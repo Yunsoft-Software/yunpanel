@@ -144,7 +144,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.2 — Backup/restore üretim sınırı
 
-- [ ] `POST /api/websites/:websiteId/restore` için doğrudan root dosya restore'u yerine resource-locked durable job/operation kur; snapshot'ın Website, path ve dependency revision kapsamını pinle, mutation öncesi pre-restore snapshot kanıtını persist et, restartta kör replay yapma, health/rollback sonucunu kalıcı ve idempotent kaydet. Bu tamamlanana kadar varsayılan production rota `website_restore_not_ready` (503) döner; mevcut restore service yalnız prototip/test sözleşmesidir.
 - [ ] Restic/rclone için minimum sürüm ve paket/binary provenance politikasını tamamla; restic private geçici password-file artıklarını process kill/restart sonrasında güvenli temizle. Fresh install/upgrade ve binary health gerçek-host kabulü `todo.md` içindedir.
 
 ## P1.3 — Monitoring/security

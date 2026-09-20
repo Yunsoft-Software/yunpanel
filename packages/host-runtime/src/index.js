@@ -398,3 +398,8 @@ export {
   RcloneError,
   rcloneManagerInternals,
 } from './rclone-manager.js';
+export {
+  createWebsiteRestoreReceiptStore,
+  WebsiteRestoreReceiptError,
+  websiteRestoreReceiptInternals,
+} from './website-restore-receipt.js';

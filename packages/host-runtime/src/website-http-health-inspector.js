@@ -1,4 +1,5 @@
 import http from 'node:http';
+import https from 'node:https';
 import { normalizeDomainSet } from '@yunpanel/shared';
 
 const HEALTH_PATH_PATTERN = /^\/[A-Za-z0-9._~!$&'()*+,;=:@%/-]*$/;
@@ -45,7 +46,49 @@ function defaultRequest({ primaryDomain, healthPath, timeoutMs }) {
       },
     }, (response) => {
       const statusCode = response.statusCode ?? 0;
+      const location = response.headers?.location;
       response.resume();
+
+      if ((statusCode === 301 || statusCode === 302 || statusCode === 307 || statusCode === 308) && typeof location === 'string' && location.startsWith('https://')) {
+        let httpsPath = healthPath;
+        try {
+          const parsed = new URL(location);
+          httpsPath = parsed.pathname + parsed.search;
+        } catch {
+          // fallback to healthPath
+        }
+
+        const httpsRequest = https.request({
+          host: '127.0.0.1',
+          port: 443,
+          path: httpsPath,
+          method: 'GET',
+          timeout: timeoutMs,
+          servername: primaryDomain,
+          rejectUnauthorized: false,
+          headers: {
+            host: primaryDomain,
+            connection: 'close',
+            'user-agent': 'YunPanel-Health/1',
+          },
+        }, (httpsResponse) => {
+          const httpsStatusCode = httpsResponse.statusCode ?? 0;
+          httpsResponse.resume();
+          resolve(Object.freeze({
+            reachable: true,
+            healthy: httpsStatusCode >= 200 && httpsStatusCode < 300,
+            statusCode: httpsStatusCode,
+          }));
+        });
+        httpsRequest.on('timeout', () => {
+          httpsRequest.destroy();
+          resolve(Object.freeze({ reachable: false, healthy: false, statusCode: null }));
+        });
+        httpsRequest.on('error', () => resolve(Object.freeze({ reachable: false, healthy: false, statusCode: null })));
+        httpsRequest.end();
+        return;
+      }
+
       resolve(Object.freeze({
         reachable: true,
         healthy: statusCode >= 200 && statusCode < 300,

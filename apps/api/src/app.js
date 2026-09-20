@@ -10,6 +10,7 @@ import {
   MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
   createResticManager,
+  createWebsiteRestoreReceiptStore,
 } from '@yunpanel/host-runtime';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
@@ -791,18 +792,11 @@ export function createApp({
       websiteBackupSetProvider,
       healthInspector: createWebsiteHttpHealthInspector(),
       localServerId,
+      jobRegistry,
+      receiptStore: createWebsiteRestoreReceiptStore(),
     });
     mountWebsiteRestoreRoutes(app, {
-      websiteRestoreService: websiteRestoreService ?? {
-        previewRestore: resolvedWebsiteRestoreService.previewRestore,
-        async executeRestore() {
-          throw new WebsiteRestoreError(
-            'website_restore_not_ready',
-            'Website restore requires a durable, resource-locked operation before it can be enabled',
-            503,
-          );
-        },
-      },
+      websiteRestoreService: resolvedWebsiteRestoreService,
       localServerId,
     });
   }

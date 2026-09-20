@@ -19,6 +19,7 @@ function fixture({
   healthThrows = false,
   preRestoreFails = false,
   restoreExecutionFails = false,
+  activeJobs = [],
 } = {}) {
   const calls = {
     listSnapshots: [],
@@ -56,6 +57,18 @@ function fixture({
     targetPaths: ['/var/lib/yunpanel/apps/test/current', '/var/lib/yunpanel/data/test'],
     excludePatterns: ['**/tmp/**'],
     tags: [`website:${websiteId}`, `server:${serverId}`],
+  };
+
+  const receipts = new Map();
+  const receiptStore = {
+    async read(id) {
+      return receipts.get(id) ?? null;
+    },
+    async write(val) {
+      const copy = { ...val, committedAt: new Date().toISOString() };
+      receipts.set(val.transactionId, copy);
+      return copy;
+    },
   };
 
   const service = createWebsiteRestoreService({
@@ -113,9 +126,15 @@ function fixture({
       },
     },
     localServerId: serverId,
+    jobRegistry: {
+      async listJobs() {
+        return activeJobs;
+      },
+    },
+    receiptStore,
   });
 
-  return { service, calls, website, repository, snapshots, backupSet };
+  return { service, calls, website, repository, snapshots, backupSet, receipts, activeJobs };
 }
 
 test('previewRestore generates valid preview, digest, and confirmation for website snapshot', async () => {
@@ -128,6 +147,7 @@ test('previewRestore generates valid preview, digest, and confirmation for websi
   });
 
   assert.equal(preview.websiteId, websiteId);
+  assert.equal(preview.websiteRevision, 3);
   assert.equal(preview.repositoryId, repositoryId);
   assert.equal(preview.snapshotId, snapshotId);
   assert.deepEqual(preview.healthSpec, {
@@ -169,8 +189,26 @@ test('previewRestore errors: missing website, missing repo, missing snapshot, in
   );
 });
 
+test('previewRestore and executeRestore reject when an active job exists on the website (resource locking)', async () => {
+  const activeJobs = [
+    {
+      id: 'job-1',
+      status: 'running',
+      resourceType: 'website',
+      resourceId: websiteId,
+      operation: 'app.node.deploy',
+    },
+  ];
+  const { service } = fixture({ activeJobs });
+
+  await assert.rejects(
+    () => service.previewRestore({ websiteId, repositoryId, snapshotId }),
+    (err) => err instanceof WebsiteRestoreError && err.code === 'website_job_conflict' && err.status === 409,
+  );
+});
+
 test('executeRestore takes pre-restore snapshot, restores, checks health, and succeeds', async () => {
-  const { service, calls, repository, backupSet } = fixture({ healthSatisfied: true });
+  const { service, calls, repository, backupSet, receipts } = fixture({ healthSatisfied: true });
 
   const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
 
@@ -205,10 +243,30 @@ test('executeRestore takes pre-restore snapshot, restores, checks health, and su
   // Verify health check was performed
   assert.equal(calls.healthInspect.length, 1);
   assert.equal(calls.healthInspect[0].primaryDomain, 'example.com');
+
+  // Verify receipt was persisted with succeeded status
+  assert.equal(receipts.size, 1);
+  const [receipt] = receipts.values();
+  assert.equal(receipt.status, 'succeeded');
+  assert.equal(receipt.websiteRevision, 3);
+
+  // Verify idempotent replay
+  const replayResult = await service.executeRestore({
+    websiteId,
+    repositoryId,
+    snapshotId,
+    expectedPreviewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(replayResult.status, 'succeeded');
+  assert.equal(replayResult.idempotent, true);
+  // calls to restore and createSnapshot must NOT have increased
+  assert.equal(calls.restore.length, 1);
+  assert.equal(calls.createSnapshot.length, 1);
 });
 
 test('executeRestore triggers automatic health rollback when health check fails', async () => {
-  const { service, calls } = fixture({ healthSatisfied: false });
+  const { service, calls, receipts } = fixture({ healthSatisfied: false });
 
   const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
 
@@ -232,6 +290,23 @@ test('executeRestore triggers automatic health rollback when health check fails'
   assert.equal(calls.restore.length, 2);
   assert.equal(calls.restore[0].snapshotId, snapshotId);
   assert.equal(calls.restore[1].snapshotId, preRestoreSnapshotId);
+
+  // Verify rolled_back receipt was persisted
+  const [receipt] = receipts.values();
+  assert.equal(receipt.status, 'rolled_back');
+  assert.equal(receipt.rollbackReason, 'health_check_failed');
+
+  // Verify idempotent replay of rolled back state
+  const replay = await service.executeRestore({
+    websiteId,
+    repositoryId,
+    snapshotId,
+    expectedPreviewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(replay.status, 'rolled_back');
+  assert.equal(replay.idempotent, true);
+  assert.equal(calls.restore.length, 2);
 });
 
 test('executeRestore aborts before mutation if pre-restore snapshot fails', async () => {
@@ -255,7 +330,7 @@ test('executeRestore aborts before mutation if pre-restore snapshot fails', asyn
 });
 
 test('executeRestore rejects stale preview digest or wrong confirmation', async () => {
-  const { service } = fixture();
+  const { service, website } = fixture();
 
   const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
 
@@ -279,5 +354,18 @@ test('executeRestore rejects stale preview digest or wrong confirmation', async 
       confirmation: 'wrong-confirmation',
     }),
     (err) => err instanceof WebsiteRestoreError && err.code === 'restore_confirmation_invalid' && err.status === 409,
+  );
+
+  // Revision change causes stale preview
+  website.revision = 4;
+  await assert.rejects(
+    () => service.executeRestore({
+      websiteId,
+      repositoryId,
+      snapshotId,
+      expectedPreviewDigest: preview.previewDigest,
+      confirmation: preview.confirmation,
+    }),
+    (err) => err instanceof WebsiteRestoreError && err.code === 'restore_preview_stale' && err.status === 409,
   );
 });

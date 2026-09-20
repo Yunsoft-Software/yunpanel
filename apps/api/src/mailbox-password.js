@@ -1,7 +1,7 @@
-import { argon2, randomBytes, timingSafeEqual } from 'node:crypto';
+import crypto, { randomBytes, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
-const derive = promisify(argon2);
+const derive = typeof crypto.argon2 === 'function' ? promisify(crypto.argon2) : null;
 const PREFIX = '$argon2id$v=19$m=65536,t=3,p=1$';
 const HASH_PATTERN = /^\$argon2id\$v=19\$m=65536,t=3,p=1\$([A-Za-z0-9+/]{22})\$([A-Za-z0-9+/]{43})$/;
 const MAX_ACTIVE_HASHES = 2;
@@ -42,6 +42,9 @@ function parseHash(value) {
 }
 
 async function derivePassword(password, salt) {
+  if (!derive) {
+    throw new MailboxPasswordError('argon2_unsupported_runtime', 'Argon2id requires Node.js 24 or newer with crypto.argon2', 500);
+  }
   if (activeHashes >= MAX_ACTIVE_HASHES) {
     throw new MailboxPasswordError('mailbox_password_busy', 'Mailbox password service is busy; retry shortly', 503);
   }

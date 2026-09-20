@@ -1,7 +1,9 @@
 import { createHash } from 'node:crypto';
 import { assertUuid } from '@yunpanel/shared';
+import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const ACTIVE_STATUSES = new Set(['queued', 'running']);
 
 export class WebsiteRestoreError extends Error {
   constructor(code, message, status = 400, details = null) {
@@ -40,6 +42,8 @@ export function createWebsiteRestoreService({
   websiteBackupSetProvider,
   healthInspector,
   localServerId = null,
+  jobRegistry = null,
+  receiptStore = null,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {
     throw new WebsiteRestoreError('website_restore_dependencies_invalid', 'Website registry is required', 503);
@@ -58,6 +62,30 @@ export function createWebsiteRestoreService({
   }
   if (!healthInspector || typeof healthInspector.inspect !== 'function') {
     throw new WebsiteRestoreError('website_restore_dependencies_invalid', 'Website health inspector is required', 503);
+  }
+
+  const resolvedReceiptStore = receiptStore ?? createWebsiteRestoreReceiptStore();
+
+  async function assertIdle(websiteId, serverId) {
+    if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') return;
+    let jobs;
+    try {
+      jobs = await jobRegistry.listJobs({ serverId });
+    } catch {
+      throw new WebsiteRestoreError('website_job_state_unavailable', 'Website job state could not be inspected', 503);
+    }
+    if (!Array.isArray(jobs)) {
+      throw new WebsiteRestoreError('website_job_state_unavailable', 'Website job state is invalid', 503);
+    }
+    const hasConflict = jobs.some((job) =>
+      ACTIVE_STATUSES.has(job.status) && (
+        (job.resourceType === 'website' && job.resourceId === websiteId)
+        || job.payload?.websiteId === websiteId
+      )
+    );
+    if (hasConflict) {
+      throw new WebsiteRestoreError('website_job_conflict', 'Another operation is already queued or running for this website', 409);
+    }
   }
 
   async function resolveTargetWebsite(websiteId) {
@@ -112,17 +140,20 @@ export function createWebsiteRestoreService({
     timeoutSeconds = 30,
   } = {}) {
     const website = await resolveTargetWebsite(websiteId);
+    await assertIdle(website.id, website.serverId);
+
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
     const snapshot = await resolveTargetSnapshot(repository.target, password, website.id, snapshotId);
 
     const healthSpec = Object.freeze({
-      primaryDomain: website.primaryDomain,
+      primaryDomain: website.primaryDomain ?? website.name ?? website.id,
       healthPath: typeof healthPath === 'string' && healthPath.startsWith('/') ? healthPath : '/health',
       timeoutSeconds: Number.isInteger(timeoutSeconds) && timeoutSeconds >= 5 && timeoutSeconds <= 120 ? timeoutSeconds : 30,
     });
 
     const previewPayload = {
       websiteId: website.id,
+      websiteRevision: website.revision ?? 1,
       repositoryId: repository.id,
       snapshotId: snapshot.id,
       snapshotTime: snapshot.time,
@@ -174,6 +205,44 @@ export function createWebsiteRestoreService({
     }
 
     const website = await resolveTargetWebsite(websiteId);
+    await assertIdle(website.id, website.serverId);
+
+    const transactionId = `restore:${website.id}:${preview.previewDigest.slice(0, 32)}`;
+
+    // Check existing receipt for idempotency
+    if (resolvedReceiptStore && typeof resolvedReceiptStore.read === 'function') {
+      try {
+        const existingReceipt = await resolvedReceiptStore.read(transactionId);
+        if (existingReceipt) {
+          if (existingReceipt.status === 'succeeded') {
+            return Object.freeze({
+              status: 'succeeded',
+              websiteId: website.id,
+              snapshotId: preview.snapshotId,
+              preRestoreSnapshotId: existingReceipt.preRestoreSnapshotId,
+              healthCheck: Object.freeze({ ...existingReceipt.healthCheck }),
+              restoredAt: existingReceipt.committedAt,
+              idempotent: true,
+            });
+          }
+          if (existingReceipt.status === 'rolled_back') {
+            return Object.freeze({
+              status: 'rolled_back',
+              websiteId: website.id,
+              snapshotId: preview.snapshotId,
+              preRestoreSnapshotId: existingReceipt.preRestoreSnapshotId,
+              rollbackReason: existingReceipt.rollbackReason,
+              healthCheck: Object.freeze({ ...existingReceipt.healthCheck }),
+              rolledBackAt: existingReceipt.committedAt,
+              idempotent: true,
+            });
+          }
+        }
+      } catch {
+        // Continue if receipt read fails
+      }
+    }
+
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
 
     // Step 1: Pre-restore snapshot
@@ -190,7 +259,7 @@ export function createWebsiteRestoreService({
         repository: repository.target,
         password,
         paths: currentBackupSet.targetPaths,
-        tags: [...currentBackupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`],
+        tags: [...currentBackupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`],
         excludes: currentBackupSet.excludePatterns,
       });
     } catch (error) {
@@ -198,6 +267,24 @@ export function createWebsiteRestoreService({
     }
 
     const preRestoreSnapshotId = preRestoreSnapshotResult.snapshotId;
+
+    // Persist intent before filesystem mutation
+    if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
+      try {
+        await resolvedReceiptStore.write({
+          transactionId,
+          websiteId: website.id,
+          websiteRevision: preview.websiteRevision,
+          repositoryId: repository.id,
+          snapshotId: preview.snapshotId,
+          preRestoreSnapshotId,
+          status: 'pre_restore_created',
+          previewDigest: preview.previewDigest,
+        });
+      } catch {
+        // Receipt persistence error
+      }
+    }
 
     // Step 2: Restore from target snapshot
     try {
@@ -218,6 +305,23 @@ export function createWebsiteRestoreService({
         });
       } catch {
         // Rollback attempt recorded
+      }
+      if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
+        try {
+          await resolvedReceiptStore.write({
+            transactionId,
+            websiteId: website.id,
+            websiteRevision: preview.websiteRevision,
+            repositoryId: repository.id,
+            snapshotId: preview.snapshotId,
+            preRestoreSnapshotId,
+            status: 'rolled_back',
+            rollbackReason: 'restore_execution_failed',
+            previewDigest: preview.previewDigest,
+          });
+        } catch {
+          // Ignore
+        }
       }
       throw new WebsiteRestoreError(
         'restore_execution_failed',
@@ -262,6 +366,25 @@ export function createWebsiteRestoreService({
         );
       }
 
+      if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
+        try {
+          await resolvedReceiptStore.write({
+            transactionId,
+            websiteId: website.id,
+            websiteRevision: preview.websiteRevision,
+            repositoryId: repository.id,
+            snapshotId: preview.snapshotId,
+            preRestoreSnapshotId,
+            status: 'rolled_back',
+            rollbackReason: 'health_check_failed',
+            healthCheck: healthResult,
+            previewDigest: preview.previewDigest,
+          });
+        } catch {
+          // Ignore
+        }
+      }
+
       return Object.freeze({
         status: 'rolled_back',
         websiteId: website.id,
@@ -276,6 +399,25 @@ export function createWebsiteRestoreService({
         }),
         rolledBackAt: new Date().toISOString(),
       });
+    }
+
+    // Step 5: Success
+    if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
+      try {
+        await resolvedReceiptStore.write({
+          transactionId,
+          websiteId: website.id,
+          websiteRevision: preview.websiteRevision,
+          repositoryId: repository.id,
+          snapshotId: preview.snapshotId,
+          preRestoreSnapshotId,
+          status: 'succeeded',
+          healthCheck: healthResult,
+          previewDigest: preview.previewDigest,
+        });
+      } catch {
+        // Ignore
+      }
     }
 
     return Object.freeze({

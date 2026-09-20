@@ -245,15 +245,32 @@ export function createResticRepositoryRegistry({
     return publicRepository(record);
   }
 
+  async function reloadFromDisk() {
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.version === STORE_VERSION && Array.isArray(parsed.repositories)) {
+        state = parsed;
+      }
+    } catch {
+      // ignore
+    }
+  }
+
   async function getRepository(repositoryId) {
     await ensureInitialized();
     const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
+    let record = state.repositories.find((r) => r.id === id);
+    if (!record) {
+      await reloadFromDisk();
+      record = state.repositories.find((r) => r.id === id);
+    }
     return record ? publicRepository(record) : null;
   }
 
   async function listRepositories({ serverId = null } = {}) {
     await ensureInitialized();
+    await reloadFromDisk();
     const normalizedServerId = serverId === null ? null : normalizeUuid(serverId, 'serverId');
     return state.repositories
       .filter((r) => normalizedServerId === null || r.serverId === normalizedServerId)
