@@ -17,7 +17,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 - [ ] Passenger shared-hosting izolasyonunu iki gerçek Node app ile doğrula; başka site startup file/user seçimi veya raw Passenger/Nginx directive privilege escalation üretemesin.
 - [ ] Site başına PHP-FPM pool/socket gerçek UID/GID, private tmp/session path, bounded ini/resource policy ile çalışsın; başka site socket/document root erişimi reddedilsin.
 - [ ] Multi-version PHP (8.1, 8.2, 8.4) ve distro 8.3 kabulü: ppa:ondrej/php doğrulanmış repo yoksa distro dışı sürüm kurulumunun fail-closed durduğunu, repo eklendiğinde ilgili sürümün FPM servisinin ve havuzunun siteye özel izole soket ve doğru php-fpm binary/unit ile çalıştığını gerçek Ubuntu hostta doğrula.
-- [ ] Python runtime kabulü: Ubuntu 24.04 test sunucusunda `python3` ve `python3-venv` kurulu iken dedicated site kullanıcısı altında venv (`/var/lib/yunpanel/data/<applicationId>/venv`) oluşturulduğunu, `requirements.txt` varsa bağımlılıkların izole yüklendiğini, systemd unit'in (`yunpanel-python-<appId>.service`) unix socket (`/run/yunpanel/python-<appId>.sock`) veya loopback TCP portu üzerinde Gunicorn/Uvicorn ile çalıştığını, Nginx reverse proxy hedefinin doğru bağlandığını ve restart/rollback operasyonlarının servis sürekliliğini koruduğunu doğrula.
 - [ ] Passenger Node, PHP ve Python Website; YunPanel API/web restartı ve package upgrade sırasında hizmet vermeye devam etsin. `.28` üzerinde mevcut Static ve legacy direct-systemd Node HTTP 200 ve gövde SHA-256 değerleri panel API/web restartı öncesi/sonrası aynı kaldı; yeni paket sonrası da erişilebilirler. Passenger/PHP/Python fixture ve bunların package-upgrade sürekliliği hâlâ açık.
 
 ## T-TOOLS — P0 ttyd, elFinder, phpMyAdmin/pgAdmin gateway
@@ -86,7 +85,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 - [ ] Managed Compose Website kendi project/network/volume/log/terminal/backup scope'uyla başka Website'ten izole çalışsın; Docker Engine/Compose dışındaki genel yönetim yeniden yazılmasın.
 - [ ] Portainer adapter'ı açılırsa yalnız authenticated Owner gateway'i, local endpoint ve secret-safe session ile erişilsin; direct port public olmasın.
-- [ ] Python venv + Gunicorn/Uvicorn Website gerçek site user/systemd sandbox, Nginx health ve rollback ile çalışsın.
 - [ ] Agentless migration/rollback bütün yeni vendor config/state, `yunapp-*` identity, release, PowerDNS, restic, Roundcube, tool gateway ve secrets'i korusun; ardından legacy agent fiziksel olarak kaldırılabilsin.
 - [ ] Plesk importer yalnız `.44` olmayan açık fixture veya offline export üzerinde read-only discovery yaparak Passenger/PHP/static/Node, domain/DNS, DB, mail, cron ve backup mapping preview'ı üretsin.
 

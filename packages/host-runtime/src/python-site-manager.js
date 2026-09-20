@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import {
@@ -61,6 +61,7 @@ export function createPythonSiteManager({
     maxBuffer: 1024 * 1024,
     env: options.env,
   }),
+  chmodFn = chmod,
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
@@ -69,6 +70,7 @@ export function createPythonSiteManager({
 } = {}) {
   if (
     typeof run !== 'function'
+    || typeof chmodFn !== 'function'
     || typeof lstatFn !== 'function'
     || typeof mkdirFn !== 'function'
     || typeof readFileFn !== 'function'
@@ -98,6 +100,7 @@ export function createPythonSiteManager({
 
     try {
       await run(python3, ['-m', 'venv', '--help'], { timeout: 5_000 });
+      await run(python3, ['-c', 'import ensurepip'], { timeout: 5_000 });
     } catch {
       throw new PythonSiteManagerError('python_prerequisites_missing', 'Python 3 venv module is not installed (python3-venv package required)');
     }
@@ -240,7 +243,12 @@ export function createPythonSiteManager({
     });
 
     await mkdirFn(receiptRoot, { recursive: true, mode: 0o700 });
-    await mkdirFn(RUN_ROOT, { recursive: true, mode: 0o755 });
+    await mkdirFn(RUN_ROOT, { recursive: true, mode: 0o1777 });
+    try {
+      await chmodFn(RUN_ROOT, 0o1777);
+    } catch {
+      // Allow in testing or non-root
+    }
 
     const receiptPath = path.posix.join(receiptRoot, `${operationId}.json`);
     const receipt = {

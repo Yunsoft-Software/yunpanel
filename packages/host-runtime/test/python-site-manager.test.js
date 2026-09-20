@@ -55,6 +55,7 @@ test('ensurePrerequisites verifies python3 and venv module', async () => {
     calls.push([bin, ...args]);
     if (args.includes('--version')) return { stdout: 'Python 3.12.3\n' };
     if (args.includes('venv')) return { stdout: 'usage: venv ...\n' };
+    if (args.includes('import ensurepip')) return { stdout: '' };
     return { stdout: '' };
   };
 
