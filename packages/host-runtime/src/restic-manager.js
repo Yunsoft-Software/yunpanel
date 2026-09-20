@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access } from 'node:fs/promises';
+import { access, mkdtemp, open, rmdir, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -66,12 +67,15 @@ async function findResticBinary(customPath, accessFn) {
   return null;
 }
 
-function mapResticError(error, context = '') {
+function mapResticError(error, context = '', password = '') {
   if (error instanceof ResticError) return error;
-  const stderr = (error?.stderr || '').toString();
-  const stdout = (error?.stdout || '').toString();
-  const raw = `${stderr}\n${stdout}`.trim() || error?.message || '';
-  const lower = raw.toLowerCase();
+  const redact = (value) => password ? value.replaceAll(password, '[REDACTED]') : value;
+  const originalStderr = (error?.stderr || '').toString();
+  const originalStdout = (error?.stdout || '').toString();
+  const originalRaw = `${originalStderr}\n${originalStdout}`.trim() || error?.message || '';
+  const stderr = redact(originalStderr);
+  const raw = redact(originalRaw);
+  const lower = originalRaw.toLowerCase();
 
   if (lower.includes('is already locked') || lower.includes('unable to create lock')) {
     return new ResticError('restic_repo_locked', `Restic repository is locked: ${stderr.trim() || raw}`, 409);
@@ -133,17 +137,28 @@ export function createResticManager({
     return binary;
   }
 
-  async function execRestic(args, { repository, password, extraEnv = {}, timeout = DEFAULT_TIMEOUT, context = 'exec' } = {}) {
+  async function execRestic(args, { repository, password, timeout = DEFAULT_TIMEOUT, context = 'exec' } = {}) {
     const binary = await requireBinary();
-    const env = {
-      RESTIC_REPOSITORY: normalizeRepository(repository),
-      RESTIC_PASSWORD: normalizePassword(password),
-      ...extraEnv,
-    };
+    const target = normalizeRepository(repository);
+    const secret = normalizePassword(password);
+    const secretDirectory = await mkdtemp(path.join(tmpdir(), 'yunpanel-restic-'));
+    const secretPath = path.join(secretDirectory, 'password');
     try {
-      return await runCommand(binary, args, { env, timeout });
+      const handle = await open(secretPath, 'wx', 0o600);
+      try {
+        await handle.writeFile(secret, 'utf8');
+      } finally {
+        await handle.close();
+      }
+      return await runCommand(binary, args, {
+        env: { RESTIC_REPOSITORY: target, RESTIC_PASSWORD_FILE: secretPath },
+        timeout,
+      });
     } catch (error) {
-      throw mapResticError(error, context);
+      throw mapResticError(error, context, secret);
+    } finally {
+      await unlink(secretPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
+      await rmdir(secretDirectory);
     }
   }
 

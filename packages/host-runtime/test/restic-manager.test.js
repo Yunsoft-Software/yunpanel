@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile, stat } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import {
   createResticManager,
@@ -32,11 +34,19 @@ function createMockRunner(handlers = {}) {
 }
 
 test('initRepository initializes repository and returns structured receipt', async () => {
+  let passwordFileChecked = false;
   const { runCommand, calls } = createMockRunner({
-    init: () => ({
-      stdout: JSON.stringify({ id: '9a8b7c6d5e4f', message: 'created restic repository' }),
-      stderr: '',
-    }),
+    init: async (args, options) => {
+      assert.equal(options.env.RESTIC_PASSWORD, undefined);
+      assert.equal(await readFile(options.env.RESTIC_PASSWORD_FILE, 'utf8'), repoPassword);
+      assert.equal((await stat(options.env.RESTIC_PASSWORD_FILE)).mode & 0o777, 0o600);
+      assert.equal((await stat(path.dirname(options.env.RESTIC_PASSWORD_FILE))).mode & 0o777, 0o700);
+      passwordFileChecked = true;
+      return {
+        stdout: JSON.stringify({ id: '9a8b7c6d5e4f', message: 'created restic repository' }),
+        stderr: '',
+      };
+    },
   });
   const manager = createResticManager({
     resticPath: mockBinary,
@@ -51,7 +61,8 @@ test('initRepository initializes repository and returns structured receipt', asy
   assert.equal(calls[0].file, mockBinary);
   assert.deepEqual(calls[0].args, ['init', '--json']);
   assert.equal(calls[0].options.env.RESTIC_REPOSITORY, repoPath);
-  assert.equal(calls[0].options.env.RESTIC_PASSWORD, repoPassword);
+  assert.equal(passwordFileChecked, true);
+  await assert.rejects(readFile(calls[0].options.env.RESTIC_PASSWORD_FILE, 'utf8'), { code: 'ENOENT' });
 
   assert.equal(result.repository, repoPath);
   assert.equal(result.id, '9a8b7c6d5e4f');
@@ -408,6 +419,20 @@ test('error mapping correctly identifies restic error states', async () => {
   await assert.rejects(
     noSnapshotManager.restore({ repository: repoPath, password: repoPassword, snapshotId: '12345678', targetDirectory: '/tmp' }),
     (err) => err instanceof ResticError && err.code === 'restic_snapshot_not_found' && err.status === 404,
+  );
+
+  const echoedSecretManager = createResticManager({
+    resticPath: mockBinary,
+    accessFn: async () => {},
+    runCommand: async () => {
+      const err = new Error(`command failed with ${repoPassword}`);
+      err.stderr = `fatal: ${repoPassword}`;
+      throw err;
+    },
+  });
+  await assert.rejects(
+    echoedSecretManager.check({ repository: repoPath, password: repoPassword }),
+    (err) => err instanceof ResticError && !err.message.includes(repoPassword),
   );
 });
 
