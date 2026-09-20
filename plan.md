@@ -101,6 +101,7 @@ Son Passenger Nginx runtime ve shared-hosting izolasyonu canlı kabulü: `docs/h
 Son hosted apps (Passenger, PHP, Python) panel restart sürekliliği canlı kabulü: `docs/history/hosted-apps-continuity-panel-restart-live-acceptance-2026-09-20.md`.
 Son ttyd ve elFinder tools gateway canlı kabulü: `docs/history/ttyd-elfinder-tools-gateway-live-acceptance-2026-09-20.md`.
 Son MariaDB güvenlik, canlı envanter, site izolasyonu ve dump/restore canlı kabulü: `docs/history/mariadb-isolation-dump-restore-live-acceptance-2026-09-20.md`.
+Son PowerDNS soket sağlığı, yetkili sorgular, non-recursion ve konfigürasyon canlı kabulü: `docs/history/powerdns-socket-health-authoritative-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
