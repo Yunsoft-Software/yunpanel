@@ -51,7 +51,7 @@ const passengerTarget = Object.freeze({
   user: applicationUser,
   group: applicationUser,
   appEnv: 'production',
-  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+  environmentInclude: `/etc/yunpanel/passenger-env/${applicationId}.conf`,
 });
 
 function migratedResult(overrides = {}) {

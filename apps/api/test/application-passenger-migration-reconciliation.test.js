@@ -30,7 +30,7 @@ const passengerTarget = Object.freeze({
   user: 'yunapp-0123456789ab',
   group: 'yunapp-0123456789ab',
   appEnv: 'production',
-  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+  environmentInclude: `/etc/yunpanel/passenger-env/${applicationId}.conf`,
 });
 
 function state() {

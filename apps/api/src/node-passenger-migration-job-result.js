@@ -99,7 +99,7 @@ function passengerTargetEvidence(job, applicationId, value) {
     `/opt/yunpanel/node-runtimes/v${runtime.nodeMajor}/bin/node`,
     '/usr/bin/node',
   ]);
-  const expectedEnvironmentInclude = `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`;
+  const expectedEnvironmentInclude = `/etc/yunpanel/passenger-env/${applicationId}.conf`;
   if (value.appRoot !== expectedAppRoot
     || value.documentRoot !== expectedAppRoot
     || value.startupFile !== runtime.start?.entryFile

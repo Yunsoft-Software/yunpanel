@@ -31,7 +31,7 @@ const PASSENGER_TARGET = Object.freeze({
   user: APPLICATION_USER,
   group: APPLICATION_USER,
   appEnv: 'production',
-  environmentInclude: `/etc/nginx/yunpanel/passenger-env/${APPLICATION_ID}.conf`,
+  environmentInclude: `/etc/yunpanel/passenger-env/${APPLICATION_ID}.conf`,
 });
 const sha256 = (character) => character.repeat(64);
 

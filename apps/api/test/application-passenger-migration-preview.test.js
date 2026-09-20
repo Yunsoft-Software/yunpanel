@@ -65,7 +65,7 @@ function defaultHostResult() {
       environmentBinding: {
         satisfied: true,
         sourcePath: `/etc/yunpanel/apps/${applicationId}.env`,
-        environmentInclude: `/etc/nginx/yunpanel/passenger-env/${applicationId}.conf`,
+        environmentInclude: `/etc/yunpanel/passenger-env/${applicationId}.conf`,
         includeSha256: 'b'.repeat(64),
       },
     },
