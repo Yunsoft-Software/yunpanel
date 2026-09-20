@@ -91,6 +91,7 @@ Son Domain delete parent operation canlı kabulü: `docs/history/domain-delete-p
 Son Domain delete Mail Domain child lifecycle canlı kabulü: `docs/history/domain-delete-mail-child-live-acceptance-2026-09-20.md`.
 Son Website removal reverse-order orchestrator canlı kabulü: `docs/history/website-removal-orchestrator-live-acceptance-2026-09-20.md`.
 Son Fresh Website transactional provisioning ve compensation canlı kabulü: `docs/history/transactional-provisioning-live-acceptance-2026-09-20.md`.
+Son Node direct-systemd Passenger migration canlı kabulü: `docs/history/passenger-migration-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
