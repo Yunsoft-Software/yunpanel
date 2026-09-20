@@ -6,6 +6,7 @@ import {
   LOCAL_HOST_OPERATIONS,
   LOCAL_MAIL_DATA_OPERATIONS,
   LOCAL_NODE_ENVIRONMENT_OPERATIONS,
+  LOCAL_PYTHON_ENVIRONMENT_OPERATIONS,
 } from '../src/local-host-operations.js';
 
 function fixture({ withEnvironment = false } = {}) {
@@ -64,18 +65,18 @@ function fixture({ withEnvironment = false } = {}) {
   return { calls, environments, credentials, operations: createLocalHostOperations(options) };
 }
 
-test('Node mutations stay unsupported when no application environment provider is configured', async () => {
+test('Node and Python mutations stay unsupported when no application environment provider is configured', async () => {
   const { operations } = fixture();
   assert.deepEqual(operations.operations, [...LOCAL_HOST_OPERATIONS, ...LOCAL_MAIL_DATA_OPERATIONS]);
-  for (const operation of LOCAL_NODE_ENVIRONMENT_OPERATIONS) {
+  for (const operation of [...LOCAL_NODE_ENVIRONMENT_OPERATIONS, ...LOCAL_PYTHON_ENVIRONMENT_OPERATIONS]) {
     assert.equal(operations.supports(operation), false);
     await assert.rejects(() => operations.executeOperation(operation, {}), { code: 'local_operation_not_migrated' });
   }
 });
 
-test('configured environment provider enables all Node mutation operations', () => {
+test('configured environment provider enables all Node and Python mutation operations', () => {
   const { operations } = fixture({ withEnvironment: true });
-  for (const operation of [...LOCAL_HOST_OPERATIONS, ...LOCAL_NODE_ENVIRONMENT_OPERATIONS]) {
+  for (const operation of [...LOCAL_HOST_OPERATIONS, ...LOCAL_NODE_ENVIRONMENT_OPERATIONS, ...LOCAL_PYTHON_ENVIRONMENT_OPERATIONS]) {
     assert.equal(operations.supports(operation), true);
     assert.ok(operations.operations.includes(operation));
   }

@@ -19,6 +19,8 @@ import {
   createNodeRuntimeManager,
   createNodeRollbackManager,
   createNodeStatusInspector,
+  createPythonDeploymentManager,
+  createPythonRollbackManager,
   createPythonSiteManager,
   createStaticDeploymentManager,
   createStaticDeploymentReceiptStore,
@@ -155,6 +157,8 @@ export function createLocalHostOperations({
   nodePassengerMigrationOperation = createLocalNodePassengerMigrationOperation(),
   nodeRuntimeManager = createNodeRuntimeManager(),
   nodeStatusInspector = createNodeStatusInspector(),
+  pythonDeploymentManager = null,
+  pythonRollbackManager = null,
   pythonSiteManager = createPythonSiteManager(),
   mailConfigManager = null,
   mailConfigBackupManager = null,
@@ -229,6 +233,13 @@ export function createLocalHostOperations({
   });
   const resolvedStaticDeploymentManager = staticDeploymentManager ?? createStaticDeploymentManager({ recordLog: deploymentLog });
   const resolvedNodeDeploymentManager = nodeDeploymentManager ?? createNodeDeploymentManager({ recordLog: deploymentLog });
+  const resolvedPythonDeploymentManager = pythonDeploymentManager ?? createPythonDeploymentManager({
+    pythonSiteManager,
+    recordLog: deploymentLog,
+  });
+  const resolvedPythonRollbackManager = pythonRollbackManager ?? createPythonRollbackManager({
+    pythonSiteManager,
+  });
   const resolvedMailConfigManager = mailConfigManager ?? createMailConfigManager();
   const resolvedMailConfigBackupManager = mailConfigBackupManager ?? createMailConfigBackupManager();
   const resolvedMailConfigActivator = mailConfigActivator ?? createMailConfigActivator({
@@ -719,6 +730,10 @@ export function createLocalHostOperations({
     })));
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
     handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
+    handlers.set(OPERATIONS.APP_PYTHON_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => resolvedPythonDeploymentManager.deployPython(hydrated, {
+      gitCredential: await credentialFor(payload.applicationId),
+    })));
+    handlers.set(OPERATIONS.APP_PYTHON_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => resolvedPythonRollbackManager.rollbackPython(hydrated)));
     handlers.set(OPERATIONS.APP_PYTHON_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => pythonSiteManager.restart(hydrated)));
   }
   if (loadManagedMailConfiguration) {
