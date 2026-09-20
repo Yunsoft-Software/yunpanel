@@ -124,7 +124,9 @@ function emptyState() {
 }
 
 function publicJob(job) {
-  return {
+  const proto = job?.payload != null ? { payload: structuredClone(job.payload) } : Object.prototype;
+  const result = Object.create(proto);
+  Object.assign(result, {
     id: job.id,
     serverId: job.serverId,
     type: job.type,
@@ -136,10 +138,10 @@ function publicJob(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     attempts: job.attempts,
-    payload: job.payload == null ? null : structuredClone(job.payload),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
-  };
+  });
+  return result;
 }
 
 function publicResult(operation, result) {
@@ -174,6 +176,7 @@ function diagnosisScope(operation) {
 export function jobPublicView(job) {
   if (!job || typeof job !== 'object') return null;
   const view = publicJob(job);
+  Object.setPrototypeOf(view, Object.prototype);
   delete view.payload;
   view.result = publicResult(job.operation, job.result);
   view.error = job.error ? safeLocalOperationError(job.error) : null;
