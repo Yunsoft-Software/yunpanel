@@ -63,6 +63,7 @@ Son Python WSGI/ASGI runtime golden path ilerlemesi: `docs/history/python-runtim
 Python yürütücü ve gerçek-host kabul düzeltmesi: `docs/history/runtime-acceptance-audit-2026-09-20.md`.
 Son Mail Domain disable Roundcube mapping teardown ve blocker ilerlemesi: `docs/history/mail-domain-disable-webmail-mapping-progress-2026-09-20.md`.
 Son External DNS requirements ve provider apply ilerlemesi: `docs/history/external-dns-requirements-provider-apply-2026-09-20.md`.
+Son Managed Compose identity ve Passenger runtime ilerlemesi: `docs/history/managed-compose-identity-and-passenger-cleanup-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -136,11 +137,6 @@ Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı,
 Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
 
 # P1 — Core parity sonrası
-
-## P1.1 — Runtime golden path
-
-- [ ] Passenger dependency/env/log/startup/config validation + rollback.
-- [ ] Managed Compose dedicated project/network/volume identity.
 
 ## P1.2 — Backup/restore
 
