@@ -65,6 +65,7 @@ Son Mail Domain disable Roundcube mapping teardown ve blocker ilerlemesi: `docs/
 Son External DNS requirements ve provider apply ilerlemesi: `docs/history/external-dns-requirements-provider-apply-2026-09-20.md`.
 Son Managed Compose identity ve Passenger runtime ilerlemesi: `docs/history/managed-compose-identity-and-passenger-cleanup-2026-09-20.md`.
 Son restic repository ve snapshot lifecycle ilerlemesi: `docs/history/restic-lifecycle-engine-progress-2026-09-20.md`.
+Son rclone remote registry ve uzak depo testi ilerlemesi: `docs/history/rclone-remote-registry-and-testing-progress-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -141,7 +142,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.2 — Backup/restore
 
-- [ ] rclone remote registry/test + encrypted credential.
 - [ ] Website backup set: files/data/env metadata/DB dump/mail/DNS/Nginx/Compose hooks.
 - [ ] Restore preview + pre-restore snapshot + health rollback.
 
