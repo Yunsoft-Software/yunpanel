@@ -1,4 +1,6 @@
-# Required Owner MFA — current HTTPS access policy
+# Required Owner MFA — historical HTTPS access policy
+
+2026-09-20 update: MFA is now configurable with `YUNPANEL_OWNER_MFA_REQUIRED=true|false` (default `true`). The authorized `.28` development/test host runs with `false` and no enrolled Owner factor. Password/session, CSRF, Origin, IP allowlist and backend authorization checks remain mandatory; an already enrolled account still needs MFA at login until locally recovered. The remaining text records the previous mandatory-policy implementation.
 
 ## Behavior and upgrade impact
 

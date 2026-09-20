@@ -65,6 +65,7 @@ function createBrowserAuthBoundary({
   store,
   publicOrigin,
   development = false,
+  ownerMfaRequired = true,
   proxyToken,
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
 }) {
@@ -74,7 +75,8 @@ function createBrowserAuthBoundary({
   if (origin.origin !== publicOrigin || (origin.protocol !== 'https:' && !localDevelopment)) {
     throw new Error('Panel origin must be an exact HTTPS origin (HTTP is only allowed for loopback development)');
   }
-  const ownerPolicy = createOwnerMfaPolicy({ store, required: !localDevelopment });
+  if (typeof ownerMfaRequired !== 'boolean') throw new TypeError('Owner MFA policy must be a boolean');
+  const ownerPolicy = createOwnerMfaPolicy({ store, required: ownerMfaRequired && !localDevelopment });
   const trustedProxies = parseTrustedProxies(trustedProxyIps);
   if (proxyToken !== undefined && (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken))) {
     throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is invalid');
@@ -162,12 +164,13 @@ export function createAuthenticatedApi({
   store,
   publicOrigin,
   development = false,
+  ownerMfaRequired = true,
   proxyToken,
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
   publicWebhookHandler = null,
   toolGatewayAuthorizer = null,
 }) {
-  const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, proxyToken, trustedProxyIps });
+  const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, ownerMfaRequired, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
   const cookieOptions = `Path=/; HttpOnly; SameSite=Strict${localDevelopment ? '' : '; Secure'}`;
   const handler = createHandler();

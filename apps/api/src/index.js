@@ -199,6 +199,11 @@ const applicationEnvironmentStorePath = process.env.YUNPANEL_APPLICATION_ENVIRON
 const authStorePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStorePath), 'auth', 'auth.sqlite');
 const internalProxyToken = process.env.YUNPANEL_INTERNAL_PROXY_TOKEN;
 const publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN ?? (process.env.NODE_ENV === 'development' ? 'http://127.0.0.1:5173' : undefined);
+const ownerMfaRequiredRaw = process.env.YUNPANEL_OWNER_MFA_REQUIRED ?? 'true';
+if (!['true', 'false'].includes(ownerMfaRequiredRaw)) {
+  throw new Error('YUNPANEL_OWNER_MFA_REQUIRED must be true or false');
+}
+const ownerMfaRequired = ownerMfaRequiredRaw === 'true';
 const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
 const dnsZoneRetentionDaysRaw = process.env.YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS?.trim() || null;
 const dnsZoneSnapshotRetentionDays = dnsZoneRetentionDaysRaw === null
@@ -905,6 +910,7 @@ const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin,
   development: process.env.NODE_ENV === 'development',
+  ownerMfaRequired,
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
   toolGatewayAuthorizer: ({ gateway, request, session }) => {
@@ -1050,6 +1056,7 @@ const terminalAuthenticator = createLiveConnectionAuthenticator({
   store: authStore,
   publicOrigin,
   development: process.env.NODE_ENV === 'development',
+  ownerMfaRequired,
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
 });

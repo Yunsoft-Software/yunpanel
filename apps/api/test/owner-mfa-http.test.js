@@ -5,7 +5,7 @@ import { once } from 'node:events';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { AuthError } from '../src/auth-error.js';
 
-async function fixture(t, { development = false, origin = 'https://panel.example.test' } = {}) {
+async function fixture(t, { development = false, origin = 'https://panel.example.test', ownerMfaRequired = true } = {}) {
   let enrolled = false;
   let currentToken = 'before';
   let active = true;
@@ -30,7 +30,7 @@ async function fixture(t, { development = false, origin = 'https://panel.example
       cancelLogin: () => {},
     },
   };
-  const listener = createAuthenticatedApi({ store, publicOrigin: origin, development, createHandler: () => (request, response) => {
+  const listener = createAuthenticatedApi({ store, publicOrigin: origin, development, ownerMfaRequired, createHandler: () => (request, response) => {
     calls++;
     const agent = request.url.includes('/commands/next');
     response.writeHead(agent ? 401 : 200, { 'content-type': 'application/json' });
@@ -137,6 +137,18 @@ test('development exemption applies only to explicit loopback HTTP, not HTTPS', 
   assert.equal((await local.request('/api/servers')).status, 200);
   const https = await fixture(t, { development: true });
   assert.equal((await https.request('/api/servers')).status, 403);
+});
+
+test('explicit optional MFA permits password-only Owner management over HTTPS but keeps session and CSRF gates', async (t) => {
+  const app = await fixture(t, { ownerMfaRequired: false });
+  assert.equal((await app.request('/api/servers', { authenticated: false })).status, 401);
+  const login = await app.request('/api/auth/login', { method: 'POST', body: {}, authenticated: false });
+  assert.equal(login.status, 200);
+  const body = (await login.json()).data;
+  assert.deepEqual(body.security, { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true });
+  assert.equal((await app.request('/api/servers')).status, 200);
+  assert.equal((await app.request('/api/panel/domains', { method: 'POST', body: {}, headers: { 'x-csrf-token': 'wrong' } })).status, 403);
+  assert.throws(() => createAuthenticatedApi({ store: app.store, publicOrigin: 'https://panel.example.test', ownerMfaRequired: 'false', createHandler: () => () => {} }), TypeError);
 });
 
 test('agent channel keeps its own guard and cannot use Owner cookies to bypass policy', async (t) => {
