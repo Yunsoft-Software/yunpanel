@@ -103,6 +103,7 @@ Son ttyd ve elFinder tools gateway canlı kabulü: `docs/history/ttyd-elfinder-t
 Son MariaDB güvenlik, canlı envanter, site izolasyonu ve dump/restore canlı kabulü: `docs/history/mariadb-isolation-dump-restore-live-acceptance-2026-09-20.md`.
 Son PowerDNS soket sağlığı, yetkili sorgular, non-recursion ve konfigürasyon canlı kabulü: `docs/history/powerdns-socket-health-authoritative-live-acceptance-2026-09-20.md`.
 Son restic ve rclone yedekleme motoru canlı kabulü: `docs/history/restic-rclone-live-acceptance-2026-09-20.md`.
+Son nftables tek firewall authority ve CrowdSec engine/bouncer canlı kabulü: `docs/history/nftables-crowdsec-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -165,13 +166,6 @@ Domain removal HTTP API'ı (`preview`, `operations`, `retry-routing`, `continue`
 Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı, deepest-first child domain yürütümü, certificate retirement, shared Webmail mapping temizliği, Mail Domain child operasyonu, External DNS metadata unlinking, Website binding detach, authoritative DNS retirement ve Domain/Website metadata finalization kaynak kod tarafında tamamlandı. Mail/DB/file deletion için typed confirmation, retention ve backup evidence zincirleri (database credential deletion, unbind, backup evidence ve file cleanup retained backups) üst operasyonlara bağlandı. Authenticated HTTP rotaları (`/api/domains/:domainId/removal*` ve `/api/websites/:websiteId/removal*`) eklendi.
 
 Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
-
-# P1 — Core parity sonrası
-
-## P1.3 — Monitoring/security
-
-- [ ] nftables tek firewall authority.
-- [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority olmasın.
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 

@@ -67,8 +67,8 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-OBSERVABILITY-SECURITY — P1 Netdata, GoAccess, CrowdSec
 
-- [ ] nftables ownership/reconcile gerçek hostta mevcut SSH yönetim erişimini kilitlemeden uygulanıp rollback edilsin. UFW/direct nftables çifte-yazar drift'i tespit edilip mutation bloklansın.
-- [ ] CrowdSec engine + firewall bouncer gerçek SSH/SMTP/Nginx logunu okuyup test decision'ını nftables'a uygulasın; ban/unban, IPv4/IPv6, restart ve health görünürlüğü çalışsın.
+- [ ] nftables ownership/reconcile gerçek hostta mevcut SSH yönetim erişimini kilitlemeden uygulanıp rollback edilsin. UFW/direct nftables çifte-yazar drift'i tespit edilip mutation bloklansın (nftables 1.0.9 lockout koruması, sözdizimi denetimi, UFW çakışma tespiti, atomik uygulama, rollback ve 0755 kalıcı konfigürasyon 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/nftables-crowdsec-live-acceptance-2026-09-20.md`).
+- [ ] CrowdSec engine + firewall bouncer gerçek SSH/SMTP/Nginx logunu okuyup test decision'ını nftables'a uygulasın; ban/unban, IPv4/IPv6, restart ve health görünürlüğü çalışsın (CrowdSec 1.4.6 ve crowdsec-firewall-bouncer 0.0.25 canlı log tespiti, IPv4/IPv6 ban/unban kararları ve kernel nftables set senkronizasyonu 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/nftables-crowdsec-live-acceptance-2026-09-20.md`).
 
 ## T-SITE-FEATURES-SETTINGS — P1
 

@@ -299,8 +299,8 @@ export function createNftablesManager({
       await atomicWrite(configPath, contentToApply, 0o755);
     }
 
-    // 7. Enable and start nftables.service if requested
-    if (enableService) {
+    // 7. Enable and start nftables.service if requested (only when persisted)
+    if (enableService && persist) {
       try {
         await execFn(systemctlPath, ['enable', 'nftables']);
         await execFn(systemctlPath, ['start', 'nftables']);
@@ -309,13 +309,21 @@ export function createNftablesManager({
       }
     }
 
+    // 8. If crowdsec-firewall-bouncer is active, restart it so its nftables tables are restored after flush
+    try {
+      const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
+      if (stdout.trim() === 'active') {
+        await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
+      }
+    } catch {}
+
     return Object.freeze({
       success: true,
       appliedAt: new Date().toISOString(),
       appliedRulesetSha256: computeSha256(contentToApply),
       backupRulesetSha256,
       persisted: persist,
-      serviceEnabled: enableService,
+      serviceEnabled: enableService && persist,
       allowedSshPort,
     });
   }
@@ -324,20 +332,37 @@ export function createNftablesManager({
     if (!previousRuleset || typeof previousRuleset !== 'string' || !previousRuleset.trim()) {
       // If previous ruleset is empty, flush ruleset
       await execFn(nftPath, ['flush', 'ruleset']);
+      try {
+        const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
+        if (stdout.trim() === 'active') {
+          await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
+        }
+      } catch {}
       return Object.freeze({ success: true, rolledBack: true, flushed: true });
     }
 
+    // Ensure flush ruleset is present at the beginning so existing tables not in previousRuleset are removed
+    const contentToRestore = previousRuleset.includes('flush ruleset')
+      ? previousRuleset
+      : `flush ruleset\n\n${previousRuleset}`;
+
     const tempPath = `/tmp/nftables-rollback.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
     try {
-      await writeFileFn(tempPath, previousRuleset, { encoding: 'utf8', mode: 0o600 });
+      await writeFileFn(tempPath, contentToRestore, { encoding: 'utf8', mode: 0o600 });
       await execFn(nftPath, ['-f', tempPath]);
       if (persist) {
-        await atomicWrite(configPath, previousRuleset, 0o755);
+        await atomicWrite(configPath, contentToRestore, 0o755);
       }
+      try {
+        const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
+        if (stdout.trim() === 'active') {
+          await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
+        }
+      } catch {}
       return Object.freeze({
         success: true,
         rolledBack: true,
-        rulesetSha256: computeSha256(previousRuleset),
+        rulesetSha256: computeSha256(contentToRestore),
       });
     } catch (error) {
       throw new NftablesManagerError(

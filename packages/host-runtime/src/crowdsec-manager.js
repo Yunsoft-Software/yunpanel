@@ -115,21 +115,42 @@ export function createCrowdsecManager({
       if (!trimmed || trimmed === 'null' || trimmed === '[]') {
         return [];
       }
-      const rawDecisions = JSON.parse(trimmed);
-      if (!Array.isArray(rawDecisions)) {
+      const raw = JSON.parse(trimmed);
+      if (!Array.isArray(raw)) {
         return [];
       }
-      return rawDecisions.map((d) => Object.freeze({
-        id: d.id,
-        source: d.origin ?? d.source ?? 'cscli',
-        scope: d.scope ?? 'ip',
-        value: d.value,
-        reason: d.scenario ?? d.reason ?? 'manual',
-        duration: d.duration,
-        type: d.type ?? d.action ?? 'ban',
-        simulated: Boolean(d.simulated),
-        createdAt: d.created_at ?? null,
-      }));
+
+      const decisionsList = [];
+      for (const item of raw) {
+        if (Array.isArray(item.decisions)) {
+          for (const d of item.decisions) {
+            decisionsList.push(Object.freeze({
+              id: d.id,
+              source: d.origin ?? d.source ?? 'crowdsec',
+              scope: d.scope ?? 'ip',
+              value: d.value,
+              reason: d.scenario ?? d.reason ?? item.scenario ?? 'manual',
+              duration: d.duration,
+              type: d.type ?? d.action ?? 'ban',
+              simulated: Boolean(d.simulated),
+              createdAt: item.created_at ?? null,
+            }));
+          }
+        } else if (item.value || item.id) {
+          decisionsList.push(Object.freeze({
+            id: item.id,
+            source: item.origin ?? item.source ?? 'crowdsec',
+            scope: item.scope ?? 'ip',
+            value: item.value,
+            reason: item.scenario ?? item.reason ?? 'manual',
+            duration: item.duration,
+            type: item.type ?? item.action ?? 'ban',
+            simulated: Boolean(item.simulated),
+            createdAt: item.created_at ?? null,
+          }));
+        }
+      }
+      return Object.freeze(decisionsList);
     } catch (error) {
       if (error instanceof SyntaxError) {
         throw new CrowdsecManagerError('decisions_parse_error', `Failed to parse decisions JSON: ${error.message}`);
