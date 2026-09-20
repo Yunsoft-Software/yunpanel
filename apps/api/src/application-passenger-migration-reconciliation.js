@@ -125,6 +125,9 @@ export async function reconcileApplicationPassengerMigration({
 
   const currentBinding = await runtimeBindingRegistry.getBinding(application.id);
   const expectedRevision = currentBinding?.revision ?? 0;
+  if (typeof applicationRegistry.markPassengerMigrated === 'function') {
+    await applicationRegistry.markPassengerMigrated(application.id, { operationId: job.id });
+  }
   return runtimeBindingRegistry.activate({
     applicationId: application.id,
     serverId: application.serverId,

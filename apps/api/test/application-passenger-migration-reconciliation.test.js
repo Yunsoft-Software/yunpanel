@@ -100,9 +100,16 @@ function state() {
 
 function dependencies(current, { binding = null, extraWebsites = [], extraDomains = [] } = {}) {
   const activations = [];
+  const migratedApplications = [];
   return {
     activations,
-    applicationRegistry: { async getApplication() { return current.application; } },
+    migratedApplications,
+    applicationRegistry: {
+      async getApplication() { return current.application; },
+      async markPassengerMigrated(id, options) {
+        migratedApplications.push({ id, options });
+      },
+    },
     websiteRegistry: {
       async getWebsite(id) { return id === current.website.id ? current.website : null; },
       async listWebsites() { return [current.website, ...extraWebsites]; },
@@ -135,6 +142,7 @@ test('reconciles a successful migration into the exact queued Passenger runtime 
   assert.equal(result.domains[0].nginxChecksum, 'b'.repeat(64));
   assert.deepEqual(result.passengerTarget, passengerTarget);
   assert.deepEqual(deps.activations[0].options, { expectedRevision: 0 });
+  assert.deepEqual(deps.migratedApplications, [{ id: applicationId, options: { operationId: jobId } }]);
 });
 
 test('persists cleanup-required without pretending systemd cleanup completed', async () => {

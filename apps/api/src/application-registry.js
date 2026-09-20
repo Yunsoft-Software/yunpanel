@@ -46,7 +46,7 @@ function normalizeRetention(value) {
   return Number.isInteger(value) && value >= 2 && value <= 20 ? value : 5;
 }
 
-function normalizeRuntimeAdapter(value = 'direct-systemd') {
+function normalizeRuntimeAdapter(value = 'passenger') {
   if (!NODE_RUNTIME_ADAPTERS.has(value)) {
     throw new ApplicationRegistryError('invalid_node_runtime_adapter', 'Node runtime adapter must be direct-systemd or passenger');
   }
@@ -67,8 +67,9 @@ function normalizeStaticConfig({ repositoryUrl, branch, build, retention }) {
   }
 }
 
-function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention, runtimeAdapter = 'direct-systemd' }) {
-  const adapter = normalizeRuntimeAdapter(runtimeAdapter);
+function normalizeNodeConfig({ repositoryUrl, branch, runtime, retention, runtimeAdapter }) {
+  const inferredAdapter = runtimeAdapter ?? (runtime?.port !== undefined && runtime?.port !== null ? 'direct-systemd' : 'passenger');
+  const adapter = normalizeRuntimeAdapter(inferredAdapter);
   try {
     return {
       repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
@@ -167,7 +168,11 @@ function hydrateApplication(application) {
   if (!['static', 'node', 'php', 'python'].includes(application.type)) {
     throw new ApplicationRegistryError('application_state_invalid', 'Application type is not supported by the current registry', 409);
   }
-  if (application.type === 'node') application.runtimeAdapter = normalizeRuntimeAdapter(application.runtimeAdapter ?? 'direct-systemd');
+  if (application.type === 'node') {
+    application.runtimeAdapter = normalizeRuntimeAdapter(
+      application.runtimeAdapter ?? (application.runtime?.port ? 'direct-systemd' : 'passenger')
+    );
+  }
   else application.runtimeAdapter = null;
   if (!Array.isArray(application.releases)) application.releases = [];
   if (application.pendingRollbackReleaseId === undefined) application.pendingRollbackReleaseId = null;
@@ -220,15 +225,22 @@ function hydrateApplication(application) {
       || (application.currentReleaseId !== null && (application.activeRuntime === null || application.appliedRevision < 1))) {
       throw new ApplicationRegistryError('application_state_invalid', 'Node application configuration state is invalid', 409);
     }
-    application.releases = application.releases.map((release) => ({
-      ...release,
-      runtime: normalizeNodeRuntimeConfig(release.runtime ?? application.activeRuntime ?? application.runtime, {
-        requirePort: application.runtimeAdapter === 'direct-systemd',
-      }),
-      configurationRevision: Number.isSafeInteger(release.configurationRevision) && release.configurationRevision >= 1
-        ? release.configurationRevision
-        : application.appliedRevision || 1,
-    }));
+    application.releases = application.releases.map((release) => {
+      let rawRuntime = release.runtime ?? application.activeRuntime ?? application.runtime;
+      if (application.runtimeAdapter === 'passenger' && rawRuntime?.port !== undefined && rawRuntime?.port !== null) {
+        const { port: _p, ...withoutPort } = rawRuntime;
+        rawRuntime = withoutPort;
+      }
+      return {
+        ...release,
+        runtime: normalizeNodeRuntimeConfig(rawRuntime, {
+          requirePort: application.runtimeAdapter === 'direct-systemd',
+        }),
+        configurationRevision: Number.isSafeInteger(release.configurationRevision) && release.configurationRevision >= 1
+          ? release.configurationRevision
+          : application.appliedRevision || 1,
+      };
+    });
   } else if (application.type === 'python') {
     const pythonConfig = normalizePythonConfig({
       repositoryUrl: application.repositoryUrl,
@@ -449,7 +461,7 @@ export function createApplicationRegistry({
     repositoryUrl,
     branch = 'main',
     runtime,
-    runtimeAdapter = 'direct-systemd',
+    runtimeAdapter,
     retention = 5,
   }) {
     await ensureInitialized();
@@ -857,6 +869,38 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function markPassengerMigrated(applicationId, { operationId = null } = {}) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'node') {
+      throw new ApplicationRegistryError('invalid_application_type', 'Application is not a Node application', 409);
+    }
+    if (application.runtimeAdapter === 'passenger') {
+      return publicApplication(application);
+    }
+    const timestamp = new Date(now()).toISOString();
+    application.runtimeAdapter = 'passenger';
+    if (application.runtime && typeof application.runtime === 'object') {
+      const { port: _unusedPort, ...cleanRuntime } = application.runtime;
+      application.runtime = cleanRuntime;
+    }
+    if (application.activeRuntime && typeof application.activeRuntime === 'object') {
+      const { port: _unusedActivePort, ...cleanActiveRuntime } = application.activeRuntime;
+      application.activeRuntime = cleanActiveRuntime;
+    }
+    application.releases = application.releases.map((release) => {
+      if (!release.runtime || typeof release.runtime !== 'object') return release;
+      const { port: _unusedRelPort, ...cleanRelRuntime } = release.runtime;
+      return { ...release, runtime: cleanRelRuntime };
+    });
+    application.serviceName = null;
+    application.servicePort = null;
+    application.proxyTarget = null;
+    application.updatedAt = timestamp;
+    await persist();
+    return publicApplication(application);
+  }
+
   async function activatePythonRelease(applicationId, {
     operationId,
     releaseId,
@@ -1193,6 +1237,7 @@ export function createApplicationRegistry({
     markDeployed,
     activatePassengerRelease,
     resetPassengerInitialRelease,
+    markPassengerMigrated,
     activatePythonRelease,
     resetPythonInitialRelease,
     markRollingBack,

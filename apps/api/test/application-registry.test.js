@@ -214,3 +214,45 @@ test('Passenger release finalization is idempotent and initial provisioning can 
   assert.equal(reset.state, 'draft');
   assert.equal(reset.releases.length, 0);
 });
+
+test('createNodeApplication defaults to passenger runtimeAdapter when port is omitted', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  const app = await registry.createNodeApplication({
+    serverId: 'server-1',
+    name: 'Default Node',
+    repositoryUrl: 'https://github.com/example/default-node',
+  });
+  assert.equal(app.runtimeAdapter, 'passenger');
+  assert.equal(app.servicePort, null);
+  assert.equal(app.proxyTarget, null);
+});
+
+test('markPassengerMigrated transitions direct-systemd application to passenger and clears legacy systemd fields', async () => {
+  const registry = createApplicationRegistry({ serverExists: async () => true });
+  const direct = await registry.createNodeApplication({
+    serverId: 'server-1',
+    name: 'Migrating Node',
+    repositoryUrl: 'https://github.com/example/migrating-node',
+    runtimeAdapter: 'direct-systemd',
+    runtime: { port: 3100 },
+  });
+  assert.equal(direct.runtimeAdapter, 'direct-systemd');
+  assert.equal(direct.servicePort, 3100);
+  assert.deepEqual(direct.proxyTarget, { host: '127.0.0.1', port: 3100 });
+
+  const migrated = await registry.markPassengerMigrated(direct.id, { operationId: 'mig-1' });
+  assert.equal(migrated.runtimeAdapter, 'passenger');
+  assert.equal(migrated.serviceName, null);
+  assert.equal(migrated.servicePort, null);
+  assert.equal(migrated.proxyTarget, null);
+
+  const fetched = await registry.getApplication(direct.id);
+  assert.equal(fetched.runtimeAdapter, 'passenger');
+  assert.equal(fetched.servicePort, null);
+  assert.equal(fetched.proxyTarget, null);
+
+  // Idempotent call
+  const idempotent = await registry.markPassengerMigrated(direct.id);
+  assert.equal(idempotent.runtimeAdapter, 'passenger');
+});
+

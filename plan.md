@@ -119,6 +119,7 @@ Son Website backup, restore, restic repo ve rclone remote canlı kabulü: `docs/
 Son Shared Roundcube mapping failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/roundcube-mapping-failure-injection-live-acceptance-2026-09-21.md`.
 Son SQLite Mail failure-injection ve yaşam döngüsü canlı kabulü: `docs/history/sqlite-mail-failure-injection-live-acceptance-2026-09-21.md`.
 Son External DNS requirements ve Cloudflare sağlayıcı canlı kabulü: `docs/history/external-dns-requirements-cloudflare-live-acceptance-2026-09-21.md`.
+Son Node.js Passenger varsayılanı ve direct-systemd migration uyumluluğu ilerlemesi: `docs/history/passenger-default-migration-cleanup-progress-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
@@ -177,7 +178,7 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 
-- [ ] Passenger acceptance sonrası direct-systemd yalnız legacy migration adapter'ı olarak kalsın; migration sonunda kaldır.
+- [ ] Legacy migration dönemi tamamlandığında direct-systemd compatibility adapter kodlarını kaldır.
 - [ ] restic acceptance sonrası custom backup archive yollarını kaldır.
 - [ ] Agentless local backend acceptance sonrası retained legacy agent transport/package/state kaldır.
 - [ ] Backend/functionality tamamlandıktan sonra enterprise UI/UX polish.
