@@ -66,6 +66,7 @@ test('applyRedisAcl generates correct redis-cli ACL arguments and restricts dang
   assert.ok(firstCall.args.includes('ACL'));
   assert.ok(firstCall.args.includes('SETUSER'));
   assert.ok(firstCall.args.includes(VALID_USER));
+  assert.ok(firstCall.args.includes('resetpass'));
   assert.ok(firstCall.args.includes(`>${VALID_PASSWORD}`));
   assert.ok(firstCall.args.includes(`~${VALID_PREFIX}*`));
   assert.ok(firstCall.args.includes('+select|2'));

@@ -56,6 +56,7 @@ export function createCacheIsolationManager({
     const aclArgs = [
       'ACL', 'SETUSER', username,
       'on',
+      'resetpass',
       `>${password}`,
       'resetkeys',
       keyPattern,

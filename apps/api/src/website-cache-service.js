@@ -184,6 +184,14 @@ export function createWebsiteCacheService({
 
   async function enableMemcached(websiteId) {
     const { unixUser } = await resolveWebsite(websiteId);
+    const existing = await cachePolicyRegistry.get(websiteId);
+
+    if (existing?.type === 'redis') {
+      try {
+        await cacheIsolationManager.removeRedisAcl({ username: existing.redis?.username ?? unixUser });
+      } catch {}
+    }
+
     const memcachedPolicy = cacheIsolationManager.generateMemcachedPolicy({
       websiteId,
       unixUser,
@@ -209,11 +217,9 @@ export function createWebsiteCacheService({
     const { unixUser } = await resolveWebsite(websiteId);
     const existing = await cachePolicyRegistry.get(websiteId);
 
-    if (existing?.type === 'redis') {
-      try {
-        await cacheIsolationManager.removeRedisAcl({ username: existing.redis.username ?? unixUser });
-      } catch {}
-    }
+    try {
+      await cacheIsolationManager.removeRedisAcl({ username: existing?.redis?.username ?? unixUser });
+    } catch {}
 
     await cachePolicyRegistry.delete(websiteId);
 
