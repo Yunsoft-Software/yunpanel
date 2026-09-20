@@ -181,3 +181,30 @@ test('local panel hides mailboxes whose mail Domain belongs to another Server', 
     body: { mailDomainId: remoteMailDomain.id, address: 'second@remote.example', password: 'valid mailbox password' },
   })).status, 404);
 });
+
+test('mailbox deletion is blocked when an alias references the mailbox address', async (t) => {
+  const mailAliasRegistry = {
+    async listAliases() {
+      return [{
+        id: randomUUID(),
+        source: 'info@example.com',
+        destinations: ['owner@example.com'],
+        enabled: true,
+      }];
+    },
+  };
+  const { base, mailboxRegistry } = await listen(t, owner, null, { mailAliasRegistry });
+  const created = await mailboxRegistry.createMailbox({
+    mailDomainId: localDomain.id,
+    address: 'owner@example.com',
+    password: 'valid mailbox password',
+  });
+
+  const response = await request(base, `/api/mailboxes/${created.id}`, {
+    method: 'DELETE',
+    body: { expectedRevision: 1, confirmation: 'delete-mailbox:owner@example.com' },
+  });
+  assert.equal(response.status, 409);
+  const body = await response.json();
+  assert.equal(body.error.code, 'mailbox_delete_alias_reference_configured');
+});

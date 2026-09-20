@@ -115,7 +115,7 @@ export function mountMailboxRoutes(app, {
     }
   }
 
-  async function assertDeleteDependenciesCleared(mailboxId) {
+  async function assertDeleteDependenciesCleared(mailboxId, mailboxAddress = null) {
     if (mailboxQuotaRegistry && await mailboxQuotaRegistry.getQuota(mailboxId)) {
       throw new MailboxRegistryError(
         'mailbox_delete_quota_configured',
@@ -129,6 +129,20 @@ export function mountMailboxRoutes(app, {
         'Mailbox forwarding must be cleared before deleting the mailbox',
         409,
       );
+    }
+    if (mailAliasRegistry && mailboxAddress) {
+      let aliases;
+      try { aliases = await mailAliasRegistry.listAliases(); }
+      catch {
+        throw new MailboxRegistryError('mail_alias_state_unavailable', 'Mail alias state could not be verified', 503);
+      }
+      if (Array.isArray(aliases) && aliases.some((alias) => alias.destinations?.includes(mailboxAddress))) {
+        throw new MailboxRegistryError(
+          'mailbox_delete_alias_reference_configured',
+          'Mailbox is referenced by one or more mail aliases; remove the alias references first',
+          409,
+        );
+      }
     }
   }
 
@@ -176,14 +190,14 @@ export function mountMailboxRoutes(app, {
 
   app.delete('/api/mailboxes/:mailboxId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    await localMailbox(request.params.mailboxId);
+    const mailbox = await localMailbox(request.params.mailboxId);
     if (localServerId !== null) {
       const body = exactBody(request.body, FINALIZE_DELETE_FIELDS, 'mailbox_delete_input_invalid');
       const result = await mailDeleteFinalizeService.finalizeMailbox({ mailboxId: request.params.mailboxId, ...body });
       return response.json({ data: result, sideEffects: noHostSideEffects });
     }
     const body = exactBody(request.body, DELETE_FIELDS, 'mailbox_delete_input_invalid');
-    await assertDeleteDependenciesCleared(request.params.mailboxId);
+    await assertDeleteDependenciesCleared(request.params.mailboxId, mailbox.address);
     await mailboxRegistry.deleteMailbox(request.params.mailboxId, body);
     return response.json({
       data: { id: request.params.mailboxId, deleted: true },

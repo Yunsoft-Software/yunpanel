@@ -59,6 +59,43 @@ function externalForwardingRequired(domains, forwardings) {
   ));
 }
 
+function assertNoMailRoutingCycles(forwardings, aliases) {
+  const bySource = new Map();
+  for (const policy of forwardings) {
+    bySource.set(policy.source, policy.destinations);
+  }
+  for (const alias of aliases) {
+    if (alias.enabled === false) continue;
+    if (bySource.has(alias.source)) {
+      throw new MailConfigurationError(
+        'mail_configuration_state_invalid',
+        'An address cannot be both a forwarding source and a mail alias source',
+        409,
+      );
+    }
+    bySource.set(alias.source, alias.destinations);
+  }
+  const visiting = new Set();
+  const visited = new Set();
+  function visit(source) {
+    if (visiting.has(source)) {
+      throw new MailConfigurationError(
+        'mail_configuration_routing_cycle',
+        'Mail forwarding and alias policies must not contain routing cycles',
+        409,
+      );
+    }
+    if (visited.has(source)) return;
+    visiting.add(source);
+    for (const destination of bySource.get(source) ?? []) {
+      if (bySource.has(destination)) visit(destination);
+    }
+    visiting.delete(source);
+    visited.add(source);
+  }
+  for (const source of bySource.keys()) visit(source);
+}
+
 function publicPostfixParameter(parameter) {
   if (parameter?.protected === true) {
     return Object.freeze({
@@ -289,6 +326,8 @@ export function createMailConfigurationService({
         });
       })
       .sort((left, right) => left.source.localeCompare(right.source));
+
+    assertNoMailRoutingCycles(forwardings, aliases);
 
     if (publicMailboxes.length !== privateAccounts.length
       || publicMailboxes.some((mailbox, index) => mailbox.address !== privateAccounts[index]?.address)) {
@@ -563,6 +602,7 @@ export function createMailConfigurationService({
 export const mailConfigurationInternals = Object.freeze({
   transitionInput,
   externalForwardingRequired,
+  assertNoMailRoutingCycles,
   publicPostfixParameter,
   publicConfigurationPreview,
   transitionPreview,

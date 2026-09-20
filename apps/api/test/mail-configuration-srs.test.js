@@ -201,3 +201,55 @@ test('SRS secret rotation makes a previously approved managed-mail preview stale
     (error) => error instanceof MailConfigurationError && error.code === 'mail_configuration_preview_stale',
   );
 });
+
+test('cross-routing cycle between mailbox forwarding and alias fails closed', async () => {
+  const deps = baseDependencies();
+  deps.mailboxForwardingRegistry = {
+    materializeEnabledForwardings: async () => [{
+      mailboxId: MAILBOX_ID,
+      source: 'owner@example.com',
+      mode: 'copy',
+      destinations: ['alias@example.com'],
+    }],
+  };
+  deps.mailAliasRegistry = {
+    materializeEnabledAliases: async () => [{
+      source: 'alias@example.com',
+      destinations: ['owner@example.com'],
+      enabled: true,
+    }],
+  };
+  const srs = readySrsService();
+  const service = createMailConfigurationService({ ...deps, mailSrsConfigurationService: srs });
+
+  await assert.rejects(
+    service.previewTransition(transition),
+    (error) => error instanceof MailConfigurationError && error.code === 'mail_configuration_routing_cycle',
+  );
+});
+
+test('address cannot be both a forwarding source and a mail alias source', async () => {
+  const deps = baseDependencies();
+  deps.mailboxForwardingRegistry = {
+    materializeEnabledForwardings: async () => [{
+      mailboxId: MAILBOX_ID,
+      source: 'owner@example.com',
+      mode: 'copy',
+      destinations: ['dest1@example.com'],
+    }],
+  };
+  deps.mailAliasRegistry = {
+    materializeEnabledAliases: async () => [{
+      source: 'owner@example.com',
+      destinations: ['dest2@example.com'],
+      enabled: true,
+    }],
+  };
+  const srs = readySrsService();
+  const service = createMailConfigurationService({ ...deps, mailSrsConfigurationService: srs });
+
+  await assert.rejects(
+    service.previewTransition(transition),
+    (error) => error instanceof MailConfigurationError && error.code === 'mail_configuration_state_invalid',
+  );
+});
