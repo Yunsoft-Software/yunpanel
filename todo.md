@@ -13,7 +13,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-RUNTIME — P0 Passenger, PHP-FPM ve hosted app sürekliliği
 
-- [ ] Passenger Node, PHP ve Python Website; YunPanel API/web restartı ve package upgrade sırasında hizmet vermeye devam etsin. `.28` üzerinde mevcut Static ve legacy direct-systemd Node HTTP 200 ve gövde SHA-256 değerleri panel API/web restartı öncesi/sonrası aynı kaldı; yeni paket sonrası da erişilebilirler. Passenger/PHP/Python fixture ve bunların package-upgrade sürekliliği hâlâ açık.
+- [ ] Passenger, PHP ve Python Website; yeni Debian paketi upgrade'i sırasında hizmet vermeye devam etsin (.28 üzerinde panel API/web restartı sırasında HTTP 200 ve gövde SHA-256 sürekliliği Passenger, PHP ve Python için 2026-09-20'de doğrulandı).
 
 ## T-TOOLS — P0 ttyd, elFinder, phpMyAdmin/pgAdmin gateway
 
