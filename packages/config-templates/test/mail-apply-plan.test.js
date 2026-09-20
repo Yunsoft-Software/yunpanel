@@ -49,8 +49,12 @@ test('builds deterministic secret-free managed mail apply and rollback stages wi
   assert.equal(plan.sensitiveMaterialRequired, true);
   assert.deepEqual(plan.stages.write.map((entry) => entry.path), preview.artifacts.map((entry) => entry.path));
   assert.deepEqual(plan.stages.compile, EXPECTED_COMPILE);
-  assert.deepEqual(plan.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
-  assert.equal(plan.stages.configurePostfixMaster.length, 1 + mailSubmissionTemplatePolicy.service.parameters.length);
+  assert.deepEqual(plan.postfixMasterServices, mailSubmissionTemplatePolicy.services);
+  const totalMasterCommands = mailSubmissionTemplatePolicy.services.reduce(
+    (sum, service) => sum + 1 + service.parameters.length,
+    0,
+  );
+  assert.equal(plan.stages.configurePostfixMaster.length, totalMasterCommands);
   assert.deepEqual(plan.stages.configurePostfixMaster[0], {
     file: '/usr/sbin/postconf',
     args: ['-M', 'submission/inet=submission inet n - n - - smtpd'],

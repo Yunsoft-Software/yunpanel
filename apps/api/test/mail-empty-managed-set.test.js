@@ -46,14 +46,15 @@ test('last enabled mail domain produces an applyable empty submission-aware mana
   assert.deepEqual(preview.domains, []);
   assert.deepEqual(preview.blockers, []);
   assert.deepEqual(preview.configuration.counts, { domains: 0, mailboxes: 0, aliases: 0, forwardings: 0 });
-  assert.equal(preview.configuration.postfixMasterServices.length, 1);
-  assert.equal(preview.configuration.postfixMasterServices[0].service, mailSubmissionTemplatePolicy.service.service);
-  assert.equal(
-    preview.configuration.postfixMasterServices[0].parameters.find(
-      (parameter) => parameter.name === 'smtpd_sender_login_maps',
-    ).value,
-    'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
-  );
+  assert.equal(preview.configuration.postfixMasterServices.length, 2);
+  for (const service of preview.configuration.postfixMasterServices) {
+    assert.equal(
+      service.parameters.find(
+        (parameter) => parameter.name === 'smtpd_sender_login_maps',
+      ).value,
+      'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+    );
+  }
   assert.equal(
     preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSqlTemplatePolicy.seedPath),
     true,

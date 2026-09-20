@@ -324,7 +324,7 @@ function replaceParameter(parameters, name, value) {
 }
 
 function sqlMasterServices(services, senderLoginLookup) {
-  if (!Array.isArray(services) || services.length !== 1) {
+  if (!Array.isArray(services) || services.length === 0) {
     throw new MailSqlTemplateError(
       'mail_sql_submission_service_invalid',
       'Managed submission service metadata is unavailable for SQL migration',
@@ -339,10 +339,10 @@ function sqlMasterServices(services, senderLoginLookup) {
       return Object.freeze({ name: parameter.name, value: senderLoginLookup });
     })),
   }));
-  if (replacements !== 1) {
+  if (replacements !== services.length) {
     throw new MailSqlTemplateError(
       'mail_sql_submission_service_invalid',
-      'Managed submission service must contain one sender-login map',
+      'Managed submission service must contain one sender-login map per service',
     );
   }
   return Object.freeze(result);

@@ -8,7 +8,9 @@ const MAX_OUTPUT = 32 * 1024;
 const PROTOCOLS = Object.freeze([
   Object.freeze({ id: 'smtp', port: 25 }),
   Object.freeze({ id: 'submission', port: 587 }),
+  Object.freeze({ id: 'submissions', port: 465 }),
   Object.freeze({ id: 'imap', port: 143 }),
+  Object.freeze({ id: 'imaps', port: 993 }),
 ]);
 
 export class MailProtocolHealthInspectorError extends Error {

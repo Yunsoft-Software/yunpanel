@@ -49,7 +49,7 @@ test('stages the empty managed mail set with protected passwd, sender-login and 
     mailForwardingTemplatePolicy.sievePath,
     mailTemplatePolicy.rspamdProxyConfigPath,
   ]);
-  assert.deepEqual(plan.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.deepEqual(plan.postfixMasterServices, mailSubmissionTemplatePolicy.services);
 
   const stageDirectory = manager.stageDirectory(plan.sha256);
   const senderArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailSubmissionTemplatePolicy.senderLoginPath);

@@ -196,7 +196,7 @@ async function prepare({
   const calls = [];
   const postfixParameters = new Map();
   const masterParameters = new Map();
-  let masterDefinition = null;
+  const masterDefinitions = new Map();
   let doveconfFailuresRemaining = failFirstDoveconf ? 1 : 0;
   let doveconfCalls = 0;
   const failedDoveconfCalls = new Set(failDoveconfCalls);
@@ -271,11 +271,13 @@ async function prepare({
       const expression = args[1];
       const separator = expression.indexOf('=');
       if (separator >= 0) {
-        masterDefinition = expression.slice(separator + 1);
-        await appendFile(mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath), `${masterDefinition}\n`);
+        const key = expression.slice(0, separator);
+        const definition = expression.slice(separator + 1);
+        masterDefinitions.set(key, definition);
+        await appendFile(mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath), `${definition}\n`);
         return { stdout: '', stderr: '' };
       }
-      return { stdout: `${masterDefinition ?? ''}\n`, stderr: '' };
+      return { stdout: `${masterDefinitions.get(expression) ?? ''}\n`, stderr: '' };
     }
     if (file === '/usr/sbin/postconf' && args[0] === '-P') {
       const expression = args[1];

@@ -162,9 +162,11 @@ function fixture({
           protocols: [
             { id: 'smtp', port: 25, satisfied: true },
             { id: 'submission', port: 587, satisfied: protocolReady },
+            { id: 'submissions', port: 465, satisfied: protocolReady },
             { id: 'imap', port: 143, satisfied: protocolReady },
+            { id: 'imaps', port: 993, satisfied: protocolReady },
           ],
-          blockers: protocolReady ? [] : ['submission', 'imap'],
+          blockers: protocolReady ? [] : ['submission', 'submissions', 'imap', 'imaps'],
           sideEffects: false,
         };
       },
@@ -274,7 +276,7 @@ test('local-mail health blocks Website readiness while SMTP submission or IMAP l
   assert.deepEqual(evidence, {
     satisfied: false,
     reason: 'website_mail_protocol_health_not_ready',
-    blockers: ['submission', 'imap'],
+    blockers: ['submission', 'submissions', 'imap', 'imaps'],
   });
   assert.equal(f.calls().endpointCalls, 0);
   assert.equal(f.calls().discoveryCalls, 0);

@@ -213,6 +213,9 @@ test('renders Dovecot Maildir and Postfix LMTP socket from fixed paths', () => {
   assert.match(config, /^    mode = 0600$/m);
   assert.match(config, /^    user = postfix$/m);
   assert.match(config, /^    group = postfix$/m);
+  assert.match(config, /service imap-login/);
+  assert.match(config, /inet_listener imap \{\s+port = 143\s+\}/);
+  assert.match(config, /inet_listener imaps \{\s+port = 993\s+ssl = yes\s+\}/);
   assert.match(config, /^  postmaster_address = postmaster@example\.com$/m);
   assert.throws(
     () => renderDovecotMailConfig({ domains: ['example.com'], postmasterAddress: 'postmaster@other.example' }),

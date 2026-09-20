@@ -77,7 +77,7 @@ test('empty managed set remains compatible with the production security/submissi
     { file: '/usr/sbin/postmap', args: [`hash:${mailSubmissionTemplatePolicy.senderLoginPath}`] },
     { file: '/usr/bin/sievec', args: ['/etc/dovecot/yunpanel-forwarding.sieve'] },
   ]);
-  assert.deepEqual(plan.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.deepEqual(plan.postfixMasterServices, mailSubmissionTemplatePolicy.services);
   assert.deepEqual(plan.stages.reload.map((command) => command.args[1]), ['rspamd', 'dovecot', 'postfix']);
   assert.deepEqual(plan.stages.health.map((command) => command.args[2]), ['rspamd', 'dovecot', 'postfix']);
 });

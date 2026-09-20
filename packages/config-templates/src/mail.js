@@ -314,7 +314,35 @@ export function renderDovecotMailConfig({ domains, postmasterAddress } = {}) {
   if (!normalizedDomains.includes(postmaster.domain)) {
     throw new MailTemplateError('postmaster_domain_unmanaged', 'Dovecot postmaster address must belong to a managed mail domain');
   }
-  return `protocols = imap lmtp\nmail_home = /var/lib/yunpanel/mail/%d/%n\nmail_location = maildir:~/Maildir\n\nservice lmtp {\n  unix_listener /var/spool/postfix/private/dovecot-lmtp {\n    mode = 0600\n    user = postfix\n    group = postfix\n  }\n}\n\nprotocol lmtp {\n  auth_username_format = %Lu\n  postmaster_address = ${postmaster.address}\n}\n`;
+  return [
+    'protocols = imap lmtp',
+    'mail_home = /var/lib/yunpanel/mail/%d/%n',
+    'mail_location = maildir:~/Maildir',
+    '',
+    'service imap-login {',
+    '  inet_listener imap {',
+    '    port = 143',
+    '  }',
+    '  inet_listener imaps {',
+    '    port = 993',
+    '    ssl = yes',
+    '  }',
+    '}',
+    '',
+    'service lmtp {',
+    '  unix_listener /var/spool/postfix/private/dovecot-lmtp {',
+    '    mode = 0600',
+    '    user = postfix',
+    '    group = postfix',
+    '  }',
+    '}',
+    '',
+    'protocol lmtp {',
+    '  auth_username_format = %Lu',
+    `  postmaster_address = ${postmaster.address}`,
+    '}',
+    '',
+  ].join('\n');
 }
 
 export function previewDovecotVirtualMailConfig(input = {}) {

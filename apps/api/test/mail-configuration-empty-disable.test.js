@@ -23,12 +23,12 @@ test('disabling the only enabled local mail domain keeps deterministic submissio
   assert.equal(preview.readyToApply, true);
   assert.equal(preview.configuration !== null, true);
   assert.deepEqual(preview.blockers, []);
-  assert.deepEqual(preview.configuration.postfixMasterServices, [{
-    ...mailSubmissionTemplatePolicy.service,
-    parameters: mailSubmissionTemplatePolicy.service.parameters.map((parameter) => parameter.name === 'smtpd_sender_login_maps'
+  assert.deepEqual(preview.configuration.postfixMasterServices, mailSubmissionTemplatePolicy.services.map((service) => ({
+    ...service,
+    parameters: service.parameters.map((parameter) => parameter.name === 'smtpd_sender_login_maps'
       ? { ...parameter, value: `proxy:sqlite:${mailSqlTemplatePolicy.postfixSenderLoginPath}` }
       : parameter),
-  }]);
+  })));
   assert.equal(
     preview.configuration.artifactDigests.some((artifact) => artifact.path === mailSqlTemplatePolicy.postfixSenderLoginPath),
     true,

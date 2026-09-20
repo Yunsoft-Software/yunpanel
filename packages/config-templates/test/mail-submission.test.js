@@ -35,7 +35,17 @@ test('submission preview reuses canonical Dovecot auth mechanisms and adds one p
 
   assert.ok(senderLogins);
   assert.equal(senderLogins.content, 'owner@example.com owner@example.com\n');
-  assert.deepEqual(preview.postfixMasterServices, [mailSubmissionTemplatePolicy.service]);
+  assert.deepEqual(preview.postfixMasterServices, mailSubmissionTemplatePolicy.services);
+  assert.equal(preview.postfixMasterServices.length, 2);
+  const submission = preview.postfixMasterServices.find((entry) => entry.service === 'submission');
+  const submissions = preview.postfixMasterServices.find((entry) => entry.service === 'submissions');
+  assert.ok(submission);
+  assert.ok(submissions);
+  assert.equal(submission.parameters.find((p) => p.name === 'smtpd_tls_security_level').value, 'encrypt');
+  assert.equal(submission.parameters.find((p) => p.name === 'smtpd_tls_auth_only').value, 'yes');
+  assert.equal(submissions.parameters.find((p) => p.name === 'smtpd_tls_wrappermode').value, 'yes');
+  assert.equal(submissions.parameters.find((p) => p.name === 'smtpd_tls_security_level').value, 'encrypt');
+  assert.equal(submissions.parameters.find((p) => p.name === 'smtpd_tls_auth_only').value, 'yes');
   assert.match(preview.sha256, /^[a-f0-9]{64}$/);
 });
 

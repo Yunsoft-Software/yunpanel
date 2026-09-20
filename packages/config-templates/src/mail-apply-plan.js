@@ -105,40 +105,45 @@ function compileCommand(artifact) {
 }
 
 function canonicalMasterServices(value, { sqlEnabled = false } = {}) {
-  const expected = mailSubmissionTemplatePolicy.service;
-  if (!Array.isArray(value) || value.length !== 1) {
+  const expectedServices = mailSubmissionTemplatePolicy.services;
+  if (!Array.isArray(value) || value.length !== expectedServices.length) {
     throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is incomplete');
   }
-  const service = value[0];
-  if (!service || service.service !== expected.service || service.type !== expected.type
-    || service.definition !== expected.definition || !Array.isArray(service.parameters)
-    || service.parameters.length !== expected.parameters.length) {
-    throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is invalid');
-  }
-  for (let index = 0; index < expected.parameters.length; index += 1) {
-    const actual = service.parameters[index];
-    const baseWanted = expected.parameters[index];
-    const wanted = baseWanted.name === 'smtpd_sender_login_maps' && sqlEnabled
-      ? Object.freeze({
-        name: baseWanted.name,
-        value: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
-      })
-      : baseWanted;
-    if (!actual || actual.name !== wanted.name || actual.value !== wanted.value) {
-      throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service override is not allowlisted');
+  const result = [];
+  for (let sIndex = 0; sIndex < expectedServices.length; sIndex += 1) {
+    const expected = expectedServices[sIndex];
+    const service = value[sIndex];
+    if (!service || service.service !== expected.service || service.type !== expected.type
+      || service.definition !== expected.definition || !Array.isArray(service.parameters)
+      || service.parameters.length !== expected.parameters.length) {
+      throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service metadata is invalid');
     }
+    for (let index = 0; index < expected.parameters.length; index += 1) {
+      const actual = service.parameters[index];
+      const baseWanted = expected.parameters[index];
+      const wanted = baseWanted.name === 'smtpd_sender_login_maps' && sqlEnabled
+        ? Object.freeze({
+          name: baseWanted.name,
+          value: 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath,
+        })
+        : baseWanted;
+      if (!actual || actual.name !== wanted.name || actual.value !== wanted.value) {
+        throw new MailApplyPlanError('invalid_postfix_master_service', 'Managed Postfix master service override is not allowlisted');
+      }
+    }
+    result.push(Object.freeze({
+      service: expected.service,
+      type: expected.type,
+      definition: expected.definition,
+      parameters: Object.freeze(expected.parameters.map((parameter) => Object.freeze({
+        ...parameter,
+        value: parameter.name === 'smtpd_sender_login_maps' && sqlEnabled
+          ? 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath
+          : parameter.value,
+      }))),
+    }));
   }
-  return Object.freeze([Object.freeze({
-    service: expected.service,
-    type: expected.type,
-    definition: expected.definition,
-    parameters: Object.freeze(expected.parameters.map((parameter) => Object.freeze({
-      ...parameter,
-      value: parameter.name === 'smtpd_sender_login_maps' && sqlEnabled
-        ? 'proxy:sqlite:' + mailSqlTemplatePolicy.postfixSenderLoginPath
-        : parameter.value,
-    }))),
-  })]);
+  return Object.freeze(result);
 }
 
 function masterServiceCommands(services) {

@@ -169,7 +169,7 @@ async function prepare(root, { failFirstDoveconf = false } = {}) {
   const calls = [];
   const postfixParameters = new Map();
   const masterParameters = new Map();
-  let masterDefinition = null;
+  const masterDefinitions = new Map();
   let doveconfFailuresRemaining = failFirstDoveconf ? 1 : 0;
   const run = async (file, args) => {
     calls.push([file, [...args]]);
@@ -207,10 +207,10 @@ async function prepare(root, { failFirstDoveconf = false } = {}) {
       const expression = args[1];
       const separator = expression.indexOf('=');
       if (separator >= 0) {
-        masterDefinition = expression.slice(separator + 1);
+        masterDefinitions.set(expression.slice(0, separator), expression.slice(separator + 1));
         return { stdout: '', stderr: '' };
       }
-      return { stdout: `${masterDefinition ?? ''}\n`, stderr: '' };
+      return { stdout: `${masterDefinitions.get(expression) ?? ''}\n`, stderr: '' };
     }
     if (file === '/usr/sbin/postconf' && args[0] === '-P') {
       const expression = args[1];

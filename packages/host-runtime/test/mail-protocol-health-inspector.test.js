@@ -24,23 +24,25 @@ function inspector({ missing = [] } = {}) {
   });
 }
 
-test('requires SMTP, submission and IMAP listeners without exposing socket addresses', async () => {
+test('requires SMTP, submission, submissions, IMAP and IMAPS listeners without exposing socket addresses', async () => {
   const result = await inspector().inspect();
   assert.equal(result.ready, true);
   assert.deepEqual(result.blockers, []);
   assert.deepEqual(result.protocols, [
     { id: 'smtp', port: 25, satisfied: true },
     { id: 'submission', port: 587, satisfied: true },
+    { id: 'submissions', port: 465, satisfied: true },
     { id: 'imap', port: 143, satisfied: true },
+    { id: 'imaps', port: 993, satisfied: true },
   ]);
   assert.match(result.sha256, /^[a-f0-9]{64}$/);
   assert.equal(JSON.stringify(result).includes('0.0.0.0'), false);
 });
 
 test('reports missing protocol listeners as bounded blockers', async () => {
-  const result = await inspector({ missing: [587, 143] }).inspect();
+  const result = await inspector({ missing: [587, 465, 143, 993] }).inspect();
   assert.equal(result.ready, false);
-  assert.deepEqual(result.blockers, ['submission', 'imap']);
+  assert.deepEqual(result.blockers, ['submission', 'submissions', 'imap', 'imaps']);
   assert.equal(result.protocols.find((entry) => entry.id === 'smtp').satisfied, true);
 });
 
@@ -57,6 +59,8 @@ test('uses the fixed ss binary and port-scoped listener filters', async () => {
   assert.deepEqual(calls, [
     `${mailProtocolHealthInternals.ssPath} -H -ltn sport = :25`,
     `${mailProtocolHealthInternals.ssPath} -H -ltn sport = :587`,
+    `${mailProtocolHealthInternals.ssPath} -H -ltn sport = :465`,
     `${mailProtocolHealthInternals.ssPath} -H -ltn sport = :143`,
+    `${mailProtocolHealthInternals.ssPath} -H -ltn sport = :993`,
   ]);
 });

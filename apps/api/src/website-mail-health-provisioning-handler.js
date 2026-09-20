@@ -118,7 +118,7 @@ function protocolEvidence(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || value.version !== 1 || !SHA256_PATTERN.test(value.sha256 ?? '')
     || typeof value.ready !== 'boolean'
-    || !Array.isArray(value.protocols) || value.protocols.length !== 3
+    || !Array.isArray(value.protocols) || value.protocols.length !== 5
     || !Array.isArray(value.blockers)
     || value.blockers.some((entry) => typeof entry !== 'string' || !entry)
     || value.sideEffects !== false) {
@@ -128,7 +128,13 @@ function protocolEvidence(value) {
       503,
     );
   }
-  const expected = [['smtp', 25], ['submission', 587], ['imap', 143]];
+  const expected = [
+    ['smtp', 25],
+    ['submission', 587],
+    ['submissions', 465],
+    ['imap', 143],
+    ['imaps', 993],
+  ];
   for (let index = 0; index < expected.length; index += 1) {
     const [id, port] = expected[index];
     const current = value.protocols[index];

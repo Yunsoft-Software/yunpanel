@@ -23,6 +23,30 @@ const POSTFIX_SUBMISSION_SERVICE = Object.freeze({
     Object.freeze({ name: 'smtpd_tls_security_level', value: 'encrypt' }),
   ]),
 });
+const POSTFIX_SUBMISSIONS_SERVICE = Object.freeze({
+  service: 'submissions',
+  type: 'inet',
+  definition: 'submissions inet n - n - - smtpd',
+  parameters: Object.freeze([
+    Object.freeze({ name: 'syslog_name', value: 'postfix/submissions' }),
+    Object.freeze({ name: 'smtpd_recipient_restrictions', value: 'permit_sasl_authenticated,reject' }),
+    Object.freeze({ name: 'smtpd_relay_restrictions', value: 'permit_sasl_authenticated,reject' }),
+    Object.freeze({ name: 'smtpd_sasl_auth_enable', value: 'yes' }),
+    Object.freeze({ name: 'smtpd_sasl_path', value: 'private/auth' }),
+    Object.freeze({ name: 'smtpd_sasl_security_options', value: 'noanonymous' }),
+    Object.freeze({ name: 'smtpd_sasl_type', value: 'dovecot' }),
+    Object.freeze({ name: 'smtpd_sender_login_maps', value: `hash:${SENDER_LOGIN_PATH}` }),
+    Object.freeze({ name: 'smtpd_sender_restrictions', value: 'reject_sender_login_mismatch' }),
+    Object.freeze({ name: 'smtpd_tls_auth_only', value: 'yes' }),
+    Object.freeze({ name: 'smtpd_tls_mandatory_protocols', value: `>=${mailSecurityTemplatePolicy.tlsMinProtocol}` }),
+    Object.freeze({ name: 'smtpd_tls_security_level', value: 'encrypt' }),
+    Object.freeze({ name: 'smtpd_tls_wrappermode', value: 'yes' }),
+  ]),
+});
+const POSTFIX_MASTER_SERVICES = Object.freeze([
+  POSTFIX_SUBMISSION_SERVICE,
+  POSTFIX_SUBMISSIONS_SERVICE,
+]);
 const AUTH_APPEND = [
   '',
   'service auth {',
@@ -138,13 +162,13 @@ export function enableManagedMailSubmission(preview, mailboxes = []) {
     version: 1,
     baseSha256: preview.sha256,
     artifactDigests: frozenArtifacts.map((artifact) => ({ path: artifact.path, sha256: artifact.sha256 })),
-    postfixMasterServices: Object.freeze([POSTFIX_SUBMISSION_SERVICE]),
+    postfixMasterServices: POSTFIX_MASTER_SERVICES,
   });
   return Object.freeze({
     ...preview,
     sha256: sha256(JSON.stringify(identity)),
     artifacts: frozenArtifacts,
-    postfixMasterServices: Object.freeze([POSTFIX_SUBMISSION_SERVICE]),
+    postfixMasterServices: POSTFIX_MASTER_SERVICES,
     readyToApply: false,
     sideEffects: false,
   });
@@ -161,6 +185,9 @@ export const mailSubmissionTemplatePolicy = Object.freeze({
   senderLoginPath: SENDER_LOGIN_PATH,
   dovecotAuthSocket: DOVECOT_AUTH_SOCKET,
   service: POSTFIX_SUBMISSION_SERVICE,
+  submissionService: POSTFIX_SUBMISSION_SERVICE,
+  submissionsService: POSTFIX_SUBMISSIONS_SERVICE,
+  services: POSTFIX_MASTER_SERVICES,
 });
 
 export const mailSubmissionTemplateInternals = Object.freeze({

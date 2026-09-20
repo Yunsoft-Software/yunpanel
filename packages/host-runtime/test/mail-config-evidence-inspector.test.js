@@ -104,9 +104,17 @@ function inspectorFor({
 } = {}) {
   const plan = previewManagedMailApplyPlan(preview);
   const parameters = new Map(plan.postfixParameters.map((entry) => [entry.name, entry.value]));
-  const masterService = plan.postfixMasterServices[0];
-  const masterIdentity = `${masterService.service}/${masterService.type}`;
-  const masterParameters = new Map(masterService.parameters.map((entry) => [entry.name, entry.value]));
+  const masterDefinitions = new Map(plan.postfixMasterServices.map((service) => [
+    `${service.service}/${service.type}`,
+    service.definition,
+  ]));
+  const masterParameters = new Map();
+  for (const service of plan.postfixMasterServices) {
+    const identity = `${service.service}/${service.type}`;
+    for (const parameter of service.parameters) {
+      masterParameters.set(`${identity}/${parameter.name}`, parameter.value);
+    }
+  }
   return createMailConfigEvidenceInspector({
     readinessInspector: {
       inspect: async (_candidate, { phase } = {}) => ({
@@ -195,17 +203,18 @@ function inspectorFor({
         return { stdout: `${value ?? ''}\n`, stderr: '' };
       }
       if (file === '/usr/sbin/postconf' && args[0] === '-M') {
-        if (args[1] !== masterIdentity) throw new Error('unexpected master service');
-        return { stdout: `${masterDefinitionOverride ?? masterService.definition}\n`, stderr: '' };
+        const definition = masterDefinitions.get(args[1]);
+        if (!definition) throw new Error('unexpected master service');
+        return { stdout: `${masterDefinitionOverride ?? definition}\n`, stderr: '' };
       }
       if (file === '/usr/sbin/postconf' && args[0] === '-P') {
-        const prefix = `${masterIdentity}/`;
-        if (!args[1].startsWith(prefix)) throw new Error('unexpected master parameter');
-        const name = args[1].slice(prefix.length);
-        const value = masterParameterOverride?.name === name
+        const lastSlash = args[1].lastIndexOf('/');
+        const paramName = lastSlash >= 0 ? args[1].slice(lastSlash + 1) : args[1];
+        const value = (masterParameterOverride?.name === paramName || masterParameterOverride?.name === args[1])
           ? masterParameterOverride.value
-          : masterParameters.get(name);
-        return { stdout: `${args[1]}=${value ?? ''}\n`, stderr: '' };
+          : masterParameters.get(args[1]);
+        if (value === undefined) throw new Error('unexpected master parameter');
+        return { stdout: `${args[1]}=${value}\n`, stderr: '' };
       }
       const allowed = new Set([
         ...plan.stages.validate.map((command) => commandKey(command.file, command.args)),
