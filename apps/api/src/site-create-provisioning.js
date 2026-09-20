@@ -425,6 +425,14 @@ export function siteCreateProvisioningPlan(preview) {
       { dockerWorkloadId: preview.plan.dockerWorkload.id },
     ));
   }
+  if (preview.plan.managedComposeBinding) {
+    steps.push(metadataStep(
+      'managed_compose_binding',
+      'managed_compose_binding',
+      preview.steps?.managedComposeReady === true,
+      { ...preview.plan.managedComposeBinding },
+    ));
+  }
   steps.push(metadataStep(
     'website_metadata',
     'website_metadata',

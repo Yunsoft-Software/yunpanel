@@ -515,6 +515,7 @@ export function createApp({
     registry: localRegistry,
     applicationRegistry,
     dockerWorkloadRegistry,
+    dockerComposeProjectRegistry,
     websiteRegistry,
     domainRegistry,
     mailDomainRegistry,

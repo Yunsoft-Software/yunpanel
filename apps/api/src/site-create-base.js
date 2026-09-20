@@ -15,7 +15,7 @@ import {
 import { DomainHierarchyError, validateDomainParent } from './domain-hierarchy.js';
 
 const SITE_NAMESPACE = Buffer.from('0bcd2cf8883b49f997294b5d225cf15e', 'hex');
-const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'new_static', 'new_node', 'new_php', 'new_python', 'external_proxy']);
+const SOURCE_KINDS = new Set(['existing_application', 'existing_docker', 'existing_managed_compose', 'new_static', 'new_node', 'new_php', 'new_python', 'external_proxy']);
 const WWW_MODES = new Set(['none', 'alias', 'independent']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DATABASE_MODES = new Set(['none', 'create']);
@@ -85,6 +85,32 @@ function normalizedSource(source) {
     if (source.kind === 'existing_docker') {
       exactObject(source, new Set(['kind', 'dockerWorkloadId']), 'site_create_source_invalid', 'Existing Docker source requires only kind and dockerWorkloadId');
       return Object.freeze({ kind: source.kind, dockerWorkloadId: uuid(source.dockerWorkloadId, 'dockerWorkloadId') });
+    }
+    if (source.kind === 'existing_managed_compose') {
+      const allowed = new Set(['kind', 'projectId', 'serviceName', 'targetPort', 'protocol']);
+      if (!source || typeof source !== 'object' || Array.isArray(source)
+        || Object.keys(source).some((key) => !allowed.has(key))
+        || !source.projectId || !source.serviceName || source.targetPort === undefined) {
+        throw new SiteCreateError('site_create_source_invalid', 'Existing managed compose source requires kind, projectId, serviceName, and targetPort');
+      }
+      const projectId = uuid(source.projectId, 'projectId');
+      if (typeof source.serviceName !== 'string' || !/^[a-z0-9][a-z0-9_.-]{0,62}$/.test(source.serviceName)) {
+        throw new SiteCreateError('site_create_service_name_invalid', 'Managed compose service name is invalid');
+      }
+      if (!Number.isSafeInteger(source.targetPort) || source.targetPort < 1 || source.targetPort > 65535) {
+        throw new SiteCreateError('site_create_target_port_invalid', 'Managed compose target port must be between 1 and 65535');
+      }
+      const protocol = source.protocol ?? 'tcp';
+      if (protocol !== 'tcp') {
+        throw new SiteCreateError('site_create_protocol_unsupported', 'Managed compose protocol must be tcp');
+      }
+      return Object.freeze({
+        kind: source.kind,
+        projectId,
+        serviceName: source.serviceName,
+        targetPort: source.targetPort,
+        protocol,
+      });
     }
     if (source.kind === 'external_proxy') {
       exactObject(source, new Set(['kind', 'target']), 'site_create_source_invalid', 'External proxy source requires only kind and target');
@@ -315,6 +341,7 @@ function stableWebsite(website) {
     name: website.name,
     applicationId: website.applicationId,
     dockerWorkloadId: website.dockerWorkloadId ?? null,
+    managedComposeBinding: website.managedComposeBinding ? { ...website.managedComposeBinding } : null,
     runtimeType: website.runtimeType,
     documentRoot: website.documentRoot,
     unixUser: website.unixUser,
@@ -364,11 +391,21 @@ function ensureExact(existing, expected, code, message, project = (value) => val
   return true;
 }
 
-function domainTarget(application, source, dockerWorkload = null) {
+function domainTarget(application, source, dockerWorkload = null, managedComposeTarget = null) {
   if (source.kind === 'external_proxy') {
     return Object.freeze({
       targetType: 'proxy',
       target: Object.freeze({ upstreamHost: source.target.host, upstreamPort: source.target.port, websocket: source.target.websocket }),
+    });
+  }
+  if (source.kind === 'existing_managed_compose') {
+    if (!managedComposeTarget || !LOOPBACK_HOSTS.has(managedComposeTarget.host)
+      || !Number.isInteger(managedComposeTarget.port) || managedComposeTarget.port < 1024 || managedComposeTarget.port > 65535) {
+      throw new SiteCreateError('site_create_managed_compose_target_invalid', 'Managed Compose published target is invalid', 409);
+    }
+    return Object.freeze({
+      targetType: 'proxy',
+      target: Object.freeze({ upstreamHost: managedComposeTarget.host, upstreamPort: managedComposeTarget.port, websocket: true }),
     });
   }
   if (source.kind === 'existing_docker') {
@@ -472,6 +509,7 @@ export async function previewSiteCreate({
   registry,
   applicationRegistry,
   dockerWorkloadRegistry,
+  dockerComposeProjectRegistry = null,
   websiteRegistry,
   domainRegistry,
   mailDomainRegistry = null,
@@ -518,6 +556,7 @@ export async function previewSiteCreate({
 
   let application = null;
   let dockerWorkload = null;
+  let managedComposeTarget = null;
   let applicationExpected = null;
   const assignedPort = null;
   if (normalized.source.kind === 'existing_application') {
@@ -531,6 +570,38 @@ export async function previewSiteCreate({
     if (dockerWorkload.serverId !== normalized.serverId) {
       throw new SiteCreateError('site_create_docker_server_mismatch', 'Selected Docker workload belongs to a different server', 409);
     }
+  } else if (normalized.source.kind === 'existing_managed_compose') {
+    if (!dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function') {
+      throw new SiteCreateError(
+        'site_create_managed_compose_dependencies_invalid',
+        'Managed Compose project registry is required for requested site compose provisioning',
+        503,
+      );
+    }
+    const project = await dockerComposeProjectRegistry.getProject(normalized.source.projectId);
+    if (!project) {
+      throw new SiteCreateError('managed_compose_project_not_found', 'Selected Managed Compose project does not exist', 404);
+    }
+    if (project.serverId !== normalized.serverId) {
+      throw new SiteCreateError('site_create_managed_compose_server_mismatch', 'Selected Managed Compose project belongs to a different server', 409);
+    }
+    const service = project.services.find((s) => s.name === normalized.source.serviceName) ?? null;
+    if (!service) {
+      throw new SiteCreateError('site_create_managed_compose_service_not_found', 'Selected Managed Compose service does not exist in project', 404);
+    }
+    const portMatch = service.publishedPorts.find((p) => p.targetPort === normalized.source.targetPort && p.protocol === normalized.source.protocol) ?? null;
+    if (!portMatch) {
+      throw new SiteCreateError('site_create_managed_compose_port_not_published', 'Selected Managed Compose target port is not published', 409);
+    }
+    const host = (portMatch.hostIp === null || portMatch.hostIp === '0.0.0.0' || portMatch.hostIp === '::')
+      ? '127.0.0.1'
+      : portMatch.hostIp;
+    managedComposeTarget = Object.freeze({
+      host,
+      port: portMatch.publishedPort,
+      targetPort: portMatch.targetPort,
+      protocol: portMatch.protocol,
+    });
   } else if (normalized.source.kind === 'new_static') {
     applicationExpected = {
       id: ids.applicationId,
@@ -616,21 +687,43 @@ export async function previewSiteCreate({
     const boundElsewhere = websites.find((website) => website.dockerWorkloadId === dockerWorkload.id && website.id !== ids.websiteId);
     if (boundElsewhere) throw new SiteCreateError('docker_workload_already_bound', 'Docker workload is already bound to another Website', 409);
   }
-  const target = domainTarget(application, normalized.source, dockerWorkload);
+  if (normalized.source.kind === 'existing_managed_compose') {
+    const boundElsewhere = websites.find((website) => website.managedComposeBinding
+      && website.managedComposeBinding.projectId === normalized.source.projectId
+      && website.managedComposeBinding.serviceName === normalized.source.serviceName
+      && website.managedComposeBinding.targetPort === normalized.source.targetPort
+      && (website.managedComposeBinding.protocol ?? 'tcp') === (normalized.source.protocol ?? 'tcp')
+      && website.id !== ids.websiteId);
+    if (boundElsewhere) throw new SiteCreateError('managed_compose_binding_already_bound', 'Managed Compose service port is already bound to another Website', 409);
+  }
+  const target = domainTarget(application, normalized.source, dockerWorkload, managedComposeTarget);
   const websiteExpected = normalized.source.kind === 'external_proxy'
     ? {
         id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: null,
-        dockerWorkloadId: null, runtimeType: 'proxy', documentRoot: null, unixUser: null, proxyTarget: normalized.source.target, revision: 1,
+        dockerWorkloadId: null, managedComposeBinding: null, runtimeType: 'proxy', documentRoot: null, unixUser: null, proxyTarget: normalized.source.target, revision: 1,
       }
     : normalized.source.kind === 'existing_docker'
       ? {
           id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: null,
-          dockerWorkloadId: dockerWorkload.id, runtimeType: 'docker', documentRoot: null, unixUser: null,
+          dockerWorkloadId: dockerWorkload.id, managedComposeBinding: null, runtimeType: 'docker', documentRoot: null, unixUser: null,
           proxyTarget: dockerWorkload.proxyTarget, revision: 1,
+        }
+    : normalized.source.kind === 'existing_managed_compose'
+      ? {
+          id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: null,
+          dockerWorkloadId: null,
+          managedComposeBinding: {
+            projectId: normalized.source.projectId,
+            serviceName: normalized.source.serviceName,
+            targetPort: normalized.source.targetPort,
+            protocol: normalized.source.protocol ?? 'tcp',
+          },
+          runtimeType: 'docker', documentRoot: null, unixUser: null,
+          proxyTarget: null, revision: 1,
         }
     : {
         id: ids.websiteId, serverId: normalized.serverId, name: normalized.name, applicationId: application.id,
-        dockerWorkloadId: null, runtimeType: application.type,
+        dockerWorkloadId: null, managedComposeBinding: null, runtimeType: application.type,
         documentRoot: ['static', 'php'].includes(application.type) ? application.webRoot : `/var/lib/yunpanel/apps/${application.id}/current`,
         unixUser: `yunapp-${createHash('sha256').update(application.id).digest('hex').slice(0, 12)}`, proxyTarget: null, revision: 1,
       };
@@ -733,6 +826,7 @@ export async function previewSiteCreate({
 
   const applicationReady = normalized.source.kind === 'existing_application'
     || normalized.source.kind === 'existing_docker'
+    || normalized.source.kind === 'existing_managed_compose'
     || normalized.source.kind === 'external_proxy'
     || applications.some((candidate) => candidate.id === ids.applicationId);
   const state = canonicalState({
@@ -767,6 +861,7 @@ export async function previewSiteCreate({
       : websiteExpected.runtimeType === 'php' ? 'php-fpm'
       : websiteExpected.runtimeType === 'static' ? 'static'
       : websiteExpected.runtimeType === 'python' ? (normalized.source.runtime?.appServer ?? 'gunicorn')
+      : normalized.source.kind === 'existing_managed_compose' ? 'managed_compose'
       : websiteExpected.runtimeType,
     documentRoot: websiteExpected.documentRoot,
     appRoot: websiteExpected.documentRoot,
@@ -774,6 +869,12 @@ export async function previewSiteCreate({
     startMode: normalized.source.runtime?.start?.mode ?? null,
     entryFile: normalized.source.runtime?.start?.entryFile ?? null,
     healthPath: normalized.source.runtime?.healthPath ?? null,
+    ...(normalized.source.kind === 'existing_managed_compose' ? {
+      serviceName: normalized.source.serviceName,
+      targetPort: normalized.source.targetPort,
+      protocol: normalized.source.protocol ?? 'tcp',
+      publishedPort: managedComposeTarget?.port ?? null,
+    } : {}),
   });
 
   const dnsExpected = Object.freeze({
@@ -831,6 +932,7 @@ export async function previewSiteCreate({
     resources: {
       application: applicationExpected ?? (application ? stableApplication(application) : null),
       dockerWorkload: dockerWorkload ? stableDockerWorkload(dockerWorkload) : null,
+      managedComposeBinding: websiteExpected.managedComposeBinding ?? null,
       website: websiteExpected,
       database: databaseExpected,
       mailDomain: mailDomainExpected,
@@ -879,6 +981,7 @@ export async function previewSiteCreate({
     steps: Object.freeze({
       applicationReady,
       ...(normalized.source.kind === 'existing_docker' ? { dockerWorkloadReady: true } : {}),
+      ...(normalized.source.kind === 'existing_managed_compose' ? { managedComposeReady: true } : {}),
       websiteReady,
       primaryDomainReady: primaryReady,
       wwwDomainReady: normalized.wwwMode === 'independent' ? wwwReady : null,
@@ -891,6 +994,7 @@ export async function previewSiteCreate({
       mailDomainCreated: normalized.mail.mode !== 'none' && mailDomainReady,
       ...(normalized.mail.mode === 'local' ? { webmailMappingActive: false } : {}),
       ...(normalized.source.kind === 'existing_docker' ? { containersChanged: false } : {}),
+      ...(normalized.source.kind === 'existing_managed_compose' ? { containersChanged: false } : {}),
     }),
     plan: Object.freeze(planCore.resources),
   });
@@ -903,6 +1007,7 @@ export async function createSite({
   registry,
   applicationRegistry,
   dockerWorkloadRegistry,
+  dockerComposeProjectRegistry = null,
   websiteRegistry,
   domainRegistry,
   mailDomainRegistry = null,
@@ -912,7 +1017,7 @@ export async function createSite({
     throw new SiteCreateError('site_create_preview_digest_invalid', 'A current site-create preview digest is required');
   }
   const preview = await previewSiteCreate({
-    input, registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+    input, registry, applicationRegistry, dockerWorkloadRegistry, dockerComposeProjectRegistry, websiteRegistry, domainRegistry,
     mailDomainRegistry, serverDnsIdentityRegistry,
   });
   if (preview.previewDigest !== previewDigest) {
@@ -986,7 +1091,8 @@ export async function createSite({
     name: normalized.name,
     applicationId: application?.id ?? null,
     dockerWorkloadId: dockerWorkload?.id ?? null,
-    runtimeType: dockerWorkload ? 'docker' : application?.type ?? 'proxy',
+    managedComposeBinding: preview.plan.managedComposeBinding ? { ...preview.plan.managedComposeBinding } : null,
+    runtimeType: preview.plan.website.runtimeType,
     proxyTarget: normalized.source.kind === 'external_proxy' ? normalized.source.target : null,
   });
   const primaryDomain = await domainRegistry.createDomain({
