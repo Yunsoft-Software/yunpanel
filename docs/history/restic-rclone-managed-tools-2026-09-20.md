@@ -1,0 +1,5 @@
+# restic/rclone managed-tool kaynak dilimi — 2026-09-20
+
+Restic ve rclone, mevcut managed-service sabit kataloğuna `backup_tool` türünde, systemd unit'i olmayan iki kurulum hedefi olarak eklendi. Her biri yalnız kendi Ubuntu APT paketini (`restic` veya `rclone`) kurabilir; health inspect ilgili sabit `/usr/bin/<tool> version` komutunun başarıyla çalışmasını ister. Kurulum sonrası binary health geçmezse durable install job'unun host yürütücüsü başarılı sonuç döndürmez. Start/stop/restart rotaları bu araçlar için kapalıdır. Protokol allowlist'i, API job-state politikası ve testler aynı katalogla eşleşir; generic shell argümanı kabul edilmez.
+
+Bu dilim binary kurulumunu mevcut server-scope durable managed-service job akışına bağlar; restic/rclone repository credential, backup veya restore akışını tamamlanmış saymaz. Minimum desteklenen sürüm, paket/binary provenance ve crash sonrası private parola dosyası temizliği `plan.md` P1.2'de açıktır. Gerçek Ubuntu/package upgrade/Owner API kabulü `todo.md` T-BACKUP maddesinde bekler. `.28` canlı panel paketine bu kaynak dilimi kurulmadı; `.44` sunucusuna dokunulmadı.

@@ -124,6 +124,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-BACKUP — P1 restic/rclone
 
+- [ ] Güncel YunPanel paketini yalnız `.local/test-server.env` test hostuna kurduktan sonra authenticated Owner ile `restic` ve `rclone` managed-service inspect/install durable job akışını gerçek Ubuntu'da doğrula: yalnız sabit APT paketleri kurulsun, `restic version`/`rclone version` health'i geçmeden install job başarılı olmasın, systemd control route'u 400 kalsın, installed/version state'i API restart ve package upgrade sonrası doğru olsun. Kaynak testleri `docs/history/restic-rclone-managed-tools-2026-09-20.md` içinde; canlı panele bu turda deploy yapılmadı.
 - [ ] Local restic repository init/backup/snapshot/check/restore/forget/prune akışını gerçek Website release/data/env metadata, Nginx/DNS config, DB dump ve Maildir ile doğrula.
 - [ ] S3-compatible ve rclone remote için encrypted credential, target test, network interruption, partial upload, retry/idempotency, checksum ve retention doğrulansın; secret argv/URL/process list/job/audit/log/browser'a çıkmasın.
 - [ ] Çalışan Passenger/PHP/Docker, database ve mail kaynaklarında quiesce/vendor dump hooks tutarlı snapshot üretsin; panel sessiz live filesystem kopyasını başarılı backup saymasın.
