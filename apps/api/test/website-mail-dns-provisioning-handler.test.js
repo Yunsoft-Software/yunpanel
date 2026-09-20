@@ -64,6 +64,24 @@ function records() {
       templateVersion: null,
     },
     {
+      key: 'mail-spf',
+      owner: 'example.com',
+      type: 'TXT',
+      ttl: 300,
+      values: ['v=spf1 mx -all'],
+      source: 'mail',
+      templateVersion: null,
+    },
+    {
+      key: 'mail-dmarc',
+      owner: '_dmarc.example.com',
+      type: 'TXT',
+      ttl: 300,
+      values: ['v=DMARC1; p=none'],
+      source: 'mail',
+      templateVersion: null,
+    },
+    {
       key: 'webmail-ipv4',
       owner: 'webmail.example.com',
       type: 'A',
@@ -184,6 +202,7 @@ function fixture({
   includeHistory = true,
   mailDomainRevision = 2,
   keySelector = selector,
+  previewOverrides = null,
 } = {}) {
   let applied = initiallyApplied;
   let rolledBack = false;
@@ -193,7 +212,8 @@ function fixture({
   const runtime = {
     async preview({ domainId }) {
       assert.equal(domainId, webDomainId);
-      return applied && !rolledBack ? appliedPreview() : pendingPreview();
+      const basePreview = applied && !rolledBack ? appliedPreview() : pendingPreview();
+      return previewOverrides ? { ...basePreview, ...previewOverrides } : basePreview;
     },
     async start(input) {
       assert.deepEqual(input, {
@@ -370,4 +390,38 @@ test('Website local mail DNS fails closed when a foreign DKIM selector owns the 
       && error.code === 'website_mail_dns_dkim_state_drift',
   );
   assert.equal(f.starts(), 0);
+});
+
+test('Website local mail DNS apply includes spfRecord and dmarcRecord in evidence', async () => {
+  const f = fixture();
+  const evidence = await f.handler.apply(f.context);
+  assert.equal(evidence.satisfied, true);
+  assert.equal(evidence.spfRecord, 'v=spf1 mx -all');
+  assert.equal(evidence.dmarcRecord, 'v=DMARC1; p=none');
+});
+
+test('Website local mail DNS fails closed when preview is missing SPF TXT record', async () => {
+  const f = fixture({
+    previewOverrides: {
+      records: records().filter((r) => r.key !== 'mail-spf'),
+    },
+  });
+  await assert.rejects(
+    f.handler.apply(f.context),
+    (error) => error instanceof WebsiteMailDnsProvisioningError
+      && error.code === 'website_mail_dns_spf_record_missing',
+  );
+});
+
+test('Website local mail DNS fails closed when preview is missing DMARC TXT record', async () => {
+  const f = fixture({
+    previewOverrides: {
+      records: records().filter((r) => r.key !== 'mail-dmarc'),
+    },
+  });
+  await assert.rejects(
+    f.handler.apply(f.context),
+    (error) => error instanceof WebsiteMailDnsProvisioningError
+      && error.code === 'website_mail_dns_dmarc_record_missing',
+  );
 });

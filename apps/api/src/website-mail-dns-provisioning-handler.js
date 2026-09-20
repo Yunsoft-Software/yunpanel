@@ -91,7 +91,18 @@ function validateChildOperation(operation, request, preview = null) {
   return operation;
 }
 
-function evidence(operation, request) {
+function evidence(operation, request, preview = null) {
+  const spf = preview?.records?.find((record) => record?.source === 'mail'
+    && record?.type === 'TXT'
+    && record?.owner === request.zoneName
+    && Array.isArray(record?.values)
+    && record.values.some((val) => typeof val === 'string' && val.toLowerCase().startsWith('v=spf1')));
+  const dmarc = preview?.records?.find((record) => record?.source === 'mail'
+    && record?.type === 'TXT'
+    && record?.owner === `_dmarc.${request.zoneName}`
+    && Array.isArray(record?.values)
+    && record.values.some((val) => typeof val === 'string' && val.toLowerCase().startsWith('v=dmarc1')));
+
   return Object.freeze({
     satisfied: true,
     adapter: 'powerdns-mail-reapply',
@@ -103,6 +114,8 @@ function evidence(operation, request) {
     mailStateDigest: operation.mailStateDigest,
     appliedZoneDigest: operation.rollback.appliedZoneDigest,
     serial: operation.result.serial,
+    spfRecord: spf ? spf.values[0] : null,
+    dmarcRecord: dmarc ? dmarc.values[0] : null,
   });
 }
 
@@ -236,6 +249,30 @@ export function createWebsiteMailDnsProvisioningHandler({
         503,
       );
     }
+    const spf = preview.records.find((record) => record?.source === 'mail'
+      && record?.type === 'TXT'
+      && record?.owner === request.zoneName
+      && Array.isArray(record?.values)
+      && record.values.some((val) => typeof val === 'string' && val.toLowerCase().startsWith('v=spf1')));
+    if (!spf) {
+      throw new WebsiteMailDnsProvisioningError(
+        'website_mail_dns_spf_record_missing',
+        'Local authoritative DNS preview is missing the SPF policy TXT record',
+        503,
+      );
+    }
+    const dmarc = preview.records.find((record) => record?.source === 'mail'
+      && record?.type === 'TXT'
+      && record?.owner === `_dmarc.${request.zoneName}`
+      && Array.isArray(record?.values)
+      && record.values.some((val) => typeof val === 'string' && val.toLowerCase().startsWith('v=dmarc1')));
+    if (!dmarc) {
+      throw new WebsiteMailDnsProvisioningError(
+        'website_mail_dns_dmarc_record_missing',
+        'Local authoritative DNS preview is missing the DMARC policy TXT record',
+        503,
+      );
+    }
     return preview;
   }
 
@@ -291,7 +328,7 @@ export function createWebsiteMailDnsProvisioningHandler({
       );
     }
     validateChildOperation(child, request);
-    return evidence(child, request);
+    return evidence(child, request, preview);
   }
 
   async function apply(context = {}) {
@@ -307,7 +344,7 @@ export function createWebsiteMailDnsProvisioningHandler({
         );
       }
       validateChildOperation(child, request);
-      return evidence(child, request);
+      return evidence(child, request, preview);
     }
     if (preview.applyAllowed !== true
       || !SHA256_PATTERN.test(preview.previewDigest ?? '')
@@ -337,7 +374,7 @@ export function createWebsiteMailDnsProvisioningHandler({
         503,
       );
     }
-    return evidence(child, request);
+    return evidence(child, request, after);
   }
 
   function evidenceOperationId(context) {
