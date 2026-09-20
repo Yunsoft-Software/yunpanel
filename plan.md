@@ -89,6 +89,7 @@ Son Website provisioning ters sıra compensation, drift ve restart canlı kabul�
 Son Site move/delete resource impact ve cascade engeli canlı kabulü: `docs/history/site-move-delete-impact-live-acceptance-2026-09-20.md`.
 Son Domain delete parent operation canlı kabulü: `docs/history/domain-delete-parent-operation-live-acceptance-2026-09-20.md`.
 Son Domain delete Mail Domain child lifecycle canlı kabulü: `docs/history/domain-delete-mail-child-live-acceptance-2026-09-20.md`.
+Son Website removal reverse-order orchestrator canlı kabulü: `docs/history/website-removal-orchestrator-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 

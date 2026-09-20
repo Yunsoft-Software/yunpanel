@@ -12,7 +12,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-PROVISIONING — P0 yeni Website ve izolasyon
 
-- [ ] Website removal reverse-order orchestrator'ını gerçek Ubuntu/MariaDB/filesystem ortamında failure-injection ile doğrula: preview'da bağlı child/root domain'ler deepest-first sıralansın; cron, sftp key, database binding, runtime binding, data/app files ve unix identity adımları domain removal tamamlanmadan önce çalışmasın. Database binding temizliğinde credential ve veritabanı bağı typed confirmation ile kaldırılsın; dosya temizliğinde retained backup referansları korunsun; adımlar sırasında API kesildiğinde restart kör replay yapmayıp adımı blocked bıraksın ve explicit continuation beklesin.
 - [ ] Fresh Website transactional provisioning kabulü: preflight'ta FQDN/IDN/duplicate/parent/alias conflict doğrulaması, exact resource preview (`runtime`, `dns`, `ip`, `certificate`, `sftp`, `database`, `mailDomain`) ve package/service blocker kontrollerinin eksiksiz çalıştığını doğrula. Downstream failure'da TLS activation compensation'ının Nginx'i HTTP-only'ye geri aldığını ve rollback receipt ürettiğini, certificate step'inin ise fiziksel silme yapmayıp retention receipt verdiğini failure-injection ile doğrula.
 
 ## T-RUNTIME — P0 Passenger, PHP-FPM ve hosted app sürekliliği
