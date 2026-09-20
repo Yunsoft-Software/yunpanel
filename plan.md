@@ -99,6 +99,7 @@ Son Multi-version PHP (8.1, 8.2, 8.4) ve distro 8.3 canlı kabulü: `docs/histor
 Son PHP-FPM havuz ve soket izolasyonu canlı kabulü: `docs/history/php-fpm-pool-socket-isolation-live-acceptance-2026-09-20.md`.
 Son Passenger Nginx runtime ve shared-hosting izolasyonu canlı kabulü: `docs/history/passenger-runtime-shared-hosting-isolation-live-acceptance-2026-09-20.md`.
 Son hosted apps (Passenger, PHP, Python) panel restart sürekliliği canlı kabulü: `docs/history/hosted-apps-continuity-panel-restart-live-acceptance-2026-09-20.md`.
+Son ttyd ve elFinder tools gateway canlı kabulü: `docs/history/ttyd-elfinder-tools-gateway-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
