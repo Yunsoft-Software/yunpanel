@@ -1049,6 +1049,8 @@ function proxyNetdataWebSocket(request, socket, head, {
     socket.pipe(upstreamSocket).pipe(socket);
     socket.on('error', () => upstreamSocket.destroy());
     upstreamSocket.on('error', () => socket.destroy());
+    socket.on('close', () => upstreamSocket.destroy());
+    upstreamSocket.on('close', () => socket.destroy());
   });
   upstream.on('response', (response) => {
     response.resume();
@@ -1182,6 +1184,8 @@ function proxyGoAccessWebSocket(request, socket, head, {
     socket.pipe(upstreamSocket).pipe(socket);
     socket.on('error', () => upstreamSocket.destroy());
     upstreamSocket.on('error', () => socket.destroy());
+    socket.on('close', () => upstreamSocket.destroy());
+    upstreamSocket.on('close', () => socket.destroy());
   });
   upstream.on('response', (upstreamResponse) => {
     upstreamResponse.resume();

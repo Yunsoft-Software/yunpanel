@@ -26,7 +26,17 @@ async function listen(server) {
   return server.address().port;
 }
 async function close(server) {
-  await new Promise((resolve, reject) => { server.close((error) => (error ? reject(error) : resolve())); server.closeAllConnections(); });
+  if (!server) return;
+  try {
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+  } catch {}
+  await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(), 1000);
+    server.close(() => {
+      clearTimeout(timer);
+      resolve();
+    });
+  });
 }
 async function fixture(t, listener) {
   const upstream = http.createServer(listener);
@@ -897,6 +907,7 @@ test('netdata gateway proxies WebSocket upgrade for live metrics', async (t) => 
   });
   const panelPort = await listen(panel);
   t.after(async () => {
+    for (const client of netdataWs.clients) client.terminate();
     netdataWs.close();
     await close(panel);
     await close(api);
@@ -912,8 +923,9 @@ test('netdata gateway proxies WebSocket upgrade for live metrics', async (t) => 
       cookie: '__Host-yunpanel_session=owner',
     },
   });
+  const messagePromise = once(clientWs, 'message');
   await once(clientWs, 'open');
-  const [message] = await once(clientWs, 'message');
+  const [message] = await messagePromise;
   assert.equal(message.toString(), 'netdata-metric-stream');
   assert.equal(netdataWsConnected, true);
   clientWs.close();
@@ -930,6 +942,7 @@ test('netdata gateway proxies WebSocket upgrade for live metrics', async (t) => 
   const [, unauthResp] = await once(unauthWs, 'unexpected-response');
   assert.equal(unauthResp.statusCode, 403);
   unauthResp.resume();
+  unauthWs.terminate();
 });
 
 test('goaccess gateway authenticates Owner access before serving HTML report with rewritten WebSocket URL', async (t) => {
@@ -1071,6 +1084,7 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
   });
   const panelPort = await listen(panel);
   t.after(async () => {
+    for (const client of goaccessWs.clients) client.terminate();
     goaccessWs.close();
     await close(panel);
     await close(api);
@@ -1086,8 +1100,9 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
       cookie: '__Host-yunpanel_session=owner',
     },
   });
+  const messagePromise = once(clientWs, 'message');
   await once(clientWs, 'open');
-  const [message] = await once(clientWs, 'message');
+  const [message] = await messagePromise;
   assert.equal(message.toString(), 'goaccess-realtime-update');
   assert.equal(goaccessWsConnected, true);
   clientWs.close();
@@ -1104,6 +1119,7 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
   const [, unauthResp] = await once(unauthWs, 'unexpected-response');
   assert.equal(unauthResp.statusCode, 403);
   unauthResp.resume();
+  unauthWs.terminate();
 });
 
 
