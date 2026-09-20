@@ -28,7 +28,7 @@ export function mountPanelSettingsRoutes(app, { panelSettingsService }) {
   }
 
   app.get(
-    '/api/panel/settings',
+    ['/api/settings', '/api/panel/settings'],
     requirePanelRouteAccess,
     asyncRoute(async (request, response) => {
       const data = await panelSettingsService.getSystemSettings();
@@ -37,7 +37,7 @@ export function mountPanelSettingsRoutes(app, { panelSettingsService }) {
   );
 
   app.patch(
-    '/api/panel/settings',
+    ['/api/settings', '/api/panel/settings'],
     requirePanelRouteAccess,
     asyncRoute(async (request, response) => {
       const data = await panelSettingsService.updateSystemSettings(request.body);

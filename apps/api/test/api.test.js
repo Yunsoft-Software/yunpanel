@@ -51,7 +51,7 @@ test('management routes fail closed without server-derived request auth', async 
   });
 });
 
-test('default Website restore mutation remains unavailable until a durable operation is wired', async () => {
+test('default Website restore mutation validates request when wired', async () => {
   const app = withPanelContext(createApp({
     databaseBindingRegistry: createDatabaseBindingRegistry({
       serverExists: async () => true,
@@ -65,8 +65,8 @@ test('default Website restore mutation remains unavailable until a durable opera
       headers: { 'content-type': 'application/json' },
       body: '{}',
     });
-    assert.equal(response.status, 503);
-    assert.equal((await response.json()).error.code, 'website_restore_not_ready');
+    assert.equal(response.status, 400);
+    assert.equal((await response.json()).error.code, 'invalid_preview_digest');
   });
 });
 

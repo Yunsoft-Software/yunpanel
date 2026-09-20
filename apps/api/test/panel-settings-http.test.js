@@ -71,6 +71,22 @@ test('Panel Settings HTTP API', async (t) => {
     }
   });
 
+  await t.test('GET /api/settings (proxied path) returns 200 and system settings for owner', async () => {
+    const app = createMockApp({ panelSettingsService: mockService, userRole: 'owner' });
+    const server = app.listen(0);
+    const port = server.address().port;
+
+    try {
+      const res = await fetch(`http://127.0.0.1:${port}/api/settings`);
+      assert.equal(res.status, 200);
+      const body = await res.json();
+      assert.equal(body.data.panel.version, '0.3.0');
+      assert.equal(body.data.websiteDefaults.defaultRuntime, 'node');
+    } finally {
+      server.close();
+    }
+  });
+
   await t.test('GET /api/panel/settings returns 200 and system settings for read_only', async () => {
     const app = createMockApp({ panelSettingsService: mockService, userRole: 'read_only' });
     const server = app.listen(0);
