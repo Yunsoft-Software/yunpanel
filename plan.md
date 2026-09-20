@@ -142,10 +142,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 # P1 — Core parity sonrası
 
-## P1.2 — Backup/restore üretim sınırı
-
-- [ ] Restic/rclone için minimum sürüm ve paket/binary provenance politikasını tamamla; restic private geçici password-file artıklarını process kill/restart sonrasında güvenli temizle. Fresh install/upgrade ve binary health gerçek-host kabulü `todo.md` içindedir.
-
 ## P1.3 — Monitoring/security
 
 - [ ] Netdata loopback + authenticated gateway.

@@ -4,6 +4,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   createResticManager,
+  cleanOrphanedPasswordFiles,
   ResticError,
   resticManagerInternals,
 } from '../src/restic-manager.js';
@@ -466,4 +467,109 @@ test('validation rejects invalid inputs', async () => {
     manager.restore({ repository: repoPath, password: repoPassword, snapshotId: '12345678', targetDirectory: 'relative/path' }),
     (err) => err instanceof ResticError && err.code === 'restic_argument_invalid',
   );
+});
+
+test('version parses plain text restic version output and JSON output', async () => {
+  const { runCommand } = createMockRunner({
+    version: () => ({
+      stdout: 'restic 0.16.4 compiled with go1.22.2 on linux/amd64\n',
+      stderr: '',
+    }),
+  });
+  const manager = createResticManager({
+    resticPath: mockBinary,
+    accessFn: async () => {},
+    runCommand,
+  });
+  const info = await manager.version();
+  assert.equal(info.version, '0.16.4');
+  assert.equal(info.go_version, 'go1.22.2');
+  assert.equal(info.go_os_arch, 'linux/amd64');
+});
+
+test('verifyProvenance passes on valid allowlisted binary and rejects unsafe or outdated binaries', async () => {
+  const { runCommand } = createMockRunner({
+    version: () => ({
+      stdout: 'restic 0.16.4 compiled with go1.22.2 on linux/amd64\n',
+      stderr: '',
+    }),
+  });
+
+  const validManager = createResticManager({
+    resticPath: '/usr/bin/restic',
+    accessFn: async () => {},
+    runCommand,
+  });
+  const validStat = async () => ({
+    isFile: () => true,
+    mode: 0o755,
+    uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  });
+  const provenance = await validManager.verifyProvenance({ statFn: validStat });
+  assert.equal(provenance.path, '/usr/bin/restic');
+  assert.equal(provenance.version, '0.16.4');
+  assert.equal(provenance.minimumVersion, '0.16.0');
+
+  // Rejects non-allowlisted path
+  const unallowlistedManager = createResticManager({
+    resticPath: '/tmp/malicious/restic',
+    accessFn: async () => {},
+    runCommand,
+  });
+  await assert.rejects(
+    unallowlistedManager.verifyProvenance({ statFn: validStat }),
+    (err) => err instanceof ResticError && err.code === 'restic_provenance_invalid',
+  );
+
+  // Rejects world-writable binary
+  const worldWritableStat = async () => ({
+    isFile: () => true,
+    mode: 0o777,
+    uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  });
+  await assert.rejects(
+    validManager.verifyProvenance({ statFn: worldWritableStat }),
+    (err) => err instanceof ResticError && err.code === 'restic_provenance_invalid',
+  );
+
+  // Rejects outdated version (< 0.16.0)
+  const oldVersionRunner = createMockRunner({
+    version: () => ({
+      stdout: 'restic 0.14.0 compiled with go1.19.0 on linux/amd64\n',
+      stderr: '',
+    }),
+  });
+  const oldManager = createResticManager({
+    resticPath: '/usr/bin/restic',
+    accessFn: async () => {},
+    runCommand: oldVersionRunner.runCommand,
+  });
+  await assert.rejects(
+    oldManager.verifyProvenance({ statFn: validStat }),
+    (err) => err instanceof ResticError && err.code === 'restic_version_unsupported',
+  );
+});
+
+test('cleanOrphanedPasswordFiles cleans stale directories and ignores recent or unrelated ones', async () => {
+  const fakeDirs = ['yunpanel-restic-old1', 'yunpanel-restic-recent', 'other-dir'];
+  const removed = [];
+  const fakeNow = 1_000_000;
+
+  const result = await cleanOrphanedPasswordFiles({
+    baseDir: '/tmp',
+    maxAgeMs: 300_000, // 5 minutes
+    readdirFn: async () => fakeDirs,
+    statFn: async (dirPath) => {
+      if (dirPath.includes('old1')) return { isDirectory: () => true, mtimeMs: fakeNow - 400_000 };
+      if (dirPath.includes('recent')) return { isDirectory: () => true, mtimeMs: fakeNow - 100_000 };
+      return { isDirectory: () => true, mtimeMs: fakeNow - 500_000 };
+    },
+    rmFn: async (dirPath) => {
+      removed.push(dirPath);
+    },
+    now: () => fakeNow,
+  });
+
+  assert.equal(result.cleanedCount, 1);
+  assert.deepEqual(removed, ['/tmp/yunpanel-restic-old1']);
 });

@@ -779,6 +779,9 @@ export function createApp({
       localServerId,
     });
     const resolvedResticManager = resticManager ?? createResticManager();
+    if (typeof resolvedResticManager.cleanOrphanedPasswordFiles === 'function') {
+      resolvedResticManager.cleanOrphanedPasswordFiles().catch(() => {});
+    }
     const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
       createResticRepositoryRegistry({
         resticManager: resolvedResticManager,

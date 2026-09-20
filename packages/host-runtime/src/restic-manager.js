@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
-import { access, mkdtemp, open, rmdir, unlink } from 'node:fs/promises';
+import { rmSync } from 'node:fs';
+import { access, mkdtemp, open, readdir, rm, rmdir, stat, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -8,6 +9,88 @@ const execFileAsync = promisify(execFile);
 const RESTIC_PATHS = Object.freeze(['/usr/bin/restic', '/usr/local/bin/restic', '/bin/restic']);
 const SNAPSHOT_ID_PATTERN = /^[a-f0-9]{8,64}$/i;
 const DEFAULT_TIMEOUT = 60 * 60 * 1000; // 1 hour
+export const MINIMUM_RESTIC_VERSION = '0.16.0';
+
+function parseSemver(str) {
+  if (typeof str !== 'string') return null;
+  const match = str.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: match[3] ? parseInt(match[3], 10) : 0,
+  };
+}
+
+function compareSemver(a, b) {
+  const parsedA = typeof a === 'string' ? parseSemver(a) : a;
+  const parsedB = typeof b === 'string' ? parseSemver(b) : b;
+  if (!parsedA || !parsedB) return 0;
+  if (parsedA.major !== parsedB.major) return parsedA.major - parsedB.major;
+  if (parsedA.minor !== parsedB.minor) return parsedA.minor - parsedB.minor;
+  return parsedA.patch - parsedB.patch;
+}
+
+const activeSecretDirs = new Set();
+let processHooksRegistered = false;
+
+function cleanupActiveSecretDirs() {
+  for (const dir of activeSecretDirs) {
+    try {
+      rmSync(dir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  }
+  activeSecretDirs.clear();
+}
+
+function registerProcessHooks() {
+  if (processHooksRegistered) return;
+  processHooksRegistered = true;
+  process.on('exit', cleanupActiveSecretDirs);
+  process.on('SIGINT', cleanupActiveSecretDirs);
+  process.on('SIGTERM', cleanupActiveSecretDirs);
+}
+
+export async function cleanOrphanedPasswordFiles({
+  baseDir = tmpdir(),
+  maxAgeMs = 5 * 60 * 1000,
+  readdirFn = readdir,
+  statFn = stat,
+  rmFn = rm,
+  now = () => Date.now(),
+} = {}) {
+  let cleanedCount = 0;
+  const cleanedPaths = [];
+  try {
+    const entries = await readdirFn(baseDir);
+    const candidateDirs = entries.filter((name) => typeof name === 'string' && name.startsWith('yunpanel-restic-'));
+    const currentTime = now();
+    for (const dirName of candidateDirs) {
+      const fullPath = path.join(baseDir, dirName);
+      try {
+        const stats = await statFn(fullPath);
+        if (typeof stats.isDirectory === 'function' ? stats.isDirectory() : stats.isDirectory) {
+          const ageMs = currentTime - (stats.mtimeMs ?? 0);
+          if (ageMs >= maxAgeMs) {
+            await rmFn(fullPath, { recursive: true, force: true });
+            cleanedCount += 1;
+            cleanedPaths.push(fullPath);
+          }
+        }
+      } catch {
+        // ignore
+      }
+    }
+  } catch {
+    // ignore
+  }
+  return Object.freeze({
+    cleanedCount,
+    cleanedPaths: Object.freeze(cleanedPaths),
+  });
+}
 
 export class ResticError extends Error {
   constructor(code, message, status = 400) {
@@ -77,7 +160,7 @@ function mapResticError(error, context = '', password = '') {
   const raw = redact(originalRaw);
   const lower = originalRaw.toLowerCase();
 
-  if (lower.includes('is already locked') || lower.includes('unable to create lock')) {
+  if (lower.includes('is already locked') || lower.includes('unable to create lock') || lower.includes('invalid lock file') || lower.includes('failed to create lock')) {
     return new ResticError('restic_repo_locked', `Restic repository is locked: ${stderr.trim() || raw}`, 409);
   }
   if (lower.includes('wrong password') || lower.includes('ciphertext verification failed') || lower.includes('keys do not match')) {
@@ -142,6 +225,8 @@ export function createResticManager({
     const target = normalizeRepository(repository);
     const secret = normalizePassword(password);
     const secretDirectory = await mkdtemp(path.join(tmpdir(), 'yunpanel-restic-'));
+    activeSecretDirs.add(secretDirectory);
+    registerProcessHooks();
     const secretPath = path.join(secretDirectory, 'password');
     try {
       const handle = await open(secretPath, 'wx', 0o600);
@@ -157,8 +242,9 @@ export function createResticManager({
     } catch (error) {
       throw mapResticError(error, context, secret);
     } finally {
+      activeSecretDirs.delete(secretDirectory);
       await unlink(secretPath).catch((error) => { if (error.code !== 'ENOENT') throw error; });
-      await rmdir(secretDirectory);
+      await rmdir(secretDirectory).catch(() => {});
     }
   }
 
@@ -416,6 +502,65 @@ export function createResticManager({
     });
   }
 
+  async function version() {
+    const binary = await requireBinary();
+    try {
+      const result = await runCommand(binary, ['version'], { context: 'version' });
+      const raw = result.stdout.trim();
+      let parsed = null;
+      try {
+        parsed = JSON.parse(raw);
+      } catch {
+        const match = raw.match(/restic\s+([0-9]+\.[0-9]+(?:\.[0-9]+)?)/i);
+        const goMatch = raw.match(/compiled with\s+([^\s]+)/i);
+        const archMatch = raw.match(/on\s+([^\s]+)/i);
+        parsed = {
+          version: match ? match[1] : raw,
+          go_version: goMatch ? goMatch[1] : null,
+          go_os_arch: archMatch ? archMatch[1] : null,
+          raw,
+        };
+      }
+      return Object.freeze(parsed);
+    } catch (error) {
+      throw mapResticError(error, 'version');
+    }
+  }
+
+  async function verifyProvenance({ statFn = stat } = {}) {
+    const binary = await requireBinary();
+    if (!RESTIC_PATHS.includes(binary)) {
+      throw new ResticError('restic_provenance_invalid', `Restic binary at ${binary} is not in allowlisted paths`, 403);
+    }
+    const stats = await statFn(binary);
+    const isFile = typeof stats.isFile === 'function' ? stats.isFile() : Boolean(stats.isFile);
+    if (!isFile) {
+      throw new ResticError('restic_provenance_invalid', `Restic binary at ${binary} is not a regular file`, 403);
+    }
+    if ((stats.mode & 0o002) !== 0) {
+      throw new ResticError('restic_provenance_invalid', `Restic binary at ${binary} is world-writable`, 403);
+    }
+    if (typeof process.getuid === 'function') {
+      const currentUid = process.getuid();
+      if (stats.uid !== 0 && stats.uid !== currentUid) {
+        throw new ResticError('restic_provenance_invalid', `Restic binary at ${binary} has untrusted owner UID ${stats.uid}`, 403);
+      }
+    }
+    const ver = await version();
+    const semver = parseSemver(ver.version);
+    if (!semver || compareSemver(semver, MINIMUM_RESTIC_VERSION) < 0) {
+      throw new ResticError('restic_version_unsupported', `Restic version ${ver.version} is below minimum required ${MINIMUM_RESTIC_VERSION}`, 503);
+    }
+    return Object.freeze({
+      path: binary,
+      version: ver.version,
+      minimumVersion: MINIMUM_RESTIC_VERSION,
+      uid: stats.uid,
+      mode: stats.mode,
+      verifiedAt: new Date(now()).toISOString(),
+    });
+  }
+
   return Object.freeze({
     init,
     check,
@@ -426,15 +571,22 @@ export function createResticManager({
     prune,
     restore,
     stats,
+    version,
+    verifyProvenance,
+    cleanOrphanedPasswordFiles,
   });
 }
 
 export const resticManagerInternals = Object.freeze({
   RESTIC_PATHS,
+  MINIMUM_RESTIC_VERSION,
   findResticBinary,
   mapResticError,
   normalizeRepository,
   normalizePassword,
   normalizeSnapshotId,
   parseJsonLines,
+  parseSemver,
+  compareSemver,
+  activeSecretDirs,
 });

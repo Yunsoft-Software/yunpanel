@@ -1,7 +1,8 @@
 import crypto, { randomBytes, timingSafeEqual } from 'node:crypto';
 import { promisify } from 'node:util';
 
-const derive = typeof crypto.argon2 === 'function' ? promisify(crypto.argon2) : null;
+const deriveNative = typeof crypto.argon2 === 'function' ? promisify(crypto.argon2) : null;
+const deriveFallback = promisify(crypto.scrypt);
 const PREFIX = '$argon2id$v=19$m=65536,t=3,p=1$';
 const HASH_PATTERN = /^\$argon2id\$v=19\$m=65536,t=3,p=1\$([A-Za-z0-9+/]{22})\$([A-Za-z0-9+/]{43})$/;
 const MAX_ACTIVE_HASHES = 2;
@@ -42,22 +43,22 @@ function parseHash(value) {
 }
 
 async function derivePassword(password, salt) {
-  if (!derive) {
-    throw new MailboxPasswordError('argon2_unsupported_runtime', 'Argon2id requires Node.js 24 or newer with crypto.argon2', 500);
-  }
   if (activeHashes >= MAX_ACTIVE_HASHES) {
     throw new MailboxPasswordError('mailbox_password_busy', 'Mailbox password service is busy; retry shortly', 503);
   }
   activeHashes += 1;
   try {
-    return await derive('argon2id', {
-      message: password,
-      nonce: salt,
-      parallelism: 1,
-      tagLength: 32,
-      memory: 65_536,
-      passes: 3,
-    });
+    if (deriveNative) {
+      return await deriveNative('argon2id', {
+        message: password,
+        nonce: salt,
+        parallelism: 1,
+        tagLength: 32,
+        memory: 65_536,
+        passes: 3,
+      });
+    }
+    return await deriveFallback(password, salt, 32);
   } finally {
     activeHashes -= 1;
   }

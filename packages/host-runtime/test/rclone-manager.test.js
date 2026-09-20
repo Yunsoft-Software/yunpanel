@@ -237,3 +237,66 @@ test('validation rejects invalid remote names and config paths', async () => {
     (err) => err instanceof RcloneError && err.code === 'rclone_config_invalid',
   );
 });
+
+test('verifyProvenance passes on valid allowlisted binary and rejects unsafe or outdated binaries', async () => {
+  const { runCommand } = createMockRunner({
+    version: () => ({
+      stdout: JSON.stringify({ version: 'v1.60.1', os: 'linux', arch: 'amd64' }),
+      stderr: '',
+    }),
+  });
+
+  const validManager = createRcloneManager({
+    rclonePath: '/usr/bin/rclone',
+    accessFn: async () => {},
+    runCommand,
+  });
+  const validStat = async () => ({
+    isFile: () => true,
+    mode: 0o755,
+    uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  });
+  const provenance = await validManager.verifyProvenance({ statFn: validStat });
+  assert.equal(provenance.path, '/usr/bin/rclone');
+  assert.equal(provenance.version, 'v1.60.1');
+  assert.equal(provenance.minimumVersion, '1.60.0');
+
+  // Rejects non-allowlisted path
+  const unallowlistedManager = createRcloneManager({
+    rclonePath: '/tmp/malicious/rclone',
+    accessFn: async () => {},
+    runCommand,
+  });
+  await assert.rejects(
+    unallowlistedManager.verifyProvenance({ statFn: validStat }),
+    (err) => err instanceof RcloneError && err.code === 'rclone_provenance_invalid',
+  );
+
+  // Rejects world-writable binary
+  const worldWritableStat = async () => ({
+    isFile: () => true,
+    mode: 0o777,
+    uid: typeof process.getuid === 'function' ? process.getuid() : 0,
+  });
+  await assert.rejects(
+    validManager.verifyProvenance({ statFn: worldWritableStat }),
+    (err) => err instanceof RcloneError && err.code === 'rclone_provenance_invalid',
+  );
+
+  // Rejects outdated version (< 1.60.0)
+  const oldVersionRunner = createMockRunner({
+    version: () => ({
+      stdout: JSON.stringify({ version: 'v1.58.0', os: 'linux', arch: 'amd64' }),
+      stderr: '',
+    }),
+  });
+  const oldManager = createRcloneManager({
+    rclonePath: '/usr/bin/rclone',
+    accessFn: async () => {},
+    runCommand: oldVersionRunner.runCommand,
+  });
+  await assert.rejects(
+    oldManager.verifyProvenance({ statFn: validStat }),
+    (err) => err instanceof RcloneError && err.code === 'rclone_version_unsupported',
+  );
+});

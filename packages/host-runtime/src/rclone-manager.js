@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { access, mkdir, rename, writeFile } from 'node:fs/promises';
+import { access, mkdir, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -8,6 +8,27 @@ const execFileAsync = promisify(execFile);
 const RCLONE_PATHS = Object.freeze(['/usr/bin/rclone', '/usr/local/bin/rclone', '/bin/rclone']);
 const REMOTE_NAME_PATTERN = /^[a-zA-Z0-9_-]{1,64}$/;
 const DEFAULT_TIMEOUT = 30 * 1000; // 30 seconds for probe/test
+export const MINIMUM_RCLONE_VERSION = '1.60.0';
+
+function parseSemver(str) {
+  if (typeof str !== 'string') return null;
+  const match = str.match(/(\d+)\.(\d+)(?:\.(\d+))?/);
+  if (!match) return null;
+  return {
+    major: parseInt(match[1], 10),
+    minor: parseInt(match[2], 10),
+    patch: match[3] ? parseInt(match[3], 10) : 0,
+  };
+}
+
+function compareSemver(a, b) {
+  const parsedA = typeof a === 'string' ? parseSemver(a) : a;
+  const parsedB = typeof b === 'string' ? parseSemver(b) : b;
+  if (!parsedA || !parsedB) return 0;
+  if (parsedA.major !== parsedB.major) return parsedA.major - parsedB.major;
+  if (parsedA.minor !== parsedB.minor) return parsedA.minor - parsedB.minor;
+  return parsedA.patch - parsedB.patch;
+}
 
 export class RcloneError extends Error {
   constructor(code, message, status = 400) {
@@ -216,8 +237,43 @@ export function createRcloneManager({
     });
   }
 
+  async function verifyProvenance({ statFn = stat } = {}) {
+    const binary = await requireBinary();
+    if (!RCLONE_PATHS.includes(binary)) {
+      throw new RcloneError('rclone_provenance_invalid', `Rclone binary at ${binary} is not in allowlisted paths`, 403);
+    }
+    const stats = await statFn(binary);
+    const isFile = typeof stats.isFile === 'function' ? stats.isFile() : Boolean(stats.isFile);
+    if (!isFile) {
+      throw new RcloneError('rclone_provenance_invalid', `Rclone binary at ${binary} is not a regular file`, 403);
+    }
+    if ((stats.mode & 0o002) !== 0) {
+      throw new RcloneError('rclone_provenance_invalid', `Rclone binary at ${binary} is world-writable`, 403);
+    }
+    if (typeof process.getuid === 'function') {
+      const currentUid = process.getuid();
+      if (stats.uid !== 0 && stats.uid !== currentUid) {
+        throw new RcloneError('rclone_provenance_invalid', `Rclone binary at ${binary} has untrusted owner UID ${stats.uid}`, 403);
+      }
+    }
+    const ver = await version();
+    const semver = parseSemver(ver.version);
+    if (!semver || compareSemver(semver, MINIMUM_RCLONE_VERSION) < 0) {
+      throw new RcloneError('rclone_version_unsupported', `Rclone version ${ver.version} is below minimum required ${MINIMUM_RCLONE_VERSION}`, 503);
+    }
+    return Object.freeze({
+      path: binary,
+      version: ver.version,
+      minimumVersion: MINIMUM_RCLONE_VERSION,
+      uid: stats.uid,
+      mode: stats.mode,
+      verifiedAt: new Date(now()).toISOString(),
+    });
+  }
+
   return Object.freeze({
     version,
+    verifyProvenance,
     testRemote,
     listRemotes,
     writeConfigFile,
@@ -227,8 +283,11 @@ export function createRcloneManager({
 
 export const rcloneManagerInternals = Object.freeze({
   RCLONE_PATHS,
+  MINIMUM_RCLONE_VERSION,
   findRcloneBinary,
   mapRcloneError,
   normalizeRemoteName,
   formatIniConfig,
+  parseSemver,
+  compareSemver,
 });

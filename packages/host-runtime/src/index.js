@@ -390,11 +390,14 @@ export {
 } from './cache-isolation-manager.js';
 export {
   createResticManager,
+  cleanOrphanedPasswordFiles,
+  MINIMUM_RESTIC_VERSION,
   ResticError,
   resticManagerInternals,
 } from './restic-manager.js';
 export {
   createRcloneManager,
+  MINIMUM_RCLONE_VERSION,
   RcloneError,
   rcloneManagerInternals,
 } from './rclone-manager.js';
