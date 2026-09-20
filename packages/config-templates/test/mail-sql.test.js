@@ -102,6 +102,7 @@ test('Postfix SQLite lookup configs use one private database and bounded exact q
   assert.match(renderPostfixSqlMailboxLookup(), /virtual_mailboxes WHERE address = '%s' AND enabled = 1/);
   assert.match(renderPostfixSqlAliasLookup(), /SELECT destinations FROM virtual_aliases/);
   assert.match(renderPostfixSqlSenderLoginLookup(), /SELECT address FROM virtual_mailboxes/);
+  assert.match(renderPostfixSqlSenderLoginLookup(), /UNION ALL SELECT destinations FROM virtual_aliases/);
 });
 
 test('Dovecot SQL auth keeps static vmail userdb and obtains only protected credentials/quota from SQLite', () => {

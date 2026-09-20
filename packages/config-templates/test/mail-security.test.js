@@ -18,12 +18,25 @@ function assertSecurityPolicy(preview) {
   const parameters = parameterMap(preview);
   assert.equal(parameters.get('mynetworks'), '127.0.0.0/8 [::1]/128');
   assert.equal(parameters.get('smtpd_relay_restrictions'), 'permit_mynetworks, reject_unauth_destination');
+  assert.equal(parameters.get('smtpd_recipient_restrictions'), 'permit_mynetworks, reject_unauth_destination');
+  assert.equal(parameters.get('smtpd_helo_required'), 'yes');
+  assert.equal(parameters.get('smtpd_helo_restrictions'), 'permit_mynetworks, reject_invalid_helo_hostname, permit');
   assert.equal(parameters.get('smtpd_sasl_auth_enable'), 'no');
   assert.equal(parameters.get('smtpd_tls_auth_only'), 'yes');
   assert.equal(parameters.get('smtpd_tls_security_level'), 'may');
   assert.equal(parameters.get('smtp_tls_security_level'), 'may');
   assert.equal(parameters.get('smtpd_tls_protocols'), '>=TLSv1.2');
   assert.equal(parameters.get('smtp_tls_protocols'), '>=TLSv1.2');
+  assert.equal(parameters.get('anvil_rate_time_unit'), '60s');
+  assert.equal(parameters.get('smtpd_client_connection_rate_limit'), '30');
+  assert.equal(parameters.get('smtpd_client_message_rate_limit'), '100');
+  assert.equal(parameters.get('smtpd_client_recipient_rate_limit'), '200');
+  assert.equal(parameters.get('smtpd_client_connection_count_limit'), '50');
+  assert.equal(parameters.get('smtpd_client_new_tls_session_rate_limit'), '30');
+  assert.equal(parameters.get('smtpd_error_sleep_time'), '1s');
+  assert.equal(parameters.get('smtpd_soft_error_limit'), '10');
+  assert.equal(parameters.get('smtpd_hard_error_limit'), '20');
+  assert.equal(parameters.get('milter_mail_macros'), 'i {mail_addr} {client_addr} {client_name} {auth_authen}');
   assert.deepEqual(
     preview.postfixParameters.map((entry) => entry.name),
     [...preview.postfixParameters.map((entry) => entry.name)].sort(),
@@ -63,5 +76,13 @@ test('security policy constants remain bounded and explicit', () => {
   assert.equal(mailSecurityTemplatePolicy.tlsMinProtocol, 'TLSv1.2');
   assert.equal(mailSecurityTemplatePolicy.loopbackNetworks, '127.0.0.0/8 [::1]/128');
   assert.equal(mailSecurityTemplatePolicy.relayRestrictions, 'permit_mynetworks, reject_unauth_destination');
-  assert.equal(mailSecurityTemplatePolicy.postfixParameters.length, 8);
+  assert.equal(mailSecurityTemplatePolicy.recipientRestrictions, 'permit_mynetworks, reject_unauth_destination');
+  assert.equal(mailSecurityTemplatePolicy.heloRestrictions, 'permit_mynetworks, reject_invalid_helo_hostname, permit');
+  assert.equal(mailSecurityTemplatePolicy.milterMailMacros, 'i {mail_addr} {client_addr} {client_name} {auth_authen}');
+  assert.equal(mailSecurityTemplatePolicy.rateLimits.anvilRateTimeUnit, '60s');
+  assert.equal(mailSecurityTemplatePolicy.rateLimits.connectionRateLimit, '30');
+  assert.equal(mailSecurityTemplatePolicy.rateLimits.messageRateLimit, '100');
+  assert.equal(mailSecurityTemplatePolicy.rateLimits.recipientRateLimit, '200');
+  assert.equal(mailSecurityTemplatePolicy.rateLimits.connectionCountLimit, '50');
+  assert.equal(mailSecurityTemplatePolicy.postfixParameters.length, 21);
 });

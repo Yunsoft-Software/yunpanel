@@ -82,13 +82,28 @@ function canonicalAddresses(values) {
   return Object.freeze(result);
 }
 
-export function renderPostfixSenderLoginMap(mailboxes = []) {
+export function renderPostfixSenderLoginMap(mailboxes = [], aliases = []) {
   const addresses = canonicalAddresses(mailboxes);
-  return addresses.length === 0 ? '' : `${addresses.map((address) => `${address} ${address}`).join('\n')}\n`;
+  const aliasLines = [];
+  if (Array.isArray(aliases)) {
+    for (const alias of aliases) {
+      if (alias && typeof alias === 'object' && !Array.isArray(alias)
+        && typeof alias.source === 'string' && Array.isArray(alias.destinations) && alias.destinations.length > 0) {
+        const source = normalizeMailboxAddress(alias.source).address;
+        const destinations = alias.destinations.map((destination) => normalizeMailboxAddress(destination).address).sort();
+        aliasLines.push(`${source} ${destinations.join(', ')}`);
+      }
+    }
+  }
+  const lines = [
+    ...addresses.map((address) => `${address} ${address}`),
+    ...aliasLines,
+  ].sort();
+  return lines.length === 0 ? '' : `${lines.join('\n')}\n`;
 }
 
-function senderLoginArtifact(mailboxes) {
-  const content = renderPostfixSenderLoginMap(mailboxes);
+function senderLoginArtifact(mailboxes, aliases = []) {
+  const content = renderPostfixSenderLoginMap(mailboxes, aliases);
   return Object.freeze({
     version: 1,
     path: SENDER_LOGIN_PATH,
@@ -126,13 +141,13 @@ function submissionAuthArtifact(artifact) {
   });
 }
 
-export function enableManagedMailSubmission(preview, mailboxes = []) {
+export function enableManagedMailSubmission(preview, mailboxes = [], aliases = []) {
   if (!preview || typeof preview !== 'object' || Array.isArray(preview)
     || preview.version !== 1 || typeof preview.sha256 !== 'string'
     || !Array.isArray(preview.artifacts) || !Array.isArray(preview.postfixParameters)) {
-    throw new MailSubmissionTemplateError('submission_preview_invalid', 'Managed mail preview is invalid');
+  throw new MailSubmissionTemplateError('submission_preview_invalid', 'Managed mail preview is invalid');
   }
-  const loginArtifact = senderLoginArtifact(mailboxes);
+  const loginArtifact = senderLoginArtifact(mailboxes, aliases);
   const artifacts = [];
   let authArtifacts = 0;
   let insertedSenderLogins = false;
@@ -178,6 +193,7 @@ export function previewManagedMailSubmissionConfiguration(input = {}) {
   return enableManagedMailSubmission(
     previewManagedMailSecurityConfiguration(input),
     input.mailboxes ?? [],
+    input.aliases ?? [],
   );
 }
 

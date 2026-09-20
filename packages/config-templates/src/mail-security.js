@@ -5,13 +5,41 @@ import { previewManagedMailForwardingConfiguration } from './mail-forwarding.js'
 const TLS_MIN_PROTOCOL = 'TLSv1.2';
 const LOOPBACK_NETWORKS = '127.0.0.0/8 [::1]/128';
 const RELAY_RESTRICTIONS = 'permit_mynetworks, reject_unauth_destination';
+const RECIPIENT_RESTRICTIONS = 'permit_mynetworks, reject_unauth_destination';
+const HELO_RESTRICTIONS = 'permit_mynetworks, reject_invalid_helo_hostname, permit';
+const MILTER_MAIL_MACROS = 'i {mail_addr} {client_addr} {client_name} {auth_authen}';
+
+const RATE_LIMITS = Object.freeze({
+  anvilRateTimeUnit: '60s',
+  connectionCountLimit: '50',
+  connectionRateLimit: '30',
+  messageRateLimit: '100',
+  newTlsSessionRateLimit: '30',
+  recipientRateLimit: '200',
+  errorSleepTime: '1s',
+  softErrorLimit: '10',
+  hardErrorLimit: '20',
+});
 
 const POSTFIX_SECURITY_PARAMETERS = Object.freeze([
+  Object.freeze({ name: 'anvil_rate_time_unit', value: RATE_LIMITS.anvilRateTimeUnit }),
+  Object.freeze({ name: 'milter_mail_macros', value: MILTER_MAIL_MACROS }),
   Object.freeze({ name: 'mynetworks', value: LOOPBACK_NETWORKS }),
   Object.freeze({ name: 'smtp_tls_protocols', value: `>=${TLS_MIN_PROTOCOL}` }),
   Object.freeze({ name: 'smtp_tls_security_level', value: 'may' }),
+  Object.freeze({ name: 'smtpd_client_connection_count_limit', value: RATE_LIMITS.connectionCountLimit }),
+  Object.freeze({ name: 'smtpd_client_connection_rate_limit', value: RATE_LIMITS.connectionRateLimit }),
+  Object.freeze({ name: 'smtpd_client_message_rate_limit', value: RATE_LIMITS.messageRateLimit }),
+  Object.freeze({ name: 'smtpd_client_new_tls_session_rate_limit', value: RATE_LIMITS.newTlsSessionRateLimit }),
+  Object.freeze({ name: 'smtpd_client_recipient_rate_limit', value: RATE_LIMITS.recipientRateLimit }),
+  Object.freeze({ name: 'smtpd_error_sleep_time', value: RATE_LIMITS.errorSleepTime }),
+  Object.freeze({ name: 'smtpd_hard_error_limit', value: RATE_LIMITS.hardErrorLimit }),
+  Object.freeze({ name: 'smtpd_helo_required', value: 'yes' }),
+  Object.freeze({ name: 'smtpd_helo_restrictions', value: HELO_RESTRICTIONS }),
+  Object.freeze({ name: 'smtpd_recipient_restrictions', value: RECIPIENT_RESTRICTIONS }),
   Object.freeze({ name: 'smtpd_relay_restrictions', value: RELAY_RESTRICTIONS }),
   Object.freeze({ name: 'smtpd_sasl_auth_enable', value: 'no' }),
+  Object.freeze({ name: 'smtpd_soft_error_limit', value: RATE_LIMITS.softErrorLimit }),
   Object.freeze({ name: 'smtpd_tls_auth_only', value: 'yes' }),
   Object.freeze({ name: 'smtpd_tls_protocols', value: `>=${TLS_MIN_PROTOCOL}` }),
   Object.freeze({ name: 'smtpd_tls_security_level', value: 'may' }),
@@ -127,6 +155,10 @@ export const mailSecurityTemplatePolicy = Object.freeze({
   tlsMinProtocol: TLS_MIN_PROTOCOL,
   loopbackNetworks: LOOPBACK_NETWORKS,
   relayRestrictions: RELAY_RESTRICTIONS,
+  recipientRestrictions: RECIPIENT_RESTRICTIONS,
+  heloRestrictions: HELO_RESTRICTIONS,
+  milterMailMacros: MILTER_MAIL_MACROS,
+  rateLimits: RATE_LIMITS,
   postfixParameters: POSTFIX_SECURITY_PARAMETERS,
   dovecotTlsPrefix: DOVECOT_TLS_PREFIX,
 });

@@ -71,7 +71,10 @@ test('stages the complete submission-aware mail bundle atomically without return
   const senderLogins = manifest.artifacts.find((artifact) => artifact.targetPath === mailSubmissionTemplatePolicy.senderLoginPath);
   assert.ok(senderLogins);
   assert.equal((await stat(path.join(directory, senderLogins.stagedName))).mode & 0o777, 0o640);
-  assert.equal(await readFile(path.join(directory, senderLogins.stagedName), 'utf8'), 'owner@example.com owner@example.com\n');
+  assert.equal(
+    await readFile(path.join(directory, senderLogins.stagedName), 'utf8'),
+    'info@example.com owner@example.com\nowner@example.com owner@example.com\n',
+  );
   const sieveArtifact = manifest.artifacts.find((artifact) => artifact.targetPath === mailForwardingTemplatePolicy.sievePath);
   assert.ok(sieveArtifact);
   assert.equal((await stat(path.join(directory, sieveArtifact.stagedName))).mode & 0o777, 0o640);

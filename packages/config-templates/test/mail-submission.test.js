@@ -55,6 +55,13 @@ test('submission sender login map is canonical, deterministic and empty for an e
     renderPostfixSenderLoginMap(['Zed@Example.com', 'alice@example.com']),
     'alice@example.com alice@example.com\nzed@example.com zed@example.com\n',
   );
+  assert.equal(
+    renderPostfixSenderLoginMap(
+      ['alice@example.com'],
+      [{ source: 'info@example.com', destinations: ['alice@example.com'] }],
+    ),
+    'alice@example.com alice@example.com\ninfo@example.com alice@example.com\n',
+  );
 });
 
 test('submission rejects drifted Dovecot authentication policy instead of silently weakening it', () => {

@@ -176,7 +176,16 @@ function candidateRelayPolicySatisfied(preview) {
   if (!parameters) return false;
   return parameters.get('mynetworks') === mailSecurityTemplatePolicy.loopbackNetworks
     && parameters.get('smtpd_relay_restrictions') === mailSecurityTemplatePolicy.relayRestrictions
-    && parameters.get('smtpd_sasl_auth_enable') === 'no';
+    && parameters.get('smtpd_recipient_restrictions') === mailSecurityTemplatePolicy.recipientRestrictions
+    && parameters.get('smtpd_helo_required') === 'yes'
+    && parameters.get('smtpd_helo_restrictions') === mailSecurityTemplatePolicy.heloRestrictions
+    && parameters.get('smtpd_sasl_auth_enable') === 'no'
+    && parameters.get('anvil_rate_time_unit') === mailSecurityTemplatePolicy.rateLimits.anvilRateTimeUnit
+    && parameters.get('smtpd_client_connection_rate_limit') === mailSecurityTemplatePolicy.rateLimits.connectionRateLimit
+    && parameters.get('smtpd_client_message_rate_limit') === mailSecurityTemplatePolicy.rateLimits.messageRateLimit
+    && parameters.get('smtpd_client_recipient_rate_limit') === mailSecurityTemplatePolicy.rateLimits.recipientRateLimit
+    && parameters.get('smtpd_client_connection_count_limit') === mailSecurityTemplatePolicy.rateLimits.connectionCountLimit
+    && parameters.get('milter_mail_macros') === mailSecurityTemplatePolicy.milterMailMacros;
 }
 
 function candidateTlsPolicySatisfied(preview) {

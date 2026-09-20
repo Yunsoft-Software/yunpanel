@@ -255,7 +255,9 @@ export function renderPostfixSqlAliasLookup() {
 }
 
 export function renderPostfixSqlSenderLoginLookup() {
-  return renderPostfixSqlLookup("SELECT address FROM virtual_mailboxes WHERE address = '%s' AND enabled = 1");
+  return renderPostfixSqlLookup(
+    "SELECT address FROM virtual_mailboxes WHERE address = '%s' AND enabled = 1 UNION ALL SELECT destinations FROM virtual_aliases WHERE source = '%s' AND enabled = 1",
+  );
 }
 
 export function renderDovecotSqlConfig() {
