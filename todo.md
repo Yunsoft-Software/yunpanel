@@ -10,9 +10,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 - [ ] Production exact `YUNPANEL_LOCAL_SERVER_ID` + OS hostname olmadan başlamasın; uzak/eski server detail/mutation ve retained agent transport fail-closed kalsın.
 - [ ] `.28` geliştirme hostunda `YUNPANEL_OWNER_MFA_REQUIRED=false` kalırken gerçek HTTPS Owner password-only setup/login/session/logout/logout-all/idle/absolute timeout, CSRF, rate-limit ve trusted-proxy sınırı Chromium/Firefox'ta çalışsın. TOTP/recovery bu hostun geliştirme kabul kapısı değildir; kullanıcı açıkça tersini istemedikçe `.28` üzerinde MFA etkinleştirilmez veya kodu istenmez.
 
-## T-PROVISIONING — P0 yeni Website ve izolasyon
-
-- [ ] Fresh Website transactional provisioning kabulü: preflight'ta FQDN/IDN/duplicate/parent/alias conflict doğrulaması, exact resource preview (`runtime`, `dns`, `ip`, `certificate`, `sftp`, `database`, `mailDomain`) ve package/service blocker kontrollerinin eksiksiz çalıştığını doğrula. Downstream failure'da TLS activation compensation'ının Nginx'i HTTP-only'ye geri aldığını ve rollback receipt ürettiğini, certificate step'inin ise fiziksel silme yapmayıp retention receipt verdiğini failure-injection ile doğrula.
 
 ## T-RUNTIME — P0 Passenger, PHP-FPM ve hosted app sürekliliği
 
