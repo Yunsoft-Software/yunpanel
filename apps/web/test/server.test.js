@@ -730,3 +730,206 @@ test('elFinder gateway rejects query handoff, cross-origin bootstrap and direct 
   assert.equal(handoffRequests, 0);
   assert.equal(gatewayRequests, 0);
 });
+
+test('netdata gateway authenticates Owner access before proxying loopback HTTP', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-netdata-web-'));
+  const netdataRequests = [];
+  const netdataServer = http.createServer((request, response) => {
+    netdataRequests.push({
+      method: request.method,
+      url: request.url,
+      host: request.headers.host,
+      cookie: request.headers.cookie,
+      forwardedPrefix: request.headers['x-forwarded-prefix'],
+      forwardedProto: request.headers['x-forwarded-proto'],
+    });
+    if (request.url === '/api/v1/info') {
+      response.writeHead(302, {
+        location: '/index.html',
+        'set-cookie': 'netdata_session=fixture; Path=/; Secure; HttpOnly',
+        'content-type': 'application/json',
+      });
+      response.end('{"version":"1.43.2"}');
+      return;
+    }
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end('{"ok":true}');
+  });
+  const netdataPort = await listen(netdataServer);
+
+  const accessRequests = [];
+  const api = http.createServer((request, response) => {
+    accessRequests.push({
+      method: request.method,
+      url: request.url,
+      cookie: request.headers.cookie,
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+      clientIp: request.headers['x-yunpanel-client-ip'],
+    });
+    if (request.url !== '/api/netdata-gateway-access') {
+      response.writeHead(404);
+      response.end();
+      return;
+    }
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403, {
+      'cache-control': 'no-store',
+    });
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    netdataPort,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await close(netdataServer);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  // Canonicalize trailing slash
+  const redirectResponse = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/netdata?chart=system.cpu`,
+    {
+      redirect: 'manual',
+      headers: { 'x-real-ip': '203.0.113.8' },
+    },
+  );
+  assert.equal(redirectResponse.status, 308);
+  assert.equal(redirectResponse.headers.get('location'), '/tools/netdata/?chart=system.cpu');
+
+  // Authenticated Owner request
+  const response = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/netdata/api/v1/info`,
+    {
+      redirect: 'manual',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+      },
+    },
+  );
+  assert.equal(response.status, 302);
+  assert.equal(response.headers.get('location'), '/tools/netdata/index.html');
+  assert.match(response.headers.get('set-cookie'), /Path=\/tools\/netdata\//);
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+  assert.deepEqual(accessRequests[0], {
+    method: 'GET',
+    url: '/api/netdata-gateway-access',
+    cookie: '__Host-yunpanel_session=owner',
+    proxyToken,
+    clientIp: '203.0.113.8',
+  });
+  assert.deepEqual(netdataRequests[0], {
+    method: 'GET',
+    url: '/api/v1/info',
+    host: 'panel.example.com',
+    cookie: '__Host-yunpanel_session=owner',
+    forwardedPrefix: '/tools/netdata/',
+    forwardedProto: 'https',
+  });
+
+  // Unauthenticated request
+  const unauth = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/netdata/api/v1/info`,
+    {
+      headers: { 'x-real-ip': '203.0.113.8' },
+    },
+  );
+  assert.equal(unauth.status, 403);
+
+  // Cross-origin mutation
+  const crossOrigin = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/netdata/api/v1/data`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+        origin: 'https://attacker.example',
+      },
+    },
+  );
+  assert.equal(crossOrigin.status, 403);
+});
+
+test('netdata gateway proxies WebSocket upgrade for live metrics', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-netdata-ws-'));
+  const netdataServer = http.createServer((_request, response) => {
+    response.writeHead(404);
+    response.end();
+  });
+  let netdataWsConnected = false;
+  const netdataWs = new WebSocketServer({ noServer: true });
+  netdataServer.on('upgrade', (request, socket, head) => {
+    netdataWs.handleUpgrade(request, socket, head, (ws) => {
+      netdataWsConnected = true;
+      ws.send('netdata-metric-stream');
+    });
+  });
+  const netdataPort = await listen(netdataServer);
+
+  const api = http.createServer((request, response) => {
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    netdataPort,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    netdataWs.close();
+    await close(panel);
+    await close(api);
+    await close(netdataServer);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  // Successful authenticated WebSocket upgrade
+  const clientWs = new WebSocket(`ws://127.0.0.1:${panelPort}/tools/netdata/websocket`, {
+    headers: {
+      origin: 'https://panel.example.com',
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+    },
+  });
+  await once(clientWs, 'open');
+  const [message] = await once(clientWs, 'message');
+  assert.equal(message.toString(), 'netdata-metric-stream');
+  assert.equal(netdataWsConnected, true);
+  clientWs.close();
+  await once(clientWs, 'close');
+
+  // Unauthenticated WebSocket upgrade rejected
+  const unauthWs = new WebSocket(`ws://127.0.0.1:${panelPort}/tools/netdata/websocket`, {
+    headers: {
+      origin: 'https://panel.example.com',
+      'x-real-ip': '203.0.113.8',
+    },
+  });
+  unauthWs.on('error', () => {});
+  const [, unauthResp] = await once(unauthWs, 'unexpected-response');
+  assert.equal(unauthResp.statusCode, 403);
+  unauthResp.resume();
+});
+
+

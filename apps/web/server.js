@@ -20,6 +20,10 @@ const TTYD_GATEWAY = integratedToolGateway('ttyd');
 const TTYD_PREFIX = TTYD_GATEWAY.publicPrefix;
 const TTYD_GATEWAY_ACCESS_PATH = TTYD_GATEWAY.accessPath;
 const TTYD_SOCKET_ROOT = TTYD_GATEWAY.socketRoot;
+const NETDATA_GATEWAY = integratedToolGateway('netdata');
+const NETDATA_PREFIX = NETDATA_GATEWAY.publicPrefix;
+const NETDATA_GATEWAY_ACCESS_PATH = NETDATA_GATEWAY.accessPath;
+const NETDATA_LOOPBACK_PORT = NETDATA_GATEWAY.loopbackPort;
 const TTYD_AUTH_HEADER = 'x-yunpanel-ttyd-auth';
 const TTYD_REAUTHORIZE_MS = 15_000;
 const TTYD_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -174,6 +178,14 @@ function authorizeElFinderGateway(request, options) {
     ...options,
     accessPath: ELFINDER_GATEWAY_ACCESS_PATH,
     label: 'elFinder',
+  });
+}
+
+function authorizeNetdataGateway(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: NETDATA_GATEWAY_ACCESS_PATH,
+    label: 'Netdata',
   });
 }
 
@@ -519,6 +531,76 @@ function proxyPhpMyAdmin(request, response, {
   upstream.setTimeout(120_000, () => upstream.destroy(new Error('phpMyAdmin upstream timeout')));
   upstream.once('error', () => {
     if (!response.headersSent) reply(response, 503, 'phpMyAdmin is unavailable.');
+    else response.destroy();
+  });
+  request.once('aborted', () => upstream.destroy());
+  request.pipe(upstream);
+}
+
+function rewriteNetdataLocation(value) {
+  if (typeof value !== 'string' || !value.startsWith('/')) return value;
+  if (value === NETDATA_PREFIX || value.startsWith(`${NETDATA_PREFIX}/`)) return value;
+  return `${NETDATA_PREFIX}${value}`;
+}
+
+function scopeNetdataSetCookie(value) {
+  const rewrite = (cookie) => String(cookie).replace(/;\s*Path=\/(?:;|$)/i, `; Path=${NETDATA_PREFIX}/;`);
+  if (Array.isArray(value)) return value.map(rewrite);
+  return typeof value === 'string' ? rewrite(value) : value;
+}
+
+function proxyNetdata(request, response, {
+  netdataPort, netdataHost = '127.0.0.1', publicOrigin,
+}) {
+  if (!sameOriginMutation(request, publicOrigin)) {
+    reply(response, 403, 'Cross-origin Netdata mutations are not allowed.');
+    return;
+  }
+  if (!['GET', 'HEAD', 'POST', 'PUT', 'DELETE', 'OPTIONS'].includes(request.method ?? '')) {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const upstreamPath = requestUrl.pathname.slice(NETDATA_PREFIX.length) || '/';
+  if (!upstreamPath.startsWith('/')) {
+    reply(response, 404, 'Not found.');
+    return;
+  }
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  headers.host = publicUrl.host;
+  headers['x-forwarded-proto'] = 'https';
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = `${NETDATA_PREFIX}/`;
+
+  const upstream = http.request({
+    host: netdataHost,
+    port: netdataPort,
+    method: request.method,
+    path: `${upstreamPath}${requestUrl.search}`,
+    headers,
+  }, (upstreamResponse) => {
+    const responseHeaders = {};
+    for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+      if (HOP_BY_HOP_HEADERS.has(name) || value === undefined) continue;
+      if (name === 'location') {
+        responseHeaders[name] = rewriteNetdataLocation(value);
+        continue;
+      }
+      if (name === 'set-cookie') {
+        responseHeaders[name] = scopeNetdataSetCookie(value);
+        continue;
+      }
+      responseHeaders[name] = value;
+    }
+    responseHeaders['cache-control'] = responseHeaders['cache-control'] || 'no-store';
+    responseHeaders['x-robots-tag'] = 'noindex, nofollow, noarchive';
+    response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(120_000, () => upstream.destroy(new Error('Netdata upstream timeout')));
+  upstream.once('error', () => {
+    if (!response.headersSent) reply(response, 502, 'Netdata upstream is unavailable.');
     else response.destroy();
   });
   request.once('aborted', () => upstream.destroy());
@@ -912,6 +994,59 @@ function proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, pro
   upstream.end();
 }
 
+function proxyNetdataWebSocket(request, socket, head, {
+  netdataPort, netdataHost = '127.0.0.1', publicOrigin,
+}) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (request.method !== 'GET' || request.headers.origin !== publicOrigin
+    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+    rejectSocket(socket, 403);
+    return;
+  }
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const upstreamPath = requestUrl.pathname.slice(NETDATA_PREFIX.length) || '/';
+  const headers = browserProxyHeaders(request);
+  const publicUrl = new URL(publicOrigin);
+  headers.host = publicUrl.host;
+  headers.connection = 'Upgrade';
+  headers.upgrade = 'websocket';
+  headers['x-forwarded-proto'] = 'https';
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = `${NETDATA_PREFIX}/`;
+
+  const upstream = http.request({
+    host: netdataHost,
+    port: netdataPort,
+    method: 'GET',
+    path: `${upstreamPath}${requestUrl.search}`,
+    headers,
+  });
+  upstream.setTimeout(10_000, () => upstream.destroy(new Error('Netdata WebSocket timeout')));
+  upstream.on('upgrade', (response, upstreamSocket, upstreamHead) => {
+    upstream.setTimeout(0);
+    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol'];
+    const responseHeaders = [];
+    for (const name of allowed) {
+      const value = response.headers[name];
+      if (typeof value === 'string' && !/[\r\n]/.test(value)) responseHeaders.push(`${name}: ${value}`);
+    }
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${responseHeaders.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length) socket.write(upstreamHead);
+    if (head.length) upstreamSocket.write(head);
+    socket.pipe(upstreamSocket).pipe(socket);
+    socket.on('error', () => upstreamSocket.destroy());
+    upstreamSocket.on('error', () => socket.destroy());
+  });
+  upstream.on('response', (response) => {
+    response.resume();
+    rejectSocket(socket, [400, 401, 403, 404, 409, 429, 503].includes(response.statusCode) ? response.statusCode : 502);
+  });
+  upstream.on('error', () => rejectSocket(socket, 502));
+  socket.on('error', () => upstream.destroy());
+  socket.on('close', () => upstream.destroy());
+  upstream.end();
+}
+
 async function serveStatic(request, response, webRoot, pathname) {
   if (request.method !== 'GET' && request.method !== 'HEAD') { reply(response, 405, 'Method not allowed.'); return; }
   let decodedPath;
@@ -950,6 +1085,8 @@ export function createPanelServer({
   elFinderHandoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
   elFinderGatewaySessions = createElFinderGatewaySessions(),
   ttydSocketRoot = TTYD_SOCKET_ROOT,
+  netdataPort = NETDATA_LOOPBACK_PORT,
+  netdataHost = '127.0.0.1',
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -961,6 +1098,8 @@ export function createPanelServer({
   if (typeof proxyToken !== 'string' || !PROXY_TOKEN_PATTERN.test(proxyToken)) throw new Error('YUNPANEL_INTERNAL_PROXY_TOKEN is required');
   if (!Number.isInteger(apiPort) || apiPort < 1 || apiPort > 65535) throw new Error('YUNPANEL_API_PORT is invalid');
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
+  if (!Number.isInteger(netdataPort) || netdataPort < 1024 || netdataPort > 65535) throw new Error('netdataPort is invalid');
+  if (typeof netdataHost !== 'string' || !['127.0.0.1', '::1', 'localhost'].includes(netdataHost)) throw new Error('netdataHost must be a loopback address');
   if (typeof phpMyAdminSocketPath !== 'string' || !path.isAbsolute(phpMyAdminSocketPath)
     || path.resolve(phpMyAdminSocketPath) !== phpMyAdminSocketPath || phpMyAdminSocketPath === '/') {
     throw new Error('phpMyAdmin socket path is invalid');
@@ -1111,6 +1250,26 @@ export function createPanelServer({
       proxyPhpMyAdmin(request, response, { phpMyAdminSocketPath, publicOrigin });
       return;
     }
+    if (requestUrl.pathname === NETDATA_PREFIX) {
+      response.writeHead(308, {
+        'cache-control': 'no-store',
+        location: `${NETDATA_PREFIX}/${requestUrl.search}`,
+      });
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname.startsWith(`${NETDATA_PREFIX}/`)) {
+      const accessStatus = await authorizeNetdataGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      });
+      if (accessStatus !== 204) {
+        const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
+        reply(response, status, status === 401 ? 'Authentication required.' : 'Netdata access denied.');
+        return;
+      }
+      proxyNetdata(request, response, { netdataPort, netdataHost, publicOrigin });
+      return;
+    }
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
       proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
     }
@@ -1155,6 +1314,26 @@ export function createPanelServer({
       }).catch(() => rejectSocket(socket, 503));
       return;
     }
+    if (requestUrl.pathname === NETDATA_PREFIX || requestUrl.pathname.startsWith(`${NETDATA_PREFIX}/`)) {
+      void authorizeNetdataGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      }).then((accessStatus) => {
+        if (socket.destroyed) return;
+        if (accessStatus !== 204) {
+          rejectSocket(
+            socket,
+            accessStatus === 401 || accessStatus === 403 ? accessStatus : 503,
+          );
+          return;
+        }
+        proxyNetdataWebSocket(request, socket, head, {
+          netdataPort,
+          netdataHost,
+          publicOrigin,
+        });
+      }).catch(() => rejectSocket(socket, 503));
+      return;
+    }
     if (requestUrl.pathname !== '/api/terminal' || requestUrl.search) { rejectSocket(socket, 404); return; }
     proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin });
   });
@@ -1172,15 +1351,20 @@ export const panelServerInternals = Object.freeze({
   authorizePhpMyAdminGateway,
   authorizeElFinderGateway,
   authorizeTtydGateway,
+  authorizeNetdataGateway,
   proxyPhpMyAdmin,
   proxyElFinder,
   proxyTtyd,
   proxyTtydWebSocket,
+  proxyNetdata,
+  proxyNetdataWebSocket,
   parseTtydGatewayPath,
   ttydSocketPath,
   rewritePhpMyAdminLocation,
   rewriteElFinderLocation,
+  rewriteNetdataLocation,
   scopePhpMyAdminSetCookie,
+  scopeNetdataSetCookie,
   panelSessionDigest,
   createElFinderGatewaySessions,
   validElFinderBundle,
@@ -1202,6 +1386,9 @@ export const panelServerInternals = Object.freeze({
   ttydSocketRoot: TTYD_SOCKET_ROOT,
   ttydAuthHeader: TTYD_AUTH_HEADER,
   ttydReauthorizeMs: TTYD_REAUTHORIZE_MS,
+  netdataPrefix: NETDATA_PREFIX,
+  netdataGatewayAccessPath: NETDATA_GATEWAY_ACCESS_PATH,
+  netdataLoopbackPort: NETDATA_LOOPBACK_PORT,
 });
 
 export function startPanelServer(options = {}) {

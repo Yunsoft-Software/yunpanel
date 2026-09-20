@@ -144,7 +144,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.3 — Monitoring/security
 
-- [ ] Netdata loopback + authenticated gateway.
 - [ ] GoAccess site logs/report/WebSocket.
 - [ ] nftables tek firewall authority.
 - [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority olmasın.

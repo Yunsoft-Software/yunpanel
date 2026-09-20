@@ -21,9 +21,11 @@ test('managed hosting service protocol exposes the fixed supported catalog', () 
   assert.deepEqual(MANAGED_SERVICE_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
     'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'postsrsd', 'redis', 'memcached',
+    'netdata',
   ]);
   assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd', 'redis', 'memcached',
+    'netdata',
   ]);
   assert.deepEqual(MANAGED_SERVICE_ACTIONS, ['start', 'stop', 'restart']);
   assert.equal(isReadOnlyOperation(OPERATIONS.SYSTEM_SERVICES_INSPECT), true);
@@ -35,10 +37,12 @@ test('service inspection accepts either the full catalog or one allowlisted serv
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, {}).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'netdata' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'restic' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'ssh' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker', command: 'id' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd', command: 'id' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'netdata', command: 'id' }).ok, false);
 });
 
 test('service install accepts exactly one allowlisted service id', () => {

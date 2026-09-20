@@ -128,6 +128,17 @@ const SERVICE_CATALOG = Object.freeze([
   service({
     id: 'memcached', label: 'Memcached', category: 'cache', packages: ['memcached'], units: ['memcached.service'],
   }),
+  service({
+    id: 'netdata',
+    label: 'Netdata',
+    category: 'monitoring',
+    packages: ['netdata'],
+    units: ['netdata.service'],
+    configurationChecks: [
+      { file: '/usr/sbin/netdata', args: ['-v'] },
+      { file: '/usr/bin/test', args: ['-f', '/etc/netdata/netdata.conf'] },
+    ],
+  }),
 ]);
 const SERVICE_BY_ID = new Map(SERVICE_CATALOG.map((entry) => [entry.id, entry]));
 

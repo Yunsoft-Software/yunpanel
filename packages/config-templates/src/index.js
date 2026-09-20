@@ -244,3 +244,11 @@ export {
   renderPhpMyAdminSignonBridge,
   renderPhpMyAdminSignonConfig,
 } from './phpmyadmin-signon.js';
+
+export {
+  NetdataTemplateError,
+  netdataTemplatePolicy,
+  previewNetdataConfiguration,
+  renderNetdataConfig,
+} from './netdata.js';
+

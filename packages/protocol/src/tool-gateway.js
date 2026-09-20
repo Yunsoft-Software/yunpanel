@@ -6,6 +6,9 @@ const SAFE_SOCKET_ROOT = /^\/[A-Za-z0-9._/-]+$/;
 const ACCESS_MODES = new Set(['owner', 'session']);
 
 function descriptor(value) {
+  const targetCount = Number(value?.socketPath !== undefined)
+    + Number(value?.socketRoot !== undefined)
+    + Number(value?.loopbackPort !== undefined);
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !SAFE_ID.test(value.id ?? '')
     || !SAFE_AUDIENCE.test(value.audience ?? '')
@@ -13,10 +16,12 @@ function descriptor(value) {
     || value.publicPrefix.endsWith('/')
     || !SAFE_HTTP_PATH.test(value.accessPath ?? '')
     || !ACCESS_MODES.has(value.accessMode)
-    || ((value.socketPath === undefined) === (value.socketRoot === undefined))
+    || targetCount !== 1
     || (value.socketPath !== undefined && !SAFE_SOCKET_PATH.test(value.socketPath))
     || (value.socketRoot !== undefined && (!SAFE_SOCKET_ROOT.test(value.socketRoot)
-      || value.socketRoot === '/' || value.socketRoot.endsWith('/')))) {
+      || value.socketRoot === '/' || value.socketRoot.endsWith('/')))
+    || (value.loopbackPort !== undefined && (!Number.isInteger(value.loopbackPort)
+      || value.loopbackPort < 1024 || value.loopbackPort > 65535))) {
     throw new TypeError('Integrated tool gateway descriptor is invalid');
   }
   return Object.freeze({
@@ -27,6 +32,7 @@ function descriptor(value) {
     accessMode: value.accessMode,
     socketPath: value.socketPath ?? null,
     socketRoot: value.socketRoot ?? null,
+    loopbackPort: value.loopbackPort ?? null,
   });
 }
 
@@ -54,6 +60,14 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     accessPath: '/api/ttyd-gateway-access',
     accessMode: 'session',
     socketRoot: '/run/yunpanel/ttyd',
+  }),
+  netdata: descriptor({
+    id: 'netdata',
+    audience: 'netdata',
+    publicPrefix: '/tools/netdata',
+    accessPath: '/api/netdata-gateway-access',
+    accessMode: 'owner',
+    loopbackPort: 19999,
   }),
 });
 

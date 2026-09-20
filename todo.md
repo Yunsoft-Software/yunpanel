@@ -113,7 +113,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-OBSERVABILITY-SECURITY — P1 Netdata, GoAccess, CrowdSec
 
-- [ ] Netdata yalnız loopback dinlesin ve YunPanel authenticated reverse proxy arkasında gerçek CPU/RAM/load/disk/inode/service/container verisi göstersin; doğrudan port public erişilemesin.
 - [ ] GoAccess her Website'in ayrı Nginx logundan static ve real-time rapor üretsin; Site A raporu Site B hostname/path/client verisini göstermesin; WebSocket proxy/restart/rotation çalışsın.
 - [ ] nftables ownership/reconcile gerçek hostta mevcut SSH yönetim erişimini kilitlemeden uygulanıp rollback edilsin. UFW/direct nftables çifte-yazar drift'i tespit edilip mutation bloklansın.
 - [ ] CrowdSec engine + firewall bouncer gerçek SSH/SMTP/Nginx logunu okuyup test decision'ını nftables'a uygulasın; ban/unban, IPv4/IPv6, restart ve health görünürlüğü çalışsın.

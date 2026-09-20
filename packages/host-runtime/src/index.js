@@ -406,3 +406,8 @@ export {
   WebsiteRestoreReceiptError,
   websiteRestoreReceiptInternals,
 } from './website-restore-receipt.js';
+export {
+  createNetdataManager,
+  NetdataManagerError,
+} from './netdata-manager.js';
+

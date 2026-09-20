@@ -26,6 +26,7 @@ const CRON_REMOVE = 'cron.remove';
 const POSTSRSD_SERVICE_ID = 'postsrsd';
 const REDIS_SERVICE_ID = 'redis';
 const MEMCACHED_SERVICE_ID = 'memcached';
+const NETDATA_SERVICE_ID = 'netdata';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
@@ -37,12 +38,14 @@ export const MANAGED_SERVICE_IDS = Object.freeze([
   POSTSRSD_SERVICE_ID,
   REDIS_SERVICE_ID,
   MEMCACHED_SERVICE_ID,
+  NETDATA_SERVICE_ID,
 ]);
 export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([
   ...BASE_MANAGED_SERVICE_CONTROL_IDS,
   POSTSRSD_SERVICE_ID,
   REDIS_SERVICE_ID,
   MEMCACHED_SERVICE_ID,
+  NETDATA_SERVICE_ID,
 ]);
 
 export const OPERATIONS = Object.freeze({
@@ -277,14 +280,21 @@ function validateDnsTxtApply(payload, errors) {
   }
 }
 
-function validatePostsrsdServiceOperation(operation, payload, errors) {
+const EXTENDED_MANAGED_SERVICE_IDS = new Set([
+  POSTSRSD_SERVICE_ID,
+  REDIS_SERVICE_ID,
+  MEMCACHED_SERVICE_ID,
+  NETDATA_SERVICE_ID,
+]);
+
+function validateExtendedServiceOperation(operation, payload, errors) {
   const allowed = operation === BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL
     ? new Set(['serviceId', 'action'])
     : new Set(['serviceId']);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${operation} contains unsupported arguments`);
   }
-  if (payload.serviceId !== POSTSRSD_SERVICE_ID) {
+  if (!EXTENDED_MANAGED_SERVICE_IDS.has(payload.serviceId)) {
     errors.push(`${operation} serviceId is invalid`);
   }
   if (operation === BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL
@@ -304,12 +314,12 @@ function extendedOperation(value) {
   if (value.operation === ROUNDCUBE_CONFIG_APPLY) return 'roundcube';
   if (value.operation === CRON_APPLY || value.operation === CRON_REMOVE) return 'cron';
   if (value.operation === BASE_OPERATIONS.DNS_RECORD_APPLY && value.payload?.record?.type === 'TXT') return 'dns_txt';
-  if (value.payload?.serviceId === POSTSRSD_SERVICE_ID
+  if (EXTENDED_MANAGED_SERVICE_IDS.has(value.payload?.serviceId)
     && [
       BASE_OPERATIONS.SYSTEM_SERVICES_INSPECT,
       BASE_OPERATIONS.SYSTEM_SERVICE_INSTALL,
       BASE_OPERATIONS.SYSTEM_SERVICE_CONTROL,
-    ].includes(value.operation)) return 'postsrsd_service';
+    ].includes(value.operation)) return 'extended_service';
   return null;
 }
 
@@ -336,8 +346,8 @@ export function validateOperationEnvelope(value) {
     validateRoundcubeConfigApply(value.payload, errors);
   } else if (extension === 'cron') {
     validateCronMutation(value.payload, value.operation, errors);
-  } else if (extension === 'postsrsd_service') {
-    validatePostsrsdServiceOperation(value.operation, value.payload, errors);
+  } else if (extension === 'extended_service') {
+    validateExtendedServiceOperation(value.operation, value.payload, errors);
   } else {
     validateDnsTxtApply(value.payload, errors);
   }
@@ -358,7 +368,7 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
     || operation === CRON_APPLY
     || operation === CRON_REMOVE
     || (operation === BASE_OPERATIONS.DNS_RECORD_APPLY && payload?.record?.type === 'TXT')
-    || (payload?.serviceId === POSTSRSD_SERVICE_ID
+    || (EXTENDED_MANAGED_SERVICE_IDS.has(payload?.serviceId)
       && [
         BASE_OPERATIONS.SYSTEM_SERVICES_INSPECT,
         BASE_OPERATIONS.SYSTEM_SERVICE_INSTALL,
@@ -392,5 +402,7 @@ export const protocolExtensionInternals = Object.freeze({
   validateRoundcubeConfigApply,
   validateCronMutation,
   validateDnsTxtApply,
-  validatePostsrsdServiceOperation,
+  validateExtendedServiceOperation,
+  validatePostsrsdServiceOperation: validateExtendedServiceOperation,
 });
+
