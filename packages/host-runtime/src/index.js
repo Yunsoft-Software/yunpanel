@@ -414,4 +414,12 @@ export {
   createGoAccessManager,
   GoAccessManagerError,
 } from './goaccess-manager.js';
+export {
+  createNftablesManager,
+  NftablesManagerError,
+} from './nftables-manager.js';
+export {
+  createCrowdsecManager,
+  CrowdsecManagerError,
+} from './crowdsec-manager.js';
 
