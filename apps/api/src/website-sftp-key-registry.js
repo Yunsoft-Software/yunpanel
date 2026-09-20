@@ -342,8 +342,9 @@ export function createWebsiteSftpKeyRegistry({
     return publicRecord(record);
   }
 
-  async function listKeys({ websiteId } = {}) {
+  async function listKeys(target = {}) {
     await ensureInitialized();
+    const websiteId = typeof target === 'string' ? target : target?.websiteId;
     const website = await requireWebsite(websiteId);
     return Object.freeze(state.keys
       .filter((entry) => entry.websiteId === website.id)

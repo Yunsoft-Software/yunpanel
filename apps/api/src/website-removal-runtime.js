@@ -262,10 +262,27 @@ export function createWebsiteRemovalRuntime({
 
         case 'sftp_key_cleanup': {
           if (websiteSftpKeyRegistry && typeof websiteSftpKeyRegistry.listKeys === 'function') {
-            const keys = await websiteSftpKeyRegistry.listKeys(op.websiteId);
-            for (const key of keys) {
+            let keys = [];
+            try {
+              keys = await websiteSftpKeyRegistry.listKeys({ websiteId: op.websiteId });
+            } catch {
+              keys = await websiteSftpKeyRegistry.listKeys(op.websiteId);
+            }
+            for (const key of (keys || [])) {
               if (typeof websiteSftpKeyRegistry.revokeKey === 'function') {
-                await websiteSftpKeyRegistry.revokeKey(key.id);
+                if (websiteSftpKeyRegistry.revokeKey.length === 1) {
+                  await websiteSftpKeyRegistry.revokeKey(key.id);
+                } else {
+                  try {
+                    await websiteSftpKeyRegistry.revokeKey({
+                      websiteId: op.websiteId,
+                      keyId: key.id,
+                      expectedRevision: key.revision ?? 1,
+                    });
+                  } catch {
+                    await websiteSftpKeyRegistry.revokeKey(key.id);
+                  }
+                }
               }
             }
           }

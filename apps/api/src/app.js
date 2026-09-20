@@ -160,6 +160,7 @@ import { WebsiteSftpKeyRegistryError } from './website-sftp-key-registry.js';
 import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
 import { mountWebsiteCronRoutes, WebsiteCronHttpError } from './website-cron-http.js';
 import { WebsiteCronApplyServiceError } from './website-cron-apply-service.js';
+import { WebsiteCronRegistryError } from './website-cron-registry.js';
 import { mountWebsitePhpToolsRoutes } from './website-php-tools-http.js';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 import { PhpCliToolError, CacheIsolationError } from '@yunpanel/host-runtime';
@@ -915,7 +916,8 @@ export function createApp({
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
     if (
-      isBackupHttpError(error)
+      (Number.isInteger(error?.status) && error.status >= 400 && error.status < 600 && typeof error?.code === 'string')
+      || isBackupHttpError(error)
       || isWebsiteBackupHttpError(error)
       || isWebsiteRestoreHttpError(error)
       || error instanceof ApplicationRuntimeBindingRegistryError
@@ -1019,6 +1021,9 @@ export function createApp({
     }
     const invalidJson = error instanceof SyntaxError && error.status === 400;
     const bodyTooLarge = error?.type === 'entity.too.large' || error?.status === 413;
+    if (!invalidJson && !bodyTooLarge) {
+      console.error('[yunpanel-api] Unhandled error:', error);
+    }
     return response.status(bodyTooLarge ? 413 : invalidJson ? 400 : 500).json({
       error: {
         code: bodyTooLarge ? 'request_body_too_large' : invalidJson ? 'invalid_json' : 'internal_error',

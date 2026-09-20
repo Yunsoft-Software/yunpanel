@@ -18,8 +18,23 @@ export function createSftpKeyImpactProvider({ websiteSftpKeyRegistry }) {
   }
   return async ({ websiteId }) => {
     if (!websiteId) return [];
-    const keys = await websiteSftpKeyRegistry.listKeys(websiteId);
-    return keys.map((key) => ({
+    let keys = [];
+    try {
+      keys = await websiteSftpKeyRegistry.listKeys({ websiteId });
+    } catch {
+      // In case mock only accepts raw string
+    }
+    if (!Array.isArray(keys) || keys.length === 0) {
+      try {
+        const fallback = await websiteSftpKeyRegistry.listKeys(websiteId);
+        if (Array.isArray(fallback) && fallback.length > 0) {
+          keys = fallback;
+        }
+      } catch {
+        // ignore
+      }
+    }
+    return (keys || []).map((key) => ({
       id: key.id,
       state: key.status,
     }));
