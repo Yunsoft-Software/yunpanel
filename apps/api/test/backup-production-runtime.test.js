@@ -21,35 +21,29 @@ function fixture(overrides = {}) {
       async failStep() {},
       async getOperation() {},
     },
-    applicationRegistry: { async getApplication() { return null; } },
-    applicationEnvironmentRegistry: {
-      async environmentStatus() {},
-      async materialize() {},
-    },
-    dockerComposeProjectRegistry: { async getProject() { return null; } },
-    dockerComposeObserver: { async inspect() { return { status: 'stopped' }; } },
     async loadDatabaseInventory() { return null; },
     mailDataOperationsService: { async previewBackup() { return null; } },
     async projectBackupLocked() { return true; },
-    localBackupArtifactManager: { async archive() {} },
-    async inspectDockerVolume() {},
     ...overrides,
   };
 }
 
-test('production backup runtime assembles child dispatch and local executors behind one orchestrator factory', () => {
+test('production backup runtime assembles child dispatch and omits retired custom tar executors', () => {
   const runtime = createBackupProductionRuntime(fixture());
 
   assert.equal(typeof runtime.jobIdempotencyLookup.find, 'function');
   assert.equal(typeof runtime.childJobDispatcher.dispatchPrepared, 'function');
-  assert.deepEqual(Object.keys(runtime.localExecutors).sort(), [
-    'application_snapshot',
-    'docker_storage_backup',
-  ]);
+  assert.deepEqual(Object.keys(runtime.localExecutors), []);
 
   const orchestrator = runtime.createOrchestrator({ async preview() {} });
   assert.equal(typeof orchestrator.create, 'function');
   assert.equal(typeof orchestrator.advance, 'function');
+});
+
+test('production backup runtime supports optional explicit local executors', () => {
+  const custom = { custom_step: { async prepare() {}, async executePrepared() {} } };
+  const runtime = createBackupProductionRuntime(fixture({ localExecutors: custom }));
+  assert.deepEqual(Object.keys(runtime.localExecutors), ['custom_step']);
 });
 
 test('production backup runtime fails closed when durable production dependencies are missing', () => {

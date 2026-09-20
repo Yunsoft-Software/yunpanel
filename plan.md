@@ -179,7 +179,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 # P2 — Migration temizliği ve son ürün yüzeyi
 
 - [ ] Legacy migration dönemi tamamlandığında direct-systemd compatibility adapter kodlarını kaldır.
-- [ ] restic acceptance sonrası custom backup archive yollarını kaldır.
 - [ ] Agentless local backend acceptance sonrası retained legacy agent transport/package/state kaldır.
 - [ ] Backend/functionality tamamlandıktan sonra enterprise UI/UX polish.
 

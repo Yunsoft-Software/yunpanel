@@ -1,10 +1,4 @@
-import {
-  createDockerVolumeInspector,
-  createLocalBackupArtifactManager,
-} from '@yunpanel/host-runtime';
-import { createBackupApplicationLocalExecutor } from './backup-application-local-executor.js';
 import { createBackupChildJobDispatcher } from './backup-child-job-dispatcher.js';
-import { createBackupDockerLocalExecutor } from './backup-docker-local-executor.js';
 import { createBackupExecutionOrchestrator } from './backup-execution-orchestrator.js';
 import { createJobIdempotencyLookup } from './job-idempotency-lookup.js';
 
@@ -28,15 +22,14 @@ export function createBackupProductionRuntime({
   jobRegistry,
   jobStorePath,
   backupOperationRegistry,
-  applicationRegistry,
-  applicationEnvironmentRegistry,
-  dockerComposeProjectRegistry,
-  dockerComposeObserver,
+  applicationRegistry: _applicationRegistry,
+  applicationEnvironmentRegistry: _applicationEnvironmentRegistry,
+  dockerComposeProjectRegistry: _dockerComposeProjectRegistry,
+  dockerComposeObserver: _dockerComposeObserver,
   loadDatabaseInventory,
   mailDataOperationsService,
   projectBackupLocked,
-  localBackupArtifactManager = createLocalBackupArtifactManager(),
-  inspectDockerVolume = createDockerVolumeInspector(),
+  localExecutors = {},
 } = {}) {
   if (!jobRegistry
     || typeof jobRegistry.enqueue !== 'function'
@@ -50,17 +43,10 @@ export function createBackupProductionRuntime({
     || typeof backupOperationRegistry.succeedStep !== 'function'
     || typeof backupOperationRegistry.failStep !== 'function'
     || typeof backupOperationRegistry.getOperation !== 'function'
-    || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
-    || !applicationEnvironmentRegistry
-    || typeof applicationEnvironmentRegistry.environmentStatus !== 'function'
-    || typeof applicationEnvironmentRegistry.materialize !== 'function'
-    || !dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.getProject !== 'function'
-    || !dockerComposeObserver || typeof dockerComposeObserver.inspect !== 'function'
     || typeof loadDatabaseInventory !== 'function'
     || !mailDataOperationsService || typeof mailDataOperationsService.previewBackup !== 'function'
     || typeof projectBackupLocked !== 'function'
-    || !localBackupArtifactManager || typeof localBackupArtifactManager.archive !== 'function'
-    || typeof inspectDockerVolume !== 'function') invalid();
+    || !localExecutors || typeof localExecutors !== 'object' || Array.isArray(localExecutors)) invalid();
 
   const jobIdempotencyLookup = createJobIdempotencyLookup({
     filePath: jobStorePath,
@@ -72,23 +58,7 @@ export function createBackupProductionRuntime({
     loadDatabaseInventory,
     mailDataOperationsService,
   });
-  const applicationExecutor = createBackupApplicationLocalExecutor({
-    applicationRegistry,
-    applicationEnvironmentRegistry,
-    localBackupArtifactManager,
-  });
-  const dockerExecutor = createBackupDockerLocalExecutor({
-    dockerComposeProjectRegistry,
-    dockerComposeObserver,
-    jobRegistry,
-    projectBackupLocked,
-    inspectDockerVolume,
-    localBackupArtifactManager,
-  });
-  const localExecutors = Object.freeze({
-    application_snapshot: applicationExecutor,
-    docker_storage_backup: dockerExecutor,
-  });
+  const executors = Object.freeze({ ...localExecutors });
 
   function createOrchestrator(backupResourceProvider) {
     if (!backupResourceProvider || typeof backupResourceProvider.preview !== 'function') invalid();
@@ -96,7 +66,7 @@ export function createBackupProductionRuntime({
       backupResourceProvider,
       backupOperationRegistry,
       childJobDispatcher,
-      localExecutors,
+      localExecutors: executors,
     });
   }
 
@@ -104,7 +74,7 @@ export function createBackupProductionRuntime({
     backupOperationRegistry,
     jobIdempotencyLookup,
     childJobDispatcher,
-    localExecutors,
+    localExecutors: executors,
     createOrchestrator,
   });
 }
