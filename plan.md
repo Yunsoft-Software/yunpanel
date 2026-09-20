@@ -85,6 +85,7 @@ Son Website PHP container metadata repair ve rollback canlı kabulü: `docs/hist
 Son Website static control metadata repair ve rollback canlı kabulü: `docs/history/website-static-control-metadata-repair-live-acceptance-2026-09-20.md`.
 Son Website provisioning step sınırları ve restart canlı kabulü: `docs/history/website-provisioning-step-boundaries-live-acceptance-2026-09-20.md`.
 Son Website provisioning step failure injection ve retry canlı kabulü: `docs/history/website-provisioning-step-failure-retry-live-acceptance-2026-09-20.md`.
+Son Website provisioning ters sıra compensation, drift ve restart canlı kabulü: `docs/history/website-provisioning-reverse-compensation-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
