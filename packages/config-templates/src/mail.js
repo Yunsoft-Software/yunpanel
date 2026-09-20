@@ -316,6 +316,8 @@ export function renderDovecotMailConfig({ domains, postmasterAddress } = {}) {
   }
   return [
     'protocols = imap lmtp',
+    'first_valid_uid = 100',
+    'first_valid_gid = 1',
     'mail_home = /var/lib/yunpanel/mail/%d/%n',
     'mail_location = maildir:~/Maildir',
     '',

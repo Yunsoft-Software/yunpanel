@@ -207,6 +207,8 @@ test('renders fail-closed Dovecot virtual authentication without PAM fallback', 
 test('renders Dovecot Maildir and Postfix LMTP socket from fixed paths', () => {
   const config = renderDovecotMailConfig({ domains: ['example.com'], postmasterAddress: 'Postmaster@EXAMPLE.COM.' });
   assert.match(config, /^protocols = imap lmtp$/m);
+  assert.match(config, /^first_valid_uid = 100$/m);
+  assert.match(config, /^first_valid_gid = 1$/m);
   assert.match(config, /^mail_home = \/var\/lib\/yunpanel\/mail\/%d\/%n$/m);
   assert.match(config, /^mail_location = maildir:~\/Maildir$/m);
   assert.match(config, /unix_listener \/var\/spool\/postfix\/private\/dovecot-lmtp/);

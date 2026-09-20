@@ -404,6 +404,13 @@ export function enableManagedMailSql(preview, input = {}) {
   postfixParameters = replaceParameter(postfixParameters, 'virtual_alias_maps', sql.postfixLookups.aliases);
   postfixParameters = replaceParameter(postfixParameters, 'virtual_mailbox_domains', sql.postfixLookups.domains);
   postfixParameters = replaceParameter(postfixParameters, 'virtual_mailbox_maps', sql.postfixLookups.mailboxes);
+  const senderLoginIndex = postfixParameters.findIndex((entry) => entry?.name === 'smtpd_sender_login_maps');
+  const senderLoginParam = Object.freeze({ name: 'smtpd_sender_login_maps', value: sql.postfixLookups.senderLogin });
+  if (senderLoginIndex >= 0) {
+    postfixParameters[senderLoginIndex] = senderLoginParam;
+  } else {
+    postfixParameters.push(senderLoginParam);
+  }
   postfixParameters = Object.freeze(postfixParameters.sort((left, right) => left.name.localeCompare(right.name)));
   const postfixMasterServices = sqlMasterServices(preview.postfixMasterServices, sql.postfixLookups.senderLogin);
   const requirements = Object.freeze([...preview.requirements, 'mail_sqlite']);
