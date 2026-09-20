@@ -9,6 +9,8 @@ import {
   MailDataInspectorError,
   MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
+  createResticManager,
+  createWebsiteHttpHealthInspector,
 } from '@yunpanel/host-runtime';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationPassengerMigrationRoutes } from './application-passenger-migration-http.js';
@@ -167,6 +169,9 @@ import { mountPanelSettingsRoutes, PanelSettingsHttpError } from './panel-settin
 import { PanelSettingsRegistryError } from './panel-settings-registry.js';
 import { createWebsiteBackupSetProvider } from './website-backup-set.js';
 import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-backup-http.js';
+import { createResticRepositoryRegistry } from './restic-repository-registry.js';
+import { createWebsiteRestoreService } from './website-restore-service.js';
+import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -299,6 +304,9 @@ export function createApp({
   websiteRemovalRuntime = null,
   websiteSuspensionRuntime = null,
   websiteCronImpactProvider = null,
+  resticRepositoryRegistry = null,
+  resticManager = null,
+  websiteRestoreService = null,
   ...options
 } = {}) {
   const core = createCoreApp({
@@ -768,6 +776,25 @@ export function createApp({
     websiteBackupSetProvider,
     localServerId,
   });
+  const resolvedResticManager = resticManager ?? createResticManager();
+  const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
+    createResticRepositoryRegistry({
+      resticManager: resolvedResticManager,
+      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+    })
+  );
+  const resolvedWebsiteRestoreService = websiteRestoreService ?? createWebsiteRestoreService({
+    websiteRegistry,
+    resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+    resticManager: resolvedResticManager,
+    websiteBackupSetProvider,
+    healthInspector: createWebsiteHttpHealthInspector(),
+    localServerId,
+  });
+  mountWebsiteRestoreRoutes(app, {
+    websiteRestoreService: resolvedWebsiteRestoreService,
+    localServerId,
+  });
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
     domainRegistry,
@@ -880,6 +907,7 @@ export function createApp({
     if (
       isBackupHttpError(error)
       || isWebsiteBackupHttpError(error)
+      || isWebsiteRestoreHttpError(error)
       || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError
