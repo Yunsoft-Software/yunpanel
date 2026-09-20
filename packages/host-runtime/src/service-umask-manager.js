@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -62,10 +62,11 @@ export function createServiceUmaskManager({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  chmodFn = chmod,
 } = {}) {
   if (typeof run !== 'function' || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function'
     || typeof readFileFn !== 'function' || typeof renameFn !== 'function' || typeof rmFn !== 'function'
-    || typeof writeFileFn !== 'function') {
+    || typeof writeFileFn !== 'function' || typeof chmodFn !== 'function') {
     throw new ServiceUmaskManagerError('service_umask_dependencies_invalid', 'Managed runtime umask dependencies are invalid');
   }
 
@@ -82,6 +83,8 @@ export function createServiceUmaskManager({
     await rmFn(temporary, { force: true }).catch(() => {});
     try {
       await writeFileFn(temporary, content, { encoding: 'utf8', mode: DROPIN_MODE });
+      // writeFile's mode is filtered by the root API service's process umask.
+      await chmodFn(temporary, DROPIN_MODE);
       await renameFn(temporary, file);
     } finally {
       await rmFn(temporary, { force: true }).catch(() => {});

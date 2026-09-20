@@ -12,7 +12,7 @@ function missing(code = 'ENOENT') {
   return error;
 }
 
-function fakeHost({ active = true, effective = 0o022 } = {}) {
+function fakeHost({ active = true, effective = 0o022, processUmask = 0 } = {}) {
   const entries = new Map();
   const calls = [];
   const readFileFn = async (file) => {
@@ -21,7 +21,12 @@ function fakeHost({ active = true, effective = 0o022 } = {}) {
     return entry.content;
   };
   const writeFileFn = async (file, content, options = {}) => {
-    entries.set(file, { content: String(content), mode: options.mode ?? 0o600, uid: 0, gid: 0, type: 'file' });
+    entries.set(file, { content: String(content), mode: (options.mode ?? 0o600) & ~processUmask, uid: 0, gid: 0, type: 'file' });
+  };
+  const chmodFn = async (file, mode) => {
+    const entry = entries.get(file);
+    if (!entry) throw missing();
+    entry.mode = mode;
   };
   const renameFn = async (source, target) => {
     const entry = entries.get(source);
@@ -57,7 +62,7 @@ function fakeHost({ active = true, effective = 0o022 } = {}) {
     }
     throw new Error(`unexpected ${args.join(' ')}`);
   };
-  return { entries, calls, lstatFn, readFileFn, writeFileFn, renameFn, rmFn, mkdirFn: async () => {}, run };
+  return { entries, calls, lstatFn, readFileFn, writeFileFn, chmodFn, renameFn, rmFn, mkdirFn: async () => {}, run };
 }
 
 function manager(host) {
@@ -66,6 +71,7 @@ function manager(host) {
     lstatFn: host.lstatFn,
     readFileFn: host.readFileFn,
     writeFileFn: host.writeFileFn,
+    chmodFn: host.chmodFn,
     renameFn: host.renameFn,
     rmFn: host.rmFn,
     mkdirFn: host.mkdirFn,
@@ -85,6 +91,14 @@ test('service umask apply writes root-owned policy and restarts Passenger servic
   assert.equal(host.entries.get(file).content, '[Service]\nUMask=0027\n');
   assert.equal(host.calls.some(([, args]) => args[0] === 'daemon-reload'), true);
   assert.equal(host.calls.some(([, args]) => args[0] === 'restart' && args[1] === 'nginx.service'), true);
+});
+
+test('service umask drop-in keeps exact mode under restrictive root process umask', async () => {
+  const host = fakeHost({ processUmask: 0o027 });
+  const result = await manager(host).apply('php');
+  const file = serviceUmaskManagerInternals.dropInPath('php8.3-fpm.service');
+  assert.equal(result.satisfied, true);
+  assert.equal(host.entries.get(file).mode, 0o644);
 });
 
 test('service umask apply is idempotent when policy is already effective', async () => {
