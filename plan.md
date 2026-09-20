@@ -110,6 +110,7 @@ Son OpenSSH internal-sftp chroot, izolasyon ve güvenlik canlı kabulü: `docs/h
 Son Website cron gerçek çalıştırma, izolasyon ve ortam doğrulama canlı kabulü: `docs/history/website-cron-live-execution-acceptance-2026-09-20.md`.
 Son Yerel sunucu kimliği ve hostname fail-closed canlı kabulü: `docs/history/local-server-identity-fail-closed-live-acceptance-2026-09-20.md`.
 Son Plesk read-only importer ve offline export preview canlı kabulü: `docs/history/plesk-importer-live-acceptance-2026-09-21.md`.
+Son Website database delete lifecycle canlı kabulü: `docs/history/website-database-delete-lifecycle-live-acceptance-2026-09-21.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
