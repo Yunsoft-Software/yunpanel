@@ -68,6 +68,7 @@ Son restic repository ve snapshot lifecycle ilerlemesi: `docs/history/restic-lif
 Son rclone remote registry ve uzak depo testi ilerlemesi: `docs/history/rclone-remote-registry-and-testing-progress-2026-09-20.md`.
 Son Website backup set ilerlemesi: `docs/history/website-backup-set-progress-2026-09-20.md`.
 Son Website restore yaşam döngüsü ilerlemesi: `docs/history/website-restore-lifecycle-progress-2026-09-20.md`.
+Son restic gerçek-host izole kabulü ve restore güvenlik düzeltmeleri: `docs/history/restic-isolated-host-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -141,6 +142,11 @@ Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı,
 Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
 
 # P1 — Core parity sonrası
+
+## P1.2 — Backup/restore üretim sınırı
+
+- [ ] `POST /api/websites/:websiteId/restore` için doğrudan root dosya restore'u yerine resource-locked durable job/operation kur; snapshot'ın Website, path ve dependency revision kapsamını pinle, mutation öncesi pre-restore snapshot kanıtını persist et, restartta kör replay yapma, health/rollback sonucunu kalıcı ve idempotent kaydet. Bu tamamlanana kadar varsayılan production rota `website_restore_not_ready` (503) döner; mevcut restore service yalnız prototip/test sözleşmesidir.
+- [ ] Restic/rclone binary kurulum ve sürüm politikasını panelin package/service adapter'ına bağla; fresh install/upgrade sonrası binary health ve private geçici password-file crash cleanup davranışını doğrula.
 
 ## P1.3 — Monitoring/security
 
