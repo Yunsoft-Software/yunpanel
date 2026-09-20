@@ -52,6 +52,45 @@ test('version executes rclone version --json and parses output', async () => {
   assert.equal(info.os, 'linux');
 });
 
+test('version falls back to plain text when --json is not supported (rclone 1.60)', async () => {
+  let callCount = 0;
+  const { runCommand, calls } = createMockRunner({
+    version: (args) => {
+      callCount++;
+      if (args.includes('--json')) {
+        const err = new Error('unknown flag: --json');
+        err.stderr = 'Error: unknown flag: --json\n';
+        throw err;
+      }
+      return {
+        stdout: [
+          'rclone v1.60.1-DEV',
+          '- os/version: ubuntu 24.04 (64 bit)',
+          '- os/kernel: 6.8.0-139-generic (x86_64)',
+          '- os/type: linux',
+          '- os/arch: amd64',
+          '- go/version: go1.22.2',
+        ].join('\n'),
+        stderr: '',
+      };
+    },
+  });
+  const manager = createRcloneManager({
+    rclonePath: mockBinary,
+    accessFn: async () => {},
+    runCommand,
+  });
+
+  const info = await manager.version();
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[0].args, ['version', '--json']);
+  assert.deepEqual(calls[1].args, ['version']);
+  assert.equal(info.version, 'v1.60.1-DEV');
+  assert.equal(info.os, 'linux');
+  assert.equal(info.arch, 'amd64');
+  assert.equal(info.go_version, 'go1.22.2');
+});
+
 test('testRemote executes rclone lsd with config and probe timeouts', async () => {
   const { runCommand, calls } = createMockRunner({
     lsd: () => ({ stdout: '          -1 2026-09-20 10:00:00        -1 mybucket', stderr: '' }),

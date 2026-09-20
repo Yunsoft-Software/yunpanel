@@ -128,11 +128,33 @@ export function createRcloneManager({
   }
 
   async function version() {
-    const result = await execRclone(['version', '--json'], { context: 'version' });
+    let result;
     try {
+      result = await execRclone(['version', '--json'], { context: 'version' });
       return Object.freeze(JSON.parse(result.stdout.trim()));
     } catch {
-      throw new RcloneError('rclone_command_failed', 'Failed to parse rclone version output', 500);
+      try {
+        result = await execRclone(['version'], { context: 'version' });
+        const lines = result.stdout.trim().split('\n').map((l) => l.trim());
+        const firstLine = lines[0] || '';
+        const versionMatch = firstLine.match(/rclone\s+(v[^\s]+)/i);
+        const parsed = {
+          version: versionMatch ? versionMatch[1] : firstLine,
+          raw: result.stdout.trim(),
+        };
+        for (const line of lines.slice(1)) {
+          const match = line.match(/^-\s*([^:]+):\s*(.+)$/);
+          if (match) {
+            const key = match[1].trim().replace(/\//g, '_');
+            parsed[key] = match[2].trim();
+          }
+        }
+        if (parsed.os_type && !parsed.os) parsed.os = parsed.os_type;
+        if (parsed.os_arch && !parsed.arch) parsed.arch = parsed.os_arch;
+        return Object.freeze(parsed);
+      } catch {
+        throw new RcloneError('rclone_command_failed', 'Failed to parse rclone version output', 500);
+      }
     }
   }
 
@@ -157,11 +179,33 @@ export function createRcloneManager({
     return Object.freeze(remotes);
   }
 
+  async function obscure(password) {
+    if (typeof password !== 'string' || !password) return '';
+    const result = await execRclone(['obscure', password], { context: 'obscure' });
+    return result.stdout.trim();
+  }
+
   async function writeConfigFile({ remotes, targetPath }) {
     if (typeof targetPath !== 'string' || !path.isAbsolute(targetPath)) {
       throw new RcloneError('rclone_config_invalid', 'targetPath must be an absolute path');
     }
-    const content = formatIniConfig(remotes);
+    const preparedRemotes = [];
+    for (const remote of remotes) {
+      if (!remote || typeof remote !== 'object' || !remote.name || !remote.type) {
+        throw new RcloneError('rclone_config_invalid', 'Invalid remote definition for rclone config');
+      }
+      const credentials = { ...(remote.credentials ?? {}) };
+      for (const key of ['pass', 'key_file_pass']) {
+        if (credentials[key] && typeof credentials[key] === 'string') {
+          credentials[key] = await obscure(credentials[key]);
+        }
+      }
+      preparedRemotes.push({
+        ...remote,
+        credentials,
+      });
+    }
+    const content = formatIniConfig(preparedRemotes);
     await mkdir(path.dirname(targetPath), { recursive: true });
     const temporaryPath = `${targetPath}.${randomUUID()}.tmp`;
     await writeFile(temporaryPath, content, { encoding: 'utf8', mode: 0o600 });
@@ -177,6 +221,7 @@ export function createRcloneManager({
     testRemote,
     listRemotes,
     writeConfigFile,
+    obscure,
   });
 }
 
