@@ -1,6 +1,6 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { createReadStream, readFileSync } from 'node:fs';
-import { stat } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import http from 'node:http';
 import { isIP } from 'node:net';
 import path from 'node:path';
@@ -24,6 +24,11 @@ const NETDATA_GATEWAY = integratedToolGateway('netdata');
 const NETDATA_PREFIX = NETDATA_GATEWAY.publicPrefix;
 const NETDATA_GATEWAY_ACCESS_PATH = NETDATA_GATEWAY.accessPath;
 const NETDATA_LOOPBACK_PORT = NETDATA_GATEWAY.loopbackPort;
+const GOACCESS_GATEWAY = integratedToolGateway('goaccess');
+const GOACCESS_PREFIX = GOACCESS_GATEWAY.publicPrefix;
+const GOACCESS_GATEWAY_ACCESS_PATH = GOACCESS_GATEWAY.accessPath;
+const GOACCESS_SOCKET_ROOT = GOACCESS_GATEWAY.socketRoot;
+const GOACCESS_REPORTS_ROOT = '/var/lib/yunpanel/reports/goaccess';
 const TTYD_AUTH_HEADER = 'x-yunpanel-ttyd-auth';
 const TTYD_REAUTHORIZE_MS = 15_000;
 const TTYD_SESSION_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -186,6 +191,14 @@ function authorizeNetdataGateway(request, options) {
     ...options,
     accessPath: NETDATA_GATEWAY_ACCESS_PATH,
     label: 'Netdata',
+  });
+}
+
+function authorizeGoAccessGateway(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: GOACCESS_GATEWAY_ACCESS_PATH,
+    label: 'GoAccess',
   });
 }
 
@@ -1047,6 +1060,139 @@ function proxyNetdataWebSocket(request, socket, head, {
   upstream.end();
 }
 
+function parseGoAccessGatewayPath(pathname) {
+  if (typeof pathname !== 'string') return null;
+  const match = pathname.match(/^\/tools\/goaccess\/([a-zA-Z0-9_-]{1,64})(|\/|\/ws)$/);
+  if (!match) return null;
+  return {
+    websiteId: match[1],
+    trailingSlash: match[2] === '/',
+    isWebSocket: match[2] === '/ws',
+  };
+}
+
+async function proxyGoAccessReport(request, response, {
+  websiteId,
+  reportsRoot = GOACCESS_REPORTS_ROOT,
+  publicOrigin,
+}) {
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    reply(response, 405, 'Method not allowed.');
+    return;
+  }
+  if (typeof websiteId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(websiteId)) {
+    reply(response, 400, 'Invalid website ID.');
+    return;
+  }
+  const resolvedRoot = path.resolve(reportsRoot);
+  const reportPath = path.resolve(resolvedRoot, `${websiteId}.html`);
+  if (!reportPath.startsWith(`${resolvedRoot}${path.sep}`)) {
+    reply(response, 403, 'Forbidden.');
+    return;
+  }
+
+  try {
+    const rawContent = await readFile(reportPath, 'utf8');
+    const publicUrl = new URL(publicOrigin);
+    const wsProto = publicUrl.protocol === 'https:' ? 'wss' : 'ws';
+    const wsPort = publicUrl.port ? Number.parseInt(publicUrl.port, 10) : (publicUrl.protocol === 'https:' ? 443 : 80);
+    const wsHost = `${publicUrl.hostname}:${wsPort}`;
+    const wsUrl = `${wsProto}://${wsHost}${GOACCESS_PREFIX}/${websiteId}/ws`;
+
+    const rewrittenContent = rawContent.replace(
+      /var\s+connection\s*=\s*\{[^}]*\};/,
+      `var connection = {"url": "${wsUrl}", "port": ${wsPort}};`,
+    );
+
+    const bodyBuffer = Buffer.from(rewrittenContent, 'utf8');
+
+    response.writeHead(200, {
+      'content-type': 'text/html; charset=utf-8',
+      'content-length': bodyBuffer.length,
+      'cache-control': 'no-store',
+      'x-robots-tag': 'noindex, nofollow, noarchive',
+      'x-content-type-options': 'nosniff',
+      'x-frame-options': 'DENY',
+      'content-security-policy': "default-src 'self' 'unsafe-inline'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-ancestors 'none';",
+    });
+
+    if (request.method === 'HEAD') {
+      response.end();
+      return;
+    }
+    response.end(bodyBuffer);
+  } catch (error) {
+    if (error?.code === 'ENOENT') {
+      reply(response, 404, `GoAccess report for website '${websiteId}' is not found.`);
+      return;
+    }
+    reply(response, 500, 'Unable to read GoAccess report.');
+  }
+}
+
+function proxyGoAccessWebSocket(request, socket, head, {
+  websiteId,
+  socketRoot = GOACCESS_SOCKET_ROOT,
+  publicOrigin,
+}) {
+  const fetchSite = request.headers['sec-fetch-site'];
+  if (request.method !== 'GET' || request.headers.origin !== publicOrigin
+    || (fetchSite && !['same-origin', 'none'].includes(fetchSite))) {
+    rejectSocket(socket, 403);
+    return;
+  }
+  if (typeof websiteId !== 'string' || !/^[a-zA-Z0-9_-]{1,64}$/.test(websiteId)) {
+    rejectSocket(socket, 400);
+    return;
+  }
+  const resolvedRoot = path.resolve(socketRoot);
+  const sessionSocket = path.resolve(resolvedRoot, `${websiteId}.sock`);
+  if (!sessionSocket.startsWith(`${resolvedRoot}${path.sep}`)) {
+    rejectSocket(socket, 403);
+    return;
+  }
+
+  const publicUrl = new URL(publicOrigin);
+  const headers = browserProxyHeaders(request);
+  headers.host = publicUrl.host;
+  headers.connection = 'Upgrade';
+  headers.upgrade = 'websocket';
+  headers['x-forwarded-proto'] = 'https';
+  headers['x-forwarded-host'] = publicUrl.host;
+  headers['x-forwarded-prefix'] = `${GOACCESS_PREFIX}/${websiteId}/`;
+
+  const upstream = http.request({
+    socketPath: sessionSocket,
+    method: 'GET',
+    path: '/',
+    headers,
+  });
+  upstream.setTimeout(10_000, () => upstream.destroy(new Error('GoAccess WebSocket timeout')));
+  upstream.on('upgrade', (upstreamResponse, upstreamSocket, upstreamHead) => {
+    upstream.setTimeout(0);
+    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol'];
+    const responseHeaders = [];
+    for (const name of allowed) {
+      const value = upstreamResponse.headers[name];
+      if (typeof value === 'string' && !/[\r\n]/.test(value)) responseHeaders.push(`${name}: ${value}`);
+    }
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\n${responseHeaders.join('\r\n')}\r\n\r\n`);
+    if (upstreamHead.length) socket.write(upstreamHead);
+    if (head.length) upstreamSocket.write(head);
+    socket.pipe(upstreamSocket).pipe(socket);
+    socket.on('error', () => upstreamSocket.destroy());
+    upstreamSocket.on('error', () => socket.destroy());
+  });
+  upstream.on('response', (upstreamResponse) => {
+    upstreamResponse.resume();
+    rejectSocket(socket, [400, 401, 403, 404, 409, 429, 503].includes(upstreamResponse.statusCode) ? upstreamResponse.statusCode : 502);
+  });
+  upstream.on('error', () => rejectSocket(socket, 502));
+  socket.on('error', () => upstream.destroy());
+  socket.on('close', () => upstream.destroy());
+  upstream.end();
+}
+
 async function serveStatic(request, response, webRoot, pathname) {
   if (request.method !== 'GET' && request.method !== 'HEAD') { reply(response, 405, 'Method not allowed.'); return; }
   let decodedPath;
@@ -1087,6 +1233,8 @@ export function createPanelServer({
   ttydSocketRoot = TTYD_SOCKET_ROOT,
   netdataPort = NETDATA_LOOPBACK_PORT,
   netdataHost = '127.0.0.1',
+  goaccessSocketRoot = GOACCESS_SOCKET_ROOT,
+  goaccessReportsRoot = GOACCESS_REPORTS_ROOT,
   trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
   webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
 } = {}) {
@@ -1100,6 +1248,14 @@ export function createPanelServer({
   if (!publicOrigin || new URL(publicOrigin).origin !== publicOrigin) throw new Error('YUNPANEL_PUBLIC_ORIGIN is required');
   if (!Number.isInteger(netdataPort) || netdataPort < 1024 || netdataPort > 65535) throw new Error('netdataPort is invalid');
   if (typeof netdataHost !== 'string' || !['127.0.0.1', '::1', 'localhost'].includes(netdataHost)) throw new Error('netdataHost must be a loopback address');
+  if (typeof goaccessSocketRoot !== 'string' || !path.isAbsolute(goaccessSocketRoot)
+    || path.resolve(goaccessSocketRoot) !== goaccessSocketRoot || goaccessSocketRoot === '/') {
+    throw new Error('GoAccess socket root is invalid');
+  }
+  if (typeof goaccessReportsRoot !== 'string' || !path.isAbsolute(goaccessReportsRoot)
+    || path.resolve(goaccessReportsRoot) !== goaccessReportsRoot || goaccessReportsRoot === '/') {
+    throw new Error('GoAccess reports root is invalid');
+  }
   if (typeof phpMyAdminSocketPath !== 'string' || !path.isAbsolute(phpMyAdminSocketPath)
     || path.resolve(phpMyAdminSocketPath) !== phpMyAdminSocketPath || phpMyAdminSocketPath === '/') {
     throw new Error('phpMyAdmin socket path is invalid');
@@ -1270,6 +1426,43 @@ export function createPanelServer({
       proxyNetdata(request, response, { netdataPort, netdataHost, publicOrigin });
       return;
     }
+    if (requestUrl.pathname === GOACCESS_PREFIX) {
+      response.writeHead(308, {
+        'cache-control': 'no-store',
+        location: `${GOACCESS_PREFIX}/${requestUrl.search}`,
+      });
+      response.end();
+      return;
+    }
+    if (requestUrl.pathname.startsWith(`${GOACCESS_PREFIX}/`)) {
+      const goaccessRoute = parseGoAccessGatewayPath(requestUrl.pathname);
+      if (!goaccessRoute) {
+        reply(response, 404, 'Not found.');
+        return;
+      }
+      if (!goaccessRoute.trailingSlash && !goaccessRoute.isWebSocket) {
+        response.writeHead(308, {
+          'cache-control': 'no-store',
+          location: `${GOACCESS_PREFIX}/${goaccessRoute.websiteId}/${requestUrl.search}`,
+        });
+        response.end();
+        return;
+      }
+      const accessStatus = await authorizeGoAccessGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      });
+      if (accessStatus !== 204) {
+        const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
+        reply(response, status, status === 401 ? 'Authentication required.' : 'GoAccess access denied.');
+        return;
+      }
+      await proxyGoAccessReport(request, response, {
+        websiteId: goaccessRoute.websiteId,
+        reportsRoot: goaccessReportsRoot,
+        publicOrigin,
+      });
+      return;
+    }
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
       proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
     }
@@ -1334,6 +1527,27 @@ export function createPanelServer({
       }).catch(() => rejectSocket(socket, 503));
       return;
     }
+    const goaccessRoute = parseGoAccessGatewayPath(requestUrl.pathname);
+    if (goaccessRoute?.isWebSocket) {
+      void authorizeGoAccessGateway(request, {
+        apiHost, apiPort, clientIp, proxyToken,
+      }).then((accessStatus) => {
+        if (socket.destroyed) return;
+        if (accessStatus !== 204) {
+          rejectSocket(
+            socket,
+            accessStatus === 401 || accessStatus === 403 ? accessStatus : 503,
+          );
+          return;
+        }
+        proxyGoAccessWebSocket(request, socket, head, {
+          websiteId: goaccessRoute.websiteId,
+          socketRoot: goaccessSocketRoot,
+          publicOrigin,
+        });
+      }).catch(() => rejectSocket(socket, 503));
+      return;
+    }
     if (requestUrl.pathname !== '/api/terminal' || requestUrl.search) { rejectSocket(socket, 404); return; }
     proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin });
   });
@@ -1352,12 +1566,16 @@ export const panelServerInternals = Object.freeze({
   authorizeElFinderGateway,
   authorizeTtydGateway,
   authorizeNetdataGateway,
+  authorizeGoAccessGateway,
   proxyPhpMyAdmin,
   proxyElFinder,
   proxyTtyd,
   proxyTtydWebSocket,
   proxyNetdata,
   proxyNetdataWebSocket,
+  parseGoAccessGatewayPath,
+  proxyGoAccessReport,
+  proxyGoAccessWebSocket,
   parseTtydGatewayPath,
   ttydSocketPath,
   rewritePhpMyAdminLocation,
@@ -1389,6 +1607,10 @@ export const panelServerInternals = Object.freeze({
   netdataPrefix: NETDATA_PREFIX,
   netdataGatewayAccessPath: NETDATA_GATEWAY_ACCESS_PATH,
   netdataLoopbackPort: NETDATA_LOOPBACK_PORT,
+  goaccessPrefix: GOACCESS_PREFIX,
+  goaccessGatewayAccessPath: GOACCESS_GATEWAY_ACCESS_PATH,
+  goaccessSocketRoot: GOACCESS_SOCKET_ROOT,
+  goaccessReportsRoot: GOACCESS_REPORTS_ROOT,
 });
 
 export function startPanelServer(options = {}) {

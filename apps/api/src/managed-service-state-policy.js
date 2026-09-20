@@ -26,6 +26,7 @@ const POLICY = new Map([
   ['redis', definition(['redis-server'], ['redis-server.service'])],
   ['memcached', definition(['memcached'], ['memcached.service'])],
   ['netdata', definition(['netdata'], ['netdata.service'], true)],
+  ['goaccess', definition(['goaccess'], [], true)],
 ]);
 
 if (POLICY.size !== MANAGED_SERVICE_IDS.length || MANAGED_SERVICE_IDS.some((id) => !POLICY.has(id))) {

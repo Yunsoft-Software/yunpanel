@@ -35,5 +35,9 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(web, /NETDATA_GATEWAY\.publicPrefix/);
   assert.match(web, /NETDATA_GATEWAY\.accessPath/);
   assert.match(web, /NETDATA_GATEWAY\.loopbackPort/);
+  assert.match(web, /integratedToolGateway\('goaccess'\)/);
+  assert.match(web, /GOACCESS_GATEWAY\.publicPrefix/);
+  assert.match(web, /GOACCESS_GATEWAY\.accessPath/);
+  assert.match(web, /GOACCESS_GATEWAY\.socketRoot/);
 });
 

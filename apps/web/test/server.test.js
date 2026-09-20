@@ -932,4 +932,178 @@ test('netdata gateway proxies WebSocket upgrade for live metrics', async (t) => 
   unauthResp.resume();
 });
 
+test('goaccess gateway authenticates Owner access before serving HTML report with rewritten WebSocket URL', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-goaccess-report-'));
+  const reportsDir = path.join(directory, 'reports');
+  const socketDir = path.join(directory, 'sockets');
+  await import('node:fs/promises').then(({ mkdir }) => Promise.all([
+    mkdir(reportsDir, { recursive: true }),
+    mkdir(socketDir, { recursive: true }),
+  ]));
+
+  const sampleHtml = '<!DOCTYPE html><html><head><title>GoAccess</title></head><body><script>var connection = {"url": "/tools/goaccess/site-1/ws", "port": 7890};</script><h1>Report</h1></body></html>';
+  await writeFile(path.join(reportsDir, 'site-1.html'), sampleHtml, 'utf8');
+
+  const accessRequests = [];
+  const api = http.createServer((request, response) => {
+    accessRequests.push({
+      method: request.method,
+      url: request.url,
+      cookie: request.headers.cookie,
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+      clientIp: request.headers['x-yunpanel-client-ip'],
+    });
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    goaccessReportsRoot: reportsDir,
+    goaccessSocketRoot: socketDir,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  // Redirect /tools/goaccess -> /tools/goaccess/
+  const redirectBase = await fetch(`http://127.0.0.1:${panelPort}/tools/goaccess`, {
+    redirect: 'manual',
+    headers: { 'x-real-ip': '203.0.113.8' },
+  });
+  assert.equal(redirectBase.status, 308);
+  assert.equal(redirectBase.headers.get('location'), '/tools/goaccess/');
+
+  // Redirect /tools/goaccess/site-1 -> /tools/goaccess/site-1/
+  const redirectSite = await fetch(`http://127.0.0.1:${panelPort}/tools/goaccess/site-1?refresh=1`, {
+    redirect: 'manual',
+    headers: { 'x-real-ip': '203.0.113.8' },
+  });
+  assert.equal(redirectSite.status, 308);
+  assert.equal(redirectSite.headers.get('location'), '/tools/goaccess/site-1/?refresh=1');
+
+  // Unauthenticated request
+  const unauth = await fetch(`http://127.0.0.1:${panelPort}/tools/goaccess/site-1/`, {
+    headers: { 'x-real-ip': '203.0.113.8' },
+  });
+  assert.equal(unauth.status, 403);
+
+  // Authenticated Owner request
+  const response = await fetch(`http://127.0.0.1:${panelPort}/tools/goaccess/site-1/`, {
+    headers: {
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+    },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get('content-type'), 'text/html; charset=utf-8');
+  assert.equal(response.headers.get('cache-control'), 'no-store');
+  assert.equal(response.headers.get('x-robots-tag'), 'noindex, nofollow, noarchive');
+  const body = await response.text();
+  assert.match(body, /var connection = \{"url": "wss:\/\/panel\.example\.com:443\/tools\/goaccess\/site-1\/ws", "port": 443\};/);
+  assert.match(body, /<h1>Report<\/h1>/);
+
+  // Non-existent report returns 404
+  const notFound = await fetch(`http://127.0.0.1:${panelPort}/tools/goaccess/missing-site/`, {
+    headers: {
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+    },
+  });
+  assert.equal(notFound.status, 404);
+});
+
+test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-goaccess-ws-'));
+  const reportsDir = path.join(directory, 'reports');
+  const socketDir = path.join(directory, 'sockets');
+  await import('node:fs/promises').then(({ mkdir }) => Promise.all([
+    mkdir(reportsDir, { recursive: true }),
+    mkdir(socketDir, { recursive: true }),
+  ]));
+
+  const socketPath = path.join(socketDir, 'site-1.sock');
+  let goaccessWsConnected = false;
+  const goaccessWs = new WebSocketServer({ noServer: true });
+  const daemonServer = http.createServer((_request, response) => {
+    response.writeHead(404);
+    response.end();
+  });
+  daemonServer.on('upgrade', (request, socket, head) => {
+    goaccessWs.handleUpgrade(request, socket, head, (ws) => {
+      goaccessWsConnected = true;
+      ws.send('goaccess-realtime-update');
+    });
+  });
+  daemonServer.listen(socketPath);
+  await once(daemonServer, 'listening');
+
+  const api = http.createServer((request, response) => {
+    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    goaccessReportsRoot: reportsDir,
+    goaccessSocketRoot: socketDir,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    goaccessWs.close();
+    await close(panel);
+    await close(api);
+    await close(daemonServer);
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  // Successful authenticated WebSocket upgrade
+  const clientWs = new WebSocket(`ws://127.0.0.1:${panelPort}/tools/goaccess/site-1/ws`, {
+    headers: {
+      origin: 'https://panel.example.com',
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+    },
+  });
+  await once(clientWs, 'open');
+  const [message] = await once(clientWs, 'message');
+  assert.equal(message.toString(), 'goaccess-realtime-update');
+  assert.equal(goaccessWsConnected, true);
+  clientWs.close();
+  await once(clientWs, 'close');
+
+  // Unauthenticated WebSocket upgrade rejected
+  const unauthWs = new WebSocket(`ws://127.0.0.1:${panelPort}/tools/goaccess/site-1/ws`, {
+    headers: {
+      origin: 'https://panel.example.com',
+      'x-real-ip': '203.0.113.8',
+    },
+  });
+  unauthWs.on('error', () => {});
+  const [, unauthResp] = await once(unauthWs, 'unexpected-response');
+  assert.equal(unauthResp.statusCode, 403);
+  unauthResp.resume();
+});
+
 

@@ -27,6 +27,7 @@ const POSTSRSD_SERVICE_ID = 'postsrsd';
 const REDIS_SERVICE_ID = 'redis';
 const MEMCACHED_SERVICE_ID = 'memcached';
 const NETDATA_SERVICE_ID = 'netdata';
+const GOACCESS_SERVICE_ID = 'goaccess';
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
@@ -39,6 +40,7 @@ export const MANAGED_SERVICE_IDS = Object.freeze([
   REDIS_SERVICE_ID,
   MEMCACHED_SERVICE_ID,
   NETDATA_SERVICE_ID,
+  GOACCESS_SERVICE_ID,
 ]);
 export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze([
   ...BASE_MANAGED_SERVICE_CONTROL_IDS,
@@ -285,6 +287,7 @@ const EXTENDED_MANAGED_SERVICE_IDS = new Set([
   REDIS_SERVICE_ID,
   MEMCACHED_SERVICE_ID,
   NETDATA_SERVICE_ID,
+  GOACCESS_SERVICE_ID,
 ]);
 
 function validateExtendedServiceOperation(operation, payload, errors) {
@@ -405,4 +408,9 @@ export const protocolExtensionInternals = Object.freeze({
   validateExtendedServiceOperation,
   validatePostsrsdServiceOperation: validateExtendedServiceOperation,
 });
+
+export {
+  NETDATA_SERVICE_ID,
+  GOACCESS_SERVICE_ID,
+};
 

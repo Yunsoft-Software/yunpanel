@@ -15,6 +15,8 @@ test('renders a static SPA server block with normalized domains', () => {
   });
 
   assert.match(config, /server_name example\.com www\.example\.com;/);
+  assert.match(config, /access_log \/var\/log\/nginx\/example\.com\.access\.log;/);
+  assert.match(config, /error_log \/var\/log\/nginx\/example\.com\.error\.log;/);
   assert.match(config, /root \/var\/lib\/yunpanel\/apps\/example\/current;/);
   assert.match(config, /try_files \$uri \$uri\/ \/index\.html;/);
   assert.match(config, /\.well-known\/acme-challenge/);

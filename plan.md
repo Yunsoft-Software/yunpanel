@@ -77,6 +77,7 @@ Son external mail site-create canlı kabulü: `docs/history/external-mail-site-c
 Son Mail Domain disable webmail mapping blocker ve teardown canlı kabulü: `docs/history/mail-domain-disable-webmail-blocker-live-acceptance-2026-09-20.md`.
 Son DKIM key rotation ve local PowerDNS retirement canlı kabulü: `docs/history/dkim-rotation-retirement-live-acceptance-2026-09-20.md`.
 Son phpMyAdmin ve MariaDB canlı signon ve veritabanı izolasyon kabulü: `docs/history/phpmyadmin-live-signon-isolation-acceptance-2026-09-20.md`.
+Son GoAccess site logs/rapor/WebSocket canlı kabulü: `docs/history/goaccess-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -144,7 +145,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 ## P1.3 — Monitoring/security
 
-- [ ] GoAccess site logs/report/WebSocket.
 - [ ] nftables tek firewall authority.
 - [ ] CrowdSec engine/bouncer; duplicate Fail2ban authority olmasın.
 

@@ -69,6 +69,14 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     accessMode: 'owner',
     loopbackPort: 19999,
   }),
+  goaccess: descriptor({
+    id: 'goaccess',
+    audience: 'goaccess',
+    publicPrefix: '/tools/goaccess',
+    accessPath: '/api/goaccess-gateway-access',
+    accessMode: 'owner',
+    socketRoot: '/run/yunpanel/goaccess',
+  }),
 });
 
 const BY_ACCESS_PATH = new Map(

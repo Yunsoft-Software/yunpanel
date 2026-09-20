@@ -252,3 +252,15 @@ export {
   renderNetdataConfig,
 } from './netdata.js';
 
+export {
+  GOACCESS_DATE_FORMAT,
+  GOACCESS_DEFAULT_REPORTS_ROOT,
+  GOACCESS_DEFAULT_SOCKET_ROOT,
+  GOACCESS_LOG_FORMAT,
+  GOACCESS_TIME_FORMAT,
+  GoAccessTemplateError,
+  goAccessTemplatePolicy,
+  previewGoAccessConfig,
+  renderGoAccessConfig,
+} from './goaccess.js';
+

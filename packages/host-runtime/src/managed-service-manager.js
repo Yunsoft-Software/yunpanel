@@ -139,6 +139,16 @@ const SERVICE_CATALOG = Object.freeze([
       { file: '/usr/bin/test', args: ['-f', '/etc/netdata/netdata.conf'] },
     ],
   }),
+  service({
+    id: 'goaccess',
+    label: 'GoAccess',
+    category: 'monitoring',
+    packages: ['goaccess'],
+    units: [],
+    configurationChecks: [
+      { file: '/usr/bin/goaccess', args: ['--version'] },
+    ],
+  }),
 ]);
 const SERVICE_BY_ID = new Map(SERVICE_CATALOG.map((entry) => [entry.id, entry]));
 

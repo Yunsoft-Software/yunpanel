@@ -173,6 +173,7 @@ import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-ba
 import { createResticRepositoryRegistry } from './restic-repository-registry.js';
 import { createWebsiteRestoreService, WebsiteRestoreError } from './website-restore-service.js';
 import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
+import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from './website-analytics-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -763,6 +764,7 @@ export function createApp({
     });
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
       websiteRegistry,
@@ -1011,6 +1013,7 @@ export function createApp({
       || error instanceof CacheIsolationError
       || error instanceof PanelSettingsRegistryError
       || error instanceof PanelSettingsHttpError
+      || error instanceof WebsiteAnalyticsHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

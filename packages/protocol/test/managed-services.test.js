@@ -21,7 +21,7 @@ test('managed hosting service protocol exposes the fixed supported catalog', () 
   assert.deepEqual(MANAGED_SERVICE_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
     'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'postsrsd', 'redis', 'memcached',
-    'netdata',
+    'netdata', 'goaccess',
   ]);
   assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd', 'redis', 'memcached',
@@ -38,11 +38,13 @@ test('service inspection accepts either the full catalog or one allowlisted serv
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'netdata' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'goaccess' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'restic' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'ssh' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker', command: 'id' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd', command: 'id' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'netdata', command: 'id' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'goaccess', command: 'id' }).ok, false);
 });
 
 test('service install accepts exactly one allowlisted service id', () => {
@@ -51,6 +53,7 @@ test('service install accepts exactly one allowlisted service id', () => {
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'phpmyadmin' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'elfinder' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'postsrsd' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'goaccess' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'restic' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'rclone' }).ok, true);
   const envelope = createOperationEnvelope({

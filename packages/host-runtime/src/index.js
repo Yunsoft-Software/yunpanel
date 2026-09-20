@@ -410,4 +410,8 @@ export {
   createNetdataManager,
   NetdataManagerError,
 } from './netdata-manager.js';
+export {
+  createGoAccessManager,
+  GoAccessManagerError,
+} from './goaccess-manager.js';
 

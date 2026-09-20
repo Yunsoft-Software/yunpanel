@@ -13,11 +13,12 @@ test('managed service catalog covers the hosting service groups without arbitrar
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
     'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'postsrsd', 'redis', 'memcached',
+    'netdata', 'goaccess',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {
     assert.ok(entry.packages.length > 0);
-    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(entry.id));
+    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'goaccess'].includes(entry.id));
     assert.ok(entry.units.every((unit) => unit.endsWith('.service')));
   }
 });

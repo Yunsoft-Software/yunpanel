@@ -116,7 +116,15 @@ function redirectBody(destination, headers) {
   return `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    return 301 ${destination}$request_uri;\n  }`;
 }
 
-function serverBlock({ names, body, acmeRoot = null, tls = null, clientMaxBodySizeMb = null }) {
+function serverBlock({
+  names,
+  body,
+  acmeRoot = null,
+  tls = null,
+  clientMaxBodySizeMb = null,
+  accessLog = null,
+  errorLog = null,
+}) {
   const listen = tls
     ? '  listen 443 ssl;\n  listen [::]:443 ssl;'
     : '  listen 80;\n  listen [::]:80;';
@@ -125,7 +133,9 @@ function serverBlock({ names, body, acmeRoot = null, tls = null, clientMaxBodySi
     ? `\n\n  ssl_certificate ${tls.fullchainPath};\n  ssl_certificate_key ${tls.privateKeyPath};`
     : '';
   const bodySize = clientMaxBodySizeMb === null ? '' : `\n  client_max_body_size ${clientMaxBodySizeMb}m;`;
-  return `server {\n${listen}\n  server_name ${names};${bodySize}${acme}${certificates}\n\n${body}\n}`;
+  const access = accessLog === null ? '' : `\n  access_log ${accessLog};`;
+  const error = errorLog === null ? '' : `\n  error_log ${errorLog};`;
+  return `server {\n${listen}\n  server_name ${names};${bodySize}${access}${error}${acme}${certificates}\n\n${body}\n}`;
 }
 
 function renderServerSet({
@@ -139,11 +149,15 @@ function renderServerSet({
   nginxSettings,
   acmeOnlyHostnames = [],
   mailDiscoverySocketPath = null,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
   }
   const names = serverNames(primaryDomain, aliases);
+  const accessLog = accessLogPath === null ? null : assertSafeAbsolutePath(accessLogPath ?? `/var/log/nginx/${names.primary}.access.log`, 'accessLogPath');
+  const errorLog = errorLogPath === null ? null : assertSafeAbsolutePath(errorLogPath ?? `/var/log/nginx/${names.primary}.error.log`, 'errorLogPath');
   const blocks = [];
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
@@ -151,20 +165,22 @@ function renderServerSet({
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
-    blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
-    if (tls) blocks.push(serverBlock({ names: names.all, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+    blocks.push(serverBlock({ names: names.all, body: httpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
+    if (tls) blocks.push(serverBlock({ names: names.all, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
     for (const hostname of challengeOnlyNames) {
       blocks.push(serverBlock({
         names: hostname,
         body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
         acmeRoot,
+        accessLog,
+        errorLog,
       }));
     }
     return `${blocks.join('\n\n')}\n`;
   }
 
   const primaryHttpBody = tls && httpsRedirect ? redirectBody(`https://${names.primary}`, nginxSettings.headers) : body;
-  blocks.push(serverBlock({ names: names.primary, body: primaryHttpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+  blocks.push(serverBlock({ names: names.primary, body: primaryHttpBody, acmeRoot, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
   if (names.aliases.length > 0) {
     const aliasScheme = tls && httpsRedirect ? 'https' : 'http';
     blocks.push(serverBlock({
@@ -172,16 +188,20 @@ function renderServerSet({
       body: redirectBody(`${aliasScheme}://${names.primary}`, nginxSettings.headers),
       acmeRoot,
       clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb,
+      accessLog,
+      errorLog,
     }));
   }
   if (tls) {
-    blocks.push(serverBlock({ names: names.primary, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb }));
+    blocks.push(serverBlock({ names: names.primary, body: tlsBody, tls, clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb, accessLog, errorLog }));
     if (names.aliases.length > 0) {
       blocks.push(serverBlock({
         names: names.aliases.join(' '),
         body: redirectBody(`https://${names.primary}`, nginxSettings.headers),
         tls,
         clientMaxBodySizeMb: nginxSettings.clientMaxBodySizeMb,
+        accessLog,
+        errorLog,
       }));
     }
   }
@@ -190,6 +210,8 @@ function renderServerSet({
       names: hostname,
       body: '  location / {\n    return 301 https://$host$request_uri;\n  }',
       acmeRoot,
+      accessLog,
+      errorLog,
     }));
   }
   return `${blocks.join('\n\n')}\n`;
@@ -244,13 +266,15 @@ export function renderStaticSiteConfig({
   canonicalRedirect = false,
   httpsRedirect = true,
   nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   const safeRoot = assertSafeAbsolutePath(root, 'root');
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('static', nginxSettings ?? { spaFallback });
   const body = staticBody({ root: safeRoot, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 
@@ -267,6 +291,8 @@ export function renderProxySiteConfig({
   canonicalRedirect = false,
   httpsRedirect = true,
   nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   const host = assertUpstreamHost(upstreamHost);
   const port = assertUpstreamPort(upstreamPort);
@@ -274,7 +300,7 @@ export function renderProxySiteConfig({
   const settings = normalizeNginxSettings('proxy', nginxSettings ?? { websocket });
   const body = proxyBody({ host, port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 
@@ -289,12 +315,14 @@ export function renderPassengerSiteConfig({
   canonicalRedirect = false,
   httpsRedirect = true,
   nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('passenger', nginxSettings ?? {});
   const body = passengerBody({ target, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 
@@ -310,6 +338,8 @@ export function renderPhpSiteConfig({
   canonicalRedirect = false,
   httpsRedirect = true,
   nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   const safeRoot = assertSafeAbsolutePath(root, 'root');
   const safeSocket = assertSafeAbsolutePath(socketPath, 'socketPath');
@@ -320,7 +350,7 @@ export function renderPhpSiteConfig({
   const settings = normalizeNginxSettings('php', nginxSettings ?? {});
   const body = phpBody({ root: safeRoot, socketPath: safeSocket, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 
@@ -349,6 +379,8 @@ export function renderPythonSiteConfig({
   canonicalRedirect = false,
   httpsRedirect = true,
   nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
 }) {
   if (!socketPath && !upstreamPort) {
     throw new NginxTemplateError('invalid_upstream', 'Python upstream requires either a socketPath or upstreamPort');
@@ -367,7 +399,7 @@ export function renderPythonSiteConfig({
   const settings = normalizeNginxSettings('python', nginxSettings ?? {});
   const body = pythonBody({ socketPath: safeSocket, upstreamPort: port, nginxSettings: settings });
   return renderServerSet({
-    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings,
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 
