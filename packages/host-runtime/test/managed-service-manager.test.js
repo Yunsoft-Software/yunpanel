@@ -12,12 +12,12 @@ const INACTIVE_UNIT = 'LoadState=loaded\nActiveState=inactive\nSubState=dead\nUn
 test('managed service catalog covers the hosting service groups without arbitrary units', () => {
   assert.deepEqual(managedServicePolicy.services.map((entry) => entry.id), [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
-    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd', 'redis', 'memcached',
+    'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'postsrsd', 'redis', 'memcached',
   ]);
   assert.deepEqual(managedServicePolicy.actions, ['start', 'stop', 'restart']);
   for (const entry of managedServicePolicy.services) {
     assert.ok(entry.packages.length > 0);
-    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin', 'elfinder'].includes(entry.id));
+    assert.equal(entry.units.length > 0, !['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(entry.id));
     assert.ok(entry.units.every((unit) => unit.endsWith('.service')));
   }
 });
@@ -277,6 +277,46 @@ test('elFinder installs only PHP runtime dependencies and validates the packaged
     && args[1].includes('mb_strlen') && args[1].includes('ZipArchive')));
   assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
   await assert.rejects(manager.control('elfinder', 'restart'), { code: 'managed_service_not_controllable' });
+});
+
+test('restic and rclone are fixed package-only tools with binary health gates', async () => {
+  for (const tool of ['restic', 'rclone']) {
+    const calls = [];
+    let installed = false;
+    let binaryHealthy = true;
+    const manager = createManagedServiceManager({
+      run: async (file, args) => {
+        calls.push([file, args]);
+        if (file === '/usr/bin/dpkg-query') {
+          if (!installed) throw new Error('not installed');
+          return { stdout: 'install ok installed\t1.2.3-1' };
+        }
+        if (file === '/usr/bin/apt-get' && args[0] === 'install') {
+          assert.deepEqual(args, ['install', '--yes', '--no-install-recommends', tool]);
+          installed = true;
+          return { stdout: '' };
+        }
+        if (file === '/usr/bin/apt-get') return { stdout: '' };
+        if (file === `/usr/bin/${tool}` && args[0] === 'version') {
+          if (!binaryHealthy) throw new Error('binary failed');
+          return { stdout: `${tool} 1.2.3` };
+        }
+        throw new Error('unexpected command');
+      },
+    });
+    const result = await manager.install(tool);
+    assert.equal(result.changed, true);
+    assert.equal(result.active, false);
+    assert.deepEqual(result.units, []);
+    assert.deepEqual(result.health, { status: 'installed', configuration: 'valid' });
+    assert.equal(calls.some(([file]) => file === '/usr/bin/systemctl'), false);
+    await assert.rejects(manager.control(tool, 'restart'), { code: 'managed_service_not_controllable' });
+    binaryHealthy = false;
+    const drifted = await manager.inspect(tool);
+    assert.deepEqual(drifted.health, { status: 'configuration_invalid', configuration: 'invalid' });
+    await assert.rejects(manager.install(tool), { code: 'managed_backup_binary_unhealthy' });
+    assert.equal(calls.filter(([file, args]) => file === '/usr/bin/apt-get' && args[0] === 'install').length, 1);
+  }
 });
 
 test('PostSRSd installs only the fixed Noble package and managed service unit', async () => {

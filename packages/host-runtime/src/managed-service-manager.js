@@ -112,6 +112,14 @@ const SERVICE_CATALOG = Object.freeze([
     ],
   }),
   service({
+    id: 'restic', label: 'restic', category: 'backup_tool', packages: ['restic'], units: [],
+    configurationChecks: [{ file: '/usr/bin/restic', args: ['version'] }],
+  }),
+  service({
+    id: 'rclone', label: 'rclone', category: 'backup_tool', packages: ['rclone'], units: [],
+    configurationChecks: [{ file: '/usr/bin/rclone', args: ['version'] }],
+  }),
+  service({
     id: 'postsrsd', label: 'PostSRSd', category: 'mail', packages: ['postsrsd'], units: ['postsrsd.service'],
   }),
   service({
@@ -319,6 +327,9 @@ export function createManagedServiceManager({
       const after = await inspectOne(serviceId);
       if (!after.installed) throw new ManagedServiceError('managed_service_install_incomplete', `${definition.label} package installation could not be confirmed`);
       if (definition.units.length > 0 && !after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
+      if (definition.category === 'backup_tool' && after.health.configuration !== CONFIGURATION_STATES.VALID) {
+        throw new ManagedServiceError('managed_backup_binary_unhealthy', `${definition.label} binary health could not be confirmed`);
+      }
       if (definition.category === 'database') {
         if (!databaseSecurityInspector) {
           throw new ManagedServiceError('managed_database_security_inspection_unavailable', `${definition.label} security baseline is unavailable`);

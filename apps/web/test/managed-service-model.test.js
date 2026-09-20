@@ -66,6 +66,7 @@ test('service metadata provides category labels and package versions', () => {
   assert.equal(managedServiceCategoryLabel('database'), 'Veritabanı');
   assert.equal(managedServiceCategoryLabel('database_tool'), 'Veritabanı aracı');
   assert.equal(managedServiceCategoryLabel('file_tool'), 'Dosya yöneticisi');
+  assert.equal(managedServiceCategoryLabel('backup_tool'), 'Yedekleme aracı');
   assert.equal(managedServiceCategoryLabel('custom'), 'custom');
   assert.equal(managedServiceVersion({ packages: [{ version: '1.2.3' }, { version: null }] }), '1.2.3');
   assert.equal(managedServiceVersion({ packages: [] }), null);

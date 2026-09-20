@@ -6,6 +6,7 @@ const CATEGORY_LABELS = Object.freeze({
   mail: 'Mail',
   database_tool: 'Veritabanı aracı',
   file_tool: 'Dosya yöneticisi',
+  backup_tool: 'Yedekleme aracı',
 });
 
 const CONFLICTS = Object.freeze({

@@ -11,17 +11,19 @@ const servicePackages = {
   rspamd: ['rspamd'],
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
   elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
+  restic: ['restic'],
+  rclone: ['rclone'],
   postsrsd: ['postsrsd'],
   redis: ['redis-server'],
   memcached: ['memcached'],
 };
 
 function serviceState(id, { installed = false, active = false } = {}) {
-  const unitless = ['roundcube', 'phpmyadmin', 'elfinder'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id);
   const effectiveActive = unitless ? false : active;
   const configuration = !installed
     ? 'not_checked'
-    : ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder'].includes(id) ? 'valid' : 'not_applicable';
+    : ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id) ? 'valid' : 'not_applicable';
   const unitName = id === 'redis' ? 'redis-server.service' : `${id}.service`;
   return {
     id,

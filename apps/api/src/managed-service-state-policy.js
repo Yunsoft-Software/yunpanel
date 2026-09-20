@@ -20,6 +20,8 @@ const POLICY = new Map([
   ['roundcube', definition(['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], [], true)],
   ['phpmyadmin', definition(['phpmyadmin', 'php-fpm', 'php-mysql'], [], true)],
   ['elfinder', definition(['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'], [], true)],
+  ['restic', definition(['restic'], [], true)],
+  ['rclone', definition(['rclone'], [], true)],
   ['postsrsd', definition(['postsrsd'], ['postsrsd.service'])],
   ['redis', definition(['redis-server'], ['redis-server.service'])],
   ['memcached', definition(['memcached'], ['memcached.service'])],

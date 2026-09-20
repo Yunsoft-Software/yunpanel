@@ -20,7 +20,7 @@ function validate(operation, payload) {
 test('managed hosting service protocol exposes the fixed supported catalog', () => {
   assert.deepEqual(MANAGED_SERVICE_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
-    'roundcube', 'phpmyadmin', 'elfinder', 'postsrsd', 'redis', 'memcached',
+    'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'postsrsd', 'redis', 'memcached',
   ]);
   assert.deepEqual(MANAGED_SERVICE_CONTROL_IDS, [
     'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd', 'postsrsd', 'redis', 'memcached',
@@ -35,6 +35,7 @@ test('service inspection accepts either the full catalog or one allowlisted serv
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, {}).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'restic' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'ssh' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker', command: 'id' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'postsrsd', command: 'id' }).ok, false);
@@ -46,6 +47,8 @@ test('service install accepts exactly one allowlisted service id', () => {
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'phpmyadmin' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'elfinder' }).ok, true);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'postsrsd' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'restic' }).ok, true);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'rclone' }).ok, true);
   const envelope = createOperationEnvelope({
     id,
     operation: OPERATIONS.SYSTEM_SERVICE_INSTALL,
@@ -77,4 +80,6 @@ test('service control accepts only start stop and restart without shell argument
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'roundcube', action: 'restart' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'phpmyadmin', action: 'restart' }).ok, false);
   assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'elfinder', action: 'restart' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'restic', action: 'restart' }).ok, false);
+  assert.equal(validate(OPERATIONS.SYSTEM_SERVICE_CONTROL, { serviceId: 'rclone', action: 'restart' }).ok, false);
 });

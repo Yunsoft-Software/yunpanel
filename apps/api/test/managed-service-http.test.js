@@ -17,6 +17,8 @@ const servicePackages = {
   rspamd: ['rspamd'],
   roundcube: ['roundcube-core', 'roundcube-sqlite3', 'php-fpm'], phpmyadmin: ['phpmyadmin', 'php-fpm', 'php-mysql'],
   elfinder: ['php-fpm', 'php-mbstring', 'php-zip', 'libjs-jquery', 'libjs-jquery-ui'],
+  restic: ['restic'],
+  rclone: ['rclone'],
   postsrsd: ['postsrsd'],
   redis: ['redis-server'],
   memcached: ['memcached'],
@@ -71,7 +73,7 @@ async function fixture(t, role = 'owner') {
 }
 
 function healthyService(id) {
-  const unitless = ['roundcube', 'phpmyadmin', 'elfinder'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id);
   const unitName = id === 'redis' ? 'redis-server.service' : `${id}.service`;
   return {
     id,
@@ -90,7 +92,7 @@ function healthyService(id) {
     }],
     health: {
       status: unitless ? 'installed' : 'ready',
-      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder'].includes(id) ? 'valid' : 'not_applicable',
+      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id) ? 'valid' : 'not_applicable',
     },
   };
 }
@@ -145,6 +147,16 @@ test('service installation requires exact confirmation and queues only an allowl
     body: { confirmation: 'install:phpmyadmin' },
   });
   assert.equal(phpMyAdminResponse.status, 202);
+
+  for (const serviceId of ['restic', 'rclone']) {
+    const tool = await fixture(t);
+    const response = await tool.request(`/api/servers/${tool.serverId}/services/${serviceId}/install`, {
+      method: 'POST',
+      body: { confirmation: `install:${serviceId}` },
+    });
+    assert.equal(response.status, 202);
+    assert.equal((await response.json()).data.operation, OPERATIONS.SYSTEM_SERVICE_INSTALL);
+  }
 });
 
 test('service control validates action confirmation and serializes server system work', async (t) => {
@@ -162,7 +174,7 @@ test('service control validates action confirmation and serializes server system
 });
 
 test('package-only managed applications cannot be queued as systemd control operations', async (t) => {
-  for (const serviceId of ['roundcube', 'phpmyadmin', 'elfinder']) {
+  for (const serviceId of ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone']) {
     const { request, jobRegistry, serverId } = await fixture(t);
     const response = await request(`/api/servers/${serverId}/services/${serviceId}/control`, {
       method: 'POST',

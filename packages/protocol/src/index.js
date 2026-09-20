@@ -22,10 +22,10 @@ export const AGENT_PROTOCOL_VERSION = 9;
 
 export const MANAGED_SERVICE_IDS = Object.freeze([
   'nginx', 'mariadb', 'mysql', 'docker', 'cron', 'postfix', 'dovecot', 'rspamd',
-  'roundcube', 'phpmyadmin', 'elfinder',
+  'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone',
 ]);
 export const MANAGED_SERVICE_CONTROL_IDS = Object.freeze(
-  MANAGED_SERVICE_IDS.filter((id) => !['roundcube', 'phpmyadmin', 'elfinder'].includes(id)),
+  MANAGED_SERVICE_IDS.filter((id) => !['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id)),
 );
 export const MANAGED_SERVICE_ACTIONS = Object.freeze(['start', 'stop', 'restart']);
 export const MANAGED_NODE_RUNTIME_MAJORS = SHARED_MANAGED_NODE_RUNTIME_MAJORS;
