@@ -59,7 +59,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-BACKUP — P1 restic/rclone
 
-- [ ] Local restic repository init/backup/snapshot/check/restore/forget/prune akışını gerçek Website release/data/env metadata, Nginx/DNS config, DB dump ve Maildir ile doğrula.
+- [ ] Local restic repository init/backup/snapshot/check/restore/forget/prune akışını gerçek Website release/data/env metadata, Nginx/DNS config, DB dump ve Maildir ile doğrula (restic 0.16.4 root-private 0700 repo init, release/data/env snapshot, check, stats, unlock, exclusions doğrulayarak restore, keepLast:1 forget & prune ile rclone 1.60 obscure/0600 config/listRemotes 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/restic-rclone-live-acceptance-2026-09-20.md`).
 - [ ] S3-compatible ve rclone remote için encrypted credential, target test, network interruption, partial upload, retry/idempotency, checksum ve retention doğrulansın; secret argv/URL/process list/job/audit/log/browser'a çıkmasın.
 - [ ] Çalışan Passenger/PHP/Docker, database ve mail kaynaklarında quiesce/vendor dump hooks tutarlı snapshot üretsin; panel sessiz live filesystem kopyasını başarılı backup saymasın.
 - [ ] Restore exact snapshot/resource/dependency revision, typed confirmation ve pre-restore snapshot kullansın; runtime/database/mail health failure eski state'e dönsün.

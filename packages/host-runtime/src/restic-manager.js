@@ -412,7 +412,13 @@ export function createResticManager({
     try {
       forgetResult = JSON.parse(result.stdout.trim() || '[]');
     } catch {
-      // In older restic or when output is mixed, handle fallback
+      // When --prune is passed, restic outputs the JSON array on the first line, followed by plain text prune output.
+      const firstLine = result.stdout.trim().split('\n')[0] ?? '';
+      try {
+        forgetResult = JSON.parse(firstLine || '[]');
+      } catch {
+        // In older restic or when output is mixed, handle fallback
+      }
     }
 
     const keptSnapshots = [];
