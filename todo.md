@@ -147,6 +147,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 - [ ] Gerçek Chromium/Firefox ile Settings sayfasında Panel, Network/NS, Website defaults, DNS/SSL, Mail/Webmail, Databases, Backup/storage, Security, Monitoring/logs, Users/audit ve package versions alanlarının gerçek persisted state/health ile yüklendiğini, boş placeholder kalmadığını doğrula.
 - [ ] Gerçek Ubuntu test sunucusunda restic binary ile repository init, check, unlock, snapshot, list, retention/forget, prune ve restore lifecycle operasyonlarını doğrula: şifrelenmiş parolanın CLI argümanı veya loglara sızmadığını, repository kilitlenmelerinde fail-closed kaldığını ve restore işleminin beklenen dosyaları eksiksiz çıkardığını kanıtla.
 - [ ] Gerçek Ubuntu test sunucusunda rclone binary ile uzak depo bağlantı testini (S3/B2/SFTP/WebDAV) doğrula: şifrelenmiş kimlik bilgilerinin geçici `0600` yetkili rclone.conf ile izole test edildiğini, test bitiminde geçici dosyanın silindiğini ve restic rclone backend'ine doğru aktarıldığını kanıtla.
+- [ ] Gerçek Ubuntu test sunucusunda Website backup set üretimini ve restic snapshot entegrasyonunu doğrula: static, node, php, python ve managed compose sitelerinde files, data, env metadata, DB dump hook'u, yerel posta dizinleri, DNS zone tanımları, Nginx vhost konfigürasyonları ve compose hook/storage mount'larının eksiksiz ve deterministik digest ile toplandığını kanıtla.
 
 ## T-DOCKER-PYTHON-MIGRATION — P2
 
