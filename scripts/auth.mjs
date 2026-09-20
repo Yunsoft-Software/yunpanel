@@ -45,7 +45,10 @@ try {
     console.log(setup.token);
   } else if (command === 'reset-mfa') {
     store.mfa.resetLocal(username);
-    console.log('MFA removed; recovery codes, sessions and login challenges revoked. Password unchanged. Re-enroll the authenticator after signing in.');
+    const nextStep = process.env.YUNPANEL_OWNER_MFA_REQUIRED === 'false'
+      ? 'Password-only Owner login is enabled by this host policy.'
+      : 'Re-enroll the authenticator after signing in.';
+    console.log(`MFA removed; recovery codes, sessions and login challenges revoked. Password unchanged. ${nextStep}`);
   } else {
     await store.resetPassword(username, await readPassword());
     console.log('Password updated; all sessions for this user have been revoked.');

@@ -40,6 +40,10 @@ test('local MFA reset requires explicit confirmation and preserves the account p
   const reset = await run(['reset-mfa', 'owner', '--confirm'], env);
   assert.equal(reset.code, 0);
   assert.match(reset.stdout, /Password unchanged/);
+  const optional = await run(['reset-mfa', 'owner', '--confirm'], { ...env, YUNPANEL_OWNER_MFA_REQUIRED: 'false' });
+  assert.equal(optional.code, 0);
+  assert.match(optional.stdout, /Password-only Owner login is enabled/);
+  assert.doesNotMatch(optional.stdout, /Re-enroll/);
   for (const secret of [password, enrollment.secret, enabled.token, ...enabled.recoveryCodes]) assert.equal(`${reset.stdout}${reset.stderr}`.includes(secret), false);
   assert.equal(store.getSession(enabled.token), null);
   assert.throws(() => store.mfa.completeLogin(pending.challengeToken, { method: 'recovery', code: enabled.recoveryCodes[0] }), { code: 'mfa_challenge_expired' });
