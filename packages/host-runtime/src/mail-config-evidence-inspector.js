@@ -217,12 +217,15 @@ export function createMailConfigEvidenceInspector({
     const identity = `${service.service}/${service.type}`;
     try {
       const serviceResult = await run(POSTCONF, ['-M', identity], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
-      if (boundedOutput(serviceResult?.stdout ?? serviceResult).replace(/\s+/g, ' ')
-        !== service.definition.replace(/\s+/g, ' ')) return false;
+      const rawOutput = boundedOutput(serviceResult?.stdout ?? serviceResult);
+      const baseOutput = rawOutput.split(/\s+-o\s+/)[0].trim().replace(/\s+/g, ' ');
+      if (baseOutput !== service.definition.replace(/\s+/g, ' ')) return false;
       for (const parameter of service.parameters) {
         const key = `${identity}/${parameter.name}`;
         const result = await run(POSTCONF, ['-P', key], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
-        if (boundedOutput(result?.stdout ?? result) !== `${key}=${parameter.value}`) return false;
+        const paramOutput = boundedOutput(result?.stdout ?? result).trim();
+        const normalizedParam = paramOutput.replace(/\s*=\s*/, '=');
+        if (normalizedParam !== `${key}=${parameter.value}`) return false;
       }
       return true;
     } catch {
