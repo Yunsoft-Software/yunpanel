@@ -88,7 +88,7 @@ export function createWebsiteRestoreService({
   async function resolveTargetSnapshot(repoPath, password, websiteId, snapshotId) {
     const normalizedSnapshotId = normalizeSnapshotId(snapshotId);
     const snapshots = await resticManager.listSnapshots({
-      repoPath,
+      repository: repoPath,
       password,
       tags: [`website:${websiteId}`],
     });
@@ -113,7 +113,7 @@ export function createWebsiteRestoreService({
   } = {}) {
     const website = await resolveTargetWebsite(websiteId);
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
-    const snapshot = await resolveTargetSnapshot(repository.path, password, website.id, snapshotId);
+    const snapshot = await resolveTargetSnapshot(repository.target, password, website.id, snapshotId);
 
     const healthSpec = Object.freeze({
       primaryDomain: website.primaryDomain,
@@ -179,7 +179,7 @@ export function createWebsiteRestoreService({
     // Step 1: Pre-restore snapshot
     let currentBackupSet;
     try {
-      currentBackupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id });
+      currentBackupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
     } catch (error) {
       throw new WebsiteRestoreError('pre_restore_snapshot_failed', `Failed to compile current website backup set: ${error.message}`, 500);
     }
@@ -187,11 +187,11 @@ export function createWebsiteRestoreService({
     let preRestoreSnapshotResult;
     try {
       preRestoreSnapshotResult = await resticManager.createSnapshot({
-        repoPath: repository.path,
+        repository: repository.target,
         password,
-        targetPaths: currentBackupSet.targetPaths,
+        paths: currentBackupSet.targetPaths,
         tags: [...currentBackupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`],
-        excludePatterns: currentBackupSet.excludePatterns,
+        excludes: currentBackupSet.excludePatterns,
       });
     } catch (error) {
       throw new WebsiteRestoreError('pre_restore_snapshot_failed', `Pre-restore snapshot creation failed; restore aborted: ${error.message}`, 500);
@@ -202,7 +202,7 @@ export function createWebsiteRestoreService({
     // Step 2: Restore from target snapshot
     try {
       await resticManager.restore({
-        repoPath: repository.path,
+        repository: repository.target,
         password,
         snapshotId: preview.snapshotId,
         targetDirectory: '/',
@@ -211,7 +211,7 @@ export function createWebsiteRestoreService({
       // Automatic rollback on restore execution failure
       try {
         await resticManager.restore({
-          repoPath: repository.path,
+          repository: repository.target,
           password,
           snapshotId: preRestoreSnapshotId,
           targetDirectory: '/',
@@ -248,7 +248,7 @@ export function createWebsiteRestoreService({
     if (!healthResult || healthResult.satisfied !== true) {
       try {
         await resticManager.restore({
-          repoPath: repository.path,
+          repository: repository.target,
           password,
           snapshotId: preRestoreSnapshotId,
           targetDirectory: '/',

@@ -10,8 +10,8 @@ import {
   MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
   createResticManager,
-  createWebsiteHttpHealthInspector,
 } from '@yunpanel/host-runtime';
+import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationPassengerMigrationRoutes } from './application-passenger-migration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
@@ -170,7 +170,7 @@ import { PanelSettingsRegistryError } from './panel-settings-registry.js';
 import { createWebsiteBackupSetProvider } from './website-backup-set.js';
 import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-backup-http.js';
 import { createResticRepositoryRegistry } from './restic-repository-registry.js';
-import { createWebsiteRestoreService } from './website-restore-service.js';
+import { createWebsiteRestoreService, WebsiteRestoreError } from './website-restore-service.js';
 import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
@@ -762,39 +762,50 @@ export function createApp({
     });
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
-  const websiteBackupSetProvider = createWebsiteBackupSetProvider({
-    websiteRegistry,
-    domainRegistry,
-    databaseBindingRegistry,
-    mailDomainRegistry,
-    applicationRegistry,
-    applicationEnvironmentRegistry,
-    dockerComposeProjectRegistry,
-    localServerId,
-  });
-  mountWebsiteBackupRoutes(app, {
-    websiteBackupSetProvider,
-    localServerId,
-  });
-  const resolvedResticManager = resticManager ?? createResticManager();
-  const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
-    createResticRepositoryRegistry({
+  if (databaseBindingRegistry) {
+    const websiteBackupSetProvider = createWebsiteBackupSetProvider({
+      websiteRegistry,
+      domainRegistry,
+      databaseBindingRegistry,
+      mailDomainRegistry,
+      applicationRegistry,
+      applicationEnvironmentRegistry,
+      dockerComposeProjectRegistry,
+      localServerId,
+    });
+    mountWebsiteBackupRoutes(app, {
+      websiteBackupSetProvider,
+      localServerId,
+    });
+    const resolvedResticManager = resticManager ?? createResticManager();
+    const resolvedResticRepositoryRegistry = resticRepositoryRegistry ?? (
+      createResticRepositoryRegistry({
+        resticManager: resolvedResticManager,
+        masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+      })
+    );
+    const resolvedWebsiteRestoreService = websiteRestoreService ?? createWebsiteRestoreService({
+      websiteRegistry,
+      resticRepositoryRegistry: resolvedResticRepositoryRegistry,
       resticManager: resolvedResticManager,
-      masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
-    })
-  );
-  const resolvedWebsiteRestoreService = websiteRestoreService ?? createWebsiteRestoreService({
-    websiteRegistry,
-    resticRepositoryRegistry: resolvedResticRepositoryRegistry,
-    resticManager: resolvedResticManager,
-    websiteBackupSetProvider,
-    healthInspector: createWebsiteHttpHealthInspector(),
-    localServerId,
-  });
-  mountWebsiteRestoreRoutes(app, {
-    websiteRestoreService: resolvedWebsiteRestoreService,
-    localServerId,
-  });
+      websiteBackupSetProvider,
+      healthInspector: createWebsiteHttpHealthInspector(),
+      localServerId,
+    });
+    mountWebsiteRestoreRoutes(app, {
+      websiteRestoreService: websiteRestoreService ?? {
+        previewRestore: resolvedWebsiteRestoreService.previewRestore,
+        async executeRestore() {
+          throw new WebsiteRestoreError(
+            'website_restore_not_ready',
+            'Website restore requires a durable, resource-locked operation before it can be enabled',
+            503,
+          );
+        },
+      },
+      localServerId,
+    });
+  }
   mountWebsiteMigrationRoutes(app, {
     websiteRegistry,
     domainRegistry,

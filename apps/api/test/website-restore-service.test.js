@@ -21,6 +21,7 @@ function fixture({
   restoreExecutionFails = false,
 } = {}) {
   const calls = {
+    listSnapshots: [],
     createSnapshot: [],
     restore: [],
     healthInspect: [],
@@ -39,7 +40,7 @@ function fixture({
     id: repositoryId,
     serverId,
     name: 'default_repo',
-    path: '/var/lib/yunpanel/backups/restic/repos/default_repo',
+    target: '/var/lib/yunpanel/backups/restic/repos/default_repo',
   };
 
   const snapshots = [
@@ -72,7 +73,8 @@ function fixture({
       },
     },
     resticManager: {
-      async listSnapshots({ repoPath, password, tags }) {
+      async listSnapshots(args) {
+        calls.listSnapshots.push(args);
         return snapshots;
       },
       async createSnapshot(args) {
@@ -117,7 +119,7 @@ function fixture({
 }
 
 test('previewRestore generates valid preview, digest, and confirmation for website snapshot', async () => {
-  const { service } = fixture();
+  const { service, calls, repository } = fixture();
 
   const preview = await service.previewRestore({
     websiteId,
@@ -136,6 +138,11 @@ test('previewRestore generates valid preview, digest, and confirmation for websi
   assert.equal(typeof preview.previewDigest, 'string');
   assert.equal(preview.previewDigest.length, 64);
   assert.equal(preview.confirmation, `restore:${websiteId}:${snapshotId}:${preview.previewDigest}`);
+  assert.deepEqual(calls.listSnapshots[0], {
+    repository: repository.target,
+    password: 'super_secret_password',
+    tags: [`website:${websiteId}`],
+  });
 });
 
 test('previewRestore errors: missing website, missing repo, missing snapshot, invalid UUID', async () => {
@@ -163,7 +170,7 @@ test('previewRestore errors: missing website, missing repo, missing snapshot, in
 });
 
 test('executeRestore takes pre-restore snapshot, restores, checks health, and succeeds', async () => {
-  const { service, calls } = fixture({ healthSatisfied: true });
+  const { service, calls, repository, backupSet } = fixture({ healthSatisfied: true });
 
   const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
 
@@ -186,10 +193,14 @@ test('executeRestore takes pre-restore snapshot, restores, checks health, and su
   assert.equal(calls.createSnapshot.length, 1);
   assert.ok(calls.createSnapshot[0].tags.includes('pre-restore'));
   assert.ok(calls.createSnapshot[0].tags.includes(`restore-of:${snapshotId}`));
+  assert.equal(calls.createSnapshot[0].repository, repository.target);
+  assert.deepEqual(calls.createSnapshot[0].paths, backupSet.targetPaths);
+  assert.deepEqual(calls.createSnapshot[0].excludes, backupSet.excludePatterns);
 
   // Verify restore was called with target snapshot
   assert.equal(calls.restore.length, 1);
   assert.equal(calls.restore[0].snapshotId, snapshotId);
+  assert.equal(calls.restore[0].repository, repository.target);
 
   // Verify health check was performed
   assert.equal(calls.healthInspect.length, 1);

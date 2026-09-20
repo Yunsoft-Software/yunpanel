@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApp } from '../src/app.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDatabaseBindingRegistry } from '../src/database-binding-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
@@ -47,6 +48,25 @@ test('management routes fail closed without server-derived request auth', async 
     assert.equal(response.status, 401);
     const body = await response.json();
     assert.equal(body.error.code, 'unauthorized');
+  });
+});
+
+test('default Website restore mutation remains unavailable until a durable operation is wired', async () => {
+  const app = withPanelContext(createApp({
+    databaseBindingRegistry: createDatabaseBindingRegistry({
+      serverExists: async () => true,
+      getWebsite: async () => null,
+      getApplication: async () => null,
+    }),
+  }));
+  await withServer(app, async (baseUrl) => {
+    const response = await fetch(`${baseUrl}/api/websites/2c387b02-8747-458a-b509-8f531d4d149e/restore`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+    assert.equal(response.status, 503);
+    assert.equal((await response.json()).error.code, 'website_restore_not_ready');
   });
 });
 
