@@ -106,6 +106,7 @@ Son restic ve rclone yedekleme motoru canlı kabulü: `docs/history/restic-rclon
 Son nftables tek firewall authority ve CrowdSec engine/bouncer canlı kabulü: `docs/history/nftables-crowdsec-live-acceptance-2026-09-20.md`.
 Son WP-CLI ve Composer site-user bounded adapter canlı kabulü: `docs/history/wp-cli-composer-live-acceptance-2026-09-20.md`.
 Son Settings sayfası ve sistem ayarları canlı kabulü: `docs/history/settings-page-live-acceptance-2026-09-20.md`.
+Son OpenSSH internal-sftp chroot, izolasyon ve güvenlik canlı kabulü: `docs/history/openssh-internal-sftp-live-acceptance-2026-09-20.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
@@ -138,9 +139,7 @@ Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website F
 
 ## P0.7 — IntegratedToolGateway
 
-Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözleşmesi, session-bound ttyd access gate, masked distro ttyd runtime, on-demand one-shot Unix-socket sessions, Website UID/GID drop, same-origin HTTP/WebSocket proxy, 15 saniyelik live reauthorization, Owner-bound explicit close ve ttyd-primary Terminal UI tamamlandı. Gerçek Ubuntu/browser/TUI kabul kapıları `todo.md` T-TOOLS altındadır. Legacy `node-pty` process manager, `/api/terminal` WebSocket transport ve yerel `node-pty` native modül bağımlılığı ttyd kabulü sonrasında kaynaktan tamamen kaldırılmıştır.
-
-- [ ] Roundcube Owner panel gateway'ine bağlı olmasın; shared webmail yüzeyi mailbox auth kullansın.
+Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözleşmesi, session-bound ttyd access gate, masked distro ttyd runtime, on-demand one-shot Unix-socket sessions, Website UID/GID drop, same-origin HTTP/WebSocket proxy, 15 saniyelik live reauthorization, Owner-bound explicit close ve ttyd-primary Terminal UI tamamlandı. Gerçek Ubuntu/browser/TUI kabul kapıları `todo.md` T-TOOLS altındadır. Legacy `node-pty` process manager, `/api/terminal` WebSocket transport ve yerel `node-pty` native modül bağımlılığı ttyd kabulü sonrasında kaynaktan tamamen kaldırılmıştır. Shared Roundcube webmail yüzeyi Owner panel gateway'ine bağlı olmayıp bağımsız `webmail.<domain>` Nginx blokları ve doğrudan posta kutusu (mailbox) kimlik doğrulaması kullanır.
 
 ## P0.8 — Transactional Website/domain provisioning
 
