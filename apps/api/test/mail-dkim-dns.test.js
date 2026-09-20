@@ -225,3 +225,75 @@ test('active DNS-zone job blocks DKIM provider preview before provider inspectio
   );
   assert.deepEqual(state.calls.map(([name]) => name), ['listJobs']);
 });
+
+test('reconcileRetirement gracefully handles unmanaged DNS zone', async () => {
+  const retirement = {
+    mailDomainId,
+    domainName: 'example.com',
+    previousSelector: 'mail-old',
+    previousDnsRecord: {
+      type: 'TXT',
+      name: 'mail-old._domainkey.example.com',
+      value: oldTxt,
+    },
+    targetSelector: 'mail-new',
+    previousKeyRevision: 1,
+    currentKeyRevision: 2,
+    phase: 'dns_retirement_pending',
+    revision: 2,
+  };
+  const unmanaged = fixture({ retirement });
+  unmanaged.service = createMailDkimDnsService({
+    ...unmanaged,
+    localServerId: serverId,
+    mailDomainRegistry: {
+      async getMailDomain(id) {
+        return id === mailDomainId ? {
+          id: mailDomainId,
+          webDomainId,
+          domainName: 'example.com',
+          managementMode: 'local',
+          status: 'enabled',
+        } : null;
+      },
+    },
+    mailDkimRegistry: {
+      async getKey(id) {
+        return id === mailDomainId ? {
+          mailDomainId,
+          domainName: 'example.com',
+          selector: 'mail-new',
+          publicKey: PUBLIC_CURRENT,
+          revision: 2,
+          dnsRecord: { type: 'TXT', name: 'mail-new._domainkey.example.com', value: currentTxt },
+        } : null;
+      },
+    },
+    mailDkimRetirementRegistry: {
+      async getRetirement() { return retirement; },
+      async clearRetirement() { throw new Error('not used'); },
+    },
+    domainRegistry: {
+      async getDomain(id) {
+        return id === webDomainId ? { id: webDomainId, serverId, primaryDomain: 'example.com' } : null;
+      },
+    },
+    dnsHostingRegistry: {
+      async listZones() { return []; },
+    },
+    dnsProviderCredentialRegistry: {
+      async getForZone() { return null; },
+      async materialize() { return null; },
+    },
+    dnsRecordManager: {
+      async inspectRecord() { return null; },
+    },
+    jobRegistry: {
+      async listJobs() { return []; },
+      async enqueue() { return null; },
+    },
+  });
+  const result = await unmanaged.service.reconcileRetirement(mailDomainId);
+  assert.deepEqual(result, { pending: true, cleared: false, unmanaged: true });
+});
+

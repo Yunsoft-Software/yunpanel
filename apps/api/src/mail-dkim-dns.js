@@ -269,11 +269,23 @@ export function createMailDkimDnsService({
     if (!retirement || retirement.phase !== 'dns_retirement_pending') {
       return Object.freeze({ pending: false, cleared: false });
     }
-    const preview = await buildPreview({
-      mailDomainId,
-      kind: 'retirement',
-      expectedRevision: retirement.revision,
-    });
+    let preview;
+    try {
+      preview = await buildPreview({
+        mailDomainId,
+        kind: 'retirement',
+        expectedRevision: retirement.revision,
+      });
+    } catch (error) {
+      if (error instanceof MailDkimDnsError && [
+        'mail_dkim_dns_zone_required',
+        'mail_dkim_dns_credential_required',
+        'mail_domain_not_locally_managed',
+      ].includes(error.code)) {
+        return Object.freeze({ pending: true, cleared: false, unmanaged: true });
+      }
+      throw error;
+    }
     if (preview.effect !== 'no_change') {
       return Object.freeze({ pending: true, cleared: false, preview });
     }
