@@ -16,10 +16,12 @@ const servicePackages = {
   postsrsd: ['postsrsd'],
   redis: ['redis-server'],
   memcached: ['memcached'],
+  netdata: ['netdata'],
+  goaccess: ['goaccess'],
 };
 
 function serviceState(id, { installed = false, active = false } = {}) {
-  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'goaccess'].includes(id);
   const effectiveActive = unitless ? false : active;
   const configuration = !installed
     ? 'not_checked'

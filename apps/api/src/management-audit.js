@@ -43,11 +43,6 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/revoke$/)) && method === 'POST') return { action: 'website.sftp_key.revoke', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/rotate$/)) && method === 'POST') return { action: 'website.sftp_key.rotate', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/reconcile$/)) && method === 'POST') return { action: 'website.sftp_key.reconcile', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/upload$/)) && method === 'PUT') return { action: 'website.file.upload', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/text$/)) && method === 'PUT') return { action: 'website.file.edit', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/mkdir$/)) && method === 'POST') return { action: 'website.file.mkdir', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files\/rename$/)) && method === 'POST') return { action: 'website.file.rename', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/files$/)) && method === 'DELETE') return { action: 'website.file.delete', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)$/)) && method === 'PATCH') return { action: 'website.update', resourceType: 'website', resourceId: parts[0] };
   if (method === 'POST' && pathname === '/api/applications') return { action: 'application.create', resourceType: 'application', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/terminal/capabilities') return { action: 'terminal.capability.issued', resourceType: 'terminal', resourceId: 'new' };

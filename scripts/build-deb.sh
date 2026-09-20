@@ -33,10 +33,6 @@ if [[ "$node_platform" != linux || "$(dpkg --print-architecture)" != "$architect
   printf 'build the native YunPanel package on matching Linux %s (current platform=%s dpkg=%s)\n' "$architecture" "$node_platform" "$(dpkg --print-architecture)" >&2
   exit 1
 fi
-if ! node --input-type=module -e 'import { spawn } from "node-pty"; if (typeof spawn !== "function") process.exit(1);'; then
-  printf 'node-pty native module is missing; run the approved npm install on this Linux architecture\n' >&2
-  exit 1
-fi
 
 repository_root=$(pwd)
 elfinder_version=2.1.70

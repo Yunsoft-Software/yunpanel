@@ -133,9 +133,6 @@ import { RoundcubeDomainMappingServiceError } from './roundcube-domain-mapping-s
 import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
-import { SiteFileHttpError, mountSiteFileRoutes } from './site-file-http.js';
-import { createSiteFileManager, SiteFileManagerError } from './site-file-manager.js';
-import { SiteFileWorkerError } from './site-file-worker.js';
 import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
 import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
@@ -293,7 +290,6 @@ export function createApp({
   localServerId = null,
   terminalCapabilityRegistry = null,
   ttydSessionManager = null,
-  siteFileManager = null,
   websiteProvisioningRuntime = null,
   websiteSftpKeyRegistry = null,
   websiteSftpKeyService = null,
@@ -331,7 +327,6 @@ export function createApp({
   const passengerMigrationPreviewService = options.applicationPassengerMigrationPreviewService ?? null;
   const passengerMigrationService = options.applicationPassengerMigrationService ?? null;
   const runtimeBindingRegistry = options.runtimeBindingRegistry ?? null;
-  const files = siteFileManager ?? createSiteFileManager({ websiteRegistry, localServerId });
   const readiness = dnsReadinessService ?? createDnsReadinessService({
     dnsHostingRegistry,
     domainRegistry,
@@ -454,7 +449,6 @@ export function createApp({
     localServerId,
   }) : null);
   app.disable('x-powered-by');
-  mountSiteFileRoutes(app, { siteFileManager: files });
   app.use(express.json({ limit: '256kb' }));
   const backupResourceProviderForRequest = (request) => createBackupResourceProvider({
     serverRegistry: localRegistry,
@@ -985,9 +979,6 @@ export function createApp({
       || error instanceof RoundcubeDomainMappingServiceError
       || error instanceof RoundcubeSecretRegistryError
       || error instanceof ServerDnsIdentityRegistryError
-      || error instanceof SiteFileHttpError
-      || error instanceof SiteFileManagerError
-      || error instanceof SiteFileWorkerError
       || error instanceof SiteCreateError
       || error instanceof TerminalCapabilityError
       || error instanceof TtydSessionError

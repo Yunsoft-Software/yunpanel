@@ -133,16 +133,12 @@ Gerçek inbound/outbound SMTP, IMAP, Roundcube ve anti-abuse kabul kapıları `t
 
 ## P0.6 — elFinder; homegrown File Manager removal
 
-Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website FPM materialization, private Nginx gateway, Owner handoff/session bridge ve Files UI wiring tamamlandı. Gerçek Ubuntu/browser/filesystem isolation kabul kapıları `todo.md` T-TOOLS altındadır.
-
-- [ ] T-TOOLS elFinder kabulü geçtikten sonra custom `site-file-manager` HTTP/worker/backend/UI fallback yollarını kaldır; package upgrade/rollback'te orphan session/process bırakma.
-- [ ] elFinder site-UID acceptance gerçek hostta başarısız olursa homegrown'a dönme; Filestash + localhost SFTP alternatifini ayrı adapter olarak değerlendir.
+Kaynak kod tarafındaki shared vendor package, hardened connector, per-Website FPM materialization, private Nginx gateway, Owner handoff/session bridge ve Files UI wiring tamamlandı. Gerçek Ubuntu/browser/filesystem isolation kabul kapıları `todo.md` T-TOOLS altındadır. Legacy `site-file-manager` HTTP/worker/backend fallback yolları elFinder kabulü sonrasında kaynaktan kaldırılmıştır.
 
 ## P0.7 — IntegratedToolGateway
 
-Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözleşmesi, session-bound ttyd access gate, masked distro ttyd runtime, on-demand one-shot Unix-socket sessions, Website UID/GID drop, same-origin HTTP/WebSocket proxy, 15 saniyelik live reauthorization, Owner-bound explicit close ve ttyd-primary Terminal UI tamamlandı. Gerçek Ubuntu/browser/TUI kabul kapıları `todo.md` T-TOOLS altındadır.
+Kaynak kod tarafında reusable phpMyAdmin/elFinder/ttyd gateway descriptor sözleşmesi, session-bound ttyd access gate, masked distro ttyd runtime, on-demand one-shot Unix-socket sessions, Website UID/GID drop, same-origin HTTP/WebSocket proxy, 15 saniyelik live reauthorization, Owner-bound explicit close ve ttyd-primary Terminal UI tamamlandı. Gerçek Ubuntu/browser/TUI kabul kapıları `todo.md` T-TOOLS altındadır. Legacy `node-pty` process manager, `/api/terminal` WebSocket transport ve yerel `node-pty` native modül bağımlılığı ttyd kabulü sonrasında kaynaktan tamamen kaldırılmıştır.
 
-- [ ] T-TOOLS ttyd kabulü geçtikten sonra custom `node-pty` process manager, legacy `/api/terminal` WebSocket transport, embedded xterm fallback ve native node-pty package/build bağımlılığını kaldır; package upgrade/rollback ve açık session cleanup'ını doğrula.
 - [ ] Roundcube Owner panel gateway'ine bağlı olmasın; shared webmail yüzeyi mailbox auth kullansın.
 
 ## P0.8 — Transactional Website/domain provisioning
@@ -169,8 +165,6 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 
-- [ ] elFinder acceptance sonrası custom `site-file-manager` kaldır.
-- [ ] ttyd acceptance sonrası custom node-pty terminal kaldır.
 - [ ] Passenger acceptance sonrası direct-systemd yalnız legacy migration adapter'ı olarak kalsın; migration sonunda kaldır.
 - [ ] restic acceptance sonrası custom backup archive yollarını kaldır.
 - [ ] Agentless local backend acceptance sonrası retained legacy agent transport/package/state kaldır.

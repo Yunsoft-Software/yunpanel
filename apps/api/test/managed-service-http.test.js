@@ -22,6 +22,8 @@ const servicePackages = {
   postsrsd: ['postsrsd'],
   redis: ['redis-server'],
   memcached: ['memcached'],
+  netdata: ['netdata'],
+  goaccess: ['goaccess'],
 };
 
 function fakeStore(role = 'owner') {
@@ -73,7 +75,7 @@ async function fixture(t, role = 'owner') {
 }
 
 function healthyService(id) {
-  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id);
+  const unitless = ['roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'goaccess'].includes(id);
   const unitName = id === 'redis' ? 'redis-server.service' : `${id}.service`;
   return {
     id,
@@ -92,7 +94,7 @@ function healthyService(id) {
     }],
     health: {
       status: unitless ? 'installed' : 'ready',
-      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone'].includes(id) ? 'valid' : 'not_applicable',
+      configuration: ['postfix', 'dovecot', 'rspamd', 'roundcube', 'phpmyadmin', 'elfinder', 'restic', 'rclone', 'netdata', 'goaccess'].includes(id) ? 'valid' : 'not_applicable',
     },
   };
 }

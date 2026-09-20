@@ -17,7 +17,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-TOOLS — P0 ttyd, elFinder, phpMyAdmin/pgAdmin gateway
 
-- [ ] elFinder/ttyd replacement kabulü tamamlanınca özel site-file-manager ve node-pty/xterm yollarının kaldırılması upgrade/rollback ile denenip açık session/orphan bırakmadığı doğrulansın (ttyd 1.7.4 root sunucu ve site kullanıcısı one-shot oturumları, elFinder 2.1.70 connector ve site başına izole PHP-FPM havuz materyalizasyonu/telafisi 2026-09-20'de `.28` üzerinde doğrulandı; `docs/history/ttyd-elfinder-tools-gateway-live-acceptance-2026-09-20.md`).
+- [ ] elFinder/ttyd replacement kabulü tamamlanınca özel site-file-manager ve node-pty/xterm yollarının kaldırılması upgrade/rollback ile denenip açık session/orphan bırakmadığı doğrulansın (ttyd 1.7.4 root sunucu ve site kullanıcısı one-shot oturumları, elFinder 2.1.70 connector ve site başına izole PHP-FPM havuz materyalizasyonu/telafisi 2026-09-20'de `.28` üzerinde doğrulandı; `docs/history/ttyd-elfinder-tools-gateway-live-acceptance-2026-09-20.md`. Özel `site-file-manager` ve `node-pty`/xterm kaynak koddan tamamen kaldırıldı).
 - [ ] PostgreSQL/pgAdmin açıldığında aynı Website role/scope, gateway auth ve çapraz-site reddi gerçek PostgreSQL ile doğrulansın.
 
 ## T-DNS — P0 PowerDNS ve nameserver
