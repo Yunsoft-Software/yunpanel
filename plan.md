@@ -70,6 +70,7 @@ Son Website backup set ilerlemesi: `docs/history/website-backup-set-progress-202
 Son Website restore yaşam döngüsü ilerlemesi: `docs/history/website-restore-lifecycle-progress-2026-09-20.md`.
 Son restic gerçek-host izole kabulü ve restore güvenlik düzeltmeleri: `docs/history/restic-isolated-host-acceptance-2026-09-20.md`.
 Son restic/rclone yönetilen paket ve binary sağlık kaynağı: `docs/history/restic-rclone-managed-tools-2026-09-20.md`.
+Son isteğe bağlı Owner MFA ve `webrich.news` canlı kabulü: `docs/history/owner-mfa-optional-webrich-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 

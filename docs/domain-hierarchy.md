@@ -36,7 +36,7 @@ POST /api/sites/create-preview
 POST /api/sites
 ```
 
-Preview accepts exactly one `input` object. Apply accepts that same input plus the exact current `previewDigest` and typed `confirmation` returned by preview. Both routes require the normal Owner session, Origin, CSRF and MFA management boundary; Read Only is denied before registry access. Both enter the bounded common management audit without persisting request bodies, repository URLs, proxy targets, digests or confirmation text.
+Preview accepts exactly one `input` object. Apply accepts that same input plus the exact current `previewDigest` and typed `confirmation` returned by preview. Both routes require the normal Owner session, Origin, CSRF and configured MFA policy boundary; Read Only is denied before registry access. Both enter the bounded common management audit without persisting request bodies, repository URLs, proxy targets, digests or confirmation text.
 
 The input requires a caller-generated UUID `operationId`, `serverId`, display `name`, canonicalized `primaryDomain`, explicit nullable `parentDomainId`, `wwwMode`, `httpsMode` and one source:
 
