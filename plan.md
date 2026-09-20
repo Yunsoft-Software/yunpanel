@@ -81,6 +81,7 @@ Son GoAccess site logs/rapor/WebSocket canlı kabulü: `docs/history/goaccess-li
 Son Website cron ve read-only rolü canlı kabulü: `docs/history/website-cron-and-readonly-live-acceptance-2026-09-20.md`.
 Son Website SFTP isolation migration ve rollback canlı kabulü: `docs/history/website-sftp-isolation-migration-live-acceptance-2026-09-20.md`.
 Son Website PHP-FPM pool isolation migration ve rollback canlı kabulü: `docs/history/website-php-fpm-pool-isolation-migration-live-acceptance-2026-09-20.md`.
+Son Website PHP container metadata repair ve rollback canlı kabulü: `docs/history/website-php-container-metadata-repair-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
