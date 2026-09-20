@@ -46,9 +46,9 @@ test('elFinder connector fails closed when packaged vendor code or runtime ident
 
   assert.match(content, /is_file\(YUNPANEL_ELFINDER_AUTOLOAD\)/);
   assert.match(content, /is_readable\(YUNPANEL_ELFINDER_AUTOLOAD\)/);
-  assert.match(content, /class_exists\('elFinder', false\)/);
-  assert.match(content, /class_exists\('elFinderConnector', false\)/);
-  assert.match(content, /class_exists\('elFinderVolumeLocalFileSystem', false\)/);
+  assert.match(content, /class_exists\('elFinder'\)/);
+  assert.match(content, /class_exists\('elFinderConnector'\)/);
+  assert.match(content, /class_exists\('elFinderVolumeLocalFileSystem'\)/);
   assert.match(content, /yunpanel_elfinder_fail\(503\)/);
   assert.match(content, /yunpanel_elfinder_fail\(403\)/);
   assert.match(content, /Cache-Control: no-store/);

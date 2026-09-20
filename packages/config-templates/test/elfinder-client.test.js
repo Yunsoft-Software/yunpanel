@@ -13,7 +13,7 @@ test('elFinder browser shell exposes only the minimal same-origin bootstrap befo
   for (const path of [
     '/tools/elfinder/assets/jquery/jquery.min.js',
     '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
-    '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
+    '/tools/elfinder/assets/jquery-ui/themes/base/jquery-ui.min.css',
     '/tools/elfinder/vendor/js/elfinder.min.js',
     '/tools/elfinder/vendor/css/elfinder.min.css',
   ]) assert.equal(html.includes(path), false, path);
@@ -35,7 +35,7 @@ test('elFinder client points only at protected connector and disables external p
   for (const path of [
     '/tools/elfinder/assets/jquery/jquery.min.js',
     '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
-    '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
+    '/tools/elfinder/assets/jquery-ui/themes/base/jquery-ui.min.css',
     '/tools/elfinder/vendor/js/elfinder.min.js',
     '/tools/elfinder/vendor/css/elfinder.min.css',
   ]) assert.ok(script.includes(path), path);

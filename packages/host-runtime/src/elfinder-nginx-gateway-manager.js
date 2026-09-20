@@ -221,8 +221,19 @@ export function createElFinderNginxGatewayManager({
       );
     }
     if (!info?.isSocket?.() || info.isSymbolicLink?.()
-      || info.uid !== ROOT_UID || info.gid !== group.gid
-      || modeOf(info) !== elFinderNginxTemplatePolicy.gatewaySocketMode) {
+      || info.uid !== ROOT_UID) {
+      return Object.freeze({ satisfied: false, reason: 'elfinder_gateway_socket_drift' });
+    }
+    if (info.gid !== group.gid || modeOf(info) !== elFinderNginxTemplatePolicy.gatewaySocketMode) {
+      try {
+        await chownFn(elFinderNginxTemplatePolicy.gatewaySocketPath, ROOT_UID, group.gid);
+        await chmodFn(elFinderNginxTemplatePolicy.gatewaySocketPath, elFinderNginxTemplatePolicy.gatewaySocketMode);
+        info = await lstatFn(elFinderNginxTemplatePolicy.gatewaySocketPath);
+      } catch {
+        // Continue to the verification below
+      }
+    }
+    if (info.gid !== group.gid || modeOf(info) !== elFinderNginxTemplatePolicy.gatewaySocketMode) {
       return Object.freeze({ satisfied: false, reason: 'elfinder_gateway_socket_drift' });
     }
     return Object.freeze({ satisfied: true });

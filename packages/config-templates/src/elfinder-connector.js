@@ -73,9 +73,9 @@ if (! is_file(YUNPANEL_ELFINDER_AUTOLOAD) || ! is_readable(YUNPANEL_ELFINDER_AUT
 }
 require YUNPANEL_ELFINDER_AUTOLOAD;
 
-if (! class_exists('elFinder', false)
-    || ! class_exists('elFinderConnector', false)
-    || ! class_exists('elFinderVolumeLocalFileSystem', false)) {
+if (! class_exists('elFinder')
+    || ! class_exists('elFinderConnector')
+    || ! class_exists('elFinderVolumeLocalFileSystem')) {
     yunpanel_elfinder_fail(503);
 }
 

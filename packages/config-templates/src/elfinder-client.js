@@ -13,7 +13,7 @@ export const elFinderClientTemplatePolicy = Object.freeze({
   handoffPath: '/tools/elfinder/__yunpanel/handoff',
   jqueryPath: '/tools/elfinder/assets/jquery/jquery.min.js',
   jqueryUiScriptPath: '/tools/elfinder/assets/jquery-ui/jquery-ui.min.js',
-  jqueryUiCssPath: '/tools/elfinder/assets/jquery-ui/jquery-ui.min.css',
+  jqueryUiCssPath: '/tools/elfinder/assets/jquery-ui/themes/base/jquery-ui.min.css',
   elFinderScriptPath: '/tools/elfinder/vendor/js/elfinder.min.js',
   elFinderCssPath: '/tools/elfinder/vendor/css/elfinder.min.css',
 });
