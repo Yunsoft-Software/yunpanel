@@ -88,6 +88,7 @@ Son Website provisioning step failure injection ve retry canlı kabulü: `docs/h
 Son Website provisioning ters sıra compensation, drift ve restart canlı kabulü: `docs/history/website-provisioning-reverse-compensation-live-acceptance-2026-09-20.md`.
 Son Site move/delete resource impact ve cascade engeli canlı kabulü: `docs/history/site-move-delete-impact-live-acceptance-2026-09-20.md`.
 Son Domain delete parent operation canlı kabulü: `docs/history/domain-delete-parent-operation-live-acceptance-2026-09-20.md`.
+Son Domain delete Mail Domain child lifecycle canlı kabulü: `docs/history/domain-delete-mail-child-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
