@@ -16,7 +16,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 - [ ] Ubuntu 24.04 paketinde Nginx Passenger kurulumu/version/configtest/health çalışsın. Yeni Node Website explicit `passenger_user/group`, startup file, Node binary ve env ile site UID/GID altında başlasın.
 - [ ] Passenger shared-hosting izolasyonunu iki gerçek Node app ile doğrula; başka site startup file/user seçimi veya raw Passenger/Nginx directive privilege escalation üretemesin.
 - [ ] Site başına PHP-FPM pool/socket gerçek UID/GID, private tmp/session path, bounded ini/resource policy ile çalışsın; başka site socket/document root erişimi reddedilsin.
-- [ ] Multi-version PHP (8.1, 8.2, 8.4) ve distro 8.3 kabulü: ppa:ondrej/php doğrulanmış repo yoksa distro dışı sürüm kurulumunun fail-closed durduğunu, repo eklendiğinde ilgili sürümün FPM servisinin ve havuzunun siteye özel izole soket ve doğru php-fpm binary/unit ile çalıştığını gerçek Ubuntu hostta doğrula.
 - [ ] Passenger Node, PHP ve Python Website; YunPanel API/web restartı ve package upgrade sırasında hizmet vermeye devam etsin. `.28` üzerinde mevcut Static ve legacy direct-systemd Node HTTP 200 ve gövde SHA-256 değerleri panel API/web restartı öncesi/sonrası aynı kaldı; yeni paket sonrası da erişilebilirler. Passenger/PHP/Python fixture ve bunların package-upgrade sürekliliği hâlâ açık.
 
 ## T-TOOLS — P0 ttyd, elFinder, phpMyAdmin/pgAdmin gateway

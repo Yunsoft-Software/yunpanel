@@ -95,6 +95,7 @@ Son Node direct-systemd Passenger migration canlı kabulü: `docs/history/passen
 Son Static durable runtime binding canlı kabulü: `docs/history/static-binding-live-acceptance-2026-09-20.md`.
 Son Static website site-user identity ve routing canlı kabulü: `docs/history/static-identity-routing-live-acceptance-2026-09-20.md`.
 Son Python runtime canlı kabulü: `docs/history/python-runtime-live-acceptance-2026-09-20.md`.
+Son Multi-version PHP (8.1, 8.2, 8.4) ve distro 8.3 canlı kabulü: `docs/history/php-multiversion-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
