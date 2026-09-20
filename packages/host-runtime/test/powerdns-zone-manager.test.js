@@ -125,6 +125,7 @@ test('creates a zone then replaces generated SOA and NS with managed RRsets', as
   assert.equal(applied.managedRrsetCount, 4);
   assert.equal(applied.manualRrsetCount, 0);
   assert.equal(api.calls.some((call) => call.method === 'POST'), true);
+  assert.equal(api.calls.find((call) => call.method === 'POST').body.soa_edit_api, '');
   const patch = api.calls.find((call) => call.method === 'PATCH');
   assert.ok(patch);
   assert.equal(patch.body.rrsets.some((rrset) => rrset.type === 'SOA'), true);

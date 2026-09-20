@@ -621,6 +621,8 @@ export function createPowerDnsZoneManager({
           masters: [],
           nameservers,
           dnssec: dnssec === true,
+          // YunPanel publishes an explicit SOA serial with every managed change.
+          soa_edit_api: '',
         },
       });
       created = true;
