@@ -73,6 +73,7 @@ Son restic/rclone yönetilen paket ve binary sağlık kaynağı: `docs/history/r
 Son isteğe bağlı Owner MFA ve `webrich.news` canlı kabulü: `docs/history/owner-mfa-optional-webrich-live-acceptance-2026-09-20.md`.
 Son mail SMTP/IMAP protokol, TLS, anti-abuse ve LMTP canlı kabulü: `docs/history/mail-smtp-imap-live-acceptance-2026-09-20.md`.
 Son fresh Website local-mail, dedicated webmail TLS ve shared Roundcube canlı kabulü: `docs/history/site-create-local-mail-roundcube-live-acceptance-2026-09-20.md`.
+Son external mail site-create canlı kabulü: `docs/history/external-mail-site-create-live-acceptance-2026-09-20.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
