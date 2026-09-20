@@ -136,6 +136,7 @@ function publicJob(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     attempts: job.attempts,
+    payload: job.payload == null ? null : structuredClone(job.payload),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
   };
@@ -173,6 +174,7 @@ function diagnosisScope(operation) {
 export function jobPublicView(job) {
   if (!job || typeof job !== 'object') return null;
   const view = publicJob(job);
+  delete view.payload;
   view.result = publicResult(job.operation, job.result);
   view.error = job.error ? safeLocalOperationError(job.error) : null;
   const scope = job.status === 'failed' ? diagnosisScope(job.operation) : null;
