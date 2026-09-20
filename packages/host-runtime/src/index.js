@@ -388,3 +388,8 @@ export {
   CacheIsolationError,
   cacheIsolationInternals,
 } from './cache-isolation-manager.js';
+export {
+  createResticManager,
+  ResticError,
+  resticManagerInternals,
+} from './restic-manager.js';
