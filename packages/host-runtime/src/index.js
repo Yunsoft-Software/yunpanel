@@ -393,3 +393,8 @@ export {
   ResticError,
   resticManagerInternals,
 } from './restic-manager.js';
+export {
+  createRcloneManager,
+  RcloneError,
+  rcloneManagerInternals,
+} from './rclone-manager.js';
