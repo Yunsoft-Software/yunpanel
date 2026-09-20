@@ -1,6 +1,9 @@
 import { createHash } from 'node:crypto';
 import { createNodePassengerMigrationPreview } from '@yunpanel/host-runtime/node-passenger-migration-preview';
+import { nodePassengerMigrationManagerInternals } from '@yunpanel/host-runtime/node-passenger-migration-manager';
 import { ApplicationRegistryError } from './application-registry.js';
+
+const { preflightCanPrepare } = nodePassengerMigrationManagerInternals;
 
 function blocker(code, detail = null) {
   return Object.freeze({ code, ...(detail ? { detail } : {}) });
@@ -161,6 +164,7 @@ export function createApplicationPassengerMigrationPreviewService({
       host: hostDigestEvidence(host),
       blockers: uniqueBlockers,
     });
+    const isHostReady = host?.ready === true || (Boolean(host) && preflightCanPrepare(host));
     return Object.freeze({
       version: 1,
       mode: 'read-only',
@@ -170,7 +174,7 @@ export function createApplicationPassengerMigrationPreviewService({
       domain: domainBinding,
       domainCount: domains.length,
       host,
-      ready: uniqueBlockers.length === 0 && host?.ready === true,
+      ready: uniqueBlockers.length === 0 && isHostReady,
       blockers: Object.freeze(uniqueBlockers),
       previewDigest: digest,
       confirmation: `migrate-node-passenger:${application.id}:${digest}`,
