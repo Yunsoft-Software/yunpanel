@@ -85,6 +85,10 @@ test('PanelSettingsService - getSystemSettings and updateSystemSettings', async 
     assert.equal(settings.mail.engine, 'postfix + dovecot + rspamd');
     assert.equal(settings.mail.authStorage, 'sqlite');
     assert.equal(settings.mail.webmail.engine, 'roundcube');
+    assert.equal(settings.mail.security.spam.engine, 'rspamd');
+    assert.equal(settings.mail.security.antivirus.profile, 'disabled');
+    assert.equal(settings.mail.security.antivirus.enabled, false);
+    assert.equal(settings.mail.security.antivirus.active, false);
 
     // Database & Cache
     assert.equal(settings.database.engine, 'mariadb');
@@ -107,7 +111,7 @@ test('PanelSettingsService - getSystemSettings and updateSystemSettings', async 
     assert.equal(settings.observability.logs.engine, 'goaccess');
   });
 
-  await t.test('updates website defaults and dnsSsl and reflects in subsequent get', async () => {
+  await t.test('updates website defaults, dnsSsl, and mailSecurity', async () => {
     const updated = await service.updateSystemSettings({
       websiteDefaults: {
         defaultRuntime: 'php',
@@ -120,6 +124,9 @@ test('PanelSettingsService - getSystemSettings and updateSystemSettings', async 
       backupDefaults: {
         retentionDaily: 14,
       },
+      mailSecurity: {
+        antivirusProfile: 'clamav',
+      },
     });
 
     assert.equal(updated.websiteDefaults.defaultRuntime, 'php');
@@ -127,11 +134,68 @@ test('PanelSettingsService - getSystemSettings and updateSystemSettings', async 
     assert.equal(updated.dnsSsl.acmeEmail, 'admin@yunsoft.local');
     assert.equal(updated.dnsSsl.autoRenewDaysBeforeExpiry, 20);
     assert.equal(updated.backup.retentionDefaults.retentionDaily, 14);
+    assert.equal(updated.mail.security.antivirus.profile, 'clamav');
+    assert.equal(updated.mail.security.antivirus.enabled, true);
 
     const reloaded = await service.getSystemSettings();
     assert.equal(reloaded.websiteDefaults.defaultRuntime, 'php');
     assert.equal(reloaded.dnsSsl.acmeEmail, 'admin@yunsoft.local');
     assert.equal(reloaded.backup.retentionDefaults.retentionDaily, 14);
+    assert.equal(reloaded.mail.security.antivirus.profile, 'clamav');
+    assert.equal(reloaded.mail.security.antivirus.enabled, true);
+    assert.equal(reloaded.mail.security.antivirus.active, false); // No inspector provided -> health yoksa aktif gösterme!
+  });
+
+  await t.test('health yoksa aktif gösterme: clamav active only when healthy', async () => {
+    // 1. Unhealthy inspector -> active must be false
+    const unhealthyInspector = {
+      inspect: async () => ({
+        profile: 'clamav',
+        enabled: true,
+        active: false,
+        healthy: false,
+        status: 'unhealthy',
+        blockers: ['clamav_service_inactive'],
+      }),
+    };
+    const unhealthyService = createPanelSettingsService({
+      panelSettingsRegistry: registry,
+      serverRegistry: mockServerRegistry,
+      serverDnsIdentityRegistry: mockDnsRegistry,
+      jobRegistry: mockJobRegistry,
+      localServerId: 'srv-local',
+      mailAntivirusHealthInspector: unhealthyInspector,
+    });
+    const unhealthySettings = await unhealthyService.getSystemSettings();
+    assert.equal(unhealthySettings.mail.security.antivirus.enabled, true);
+    assert.equal(unhealthySettings.mail.security.antivirus.healthy, false);
+    assert.equal(unhealthySettings.mail.security.antivirus.active, false); // health yoksa aktif gösterme!
+    assert.equal(unhealthySettings.mail.security.antivirus.status, 'unhealthy');
+
+    // 2. Healthy inspector -> active is true
+    const healthyInspector = {
+      inspect: async () => ({
+        profile: 'clamav',
+        enabled: true,
+        active: true,
+        healthy: true,
+        status: 'ready',
+        blockers: [],
+      }),
+    };
+    const healthyService = createPanelSettingsService({
+      panelSettingsRegistry: registry,
+      serverRegistry: mockServerRegistry,
+      serverDnsIdentityRegistry: mockDnsRegistry,
+      jobRegistry: mockJobRegistry,
+      localServerId: 'srv-local',
+      mailAntivirusHealthInspector: healthyInspector,
+    });
+    const healthySettings = await healthyService.getSystemSettings();
+    assert.equal(healthySettings.mail.security.antivirus.enabled, true);
+    assert.equal(healthySettings.mail.security.antivirus.healthy, true);
+    assert.equal(healthySettings.mail.security.antivirus.active, true);
+    assert.equal(healthySettings.mail.security.antivirus.status, 'ready');
   });
 
   await t.test('rejects invalid patch values', async () => {
@@ -142,6 +206,10 @@ test('PanelSettingsService - getSystemSettings and updateSystemSettings', async 
     await assert.rejects(
       () => service.updateSystemSettings({ dnsSsl: { acmeEmail: 'invalid-email' } }),
       /ACME email must be a valid email address/,
+    );
+    await assert.rejects(
+      () => service.updateSystemSettings({ mailSecurity: { antivirusProfile: 'unknown' } }),
+      /Antivirus profile must be disabled or clamav/,
     );
   });
 });

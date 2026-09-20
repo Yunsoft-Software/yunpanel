@@ -256,6 +256,8 @@ export function createApp({
   mailDiscoveryEndpointResolver = null,
   roundcubeWebmailEndpointResolver = null,
   mailSrsConfigurationService = null,
+  mailAntivirusHealthInspector = null,
+  panelSettingsRegistry = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -697,6 +699,8 @@ export function createApp({
     mailboxRegistry,
     mailboxForwardingRegistry,
     mailSrsConfigurationService,
+    mailAntivirusHealthInspector,
+    panelSettingsRegistry,
     localServerId,
   });
   if (mailServiceIdentityRegistry) {

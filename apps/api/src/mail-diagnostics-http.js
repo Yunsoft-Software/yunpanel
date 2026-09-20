@@ -164,6 +164,28 @@ function appendForwardingDiagnostic(result, forwardingDeliverability) {
   });
 }
 
+function appendAntivirusDiagnostic(result, antivirusHealth) {
+  if (!antivirusHealth) return result;
+  const diagnostics = Object.freeze({
+    ...(result?.diagnostics ?? {}),
+    antivirus: antivirusHealth,
+  });
+  const issues = Array.isArray(result?.issues) ? [...result.issues] : [];
+  if (antivirusHealth.enabled && !antivirusHealth.active) {
+    issues.push(Object.freeze({
+      kind: 'antivirus',
+      reasonCode: 'mail_antivirus_unhealthy',
+      action: 'check_clamav_service',
+    }));
+  }
+  return Object.freeze({
+    ...result,
+    diagnostics,
+    attentionRequired: issues.length > 0,
+    issues: Object.freeze(issues),
+  });
+}
+
 export function mountMailDiagnosticsRoutes(app, {
   mailDiagnosticsInspector,
   mailDkimRegistry,
@@ -172,6 +194,8 @@ export function mountMailDiagnosticsRoutes(app, {
   mailboxRegistry,
   mailboxForwardingRegistry,
   mailSrsConfigurationService = null,
+  mailAntivirusHealthInspector = null,
+  panelSettingsRegistry = null,
   localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function') throw new Error('Express application is required');
@@ -210,8 +234,25 @@ export function mountMailDiagnosticsRoutes(app, {
       }),
     ]);
     const diagnostics = await mailDiagnosticsInspector.inspect(mailDomain.domainName, { dkim });
+
+    let antivirusHealth = null;
+    if (mailAntivirusHealthInspector) {
+      let profile = 'disabled';
+      if (panelSettingsRegistry && typeof panelSettingsRegistry.getSettings === 'function') {
+        try {
+          const settings = await panelSettingsRegistry.getSettings();
+          profile = settings.mailSecurity?.antivirusProfile ?? 'disabled';
+        } catch {
+          profile = 'disabled';
+        }
+      }
+      antivirusHealth = await mailAntivirusHealthInspector.inspect({ profile });
+    }
+
+    const withForwarding = appendForwardingDiagnostic(diagnostics, forwardingDeliverability);
+    const withAntivirus = appendAntivirusDiagnostic(withForwarding, antivirusHealth);
     return response.json({
-      data: appendForwardingDiagnostic(diagnostics, forwardingDeliverability),
+      data: withAntivirus,
     });
   }));
 }
@@ -221,4 +262,5 @@ export const mailDiagnosticsHttpInternals = Object.freeze({
   scopedLocalMailDomain,
   inspectForwardingDeliverability,
   appendForwardingDiagnostic,
+  appendAntivirusDiagnostic,
 });

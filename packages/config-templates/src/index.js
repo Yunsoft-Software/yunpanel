@@ -119,6 +119,13 @@ export {
 } from './mail-security.js';
 
 export {
+  MailAntivirusTemplateError,
+  mailAntivirusTemplatePolicy,
+  enableManagedMailAntivirus,
+  renderRspamdAntivirusConfig,
+} from './mail-antivirus.js';
+
+export {
   MailSrsTemplateError,
   enableManagedMailSrs,
   mailSrsTemplatePolicy,

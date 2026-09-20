@@ -8,6 +8,7 @@ export function createPanelSettingsService({
   serverDnsIdentityRegistry,
   jobRegistry,
   localServerId,
+  mailAntivirusHealthInspector,
 }) {
   if (!panelSettingsRegistry || typeof panelSettingsRegistry.getSettings !== 'function') {
     throw new Error('Panel settings registry is required');
@@ -64,6 +65,21 @@ export function createPanelSettingsService({
       };
 
       // 5. Mail & Webmail
+      const antivirusProfile = persistedSettings.mailSecurity?.antivirusProfile ?? 'disabled';
+      let antivirusHealth = null;
+      if (mailAntivirusHealthInspector) {
+        antivirusHealth = await mailAntivirusHealthInspector.inspect({ profile: antivirusProfile });
+      } else {
+        antivirusHealth = {
+          profile: antivirusProfile,
+          enabled: antivirusProfile === 'clamav',
+          active: false,
+          healthy: false,
+          status: antivirusProfile === 'clamav' ? 'unhealthy' : 'disabled',
+          blockers: antivirusProfile === 'clamav' ? ['mail_antivirus_inspector_unavailable'] : [],
+        };
+      }
+
       const mail = {
         engine: 'postfix + dovecot + rspamd',
         authStorage: 'sqlite',
@@ -73,6 +89,10 @@ export function createPanelSettingsService({
           engine: 'roundcube',
           deployment: 'shared-instance',
           subdomainPattern: 'webmail.<domain>',
+        },
+        security: {
+          spam: { engine: 'rspamd', enabled: true },
+          antivirus: antivirusHealth,
         },
       };
 

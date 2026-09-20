@@ -1,8 +1,10 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { stat } from 'node:fs/promises';
+import os from 'node:os';
 import { promisify } from 'node:util';
 import {
+  mailAntivirusTemplatePolicy,
   mailSecurityTemplatePolicy,
   mailSqlTemplatePolicy,
   mailSrsTemplatePolicy,
@@ -53,6 +55,12 @@ const SRS_SIEVE_REQUIREMENTS = Object.freeze([
 const SQL_BASE_REQUIREMENTS = Object.freeze([...BASE_REQUIREMENTS, 'mail_sqlite']);
 const SQL_SIEVE_REQUIREMENTS = Object.freeze([...SIEVE_REQUIREMENTS, 'mail_sqlite']);
 const SQL_SRS_SIEVE_REQUIREMENTS = Object.freeze([...SRS_SIEVE_REQUIREMENTS, 'mail_sqlite']);
+const CLAMAV_BASE_REQUIREMENTS = Object.freeze([...BASE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
+const CLAMAV_SIEVE_REQUIREMENTS = Object.freeze([...SIEVE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
+const CLAMAV_SRS_SIEVE_REQUIREMENTS = Object.freeze([...SRS_SIEVE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
+const CLAMAV_SQL_BASE_REQUIREMENTS = Object.freeze([...SQL_BASE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
+const CLAMAV_SQL_SIEVE_REQUIREMENTS = Object.freeze([...SQL_SIEVE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
+const CLAMAV_SQL_SRS_SIEVE_REQUIREMENTS = Object.freeze([...SQL_SRS_SIEVE_REQUIREMENTS, mailAntivirusTemplatePolicy.requirement]);
 
 export class MailReadinessError extends Error {
   constructor(code, message) {
@@ -77,6 +85,12 @@ function canonicalRequirementIds(value) {
     SQL_BASE_REQUIREMENTS,
     SQL_SIEVE_REQUIREMENTS,
     SQL_SRS_SIEVE_REQUIREMENTS,
+    CLAMAV_BASE_REQUIREMENTS,
+    CLAMAV_SIEVE_REQUIREMENTS,
+    CLAMAV_SRS_SIEVE_REQUIREMENTS,
+    CLAMAV_SQL_BASE_REQUIREMENTS,
+    CLAMAV_SQL_SIEVE_REQUIREMENTS,
+    CLAMAV_SQL_SRS_SIEVE_REQUIREMENTS,
   ]) {
     if (value.length === allowed.length && value.every((requirement, index) => requirement === allowed[index])) {
       return allowed;
@@ -249,6 +263,7 @@ export function createMailReadinessInspector({
     ...options,
   }),
   statFn = stat,
+  totalMemFn = () => os.totalmem(),
 } = {}) {
   if (!managedServiceManager || typeof managedServiceManager.inspect !== 'function') {
     throw new MailReadinessError('mail_readiness_service_manager_invalid', 'Managed service inspector is unavailable');
@@ -287,6 +302,7 @@ export function createMailReadinessInspector({
     const requiresSieve = requirementIds.includes('dovecot_sieve');
     const requiresSrs = requirementIds.includes(mailSrsTemplatePolicy.requirement);
     const requiresSql = requirementIds.includes('mail_sqlite');
+    const requiresClamav = requirementIds.includes(mailAntivirusTemplatePolicy.requirement);
     const [postfix, dovecot, rspamd] = await Promise.all([
       managedServiceManager.inspect('postfix'),
       managedServiceManager.inspect('dovecot'),
@@ -378,6 +394,18 @@ export function createMailReadinessInspector({
       }
     }
 
+    let clamavSatisfied = true;
+    if (requiresClamav) {
+      const [serviceActive, primarySocket, fallbackSocket] = await Promise.all([
+        runText(SYSTEMCTL, ['is-active', '--quiet', mailAntivirusTemplatePolicy.serviceUnit]),
+        regularFileExists(mailAntivirusTemplatePolicy.clamavSocketPath),
+        regularFileExists(mailAntivirusTemplatePolicy.clamavFallbackSocketPath),
+      ]);
+      let memoryBytes = 0;
+      try { memoryBytes = Number(totalMemFn()) || 0; } catch { memoryBytes = 0; }
+      clamavSatisfied = Boolean(serviceActive.ok && (primarySocket || fallbackSocket) && memoryBytes >= mailAntivirusTemplatePolicy.minMemoryBytes);
+    }
+
     const variablesValid = myhostname.ok && mydomain.ok
       && /^[a-z0-9.-]+$/i.test(myhostname.output) && /^[a-z0-9.-]+$/i.test(mydomain.output);
     const destinations = variablesValid && mydestination.ok
@@ -405,6 +433,7 @@ export function createMailReadinessInspector({
       ['postfix_relay_policy_verified', candidateRelayPolicySatisfied(preview)],
       [mailSrsTemplatePolicy.requirement, srsSatisfied],
       ['mail_sqlite', sqlSatisfied],
+      [mailAntivirusTemplatePolicy.requirement, clamavSatisfied],
     ]);
     const requirements = Object.freeze(requirementIds.map((id) => Object.freeze({ id, satisfied: status.get(id) === true })));
     const blockers = Object.freeze(requirements.filter((entry) => !entry.satisfied).map((entry) => entry.id));
@@ -436,6 +465,12 @@ export const mailReadinessInternals = Object.freeze({
   sqlBaseRequirements: SQL_BASE_REQUIREMENTS,
   sqlSieveRequirements: SQL_SIEVE_REQUIREMENTS,
   sqlSrsSieveRequirements: SQL_SRS_SIEVE_REQUIREMENTS,
+  clamavBaseRequirements: CLAMAV_BASE_REQUIREMENTS,
+  clamavSieveRequirements: CLAMAV_SIEVE_REQUIREMENTS,
+  clamavSrsSieveRequirements: CLAMAV_SRS_SIEVE_REQUIREMENTS,
+  clamavSqlBaseRequirements: CLAMAV_SQL_BASE_REQUIREMENTS,
+  clamavSqlSieveRequirements: CLAMAV_SQL_SIEVE_REQUIREMENTS,
+  clamavSqlSrsSieveRequirements: CLAMAV_SQL_SRS_SIEVE_REQUIREMENTS,
   sqlitePath: SQLITE,
   mailAuthGroup: MAIL_AUTH_GROUP,
   postsrsdPath: POSTSRSD,

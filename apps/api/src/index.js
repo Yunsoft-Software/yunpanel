@@ -4,6 +4,7 @@ import path from 'node:path';
 import {
   createJournalLogReader,
   createDatabaseManager,
+  createMailAntivirusHealthInspector,
   createMailDiagnosticsInspector,
   createMailProtocolHealthInspector,
   createMailReadinessInspector,
@@ -587,6 +588,7 @@ const panelSettingsService = createPanelSettingsService({
   serverDnsIdentityRegistry,
   jobRegistry,
   localServerId,
+  mailAntivirusHealthInspector: createMailAntivirusHealthInspector(),
 });
 const roundcubeDomainMappingService = createRoundcubeDomainMappingService({
   registry: roundcubeDomainMappingRegistry,

@@ -67,6 +67,8 @@ async function listen(t, auth, {
   srsReady = true,
   srsServiceAvailable = true,
   srsInspectionFails = false,
+  mailAntivirusHealthInspector = null,
+  panelSettingsRegistry = null,
 } = {}) {
   const calls = [];
   const mailDomains = new Map([
@@ -138,6 +140,8 @@ async function listen(t, auth, {
         };
       },
     },
+    mailAntivirusHealthInspector,
+    panelSettingsRegistry,
   });
   app.use((error, _request, response, _next) => {
     const known = error instanceof MailDiagnosticsHttpError;
@@ -286,4 +290,43 @@ test('diagnostics rejects query parameters before reading any managed mail state
   assert.equal(query.status, 400);
   assert.equal((await query.json()).error.code, 'mail_diagnostics_query_invalid');
   assert.deepEqual(calls, []);
+});
+
+test('diagnostics reports antivirus health and warns when clamav is unhealthy', async (t) => {
+  // 1. Healthy ClamAV
+  const healthyInspector = {
+    inspect: async () => ({
+      profile: 'clamav',
+      enabled: true,
+      active: true,
+      healthy: true,
+      status: 'ready',
+      blockers: [],
+    }),
+  };
+  const healthy = await listen(t, owner, { mailAntivirusHealthInspector: healthyInspector });
+  const healthyResponse = await fetch(`${healthy.base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
+  assert.equal(healthyResponse.status, 200);
+  const healthyBody = await healthyResponse.json();
+  assert.equal(healthyBody.data.diagnostics.antivirus.active, true);
+  assert.equal(healthyBody.data.diagnostics.antivirus.status, 'ready');
+
+  // 2. Unhealthy ClamAV -> active=false, issue added, attentionRequired=true
+  const unhealthyInspector = {
+    inspect: async () => ({
+      profile: 'clamav',
+      enabled: true,
+      active: false,
+      healthy: false,
+      status: 'unhealthy',
+      blockers: ['clamav_service_inactive'],
+    }),
+  };
+  const unhealthy = await listen(t, owner, { mailAntivirusHealthInspector: unhealthyInspector });
+  const unhealthyResponse = await fetch(`${unhealthy.base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
+  assert.equal(unhealthyResponse.status, 200);
+  const unhealthyBody = await unhealthyResponse.json();
+  assert.equal(unhealthyBody.data.diagnostics.antivirus.active, false); // health yoksa aktif gösterme!
+  assert.equal(unhealthyBody.data.attentionRequired, true);
+  assert.ok(unhealthyBody.data.issues.some((i) => i.kind === 'antivirus' && i.reasonCode === 'mail_antivirus_unhealthy'));
 });

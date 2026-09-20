@@ -22,6 +22,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
     retentionWeekly: 4,
     retentionMonthly: 12,
   }),
+  mailSecurity: Object.freeze({
+    antivirusProfile: 'disabled',
+  }),
 });
 
 export class PanelSettingsRegistryError extends Error {
@@ -90,6 +93,7 @@ export function createPanelSettingsRegistry({ filePath = DEFAULT_STORE_PATH } = 
             websiteDefaults: { ...DEFAULT_SETTINGS.websiteDefaults, ...parsed.settings.websiteDefaults },
             dnsSsl: { ...DEFAULT_SETTINGS.dnsSsl, ...parsed.settings.dnsSsl },
             backupDefaults: { ...DEFAULT_SETTINGS.backupDefaults, ...parsed.settings.backupDefaults },
+            mailSecurity: { ...DEFAULT_SETTINGS.mailSecurity, ...parsed.settings.mailSecurity },
           },
           updatedAt: parsed.updatedAt ?? new Date().toISOString(),
         };
@@ -107,6 +111,7 @@ export function createPanelSettingsRegistry({ filePath = DEFAULT_STORE_PATH } = 
         websiteDefaults: { ...DEFAULT_SETTINGS.websiteDefaults },
         dnsSsl: { ...DEFAULT_SETTINGS.dnsSsl },
         backupDefaults: { ...DEFAULT_SETTINGS.backupDefaults },
+        mailSecurity: { ...DEFAULT_SETTINGS.mailSecurity },
       },
       updatedAt: new Date().toISOString(),
     };
@@ -162,12 +167,24 @@ export function createPanelSettingsRegistry({ filePath = DEFAULT_STORE_PATH } = 
         if (retentionMonthly !== undefined) newBackupDefaults.retentionMonthly = validatePositiveInt(retentionMonthly, 'retention_monthly', 1, 120);
       }
 
+      const newMailSecurity = { ...current.mailSecurity };
+      if (patch.mailSecurity && typeof patch.mailSecurity === 'object') {
+        const { antivirusProfile } = patch.mailSecurity;
+        if (antivirusProfile !== undefined) {
+          if (!['disabled', 'clamav'].includes(antivirusProfile)) {
+            throw new PanelSettingsRegistryError('invalid_antivirus_profile', 'Antivirus profile must be disabled or clamav');
+          }
+          newMailSecurity.antivirusProfile = antivirusProfile;
+        }
+      }
+
       const updated = {
         version: STORE_VERSION,
         settings: {
           websiteDefaults: newWebsiteDefaults,
           dnsSsl: newDnsSsl,
           backupDefaults: newBackupDefaults,
+          mailSecurity: newMailSecurity,
         },
         updatedAt: new Date().toISOString(),
       };

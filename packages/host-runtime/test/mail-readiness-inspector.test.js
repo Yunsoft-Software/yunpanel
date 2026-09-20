@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  enableManagedMailAntivirus,
   enableManagedMailSql,
   previewManagedMailConfiguration,
   previewManagedMailSecurityConfiguration,
@@ -231,4 +232,28 @@ test('rejects forged readiness requirement ordering before host inspection', asy
     createInspector().inspect({ ...input, requirements: [...input.requirements].reverse() }),
     (error) => error instanceof MailReadinessError && error.code === 'mail_readiness_requirements_invalid',
   );
+});
+
+test('ClamAV requirement marks readiness ready when service, socket, and memory are satisfied', async () => {
+  const clamavCandidate = enableManagedMailAntivirus(sqlitePreview(), { profile: 'clamav' });
+  const outputs = healthyOutputs({
+    [command('/usr/bin/systemctl', ['is-active', '--quiet', 'clamav-daemon.service'])]: '\n',
+  });
+  const inspector = createInspector({
+    outputs,
+  });
+  const result = await inspector.inspect(clamavCandidate);
+  assert.equal(result.ready, true);
+  assert.deepEqual(result.blockers, []);
+});
+
+test('ClamAV requirement fails readiness when service is inactive or socket is missing', async () => {
+  const clamavCandidate = enableManagedMailAntivirus(sqlitePreview(), { profile: 'clamav' });
+  // Missing /run/clamav/clamd.ctl
+  const inspector = createInspector({
+    missingFiles: ['/run/clamav/clamd.ctl', '/var/run/clamav/clamd.ctl'],
+  });
+  const result = await inspector.inspect(clamavCandidate);
+  assert.equal(result.ready, false);
+  assert.ok(result.blockers.includes('clamav'));
 });

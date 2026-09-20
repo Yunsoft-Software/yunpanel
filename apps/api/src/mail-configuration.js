@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+  MailAntivirusTemplateError,
   MailForwardingTemplateError,
   MailQuotaTemplateError,
   MailSecurityTemplateError,
@@ -9,6 +10,7 @@ import {
   MailTemplateError,
   MailTlsIdentityTemplateError,
   bindManagedMailTlsIdentity,
+  enableManagedMailAntivirus,
   enableManagedMailSql,
   enableManagedMailSrs,
   enableManagedMailSubmission,
@@ -161,6 +163,7 @@ export function createMailConfigurationService({
   mailServiceIdentityRegistry = null,
   mailSrsConfigurationService = null,
   roundcubeDomainMappingRegistry = null,
+  panelSettingsRegistry = null,
 } = {}) {
   const tlsIdentityConfigured = domainRegistry !== null || mailServiceIdentityRegistry !== null;
   if (!mailDomainRegistry || typeof mailDomainRegistry.getMailDomain !== 'function'
@@ -425,6 +428,18 @@ export function createMailConfigurationService({
         });
       }
       if (tlsIdentity.identity) preview = bindManagedMailTlsIdentity(preview, tlsIdentity.identity);
+      let antivirusProfile = 'disabled';
+      if (panelSettingsRegistry && typeof panelSettingsRegistry.getSettings === 'function') {
+        try {
+          const settings = await panelSettingsRegistry.getSettings();
+          antivirusProfile = settings.mailSecurity?.antivirusProfile ?? 'disabled';
+        } catch {
+          antivirusProfile = 'disabled';
+        }
+      }
+      if (antivirusProfile === 'clamav') {
+        preview = enableManagedMailAntivirus(preview, { profile: 'clamav' });
+      }
       const legacyPreview = preview;
       preview = enableManagedMailSql(legacyPreview, {
         domains: resolved.domains,
@@ -445,6 +460,7 @@ export function createMailConfigurationService({
         || error instanceof MailQuotaTemplateError
         || error instanceof MailForwardingTemplateError
         || error instanceof MailSecurityTemplateError
+        || error instanceof MailAntivirusTemplateError
         || error instanceof MailSqlTemplateError
         || error instanceof MailSrsTemplateError
         || error instanceof MailSubmissionTemplateError

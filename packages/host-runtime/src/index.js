@@ -62,6 +62,10 @@ export {
   mailProtocolHealthInternals,
 } from './mail-protocol-health-inspector.js';
 export {
+  createMailAntivirusHealthInspector,
+  MailAntivirusHealthError,
+} from './mail-antivirus-health-inspector.js';
+export {
   createMailConfigActivator,
   MailConfigActivationError,
   mailConfigActivatorInternals,
