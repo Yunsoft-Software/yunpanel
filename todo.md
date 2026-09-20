@@ -7,7 +7,7 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 ## T-BASE — P0 güncel güvenlik ve package kapısı
 
 - [ ] Clean install ve önceki paketten upgrade; auth DB/master key, Domain/Website/Application kimlikleri, release'ler, Nginx/certificate, mail/database state'i ve root-owned private izinleri korusun.
-- [ ] Production exact `YUNPANEL_LOCAL_SERVER_ID` + OS hostname olmadan başlamasın; uzak/eski server detail/mutation ve retained agent transport fail-closed kalsın.
+- [ ] Production exact `YUNPANEL_LOCAL_SERVER_ID` + OS hostname olmadan başlamasın; uzak/eski server detail/mutation ve retained agent transport fail-closed kalsın (NODE_ENV=production altında boş ID ile startup abort, kayıt dışı UUID ile local_server_not_found fail-closed, assertBoundServer hostname/executionMode kısıtı 2026-09-20'de .28 üzerinde doğrulandı; `docs/history/local-server-identity-fail-closed-live-acceptance-2026-09-20.md`).
 - [ ] `.28` geliştirme hostunda `YUNPANEL_OWNER_MFA_REQUIRED=false` kalırken gerçek HTTPS Owner password-only setup/login/session/logout/logout-all/idle/absolute timeout, CSRF, rate-limit ve trusted-proxy sınırı Chromium/Firefox'ta çalışsın. TOTP/recovery bu hostun geliştirme kabul kapısı değildir; kullanıcı açıkça tersini istemedikçe `.28` üzerinde MFA etkinleştirilmez veya kodu istenmez.
 
 

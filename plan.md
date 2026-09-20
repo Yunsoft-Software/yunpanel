@@ -108,6 +108,7 @@ Son WP-CLI ve Composer site-user bounded adapter canlı kabulü: `docs/history/w
 Son Settings sayfası ve sistem ayarları canlı kabulü: `docs/history/settings-page-live-acceptance-2026-09-20.md`.
 Son OpenSSH internal-sftp chroot, izolasyon ve güvenlik canlı kabulü: `docs/history/openssh-internal-sftp-live-acceptance-2026-09-20.md`.
 Son Website cron gerçek çalıştırma, izolasyon ve ortam doğrulama canlı kabulü: `docs/history/website-cron-live-execution-acceptance-2026-09-20.md`.
+Son Yerel sunucu kimliği ve hostname fail-closed canlı kabulü: `docs/history/local-server-identity-fail-closed-live-acceptance-2026-09-20.md`.
 Son fresh Website SPF/DMARC policy ve durable DNS evidence bağlama ilerlemesi: `apps/api/src/website-mail-dns-provisioning-handler.js`.
 
 ## 0 — Değiştirilemez ürün kararı
