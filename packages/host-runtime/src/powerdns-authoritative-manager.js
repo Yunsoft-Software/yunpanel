@@ -273,9 +273,9 @@ export function createPowerDnsAuthoritativeManager({
     const config = await readOptional(powerDnsTemplatePolicy.configPath);
     if (config === null) return Object.freeze({ satisfied: false, reason: 'powerdns_config_missing', packages, recursorInstalled: false });
     const currentHash = apiKeyHashFromConfig(config);
-    if (!currentHash) throw new PowerDnsAuthoritativeManagerError('powerdns_config_drift', 'Managed PowerDNS API key hash is missing or invalid');
+    if (!currentHash) return Object.freeze({ satisfied: false, reason: 'powerdns_config_invalid', packages, recursorInstalled: false });
     const expectedConfig = renderManagedPowerDnsConfig({ apiKeyHash: currentHash, secondaryDns: spec.secondaryDns });
-    if (config !== expectedConfig) throw new PowerDnsAuthoritativeManagerError('powerdns_config_drift', 'Managed PowerDNS configuration drifted');
+    if (config !== expectedConfig) return Object.freeze({ satisfied: false, reason: 'powerdns_config_drift', packages, recursorInstalled: false });
     const [configIdentity, databaseIdentity, active, health] = await Promise.all([
       inspectPath(powerDnsTemplatePolicy.configPath, { owner: 'root', group: 'pdns', mode: '640' }),
       inspectPath(powerDnsTemplatePolicy.databasePath, { owner: 'pdns', group: 'pdns', mode: '640' }),
@@ -290,7 +290,7 @@ export function createPowerDnsAuthoritativeManager({
     if (receiptRaw === null) return Object.freeze({ satisfied: false, reason: 'powerdns_receipt_missing', packages, configIdentity, databaseIdentity, active, api: health });
     let receipt;
     try { receipt = receiptValue(JSON.parse(receiptRaw), spec, config); }
-    catch (error) { if (error instanceof PowerDnsAuthoritativeManagerError) throw error; throw new PowerDnsAuthoritativeManagerError('powerdns_receipt_invalid', 'PowerDNS authoritative receipt is invalid'); }
+    catch { return Object.freeze({ satisfied: false, reason: 'powerdns_receipt_invalid', packages, configIdentity, databaseIdentity, active, api: health }); }
     return Object.freeze({
       satisfied: true,
       adapter: 'powerdns-authoritative-gsqlite3',
