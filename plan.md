@@ -125,6 +125,7 @@ Son yerel migration yedekleme, doğrulama ve restore staging canlı kabulü: `do
 Son eski agent taşıma katmanı ve servis birimlerinin kaldırılması canlı kabulü: `docs/history/legacy-agent-transport-removal-2026-09-21.md`.
 Son canlı sunucu kabulü (T-BASE, T-DNS, T-TOOLS ve veri izolasyonu): `docs/history/live-host-acceptance-t-base-dns-tools-2026-09-21.md`.
 Son Debian paketi güncelleme ve durum koruma canlı kabulü (T-BASE): `docs/history/debian-package-upgrade-live-acceptance-2026-09-21.md`.
+Son AI yönetim katmanı foundation ilerlemesi: `docs/history/ai-management-layer-foundation-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
@@ -182,14 +183,15 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 # P1 — AI yönetim katmanı
 
-Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation, `allow/confirm/deny` policy motoru, `always` destructive confirmation koruması, SHA-256 digest-bound action preview/confirmation, local-server scoped read runtime (`server.health`, `website.list`, `website.inspect`, `application.inspect`, `job.inspect`) ve mevcut panel auth/audit zincirine bağlı `/api/ai/tools*` HTTP yüzeyi hazırdır. AI için ayrı privileged daemon, ikinci root transport veya raw shell açılmaz.
+AI foundation ilerlemesi: `docs/history/ai-management-layer-foundation-2026-09-21.md`.
 
-- [ ] Provider abstraction ve conversation/orchestrator katmanını ekle; provider credential'ı mevcut master-key tabanlı encrypted secret sınırı üzerinden reference olarak tut, plaintext'i prompt/job/audit/log/public response yüzeylerine taşıma.
-- [ ] Kalan safe read adapter'larını bağla: bounded logs, DNS, certificate, mail, database ve backup health/inspect.
-- [ ] Reversible/write tool adapter'larını mevcut durable job/preview/recovery/rollback lifecycle'larına bağla: Website restart, deploy/rollback, DNS update, certificate issue/renew, backup create/restore ve allowlisted service restart. Hiçbiri raw shell escape sunmasın.
-- [ ] Owner AI policy override store'unu revision/digest ve audit-safe settings lifecycle'ıyla ekle; `always` destructive confirmation server-side değiştirilemez kalsın.
-- [ ] AI conversation/session API, bounded context builder ve streaming response lifecycle'ını ekle; modele yalnız available + policy-allowed tool şemalarını gönder.
-- [ ] Global ve Website-contextual AI UI'yı operation card, preview, confirmation, durable job progress ve recovery state ile bağla.
+Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation, `allow/confirm/deny` policy motoru, unbreakable `always-confirm` destructive guard, SHA-256 digest-bound action preview/confirmation, provider adapter contract ve policy-filtered proposal orchestrator hazırdır. Root-private revisioned AI policy store ile Owner-only policy preview/apply HTTP akışı da production bootstrap'a bağlıdır. Mevcut control-plane registries üzerinden `server.health`, `website.list`, `website.inspect`, `application.inspect`, `job.inspect`, `dns.inspect`, `certificate.inspect`, `mail.inspect`, `database.inspect` read tool'ları; mevcut durable job lifecycle üzerinden `website.restart` ve allowlisted `service.restart` write tool'ları bağlıdır. AI için ayrı privileged daemon, ikinci root transport veya raw shell açılmaz.
+
+- [ ] Encrypted provider credential registry + provider selection ekle; somut remote/local provider adapter'larını aynı normalized provider contract'ına bağla ve plaintext credential'ı prompt/job/audit/log/public response yüzeylerine taşıma.
+- [ ] Kalan safe read adapter'larını bağla: bounded `logs.query`, `backup.inspect` ve gerektiği yerde mevcut live-health inspector sonuçları. Unbounded log/file/env dump yüzeyi açma.
+- [ ] Kalan reversible/write tool adapter'larını mevcut durable job/preview/recovery/rollback lifecycle'larına bağla: application deploy/rollback, DNS update, certificate issue/renew ve backup create/restore. Hiçbiri raw shell escape sunmasın.
+- [ ] AI conversation/session API, bounded context builder, provider tool-result loop ve streaming/cancel lifecycle'ını ekle; modele yalnız available + policy-allowed tool şemalarını gönder.
+- [ ] Global ve Website-contextual AI UI'yı operation card, preview, confirmation, policy settings, durable job progress ve recovery state ile bağla.
 - [ ] HTTP/UI control layer sabitlendikten sonra aynı Tool Registry/Policy Engine üzerinden MCP-compatible adapter ekle; duplicate management engine oluşturma.
 
 # P2 — Migration temizliği ve son ürün yüzeyi
