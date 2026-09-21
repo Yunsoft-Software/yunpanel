@@ -105,7 +105,7 @@ function normalizeInput(input, schema) {
   let encoded;
   try { encoded = JSON.stringify(value); }
   catch { throw new AiToolRegistryError('invalid_ai_tool_input', 'AI tool input must be JSON serializable'); }
-  if (Buffer.byteLength(encoded, 'utf8') > MAX_INQUP_BYTES) {
+  if (Buffer.byteLength(encoded, 'utf8') > MAX_INPUT_BYTES) {
     throw new AiToolRegistryError('ai_tool_input_too_large', 'AI tool input exceeds the supported size');
   }
   const cloned = clone(value);

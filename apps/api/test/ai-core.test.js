@@ -30,7 +30,7 @@ test('tool registry exposes metadata without handlers and refuses unbound execut
   assert.equal(tools.find((tool) => tool.name === 'server.health').available, false);
   await assert.rejects(
     registry.execute({ name: 'server.health' }),
-    (error) => error instanceof AiToolRegistryError && error.code === 'ai_tool_unavaile',
+    (error) => error instanceof AiToolRegistryError && error.code === 'ai_tool_unavailable',
   );
 });
 
