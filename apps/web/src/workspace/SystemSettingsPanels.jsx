@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Badge, Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
-import { getPanelSettings } from './system-settings-client.js';
+import { getPanelSettings, updatePanelSettings } from './system-settings-client.js';
 
 function formatUptime(seconds) {
   if (!seconds || seconds < 0) return '—';
@@ -18,13 +18,21 @@ export default function SystemSettingsPanels({ canManage = true }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [acmeEmailInput, setAcmeEmailInput] = useState('');
+  const [savingAcmeEmail, setSavingAcmeEmail] = useState(false);
+  const [acmeEmailError, setAcmeEmailError] = useState(null);
+  const [acmeEmailSuccess, setAcmeEmailSuccess] = useState(false);
 
   const load = async () => {
     setLoading(true);
     setError(null);
     try {
       const res = await getPanelSettings();
-      setData(res?.data ?? res ?? null);
+      const settings = res?.data ?? res ?? null;
+      setData(settings);
+      if (settings?.dnsSsl?.acmeEmail !== undefined) {
+        setAcmeEmailInput(settings.dnsSsl.acmeEmail ?? '');
+      }
     } catch (err) {
       setError(err?.message ?? 'Ayar bilgileri yüklenemedi.');
     } finally {
@@ -108,6 +116,62 @@ export default function SystemSettingsPanels({ canManage = true }) {
           ['Otomatik yenileme döngüsü', `Süresi dolmaya ${dnsSsl.autoRenewDaysBeforeExpiry} gün kala günlük denetim`],
           ['Özel sertifika deposu', dnsSsl.customCertificatesRoot],
         ]} />
+        {canManage && (
+          <form
+            className="ws-form"
+            style={{ marginTop: 16 }}
+            onSubmit={async (e) => {
+              e.preventDefault();
+              setSavingAcmeEmail(true);
+              setAcmeEmailError(null);
+              setAcmeEmailSuccess(false);
+              try {
+                const res = await updatePanelSettings({
+                  dnsSsl: { acmeEmail: acmeEmailInput.trim() || null },
+                });
+                setData(res?.data ?? res ?? null);
+                setAcmeEmailSuccess(true);
+                setTimeout(() => setAcmeEmailSuccess(false), 4000);
+              } catch (err) {
+                setAcmeEmailError(err?.message ?? 'ACME e-posta adresi kaydedilemedi.');
+              } finally {
+                setSavingAcmeEmail(false);
+              }
+            }}
+          >
+            <label>
+              ACME / Yönetici İletişim E-postası
+              <input
+                type="email"
+                value={acmeEmailInput}
+                placeholder="admin@domain.com"
+                onChange={(e) => {
+                  setAcmeEmailInput(e.target.value);
+                  setAcmeEmailSuccess(false);
+                }}
+                disabled={savingAcmeEmail}
+              />
+            </label>
+            <p className="ws-muted" style={{ margin: '4px 0 8px 0', fontSize: '0.85rem' }}>
+              Bu e-posta adresi SSL/TLS sertifika taleplerinde varsayılan olarak kullanılır ve Let's Encrypt bildirimleri için kaydedilir.
+            </p>
+            {acmeEmailError && <ErrorNotice error={acmeEmailError} />}
+            {acmeEmailSuccess && (
+              <p style={{ color: 'var(--ws-color-success, #10b981)', fontSize: '0.875rem', margin: '4px 0' }}>
+                ACME e-posta adresi başarıyla güncellendi.
+              </p>
+            )}
+            <div className="ws-actions">
+              <Button
+                type="submit"
+                variant="primary"
+                disabled={savingAcmeEmail || acmeEmailInput.trim() === (dnsSsl.acmeEmail ?? '')}
+              >
+                {savingAcmeEmail ? 'Kaydediliyor…' : 'E-postayı Kaydet'}
+              </Button>
+            </div>
+          </form>
+        )}
       </Section>
 
       <Section

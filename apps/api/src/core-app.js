@@ -46,12 +46,55 @@ async function resolveCertificateIssueIntent({
   localServerId,
 }) {
   if (!body || typeof body !== 'object' || Array.isArray(body)
-    || Object.keys(body).some((field) => !['email', 'staging', 'challenge'].includes(field))
-    || (body.staging !== undefined && typeof body.staging !== 'boolean')) {
+    || Object.keys(body).some((field) => !['email', 'staging', 'challenge', 'domains', 'assignToMail'].includes(field))
+    || (body.staging !== undefined && typeof body.staging !== 'boolean')
+    || (body.assignToMail !== undefined && typeof body.assignToMail !== 'boolean')) {
     throw new CertificateRegistryError('invalid_certificate_request', 'Certificate request fields are invalid');
   }
+
+  let requestedNames = null;
+  if (body.domains !== undefined) {
+    if (!Array.isArray(body.domains) || body.domains.length < 1 || body.domains.length > 21) {
+      throw new CertificateRegistryError('invalid_certificate_domains', 'Certificate names must contain between 1 and 21 domains');
+    }
+    const allowedBases = [domain.primaryDomain, ...domain.aliases];
+    const normalized = [];
+    for (const d of body.domains) {
+      if (typeof d !== 'string' || !d.trim()) {
+        throw new CertificateRegistryError('invalid_certificate_domain', 'Each domain name must be a non-empty string');
+      }
+      const item = d.trim().toLowerCase();
+      const isWildcard = item.startsWith('*.');
+      const baseCandidate = isWildcard ? item.slice(2) : item;
+      const matchesBase = allowedBases.some((base) => {
+        if (baseCandidate === base) return true;
+        if (baseCandidate.endsWith(`.${base}`)) return true;
+        return false;
+      });
+      if (!matchesBase) {
+        throw new CertificateRegistryError('certificate_domain_mismatch', `Requested domain ${item} does not belong to ${domain.primaryDomain} or its aliases`, 409);
+      }
+      normalized.push(item);
+    }
+    const unique = [...new Set(normalized)];
+    if (!unique.includes(domain.primaryDomain)) {
+      unique.unshift(domain.primaryDomain);
+    } else if (unique[0] !== domain.primaryDomain) {
+      const idx = unique.indexOf(domain.primaryDomain);
+      unique.splice(idx, 1);
+      unique.unshift(domain.primaryDomain);
+    }
+    requestedNames = unique;
+  }
+
+  const routeDomains = requestedNames ?? [domain.primaryDomain, ...domain.aliases];
+  const hasWildcard = routeDomains.some((name) => name.startsWith('*.'));
+  if (hasWildcard && body.challenge?.type !== 'dns-01') {
+    throw new CertificateRegistryError('wildcard_not_supported', 'Wildcard certificates require DNS-01', 409);
+  }
+
   if (body.challenge === undefined || (body.challenge?.type === 'http-01' && Object.keys(body.challenge).length === 1)) {
-    return { certificateNames: [domain.primaryDomain, ...domain.aliases], challenge: { type: 'http-01' } };
+    return { certificateNames: routeDomains, challenge: { type: 'http-01' } };
   }
   const challenge = body.challenge;
   const fields = new Set(['type', 'dnsZoneId', 'wildcard']);
@@ -65,8 +108,7 @@ async function resolveCertificateIssueIntent({
   }
   const zone = await dnsHostingRegistry.getZone(challenge.dnsZoneId);
   if (!zone) throw new CertificateRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
-  const routeDomains = [domain.primaryDomain, ...domain.aliases];
-  if (routeDomains.some((hostname) => !domainWithinZone(hostname, zone.zoneName))) {
+  if (routeDomains.some((hostname) => !domainWithinZone(hostname.startsWith('*.') ? hostname.slice(2) : hostname, zone.zoneName))) {
     throw new CertificateRegistryError('certificate_dns_zone_mismatch', 'DNS zone does not contain every current Domain hostname', 409);
   }
   const credential = await dnsProviderCredentialRegistry.getForZone(zone.id);

@@ -1,6 +1,7 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
-import { panelRequest } from '../api.js';
+import { panelRequest, waitForJob } from '../api.js';
+import { getPanelSettings } from './system-settings-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { certificateState, formatDate, siteHref } from './site-model.js';
@@ -74,6 +75,23 @@ export function SslOperations({ domain }) {
   const { certificates, domains, jobs, runJob, resourceBusy } = useWorkspace();
   const [email, setEmail] = useState(''); const [requested, setRequested] = useState(false);
   const [confirm, setConfirm] = useState(null); const operation = useOperation();
+  const [includeWww, setIncludeWww] = useState(true);
+  const [includeWebmail, setIncludeWebmail] = useState(true);
+  const [includeMail, setIncludeMail] = useState(true);
+  const [assignToMail, setAssignToMail] = useState(false);
+  const [includeWildcard, setIncludeWildcard] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    getPanelSettings().then((res) => {
+      const settings = res?.data ?? res;
+      if (active && settings?.dnsSsl?.acmeEmail && !email) {
+        setEmail(settings.dnsSsl.acmeEmail);
+      }
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
   useUnsavedChanges(Boolean(email.trim()) && !requested);
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const certificate = ssl.certificate;
@@ -81,6 +99,29 @@ export function SslOperations({ domain }) {
     || resourceBusy('domain', domain.id) || (certificate && resourceBusy('certificate', certificate.id))
     || certificates.items.some((item) => item.domainId === domain.id && ['issuing', 'renewing'].includes(item.state));
   const canIssue = !locked && !domain.certificateId;
+
+  const buildRequestedDomains = () => {
+    const list = [domain.primaryDomain];
+    if (includeWww && !list.includes(`www.${domain.primaryDomain}`)) {
+      list.push(`www.${domain.primaryDomain}`);
+    }
+    if (includeWebmail && !list.includes(`webmail.${domain.primaryDomain}`)) {
+      list.push(`webmail.${domain.primaryDomain}`);
+    }
+    if (includeMail && !list.includes(`mail.${domain.primaryDomain}`)) {
+      list.push(`mail.${domain.primaryDomain}`);
+    }
+    if (includeWildcard && !list.includes(`*.${domain.primaryDomain}`)) {
+      list.push(`*.${domain.primaryDomain}`);
+    }
+    if (Array.isArray(domain.aliases)) {
+      for (const alias of domain.aliases) {
+        if (!list.includes(alias)) list.push(alias);
+      }
+    }
+    return list;
+  };
+
   async function issue(staging) {
     const ok = await operation.perform(async () => {
       let currentDomain = domain;
@@ -108,7 +149,13 @@ export function SslOperations({ domain }) {
         const activateJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
         await waitForJob(activateJob.id);
       }
-      const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, { email: email.trim(), staging });
+      const requestedDomains = buildRequestedDomains();
+      const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, {
+        email: email.trim(),
+        staging,
+        domains: requestedDomains,
+        assignToMail,
+      });
       if (issueJob?.id && !staging) {
         const finished = await waitForJob(issueJob.id);
         if (finished?.status === 'succeeded') {
@@ -116,6 +163,20 @@ export function SslOperations({ domain }) {
           await waitForJob(postStage.id);
           const postActivate = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
           await waitForJob(postActivate.id);
+          if (assignToMail) {
+            try {
+              const currentIdentity = await panelRequest('/mail-service-identity').catch(() => null);
+              await panelRequest('/mail-service-identity', {
+                method: 'PUT',
+                body: {
+                  webDomainId: currentDomain.id,
+                  expectedRevision: currentIdentity?.data?.revision ?? 0,
+                },
+              });
+            } catch (err) {
+              console.error('Mail service identity bind failed:', err);
+            }
+          }
         }
       }
     });
@@ -132,6 +193,65 @@ export function SslOperations({ domain }) {
       <p className="ws-muted">Let's Encrypt ile ücretsiz SSL sertifikası alın. Alan adının DNS kayıtlarının bu sunucuya yönlendiğinden emin olun.</p>
       {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
       <label>ACME hesap e-postası<input type="email" value={email} required placeholder="admin@domain.com" onChange={(event) => { setEmail(event.target.value); setRequested(false); }} disabled={locked} /></label>
+      <div style={{ margin: '14px 0', padding: '12px', border: '1px solid var(--ws-color-border, #e2e8f0)', borderRadius: '6px' }}>
+        <strong style={{ display: 'block', marginBottom: '8px' }}>Sertifika Kapsamı (Plesk Obsidian standardı):</strong>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'default' }}>
+            <input type="checkbox" checked disabled />
+            <span><strong>{domain.primaryDomain}</strong> (Ana alan adı — zorunlu)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeWww}
+              onChange={(e) => setIncludeWww(e.target.checked)}
+              disabled={locked}
+            />
+            <span><strong>www.{domain.primaryDomain}</strong> ve alan adını koru</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeWebmail}
+              onChange={(e) => setIncludeWebmail(e.target.checked)}
+              disabled={locked}
+            />
+            <span><strong>webmail.{domain.primaryDomain}</strong> webmail arayüzünü koru</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeMail}
+              onChange={(e) => setIncludeMail(e.target.checked)}
+              disabled={locked}
+            />
+            <span><strong>mail.{domain.primaryDomain}</strong> posta sunucusunu koru</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={assignToMail}
+              onChange={(e) => setAssignToMail(e.target.checked)}
+              disabled={locked}
+            />
+            <span>Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={includeWildcard}
+              onChange={(e) => setIncludeWildcard(e.target.checked)}
+              disabled={locked}
+            />
+            <span>Joker (Wildcard) sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
+          </label>
+          {includeWildcard && (
+            <p className="ws-muted" style={{ margin: '0 0 0 24px', fontSize: '0.85rem', color: '#f59e0b' }}>
+              ⚠️ Joker sertifikalar Cloudflare DNS-01 doğrulaması gerektirir.
+            </p>
+          )}
+        </div>
+      </div>
       <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !email.trim()}>Production sertifikası iste</Button><Button disabled={!canIssue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button></div>
     </form> : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
     {domain.appliedRevision !== domain.desiredRevision && certificate?.state === 'active' && <div className="ws-section-body"><p className="ws-muted">Sertifika aktif edildi, Nginx yapılandırmasını güncelleyip etkinleştirin.</p><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div></div>}

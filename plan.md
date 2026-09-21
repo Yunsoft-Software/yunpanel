@@ -192,32 +192,6 @@ Domain removal HTTP API'ı (`preview`, `operations`, `retry-routing`, `continue`
 
 Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı, deepest-first child domain yürütümü, certificate retirement, shared Webmail mapping temizliği, Mail Domain child operasyonu, External DNS metadata unlinking, Website binding detach, authoritative DNS retirement ve Domain/Website metadata finalization kaynak kod tarafında tamamlandı. Mail/DB/file deletion için typed confirmation, retention ve backup evidence zincirleri (database credential deletion, unbind, backup evidence ve file cleanup retained backups) üst operasyonlara bağlandı. Authenticated HTTP rotaları (`/api/domains/:domainId/removal*` ve `/api/websites/:websiteId/removal*`) eklendi.
 
-## P0.10 — Plesk Obsidian SSL/TLS Parity & ACME Settings (Admin Email & SAN Options)
-
-- [ ] **P0.10.1 — Panel Ayarları: Yönetici / ACME E-Posta Yapılandırması**:
-  - `/settings` (Panel ve Sistem Ayarları) sayfasına yapılandırılabilir `acmeEmail` / `adminEmail` form alanı ekle (`GET/PUT /api/panel/system-settings/acme` veya `SystemSettingsPanels.jsx`).
-  - E-posta adresini sunucuda `/etc/yunpanel/control-plane/panel-settings.json` veya mevcut settings store üzerinde kalıcı sakla.
-  - API üzerinden `acmeEmail` değerini döndür (`/api/panel/system-settings`).
-- [ ] **P0.10.2 — Plesk Obsidian Tarzı SSL İsteme Modalı ve Çoklu SAN Kapsamı**:
-  - `SiteOperations.jsx` / `SslOperations` içindeki SSL isteme formunu Plesk Obsidian modal yapısına dönüştür:
-    - **ACME İletişim E-Postası**: Sistem ayarlarından (`acmeEmail`) otomatik dolu olarak gelsin, istenirse değiştirilebilsin.
-    - **Alan Adı Kapsamı (SAN Checkbox'ları)**:
-      - `[x] Ana alan adı (domain.com)` (zorunlu/seçili)
-      - `[x] www alt alan adını dahil et (www.domain.com)`
-      - `[x] Bu alan adı için webmail'i koru (webmail.domain.com)`
-      - `[x] Bu alan adı için 'mail' alt alan adını koru (mail.domain.com)`
-      - `[ ] Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)`
-      - `[ ] Wildcard (*.domain.com) sertifikası iste (DNS-01 doğrulama gerektirir)`
-  - Form submit edildiğinde seçilen tüm SAN domain'lerini (`domains: [...]`) ve `email`'i backend'e göndersin.
-- [ ] **P0.10.3 — Backend ACME & Certbot Çoklu SAN İsteme Motoru**:
-  - `POST /api/domains/:domainId/certificates/issue` endpoint'ini seçilen `domains` dizisini kabul edecek şekilde genişlet (`domains: ['webrich.news', 'www.webrich.news', 'webmail.webrich.news', ...]`).
-  - `acme-manager` ve Certbot komut satırı çağrısında tüm seçili alan adlarını `-d domain1 -d domain2 ...` olarak ACME isteğine dahil et.
-  - Sertifika başarıyla alındığında:
-    - Web domain Nginx yapılandırmasını (`yunpanel-<domain>.conf`) güncelle.
-    - Eğer `webmail.<domain>` seçilmişse, paylaşımlı Roundcube Nginx bloğunu (`webmail.<domain>`) bu sertifikayla bağla.
-    - Eğer "Posta alan adına ata" seçilmişse, Dovecot/Postfix SNI tablosuna sertifikayı kaydet.
-- [ ] **P0.10.4 — Dayanıklılık ve Dry-Run Düzeltmesi (Reconciliation Guard)**:
-  - `job-reconciliation.js` içinde `dryRun` renew veya staging test başarısızlıklarının diskteki geçerli aktif üretim sertifikasını `state: 'error'` yapmasını engelle. (Tamamlandı: `dryRun` başarısızlığında sertifika `active` durumunu korur).
 
 
 # P1 — AI yönetim katmanı

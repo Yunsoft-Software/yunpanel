@@ -85,5 +85,11 @@ test.describe('Module 7: SSL/TLS Certificate Management', () => {
     await expect(policySection.locator('dt', { hasText: 'ACME iletişim e-postası' })).toBeVisible();
     await expect(policySection.locator('dt', { hasText: 'Otomatik yenileme döngüsü' })).toBeVisible();
     await expect(policySection.locator('dt', { hasText: 'Özel sertifika deposu' })).toBeVisible();
+
+    // Verify editable ACME email form
+    const emailInput = policySection.locator('label:has-text("ACME / Yönetici İletişim E-postası") input');
+    await expect(emailInput).toBeVisible();
+    const saveBtn = policySection.locator('button:has-text("E-postayı Kaydet")');
+    await expect(saveBtn).toBeVisible();
   });
 });
