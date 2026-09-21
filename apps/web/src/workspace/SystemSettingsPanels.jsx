@@ -24,7 +24,7 @@ export default function SystemSettingsPanels({ canManage = true }) {
     setError(null);
     try {
       const res = await getPanelSettings();
-      setData(res?.data ?? null);
+      setData(res?.data ?? res ?? null);
     } catch (err) {
       setError(err?.message ?? 'Ayar bilgileri yüklenemedi.');
     } finally {

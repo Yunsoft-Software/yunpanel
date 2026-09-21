@@ -30,7 +30,7 @@ export default function AiDrawer({ open, onClose }) {
     setError(null);
     try {
       const res = await listAiConversations(currentWebsiteId);
-      const items = res?.data || [];
+      const items = Array.isArray(res) ? res : (res?.data || []);
       setConversations(items);
       if (items.length > 0 && !activeConvId) {
         setActiveConvId(items[0].id);
@@ -46,7 +46,7 @@ export default function AiDrawer({ open, onClose }) {
     if (!id) return;
     try {
       const res = await getAiConversation(id);
-      setActiveConversation(res?.data || null);
+      setActiveConversation(res?.messages ? res : (res?.data || null));
     } catch (err) {
       setError(err.message || 'Sohbet detayları yüklenemedi');
     }
@@ -77,8 +77,8 @@ export default function AiDrawer({ open, onClose }) {
         title: 'Yeni Sohbet',
         websiteId: currentWebsiteId,
       });
-      const created = res?.data;
-      if (created) {
+      const created = res?.id ? res : res?.data;
+      if (created?.id) {
         setConversations((prev) => [created, ...prev]);
         setActiveConvId(created.id);
       }
@@ -116,9 +116,13 @@ export default function AiDrawer({ open, onClose }) {
           title: query.slice(0, 30),
           websiteId: currentWebsiteId,
         });
-        targetConvId = res?.data?.id;
+        const created = res?.id ? res : res?.data;
+        targetConvId = created?.id;
+        if (!targetConvId) {
+          throw new Error('Sohbet başlatılamadı: kimlik alınamadı');
+        }
         setActiveConvId(targetConvId);
-        setConversations((prev) => [res.data, ...prev]);
+        setConversations((prev) => [created, ...prev.filter((c) => c?.id !== targetConvId)]);
       } catch (err) {
         setError(err.message || 'Sohbet başlatılamadı');
         setSending(false);
@@ -128,7 +132,8 @@ export default function AiDrawer({ open, onClose }) {
 
     try {
       const res = await sendAiMessage({ conversationId: targetConvId, text: query });
-      if (res?.data) {
+      const msgResult = res?.data ?? res;
+      if (msgResult) {
         await loadActiveConversation(targetConvId);
       }
     } catch (err) {

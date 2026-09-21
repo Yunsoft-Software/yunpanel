@@ -33,11 +33,11 @@ export default function AiSettingsPanel() {
     setError(null);
     try {
       const [provRes, polRes] = await Promise.all([
-        getAiProviders().catch(() => ({ data: [] })),
-        getAiPolicy().catch(() => ({ data: null })),
+        getAiProviders().catch(() => []),
+        getAiPolicy().catch(() => null),
       ]);
-      setProviders(provRes?.data || []);
-      setPolicy(polRes?.data || null);
+      setProviders(Array.isArray(provRes) ? provRes : (provRes?.data || []));
+      setPolicy(polRes?.policy ?? (polRes?.data ?? polRes) ?? null);
     } catch (err) {
       setError(err.message || 'AI ayarları yüklenemedi');
     } finally {
@@ -111,7 +111,7 @@ export default function AiSettingsPanel() {
     setError(null);
     try {
       const res = await testAiProvider(id);
-      if (res?.data?.success) {
+      if (res?.data?.success || res?.success) {
         setTestResult({ id, ok: true, message: 'Bağlantı başarılı! Sağlayıcı yanıt verdi.' });
       } else {
         setTestResult({ id, ok: false, message: 'Bağlantı testi başarısız oldu.' });
