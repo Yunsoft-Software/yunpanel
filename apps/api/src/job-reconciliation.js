@@ -474,6 +474,10 @@ async function applyReconciliation({
 
   if (job.resourceType === 'certificate') {
     if (job.status === 'failed') {
+      if (job.payload?.dryRun === true) {
+        await certificateRegistry.setState(job.resourceId, 'active');
+        return;
+      }
       await certificateRegistry.markFailed(job.resourceId, job.error?.code ?? 'certificate_operation_failed');
       return;
     }
