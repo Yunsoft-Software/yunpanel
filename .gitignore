@@ -13,3 +13,5 @@ npm-debug.log*
 .local/
 .tmp/
 tmp/
+test-results/
+playwright-report/

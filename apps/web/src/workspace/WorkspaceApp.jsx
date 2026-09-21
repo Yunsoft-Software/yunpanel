@@ -21,6 +21,10 @@ import UsersPage from './UsersPage.jsx';
 function RouteFailure() {
   return <main className="ws-content"><h1>Sayfa yüklenemedi</h1><p>Beklenmeyen bir arayüz veya veri hatası oluştu. Sayfayı yeniden yükleyin; sorun sürerse API ve web sürümlerini birlikte kontrol edin.</p><button type="button" className="ws-button" onClick={() => window.location.reload()}>Yeniden yükle</button></main>;
 }
+function OwnerRoute({ children }) {
+  const { isOwner } = usePanelSession();
+  return isOwner ? children : <Navigate to="/websites" replace />;
+}
 function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
   return canManage ? children : <Navigate to="/dashboard" replace />;
@@ -29,6 +33,7 @@ function ScopedRoute({ management, readOnly }) {
   const { canManage } = usePanelSession();
   return canManage ? management : readOnly;
 }
+const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
 function createWorkspaceRouter() {
@@ -40,10 +45,10 @@ function createWorkspaceRouter() {
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'websites/new', element: manage(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
-      { path: 'applications', element: manage(<ApplicationsPage />) },
-      { path: 'applications/new', element: manage(<ApplicationsPage create />) },
-      { path: 'domains', element: manage(<AdvancedDomainsPage />) },
-      { path: 'servers', element: scoped(<ServersPage />, <ReadOnlyServersPage />) },
+      { path: 'applications', element: owner(<ApplicationsPage />) },
+      { path: 'applications/new', element: owner(<ApplicationsPage create />) },
+      { path: 'domains', element: owner(<AdvancedDomainsPage />) },
+      { path: 'servers', element: owner(<ServersPage />) },
       { path: 'databases', element: manage(<DatabasesPage />) },
       { path: 'docker', element: manage(<DockerProjectsPage />) },
       { path: 'docker/:dockerProjectId', element: manage(<DockerProjectsPage />) },
@@ -51,9 +56,9 @@ function createWorkspaceRouter() {
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },
-      { path: 'settings', element: manage(<SettingsPage />) },
-      { path: 'settings/users', element: manage(<UsersPage />) },
-      { path: 'backups', element: manage(<CapabilityPage name="backups" />) },
+      { path: 'settings', element: owner(<SettingsPage />) },
+      { path: 'settings/users', element: owner(<UsersPage />) },
+      { path: 'backups', element: owner(<CapabilityPage name="backups" />) },
       { path: '*', element: <NotFoundPage /> },
     ],
   }]);

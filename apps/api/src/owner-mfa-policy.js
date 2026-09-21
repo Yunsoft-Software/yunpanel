@@ -35,5 +35,12 @@ export function createOwnerMfaPolicy({ store, required = true }) {
     return current;
   }
 
-  return { describe, requireManagement };
+  function requireSiteManagement(session) {
+    const current = describe(session);
+    if (!current) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+    if (!['owner', 'site_manager'].includes(current.user.role)) throw new AuthError('forbidden', 'Management access is required.', 403);
+    return current;
+  }
+
+  return { describe, requireManagement, requireSiteManagement };
 }

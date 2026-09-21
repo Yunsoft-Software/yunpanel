@@ -337,7 +337,9 @@ export function createAuthenticatedApi({
     }
     const authorized = session.user.role === 'read_only'
       ? requireReadOnlyRequest(ownerPolicy.describe(session), request.method, pathname)
-      : ownerPolicy.requireManagement(session);
+      : session.user.role === 'site_manager'
+        ? ownerPolicy.requireSiteManagement(session)
+        : ownerPolicy.requireManagement(session);
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
     request.auth = authorized;
     return withAuditActor(authorized.user.id, () => {

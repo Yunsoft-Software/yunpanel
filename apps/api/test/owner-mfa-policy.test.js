@@ -65,3 +65,13 @@ test('session descriptions publish only server-derived panel capabilities', () =
     ],
   });
 });
+
+test('requireSiteManagement allows owner and site_manager while rejecting read_only and anonymous', () => {
+  const policy = createOwnerMfaPolicy({ store: {}, required: false });
+  assert.equal(policy.requireSiteManagement(owner).user.role, 'owner');
+  const siteManagerSession = { ...owner, user: { id: 'sm1', role: 'site_manager' } };
+  assert.equal(policy.requireSiteManagement(siteManagerSession).user.role, 'site_manager');
+  assert.throws(() => policy.requireSiteManagement(null), { status: 401 });
+  assert.throws(() => policy.requireSiteManagement({ ...owner, user: { id: 'ro1', role: 'read_only' } }), { status: 403 });
+});
+
