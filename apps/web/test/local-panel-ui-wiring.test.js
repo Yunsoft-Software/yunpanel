@@ -29,8 +29,9 @@ test('management UI has one implicit local server and no server chooser', async 
 });
 
 test('primary navigation exposes working modules instead of placeholder destinations', async () => {
-  const [layout, model, app, dockerPage, dockerLifecycle, dockerConfig, operations] = await Promise.all([
+  const [layout, uxModel, model, app, dockerPage, dockerLifecycle, dockerConfig, operations] = await Promise.all([
     readFile(new URL('../src/workspace/WorkspaceLayout.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/ui/ux-model.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/site-model.js', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/WorkspaceApp.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/DockerProjectsPage.jsx', import.meta.url), 'utf8'),
@@ -38,9 +39,10 @@ test('primary navigation exposes working modules instead of placeholder destinat
     readFile(new URL('../src/workspace/DockerConfigPanel.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/OperationsPages.jsx', import.meta.url), 'utf8'),
   ]);
-  assert.match(layout, /\['\/docker', 'Docker', 'box'\]/);
-  assert.match(layout, /\['\/mail', 'Mail', 'mail'\]/);
-  assert.match(layout, /\['\/audit', 'Denetim', 'shield'\]/);
+  assert.match(layout, /navigationGroups/);
+  assert.match(uxModel, /\['\/docker', 'Docker', 'box'\]/);
+  assert.match(uxModel, /\['\/mail', 'Mail', 'mail'\]/);
+  assert.match(uxModel, /\['\/audit', 'Denetim', 'shield'\]/);
   assert.match(app, /path: 'docker', element: manage\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'docker\/:dockerProjectId', element: manage\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'mail', element: manage\(<MailDomainsPage \/>\)/);
