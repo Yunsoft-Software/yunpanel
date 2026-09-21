@@ -77,4 +77,40 @@ test.describe('Module 3: Website Workspace & Plesk Tabs', () => {
       expect(href).toMatch(/^https:\/\/webmail\./);
     }
   });
+
+  test('3.6. Provisioning and Website Isolation panels in Overview tab', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await openFirstWebsiteWorkspace(page);
+
+    // Verify Provisioning panel or Isolation panel is rendered
+    const provisioningOrIsolation = page.locator('.ws-section').filter({ hasText: /Site provisioning|Website izolasyon/i });
+    await expect(provisioningOrIsolation.first()).toBeVisible({ timeout: 10000 });
+  });
+
+  test('3.7. Settings tab displays site metadata, server name, and runtime', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await openFirstWebsiteWorkspace(page);
+
+    const settingsTab = page.locator('nav.ws-tabs a', { hasText: 'Ayarlar' });
+    await settingsTab.click();
+
+    // Verify Site Ayarları section
+    const settingsSection = page.locator('.ws-section:has-text("Site ayarları")');
+    await expect(settingsSection).toBeVisible({ timeout: 10000 });
+    await expect(settingsSection.locator('dt:has-text("Kayıt kimliği")')).toBeVisible();
+    await expect(settingsSection.locator('dt:has-text("Sunucu")')).toBeVisible();
+    await expect(settingsSection.locator('dt:has-text("Hedef türü")')).toBeVisible();
+  });
+
+  test('3.8. Recent jobs section in Overview tab', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await openFirstWebsiteWorkspace(page);
+
+    const overviewTab = page.locator('nav.ws-tabs a', { hasText: 'Genel bakış' });
+    await overviewTab.click();
+
+    const jobsSection = page.locator('.ws-section:has-text("Bu siteye ait son işlemler")');
+    await expect(jobsSection).toBeVisible({ timeout: 10000 });
+  });
 });
+

@@ -65,4 +65,63 @@ test.describe('Module 2: Website Creation & Form Validation', () => {
     await modeSelect.selectOption('domain');
     await expect(page.locator('label:has-text("www davranışı") select')).toBeVisible();
   });
+
+  test('2.4. Source mode switching dynamically updates runtime configuration fields', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await page.goto('/websites/new');
+
+    const sourceSelect = page.locator('label:has-text("Uygulama kaynağı") select');
+    await expect(sourceSelect).toBeVisible();
+
+    // Default is new_node: entry file and health path should be visible
+    await expect(page.locator('label:has-text("Başlangıç dosyası") input')).toBeVisible();
+    await expect(page.locator('label:has-text("Sağlık kontrolü yolu") input')).toBeVisible();
+
+    // Switch to new_static
+    await sourceSelect.selectOption('new_static');
+    await expect(page.locator('label:has-text("Build çıktı klasörü") input')).toBeVisible();
+    await expect(page.locator('label:has-text("Başlangıç dosyası") input')).toHaveCount(0);
+
+    // Switch to external_proxy
+    await sourceSelect.selectOption('external_proxy');
+    await expect(page.locator('label:has-text("Yerel uygulama portu") input')).toBeVisible();
+
+    // Switch to shared_website
+    await sourceSelect.selectOption('shared_website');
+    await expect(page.locator('label:has-text("Paylaşılacak Website") select')).toBeVisible();
+
+    // Switch to new_php
+    await sourceSelect.selectOption('new_php');
+    await expect(page.locator('p:has-text("PHP-FPM")')).toBeVisible();
+  });
+
+  test('2.5. Additional options: Database, HTTPS, and Mail toggles', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await page.goto('/websites/new');
+
+    // Section 3: Veritabanı toggle
+    const dbCheckbox = page.locator('label:has-text("Başlangıç veritabanı") input[type="checkbox"]');
+    await expect(dbCheckbox).toBeVisible();
+    await expect(dbCheckbox).not.toBeChecked();
+    await dbCheckbox.check();
+    await expect(dbCheckbox).toBeChecked();
+
+    // Section 4: HTTPS mode select
+    const httpsSelect = page.locator('label:has-text("Sertifika yönetimi") select');
+    await expect(httpsSelect).toBeVisible();
+    await httpsSelect.selectOption('off');
+    await expect(httpsSelect).toHaveValue('off');
+    await httpsSelect.selectOption('managed');
+    await expect(httpsSelect).toHaveValue('managed');
+
+    // Section 5: Mail mode toggle
+    const mailCheckbox = page.locator('label:has-text("Webmail (Roundcube)") input[type="checkbox"]');
+    if (await mailCheckbox.count() > 0) {
+      await mailCheckbox.uncheck();
+      await expect(mailCheckbox).not.toBeChecked();
+      await mailCheckbox.check();
+      await expect(mailCheckbox).toBeChecked();
+    }
+  });
 });
+

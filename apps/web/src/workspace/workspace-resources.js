@@ -19,6 +19,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   else if (path === '/jobs') enable('jobs');
   else if (path === '/mail' || /^\/mail\/[^/]+$/.test(path)) enable('domains', 'servers', 'jobs');
   else if (path === '/servers' || path === '/settings' || path === '/databases') enable('servers');
+  else if (path === '/docker' || /^\/docker\/[^/]+$/.test(path)) enable('servers', 'jobs');
   if (observingJob || activeJob) enable('jobs');
   return result;
 }

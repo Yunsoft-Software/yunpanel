@@ -111,4 +111,43 @@ test.describe('Module 4: Native Sandboxed File Manager', () => {
     await expect(page.locator(`strong:has-text("${item1}")`)).toHaveCount(0, { timeout: 10000 });
     await expect(page.locator(`strong:has-text("${item2}")`)).toHaveCount(0, { timeout: 10000 });
   });
+
+  test('4.5. Single item deletion and select-all toggle', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await openFirstWebsiteWorkspace(page);
+
+    await page.locator('nav.ws-tabs a', { hasText: 'Dosyalar' }).click();
+    await expect(page.locator('h2:has-text("Site Dosyaları")')).toBeVisible({ timeout: 10000 });
+
+    // Create a temporary file to delete
+    const tempFile = `single_${Date.now()}.txt`;
+    await page.click('button:has-text("Yeni Dosya")');
+    await page.fill('input[placeholder*="index.html"]', tempFile);
+    await page.click('button[type="submit"]:has-text("Oluştur")');
+    await expect(page.locator(`strong:has-text("${tempFile}")`)).toBeVisible({ timeout: 10000 });
+
+    // Click single item "Sil"
+    const fileRow = page.locator(`tr:has(strong:has-text("${tempFile}"))`);
+    await fileRow.locator('button:has-text("Sil")').click();
+
+    // Verify single delete modal: title is "${tempFile} silinsin mi?"
+    const deleteModal = page.locator('dialog[open]');
+    await expect(deleteModal.locator(`h2:has-text("${tempFile} silinsin mi?")`)).toBeVisible({ timeout: 10000 });
+    const code = await deleteModal.locator('label strong').textContent();
+    await deleteModal.locator('label input').fill(code.trim());
+    await deleteModal.locator('button[type="submit"]:has-text("Sil")').click();
+
+    // Verify file deleted from DOM
+    await expect(page.locator(`strong:has-text("${tempFile}")`)).toHaveCount(0, { timeout: 10000 });
+
+    // Test select-all toggle in header checkbox
+    const headerCheckbox = page.locator('table.ws-table thead input[type="checkbox"]');
+    if (await headerCheckbox.count() > 0) {
+      await headerCheckbox.check();
+      await expect(page.locator('button:has-text("Seçilenleri Sil")')).toBeVisible();
+      await headerCheckbox.uncheck();
+      await expect(page.locator('button:has-text("Seçilenleri Sil")')).toHaveCount(0);
+    }
+  });
 });
+

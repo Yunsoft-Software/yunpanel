@@ -9,7 +9,11 @@ test('dashboard requests all summary sources, server/settings/database pages onl
   assert.deepEqual(selected('/databases'), ['servers']);
 });
 test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
-  for (const path of ['/docker', '/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+  for (const path of ['/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+});
+test('docker workspace requests server and job dependencies', () => {
+  assert.deepEqual(selected('/docker'), ['jobs', 'servers']);
+  assert.deepEqual(selected('/docker/proj-123'), ['jobs', 'servers']);
 });
 test('mail workspace requests its implemented inventory and job dependencies', () => {
   assert.deepEqual(selected('/mail'), ['domains', 'jobs', 'servers']);
