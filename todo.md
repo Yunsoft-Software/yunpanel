@@ -4,7 +4,7 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
-## T-TOOLS — P0 ttyd, elFinder, phpMyAdmin/pgAdmin gateway
+## T-TOOLS — P0 ttyd, yerli dosya yöneticisi, phpMyAdmin/pgAdmin gateway
 
 - [ ] PostgreSQL/pgAdmin açıldığında aynı Website role/scope, gateway auth ve çapraz-site reddi gerçek PostgreSQL ile doğrulansın.
 

@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 
 const APPLICATION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const RELEASE_ID = APPLICATION_ID;
-const ROOT_PATTERN = new RegExp(`^/(?:var/www|var/lib)/yunpanel/apps/${APPLICATION_ID}(?:/(?:releases/${RELEASE_ID}|current|public_html))?$`, 'i');
+const ROOT_PATTERN = new RegExp(
+  `^/(?:var/www|var/lib)/yunpanel/apps/${APPLICATION_ID}(?:/(?:releases/${RELEASE_ID}|current)(?:/[A-Za-z0-9._-]+)*|/(?:public_html|public)(?:/[A-Za-z0-9._-]+)*)?$`,
+  'i',
+);
 const MAX_PATH_BYTES = 1_024;
 const MAX_SEGMENT_BYTES = 255;
 const MAX_LIST_ENTRIES = 1_000;
@@ -38,13 +41,16 @@ function relativePath(value, { allowRoot = false, field = 'path' } = {}) {
     fail('site_file_path_invalid', `${field} is invalid`);
   }
   if (value === '') {
-    if (allowRoot) return '';
-    fail('site_file_path_invalid', `${field} must identify an entry`);
+    if (!allowRoot) fail('site_file_path_invalid', `${field} is invalid`);
+    return '';
   }
   const segments = value.split('/');
-  if (segments.some((segment) => !segment || segment === '.' || segment === '..'
-    || Buffer.byteLength(segment, 'utf8') > MAX_SEGMENT_BYTES)) {
-    fail('site_file_path_invalid', `${field} is invalid`);
+  for (const segment of segments) {
+    if (segment === '' || segment === '.' || segment === '..'
+      || Buffer.byteLength(segment, 'utf8') > MAX_SEGMENT_BYTES
+      || segment.includes('\u0000')) {
+      fail('site_file_path_invalid', `${field} is invalid`);
+    }
   }
   return segments.join('/');
 }
@@ -76,11 +82,11 @@ async function managedRoot(value, dependencies) {
   let info;
   let resolved;
   try {
-    [info, resolved] = await Promise.all([dependencies.lstat(value), dependencies.realpath(value)]);
+    [info, resolved] = await Promise.all([dependencies.stat(value), dependencies.realpath(value)]);
   } catch {
     fail('site_file_root_unavailable', 'Managed root is unavailable', 409);
   }
-  if (!info.isDirectory() || info.isSymbolicLink() || !ROOT_PATTERN.test(resolved)) {
+  if (!info.isDirectory() || !ROOT_PATTERN.test(resolved)) {
     fail('site_file_root_invalid', 'Managed root is invalid', 409);
   }
   return resolved;
