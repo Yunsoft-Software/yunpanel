@@ -187,7 +187,7 @@ test('creates a revision-bound rollover key without accepting or returning priva
   assert.equal(JSON.stringify(result).includes('SECRET'), false);
   const createCall = calls.find((entry) => entry.method === 'POST' && entry.path.endsWith('/cryptokeys'));
   assert.deepEqual(createCall.body, {
-    keytype: 'CSK',
+    keytype: 'csk',
     active: false,
     published: false,
     algorithm: 'ECDSAP256SHA256',

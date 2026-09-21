@@ -41,13 +41,14 @@ function normalizeDs(value) {
 }
 
 function publicKey(value) {
+  const cdsList = Array.isArray(value?.cds) ? value.cds : [];
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || !Number.isSafeInteger(value.id) || value.id < 0
     || typeof value.keytype !== 'string' || !KEY_TYPES.has(value.keytype.toLowerCase())
     || typeof value.active !== 'boolean' || typeof value.published !== 'boolean'
     || typeof value.dnskey !== 'string' || !value.dnskey.trim()
-    || !Array.isArray(value.ds) || !Array.isArray(value.cds)
-    || value.ds.some((entry) => typeof entry !== 'string') || value.cds.some((entry) => typeof entry !== 'string')
+    || !Array.isArray(value.ds) || (value.cds !== undefined && !Array.isArray(value.cds))
+    || value.ds.some((entry) => typeof entry !== 'string') || cdsList.some((entry) => typeof entry !== 'string')
     || typeof value.algorithm !== 'string' || !ALGORITHM_PATTERN.test(value.algorithm.trim().toUpperCase())
     || !Number.isSafeInteger(value.bits) || value.bits < 0 || value.bits > 65535) {
     throw new PowerDnsDnssecManagerError('powerdns_dnssec_key_state_invalid', 'PowerDNS DNSSEC key state is invalid', 409);
@@ -59,7 +60,7 @@ function publicKey(value) {
     published: value.published,
     dnskey: value.dnskey.trim(),
     ds: Object.freeze(value.ds.map(normalizeDs)),
-    cds: Object.freeze(value.cds.map((entry) => String(entry).trim()).filter(Boolean)),
+    cds: Object.freeze(cdsList.map((entry) => String(entry).trim()).filter(Boolean)),
     algorithm: value.algorithm.trim().toUpperCase(),
     bits: value.bits,
   });
@@ -281,7 +282,7 @@ export function createPowerDnsDnssecManager({
         method: 'POST',
         rawApiKey,
         body: {
-          keytype: target.keyType.toUpperCase(),
+          keytype: target.keyType.toLowerCase(),
           active: target.active,
           published: target.published,
           algorithm: target.algorithm,
