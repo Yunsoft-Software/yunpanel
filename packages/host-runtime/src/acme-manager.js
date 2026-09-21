@@ -191,7 +191,8 @@ export function createAcmeManager({
     try {
       await run(executable, args);
     } catch (error) {
-      const wrapped = new AcmeManagerError('certbot_failed', 'Certbot operation failed');
+      const detail = error?.stderr || error?.stdout || error?.message || 'Certbot operation failed';
+      const wrapped = new AcmeManagerError('certbot_failed', `Certbot operation failed: ${String(detail).trim().slice(-500)}`);
       wrapped.exitCode = Number.isInteger(error?.code) ? error.code : null;
       throw wrapped;
     }

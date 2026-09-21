@@ -73,8 +73,9 @@ export default function DomainList({ domains, access, busyId = null, onAction = 
                 {onAddSubdomain && <button className="secondary-button" type="button" disabled={busy || Boolean(warning)} onClick={() => onAddSubdomain(domain)}>Add subdomain</button>}
                 {onAction && <button className="secondary-button" type="button" disabled={busy} onClick={() => onAction(domain, 'stage')}>Stage</button>}
                 {onAction && domain.stagedRevision === domain.desiredRevision && <button className="secondary-button" type="button" disabled={busy} onClick={() => onAction(domain, 'activate')}>Activate</button>}
-                {onIssue && domain.httpsMode === 'managed' && domain.state === 'active' && !domain.certificateId && <button className="secondary-button" type="button" disabled={busy} onClick={() => onIssue(domain, true)}>Validate ACME</button>}
-                {onIssue && domain.httpsMode === 'managed' && domain.state === 'active' && !domain.certificateId && <button className="primary-button" type="button" disabled={busy} onClick={() => onIssue(domain, false)}>Issue certificate</button>}
+                {onIssue && !domain.certificateId && <button className="secondary-button" type="button" disabled={busy} onClick={() => onIssue(domain, true)}>Validate ACME</button>}
+                {onIssue && !domain.certificateId && <button className="primary-button" type="button" disabled={busy} onClick={() => onIssue(domain, false)}>Issue certificate</button>}
+                {onIssue && Boolean(domain.certificateId) && <button className="secondary-button" type="button" disabled={busy} onClick={() => onIssue(domain, false)}>Renew certificate</button>}
               </div>
             )}
           </article>

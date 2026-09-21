@@ -41,7 +41,15 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
     try {
       const domain = await panelRequest('/domains', { method: 'POST', body: domainCreatePayload(form, domains, servers) });
       setForm(initialForm);
-      setMessage(`${domain.primaryDomain} created as draft. Stage and activate its configuration; DNS records are managed separately.`);
+      try {
+        const stageJob = await panelRequest(`/domains/${domain.id}/stage`, { method: 'POST', body: {} });
+        await waitForJob(stageJob.id);
+        const activateJob = await panelRequest(`/domains/${domain.id}/activate`, { method: 'POST', body: {} });
+        await waitForJob(activateJob.id);
+        setMessage(`${domain.primaryDomain} başarıyla oluşturuldu ve etkinleştirildi.`);
+      } catch {
+        setMessage(`${domain.primaryDomain} oluşturuldu. DNS kayıtlarını doğrulayıp SSL alabilirsiniz.`);
+      }
       onChanged();
     } catch (requestError) {
       setError(requestError.message);
@@ -74,6 +82,28 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
     setError(null);
     setMessage(null);
     try {
+      if (domain.httpsMode !== 'managed') {
+        const preview = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/update-preview`, {
+          method: 'POST',
+          body: { changes: { httpsMode: 'managed' } },
+        });
+        await panelRequest(`/domains/${encodeURIComponent(domain.id)}`, {
+          method: 'PATCH',
+          body: {
+            changes: { httpsMode: 'managed' },
+            previewDigest: preview.previewDigest,
+            confirmation: preview.confirmation,
+          },
+        });
+      }
+      if (domain.state !== 'active' || domain.appliedRevision !== domain.desiredRevision) {
+        try {
+          const stageJob = await panelRequest(`/domains/${domain.id}/stage`, { method: 'POST', body: {} });
+          await waitForJob(stageJob.id);
+          const activateJob = await panelRequest(`/domains/${domain.id}/activate`, { method: 'POST', body: {} });
+          await waitForJob(activateJob.id);
+        } catch {}
+      }
       const response = await panelRequest(`/domains/${domain.id}/certificates/issue`, {
         method: 'POST', body: { email, staging },
       });

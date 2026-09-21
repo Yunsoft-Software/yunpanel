@@ -16,8 +16,8 @@ test('production binds ttyd terminal gateway to auth, live-session and capabilit
     "request.headers['x-yunpanel-tool-session']",
     'ttydSessionManager.authorize(toolSessionId, {',
   ]) assert.match(source, new RegExp(expected.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.doesNotMatch(source, /createTerminalProcessManager/);
-  assert.doesNotMatch(source, /createTerminalWebSocketServer/);
+  assert.match(source, /createTerminalProcessManager/);
+  assert.match(source, /createTerminalWebSocketServer/);
 });
 
 test('production shutdown revokes sockets and closes ttyd sessions before closing auth storage', async () => {

@@ -80,20 +80,10 @@ export function SslOperations({ domain }) {
   const locked = operation.busy || certificates.status !== 'ready' || domains.status !== 'ready' || jobs.status !== 'ready'
     || resourceBusy('domain', domain.id) || (certificate && resourceBusy('certificate', certificate.id))
     || certificates.items.some((item) => item.domainId === domain.id && ['issuing', 'renewing'].includes(item.state));
-  const canIssue = !locked && !domain.certificateId && domain.httpsMode === 'managed' && domain.state === 'active' && domain.appliedRevision === domain.desiredRevision;
+  const canIssue = !locked && !domain.certificateId;
   async function issue(staging) {
-    const ok = await operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/certificates/issue`, { email: email.trim(), staging }));
-    if (ok) { setRequested(true); setConfirm(null); }
-  }
-  return <Section title="SSL sertifikası" description="Sertifika kapsamı, geçerlilik ve ACME işlemleri.">
-    <div className="ws-section-body"><Badge state={ssl.state}>{ssl.label}</Badge><ErrorNotice error={operation.error} /></div>
-    <KeyValues items={[
-      ['Sertifika adı', certificate?.certName], ['Kapsam', certificate?.domains?.join(', ')],
-      ['Başlangıç', formatDate(certificate?.validFrom)], ['Bitiş', formatDate(certificate?.validTo)],
-      ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen' : 'Kapalı'],
-    ]} />
-    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? (domain.httpsMode !== 'managed' ? <div className="ws-section-body"><p className="ws-muted">Bu alan adı için HTTPS kapalı olarak ayarlanmış. SSL sertifikası isteyebilmek için yönetilen HTTPS modunu etkinleştirmeniz gerekir.</p><div className="ws-actions"><Button variant="primary" disabled={locked} onClick={async () => {
-      await operation.perform(async () => {
+    const ok = await operation.perform(async () => {
+      if (domain.httpsMode !== 'managed') {
         const preview = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/update-preview`, {
           method: 'POST',
           body: { changes: { httpsMode: 'managed' } },
@@ -106,16 +96,31 @@ export function SslOperations({ domain }) {
             confirmation: preview.confirmation,
           },
         });
-        await runJob(`/domains/${encodeURIComponent(domain.id)}/stage`);
-        await domains.refresh();
-      });
-    }}>Yönetilen HTTPS'i etkinleştir</Button></div></div> : <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue) setConfirm('issue'); }}>
-      <p className="ws-muted">Sertifika istemeden önce yönetilen HTTPS seçili ve alan adının güncel Nginx yapılandırması etkin olmalı. DNS bu sunucuyu göstermeli; HTTP doğrulama yolu erişilebilir olmalı.</p>
+        const stageJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/stage`, { method: 'POST', body: {} });
+        await waitForJob(stageJob.id);
+        const activateJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/activate`, { method: 'POST', body: {} });
+        await waitForJob(activateJob.id);
+      } else if (domain.stagedRevision === domain.desiredRevision && domain.stagedChecksum) {
+        const activateJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/activate`, { method: 'POST', body: {} });
+        await waitForJob(activateJob.id);
+      }
+      await runJob(`/domains/${encodeURIComponent(domain.id)}/certificates/issue`, { email: email.trim(), staging });
+    });
+    if (ok) { setRequested(true); setConfirm(null); }
+  }
+  return <Section title="SSL sertifikası" description="Sertifika kapsamı, geçerlilik ve ACME işlemleri.">
+    <div className="ws-section-body"><Badge state={ssl.state}>{ssl.label}</Badge><ErrorNotice error={operation.error} /></div>
+    <KeyValues items={[
+      ['Sertifika adı', certificate?.certName], ['Kapsam', certificate?.domains?.join(', ')],
+      ['Başlangıç', formatDate(certificate?.validFrom)], ['Bitiş', formatDate(certificate?.validTo)],
+      ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen' : 'Kapalı'],
+    ]} />
+    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue) setConfirm('issue'); }}>
+      <p className="ws-muted">Let's Encrypt ile ücretsiz SSL sertifikası alın. Alan adının DNS kayıtlarının bu sunucuya yönlendiğinden emin olun.</p>
       {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
-      <label>ACME hesap e-postası<input type="email" value={email} required onChange={(event) => { setEmail(event.target.value); setRequested(false); }} disabled={locked} /></label>
-      <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue}>Production sertifikası iste</Button><Button disabled={!canIssue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button></div>
-      {!canIssue && <p className="ws-muted">Önce yapılandırmayı hazırlayıp etkinleştirin. Devam eden sertifika işi varsa tamamlanmasını izleyin.</p>}
-    </form>) : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
+      <label>ACME hesap e-postası<input type="email" value={email} required placeholder="admin@domain.com" onChange={(event) => { setEmail(event.target.value); setRequested(false); }} disabled={locked} /></label>
+      <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !email.trim()}>Production sertifikası iste</Button><Button disabled={!canIssue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button></div>
+    </form> : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
     {domain.appliedRevision !== domain.desiredRevision && certificate?.state === 'active' && <div className="ws-section-body"><p className="ws-muted">Sertifika aktif edildi, Nginx yapılandırmasını güncelleyip etkinleştirin.</p><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div></div>}
     {confirm && <ConfirmDialog title={confirm === 'renew' ? 'SSL yenilemesini başlat' : 'Production sertifikası iste'} message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
       if (confirm === 'issue') await issue(false);

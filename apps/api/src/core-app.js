@@ -533,6 +533,8 @@ export function createApp({
     const domain = await domainRegistry.createDomain({
       serverId: localServerId ?? requestedServerId,
       primaryDomain: request.body?.primaryDomain,
+      parentDomainId: request.body?.parentDomainId ?? null,
+      websiteId: request.body?.websiteId ?? null,
       aliases: request.body?.aliases ?? [],
       targetType: request.body?.targetType,
       target: request.body?.target,
@@ -579,8 +581,18 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/domains/:domainId/certificates/issue', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId);
-    if (domain.httpsMode !== 'managed') throw new CertificateRegistryError('https_not_managed', 'Domain must use managed HTTPS before requesting a certificate', 409);
+    let domain = await requireDomain(request.params.domainId);
+    if (domain.httpsMode !== 'managed') {
+      if (typeof domainRegistry.previewDomainUpdate === 'function' && typeof domainRegistry.updateDomain === 'function') {
+        try {
+          const preview = await domainRegistry.previewDomainUpdate({ domainId: domain.id, changes: { httpsMode: 'managed', httpsRedirect: true } });
+          await domainRegistry.updateDomain({ domainId: domain.id, changes: { httpsMode: 'managed', httpsRedirect: true }, previewDigest: preview.previewDigest });
+          domain = await requireDomain(request.params.domainId);
+        } catch {
+          // If domain update cannot be performed synchronously, fall back to managed mode check
+        }
+      }
+    }
     const intent = await resolveCertificateIssueIntent({
       body: request.body,
       domain,

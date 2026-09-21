@@ -51,16 +51,22 @@ export function mountTerminalCapabilityRoutes(app, {
 
   app.post('/api/terminal/capabilities', requirePanelRouteAccess, async (request, response) => {
     const auth = request.auth;
-    if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || auth.user.role !== 'owner') {
-      throw new TerminalCapabilityError('terminal_session_invalid', 'Terminal requires an authenticated Owner session', 401);
+    if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || !['owner', 'site_manager'].includes(auth.user.role)) {
+      throw new TerminalCapabilityError('terminal_session_invalid', 'Terminal requires an authenticated session', 401);
     }
     let target;
     if (request.body?.scope === 'server' && exactBody(request.body, ['scope', 'serverId'])) {
+      if (auth.user.role !== 'owner') {
+        throw new TerminalCapabilityError('terminal_server_forbidden', 'Only server owner can access root terminal', 403);
+      }
       const server = await serverRegistry.getServer(request.body.serverId);
       if (!server) throw new TerminalCapabilityError('server_not_found', 'Server not found', 404);
       localTarget(server.id, localServerId);
       target = { scope: 'server', serverId: server.id, user: 'root', cwd: '/root' };
     } else if (request.body?.scope === 'site' && exactBody(request.body, ['scope', 'websiteId'])) {
+      if (auth.user.role === 'site_manager' && (!Array.isArray(auth.user.websiteIds) || !auth.user.websiteIds.includes(request.body.websiteId))) {
+        throw new TerminalCapabilityError('terminal_site_forbidden', 'You do not have access to this website terminal', 403);
+      }
       const website = await websiteRegistry.getWebsite(request.body.websiteId);
       if (!website) throw new TerminalCapabilityError('website_not_found', 'Website not found', 404);
       localTarget(website.serverId, localServerId);

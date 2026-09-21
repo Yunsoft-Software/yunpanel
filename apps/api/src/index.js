@@ -23,11 +23,13 @@ import { createAiProviderRegistry } from './ai-provider-registry.js';
 import { createAiToolRuntime } from './ai-tool-runtime.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
-import { createAuthenticatedApi } from './auth-http.js';
+import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationPassengerMigrationPreviewService } from './application-passenger-migration-preview.js';
 import { createApplicationPassengerMigrationService } from './application-passenger-migration-service.js';
+import { createTerminalProcessManager } from './terminal-process-manager.js';
+import { createTerminalWebSocketServer } from './terminal-websocket.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createApplicationRuntimeBindingRegistry } from './application-runtime-binding-registry.js';
 import { createBackupOperationRegistry } from './backup-operation-registry.js';
@@ -591,6 +593,7 @@ await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
+const terminalProcessManager = createTerminalProcessManager();
 const ttydSessionManager = createTtydSessionManager({ liveSessions });
 const auditedJobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
@@ -1119,6 +1122,22 @@ const renewalScheduler = startCertificateRenewalScheduler({
   renewBeforeMs: certificateRenewBeforeMs,
 });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
+const terminalAuthenticator = createLiveConnectionAuthenticator({
+  store: authStore,
+  publicOrigin,
+  development: process.env.NODE_ENV === 'development',
+  ownerMfaRequired,
+  proxyToken: internalProxyToken,
+  trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
+});
+const terminalWebSocket = createTerminalWebSocketServer({
+  ...terminalAuthenticator,
+  terminalCapabilityRegistry,
+  terminalProcessManager,
+  liveSessions,
+  audit: authStore.audit,
+});
+server.on('upgrade', terminalWebSocket.handleUpgrade);
 server.listen(port, host, () => {
   console.log(`[yunpanel-api] listening on http://${host}:${port}`);
   console.log(`[yunpanel-api] server store=${serverStorePath}`);
@@ -1193,6 +1212,7 @@ async function shutdown(signal) {
     catch { console.error('[yunpanel-api] mail discovery shutdown failed'); }
   }
   liveSessions.closeAll('server_shutdown');
+  terminalWebSocket.closeAll('server_shutdown');
   ttydSessionManager.closeAll('server_shutdown');
   const closePromise = new Promise((resolve) => {
     server.close((error) => resolve(error ?? null));

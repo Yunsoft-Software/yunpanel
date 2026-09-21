@@ -9,7 +9,7 @@ test('Debian package output is architecture-specific and node-pty native module 
     readFile(new URL('../../../packaging/debian/control', import.meta.url), 'utf8'),
     readFile(new URL('../../../scripts/build-deb.sh', import.meta.url), 'utf8'),
   ]);
-  assert.equal(apiPackage.dependencies['node-pty'], undefined);
+  assert.equal(typeof apiPackage.dependencies['node-pty'], 'string');
   assert.equal(rootPackage.allowScripts, undefined);
   assert.match(control, /^Architecture: @ARCHITECTURE@$/m);
   assert.match(control, /^Depends:.*\blibc6\b.*\blibstdc\+\+6\b/m);

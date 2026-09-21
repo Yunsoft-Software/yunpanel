@@ -6,11 +6,8 @@ import { panelRequest } from '../api.js';
 import { Button, ErrorNotice, Section } from './PanelKit.jsx';
 import {
   createTerminalWebSocket,
-  normalizeTerminalCapability,
-  normalizeTtydSession,
   parseTerminalMessage,
   terminalClientInternals,
-  ttydSessionPath,
 } from './terminal-client.js';
 import './terminal.css';
 
@@ -30,7 +27,7 @@ function issueBody(target) {
 }
 
 function closeMessage(code) {
-  if (code === 4001) return 'Oturum veya Owner yetkisi değiştiği için terminal kapatıldı.';
+  if (code === 4001) return 'Oturum veya yetki değiştiği için terminal kapatıldı.';
   if (code === 4008) return 'Terminal süre sınırı nedeniyle kapatıldı.';
   if (code === 4009) return 'Terminal güvenli çıktı sınırı nedeniyle kapatıldı.';
   if (code === 1012) return 'Panel servisi yeniden başlatıldığı için terminal kapatıldı.';
@@ -46,14 +43,11 @@ export default function TerminalPanel({ target, title, description, unavailable 
   const terminal = useRef(null);
   const fit = useRef(null);
   const socket = useRef(null);
-  const ttydSessionRef = useRef(null);
   const connected = useRef(false);
   const attempt = useRef(0);
   const [status, setStatus] = useState('idle');
   const [error, setError] = useState(null);
   const [context, setContext] = useState(null);
-  const [mode, setMode] = useState(null);
-  const [ttydSession, setTtydSession] = useState(null);
   const body = issueBody(target);
 
   function writeNotice(message) {
@@ -92,20 +86,13 @@ export default function TerminalPanel({ target, title, description, unavailable 
       try { fitAddon.fit(); } catch {}
     }) : null;
     observer?.observe(container.current);
+
     return () => {
       attempt.current += 1;
       connected.current = false;
       const active = socket.current;
       socket.current = null;
       if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'view_closed');
-      const activeTtyd = ttydSessionRef.current;
-      ttydSessionRef.current = null;
-      if (activeTtyd) {
-        void panelRequest(ttydSessionPath(activeTtyd.sessionId), {
-          method: 'DELETE',
-          body: {},
-        }).catch(() => {});
-      }
       observer?.disconnect();
       input.dispose();
       resize.dispose();
@@ -115,7 +102,7 @@ export default function TerminalPanel({ target, title, description, unavailable 
     };
   }, []);
 
-  async function connectLegacy() {
+  async function connect() {
     if (!body || ['issuing', 'connecting', 'open'].includes(status)) return;
     const currentAttempt = attempt.current + 1;
     attempt.current = currentAttempt;
@@ -147,7 +134,6 @@ export default function TerminalPanel({ target, title, description, unavailable 
             return;
           }
           connected.current = true;
-          setMode('legacy');
           setContext(message.target);
           setStatus('open');
           terminal.current?.reset();
@@ -167,7 +153,6 @@ export default function TerminalPanel({ target, title, description, unavailable 
         connected.current = false;
         socket.current = null;
         setContext(null);
-        setMode(null);
         setStatus(event.wasClean ? 'closed' : 'error');
         writeNotice(closeMessage(event.code));
       });
@@ -177,78 +162,25 @@ export default function TerminalPanel({ target, title, description, unavailable 
     } catch (failure) {
       if (attempt.current !== currentAttempt || failure.name === 'AbortError') return;
       setStatus('error');
-      setMode(null);
       setError(failure.message);
       writeNotice('Terminal açılamadı.');
     }
   }
 
-  function disconnectLegacy() {
+  function disconnect() {
     attempt.current += 1;
     connected.current = false;
     const active = socket.current;
     socket.current = null;
-    if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'owner_closed');
+    if (active && active.readyState < WebSocket.CLOSING) active.close(1000, 'user_closed');
     setStatus('closed');
-    setMode(null);
     setContext(null);
     writeNotice('Terminal kullanıcı tarafından kapatıldı.');
   }
 
-  async function connectTtyd() {
-    if (!body || ['issuing', 'connecting', 'open'].includes(status)) return;
-    const currentAttempt = attempt.current + 1;
-    attempt.current = currentAttempt;
-    setError(null);
-    setContext(null);
-    setMode(null);
-    setStatus('issuing');
-    try {
-      const rawCapability = await panelRequest('/terminal/capabilities', {
-        method: 'POST',
-        body,
-      });
-      const capability = normalizeTerminalCapability(rawCapability);
-      if (attempt.current !== currentAttempt) return;
-
-      setStatus('connecting');
-      const rawSession = await panelRequest('/terminal/ttyd-sessions', {
-        method: 'POST',
-        body: { capability: capability.capability },
-      });
-      if (attempt.current !== currentAttempt) return;
-      const session = normalizeTtydSession(rawSession, capability.target);
-      ttydSessionRef.current = session;
-      setTtydSession(session);
-      setContext(session.target);
-      setMode('ttyd');
-      setStatus('open');
-    } catch (failure) {
-      if (attempt.current !== currentAttempt || failure.name === 'AbortError') return;
-      setStatus('error');
-      setMode(null);
-      setError(failure.message);
-    }
-  }
-
-  async function disconnectTtyd() {
-    const active = ttydSessionRef.current;
-    if (!active) return;
-    attempt.current += 1;
-    ttydSessionRef.current = null;
-    setTtydSession(null);
-    setContext(null);
-    setMode(null);
-    setStatus('closed');
-    setError(null);
-    try {
-      await panelRequest(ttydSessionPath(active.sessionId), {
-        method: 'DELETE',
-        body: {},
-      });
-    } catch (failure) {
-      if (failure.name !== 'AbortError') setError(failure.message);
-    }
+  function clearTerminal() {
+    terminal.current?.clear();
+    terminal.current?.focus();
   }
 
   const pending = ['issuing', 'connecting'].includes(status);
@@ -257,38 +189,29 @@ export default function TerminalPanel({ target, title, description, unavailable 
     description={description}
     actions={<div className="ws-actions">
       <span className="ws-muted" role="status">{statusLabels[status]}</span>
-      {status === 'open' && mode === 'ttyd' && <Button onClick={disconnectTtyd}>Terminali kapat</Button>}
-      {status === 'open' && mode === 'legacy' && <Button onClick={disconnectLegacy}>Legacy bağlantıyı kapat</Button>}
-      {status !== 'open' && <>
-        <Button
-          variant="primary"
-          icon="terminal"
-          onClick={connectTtyd}
-          disabled={!body || pending}
-        >{status === 'closed' || status === 'error' ? 'ttyd ile yeniden aç' : 'ttyd ile aç'}</Button>
-        {target?.scope === 'server' && <Button
-          onClick={connectLegacy}
-          disabled={!body || pending}
-        >Legacy gömülü terminal</Button>}
+      {status === 'open' && <>
+        <Button onClick={clearTerminal}>Temizle</Button>
+        <Button onClick={disconnect}>Bağlantıyı kapat</Button>
       </>}
+      {status !== 'open' && <Button
+        variant="primary"
+        icon="terminal"
+        onClick={connect}
+        disabled={!body || pending}
+      >{status === 'closed' || status === 'error' ? 'Yeniden bağlan' : 'Terminali aç'}</Button>}
     </div>}
   >
     {unavailable && <div className="ws-notice ws-notice-warn"><span>{unavailable}</span></div>}
     <ErrorNotice error={error} />
-    <div className="ws-terminal-context" aria-label="Terminal bağlamı"><span>{context?.user ?? (target?.scope === 'server' ? 'root' : 'Site kullanıcısı')}</span><span>{context?.cwd ?? 'Bağlantı açıldığında çalışma dizini doğrulanır'}</span></div>
-    {ttydSession && <iframe
-      className="ws-terminal-frame"
-      src={ttydSession.basePath}
-      title={`${title} · ttyd`}
-      referrerPolicy="no-referrer"
-    />}
+    <div className="ws-terminal-context" aria-label="Terminal bağlamı">
+      <span><strong>Kullanıcı:</strong> {context?.user ?? (target?.scope === 'server' ? 'root' : 'Site kullanıcısı (izole)')}</span>
+      <span><strong>Dizin:</strong> {context?.cwd ?? (target?.scope === 'server' ? '/root' : 'Site document root')}</span>
+    </div>
     <div
       ref={container}
       className="ws-terminal-surface"
       aria-label={title}
-      hidden={Boolean(ttydSession)}
     />
-    {!ttydSession && mode !== 'legacy' && <p className="ws-muted ws-terminal-migration-note">Birincil terminal ttyd'dir. Legacy gömülü xterm yalnız gerçek host kabulü tamamlanana kadar migration fallback olarak tutulur.</p>}
   </Section>;
 }
 
