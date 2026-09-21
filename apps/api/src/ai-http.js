@@ -167,6 +167,7 @@ export function mountAiRoutes(app, {
   policyOverrides = {},
   policyStore = null,
   providerRegistry = null,
+  conversationService = null,
 } = {}) {
   validateDependencies(app, registry, audit, policyOverrides, policyStore, providerRegistry);
 
@@ -253,6 +254,68 @@ export function mountAiRoutes(app, {
         throw new AiHttpError('provider_test_failed', `Provider connection test failed: ${error.message}`, 502);
       }
     }));
+  }
+
+  if (conversationService) {
+    app.get('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const websiteId = typeof request.query.websiteId === 'string' ? request.query.websiteId : null;
+      const list = await conversationService.listConversations({ websiteId });
+      return response.json({ data: list });
+    }));
+
+    app.post('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const title = typeof request.body?.title === 'string' ? request.body.title : undefined;
+      const websiteId = typeof request.body?.websiteId === 'string' ? request.body.websiteId : null;
+      const conversation = await conversationService.createConversation({ title, websiteId });
+      return response.status(201).json({ data: conversation });
+    }));
+
+    app.get('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const conversation = await conversationService.getConversation(request.params.conversationId);
+      if (!conversation) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
+      return response.json({ data: conversation });
+    }));
+
+    app.delete('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const deleted = await conversationService.deleteConversation(request.params.conversationId);
+      if (!deleted) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
+      return response.json({ data: { success: true } });
+    }));
+
+    app.post('/api/ai/conversations/:conversationId/messages', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const text = request.body?.text;
+      const message = await conversationService.sendMessage({
+        conversationId: request.params.conversationId,
+        text,
+        auth: request.auth,
+      });
+      return response.json({ data: message });
+    }));
+
+    app.post('/api/ai/conversations/:conversationId/messages/stream', requirePanelRouteAccess, async (request, response) => {
+      response.setHeader('content-type', 'text/event-stream');
+      response.setHeader('cache-control', 'no-cache');
+      response.setHeader('connection', 'keep-alive');
+      response.setHeader('x-accel-buffering', 'no');
+      response.flushHeaders?.();
+
+      const sendEvent = (event) => {
+        response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+      };
+
+      try {
+        await conversationService.sendMessage({
+          conversationId: request.params.conversationId,
+          text: request.body?.text,
+          auth: request.auth,
+          onEvent: sendEvent,
+        });
+        response.end();
+      } catch (err) {
+        sendEvent({ type: 'error', code: err.code || 'chat_error', message: err.message });
+        response.end();
+      }
+    });
   }
 
   app.get('/api/ai/tools', requirePanelRouteAccess, asyncRoute(async (request, response) => {

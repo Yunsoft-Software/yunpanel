@@ -17,6 +17,7 @@ import {
   inspectNginx,
 } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
+import { createAiConversationService } from './ai-conversation-service.js';
 import { createAiPolicyStore } from './ai-policy-store.js';
 import { createAiProviderRegistry } from './ai-provider-registry.js';
 import { createAiToolRuntime } from './ai-tool-runtime.js';
@@ -166,6 +167,8 @@ const aiPolicyStorePath = process.env.YUNPANEL_AI_POLICY_STORE
   ?? path.join(controlPlaneStateRoot, 'ai-policy.json');
 const aiProviderStorePath = process.env.YUNPANEL_AI_PROVIDER_STORE
   ?? path.join(controlPlaneStateRoot, 'ai-providers.json');
+const aiConversationStorePath = process.env.YUNPANEL_AI_CONVERSATION_STORE
+  ?? path.join(controlPlaneStateRoot, 'ai-conversations.json');
 const resticRepositoryStorePath = process.env.YUNPANEL_RESTIC_REPOSITORY_STORE
   ?? path.join(controlPlaneStateRoot, 'restic-repositories.json');
 const rcloneRemoteStorePath = process.env.YUNPANEL_RCLONE_REMOTE_STORE
@@ -617,6 +620,16 @@ const aiToolRegistry = createAiToolRuntime({
   nginxLogReader,
   localServerId,
 });
+const aiConversationService = createAiConversationService({
+  filePath: aiConversationStorePath,
+  providerRegistry: aiProviderRegistry,
+  toolRegistry: aiToolRegistry,
+  policyStore: aiPolicyStore,
+  websiteRegistry,
+  domainRegistry,
+  applicationRegistry,
+});
+await aiConversationService.init();
 const websiteCronApplyService = createWebsiteCronApplyService({
   websiteCronRegistry,
   jobRegistry,
@@ -988,6 +1001,7 @@ const listener = createAuthenticatedApi({
       aiAudit: authStore.audit,
       aiPolicyStore,
       aiProviderRegistry,
+      aiConversationService,
       domainSuspensionRuntime,
       dnsZoneRetirementImpactService: dnsZoneRetirementService,
       dnsZoneRetirementRuntime,

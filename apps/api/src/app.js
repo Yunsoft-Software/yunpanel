@@ -213,6 +213,7 @@ export function createApp({
   aiPolicyOverrides = {},
   aiPolicyStore = null,
   aiProviderRegistry = null,
+  aiConversationService = null,
   certificateRegistry = createCertificateRegistry(),
   certificateMaterialManager = createCertificateMaterialManager(),
   certificateMaterialGc = null,
@@ -474,6 +475,7 @@ export function createApp({
       policyOverrides: aiPolicyOverrides,
       policyStore: aiPolicyStore,
       providerRegistry: aiProviderRegistry,
+      conversationService: aiConversationService,
     });
   }
   const resolvedResticManager = resticManager ?? (
