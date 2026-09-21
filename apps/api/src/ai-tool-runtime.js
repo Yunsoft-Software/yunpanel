@@ -1,4 +1,6 @@
+import { createHash } from 'node:crypto';
 import { MANAGED_SERVICE_CONTROL_IDS, OPERATIONS } from '@yunpanel/protocol';
+import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { DEFAULT_AI_TOOL_DEFINITIONS } from './ai-tool-catalog.js';
 import { createAiToolRegistry } from './ai-tool-registry.js';
 import { jobPublicView } from './job-registry.js';
@@ -73,10 +75,19 @@ export function createAiToolRuntime({
   applicationRegistry,
   jobRegistry,
   applicationEnvironmentRegistry = null,
+  applicationDeployQueue = null,
   dnsHostingRegistry = null,
+  dnsRecordManager = null,
   certificateRegistry = null,
   mailDomainRegistry = null,
   databaseBindingRegistry = null,
+  websiteBackupSetProvider = null,
+  websiteBackupService = null,
+  websiteRestoreService = null,
+  resticRepositoryRegistry = null,
+  resticManager = null,
+  journalLogReader = null,
+  nginxLogReader = null,
   localServerId = null,
 } = {}) {
   requireDependencies({ serverRegistry, websiteRegistry, domainRegistry, applicationRegistry, jobRegistry });
@@ -311,6 +322,294 @@ export function createAiToolRuntime({
         resourceId: application.id,
       });
       return jobPublicView(job);
+    });
+  }
+
+  const deployQueue = applicationDeployQueue ?? (
+    applicationEnvironmentRegistry && typeof jobRegistry?.enqueue === 'function'
+      ? createApplicationDeployQueue({ applicationRegistry, applicationEnvironmentRegistry, jobRegistry })
+      : null
+  );
+
+  if (deployQueue) {
+    registry.bind('application.deploy', async ({ input }) => {
+      const application = requireLocalResource(
+        await applicationRegistry.getApplication(input.applicationId),
+        localServerId,
+        'application_not_found',
+        'Application not found',
+      );
+      await ensureResourceIdle(jobRegistry, 'application', application.id);
+      const result = await deployQueue({
+        applicationId: application.id,
+        gitTarget: input.gitTarget ?? null,
+      });
+      return Object.freeze({
+        application: result.application,
+        job: jobPublicView(result.job),
+        replayed: Boolean(result.replayed),
+      });
+    });
+  }
+
+  if (typeof jobRegistry?.enqueue === 'function' && applicationEnvironmentRegistry) {
+    registry.bind('application.rollback', async ({ input }) => {
+      const application = requireLocalResource(
+        await applicationRegistry.getApplication(input.applicationId),
+        localServerId,
+        'application_not_found',
+        'Application not found',
+      );
+      if (!['static', 'node', 'python'].includes(application.type)) {
+        throw new AiToolRuntimeError('rollback_not_supported', 'Rollback is not implemented for this application type', 409);
+      }
+      await ensureResourceIdle(jobRegistry, 'application', application.id);
+      if (application.activeDeploymentId) {
+        throw new AiToolRuntimeError('deployment_in_progress', 'Application already has an active operation', 409);
+      }
+
+      const releaseId = input.releaseId ?? application.previousReleaseId;
+      if (!releaseId) {
+        throw new AiToolRuntimeError('rollback_release_required', 'No previous release is available for rollback', 409);
+      }
+
+      const nodeRollback = application.type === 'node';
+      const pythonRollback = application.type === 'python';
+      const environment = (nodeRollback || pythonRollback) ? await applicationEnvironmentRegistry.environmentStatus(application.id) : null;
+      const job = await jobRegistry.enqueue({
+        serverId: application.serverId,
+        type: pythonRollback ? 'app.python.rollback' : (nodeRollback ? 'app.node.rollback' : 'app.static.rollback'),
+        operation: pythonRollback ? OPERATIONS.APP_PYTHON_ROLLBACK : (nodeRollback ? OPERATIONS.APP_NODE_ROLLBACK : OPERATIONS.APP_STATIC_ROLLBACK),
+        payload: (nodeRollback || pythonRollback)
+          ? {
+              applicationId: application.id,
+              releaseId,
+              currentReleaseId: application.currentReleaseId,
+              runtime: application.releases?.find((release) => release.releaseId === releaseId)?.runtime
+                ?? application.activeRuntime
+                ?? application.runtime,
+              environmentRevision: environment?.savedRevision ?? null,
+            }
+          : {
+              applicationId: application.id,
+              releaseId,
+              currentReleaseId: application.currentReleaseId,
+            },
+        resourceType: 'application',
+        resourceId: application.id,
+      });
+
+      const updatedApp = await applicationRegistry.markRollingBack(application.id, job.id, releaseId);
+      return Object.freeze({
+        application: updatedApp,
+        job: jobPublicView(job),
+      });
+    });
+  }
+
+  if (journalLogReader || nginxLogReader) {
+    registry.bind('logs.query', async ({ input }) => {
+      const limit = Math.min(Math.max(1, Number(input?.limit) || 50), 200);
+      const search = typeof input?.query === 'string' ? input.query.slice(0, 100) : null;
+      let entries = [];
+      let source = 'system';
+
+      if (input?.applicationId) {
+        const application = requireLocalResource(
+          await applicationRegistry.getApplication(input.applicationId),
+          localServerId,
+          'application_not_found',
+          'Application not found',
+        );
+        if (application.type === 'node' && journalLogReader) {
+          const unit = `yunpanel-node-${createHash('sha256').update(application.id.toLowerCase()).digest('hex').slice(0, 16)}.service`;
+          const result = await journalLogReader.query({
+            unit,
+            limit,
+            search: search || undefined,
+          });
+          entries = result.entries ?? [];
+          source = 'journal';
+        }
+      } else if (input?.websiteId) {
+        const website = requireLocalResource(
+          await websiteRegistry.getWebsite(input.websiteId),
+          localServerId,
+          'website_not_found',
+          'Website not found',
+        );
+        if (website.applicationId && journalLogReader) {
+          const app = await applicationRegistry.getApplication(website.applicationId);
+          if (app && app.type === 'node') {
+            const unit = `yunpanel-node-${createHash('sha256').update(app.id.toLowerCase()).digest('hex').slice(0, 16)}.service`;
+            const result = await journalLogReader.query({
+              unit,
+              limit,
+              search: search || undefined,
+            });
+            entries = result.entries ?? [];
+            source = 'journal';
+          }
+        }
+        if (entries.length === 0 && nginxLogReader) {
+          const domains = (await domainRegistry.listDomains()).filter((d) => d.websiteId === website.id);
+          const domainName = domains[0]?.domainName;
+          if (domainName) {
+            const result = await nginxLogReader.query({
+              domain: domainName,
+              limit,
+              search: search || undefined,
+            }).catch(() => ({ entries: [] }));
+            entries = result.entries ?? [];
+            source = 'nginx';
+          }
+        }
+      } else if (journalLogReader) {
+        const result = await journalLogReader.query({
+          unit: 'nginx.service',
+          limit,
+          search: search || undefined,
+        });
+        entries = result.entries ?? [];
+        source = 'system';
+      }
+
+      return Object.freeze({
+        source,
+        limit,
+        count: entries.length,
+        entries: Object.freeze(entries.slice(0, limit)),
+      });
+    });
+  }
+
+  if (dnsHostingRegistry && typeof jobRegistry?.enqueue === 'function') {
+    registry.bind('dns.update', async ({ input }) => {
+      const zone = await dnsHostingRegistry.getZone(input.dnsZoneId);
+      if (!zone) throw new AiToolRuntimeError('dns_zone_not_found', 'DNS zone not found', 404);
+      const server = await resolveLocalServer(serverRegistry, localServerId);
+      await ensureResourceIdle(jobRegistry, 'dns_zone', zone.id);
+
+      const job = await jobRegistry.enqueue({
+        serverId: server.id,
+        type: 'dns.record.apply',
+        operation: OPERATIONS.DNS_RECORD_APPLY,
+        payload: {
+          dnsZoneId: zone.id,
+          zoneName: zone.zoneName,
+          change: input.change,
+        },
+        resourceType: 'dns_zone',
+        resourceId: zone.id,
+      });
+
+      return Object.freeze({
+        zone,
+        job: jobPublicView(job),
+      });
+    });
+  }
+
+  if (certificateRegistry && typeof jobRegistry?.enqueue === 'function') {
+    registry.bind('certificate.issue', async ({ input }) => {
+      const domain = requireLocalResource(
+        await domainRegistry.getDomain(input.domainId),
+        localServerId,
+        'domain_not_found',
+        'Domain not found',
+      );
+      await ensureResourceIdle(jobRegistry, 'certificate', domain.id);
+      const server = await resolveLocalServer(serverRegistry, localServerId);
+
+      const job = await jobRegistry.enqueue({
+        serverId: server.id,
+        type: 'ssl.issue',
+        operation: OPERATIONS.SSL_ISSUE,
+        payload: {
+          domainId: domain.id,
+          domains: [domain.domainName],
+        },
+        resourceType: 'certificate',
+        resourceId: domain.id,
+      });
+
+      return Object.freeze({
+        domain,
+        job: jobPublicView(job),
+      });
+    });
+
+    registry.bind('certificate.renew', async ({ input }) => {
+      const cert = await certificateRegistry.getCertificate(input.certificateId);
+      if (!cert) throw new AiToolRuntimeError('certificate_not_found', 'Certificate not found', 404);
+      await ensureResourceIdle(jobRegistry, 'certificate', cert.id);
+      const server = await resolveLocalServer(serverRegistry, localServerId);
+
+      const job = await jobRegistry.enqueue({
+        serverId: server.id,
+        type: 'ssl.renew',
+        operation: OPERATIONS.SSL_RENEW,
+        payload: {
+          certName: cert.certName,
+          certificateId: cert.id,
+        },
+        resourceType: 'certificate',
+        resourceId: cert.id,
+      });
+
+      return Object.freeze({
+        certificate: cert,
+        job: jobPublicView(job),
+      });
+    });
+  }
+
+  if (websiteBackupSetProvider) {
+    registry.bind('backup.inspect', async ({ input }) => {
+      const website = requireLocalResource(
+        await websiteRegistry.getWebsite(input.websiteId),
+        localServerId,
+        'website_not_found',
+        'Website not found',
+      );
+      const server = await resolveLocalServer(serverRegistry, localServerId);
+      const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({
+        websiteId: website.id,
+        serverId: server.id,
+      });
+      return Object.freeze({ website, backupSet });
+    });
+  }
+
+  if (websiteBackupService) {
+    registry.bind('backup.create', async ({ input }) => {
+      const website = requireLocalResource(
+        await websiteRegistry.getWebsite(input.websiteId),
+        localServerId,
+        'website_not_found',
+        'Website not found',
+      );
+      const result = await websiteBackupService.executeBackup({
+        websiteId: website.id,
+        tags: ['ai-agent'],
+      });
+      return Object.freeze({ website, result });
+    });
+  }
+
+  if (websiteRestoreService) {
+    registry.bind('backup.restore', async ({ input }) => {
+      const website = requireLocalResource(
+        await websiteRegistry.getWebsite(input.websiteId),
+        localServerId,
+        'website_not_found',
+        'Website not found',
+      );
+      const result = await websiteRestoreService.executeRestore({
+        websiteId: website.id,
+        snapshotId: input.snapshotId,
+      });
+      return Object.freeze({ website, result });
     });
   }
 

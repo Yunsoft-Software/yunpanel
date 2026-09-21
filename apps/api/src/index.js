@@ -613,6 +613,8 @@ const aiToolRegistry = createAiToolRuntime({
   certificateRegistry,
   mailDomainRegistry,
   databaseBindingRegistry,
+  journalLogReader,
+  nginxLogReader,
   localServerId,
 });
 const websiteCronApplyService = createWebsiteCronApplyService({
