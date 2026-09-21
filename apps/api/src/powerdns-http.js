@@ -26,6 +26,8 @@ import { createDnsZoneTemplateRollbackService } from './dns-zone-template-rollba
 import { createDomainRegistry } from './domain-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
+import { createPowerDnsZoneManager } from '@yunpanel/host-runtime/powerdns-zone-manager';
+import { renderDnsZoneDesiredState } from './dns-zone-desired-state.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
@@ -740,6 +742,66 @@ export function mountPowerDnsRoutes(app, {
 
   app.get('/api/domains/:domainId/dns/zone', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const zone = await zoneRecordsOperation(async () => (await zoneRecordsService()).getZone({ domainId: request.params.domainId }));
+    return response.json({ data: zone });
+  }));
+
+  app.post('/api/domains/:domainId/dns/provision-zone', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (!domainRegistry) throw new PowerDnsHttpError('domain_registry_unavailable', 'Domain registry is unavailable', 503);
+    const domain = await domainRegistry.getDomain(request.params.domainId);
+    if (!domain) throw new PowerDnsHttpError('domain_not_found', 'Domain was not found', 404);
+    const localId = authoritativeService.localServerId;
+    if (domain.serverId !== localId) {
+      throw new PowerDnsHttpError('domain_not_local', 'DNS zone provisioning is restricted to this panel host', 404);
+    }
+    if (domain.parentDomainId !== null && domain.parentDomainId !== undefined) {
+      throw new PowerDnsHttpError('domain_is_subdomain', 'Only root domains can have an authoritative DNS zone', 409);
+    }
+    const identity = await dnsIdentityRegistry.getForServer(domain.serverId);
+    if (!identity) {
+      throw new PowerDnsHttpError('dns_identity_required', 'Server DNS identity is not configured', 409);
+    }
+    const template = await templateRegistry.getForServer(domain.serverId)
+      ?? await templateRegistry.ensureForServer(domain.serverId);
+    const secret = await powerDnsSecretRegistry.materializeForServer(domain.serverId);
+    const date = new Date();
+    const serial = Number.parseInt([
+      date.getUTCFullYear().toString().padStart(4, '0'),
+      (date.getUTCMonth() + 1).toString().padStart(2, '0'),
+      date.getUTCDate().toString().padStart(2, '0'),
+      '01',
+    ].join(''), 10);
+    let mailState = null;
+    if (mailDomainRegistry && mailServiceIdentityRegistry) {
+      try {
+        const resolver = createDnsZoneMailIntentResolver({
+          mailDomainRegistry,
+          mailDkimRegistry,
+          mailDkimRetirementRegistry,
+          mailServiceIdentityRegistry,
+          mailDiscoveryEndpointResolver,
+          roundcubeWebmailEndpointResolver,
+        });
+        mailState = await resolver.resolve({ domain, retirePendingDkim: false });
+      } catch {
+        // Continue without mail intent if domain has no mail or resolution fails
+      }
+    }
+    const desired = renderDnsZoneDesiredState({
+      zoneName: domain.primaryDomain,
+      template,
+      dnsIdentity: identity,
+      serial,
+      mail: mailState?.intent ?? null,
+    });
+    const manager = createPowerDnsZoneManager();
+    await manager.apply({
+      zoneName: domain.primaryDomain,
+      apiKey: secret.apiKey,
+      records: desired.records,
+      dnssec: identity.settings?.dnssecDefault === true,
+      notifySecondaries: Array.isArray(identity.settings?.secondaryDns) && identity.settings.secondaryDns.length > 0,
+    });
+    const zone = await zoneRecordsOperation(async () => (await zoneRecordsService()).getZone({ domainId: domain.id }));
     return response.json({ data: zone });
   }));
 

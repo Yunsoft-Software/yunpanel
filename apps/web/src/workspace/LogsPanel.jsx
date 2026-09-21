@@ -9,7 +9,7 @@ function logPath({ application, serverId, source }) {
 }
 
 export default function LogsPanel({ application, domain, server }) {
-  const [source, setSource] = useState(application?.type === 'node' ? 'node' : 'nginx-error');
+  const [source, setSource] = useState(application?.type === 'node' ? 'node' : 'nginx-access');
   const [search, setSearch] = useState('');
   const [result, setResult] = useState(null);
   const [busy, setBusy] = useState(false);

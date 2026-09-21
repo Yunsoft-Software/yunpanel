@@ -251,7 +251,7 @@ function passengerBody({ target, nginxSettings }) {
 function phpBody({ root, socketPath, nginxSettings }) {
   const renderedHeaders = headerLines(nginxSettings.headers);
   const phpHeaders = headerLines(nginxSettings.headers);
-  return `  root ${root};\n  index index.php index.html;\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n  }`;
+  return `  root ${root};\n  index index.php index.html;\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }`;
 }
 
 export function renderStaticSiteConfig({

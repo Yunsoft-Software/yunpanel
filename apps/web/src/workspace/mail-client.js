@@ -225,4 +225,54 @@ export function applyMailDkim(mailDomainId, { expectedKeyRevision, preview } = {
   });
 }
 
+export function inspectMailWebmail(mailDomainId) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail`);
+}
+
+export function previewBindMailWebmail(mailDomainId, { certificateId } = {}) {
+  requiredId(certificateId, 'certificateId');
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail/bind-preview`, {
+    method: 'POST',
+    body: { certificateId },
+  });
+}
+
+export function bindMailWebmail(mailDomainId, { certificateId, previewDigest, confirmation } = {}) {
+  requiredId(certificateId, 'certificateId');
+  if (typeof previewDigest !== 'string' || !previewDigest) throw new Error('previewDigest is required');
+  if (typeof confirmation !== 'string' || !confirmation) throw new Error('confirmation is required');
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail/bind`, {
+    method: 'POST',
+    body: { certificateId, previewDigest, confirmation },
+  });
+}
+
+export function previewDeleteMailWebmail(mailDomainId) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail/delete-preview`, {
+    method: 'POST',
+    body: {},
+  });
+}
+
+export function deleteMailWebmail(mailDomainId, { expectedRevision, previewDigest, confirmation } = {}) {
+  positiveRevision(expectedRevision);
+  if (typeof previewDigest !== 'string' || !previewDigest) throw new Error('previewDigest is required');
+  if (typeof confirmation !== 'string' || !confirmation) throw new Error('confirmation is required');
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail/delete`, {
+    method: 'POST',
+    body: { expectedRevision, previewDigest, confirmation },
+  });
+}
+
+export function continueMailWebmail(mailDomainId, { operationId, expectedUpdatedAt, confirmation } = {}) {
+  if (typeof operationId !== 'string' || !operationId) throw new Error('operationId is required');
+  if (typeof expectedUpdatedAt !== 'string' || !expectedUpdatedAt) throw new Error('expectedUpdatedAt is required');
+  if (typeof confirmation !== 'string' || !confirmation) throw new Error('confirmation is required');
+  return panelRequest(`${mailDomainPath(mailDomainId)}/webmail/continue`, {
+    method: 'POST',
+    body: { operationId, expectedUpdatedAt, confirmation },
+  });
+}
+
 export const mailClientInternals = Object.freeze({ requiredId, positiveRevision, mailDomainPath, mailboxPath, aliasPath });
+

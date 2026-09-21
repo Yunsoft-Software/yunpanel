@@ -7,6 +7,7 @@ import MailConfigurationPanel from './MailConfigurationPanel.jsx';
 import MailDkimDiagnosticsPanel from './MailDkimDiagnosticsPanel.jsx';
 import MailDomainCreateDialog from './MailDomainCreateDialog.jsx';
 import MailOperationsPanel from './MailOperationsPanel.jsx';
+import MailWebmailPanel from './MailWebmailPanel.jsx';
 import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 
@@ -67,7 +68,7 @@ function MailDomainDetail({ mailDomainId }) {
     ['Mailbox', data.mailboxes?.length ?? 0],
     ['Alias', data.aliases?.length ?? 0],
     ['Son gözlem', formatDate(domain.lastObservedAt)],
-  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, alias, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section>{domain.managementMode === 'local' ? <><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /><MailOperationsPanel /></> : <Section title="External mail takibi"><EmptyState icon="external" title="Host mail konfigürasyonu bu panel tarafından yönetilmiyor" detail="Bu kayıt external lifecycle identity olarak tutulur. Local mailbox, alias veya DKIM desired-state oluşturulmaz." /></Section>}</>}</>;
+  ]} />{domain.managementMode === 'external' && <p className="ws-muted">External mail domain yalnız takip edilir; local mailbox, alias, DKIM ve host configuration işlemleri bu kayda uygulanmaz.</p>}</div></Section>{domain.managementMode === 'local' ? <><MailWebmailPanel domain={domain} onChanged={detail.refresh} /><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /><MailOperationsPanel /></> : <Section title="External mail takibi"><EmptyState icon="external" title="Host mail konfigürasyonu bu panel tarafından yönetilmiyor" detail="Bu kayıt external lifecycle identity olarak tutulur. Local mailbox, alias veya DKIM desired-state oluşturulmaz." /></Section>}</>}</>;
 }
 
 export default function MailDomainsPage() {

@@ -10,6 +10,7 @@ import {
   listDnssecOperations,
   previewDnsReapply,
   previewDnssec,
+  provisionDnsZone,
   saveManualDnsRecord,
   waitForDnsOperation,
 } from './dns-client.js';
@@ -165,9 +166,16 @@ export default function DnsPanel({ domain, domains, canManage }) {
       listDnsReapplyOperations(root.id), listDnssecOperations(root.id),
     ]);
     const setters = [setZone, setSecondary, setReapply, setDnssec, setReapplyOperations, setDnssecOperations];
-    results.forEach((result, index) => { if (result.status === 'fulfilled') setters[index](result.value); });
-    const critical = results.slice(0, 4).find((result) => result.status === 'rejected');
-    if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
+    results.forEach((result, index) => {
+      if (result.status === 'fulfilled') setters[index](result.value);
+      else setters[index](null);
+    });
+    const zoneNotFound = results[0].status === 'rejected'
+      && (results[0].reason?.message?.includes('not found') || results[0].reason?.message?.includes('bulunamadı') || results[0].reason?.status === 404);
+    if (!zoneNotFound) {
+      const critical = results.slice(0, 4).find((result) => result.status === 'rejected');
+      if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
+    }
     setLoading(false);
   }, [domain.id, root?.id]);
 
@@ -180,6 +188,19 @@ export default function DnsPanel({ domain, domains, canManage }) {
     setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
     if (messageText) setMessage(messageText);
     await refresh();
+  }
+
+  async function provisionZone() {
+    if (!root || busy) return;
+    setBusy(true); setError(null); setMessage(null);
+    try {
+      await provisionDnsZone(root.id);
+      await refreshed('Yerel PowerDNS authoritative zone başarıyla oluşturuldu.');
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function deleteRecord() {
@@ -234,11 +255,13 @@ export default function DnsPanel({ domain, domains, canManage }) {
     <Section title="Authoritative DNS zone" description={`${root.primaryDomain} · PowerDNS authoritative`} actions={<Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : 'Yenile'}</Button>}>
       {zone ? <><div className="ws-section-body"><KeyValues items={[
         ['Zone', zone.zoneName], ['SOA serial', zone.serial], ['Zone türü', zone.kind], ['DNSSEC', zone.dnssec ? 'Signing açık' : 'Kapalı'],
-      ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Zone okunamadı" detail="PowerDNS authoritative zone henüz yok veya backend erişilemiyor." icon="globe" />}
+      ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Yerel Authoritative DNS Zone Bulunmuyor" detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS authoritative zone bulunmuyor. Alan adınızın DNS kayıtları alan adı firmanızda veya harici DNS sağlayıcınızda (Cloudflare vb.) barındırılıyor olabilir.`} icon="globe" action={canManage ? <Button variant="primary" icon="plus" disabled={busy} onClick={provisionZone}>{busy ? 'Zone oluşturuluyor…' : 'Yerel DNS Zone Oluştur'}</Button> : null} />}
     </Section>
-    <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />
-    <div className="ws-equal-columns"><ReapplyPanel preview={reapply} loading={loading} canManage={canManage} busy={busy} onRefresh={refresh} onApply={() => setConfirmation({ kind: 'reapply', preview: reapply })} /><DnssecPanel state={dnssec} preview={dnssecPreview} canManage={canManage} busy={busy} onPreview={prepareDnssec} onRefresh={refresh} /></div>
-    <OperationsPanel reapply={reapplyOperations} dnssec={dnssecOperations} />
+    {zone && <>
+      <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />
+      <div className="ws-equal-columns"><ReapplyPanel preview={reapply} loading={loading} canManage={canManage} busy={busy} onRefresh={refresh} onApply={() => setConfirmation({ kind: 'reapply', preview: reapply })} /><DnssecPanel state={dnssec} preview={dnssecPreview} canManage={canManage} busy={busy} onPreview={prepareDnssec} onRefresh={refresh} /></div>
+      <OperationsPanel reapply={reapplyOperations} dnssec={dnssecOperations} />
+    </>}
     {recordDialog && zone && <DnsRecordDialog zone={zone} rrset={recordDialog.rrset} onClose={() => setRecordDialog(null)} onSaved={refreshed} />}
     {deleteTarget && zone && <ConfirmDialog title="Manual DNS kaydını sil" message={`${relativeDnsOwner(deleteTarget.owner, zone.zoneName)} ${deleteTarget.type} RRset’i silinecek. Managed kayıtlar bu yoldan silinemez.`} confirmation={`delete-dns:${relativeDnsOwner(deleteTarget.owner, zone.zoneName)}:${deleteTarget.type}`} confirmLabel="Kaydı sil" busy={busy} error={null} onCancel={() => setDeleteTarget(null)} onConfirm={deleteRecord} />}
     {confirmation?.kind === 'reapply' && <ConfirmDialog title="Zone Template’i yeniden uygula" message={`${confirmation.preview.changes?.length ?? 0} managed RRset değişikliği uygulanacak; manual kayıtlar korunacak ve SOA serial ${confirmation.preview.observedSerial} → ${confirmation.preview.nextSerial} ilerleyecek.`} confirmation={confirmation.preview.confirmation} confirmLabel="Zone’u güncelle" busy={busy} error={null} onCancel={() => setConfirmation(null)} onConfirm={runReapply} />}
