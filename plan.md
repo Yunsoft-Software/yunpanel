@@ -133,6 +133,7 @@ Son External-DNS modunda Cloudflare record ve Certbot DNS-01 canlı kabulü (T-D
 Son Authoritative DNS Delegation, Glue ve Secondary DNS canlı kabulü (T-DNS): `docs/history/dns-delegation-glue-secondary-live-acceptance-2026-09-21.md`.
 Son DNSSEC Enable, Parent DS, Disable, Restart Recovery ve Key Rollover canlı kabulü (T-DNS): `docs/history/dnssec-lifecycle-live-acceptance-2026-09-21.md`.
 Son Managed Compose Website İzolasyonu canlı kabulü (T-DOCKER-PYTHON-MIGRATION): `docs/history/managed-compose-isolation-live-acceptance-2026-09-21.md`.
+Son UX Development Entegrasyonu ve Canlı Doğrulama kabulü: `docs/history/ux-development-merge-and-live-acceptance-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
