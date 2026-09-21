@@ -180,6 +180,18 @@ Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı,
 
 Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
 
+# P1 — AI yönetim katmanı
+
+Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation, `allow/confirm/deny` policy motoru, `always` destructive confirmation koruması, SHA-256 digest-bound action preview/confirmation, local-server scoped read runtime (`server.health`, `website.list`, `website.inspect`, `application.inspect`, `job.inspect`) ve mevcut panel auth/audit zincirine bağlı `/api/ai/tools*` HTTP yüzeyi hazırdır. AI için ayrı privileged daemon, ikinci root transport veya raw shell açılmaz.
+
+- [ ] Provider abstraction ve conversation/orchestrator katmanını ekle; provider credential'ı mevcut master-key tabanlı encrypted secret sınırı üzerinden reference olarak tut, plaintext'i prompt/job/audit/log/public response yüzeylerine taşıma.
+- [ ] Kalan safe read adapter'larını bağla: bounded logs, DNS, certificate, mail, database ve backup health/inspect.
+- [ ] Reversible/write tool adapter'larını mevcut durable job/preview/recovery/rollback lifecycle'larına bağla: Website restart, deploy/rollback, DNS update, certificate issue/renew, backup create/restore ve allowlisted service restart. Hiçbiri raw shell escape sunmasın.
+- [ ] Owner AI policy override store'unu revision/digest ve audit-safe settings lifecycle'ıyla ekle; `always` destructive confirmation server-side değiştirilemez kalsın.
+- [ ] AI conversation/session API, bounded context builder ve streaming response lifecycle'ını ekle; modele yalnız available + policy-allowed tool şemalarını gönder.
+- [ ] Global ve Website-contextual AI UI'yı operation card, preview, confirmation, durable job progress ve recovery state ile bağla.
+- [ ] HTTP/UI control layer sabitlendikten sonra aynı Tool Registry/Policy Engine üzerinden MCP-compatible adapter ekle; duplicate management engine oluşturma.
+
 # P2 — Migration temizliği ve son ürün yüzeyi
 
 - [ ] Legacy migration dönemi tamamlandığında direct-systemd compatibility adapter kodlarını kaldır.
@@ -191,7 +203,8 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 2. **Runtime golden paths** — Passenger gerçek dependency/config/rollback kabulü ardından PHP-FPM, static, Python ve Managed Compose kaynak/acceptance açıklarını kapat.
 3. **Backup/restore** — restic/rclone lifecycle, Website backup set ve health-rollback'li restore akışını tamamla.
 4. **Monitoring/security** — Netdata, GoAccess, nftables ve CrowdSec entegrasyonlarını tek authority sınırlarıyla tamamla.
-5. **Acceptance-gated migration cleanup** — elFinder, ttyd, Passenger, restic ve agentless local backend kabulünden sonra karşılık gelen legacy fallback/transport yollarını kaldır.
-6. **Son ürün yüzeyi** — Backend/functionality sonrasında enterprise UI/UX polish.
+5. **AI control layer** — provider abstraction, bounded context/orchestrator, safe read adapters, durable write adapters, policy store ve işlevsel global/contextual AI yüzeyini tamamla.
+6. **Acceptance-gated migration cleanup** — elFinder, ttyd, Passenger, restic ve agentless local backend kabulünden sonra karşılık gelen legacy fallback/transport yollarını kaldır.
+7. **Son ürün yüzeyi** — Backend/functionality sonrasında enterprise UI/UX polish.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
