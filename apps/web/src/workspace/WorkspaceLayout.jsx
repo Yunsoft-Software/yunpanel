@@ -8,6 +8,7 @@ import { navigationGroups, websiteCount } from './ui/ux-model.js';
 import Preferences from './ui/Preferences.jsx';
 import CommandPalette from './ui/CommandPalette.jsx';
 import JobDrawer from './JobDrawer.jsx';
+import AiDrawer from './AiDrawer.jsx';
 import './workspace.css';
 import './ui/ux-theme.css';
 
@@ -19,6 +20,7 @@ function Shell() {
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [aiOpen, setAiOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
   const menu = useRef(null); const content = useRef(null);
   const sites = websiteCount(websites);
@@ -34,6 +36,9 @@ function Shell() {
     const shortcut = (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !event.isComposing && !menuOpen && !document.querySelector('dialog[open]')) {
         event.preventDefault(); setPaletteOpen(true);
+      }
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'a' && !event.isComposing) {
+        event.preventDefault(); setAiOpen((prev) => !prev);
       }
     };
     window.addEventListener('keydown', shortcut); return () => window.removeEventListener('keydown', shortcut);
@@ -65,11 +70,12 @@ function Shell() {
     <div className="ws-main" inert={narrow && menuOpen}>
       <div className="ws-toolbar"><Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya panel bölümü ara…</span><kbd>⌘ / Ctrl K</kbd></button>
-        {canManage && <div className="ws-toolbar-actions"><LinkButton to="/jobs" icon="jobs">İşlemler{jobCount > 0 ? ` · ${jobCount} aktif` : ''}</LinkButton><LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton></div>}
+        {canManage && <div className="ws-toolbar-actions"><Button icon="terminal" onClick={() => setAiOpen(true)}>AI Asistan</Button><LinkButton to="/jobs" icon="jobs">İşlemler{jobCount > 0 ? ` · ${jobCount} aktif` : ''}</LinkButton><LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton></div>}
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>
     {paletteOpen && <CommandPalette domains={domains} canManage={canManage} onClose={() => setPaletteOpen(false)} />}
     {canManage && <JobDrawer />}
+    {canManage && <AiDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
   </div>;
 }
