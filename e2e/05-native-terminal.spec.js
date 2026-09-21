@@ -87,4 +87,46 @@ test.describe('Module 5: Native Sandboxed Web Terminal', () => {
     await expect(page.locator('span[role="status"]:has-text("Bağlantı kapandı")')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('button:has-text("Yeniden bağlan")')).toBeVisible();
   });
+
+  test('5.4. Server Root Terminal: open connection from /servers and verify root PTY execution', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+    await page.goto('/servers');
+
+    // Wait for Sunucu terminali section
+    const termSection = page.locator('section, .ws-section', { hasText: 'Sunucu terminali' });
+    await expect(termSection).toBeVisible({ timeout: 15000 });
+
+    const terminalSurface = termSection.locator('.ws-terminal-surface');
+    await expect(terminalSurface).toBeVisible({ timeout: 10000 });
+
+    const connectBtn = termSection.locator('button:has-text("Terminali aç"), button:has-text("Yeniden bağlan")');
+    await expect(connectBtn).toBeVisible({ timeout: 10000 });
+    await connectBtn.click();
+
+    // Wait for connected status
+    await expect(termSection.locator('span[role="status"]:has-text("Bağlı")')).toBeVisible({ timeout: 15000 });
+
+    // Focus terminal surface
+    await terminalSurface.click();
+
+    // Execute whoami and id -u to verify root privileges
+    const marker = `ROOT_TEST_${Date.now()}`;
+    await page.keyboard.type(`echo "${marker}"`);
+    await page.keyboard.press('Enter');
+
+    const xtermRows = termSection.locator('.xterm-rows');
+    await expect(xtermRows).toContainText(marker, { timeout: 10000 });
+
+    await page.keyboard.type('id -u');
+    await page.keyboard.press('Enter');
+    await expect(xtermRows).toContainText('0', { timeout: 10000 });
+
+    // Disconnect
+    const disconnectBtn = termSection.locator('button:has-text("Bağlantıyı kapat")');
+    await expect(disconnectBtn).toBeVisible();
+    await disconnectBtn.click();
+
+    await expect(termSection.locator('span[role="status"]:has-text("Bağlantı kapandı")')).toBeVisible({ timeout: 10000 });
+  });
 });
+
