@@ -17,6 +17,7 @@ import {
   inspectNginx,
 } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
+import { createAiToolRuntime } from './ai-tool-runtime.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi } from './auth-http.js';
@@ -588,6 +589,14 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
 });
+const aiToolRegistry = createAiToolRuntime({
+  serverRegistry: registry,
+  websiteRegistry,
+  domainRegistry,
+  applicationRegistry,
+  jobRegistry,
+  localServerId,
+});
 const websiteCronApplyService = createWebsiteCronApplyService({
   websiteCronRegistry,
   jobRegistry,
@@ -955,6 +964,8 @@ const listener = createAuthenticatedApi({
       registry,
       domainRegistry,
       jobRegistry,
+      aiToolRegistry,
+      aiAudit: authStore.audit,
       domainSuspensionRuntime,
       dnsZoneRetirementImpactService: dnsZoneRetirementService,
       dnsZoneRetirementRuntime,

@@ -1,4 +1,5 @@
 import express from 'express';
+import { mountAiRoutes } from './ai-http.js';
 import {
   createCloudflareDnsManager,
   CloudflareDnsManagerError,
@@ -207,6 +208,9 @@ function localServerRegistryView(registry, localServerId) {
 export function createApp({
   registry = createServerRegistry(),
   jobRegistry = createJobRegistry(),
+  aiToolRegistry = null,
+  aiAudit = null,
+  aiPolicyOverrides = {},
   certificateRegistry = createCertificateRegistry(),
   certificateMaterialManager = createCertificateMaterialManager(),
   certificateMaterialGc = null,
@@ -461,6 +465,9 @@ export function createApp({
   }) : null);
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
+  if (aiToolRegistry !== null) {
+    mountAiRoutes(app, { registry: aiToolRegistry, audit: aiAudit, policyOverrides: aiPolicyOverrides });
+  }
   const resolvedResticManager = resticManager ?? (
     databaseBindingRegistry || resticRepositoryRegistry ? createResticManager() : null
   );
