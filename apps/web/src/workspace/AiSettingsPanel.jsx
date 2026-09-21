@@ -244,6 +244,7 @@ export default function AiSettingsPanel() {
                   onChange={(e) => setFormType(e.target.value)}
                   style={{ width: '100%', padding: '8px', marginTop: '4px' }}
                 >
+                  <option value="openrouter">OpenRouter (GLM 5.2, Claude, Llama vb.)</option>
                   <option value="anthropic">Anthropic (Claude 3.7 Sonnet)</option>
                   <option value="openai">OpenAI (GPT-4o, GPT-4o-mini)</option>
                   <option value="gemini">Google Gemini (Gemini 2.0 Flash)</option>
@@ -257,7 +258,7 @@ export default function AiSettingsPanel() {
               <input
                 type="password"
                 required={formType !== 'ollama'}
-                placeholder={formType === 'anthropic' ? 'sk-ant-...' : formType === 'openai' ? 'sk-...' : 'AI API Key'}
+                placeholder={formType === 'openrouter' ? 'sk-or-v1-...' : formType === 'anthropic' ? 'sk-ant-...' : formType === 'openai' ? 'sk-...' : 'AI API Key'}
                 value={formKey}
                 onChange={(e) => setFormKey(e.target.value)}
                 style={{ width: '100%', padding: '8px', marginTop: '4px' }}
@@ -269,7 +270,7 @@ export default function AiSettingsPanel() {
                 Özel Base URL (İsteğe bağlı):
                 <input
                   type="url"
-                  placeholder={formType === 'ollama' ? 'http://127.0.0.1:11434' : 'Varsayılan endpoint kullanılır'}
+                  placeholder={formType === 'openrouter' ? 'https://openrouter.ai/api/v1' : formType === 'ollama' ? 'http://127.0.0.1:11434' : 'Varsayılan endpoint kullanılır'}
                   value={formBaseUrl}
                   onChange={(e) => setFormBaseUrl(e.target.value)}
                   style={{ width: '100%', padding: '8px', marginTop: '4px' }}
@@ -280,7 +281,7 @@ export default function AiSettingsPanel() {
                 Varsayılan Model (İsteğe bağlı):
                 <input
                   type="text"
-                  placeholder={formType === 'anthropic' ? 'claude-3-7-sonnet-20250219' : formType === 'openai' ? 'gpt-4o' : formType === 'gemini' ? 'gemini-2.0-flash' : 'llama3.2'}
+                  placeholder={formType === 'openrouter' ? 'z-ai/glm-5.2' : formType === 'anthropic' ? 'claude-3-7-sonnet-20250219' : formType === 'openai' ? 'gpt-4o' : formType === 'gemini' ? 'gemini-2.0-flash' : 'llama3.2'}
                   value={formModel}
                   onChange={(e) => setFormModel(e.target.value)}
                   style={{ width: '100%', padding: '8px', marginTop: '4px' }}

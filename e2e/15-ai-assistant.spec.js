@@ -72,19 +72,15 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
 
     await saveBtn.click();
 
-    // Verify success notice or provider in table
-    const successNotice = aiSection.locator('.ws-notice');
-    const provRow = aiSection.locator(`tr:has-text("${testProvId}")`);
-    await expect(successNotice.or(provRow)).toBeVisible({ timeout: 15000 });
+    // Verify provider card is rendered in list
+    const provCard = aiSection.locator('div').filter({ has: page.locator(`strong:text-is("${testProvId}")`) }).first();
+    await expect(provCard).toBeVisible({ timeout: 15000 });
 
-    // Clean up: delete test provider
-    if (await provRow.isVisible().catch(() => false)) {
-      page.once('dialog', (dialog) => dialog.accept());
-      const deleteBtn = provRow.locator('button:has-text("Sil")');
-      if (await deleteBtn.isVisible().catch(() => false)) {
-        await deleteBtn.click();
-        await expect(provRow).not.toBeVisible({ timeout: 10000 });
-      }
-    }
+    // Clean up: delete test provider deterministically
+    page.once('dialog', (dialog) => dialog.accept());
+    const deleteBtn = provCard.locator('button:has-text("Sil")');
+    await expect(deleteBtn).toBeVisible({ timeout: 5000 });
+    await deleteBtn.click();
+    await expect(provCard).not.toBeVisible({ timeout: 10000 });
   });
 });

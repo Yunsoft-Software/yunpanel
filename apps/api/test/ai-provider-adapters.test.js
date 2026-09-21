@@ -195,3 +195,52 @@ test('createProviderFromConfig instantiates correct adapter and maps errors', as
     (err) => err instanceof AiProviderError && err.code === 'ai_provider_authentication_failed' && err.status === 401,
   );
 });
+
+test('createOpenRouterAdapter sends OpenRouter headers and defaults to GLM 5.2', async () => {
+  let capturedHeaders = null;
+  let capturedUrl = null;
+  let capturedBody = null;
+
+  const mockFetch = async (url, options) => {
+    capturedUrl = url;
+    capturedHeaders = options.headers;
+    capturedBody = JSON.parse(options.body);
+    return {
+      ok: true,
+      status: 200,
+      json: async () => ({
+        choices: [
+          {
+            message: {
+              role: 'assistant',
+              content: 'GLM 5.2 response via OpenRouter',
+            },
+          },
+        ],
+      }),
+    };
+  };
+
+  const adapter = createProviderFromConfig(
+    {
+      id: 'openrouter-glm',
+      type: 'openrouter',
+      apiKey: 'sk-or-v1-testkey',
+      defaultModel: 'z-ai/glm-5.2',
+    },
+    { fetchClient: mockFetch },
+  );
+
+  const res = await adapter.invoke({
+    messages: [{ role: 'user', text: 'Test GLM' }],
+  });
+
+  assert.equal(res.type, 'message');
+  assert.equal(res.text, 'GLM 5.2 response via OpenRouter');
+  assert.equal(capturedUrl, 'https://openrouter.ai/api/v1/chat/completions');
+  assert.equal(capturedHeaders.authorization, 'Bearer sk-or-v1-testkey');
+  assert.equal(capturedHeaders['HTTP-Referer'], 'https://yunpanel.com');
+  assert.equal(capturedHeaders['X-Title'], 'YunPanel');
+  assert.equal(capturedBody.model, 'z-ai/glm-5.2');
+});
+

@@ -306,12 +306,17 @@ function publicProject(record) {
 }
 
 function validatePersisted(value) {
-  const fields = new Set([
+  const allowedFields = new Set([
+    'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
+    'networks', 'networkDetails', 'volumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
+  ]);
+  const requiredFields = new Set([
     'id', 'serverId', 'projectName', 'revision', 'composeSha256', 'composeBytes', 'services',
     'networks', 'volumes', 'secretCount', 'configCount', 'encryptedDocument', 'createdAt', 'updatedAt',
   ]);
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== fields.size || Object.keys(value).some((key) => !fields.has(key))
+    || Object.keys(value).some((key) => !allowedFields.has(key))
+    || Array.from(requiredFields).some((key) => !(key in value))
     || !Number.isSafeInteger(value.revision) || value.revision < 1
     || typeof value.composeSha256 !== 'string' || !SHA256_PATTERN.test(value.composeSha256)
     || !Number.isSafeInteger(value.composeBytes) || value.composeBytes < 1 || value.composeBytes > 512 * 1024
@@ -326,6 +331,20 @@ function validatePersisted(value) {
   const normalizedServices = value.services
     .map((service) => normalizeServiceSummary(service, 'docker_compose_project_state_invalid'))
     .sort((a, b) => a.name.localeCompare(b.name));
+  let networkDetails = null;
+  if (Array.isArray(value.networkDetails)) {
+    networkDetails = value.networkDetails.map((net) => {
+      if (!net || typeof net !== 'object' || typeof net.name !== 'string' || typeof net.scope !== 'string') {
+        throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project network state is invalid', 409);
+      }
+      if (net.scope !== 'project') {
+        throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose networks must have project scope', 409);
+      }
+      return Object.freeze({ name: net.name, scope: net.scope });
+    });
+  } else if (value.networkDetails !== undefined) {
+    throw new DockerComposeProjectRegistryError('docker_compose_project_state_invalid', 'Docker Compose project network state is invalid', 409);
+  }
   return {
     id: normalizeUuid(value.id, 'dockerProjectId'),
     serverId: normalizeUuid(value.serverId, 'serverId'),
@@ -335,6 +354,7 @@ function validatePersisted(value) {
     composeBytes: value.composeBytes,
     services: normalizedServices,
     networks: normalizeNameArray(value.networks, 'network'),
+    ...(networkDetails ? { networkDetails: Object.freeze(networkDetails) } : {}),
     volumes: normalizeNameArray(value.volumes, 'volume'),
     secretCount: value.secretCount,
     configCount: value.configCount,

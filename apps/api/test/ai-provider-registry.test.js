@@ -160,3 +160,37 @@ test('AiProviderRegistry enforces validation rules', async () => {
     await rm(tempDir, { recursive: true, force: true });
   }
 });
+
+test('AiProviderRegistry supports OpenRouter with default base URL and GLM 5.2 model', async () => {
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ai-provider-openrouter-'));
+  const filePath = path.join(tempDir, 'ai-providers.json');
+
+  try {
+    const registry = createAiProviderRegistry({
+      filePath,
+      masterKey: TEST_MASTER_KEY,
+    });
+
+    const openrouter = await registry.setProvider({
+      id: 'openrouter-glm',
+      type: 'openrouter',
+      apiKey: 'sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef',
+      defaultModel: 'z-ai/glm-5.2',
+      makeActive: true,
+    });
+
+    assert.equal(openrouter.id, 'openrouter-glm');
+    assert.equal(openrouter.type, 'openrouter');
+    assert.equal(openrouter.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(openrouter.defaultModel, 'z-ai/glm-5.2');
+    assert.equal(openrouter.active, true);
+
+    const decrypted = await registry.getDecryptedActiveProvider();
+    assert.equal(decrypted.apiKey, 'sk-or-v1-0123456789abcdef0123456789abcdef0123456789abcdef');
+    assert.equal(decrypted.baseUrl, 'https://openrouter.ai/api/v1');
+    assert.equal(decrypted.defaultModel, 'z-ai/glm-5.2');
+  } finally {
+    await rm(tempDir, { recursive: true, force: true });
+  }
+});
+

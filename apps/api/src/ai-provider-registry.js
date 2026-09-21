@@ -6,18 +6,20 @@ import { normalizeEnvironmentMasterKey } from './application-environment-registr
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
 const ID_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
-const SUPPORTED_TYPES = new Set(['anthropic', 'openai', 'gemini', 'ollama']);
+const SUPPORTED_TYPES = new Set(['anthropic', 'openai', 'gemini', 'ollama', 'openrouter']);
 const DEFAULT_BASE_URLS = Object.freeze({
   anthropic: 'https://api.anthropic.com',
   openai: 'https://api.openai.com/v1',
   gemini: 'https://generativelanguage.googleapis.com',
   ollama: 'http://127.0.0.1:11434',
+  openrouter: 'https://openrouter.ai/api/v1',
 });
 const DEFAULT_MODELS = Object.freeze({
   anthropic: 'claude-3-7-sonnet-20250219',
   openai: 'gpt-4o',
   gemini: 'gemini-2.0-flash',
   ollama: 'llama3.2',
+  openrouter: 'z-ai/glm-5.2',
 });
 
 export class AiProviderRegistryError extends Error {

@@ -20,6 +20,7 @@ export function createOpenAiCompatibleAdapter({
   baseUrl = 'https://api.openai.com/v1',
   defaultModel = 'gpt-4o',
   fetchClient = globalThis.fetch,
+  extraHeaders = {},
 } = {}) {
   const endpoint = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
 
@@ -58,6 +59,7 @@ export function createOpenAiCompatibleAdapter({
 
     const headers = {
       'content-type': 'application/json',
+      ...extraHeaders,
     };
     if (apiKey) {
       headers.authorization = `Bearer ${apiKey}`;
@@ -325,6 +327,26 @@ export function createGeminiAdapter({
   });
 }
 
+export function createOpenRouterAdapter({
+  id = 'openrouter',
+  apiKey = '',
+  baseUrl = 'https://openrouter.ai/api/v1',
+  defaultModel = 'z-ai/glm-5.2',
+  fetchClient = globalThis.fetch,
+} = {}) {
+  return createOpenAiCompatibleAdapter({
+    id,
+    apiKey,
+    baseUrl,
+    defaultModel,
+    fetchClient,
+    extraHeaders: {
+      'HTTP-Referer': 'https://yunpanel.com',
+      'X-Title': 'YunPanel',
+    },
+  });
+}
+
 export function createProviderFromConfig(config, options = {}) {
   if (!config || typeof config !== 'object') {
     throw new AiProviderError('invalid_provider_config', 'Provider configuration is missing', 500);
@@ -338,7 +360,10 @@ export function createProviderFromConfig(config, options = {}) {
     case 'openai':
     case 'ollama':
       return createOpenAiCompatibleAdapter({ ...config, ...options });
+    case 'openrouter':
+      return createOpenRouterAdapter({ ...config, ...options });
     default:
       throw new AiProviderError('unsupported_ai_provider_type', `AI provider type ${type} is not supported`, 500);
   }
 }
+
