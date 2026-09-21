@@ -17,6 +17,7 @@ import {
   inspectNginx,
 } from '@yunpanel/host-runtime';
 import { createApp, API_VERSION } from './app.js';
+import { createAiPolicyStore } from './ai-policy-store.js';
 import { createAiToolRuntime } from './ai-tool-runtime.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createAuthStore } from './auth-store.js';
@@ -160,6 +161,8 @@ const websiteCachePolicyStorePath = process.env.YUNPANEL_WEBSITE_CACHE_POLICY_ST
   ?? path.join(controlPlaneStateRoot, 'website-cache-policies.json');
 const panelSettingsStorePath = process.env.YUNPANEL_PANEL_SETTINGS_STORE
   ?? path.join(controlPlaneStateRoot, 'panel-settings.json');
+const aiPolicyStorePath = process.env.YUNPANEL_AI_POLICY_STORE
+  ?? path.join(controlPlaneStateRoot, 'ai-policy.json');
 const resticRepositoryStorePath = process.env.YUNPANEL_RESTIC_REPOSITORY_STORE
   ?? path.join(controlPlaneStateRoot, 'restic-repositories.json');
 const rcloneRemoteStorePath = process.env.YUNPANEL_RCLONE_REMOTE_STORE
@@ -414,6 +417,8 @@ await serverDnsIdentityRegistry.init();
 const panelSettingsRegistry = createPanelSettingsRegistry({
   filePath: panelSettingsStorePath,
 });
+const aiPolicyStore = createAiPolicyStore({ filePath: aiPolicyStorePath });
+await aiPolicyStore.init();
 const powerDnsSecretRegistry = createPowerDnsSecretRegistry({
   filePath: powerDnsSecretStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
@@ -971,6 +976,7 @@ const listener = createAuthenticatedApi({
       jobRegistry,
       aiToolRegistry,
       aiAudit: authStore.audit,
+      aiPolicyStore,
       domainSuspensionRuntime,
       dnsZoneRetirementImpactService: dnsZoneRetirementService,
       dnsZoneRetirementRuntime,

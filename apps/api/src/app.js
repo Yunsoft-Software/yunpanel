@@ -211,6 +211,7 @@ export function createApp({
   aiToolRegistry = null,
   aiAudit = null,
   aiPolicyOverrides = {},
+  aiPolicyStore = null,
   certificateRegistry = createCertificateRegistry(),
   certificateMaterialManager = createCertificateMaterialManager(),
   certificateMaterialGc = null,
@@ -466,7 +467,12 @@ export function createApp({
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
   if (aiToolRegistry !== null) {
-    mountAiRoutes(app, { registry: aiToolRegistry, audit: aiAudit, policyOverrides: aiPolicyOverrides });
+    mountAiRoutes(app, {
+      registry: aiToolRegistry,
+      audit: aiAudit,
+      policyOverrides: aiPolicyOverrides,
+      policyStore: aiPolicyStore,
+    });
   }
   const resolvedResticManager = resticManager ?? (
     databaseBindingRegistry || resticRepositoryRegistry ? createResticManager() : null
