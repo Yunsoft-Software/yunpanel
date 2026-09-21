@@ -168,4 +168,68 @@ test.describe('YunPanel E2E Test Suite', () => {
       await expect(page.locator('.ws-notice')).toContainText(/silindi/i, { timeout: 10000 });
     }
   });
+
+  test('4. Native Sandboxed File Manager and Webmail verification', async ({ page }) => {
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+
+    await page.goto('/websites');
+    await expect(page.locator('h1', { hasText: 'Web siteleri' })).toBeVisible({ timeout: 10000 });
+
+    const siteLink = page.locator('table.ws-table tbody tr a[href^="/websites/"]').first();
+    const siteCount = await siteLink.count();
+
+    if (siteCount > 0) {
+      await siteLink.click();
+      await page.waitForURL(/\/websites\/[^/]+/, { timeout: 10000 });
+
+      const tabsNav = page.locator('nav.ws-tabs');
+
+      // 1. Verify Webmail in Bağlı kaynaklar
+      const resourcesTab = tabsNav.locator('a', { hasText: 'Bağlı kaynaklar' });
+      if (await resourcesTab.count() > 0) {
+        await resourcesTab.click();
+        await expect(page.locator('h2', { hasText: 'Mail & Webmail' })).toBeVisible({ timeout: 10000 });
+      }
+
+      // 2. Verify Native File Manager in Dosyalar tab
+      const filesTab = tabsNav.locator('a', { hasText: 'Dosyalar' });
+      if (await filesTab.count() > 0) {
+        await filesTab.click();
+
+        // Native toolbar
+        await expect(page.locator('h2', { hasText: 'Site Dosyaları' })).toBeVisible({ timeout: 10000 });
+        await expect(page.locator('button', { hasText: 'Yeni Dosya' })).toBeVisible();
+        await expect(page.locator('button', { hasText: 'Yeni Klasör' })).toBeVisible();
+        await expect(page.locator('button', { hasText: 'Dosya Yükle' })).toBeVisible();
+        await expect(page.locator('.ws-breadcrumb')).toBeVisible();
+
+        // Create new file
+        await page.click('button:has-text("Yeni Dosya")');
+        await expect(page.locator('h2', { hasText: 'Yeni Dosya Oluştur' })).toBeVisible();
+        const testFileName = `e2e-${Date.now()}.txt`;
+        await page.fill('input[placeholder*="index.html"]', testFileName);
+        await page.click('button[type="submit"]:has-text("Oluştur")');
+
+        // Verify file created in listing
+        await expect(page.locator(`strong:has-text("${testFileName}")`)).toBeVisible({ timeout: 10000 });
+
+        // Select checkbox for this file
+        const row = page.locator(`tr:has(strong:has-text("${testFileName}"))`);
+        await row.locator('input[type="checkbox"]').check();
+
+        // Batch delete button should appear
+        const batchBtn = page.locator('button:has-text("Seçilenleri Sil")');
+        await expect(batchBtn).toBeVisible();
+
+        // Single delete button
+        await row.locator('button:has-text("Sil")').click();
+        await expect(page.locator('h2', { hasText: 'silinsin mi?' })).toBeVisible();
+        await page.fill('label:has-text("Onaylamak için") input', testFileName);
+        await page.click('button[type="submit"]:has-text("Sil")');
+
+        // Verify removed
+        await expect(page.locator(`strong:has-text("${testFileName}")`)).not.toBeVisible({ timeout: 10000 });
+      }
+    }
+  });
 });
