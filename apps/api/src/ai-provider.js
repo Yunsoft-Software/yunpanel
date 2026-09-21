@@ -156,7 +156,7 @@ export function createAiProviderAdapter({ id, invoke } = {}) {
     return normalizeProviderResult(result);
   }
 
-  return Object.freeze({ id, complete });
+  return Object.freeze({ id, complete, invoke: complete });
 }
 
 export const aiProviderInternals = Object.freeze({

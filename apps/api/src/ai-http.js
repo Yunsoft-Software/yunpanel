@@ -1,8 +1,10 @@
 import { createAiActionPlan, verifyAiActionExecution } from './ai-action-plan.js';
 import { evaluateAiToolPolicy } from './ai-policy.js';
+import { createProviderFromConfig } from './ai-provider-adapters.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const TOOL_NAME_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/;
+const PROVIDER_FIELDS = new Set(['id', 'type', 'apiKey', 'baseUrl', 'defaultModel', 'makeActive']);
 
 export class AiHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -86,6 +88,33 @@ function policyApplyBody(body) {
   };
 }
 
+function providerBody(body) {
+  const value = normalizeBody(body, PROVIDER_FIELDS);
+  if (value.id != null && typeof value.id !== 'string') {
+    throw new AiHttpError('invalid_ai_provider_request', 'AI provider id must be a string');
+  }
+  if (value.type != null && typeof value.type !== 'string') {
+    throw new AiHttpError('invalid_ai_provider_request', 'AI provider type must be a string');
+  }
+  if (value.apiKey != null && typeof value.apiKey !== 'string') {
+    throw new AiHttpError('invalid_ai_provider_request', 'AI provider apiKey must be a string');
+  }
+  if (value.baseUrl != null && typeof value.baseUrl !== 'string') {
+    throw new AiHttpError('invalid_ai_provider_request', 'AI provider baseUrl must be a string');
+  }
+  if (value.defaultModel != null && typeof value.defaultModel !== 'string') {
+    throw new AiHttpError('invalid_ai_provider_request', 'AI provider defaultModel must be a string');
+  }
+  return {
+    id: value.id,
+    type: value.type,
+    apiKey: value.apiKey,
+    baseUrl: value.baseUrl,
+    defaultModel: value.defaultModel,
+    makeActive: Boolean(value.makeActive),
+  };
+}
+
 async function currentPolicyOverrides(policyStore, fallback) {
   if (!policyStore) return fallback;
   return (await policyStore.getSnapshot()).overrides;
@@ -108,7 +137,7 @@ function failureCode(error) {
     : 'ai_tool_failed';
 }
 
-function validateDependencies(app, registry, audit, policyOverrides, policyStore) {
+function validateDependencies(app, registry, audit, policyOverrides, policyStore, providerRegistry) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
     throw new AiHttpError('invalid_ai_http_app', 'AI HTTP app is invalid');
   }
@@ -125,6 +154,11 @@ function validateDependencies(app, registry, audit, policyOverrides, policyStore
     || ['getSnapshot', 'previewUpdate', 'applyUpdate'].some((method) => typeof policyStore[method] !== 'function'))) {
     throw new AiHttpError('invalid_ai_policy_store', 'AI policy store is invalid');
   }
+  if (providerRegistry !== null && (!providerRegistry
+    || ['listProviders', 'getProvider', 'setProvider', 'deleteProvider', 'setActiveProvider', 'getActiveProvider']
+      .some((method) => typeof providerRegistry[method] !== 'function'))) {
+    throw new AiHttpError('invalid_ai_provider_registry', 'AI provider registry is invalid');
+  }
 }
 
 export function mountAiRoutes(app, {
@@ -132,8 +166,94 @@ export function mountAiRoutes(app, {
   audit,
   policyOverrides = {},
   policyStore = null,
+  providerRegistry = null,
 } = {}) {
-  validateDependencies(app, registry, audit, policyOverrides, policyStore);
+  validateDependencies(app, registry, audit, policyOverrides, policyStore, providerRegistry);
+
+  if (providerRegistry) {
+    app.get('/api/ai/providers', requireAiOwner, asyncRoute(async (_request, response) => {
+      const providers = await providerRegistry.listProviders();
+      const active = await providerRegistry.getActiveProvider();
+      return response.json({ data: providers, activeProviderId: active?.id ?? null });
+    }));
+
+    app.post('/api/ai/providers', requireAiOwner, asyncRoute(async (request, response) => {
+      const body = providerBody(request.body);
+      const actorId = request.auth.user.id;
+      try {
+        const provider = await providerRegistry.setProvider(body);
+        audit.record({
+          actorId,
+          action: 'ai.provider.save',
+          resourceType: 'ai_provider',
+          resourceId: provider.id,
+          outcome: 'succeeded',
+          code: null,
+        });
+        return response.status(201).json({ data: provider });
+      } catch (error) {
+        audit.record({
+          actorId,
+          action: 'ai.provider.save',
+          resourceType: 'ai_provider',
+          resourceId: body.id ?? 'unknown',
+          outcome: 'failed',
+          code: failureCode(error),
+        });
+        throw error;
+      }
+    }));
+
+    app.delete('/api/ai/providers/:providerId', requireAiOwner, asyncRoute(async (request, response) => {
+      const providerId = request.params.providerId;
+      const actorId = request.auth.user.id;
+      const deleted = await providerRegistry.deleteProvider(providerId);
+      if (!deleted) {
+        throw new AiHttpError('provider_not_found', 'AI provider not found', 404);
+      }
+      audit.record({
+        actorId,
+        action: 'ai.provider.delete',
+        resourceType: 'ai_provider',
+        resourceId: providerId,
+        outcome: 'succeeded',
+        code: null,
+      });
+      return response.json({ data: { success: true } });
+    }));
+
+    app.post('/api/ai/providers/:providerId/active', requireAiOwner, asyncRoute(async (request, response) => {
+      const providerId = request.params.providerId;
+      const actorId = request.auth.user.id;
+      const provider = await providerRegistry.setActiveProvider(providerId);
+      audit.record({
+        actorId,
+        action: 'ai.provider.set_active',
+        resourceType: 'ai_provider',
+        resourceId: providerId,
+        outcome: 'succeeded',
+        code: null,
+      });
+      return response.json({ data: provider });
+    }));
+
+    app.post('/api/ai/providers/:providerId/test', requireAiOwner, asyncRoute(async (request, response) => {
+      const providerId = request.params.providerId;
+      const provider = await providerRegistry.getDecryptedProvider(providerId);
+      if (!provider) {
+        throw new AiHttpError('provider_not_found', 'AI provider not found', 404);
+      }
+      try {
+        const adapter = createProviderFromConfig(provider);
+        const testResult = await adapter.invoke({
+          messages: [{ role: 'user', text: 'Respond with the word "pong" only.' }],
+        });
+        return response.json({ data: { success: true, response: testResult } });
+      } catch (error) {
+        throw new AiHttpError('provider_test_failed', `Provider connection test failed: ${error.message}`, 502);
+      }
+    }));
+  }
 
   app.get('/api/ai/tools', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
@@ -240,6 +360,7 @@ export const aiHttpInternals = Object.freeze({
   normalizeBody,
   previewBody,
   executeBody,
+  providerBody,
   policyPreviewBody,
   policyApplyBody,
   currentPolicyOverrides,
