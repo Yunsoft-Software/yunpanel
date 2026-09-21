@@ -539,9 +539,15 @@ export function createApp({
     return response.json({ data: domain });
   });
   app.post('/api/domains', requirePanelRouteAccess, async (request, response) => {
+    let parentDomainId = request.body?.parentDomainId ?? null;
+    let websiteId = request.body?.websiteId ?? null;
+    if (parentDomainId && !websiteId) {
+      const parent = await domainRegistry.getDomain(parentDomainId).catch(() => null);
+      if (parent?.websiteId) websiteId = parent.websiteId;
+    }
     if (request.auth?.user?.role === 'site_manager') {
       const allowed = new Set(request.auth.user.websiteIds ?? []);
-      if (!request.body?.websiteId || !allowed.has(request.body.websiteId)) {
+      if (!websiteId || !allowed.has(websiteId)) {
         throw new DomainRegistryError('forbidden', 'Site manager must create domains within their assigned website', 403);
       }
     }
@@ -552,8 +558,8 @@ export function createApp({
     const domain = await domainRegistry.createDomain({
       serverId: localServerId ?? requestedServerId,
       primaryDomain: request.body?.primaryDomain,
-      parentDomainId: request.body?.parentDomainId ?? null,
-      websiteId: request.body?.websiteId ?? null,
+      parentDomainId,
+      websiteId,
       aliases: request.body?.aliases ?? [],
       targetType: request.body?.targetType,
       target: request.body?.target,

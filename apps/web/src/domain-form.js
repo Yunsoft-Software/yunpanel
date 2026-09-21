@@ -25,7 +25,7 @@ export function domainCreatePayload(form, domains, servers) {
     throw new Error('Upstream port must be between 1024 and 65535.');
   }
   return {
-    serverId, primaryDomain, parentDomainId: parent?.id ?? null,
+    serverId, websiteId: parent?.websiteId ?? null, primaryDomain, parentDomainId: parent?.id ?? null,
     aliases: form.aliases.split(',').map((value) => value.trim()).filter(Boolean),
     targetType: form.targetType, target, httpsMode: form.httpsMode,
   };

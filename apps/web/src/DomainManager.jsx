@@ -108,6 +108,14 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
         method: 'POST', body: { email, staging },
       });
       await waitForJob(response.job.id, { attempts: 720 });
+      if (!staging) {
+        try {
+          const postStage = await panelRequest(`/domains/${domain.id}/stage`, { method: 'POST', body: {} });
+          await waitForJob(postStage.id);
+          const postActivate = await panelRequest(`/domains/${domain.id}/activate`, { method: 'POST', body: {} });
+          await waitForJob(postActivate.id);
+        } catch {}
+      }
       setMessage(`${domain.primaryDomain}: ${staging ? 'ACME validation' : 'certificate issuance'} succeeded.`);
       onChanged();
     } catch (requestError) {

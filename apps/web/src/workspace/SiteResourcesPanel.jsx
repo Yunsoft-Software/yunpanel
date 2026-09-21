@@ -45,7 +45,7 @@ const DELETE_BLOCKER_LABELS = Object.freeze({
   database_job_active: 'Başka bir database işi queued/running durumda.',
 });
 
-export default function SiteResourcesPanel({ domain, website, application, server }) {
+export default function SiteResourcesPanel({ domain, website, application, server, activeTab }) {
   const { jobs, observe, resourceBusy, updateJob, canManage } = useWorkspace();
   const operationPending = useRef(false);
   const [mailDomains, setMailDomains] = useState(undefined);
@@ -438,8 +438,81 @@ export default function SiteResourcesPanel({ domain, website, application, serve
     }),
   ]));
 
+  const showOverview = !activeTab || activeTab === 'resources';
+  const showDatabases = showOverview || activeTab === 'databases';
+  const showMail = showOverview || activeTab === 'mail';
+  const showDocker = showOverview;
+
+  const databaseSection = (
+    <Section title="Veritabanları" description="Bu Website’e explicit bağlı schema ve secret-free credential/grant durumu." actions={<Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button>}>
+      {databases.length ? <div className="ws-table-scroll">
+        <table className="ws-table">
+          <thead><tr><th>Veritabanı</th><th>Site user</th><th>DB user / grant</th><th>Revizyon</th><th className="ws-row-end">İşlem</th></tr></thead>
+          <tbody>{databases.map(({ binding, credential }) => <tr key={binding.id}>
+            <td><strong>{binding.databaseName}</strong><small>{binding.id}</small></td>
+            <td><code>{binding.unixUser}</code></td>
+            <td>{credential ? <><code>{credential.username}</code><small>{credential.privileges.join(', ')}</small></> : <span>Credential oluşturulmadı</span>}</td>
+            <td>{binding.revision}{credential ? ` / ${credential.revision}` : ''}</td>
+            <td className="ws-row-end"><div className="ws-actions">
+              {credential && <Button
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                title="Bu Website credential kapsamıyla phpMyAdmin aç"
+                onClick={() => openPhpMyAdmin(credential)}
+              >{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button>}
+              <Button
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                onClick={() => {
+                  setError(null); setNotice(null);
+                  setBackupTarget({ binding, backupJob: null });
+                }}
+              >Yedek al</Button>
+              <Button
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName) || !backupsByBinding.get(binding.id)?.length}
+                title={backupsByBinding.get(binding.id)?.length ? 'Doğrulanmış bir vendor dump yedeğini geri yükle' : 'Bu schema için başarılı backup job kanıtı yok'}
+                onClick={() => {
+                  setError(null); setNotice(null);
+                  const choices = backupsByBinding.get(binding.id) ?? [];
+                  if (!choices.length) return;
+                  setRestoreTarget({ binding, choices, backupId: choices[0].id, preview: null, restoreJob: null });
+                }}
+              >Geri yükle</Button>
+              <Button
+                variant="danger"
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                onClick={() => previewDatabaseDrop(binding)}
+              >Silme önizleme</Button>
+              {credential && <Button
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                onClick={() => {
+                  setError(null); setNotice(null);
+                  setRotateTarget({ binding, credential, rotatedCredential: null });
+                }}
+              >Parolayı döndür</Button>}
+              {credential && <Button
+                variant="danger"
+                disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
+                onClick={() => {
+                  setError(null); setNotice(null);
+                  setRevokeTarget({ binding, credential, deleteJob: null });
+                }}
+              >Credential’ı kaldır</Button>}
+            </div></td>
+          </tr>)}</tbody>
+        </table>
+      </div> : databaseResources !== undefined && <EmptyState icon="database" title="Bağlı veritabanı yok" detail="Sunucu veritabanları ayrı envanterde olabilir; burada yalnız bu siteye explicit bind edilmiş kayıtlar gösterilir." />}
+      <div className="ws-section-body"><LinkButton to="/databases" icon="database">Veritabanlarını yönet</LinkButton></div>
+    </Section>
+  );
+
+  const mailSection = (
+    <Section title="Mail" description="Web Domain kimliğiyle explicit bağlı mail-domain kayıtları." actions={<Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button>}>
+      {mails.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Domain</th><th>Mod</th><th>Durum</th></tr></thead><tbody>{mails.map((mail) => <tr key={mail.id}><td><strong>{mail.domainName}</strong></td><td>{mail.managementMode}</td><td><Badge state={mail.status === 'enabled' || mail.status === 'ready' ? 'active' : mail.status === 'degraded' ? 'warning' : 'offline'}>{mail.status}</Badge></td></tr>)}</tbody></table></div> : mailDomains !== undefined && <EmptyState icon="mail" title="Bağlı mail domain yok" detail="Bu web Domain için explicit mail-domain lifecycle kaydı bulunmuyor." />}
+      <div className="ws-section-body">{mails[0] ? <LinkButton to={`/mail/${encodeURIComponent(mails[0].id)}`} icon="mail">Mail’i yönet</LinkButton> : <LinkButton to="/mail" icon="mail">Mail domainleri</LinkButton>}</div>
+    </Section>
+  );
+
   return <>
-    <Section
+    {showOverview && <Section
       title="Bağlı kaynaklar"
       description="Yalnız explicit Website/Application/Domain ilişkileri gösterilir; port, isim veya hostname tahmini yapılmaz."
       actions={<Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button>}
@@ -458,72 +531,13 @@ export default function SiteResourcesPanel({ domain, website, application, serve
           ['Docker bağı', compose ? 'Managed Compose' : externalDocker ? 'External workload' : 'Yok'],
         ]} />
       </div>
-    </Section>
-    <div className="ws-equal-columns">
-      <Section title="Veritabanları" description="Bu Website’e explicit bağlı schema ve secret-free credential/grant durumu.">
-        {databases.length ? <div className="ws-table-scroll">
-          <table className="ws-table">
-            <thead><tr><th>Veritabanı</th><th>Site user</th><th>DB user / grant</th><th>Revizyon</th><th className="ws-row-end">İşlem</th></tr></thead>
-            <tbody>{databases.map(({ binding, credential }) => <tr key={binding.id}>
-              <td><strong>{binding.databaseName}</strong><small>{binding.id}</small></td>
-              <td><code>{binding.unixUser}</code></td>
-              <td>{credential ? <><code>{credential.username}</code><small>{credential.privileges.join(', ')}</small></> : <span>Credential oluşturulmadı</span>}</td>
-              <td>{binding.revision}{credential ? ` / ${credential.revision}` : ''}</td>
-              <td className="ws-row-end"><div className="ws-actions">
-                {credential && <Button
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                  title="Bu Website credential kapsamıyla phpMyAdmin aç"
-                  onClick={() => openPhpMyAdmin(credential)}
-                >{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button>}
-                <Button
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                  onClick={() => {
-                    setError(null); setNotice(null);
-                    setBackupTarget({ binding, backupJob: null });
-                  }}
-                >Yedek al</Button>
-                <Button
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName) || !backupsByBinding.get(binding.id)?.length}
-                  title={backupsByBinding.get(binding.id)?.length ? 'Doğrulanmış bir vendor dump yedeğini geri yükle' : 'Bu schema için başarılı backup job kanıtı yok'}
-                  onClick={() => {
-                    setError(null); setNotice(null);
-                    const choices = backupsByBinding.get(binding.id) ?? [];
-                    if (!choices.length) return;
-                    setRestoreTarget({ binding, choices, backupId: choices[0].id, preview: null, restoreJob: null });
-                  }}
-                >Geri yükle</Button>
-                <Button
-                  variant="danger"
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                  onClick={() => previewDatabaseDrop(binding)}
-                >Silme önizleme</Button>
-                {credential && <Button
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                  onClick={() => {
-                    setError(null); setNotice(null);
-                    setRotateTarget({ binding, credential, rotatedCredential: null });
-                  }}
-                >Parolayı döndür</Button>}
-                {credential && <Button
-                  variant="danger"
-                  disabled={busy || !canManage || resourceBusy('database', binding.databaseName)}
-                  onClick={() => {
-                    setError(null); setNotice(null);
-                    setRevokeTarget({ binding, credential, deleteJob: null });
-                  }}
-                >Credential’ı kaldır</Button>}
-              </div></td>
-            </tr>)}</tbody>
-          </table>
-        </div> : databaseResources !== undefined && <EmptyState icon="database" title="Bağlı veritabanı yok" detail="Sunucu veritabanları ayrı envanterde olabilir; burada yalnız bu siteye explicit bind edilmiş kayıtlar gösterilir." />}
-        <div className="ws-section-body"><LinkButton to="/databases" icon="database">Veritabanlarını yönet</LinkButton></div>
-      </Section>
-      <Section title="Mail" description="Web Domain kimliğiyle explicit bağlı mail-domain kayıtları.">
-        {mails.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Domain</th><th>Mod</th><th>Durum</th></tr></thead><tbody>{mails.map((mail) => <tr key={mail.id}><td><strong>{mail.domainName}</strong></td><td>{mail.managementMode}</td><td><Badge state={mail.status === 'enabled' || mail.status === 'ready' ? 'active' : mail.status === 'degraded' ? 'warning' : 'offline'}>{mail.status}</Badge></td></tr>)}</tbody></table></div> : mailDomains !== undefined && <EmptyState icon="mail" title="Bağlı mail domain yok" detail="Bu web Domain için explicit mail-domain lifecycle kaydı bulunmuyor." />}
-        <div className="ws-section-body">{mails[0] ? <LinkButton to={`/mail/${encodeURIComponent(mails[0].id)}`} icon="mail">Mail’i yönet</LinkButton> : <LinkButton to="/mail" icon="mail">Mail domainleri</LinkButton>}</div>
-      </Section>
-    </div>
-    <Section title="Docker" description="Website runtime’ına bağlı Docker identity; transient host published port burada kalıcı state olarak tutulmaz.">
+    </Section>}
+    {!showOverview && <div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}</div>}
+    {showOverview ? <div className="ws-equal-columns">{databaseSection}{mailSection}</div> : <>
+      {showDatabases && databaseSection}
+      {showMail && mailSection}
+    </>}
+    {showDocker && <Section title="Docker" description="Website runtime’ına bağlı Docker identity; transient host published port burada kalıcı state olarak tutulmaz.">
       <div className="ws-section-body">{compose ? <>
         <KeyValues items={[
           ['Tür', 'Managed Compose'], ['Project ID', compose.projectId], ['Servis', compose.serviceName], ['Target port', `${compose.targetPort}/${compose.protocol}`],
@@ -533,7 +547,7 @@ export default function SiteResourcesPanel({ domain, website, application, serve
         <KeyValues items={[['Tür', 'External / unverified workload'], ['Workload ID', externalDocker]]} />
         <p className="ws-muted">Bu legacy/external workload Managed Compose project gibi varsayılmaz.</p>
       </> : <EmptyState icon="box" title="Docker bağı yok" detail="Bu Website Application/static runtime kullanıyor veya Docker ile ilişkilendirilmemiş." />}</div>
-    </Section>
+    </Section>}
     {rotateTarget && <ConfirmDialog
       key={`${rotateTarget.credential.id}:${rotateTarget.credential.revision}:${rotateTarget.rotatedCredential?.revision ?? 'pending'}`}
       title="Database parolasını döndür"

@@ -83,12 +83,13 @@ export function SslOperations({ domain }) {
   const canIssue = !locked && !domain.certificateId;
   async function issue(staging) {
     const ok = await operation.perform(async () => {
-      if (domain.httpsMode !== 'managed') {
-        const preview = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/update-preview`, {
+      let currentDomain = domain;
+      if (currentDomain.httpsMode !== 'managed') {
+        const preview = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/update-preview`, {
           method: 'POST',
           body: { changes: { httpsMode: 'managed' } },
         });
-        await panelRequest(`/domains/${encodeURIComponent(domain.id)}`, {
+        await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`, {
           method: 'PATCH',
           body: {
             changes: { httpsMode: 'managed' },
@@ -96,15 +97,27 @@ export function SslOperations({ domain }) {
             confirmation: preview.confirmation,
           },
         });
-        const stageJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/stage`, { method: 'POST', body: {} });
+        currentDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+      }
+      if (currentDomain.stagedRevision !== currentDomain.desiredRevision || !currentDomain.stagedChecksum) {
+        const stageJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/stage`, { method: 'POST', body: {} });
         await waitForJob(stageJob.id);
-        const activateJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/activate`, { method: 'POST', body: {} });
-        await waitForJob(activateJob.id);
-      } else if (domain.stagedRevision === domain.desiredRevision && domain.stagedChecksum) {
-        const activateJob = await panelRequest(`/domains/${encodeURIComponent(domain.id)}/activate`, { method: 'POST', body: {} });
+        currentDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+      }
+      if (currentDomain.appliedRevision !== currentDomain.desiredRevision || currentDomain.state !== 'active') {
+        const activateJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
         await waitForJob(activateJob.id);
       }
-      await runJob(`/domains/${encodeURIComponent(domain.id)}/certificates/issue`, { email: email.trim(), staging });
+      const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, { email: email.trim(), staging });
+      if (issueJob?.id && !staging) {
+        const finished = await waitForJob(issueJob.id);
+        if (finished?.status === 'succeeded') {
+          const postStage = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/stage`, { method: 'POST', body: {} });
+          await waitForJob(postStage.id);
+          const postActivate = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
+          await waitForJob(postActivate.id);
+        }
+      }
     });
     if (ok) { setRequested(true); setConfirm(null); }
   }
