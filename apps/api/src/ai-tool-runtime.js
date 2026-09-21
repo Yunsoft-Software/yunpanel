@@ -73,6 +73,10 @@ export function createAiToolRuntime({
   applicationRegistry,
   jobRegistry,
   applicationEnvironmentRegistry = null,
+  dnsHostingRegistry = null,
+  certificateRegistry = null,
+  mailDomainRegistry = null,
+  databaseBindingRegistry = null,
   localServerId = null,
 } = {}) {
   requireDependencies({ serverRegistry, websiteRegistry, domainRegistry, applicationRegistry, jobRegistry });
@@ -127,6 +131,121 @@ export function createAiToolRuntime({
     const job = requireLocalResource(await jobRegistry.getJob(input.jobId), localServerId, 'job_not_found', 'Job not found');
     return jobPublicView(job);
   });
+
+  if (dnsHostingRegistry && typeof dnsHostingRegistry.getZone === 'function' && typeof dnsHostingRegistry.listZones === 'function'
+    && typeof domainRegistry.getDomain === 'function') {
+    registry.bind('dns.inspect', async ({ input }) => {
+      const hasWebsite = typeof input.websiteId === 'string';
+      const hasZone = typeof input.dnsZoneId === 'string';
+      if (hasWebsite === hasZone) {
+        throw new AiToolRuntimeError('invalid_ai_dns_scope', 'DNS inspection requires exactly one Website or DNS zone identity');
+      }
+      if (hasWebsite) {
+        const website = requireLocalResource(
+          await websiteRegistry.getWebsite(input.websiteId),
+          localServerId,
+          'website_not_found',
+          'Website not found',
+        );
+        const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
+        const domainIds = new Set(domains.map((domain) => domain.id));
+        const zones = (await dnsHostingRegistry.listZones()).filter((zone) => zone.webDomainId && domainIds.has(zone.webDomainId));
+        return Object.freeze({ website, domains: Object.freeze(domains), zones: Object.freeze(zones) });
+      }
+      const zone = await dnsHostingRegistry.getZone(input.dnsZoneId);
+      if (!zone) throw new AiToolRuntimeError('dns_zone_not_found', 'DNS zone not found', 404);
+      const domain = zone.webDomainId ? await domainRegistry.getDomain(zone.webDomainId) : null;
+      requireLocalResource(domain, localServerId, 'dns_zone_not_found', 'DNS zone not found');
+      return Object.freeze({ zone, domain });
+    });
+  }
+
+  if (certificateRegistry && typeof certificateRegistry.getForDomain === 'function'
+    && typeof domainRegistry.getDomain === 'function') {
+    registry.bind('certificate.inspect', async ({ input }) => {
+      const hasWebsite = typeof input.websiteId === 'string';
+      const hasDomain = typeof input.domainId === 'string';
+      if (hasWebsite === hasDomain) {
+        throw new AiToolRuntimeError('invalid_ai_certificate_scope', 'Certificate inspection requires exactly one Website or Domain identity');
+      }
+      if (hasDomain) {
+        const domain = requireLocalResource(
+          await domainRegistry.getDomain(input.domainId),
+          localServerId,
+          'domain_not_found',
+          'Domain not found',
+        );
+        return Object.freeze({ domain, certificate: await certificateRegistry.getForDomain(domain.id) });
+      }
+      const website = requireLocalResource(
+        await websiteRegistry.getWebsite(input.websiteId),
+        localServerId,
+        'website_not_found',
+        'Website not found',
+      );
+      const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
+      const certificates = await Promise.all(domains.map(async (domain) => Object.freeze({
+        domain,
+        certificate: await certificateRegistry.getForDomain(domain.id),
+      })));
+      return Object.freeze({ website, certificates: Object.freeze(certificates) });
+    });
+  }
+
+  if (mailDomainRegistry && typeof mailDomainRegistry.getMailDomain === 'function'
+    && typeof mailDomainRegistry.listMailDomains === 'function' && typeof domainRegistry.getDomain === 'function') {
+    registry.bind('mail.inspect', async ({ input }) => {
+      const hasWebsite = typeof input.websiteId === 'string';
+      const hasMailDomain = typeof input.mailDomainId === 'string';
+      if (hasWebsite === hasMailDomain) {
+        throw new AiToolRuntimeError('invalid_ai_mail_scope', 'Mail inspection requires exactly one Website or Mail Domain identity');
+      }
+      if (hasWebsite) {
+        const website = requireLocalResource(
+          await websiteRegistry.getWebsite(input.websiteId),
+          localServerId,
+          'website_not_found',
+          'Website not found',
+        );
+        const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
+        const domainIds = new Set(domains.map((domain) => domain.id));
+        const mailDomains = (await mailDomainRegistry.listMailDomains())
+          .filter((mailDomain) => mailDomain.webDomainId && domainIds.has(mailDomain.webDomainId));
+        return Object.freeze({ website, domains: Object.freeze(domains), mailDomains: Object.freeze(mailDomains) });
+      }
+      const mailDomain = await mailDomainRegistry.getMailDomain(input.mailDomainId);
+      if (!mailDomain) throw new AiToolRuntimeError('mail_domain_not_found', 'Mail Domain not found', 404);
+      const domain = mailDomain.webDomainId ? await domainRegistry.getDomain(mailDomain.webDomainId) : null;
+      requireLocalResource(domain, localServerId, 'mail_domain_not_found', 'Mail Domain not found');
+      return Object.freeze({ mailDomain, domain });
+    });
+  }
+
+  if (databaseBindingRegistry && typeof databaseBindingRegistry.listBindings === 'function'
+    && typeof databaseBindingRegistry.getByDatabase === 'function') {
+    registry.bind('database.inspect', async ({ input }) => {
+      const hasWebsite = typeof input.websiteId === 'string';
+      const hasDatabase = typeof input.databaseName === 'string';
+      if (hasWebsite === hasDatabase) {
+        throw new AiToolRuntimeError('invalid_ai_database_scope', 'Database inspection requires exactly one Website or database name');
+      }
+      const server = await resolveLocalServer(serverRegistry, localServerId);
+      if (hasDatabase) {
+        return Object.freeze({
+          serverId: server.id,
+          binding: await databaseBindingRegistry.getByDatabase({ serverId: server.id, databaseName: input.databaseName }),
+        });
+      }
+      const website = requireLocalResource(
+        await websiteRegistry.getWebsite(input.websiteId),
+        localServerId,
+        'website_not_found',
+        'Website not found',
+      );
+      const bindings = await databaseBindingRegistry.listBindings({ serverId: server.id, websiteId: website.id });
+      return Object.freeze({ website, bindings: Object.freeze(bindings) });
+    });
+  }
 
   if (typeof jobRegistry.enqueue === 'function') {
     registry.bind('service.restart', async ({ input }) => {
