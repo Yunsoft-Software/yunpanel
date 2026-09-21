@@ -56,7 +56,48 @@ function normalizeDefinition(input) {
   });
 }
 
-function normalizeInput(input) {
+function validateInputSchema(value, schema, path = 'input') {
+  if (!schema || typeof schema !== 'object' || Array.isArray(schema)) {
+    throw new AiToolRegistryError('invalid_ai_tool_schema', 'AI tool input schema is invalid');
+  }
+  if (schema.type === 'object') {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new AiToolRegistryError('invalid_ai_tool_input', `${path} must be an object`);
+    }
+    const properties = schema.properties ?? {};
+    const required = new Set(schema.required ?? []);
+    for (const field of required) {
+      if (!Object.hasOwn(value, field)) throw new AiToolRegistryError('invalid_ai_tool_input', `${path}.${field} is required`);
+    }
+    if (schema.additionalProperties === false) {
+      const unknown = Object.keys(value).find((field) => !Object.hasOwn(properties, field));
+      if (unknown) throw new AiToolRegistryError('invalid_ai_tool_input', `${path}.${unknown} is not supported`);
+    }
+    for (const [field, child] of Object.entries(properties)) {
+      if (Object.hasOwn(value, field)) validateInputSchema(value[field], child, `${path}.${field}`);
+    }
+    return;
+  }
+  if (schema.type === 'string') {
+    if (typeof value !== 'string'
+      || (Number.isSafeInteger(schema.minLength) && value.length < schema.minLength)
+      || (Number.isSafeInteger(schema.maxLength) && value.length > schema.maxLength)) {
+      throw new AiToolRegistryError('invalid_ai_tool_input', `${path} must be a valid string`);
+    }
+    return;
+  }
+  if (schema.type === 'integer') {
+    if (!Number.isSafeInteger(value)
+      || (Number.isSafeInteger(schema.minimum) && value < schema.minimum)
+      || (Number.isSafeInteger(schema.maximum) && value > schema.maximum)) {
+      throw new AiToolRegistryError('invalid_ai_tool_input', `${path} must be a valid integer`);
+    }
+    return;
+  }
+  throw new AiToolRegistryError('invalid_ai_tool_schema', `Unsupported AI tool input schema type at ${path}`);
+}
+
+function normalizeInput(input, schema) {
   const value = input ?? {};
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new AiToolRegistryError('invalid_ai_tool_input', 'AI tool input must be an object');
@@ -64,10 +105,12 @@ function normalizeInput(input) {
   let encoded;
   try { encoded = JSON.stringify(value); }
   catch { throw new AiToolRegistryError('invalid_ai_tool_input', 'AI tool input must be JSON serializable'); }
-  if (Buffer.byteLength(encoded, 'utf8') > MAX_INPUT_BYTES) {
+  if (Buffer.byteLength(encoded, 'utf8') > MAX_INQUP_BYTES) {
     throw new AiToolRegistryError('ai_tool_input_too_large', 'AI tool input exceeds the supported size');
   }
-  return clone(value);
+  const cloned = clone(value);
+  validateInputSchema(cloned, schema);
+  return cloned;
 }
 
 function publicView(tool, bound) {
@@ -118,18 +161,24 @@ export function createAiToolRegistry({ definitions = [] } = {}) {
     return get(name);
   }
 
+  function prepare({ name, input = {} } = {}) {
+    const tool = requireTool(name);
+    return Object.freeze({ tool: publicView(tool, handlers.has(tool.name)), input: normalizeInput(input, tool.inputSchema) });
+  }
+
   async function execute({ name, input = {}, context = null } = {}) {
     const tool = requireTool(name);
     const handler = handlers.get(tool.name);
     if (!handler) throw new AiToolRegistryError('ai_tool_unavailable', `AI tool ${tool.name} is not available`, 409);
-    return handler({ input: normalizeInput(input), context, tool: publicView(tool, true) });
+    return handler({ input: normalizeInput(input, tool.inputSchema), context, tool: publicView(tool, true) });
   }
 
-  return Object.freeze({ list, get, bind, execute });
+  return Object.freeze({ list, get, bind, prepare, execute });
 }
 
 export const aiToolRegistryInternals = Object.freeze({
   maxInputBytes: MAX_INPUT_BYTES,
   normalizeDefinition,
   normalizeInput,
+  validateInputSchema,
 });

@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from './ai-tool-catalog.js';
-import { AiToolRegistryError, createAiToolRegistry } from './ai-tool-registry.js';
-import { evaluateAiToolPolicy } from './ai-policy.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import { AiToolRegistryError, createAiToolRegistry } from '../src/ai-tool-registry.js';
+import { evaluateAiToolPolicy } from '../src/ai-policy.js';
 
 const ownerAuth = Object.freeze({
   user: Object.freeze({ id: 'owner-1', role: 'owner' }),
@@ -89,4 +89,20 @@ test('read-only actor can use read tools but cannot run mutations', () => {
   assert.deepEqual(evaluateAiToolPolicy({ tool: byName.get('website.inspect'), auth: readOnlyAuth }), { decision: 'allow', reason: 'read_only_safe' });
   assert.deepEqual(evaluateAiToolPolicy({ tool: byName.get('website.restart'), auth: readOnlyAuth }), { decision: 'deny', reason: 'owner_management_required' });
   assert.deepEqual(evaluateAiToolPolicy({ tool: byName.get('server.health'), auth: null }), { decision: 'deny', reason: 'owner_management_required' });
+});
+
+
+test('tool registry enforces the declared bounded input schema before execution', async () => {
+  const registry = createAiToolRegistry({ definitions: DEFAULT_AI_TOOL_DEFINITIONS });
+  let calls = 0;
+  registry.bind('website.inspect', async () => { calls += 1; return { ok: true }; });
+  await assert.rejects(
+    registry.execute({ name: 'website.inspect', input: {} }),
+    (error) => error.code === 'invalid_ai_tool_input',
+  );
+  await assert.rejects(
+    registry.execute({ name: 'website.inspect', input: { websiteId: 'site-1', extra: true } }),
+    (error) => error.code === 'invalid_ai_tool_input',
+  );
+  assert.equal(calls, 0);
 });
