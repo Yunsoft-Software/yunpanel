@@ -43,12 +43,12 @@ export function mountElFinderHandoffRoutes(app, {
       emptyQuery(request.query);
       emptyBody(request.body);
       const auth = request.auth;
-      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
-        || auth.user.role !== 'owner' || auth.access?.mode !== 'management'
-        || auth.security?.managementAllowed !== true) {
+      const isOwner = auth?.user?.role === 'owner' && auth?.access?.mode === 'management' && auth?.security?.managementAllowed === true;
+      const isSiteManager = auth?.user?.role === 'site_manager' && auth?.access?.mode === 'site_management' && (auth?.user?.websiteIds ?? []).includes(request.params.websiteId);
+      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || (!isOwner && !isSiteManager)) {
         throw new ElFinderHandoffError(
-          'elfinder_handoff_owner_required',
-          'elFinder requires an authenticated Owner session',
+          'elfinder_handoff_authorized_required',
+          'elFinder requires an authorized session for this website',
           403,
         );
       }

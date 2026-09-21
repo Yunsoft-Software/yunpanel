@@ -32,18 +32,19 @@ function asyncRoute(handler) {
   };
 }
 
-function requireOwnerManagement(auth) {
-  if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
-    || auth.user.role !== 'owner' || auth.access?.mode !== 'management'
-    || auth.security?.managementAllowed !== true) {
+function requireAuthorizedManagement(auth, websiteId = null) {
+  const isOwner = auth?.user?.role === 'owner' && auth?.access?.mode === 'management' && auth?.security?.managementAllowed === true;
+  const isSiteManager = auth?.user?.role === 'site_manager' && auth?.access?.mode === 'site_management' && (!websiteId || (auth?.user?.websiteIds ?? []).includes(websiteId));
+  if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || (!isOwner && !isSiteManager)) {
     throw new PhpMyAdminHandoffError(
-      'phpmyadmin_handoff_owner_required',
-      'phpMyAdmin requires an authenticated Owner session',
+      'phpmyadmin_handoff_authorized_required',
+      'phpMyAdmin requires an authorized session for this website',
       403,
     );
   }
   return auth;
 }
+const requireOwnerManagement = requireAuthorizedManagement;
 
 export function mountPhpMyAdminHandoffRoutes(app, {
   registry,
@@ -60,7 +61,7 @@ export function mountPhpMyAdminHandoffRoutes(app, {
     requirePanelRouteAccess,
     asyncRoute(async (request, response) => {
       emptyQuery(request.query);
-      const auth = requireOwnerManagement(request.auth);
+      const auth = requireAuthorizedManagement(request.auth, request.params.websiteId);
       const server = await registry.getServer(request.params.serverId);
       if (!server) {
         throw new PhpMyAdminHandoffError(

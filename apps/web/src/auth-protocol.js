@@ -3,7 +3,7 @@ import { announceSessionChange, authRequest, beginSessionTransition, setSession 
 export function requireSession(value) {
   if (!value || typeof value.id !== 'string' || !value.id || !value.user
     || typeof value.user.id !== 'string' || typeof value.user.username !== 'string'
-    || !['owner', 'read_only'].includes(value.user.role)
+    || !['owner', 'read_only', 'site_manager'].includes(value.user.role)
     || typeof value.csrfToken !== 'string' || !value.csrfToken
     || !Number.isFinite(value.expiresAt) || !Number.isFinite(value.idleExpiresAt)) {
     throw new Error('Sunucudan geçerli bir oturum alınamadı.');

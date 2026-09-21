@@ -130,13 +130,13 @@ export default function AuthGate({ children }) {
   return <div className="authenticated-panel">
     <div className="auth-sessionbar" aria-label="Hesap işlemleri">
       <span>YunPanel <span className="auth-separator">/</span> Yönetim</span>
-      <div><span>{state.session.user.username}</span><span className="auth-role">{state.session.user.role === 'owner' ? 'Owner' : 'Read Only'}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
+      <div><span>{state.session.user.username}</span><span className="auth-role">{state.session.user.role === 'owner' ? 'Owner' : state.session.user.role === 'site_manager' ? 'Site Manager' : 'Read Only'}</span><button disabled={busy || showEnrollment} onClick={() => setAccountOpen(true)}>Hesabım</button><button disabled={busy} onClick={logout}>{busy ? 'İşleniyor…' : 'Çıkış yap'}</button></div>
     </div>
     {deadline.warning && <div className="auth-expiry" role="status"><span>{deadline.absolute ? 'Azami oturum süresi dolmak üzere. Yeniden giriş gerekecek.' : 'Oturumunuz hareketsizlik nedeniyle kapanmak üzere.'}</span>{!deadline.absolute && <button className="auth-secondary" disabled={busy} onClick={extend}>Oturumu uzat</button>}</div>}
     {actionError && <p className="auth-banner" role="alert">{actionError}</p>}
     {showEnrollment
       ? <OwnerEnrollment session={state.session} onSession={accept} onSignedOut={signedOut} onComplete={() => setEnrollmentOpen(false)} />
-      : ['management', 'read_only'].includes(access)
+      : ['management', 'site_management', 'read_only'].includes(access)
         ? <PanelSessionProvider session={state.session}><div key={state.session.id}>{children}</div></PanelSessionProvider>
         : <main className="auth-loading"><h1>{access === 'unknown' ? 'Güvenlik durumu alınamadı' : 'Yönetim erişimi yok'}</h1><p role="alert">{access === 'unknown' ? 'Web arayüzü ve API sürümlerini kontrol edin. Yönetim ekranları güvenlik bilgisi doğrulanana kadar açılmaz.' : 'Bu hesap için sunucu yönetimi yetkisi tanımlı değil.'}</p><button className="auth-primary" onClick={() => refresh()}>Durumu yeniden kontrol et</button></main>}
     {accountOpen && <AccountDialog session={state.session} onClose={() => setAccountOpen(false)} onSession={accept} onSignedOut={signedOut} />}

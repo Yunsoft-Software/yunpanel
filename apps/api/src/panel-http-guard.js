@@ -36,6 +36,23 @@ export function requirePanelRouteAccess(request, response, next) {
     return next();
   }
 
+  if (
+    auth.user.role === 'site_manager'
+    && auth.access.mode === 'site_management'
+    && auth.security.managementAllowed === true
+  ) {
+    const path = pathname(request);
+    if (
+      path.startsWith('/api/users')
+      || path.startsWith('/api/audit')
+      || path.startsWith('/api/panel/settings')
+      || path.startsWith('/api/system/packages')
+    ) {
+      return deny(response, 403, 'forbidden', 'Site manager cannot access global server management.');
+    }
+    return next();
+  }
+
   if (auth.user.role === 'read_only' && auth.access.mode === 'read_only') {
     const permission = readOnlyPermission(request.method, pathname(request));
     if (permission && Array.isArray(auth.access.permissions) && auth.access.permissions.includes(permission)) {

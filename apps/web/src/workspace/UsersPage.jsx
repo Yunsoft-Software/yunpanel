@@ -4,10 +4,17 @@ import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
+import { useWorkspace } from './WorkspaceContext.jsx';
 import { createUserAdminClient, emptyUserPage, userAdminInput, userAdminMessage } from './user-admin-client.js';
 
 const LIMIT = 25;
-const initialForm = (user) => ({ username: user?.username ?? '', password: '', role: user?.role ?? 'owner', active: user?.active ?? true });
+const initialForm = (user) => ({
+  username: user?.username ?? '',
+  password: '',
+  role: user?.role ?? 'owner',
+  active: user?.active ?? true,
+  websiteIds: user?.websiteIds ?? [],
+});
 const mustReload = (error) => error?.reconcile || ['user_revision_conflict', 'user_not_found', 'invalid_revision'].includes(error?.code);
 
 export default function UsersPage() {
@@ -60,7 +67,7 @@ export default function UsersPage() {
         <thead><tr><th scope="col">Kullanıcı adı</th><th scope="col">Rol</th><th scope="col">Durum</th><th scope="col">MFA</th><th scope="col">İşlemler</th></tr></thead>
         <tbody>{visible.users.map((user) => <tr key={user.id}>
           <th scope="row" style={{ overflowWrap: 'anywhere' }}>{user.username}</th>
-          <td>{user.role === 'owner' ? 'Owner' : 'Read Only'}</td>
+          <td>{user.role === 'owner' ? 'Owner' : user.role === 'site_manager' ? 'Site Yöneticisi' : 'Read Only'}</td>
           <td><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
           <td><Badge state={user.mfaEnabled ? 'active' : 'warning'}>{user.mfaEnabled ? 'Kurulu' : 'Kurulu değil'}</Badge></td>
           <td><div className="ws-actions"><Button disabled={locked} aria-label={`${user.username} hesabını düzenle`} onClick={() => { setNotice(''); setDialog({ type: 'edit', user }); }}>Düzenle</Button>
@@ -77,6 +84,7 @@ export default function UsersPage() {
 }
 
 function UserDialog({ mode, user, onClose, onSave }) {
+  const { websites } = useWorkspace();
   const [form, setForm] = useState(() => initialForm(user));
   const [confirmation, setConfirmation] = useState('');
   const [discard, setDiscard] = useState(false);
@@ -86,7 +94,10 @@ function UserDialog({ mode, user, onClose, onSave }) {
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   const deleting = mode === 'delete';
   const baseline = initialForm(user);
-  const dirty = deleting ? confirmation.length > 0 : Object.keys(form).some((key) => form[key] !== baseline[key]);
+  const dirty = deleting ? confirmation.length > 0 : Object.keys(form).some((key) => {
+    if (key === 'websiteIds') return JSON.stringify(form[key]?.slice().sort()) !== JSON.stringify(baseline[key]?.slice().sort());
+    return form[key] !== baseline[key];
+  });
   useUnsavedChanges(dirty || busy);
   const reload = mustReload(error);
   function close() {
@@ -119,9 +130,36 @@ function UserDialog({ mode, user, onClose, onSave }) {
         </> : <>
           <div className="ws-form-grid"><label>Kullanıcı adı<input name="username" value={form.username} onChange={(event) => update('username', event.target.value)} autoComplete="off" autoCapitalize="none" spellCheck={false} maxLength={128} required /><span className="ws-field-hint">3–128 karakter; harf, rakam ve . _ @ + - kullanılabilir.</span></label>
             {!user && <label>İlk parola<input type="password" name="new-password" value={form.password} onChange={(event) => update('password', event.target.value)} autoComplete="new-password" minLength={12} required /><span className="ws-field-hint">En az 12 karakter. Parola daha sonra listelenmez; güvenli bir kanaldan paylaşın.</span></label>}
-            <label>Rol<select value={form.role} onChange={(event) => update('role', event.target.value)}><option value="owner">Owner — tam yönetim</option><option value="read_only">Read Only — yalnız kendi hesabı</option></select></label>
+            <label>Rol<select value={form.role} onChange={(event) => update('role', event.target.value)}>
+              <option value="owner">Owner — tam yönetim</option>
+              <option value="site_manager">Site Yöneticisi — seçili siteler</option>
+              <option value="read_only">Read Only — yalnız kendi hesabı</option>
+            </select></label>
             <label>Hesap durumu<select value={String(form.active)} onChange={(event) => update('active', event.target.value === 'true')}><option value="true">Aktif</option><option value="false">Devre dışı</option></select></label>
           </div>
+          {form.role === 'site_manager' && (
+            <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+              <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: '13px' }}>Yönetilecek Web Siteleri</p>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
+                {websites.items.length === 0 && <p className="ws-muted">Henüz kayıtlı web sitesi yok.</p>}
+                {websites.items.map((site) => (
+                  <label key={site.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px' }}>
+                    <input
+                      type="checkbox"
+                      checked={form.websiteIds?.includes(site.id) ?? false}
+                      onChange={(event) => {
+                        const current = new Set(form.websiteIds ?? []);
+                        if (event.target.checked) current.add(site.id);
+                        else current.delete(site.id);
+                        update('websiteIds', [...current]);
+                      }}
+                    />
+                    <span>{site.name}</span>
+                  </label>
+                ))}
+              </div>
+            </div>
+          )}
           <p className="ws-muted">{user ? 'Kullanıcı adı, rol veya durum değişirse bu hesabın bütün oturumları ve bekleyen giriş doğrulamaları iptal edilir. Kendi hesabınızı değiştirirseniz yeniden giriş gerekir.' : 'Yeni Owner hesabı, ilk HTTPS girişinde iki adımlı doğrulamayı kurmadan yönetim ekranlarına erişemez.'}</p>
           {form.role === 'read_only' && <p className="ws-muted">Read Only bu sürümde site, sunucu, log veya kullanıcı listesini görüntüleyemez. Kaynak bazlı izinler henüz uygulanmadı.</p>}
         </>}

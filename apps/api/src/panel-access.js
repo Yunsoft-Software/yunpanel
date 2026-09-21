@@ -31,12 +31,13 @@ const READ_ONLY_RULES = Object.freeze([
 export function describePanelAccess(session) {
   if (!session) return null;
   const management = session.user?.role === 'owner' && session.security?.managementAllowed === true;
+  const siteManager = session.user?.role === 'site_manager';
   const readOnly = session.user?.role === 'read_only';
   return {
     ...session,
     access: {
-      mode: management ? 'management' : readOnly ? 'read_only' : 'self_service',
-      permissions: management ? ['*'] : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
+      mode: management ? 'management' : siteManager ? 'site_management' : readOnly ? 'read_only' : 'self_service',
+      permissions: management ? ['*'] : siteManager ? ['sites.manage'] : readOnly ? [...READ_ONLY_PERMISSIONS] : [],
     },
   };
 }

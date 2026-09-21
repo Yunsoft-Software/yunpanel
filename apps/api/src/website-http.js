@@ -154,22 +154,41 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') throw new Error('Domain registry is required for Website relationships');
 
-  app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => (
-    response.json({ data: await websiteRegistry.listWebsites(localListFilter(request.query, localServerId)) })
-  )));
+  function checkWebsiteAccess(request, websiteId) {
+    if (request.auth?.user?.role === 'site_manager') {
+      const allowed = new Set(request.auth.user.websiteIds ?? []);
+      if (!allowed.has(websiteId)) {
+        throw new WebsiteRegistryError('forbidden', 'Access denied to this website', 403);
+      }
+    }
+  }
+
+  app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    let websites = await websiteRegistry.listWebsites(localListFilter(request.query, localServerId));
+    if (request.auth?.user?.role === 'site_manager') {
+      const allowed = new Set(request.auth.user.websiteIds ?? []);
+      websites = websites.filter((w) => allowed.has(w.id));
+    }
+    return response.json({ data: websites });
+  }));
 
   app.get('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    checkWebsiteAccess(request, request.params.websiteId);
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     return response.json({ data: website });
   }));
 
   app.get('/api/websites/:websiteId/domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    checkWebsiteAccess(request, request.params.websiteId);
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
     return response.json({ data: domains });
   }));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    if (request.auth?.user?.role === 'site_manager') {
+      throw new WebsiteRegistryError('forbidden', 'Site manager cannot create top-level websites', 403);
+    }
     const body = assertCreateBody(request.body);
     if (localServerId && body.serverId !== undefined && body.serverId !== localServerId) {
       throw new WebsiteRegistryError('local_server_required', 'Websites can be created only on this panel host', 404);
@@ -187,6 +206,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }));
 
   app.post('/api/websites/:websiteId/update-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    checkWebsiteAccess(request, request.params.websiteId);
     const changes = assertPreviewBody(request.body);
     await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({
@@ -199,6 +219,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }));
 
   app.patch('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    checkWebsiteAccess(request, request.params.websiteId);
     const input = assertApplyBody(request.body);
     await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({

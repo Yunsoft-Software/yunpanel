@@ -20,7 +20,7 @@ export function createOwnerMfaPolicy({ store, required = true }) {
       security: {
         ownerMfaRequired: owner && required,
         enrollmentRequired: owner && required && !enrolled,
-        managementAllowed: owner && (!required || enrolled),
+        managementAllowed: owner ? (!required || enrolled) : session.user?.role === 'site_manager',
       },
     });
   }

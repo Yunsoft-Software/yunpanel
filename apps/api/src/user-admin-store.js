@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { AuthError } from './auth-error.js';
 
-const ROLES = new Set(['owner', 'read_only']);
+const ROLES = new Set(['owner', 'read_only', 'site_manager']);
 const conflict = () => new AuthError('user_revision_conflict', 'This account changed. Reload it before saving.', 409);
 const missing = () => new AuthError('user_not_found', 'Account not found.', 404);
 
@@ -11,7 +11,7 @@ function fields(input, allowed) {
   }
 }
 function role(value) {
-  if (!ROLES.has(value)) throw new AuthError('invalid_role', 'Choose owner or read_only.');
+  if (!ROLES.has(value)) throw new AuthError('invalid_role', 'Choose owner, site_manager or read_only.');
   return value;
 }
 function active(value) {
@@ -47,6 +47,11 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         id INTEGER PRIMARY KEY, actor_id TEXT NOT NULL, target_id TEXT NOT NULL,
         action TEXT NOT NULL, created_at INTEGER NOT NULL
       );
+      CREATE TABLE IF NOT EXISTS auth_user_websites (
+        user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        website_id TEXT NOT NULL,
+        PRIMARY KEY (user_id, website_id)
+      );
     `);
   });
   const select = `SELECT u.id, u.username, u.role, u.active, u.created_at,
@@ -54,10 +59,16 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
     EXISTS(SELECT 1 FROM auth_mfa m WHERE m.user_id = u.id) AS mfa_enabled
     FROM users u LEFT JOIN auth_user_revisions r ON r.user_id = u.id`;
   const read = (id) => db.prepare(`${select} WHERE u.id = ?`).get(id);
-  const publicUser = (row) => ({
-    id: row.id, username: row.username, role: row.role, active: Boolean(row.active),
-    createdAt: row.created_at, updatedAt: row.updated_at, revision: row.revision, mfaEnabled: Boolean(row.mfa_enabled),
-  });
+  const publicUser = (row) => {
+    const websiteIds = row.role === 'site_manager'
+      ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.id).map((r) => r.website_id)
+      : undefined;
+    return {
+      id: row.id, username: row.username, role: row.role, active: Boolean(row.active),
+      createdAt: row.created_at, updatedAt: row.updated_at, revision: row.revision, mfaEnabled: Boolean(row.mfa_enabled),
+      ...(websiteIds !== undefined ? { websiteIds } : {}),
+    };
+  };
   function requireActor(rawToken, requireManagement, expected = null) {
     if (typeof requireManagement !== 'function') throw new TypeError('A live management policy is required');
     const current = requireManagement(getSession(rawToken));
@@ -110,10 +121,13 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
     },
     async create(rawToken, requireManagement, input) {
       const actor = requireActor(rawToken, requireManagement);
-      fields(input, ['username', 'password', 'role', 'active']);
+      fields(input, ['username', 'password', 'role', 'active', 'websiteIds']);
       const name = normalizeUsername(input.username);
       const nextRole = role(input.role ?? 'owner');
       const nextActive = active(input.active ?? true);
+      if (input.websiteIds !== undefined && (!Array.isArray(input.websiteIds) || input.websiteIds.some((id) => typeof id !== 'string' || !id))) {
+        throw new AuthError('invalid_website_ids', 'websiteIds must be an array of string identifiers.');
+      }
       unique(name);
       const passwordHash = await hashPassword(input.password);
       return transaction(() => {
@@ -122,13 +136,21 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const id = randomUUID();
         db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
           .run(id, name, passwordHash, nextRole, Number(nextActive), now(), now());
+        if (nextRole === 'site_manager' && Array.isArray(input.websiteIds)) {
+          for (const websiteId of input.websiteIds) {
+            db.prepare('INSERT OR IGNORE INTO auth_user_websites(user_id, website_id) VALUES (?, ?)').run(id, websiteId);
+          }
+        }
         record(actor.user.id, id, 'user.created');
         return publicUser(read(id));
       });
     },
     update(rawToken, requireManagement, id, input) {
-      fields(input, ['revision', 'username', 'role', 'active']);
-      if (!['username', 'role', 'active'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
+      fields(input, ['revision', 'username', 'role', 'active', 'websiteIds']);
+      if (!['username', 'role', 'active', 'websiteIds'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
+      if (input.websiteIds !== undefined && (!Array.isArray(input.websiteIds) || input.websiteIds.some((item) => typeof item !== 'string' || !item))) {
+        throw new AuthError('invalid_website_ids', 'websiteIds must be an array of string identifiers.');
+      }
       const result = transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
@@ -137,7 +159,15 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const nextActive = Object.hasOwn(input, 'active') ? active(input.active) : Boolean(user.active);
         unique(name, id);
         protectOwner(user, nextRole, nextActive);
-        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive) {
+        if (nextRole === 'site_manager' && Array.isArray(input.websiteIds)) {
+          db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
+          for (const websiteId of input.websiteIds) {
+            db.prepare('INSERT OR IGNORE INTO auth_user_websites(user_id, website_id) VALUES (?, ?)').run(id, websiteId);
+          }
+        } else if (nextRole !== 'site_manager') {
+          db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
+        }
+        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive && !Object.hasOwn(input, 'websiteIds')) {
           return { user: publicUser(user), revoked: false };
         }
         if (user.revision === Number.MAX_SAFE_INTEGER) throw conflict();
@@ -158,6 +188,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const user = existing(id, input.revision);
         protectOwner(user, null, false);
         revoke(id);
+        db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM auth_mfa_recovery WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM auth_mfa WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM users WHERE id = ?').run(id);

@@ -16,7 +16,7 @@ export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
 }
 function Shell() {
-  const { domains, websites, jobs, notice, setNotice, canManage } = useWorkspace();
+  const { domains, websites, jobs, notice, setNotice, canManage, isOwner } = useWorkspace();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -25,7 +25,7 @@ function Shell() {
   const menu = useRef(null); const content = useRef(null);
   const sites = websiteCount(websites);
   const jobCount = canManage ? knownCount(jobs, (job) => ['queued', 'running'].includes(job.status)) : null;
-  const groups = navigationGroups(canManage);
+  const groups = navigationGroups(canManage, isOwner);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
     const change = () => { setNarrow(media.matches); if (!media.matches) setMenuOpen(false); };
@@ -65,12 +65,16 @@ function Shell() {
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>SUNUCU YÖNETİMİ</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <NavLink key={to} to={to}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</NavLink>)}</div></div>)}</nav>
       <Preferences />
-      <div className="ws-sidebar-footer"><strong>{canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm'}</strong><span>{canManage ? 'Bu panel yalnız kurulu olduğu sunucuyu yönetir.' : 'Yalnız hesabınıza izin verilen envanter gösterilir.'}</span></div>
+      <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Bu panel yalnız kurulu olduğu sunucuyu yönetir.' : 'Yalnız hesabınıza izin verilen envanter gösterilir.') : 'Yalnız yetkili olduğunuz web sitelerini yönetebilirsiniz.'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>
       <div className="ws-toolbar"><Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya panel bölümü ara…</span><kbd>⌘ / Ctrl K</kbd></button>
-        {canManage && <div className="ws-toolbar-actions"><Button icon="terminal" onClick={() => setAiOpen(true)}>AI Asistan</Button><LinkButton to="/jobs" icon="jobs">İşlemler{jobCount > 0 ? ` · ${jobCount} aktif` : ''}</LinkButton><LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton></div>}
+        {canManage && <div className="ws-toolbar-actions">
+          {isOwner && <Button icon="terminal" onClick={() => setAiOpen(true)}>AI Asistan</Button>}
+          <LinkButton to="/jobs" icon="jobs">İşlemler{jobCount > 0 ? ` · ${jobCount} aktif` : ''}</LinkButton>
+          {isOwner && <LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton>}
+        </div>}
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>

@@ -111,10 +111,25 @@ export function createAuthStore({
   db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
   const version = db.prepare('PRAGMA user_version').get().user_version;
   if (![0, 1, 2].includes(version)) { db.close(); throw new Error('Unsupported auth database version'); }
+  const userTable = db.prepare("SELECT sql FROM sqlite_master WHERE type='table' AND name='users'").get();
+  if (userTable?.sql && !userTable.sql.includes("'site_manager'")) {
+    db.exec(`
+      PRAGMA foreign_keys = OFF;
+      CREATE TABLE users_new (
+        id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+        role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+        created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
+      );
+      INSERT INTO users_new SELECT id, username, password_hash, role, active, created_at, password_changed_at FROM users;
+      DROP TABLE users;
+      ALTER TABLE users_new RENAME TO users;
+      PRAGMA foreign_keys = ON;
+    `);
+  }
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only')), active INTEGER NOT NULL DEFAULT 1,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -125,6 +140,12 @@ export function createAuthStore({
     CREATE TABLE IF NOT EXISTS setup (id INTEGER PRIMARY KEY CHECK(id = 1), token_hash TEXT NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_limits (key TEXT PRIMARY KEY, attempts INTEGER NOT NULL, expires_at INTEGER NOT NULL);
     CREATE TABLE IF NOT EXISTS auth_events (id INTEGER PRIMARY KEY, actor_id TEXT, action TEXT NOT NULL, created_at INTEGER NOT NULL);
+    CREATE TABLE IF NOT EXISTS auth_user_websites (
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      website_id TEXT NOT NULL,
+      PRIMARY KEY (user_id, website_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_user_websites_user ON auth_user_websites(user_id);
   `);
   let dummyHash;
   const publicUser = (row) => ({ id: row.id, username: row.username, role: row.role });
@@ -178,7 +199,21 @@ export function createAuthStore({
       db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(now(), row.id);
       row.last_active_at = now();
     }
-    return { id: row.id, user: { id: row.user_id, username: row.username, role: row.role }, expiresAt: row.expires_at, idleExpiresAt: Math.min(row.expires_at, row.last_active_at + idleMs), csrfToken: csrfForSession(rawToken) };
+    const websiteIds = row.role === 'site_manager'
+      ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
+      : null;
+    return {
+      id: row.id,
+      user: {
+        id: row.user_id,
+        username: row.username,
+        role: row.role,
+        ...(websiteIds !== null ? { websiteIds } : {}),
+      },
+      expiresAt: row.expires_at,
+      idleExpiresAt: Math.min(row.expires_at, row.last_active_at + idleMs),
+      csrfToken: csrfForSession(rawToken),
+    };
   }
 
   function createSession(userId) {

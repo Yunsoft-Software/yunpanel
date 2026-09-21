@@ -22,7 +22,12 @@ const groups = [
   { id: 'system', label: 'Sistem', items: [['/servers', 'Sunucu', 'server'], ['/audit', 'Denetim', 'shield'], ['/settings', 'Ayarlar', 'settings']] },
 ];
 const readOnlyRoutes = new Set(['/dashboard', '/websites', '/servers']);
-export function navigationGroups(canManage) {
+export function navigationGroups(canManage, isOwner = true) {
+  if (!isOwner) {
+    return [
+      { id: 'daily', label: 'Çalışma alanı', items: [['/websites', 'Web siteleri', 'globe'], ['/jobs', 'İşlemler', 'jobs']] },
+    ];
+  }
   return groups.map((group) => ({ ...group, items: group.items.filter(([to]) => canManage || readOnlyRoutes.has(to)) })).filter((group) => group.items.length);
 }
 export function websiteCount(resource) {

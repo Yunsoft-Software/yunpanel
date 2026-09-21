@@ -214,9 +214,15 @@ export function createApp({
     if (!inLocalScope(application)) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return application;
   };
-  const requireDomain = async (domainId) => {
+  const requireDomain = async (domainId, request = null) => {
     const domain = await domainRegistry.getDomain(domainId);
     if (!inLocalScope(domain)) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+    if (request?.auth?.user?.role === 'site_manager') {
+      const allowed = new Set(request.auth.user.websiteIds ?? []);
+      if (!domain.websiteId || !allowed.has(domain.websiteId)) {
+        throw new DomainRegistryError('forbidden', 'Access denied to this domain', 403);
+      }
+    }
     return domain;
   };
   const requireCertificate = async (certificateId) => {
@@ -520,12 +526,25 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
 
-  app.get('/api/domains', requirePanelRouteAccess, async (request, response) => response.json({ data: localOnly(await domainRegistry.listDomains()) }));
+  app.get('/api/domains', requirePanelRouteAccess, async (request, response) => {
+    let domains = localOnly(await domainRegistry.listDomains());
+    if (request.auth?.user?.role === 'site_manager') {
+      const allowed = new Set(request.auth.user.websiteIds ?? []);
+      domains = domains.filter((domain) => domain.websiteId && allowed.has(domain.websiteId));
+    }
+    return response.json({ data: domains });
+  });
   app.get('/api/domains/:domainId', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId);
+    const domain = await requireDomain(request.params.domainId, request);
     return response.json({ data: domain });
   });
   app.post('/api/domains', requirePanelRouteAccess, async (request, response) => {
+    if (request.auth?.user?.role === 'site_manager') {
+      const allowed = new Set(request.auth.user.websiteIds ?? []);
+      if (!request.body?.websiteId || !allowed.has(request.body.websiteId)) {
+        throw new DomainRegistryError('forbidden', 'Site manager must create domains within their assigned website', 403);
+      }
+    }
     const requestedServerId = request.body?.serverId ?? null;
     if (localServerId !== null && requestedServerId !== null && requestedServerId !== localServerId) {
       throw new DomainRegistryError('local_server_required', 'Domains can be created only on this panel host', 404);
@@ -546,7 +565,7 @@ export function createApp({
     return response.status(201).json({ data: domain });
   });
   app.post('/api/domains/:domainId/stage', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId);
+    const domain = await requireDomain(request.params.domainId, request);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId);
     const payload = {
@@ -563,7 +582,7 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/domains/:domainId/activate', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId);
+    const domain = await requireDomain(request.params.domainId, request);
     if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision must be staged before activation', 409);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const job = await jobRegistry.enqueue({
@@ -581,13 +600,13 @@ export function createApp({
     return response.status(202).json({ data: job });
   });
   app.post('/api/domains/:domainId/certificates/issue', requirePanelRouteAccess, async (request, response) => {
-    let domain = await requireDomain(request.params.domainId);
+    let domain = await requireDomain(request.params.domainId, request);
     if (domain.httpsMode !== 'managed') {
       if (typeof domainRegistry.previewDomainUpdate === 'function' && typeof domainRegistry.updateDomain === 'function') {
         try {
           const preview = await domainRegistry.previewDomainUpdate({ domainId: domain.id, changes: { httpsMode: 'managed', httpsRedirect: true } });
           await domainRegistry.updateDomain({ domainId: domain.id, changes: { httpsMode: 'managed', httpsRedirect: true }, previewDigest: preview.previewDigest });
-          domain = await requireDomain(request.params.domainId);
+          domain = await requireDomain(request.params.domainId, request);
         } catch {
           // If domain update cannot be performed synchronously, fall back to managed mode check
         }

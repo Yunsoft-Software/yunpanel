@@ -33,12 +33,12 @@ export function userAdminMessage(error) {
 export function readAdminUser(value) {
   if (!object(value) || !ID.test(value.id) || typeof value.id !== 'string'
     || typeof value.username !== 'string' || !USERNAME.test(value.username)
-    || !['owner', 'read_only'].includes(value.role) || typeof value.active !== 'boolean'
+    || !['owner', 'read_only', 'site_manager'].includes(value.role) || typeof value.active !== 'boolean'
     || typeof value.mfaEnabled !== 'boolean' || !integer(value.revision, 1)
     || !integer(value.createdAt) || !integer(value.updatedAt)) throw problem('user_result_invalid');
   // Never retain arbitrary response fields (including any accidental credentials).
-  const { id, username, role, active, mfaEnabled, revision, createdAt, updatedAt } = value;
-  return { id, username, role, active, mfaEnabled, revision, createdAt, updatedAt };
+  const { id, username, role, active, mfaEnabled, revision, createdAt, updatedAt, websiteIds } = value;
+  return { id, username, role, active, mfaEnabled, revision, createdAt, updatedAt, ...(Array.isArray(websiteIds) ? { websiteIds } : {}) };
 }
 
 export function readUserPage(value, { limit, offset }) {
@@ -54,9 +54,14 @@ export function readUserPage(value, { limit, offset }) {
 export function userAdminInput(form, user = null) {
   const username = typeof form.username === 'string' ? form.username.trim().toLowerCase() : '';
   if (!USERNAME.test(username)) throw problem('invalid_username');
-  if (!['owner', 'read_only'].includes(form.role)) throw problem('invalid_role');
+  if (!['owner', 'read_only', 'site_manager'].includes(form.role)) throw problem('invalid_role');
   if (typeof form.active !== 'boolean') throw problem('invalid_active');
-  const input = { username, role: form.role, active: form.active };
+  const input = {
+    username,
+    role: form.role,
+    active: form.active,
+    ...(form.role === 'site_manager' && Array.isArray(form.websiteIds) ? { websiteIds: form.websiteIds } : {}),
+  };
   if (user) {
     if (!integer(user.revision, 1)) throw problem('invalid_revision');
     return { ...input, revision: user.revision };
