@@ -1467,7 +1467,7 @@ export function createPanelServer({
       });
       return;
     }
-    if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/')) {
+    if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/') || requestUrl.pathname.startsWith('/api/ai/')) {
       proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
     }
     if (requestUrl.pathname.startsWith('/api/')) { reply(response, 404, 'Not found.'); return; }
