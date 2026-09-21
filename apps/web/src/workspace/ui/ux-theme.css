@@ -1,0 +1,222 @@
+/* Additive UI skin. Import AFTER workspace.css; do not restyle vendor iframes.
+   Keep --ws-* aliases so parallel functionality patches retain their styling. */
+:root {
+  --ws-canvas: #f4f6fa; --ws-surface: #ffffff; --ws-surface-raised: #ffffff;
+  --ws-surface-subtle: #f0f3f8; --ws-surface-hover: #edf2fa;
+  --ws-text: #1b2940; --ws-muted: #52637a; --ws-border: #dce3ed;
+  --ws-control-border: #9baac0; --ws-accent: #2e62dc; --ws-accent-soft: #edf3ff;
+  --ws-accent-hover: #244fb5; --ws-on-accent: #ffffff; --ws-focus: #2455c2;
+  --ws-success: #196546; --ws-success-soft: #e9f5ef;
+  --ws-warning: #80520b; --ws-warning-soft: #fff4dc;
+  --ws-danger: #a12d3d; --ws-danger-soft: #fdeef0;
+  --ws-info: #295a98; --ws-info-soft: #edf4fe;
+  --ws-unknown: #52637a; --ws-unknown-soft: #eef1f6;
+  --ws-nav: #18263c; --ws-nav-text: #d1dbee; --ws-nav-muted: #a7b8d0;
+  --ws-nav-hover: #223650; --ws-nav-active: #2a4165;
+  --ws-radius: 10px; --ws-sidebar-width: 248px;
+  --ws-control-height: 40px; --ws-row-pad: 15px; --ws-section-pad: 24px;
+  --ws-shadow: 0 2px 6px #14223c08; --ws-overlay-shadow: 0 16px 48px #0d193533;
+  --ws-fast: 120ms; --ws-normal: 180ms; --ws-slow: 240ms;
+  --ws-ease: cubic-bezier(.2, 0, 0, 1);
+}
+:root[data-ws-theme="dark"] {
+  color-scheme: dark;
+  --ws-canvas: #0f172a; --ws-surface: #182235; --ws-surface-raised: #1e2b40;
+  --ws-surface-subtle: #141e30; --ws-surface-hover: #23334b;
+  --ws-text: #e5edf7; --ws-muted: #a8b7cc; --ws-border: #35445c;
+  --ws-control-border: #6e829e; --ws-accent: #8aaeff; --ws-accent-soft: #253959;
+  --ws-accent-hover: #a7c2ff; --ws-on-accent: #101827; --ws-focus: #abc7ff;
+  --ws-success: #8bd6b0; --ws-success-soft: #153a31;
+  --ws-warning: #f5cf87; --ws-warning-soft: #41351f;
+  --ws-danger: #ffacb7; --ws-danger-soft: #442a34;
+  --ws-info: #a6c9ff; --ws-info-soft: #213855;
+  --ws-unknown: #bdc9da; --ws-unknown-soft: #29364a;
+  --ws-nav: #101827; --ws-nav-hover: #1d2b42; --ws-nav-active: #273c5c;
+  --ws-shadow: 0 2px 6px #00000014; --ws-overlay-shadow: 0 16px 48px #00000066;
+}
+:root[data-ws-theme="light"] { color-scheme: light; }
+:root[data-ws-density="compact"] { --ws-control-height: 36px; --ws-row-pad: 9px; --ws-section-pad: 20px; }
+.workspace-shell, .ws-modal { font: 14px/1.55 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+.workspace-shell { font-variant-numeric: tabular-nums; }
+.workspace-shell button, .ws-modal button { font-family: inherit; }
+.workspace-shell a, .ws-modal a { color: var(--ws-accent); }
+.ws-sidebar { width: var(--ws-sidebar-width); padding: 24px 14px 18px; color: var(--ws-nav-text); }
+.ws-main { margin-left: var(--ws-sidebar-width); }
+.ws-brand { padding: 0 12px 25px; }
+.ws-brand strong { font-size: 21px; letter-spacing: -.6px; }
+.ws-brand small { font-size: 11px; color: var(--ws-nav-muted); }
+.ws-brand-mark { width: 38px; height: 38px; border-radius: 10px; background: #3769dc; }
+.ws-nav-group + .ws-nav-group { margin-top: 20px; }
+.ws-nav-label { margin: 0 0 8px; font-size: 11px; color: var(--ws-nav-muted); letter-spacing: .8px; }
+.workspace-shell .ws-nav a { min-height: 44px; font-size: 14px; color: var(--ws-nav-text); transition: background-color var(--ws-fast), color var(--ws-fast); }
+.workspace-shell .ws-nav a:hover { background: var(--ws-nav-hover); }
+.workspace-shell .ws-nav a.active { background: var(--ws-nav-active); }
+.ws-nav-count { font-size: 12px; min-width: 23px; text-align: center; }
+.ws-sidebar-footer { padding: 22px 12px 0; color: var(--ws-nav-muted); font-size: 12px; }
+.ws-sidebar-footer strong { font-size: 13px; }
+.workspace-shell .ws-preferences { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 24px 8px 0; padding: 16px 0; border-block: 1px solid #354760; }
+.ws-preferences legend { color: var(--ws-nav-muted); padding-right: 6px; font-size: 12px; }
+.workspace-shell .ws-preferences label { color: var(--ws-nav-text); font-size: 12px; }
+.workspace-shell .ws-preferences select { background: var(--ws-nav); color: #edf3ff; border-color: #6d829f; min-height: 36px; padding: 6px; font-size: 12px; color-scheme: dark; }
+.ws-preferences p { grid-column: 1 / -1; color: #f5cf87; font-size: 12px; margin: 0; }
+.ws-toolbar { gap: 16px; padding: 16px 28px; min-height: 76px; }
+.ws-command-trigger { display: flex; align-items: center; gap: 10px; text-align: left; width: min(100%, 500px); min-width: 0; padding: 10px 14px; border: 1px solid var(--ws-border); border-radius: 8px; background: var(--ws-surface-subtle); color: var(--ws-muted); font-size: 14px; cursor: pointer; }
+.ws-command-trigger > span { flex: 1; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.ws-command-trigger > svg { flex: none; }
+.ws-command-trigger kbd { font-family: inherit; font-size: 11px; line-height: 1.6; white-space: nowrap; border: 1px solid var(--ws-control-border); padding: 1px 5px; border-radius: 4px; }
+.ws-toolbar-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+.ws-content { max-width: 1640px; padding: 28px; }
+.ws-page-heading { gap: 20px; margin-bottom: 24px; }
+.ws-page-heading h1 { font-size: 28px; font-weight: 650; letter-spacing: -.75px; }
+.ws-page-heading p { font-size: 14px; max-width: 850px; }
+.ws-eyebrow { font-size: 11px !important; letter-spacing: 1px; }
+.ws-section, .ws-metric { box-shadow: var(--ws-shadow); }
+.ws-section-heading { padding: 18px var(--ws-section-pad); flex-wrap: wrap; }
+.ws-section-heading h2 { font-size: 16px; font-weight: 650; }
+.ws-section-heading p { font-size: 13px; }
+.ws-section-body, .ws-form { padding: var(--ws-section-pad); }
+.ws-metric { background: var(--ws-surface); padding: 22px; }
+.ws-metric-label { font-size: 13px; }
+.ws-metric-label svg { color: var(--ws-muted); }
+.ws-metric strong { font-size: 32px; line-height: 1.2; letter-spacing: -.8px; }
+.ws-metric small, .ws-server-metrics small { font-size: 12px; }
+.ws-button { position: relative; min-height: var(--ws-control-height); padding: 9px 14px; border-color: var(--ws-control-border); background: var(--ws-surface); color: var(--ws-text) !important; font-family: inherit; font-weight: 600; font-size: 13px; line-height: 1.4; transition: background-color var(--ws-fast), border-color var(--ws-fast), color var(--ws-fast), transform var(--ws-fast); }
+.ws-button:hover { background: var(--ws-surface-hover); }
+.ws-button:active:not(:disabled) { transform: scale(.98); }
+.ws-button-primary { background: var(--ws-accent); border-color: var(--ws-accent); color: var(--ws-on-accent) !important; }
+.ws-button-primary:hover { background: var(--ws-accent-hover); border-color: var(--ws-accent-hover); }
+.ws-button-danger { background: var(--ws-danger-soft); border-color: var(--ws-danger); color: var(--ws-danger) !important; }
+.ws-button-danger:hover { background: var(--ws-danger); color: var(--ws-surface) !important; }
+.ws-button:disabled { opacity: .65; }
+.ws-button[aria-busy="true"] { cursor: progress; }
+.ws-button-label { display: inline-flex; align-items: center; gap: 7px; }
+.ws-button[aria-busy="true"] > .ws-button-label { visibility: hidden; }
+.ws-button-pending { position: absolute; inset: 0; display: grid; place-items: center; }
+.ws-button-pending .ws-spinner { border-color: currentColor; border-right-color: transparent; }
+.workspace-shell :is(button, a, input, select, textarea, summary):focus-visible, .ws-modal :is(button, a, input, select, textarea, summary):focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
+.ws-sidebar :is(a, button, select):focus-visible { outline-color: #abc7ff; }
+.workspace-shell :is(input, select, textarea), .ws-modal :is(input, select, textarea) { min-height: var(--ws-control-height); background: var(--ws-surface); border-color: var(--ws-control-border); color: var(--ws-text); font-size: 14px; }
+.workspace-shell :is(input, textarea)::placeholder, .ws-modal :is(input, textarea)::placeholder { color: var(--ws-muted); opacity: 1; }
+.workspace-shell input:is([type="checkbox"], [type="radio"]), .ws-modal input:is([type="checkbox"], [type="radio"]) { width: 18px; height: 18px; min-height: 0; accent-color: var(--ws-accent); }
+.workspace-shell label, .ws-modal label { font-size: 13px; }
+.workspace-shell [aria-invalid="true"], .ws-modal [aria-invalid="true"] { border-color: var(--ws-danger); }
+.ws-field-hint, .ws-muted { font-size: 13px; }
+.ws-table { font-size: 14px; }
+.ws-table th { background: var(--ws-surface-subtle); padding: 12px 20px; font-size: 12px; }
+.ws-table td { padding: var(--ws-row-pad) 20px; border-color: var(--ws-border); }
+.ws-table tbody tr:hover, .ws-context-row { background: var(--ws-surface-hover); }
+.ws-table td strong { font-size: 14px; }
+.ws-table td small { font-size: 12px; }
+.ws-domain-symbol { color: var(--ws-accent); background: var(--ws-accent-soft); border-color: var(--ws-border); }
+.ws-domain-name { max-width: 560px; }
+.ws-table-scroll { overscroll-behavior-x: contain; }
+.ws-pagination, .ws-breadcrumb { font-size: 13px; }
+.ws-badge { gap: 6px; padding: 4px 8px; font-size: 12px; border-radius: 6px; font-weight: 600; }
+.ws-badge-good { color: var(--ws-success); background: var(--ws-success-soft); }
+.ws-badge-bad { color: var(--ws-danger); background: var(--ws-danger-soft); }
+.ws-badge-warn { color: var(--ws-warning); background: var(--ws-warning-soft); }
+.ws-badge-info { color: var(--ws-info); background: var(--ws-info-soft); }
+.ws-badge-neutral { color: var(--ws-unknown); background: var(--ws-unknown-soft); }
+.ws-badge svg { flex-shrink: 0; }
+.ws-empty { padding: 48px 24px; }
+.ws-empty-icon { color: var(--ws-muted); background: var(--ws-surface-subtle); }
+.ws-empty h3 { font-size: 17px; }
+.ws-empty p { font-size: 14px; }
+.ws-notice { font-size: 13px; color: var(--ws-info); background: var(--ws-info-soft); border-color: var(--ws-info); }
+.ws-notice-warn { color: var(--ws-warning); background: var(--ws-warning-soft); border-color: var(--ws-warning); }
+.ws-notice-error { color: var(--ws-danger); background: var(--ws-danger-soft); border-color: var(--ws-danger); }
+.ws-keyvalues > div { font-size: 13px; border-color: var(--ws-border); padding: 14px 0; }
+.ws-site-meta { margin: -10px 0 24px; font-size: 13px; padding-bottom: 20px; border-bottom: 1px solid var(--ws-border); }
+.ws-site-navigation { margin-bottom: 24px; }
+.ws-site-groups { display: flex; gap: 4px; overflow-x: auto; border-bottom: 1px solid var(--ws-border); }
+.workspace-shell .ws-site-groups a { display: flex; align-items: center; gap: 8px; padding: 13px 16px; min-height: 48px; white-space: nowrap; color: var(--ws-muted); border-bottom: 3px solid transparent; text-decoration: none; font-size: 14px; }
+.workspace-shell .ws-site-groups a:hover { background: var(--ws-surface-hover); }
+.workspace-shell .ws-site-groups a[aria-current] { color: var(--ws-accent); border-bottom-color: var(--ws-accent); font-weight: 650; }
+.ws-site-subnav { display: flex; flex-wrap: wrap; gap: 6px; padding: 12px 0; }
+.workspace-shell .ws-site-subnav a { display: block; padding: 8px 14px; min-height: 40px; border-radius: 6px; color: var(--ws-muted); text-decoration: none; }
+.workspace-shell .ws-site-subnav a[aria-current="page"] { color: var(--ws-accent); background: var(--ws-accent-soft); font-weight: 600; }
+.ws-site-shortcuts { display: grid; grid-template-columns: repeat(auto-fit, minmax(145px, 1fr)); gap: 12px; margin-top: 20px; }
+.workspace-shell .ws-site-shortcuts a { display: flex; gap: 9px; align-items: center; padding: 14px; background: var(--ws-surface); border: 1px solid var(--ws-border); border-radius: 8px; color: var(--ws-text); text-decoration: none; font-size: 13px; }
+.ws-site-shortcuts a > svg:first-child { color: var(--ws-accent); flex: none; }
+.ws-site-shortcuts a > svg:last-child { margin-left: auto; flex: none; }
+.workspace-shell .ws-site-shortcuts a:hover { border-color: var(--ws-accent); background: var(--ws-accent-soft); }
+.workspace-shell .ws-tabs { border-color: var(--ws-border); }
+.workspace-shell .ws-tabs a { font-size: 13px; }
+.ws-modal { background: var(--ws-surface); box-shadow: var(--ws-overlay-shadow); animation: ws-dialog-in var(--ws-normal) var(--ws-ease); }
+.ws-modal > header { background: var(--ws-surface-raised); padding: 18px 24px; }
+.ws-modal-body { padding: 24px; }
+.ws-modal::backdrop { background: #080f2070; }
+.ws-modal .ws-keyvalues { padding: 0; }
+.ws-modal .ws-muted, .ws-job-status > p { font-size: 13px; }
+.ws-drawer { position: fixed; inset: 0 0 0 auto; margin: 0; width: min(480px, 100vw); max-width: 100vw; height: 100dvh; max-height: 100dvh; border-radius: 12px 0 0 12px; border-width: 0 0 0 1px; z-index: 60; overflow: hidden; animation: ws-drawer-in var(--ws-slow) var(--ws-ease); }
+.ws-drawer[open] { display: flex; flex-direction: column; }
+.ws-drawer > header { flex-shrink: 0; }
+.ws-drawer > .ws-modal-body { flex: 1; overflow-y: auto; overscroll-behavior: contain; }
+.ws-drawer .ws-keyvalues > div { grid-template-columns: 110px minmax(0, 1fr); gap: 12px; }
+.ws-drawer .ws-eyebrow { margin: 0 0 5px !important; }
+.ws-command-search { display: flex; align-items: center; gap: 10px; color: var(--ws-muted); }
+.ws-command-search > svg { flex-shrink: 0; }
+.ws-command-results { max-height: min(48dvh, 430px); overflow: auto; padding: 4px; margin: 0 -4px; }
+.ws-command-result { display: flex; gap: 12px; align-items: center; padding: 12px; border-radius: 8px; text-decoration: none; color: var(--ws-text) !important; }
+.ws-command-result[aria-selected="true"] { background: var(--ws-accent-soft); outline: 1px solid var(--ws-accent); outline-offset: -1px; }
+.ws-command-result > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
+.ws-command-result > svg { flex-shrink: 0; color: var(--ws-muted); }
+.ws-command-result strong { display: block; font-size: 14px; }
+.ws-command-result small { color: var(--ws-muted); font-size: 12px; }
+.ws-command-footer { border-top: 1px solid var(--ws-border); padding-top: 16px; margin-bottom: 0; }
+.ws-resource-loading { min-height: 36px; }
+.ws-skeleton { padding: 20px; }
+.ws-skeleton-row { display: flex; align-items: center; gap: 16px; padding: 8px 0; }
+.ws-skeleton-row span { display: block; flex: 1; height: 13px; border-radius: 4px; background: var(--ws-surface-subtle); position: relative; overflow: hidden; }
+.ws-skeleton-row span::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, var(--ws-border), transparent); transform: translateX(-100%); animation: ws-shimmer 1400ms linear infinite; opacity: .45; }
+.ws-skeleton-lines .ws-skeleton-row span:not(:first-child) { display: none; }
+.ws-skeleton-lines .ws-skeleton-row:nth-child(2) { max-width: 75%; }
+.ws-skeleton-lines .ws-skeleton-row:nth-child(3) { max-width: 55%; }
+.ws-skeleton-cards { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+.ws-skeleton-cards .ws-skeleton-row { padding: 24px 16px; border: 1px solid var(--ws-border); border-radius: 8px; flex-direction: column; }
+.ws-skeleton-cards .ws-skeleton-row span { width: 100%; flex: none; }
+.ws-skeleton-form .ws-skeleton-row { flex-direction: column; align-items: stretch; }
+.ws-skeleton-form .ws-skeleton-row span { min-height: 32px; }
+.ws-skeleton small { display: block; font-size: 12px; color: var(--ws-muted); margin-top: 8px; grid-column: 1 / -1; }
+.ws-spinner { border-color: var(--ws-border); border-top-color: var(--ws-accent); }
+.ws-alert-item strong { font-size: 14px; }
+.ws-alert-item p, .ws-server-metrics span { font-size: 13px; }
+.workspace-shell .panel { background: var(--ws-surface); color: var(--ws-text); }
+.authenticated-panel .auth-sessionbar { padding-left: calc(var(--ws-sidebar-width) + 28px); background: var(--ws-surface); color: var(--ws-text); }
+.authenticated-panel .auth-sessionbar button { background: var(--ws-surface); color: var(--ws-text); border-color: var(--ws-control-border); font-size: 12px; }
+.ws-skip { background: var(--ws-surface); left: calc(var(--ws-sidebar-width) + 12px); }
+@keyframes ws-dialog-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+@keyframes ws-drawer-in { from { opacity: 0; transform: translateX(24px); } to { opacity: 1; transform: translateX(0); } }
+@keyframes ws-shimmer { to { transform: translateX(100%); } }
+@media (max-width: 1180px) { .ws-content { padding: 24px; } .ws-site-groups a svg { display: none; } }
+@media (max-width: 900px) {
+  .ws-main { margin-left: 0; }
+  .ws-sidebar { width: min(290px, 90vw); }
+  .ws-toolbar { padding: 14px 18px; gap: 10px; }
+  .ws-toolbar-actions .ws-button { padding-inline: 10px; }
+  .authenticated-panel .auth-sessionbar { padding-left: 18px; }
+  .ws-skip { left: 12px; }
+  .ws-drawer { width: 100vw; border-radius: 0; border: 0; }
+  .workspace-shell .ws-nav-close { background: transparent; color: #edf3ff !important; border-color: #6d829f; }
+}
+@media (max-width: 640px) {
+  .ws-content { padding: 20px 16px 40px; }
+  .ws-toolbar { flex-wrap: wrap; }
+  .ws-command-trigger { flex: 1; width: auto; }
+  .ws-command-trigger kbd { display: none; }
+  .ws-toolbar-actions { width: 100%; justify-content: flex-end; }
+  .ws-toolbar-actions .ws-button { flex: 1; }
+  .ws-page-heading h1 { font-size: 24px; }
+  .ws-section-heading, .ws-section-body, .ws-form, .ws-modal-body { padding: 18px; }
+  .ws-site-shortcuts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .workspace-shell .ws-site-groups a { padding-inline: 13px; }
+  .ws-skeleton-cards { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ws-keyvalues > div { font-size: 13px; }
+  .ws-metric-label, .ws-metric small { font-size: 12px; }
+}
+@media (pointer: coarse) { .ws-button, .ws-command-trigger, .workspace-shell select, .ws-modal select { min-height: 44px; } }
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal *, .ws-modal *::before, .ws-modal *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
+  .ws-button:active:not(:disabled) { transform: none; }
+  .ws-skeleton-row span::after { display: none; }
+}
