@@ -127,6 +127,7 @@ Son canlı sunucu kabulü (T-BASE, T-DNS, T-TOOLS ve veri izolasyonu): `docs/his
 Son Debian paketi güncelleme ve durum koruma canlı kabulü (T-BASE): `docs/history/debian-package-upgrade-live-acceptance-2026-09-21.md`.
 Son PowerDNS Authoritative DNS retirement canlı kabulü (T-DNS): `docs/history/powerdns-retirement-orchestrator-live-acceptance-2026-09-21.md`.
 Son PowerDNS Durable Apply, Explicit Rollback ve Failure Injection canlı kabulü (T-DNS): `docs/history/powerdns-durable-apply-rollback-live-acceptance-2026-09-21.md`.
+Son Pre-Existing Local Zone Re-Apply, Rollback ve Failure Injection canlı kabulü (T-DNS): `docs/history/dns-zone-reapply-rollback-live-acceptance-2026-09-21.md`.
 
 ## 0 — Değiştirilemez ürün kararı
 
