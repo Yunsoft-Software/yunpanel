@@ -24,5 +24,8 @@
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/validate-repository.mjs",
     "check": "npm run lint && npm test && npm run build"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0"
   }
 }
