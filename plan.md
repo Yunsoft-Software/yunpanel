@@ -188,7 +188,48 @@ Domain removal HTTP API'ı (`preview`, `operations`, `retry-routing`, `continue`
 
 Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı, deepest-first child domain yürütümü, certificate retirement, shared Webmail mapping temizliği, Mail Domain child operasyonu, External DNS metadata unlinking, Website binding detach, authoritative DNS retirement ve Domain/Website metadata finalization kaynak kod tarafında tamamlandı. Mail/DB/file deletion için typed confirmation, retention ve backup evidence zincirleri (database credential deletion, unbind, backup evidence ve file cleanup retained backups) üst operasyonlara bağlandı. Authenticated HTTP rotaları (`/api/domains/:domainId/removal*` ve `/api/websites/:websiteId/removal*`) eklendi.
 
-Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `todo.md` T-PROVISIONING ve T-MAIL içindedir.
+## P0.10 — Plesk Tipi Site-Merkezli Workspace, İzolasyonlu Yerli Terminal, SSL/Subdomain Tamiri, Scoped Kullanıcı ve Playwright E2E
+
+- [ ] **P0.10.1 — SSL / TLS Düzeltmesi ve Kusursuz Alım Akışı**:
+  - `apps/api/src/certificate-http.js` ve `packages/host-runtime/src/acme-manager.js`:
+    - Domain veya Subdomain `httpsMode: 'off'` olsa dahi SSL talep edildiğinde otomatik olarak `managed` moduna geçirilsin (`https_not_managed` 409 hatasıyla kullanıcıyı tıkamasın).
+    - Subdomain'ler için Certbot HTTP-01 / DNS-01 flow'u sorunsuz çalışsın; Nginx vhost'u SSL sertifikasını alıp Nginx'i anında yeniden yüklesin.
+    - Web UI'da (Website SSL sekmesi ve Domain listesi): Tek tıkla "Let's Encrypt SSL Al" butonu, anlık durum takibi ve HTTP->HTTPS yönlendirme anahtarı.
+- [ ] **P0.10.2 — Subdomain Yönetimi ve İşlem Tamiri**:
+  - `DomainManager.jsx` ve `DomainList.jsx` içindeki ölü `/stage` ve `/activate` çağrıları temizlensin; modern durable job / state API'sine bağlansın.
+  - Website içinden "Alt Alan Adı Ekle" tıklandığında üst siteye bağlı subdomain hemen açılsın; proxy portu veya alt dizin hedefi belirlensin.
+  - Alt alan adında SSL alma, DNS kayıtlarını görme/düzenleme, hedef değiştirme ve silme işlemleri eksiksiz çalışsın.
+- [ ] **P0.10.3 — ttyd Kaldırılması & Yerli İzolasyonlu WebSocket Terminali**:
+  - `ttyd` hazır paketi ve ona bağlı servis/iframe mantığı tamamen kaldırılsın.
+  - `/api/terminal` WebSocket sunucusu yeniden ayağa kaldırılsın:
+    - **Site İçi Terminal**: Hedef bir web sitesi olduğunda (`scope: 'site'`), terminal ilgili sitenin özel Linux kullanıcısı (`website.unixUser`, örn. `yunapp-...`) kimliğiyle ve sitenin çalışma dizininde (`website.documentRoot`) başlasın. Linux dosya izinleri ve proses ayrımı sayesinde `/root`, diğer sitelerin dizinleri veya sistem özel dosyalarına erişim imkansız olsun.
+    - **Sunucu / Yönetici Terminali**: Yalnızca Ayarlar veya Sunucu menüsünden, `owner` / `admin` rolündeki kullanıcı için `/root` dizininde `root` kabuğu olarak açılsın.
+    - Frontend `TerminalPanel.jsx` ttyd bağımlılığını atsın, doğrudan xterm.js + WebSocket üzerinden saf, hızlı ve yerli terminali sunsun.
+- [ ] **P0.10.4 — Plesk-Tarzı Kapsamlı Website Workspace'i ve Sekmeli/Kategorize Tasarım**:
+  - Bir web sitesine tıklandığında (veya alt alan adına tıklandığında) tek sayfada yığılmış çirkin görünüm yerine Plesk tarzı organize, temiz ve modern sekmeli arayüz:
+    - **Genel Bakış (Overview)**: Site durumu, IP, SSL durumu, disk/kaynak kullanımı, hızlı işlem butonları.
+    - **Dosyalar ve Barındırma (Files & Hosting)**: Belge kökü, dosya yöneticisi, SFTP bilgileri, web sunucusu ayarları.
+    - **Alan Adları ve DNS (Domains & DNS)**: Ana alan adı, bağlı alt alan adları (subdomains), aliaslar, DNS kayıt tablosu.
+    - **SSL / TLS**: Sertifika durumu, süre bilgisi, tek tıkla SSL alma butonu, HTTPS zorunluluğu toggle'ı.
+    - **E-Posta (Mail & Webmail)**: Bu siteye ait posta kutuları listesi (`info@domain.com`), yeni hesap açma, şifre değiştirme, Roundcube Webmail direkt giriş linki.
+    - **Veritabanları (Databases)**: Siteye bağlı MariaDB veritabanları ve kullanıcıları, phpMyAdmin hızlı giriş.
+    - **Uygulamalar ve Docker**: Node/PHP/Python sürüm seçimi, Git repo & auto-deploy, siteye ait Docker container'ları.
+    - **Loglar ve İstatistikler**: Nginx access/error logları, canlı GoAccess web raporu.
+    - **Terminal**: Sitenin kendi izole Linux kabuğu.
+    - **Yedekler (Backups)**: Siteye ait anlık yedek alma ve geri yükleme.
+    - **Site Ayarları**: Sitenin kullanıcı bilgileri, ortam değişkenleri (env), siteyi silme.
+- [ ] **P0.10.5 — Scoped Website Kullanıcı Rolü (Plesk Müşteri/Site Kullanıcısı Modeli)**:
+  - Sadece tek bir siteyi (veya siteleri) yönetebilen kısıtlı kullanıcı rolü (`site_manager` / `site_user`).
+  - Bu kullanıcı giriş yaptığında diğer siteleri, sunucu ayarlarını, global audit loglarını veya sunucu root terminalini göremez.
+  - Sadece kendisine atanan Website Workspace'ini açabilir; o sitenin docker, domain, ssl, mail, dosya, db, cron ve site terminalini tam yetkiyle kullanabilir.
+- [ ] **P0.10.6 — Playwright ile Uçtan Uca (E2E) Gerçek Tarayıcı Testleri**:
+  - `@playwright/test` kurulumu ve Chromium ile e2e test suite'i (`e2e/`):
+    - Login akışı.
+    - Web sitesi ve subdomain oluşturma.
+    - Subdomain üzerinde SSL alma ve hedef yapılandırma.
+    - Tüm sekmelerin (Hosting, Domains, SSL, Mail, DB, Files, Terminal, Backups) gezilmesi ve doğrulanması.
+    - Site içi terminalin açılıp `whoami` ve `pwd` ile doğru izole kullanıcıda çalıştığının testi.
+    - Scoped site kullanıcısı ile giriş yapıp başka siteleri göremediğinin ve kendi sitesini yönetebildiğinin testi.
 
 # P1 — AI yönetim katmanı
 
