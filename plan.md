@@ -137,6 +137,8 @@ Son UX Development Entegrasyonu ve Canlı Doğrulama kabulü: `docs/history/ux-d
 Son AI yönetim katmanı foundation ilerlemesi: `docs/history/ai-management-layer-foundation-2026-09-21.md`.
 Son Plesk site workspace, yerli WebSocket terminali, scoped site_manager rolü ve Playwright E2E canlı kabulü: `docs/history/plesk-workspace-terminal-site-manager-e2e-2026-09-21.md`.
 Son Yerli İzolasyonlu Dosya Yöneticisi ve Otomatik Webmail Entegrasyonu canlı kabulü: `docs/history/native-file-manager-and-auto-webmail-live-acceptance-2026-09-21.md`.
+Son Tüm Özellikler İçin Kapsamlı Playwright E2E Test Paketi Canlı Kabulü: `docs/history/comprehensive-playwright-e2e-all-features-2026-09-21.md`.
+
 
 ## 0 — Değiştirilemez ürün kararı
 
