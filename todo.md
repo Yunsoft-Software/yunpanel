@@ -10,7 +10,6 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 
 ## T-DOCKER-PYTHON-MIGRATION — P2
 
-- [ ] Managed Compose Website kendi project/network/volume/log/terminal/backup scope'uyla başka Website'ten izole çalışsın; Docker Engine/Compose dışındaki genel yönetim yeniden yazılmasın.
 - [ ] Portainer adapter'ı açılırsa yalnız authenticated Owner gateway'i, local endpoint ve secret-safe session ile erişilsin; direct port public olmasın.
 
 ## T-UI — Son kabul

@@ -37,7 +37,7 @@ const SERVICE_CATALOG = Object.freeze([
   service({ id: 'nginx', label: 'Nginx', category: 'web', packages: ['nginx'], units: ['nginx.service'] }),
   service({ id: 'mariadb', label: 'MariaDB', category: 'database', packages: ['mariadb-server'], units: ['mariadb.service'], conflicts: ['mysql'] }),
   service({ id: 'mysql', label: 'MySQL', category: 'database', packages: ['mysql-server'], units: ['mysql.service'], conflicts: ['mariadb'] }),
-  service({ id: 'docker', label: 'Docker', category: 'containers', packages: ['docker.io'], units: ['docker.service'] }),
+  service({ id: 'docker', label: 'Docker', category: 'containers', packages: ['docker.io', 'docker-compose-v2'], units: ['docker.service'] }),
   service({ id: 'cron', label: 'Cron', category: 'scheduler', packages: ['cron'], units: ['cron.service'] }),
   service({
     id: 'postfix',

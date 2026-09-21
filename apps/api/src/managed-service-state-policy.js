@@ -12,7 +12,7 @@ const POLICY = new Map([
   ['nginx', definition(['nginx'], ['nginx.service'])],
   ['mariadb', definition(['mariadb-server'], ['mariadb.service'])],
   ['mysql', definition(['mysql-server'], ['mysql.service'])],
-  ['docker', definition(['docker.io'], ['docker.service'])],
+  ['docker', definition(['docker.io', 'docker-compose-v2'], ['docker.service'])],
   ['cron', definition(['cron'], ['cron.service'])],
   ['postfix', definition(['postfix', 'postfix-sqlite', 'sqlite3'], ['postfix.service'], true)],
   ['dovecot', definition(['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-sqlite', 'sqlite3'], ['dovecot.service'], true)],

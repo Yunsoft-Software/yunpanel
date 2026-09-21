@@ -5,7 +5,7 @@ import { createJobRegistry, JobRegistryError } from '../src/job-registry.js';
 
 const serverId = 'server-1';
 const servicePackages = {
-  nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io'], cron: ['cron'],
+  nginx: ['nginx'], mariadb: ['mariadb-server'], mysql: ['mysql-server'], docker: ['docker.io', 'docker-compose-v2'], cron: ['cron'],
   postfix: ['postfix', 'postfix-sqlite', 'sqlite3'],
   dovecot: ['dovecot-imapd', 'dovecot-lmtpd', 'dovecot-sieve', 'dovecot-sqlite', 'sqlite3'],
   rspamd: ['rspamd'],
