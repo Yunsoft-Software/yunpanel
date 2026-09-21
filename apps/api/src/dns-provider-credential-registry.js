@@ -182,11 +182,22 @@ export function createDnsProviderCredentialRegistry({
           || new Set(credentials.map((record) => record.dnsZoneId)).size !== credentials.length) {
           throw new DnsProviderCredentialRegistryError('dns_provider_credential_state_invalid', 'DNS provider credential identities are not unique', 409);
         }
+        const validCredentials = [];
         for (const record of credentials) {
-          await requireZone(record.dnsZoneId);
+          let zone;
+          try {
+            zone = await getDnsZone(record.dnsZoneId);
+          } catch {
+            throw new DnsProviderCredentialRegistryError('dns_zone_unavailable', 'DNS zone could not be verified', 503);
+          }
+          if (!zone) continue;
           decryptToken(key, record);
+          validCredentials.push(record);
         }
-        state = { version: STORE_VERSION, credentials };
+        state = { version: STORE_VERSION, credentials: validCredentials };
+        if (validCredentials.length !== credentials.length) {
+          await persist();
+        }
       } catch (error) {
         if (error?.code !== 'ENOENT') throw error;
         await persist();

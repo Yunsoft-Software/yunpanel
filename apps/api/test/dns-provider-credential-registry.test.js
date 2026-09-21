@@ -75,3 +75,24 @@ test('DNS provider credential writes require a valid zone and configured master 
     (error) => error instanceof DnsProviderCredentialRegistryError && error.code === 'dns_zone_not_found',
   );
 });
+
+test('DNS provider credential store prunes orphaned credentials during init if zone was removed', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-dns-provider-orphan-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'credentials.json');
+  const masterKey = randomBytes(32);
+  let activeZones = new Set([DNS_ZONE_ID]);
+  const getDnsZone = async (id) => activeZones.has(id) ? { id, zoneName: 'example.com' } : null;
+
+  const registry = createDnsProviderCredentialRegistry({ filePath, masterKey, getDnsZone });
+  await registry.setCredential({ dnsZoneId: DNS_ZONE_ID, provider: 'cloudflare', token: 'cloudflare_token_private_1234567890' });
+
+  // Simulate zone being removed/retired
+  activeZones.delete(DNS_ZONE_ID);
+
+  // Re-opening registry should not throw; it should prune the orphaned credential
+  const reopened = createDnsProviderCredentialRegistry({ filePath, masterKey, getDnsZone });
+  await reopened.init();
+  assert.equal((await reopened.getForZone(DNS_ZONE_ID)).configured, false);
+});
+
