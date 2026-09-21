@@ -595,6 +595,7 @@ const aiToolRegistry = createAiToolRuntime({
   domainRegistry,
   applicationRegistry,
   jobRegistry,
+  applicationEnvironmentRegistry,
   localServerId,
 });
 const websiteCronApplyService = createWebsiteCronApplyService({
