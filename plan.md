@@ -189,6 +189,33 @@ Domain removal HTTP API'ı (`preview`, `operations`, `retry-routing`, `continue`
 
 Domain removal ve Website removal lifecycle, reverse-order step orchestrator'ı, deepest-first child domain yürütümü, certificate retirement, shared Webmail mapping temizliği, Mail Domain child operasyonu, External DNS metadata unlinking, Website binding detach, authoritative DNS retirement ve Domain/Website metadata finalization kaynak kod tarafında tamamlandı. Mail/DB/file deletion için typed confirmation, retention ve backup evidence zincirleri (database credential deletion, unbind, backup evidence ve file cleanup retained backups) üst operasyonlara bağlandı. Authenticated HTTP rotaları (`/api/domains/:domainId/removal*` ve `/api/websites/:websiteId/removal*`) eklendi.
 
+## P0.11 — Otomatik Webmail (Roundcube) Entegrasyonu & DNS/TLS/Nginx Eşleştirmesi
+
+- [ ] **P0.11.1 — Site Oluşturma Formunda Otomatik Local Mail/Webmail**:
+  - `apps/web/src/workspace/new-website-form.js` ve `NewWebsitePage.jsx`: Birincil domain ile yeni website açılırken varsayılan olarak `mail: { mode: 'local' }` gönderilsin.
+  - Provizyon akışı (`site-create-mail-provisioning.js`, `site-create-provisioning.js`):
+    - Mail Domain otomatik oluşturulsun.
+    - `webmail.<domain>` DNS A kaydı sunucu genel IP'sine eklensin (`dns-zone-desired-state.js`).
+    - `webmail.<domain>` Let's Encrypt SSL sertifikası alınsın.
+    - Roundcube Nginx vhost mapping'i (`server_name webmail.<domain>;`) oluşturulup Nginx yeniden yüklensin.
+- [ ] **P0.11.2 — Sitede Tek Tıkla Webmail Açma / Bağlama**:
+  - Website Workspace (Mail & Bağlı Kaynaklar sekmesi): Mevcut domain için mail domaini yoksa tek tıkla "Webmail & Mail Etkinleştir" butonu sunulsun.
+  - Aktif webmail adresi (`https://webmail.<domain>`) tek tıkla yeni sekmede açılabilsin.
+
+## P0.12 — Yerli İzolasyonlu Dosya Yöneticisi (File Manager) — elFinder Kaldırılması ve Modern CRUD/Toplu Silme
+
+- [ ] **P0.12.1 — Backend Dosya Yöneticisi Katmanı (`site-file-worker` & `site-file-http`)**:
+  - `apps/api/src/site-file-worker.js`: Sitenin dedicated Linux kullanıcısı (`website.unixUser`) ve `website.documentRoot` sınırlarında izole, güvenli worker:
+    - Listeleme (`list`), yeni dosya (`create_file`), yeni klasör (`mkdir`), metin okuma/yazma (`read_text`, `write_text` with optimistic sha256 lock), dosya yükleme/indirme (`upload`, `download`), tekil silme (`delete`), çoklu/toplu silme (`batch_delete`).
+  - `apps/api/src/site-file-http.js`: `/api/websites/:websiteId/files*` REST endpoint'leri (`owner` ve `site_manager` yetkisiyle).
+- [ ] **P0.12.2 — Frontend Modern Dosya Yöneticisi Paneli (`FilesPanel.jsx`)**:
+  - `elFinder` iframe ve bağımlılıkları tamamen kaldırılsın; doğrudan panel içinde React tabanlı yerli dosya yöneticisi sunulsun.
+  - Breadcrumb yol takibi ve üst işlem çubuğu ("Yeni Dosya", "Yeni Klasör", "Dosya Yükle", "Seçilenleri Sil", "Yenile").
+  - Checkbox çoklu seçim (Başlıkta "Tümünü Seç", satır bazlı checkbox'lar).
+  - Toplu silme (Birden fazla dosya ve klasörü tek tıkla ve onay penceresiyle silme).
+  - Dosya düzenleyici (kod/metin editörü, kaydetme, kapatma).
+  - Tekil silme, dosya indirme ve yeniden adlandırma.
+
 # P1 — AI yönetim katmanı
 
 AI foundation ilerlemesi: `docs/history/ai-management-layer-foundation-2026-09-21.md`.
