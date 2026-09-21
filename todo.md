@@ -23,8 +23,8 @@ IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün 
 ## T-UI — Son kabul
 
 - [ ] Günlük navigasyonda uygulamalar yalnız ait oldukları Website altında görünsün; global Application ekranı yalnız Owner tanılama envanteri olsun.
-- [ ] Website tabs runtime/capability'ye göre Hosting, Deploy, DNS, SSL, Mail/Webmail, Databases/phpMyAdmin, Files/elFinder, Logs/GoAccess, Terminal/ttyd, Backup, Cron ve Settings'i gerçek çalışır durumla göstersin.
 - [ ] Gerçek Chromium/Firefox, mobil viewport, klavye ve ekran okuyucu ile deep-link/reload/back-forward, loading/error/missing dependency, modal confirmation ve uzun job progress davranışı doğrulansın.
+
 
 ## Yayın kuralı
 
