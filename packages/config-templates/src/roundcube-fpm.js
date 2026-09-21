@@ -59,7 +59,7 @@ export function renderRoundcubeFpmPool({
     throw new RoundcubeFpmTemplateError('invalid_roundcube_fpm_path', 'socketPath must use the managed Roundcube socket');
   }
   const temp = safePath(temporaryDirectory, 'temporaryDirectory');
-  return `[${roundcubeFpmTemplatePolicy.poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socket}\nlisten.owner = ${owner}\nlisten.group = ${socketGroupName}\nlisten.mode = ${roundcubeFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = 10\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = no\nsecurity.limit_extensions = .php\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\nphp_admin_value[error_reporting] = 8191\n`;
+  return `[${roundcubeFpmTemplatePolicy.poolName}]\nuser = ${user}\ngroup = ${group}\nlisten = ${socket}\nlisten.owner = ${owner}\nlisten.group = ${socketGroupName}\nlisten.mode = ${roundcubeFpmTemplatePolicy.socketMode}\npm = ondemand\npm.max_children = 10\npm.process_idle_timeout = 10s\npm.max_requests = 500\nclear_env = yes\ncatch_workers_output = no\nsecurity.limit_extensions = .php\nphp_admin_value[sys_temp_dir] = ${temp}\nphp_admin_value[upload_tmp_dir] = ${temp}\n`;
 }
 
 export function previewRoundcubeFpmPool(input = {}) {

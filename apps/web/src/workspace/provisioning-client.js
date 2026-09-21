@@ -63,6 +63,51 @@ export function compensateWebsiteProvisioningStep(operationId, provisioningStepI
   });
 }
 
+export async function autoAdvanceWebsiteProvisioning(operationId, { maxSteps = 30, signal, onStep } = {}) {
+  const id = uuid(operationId, 'provisioning operation id');
+  let currentOperation = null;
+  const retriedSteps = new Set();
+  for (let i = 0; i < maxSteps; i += 1) {
+    if (signal?.aborted) break;
+    let result = null;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (signal?.aborted) break;
+      try {
+        result = await panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
+          method: 'POST',
+          body: { confirmation: continueConfirmation(id) },
+          signal,
+        });
+        break;
+      } catch (err) {
+        if (attempt === 2 || signal?.aborted) throw err;
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+      }
+    }
+    currentOperation = result?.operation ?? null;
+    if (typeof onStep === 'function') onStep(result);
+
+    if (result?.outcome === 'failed' && result?.stepId && !retriedSteps.has(result.stepId)) {
+      retriedSteps.add(result.stepId);
+      try {
+        const retryResult = await retryWebsiteProvisioningStep(id, result.stepId);
+        currentOperation = retryResult?.operation ?? currentOperation;
+        if (typeof onStep === 'function') onStep(retryResult);
+        if (retryResult?.outcome === 'progressed') {
+          continue;
+        }
+      } catch {
+        // Fall through to outcome check
+      }
+    }
+
+    if (!result || ['ready', 'failed', 'blocked', 'interrupted'].includes(result.outcome)) {
+      break;
+    }
+  }
+  return currentOperation;
+}
+
 export const provisioningClientInternals = Object.freeze({
   uuid,
   stepId,

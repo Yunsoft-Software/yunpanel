@@ -14,6 +14,7 @@ import {
   siteCreateInputFromForm,
 } from './new-website-form.js';
 import { siteHref } from './site-model.js';
+import { autoAdvanceWebsiteProvisioning } from './provisioning-client.js';
 
 export default function NewWebsitePage() {
   const [params] = useSearchParams();
@@ -43,6 +44,7 @@ function WebsiteForm({ parentId }) {
 
   const [operationId] = useState(() => crypto.randomUUID());
   const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
+  const [progressStep, setProgressStep] = useState(null);
   const pending = useRef(false); const requests = useRef(null);
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
   useUnsavedChanges(dirty && !created);
@@ -98,12 +100,27 @@ function WebsiteForm({ parentId }) {
         return;
       }
       setBusy(true);
+      setProgressStep('Site kaydı oluşturuluyor…');
       const input = siteCreateInputFromForm({ form, operationId, serverId, domain, selectedApplication: selected });
       const preview = await panelRequest('/sites/create-preview', { method: 'POST', body: { input }, signal: requests.current.signal });
       const result = await panelRequest('/sites', {
         method: 'POST', body: { input, previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal: requests.current.signal,
       });
-      setCreated(result.primaryDomain); setDirty(false); refreshAll();
+
+      let provOp = result?.provisioning ?? null;
+      if (provOp && provOp.operationId && !provOp.ready) {
+        setProgressStep('Workspace ve servisler kuruluyor…');
+        provOp = await autoAdvanceWebsiteProvisioning(provOp.operationId, {
+          signal: requests.current.signal,
+          onStep: (stepRes) => {
+            if (stepRes?.stepId) setProgressStep(`${stepRes.stepId} kuruluyor…`);
+          },
+        });
+      }
+
+      setCreated({ ...result.primaryDomain, ready: provOp?.ready ?? false });
+      setDirty(false);
+      refreshAll();
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { pending.current = false; if (!requests.current.signal.aborted) setBusy(false); }
   }
@@ -121,7 +138,7 @@ function WebsiteForm({ parentId }) {
   return <>
     <nav className="ws-breadcrumb" aria-label="Konum"><Link to="/websites">Web siteleri</Link><span>/</span><span>Yeni kayıt</span></nav>
     <PageHeading title={form.mode === 'subdomain' ? 'Alt alan adı ekle' : 'Web sitesi ekle'} description="Ayrı bir uygulama oluşturun, kullanılmamış bir uygulamayı bağlayın veya açıkça mevcut Website’i paylaşın." />
-    {created ? <Section title="Site kaydı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Kayıt taslak olarak oluşturuldu. DNS kayıtlarını hazırlayın; ardından Nginx yapılandırmasını ve SSL’i site içinden etkinleştirin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'domains')}>Siteyi yapılandır</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
+    {created ? <Section title="Site ve çalışma alanı hazırlandı"><EmptyState icon="check" title={created.primaryDomain} detail={created.ready ? 'Web sitesi, çalışma alanı (workspace), Nginx ve Webmail otomatik olarak başarıyla kuruldu.' : 'Web sitesi ve çalışma alanı oluşturuldu. Kalan adımları (DNS/SSL) site genel bakışından tamamlayabilirsiniz.'} action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Yerel sunucu" />{(existingType || sharedMode) && <><CollectionNotice resource={applications} label="Uygulamalar" /><CollectionNotice resource={websites} label="Website bağları" /></>}
       <form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={baseLocked}>
         <h3>1. Alan adı</h3><div className="ws-form-grid" style={{ marginTop: 16 }}>
@@ -142,7 +159,7 @@ function WebsiteForm({ parentId }) {
         {!sharedMode && form.sourceMode !== 'external_proxy' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. Veritabanı</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.initialDatabase} onChange={(event) => update('initialDatabase', event.target.checked)} /><span><strong>Başlangıç veritabanı ve kullanıcı oluştur</strong><small>Schema adı YunPanel tarafından belirlenir; yalnız bu Website’e bağlı localhost kullanıcısına scoped grant verilir. Parola panel secret store’unda tutulur.</small></span></label></div>}
         <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '4' : '3'}. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
         {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '5' : '4'}. E-Posta ve Webmail</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>Otomatik E-Posta ve Webmail (Roundcube) etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve Roundcube web arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
-        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? 'Oluşturuluyor…' : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
+        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? (progressStep ?? 'Oluşturuluyor ve kuruluyor…') : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
 
       </fieldset></form>
     </Section>}

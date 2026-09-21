@@ -8,12 +8,12 @@
 
 ## 1. Amaç ve Çözülen Sorunlar
 
-1. **Otomatik Webmail (`webmail.<domain>`) Açılmama Sorunu (P0.11)**:
-   - **Kök Neden**: Web arayüzündeki yeni site oluşturma formu (`new-website-form.js`), backend'e `/sites/create-preview` çağrısı yaparken `mail` nesnesini göndermiyordu. Backend `site-create-base.js` ise gönderilmeyen `mail` parametresini varsayılan olarak `{ mode: 'none' }` kabul ettiği için `site-create-mail-provisioning.js` adımları (Roundcube Nginx mapping, DNS A kaydı, TLS sertifikası) hiç tetiklenmiyordu.
-   - **Çözüm**: `NewWebsitePage.jsx` ve `new-website-form.js` güncellenerek ana domainler için varsayılan `mail: { mode: 'local' }` ve kullanıcı onay seçeneği eklendi. `SiteResourcesPanel.jsx` içine doğrudan `https://webmail.<domain>` erişim bağlantıları entegre edildi.
+1. **Otomatik Webmail (`webmail.<domain>`) Açılmama ve Roundcube error_reporting Sorunu (P0.11)**:
+   - **Kök Neden**: Web arayüzündeki yeni site oluşturma formu (`new-website-form.js`), backend'e `/sites/create-preview` çağrısı yaparken `mail` nesnesini göndermiyordu. Backend `site-create-base.js` ise gönderilmeyen `mail` parametresini varsayılan olarak `{ mode: 'none' }` kabul ettiği için `site-create-mail-provisioning.js` adımları (Roundcube Nginx mapping, DNS A kaydı, TLS sertifikası) hiç tetiklenmiyordu. Ayrıca PHP-FPM pool şablonunda `php_admin_value[error_reporting]` kullanılması, Roundcube'un çalışma zamanında çağırdığı `ini_set('error_reporting', 30711)` çağrısını engelleyerek `ERROR: Wrong 'error_reporting' option value` hatasına yol açıyordu.
+   - **Çözüm**: `NewWebsitePage.jsx` ve `new-website-form.js` güncellenerek ana domainler için varsayılan `mail: { mode: 'local' }`, otomatik adım tamamlama (`autoAdvanceWebsiteProvisioning`) ve kullanıcı onay seçeneği eklendi. `roundcube-fpm.js` şablonundan `php_admin_value[error_reporting]` kaldırılarak Roundcube'un hata raporlama seviyesini kendisinin yönetmesi sağlandı. `SiteResourcesPanel.jsx` içine doğrudan `https://webmail.<domain>` erişim bağlantıları entegre edildi.
 2. **elFinder Kaldırılması ve Yerli Dosya Yöneticisi (P0.12)**:
-   - **Kök Neden**: `elFinder`'ın PHP-FPM bağımlılığı, iframe içi oturum köprüsü ve hantal kullanıcı arayüzü kullanıcı deneyimini olumsuz etkiliyordu.
-   - **Çözüm**: `elFinder` tamamen kaldırıldı; yerine doğrudan sitenin Linux kullanıcısı (`website.unixUser`) ve `website.documentRoot` sınırları içerisinde izole çalışan yüksek performanslı yerli bir dosya yöneticisi mimarisi uygulandı.
+   - **Kök Neden**: `elFinder`'ın PHP-FPM bağımlılığı, iframe içi oturum köprüsü ve hantal kullanıcı arayüzü kullanıcı deneyimini olumsuz etkiliyordu. Ayrıca dosya işçisi kök dizin `/` isteklerini ve baştaki slash'leri reddediyor, API servisinin `UMask=0077` kuralı nedeniyle oluşturulan dosyalar `0600` izniyle oluşturulup Nginx (`www-data`) tarafından 403 Forbidden ile dönüyordu.
+   - **Çözüm**: `elFinder` tamamen kaldırıldı; yerine doğrudan sitenin Linux kullanıcısı (`website.unixUser`) ve `website.documentRoot` sınırları içerisinde izole çalışan yüksek performanslı yerli bir dosya yöneticisi mimarisi uygulandı. Kök dizin `/` güvenli biçimde normalize edildi ve dosya/dizin oluşturma izinleri kanonik `0640`/`0750` yapılarak Nginx web erişimi garanti altına alındı.
 
 ---
 
@@ -49,6 +49,8 @@
   - **Toplu Silme**: Birden fazla öge seçildiğinde beliren tehlike butonu ve typed confirm modalı.
   - **Dahili Kod/Metin Editörü**: Monospace fontlu, SHA-256 bütünlük doğrulamalı düzenleyici modalı.
   - **Yükleme/İndirme**: Çoklu dosya yükleme ve tarayıcıdan doğrudan güvenli indirme bağlantısı.
+- `apps/web/src/workspace/provisioning-client.js`:
+  - `autoAdvanceWebsiteProvisioning`: Site oluşturulduğunda sonraki 21 provisioning adımını otomatik olarak arka arkaya yürüten, ağ kopmalarına karşı 3 denemeli ve tekil hata durumunda otomatik retry yapan istemci motoru.
 - `apps/web/src/api.js`:
   - `uploadSiteFile` binary upload istemcisi.
 - `apps/web/src/workspace/PanelKit.jsx`:
@@ -59,16 +61,18 @@
 ## 3. Test ve Doğrulama Sonuçları
 
 1. **Birim ve Entegrasyon Testleri**:
-   - `apps/api/test/site-file-worker.test.js`: 4/4 test geçti.
+   - `apps/api/test/site-file-worker.test.js`: 5/5 test geçti (kök slash `/` ve baştaki slash normalizasyonu dahil).
    - `apps/api/test/site-file-http.test.js`: 5/5 test geçti.
    - `apps/web/test/new-website-form.test.js`: 8/8 test geçti.
    - `apps/web/test/elfinder-ui-wiring.test.js`: 2/2 test geçti.
-   - Tüm repo (`npm test`): 3392+ test, %100 yeşil.
+   - Tüm repo (`npm test`): 3400+ test, %100 yeşil.
 2. **Repository Lint Doğrulaması**:
    - `node scripts/validate-repository.mjs`: Başarılı.
-3. **Canlı Sunucu Dağıtımı (`157.180.11.28`)**:
-   - API dosyaları ve derlenen web paketi senkronize edildi.
-   - `systemctl restart yunpanel-api yunpanel-web`: Servisler aktif (`[yunpanel-api] site files=enabled`).
+3. **Canlı Sunucu Doğrulaması (`157.180.11.28`)**:
+   - `https://webrich.news` silinip sıfırdan oluşturuldu; 21 adım otomatik tamamlandı (Unix user, workspace, PHP runtime, DNS, Nginx, SSL, Mail config, DKIM, Webmail SSL, Roundcube mapping).
+   - Roundcube `error_reporting` hatası çözüldü; `https://webmail.webrich.news` 200 OK ve Roundcube giriş formu başarıyla yüklendi.
+   - Oluşturulan `contact@webrich.news` hesabı ile Roundcube oturumu açıldı; Dovecot `passdb auth succeeded` ve Webmail posta kutusu yönlendirmesi (`/?_task=mail`) doğrulandı.
+   - Dosya Yöneticisi üzerinden oluşturulan dosyalar `0640` izinleriyle yazıldı ve `https://webrich.news/test.html` üzerinden 200 OK ile görüntülendi (Nginx 403 engeli kalktı).
 4. **Playwright Uçtan Uca (E2E) Canlı Tarayıcı Testleri**:
    - `npx playwright test`:
      - Test 1 (Owner giriş & navigasyon): Geçti (2.6s)

@@ -127,6 +127,8 @@ import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js'
 import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
+import { previewResourceImpact } from './resource-impact.js';
+import { createAllWebsiteImpactProviders } from './website-delete-impact-providers.js';
 import { createPleskImporter } from './plesk-importer.js';
 import { createResticRepositoryRegistry } from './restic-repository-registry.js';
 import { createRcloneRemoteRegistry } from './rclone-remote-registry.js';

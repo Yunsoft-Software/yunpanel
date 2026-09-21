@@ -186,3 +186,28 @@ test('site-file-worker: path traversal protection', async (t) => {
     (err) => err instanceof SiteFileWorkerError && err.code === 'site_file_path_invalid',
   );
 });
+
+test('site-file-worker: handles root slash and leading slashes safely', async (t) => {
+  const { deps } = await createFixture(t);
+
+  // List with '/'
+  const rootList = await executeSiteFileOperation({ operation: 'list', root: FAKE_ROOT, path: '/' }, deps);
+  assert.equal(rootList.directory.path, '');
+
+  // Create file with leading slash '/hello.txt'
+  const created = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: FAKE_ROOT,
+    path: '/hello.txt',
+  }, deps);
+  assert.equal(created.created, true);
+
+  const readRes = await executeSiteFileOperation({
+    operation: 'read_text',
+    root: FAKE_ROOT,
+    path: '/hello.txt',
+  }, deps);
+  assert.equal(readRes.content, '');
+});
+
+

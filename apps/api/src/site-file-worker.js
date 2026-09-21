@@ -37,14 +37,18 @@ function fail(code, message, status = 400) {
 
 function relativePath(value, { allowRoot = false, field = 'path' } = {}) {
   if (typeof value !== 'string' || Buffer.byteLength(value, 'utf8') > MAX_PATH_BYTES
-    || /[\\\u0000-\u001f\u007f]/.test(value) || value.startsWith('/')) {
+    || /[\\\u0000-\u001f\u007f]/.test(value)) {
     fail('site_file_path_invalid', `${field} is invalid`);
   }
-  if (value === '') {
+  let normalized = value;
+  if (normalized.startsWith('/')) {
+    normalized = normalized.replace(/^\/+/, '');
+  }
+  if (normalized === '') {
     if (!allowRoot) fail('site_file_path_invalid', `${field} is invalid`);
     return '';
   }
-  const segments = value.split('/');
+  const segments = normalized.split('/');
   for (const segment of segments) {
     if (segment === '' || segment === '.' || segment === '..'
       || Buffer.byteLength(segment, 'utf8') > MAX_SEGMENT_BYTES
@@ -166,13 +170,13 @@ async function atomicWrite(absolute, content, mode, dependencies) {
 
 function safeMode(info) {
   if (!info) return null;
-  return (info.mode & 0o777) | 0o600;
+  return (info.mode & 0o777) | 0o640;
 }
 
-function creationModes(umask = process.umask?.() ?? 0o022) {
+function creationModes() {
   return {
-    file: 0o666 & ~umask,
-    directory: 0o777 & ~umask,
+    file: 0o640,
+    directory: 0o750,
   };
 }
 
