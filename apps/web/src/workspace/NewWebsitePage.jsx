@@ -38,7 +38,9 @@ function WebsiteForm({ parentId }) {
     targetValue: '',
     initialDatabase: false,
     httpsMode: 'managed',
+    mailMode: parentId ? 'none' : 'local',
   });
+
   const [operationId] = useState(() => crypto.randomUUID());
   const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
   const pending = useRef(false); const requests = useRef(null);
@@ -139,7 +141,9 @@ function WebsiteForm({ parentId }) {
         </div>{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn"><div><strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong><p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p></div></div>}</div>
         {!sharedMode && form.sourceMode !== 'external_proxy' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. Veritabanı</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.initialDatabase} onChange={(event) => update('initialDatabase', event.target.checked)} /><span><strong>Başlangıç veritabanı ve kullanıcı oluştur</strong><small>Schema adı YunPanel tarafından belirlenir; yalnız bu Website’e bağlı localhost kullanıcısına scoped grant verilir. Parola panel secret store’unda tutulur.</small></span></label></div>}
         <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '4' : '3'}. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
+        {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '5' : '4'}. E-Posta ve Webmail</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>Otomatik E-Posta ve Webmail (Roundcube) etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve Roundcube web arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
         <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? 'Oluşturuluyor…' : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
+
       </fieldset></form>
     </Section>}
     {sharedConfirmation && <ConfirmDialog

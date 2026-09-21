@@ -1,4 +1,4 @@
-import { requestJson } from './session-client.js';
+import { requestJson, sessionHeaders } from './session-client.js';
 
 const MANAGEMENT_ROOT = '/api/panel';
 
@@ -325,6 +325,26 @@ export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = 
 export async function runJob(path, options) {
   const job = await panelRequest(path, options);
   return waitForJob(job.id);
+}
+
+export async function uploadSiteFile(websiteId, targetPath, binaryData) {
+  const url = `${MANAGEMENT_ROOT}/websites/${encodeURIComponent(websiteId)}/files/upload?path=${encodeURIComponent(targetPath)}`;
+  const response = await fetch(url, {
+    method: 'PUT',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'error',
+    headers: {
+      ...sessionHeaders('PUT'),
+      'content-type': 'application/octet-stream',
+    },
+    body: binaryData,
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.error?.message ?? 'Dosya yükleme başarısız oldu');
+  }
+  return payload.data;
 }
 
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });

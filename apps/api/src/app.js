@@ -138,6 +138,9 @@ import { createServerRegistry, RegistryError } from './server-registry.js';
 import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
 import { SiteCreateError } from './site-create.js';
 import { mountSiteCreateRoutes } from './site-create-http.js';
+import { mountSiteFileRoutes, SiteFileHttpError } from './site-file-http.js';
+import { SiteFileManagerError } from './site-file-manager.js';
+import { SiteFileWorkerError } from './site-file-worker.js';
 import { mountTerminalCapabilityRoutes } from './terminal-capability-http.js';
 import { TerminalCapabilityError } from './terminal-capability-registry.js';
 import { mountTtydSessionRoutes } from './ttyd-session-http.js';
@@ -251,6 +254,7 @@ export function createApp({
   databaseCredentialApplyService = null,
   phpMyAdminHandoffService = null,
   elFinderHandoffService = null,
+  siteFileManager = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
   dnsReadinessService = null,
@@ -949,6 +953,11 @@ export function createApp({
       elFinderHandoffService,
     });
   }
+  if (siteFileManager) {
+    mountSiteFileRoutes(app, {
+      siteFileManager,
+    });
+  }
   mountDatabaseRoutes(app, {
     registry: localRegistry,
     jobRegistry,
@@ -993,6 +1002,9 @@ export function createApp({
       || error instanceof WebsiteDatabaseDeleteHttpError
       || error instanceof PhpMyAdminHandoffError
       || error instanceof ElFinderHandoffError
+      || error instanceof SiteFileHttpError
+      || error instanceof SiteFileManagerError
+      || error instanceof SiteFileWorkerError
       || error instanceof CertificateMaterialError
       || error instanceof CertificateRegistryError
       || error instanceof ApplicationRegistryError

@@ -6,22 +6,20 @@ const filesPanelUrl = new URL('../src/workspace/FilesPanel.jsx', import.meta.url
 const siteDetailUrl = new URL('../src/workspace/SiteDetailPage.jsx', import.meta.url);
 const apiUrl = new URL('../src/api.js', import.meta.url);
 
-test('Files panel uses the elFinder handoff as the primary action without removing legacy fallback yet', async () => {
+test('Files panel uses the native sandboxed file manager with multi-selection and toolbar operations', async () => {
   const [filesPanel, api] = await Promise.all([
     readFile(filesPanelUrl, 'utf8'),
     readFile(apiUrl, 'utf8'),
   ]);
 
-  assert.match(filesPanel, /openWebsiteElFinder/);
-  assert.match(filesPanel, /createElFinderHandoff/);
-  assert.match(filesPanel, /serverId,/);
-  assert.match(filesPanel, /websiteId,/);
-  assert.match(filesPanel, /elFinder ile aç/);
-  assert.match(filesPanel, /legacyAvailable = \['static', 'node'\]\.includes\(runtimeType\)/);
-  assert.match(filesPanel, /Legacy görünümü yenile/);
-  assert.match(filesPanel, /Bu runtime için legacy dosya API’si kullanılmaz/);
-  assert.match(api, /\/elfinder-handoffs/);
-  assert.match(api, /method: 'POST', body: \{\}/);
+  assert.match(filesPanel, /uploadSiteFile/);
+  assert.match(filesPanel, /websiteId/);
+  assert.match(filesPanel, /Yeni Dosya/);
+  assert.match(filesPanel, /Yeni Klasör/);
+  assert.match(filesPanel, /Seçilenleri Sil/);
+  assert.match(filesPanel, /batch-delete:/);
+  assert.match(filesPanel, /\['static', 'node', 'php', 'python'\]\.includes\(runtimeType\)/);
+  assert.match(api, /uploadSiteFile/);
 });
 
 test('PHP Websites expose Owner-only Files and ttyd Terminal through the managed Website identity', async () => {

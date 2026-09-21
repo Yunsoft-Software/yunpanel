@@ -109,6 +109,7 @@ import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
 import { createWebsiteRegistry } from './website-registry.js';
+import { createSiteFileManager } from './site-file-manager.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
 import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
 import { createWebsiteCronOperationReceiptStore } from './website-cron-operation-receipt.js';
@@ -311,6 +312,10 @@ const websiteRegistry = createWebsiteRegistry({
   getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
 });
 await websiteRegistry.init();
+const siteFileManager = createSiteFileManager({
+  websiteRegistry,
+  localServerId,
+});
 const websiteCronRegistry = createWebsiteCronRegistry({
   filePath: websiteCronStorePath,
   getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
@@ -1028,6 +1033,7 @@ const listener = createAuthenticatedApi({
       databaseCredentialApplyService,
       phpMyAdminHandoffService: phpMyAdminHandoffRuntime ? phpMyAdminHandoffService : null,
       elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
+      siteFileManager,
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,

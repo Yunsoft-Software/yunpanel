@@ -147,6 +147,7 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   ].includes(source.kind)) {
     throw new Error('Başlangıç veritabanı yalnız yönetilen Application Website için oluşturulabilir.');
   }
+  const mailMode = isSubdomain ? 'none' : (form.mailMode || 'local');
   return {
     operationId,
     serverId,
@@ -157,7 +158,9 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
     httpsMode: form.httpsMode,
     source,
     database: { mode: form.initialDatabase === true ? 'create' : 'none' },
+    mail: { mode: mailMode },
   };
 }
+
 
 export const newWebsiteFormInternals = Object.freeze({ applicationForWebsite, sourceFromForm });

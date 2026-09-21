@@ -48,6 +48,7 @@ test('independent subdomain input creates a new Application source under the exp
     },
   });
   assert.deepEqual(input.database, { mode: 'none' });
+  assert.deepEqual(input.mail, { mode: 'none' });
 });
 
 test('new Node and PHP modes use dedicated site-create Application contracts', () => {
@@ -59,6 +60,8 @@ test('new Node and PHP modes use dedicated site-create Application contracts', (
   assert.equal(node.source.runtime.entryFile, 'server.js');
   assert.equal(Object.hasOwn(node.source.runtime, 'port'), false);
   assert.deepEqual(node.database, { mode: 'none' });
+  assert.deepEqual(node.mail, { mode: 'local' });
+
 
   const php = siteCreateInputFromForm({
     form: form({ sourceMode: 'new_php', wwwMode: 'none' }),
