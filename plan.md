@@ -194,14 +194,26 @@ Gerçek Ubuntu/Nginx/PowerDNS/MariaDB/Roundcube/mailbox-auth kabul kapıları `t
 
 AI foundation ilerlemesi: `docs/history/ai-management-layer-foundation-2026-09-21.md`.
 
-Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation, `allow/confirm/deny` policy motoru, unbreakable `always-confirm` destructive guard, SHA-256 digest-bound action preview/confirmation, provider adapter contract ve policy-filtered proposal orchestrator hazırdır. Root-private revisioned AI policy store ile Owner-only policy preview/apply HTTP akışı da production bootstrap'a bağlıdır. Mevcut control-plane registries üzerinden `server.health`, `website.list`, `website.inspect`, `application.inspect`, `job.inspect`, `dns.inspect`, `certificate.inspect`, `mail.inspect`, `database.inspect` read tool'ları; mevcut durable job lifecycle üzerinden `website.restart` ve allowlisted `service.restart` write tool'ları bağlıdır. AI için ayrı privileged daemon, ikinci root transport veya raw shell açılmaz.
+Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation, `allow/confirm/deny` policy motoru, unbreakable `always-confirm` destructive guard, SHA-256 digest-bound action preview/confirmation, provider adapter contract ve policy-filtered proposal orchestrator hazırdır. Root-private revisioned AI policy store ile Owner-only policy preview/apply HTTP akışı da production bootstrap'a bağlıdır. Mevcut control-plane registries üzerinden 9 adet read tool (`server.health`, `website.list`, `website.inspect`, `application.inspect`, `job.inspect`, `dns.inspect`, `certificate.inspect`, `mail.inspect`, `database.inspect`); mevcut durable job lifecycle üzerinden 2 adet write tool (`website.restart`, `service.restart`) bağlıdır. AI için ayrı privileged daemon, ikinci root transport veya raw shell açılmaz.
 
-- [ ] Encrypted provider credential registry + provider selection ekle; somut remote/local provider adapter'larını aynı normalized provider contract'ına bağla ve plaintext credential'ı prompt/job/audit/log/public response yüzeylerine taşıma.
-- [ ] Kalan safe read adapter'larını bağla: bounded `logs.query`, `backup.inspect` ve gerektiği yerde mevcut live-health inspector sonuçları. Unbounded log/file/env dump yüzeyi açma.
-- [ ] Kalan reversible/write tool adapter'larını mevcut durable job/preview/recovery/rollback lifecycle'larına bağla: application deploy/rollback, DNS update, certificate issue/renew ve backup create/restore. Hiçbiri raw shell escape sunmasın.
-- [ ] AI conversation/session API, bounded context builder, provider tool-result loop ve streaming/cancel lifecycle'ını ekle; modele yalnız available + policy-allowed tool şemalarını gönder.
-- [ ] Global ve Website-contextual AI UI'yı operation card, preview, confirmation, policy settings, durable job progress ve recovery state ile bağla.
-- [ ] HTTP/UI control layer sabitlendikten sonra aynı Tool Registry/Policy Engine üzerinden MCP-compatible adapter ekle; duplicate management engine oluşturma.
+- [ ] **P1.1 — Provider Credential Store ve Somut Provider Adapter'ları**:
+  - Şifreli anahtar saklama (`YUNPANEL_SECRET_MASTER_KEY` ile AES-256-GCM) ve Owner-only `/api/ai/providers` CRUD API'si.
+  - Somut provider adaptörleri: Anthropic Claude, OpenAI-compatible, Google Gemini ve yerel Ollama/vLLM HTTP istemcilerini `createAiProviderAdapter` sözleşmesine bağla.
+  - Hassas anahtarlar (API key, bearer token) prompt, tool input/output, audit kayıtları, loglar veya frontend state'e asla sızdırılmayacak.
+- [ ] **P1.2 — Kalan Tool Adapter'larının Bağlanması**:
+  - Read: Bounded `logs.query` (Nginx access/error, Node/Python process loglarından en fazla 200 satır güvenli okuma), `backup.inspect` (restic snapshot/repo envanteri).
+  - Write: `application.deploy` ve `application.rollback` (mevcut Git deploy/rollback durable job flow'u), `dns.update` (PowerDNS/Cloudflare record apply), `certificate.issue` ve `certificate.renew` (Certbot ACME / DNS-01 flow'u), `backup.create` ve `backup.restore` (restic backup ve verified restore flow'u).
+  - Hiçbir adapter raw shell execution veya sınırsız dosya okuma/yazma kaçışına izin vermeyecek.
+- [ ] **P1.3 — Çok Turlu Agentic Sohbet Döngüsü ve Session API**:
+  - Bounded Context Builder: Kullanıcı mesajları, sistem talimatı, mevcut Website/Sunucu bağlamı ve izin verilen tool şemalarını context penceresi ve token sınırına göre normalize eden mekanizma.
+  - Multi-turn Loop: Model tool çağırdığında (`tool_calls`), read tool'ları otomatik yürütüp (`autoExecutable`), sonucunu modele geri besleyerek son açıklamayı üreten döngü.
+  - Streaming ve İptal: Server-Sent Events (SSE) ile token akışı (`/api/ai/chat/stream`) ve `AbortController` tabanlı anlık kullanıcı iptali.
+- [ ] **P1.4 — Web Kullanıcı Arayüzü (AI Drawer, Eylem Kartı ve Ayarlar)**:
+  - Global ve Website-bağlamsal Asistan: Sağdan açılan drawer veya modal; bulunulan sayfaya göre otomatik site bağlamı (`websiteId`, alan adı, runtime durumu).
+  - Eylem Onay Kartı (Action Proposal Card): `confirm` gerektiren veya `destructive` mutasyonlar için risk rozeti, işlem özeti, parametreler ve SHA-256 digest-bound onay butonu.
+  - AI Ayarları Ekranı (`/settings/ai`): Aktif provider/model seçimi, API key yapılandırması, tool bazlı `allow / confirm / deny` politika tablosu.
+- [ ] **P1.5 — MCP (Model Context Protocol) Uyumluluğu**:
+  - HTTP/UI katmanı tamamlandıktan sonra aynı Tool Registry ve Policy Engine üzerinden harici AI araçlarının (Claude Desktop vb.) bağlanabilmesi için MCP server adaptörü ekle.
 
 # P2 — Migration temizliği ve son ürün yüzeyi
 
