@@ -4,7 +4,11 @@
   "private": true,
   "type": "module",
   "scripts": {
+    "fonts": "node ../../scripts/prepare-ui-fonts.mjs",
+    "fonts:check": "node ../../scripts/prepare-ui-fonts.mjs --check",
+    "predev": "npm run fonts",
     "dev": "vite --host 0.0.0.0 --port 5173",
+    "prebuild": "npm run fonts",
     "build": "vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "start": "node server.js",

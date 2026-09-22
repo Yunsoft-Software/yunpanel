@@ -16,3 +16,5 @@ tmp/
 test-results/
 playwright-report/
 e2e/.auth/
+# Public, verified typography assets are acquired at build time, not committed.
+apps/web/public/fonts/ember/
