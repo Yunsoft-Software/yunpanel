@@ -59,11 +59,13 @@
 .ws-sidebar-footer { margin-top: 0; padding-top: 15px; font-size: 11px; }
 .ws-toolbar { min-height: 68px; padding: 13px 28px; gap: 14px; }
 .ws-command-trigger { min-height: 40px; width: min(100%, 480px); border-color: var(--ws-border); }
-.ws-toolbar-actions .ws-button { background: transparent; border-color: transparent; }
+.ws-toolbar-actions { width: auto; flex: 0 0 auto; }
+.ws-toolbar-actions .ws-button { flex: 0 0 auto; background: transparent; border-color: transparent; }
 .ws-toolbar-actions .ws-button:hover { background: var(--ws-surface-hover); border-color: var(--ws-border); }
 .ws-toolbar-actions .ws-button-primary { background: var(--ws-console-blue); border-color: var(--ws-console-blue); }
 .ws-content { max-width: 1760px; padding: 28px 28px 48px; }
 .ws-page-heading { align-items: center; margin-bottom: 24px; }
+.ws-page-heading > div { min-width: 0; }
 .ws-page-heading h1 { font-size: clamp(24px, 2vw, 30px); letter-spacing: -.9px; line-height: 1.25; }
 .ws-page-heading p { max-width: 70ch; font-size: 13px; }
 .ws-section, .ws-metric { border-radius: var(--ws-radius); }
@@ -133,17 +135,16 @@
 .ws-modal-footer, .ws-form-footer { gap: 10px; }
 .ws-modal::backdrop { background: #030914b8; }
 .ws-terminal-session, .ws-terminal-surface { background: #080e17; }
-.ws-usage-ring { background: conic-gradient(var(--ws-console-blue) var(--usage, 0%), var(--ws-border) 0); }
-.ws-usage-ring.is-high { background: conic-gradient(var(--ws-warning) var(--usage, 0%), var(--ws-border) 0); }
-.ws-usage-ring::before { background: var(--ws-surface); }
-.ws-usage-ring.is-unknown { background: var(--ws-border); }
+.ws-server-metrics .ws-usage-ring { background: conic-gradient(var(--ws-console-blue) var(--usage, 0%), var(--ws-border) 0); }
+.ws-server-metrics .ws-usage-ring.is-high { background: conic-gradient(var(--ws-warning) var(--usage, 0%), var(--ws-border) 0); }
+.ws-server-metrics .ws-usage-ring::before { background: var(--ws-surface); }
+.ws-server-metrics .ws-usage-ring.is-unknown { background: var(--ws-border); }
 .ws-mini-server { padding: 20px; }
 .ws-mini-server header h3 { font-size: 15px; }
 .ws-server-metrics { gap: 18px; }
 .ws-job-summary { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .ws-job-summary .ws-badge { font-size: 12px; }
 .ws-console-notice { margin: 0 0 20px; }
-.ws-mobile-context { display: none; }
 @media (min-width: 901px) and (max-width: 1199px) {
   :root { --ws-sidebar-width: 200px; }
   .ws-content { padding: 22px; }
