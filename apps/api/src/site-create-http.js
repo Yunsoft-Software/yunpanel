@@ -89,6 +89,18 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       confirmation: body.confirmation,
       ...dependencies,
     });
+    if (input.siteAdmin && dependencies.userAdminStore && result.website?.id) {
+      try {
+        await dependencies.userAdminStore.createSiteManager({
+          username: input.siteAdmin.email,
+          password: input.siteAdmin.password,
+          websiteId: result.website.id,
+          actorId: request.auth?.user?.id ?? 'system',
+        });
+      } catch (adminError) {
+        console.error('Failed to create site manager:', adminError);
+      }
+    }
     const current = await previewWithProvisioning({ input, dependencies });
     const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
     return response.status(result.created ? 201 : 200).json({

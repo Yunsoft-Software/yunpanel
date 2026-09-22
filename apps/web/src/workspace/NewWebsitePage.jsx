@@ -27,6 +27,8 @@ function WebsiteForm({ parentId }) {
     parentDomainId: parentId,
     prefix: '',
     primaryDomain: '',
+    adminEmail: '',
+    adminPassword: '',
     wwwMode: 'none',
     sourceMode: 'new_node',
     applicationId: '',
@@ -37,14 +39,14 @@ function WebsiteForm({ parentId }) {
     healthPath: '/health',
     outputDir: 'dist',
     targetValue: '',
-    initialDatabase: false,
     httpsMode: 'managed',
     mailMode: parentId ? 'none' : 'local',
   });
 
   const [operationId] = useState(() => crypto.randomUUID());
   const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
-  const [progressStep, setProgressStep] = useState(null);
+  const [provisioningSteps, setProvisioningSteps] = useState([]);
+  const [provisioningFailure, setProvisioningFailure] = useState(null);
   const pending = useRef(false); const requests = useRef(null);
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
   useUnsavedChanges(dirty && !created);
@@ -70,7 +72,6 @@ function WebsiteForm({ parentId }) {
     ...current,
     [key]: value,
     ...(['parentDomainId', 'mode', 'sourceMode'].includes(key) ? { applicationId: '', websiteId: '' } : {}),
-    ...(key === 'sourceMode' && ['shared_website', 'external_proxy'].includes(value) ? { initialDatabase: false } : {}),
   })); }
   async function submit(event) {
     event.preventDefault(); if (locked || pending.current) return;
@@ -100,20 +101,48 @@ function WebsiteForm({ parentId }) {
         return;
       }
       setBusy(true);
-      setProgressStep('Site kaydı oluşturuluyor…');
+      setProvisioningFailure(null);
+      setProvisioningSteps([{ id: 'init', label: 'Site ve çalışma alanı kaydı oluşturuluyor…', state: 'running' }]);
       const input = siteCreateInputFromForm({ form, operationId, serverId, domain, selectedApplication: selected });
       const preview = await panelRequest('/sites/create-preview', { method: 'POST', body: { input }, signal: requests.current.signal });
       const result = await panelRequest('/sites', {
         method: 'POST', body: { input, previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal: requests.current.signal,
       });
 
+      setProvisioningSteps((prev) => [
+        ...prev.map((s) => ({ ...s, state: 'succeeded' })),
+        { id: 'provisioning', label: 'Servisler ve yapılandırmalar kuruluyor…', state: 'running' },
+      ]);
+
       let provOp = result?.provisioning ?? null;
       if (provOp && provOp.operationId && !provOp.ready) {
-        setProgressStep('Workspace ve servisler kuruluyor…');
         provOp = await autoAdvanceWebsiteProvisioning(provOp.operationId, {
           signal: requests.current.signal,
           onStep: (stepRes) => {
-            if (stepRes?.stepId) setProgressStep(`${stepRes.stepId} kuruluyor…`);
+            if (stepRes?.stepId) {
+              const labelMap = {
+                dns_zone: 'DNS Zone (PowerDNS)',
+                nginx: 'Nginx Web Sunucusu',
+                mail_domain: 'E-Posta Domaini',
+                mail_dkim_key: 'DKIM Anahtarı',
+                mail_dns_reapply: 'Mail DNS Kayıtları',
+                roundcube_mapping: 'Webmail (Roundcube)',
+                webmail_certificate: 'Webmail SSL',
+              };
+              const label = labelMap[stepRes.stepId] ?? `${stepRes.stepId} adımı`;
+              const stepState = stepRes.outcome === 'failed' || stepRes.outcome === 'retry_exhausted' ? 'failed'
+                : stepRes.outcome === 'progressed' || stepRes.outcome === 'ready' ? 'succeeded' : 'running';
+              setProvisioningSteps((prev) => {
+                const existing = prev.find((s) => s.id === stepRes.stepId);
+                if (existing) {
+                  return prev.map((s) => s.id === stepRes.stepId ? { ...s, state: stepState, error: stepRes.error } : s);
+                }
+                return [...prev, { id: stepRes.stepId, label, state: stepState, error: stepRes.error }];
+              });
+              if (stepRes.outcome === 'failed' || stepRes.outcome === 'retry_exhausted') {
+                setProvisioningFailure({ stepId: stepRes.stepId, error: stepRes.error, operationId: provOp.operationId });
+              }
+            }
           },
         });
       }
@@ -156,10 +185,58 @@ function WebsiteForm({ parentId }) {
           {form.sourceMode === 'external_proxy' && <label>Yerel uygulama portu<input type="number" min={1024} max={65535} value={form.targetValue} required placeholder="4301" onChange={(event) => update('targetValue', event.target.value)} /></label>}
           {form.sourceMode === 'new_php' && <p className="ws-muted">Ayrı Application, Unix kullanıcısı, PHP-FPM pool/socket ve private site yolları provisioning planına eklenir.</p>}
         </div>{existingType && !eligible.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Bu sunucuda kullanılmamış uygun uygulama bulunmuyor. Yeni Application oluşturma seçeneklerinden birini kullanın.</p>}{sharedMode && !sharedWebsites.length && applications.status === 'ready' && websites.status === 'ready' && <p className="ws-muted">Canonical routing hedefi paylaşılabilecek yerel Website bulunmuyor.</p>}{selectedSharedWebsite && <div className="ws-notice ws-notice-warn"><div><strong>{selectedSharedDomain?.primaryDomain ?? selectedSharedWebsite.name} Website bağı paylaşılacak</strong><p>Website <code>{selectedSharedWebsite.id}</code> · runtime {selectedSharedWebsite.runtimeType} · Unix kullanıcı {selectedSharedWebsite.unixUser ?? 'uygulanamaz'}. Bu seçim yeni Application, Unix user, SFTP scope veya mailbox oluşturmaz.</p></div></div>}</div>
-        {!sharedMode && form.sourceMode !== 'external_proxy' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. Veritabanı</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.initialDatabase} onChange={(event) => update('initialDatabase', event.target.checked)} /><span><strong>Başlangıç veritabanı ve kullanıcı oluştur</strong><small>Schema adı YunPanel tarafından belirlenir; yalnız bu Website’e bağlı localhost kullanıcısına scoped grant verilir. Parola panel secret store’unda tutulur.</small></span></label></div>}
-        <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '4' : '3'}. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
-        {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>{!sharedMode && form.sourceMode !== 'external_proxy' ? '5' : '4'}. E-Posta ve Webmail</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>Otomatik E-Posta ve Webmail (Roundcube) etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve Roundcube web arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
-        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? (progressStep ?? 'Oluşturuluyor ve kuruluyor…') : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
+        {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}>
+          <h3>Site Yöneticisi</h3>
+          <p className="ws-muted">Bu web sitesi için tam yetkili site yöneticisi hesabı oluşturulur. Site silinmeden bu yönetici hesabı silinemez.</p>
+          <div className="ws-form-grid" style={{ marginTop: 16 }}>
+            <label>Yönetici e-posta adresi
+              <input
+                type="email"
+                required
+                placeholder="yonetici@example.com"
+                autoCapitalize="none"
+                spellCheck={false}
+                value={form.adminEmail}
+                onChange={(event) => update('adminEmail', event.target.value)}
+              />
+            </label>
+            <label>Yönetici parolası
+              <input
+                type="password"
+                required
+                minLength={12}
+                placeholder="En az 12 karakter"
+                autoComplete="new-password"
+                value={form.adminPassword}
+                onChange={(event) => update('adminPassword', event.target.value)}
+              />
+              <span className="ws-field-hint">En az 12 karakter ve güvenli bir parola seçin.</span>
+            </label>
+          </div>
+        </div>}
+        <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
+        {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>4. E-Posta ve Webmail</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>Otomatik E-Posta ve Webmail (Roundcube) etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve Roundcube web arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
+        {provisioningSteps.length > 0 && <div className="ws-form-divider" style={{ marginTop: 24 }}>
+          <h3>Kurulum İlerlemesi</h3>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 12 }}>
+            {provisioningSteps.map((step) => (
+              <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
+                {step.state === 'running' && <span className="ws-spinner" style={{ width: 14, height: 14 }} />}
+                {step.state === 'succeeded' && <span style={{ color: '#10b981' }}>✓</span>}
+                {step.state === 'failed' && <span style={{ color: '#ef4444' }}>✕</span>}
+                <strong style={{ color: step.state === 'failed' ? '#ef4444' : undefined }}>{step.label}</strong>
+                {step.error && <small style={{ color: '#ef4444', marginLeft: 8 }}>({step.error})</small>}
+              </div>
+            ))}
+            {provisioningFailure && (
+              <div className="ws-notice ws-notice-danger" style={{ marginTop: 8 }}>
+                <p><strong>Kurulum adımı başarısız oldu: {provisioningFailure.stepId}</strong> ({provisioningFailure.error})</p>
+                <p className="ws-muted">Kalan adımları daha sonra site genel bakışından tamamlayabilirsiniz.</p>
+              </div>
+            )}
+          </div>
+        </div>}
+        <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? 'Oluşturuluyor ve kuruluyor…' : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
 
       </fieldset></form>
     </Section>}

@@ -283,6 +283,7 @@ export function createApp({
   mailSrsConfigurationService = null,
   mailAntivirusHealthInspector = null,
   panelSettingsRegistry = null,
+  userAdminStore = null,
   mailboxRegistry = createMailboxRegistry({
     getMailDomain: async (mailDomainId) => mailDomainRegistry.getMailDomain(mailDomainId),
   }),
@@ -587,6 +588,7 @@ export function createApp({
     serverDnsIdentityRegistry,
     dnsZoneTemplateRegistry,
     localServerId,
+    userAdminStore,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
   });
   if (websiteProvisioningRuntime) {

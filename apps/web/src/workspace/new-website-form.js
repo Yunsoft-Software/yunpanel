@@ -141,6 +141,16 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   if (!isSubdomain && form.wwwMode === 'independent') {
     throw new Error('Bağımsız www, üst alan adı seçilmiş ayrı bir Website olarak oluşturulmalıdır.');
   }
+  let siteAdmin = null;
+  if (!isSubdomain && form.mode === 'domain') {
+    if (!form.adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.adminEmail.trim())) {
+      throw new Error('Site yöneticisi için geçerli bir e-posta adresi girin.');
+    }
+    if (!form.adminPassword || form.adminPassword.length < 12) {
+      throw new Error('Site yöneticisi parolası en az 12 karakter olmalıdır.');
+    }
+    siteAdmin = { email: form.adminEmail.trim().toLowerCase(), password: form.adminPassword };
+  }
   const source = sourceFromForm(form, selectedApplication);
   if (form.initialDatabase === true && ![
     'existing_application', 'new_static', 'new_node', 'new_php',
@@ -159,6 +169,7 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
     source,
     database: { mode: form.initialDatabase === true ? 'create' : 'none' },
     mail: { mode: mailMode },
+    ...(siteAdmin ? { siteAdmin } : {}),
   };
 }
 

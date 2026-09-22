@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   createDatabase,
+  createPhpMyAdminHandoff,
   deleteDatabase,
   getDatabases,
   waitForJob,
@@ -17,6 +18,7 @@ import {
 } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { databaseInventoryView, formatDatabaseBytes, validDatabaseName } from './database-model.js';
+import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 
 const SECURITY_REASON_LABELS = Object.freeze({
   database_security_inspection_unavailable: 'Güvenlik kanıtı okunamadı',
@@ -112,6 +114,26 @@ export default function DatabasesPage() {
     if (terminal) setDeleteTarget(null);
   }
 
+  async function openPhpMyAdmin(ownership) {
+    if (!server || !ownership?.websiteId || !ownership?.credential?.id || pending.current) return;
+    pending.current = true;
+    setBusy(true);
+    setError(null);
+    try {
+      await openWebsitePhpMyAdmin({
+        serverId: server.id,
+        websiteId: ownership.websiteId,
+        credentialId: ownership.credential.id,
+        issueHandoff: createPhpMyAdminHandoff,
+      });
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setError(failure.message);
+    } finally {
+      pending.current = false;
+      setBusy(false);
+    }
+  }
+
   const serverLabel = server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu';
   const engineLabel = inventory.engine === 'mariadb' ? 'MariaDB' : inventory.engine === 'mysql' ? 'MySQL' : '—';
   const securityLabel = inventory.health?.ready
@@ -160,7 +182,7 @@ export default function DatabasesPage() {
               ['Eksik schema bağı', inventory.ownership.missingDatabaseBindingCount],
             ] : []),
           ]} />
-          {inventory.databases.length === 0 ? <EmptyState title="Kullanıcı veritabanı yok" detail="Sistem şemaları güvenlik için listede gösterilmez. Yeni bir uygulama veritabanı oluşturabilirsiniz." icon="database" /> : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Veritabanı</th><th>Website sahibi</th><th>Boyut</th><th className="ws-row-end">İşlem</th></tr></thead><tbody>{inventory.databases.map((database) => <tr key={database.name}><td><strong>{database.name}</strong></td><td>{database.ownership ? <><strong><code>{database.ownership.unixUser}</code></strong><small>{database.ownership.websiteId}</small><small>{database.ownership.credential ? `DB user: ${database.ownership.credential.username}` : 'Credential oluşturulmadı'}</small></> : <span>Bağlı değil</span>}</td><td>{database.sizeLabel}</td><td className="ws-row-end"><Button variant="danger" disabled={busy} onClick={() => setDeleteTarget(database)}>Sil</Button></td></tr>)}</tbody></table></div>}
+          {inventory.databases.length === 0 ? <EmptyState title="Kullanıcı veritabanı yok" detail="Sistem şemaları güvenlik için listede gösterilmez. Yeni bir uygulama veritabanı oluşturabilirsiniz." icon="database" /> : <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Veritabanı</th><th>Website sahibi</th><th>Boyut</th><th className="ws-row-end">İşlem</th></tr></thead><tbody>{inventory.databases.map((database) => <tr key={database.name}><td><strong>{database.name}</strong></td><td>{database.ownership ? <><strong><code>{database.ownership.unixUser}</code></strong><small>{database.ownership.websiteId}</small><small>{database.ownership.credential ? `DB user: ${database.ownership.credential.username}` : 'Credential oluşturulmadı'}</small></> : <span>Bağlı değil</span>}</td><td>{database.sizeLabel}</td><td className="ws-row-end"><div className="ws-actions" style={{ justifyContent: 'flex-end' }}>{database.ownership?.credential && <Button disabled={busy} onClick={() => openPhpMyAdmin(database.ownership)}>phpMyAdmin</Button>}<Button variant="danger" disabled={busy} onClick={() => setDeleteTarget(database)}>Sil</Button></div></td></tr>)}</tbody></table></div>}
         </>}
       </Section>
 

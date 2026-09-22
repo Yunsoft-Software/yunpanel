@@ -66,7 +66,7 @@ export function compensateWebsiteProvisioningStep(operationId, provisioningStepI
 export async function autoAdvanceWebsiteProvisioning(operationId, { maxSteps = 30, signal, onStep } = {}) {
   const id = uuid(operationId, 'provisioning operation id');
   let currentOperation = null;
-  const retriedSteps = new Set();
+  const retriedSteps = new Map();
   for (let i = 0; i < maxSteps; i += 1) {
     if (signal?.aborted) break;
     let result = null;
@@ -87,21 +87,30 @@ export async function autoAdvanceWebsiteProvisioning(operationId, { maxSteps = 3
     currentOperation = result?.operation ?? null;
     if (typeof onStep === 'function') onStep(result);
 
-    if (result?.outcome === 'failed' && result?.stepId && !retriedSteps.has(result.stepId)) {
-      retriedSteps.add(result.stepId);
-      try {
-        const retryResult = await retryWebsiteProvisioningStep(id, result.stepId);
-        currentOperation = retryResult?.operation ?? currentOperation;
-        if (typeof onStep === 'function') onStep(retryResult);
-        if (retryResult?.outcome === 'progressed') {
-          continue;
+    if (result?.outcome === 'failed' && result?.stepId) {
+      const attempts = (retriedSteps.get(result.stepId) ?? 0) + 1;
+      retriedSteps.set(result.stepId, attempts);
+      if (attempts < 3) {
+        try {
+          const retryResult = await retryWebsiteProvisioningStep(id, result.stepId);
+          currentOperation = retryResult?.operation ?? currentOperation;
+          if (typeof onStep === 'function') onStep(retryResult);
+          if (retryResult?.outcome === 'progressed') {
+            continue;
+          }
+        } catch {
+          // Fall through to outcome check
         }
-      } catch {
-        // Fall through to outcome check
+      } else {
+        if (currentOperation) {
+          currentOperation = { ...currentOperation, retryExhausted: true };
+        }
+        if (typeof onStep === 'function') onStep({ ...result, outcome: 'retry_exhausted' });
+        break;
       }
     }
 
-    if (!result || ['ready', 'failed', 'blocked', 'interrupted'].includes(result.outcome)) {
+    if (!result || ['ready', 'failed', 'blocked', 'interrupted', 'retry_exhausted'].includes(result.outcome)) {
       break;
     }
   }

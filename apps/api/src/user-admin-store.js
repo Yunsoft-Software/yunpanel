@@ -107,6 +107,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
   }
 
   return {
+    hashPassword,
     revision(userId) { return read(userId)?.revision ?? null; },
     list(rawToken, requireManagement, { offset = 0, limit = 50 } = {}) {
       if (!Number.isSafeInteger(offset) || offset < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 100) {
@@ -145,12 +146,30 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         return publicUser(read(id));
       });
     },
+    async createSiteManager({ username: inputUsername, password: inputPassword, websiteId, actorId = 'system' }) {
+      const name = normalizeUsername(inputUsername);
+      if (typeof websiteId !== 'string' || !websiteId) {
+        throw new AuthError('invalid_website_ids', 'websiteId is required.');
+      }
+      unique(name);
+      const passwordHash = await hashPassword(inputPassword);
+      return transaction(() => {
+        unique(name);
+        const id = randomUUID();
+        db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, name, passwordHash, 'site_manager', 1, now(), now());
+        db.prepare('INSERT OR IGNORE INTO auth_user_websites(user_id, website_id) VALUES (?, ?)').run(id, websiteId);
+        record(actorId, id, 'user.created');
+        return publicUser(read(id));
+      });
+    },
     update(rawToken, requireManagement, id, input) {
-      fields(input, ['revision', 'username', 'role', 'active', 'websiteIds']);
-      if (!['username', 'role', 'active', 'websiteIds'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
+      fields(input, ['revision', 'username', 'passwordHash', 'role', 'active', 'websiteIds']);
+      if (!['username', 'passwordHash', 'role', 'active', 'websiteIds'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
       if (input.websiteIds !== undefined && (!Array.isArray(input.websiteIds) || input.websiteIds.some((item) => typeof item !== 'string' || !item))) {
         throw new AuthError('invalid_website_ids', 'websiteIds must be an array of string identifiers.');
       }
+      const passwordHash = input.passwordHash ?? null;
       const result = transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
@@ -159,6 +178,12 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const nextActive = Object.hasOwn(input, 'active') ? active(input.active) : Boolean(user.active);
         unique(name, id);
         protectOwner(user, nextRole, nextActive);
+        if (user.role === 'site_manager') {
+          const bound = db.prepare('SELECT count(*) AS count FROM auth_user_websites WHERE user_id = ?').get(id)?.count ?? 0;
+          if (bound > 0 && (!nextActive || nextRole !== 'site_manager')) {
+            throw new AuthError('site_manager_update_blocked', 'Site yöneticisi devre dışı bırakılamaz veya rolü değiştirilemez; önce bağlı web sitesi silinmelidir.', 409);
+          }
+        }
         if (nextRole === 'site_manager' && Array.isArray(input.websiteIds)) {
           db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
           for (const websiteId of input.websiteIds) {
@@ -167,15 +192,20 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         } else if (nextRole !== 'site_manager') {
           db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
         }
-        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive && !Object.hasOwn(input, 'websiteIds')) {
+        if (user.username === name && user.role === nextRole && Boolean(user.active) === nextActive && !Object.hasOwn(input, 'websiteIds') && !passwordHash) {
           return { user: publicUser(user), revoked: false };
         }
         if (user.revision === Number.MAX_SAFE_INTEGER) throw conflict();
-        db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(name, nextRole, Number(nextActive), id);
+        if (passwordHash) {
+          db.prepare('UPDATE users SET username = ?, password_hash = ?, password_changed_at = ?, role = ?, active = ? WHERE id = ?')
+            .run(name, passwordHash, now(), nextRole, Number(nextActive), id);
+        } else {
+          db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(name, nextRole, Number(nextActive), id);
+        }
         db.prepare('INSERT INTO auth_user_revisions VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at')
           .run(id, user.revision + 1, now());
         revoke(id);
-        record(actor.user.id, id, 'user.updated');
+        record(actor.user.id, id, passwordHash ? 'user.password_reset' : 'user.updated');
         return { user: publicUser(read(id)), revoked: true };
       });
       if (result.revoked) revokeLiveUser(id, 'user_changed');
@@ -187,6 +217,12 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
         protectOwner(user, null, false);
+        if (user.role === 'site_manager') {
+          const bound = db.prepare('SELECT count(*) AS count FROM auth_user_websites WHERE user_id = ?').get(id)?.count ?? 0;
+          if (bound > 0) {
+            throw new AuthError('site_manager_delete_blocked', 'Site yöneticisi silinemez; önce bağlı web sitesi silinmelidir.', 409);
+          }
+        }
         revoke(id);
         db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM auth_mfa_recovery WHERE user_id = ?').run(id);

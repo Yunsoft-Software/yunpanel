@@ -72,7 +72,7 @@ export function DomainOperations({ domain }) {
 }
 
 export function SslOperations({ domain }) {
-  const { certificates, domains, jobs, runJob, resourceBusy } = useWorkspace();
+  const { certificates, domains, jobs, runJob, resourceBusy, session } = useWorkspace();
   const [email, setEmail] = useState(''); const [requested, setRequested] = useState(false);
   const [confirm, setConfirm] = useState(null); const operation = useOperation();
   const [includeWww, setIncludeWww] = useState(true);
@@ -83,6 +83,11 @@ export function SslOperations({ domain }) {
 
   useEffect(() => {
     let active = true;
+    const userEmail = session?.user?.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(session?.user?.username ?? '') ? session.user.username : null);
+    if (userEmail && !email) {
+      setEmail(userEmail);
+      return () => { active = false; };
+    }
     getPanelSettings().then((res) => {
       const settings = res?.data ?? res;
       if (active && settings?.dnsSsl?.acmeEmail && !email) {
@@ -90,7 +95,7 @@ export function SslOperations({ domain }) {
       }
     }).catch(() => {});
     return () => { active = false; };
-  }, []);
+  }, [session?.user?.username, session?.user?.email]);
 
   useUnsavedChanges(Boolean(email.trim()) && !requested);
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);

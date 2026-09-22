@@ -26,7 +26,16 @@ export async function handleUserAdmin({ request, response, pathname, query, stor
   }
   if (match && ['PATCH', 'DELETE'].includes(request.method)) {
     const body = await readJson(request);
-    const user = request.method === 'PATCH' ? store.users.update(rawToken, requireManagement, match[1], body)
+    let patchBody = body;
+    if (request.method === 'PATCH' && body && Object.hasOwn(body, 'password')) {
+      const hasher = store.hashPassword || (store.users && store.users.hashPassword);
+      if (typeof hasher === 'function') {
+        const passwordHash = await hasher(body.password);
+        patchBody = { ...body, passwordHash };
+        delete patchBody.password;
+      }
+    }
+    const user = request.method === 'PATCH' ? store.users.update(rawToken, requireManagement, match[1], patchBody)
       : store.users.remove(rawToken, requireManagement, match[1], body);
     // No Set-Cookie here: a delayed self-edit response must not delete a newer
     // login cookie. The session-aware browser client clears only its own state.

@@ -100,10 +100,13 @@ function databaseHealth(value) {
   };
 }
 
+const ROUNDCUBE_SCHEMA = /^roundcube(?:mail)?(?:_|$)/i;
+
 export function validDatabaseName(value) {
   return typeof value === 'string'
     && DATABASE_NAME_PATTERN.test(value)
-    && !RESERVED_DATABASES.has(value.toLowerCase());
+    && !RESERVED_DATABASES.has(value.toLowerCase())
+    && !ROUNDCUBE_SCHEMA.test(value);
 }
 
 export function formatDatabaseBytes(value) {

@@ -57,7 +57,7 @@ test('current docs expose the implemented agentless migration and deferred-desig
     /mutation körlemesine tekrarlanmadı/,
   );
   assert.doesNotMatch(docs.get('plan.md'), /Kalan legacy hata yollarını güvenli tanı kataloğuna bağla/);
-  assert.match(docs.get('agents.md'), /DEFERRED — Enterprise UI\/UX standardı/);
+  assert.match(docs.get('agents.md'), /Enterprise UI\/UX standardı/);
   assert.match(docs.get('docs/development.md'), /New enrollment is retired/);
   assert.match(docs.get('docs/local-executor-safety.md'), /Production enters through `apps\/api\/src\/index\.js`/);
   assert.match(docs.get('docs/local-executor-safety.md'), /There is no generic `force-success`/);

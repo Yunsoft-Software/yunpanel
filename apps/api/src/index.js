@@ -1009,6 +1009,7 @@ const listener = createAuthenticatedApi({
       jobRegistry,
       aiToolRegistry,
       aiAudit: authStore.audit,
+      userAdminStore: authStore.users,
       aiPolicyStore,
       aiProviderRegistry,
       aiConversationService,

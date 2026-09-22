@@ -256,12 +256,26 @@ function normalizedDns(value, parentDomainId) {
   return Object.freeze({ mode: input.mode });
 }
 
+function normalizedSiteAdmin(value, parentDomainId) {
+  if (parentDomainId !== null) return null;
+  if (!value) return null;
+  exactObject(value, new Set(['email', 'password']), 'site_create_site_admin_invalid', 'Site admin requires email and password');
+  const email = typeof value.email === 'string' ? value.email.trim().toLowerCase() : '';
+  if (!/^[a-z0-9][a-z0-9._@+-]{2,127}$/.test(email) || !email.includes('@')) {
+    throw new SiteCreateError('site_create_site_admin_invalid', 'Site admin email is invalid');
+  }
+  if (typeof value.password !== 'string' || value.password.length < 12) {
+    throw new SiteCreateError('site_create_site_admin_invalid', 'Site admin password must be at least 12 characters');
+  }
+  return Object.freeze({ email, password: value.password });
+}
+
 function normalizeInput(input) {
   const allowedFields = new Set([
     'operationId', 'serverId', 'name', 'primaryDomain', 'parentDomainId', 'wwwMode', 'httpsMode', 'source',
-    'database', 'mail', 'dns',
+    'database', 'mail', 'dns', 'siteAdmin',
   ]);
-  const requiredFields = [...allowedFields].filter((field) => !['database', 'mail', 'dns'].includes(field));
+  const requiredFields = [...allowedFields].filter((field) => !['database', 'mail', 'dns', 'siteAdmin'].includes(field));
   if (!input || typeof input !== 'object' || Array.isArray(input)
     || Object.keys(input).some((key) => !allowedFields.has(key))
     || requiredFields.some((field) => !Object.hasOwn(input, field))) {
@@ -311,6 +325,7 @@ function normalizeInput(input) {
     database: normalizedDatabase(input.database, source),
     mail: normalizedMail(input.mail, input.httpsMode),
     dns: normalizedDns(input.dns, parentDomainId),
+    siteAdmin: normalizedSiteAdmin(input.siteAdmin, parentDomainId),
   });
 }
 
