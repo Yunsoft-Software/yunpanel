@@ -7,6 +7,8 @@ import './domain-list.css';
 import AuthGate from './AuthGate.jsx';
 import App from './App.jsx';
 import './workspace/ui/console-theme.css';
+// Visual language overrides only: keep existing UX, routes and security boundaries.
+import './workspace/ui/ember-theme.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>
