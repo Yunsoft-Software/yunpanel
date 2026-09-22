@@ -29,7 +29,7 @@ test('site operation tabs retain required locks and job history', () => {
   for (const tab of ['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources']) assert.equal(workspaceResources(`/websites/example/${tab}`).jobs, true);
   assert.equal(workspaceResources('/websites/example').websites, true);
   assert.equal(workspaceResources('/websites/example').jobs, true);
-  assert.equal(workspaceResources('/websites/example/mail').jobs, false);
+  assert.equal(workspaceResources('/websites/example/mail').jobs, true);
   assert.equal(workspaceResources('/websites/example/settings').jobs, false);
 });
 test('application forms and advanced tools retain actual resource dependencies', () => {

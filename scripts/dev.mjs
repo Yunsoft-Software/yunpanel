@@ -1,5 +1,8 @@
 import { spawn } from 'node:child_process';
 
+process.env.YUNPANEL_SECRET_MASTER_KEY = process.env.YUNPANEL_SECRET_MASTER_KEY
+  ?? '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
 const processes = [
   { name: 'api', args: ['run', 'dev:api'] },
   { name: 'web', args: ['run', 'dev:web'] },
