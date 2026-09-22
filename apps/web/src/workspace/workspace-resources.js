@@ -1,7 +1,6 @@
 const none = () => ({ domains: false, websites: false, applications: false, certificates: false, servers: false, jobs: false });
 
-// This is a data-demand map, not an authorization policy. The authenticated API
-// still validates every request, and AuthGate still owns management access.
+// Data demand only; authorization remains in the authenticated API.
 export function workspaceResources(pathname, { observingJob = false, activeJob = false } = {}) {
   const path = typeof pathname === 'string' ? pathname.replace(/\/+$/, '') || '/' : '';
   const result = none();
@@ -12,7 +11,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   else if (/^\/websites\/[^/]+(?:\/[^/]+)?$/.test(path)) {
     enable('domains', 'websites', 'applications', 'certificates', 'servers');
     const tab = path.split('/')[3] || 'overview';
-    if (['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources'].includes(tab)) enable('jobs');
+    if (['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources', 'databases', 'mail'].includes(tab)) enable('jobs');
   } else if (path === '/applications') enable('applications', 'servers', 'jobs');
   else if (path === '/applications/new') enable('applications', 'servers');
   else if (path === '/domains') enable('domains', 'certificates', 'servers');

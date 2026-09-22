@@ -2,7 +2,8 @@ const DAY = 86400000;
 const ACTIVE_JOBS = new Set(['queued', 'running']);
 export const SITE_TABS = [
   ['overview', 'Genel bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Deploy'],
-  ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL'], ['files', 'Dosyalar'], ['logs', 'Loglar'],
+  ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL'], ['files', 'Dosyalar'],
+  ['databases', 'Veritabanları'], ['mail', 'E-posta'], ['logs', 'Loglar'],
   ['terminal', 'Terminal'], ['settings', 'Ayarlar'],
 ];
 export const siteHref = (id, tab = 'overview') => `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === tab) ? tab : 'overview'}`;
@@ -18,7 +19,6 @@ export function certificateState(domain, certificates, now = Date.now()) {
   if (days <= 0) return { state: 'expired', label: 'Süresi dolmuş', certificate, days };
   return { state: days <= 30 ? 'warning' : 'active', label: `${days} gün`, certificate, days };
 }
-
 /** Compatibility view only: never persists or silently assigns an application. */
 export function matchingApplications(domain, applications) {
   if (domain.targetType !== 'proxy' || !Number.isInteger(domain.target?.upstreamPort)) return [];
