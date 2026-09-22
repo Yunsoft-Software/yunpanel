@@ -4,6 +4,7 @@ import { withAuditActor } from './audit-request-context.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { attachManagementAudit } from './management-audit.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
+import { requireToolGatewaySession } from './tool-gateway-session-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
 import { handleUserAdmin } from './user-admin-http.js';
 import { isGithubWebhookPath } from './github-webhook-http.js';
@@ -259,9 +260,9 @@ export function createAuthenticatedApi({
       if (!SAFE_METHODS.has(request.method)) {
         throw new AuthError('method_not_allowed', 'Use GET or HEAD.', 405);
       }
-      const authorized = ownerPolicy.requireManagement(session);
       const gateway = managementToolGatewayForAccessPath(pathname);
       if (!gateway) throw new AuthError('tool_gateway_unknown', 'Tool gateway is unavailable.', 503);
+      const authorized = requireToolGatewaySession(ownerPolicy, session, gateway);
       if (gateway.accessMode === 'session') {
         if (!toolGatewayAuthorizer) {
           throw new AuthError('tool_gateway_unavailable', 'Tool gateway is unavailable.', 503);
