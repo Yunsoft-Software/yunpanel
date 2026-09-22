@@ -11,7 +11,6 @@ import JobDrawer from './JobDrawer.jsx';
 import AiDrawer from './AiDrawer.jsx';
 import './workspace.css';
 import './ui/ux-theme.css';
-import './ui/console-theme.css';
 
 export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
