@@ -1,0 +1,31 @@
+/* Same-origin fonts prepared by scripts/prepare-ui-fonts.mjs; full Latin includes Turkish.
+   Do not replace these with a browser-side Google Fonts import. */
+@font-face {
+  font-family: 'Yun Manrope'; font-style: normal; font-weight: 200 800; font-display: swap;
+  src: url('/fonts/ember/manrope-75274da585.ttf') format('truetype');
+}
+@font-face {
+  font-family: 'Yun Outfit'; font-style: normal; font-weight: 100 900; font-display: swap;
+  src: url('/fonts/ember/outfit-466d6245f9.ttf') format('truetype');
+}
+:root {
+  --ws-font-body: 'Yun Manrope', 'Manrope', 'Avenir Next', 'Lato', ui-sans-serif, sans-serif;
+  --ws-font-display: 'Yun Outfit', 'Outfit', 'Avenir Next', 'Lato', ui-sans-serif, sans-serif;
+  --ws-font-code: ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+}
+.workspace-shell, .ws-modal, .authenticated-panel .auth-sessionbar {
+  font-family: var(--ws-font-body); font-size: 14px; line-height: 1.6;
+  font-feature-settings: 'ss01'; font-variant-numeric: tabular-nums;
+}
+.workspace-shell :is(button, input, select, textarea), .ws-modal :is(button, input, select, textarea) {
+  font-family: var(--ws-font-body);
+}
+.workspace-shell :is(h1, h2), .ws-modal h2, .ws-brand strong,
+.workspace-shell .ws-metric > strong, .ws-server-metrics .ws-usage-ring strong {
+  font-family: var(--ws-font-display); font-weight: 500; letter-spacing: -.025em;
+}
+.workspace-shell :is(code, pre, kbd), .ws-modal :is(code, pre, kbd),
+.workspace-shell .yf-editor textarea, .ws-modal .yf-editor textarea {
+  font-family: var(--ws-font-code); font-feature-settings: normal;
+}
+/* Keep terminal geometry controlled by its own monospace font metrics. */

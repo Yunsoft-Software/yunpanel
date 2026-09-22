@@ -1,0 +1,275 @@
+@import './ember-typography.css';
+
+/* EMBER · Visual language only. Loaded once AFTER console-theme.css.
+   UX routes, DOM roles, data, forms and authorization are deliberately unchanged.
+   Surfaces, not grid lines. Tangerine is a brand action; danger remains red. */
+:root {
+  --ws-brand: #f77749; --ws-brand-hover: #ff9169; --ws-on-brand: #21130d;
+  --ws-canvas: #f2f0eb; --ws-surface: #fffefa; --ws-surface-raised: #ffffff;
+  --ws-surface-subtle: #e9e6df; --ws-surface-hover: #e5e1d9;
+  --ws-text: #272721; --ws-muted: #635f56;
+  --ws-border: #ddd8ce; --ws-control-border: #858074;
+  --ws-accent: #9c3e1e; --ws-accent-soft: #f9e2d5; --ws-accent-hover: #76311b;
+  --ws-focus: #9b421e; --ws-on-accent: #ffffff;
+  --ws-success: #2f644b; --ws-success-soft: #dfede3;
+  --ws-warning: #75521c; --ws-warning-soft: #f8ebce;
+  --ws-danger: #a42e42; --ws-danger-soft: #f9e0e6;
+  --ws-info: #465d6b; --ws-info-soft: #e0e9ee;
+  --ws-unknown: #62615a; --ws-unknown-soft: #e9e6df;
+  --ws-nav: #e9e6df; --ws-nav-text: #47463e; --ws-nav-muted: #625f56;
+  --ws-nav-hover: #dedad0; --ws-nav-active: #292a25; --ws-nav-on-active: #fffaf0;
+  --ws-pill: #30312b; --ws-on-pill: #fffaf2;
+  --ws-chart-cpu: #a44020; --ws-chart-memory: #357052; --ws-chart-disk: #76651d;
+  --ws-folder: #896229; --ws-file: #576d66;
+  --ws-shadow: 0 4px 18px #37270d05; --ws-overlay-shadow: 0 24px 72px #22190824;
+  --ws-radius: 22px; --ws-radius-control: 13px; --ws-radius-small: 9px;
+  --ws-section-pad: 24px; --ws-row-pad: 15px;
+  /* Compatibility for the existing gauges and checkbox rules; not a blue swatch. */
+  --ws-console-blue: var(--ws-brand);
+}
+:root[data-ws-theme='dark'] {
+  color-scheme: dark;
+  --ws-canvas: #171816; --ws-surface: #222320; --ws-surface-raised: #2b2c28;
+  --ws-surface-subtle: #1c1d1a; --ws-surface-hover: #30312c;
+  --ws-text: #f3f0e8; --ws-muted: #b6b3a9;
+  --ws-border: #373831; --ws-control-border: #76786c;
+  --ws-accent: #ff9a70; --ws-accent-soft: #453026; --ws-accent-hover: #ffc09a;
+  --ws-on-accent: #24170f; --ws-focus: #ffb88a;
+  --ws-success: #a9d4b5; --ws-success-soft: #293d30;
+  --ws-warning: #e5c278; --ws-warning-soft: #423724;
+  --ws-danger: #f4a8b5; --ws-danger-soft: #472c32;
+  --ws-info: #b6cbd1; --ws-info-soft: #29393d;
+  --ws-unknown: #c0bdb3; --ws-unknown-soft: #34352f;
+  --ws-nav: #171816; --ws-nav-text: #c5c1b6; --ws-nav-muted: #a4a296;
+  --ws-nav-hover: #272823; --ws-nav-active: #f0ede4; --ws-nav-on-active: #25251f;
+  --ws-pill: #eeece2; --ws-on-pill: #272821;
+  --ws-chart-cpu: #ff9a70; --ws-chart-memory: #acd2b1; --ws-chart-disk: #e7ce87;
+  --ws-folder: #d7bd80; --ws-file: #afc8b8;
+  --ws-shadow: 0 5px 24px #00000009; --ws-overlay-shadow: 0 24px 80px #00000050;
+}
+:root[data-ws-density='compact'] { --ws-row-pad: 10px; --ws-section-pad: 20px; }
+.workspace-shell { -webkit-font-smoothing: antialiased; }
+/* Keep identity and navigation in place; remove the old permanent navy divider. */
+.workspace-shell .ws-sidebar { border-right: 0; padding-inline: 16px; }
+.workspace-shell .ws-brand { gap: 12px; padding-bottom: 32px; }
+.workspace-shell .ws-brand-mark { width: 37px; height: 37px; border-radius: 14px 14px 6px 14px; background: var(--ws-brand); color: var(--ws-on-brand); box-shadow: none; }
+.workspace-shell .ws-brand strong { color: var(--ws-text); font-size: 25px; font-weight: 550; letter-spacing: -.8px; }
+.workspace-shell .ws-brand small { color: var(--ws-nav-muted); letter-spacing: 1.3px; font-size: 9px; }
+.workspace-shell .ws-nav-label { font-size: 10px; font-weight: 500; letter-spacing: 1px; }
+.workspace-shell .ws-nav { gap: 6px; }
+.workspace-shell .ws-nav a { min-height: 44px; padding: 11px 14px; border: 0; border-radius: 15px; font-weight: 500; }
+.workspace-shell .ws-nav a.active { background: var(--ws-nav-active); color: var(--ws-nav-on-active); box-shadow: none; border: 0; }
+.workspace-shell .ws-nav a > svg { color: var(--ws-nav-muted); }
+.workspace-shell .ws-nav a.active > svg { color: inherit; }
+.workspace-shell .ws-nav-count { border-radius: 8px; color: var(--ws-nav-text); background: var(--ws-nav-hover); font-weight: 650; }
+.workspace-shell .ws-nav a.active .ws-nav-count { color: var(--ws-nav-on-active); background: transparent; }
+.workspace-shell .ws-sidebar-footer strong { color: var(--ws-nav-text); }
+.workspace-shell .ws-preferences { border: 0; }
+.workspace-shell .ws-preferences select { color: var(--ws-nav-text); background: var(--ws-nav-hover); border-color: transparent; border-radius: 10px; color-scheme: inherit; }
+.workspace-shell .ws-toolbar { background: var(--ws-canvas); border-bottom: 0; padding-block: 16px; }
+.workspace-shell .ws-command-trigger { border-color: transparent; background: var(--ws-surface); border-radius: 99px; padding-inline: 17px; }
+.workspace-shell .ws-command-trigger kbd { padding: 2px 5px; border: 0; background: var(--ws-surface-raised); border-radius: 5px; font-size: 10px; }
+.workspace-shell .ws-toolbar-actions .ws-button { font-family: var(--ws-font-body); }
+.workspace-shell .ws-content { padding-top: 24px; }
+.workspace-shell .ws-page-heading { margin-bottom: 28px; }
+.workspace-shell .ws-page-heading h1 { font-size: clamp(27px, 2.1vw, 34px); font-weight: 500; letter-spacing: -.8px; }
+.workspace-shell .ws-page-heading p { font-size: 13px; line-height: 1.7; }
+.workspace-shell .ws-eyebrow { color: var(--ws-muted); letter-spacing: 1.5px; }
+/* Actions have soft shapes, not an outline around every icon. Focus stays explicit. */
+.workspace-shell .ws-button, .ws-modal .ws-button {
+  border-color: transparent; border-radius: var(--ws-radius-control);
+  background: var(--ws-surface-raised); font-family: var(--ws-font-body); font-weight: 650;
+  transition: background-color 140ms ease, color 140ms ease, box-shadow 140ms ease;
+}
+.workspace-shell .ws-button:hover, .ws-modal .ws-button:hover { background: var(--ws-surface-hover); }
+.workspace-shell .ws-button-primary, .ws-modal .ws-button-primary { color: var(--ws-on-brand) !important; background: var(--ws-brand); border-color: transparent; }
+.workspace-shell .ws-button-primary:hover, .ws-modal .ws-button-primary:hover { background: var(--ws-brand-hover); color: var(--ws-on-brand) !important; }
+.workspace-shell .ws-button-danger, .ws-modal .ws-button-danger { color: var(--ws-danger) !important; background: var(--ws-danger-soft); border-color: transparent; }
+.workspace-shell .ws-button-danger:hover, .ws-modal .ws-button-danger:hover { box-shadow: inset 0 0 0 1px var(--ws-danger); background: var(--ws-danger-soft); }
+.workspace-shell .ws-button:active:not(:disabled), .ws-modal .ws-button:active:not(:disabled) { transform: none; }
+.workspace-shell .ws-button:disabled, .ws-modal .ws-button:disabled { opacity: .55; }
+.workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary) { background: transparent; }
+.workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary):hover { background: var(--ws-surface); }
+.workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border-radius: var(--ws-radius-control); border-color: var(--ws-control-border); background: var(--ws-surface-subtle); }
+.workspace-shell :is(input,textarea)::placeholder, .ws-modal :is(input,textarea)::placeholder { opacity: 1; }
+.workspace-shell input:is([type='checkbox'],[type='radio']), .ws-modal input:is([type='checkbox'],[type='radio']) { accent-color: var(--ws-brand); }
+.workspace-shell :is(button,a,input,select,textarea,summary):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary):focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
+/* Only cards and real control boundaries define the hierarchy. */
+.workspace-shell .ws-section, .workspace-shell .panel, .workspace-shell .ws-metric { border: 0; border-radius: var(--ws-radius); box-shadow: var(--ws-shadow); }
+.workspace-shell .ws-section-heading { border-bottom: 0; padding-top: 22px; padding-bottom: 16px; }
+.workspace-shell .ws-section-heading h2 { font-size: 17px; font-weight: 500; }
+.workspace-shell .ws-section-heading p { line-height: 1.65; }
+.workspace-shell .ws-filters { border-bottom: 0; }
+.workspace-shell .ws-inline-summary { border-bottom: 0; gap: 12px 24px; padding-block: 12px; }
+.workspace-shell .ws-table { border-collapse: separate; border-spacing: 0 3px; padding: 0 10px 10px; }
+.workspace-shell .ws-table th { border: 0; background: transparent; font-size: 11px; font-weight: 550; padding-block: 10px; }
+.workspace-shell .ws-table td { border: 0; padding-block: var(--ws-row-pad); }
+.workspace-shell .ws-table tr td:first-child { border-radius: 12px 0 0 12px; }
+.workspace-shell .ws-table tr td:last-child { border-radius: 0 12px 12px 0; }
+.workspace-shell .ws-table tbody tr:hover { background: var(--ws-surface-hover); }
+.workspace-shell .ws-pagination { border-top: 0; color: var(--ws-muted); padding-top: 18px; }
+.workspace-shell .ws-keyvalues > div { border: 0; padding-block: 10px; }
+.workspace-shell .ws-badge { border: 0; border-radius: 8px; font-size: 11px; padding: 5px 9px; font-weight: 550; }
+.workspace-shell .ws-notice, .ws-modal .ws-notice { border: 0; border-left: 3px solid currentColor; border-radius: 14px; }
+.workspace-shell .ws-empty { padding: 40px 24px; }
+.workspace-shell .ws-empty-icon { border: 0; border-radius: 18px; background: var(--ws-surface-raised); color: var(--ws-muted); padding: 17px; }
+.workspace-shell .ws-empty h3 { font-family: var(--ws-font-display); font-size: 18px; font-weight: 500; }
+.workspace-shell .ws-form-divider, .workspace-shell .ws-form-footer { border-color: var(--ws-border); }
+.workspace-shell .ws-disclosure[open] > summary { border-color: var(--ws-border); }
+.workspace-shell .ws-domain-symbol { border: 0; background: var(--ws-accent-soft); color: var(--ws-accent); border-radius: 12px; width: 36px; height: 36px; }
+.workspace-shell .ws-db-access > .ws-button { border: 0; background: var(--ws-accent-soft); color: var(--ws-accent) !important; }
+/* Quiet neutral cards; a single featured count adds warmth without recolouring status. */
+.workspace-shell .ws-console-metrics { gap: 16px; }
+.workspace-shell .ws-console-metrics .ws-metric { padding: 24px; }
+.workspace-shell .ws-console-metrics .ws-metric > strong { font-size: 39px; font-weight: 450; margin-top: 19px; }
+.workspace-shell .ws-console-metrics .ws-metric:first-child { background: var(--ws-brand); color: var(--ws-on-brand); }
+.workspace-shell .ws-console-metrics .ws-metric:first-child :is(strong,small,a,.ws-metric-label,.ws-metric-label svg) { color: var(--ws-on-brand); }
+.workspace-shell .ws-console-metrics .ws-metric:first-child a:focus-visible { outline-color: var(--ws-on-brand); }
+.workspace-shell .ws-console-quicklinks { gap: 12px; }
+.workspace-shell .ws-console-quicklink { border: 0; border-radius: 16px; background: var(--ws-surface-subtle); padding: 18px 16px; min-height: 82px; }
+.workspace-shell .ws-console-quicklink:hover { border: 0; background: var(--ws-surface-hover); }
+.workspace-shell .ws-console-quicklink > svg { color: var(--ws-accent); }
+.workspace-shell .ws-server-metrics .ws-usage-ring { background: conic-gradient(var(--ws-brand) var(--usage,0%),var(--ws-surface-raised) 0); }
+.workspace-shell .ws-server-metrics .ws-usage-ring.is-high { background: conic-gradient(var(--ws-warning) var(--usage,0%),var(--ws-surface-raised) 0); }
+.workspace-shell .ws-server-metrics .ws-usage-ring.is-unknown { background: var(--ws-surface-raised); }
+.workspace-shell .ws-server-metrics .ws-usage-ring::before { inset: 5px; }
+.workspace-shell .ws-history-grid { opacity: .42; stroke-dasharray: 2 6; }
+.workspace-shell .ws-history-wait { border: 0; border-radius: 18px; background: var(--ws-surface-subtle); }
+.workspace-shell .ws-history-header h3 { font-family: var(--ws-font-display); font-weight: 500; }
+:root .workspace-shell .ws-series-cpu { color: var(--ws-chart-cpu); stroke: var(--ws-chart-cpu); }
+:root .workspace-shell .ws-series-memory { color: var(--ws-chart-memory); stroke: var(--ws-chart-memory); }
+:root .workspace-shell .ws-series-disk { color: var(--ws-chart-disk); stroke: var(--ws-chart-disk); }
+.workspace-shell .ws-server-timestamp, .workspace-shell .ws-alert-item { border: 0; }
+/* Existing site navigation stays in exactly the same order. The indicator is a pill. */
+.workspace-shell .ws-site-meta { border: 0; padding-bottom: 4px; }
+.workspace-shell .ys-site-navigation { border: 0; padding: 5px; border-radius: 18px; background: var(--ws-surface); margin-bottom: 25px; }
+.workspace-shell .ys-site-primary { gap: 4px; }
+.workspace-shell .ys-site-primary a { min-height: 42px; padding: 10px 14px; border: 0; border-radius: 13px; font-size: 12px; }
+.workspace-shell .ys-site-primary a[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); border: 0; }
+.workspace-shell .ys-site-more summary { border-radius: 13px; }
+.workspace-shell .ys-site-more nav { border: 0; border-radius: 17px; padding: 8px; }
+.workspace-shell .ws-tabs, .workspace-shell .ws-site-groups { border: 0; background: var(--ws-surface); border-radius: 17px; padding: 5px; gap: 4px; }
+.workspace-shell .ws-tabs a, .workspace-shell .ws-site-groups a, .workspace-shell .ws-site-subnav a { border: 0; border-radius: 12px; }
+.workspace-shell .ws-tabs a[aria-current], .workspace-shell .ws-site-groups a[aria-current], .workspace-shell .ws-site-subnav a[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); border: 0; }
+/* File workspace: the two-pane behaviour is kept, the spreadsheet grid is not. */
+.workspace-shell .yf-browser { border: 0; border-radius: 24px; background: var(--ws-surface); box-shadow: var(--ws-shadow); }
+.workspace-shell .yf-header { padding: 24px; gap: 18px; }
+.workspace-shell .yf-header h2 { font-size: 21px; font-weight: 500; }
+.workspace-shell .yf-location { border: 0; margin: 0 18px 14px; padding: 9px 12px; border-radius: 14px; background: var(--ws-surface-subtle); }
+.workspace-shell .yf-location nav button[aria-current] { font-weight: 650; }
+.workspace-shell .yf-location > .ws-button { background: transparent; }
+.workspace-shell .yf-body { gap: 14px; padding: 0 18px 18px; }
+.workspace-shell .yf-folders { border: 0; border-radius: 17px; background: var(--ws-surface-subtle); }
+.workspace-shell .yf-tree { padding: 19px 10px; }
+.workspace-shell .yf-tree-caption { color: var(--ws-muted); letter-spacing: 1.2px; }
+.workspace-shell .yf-tree-name svg, .workspace-shell .yf-root > svg { color: var(--ws-folder); }
+.workspace-shell .yf-tree-row { border-radius: 10px; }
+.workspace-shell .yf-tree .is-current { background: var(--ws-surface-hover); }
+.workspace-shell .yf-root { border-radius: 12px; }
+.workspace-shell .yf-root.is-current { background: var(--ws-accent-soft); color: var(--ws-accent); }
+.workspace-shell .yf-root.is-current > svg { color: inherit; }
+.workspace-shell .yf-content { border-radius: 17px; background: var(--ws-surface); }
+.workspace-shell .yf-tools { padding: 3px 5px 13px; gap: 10px; }
+.workspace-shell .yf-search { border: 0; border-radius: 12px; padding: 0 13px; background: var(--ws-surface-subtle); }
+.workspace-shell .yf-search input { border: 0; }
+.workspace-shell .yf-sort select { border-color: transparent; border-radius: 12px; }
+.workspace-shell .yf-view { padding: 3px; border-radius: 13px; background: var(--ws-surface-subtle); }
+.workspace-shell .yf-view .ws-button { border-radius: 10px; padding: 8px; background: transparent; }
+.workspace-shell .yf-view .ws-button[aria-pressed=true] { color: var(--ws-on-pill) !important; background: var(--ws-pill); }
+.workspace-shell .yf-selection { padding: 2px 14px 10px; }
+.workspace-shell .yf-table { border-collapse: separate; border-spacing: 0 3px; }
+.workspace-shell .yf-table th { border: 0; background: transparent; padding-block: 10px; }
+.workspace-shell .yf-table td { border: 0; padding-block: 10px; }
+.workspace-shell .yf-table tr td:first-child { border-radius: 12px 0 0 12px; }
+.workspace-shell .yf-table tr td:last-child { border-radius: 0 12px 12px 0; }
+.workspace-shell .yf-file-icon { width: 31px; height: 34px; background: var(--ws-surface-raised); border-radius: 9px; color: var(--ws-file); }
+.workspace-shell .yf-entry.is-folder .yf-file-icon { background: transparent; color: var(--ws-folder); }
+.workspace-shell .yf-tile.is-folder > svg { color: var(--ws-folder); }
+.workspace-shell .yf-tile:not(.is-folder) > svg { color: var(--ws-file); }
+.workspace-shell .yf-row-actions .ws-button { border: 0; background: var(--ws-surface-raised); border-radius: 9px; }
+.workspace-shell .yf-row-actions .ws-button:hover { background: var(--ws-accent-soft); color: var(--ws-accent) !important; }
+.workspace-shell .yf-table .is-selected, .workspace-shell .yf-grid .is-selected { background: var(--ws-accent-soft); }
+.workspace-shell .yf-grid article { border: 0; border-radius: 18px; background: var(--ws-surface-subtle); padding: 16px; }
+.workspace-shell .yf-status { border: 0; padding: 17px 8px 0; }
+.workspace-shell .yf-busy, .workspace-shell .yf-feedback { border-radius: 12px; margin: 0 18px 12px; }
+.ws-modal .yf-editor { border: 0; border-radius: 15px; }
+.ws-modal .yf-editor-meta { line-height: 1.65; }
+.ws-modal .yf-editor :is(pre,textarea) { font-family: var(--ws-font-code); }
+/* Site DB/mail and global inventories use the same quiet surfaces. */
+.workspace-shell .ys-resource-heading h2 { font-size: 23px; font-weight: 500; }
+.workspace-shell .ys-resource-symbol { border-radius: 16px; background: var(--ws-accent-soft); }
+.workspace-shell .ys-resource-summary, .workspace-shell .ys-mail-summary { border: 0; border-radius: 18px; }
+.workspace-shell .ys-resource-table { border-collapse: separate; border-spacing: 0 3px; }
+.workspace-shell .ys-resource-table th { border: 0; background: transparent; padding-block: 12px; }
+.workspace-shell .ys-resource-table td { border: 0; }
+.workspace-shell .ys-resource-table tr td:first-child { border-radius: 13px 0 0 13px; }
+.workspace-shell .ys-resource-table tr td:last-child { border-radius: 0 13px 13px 0; }
+.workspace-shell .ys-resource-tabs { border: 0; gap: 6px; }
+.workspace-shell .ys-resource-tabs button { font-family: var(--ws-font-body); border: 0; border-radius: 12px; padding: 11px 15px; }
+.workspace-shell .ys-resource-tabs button[aria-current] { color: var(--ws-on-pill); background: var(--ws-pill); }
+.workspace-shell .ys-webmail-icon { width: 76px; height: 76px; border-radius: 26px 26px 12px 26px; color: var(--ws-on-brand); background: var(--ws-brand); }
+.workspace-shell .ys-webmail-access h3 { font: 500 27px/1.25 var(--ws-font-display); letter-spacing: -.5px; }
+.workspace-shell .ys-resource-link { border: 0; border-radius: 18px; }
+.workspace-shell .ys-resource-actions .ws-button { border-radius: 12px; }
+.workspace-shell .ys-resource-actions .ws-button:first-child { background: var(--ws-accent-soft); color: var(--ws-accent) !important; }
+/* Native dialogs and their focus/scroll behaviour are preserved. */
+.ws-modal { border: 1px solid var(--ws-border); border-radius: 25px; background: var(--ws-surface); box-shadow: var(--ws-overlay-shadow); }
+.ws-modal::backdrop { background: #12130fbf; }
+.ws-modal > header { border: 0; background: var(--ws-surface); padding: 23px 25px 16px; }
+.ws-modal h2 { font-size: 22px; font-weight: 500; }
+.ws-modal-body { padding: 20px 25px 25px; }
+.ws-modal-footer { gap: 10px; }
+.authenticated-panel .auth-sessionbar { border: 0; background: var(--ws-canvas); font-family: var(--ws-font-body); }
+.authenticated-panel .auth-sessionbar button { border-color: transparent; border-radius: 11px; color: var(--ws-text); background: var(--ws-surface); }
+/* Reduced density never reduces tap targets; narrow screens keep the existing record layout. */
+@media (max-width: 900px) {
+  .workspace-shell .ws-sidebar { background: var(--ws-surface); border-radius: 0 24px 24px 0; box-shadow: var(--ws-overlay-shadow); }
+  .workspace-shell .ws-sidebar .ws-button.ws-nav-close { background: var(--ws-surface-raised); color: var(--ws-text) !important; border-color: transparent; border-radius: 12px; }
+  .workspace-shell .ws-nav-backdrop { background: #12130fbf; }
+}
+@media (max-width: 640px) {
+  :root { --ws-radius: 19px; --ws-radius-control: 12px; --ws-section-pad: 18px; }
+  .workspace-shell .ws-page-heading h1 { font-size: 28px; }
+  .workspace-shell .ws-page-heading { margin-bottom: 23px; }
+  .workspace-shell .ws-toolbar { padding-block: 12px; }
+  .workspace-shell .ws-console-metrics .ws-metric { padding: 20px 16px; }
+  .workspace-shell .ws-console-metrics .ws-metric > strong { font-size: 34px; }
+  .workspace-shell .ws-console-metrics { gap: 10px; }
+  .workspace-shell .ws-console-quicklink { padding: 15px 12px; }
+  .workspace-shell :is(.ws-db-table, .ws-websites-table) { padding: 0; }
+  .workspace-shell .ws-db-table tr, .workspace-shell .ws-websites-table tbody tr { border: 0; border-radius: 15px; margin: 0 10px 10px; background: var(--ws-surface-subtle); width: auto; }
+  .workspace-shell .ys-site-navigation { padding: 4px; border-radius: 15px; }
+  .workspace-shell .ys-site-primary a { padding-inline: 11px; border-radius: 11px; min-height: 44px; }
+  .workspace-shell .yf-header { padding: 20px 16px; }
+  .workspace-shell .yf-header h2 { font-size: 21px; }
+  .workspace-shell .yf-location { margin: 0 10px 12px; padding-inline: 8px; }
+  .workspace-shell .yf-body { padding: 0 10px 12px; }
+  .workspace-shell .yf-tools { padding: 3px 3px 12px; }
+  .workspace-shell .yf-results { border-radius: 14px; }
+  .workspace-shell .yf-status { padding-inline: 5px; }
+  .ws-modal > header { padding: 20px 20px 12px; }
+  .ws-modal-body { padding: 16px 20px 20px; }
+  .ws-modal h2 { font-size: 21px; }
+}
+@media (max-width: 520px) {
+  .workspace-shell .yf-table tbody tr { border: 0; border-radius: 14px; background: var(--ws-surface-subtle); margin-bottom: 7px; padding: 14px 10px; }
+  .workspace-shell .yf-table tbody tr.is-selected { background: var(--ws-accent-soft); }
+  .workspace-shell .yf-table td { padding-block: 0; border-radius: 0 !important; }
+  .workspace-shell .yf-selection { padding-inline: 5px; }
+  .workspace-shell .yf-grid { gap: 8px; padding-inline: 2px; }
+}
+@media (max-width: 700px) {
+  .workspace-shell .ys-resource-table tbody tr { border: 0; border-radius: 15px; background: var(--ws-surface-subtle); margin: 0 12px 12px; }
+}
+@media (pointer: coarse) {
+  .workspace-shell .ws-button, .ws-modal .ws-button, .workspace-shell .yf-row-actions .ws-button { min-height: 44px; }
+  .workspace-shell .yf-row-actions .ws-button { min-width: 40px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+@media (forced-colors: active) {
+  .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article), .ws-modal { border: 1px solid CanvasText; }
+  .workspace-shell :is(.ws-nav a.active,.ys-site-primary a[aria-current],.ys-resource-tabs button[aria-current]) { outline: 2px solid Highlight; }
+  .workspace-shell :is(.ws-table,.yf-table,.ys-resource-table) td { border-bottom: 1px solid CanvasText; }
+}
