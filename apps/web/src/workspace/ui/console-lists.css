@@ -1,0 +1,46 @@
+.ws-site-list .ws-filters { align-items: end; }
+.ws-list-options { flex: 0 1 auto; }
+.ws-list-options > summary { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--ws-control-height); padding: 9px 14px; border: 1px solid var(--ws-control-border); border-radius: 8px; color: var(--ws-text); font-size: 13px; cursor: pointer; list-style: none; }
+.ws-list-options > summary::-webkit-details-marker { display: none; }
+.ws-list-options > summary::after { content: '+'; margin-left: 8px; color: var(--ws-muted); }
+.ws-list-options[open] > summary::after { content: '−'; }
+.ws-list-options[open] { flex-basis: 100%; }
+.ws-list-options[open] > summary { justify-content: flex-start; border-color: var(--ws-border); }
+.ws-filter-options { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 14px; padding-top: 16px; }
+.ws-site-list .ws-filter-options label { min-width: 0; }
+.ws-site-list .ws-websites-table td { vertical-align: middle; }
+.ws-site-list .ws-domain-name { min-width: 180px; }
+.ws-site-list .ws-row-end .ws-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.ws-site-list .ws-row-end .ws-button { min-height: 40px; }
+.ws-site-list .ws-section-heading { align-items: center; }
+.ws-site-list .ws-inline-summary { border-bottom: 0; padding-top: 12px; padding-bottom: 0; }
+@media (max-width: 1100px) {
+  .ws-filter-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ws-site-list .ws-websites-table td, .ws-site-list .ws-websites-table th { padding-inline: 12px; }
+}
+@media (max-width: 720px) {
+  .ws-site-list .ws-filters { gap: 12px; padding: 16px; }
+  .ws-site-list .ws-filter-search { flex-basis: 100%; }
+  .ws-site-list .ws-filters > label:not(.ws-filter-search), .ws-list-options { flex: 1 1 140px; }
+  .ws-list-options[open] { flex-basis: 100%; }
+  .ws-filter-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .ws-websites-table, .ws-websites-table tbody { display: block; width: 100%; }
+  .ws-websites-table thead { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip-path: inset(50%); }
+  .ws-websites-table tbody tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 12px 14px; padding: 18px 16px; border-bottom: 1px solid var(--ws-border); }
+  .ws-websites-table tbody tr:last-child { border-bottom: 0; }
+  .ws-site-list .ws-websites-table td { display: block; min-width: 0; padding: 0; border: 0; }
+  .ws-websites-table td:nth-child(1), .ws-websites-table td:nth-child(2), .ws-websites-table td:last-child { grid-column: 1 / -1; }
+  .ws-websites-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 5px; color: var(--ws-muted); font-size: 11px; }
+  .ws-site-list .ws-domain-name { min-width: 0; padding-left: calc(var(--ws-depth, 0) * 10px); gap: 8px; }
+  .ws-site-list .ws-domain-name > div { flex: 1; }
+  .ws-site-list .ws-domain-name a { overflow-wrap: anywhere; font-size: 14px; }
+  .ws-site-list .ws-tree-spacer { width: 0; }
+  .ws-site-list .ws-tree-toggle { width: 30px; height: 44px; }
+  .ws-site-list .ws-row-end .ws-actions { justify-content: stretch; flex-wrap: wrap; }
+  .ws-site-list .ws-row-end .ws-button { flex: 1; min-height: 44px; }
+  .ws-site-list .ws-pagination { padding: 16px; }
+}
+@media (max-width: 380px) {
+  .ws-filter-options { grid-template-columns: minmax(0, 1fr); }
+  .ws-site-list .ws-domain-symbol { display: none; }
+}
