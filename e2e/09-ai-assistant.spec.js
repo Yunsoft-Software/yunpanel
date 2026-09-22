@@ -61,7 +61,7 @@ test.describe('Module 9: AI Assistant & AI Management', () => {
   test('9.3. AI Settings & Provider Management form in Settings', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
 
-    await page.goto('/settings');
+    await page.goto('/settings?section=ai');
     await expect(page.locator('h1:has-text("Ayarlar")')).toBeVisible({ timeout: 10000 });
 
     // Verify AI Asistanı section

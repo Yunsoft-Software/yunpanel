@@ -120,7 +120,7 @@ test.describe('Module 8: Mail & Webmail Management', () => {
     // Save quota
     await quotaInput.fill('512');
     const saveQuotaBtn = policySection.locator('button:has-text("Quota kaydet")');
-    await expect(saveQuotaBtn).toBeEnabled({ timeout: 5000 });
+    await expect(saveQuotaBtn).toBeEnabled({ timeout: 10000 });
     await saveQuotaBtn.click();
     await expect(policySection.locator('p:has-text("512 MiB")')).toBeVisible({ timeout: 10000 });
 

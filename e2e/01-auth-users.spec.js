@@ -31,7 +31,7 @@ test.describe('Module 1: Authentication, Session & User Management', () => {
     await expect(page.locator('aside a[href="/websites"]')).toBeVisible();
     await expect(page.locator('aside a[href="/settings"]')).toBeVisible();
     await expect(page.locator('aside a[href="/servers"]')).toBeVisible();
-    await expect(page.locator('aside a[href="/jobs"]')).toBeVisible();
+    await expect(page.locator('aside a[href="/databases"]')).toBeVisible();
   });
 
   test('1.3. Scoped site_manager creation, role isolation, and deletion', async ({ page }) => {

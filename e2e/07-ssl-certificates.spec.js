@@ -70,7 +70,7 @@ test.describe('Module 7: SSL/TLS Certificate Management', () => {
 
   test('7.3. System SSL Settings: inspect global DNS/SSL policy on /settings', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-    await page.goto('/settings');
+    await page.goto('/settings?section=dns');
 
     const policySection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'DNS ve SSL politikası' }) });
     await expect(policySection).toBeVisible({ timeout: 15000 });

@@ -35,7 +35,7 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
 
   test('15.2. AI Provider Settings: form validation, provider addition and cleanup on /settings', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-    await page.goto('/settings');
+    await page.goto('/settings?section=ai');
 
     const aiSection = page.locator('section').filter({ has: page.locator('h2:text-is("AI Asistanı ve Model Sağlayıcıları")') });
     await expect(aiSection).toBeVisible({ timeout: 15000 });
@@ -73,7 +73,7 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     await saveBtn.click();
 
     // Verify provider card is rendered in list
-    const provCard = aiSection.locator('div').filter({ has: page.locator(`strong:text-is("${testProvId}")`) }).first();
+    const provCard = aiSection.locator(`[data-provider-id="${testProvId}"]`);
     await expect(provCard).toBeVisible({ timeout: 15000 });
 
     // Clean up: delete test provider deterministically

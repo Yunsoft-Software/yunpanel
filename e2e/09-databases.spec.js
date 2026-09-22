@@ -29,6 +29,9 @@ test.describe('Module 9: Databases & phpMyAdmin Integration', () => {
     await expect(table.locator('th:has-text("Website sahibi")')).toBeVisible();
     await expect(table.locator('th:has-text("Boyut")')).toBeVisible();
     await expect(table.locator('th:has-text("İşlem")')).toBeVisible();
+
+    // Verify Roundcube database is hidden from the inventory table
+    await expect(table.locator('td', { hasText: /^roundcube/i })).toHaveCount(0);
   });
 
   test('9.2. Global database creation and deletion lifecycle', async ({ page }) => {

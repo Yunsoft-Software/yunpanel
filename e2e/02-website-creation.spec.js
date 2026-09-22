@@ -23,7 +23,7 @@ test.describe('Module 2: Website Creation & Form Validation', () => {
 
     // Section 1: Alan adı
     await expect(page.locator('h3:has-text("1. Alan adı")')).toBeVisible();
-    const domainInput = page.locator('input[placeholder*="example.com"]');
+    const domainInput = page.locator('input[placeholder="example.com"]');
     await expect(domainInput).toBeVisible();
 
     // Submit button should be present
@@ -35,8 +35,10 @@ test.describe('Module 2: Website Creation & Form Validation', () => {
     const sourceSelect = page.locator('label:has-text("Uygulama kaynağı") select');
     await expect(sourceSelect).toBeVisible();
 
-    // Section 3: Veritabanı
-    await expect(page.locator('h3:has-text("3. Veritabanı")')).toBeVisible();
+    // Section: Site yöneticisi
+    await expect(page.locator('h3:has-text("Site Yöneticisi")')).toBeVisible();
+    await expect(page.locator('input[type="email"]')).toBeVisible();
+    await expect(page.locator('input[type="password"]')).toBeVisible();
 
     // Section 4: HTTPS
     await expect(page.locator('h3:has-text("HTTPS")')).toBeVisible();
@@ -95,16 +97,15 @@ test.describe('Module 2: Website Creation & Form Validation', () => {
     await expect(page.locator('p:has-text("PHP-FPM")')).toBeVisible();
   });
 
-  test('2.5. Additional options: Database, HTTPS, and Mail toggles', async ({ page }) => {
+  test('2.5. Additional options: Site Manager, HTTPS, and Mail toggles', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
     await page.goto('/websites/new');
 
-    // Section 3: Veritabanı toggle
-    const dbCheckbox = page.locator('label:has-text("Başlangıç veritabanı") input[type="checkbox"]');
-    await expect(dbCheckbox).toBeVisible();
-    await expect(dbCheckbox).not.toBeChecked();
-    await dbCheckbox.check();
-    await expect(dbCheckbox).toBeChecked();
+    // Section 3: Site yöneticisi zorunlu alanlar
+    const adminEmailInput = page.locator('label:has-text("Yönetici e-posta adresi") input');
+    const adminPasswordInput = page.locator('label:has-text("Yönetici parolası") input');
+    await expect(adminEmailInput).toBeVisible();
+    await expect(adminPasswordInput).toBeVisible();
 
     // Section 4: HTTPS mode select
     const httpsSelect = page.locator('label:has-text("Sertifika yönetimi") select');

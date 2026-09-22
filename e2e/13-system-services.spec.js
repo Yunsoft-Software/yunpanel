@@ -74,7 +74,7 @@ test.describe('Module 13: System & Services Management', () => {
 
   test('13.3. Server DNS Identity & Network settings inspection on /settings', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-    await page.goto('/settings');
+    await page.goto('/settings?section=dns');
 
     await expect(page.locator('h1')).toContainText('Ayarlar', { timeout: 10000 });
 
@@ -113,7 +113,7 @@ test.describe('Module 13: System & Services Management', () => {
 
   test('13.4. DNS Delegation inspection and PowerDNS health panels on /settings', async ({ page }) => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-    await page.goto('/settings');
+    await page.goto('/settings?section=dns');
 
     // Verify PowerDNS local / public health section
     const healthSection = page.locator('section').filter({ has: page.locator('h2:text-is("PowerDNS local / public health")') });

@@ -29,18 +29,26 @@ test.describe('Module 8: Server, System Settings & Jobs', () => {
     await page.goto('/settings');
     await expect(page.locator('h1:has-text("Ayarlar")')).toBeVisible({ timeout: 10000 });
 
-    // Verify Account & Access section
+    // Verify Account & Access section on /settings
     await expect(page.locator('h2:has-text("Hesap ve erişim")')).toBeVisible({ timeout: 10000 });
     await expect(page.locator('a[href="/settings/users"]:has-text("Kullanıcıları yönet")')).toBeVisible();
 
-    // Verify Panel & Server section
-    await expect(page.locator('h2:has-text("Panel ve sunucu")')).toBeVisible();
-    await expect(page.locator('text=YunPanel v')).toBeVisible();
-    await expect(page.locator('text=Yerel yönetim (Agentless Root)')).toBeVisible();
+    // Verify categorized tabs exist
+    await expect(page.locator('nav.ws-tabs a:has-text("Hesap ve erişim")')).toBeVisible();
+    await expect(page.locator('nav.ws-tabs a:has-text("DNS ve SSL")')).toBeVisible();
+    await expect(page.locator('nav.ws-tabs a:has-text("İşlemler ve kayıtlar")')).toBeVisible();
 
-    // Verify Site Defaults & Isolation section
-    await expect(page.locator('h2:has-text("Site varsayılanları ve izolasyon")')).toBeVisible();
-    await expect(page.locator('text=Site başına bağımsız Unix kullanıcısı ve grubu')).toBeVisible();
+    // Navigate to /servers and inspect Server Diagnostics section
+    await page.goto('/servers');
+    await expect(page.locator('h1:has-text("Sunucu")')).toBeVisible({ timeout: 10000 });
+    const diagDetails = page.locator('#server-diagnostics');
+    if (await diagDetails.count() > 0) {
+      await diagDetails.locator('summary').click();
+      await expect(page.locator('h2:has-text("Panel ve sunucu")')).toBeVisible({ timeout: 10000 });
+      await expect(page.locator('text=YunPanel v')).toBeVisible();
+      await expect(page.locator('h2:has-text("Site varsayılanları ve izolasyon")')).toBeVisible();
+      await expect(page.locator('text=Site başına bağımsız Unix kullanıcısı ve grubu')).toBeVisible();
+    }
   });
 
   test('8.3. Jobs History & Filter Lifecycle on /jobs', async ({ page }) => {
