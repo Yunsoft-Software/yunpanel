@@ -11,6 +11,7 @@ import JobDrawer from './JobDrawer.jsx';
 import AiDrawer from './AiDrawer.jsx';
 import './workspace.css';
 import './ui/ux-theme.css';
+import './ui/console-theme.css';
 
 export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
@@ -29,20 +30,28 @@ function Shell() {
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
     const change = () => { setNarrow(media.matches); if (!media.matches) setMenuOpen(false); };
-    media.addEventListener('change', change); return () => media.removeEventListener('change', change);
+    media.addEventListener('change', change);
+    return () => media.removeEventListener('change', change);
   }, []);
-  useEffect(() => { setMenuOpen(false); setPaletteOpen(false); content.current?.focus({ preventScroll: true }); window.scrollTo({ top: 0, behavior: 'instant' }); }, [location.pathname]);
+  useEffect(() => {
+    setMenuOpen(false); setPaletteOpen(false);
+    content.current?.focus({ preventScroll: true });
+    window.scrollTo({ top: 0, behavior: 'instant' });
+  }, [location.pathname]);
   useEffect(() => {
     const shortcut = (event) => {
-      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k' && !event.isComposing && !menuOpen && !document.querySelector('dialog[open]')) {
+      const blocked = menuOpen || event.isComposing || document.querySelector('dialog[open]');
+      if (blocked) return;
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault(); setPaletteOpen(true);
       }
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'a' && !event.isComposing) {
+      if (isOwner && canManage && (event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'a') {
         event.preventDefault(); setAiOpen((prev) => !prev);
       }
     };
-    window.addEventListener('keydown', shortcut); return () => window.removeEventListener('keydown', shortcut);
-  }, [menuOpen]);
+    window.addEventListener('keydown', shortcut);
+    return () => window.removeEventListener('keydown', shortcut);
+  }, [menuOpen, isOwner, canManage]);
   useEffect(() => {
     if (!narrow || !menuOpen) return undefined;
     const previous = document.activeElement; const overflow = document.body.style.overflow;
@@ -50,7 +59,7 @@ function Shell() {
     const keydown = (event) => {
       if (event.key === 'Escape') { event.preventDefault(); setMenuOpen(false); }
       if (event.key !== 'Tab') return;
-      const focusable = [...menu.current.querySelectorAll('a[href],button:not(:disabled),select:not(:disabled),input:not(:disabled)')].filter((element) => element.getClientRects().length);
+      const focusable = [...menu.current.querySelectorAll('a[href],button:not(:disabled),select:not(:disabled),input:not(:disabled),summary')].filter((element) => element.getClientRects().length);
       const first = focusable[0]; const last = focusable.at(-1);
       if (event.shiftKey && (document.activeElement === first || !menu.current.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !menu.current.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
@@ -64,16 +73,17 @@ function Shell() {
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>SUNUCU YÖNETİMİ</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <NavLink key={to} to={to}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</NavLink>)}</div></div>)}</nav>
-      <Preferences />
-      <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Bu panel yalnız kurulu olduğu sunucuyu yönetir.' : 'Yalnız hesabınıza izin verilen envanter gösterilir.') : 'Yalnız yetkili olduğunuz web sitelerini yönetebilirsiniz.'}</span></div>
+      <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
+      <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>
-      <div className="ws-toolbar"><Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
-        <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya panel bölümü ara…</span><kbd>⌘ / Ctrl K</kbd></button>
+      <div className="ws-toolbar">
+        <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
+        <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         {canManage && <div className="ws-toolbar-actions">
-          {isOwner && <Button icon="terminal" onClick={() => setAiOpen(true)}>AI Asistan</Button>}
-          <LinkButton to="/jobs" icon="jobs">İşlemler{jobCount > 0 ? ` · ${jobCount} aktif` : ''}</LinkButton>
-          {isOwner && <LinkButton to="/websites/new" variant="primary" icon="plus">Site ekle</LinkButton>}
+          {isOwner && <Button icon="terminal" aria-label="AI asistanı aç" title="AI asistanı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span></Button>}
+          <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>
+          {isOwner && <LinkButton to="/websites/new" variant="primary" icon="plus" aria-label="Web sitesi ekle" title="Web sitesi ekle"><span className="ws-toolbar-label">Site ekle</span></LinkButton>}
         </div>}
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
