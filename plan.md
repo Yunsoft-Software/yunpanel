@@ -1,19 +1,29 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## Son kapsam kararı — 2026-09-23: development, tam Plesk özellikleri
+
+Aktif dal **`development`**, başlangıç **`main@1a45ded8697d640b87c149143613454fac1fa94d`**. Bu çalışma main'e yazılmaz. Kullanıcı reseller, müşteri, abonelik, hizmet paketi ve Plesk'in bütün işlevsel kapsamını açıkça istedi. Eski belgelerin bu alanları dışlayan kararları geçersizdir. **[Tam özellik envanteri](docs/plesk-feature-parity.md)** ve **[genişletilmiş rol/ekran sözleşmesi](docs/ux/plesk-full-scope.md)** esas alınır. Çekirdek, Windows, premium/harici entegrasyonlar ayrı takip edilir; bunları ayırmak kapsamdan çıkarmak değildir. Marketplace'in her alt ürün/özellik taraması EKL-07 altında açık kalır.
+
+Kullanıcının isteğiyle biten kaynak alt işleri `[x]` tutulur. Bu işaretler canlı kabulü tamamlanmamış üst özelliği kapatmaz. Açık kaynak paneli taban alma araştırması henüz uygulanmış mimari kararı değildir; izinsiz panel/stack değiştirilmez.
+
 ## Bağlayıcı karar — 2026-09-23: önce Plesk UX, mevcut görsel dil korunur
 
 Kullanıcı production araştırmasındaki önerileri onayladı ve uygulama sırasını değiştirdi: **ilk geliştirme işi Dosyalar erişiminin geri kazanılması ve bütün kullanım/bilgi mimarisinin Plesk Obsidian referansına taşınmasıdır.** Eski backend-first/UX-sonra ve özel workspace düzeni talimatları bu konuda geçersizdir. Production güvenlik engelleri kaldırılmaz; UX önce geliştirilir, bütün yayın kapıları geçmeden production-ready denmez.
 
 **Korunacak:** mevcut Ember renkleri, fontlar, radius/element şekilleri, ortak tokenlar, açık/koyu tema tercihleri ve erişilebilir bileşenler. **Değişecek:** menü hiyerarşisi, ekranların yeri, site araçlarına giriş, sayfa geçişleri ve işlemlerin kullanım biçimi. Plesk'in rengi/logosu kopyalanmaz; Plesk'in doğrulanmış görev yerleşimi ve çalışma mantığı referans alınır. UI güzelleştirme gerekçesiyle özellik veya erişim yolu silinmez.
 
-UX uygulama girişi `ui-plan.md`; ayrıntılı sözleşme `docs/ux/plesk-ux-spec.md`; resmî ekran atlası `docs/ux/plesk-reference-atlas.md`; kapsam/rota/kabul matrisi `docs/ux/plesk-route-matrix.md` olacaktır. Bu dokümanların hazırlanması aşağıdaki uygulama maddelerinin tamamlandığı anlamına gelmez.
+UX uygulama girişi `ui-plan.md`; ayrıntılı sözleşme `docs/ux/plesk-ux-spec.md`; resmî ekran atlası `docs/ux/plesk-reference-atlas.md`; kapsam/rota/kabul matrisi `docs/ux/plesk-route-matrix.md` olacaktır. Bu dokümanların hazırlanması aşağıdaki uygulama maddelerinin tamamlandığı anlamına gelmez. Eski kapsam sınırlamalarında yukarıdaki tam-parity kararı önceliklidir.
 
-Bu dosya yalnız kalan işleri tutar. Önceki planın eksiksiz, byte-identical kopyası [karar öncesi arşiv](docs/history/plan-before-plesk-ux-80f3d1c4.md) içindedir; eski başarı anlatıları ve kabul raporu bağlantıları kaybolmamıştır. Önceki açık maddeler aşağıda korunmuştur. Bağlayıcı teknik/güvenlik sınırları `agents.md` ve `docs/architecture.md`; gerçek host/tarayıcı kabulü `todo.md` içindedir. `.44` Plesk sunucusu hiçbir amaçla kullanılmaz. Küçük commit, güncel `main`, force-push yok, GitHub Actions yok.
+Önceki planın eksiksiz, byte-identical kopyası [karar öncesi arşiv](docs/history/plan-before-plesk-ux-80f3d1c4.md) içindedir; eski başarı anlatıları ve kabul raporu bağlantıları kaybolmamıştır. Önceki açık maddeler aşağıda korunmuştur. Bağlayıcı teknik/güvenlik sınırları `agents.md` ve `docs/architecture.md`; gerçek host/tarayıcı kabulü `todo.md` ve `docs/ux/development-todo.md` içindedir. `.44` Plesk sunucusu hiçbir amaçla kullanılmaz. Küçük commit, güncel `development`, force-push yok, GitHub Actions yok.
 
 ## A — AKTİF İŞ SIRASI: Plesk UX geçişi
 
 - [ ] **UX-PL-01 — Dosyalar erişimini ilk dilimde geri kazandır.** Global Plesk uyumlu `Dosyalar / Files` girişi ve seçilen sitenin `Dosya Yöneticisi / File Manager` eylemi görünür olsun. Güncel route, menü, Website/Domain ID çözümleme, rol kontrolü, yükleme ve hata durumları izlenerek kaybolan girişin nedeni giderilsin. Mevcut çalışan dosya operasyonları/adapter/gateway kaldırılmasın; yeni motor yazılmasın. Owner ve kendi sitesine yetkili kullanıcı tarayıcıdan dosya listeleme, klasör değiştirme, yükleme, oluşturma, düzenleme, yeniden adlandırma ve güvenli silmeye ulaşabilsin. Eksik dependency veya yetki anlaşılır durumdur; ekranın sessizce yok olması değildir.
-- [ ] **UX-PL-02 — Plesk görünüm ve rol bağlamını tekilleştir.** Power User Panel ile Service Provider admin/subscription yüzeyleri birbirine karıştırılmasın. Desteklenen tek-sunucu/Owner/site-manager kapsamı ve resmî referans ekranı her eşlemede belirtilsin. Customer/reseller/billing motoru sırf Plesk menüsünde var diye uydurulmasın. Plesk'te karşılığı olmayan YunPanel AI/özel runtime özellikleri açıkça ürün uzantısı olarak işaretlensin.
+  - [x] **UX-PL-01a kaynak:** global `/files` rotası, Owner/site-manager menüsü ve komut araması mevcut dosya yönetimine bağlandı (`256d991f`).
+  - [x] **UX-PL-01b kaynak:** tek/çok site seçimi, Website→Domain eşleme, stale/forbidden/yanlış kimlikte başka siteye düşmeme ve görünür unsupported/unbound durumları (`256d991f`).
+  - [x] **UX-PL-01c kaynak testi:** `apps/web/test/files-entry-model.test.js`, 31 model/kaynak bağlantı testi Node22 ortamında geçti. JSX/React/host testi değildir; rapor `docs/history/development-files-entry-2026-09-23.md`.
+  - [ ] **UX-PL-01d kalan kaynak/kabul:** koşullu site sekmesinin loading/eksik ilişki durumları, dosya yolu/taslak geçişleri, hedef Node24/npm11 tam build ve gerçek Owner/Site A/Site B dosya işlemleri. `docs/ux/development-todo.md` T-DEV-FILES açık.
+- [ ] **UX-PL-02 — Plesk'in bütün görünüm ve rollerini uygula.** Yönetici Service Provider ve Power User, Reseller ve Customer görev bağlamlarını ayrı ve tutarlı uygula. Customer/reseller/plan/subscription artık kapsam içindedir; yalnız etiket veya sahte menü değil gerçek hiyerarşik yetki ve kaynak ilişkisi gerekir. Plesk'te karşılığı olmayan YunPanel AI/özel runtime özellikleri açıkça ürün uzantısı olarak işaretlensin. PAR-01/02/03 ile birlikte ilerler.
 - [ ] **UX-PL-03 — Ana gezinmeyi Plesk görev hiyerarşisine taşı.** Web Siteleri ve Alan Adları, Posta, Dosyalar, Veritabanları, İstatistikler, Kullanıcılar ve uygun Owner sunucu yönetimi girişleri rol/kurulum kapsamına göre konumlansın. Plesk'in desteklenen özellikler için kullandığı yerleşim korunurken boş/ölü düğme üretilmesin. Global uygulama/deploy/debug envanteri site yönetiminin yerini almasın.
 - [ ] **UX-PL-04 — Web Siteleri ve Alan Adları ana çalışma alanını uygula.** Site/domain kartı veya Plesk'teki doğrulanmış liste görünümü, domain arama/filtre, add domain/subdomain/alias, site durumu, runtime ve doğrudan araç girişlerini aynı bağlamda birleştir. Dosyalar, SSL/TLS, DNS, mail, DB, log, hosting ayarları ve runtime araçları beklenen yerlerinden erişilsin; temel eylemler `Diğer` içine saklanmasın. Domain/Website/subdomain/alias ilişkileri UI değişimiyle bozulmasın.
 - [ ] **UX-PL-05 — Dosya yöneticisi çalışma düzenini Plesk'e eşle.** Sol klasör ağacı, üst breadcrumb/yol, dosya listesi, seçim ve araç çubuğu, upload/create/archive/extract/copy/move/rename/edit/permissions/delete akışlarının mevcut kapasitesi matrise işlenip eksikler açıkça geliştirilsin. Aynı site kapsamı, conflict detection, symlink/path koruması, büyük klasör sayfalaması ve site kullanıcısıyla çalıştırma korunsun. Sunucunun root ağacı sıradan kullanıcıya açılmasın.
@@ -56,7 +66,7 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 - [ ] **PROD-12 — Mail teslimat tanılama.** Mail hesabı ve servis ekranından bağlantı bilgileri, doğru port/TLS, SPF/DKIM/DMARC, DNS gereksinimleri, mail queue/teslim logu ve test gönderim/alım durumuna erişilsin. Local/external mail ayrımı, yetki, secret masking ve gerçek teslim sonucu korunsun.
 - [ ] **PROD-13 — Yedekleme merkezi kullanım derinliği.** Plesk Backup Manager karşılığında son başarılı yedek, sonraki çalışma, kapsam, retention, uzak depo ve restore sonucu görülsün. Plan/schedule, depo sağlığı ve güvenli seçici geri yükleme mevcut motorla yönetilsin; failed/stale snapshot yeşil gösterilmesin.
 - [ ] **PROD-14 — Uygulama işletimini tamamla.** Site Node.js/PHP/Python/Docker/Git kapsamındaki runtime, environment, yayın/release geçmişi, sağlık, log ve rollback görevlerini mevcut yeteneklerle eşleştir. Plesk eşdeğeri olmayan runtime yüzeyi açık YunPanel uzantısıdır; gizli global uygulama listesi zorunlu günlük yol olmasın.
-- [ ] **PROD-15 — Kaynak ve kota görünürlüğü/uygulaması.** Site tüketimi, disk/inode, mail/DB ve desteklenen CPU/RAM/process limitleri gerçek ölçümden sunulsun. Ölçülen kullanım, tanımlı limit ve gerçekten enforce edilen limit ayrışsın; bilinmeyen sıfır sayılmasın. Limit aşımı davranışı ve diğer siteye etkisi test edilsin; bu madde reseller/faturalama motoru gerektirmez.
+- [ ] **PROD-15 — Kaynak ve kota görünürlüğü/uygulaması.** Site tüketimi, disk/inode, mail/DB ve desteklenen CPU/RAM/process limitleri gerçek ölçümden sunulsun. Ölçülen kullanım, tanımlı limit ve gerçekten enforce edilen limit ayrışsın; bilinmeyen sıfır sayılmasın. Limit aşımı davranışı ve diğer siteye etkisi test edilsin. Genişletilmiş kapsamda reseller/paket/abonelik tahsisi ve kullanım ilişkisi PAR-03 ile birlikte uygulanır.
 
 ## E — Önceki açık işler: korunur, yeni UX kararıyla uygulanır
 
@@ -67,10 +77,20 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 - [ ] **P1.5 — MCP uyumluluğu.** Aynı Tool Registry/Policy Engine üzerinden harici AI istemcileri için adaptör; UX ve production çekirdek görevlerinden sonra. HTTP/UI varlığı MCP tamamlanması değildir.
 - [ ] **P2 — Kabul sonrası migration temizliği.** Legacy direct-systemd compatibility ve diğer fallback'ler yalnız gerçek replacement kabulünden sonra kaldırılır. UX yeniden yerleştirme, dosya yöneticisi/terminal veya çalışan runtime motorunu silme gerekçesi değildir.
 
+## F — Tam Plesk eşdeğerliği: genişletilmiş ürün işleri
+
+- [x] **PAR-00a — Tarihli özellik envanteri oluşturuldu.** `docs/plesk-feature-parity.md`, 21 özellik grubu; reseller/customer/subscription, Linux/Windows ve premium entegrasyon ayrımı. Bu işaret bütün Marketplace alt ürünlerinin tarandığı veya envanterdeki özelliklerin kodlandığı anlamına gelmez.
+- [ ] **PAR-00b — Eşdeğerlik matrisini tamamla.** Her özellik satırına mevcut YunPanel kaynak/API/servis kanıtı, eksik davranış, rol/OS/provider koşulu ve test bağla. EKL-07 tam Marketplace taraması açık. Checkbox sayısından gerçeğe aykırı hazır olma yüzdesi üretme.
+- [ ] **PAR-01 — Hiyerarşik sahiplik ve güvenli migration.** Yönetici → isteğe bağlı Reseller → Customer → Subscription → Website/Domain/kaynaklar; ek kullanıcı üyelik/rolleri. Mevcut ID/Unix kullanıcıları ve site erişimi korunur; versioned migration/rollback ve eski oturum iptali tasarlanır.
+- [ ] **PAR-02 — Customer/Reseller ve tüm panel görünümleri.** Hesap CRUD/suspend/enable/delete, transfer, dönüşüm ve audited login-as; API/job/log/backup/AI/tool sınırları dahil. Site_manager rolüne isim değiştirerek tamamlandı denmez.
+- [ ] **PAR-03 — Hizmet paketleri ve abonelikler.** Hosting/reseller planı, add-on, abonelik lifecycle, expiry, quota, overuse/overselling, plan sync/lock/customization, sahiplik transferi ve kaynak etkileri. Gerçek enforcement ile UI limiti ayrılır.
+- [ ] **PAR-04 — Envanterdeki tüm kalan işlevler.** DNS/mail/DB/runtime/Docker/Git/WP/Laravel/backup/security/API/CLI/migration/branding görevlerini envanter ID'leriyle tamamla. Mevcut işler B–E gruplarına çapraz bağlanır, aynı iş iki kez icat edilmez.
+- [ ] **PAR-05 — OS ve premium/harici eşdeğerlik hatları.** Windows/IIS/.NET/MSSQL/NTFS; ticari sertifika, Sitejet/site-builder, premium security/backup/toolkit ve faturalama/registrar entegrasyonları. Her biri gerçek adapter veya lisansı uygun alternatif ve kendi kabulüyle kapanır; Ubuntu veya basit link tüm özellik karşılığı değildir.
+
 ## Uygulama ve kapanış
 
-1. UX-PL-01 ile başla; görünür Dosyalar ve site araçlarına erişimi gerçek route/rol ile kanıtla.
-2. UX-PL-02–09'u küçük, tek amaçlı dilimlerle ilerlet; B grubundaki kullanıcı regresyonlarını taşınan ekranlarda gider.
+1. UX-PL-01'in ilk kaynak dilimi `256d991f` içindedir; kalan kaynak/gerçek tarayıcı kabulünü açık tut. `docs/ux/development-todo.md` T-DEV-FILES'i mevcut kök `todo.md` ile birlikte uygula.
+2. UX-PL-02–09'u küçük, tek amaçlı dilimlerle ilerlet; B grubundaki kullanıcı regresyonlarını taşınan ekranlarda gider. Provider ekranları uygulanmadan PAR-01 sahiplik modeli tanımlanır.
 3. C grubu production güvenlik/bütünlük işleri ve YP-04/YP-11 yayın engelidir; UX önceliği bu engelleri kaldırmaz.
-4. D grubu derinliği mevcut motorlar ve Plesk görev akışları içinde tamamla; MCP/migration temizliği sonradır.
-5. Her dilimde kaynak testleri + gerçek ortam TODO ayrımını koru; kanıtı olmadan madde kapatma. Aynı hatanın ikinci kopya planını açmak yerine ilgili ID'yi çapraz referansla.
+4. D ve F grubunu Plesk görev akışları içinde tamamla; açık kaynak taban değişimi ayrıca kullanıcı kararı gerektirir. MCP/migration temizliği kabul sonradır.
+5. Her dilimde kaynak testi + gerçek ortam TODO ayrımını koru. Doğrulanmış kaynak alt adımı `[x]`, bitmeyen üst özellik `[ ]` kalır; aynı hatanın ikinci kopya planı yerine ilgili ID'yi çapraz referansla.

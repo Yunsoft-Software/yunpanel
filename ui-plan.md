@@ -1,32 +1,39 @@
 # YunPanel — Plesk UX Geçişi
 
-**Karar tarihi: 2026-09-23. Durum: uygulanacak sözleşme; uygulama tamamlanmadı.**
+**Güncel karar: 2026-09-23. Dal: `development`. Durum: ilk Files giriş dilimi kodlandı; tam UX ve canlı kabul açık.**
 
-Kullanıcı mevcut görsel dili koruyarak neyin nerede bulunduğunun ve nasıl yönetildiğinin Plesk'e geçirilmesini istedi. Önceki aaPanel/Plesk/CyberPanel birleşimi ve özel altı-gruplu workspace yaklaşımı iptal edilmiştir. Önce backend, en son UX ertelemesi de geçersizdir. **İlk kod işi Dosyalar erişimi; ardından Plesk görev hiyerarşisi.**
+Önceki aaPanel/Plesk/CyberPanel birleşimi ve özel altı-gruplu workspace yaklaşımı iptal edilmiştir. Mevcut Ember renkleri, fontlar, radius/element biçimleri ve ortak bileşenler korunur. Neyin nerede olduğu ve nasıl yönetildiği Plesk'e taşınır; marka/CSS kopyalanmaz. İlk iş Dosyalar erişimi, ardından Plesk görev hiyerarşisidir.
+
+## Kapsam genişlemesi — eski sınırlamaları geçersiz kılar
+
+Kullanıcı artık Plesk'in bütün kullanıcı/reseller/paket/abonelik davranışlarını istiyor. **Service Provider yönetici, Power User, Reseller ve Customer panellerinin tamamı hedefte.** Eski UX sözleşmesi/atlas/matrisin yalnız Power User ve site-manager ile sınırlı veya reseller/Windows/toolkit kapsam dışı ifadeleri bu konuda geçersizdir. Önceki kaynak/görsel kanıtları korunur; kapsam [tam özellik envanteri](docs/plesk-feature-parity.md) ve [yeni rol/ekran sözleşmesi](docs/ux/plesk-full-scope.md) ile genişletilir. Henüz uygulanmamış özellik sahte çalışan düğme olarak sunulmaz.
 
 ## Okuma ve uygulama sırası
 
-1. [Aktif plan](plan.md): UX-PL-01–09, sekiz kullanıcı regresyonu, onaylanmış PROD-01–15 ve önceki açık işler.
-2. [Plesk UX sözleşmesi](docs/ux/plesk-ux-spec.md): görünüm/rol, ana menü, domain kartı, araçların yeri, sayfa ve işlem akışları.
-3. [Resmî ekran atlası](docs/ux/plesk-reference-atlas.md): gerçek Plesk görselleri, kaynak ve sürüm sınırlamaları; neyin referans alındığı.
-4. [Rota ve işlev eşleme matrisi](docs/ux/plesk-route-matrix.md): mevcut kaynak, korunacak deep link, yeni giriş, rol ve kabul ölçütü.
-5. [Gerçek tarayıcı kabulü](docs/ux/plesk-browser-acceptance.md): bulma, kullanma, geri dönüş, güvenlik ve görsel regresyon kapıları; kök `todo.md` T-VISUAL/T-SITE-WORKSPACE'i tamamlar.
+1. [Aktif plan](plan.md): tamamlanan kaynak alt işleri, açık UX/BUG/PROD/PAR işleri.
+2. [Tam Plesk özellik envanteri](docs/plesk-feature-parity.md): çekirdek, OS, eklenti ve ticari servis farkları.
+3. [Genişletilmiş rol/ekran sözleşmesi](docs/ux/plesk-full-scope.md), ardından [site UX sözleşmesi](docs/ux/plesk-ux-spec.md).
+4. [Resmî ekran atlası](docs/ux/plesk-reference-atlas.md): ekranlar ve sürüm/inceleme sınırları; Service Provider görseli artık ayrı yönetici bağlamı için hedef referanstır.
+5. [Rota matrisi](docs/ux/plesk-route-matrix.md): mevcut→hedef yerler; yeni `/files` girişi kaynakta uygulandı, tam kabul açık.
+6. [Tarayıcı kabulü](docs/ux/plesk-browser-acceptance.md), [development ek TODO](docs/ux/development-todo.md) ve kök `todo.md`.
 
-## Sabit kararlar
+## Değişmeyen kullanım sözleşmesi
 
-- Owner için Plesk **Power User** görev düzeni; kısıtlı kullanıcı için izinli site kapsamındaki **Customer Panel** düzeni. Service Provider müşteri/reseller/paket/faturalama menüleri aynı ekrana karıştırılmaz.
-- Hedef domain yüzeyi genişleyen domain kartı; `Dashboard`, `Hosting & DNS`, `Mail` görev yerleri resmî belgelerle eşlenir. Eski ikon ızgarası görselleri yalnız kalıcı araç kimlikleri ve bağlam için kullanılır.
-- Global **Dosyalar** ve domain içindeki **Dosya Yöneticisi** aynı yetkili dosya yüzeyine açılır. Yükleme/eksik ilişki yüzünden araç sessizce kaybolmaz. Ctrl+K, terminal veya gizli Diğer menüsü temel erişimin yerine geçmez.
-- Mevcut Ember renk/font/radius/element biçimleri, tema tercihleri ve ortak bileşenler korunur. Plesk'in markası, CSS'i veya mavi teması taşınmaz; navigasyon ve çalışma düzeni taşınır.
-- Mevcut motorlar, API kimlikleri, auth/CSRF, Website izolasyonu, gateway, kalıcı işler, onay ve geri alma korunur. UI yerleşimi değişiyor diye çalışan FilesPanel/terminal/DB/mail kapasitesi kaldırılmaz.
-- Desteklenen işlevlerin Plesk'teki yeri uygulanır. Üründe olmayan WordPress Toolkit, Sitejet, reseller veya Windows araçları sahte düğme olarak üretilmez. SFTP, FTP diye; Nginx, Apache diye etiketlenmez. Bu farklar matriste açıktır.
+Global Dosyalar ve domain File Manager aynı yetkili siteye gider. Birden fazla site varsa seçim yapılır; açık seçilmiş kimlik bulunamadığında başka siteye düşülmez. Loading, eksik ilişki, yetki kaybı veya desteklenmeyen runtime farklı durumlardır. Ctrl+K veya terminal, görünür Files girişinin yerine geçmez.
 
-## En küçük ilk teslim
+Domain görevlerinde Dashboard / Hosting & DNS / Mail grupları ve doğrudan araç girişleri korunur. Hosting/provider nesneleri ayrı yönetici/reseller bağlamında yönetilir; aynı sitedeki dosya/mail/SSL işi gereksiz müşteri/paket katmanlarına taşınmaz. Site çalışma ekranında abonelik/sahip bağlamı görünür ve yetkilidir.
 
-`WorkspaceApp.jsx`, `ui/ux-model.js`, `SiteDetailPage.jsx`, `ui/SiteNavigation.jsx` ve mevcut FilesPanel birlikte incelenir. Global `/files` girişinin eksikliği ve koşullu site araç filtresi çözülür. Yeni route bir klasör motoru değil, mevcut yetkili Website dosya yönetimine bağlanan bağlam çözücüdür. Owner ve site hesabı ile gerçek dosya işlemleri geçmeden sonraki büyük yerleşim temizliğine gidilmez.
+Mevcut API/kimlik/auth/CSRF/gateway/Unix izolasyonu ve kalıcı iş/onay/rollback korunur. SFTP FTP diye, Nginx Apache diye, Ubuntu Windows eşdeğeri diye sunulmaz. Windows ve premium işlevler kapsamdan çıkarılmadan ayrı geliştirme/kabul hattında tutulur.
 
-Sonraki dilimler: ana kabuk → domain kartı → Files çalışma düzeni → mail/DB/SSL/DNS → runtime/Git/log/cron/backup → Owner araçları → bütün görevlerin regresyonu. Güvenlik ve production kapıları bu sırayla ertelenmiş veya kaldırılmış sayılmaz.
+## İlk kaynak ilerlemesi
 
-Bu tur araştırma/dokümantasyon turudur. Resmî referans ekranları YunPanel canlı ekranı değildir. Bitmişlik, mock görsel veya bu belgenin yazılmış olmasıyla değil gerçek görev kabulüyle ölçülür.
+- [x] Global `/files`, görünür Owner/site-manager menüsü ve mevcut FilesPanel rotasına güvenli giriş: `256d991f`.
+- [x] 31 bağımlılıksız model/kaynak-bağlantı testi; Node22 ortamında 31 geçti.
+- [ ] Hedef Node24/npm11, tam React/Vite build, gerçek tarayıcı ve host dosya işlemleri.
+- [ ] Koşullu site tabı, dosya yolu/taslak korunması ve bütün Plesk dosya yönetim davranışları.
 
-Önceki belgenin eksiksiz kopyası: [2026-09-21 UI planı](docs/history/ui-plan-before-plesk-ux-80f3d1c4.md). Bu arşiv yeni UX için talimat kaynağı değildir.
+Ayrıntı: [kaynak raporu](docs/history/development-files-entry-2026-09-23.md). Bu işaretler dosya yöneticisinin bütününün veya yeni UX'in production kabulü değildir.
+
+Sonraki dilimler: ana kabuk/görünüm bağlamı → domain kartı → Files çalışma düzeni → mail/DB/SSL/DNS → runtime/Git/log/cron/backup → provider/reseller/customer/paket/abonelik → bütün görevlerin regresyonu. Kaynak sahipliği/abonelik modeli, provider ekranları hayata geçmeden backend'de tasarlanır; salt UI rol etiketiyle reseller oluşturulmaz.
+
+Önceki belgenin eksiksiz kopyası: [2026-09-21 UI planı](docs/history/ui-plan-before-plesk-ux-80f3d1c4.md). Arşiv yeni UX için talimat kaynağı değildir.
