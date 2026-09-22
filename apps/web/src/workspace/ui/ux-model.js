@@ -18,14 +18,14 @@ export const resolveTheme = (theme, darkSystem = false) => themes.has(theme) && 
 
 const groups = [
   { id: 'daily', label: 'Günlük kullanım', items: [['/websites', 'Web siteleri', 'globe'], ['/dashboard', 'Genel bakış', 'dashboard']] },
-  { id: 'resources', label: 'Kaynaklar', items: [['/databases', 'Veritabanları', 'database'], ['/mail', 'Mail', 'mail'], ['/docker', 'Docker', 'box']] },
+  { id: 'resources', label: 'Kaynaklar', items: [['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database'], ['/mail', 'Mail', 'mail'], ['/docker', 'Docker', 'box']] },
   { id: 'system', label: 'Sistem', items: [['/servers', 'Sunucu', 'server'], ['/settings', 'Ayarlar', 'settings']] },
 ];
 const readOnlyRoutes = new Set(['/dashboard', '/websites', '/servers']);
 export function navigationGroups(canManage, isOwner = true) {
   if (!isOwner) {
     return [
-      { id: 'daily', label: 'Çalışma alanı', items: [['/websites', 'Web siteleri', 'globe']] },
+      { id: 'daily', label: 'Çalışma alanı', items: [['/websites', 'Web siteleri', 'globe'], ...(canManage ? [['/files', 'Dosyalar', 'folder']] : [])] },
     ];
   }
   return groups.map((group) => ({ ...group, items: group.items.filter(([to]) => canManage || readOnlyRoutes.has(to)) })).filter((group) => group.items.length);

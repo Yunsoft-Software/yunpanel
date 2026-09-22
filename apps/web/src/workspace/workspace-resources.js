@@ -7,6 +7,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   const enable = (...names) => { for (const name of names) result[name] = true; };
   if (path === '/' || path === '/dashboard') enable('domains', 'applications', 'certificates', 'servers', 'jobs');
   else if (path === '/websites') enable('domains', 'applications', 'certificates', 'servers');
+  else if (path === '/files') enable('domains', 'websites');
   else if (path === '/websites/new') enable('domains', 'websites', 'applications', 'servers');
   else if (/^\/websites\/[^/]+(?:\/[^/]+)?$/.test(path)) {
     enable('domains', 'websites', 'applications', 'certificates', 'servers');

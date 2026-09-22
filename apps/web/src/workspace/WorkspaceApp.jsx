@@ -6,6 +6,7 @@ import DashboardPage from './DashboardPage.jsx';
 import WebsitesPage from './WebsitesPage.jsx';
 import NewWebsitePage from './NewWebsitePage.jsx';
 import SiteDetailPage from './SiteDetailPage.jsx';
+import FilesPage from './FilesPage.jsx';
 import ApplicationsPage from './ApplicationsPage.jsx';
 import AuditPage from './AuditPage.jsx';
 import DatabasesPage from './DatabasesPage.jsx';
@@ -45,6 +46,7 @@ function createWorkspaceRouter() {
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'websites/new', element: manage(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
+      { path: 'files', element: manage(<FilesPage />) },
       { path: 'applications', element: owner(<ApplicationsPage />) },
       { path: 'applications/new', element: owner(<ApplicationsPage create />) },
       { path: 'domains', element: owner(<AdvancedDomainsPage />) },
