@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { sanitizeDatabaseJobResult } from './database-job-result.js';
 import { JobRegistryError } from './job-registry.js';
 import { mountDatabaseRestoreRoutes } from './database-restore-http.js';
@@ -21,7 +22,6 @@ const INVENTORY_OPERATIONS = new Set([
   OPERATIONS.DATABASE_DELETE,
 ]);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const DATABASE_SECURITY_REASONS = new Set([
   'database_native_socket_admin_auth_required',
   'database_anonymous_accounts_present',
@@ -42,7 +42,7 @@ export class DatabaseHttpError extends Error {
 }
 
 function requireDatabaseName(value) {
-  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASES.has(value.toLowerCase())) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || isInfrastructureDatabase(value)) {
     throw new DatabaseHttpError('invalid_database_name', 'Database name is invalid');
   }
   return value;
@@ -82,7 +82,8 @@ function copyInventory(result) {
   return {
     engine: result.engine,
     version: result.version,
-    databases: result.databases.map((database) => ({ ...database })),
+    databases: result.databases.filter((database) => !isInfrastructureDatabase(database.name))
+      .map((database) => ({ ...database })),
   };
 }
 
@@ -104,6 +105,7 @@ async function latestDatabaseSnapshot(jobRegistry, serverId) {
   for (const job of jobs.slice(inspectIndex + 1)) {
     if (job.operation === OPERATIONS.DATABASE_CREATE) {
       const database = { ...job.result.database };
+      if (isInfrastructureDatabase(database.name)) continue;
       const existingIndex = inventory.databases.findIndex((entry) => entry.name === database.name);
       if (existingIndex >= 0) inventory.databases[existingIndex] = database;
       else inventory.databases.push(database);
@@ -133,7 +135,11 @@ async function liveDatabaseInventory(databaseInventoryProvider, serverId) {
       { operation: OPERATIONS.DATABASE_INSPECT, payload: {} },
       await databaseInventoryProvider(serverId),
     );
-    return Object.freeze({ ...inventory, live: true });
+    return Object.freeze({
+      ...inventory,
+      databases: Object.freeze(inventory.databases.filter((database) => !isInfrastructureDatabase(database.name))),
+      live: true,
+    });
   } catch {
     throw new DatabaseHttpError(
       'database_inventory_unavailable',

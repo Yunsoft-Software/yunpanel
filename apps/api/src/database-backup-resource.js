@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
+const SYSTEM_SCHEMAS = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const ENGINE_VALUES = new Set(['mariadb', 'mysql']);
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const RESOURCE_KEYS = new Set(['identity', 'type', 'serverId', 'databaseName', 'snapshot', 'policy']);
@@ -25,7 +26,7 @@ function serverId(value) {
 
 function databaseName(value) {
   if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value)
-    || RESERVED_DATABASES.has(value.toLowerCase())) {
+    || isInfrastructureDatabase(value)) {
     throw new DatabaseBackupResourceError('database_backup_resource_name_invalid', 'Database schema name is invalid');
   }
   return value;
@@ -116,7 +117,8 @@ export function databaseBackupResources({ serverId: requestedServerId, inventory
   const refreshedAt = timestamp(inventory.snapshot.refreshedAt);
   const identities = new Set();
   const names = new Set();
-  const resources = inventory.databases.map((database) => {
+  const resources = inventory.databases.filter((database) => !isInfrastructureDatabase(database?.name)
+    || SYSTEM_SCHEMAS.has(database.name.toLowerCase())).map((database) => {
     if (!database || typeof database !== 'object' || Array.isArray(database)
       || Object.keys(database).length !== 2
       || !Object.hasOwn(database, 'name') || !Object.hasOwn(database, 'sizeBytes')

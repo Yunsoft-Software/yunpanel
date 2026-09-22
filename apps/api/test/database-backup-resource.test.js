@@ -73,6 +73,21 @@ test('database resource identity stays stable across size, engine version and in
   assert.notDeepEqual(first.map((entry) => entry.snapshot), second.map((entry) => entry.snapshot));
 });
 
+test('shared Roundcube schemas never enter Website backup resource choices', () => {
+  const resources = databaseBackupResources({
+    serverId,
+    inventory: inventory({ databases: [
+      { name: 'novasis', sizeBytes: 4096 },
+      { name: 'roundcube', sizeBytes: 4096 },
+      { name: 'ROUNDCUBEMAIL_sessions', sizeBytes: 256 },
+    ] }),
+  });
+  assert.deepEqual(resources.map((resource) => resource.databaseName), ['novasis']);
+  assert.throws(() => databaseBackupIdentity({ serverId, databaseName: 'roundcube' }), {
+    code: 'database_backup_resource_name_invalid',
+  });
+});
+
 test('database resource generation rejects case-insensitive duplicate schemas', () => {
   assert.throws(
     () => databaseBackupResources({

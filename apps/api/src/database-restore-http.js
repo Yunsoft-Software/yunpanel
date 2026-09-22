@@ -1,4 +1,5 @@
 import { createDatabaseDumpManager } from '@yunpanel/host-runtime';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import {
   createDatabaseBackupOperationsService,
   DatabaseBackupOperationsError,
@@ -8,7 +9,6 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { RegistryError } from './server-registry.js';
 
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 
 export class DatabaseRestoreHttpError extends JobRegistryError {
   constructor(code, message, status = 400) {
@@ -18,7 +18,7 @@ export class DatabaseRestoreHttpError extends JobRegistryError {
 }
 
 function requireDatabaseName(value) {
-  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASES.has(value.toLowerCase())) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || isInfrastructureDatabase(value)) {
     throw new DatabaseRestoreHttpError('invalid_database_name', 'Database name is invalid');
   }
   return value;

@@ -1,11 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { assertUuid } from '@yunpanel/shared';
+import { assertUuid, isInfrastructureDatabase } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const HOSTED_RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python']);
 
@@ -33,7 +32,7 @@ function uuid(value, field) {
 }
 
 function databaseName(value) {
-  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASES.has(value.toLowerCase())) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || isInfrastructureDatabase(value)) {
     throw new DatabaseBindingRegistryError('invalid_database_name', 'Database name is invalid');
   }
   return value;

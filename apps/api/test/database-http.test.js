@@ -134,6 +134,37 @@ test('Owner GET reads live inventory while explicit legacy inspection remains a 
   assert.equal((await jobRegistry.listJobs({ serverId })).length, 1);
 });
 
+test('Roundcube schemas are hidden in authenticated inventory and blocked from mutations', async (t) => {
+  const { request, jobRegistry, serverId } = await fixture(t, 'owner', {
+    databaseInventoryProvider: async () => ({
+      engine: 'mariadb', version: '10.11.13-MariaDB', databases: [
+        { name: 'live_db', sizeBytes: 42 },
+        { name: 'roundcube', sizeBytes: 512 },
+        { name: 'RoundcubeMail_archive', sizeBytes: 128 },
+      ],
+    }),
+  });
+  const route = `/api/servers/${serverId}/databases`;
+  const response = await request(route);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).data.databases, [{ name: 'live_db', sizeBytes: 42 }]);
+  for (const name of ['roundcube', 'RoundcubeMail_archive']) {
+    const encoded = encodeURIComponent(name);
+    for (const [path, method, body] of [
+      [route, 'POST', { name, confirmation: `create:${name}` }],
+      [`${route}/${encoded}`, 'DELETE', { confirmation: `delete:${name}` }],
+      [`${route}/${encoded}/backup`, 'POST', { confirmation: `backup:${name}` }],
+      [`${route}/${encoded}/drop-preview`, 'GET'],
+      [`${route}/${encoded}/restore-preview`, 'POST', { backupId: 'unrelated' }],
+    ]) {
+      const denied = await request(path, { method, body });
+      assert.equal(denied.status, 400, `${method} ${path}`);
+      assert.equal((await denied.json()).error.code, 'invalid_database_name');
+    }
+  }
+  assert.deepEqual(await jobRegistry.listJobs({ serverId }), []);
+});
+
 test('live database GET reports security inspection failure as unavailable without leaking provider errors', async (t) => {
   const { request, serverId } = await fixture(t, 'owner', {
     databaseHealthProvider: async () => { throw new Error('private database detail'); },

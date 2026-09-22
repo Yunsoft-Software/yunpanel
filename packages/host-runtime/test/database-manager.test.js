@@ -50,6 +50,20 @@ test('inspect uses the local socket and returns non-system schema sizes', async 
   assert.equal(fx.calls.some((call) => call.args.some((arg) => arg.includes('password'))), false);
 });
 
+test('Roundcube infrastructure schemas are absent from inventory and cannot be mutated', async () => {
+  const fx = fixture();
+  fx.databases.set('roundcube', 128);
+  fx.databases.set('RoundcubeMail_archive', 256);
+  assert.deepEqual((await fx.manager.inspect()).databases.map((entry) => entry.name), ['analytics', 'app_main']);
+  const callsBefore = fx.calls.length;
+  for (const name of ['roundcube', 'ROUNDCUBE_sessions', 'RoundcubeMail_archive']) {
+    await assert.rejects(fx.manager.createDatabase(name), { code: 'invalid_database_name' });
+    await assert.rejects(fx.manager.dropDatabase(name), { code: 'invalid_database_name' });
+  }
+  assert.equal(fx.calls.length, callsBefore);
+  assert.equal(fx.databases.has('roundcube'), true);
+});
+
 test('security baseline proves native root socket auth and insecure defaults are absent', async () => {
   const fx = fixture();
   assert.deepEqual(await fx.manager.inspectSecurityBaseline(), {

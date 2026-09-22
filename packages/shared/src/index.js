@@ -19,6 +19,7 @@ export {
 } from './application-environment.js';
 
 export { logSafetyPolicy, sanitizeLogMessage } from './log-safety.js';
+export { isInfrastructureDatabase } from './database-schema-policy.js';
 
 export {
   normalizeNodeApplicationSpec,

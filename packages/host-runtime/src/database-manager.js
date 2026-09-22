@@ -1,10 +1,11 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 
 const execFileAsync = promisify(execFile);
 const CLIENT_PATHS = Object.freeze(['/usr/bin/mariadb', '/usr/bin/mysql']);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
+const SYSTEM_SCHEMAS = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const CONNECTION_QUERY = 'SELECT VERSION(), @@version_comment;';
 const SECURITY_QUERY = `
 SELECT HEX(CURRENT_USER()), HEX(USER()),
@@ -45,7 +46,7 @@ function socketAdminEnvironment(base = process.env) {
 
 function requireDatabaseName(value) {
   const name = typeof value === 'string' ? value.trim() : '';
-  if (!DATABASE_NAME_PATTERN.test(name) || RESERVED_DATABASES.has(name.toLowerCase())) {
+  if (!DATABASE_NAME_PATTERN.test(name) || isInfrastructureDatabase(name)) {
     throw new DatabaseManagerError('invalid_database_name', 'Database name must use 1 to 64 letters, numbers or underscores and cannot be a system schema');
   }
   return name;
@@ -75,9 +76,10 @@ function parseDatabaseInventory(output) {
       throw new DatabaseManagerError('database_inventory_invalid', 'Database inventory returned malformed metadata');
     }
     const name = Buffer.from(nameHex, 'hex').toString('utf8');
-    if (!name || name.length > 64 || RESERVED_DATABASES.has(name.toLowerCase()) || names.has(name)) {
+    if (!name || name.length > 64 || SYSTEM_SCHEMAS.has(name.toLowerCase()) || names.has(name)) {
       throw new DatabaseManagerError('database_inventory_invalid', 'Database inventory returned an invalid schema identity');
     }
+    if (isInfrastructureDatabase(name)) continue;
     const size = BigInt(sizeText);
     if (size > BigInt(Number.MAX_SAFE_INTEGER)) {
       throw new DatabaseManagerError('database_inventory_invalid', 'Database size exceeds the supported numeric range');
@@ -280,7 +282,7 @@ export function createDatabaseManager({
 export const databaseManager = createDatabaseManager();
 export const databaseManagerPolicy = Object.freeze({
   clientPaths: CLIENT_PATHS,
-  reservedDatabases: Object.freeze([...RESERVED_DATABASES]),
+  reservedDatabases: Object.freeze(['information_schema', 'mysql', 'performance_schema', 'sys', 'roundcube', 'roundcubemail', 'roundcube_*', 'roundcubemail_*']),
 });
 export const databaseManagerInternals = Object.freeze({
   queryArgs,
