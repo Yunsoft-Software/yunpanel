@@ -26,7 +26,7 @@ Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-rec
 Son fresh Website local-mail config provisioning ilerlemesi: `docs/history/site-create-mail-config-provisioning-2026-09-19.md`.
 Son fresh Website local-mail DNS/DKIM provisioning ilerlemesi: `docs/history/site-create-mail-dns-dkim-provisioning-2026-09-19.md`.
 Son fresh Website certificate/TLS provisioning ilerlemesi: `docs/history/site-create-certificate-tls-provisioning-2026-09-19.md`.
-Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-progress-2026-09-17.md`.
+Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
 Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
@@ -35,8 +35,8 @@ Son database güvenlik ve Website resource ilerlemesi: `docs/history/database-se
 Son phpMyAdmin managed-package ilerlemesi: `docs/history/phpmyadmin-package-baseline-2026-09-17.md`.
 Son phpMyAdmin protected signon/gateway ilerlemesi: `docs/history/phpmyadmin-signon-handoff-progress-2026-09-18.md`.
 Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-handoff-2026-09-18.md`.
-Son Website database data scope ilerlemesi: `docs/history/website-database-data-scope-2026-09-18.md`.
-Son Website database delete lifecycle ilerlemesi: `docs/history/website-database-delete-lifecycle-2026-09-18.md`.
+Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
+Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
 Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
 Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway-progress-2026-09-18.md`.
 Son Domain suspension ve DNS retirement ilerlemesi: `docs/history/domain-suspension-dns-retirement-progress-2026-09-18.md`.
@@ -127,7 +127,7 @@ Son WP-CLI ve Composer site-user bounded adapter canlı kabulü: `docs/history/w
 Son Settings sayfası ve sistem ayarları canlı kabulü: `docs/history/settings-page-live-acceptance-2026-09-20.md`.
 Son OpenSSH internal-sftp chroot, izolasyon ve güvenlik canlı kabulü: `docs/history/openssh-internal-sftp-live-acceptance-2026-09-20.md`.
 Son Website cron gerçek çalıştırma, izolasyon ve ortam doğrulama canlı kabulü: `docs/history/website-cron-live-execution-acceptance-2026-09-20.md`.
-Son Yerel sunucu kimliği ve hostname fail-closed canlı kabulü: `docs/history/local-server-identity-fail-closed-live-acceptance-2026-09-20.md`.
+Son Yerel sunucu kimliği ve hostname fail-closed canlı kabulü: `docs/history/local-server-identity-fail-closed-acceptance-2026-09-20.md`.
 Son Plesk read-only importer ve offline export preview canlı kabulü: `docs/history/plesk-importer-live-acceptance-2026-09-21.md`.
 Son Website database delete lifecycle canlı kabulü: `docs/history/website-database-delete-lifecycle-live-acceptance-2026-09-21.md`.
 Son Website-scoped database vendor dump/restore canlı kabulü: `docs/history/website-database-scoped-restore-live-acceptance-2026-09-21.md`.
