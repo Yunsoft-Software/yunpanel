@@ -2,6 +2,17 @@
 
 Bu dosya repoda çalışan geliştirici ve kodlama ajanlarının kurallarını tanımlar. Dosyanın adı, kaldırılacak `yun-agent` sunucu daemon'ıyla karıştırılmamalıdır.
 
+## 2026-09-23 — Güncel kullanıcı kararı: Plesk UX önce
+
+**Bu bölüm, aşağıdaki tarihsel 2026-09-10/2026-09-22 UX ertelemesi ve eski özel navigasyon kararlarının yerine geçer.** İlk geliştirme işi `plan.md` UX-PL-01: Dosyalar erişimini geri kazandırmak; ardından UX-PL-02–09 ile Plesk'in doğrulanmış görev yerleşimi ve kullanım akışlarına geçmektir. Backend-first/UX-sonra sırası bu kapsamda uygulanmaz. Production güvenlik ve gerçek ortam kabul kapıları kaldırılmaz.
+
+- `ui-plan.md` güncel giriş belgesidir. Ayrıntılı sözleşme `docs/ux/plesk-ux-spec.md`, resmî görseller/kaynaklar `docs/ux/plesk-reference-atlas.md`, mevcut→hedef rota/işlev matrisi `docs/ux/plesk-route-matrix.md`, ek gerçek kabul `docs/ux/plesk-browser-acceptance.md` içindedir. Eski aaPanel/Plesk/CyberPanel birleşimi ve altı-gruplu özel workspace düzeni uygulanmaz.
+- Mevcut Ember renkleri, fontları, radius/element biçimleri, tema tercihleri ve ortak bileşenler korunur. Değişiklik tema yenilemesi değil; menü, kaynak bağlamı, araç yeri ve görev akışıdır. Plesk'in CSS'i/markası veya mavi teması taşınmaz.
+- Owner için Power User; site hesabı için yetkili Customer Panel görev düzeni referanstır. Service Provider reseller/billing/subscription ekranları bu tek-sunucu ürününe karıştırılmaz. Plesk'te olmayan veya YunPanel'de bulunmayan kapasite açıkça eşleme farkıdır; sahte çalışan düğme değildir.
+- **Global Dosyalar ve domain File Manager iki zorunlu giriş yoludur.** Aynı araca global/site kapsamlı iki giriş olması tekrar diye kaldırılmaz. Loading, eksik ilişki veya servis hatası yetkili aracın sessizce yok olmasına neden olamaz; gerçek yetki sınırı korunur.
+- UX gerekçesiyle mevcut FilesPanel, dosya işlemi, terminal, mail/DB veya backend motoru silinmez. Bölüm 8'deki hazır-servis hedefi korunur; çalışan fallback ancak gerçek replacement kabulünden sonra kaldırılır. Yeni giriş/route önce aynı güvenli kapasiteye bağlanır; Domain ID ile Website ID birbirinin yerine geçirilmez.
+- Her yeni yerleşim resmî Plesk kaynak ID'si, gerçek görev kabulü ve eski deep-link testiyle eşlenir. Temsilî görüntü/kaynak testi canlı YunPanel kanıtı sayılmaz. `todo.md` kabul kapıları ve yeni T-PL listesi birlikte geçmeden UX tamamlandı denmez.
+
 ## 1. Ürün hedefi ve karar önceliği
 
 YunPanel, Yunsoft'un Ubuntu sunucularını Plesk'e bağımlı olmadan yöneteceği site merkezli hosting/server panelidir. Kullanıcı bir web sitesine girdiğinde Node.js, Git/deploy, domain/subdomain, SSL, mail, dosya, veritabanı, log, cron, yedek ve terminal işlemlerini o bağlamdan yapabilmelidir.
