@@ -26,7 +26,7 @@ Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-rec
 Son fresh Website local-mail config provisioning ilerlemesi: `docs/history/site-create-mail-config-provisioning-2026-09-19.md`.
 Son fresh Website local-mail DNS/DKIM provisioning ilerlemesi: `docs/history/site-create-mail-dns-dkim-provisioning-2026-09-19.md`.
 Son fresh Website certificate/TLS provisioning ilerlemesi: `docs/history/site-create-certificate-tls-provisioning-2026-09-19.md`.
-Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-2026-09-17.md`.
+Son local PowerDNS DKIM retirement ilerlemesi: `docs/history/dns-local-dkim-retirement-progress-2026-09-17.md`.
 Son mail discovery DNS gate ilerlemesi: `docs/history/dns-mail-discovery-gate-2026-09-17.md`.
 Son DNSSEC rollover adapter ilerlemesi: `docs/history/dnssec-rollover-progress-2026-09-17.md`.
 Son DNS zone compensation ownership ilerlemesi: `docs/history/dns-zone-compensation-ownership-2026-09-17.md`.
@@ -35,8 +35,8 @@ Son database güvenlik ve Website resource ilerlemesi: `docs/history/database-se
 Son phpMyAdmin managed-package ilerlemesi: `docs/history/phpmyadmin-package-baseline-2026-09-17.md`.
 Son phpMyAdmin protected signon/gateway ilerlemesi: `docs/history/phpmyadmin-signon-handoff-progress-2026-09-18.md`.
 Son phpMyAdmin browser handoff UI ilerlemesi: `docs/history/phpmyadmin-browser-handoff-2026-09-18.md`.
-Son Website database data scope ilerlemesi: `docs/history/database-website-data-scope-2026-09-18.md`.
-Son Website database delete lifecycle ilerlemesi: `docs/history/database-delete-lifecycle-2026-09-18.md`.
+Son Website database data scope ilerlemesi: `docs/history/website-database-data-scope-2026-09-18.md`.
+Son Website database delete lifecycle ilerlemesi: `docs/history/website-database-delete-lifecycle-2026-09-18.md`.
 Son elFinder scoped handoff/FPM ilerlemesi: `docs/history/elfinder-scoped-handoff-progress-2026-09-18.md`.
 Son ttyd/IntegratedToolGateway ilerlemesi: `docs/history/ttyd-integrated-gateway-progress-2026-09-18.md`.
 Son Domain suspension ve DNS retirement ilerlemesi: `docs/history/domain-suspension-dns-retirement-progress-2026-09-18.md`.
@@ -239,3 +239,23 @@ Kaynakta provider-bağımsız 20-tool katalog, strict bounded schema validation,
 7. **2026-09-22 açık ürün işleri** — YP-01–YP-16 maddelerini bağımlılıklarına göre küçük dilimlerle uygula; görsel işler backend tamamlanmasını beklemez ve canlı kabul olmadan kapanmaz.
 
 Her küçük dilim source test kontratıyla ayrı commit edilir. GitHub Actions kullanılmaz. Gerçek Ubuntu/package/public DNS/SMTP/browser/provider acceptance bu ortamda yapılamıyorsa `todo.md`'ye bırakılır ve ilgili P0 kapısı acceptance geçmeden `DONE` olmaz.
+
+## Açık kullanıcı bildirimleri — 2026-09-23
+
+**Durum: açık / yeniden doğrulama gerekiyor.** Bu bölüm yalnız kullanıcının açıkça bildirdiği bozuklukları içerir; eski tamamlanma/kabul notları bu regresyonları kapatmaz. Firewall ve diğer production hazırlık önerileri henüz onaylanmadığından bu değişikliğe dahil değildir. Aşağıdaki maddeler uygulama ve ilgili gerçek tarayıcı/host kabulü geçmeden işaretlenmez.
+
+- [ ] **BUG-20260923-01 — İşlem deneme sayacı ve kullanıcı kontrollü yeniden deneme.** `0/3` gösteriminin yürütülmüş deneme sayısı ile otomatik deneme üst sınırını anlattığı açıkça belirtilsin; her başarılı işlem üç kere çalıştırılmasın. Otomatik tekrar yalnız uygun geçici hatalarda, bounded backoff ve sağlayıcı bekleme süreleriyle yapılsın; kalıcı hata kullanıcıya neden ve düzeltme adımıyla gösterilsin. Yetkili kullanıcı başarısız kendi işlemini, otomatik limit dolsa da güvenli olduğu durumda açık bir `Yeniden dene` eylemiyle başlatabilsin. Genel job ekranı ve ilgili kaynak ekranı tutarlı olsun; mevcut provisioning recovery kullanılsın, ownership/RBAC, aktif iş kilidi, idempotency, kısmi başarı ve destructive confirmation korumaları aşılmasın. Çift tıklama, limit dolması, sayfa yenileme ve kısmen tamamlanan iş senaryoları doğrulansın.
+
+- [ ] **BUG-20260923-02 — Website silme akışını kullanıcıya uçtan uca aç.** Website liste/detayında yetkiye uygun, bulunabilir silme eylemi mevcut authenticated removal lifecycle'ına bağlansın. Silinecek ve korunacak domain/subdomain, dosya, DB, mail, runtime, DNS, sertifika ve yedek bağımlılıkları önizlensin; gerekli açık onay, retention ve backup evidence korunsun. İşlem ilerlemesi, gerçek engel/hata ve güvenli devam/yeniden deneme görülsün. Başarılı sonlandırma liste ve detaydan kaydı kaldırsın; yarım kalmış cleanup başarı gibi gösterilmesin, yalnız UI veya metadata silinmesin ve başka Website kaynaklarına dokunulmasın.
+
+- [ ] **BUG-20260923-03 — Mail hesabı silme akışını tamamla.** Mailbox liste/detayında yetkili kullanıcının kendi hesabını silebildiği açık eylem olsun. Alias/yönlendirme bağımlılıkları ve posta verisinin saklanması/silinmesi etkisi onay öncesi gösterilsin; mevcut güvenli mail lifecycle ve gerekiyorsa config apply/backup zinciri kullanılsın. Başarıda mailbox listesi güncellensin ve silinen hesabın SMTP/IMAP/webmail kimlik doğrulaması kapanmış olsun. Aktif iş, bağımlılık veya hata durumunda gerekçe ve uygulanabilir çözüm gösterilsin; sessiz başarısızlık olmasın.
+
+- [ ] **BUG-20260923-04 — SSL ekranındaki sahte yarım işlem/kaydedilmemiş değişiklik uyarısını düzelt.** Otomatik doldurulmuş e-posta ve başlangıç varsayılanları tek başına formu dirty yapmasın. İlk yüklenen değerlerle kullanıcının gerçek değişiklikleri karşılaştırılsın; iptal/başarı sonrası başlangıç durumu güncellensin. SSL sekmesine girip hiçbir alanı değiştirmeden geri dönme uyarısız olsun; gerçek kullanıcı değişikliği ve gerçekten devam eden işlem ayrı değerlendirilip uygun uyarı verilsin.
+
+- [ ] **BUG-20260923-05 — SSL iletişim e-postasını işlemi yapan kullanıcıya bağla.** Sertifika isteyen oturum sahibinin gerçek e-postası inputta otomatik dolsun; başka bir adminin/global ACME adresi kullanıcı adresi yerine sessizce kullanılmasın. E-posta inputu her zaman görünür ve düzenlenebilir kalsın; kullanıcının seçtiği farklı geçerli adres gönderilen istekte korunsun ve geç gelen ayar/oturum cevabı elle girilmiş değeri ezmesin. Oturumda e-posta eksikse açıkça adres istensin. Owner ve site kullanıcılarıyla API payload, ekrana dönüş ve kullanıcı değişimi senaryoları doğrulansın.
+
+- [ ] **BUG-20260923-06 — SSL yenilemesi sonrası kalan gün ve sertifika durumunu gerçek sonuçla eşitle.** Yenileme isteğinin kabul edilmesi başarı sayılmasın; job tamamlanınca gerçek sertifikanın `validFrom`, `validTo` ve fingerprint bilgisi kalıcı kayda, ilgili Domain/Website bağlarına ve tüm liste/detay özetlerine yansısın. Gerçekten yeni sertifika üretildiğinde kalan gün aynı oturumda güncellensin; eski response/poll yeni bilgiyi ezmesin. Sağlayıcı yenileme gerektirmediğinde, aynı sertifikayı döndürdüğünde veya iş başarısız olduğunda uydurma yeni süre gösterilmesin; sonuç anlaşılır yazılsın. Panel kaydı ile yayında sunulan sertifikanın uyumu da doğrulansın.
+
+- [ ] **BUG-20260923-07 — Website oluşturma yönetici e-posta/parola alanlarının hizasını düzelt.** İki alan aynı kontrol yüksekliği, label hizası, satır genişliği ve boşluk sistemini kullansın. Parola altı yardımcı metin ve doğrulama hataları yanındaki alanı asimetrik bırakmasın; desktop/mobile, hata mesajı ve parola göster/gizle durumlarıyla kontrol edilsin.
+
+- [ ] **BUG-20260923-08 — AI sohbet geçmişinin bağımsız scroll ve sayfalamasını tamamla.** Çok sayıda sohbet tüm AI penceresini veya alttaki sayfayı büyütüp kaydırmasın; soldaki sohbet geçmişi kendi sınırlı yüksekliğinde scroll olsun. Geçmiş actor-scoped cursor pagination ile parça parça yüklensin; scroll sınırına geldikçe eski sayfalar eklensin, tüm kayıtlar tek seferde indirilmesin. Scroll konumu, aktif sohbet ve mesaj yazma alanı korunsun; sağ mesaj alanı gerektiğinde kendi içinde bağımsız kaydırılabilsin. Tekrarlanan paralel yükleme, sıralama/duplicate, boş/son sayfa, hata ve tekrar deneme durumları; uzun geçmiş, mobil ve klavye kullanımıyla doğrulansın.
