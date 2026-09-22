@@ -70,8 +70,14 @@ function normalizeIp(value) {
   return null;
 }
 
-function parseIpSet(value, label) {
+function parseIpSet(value, label, { allowWildcard = false } = {}) {
   const entries = (value ?? '').split(',').map((entry) => entry.trim()).filter(Boolean);
+  if (allowWildcard && (entries.length === 0 || entries.includes('*'))) {
+    return {
+      has: () => true,
+      size: entries.length || 1,
+    };
+  }
   const normalized = entries.map(normalizeIp);
   if (normalized.some((entry) => entry === null)) throw new Error(`${label} must contain only IP addresses`);
   return new Set(normalized);
@@ -1224,25 +1230,30 @@ async function serveStatic(request, response, webRoot, pathname) {
   }).pipe(response);
 }
 
-export function createPanelServer({
-  allowedClientIps = process.env.YUNPANEL_ALLOWED_CLIENT_IPS,
-  apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
-  apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
-  publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
-  proxyToken = internalProxyToken(),
-  phpMyAdminSocketPath = PHPMYADMIN_SOCKET_PATH,
-  elFinderSocketPath = ELFINDER_GATEWAY_SOCKET_PATH,
-  elFinderHandoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
-  elFinderGatewaySessions = createElFinderGatewaySessions(),
-  ttydSocketRoot = TTYD_SOCKET_ROOT,
-  netdataPort = NETDATA_LOOPBACK_PORT,
-  netdataHost = '127.0.0.1',
-  goaccessSocketRoot = GOACCESS_SOCKET_ROOT,
-  goaccessReportsRoot = GOACCESS_REPORTS_ROOT,
-  trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
-  webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
-} = {}) {
-  const allowedClients = parseIpSet(allowedClientIps, 'YUNPANEL_ALLOWED_CLIENT_IPS');
+export function createPanelServer(options = {}) {
+  const {
+    allowedClientIps = options.allowedClientIps !== undefined
+      ? options.allowedClientIps
+      : (process.env.YUNPANEL_ENFORCE_CLIENT_IPS === 'true'
+          ? (process.env.YUNPANEL_ALLOWED_CLIENT_IPS || '*')
+          : '*'),
+    apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
+    apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
+    publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
+    proxyToken = internalProxyToken(),
+    phpMyAdminSocketPath = PHPMYADMIN_SOCKET_PATH,
+    elFinderSocketPath = ELFINDER_GATEWAY_SOCKET_PATH,
+    elFinderHandoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
+    elFinderGatewaySessions = createElFinderGatewaySessions(),
+    ttydSocketRoot = TTYD_SOCKET_ROOT,
+    netdataPort = NETDATA_LOOPBACK_PORT,
+    netdataHost = '127.0.0.1',
+    goaccessSocketRoot = GOACCESS_SOCKET_ROOT,
+    goaccessReportsRoot = GOACCESS_REPORTS_ROOT,
+    trustedProxyIps = process.env.YUNPANEL_TRUSTED_PROXY_IPS ?? TRUSTED_PROXY_DEFAULT,
+    webRoot = process.env.YUNPANEL_WEB_ROOT ?? DEFAULT_WEB_ROOT,
+  } = options;
+  const allowedClients = parseIpSet(allowedClientIps, 'YUNPANEL_ALLOWED_CLIENT_IPS', { allowWildcard: true });
   const trustedProxies = parseIpSet(trustedProxyIps, 'YUNPANEL_TRUSTED_PROXY_IPS');
   const resolvedWebRoot = path.resolve(webRoot);
   if (allowedClients.size === 0) throw new Error('YUNPANEL_ALLOWED_CLIENT_IPS is required');
