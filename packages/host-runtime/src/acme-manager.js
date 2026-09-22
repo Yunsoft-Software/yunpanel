@@ -264,7 +264,7 @@ export function createAcmeManager({
     const normalizedName = normalizeDomainSet(certName, []).primary;
     const challenge = normalizeChallenge(requestedChallenge);
     await withChallengeCredential(challenge, dnsCredential, async (credentialPath) => {
-      const args = ['renew', '--cert-name', normalizedName, '--non-interactive'];
+      const args = ['renew', '--cert-name', normalizedName, '--non-interactive', '--no-random-sleep-on-renew'];
       if (challenge.type === 'dns-01') args.push(
         '--dns-cloudflare',
         '--dns-cloudflare-credentials', credentialPath,
