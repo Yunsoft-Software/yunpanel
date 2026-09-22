@@ -107,14 +107,14 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
         title="DNS ve SSL politikası"
         description="Alan adı yetkili DNS yönetimi ve Let's Encrypt SSL/TLS sertifika yaşam döngüsü."
       >
-        {diagnostics && <KeyValues items={[
+        <KeyValues items={[
           ['Yetkili DNS motoru', dnsSsl.authoritativeProvider === 'powerdns' ? 'PowerDNS Authoritative' : dnsSsl.authoritativeProvider],
           ['ACME sağlayıcısı', dnsSsl.acmeProvider === 'letsencrypt' ? "Let's Encrypt (HTTP-01 & DNS-01)" : dnsSsl.acmeProvider],
           ['ACME iletişim e-postası', dnsSsl.acmeEmail ?? 'Tanımlanmadı (YUNPANEL_ACME_EMAIL)'],
           ['Otomatik yenileme döngüsü', `Süresi dolmaya ${dnsSsl.autoRenewDaysBeforeExpiry} gün kala günlük denetim`],
           ['Özel sertifika deposu', dnsSsl.customCertificatesRoot],
-        ]} />}
-        {!diagnostics && canManage && (
+        ]} />
+        {canManage && (
           <form
             className="ws-form"
             style={{ marginTop: 16 }}

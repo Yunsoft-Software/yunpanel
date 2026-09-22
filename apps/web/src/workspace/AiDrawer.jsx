@@ -278,7 +278,7 @@ export default function AiDrawer({ open, onClose }) {
             ))}
 
             {sending && (
-              <div style={{ alignSelf: 'flex-start', padding: '8px 12px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-muted, #6b7280)' }}>
+              <div role="status" style={{ alignSelf: 'flex-start', padding: '8px 12px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-muted, #6b7280)' }}>
                 <span className="ws-spinner" style={{ marginRight: '6px' }} /> AI düşünüyor ve araçları değerlendiriyor…
               </div>
             )}

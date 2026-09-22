@@ -154,6 +154,7 @@ export default function AiSettingsPanel() {
               {providers.map((prov) => (
                 <div
                   key={prov.id}
+                  data-provider-id={prov.id}
                   style={{
                     display: 'flex',
                     justifyContent: 'space-between',
