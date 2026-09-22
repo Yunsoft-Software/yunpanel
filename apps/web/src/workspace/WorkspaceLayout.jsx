@@ -73,7 +73,7 @@ function Shell() {
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>SUNUCU YÖNETİMİ</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <NavLink key={to} to={to}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</NavLink>)}</div></div>)}</nav>
-      <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
+      <details className="ws-appearance" open><summary>Görünüm tercihleri</summary><Preferences /></details>
       <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>

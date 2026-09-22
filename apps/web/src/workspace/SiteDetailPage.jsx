@@ -98,17 +98,17 @@ function SiteWorkspace({ websiteId, tab }) {
     {['node', 'deploy'].includes(tab) && matches.length > 0 && <div className="ws-notice"><div><strong>Uygulama bağlantısını kontrol edin</strong><p>İşlemler aşağıda seçilen uygulamayı etkiler. Bu eski kaydın kalıcı site bağlantısı henüz kurulmamıştır.</p></div><label>Uygulama<select value={application?.id ?? ''} onChange={(event) => { setParams((current) => { const next = new URLSearchParams(current); if (event.target.value) next.set('application', event.target.value); else next.delete('application'); return next; }); }}><option value="">{matches.length > 1 ? 'Uygulamayı seçin' : 'Tek hedef eşleşmesi'}</option>{matches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
     {tab === 'overview' && <>
       {website && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
-      <div className="ws-console-grid"><Section title="Site bilgileri" actions={<Link to={siteHref(domain.id, 'settings')}>Ayarlar ve izolasyon</Link>}><KeyValues items={[
+      <div className="ws-console-grid"><Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'settings')}>Ayarlar ve izolasyon</Link>}><KeyValues items={[
         ['Alan adı', domain.primaryDomain], ['Uygulama türü', runtimeLabel], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
         ['Son yayın', formatDate(domain.lastAppliedAt)],
       ]} /><div className="ws-section-body"><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton></div></Section>
-      <Section title="Site araçları"><div className="ws-console-quicklinks">{shortcuts.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div></Section></div>
+      <Section title="Hızlı erişim"><div className="ws-console-quicklinks">{shortcuts.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div></Section></div>
       <details className="ws-section ws-disclosure"><summary>Yayın ve uygulama ayrıntıları</summary><KeyValues items={[
         ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
         ['Çalışma türü', website?.runtimeType ?? 'Eski / ilişkisiz kayıt'],
         ['Uygulama', application?.name ?? (matches.length > 1 ? 'Uygulama bölümünden hedef seçin' : 'Bağlı uygulama yok')],
       ]} /></details>
-      <Section title="Son site işlemleri" actions={<Link to={siteHref(domain.id, 'logs')}>Tümünü gör</Link>}><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={5} />}</Section>
+      <Section title="Bu siteye ait son işlemler" actions={<Link to={siteHref(domain.id, 'logs')}>Tümünü gör</Link>}><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={5} />}</Section>
     </>}
     {tab === 'resources' && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
@@ -120,9 +120,14 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'files' && (domain.websiteId ? <FilesPanel serverId={domain.serverId} websiteId={domain.websiteId} runtimeType={website?.runtimeType} /> : <LegacyWebsiteRepair domain={domain} canManage={canManage} onChanged={refreshAll} />)}
     {tab === 'settings' && <>
       <Section title="Site ayarları"><KeyValues items={[
+        ['Kayıt kimliği', domain.id],
+        ['Website kimliği', website?.id ?? 'Bağlı değil'],
         ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
-        ['Sunucu', server?.displayName ?? server?.hostname], ['Uygulama türü', runtimeLabel],
-        ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
+        ['Sunucu', server?.displayName ?? server?.hostname],
+        ['Hedef türü', domain.targetType],
+        ['Uygulama türü', runtimeLabel],
+        ['Oluşturulma', formatDate(domain.createdAt)],
+        ['Güncelleme', formatDate(domain.updatedAt)],
       ]} /><div className="ws-section-body"><Link to="/domains">Gelişmiş alan adı araçları</Link></div></Section>
       {website && <WebsiteIsolationPanel websiteId={website.id} onChanged={refreshAll} />}
       <details className="ws-section ws-disclosure"><summary>Teknik kayıt kimlikleri</summary><KeyValues items={[

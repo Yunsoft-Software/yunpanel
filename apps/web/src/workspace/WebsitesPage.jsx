@@ -33,7 +33,7 @@ export default function WebsitesPage() {
   const siteItems = readableItems(websites);
   const appItems = readableItems(applications);
   return <>
-    <PageHeading title="Web siteleri" description="Bir siteyi seçin; uygulama, dosyalar, veritabanı ve SSL’i aynı çalışma alanından yönetin." actions={<><Button icon="refresh" onClick={domains.refresh}>Yenile</Button><LinkButton to="/websites/new" icon="plus" variant="primary">Site ekle</LinkButton></>} />
+    <PageHeading title="Web siteleri" description="Bir siteyi seçin; uygulama, dosyalar, veritabanı ve SSL’i aynı çalışma alanından yönetin." actions={<><Button icon="refresh" onClick={domains.refresh}>Yenile</Button><LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton></>} />
     <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu` : 'Site listesi hazırlanıyor.'}>
       <div className="ws-filters">
         <label className="ws-filter-search">Site ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Alan adı veya alias" /></label>
