@@ -4,6 +4,18 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DB-UI — 2026-09-22 canlı veritabanı ve yetki kabulü (Antigravity)
+
+- [ ] `.local/test-server.env` hedefinin `.44` olmadığı doğrulandıktan ve kod güvenli dağıtıldıktan sonra Owner ile `/databases` yenile: mevcut `roundcube` ve varsa `roundcube_*`/`roundcubemail*` satırı, toplam adet/boyut ve silme/backup/restore seçimlerinde görünmesin; doğrudan API istekleri reddedilsin, fiziksel altyapı şeması varlığını ve Roundcube oturumunu korusun. Bu turdaki kaynak testleri canlı sunucu doğrulaması değildir.
+- [ ] Bağımsız ana Website yaratma/yenileme: site-admin e-posta/parola, mail ve MySQL kimlikleri ayrı; site-admin silme site yaşarken API'de de 409; Owner e-posta/parola düzenleyebilsin; site-admin başka Website'in DB/phpMyAdmin içeriğine erişemesin, kendi DB credential rotasyonu ve grant uygulaması canlı hostta çalışsın. Önceden var olan Website migrasyonu ve rollback veri kaybı olmadan gözlensin.
+- [ ] Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımlarını gerçek hostta yarat, başarılı/blocked/partial/failure progress ve API yeniden giriş sonrası state'i tarayıcıda doğrula. Subdomain/alias yeni zone/mail/Roundcube kurmasın. Dış NS delegation, SMTP/IMAP teslimi, webmail oturumu ve sertifika erişimi ayrı doğrulansın. Hata enjeksiyonuyla üçüncü otomatik denemede durma, manuel retry, restart/idempotency ve compensation kanıtlansın.
+- [ ] Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulansın; SMTP yokken başarı mesajı verilmesin. SSL formunda etkin kullanıcı e-postası gelsin, genel ACME varsayılanı ayrı kalsın; secret/URL/audit sızıntısı olmasın.
+
+## T-VISUAL — 2026-09-22 tarayıcı görsel kabulü (Antigravity)
+
+- [ ] Açık `/dashboard`, `/settings`, `/databases`, `/websites/new` sekmeleri ile kaynak sonrası Chromium/Firefox karşılaştırması yap: Ayarlar sekmeli/deep-link'li ve yalnız düzenlenebilir değerler içerir; mimari/sürüm bilgisi Sunucu > Tanılama'dadır. `[object Object]` yoktur, bilinmeyen servis hazır görünmez; servis ve terminal yalnız Sunucu, İşlemler/Denetim Ayarlar/Tanılama erişiminde bulunur.
+- [ ] Genel bakışta Website listesi kaldırılıp sayısı/linki yerleşir; CPU/RAM/disk halkaları gerçek yüzdeyi doğru yay ve erişilebilir metinle yansıtır. 0, bilinmiyor, 91%, hata ve yüksek doluluk durumlarını; mobil, klavye, ekran okuyucu, reduced-motion ve koyu temayı test et. Uzun job ve loglar arayüzü taşırmaz; ilgili detay/kayıtlara erişim sürer.
+
 ## T-TOOLS — P0 ttyd, yerli dosya yöneticisi, phpMyAdmin/pgAdmin gateway
 
 - [ ] PostgreSQL/pgAdmin açıldığında aynı Website role/scope, gateway auth ve çapraz-site reddi gerçek PostgreSQL ile doğrulansın.

@@ -10,6 +10,8 @@ YunPanel, Yunsoft'un Ubuntu sunucularını Plesk'e bağımlı olmadan yönetece�
 
 **2026-09-10 yürütme kararı:** Görsel tasarım/UI/UX yeniden tasarımı, layout/styling, component polish ve benzeri frontend tasarım işi aktif geliştirme sırasından çıkarılmıştır. Bu işler backend/functionality tamamlandıktan sonra ayrı bir modele verilecektir. Mevcut akışta backend işlevi veya güvenlik kontratı zorunlu kılmadıkça `apps/web` görsel/tasarım değişikliği yapılmaz. Enterprise UI/UX hedefi iptal değildir; yalnızca uygulanma sırası en sona alınmıştır.
 
+**2026-09-22 güncel kullanıcı kararı:** Önceki erteleme, `plan.md` içindeki 2026-09-22 Antigravity uygulama brifi kapsamındaki görsel/bilgi mimarisi işleri için kaldırıldı. Bu alanlarda kaynak geliştirme başlayabilir; auth, backend yetki kontrolü, mevcut site/host izolasyonu ve gerçek ortam kabul kapıları aynen sürer.
+
 Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hosting paketleri, tüm dağıtımlara destek ve Plesk'in bütün özellikleri bu değişikliğin önkoşulu değildir.
 
 **2026-09-14 hazır-servis kararı:** YunPanel bir kontrol düzlemi ve entegrasyon ürünüdür. Dosya yöneticisi, web terminali, database istemcisi, authoritative DNS, monitoring veya backup arşiv motorunu yeniden yazmayacak; olgun servisleri YunPanel auth/authorization, site izolasyonu, durable lifecycle ve same-origin gateway arkasında birleştirecektir. Bağlayıcı bileşen kararları ve migration sınırı `docs/architecture.md` içindedir. Bu belgeyle çelişen eski özel-ürün planları uygulanmaz.
@@ -69,9 +71,9 @@ Kapsam Yunsoft'un gerçek kullanım ihtiyaçlarıdır; reseller, faturalama, hos
 - “Site oluşturuldu” yalnız metadata yazımı değildir: Unix identity, runtime, Nginx, seçili DNS/mail/database/SFTP/log/backup kaynakları durable provisioning planında health-gated olarak tamamlanır veya açıkça partial/failed kalır.
 - Domain/subdomain silmede bağımlılıklar ve etki gösterilir; örtülü cascade yapılmaz. Migration mevcut trafik ve sertifika ilişkilerini bozmamalıdır.
 
-## 7. DEFERRED — Enterprise UI/UX standardı
+## 7. Enterprise UI/UX standardı
 
-Bu bölüm hedef tasarım standardını tanımlar fakat **aktif geliştirme talimatı değildir**. 2026-09-10 kararı gereği görsel UI/UX, layout/styling, component polish, responsive görsel düzen ve benzeri tasarım commitleri backend/functionality tamamlanana kadar yapılmaz. Backend kontratı veya güvenlik gereği zorunlu olmayan `apps/web` değişiklikleri ayrı tasarım aşamasına bırakılır.
+Bu bölüm hedef tasarım standardını tanımlar. 2026-09-22 kullanıcı talimatı ile `plan.md` uygulama brifindeki Ayarlar, Genel bakış, gezinme ve provisioning progress tasarımı aktif geliştirme kapsamındadır. İşlevsel yetki ve host acceptance yapılmadan görsel değişiklikler tamamlandı sayılmaz.
 
 Son tasarım aşamasında korunacak hedefler:
 
@@ -112,7 +114,7 @@ Son tasarım aşamasında korunacak hedefler:
 - Küçük, tek amaçlı commitlerle ilerle; refactor ve özellik geliştirmesini mümkün olduğunca ayır. İlgisiz dosyaları değiştirme; eşzamanlı kullanıcı değişikliklerini ezme.
 - GitHub Actions KULLANILMAYACAK. `.github/workflows/` eklenmeyecek. Test/build/deploy yerel komutlar veya YunPanel job sistemiyle yürütülecek.
 - Auth/session/CSRF, WebSocket yetkisi, site izolasyonu, domain hiyerarşisi/migration, config validation, deploy state, rollback, secret masking, duplicate resource, concurrency ve destructive işlemler test edilir.
-- Görsel/component/responsive polish testleri tasarım aşamasına bırakılır; auth/security browser davranışı ve backend contract kabulü ertelenmez.
+- Görsel/component/responsive kabulü `todo.md` T-VISUAL altında gerçek tarayıcıyla yapılır; auth/security browser davranışı ve backend contract kabulü ertelenmez.
 - Gerçek host bağımlı testler `todo.md` içinde takip edilir.
 - Çalıştırılmayan test, açılmayan canlı site ve uygulanmayan migration yapılmış gibi raporlanmaz. Kod testi gerçek Ubuntu/DNS/mail/restore kanıtının yerine geçmez.
 

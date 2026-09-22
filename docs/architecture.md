@@ -121,6 +121,8 @@ Passenger ve PM2 aynı uygulamanın iki supervisor'ı yapılmaz. Yeni Node Websi
 
 ## 5. Yeni Website provisioning sözleşmesi
 
+2026-09-22 ürün güncellemesi: yeni bağımsız **ana domain** Website yaratırken local DNS zone, mail domain ve paylaşılan Roundcube `webmail.<domain>` mapping artık varsayılan zorunlu adımlardır; alt alan adları/alias ayrı zone, mail domain veya Roundcube instance yaratmaz. Global Roundcube bağımlılığı bir defa kurulur, her site için yalnız mapping/route ve sağlık doğrulanır. Başlangıç veritabanı yaratılmaz; DB site sahibi tarafından daha sonra istenir ve MySQL kimliği Website yöneticisi panel kimliğinden ayrıdır. Yeni ana Website yönetici e-posta/parolası ve siteye kilitli yönetici bağı ister; mevcut siteler için parola uydurmayan migration gerekir. Provisioning operation gerçek step progress/failure/retry durumunu saklar; üç başarısız otomatik deneme sonrası manuel retry bekler. Dış registrar/teslimat kabulü ayrıca izlenir. Bu paragraf aşağıdaki eski isteğe bağlı database/mail seçimleri ve Settings'te değişebilir provisioning defaults anlatımına göre yeni karar olarak önceliklidir; kod/migration tamamlanmadan eski davranışın değiştiği iddia edilmez.
+
 “Site oluşturuldu” cevabı yalnız metadata kaydı anlamına gelmez. Yeni Website akışı durable, yeniden başlatılabilir bir provisioning operation üretir:
 
 1. İstek preview'ı runtime, domain, IP, DNS/mail seçenekleri, oluşturulacak kaynaklar ve çakışmaları gösterir.
@@ -165,7 +167,7 @@ Sunucu geneli yalnız host kaynakları içindir: servisler/paketler, Netdata, fi
 
 ### Settings
 
-Settings boş bir bağlantı listesi değildir. En az şu bölümler bulunur:
+2026-09-22 bilgi mimarisi kararı: Settings yalnız değiştirilebilir politika ve hesap formu içerir; salt okunur sürüm/çalışma modu/servis envanteri Sunucu > Tanılama'ya taşınır. İşlemler/Denetim kategori bağlantıları Settings içinde kalır ve global işlem ilerlemesi kısayolu korunur. Aşağıdaki bölüm listesi hedef yapılandırma kapsamıdır; hazır olmayan alan sahte form olarak gösterilmez.
 
 - Panel: public URL, hostname, timezone, update channel, trusted proxy;
 - Network: public IP'ler, ports, authoritative nameserver seti, secondary DNS durumu;
