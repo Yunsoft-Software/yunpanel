@@ -8,31 +8,18 @@ Bu dosya **yalnız kalan ürün/kod işlerini** tutar. Yapılmış işlerin ayr�
 
 ### P0 — Veritabanı, Website yöneticisi ve yetkiler
 
-- [ ] **YP-01 Roundcube altyapı veritabanlarını tüm normal DB yüzeylerinden çıkar.** `a46ee85c` kaynak dilimi liste/API/host sınırında başladı; kalan iş global ve Website DB seçicileri, sayı/boyut, yedek/restore ve phpMyAdmin giriş kapsamını uçtan uca tarayıp sızıntı veya mutasyon yolu varsa kapatmaktır. `roundcube`, `roundcube_*`, `roundcubemail*` korunur; fiziksel şema silinmez. Kapanış: kaynak kapsam testleri ve `todo.md` T-DB-UI canlı kabulü.
-- [ ] **YP-02 Ana Website oluştururken site yöneticisi e-posta/parolasını iste.** Website ID'ye bağlı tekil site-admin kaydı, Argon2id parola, oturum/site scope ve eski siteler için varsayılan parola üretmeyen migration/davet akışı ekle. Panel Owner, mail kutusu ve MySQL kullanıcısı ayrı kimliklerdir; subdomain/shared-site bağının kime ait olduğu açık kuralla modellenir.
-- [ ] **YP-03 Website yaşarken yöneticisinin silinmesini engelle.** Silme/devre dışı bırakma UI, API ve job sınırında reddedilir. Owner yalnız yönetici e-postasını ve parolasını güvenli doğrulama/audit ile değiştirebilir. Website silme ancak mevcut bağımlılık/retention sözleşmesinden sonra site-admin bağını kaldırır. Son Owner koruması ayrıca sürer.
 - [ ] **YP-04 Site-admin ve Owner DB yetkilerini uygula.** Site-admin yalnız kendi Website DB kullanıcı/grant/parola rotasyonunu ve phpMyAdmin handoff'unu yönetir; Owner tüm site DB'lerinde tam yetkilidir. API, job, gateway ve WebSocket scope testleri başka Website erişimini reddeder; yalnız buton gizlemek yeterli değildir.
-- [ ] **YP-05 Site oluşturma sırasında DB yaratma seçeneğini kaldır.** Şema ve localhost MySQL kullanıcısı yalnız site sahibi sonradan açık DB create eylemi yapınca durable job ile kurulur. DB kullanıcı adı/parolası site-admin girişinden bağımsızdır; secret store, audit/job/URL maskelemesi ve ayrı parola rotasyonu uygulanır.
-- [ ] **YP-06 DB satırlarına phpMyAdmin düğmesi ekle.** Website görünümünde yalnız kendi şemasına scoped, global Owner görünümünde seçilen siteye scoped kısa ömürlü handoff kullan. Root veya başka site şeması açılmaz; başarısız gateway/health durumu açık gösterilir.
-
-### P0 — Ana Website provisioning ve iş ilerlemesi
-
-- [ ] **YP-07 Ana domain için DNS ve maili otomatik hazırla.** Yeni bağımsız ana Website'ta local PowerDNS zone/SOA/NS/gerekli kayıtlar ile mail domain varsayılan provisioning adımıdır. Subdomain/alias yeni zone veya mail domain yaratmaz. DNS kimliği/servis eksikse önizleme blocker verir; registrar delegation dış doğrulama olarak ayrı kalır.
-- [ ] **YP-08 Shared Roundcube webmail'i otomatik bağla.** Sunucu başına tek Roundcube kurulumunu/sağlığını doğrula veya managed package job'ıyla hazırla; ana domain için `webmail.<domain>` DNS, Nginx ve SSL mapping'i health-gated tamamla. Subdomain başına yeni Roundcube kurulmaz; başarısız adım `ready` gösterilmez.
-- [ ] **YP-09 Site oluşturma ilerlemesini ve hatalı adımı göster.** Önizleme Unix user, runtime, Nginx, DNS, mail, webmail ve SSL hedeflerini listeler. Kalıcı operation her adımın queued/running/succeeded/failed/blocked durumunu, güvenli hata nedenini ve tamamlanma sayısını verir; reload sonrası aynı kanıt görünür.
-- [ ] **YP-10 Üç başarısız otomatik denemede tekrarı durdur.** Her operation için retry sayacı üçüncü başarısız denemede `retry_exhausted` olur; kullanıcı isterse manuel yeniden dener. Idempotency, lock, compensation ve restart inspect-first korunur; çalışan işi veya başka job türünü körlemesine iptal etme.
 
 ### P0 — Panel hesabı ve SSL iletişimi
 
 - [ ] **YP-11 Genel Owner kurtarma e-postası ve parola sıfırlama ekle.** Ayarlar > Panel yöneticisi adresi gerçek Owner kaydına bağlı ve doğrulanmış olur. Tek kullanımlık, süreli reset token'ı hash saklanır; SMTP başarısı doğrulanır, eski oturumlar iptal edilir; rate limit, anti-enumeration ve MFA policy korunur. Site-admin e-postası ve ACME varsayılanından ayrıdır.
-- [ ] **YP-12 SSL formuna işlemi açan kullanıcının e-postasını doldur.** Alan açılışta authenticated kullanıcının adresiyle dolar ve değiştirilebilir; genel ACME varsayılanı veya Owner kurtarma adresi bunun yerine sessizce kullanılmaz.
 
 ### P1 — Ayarlar, Genel bakış ve gezinme
 
-- [ ] **YP-13 Ayarlar kategorilerini tamamla.** `5dce0100` ilk kategori geçişini başlattı; Panel hesabı, Site varsayılanları, DNS/SSL, Mail, Veritabanları, Güvenlik, Yedek ve Entegrasyonlar yalnız gerçekten değiştirilebilir form/politikaları gösterir. Her kategori deep-link, reload, geri/ileri ve yetki durumuyla çalışır; gereksiz mimari metin kaldırılır.
-- [ ] **YP-14 Salt okunur tanılamayı tek doğru yere taşı.** Sürüm, dosya yolu, çalışma modu ve servis envanteri Ayarlar'da yığılmaz; gerekli bilgiler Sunucu > Tanılama'da bulunur. `Yerel yönetim (Agentless Root)` son kullanıcıya gösterilmez. Servis unit nesneleri alanlarıyla render edilir; `[object Object]` çıkmaz ve bilinmeyen sağlık durumu başarılı sayılmaz.
 - [ ] **YP-15 Menü tekrarlarını ve log yerleşimini bitir.** Servis ve terminal Sunucu bağlamında tek yerdedir. İşlemler/Denetim geçmişi kategori altından erişilir; global aktif job kısayolu kalır. Nadir kullanılan loglar büyük ana sayfa alanı tüketmez, ilgili site/Sunucu tanılama bağlantısından okunur. Eski URL'ler ve yetki sınırı bozulmaz.
 - [ ] **YP-16 Genel bakışı görsel ve işlevsel olarak tamamla.** Website tablosu yerine sayı ve liste bağlantısı, CPU/RAM/disk için gerçek yüzdeyle dolan erişilebilir halkalar, yüksek disk uyarısı ve küçük SSL/hata/aktif iş özetleri sun. İlk kaynak düzeni `5dce0100` içinde; kalan mobil, koyu tema, klavye, ekran okuyucu, reduced-motion, 0/bilinmiyor/91% durumları ve gerçek veri kabulü T-VISUAL'dadır.
+
+Son site yaşam döngüsü, site yöneticisi, veritabanı ve UI canlı kabulü: `docs/history/site-lifecycle-db-ui-acceptance-2026-09-22.md`.
 
 Son Website isolation/SFTP ilerlemesi: `docs/history/website-isolation-sftp-progress-2026-09-17.md`.
 Son mail durable apply/recovery ilerlemesi: `docs/history/mail-durable-apply-recovery-2026-09-17.md`.
