@@ -8,7 +8,7 @@ import DnsPanel from './DnsPanel.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
 import JobsTable from './JobsTable.jsx';
 import TerminalPanel from './LazyTerminalPanel.jsx';
-import FilesPanel from './FilesPanel.jsx';
+import SiteFilesPanel from './SiteFilesPanel.jsx';
 import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
@@ -65,12 +65,11 @@ function SiteWorkspace({ websiteId, tab }) {
   const matches = isOwner ? matchingApplications(domain, applications.items) : [];
   const application = applications.items.find((item) => item.id === website?.applicationId)
     ?? (isOwner ? selectedApplication(domain, applications.items, params.get('application')) : null);
-  const managedFilesWebsite = website && ['static', 'node', 'php', 'python'].includes(website.runtimeType);
   const managedTerminalWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = isOwner && !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
-    if (key === 'files') return canManage && (managedFilesWebsite || legacyManagedTarget);
+    if (key === 'files') return canManage;
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
@@ -115,7 +114,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
     {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel title="Site terminali" description={`${domain.primaryDomain} · Bu siteye ait kullanıcıyla terminal oturumu.`} target={{ scope: 'site', websiteId: domain.websiteId }} /> : <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} />)}
-    {tab === 'files' && (domain.websiteId ? <FilesPanel serverId={domain.serverId} websiteId={domain.websiteId} runtimeType={website?.runtimeType} /> : <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} />)}
+    {tab === 'files' && <SiteFilesPanel domainId={domain.id} legacyRepair={legacyManagedTarget ? <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} /> : null} />}
     {tab === 'settings' && <>
       <Section title="Site ayarları"><KeyValues items={[
         ['Kayıt kimliği', domain.id], ['Website kimliği', website?.id ?? 'Bağlı değil'],
