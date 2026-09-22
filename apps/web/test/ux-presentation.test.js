@@ -26,10 +26,11 @@ test('system theme follows OS and explicit theme wins', () => {
 test('read-only navigation retains only the existing authorized route set', () => {
   assert.deepEqual(navigationGroups(false).flatMap((group) => group.items.map(([to]) => to)), ['/websites', '/dashboard', '/servers']);
 });
-test('owner navigation preserves existing screens without advertising an unsupported backup screen', () => {
+test('owner navigation keeps jobs and audit accessible through categorized settings', () => {
   const paths = navigationGroups(true).flatMap((group) => group.items.map(([to]) => to));
-  assert.equal(paths.length, 9); assert.equal(new Set(paths).size, 9);
-  assert.ok(paths.includes('/jobs')); assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
+  assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
+  assert.ok(paths.includes('/settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
+  assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
 });
 test('website counter uses unique Website records, not hostnames or aliases', () => {
   assert.equal(websiteCount({ status: 'ready', items: [{ id: 'w1', aliases: ['a', 'b'] }, { id: 'w1' }, { id: 'w2' }] }), 2);

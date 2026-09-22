@@ -16,7 +16,7 @@ import TerminalPanel from './LazyTerminalPanel.jsx';
 export function ServersPage() {
   const { servers, canManage } = useWorkspace();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  return <><PageHeading title="Sunucu" description="YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir." actions={<Button icon="refresh" onClick={servers.refresh}>Yenile</Button>} /><CollectionNotice resource={servers} label="Yerel sunucu" />{server && <><Section title={server.displayName ?? server.name ?? server.hostname}><ServerSummary server={server} /></Section>{canManage && ['ready', 'stale'].includes(servers.status) && <ManagedServicesPanel server={server} />}{canManage && ['ready', 'stale'].includes(servers.status) && server.executionMode === 'local' && <TerminalPanel title="Sunucu terminali" description={`${server.displayName ?? server.name ?? server.hostname} üzerinde Owner root PTY. Bu oturum tam sunucu yetkisine sahiptir.`} target={{ scope: 'server', serverId: server.id }} />}</>}{!server && ['ready', 'stale'].includes(servers.status) && <Section title="Yerel sunucu"><EmptyState title="Yerel sunucu doğrulanamadı" detail="Panel uzak sunucu kaydı seçmez; kurulu olduğu hostun kimliği doğrulanmadan yönetim işlemi açılmaz." icon="server" /></Section>}</>;
+  return <><PageHeading title="Sunucu" description="YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir." actions={<Button icon="refresh" onClick={servers.refresh}>Yenile</Button>} /><CollectionNotice resource={servers} label="Yerel sunucu" />{server && <><Section title={server.displayName ?? server.name ?? server.hostname}><ServerSummary server={server} /></Section>{canManage && ['ready', 'stale'].includes(servers.status) && <ManagedServicesPanel server={server} />}{canManage && ['ready', 'stale'].includes(servers.status) && server.executionMode === 'local' && <TerminalPanel title="Sunucu terminali" description={`${server.displayName ?? server.name ?? server.hostname} üzerinde Owner root PTY. Bu oturum tam sunucu yetkisine sahiptir.`} target={{ scope: 'server', serverId: server.id }} />}{canManage && <details id="server-diagnostics" className="ws-section"><summary>Tanılama ve yazılım bilgileri</summary><SystemSettingsPanels diagnostics /></details>}</>}{!server && ['ready', 'stale'].includes(servers.status) && <Section title="Yerel sunucu"><EmptyState title="Yerel sunucu doğrulanamadı" detail="Panel uzak sunucu kaydı seçmez; kurulu olduğu hostun kimliği doğrulanmadan yönetim işlemi açılmaz." icon="server" /></Section>}</>;
 }
 export function JobsPage() {
   const { jobs, refreshAll } = useWorkspace(); const [params, setParams] = useSearchParams();
@@ -39,8 +39,26 @@ export function AdvancedDomainsPage() {
 }
 export function SettingsPage() {
   const { servers, domains, canManage } = useWorkspace();
+  const [params] = useSearchParams();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  return <><PageHeading title="Ayarlar" description="Panel bakım araçları, sistem politikaları ve yönetim erişimi." /><Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir. Owner hesapları kullanıcı ekleyebilir, düzenleyebilir, kapatabilir ve silebilir; son aktif Owner korunur.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section><CollectionNotice resource={servers} label="Yerel sunucu" />{canManage && <AiSettingsPanel />}<SystemSettingsPanels canManage={canManage} />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}<Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}</Section>{import.meta.env.DEV && <p className="ws-muted">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}<Section title="Gelişmiş araçlar"><div className="ws-section-body ws-actions"><LinkButton to="/applications" icon="code">Uygulamalar</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers" icon="server">Yerel sunucu</LinkButton></div></Section></>;
+  const section = ['account', 'dns', 'ai', 'updates', 'records'].includes(params.get('section'))
+    ? params.get('section') : 'account';
+  const categories = [
+    ['account', 'Hesap ve erişim'], ['dns', 'DNS ve SSL'],
+    ['ai', 'AI sağlayıcıları'], ['updates', 'Güncellemeler'], ['records', 'İşlemler ve kayıtlar'],
+  ];
+  return <>
+    <PageHeading title="Ayarlar" description="Hesap, DNS ve panel politikalarını yönetin." />
+    <nav className="ws-tabs" aria-label="Ayar kategorileri">
+      {categories.map(([key, label]) => <Link key={key} to={`/settings?section=${key}`}
+        aria-current={section === key ? 'page' : undefined}>{label}</Link>)}
+    </nav>
+    {section === 'account' && <Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section>}
+    {section === 'dns' && <><CollectionNotice resource={servers} label="Yerel sunucu" /><SystemSettingsPanels canManage={canManage} />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}</>}
+    {section === 'ai' && canManage && <AiSettingsPanel />}
+    {section === 'updates' && <Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}{import.meta.env.DEV && <p className="ws-muted ws-section-body">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}</Section>}
+    {section === 'records' && <Section title="İşlemler ve kayıtlar"><div className="ws-section-body ws-actions"><LinkButton to="/jobs" icon="jobs">İşlem geçmişi</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers#server-diagnostics" icon="server">Sunucu tanılama</LinkButton><LinkButton to="/applications" icon="code">Uygulama envanteri</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton></div></Section>}
+  </>;
 }
 const capabilities = {
   backups: ['Yedekler', 'Yedek hedefleri, retention ve geri yükleme yönetimi henüz uygulanmadı.', 'archive'],

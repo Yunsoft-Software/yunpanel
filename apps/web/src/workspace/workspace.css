@@ -47,6 +47,9 @@
 .workspace-shell label, .ws-modal label { display: grid; gap: 7px; font-size: 12px; font-weight: 600; }
 .workspace-shell fieldset, .ws-modal fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .ws-section { background: var(--ws-surface); border: 1px solid var(--ws-border); border-radius: var(--ws-radius); margin: 0 0 20px; overflow: hidden; }
+details.ws-section > summary { cursor: pointer; padding: 19px 22px; font-weight: 650; }
+details.ws-section[open] > summary { border-bottom: 1px solid var(--ws-border); }
+details.ws-section > .ws-section { margin: 16px; }
 .ws-section-heading { padding: 19px 22px; border-bottom: 1px solid var(--ws-border); display: flex; align-items: center; justify-content: space-between; gap: 16px; }
 .ws-section-heading h2 { margin: 0; font-size: 15px; font-weight: 650; letter-spacing: -.1px; }
 .ws-section-heading p { color: var(--ws-muted); margin: 4px 0 0; font-size: 12px; }
@@ -143,6 +146,15 @@
 .ws-server-metrics span { color: var(--ws-muted); font-size: 11px; display: block; }
 .ws-server-metrics strong { font-size: 18px; display: block; font-weight: 600; margin-top: 4px; }
 .ws-server-metrics small { font-size: 10px; color: var(--ws-muted); overflow-wrap: anywhere; display: block; }
+@property --usage { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+.ws-server-metrics .ws-usage-metric { display: flex; flex-direction: column; align-items: center; gap: 6px; text-align: center; min-width: 0; }
+.ws-server-metrics .ws-usage-ring { width: 74px; height: 74px; border-radius: 50%; background: conic-gradient(var(--ws-accent) var(--usage), var(--ws-border) 0); display: grid; place-items: center; position: relative; transition: --usage .7s ease; }
+.ws-server-metrics .ws-usage-ring.is-high { background: conic-gradient(#cf6c36 var(--usage), var(--ws-border) 0); }
+.ws-server-metrics .ws-usage-ring.is-unknown { background: var(--ws-border); }
+.ws-server-metrics .ws-usage-ring::before { content: ''; position: absolute; inset: 8px; border-radius: 50%; background: var(--ws-surface); }
+.ws-server-metrics .ws-usage-ring strong { position: relative; font-size: 15px; margin: 0; color: var(--ws-text); }
+.ws-site-count { font-size: 36px; line-height: 1; color: var(--ws-accent); }
+@media (prefers-reduced-motion: reduce) { .ws-server-metrics .ws-usage-ring { transition: none; } }
 .ws-sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 .ws-skip { position: fixed; left: 245px; top: -100px; z-index: 100; background: white; padding: 12px; border: 2px solid var(--ws-accent); }
 .ws-skip:focus { top: 8px; }

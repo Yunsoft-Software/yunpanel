@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Badge, Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
+import { Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { getPanelSettings, updatePanelSettings } from './system-settings-client.js';
 
 function formatUptime(seconds) {
@@ -14,7 +14,7 @@ function formatUptime(seconds) {
   return parts.join(' ');
 }
 
-export default function SystemSettingsPanels({ canManage = true }) {
+export default function SystemSettingsPanels({ canManage = true, diagnostics = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -69,14 +69,13 @@ export default function SystemSettingsPanels({ canManage = true }) {
     backup,
     security,
     observability,
-    managedServices,
   } = data;
 
   return (
     <>
-      <Section
+      {diagnostics && <Section
         title="Panel ve sunucu"
-        description="Sunucu kimliği, çalışma modu ve panel yazılım bilgisi."
+        description="Sunucu kimliği ve panel yazılım bilgisi."
         actions={<Button onClick={load} icon="refresh" variant="secondary">Yenile</Button>}
       >
         <KeyValues items={[
@@ -86,12 +85,11 @@ export default function SystemSettingsPanels({ canManage = true }) {
           ['Sunucu adı (Hostname)', panel.hostname],
           ['Sunucu görünen adı', panel.displayName ?? '—'],
           ['Yerel sunucu kimliği', panel.localServerId ?? '—'],
-          ['Çalışma modu', panel.executionMode === 'local' ? 'Yerel yönetim (Agentless Root)' : panel.executionMode],
           ['Çalışma süresi', formatUptime(panel.uptimeSeconds)],
         ]} />
-      </Section>
+      </Section>}
 
-      <Section
+      {diagnostics && <Section
         title="Site varsayılanları ve izolasyon"
         description="Yeni oluşturulan web siteleri için uygulanan varsayılan çalışma zamanı ve Unix kullanıcı izolasyonu."
       >
@@ -103,20 +101,20 @@ export default function SystemSettingsPanels({ canManage = true }) {
           ['Dosya izin maskesi (UMask)', websiteDefaults.defaultUmask],
           ['Unix kimlik izolasyonu', `${websiteDefaults.isolationUserPrefix}* (Site başına bağımsız Unix kullanıcısı ve grubu)`],
         ]} />
-      </Section>
+      </Section>}
 
-      <Section
+      {(diagnostics || canManage) && <Section
         title="DNS ve SSL politikası"
         description="Alan adı yetkili DNS yönetimi ve Let's Encrypt SSL/TLS sertifika yaşam döngüsü."
       >
-        <KeyValues items={[
+        {diagnostics && <KeyValues items={[
           ['Yetkili DNS motoru', dnsSsl.authoritativeProvider === 'powerdns' ? 'PowerDNS Authoritative' : dnsSsl.authoritativeProvider],
           ['ACME sağlayıcısı', dnsSsl.acmeProvider === 'letsencrypt' ? "Let's Encrypt (HTTP-01 & DNS-01)" : dnsSsl.acmeProvider],
           ['ACME iletişim e-postası', dnsSsl.acmeEmail ?? 'Tanımlanmadı (YUNPANEL_ACME_EMAIL)'],
           ['Otomatik yenileme döngüsü', `Süresi dolmaya ${dnsSsl.autoRenewDaysBeforeExpiry} gün kala günlük denetim`],
           ['Özel sertifika deposu', dnsSsl.customCertificatesRoot],
-        ]} />
-        {canManage && (
+        ]} />}
+        {!diagnostics && canManage && (
           <form
             className="ws-form"
             style={{ marginTop: 16 }}
@@ -172,8 +170,9 @@ export default function SystemSettingsPanels({ canManage = true }) {
             </div>
           </form>
         )}
-      </Section>
+      </Section>}
 
+      {diagnostics && <>
       <Section
         title="Mail ve Webmail mimarisi"
         description="SQLite tabanlı sanal posta altyapısı ve paylaşımlı Roundcube webmail arayüzü."
@@ -235,40 +234,7 @@ export default function SystemSettingsPanels({ canManage = true }) {
           ['Erişim log analizi', `${observability.logs.engine} (${observability.logs.mode})`],
         ]} />
       </Section>
-
-      {managedServices?.services && managedServices.services.length > 0 && (
-        <Section
-          title="Yönetilen servisler ve durumlar"
-          description="Sunucu üzerindeki temel hosting ve altyapı servislerinin anlık durumu."
-        >
-          <div className="ws-table-container">
-            <table className="ws-table">
-              <thead>
-                <tr>
-                  <th>Servis</th>
-                  <th>Durum</th>
-                  <th>Kurulu Paket</th>
-                  <th>Sistem Servisi (Unit)</th>
-                </tr>
-              </thead>
-              <tbody>
-                {managedServices.services.map((svc) => (
-                  <tr key={svc.id}>
-                    <td><strong>{svc.id}</strong></td>
-                    <td>
-                      <Badge state={svc.state === 'active' ? 'active' : svc.state === 'failed' ? 'failed' : 'offline'}>
-                        {svc.state ?? 'bilinmiyor'}
-                      </Badge>
-                    </td>
-                    <td>{svc.installed ? 'Kurulu' : 'Kurulu değil'}</td>
-                    <td><code>{svc.units?.join(', ') || '—'}</code></td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </Section>
-      )}
+      </>}
     </>
   );
 }

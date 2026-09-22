@@ -42,7 +42,8 @@ test('primary navigation exposes working modules instead of placeholder destinat
   assert.match(layout, /navigationGroups/);
   assert.match(uxModel, /\['\/docker', 'Docker', 'box'\]/);
   assert.match(uxModel, /\['\/mail', 'Mail', 'mail'\]/);
-  assert.match(uxModel, /\['\/audit', 'Denetim', 'shield'\]/);
+  assert.doesNotMatch(uxModel, /\['\/audit', 'Denetim', 'shield'\]/);
+  assert.match(operations, /LinkButton to="\/audit"/);
   assert.match(app, /path: 'docker', element: manage\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'docker\/:dockerProjectId', element: manage\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'mail', element: manage\(<MailDomainsPage \/>\)/);
