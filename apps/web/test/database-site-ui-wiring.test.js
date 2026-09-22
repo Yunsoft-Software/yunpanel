@@ -68,7 +68,7 @@ test('Website database delete uses scoped preview, durable DROP and evidence-gat
   assert.match(panel, /Silme önizleme/);
   assert.match(panel, /Silme onayına geç/);
   assert.match(panel, /confirmation=\{deleteTarget\.databaseName\}/);
-  assert.match(panel, /current binding revizyonuna ait doğrulanmış/);
+  assert.match(panel, /güncel bağlantı revizyonuna ait doğrulanmış/);
   assert.match(panel, /DROP tamamlandı, binding finalization bekliyor/);
   assert.match(panel, /dropImpact\.readyToFinalize/);
   assert.match(panel, /dropImpact\.completedDelete\.jobId/);

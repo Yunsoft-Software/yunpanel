@@ -63,7 +63,11 @@ test('primary navigation exposes working modules instead of placeholder destinat
   assert.match(dockerConfig, /validateSavedDockerProject/);
   assert.doesNotMatch(operations, /docker: \['Docker'/);
   assert.doesNotMatch(operations, /mail: \['Mail'/);
-  assert.doesNotMatch(model, /\['(?:mail|databases|cron|backups)'/);
+  // Mail and databases now have real site-contained surfaces. Keep only
+  // unsupported placeholder tabs forbidden; never revert the working UI here.
+  assert.doesNotMatch(model, /\['(?:cron|backups)'/);
+  assert.match(model, /\['databases', 'Veritabanları'\]/);
+  assert.match(model, /\['mail', 'E-posta'\]/);
   assert.match(model, /\['files', 'Dosyalar'\]/);
 });
 
@@ -157,7 +161,9 @@ test('legacy Domain repair and real site file manager replace terminal and file 
   assert.match(detail, /key === 'terminal'/);
   assert.match(detail, /<FilesPanel serverId=\{domain\.serverId\} websiteId=\{domain\.websiteId\}/);
   assert.doesNotMatch(detail, /Site dosyalarını listeleme, yükleme ve düzenleme API’leri henüz uygulanmadı/);
-  assert.match(files, /\/files\/text/);
+  assert.match(files, /const base = `\/websites\/\$\{encodeURIComponent\(websiteId\)\}\/files`/);
+  assert.match(files, /\$\{base\}\/text/);
+  assert.match(files, /expectedSha256: current\.sha256/);
   assert.match(files, /method: 'DELETE'/);
   assert.doesNotMatch(files, /window\.prompt|window\.alert|innerHTML/);
   assert.match(detail, /<LogsPanel application=\{application\} domain=\{domain\} server=\{server\}/);
