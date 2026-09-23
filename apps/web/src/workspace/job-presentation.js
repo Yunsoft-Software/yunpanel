@@ -73,14 +73,20 @@ export function jobResourceTarget(job, resources = {}) {
   return Object.freeze({ label, href: null });
 }
 
+// Status is not a measured fraction or a retry budget. Keep progress unknown
+// until the API exposes an explicit, validated measurement contract.
 export function jobLifecycle(job) {
   const status = job?.status;
-  if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '1 / 3', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.' });
-  if (status === 'running') return Object.freeze({ stage: 'Sunucuda çalışıyor', progress: '2 / 3', detail: 'İş claim edildi; terminal sonucu bekleniyor.' });
-  if (status === 'succeeded') return Object.freeze({ stage: 'Tamamlandı', progress: '3 / 3', detail: 'Sunucu doğrulanmış başarılı sonuç kaydetti.' });
-  if (status === 'failed') return Object.freeze({ stage: 'Başarısız', progress: '3 / 3', detail: 'İş güvenli hata sonucu ile kapandı.' });
-  if (status === 'cancelled') return Object.freeze({ stage: 'İptal edildi', progress: '3 / 3', detail: 'İş çalışmadan önce veya desteklenen iptal noktasında kapatıldı.' });
+  if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '—', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.' });
+  if (status === 'running') return Object.freeze({ stage: 'Sunucuda çalışıyor', progress: '—', detail: 'İş sunucuda çalışıyor; sonucu henüz belli değil.' });
+  if (status === 'succeeded') return Object.freeze({ stage: 'Tamamlandı', progress: '—', detail: 'Sunucu doğrulanmış başarılı sonuç kaydetti.' });
+  if (status === 'failed') return Object.freeze({ stage: 'Başarısız', progress: '—', detail: 'İşlem başarısız oldu. Hata ayrıntısını ve ilgili kaynak durumunu kontrol edin.' });
+  if (status === 'cancelled') return Object.freeze({ stage: 'İptal edildi', progress: '—', detail: 'İş çalışmadan önce veya desteklenen iptal noktasında kapatıldı.' });
   return Object.freeze({ stage: 'Bilinmiyor', progress: '—', detail: 'İş yaşam döngüsü doğrulanamadı.' });
+}
+
+export function jobAttemptCount(job) {
+  return Number.isSafeInteger(job?.attempts) && job.attempts >= 0 ? job.attempts : null;
 }
 
 export function safeJobResultMetadata(job) {
