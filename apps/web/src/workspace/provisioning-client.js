@@ -1,4 +1,6 @@
 import { panelRequest } from '../api.js';
+import { sessionVersion, sessionTransitionPending } from '../session-client.js';
+import { advanceProvisioning } from './provisioning-advance.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STEP_PATTERN = /^[a-z0-9_]{1,80}$/;
@@ -65,56 +67,17 @@ export function compensateWebsiteProvisioningStep(operationId, provisioningStepI
 
 export async function autoAdvanceWebsiteProvisioning(operationId, { maxSteps = 30, signal, onStep } = {}) {
   const id = uuid(operationId, 'provisioning operation id');
-  let currentOperation = null;
-  const retriedSteps = new Map();
-  for (let i = 0; i < maxSteps; i += 1) {
-    if (signal?.aborted) break;
-    let result = null;
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (signal?.aborted) break;
-      try {
-        result = await panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
-          method: 'POST',
-          body: { confirmation: continueConfirmation(id) },
-          signal,
-        });
-        break;
-      } catch (err) {
-        if (attempt === 2 || signal?.aborted) throw err;
-        await new Promise((resolve) => setTimeout(resolve, 1000));
-      }
-    }
-    currentOperation = result?.operation ?? null;
-    if (typeof onStep === 'function') onStep(result);
-
-    if (result?.outcome === 'failed' && result?.stepId) {
-      const attempts = (retriedSteps.get(result.stepId) ?? 0) + 1;
-      retriedSteps.set(result.stepId, attempts);
-      if (attempts < 3) {
-        try {
-          const retryResult = await retryWebsiteProvisioningStep(id, result.stepId);
-          currentOperation = retryResult?.operation ?? currentOperation;
-          if (typeof onStep === 'function') onStep(retryResult);
-          if (retryResult?.outcome === 'progressed') {
-            continue;
-          }
-        } catch {
-          // Fall through to outcome check
-        }
-      } else {
-        if (currentOperation) {
-          currentOperation = { ...currentOperation, retryExhausted: true };
-        }
-        if (typeof onStep === 'function') onStep({ ...result, outcome: 'retry_exhausted' });
-        break;
-      }
-    }
-
-    if (!result || ['ready', 'failed', 'blocked', 'interrupted', 'retry_exhausted'].includes(result.outcome)) {
-      break;
-    }
-  }
-  return currentOperation;
+  const started = sessionVersion();
+  return advanceProvisioning({
+    isCurrent: () => started === sessionVersion() && !sessionTransitionPending(),
+    operationId: id, maxSteps, signal, onStep,
+    read: ({ signal: requestSignal }) => panelRequest(`/sites/provisioning/${encodeURIComponent(id)}`, { signal: requestSignal }),
+    advance: ({ signal: requestSignal }) => panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
+      method: 'POST',
+      body: { confirmation: continueConfirmation(id) },
+      signal: requestSignal,
+    }),
+  });
 }
 
 export const provisioningClientInternals = Object.freeze({
