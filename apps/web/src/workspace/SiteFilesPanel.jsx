@@ -1,4 +1,7 @@
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { usePanelSession } from '../panel-session.jsx';
+import { sessionVersion } from '../session-client.js';
+import { FileWorkspaceSession } from './FileWorkspaceSession.jsx';
 import FilesPanel from './FilesPanel.jsx';
 import { Button, CollectionNotice, EmptyState, Section } from './PanelKit.jsx';
 import { resolveSiteFilesAccess } from './site-files-access.js';
@@ -13,7 +16,16 @@ const MESSAGES = {
 
 export default function SiteFilesPanel({ domainId, legacyRepair = null }) {
   const { domains, websites, canManage, refreshAll } = useWorkspace();
-  const access = resolveSiteFilesAccess({ domainId, domains, websites, canManage });
+  const { session } = usePanelSession();
+  const identity = JSON.stringify([domainId, session?.user?.id, session?.user?.role, sessionVersion(), canManage]);
+  const input = { domainId, domains, websites, canManage };
+  const access = resolveSiteFilesAccess(input);
+  return <FileWorkspaceSession key={identity} input={input}>
+    <SiteFilesContent access={access} domains={domains} websites={websites}
+      canManage={canManage} refreshAll={refreshAll} legacyRepair={legacyRepair} />
+  </FileWorkspaceSession>;
+}
+function SiteFilesContent({ access, domains, websites, canManage, refreshAll, legacyRepair }) {
   if (access.state === 'ready') return <FilesPanel key={access.website.id}
     serverId={access.website.serverId} websiteId={access.website.id} runtimeType={access.website.runtimeType} />;
   // Preserve the existing Owner-only migration flow, without guessing a binding.
