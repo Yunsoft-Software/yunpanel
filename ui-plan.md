@@ -10,6 +10,8 @@
 
 Kaynakta ana giriş Web Siteleri ve Alan Adları; sol menü Posta, Dosyalar, Veritabanları, Owner için Araçlar ve Ayarlar ve Kullanıcılar. Site görev aileleri Genel Bakış / Barındırma ve DNS / Posta; günlük araçlar açık bağlantılardır. Teknik kayıt/iş/envanter bilgisi günlük araçların yerine geçmez. Gerçek UI/API karşılığı bulunmayan yedek/istatistik/hosting formu, sırf Plesk'te var diye çalışan araç gibi gösterilmez; eksik olarak geliştirilir.
 
+Son kaynak dilimi [SSL formu](docs/ux/ssl-form-flow.md): BUG-20260923-04/05 için gerçek kullanıcı e-postası, otomatik varsayılan ile kullanıcı değişikliğinin ayrılması, kapsam kutuları ve taslak/sıfırlama bağlantısı. Kaynak `36a46185` / `96db8b9b`; ana plandaki üst BUG/UX kabulleri açık kalır. Site kartı/listesi kaynak işi de önceki `660e8162` / `deeb700c` içinde tamamlandı; kalan bütün site akışları bundan ayrı izlenir.
+
 ## Son karar — daha az reseller ekranı ve katmanı
 
 Owner için mevcut sunucu/site araçlarına Bayiler ve Müşteriler; bayi için **Müşterilerim / Sitelerim / Hesabım** yeterlidir. Müşteri mevcut kendi-site araçlarını kullanır. Yeni dashboard veya tema, ayrı paket editörü, add-on, zorunlu abonelik seçimi, overselling ve login-as bu sürümde yapılmaz. Aynı müşteri/site listesi, basit form ve mevcut araçlar yeniden kullanılır.
@@ -23,7 +25,7 @@ Sahiplik: Owner → isteğe bağlı tek Reseller → Customer → mevcut Website
 1. [Aktif plan](plan.md): kaynak alt işleri ve açık UX/BUG/PROD/PAR işleri; UX sırası bakımından yukarıdaki son teyit geçerlidir.
 2. [Güncel özellik kapsamı](docs/plesk-feature-parity.md) ve [RS-00–05](docs/ux/plesk-full-scope.md).
 3. [Site UX sözleşmesi](docs/ux/plesk-ux-spec.md), [resmî ekran atlası](docs/ux/plesk-reference-atlas.md) ve [rota matrisi](docs/ux/plesk-route-matrix.md). Eski reseller sınırları yerine son karar geçerlidir; son menü/rota kaynak durumu yerleşim kontrol raporundadır.
-4. [Tarayıcı kabulü](docs/ux/plesk-browser-acceptance.md), [development TODO](docs/ux/development-todo.md), [T-DEV-PLESK-NAV](docs/ux/plesk-navigation-todo.md) ve kök `todo.md`.
+4. [Tarayıcı kabulü](docs/ux/plesk-browser-acceptance.md), [development TODO](docs/ux/development-todo.md), [T-DEV-PLESK-NAV](docs/ux/plesk-navigation-todo.md), [T-DEV-SSL-FORM](docs/ux/ssl-form-flow.md) ve kök `todo.md`.
 
 ## Değişmeyen kullanım sözleşmesi
 
@@ -40,11 +42,15 @@ Mevcut API/kimlik/auth/CSRF/gateway/Unix izolasyonu ve kalıcı iş/onay/rollbac
 - [x] Sade reseller kapsamı ve kaynak sahiplik/adet politikası: `5ac33c10`, `6efc5038`, `cd89f8d8`, `87a23c2a`; önceki turun 107 Node22 testi. Bu UI veya gerçek auth entegrasyonu değildir.
 - [x] UX-PL-03a/b kaynak: Plesk görev sıralı menü, `/websites` açılışı, Owner araç dizini, rol uyumlu komut araması ve site hesabına scope'lu Posta/DB girişi; `aa41cc24`.
 - [x] UX-PL-04a/06a kaynak: üç site görev ailesi, görünür DNS/Git/günlükler, araçlar önce ve teknik kimlikler ayrıntıda; `6b755b28`. Eski site URL'leri ve çalışan paneller korundu.
-- [x] Bu turun seçili kontrolleri: 19 gezinme/model/kaynak + 20 hedef çözümleme + 10 veri-talebi testi = **49 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. Önceki testler tekrar çalıştırılmış sayılmaz; JSX render veya tam build değildir.
-- [ ] Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları.
-- [ ] Genişleyen domain kartları/görev zengini liste, domain/subdomain/alias üst eylemleri, gerçek hosting düzenleme ve kalan PHP/cron/backup/istatistik araçları. Menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz.
+- [x] Önceki gezinme turunun seçili kontrolleri: 19 gezinme/model/kaynak + 20 hedef çözümleme + 10 veri-talebi testi = **49 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. Bu SSL turunda tekrar çalıştırılmadı; JSX render veya tam build değildir.
+- [x] UX-PL-04b.1–4 kaynak: doğrudan Dosyalar/DB/SSL/DNS/Posta/Günlükler ve barındırma/uygulama/Git araçlı site kartları; mevcut arama/alias, filtre, hiyerarşi, grup sayfalama ve yoğunluk korunur. `660e8162`, `deeb700c`; önceki tur 51 test. [Rapor ve kabul](docs/ux/website-task-cards.md).
+- [x] BUG-20260923-04a/b kaynak: gerçek alan farklarına göre dirty, otomatik e-postada uyarı üretmeme, kapsam kutuları, açık sıfırlama, onaydan vazgeçince taslağı koruma, staging testinde taslağı kaydedilmiş saymama ve snapshot baseline; `36a46185`, `96db8b9b`.
+- [x] BUG-20260923-05a/b kaynak: gerçek kullanıcı session'ından adres, genel ACME ayarına fallback yok, boş adres açıklaması, elle girileni ezmeyen geç varsayılan, kullanıcı/site/session generation'a bağlı form; aynı kaynak commitleri.
+- [x] Bu SSL turu: **27 geçti / 0 başarısız / 0 atlandı** (19 model + 8 kaynak bağlantısı), Node22.16.0; JSX sözdizimi/dönüşüm kontrolü de geçti. [Kanıt ve sınır](docs/ux/ssl-form-flow.md). Gerçek React/HTTP/browser/host kabulü değildir.
+- [ ] Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır.
+- [ ] Domain/subdomain/alias görevlerinin kalan gerçek formları, hosting düzenleme, silme/askı, PHP/cron/backup/istatistik araçları. Kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonu ve tek görev/yan etki işleyişi de açıktır.
 - [ ] RS-02–05: canlı sahiplik bağlantısı, hesap lifecycle'ı, reseller/customer self-service ve tenant izolasyonu kabulü. Owner profil API/UI alt işleri kök plandaki ilerlemesiyle korunur.
 
-Sonraki dilimler: UX-PL-03/04/06/07 kullanıcı görevlerini tamamla → T-DEV-PLESK-NAV ve Files taslak/gerçek kabul → ayrı RS-02e–05 backend/self-service bağlantıları. Ertelenmiş paket/abonelik/markalama işleri ilk sürüme sessizce geri eklenmez.
+Sonraki dilimler: UX-PL-03/04/06/07 kullanıcı görevlerini tamamla → T-DEV-PLESK-NAV, T-DEV-SSL-FORM ve Files taslak/gerçek kabul → ayrı RS-02e–05 backend/self-service bağlantıları. Ertelenmiş paket/abonelik/markalama işleri ilk sürüme sessizce geri eklenmez.
 
 Önceki belgenin eksiksiz kopyası: [2026-09-21 UI planı](docs/history/ui-plan-before-plesk-ux-80f3d1c4.md). Arşiv güncel UX talimatı değildir.

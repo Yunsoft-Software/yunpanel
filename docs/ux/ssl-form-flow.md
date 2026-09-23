@@ -1,20 +1,44 @@
 # UX-PL-06/07 — SSL formu ve kullanıcı e-postası
 
-2026-09-23; başlangıç `development@bed0cafd`. Site kartları ve görünür SSL/TLS girişi korunur. Bu dilim, kök plandaki BUG-20260923-04/05'i mevcut site SSL ekranında ele alır; yeni sertifika motoru veya farklı menü kurulmaz.
+2026-09-23; başlangıç `development@bed0cafd`. Kapsam `7fdad05a`, taslak modeli `36a46185`, gerçek form bağlantısı `96db8b9b`. Site kartları ve görünür SSL/TLS girişi korunur. Bu dilim kök plandaki BUG-20260923-04/05'in kaynak düzeltmesidir; yeni sertifika motoru veya farklı menü değildir.
 
 ## Kaynakta doğrulanan sorun
 
-`SslOperations`, `session` alanını `useWorkspace()` içinden almaya çalışıyor; `WorkspaceContext` bu alanı sunmuyor. Gerçek oturum `usePanelSession()` içinde. Sonuçta kullanıcı adresi yerine genel `getPanelSettings().dnsSsl.acmeEmail` yolu çalışıyor. `Boolean(email.trim()) && !requested` denetimi otomatik dolan adresi değişiklik sayıyor; kapsam kutuları tek başına izlenmiyor ve başarılı talepten sonra yeni kapsam değişiklikleri gözden kaçabiliyor.
+Önceki `SslOperations`, `session` alanını `useWorkspace()` içinden alıyordu; `WorkspaceContext` bu alanı sunmuyor. Gerçek oturum `usePanelSession()` içinde. Kullanıcı adresi yerine genel `getPanelSettings().dnsSsl.acmeEmail` yolu çalışabiliyordu. `Boolean(email.trim()) && !requested`, otomatik dolan adresi değişiklik sayıyor; kapsam kutuları tek başına izlenmiyor ve başarılı talepten sonra yeni kapsam değişiklikleri gözden kaçıyordu.
 
-## Dar uygulama sözleşmesi
+## Tamamlanan kaynak alt işleri
 
-- [ ] SSL varsayılan e-postasını gerçek kullanıcı oturumuna bağla; bu form için genel sunucu/ACME e-postası isteğini kaldır. Geçerli kullanıcı e-postası yoksa boş ve düzenlenebilir alan göster; başka hesabın adresini tahmin etme.
-- [ ] E-posta ve tüm kapsam/posta atama seçeneklerini başlangıç değerleriyle karşılaştır. İlk yükleme ve otomatik varsayılan güncellemesi dirty değildir; kullanıcı değişikliği dirty'dir. Eski değere dönme ve açık sıfırlama temiz duruma döner.
-- [ ] Geç gelen oturum adresi elle yazılanı ezmesin; farklı kullanıcı/site bağlamı taslağı devralmasın. Onay penceresinden vazgeçmek taslağı kaydetmez veya silmez. Başarı baseline'ı yalnız gönderilen değerlerle güncellensin; test talebi gerçek sertifika başvurusu gibi taslağı kapatmasın.
-- [ ] Model ve kaynak bağlantı testleri; mümkünse JSX sözdizimi kontrolü. Gerçek React/oturum/browser ve host ACME kabulü ayrı açık tutulur.
+- [x] **BUG-20260923-05a:** SSL formu gerçek `usePanelSession()` verisine bağlandı. Geçerli kullanıcı e-postası, yoksa aynı kullanıcının e-posta biçimindeki login adı kullanılır; ikisi de yoksa alan boş ve açıklamalıdır. Bu form artık global ayar/e-posta isteği yapmaz. Adres düzenlenebilir; doğrulama ilk mutation'dan önce de yapılır.
+- [x] **BUG-20260923-04a:** e-posta ve beş kapsam/posta atama seçeneği baseline ile karşılaştırılır. İlk dolum dirty değildir. Kullanıcı değişikliği dirty'dir; eski değere dönme ve açık Değişiklikleri sıfırla temiz duruma döner. Başarıdan sonraki yeni değişiklikler de izlenir.
+- [x] **BUG-20260923-04b/05b:** geç gelen hesap adresi elle yazılanı veya kasıtlı boş bırakılan alanı ezmez. Form kimliği Domain/server/actor/role/session generation'a bağlıdır; farklı bağlam aynı taslağı devralmaz. CSRF token'ı bu kimliğe dahil edilmez, taslak kalıcı depoya yazılmaz. Bu sınır form içindir; devam eden backend işini iptal etmez.
+- [x] **UX-PL-06c:** onaydan vazgeçmek taslağı korur. E-posta, kapsam ve posta atama tercihi async hazırlıktan önce snapshot alınır. Sadece gerçek talebin mevcut akıştaki başarılı bitişi baseline günceller; staging testi veya kuyruk cevabı bu işareti vermez. Yenileme ekranında görünmeyen başvuru formu yanlış çıkış uyarısı üretmez. SSL sertifikası al ve Korunacak alan adları etiketleri kullanılır; kapsama otomatik eklenen aliaslar görünürdür.
+- [x] **Seçili testler:** 19 model + 8 kaynak bağlantısı testi, **27 geçti / 0 başarısız / 0 atlandı**. JSX sözdizimi/JavaScript dönüşümü de kontrol edildi.
+- [ ] **Üst BUG-04/05 ve UX-PL-06/07 kabulü:** gerçek React, API session, tarayıcı ve host ACME kontrolleri aşağıda açıktır. Kaynak alt işleri üst üretim kabulünü kapatmaz.
 
-## Bu dilimin dışında
+## Çalıştırılan kontroller ve sınır
 
-Sertifika süre yenileme senkronizasyonu (BUG-20260923-06), mail identity yan etkileri, işlem motorunun backend'e taşınması, bütün provisioning/retry/silme işleri ve alias/hosting formları tamamlanmış sayılmaz. Var olan durable jobs, preview/onay, CSRF, API yetkisi, Files motoru ve tema korunur. Saf form modeli sunucu yetkilendirmesi değildir.
+Ortam Node **22.16.0**, npm **10.9.2**. Seçili kaynaklar kullanıldı; tam checkout, `npm ci`, hedef Node24/npm11 `npm run check` yapılmadı.
 
-Gerçek kabul: Node >=24.11.1/npm >=11 tam check; Owner/site hesabında otomatik e-posta, boş adres, elle düzenleme, geç gelen session, kapsam kutuları, vazgeçme/sıfırlama, başarı/hata, site/oturum değiştirme ve geri/ileri/reload. Bu kayıt kök `todo.md` ve `docs/ux/development-todo.md` kabullerini tamamlar. Yalnız development, küçük commit ve `[skip ci]`; GitHub Actions ve canlı host işlemi yok.
+```sh
+node --test apps/web/test/ssl-request-draft.test.js apps/web/test/ssl-form-wiring.test.js
+```
+
+Model testleri gerçek reducer/varsayılan/snapshot işlevlerini yürütür. Sekiz wiring testi JSX kaynak metnini inceler; React render veya HTTP listener testi değildir. Ortamın hazır JSX ayrıştırıcısı/dönüştürücüsüyle `SiteOperations.jsx` sözdizimi ve üretilen JavaScript `node --check` kontrolü geçti; modül çözümleme, Vite build veya görsel kabul değildir. Projeye yeni dil/bağımlılık eklenmedi.
+
+Dört değişen kaynak/test dosyası GitHub `96db8b9b` blob SHA'larıyla yerelde sınanan içerik bakımından birebir eşleşti. `useOperation`, `ApplicationOperations` ve `DomainOperations` gövdeleri değişmedi. Önceki 51 kart, 49 gezinme, Files, reseller ve removal testleri bu tur yeniden çalıştırılmadı ve 27'ye eklenmedi.
+
+## T-DEV-SSL-FORM — gerçek ortam TODO
+
+- [ ] Node >=24.11.1/npm >=11 tam checkout'ta `npm ci`, `npm run check`; yeni iki test ve mevcut SSL/session/unsaved/UI regresyonları birlikte çalışsın. Gerçek React/Vite import çözümlemesi ve üretim bundle'ı doğrulansın.
+- [ ] Owner ve Site A/Site B hesabıyla kart → SSL/TLS → geri. Kullanıcı e-postası ve e-posta biçimindeki username senaryolarında doğru adres gelsin; adres yoksa global Owner/ACME adresine düşmeden boş alan açıklansın. Network'te bu form için global settings isteği bulunmasın.
+- [ ] Hiç değişiklik yokken geri/sekme değişimi/reload uyarısız olsun. E-posta veya her kapsam kutusu değişince uyarı gelsin; eski değere dönme/sıfırlama kaldırmalı. Yalnız kutu değişikliği ve boş e-posta da dirty sayılmalı. Yenileme ekranı gizli başvuru taslağı yüzünden uyarmamalı.
+- [ ] Geç gelen kullanıcı adresi, elle yazılan/temizlenen adres, aynı kullanıcının profil güncellemesi, logout/login/MFA rotation ve site değişimi. Taslak başka kullanıcıya/siteye taşınmamalı; onaydan vazgeçme taslağı korumalı. Native browser beforeunload ve React blocker ayrı sınansın.
+- [ ] Staging, gerçek issuance, failed/cancelled/timeout, çift tıklama ve durum güncellemesi. Staging sonrası gerçek talep taslağı temizlenmemeli. Gönderilen email/kapsam snapshot'ı formdan gelmeli; sonradan gelen default payload'ı değiştirmemeli. Bu kaynak testleri gerçek Let's Encrypt işlemi yapmadı.
+- [ ] Çok adımlı mevcut `issue()` akışında sayfadan ayrılma ve oturum/izin değişimi ayrıca sınansın. React form key'i mevcut istemci orkestrasyonunun veya sunucu job'unun cancellation/tenant güvenliğini tamamlamaz; backend'e bağlı tek görev ve güvenli retry/yeniden yetkilendirme işleri açık kalır.
+- [ ] 320/390/834/1440 px, %200 zoom, Chromium/Firefox, klavye/ekran okuyucu; e-posta açıklaması, kapsam kutuları, onay ve sıfırlama eylemi. Mevcut tasarım dili ve görünür Files/SSL/DB/mail girişleri korunsun.
+
+## Bu dilimin dışında kalan mevcut işler
+
+BUG-20260923-06 sertifika süresi/fingerprint/UI senkronizasyonu; mevcut mail identity atamasının hata/kısmi başarı/revizyon işleyişi; teknik stage/activate adımlarının tek kullanıcı görevine dönüştürülmesi; backend orkestrasyonu; alias/hosting formları ve genel tenant/host kabulü. Bunlar tamamlanmış sayılmaz. Form baseline'ının temiz olması Nginx/Postfix/Dovecot canlı sağlığına dair yeni bir kanıt değildir.
+
+`ui-plan.md` bu kaynak işaretlerine ve kabul listesine bağlanır. Kök `plan.md` BUG-04/05 üst kutuları gerçek kabul beklediği için açık kalır. Bu ek, kök `todo.md` ve `docs/ux/development-todo.md` kabullerini kaldırmaz. Yalnız development, küçük commit, `[skip ci]`; main/Actions/Files motoru/tema/deploy/canlı host işlemi yapılmadı.
