@@ -1,4 +1,5 @@
 import { AuthError } from './auth-error.js';
+import { initializeHostingSiteAllocationSchema, rollbackEmptyHostingSiteAllocationSchema } from './hosting-site-allocation-schema.js';
 
 const version = 1;
 const safeInteger = '9007199254740991';
@@ -100,11 +101,14 @@ function inspect(db) {
  */
 export function initializeHostingAccountSchema({ db, transaction }) {
   return transaction(() => {
-    if (inspect(db)) return { version, created: false };
-    for (const [, , sql] of objects) db.exec(sql);
-    db.prepare('INSERT INTO auth_hosting_schema VALUES (1, ?)').run(version);
+    const created = !inspect(db);
+    if (created) {
+      for (const [, , sql] of objects) db.exec(sql);
+      db.prepare('INSERT INTO auth_hosting_schema VALUES (1, ?)').run(version);
+    }
+    initializeHostingSiteAllocationSchema(db);
     inspect(db);
-    return { version, created: true };
+    return { version, created };
   });
 }
 
@@ -119,6 +123,7 @@ export function rollbackEmptyHostingAccountSchema({ db, transaction }) {
         throw new AuthError('hosting_schema_in_use', 'Hosting account data must be migrated before rollback.', 409);
       }
     }
+    rollbackEmptyHostingSiteAllocationSchema(db);
     for (const [type, name] of [...objects].reverse().filter(([type]) => type === 'trigger')) db.exec(`DROP ${type} ${name}`);
     for (const name of ['auth_customer_websites', 'auth_reseller_limits', 'auth_hosting_accounts', 'auth_hosting_schema']) db.exec(`DROP TABLE ${name}`);
     return { removed: true };
