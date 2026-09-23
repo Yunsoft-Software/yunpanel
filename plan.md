@@ -1,5 +1,17 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## Son kullanıcı teyidi ve UX ilerlemesi — 2026-09-23
+
+**Güncel sıra: Plesk görev yerleşimi ve site araçlarının kullanım akışları önce gelir.** Aşağıdaki eski “bu tur önce reseller” sırası bu son teyitle değiştirilmiştir. Ayrı reseller/cleanup backend genişlemesi günlük site araçlarının önüne geçmez; güvenlik ve üretim kabulü gevşetilmez. Mevcut Ember görsel dili ve çalışan motorlar korunur.
+
+- [x] **UX-PL-03a/b kaynak:** `/websites` açılışı, Plesk görev sıralı menü, Owner araç merkezi ve site hesabının kapsamlı Posta/DB girişi; `aa41cc24`. Önceki turun raporu: [yerleşim kontrolü](docs/ux/plesk-placement-recheck-2026-09-23.md).
+- [x] **UX-PL-04a/06a kaynak:** Genel Bakış / Barındırma ve DNS / Posta; görünür site araçları, teknik kimlikler ikinci planda; `6b755b28`. Önceki testler bu tur yeniden çalıştırılmış sayılmaz.
+- [x] **UX-PL-04b.1–3 kaynak:** liste artık doğrudan Dosyalar/DB/SSL/DNS/Posta/Günlükler ve barındırma/uygulama/Git erişimli kartlar kullanıyor. Arama/alias, filtreler, hiyerarşi, grup sayfalaması ve yoğunluk korundu. Doğrulanmış aynı-sunucu bağlantısı, görünür eksik/stale durum, Owner alt alan adı eylemi ve bütün kaynakları yenileme; `660e8162`, `deeb700c`.
+- [x] **UX-PL-04b.4 seçili kaynak testleri:** **51 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. 33 hedef/etiket, 7 hiyerarşi/sertifika, 7 kaynak bağlantısı ve mevcut 4 liste regresyonu. [Kaynak raporu ve T-DEV-SITE-CARDS](docs/ux/website-task-cards.md). JSX parser/render/build veya gerçek API/browser kabulü değildir.
+- [ ] **UX-PL-04/06 kalan:** gerçek alias düzenleme, hosting formu, silme/askı akışları, PHP/cron/backup/istatistik görevleri ve uçtan uca kabul. Kart kaynağı tamamlandığı için üst UX kutuları kapanmaz. Files taslak/yol korunması ve önceki production/RS kapıları açık kalır.
+
+Bu bölüm, `ui-plan.md` ve önceki navigasyon raporundaki “kart/liste kaynak işi henüz yapılmadı” notunun güncel karşılığıdır. Sonraki dilim yeni bir dashboard veya reseller paket motoru değil, mevcut site araçlarının oluşturma/düzenleme/sonuç/geri dönüş akışıdır.
+
 ## Son kapsam kararı — 2026-09-23: development, sade reseller
 
 Aktif dal **`development`**, başlangıç **`main@1a45ded8697d640b87c149143613454fac1fa94d`**. Bu çalışma main'e yazılmaz. Kullanıcının son isteğiyle reseller kapsamı küçültüldü: **Owner → isteğe bağlı tek Reseller → Customer → mevcut Website**. İlk sürüm müşteri/site yönetimi ve iki basit adet sınırıdır; zorunlu paket veya abonelik katmanı yoktur. [Güncel rol/ekran ve RS-00–05 sözleşmesi](docs/ux/plesk-full-scope.md) uygulanır. [Tam özellik envanteri](docs/plesk-feature-parity.md) uzun vadeli karşılaştırma kaydıdır; geniş reseller satırları ilk sürümün yayın engeli değildir.
