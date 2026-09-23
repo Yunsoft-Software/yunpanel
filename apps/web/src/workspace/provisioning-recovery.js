@@ -64,8 +64,9 @@ function verifiedResult(value, approved, websiteId) {
   if (!operation || operation.operationId !== approved.operationId
     || (value.stepId !== null && !operation.steps.some((step) => step.id === value.stepId))) throw invalid();
   if (approved.action === 'compensate' && value.stepId !== approved.stepId) throw invalid();
-  if ((value.outcome === 'ready') !== operation.ready) throw invalid();
+  if (value.outcome === 'ready' && !operation.ready) throw invalid();
   const step = operation.steps.find((item) => item.id === value.stepId);
+  if (value.outcome === 'failed' && step?.state !== 'failed') throw invalid();
   if (['progressed', 'reconciled'].includes(value.outcome) && step?.state !== 'succeeded') throw invalid();
   if (value.outcome === 'compensated' && step?.state !== 'compensated') throw invalid();
   return operation;
