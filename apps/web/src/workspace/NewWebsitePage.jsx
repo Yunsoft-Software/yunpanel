@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { domainCreatePayload } from '../domain-form.js';
+import { usePanelSession } from '../panel-session.jsx';
+import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, LinkButton, PageHeading, Section } from './PanelKit.jsx';
@@ -15,10 +17,15 @@ import {
 } from './new-website-form.js';
 import { siteHref } from './site-model.js';
 import { autoAdvanceWebsiteProvisioning } from './provisioning-client.js';
+import { createSiteSubmission, EMPTY_SITE_SUBMISSION, siteSubmissionBusy } from './site-create-submission.js';
+import SiteCreateResult, { SiteCreateProgress } from './SiteCreateResult.jsx';
 
 export default function NewWebsitePage() {
   const [params] = useSearchParams();
-  return <WebsiteForm key={params.get('parent') ?? 'root'} parentId={params.get('parent') ?? ''} />;
+  const { session } = usePanelSession();
+  const parentId = params.get('parent') ?? '';
+  const identity = JSON.stringify([parentId, session?.user?.id, session?.user?.role, sessionVersion()]);
+  return <WebsiteForm key={identity} parentId={parentId} />;
 }
 function WebsiteForm({ parentId }) {
   const { domains, websites, servers, applications, refreshAll } = useWorkspace();
@@ -44,12 +51,29 @@ function WebsiteForm({ parentId }) {
   });
 
   const [operationId] = useState(() => crypto.randomUUID());
-  const [dirty, setDirty] = useState(false); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
-  const [provisioningSteps, setProvisioningSteps] = useState([]);
-  const [provisioningFailure, setProvisioningFailure] = useState(null);
-  const pending = useRef(false); const requests = useRef(null);
-  useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
-  useUnsavedChanges(dirty && !created);
+  const [dirty, setDirty] = useState(false); const [sharedBusy, setSharedBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
+  const [submission, setSubmission] = useState(EMPTY_SITE_SUBMISSION);
+  const pending = useRef(false); const scope = useRef(null);
+  useEffect(() => {
+    const controller = new AbortController();
+    const version = sessionVersion();
+    const isCurrent = () => !controller.signal.aborted && version === sessionVersion() && !sessionTransitionPending();
+    const flow = createSiteSubmission({
+      request: panelRequest, advance: autoAdvanceWebsiteProvisioning, isCurrent,
+      onState: (state) => {
+        setSubmission(state);
+        if (state.created || state.phase === 'uncertain') {
+          setDirty(false);
+          setForm((value) => ({ ...value, adminPassword: '' }));
+        }
+      },
+    });
+    scope.current = { flow, isCurrent, signal: controller.signal };
+    return () => { flow.dispose(); controller.abort(); };
+  }, []);
+  const busy = sharedBusy || siteSubmissionBusy(submission);
+  const finishedAttempt = Boolean(created || submission.created || submission.phase === 'uncertain');
+  useUnsavedChanges(dirty && !finishedAttempt);
   const parent = domains.items.find((item) => item.id === form.parentDomainId);
   const serverId = servers.items.length === 1 ? servers.items[0].id : '';
   const existingType = existingApplicationType(form.sourceMode);
@@ -65,7 +89,7 @@ function WebsiteForm({ parentId }) {
   const selectedSharedDomain = selectedSharedWebsite
     ? domains.items.find((item) => item.websiteId === selectedSharedWebsite.id) ?? null
     : null;
-  const baseLocked = busy || domains.status !== 'ready' || servers.status !== 'ready';
+  const baseLocked = busy || finishedAttempt || domains.status !== 'ready' || servers.status !== 'ready';
   const bindingDataPending = (existingType || sharedMode) && (applications.status !== 'ready' || websites.status !== 'ready');
   const locked = baseLocked || Boolean(bindingDataPending);
   function update(key, value) { setDirty(true); setForm((current) => ({
@@ -74,7 +98,9 @@ function WebsiteForm({ parentId }) {
     ...(['parentDomainId', 'mode', 'sourceMode'].includes(key) ? { applicationId: '', websiteId: '' } : {}),
   })); }
   async function submit(event) {
-    event.preventDefault(); if (locked || pending.current) return;
+    event.preventDefault();
+    const current = scope.current;
+    if (locked || pending.current || !current?.isCurrent()) return;
     pending.current = true; setError(null);
     try {
       const selected = eligible.find((app) => app.id === form.applicationId);
@@ -100,76 +126,32 @@ function WebsiteForm({ parentId }) {
         });
         return;
       }
-      setBusy(true);
-      setProvisioningFailure(null);
-      setProvisioningSteps([{ id: 'init', label: 'Site ve çalışma alanı kaydı oluşturuluyor…', state: 'running' }]);
       const input = siteCreateInputFromForm({ form, operationId, serverId, domain, selectedApplication: selected });
-      const preview = await panelRequest('/sites/create-preview', { method: 'POST', body: { input }, signal: requests.current.signal });
-      const result = await panelRequest('/sites', {
-        method: 'POST', body: { input, previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal: requests.current.signal,
-      });
-
-      setProvisioningSteps((prev) => [
-        ...prev.map((s) => ({ ...s, state: 'succeeded' })),
-        { id: 'provisioning', label: 'Servisler ve yapılandırmalar kuruluyor…', state: 'running' },
-      ]);
-
-      let provOp = result?.provisioning ?? null;
-      if (provOp && provOp.operationId && !provOp.ready) {
-        provOp = await autoAdvanceWebsiteProvisioning(provOp.operationId, {
-          signal: requests.current.signal,
-          onStep: (stepRes) => {
-            if (stepRes?.stepId) {
-              const labelMap = {
-                dns_zone: 'DNS Zone (PowerDNS)',
-                nginx: 'Nginx Web Sunucusu',
-                mail_domain: 'E-Posta Domaini',
-                mail_dkim_key: 'DKIM Anahtarı',
-                mail_dns_reapply: 'Mail DNS Kayıtları',
-                roundcube_mapping: 'Webmail (Roundcube)',
-                webmail_certificate: 'Webmail SSL',
-              };
-              const label = labelMap[stepRes.stepId] ?? `${stepRes.stepId} adımı`;
-              const stepState = stepRes.outcome === 'failed' || stepRes.outcome === 'retry_exhausted' ? 'failed'
-                : stepRes.outcome === 'progressed' || stepRes.outcome === 'ready' ? 'succeeded' : 'running';
-              setProvisioningSteps((prev) => {
-                const existing = prev.find((s) => s.id === stepRes.stepId);
-                if (existing) {
-                  return prev.map((s) => s.id === stepRes.stepId ? { ...s, state: stepState, error: stepRes.error } : s);
-                }
-                return [...prev, { id: stepRes.stepId, label, state: stepState, error: stepRes.error }];
-              });
-              if (stepRes.outcome === 'failed' || stepRes.outcome === 'retry_exhausted') {
-                setProvisioningFailure({ stepId: stepRes.stepId, error: stepRes.error, operationId: provOp.operationId });
-              }
-            }
-          },
-        });
-      }
-
-      setCreated({ ...result.primaryDomain, ready: provOp?.ready ?? false });
-      setDirty(false);
-      refreshAll();
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { pending.current = false; if (!requests.current.signal.aborted) setBusy(false); }
+      const state = await current.flow.submit(input, { signal: current.signal });
+      if (current.isCurrent() && (state.created || state.phase === 'uncertain')) refreshAll();
+    } catch (failure) { if (current.isCurrent() && failure.name !== 'AbortError') setError(failure.message); }
+    finally { pending.current = false; }
   }
   async function confirmSharedSite() {
-    if (!sharedConfirmation || busy || pending.current) return;
-    pending.current = true; setBusy(true); setError(null);
+    const current = scope.current;
+    if (!sharedConfirmation || locked || pending.current || !current?.isCurrent()) return;
+    pending.current = true; setSharedBusy(true); setError(null);
     try {
       const result = await panelRequest('/domains', {
-        method: 'POST', body: sharedConfirmation.input, signal: requests.current.signal,
+        method: 'POST', body: sharedConfirmation.input, signal: current.signal,
       });
-      setCreated(result); setSharedConfirmation(null); setDirty(false); refreshAll();
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { pending.current = false; if (!requests.current.signal.aborted) setBusy(false); }
+      if (!current.isCurrent()) return;
+      setCreated(result); setSharedConfirmation(null); setDirty(false);
+      setForm((value) => ({ ...value, adminPassword: '' })); refreshAll();
+    } catch (failure) { if (current.isCurrent() && failure.name !== 'AbortError') setError(failure.message); }
+    finally { pending.current = false; if (current.isCurrent()) setSharedBusy(false); }
   }
   return <>
     <nav className="ws-breadcrumb" aria-label="Konum"><Link to="/websites">Web siteleri</Link><span>/</span><span>Yeni kayıt</span></nav>
     <PageHeading title={form.mode === 'subdomain' ? 'Alt alan adı ekle' : 'Web sitesi ekle'} description="Ayrı bir uygulama oluşturun, kullanılmamış bir uygulamayı bağlayın veya açıkça mevcut Website’i paylaşın." />
-    {created ? <Section title="Site ve çalışma alanı hazırlandı"><EmptyState icon="check" title={created.primaryDomain} detail={created.ready ? 'Web sitesi, çalışma alanı (workspace), Nginx ve Webmail otomatik olarak başarıyla kuruldu.' : 'Web sitesi ve çalışma alanı oluşturuldu. Kalan adımları (DNS/SSL) site genel bakışından tamamlayabilirsiniz.'} action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
+    {submission.created || submission.phase === 'uncertain' ? <SiteCreateResult state={submission} /> : created ? <Section title="Alan adı bağlantısı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Alan adı mevcut Website’e bağlandı. Yayın ve servis durumunu site araçlarından kontrol edin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Yerel sunucu" />{(existingType || sharedMode) && <><CollectionNotice resource={applications} label="Uygulamalar" /><CollectionNotice resource={websites} label="Website bağları" /></>}
-      <form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><fieldset disabled={baseLocked}>
+      <form className="ws-form" onSubmit={submit}><ErrorNotice error={error ?? submission.error} /><fieldset disabled={baseLocked}>
         <h3>1. Alan adı</h3><div className="ws-form-grid" style={{ marginTop: 16 }}>
           <label>Kayıt türü<select value={form.mode} onChange={(event) => update('mode', event.target.value)}><option value="domain">Bağımsız alan adı</option><option value="subdomain">Alt alan adı</option></select></label>
           {form.mode === 'subdomain' ? <><label>Üst alan adı<select value={form.parentDomainId} required onChange={(event) => update('parentDomainId', event.target.value)}><option value="">Alan adı seçin</option>{domains.items.map((item) => <option key={item.id} value={item.id}>{item.primaryDomain}</option>)}</select></label><label>Alt alan adı<input value={form.prefix} required placeholder="api" autoCapitalize="none" spellCheck={false} onChange={(event) => update('prefix', event.target.value)} /><span className="ws-field-hint">{parent ? `${form.prefix.trim() || 'api'}.${parent.primaryDomain}` : 'Önce üst alan adını seçin.'}</span></label></> : <label>Alan adı<input value={form.primaryDomain} required placeholder="example.com" autoCapitalize="none" spellCheck={false} onChange={(event) => update('primaryDomain', event.target.value)} /></label>}
@@ -216,26 +198,7 @@ function WebsiteForm({ parentId }) {
         </div>}
         <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>3. HTTPS</h3><label style={{ marginTop: 16 }}>Sertifika yönetimi<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="managed">Yönetilen HTTPS — sertifika daha sonra istenir</option><option value="off">Şimdilik HTTP</option></select><span className="ws-field-hint">Kayıt oluşturmak sertifika üretmez. DNS ve Nginx doğrulandıktan sonra SSL sekmesinden isteyin.</span></label></div>
         {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}><h3>4. E-Posta ve Webmail</h3><label className="ws-check" style={{ marginTop: 16 }}><input type="checkbox" checked={form.mailMode === 'local'} onChange={(event) => update('mailMode', event.target.checked ? 'local' : 'none')} /><span><strong>Otomatik E-Posta ve Webmail (Roundcube) etkinleştir</strong><small><code>webmail.{form.primaryDomain.trim() || 'domain.com'}</code> için DNS A kaydı, SSL sertifikası ve Roundcube web arayüzü otomatik olarak hazırlanır.</small></span></label></div>}
-        {provisioningSteps.length > 0 && <div className="ws-form-divider" style={{ marginTop: 24 }}>
-          <h3>Kurulum İlerlemesi</h3>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: 12 }}>
-            {provisioningSteps.map((step) => (
-              <div key={step.id} style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '0.9rem' }}>
-                {step.state === 'running' && <span className="ws-spinner" style={{ width: 14, height: 14 }} />}
-                {step.state === 'succeeded' && <span style={{ color: '#10b981' }}>✓</span>}
-                {step.state === 'failed' && <span style={{ color: '#ef4444' }}>✕</span>}
-                <strong style={{ color: step.state === 'failed' ? '#ef4444' : undefined }}>{step.label}</strong>
-                {step.error && <small style={{ color: '#ef4444', marginLeft: 8 }}>({step.error})</small>}
-              </div>
-            ))}
-            {provisioningFailure && (
-              <div className="ws-notice ws-notice-danger" style={{ marginTop: 8 }}>
-                <p><strong>Kurulum adımı başarısız oldu: {provisioningFailure.stepId}</strong> ({provisioningFailure.error})</p>
-                <p className="ws-muted">Kalan adımları daha sonra site genel bakışından tamamlayabilirsiniz.</p>
-              </div>
-            )}
-          </div>
-        </div>}
+        <SiteCreateProgress state={submission} />
         <footer className="ws-form-footer" style={{ marginTop: 24 }}><LinkButton to="/websites">Vazgeç</LinkButton><Button type="submit" variant="primary" icon="plus" disabled={locked || !serverId || (existingType && !form.applicationId) || (sharedMode && !form.websiteId)}>{busy ? 'Oluşturuluyor ve kuruluyor…' : sharedMode ? 'Website bağını oluştur' : 'Siteyi oluştur'}</Button></footer>
 
       </fieldset></form>
