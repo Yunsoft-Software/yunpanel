@@ -1,5 +1,13 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## HST-UI-01–04 — Barındırma yönlendirme formu kaynağı tamamlandı
+
+- [x] **Model/istemci:** önceki `cdd25bdd`, `4fa4ac36`, `e4575721` kaynakları dalda; yalnız HTTP→HTTPS ve alias→ana alan adı tercihleri. Önizleme, güncel hedef/revizyon, dar PATCH ve kayıt sonrası doğrulama korunur.
+- [x] **Form ve taslak:** `fdb4b0f5`, `0dee00ab`, `353ff13e`; mevcut Site → Barındırma ve DNS → Barındırma ayarları (`/websites/:domainId/settings`). Açık inceleme/kaydetme, iptal, kaydedilmemiş taslak uyarısı, kullanıcı/site/oturum değişimi ve belirsiz sonuçta yeniden okuma. Yeniden yüklemede yalnız kullanıcının değiştirdiği tercihler korunur; dokunulmayan alanlar güncel kayıttan gelir. Files/SSL/alias motorları ve bilgi görünümü korunur.
+- [x] **Canlı veri koruması:** `91957be5` ile settings rotası jobs yükler. Domain/job güncelliği, çalışan iş, yetki ve askı mutation öncesinde tekrar denetlenir. Kaydetme yayın değildir; mevcut Yayın yönetimi → Yayına uygula akışına bağlantı vardır, ikinci yayın motoru yoktur.
+- [x] **Seçili kaynak testi:** `9289a0ba`; Node22.16.0 altında 85 geçti / 0 başarısız / 0 atlandı (önceki hosting 49 yeniden koşuldu + yeni 36). Yeni 36'nın 5'i JSX kaynak bağlantısı kontrolüdür; React render değildir. İki JSX sözdizimi/dönüşüm kontrolü temiz; beş yeni/değişmiş kaynak/test dosyası GitHub blob'larıyla eşleşir.
+- [ ] **Gerçek kabul ve kapsam:** Node24/npm11 tam check, gerçek React/Vite/HTTP/browser/host ve T-DEV-HOSTING açık. İki tercih dışındaki ayrıntılı hosting düzenlemeleri, diğer UX-PL-04/06 görevleri ve backend ortak kilit kapıları kapanmadı. [Güncel kaynak, commitler ve Codex kabul listesi](docs/ux/hosting-settings-flow.md). Eski “hosting formu henüz bağlanmadı” notlarının yalnız bu iki tercihlik kaynak dilimi güncellenmiştir.
+
 ## UX-PL-04c / 06d — Alias kaynak aktarımı tamamlandı
 
 - [x] **Kaynak / development:** önceki yerel paket `027b664f` ve `e3ac0fc9` ile dalda. Barındırma ve DNS → Alan adları; görünür ekle/çıkar/iptal, SSL etkili önizleme ve aynı mevcut API üzerinden kaydetme. SiteDetailPage bağlantısı yalnız iki import satırıdır; Files/SSL motorları değişmedi.
@@ -15,7 +23,7 @@
 - [x] **UX-PL-04a/06a kaynak:** Genel Bakış / Barındırma ve DNS / Posta; görünür site araçları, teknik kimlikler ikinci planda; `6b755b28`. Önceki testler bu tur yeniden çalıştırılmış sayılmaz.
 - [x] **UX-PL-04b.1–3 kaynak:** liste artık doğrudan Dosyalar/DB/SSL/DNS/Posta/Günlükler ve barındırma/uygulama/Git erişimli kartlar kullanıyor. Arama/alias, filtreler, hiyerarşi, grup sayfalaması ve yoğunluk korundu. Doğrulanmış aynı-sunucu bağlantısı, görünür eksik/stale durum, Owner alt alan adı eylemi ve bütün kaynakları yenileme; `660e8162`, `deeb700c`.
 - [x] **UX-PL-04b.4 seçili kaynak testleri:** **51 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. 33 hedef/etiket, 7 hiyerarşi/sertifika, 7 kaynak bağlantısı ve mevcut 4 liste regresyonu. [Kaynak raporu ve T-DEV-SITE-CARDS](docs/ux/website-task-cards.md). JSX parser/render/build veya gerçek API/browser kabulü değildir.
-- [ ] **UX-PL-04/06 kalan:** alias gerçek ortam/DNS/posta kabulü, hosting formu, silme/askı akışları, PHP/cron/backup/istatistik görevleri ve uçtan uca kabul. Kart kaynağı tamamlandığı için üst UX kutuları kapanmaz. Files taslak/yol korunması ve önceki production/RS kapıları açık kalır.
+- [ ] **UX-PL-04/06 kalan:** alias gerçek ortam/DNS/posta kabulü, iki yönlendirme dışındaki hosting düzenlemeleri ve T-DEV-HOSTING, silme/askı akışları, PHP/cron/backup/istatistik görevleri ve uçtan uca kabul. Kart kaynağı tamamlandığı için üst UX kutuları kapanmaz. Files taslak/yol korunması ve önceki production/RS kapıları açık kalır.
 
 Bu bölüm, `ui-plan.md` ve önceki navigasyon raporundaki “kart/liste kaynak işi henüz yapılmadı” notunun güncel karşılığıdır. Sonraki dilim yeni bir dashboard veya reseller paket motoru değil, mevcut site araçlarının oluşturma/düzenleme/sonuç/geri dönüş akışıdır.
 
