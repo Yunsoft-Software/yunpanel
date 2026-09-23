@@ -1,4 +1,5 @@
 import { AuthError } from './auth-error.js';
+import { handleHostingAccountAdmin, isHostingAccountPath } from './hosting-account-http.js';
 
 function pagination(query) {
   for (const key of query.keys()) {
@@ -13,6 +14,9 @@ function pagination(query) {
  * The store repeats live authorization inside the write transaction / after KDF.
  */
 export async function handleUserAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
+  if (isHostingAccountPath(pathname)) {
+    return handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json });
+  }
   const collection = pathname === '/api/users';
   const match = /^\/api\/users\/([A-Za-z0-9_-]{1,128})$/.exec(pathname);
   if (!collection && !match) throw new AuthError('not_found', 'Account route not found.', 404);

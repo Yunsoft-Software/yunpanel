@@ -1,6 +1,6 @@
 import { AuthError } from './auth-error.js';
 
-const ROOT = '/api/hosting-accounts';
+const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
 const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile))?$`);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
