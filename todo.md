@@ -4,6 +4,15 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-CREATE-RESULT — Site oluşturma sonucu sürekliliği (2026-09-23)
+
+Kaynak `development` dalında CREATE-RESULT-01–04 ile tamamlandı; [kaynak/test raporu ve ayrıntılı kabul](docs/ux/site-create-result-flow.md). Bu tur 62 seçili Node22 testi ve iki JSX sözdizimi kontrolü çalıştı; gerçek React/API/host kabulü değildir. Önceki test sayıları eklenmez.
+
+- [ ] Node >=24.11.1/npm >=11 tam checkout, npm ci, lint/test/build. `site-create-submission.test.js`, `site-create-result-wiring.test.js` ve mevcut form/create/provisioning/session regresyonları birlikte çalışsın. GitHub/npm DNS hatası nedeniyle burada tam checkout ve hedef bağımlılık kurulumu yapılamadı.
+- [ ] Gerçek create 201/200 sonrasında provisioning hatası, timeout, yanlış/bozuk cevap ve blocked/failed/interrupted sonucu: oluşturulmuş site kartı, adımlar ve doğru Domain-ID Genel Bakış/Dosyalar bağlantısı korunsun. Kayıt başarısı çalışır site/SSL/mail/site-admin başarısı diye sunulmasın.
+- [ ] Create POST yanıt kaybı, 401/403/409/429/5xx ve çift gönderimde aynı form kör create tekrarı yapmasın. Önizleme hatası düzeltilebilir kalsın. Belirsiz sonucu mevcut site listesinden/backend kaydından uzlaştır; otomatik cleanup veya yeni site oluşturma yapma.
+- [ ] Gerçek React StrictMode, logout/login, yetki değişimi, unmount/abort ve yeni form bağlamında eski yanıt sızmasın. Parola alanının temizlenmesini, sonuç odağı/ekran okuyucu/mobil/klavye/koyu tema ve mevcut shared-site açık onayını doğrula. `.44` dışında yalnız izinli test hostunu kullan. Manuel recovery, backend site-admin hata yayılımı ve güvenli retry kaynak işleri `plan.md` içinde açık kalır.
+
 ## T-DEV-JOB-UX — İşlem durumu ve kurulum ilerletme (2026-09-23)
 
 Aktif çalışma dalı `development`; aşağıdaki eski tarihli `main` ifadeleri bu dilimin hedefi değildir. Kaynak ve ayrıntılı kabul: [job-progress-retry-flow.md](docs/ux/job-progress-retry-flow.md). Seçili Node22 testleri gerçek ortam kabulünü kapatmaz.
