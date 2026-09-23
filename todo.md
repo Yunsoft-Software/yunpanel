@@ -4,6 +4,15 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-ADMIN-RESULT — Site yöneticisi hesap sonucu (2026-09-24)
+
+Kaynak ADMIN-RESULT-01–04 ile `development` dalında tamamlandı; [kaynak/test raporu](docs/ux/site-admin-result-flow.md). Seçili Node22 koşusunda 39 test geçti; gerçek auth/Argon2/SQLite/React/host kabulü değildir. Rota testindeki engine/planner/guard/store bağımlılıkları açık fixture'dır.
+
+- [ ] Node >=24.11.1/npm >=11 ile tam checkout/npm ci/lint/test/build. Yeni `site-admin-provisioning.test.js`, `site-create-mount-contract.test.js`, `site-admin-result.test.js` ile mevcut create/user/auth/form/provisioning regresyonlarını birlikte çalıştır; gerçek app.js import ve HTTP/auth/CSRF zincirini doğrula.
+- [ ] Gerçek kullanıcı deposunda hesap yaratılmasını bekle; normalize kullanıcı adı, actorId audit'i, site_manager rolü, aktiflik ve yalnız beklenen Website bağı doğrulansın. Yeni hesapla gerçek giriş ve Site A→Site B erişim reddi denensin.
+- [ ] Hesap çakışması/hash/store hatası, eksik bağımlılık ve eski/bozuk API cevabında site kaydı ile hesap sonucu ayrı görünsün. Host planı tamamlanınca hesap uyarısı kaybolmasın. Replay mevcut hesabı yeniden yaratmasın, parolasını veya site yetkisini değiştirmesin; kalıcı operation→user uzlaştırmasını ayrıca tamamla.
+- [ ] Hash sırasında yetki iptali/Website silme, iki süreç yarışı ve hesap sonrası provisioning registry yazma hatalarını test et. Atomik yetki/kilit ve kalıcı sonuç kaydı bu kaynak dilimiyle kapanmadı. Gerçek React/router/mobil/klavye/koyu tema ve mevcut kullanıcı yönetimi/Genel Bakış/Dosyalar bağlantılarını doğrula. `.44` kesinlikle hariç; canlı deploy bu tur yapılmadı.
+
 ## T-DEV-RECOVERY — Manuel kurulum kurtarma (2026-09-23)
 
 Kaynak `development` dalında RECOVERY-01–04 ile tamamlandı; [güncel kaynak ve test raporu](docs/ux/provisioning-recovery-flow.md). Son koşu 71 geçti / 0 başarısız / 0 atlandı: önceki 70 yeniden koşuldu + 1 optional compensation testi. Node22 seçili davranış/kaynak testleri gerçek React/API/host kabulü değildir. GitHub DNS hatası nedeniyle burada tam checkout alınamadı.
@@ -19,7 +28,7 @@ Kaynak `development` dalında RECOVERY-01–04 ile tamamlandı; [güncel kaynak 
 Kaynak `development` dalında CREATE-RESULT-01–04 ile tamamlandı; [kaynak/test raporu ve ayrıntılı kabul](docs/ux/site-create-result-flow.md). Bu tur 62 seçili Node22 testi ve iki JSX sözdizimi kontrolü çalıştı; gerçek React/API/host kabulü değildir. Önceki test sayıları eklenmez.
 
 - [ ] Node >=24.11.1/npm >=11 tam checkout, npm ci, lint/test/build. `site-create-submission.test.js`, `site-create-result-wiring.test.js` ve mevcut form/create/provisioning/session regresyonları birlikte çalışsın. GitHub/npm DNS hatası nedeniyle burada tam checkout ve hedef bağımlılık kurulumu yapılamadı.
-- [ ] Gerçek create 201/200 sonrasında provisioning hatası, timeout, yanlış/bozuk cevap ve blocked/failed/interrupted sonucu: oluşturulmuş site kartı, adımlar ve doğru Domain-ID Genel Bakış/Dosyalar bağlantısı korunsun. Kayıt başarısı çalışır site/SSL/mail/site-admin başarısı diye sunulmasın.
+- [ ] Gerçek create 201/200 sonrasında provisioning hatası, timeout, yanlış/bozuk cevap ve blocked/failed/interrupted sonucu: oluşturulmuş site kartı, adımlar ve doğru Domain-ID Genel Bakış/Dosyalar bağlantıları korunsun. Kayıt başarısı çalışır site/SSL/mail/site-admin başarısı diye sunulmasın.
 - [ ] Create POST yanıt kaybı, 401/403/409/429/5xx ve çift gönderimde aynı form kör create tekrarı yapmasın. Önizleme hatası düzeltilebilir kalsın. Belirsiz sonucu mevcut site listesinden/backend kaydından uzlaştır; otomatik cleanup veya yeni site oluşturma yapma.
 - [ ] Gerçek React StrictMode, logout/login, yetki değişimi, unmount/abort ve yeni form bağlamında eski yanıt sızmasın. Parola alanının temizlenmesini, sonuç odağı/ekran okuyucu/mobil/klavye/koyu tema ve mevcut shared-site açık onayını doğrula. `.44` dışında yalnız izinli test hostunu kullan. Manuel recovery istemci kaynağı RECOVERY-01–04 ile tamamlandı, gerçek kabulü yukarıda açık; backend site-admin hata yayılımı ve güvenli retry kaynak işleri `plan.md` içinde açık kalır.
 
