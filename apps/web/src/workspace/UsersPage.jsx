@@ -5,6 +5,7 @@ import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, Modal, PageHeading, Section } from './PanelKit.jsx';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { HostingAccountsPanel, HostingProfileDialog } from './HostingAccountsPanel.jsx';
 import { createUserAdminClient, emptyUserPage, userAdminInput, userAdminMessage } from './user-admin-client.js';
 
 const LIMIT = 25;
@@ -22,6 +23,7 @@ export default function UsersPage() {
   const [number, setNumber] = useState(1);
   const [dialog, setDialog] = useState(null);
   const [notice, setNotice] = useState('');
+  const [profileRevision, setProfileRevision] = useState(0);
   const client = useRef(null);
   useEffect(() => {
     const instance = createUserAdminClient({ request: panelRequest, generation: sessionGeneration, onPage: setPage,
@@ -37,13 +39,18 @@ export default function UsersPage() {
   const totalPages = page.data ? Math.max(1, Math.ceil(page.data.total / LIMIT)) : number;
   useEffect(() => { if (page.status === 'ready' && number > totalPages) setNumber(totalPages); }, [number, page.status, totalPages]);
   function refresh() { return client.current?.load({ offset: (number - 1) * LIMIT, limit: LIMIT }); }
-  function closeDialog() { setDialog(null); refresh(); }
+  function closeDialog() { setDialog(null); setProfileRevision((value) => value + 1); refresh(); }
+  function hostingAccessLost() {
+    setDialog(null); setNotice(''); setSession(null);
+    window.dispatchEvent(new Event('yunpanel:session-expired'));
+  }
   async function save(method, user, body) {
     const instance = client.current; const started = sessionGeneration();
     if (!instance) { const error = new Error('Closed page'); error.name = 'AbortError'; throw error; }
     const result = await instance.mutate({ method, id: user?.id, body });
     if (result.sessionRevoked || instance !== client.current || started !== sessionGeneration()) return;
     setDialog(null);
+    setProfileRevision((value) => value + 1);
     setNotice(method === 'POST' ? 'Hesap oluşturuldu. Owner, ilk HTTPS girişinde MFA kurulumunu tamamlamalıdır.'
       : method === 'DELETE' ? 'Kullanıcı hesabı silindi. Web siteleri ve uygulamalar değiştirilmedi.'
         : 'Hesap kaydedildi. Değişiklik yapıldıysa kullanıcının mevcut oturumları kapatıldı.');
@@ -71,6 +78,7 @@ export default function UsersPage() {
           <td><Badge state={user.active ? 'active' : 'off'}>{user.active ? 'Aktif' : 'Devre dışı'}</Badge></td>
           <td><Badge state={user.mfaEnabled ? 'active' : 'warning'}>{user.mfaEnabled ? 'Kurulu' : 'Kurulu değil'}</Badge></td>
           <td><div className="ws-actions"><Button disabled={locked} aria-label={`${user.username} hesabını düzenle`} onClick={() => { setNotice(''); setDialog({ type: 'edit', user }); }}>Düzenle</Button>
+            {user.role === 'site_manager' && <Button disabled={locked} aria-label={`${user.username} bayi veya müşteri profilini yönet`} onClick={() => { setNotice(''); setDialog({ type: 'hosting', user }); }}>Bayi / müşteri</Button>}
             <Button disabled={locked} variant="danger" aria-label={`${user.username} hesabını sil`} onClick={() => { setNotice(''); setDialog({ type: 'delete', user }); }}>Sil</Button></div></td>
         </tr>)}</tbody>
       </table></div> : <EmptyState title="Bu sayfada hesap yok" detail="Önceki sayfaya dönün veya listeyi yenileyin." icon="user" />)}
@@ -79,7 +87,11 @@ export default function UsersPage() {
         <Button disabled={locked || !visible || number >= totalPages} onClick={() => setNumber((value) => value + 1)}>Sonraki</Button>
       </div></footer>
     </Section>
-    {dialog && <UserDialog key={`${dialog.type}:${dialog.user?.id ?? 'new'}`} mode={dialog.type} user={dialog.user} onClose={closeDialog} onSave={save} />}
+    <HostingAccountsPanel refreshKey={profileRevision} locked={dialog !== null} onAccessLost={hostingAccessLost}
+      onOpen={(accountId) => { setNotice(''); setDialog({ type: 'hosting', accountId }); }} />
+    {dialog?.type === 'hosting' ? <HostingProfileDialog key={dialog.user?.id ?? dialog.accountId} user={dialog.user} accountId={dialog.accountId}
+      onClose={closeDialog} onSaved={(message) => { setNotice(message); closeDialog(); }} onAccessLost={hostingAccessLost} />
+      : dialog && <UserDialog key={`${dialog.type}:${dialog.user?.id ?? 'new'}`} mode={dialog.type} user={dialog.user} onClose={closeDialog} onSave={save} />}
   </>;
 }
 
@@ -137,6 +149,7 @@ function UserDialog({ mode, user, onClose, onSave }) {
             </select></label>
             <label>Hesap durumu<select value={String(form.active)} onChange={(event) => update('active', event.target.value === 'true')}><option value="true">Aktif</option><option value="false">Devre dışı</option></select></label>
           </div>
+          {user && form.role === 'site_manager' && <p className="ws-muted">Bayi/müşteri profiline bağlı hesaplarda rol, durum ve site yetkileri bu formdan değiştirilemez. Profil işlemleri için kullanıcı listesindeki Bayi / müşteri düğmesini kullanın.</p>}
           {form.role === 'site_manager' && (
             <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
               <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: '13px' }}>Yönetilecek Web Siteleri</p>
