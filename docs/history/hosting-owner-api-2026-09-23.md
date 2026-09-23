@@ -1,28 +1,34 @@
 # RS-03a — Owner için sade hesap API'si
 
-2026-09-23; `development`, başlangıç `fbe2e591`.
+2026-09-23; `development`, kaynak commitleri `fc4672df` ve `cca9745b`.
 
-## Dilim ve uygulama sırası
+## Güncel bağlantı ve kapsam
 
-RS-02e'nin site yazıcıları/ortak kilit/tenant erişimi açık kalır. Onları tamamlanmış varsayarak site create veya reseller login açmak yerine, mevcut Owner kontrollü hesap deposu HTTP'ye bağlanır. Bu sınırlı RS-03a işi RS-02e'den bağımsızdır; yeni rol, site yetkisi, paket/abonelik motoru veya otomatik migration eklemez.
+Kök yol **`/api/users/hosting/accounts`**. Mevcut `user-admin-http.js` üzerinden 4 ek satırla bağlandı; `auth-http.js` değiştirilmedi. İlk handler dilimindeki `/api/hosting-accounts` henüz yayımlanmamış taslak yoldu; güncel istemci onu kullanmaz. `/api/panel/users/hosting/accounts` mevcut uyumluluk katmanından aynı korumalarla geçer.
+
+RS-02e'nin ortak site kilidi, bütün hedeflerde tenant yetkisi ve güvenli kontenjan temizliği açıktır. Owner profil yönetimi bunlardan bağımsız ilerler. Profil bağlamak yeni login, çalışan bayi paneli veya site erişimi oluşturmaz.
 
 ## API sözleşmesi
 
-Kök yol `/api/hosting-accounts`; mevcut `/api/panel/` uyumluluk yolu aynı authentication katmanından geçer.
+| İstek | Davranış |
+| --- | --- |
+| `GET /api/users/hosting/accounts` | `kind=reseller|customer`, `resellerId=<id>` veya müşteriler için `direct=true`, `limit=1..100`, `offset>=0`. Tekrarlı, bilinmeyen ve çelişen filtreler reddedilir. |
+| `POST /api/users/hosting/accounts` | Mevcut, site üyeliği olmayan site_manager hesabına profil bağlar. Bayi: `{kind:'reseller',userId,expectedUserRevision,limits:{maxCustomers,maxWebsites}}`. Müşteri: `{kind:'customer',userId,expectedUserRevision,resellerId}`. Doğrudan müşteri için `resellerId:null`. |
+| `GET /api/users/hosting/accounts/:id` | Güncel profil, revizyon ve desteklenen kayıtlı kullanım. `stage:profile_only` korunur. |
+| `PATCH /api/users/hosting/accounts/:id/limits` | `{revision,limits}`. İki açık adet sınırı; `null` sınırsız, `0` yeni kayıt yok. |
+| `DELETE /api/users/hosting/accounts/:id/profile` | `{revision,confirmation:'unregister-hosting-profile:<id>:<revision>'}`. Yalnız boş profili kaldırır. Bağlı müşteri/site/rezervasyon 409; login ve siteler silinmez (`loginDeleted:false`). |
 
-- `GET /api/hosting-accounts`: `kind=reseller|customer`, `resellerId=<id>` veya müşteri için `direct=true`, `limit=1..100`, `offset>=0`. Tekrarlı/bilinmeyen/çelişkili filtreler reddedilir. `null`/`none` metni geçerli kimlik olarak korunur, doğrudan müşteri anlamına gelmez.
-- `POST /api/hosting-accounts`: mevcut boş site_manager login'ine profil bağlar. Bayi için `{kind:'reseller', userId, expectedUserRevision, limits:{maxCustomers,maxWebsites}}`; müşteri için `{kind:'customer', userId, expectedUserRevision, resellerId}`. `resellerId:null` doğrudan müşteri. Yeni login/parola yaratma işlemi değildir.
-- `GET /api/hosting-accounts/:id`: güncel profil/limit/kayıtlı kullanım. `stage:profile_only` korunur; bayinin çalışan site paneli olduğu iddia edilmez.
-- `PATCH /api/hosting-accounts/:id/limits`: `{revision, limits}`; yalnız Owner, limitler explicit/null/0 anlamını korur.
-- `DELETE /api/hosting-accounts/:id/profile`: `{revision, confirmation:'unregister-hosting-profile:<id>:<revision>'}`. Yalnız boş profili kaldırır; bağlı müşteri/site/rezervasyon varsa mevcut depo 409 döndürür. Login, parola ve siteler silinmez (`loginDeleted:false`).
+Girdi rolü/actor/usage yetki kaynağı değildir. Mutation önce cookie, Origin, CSRF ve Owner/MFA katmanından geçer; depo işlem içinde güncel Owner yetkisini tekrar kontrol eder. Bilinmeyen alt yollar başka router'a düşmez. Site allocation/create/release, transfer, suspend ve login-as bu API'de yoktur. Profil değişimi hedef oturumlarını iptal eder; işlemi yapan Owner'ın cookie'sini silmez.
 
-Her mutation mevcut cookie + Origin + CSRF + Owner/MFA korumasının ardından çalışır; depo güncel oturumu transaction içinde yeniden doğrular. Query/body actor veya rolü yetki değildir. Yeni yol `siteAllocations`, create/release, transfer, suspend veya login-as metotlarını dışarı açmaz. Kök namespace altındaki bilinmeyen yollar başka router'a düşmez. Kayıt/kaldırma hedefin oturumlarını iptal eder; Owner'ın tarayıcı cookie'sini silmez.
+## Kaydedilen kaynak kabulü
 
-## Kaynak doğrulaması
+- [x] **RS-03a.1:** `fc4672df`, handler ve query sözleşmesi; 51 test.
+- [x] **RS-03a.2:** `cca9745b`, mevcut kullanıcı router'ı bağlantısı ve 32 yerel HTTP/SQLite testi.
+- [x] Önceki çalışma turunda `node --test apps/api/test/hosting-account-http*.test.js`: **83 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. Bu doküman düzeltmesinde yeniden çalıştırıldığı iddia edilmez.
+- [ ] Owner arayüzü: mevcut kullanıcı satırından profil yönetimi, açık limitler ve müşteri için bayi seçimi; yeni login veya site yetkisi varmış gibi sunma.
+- [ ] RS-02e, reseller/customer self-service ve RS-03–05 üst kabulleri.
+- [ ] Node>=24.11.1/npm>=11 tam check, native login/MFA, gerçek tarayıcı ve izinli host kabulü.
 
-- [x] Handler/query sözleşmesi ve 51 bağımlılıksız test: Node22.16.0, 51 geçti / 0 başarısız. Bunlar kontrollü depo/policy adaptörleriyle handler testidir; gerçek cookie/CSRF/SQLite/native login kanıtı değildir.
-- [ ] Auth HTTP bağlantısı ve gerçek SQLite/HTTP sınır testleri.
-- [ ] Owner UI bağlantısı; site yazıcıları/RS-02e ve bayi/müşteri self-service erişimi.
-- [ ] Node>=24.11.1/npm>=11 tam check, gerçek browser/host kabulü.
+HTTP testleri gerçek loopback Node HTTP sunucusu, mevcut cookie/Origin/CSRF sınırı, Owner/MFA policy, kullanıcı router'ı ve hosting SQLite deposunu çalıştırır. Oturum ve MFA enrollment fixture'dır; native Argon2/setup/login veya ikinci faktör challenge kabulü değildir. İlgisiz webhook/gateway/genel-audit adapter'ları test importunda taklittir; hosting transaction/audit deposu gerçektir. Loader import sonrasında hook'u kaldırır.
 
-GitHub Actions, main değişikliği ve host deployment yok. Kaynak tamamlanması production-ready anlamına gelmez.
+GitHub Actions, main değişikliği ve host deployment yapılmadı. Kaynak kabulü production-ready anlamına gelmez. Güncel alt iş ve kalan kabuller `docs/ux/plesk-full-scope.md`, `plan.md` ve `docs/ux/development-todo.md` ile birlikte izlenir.
