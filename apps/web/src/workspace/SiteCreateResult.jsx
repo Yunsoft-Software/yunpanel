@@ -1,6 +1,7 @@
 import { EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
 import { siteHref } from './site-model.js';
 import { siteSubmissionBusy } from './site-create-submission.js';
+import { siteAdminMessage } from './site-admin-result.js';
 
 const STEP_LABELS = Object.freeze({
   application: 'Uygulama kaydı', website: 'Site kaydı', primary_domain: 'Alan adı kaydı',
@@ -38,6 +39,13 @@ export default function SiteCreateResult({ state }) {
       detail={domain ? 'Kayıt oluşturma ile servislerin çalışır duruma gelmesi ayrı aşamalardır.'
         : 'Aynı formdan otomatik veya tekrarlı oluşturma yapılmayacak. Önce mevcut siteleri kontrol edin.'} />
     <div className="ws-section-body"><ErrorNotice error={state.error} />
+      {domain && state.siteAdmin && state.siteAdmin.status !== 'not_requested' && <div
+        className={state.siteAdmin.status === 'attention' ? 'ws-notice ws-notice-warn' : 'ws-notice'} role="status">
+        <div><strong>{state.siteAdmin.status === 'created' ? 'Yönetici hesabı oluşturuldu' : 'Yönetici hesabı kontrol edilmeli'}</strong>
+          <p>{siteAdminMessage(state.siteAdmin)}</p>
+          {state.siteAdmin.status === 'attention' && <LinkButton to="/settings/users">Kullanıcıları kontrol et</LinkButton>}
+        </div>
+      </div>}
       <div className="ws-actions">{domain ? <>
         <LinkButton variant="primary" icon="arrow" to={siteHref(domain.id, 'overview')}>Site genel bakışı</LinkButton>
         <LinkButton icon="folder" to={siteHref(domain.id, 'files')}>Dosyaları aç</LinkButton>
