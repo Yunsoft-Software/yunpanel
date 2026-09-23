@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useReducer, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { panelRequest, waitForJob } from '../api.js';
-import { getPanelSettings } from './system-settings-client.js';
+import { usePanelSession } from '../panel-session.jsx';
+import { sessionVersion } from '../session-client.js';
+import { createSslRequestDraft, sslContactEmail, sslDraftDirty, sslDraftKey, sslDraftSnapshot, sslRequestDraftReducer, validSslContactEmail } from './ssl-request-draft.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { certificateState, formatDate, siteHref } from './site-model.js';
@@ -72,51 +74,43 @@ export function DomainOperations({ domain }) {
 }
 
 export function SslOperations({ domain }) {
-  const { certificates, domains, jobs, runJob, resourceBusy, session } = useWorkspace();
-  const [email, setEmail] = useState(''); const [requested, setRequested] = useState(false);
+  const { session } = usePanelSession();
+  return <SslOperationForm key={sslDraftKey(domain, session, sessionVersion())} domain={domain} session={session} />;
+}
+
+function SslOperationForm({ domain, session }) {
+  const { certificates, domains, jobs, runJob, resourceBusy, canManage } = useWorkspace();
+  const defaultEmail = sslContactEmail(session);
+  const [draft, dispatchDraft] = useReducer(sslRequestDraftReducer, defaultEmail, createSslRequestDraft);
+  const { email, includeWww, includeWebmail, includeMail, assignToMail, includeWildcard } = draft.values;
   const [confirm, setConfirm] = useState(null); const operation = useOperation();
-  const [includeWww, setIncludeWww] = useState(true);
-  const [includeWebmail, setIncludeWebmail] = useState(true);
-  const [includeMail, setIncludeMail] = useState(true);
-  const [assignToMail, setAssignToMail] = useState(false);
-  const [includeWildcard, setIncludeWildcard] = useState(false);
+  const emailHintId = useId();
+  const dirty = sslDraftDirty(draft);
+  const edit = (field, value) => dispatchDraft({ type: 'edit', field, value });
 
-  useEffect(() => {
-    let active = true;
-    const userEmail = session?.user?.email || (/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(session?.user?.username ?? '') ? session.user.username : null);
-    if (userEmail && !email) {
-      setEmail(userEmail);
-      return () => { active = false; };
-    }
-    getPanelSettings().then((res) => {
-      const settings = res?.data ?? res;
-      if (active && settings?.dnsSsl?.acmeEmail && !email) {
-        setEmail(settings.dnsSsl.acmeEmail);
-      }
-    }).catch(() => {});
-    return () => { active = false; };
-  }, [session?.user?.username, session?.user?.email]);
-
-  useUnsavedChanges(Boolean(email.trim()) && !requested);
+  useEffect(() => { dispatchDraft({ type: 'email-default', email: defaultEmail }); }, [defaultEmail]);
+  // A hidden issuance form must not block navigation on the renewal screen.
+  // Running server jobs are tracked separately, not treated as unsaved input.
+  useUnsavedChanges(!domain.certificateId && dirty);
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const certificate = ssl.certificate;
-  const locked = operation.busy || certificates.status !== 'ready' || domains.status !== 'ready' || jobs.status !== 'ready'
+  const locked = !canManage || operation.busy || certificates.status !== 'ready' || domains.status !== 'ready' || jobs.status !== 'ready'
     || resourceBusy('domain', domain.id) || (certificate && resourceBusy('certificate', certificate.id))
     || certificates.items.some((item) => item.domainId === domain.id && ['issuing', 'renewing'].includes(item.state));
   const canIssue = !locked && !domain.certificateId;
 
-  const buildRequestedDomains = () => {
+  const buildRequestedDomains = (values) => {
     const list = [domain.primaryDomain];
-    if (includeWww && !list.includes(`www.${domain.primaryDomain}`)) {
+    if (values.includeWww && !list.includes(`www.${domain.primaryDomain}`)) {
       list.push(`www.${domain.primaryDomain}`);
     }
-    if (includeWebmail && !list.includes(`webmail.${domain.primaryDomain}`)) {
+    if (values.includeWebmail && !list.includes(`webmail.${domain.primaryDomain}`)) {
       list.push(`webmail.${domain.primaryDomain}`);
     }
-    if (includeMail && !list.includes(`mail.${domain.primaryDomain}`)) {
+    if (values.includeMail && !list.includes(`mail.${domain.primaryDomain}`)) {
       list.push(`mail.${domain.primaryDomain}`);
     }
-    if (includeWildcard && !list.includes(`*.${domain.primaryDomain}`)) {
+    if (values.includeWildcard && !list.includes(`*.${domain.primaryDomain}`)) {
       list.push(`*.${domain.primaryDomain}`);
     }
     if (Array.isArray(domain.aliases)) {
@@ -128,7 +122,13 @@ export function SslOperations({ domain }) {
   };
 
   async function issue(staging) {
+    if (!canIssue) return;
+    // Capture the user's intent before any asynchronous preparation begins.
+    const submitted = sslDraftSnapshot(draft);
+    const requestedDomains = buildRequestedDomains(submitted);
+    let completed = false;
     const ok = await operation.perform(async () => {
+      if (!validSslContactEmail(submitted.email)) throw new Error('Geçerli bir e-posta adresi girin.');
       let currentDomain = domain;
       if (currentDomain.httpsMode !== 'managed') {
         const preview = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/update-preview`, {
@@ -154,12 +154,11 @@ export function SslOperations({ domain }) {
         const activateJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
         await waitForJob(activateJob.id);
       }
-      const requestedDomains = buildRequestedDomains();
       const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, {
-        email: email.trim(),
+        email: submitted.email,
         staging,
         domains: requestedDomains,
-        assignToMail,
+        assignToMail: submitted.assignToMail,
       });
       if (issueJob?.id && !staging) {
         const finished = await waitForJob(issueJob.id);
@@ -168,7 +167,7 @@ export function SslOperations({ domain }) {
           await waitForJob(postStage.id);
           const postActivate = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
           await waitForJob(postActivate.id);
-          if (assignToMail) {
+          if (submitted.assignToMail) {
             try {
               const currentIdentity = await panelRequest('/mail-service-identity').catch(() => null);
               await panelRequest('/mail-service-identity', {
@@ -182,10 +181,14 @@ export function SslOperations({ domain }) {
               console.error('Mail service identity bind failed:', err);
             }
           }
+          completed = true;
         }
       }
     });
-    if (ok) { setRequested(true); setConfirm(null); }
+    if (ok) {
+      if (!staging && completed) dispatchDraft({ type: 'submitted', values: submitted });
+      setConfirm(null);
+    }
   }
   return <Section title="SSL sertifikası" description="Sertifika kapsamı, geçerlilik ve ACME işlemleri.">
     <div className="ws-section-body"><Badge state={ssl.state}>{ssl.label}</Badge><ErrorNotice error={operation.error} /></div>
@@ -194,12 +197,13 @@ export function SslOperations({ domain }) {
       ['Başlangıç', formatDate(certificate?.validFrom)], ['Bitiş', formatDate(certificate?.validTo)],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen' : 'Kapalı'],
     ]} />
-    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue) setConfirm('issue'); }}>
+    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue && validSslContactEmail(email)) setConfirm('issue'); }}>
       <p className="ws-muted">Let's Encrypt ile ücretsiz SSL sertifikası alın. Alan adının DNS kayıtlarının bu sunucuya yönlendiğinden emin olun.</p>
       {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
-      <label>ACME hesap e-postası<input type="email" value={email} required placeholder="admin@domain.com" onChange={(event) => { setEmail(event.target.value); setRequested(false); }} disabled={locked} /></label>
+      <label>Sertifika iletişim e-postası<input type="email" value={email} required maxLength={254} placeholder="E-posta adresiniz" aria-describedby={emailHintId} onChange={(event) => edit('email', event.target.value)} disabled={locked} /></label>
+      <p id={emailHintId} className="ws-muted">{defaultEmail ? 'Başlangıç adresi hesabınızdan alınır; gerektiğinde değiştirebilirsiniz.' : 'Hesabınızda kullanılabilir e-posta adresi bulunamadı. Sertifika için iletişim adresinizi girin.'}</p>
       <div style={{ margin: '14px 0', padding: '12px', border: '1px solid var(--ws-color-border, #e2e8f0)', borderRadius: '6px' }}>
-        <strong style={{ display: 'block', marginBottom: '8px' }}>Sertifika Kapsamı (Plesk Obsidian standardı):</strong>
+        <strong style={{ display: 'block', marginBottom: '8px' }}>Korunacak alan adları:</strong>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
           <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'default' }}>
             <input type="checkbox" checked disabled />
@@ -209,7 +213,7 @@ export function SslOperations({ domain }) {
             <input
               type="checkbox"
               checked={includeWww}
-              onChange={(e) => setIncludeWww(e.target.checked)}
+              onChange={(e) => edit('includeWww', e.target.checked)}
               disabled={locked}
             />
             <span><strong>www.{domain.primaryDomain}</strong> ve alan adını koru</span>
@@ -218,7 +222,7 @@ export function SslOperations({ domain }) {
             <input
               type="checkbox"
               checked={includeWebmail}
-              onChange={(e) => setIncludeWebmail(e.target.checked)}
+              onChange={(e) => edit('includeWebmail', e.target.checked)}
               disabled={locked}
             />
             <span><strong>webmail.{domain.primaryDomain}</strong> webmail arayüzünü koru</span>
@@ -227,7 +231,7 @@ export function SslOperations({ domain }) {
             <input
               type="checkbox"
               checked={includeMail}
-              onChange={(e) => setIncludeMail(e.target.checked)}
+              onChange={(e) => edit('includeMail', e.target.checked)}
               disabled={locked}
             />
             <span><strong>mail.{domain.primaryDomain}</strong> posta sunucusunu koru</span>
@@ -236,7 +240,7 @@ export function SslOperations({ domain }) {
             <input
               type="checkbox"
               checked={assignToMail}
-              onChange={(e) => setAssignToMail(e.target.checked)}
+              onChange={(e) => edit('assignToMail', e.target.checked)}
               disabled={locked}
             />
             <span>Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)</span>
@@ -245,7 +249,7 @@ export function SslOperations({ domain }) {
             <input
               type="checkbox"
               checked={includeWildcard}
-              onChange={(e) => setIncludeWildcard(e.target.checked)}
+              onChange={(e) => edit('includeWildcard', e.target.checked)}
               disabled={locked}
             />
             <span>Joker (Wildcard) sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
@@ -255,12 +259,13 @@ export function SslOperations({ domain }) {
               ⚠️ Joker sertifikalar Cloudflare DNS-01 doğrulaması gerektirir.
             </p>
           )}
+          {domain.aliases?.length > 0 && <p className="ws-muted">Bu sitenin ek alan adları da kapsama dahildir: {domain.aliases.join(', ')}</p>}
         </div>
       </div>
-      <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !email.trim()}>Production sertifikası iste</Button><Button disabled={!canIssue || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button></div>
+      <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !validSslContactEmail(email)}>SSL sertifikası al</Button><Button disabled={!canIssue || !validSslContactEmail(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button><Button type="button" disabled={locked || !dirty} onClick={() => dispatchDraft({ type: 'reset' })}>Değişiklikleri sıfırla</Button></div>
     </form> : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
     {domain.appliedRevision !== domain.desiredRevision && certificate?.state === 'active' && <div className="ws-section-body"><p className="ws-muted">Sertifika aktif edildi, Nginx yapılandırmasını güncelleyip etkinleştirin.</p><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div></div>}
-    {confirm && <ConfirmDialog title={confirm === 'renew' ? 'SSL yenilemesini başlat' : 'Production sertifikası iste'} message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
+    {confirm && <ConfirmDialog title={confirm === 'renew' ? 'SSL yenilemesini başlat' : 'SSL sertifikası al'} message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
       if (confirm === 'issue') await issue(false);
       else if (certificate) { const ok = await operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: false })); if (ok) setConfirm(null); }
     }} confirmLabel="İşlemi başlat" />}
