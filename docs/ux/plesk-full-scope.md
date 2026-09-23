@@ -1,35 +1,38 @@
-# Plesk tam kapsamı — rol, sahiplik ve ekran sözleşmesi
+# Plesk görev düzeni — sade reseller kapsamı
 
-2026-09-23; `development`. Bu belge `plesk-ux-spec.md`, `plesk-route-matrix.md`, `plesk-reference-atlas.md` ve mimari belgenin eski reseller/abonelik dışlama kararlarını yalnız ürün kapsamı bakımından geçersiz kılar. Teknik güvenlik/veri koruma değişmez. Ana envanter: [tam özellik listesi](../plesk-feature-parity.md).
+2026-09-23; `development`. Kullanıcının son kararı önceki tam reseller/paket/abonelik zorunluluğunu daraltır. Plesk'e benzeyen kullanım düzeni, mevcut site araçları ve güvenlik sınırları korunur. Bu belge `plan.md` PAR-01/02/03 ve UX-PL-02 için güncel reseller sözleşmesidir; eski envanterin geniş reseller satırları ilk sürümün kabul şartı değildir.
 
-## Dört ayrı çalışma bağlamı
+## İlk sürümde kullanıcı ne yapacak?
 
-| Bağlam | Plesk'e eşlenecek ana işler | Yetki sınırı |
+| Hesap | Görünen işler | Sınır |
 | --- | --- | --- |
-| Service Provider yönetici | Customers, Resellers, Domains, Subscriptions, Service Plans, Tools & Settings; eklentiler ve sistem | Yerel kurulumdaki tüm yetkili kaynaklar; son Owner korunur |
-| Power User yönetici | Websites & Domains, Mail, Files, Databases, Statistics, Users, sunucu araçları | Aynı yönetici hesabının site odaklı görünümü; reseller verisi silinmez |
-| Reseller | Kendi müşterileri, abonelikleri, hosting paketleri, kendi siteleri, kullanım ve hesap | Yalnız kendine tahsisli kaynaklar/izinler; üst yönetici veya başka bayi kaynakları yok |
-| Customer | Websites & Domains, Mail, Files, Databases, Statistics, izinli kullanıcılar ve hesap | Yetkili abonelik/site kümesi; sunucu root ve başka müşteri verisi yok |
+| Owner | Mevcut sunucu/site araçları; bayiler ve müşteriler; basit adet limitleri | Tüm yetkili yerel kaynaklar; son aktif Owner korunur |
+| Reseller | Müşterilerim, Sitelerim, Hesabım; müşteri ekleme/düzenleme, kendi kapsamındaki site araçları | Yalnız kendine bağlı müşteriler/siteler; sunucu ayarları, root terminal, başka bayi ve Owner hesapları yok |
+| Customer | Web Siteleri ve Alan Adları, Posta, Dosyalar, Veritabanları ve diğer izinli mevcut site araçları | Yalnız kendi siteleri; başka müşteri veya kullanıcı yönetim yetkisi yok |
 
-Resmî rol ayrımı: https://docs.plesk.com/en-US/obsidian/administrator-guide/70562/ ; müşteri/reseller: https://docs.plesk.com/en-US/obsidian/administrator-guide/customers-and-resellers.70622/ ; abonelik yönetimi: https://docs.plesk.com/en-US/obsidian/reseller-guide/managing-subscriptions.65732/ . Görünüm ve edition/extension koşulları uygulama matrisi içinde doğrulanır.
+Ayrı bir reseller dashboard, tema, paket editörü veya abonelik ekranı gerekmez. Mevcut liste/form/site araçları kullanılır. Yönetici Service Provider/Power User ayrımı uzun vadeli UX referansıdır; sade reseller için iki yeni panel inşa etmek önkoşul değildir.
 
-## Sahiplik ve model
+## Küçük veri modeli
 
-Yönetici → opsiyonel Reseller → Customer → Subscription → Website/Domain → kaynaklar. Ek kullanıcılar üyelik/rol ile bağlanır; oturum actor kimliğini korur. Reseller kendi sitesi için de açık müşteri/abonelik bağı taşır. Plan bir kaynak değildir: aboneliğe aktarılan izin/limit/default sözleşmesidir. Add-on ve özelleştirme farkı, plan sync/lock/unsynced, expiry/suspend, overuse/overselling ve ownership transferi ayrı durumdur.
+**Owner → isteğe bağlı tek Reseller → Customer → mevcut Website.** Müşteri doğrudan Owner'a bağlı olabilir (`resellerId: null`). Reseller altında reseller kurulmaz. Reseller kendi sitesini yönetecekse normal müşteri kaydı üzerinden aynı akış kullanılır; ayrı bir hosting aboneliği türü açılmaz.
 
-Bu bir hedef modeldir; bu tur reseller API veya veritabanı migrasyonu uygulanmadı. Mevcut site_manager'ı yeniden adlandırmak eşdeğer değildir. Her API/list/job/tool/backup/log/AI eylemi yeni kapsamda yeniden yetkilendirilir. Unix kimlikleri açık veri migrasyonu olmadan birleştirilmez.
+Mevcut auth kullanıcıları ve Website kimlikleri tekrar oluşturulmaz. Müşteri sahipliği, site erişim üyeliği ve login rolü farklı kavramlardır: mevcut `site_manager` otomatik olarak reseller veya müşteri sahibi sayılmaz. Veri bağlantısı açık, sürümlü ve geri alınabilir olmalıdır; Unix kullanıcıları aynı kalır. Girdide gelen actor rolü veya sahiplik alanı tek başına yetki değildir.
 
-## Yeni görev akışları
+**Basit limit:** Owner'ın belirlediği toplam müşteri ve Website adedi. `null` sınırsız, `0` yeni kayıt açılamaz; negatif, kesirli veya bilinmeyen kullanım geçersizdir. Askıdaki kayıtlar da adet tüketir; askıya alıp sınır aşılamaz. Sınır düşürmek mevcut veriyi silmez, yeni eklemeyi engeller. Site limiti bayinin tüm müşterileri toplamıdır. Kontrol ve kayıt aynı işlem/kilit içinde yapılır; salt önizleme kota enforcement değildir. Disk/trafik/CPU/RAM için ikinci bir reseller ölçüm veya rezervasyon motoru kurulmaz; mevcut site düzeyindeki ölçüm/limit işleri PROD-15'te sürer.
 
-- [ ] Müşteri: Liste → ekle/ayrıntı → iletişim/giriş/abonelikler → suspend/transfer/delete etki onayı → doğrulanmış sonuç.
-- [ ] Reseller: Liste → paket/limit/izin tahsisi → kendi müşteri/abonelikleri → kullanım → güvenli yönetim bağlamı ve yöneticiye dönüş.
-- [ ] Service Plans: hosting ve reseller planlarını ayrı listele → limit/izin/hosting/mail/DNS tercihleri → etkilenen abonelikler → sync/lock/customization farkı ve sonuç.
-- [ ] Subscriptions: müşteri/paket/alan adı → oluşturma → kaynak/limit/expiry → paket değiştirme/add-on/ownership → suspend/restore/delete.
-- [ ] Customer site işleri: mevcut doğrudan Files/Mail/DB/DNS/SSL yolları korunur. Aktif abonelik veya bütün izinli abonelikler filtrelenir; seçimin query veya eski cookie değeri olması yetki değildir.
-- [ ] Admin login-as: explicit izin, audit actor/subject, süre ve görünür geri dönüş; gerçek müşteri parolasını öğrenme/kopyalama yok.
+## İlk sürümde yapılmayacaklar
 
-## Test kapıları
+Alt bayi, reseller hizmet paketleri, add-on, zorunlu Subscription, paket sync/lock/unsynced/customization, overselling, otomatik expiry/faturalama, marka özelleştirme, müşteri↔reseller dönüşümü, toplu transfer ve login-as sonraki fazdır. İlk sürümde sahiplik aktarımı API'den de kapalı tutulur; yalnız formdan kaldırmak yeterli değildir. Mevcut site askıya alma/silme motorları korunur; hesap askıya alma ile hosttaki siteyi kapatma aynı işlem gibi gösterilmez.
 
-İki reseller, her birinde iki müşteri ve farklı abonelikler; doğrudan API kimliği değiştirme, plan limitleri, quota race, transfer sırasında açık oturum/AI/job, eski backup erişimi, silme bağımlılıkları ve suspend etkileri test edilir. Üst yöneticinin global işi ile reseller/customer işi aynı güçlü root backend'de çalışsa da hedef yetkisi hiçbir yoldan genişletilmez.
+## Küçük uygulama dilimleri
 
-Windows ve üçüncü taraf premium eklentilerin eşdeğerliği envanterde ayrı satırlardır. Bunlar tamamlanmadan tüm Plesk birebir tamamlandı denmez. Açık kaynak taban kararı verilirse bu görev kabulü karşılaştırma kriteri olarak korunur; kullanıcıya görünür yeni bir özel düzen icat edilmez.
+- [x] **RS-00 — Kapsam sadeleştirildi.** Bu sözleşme ve `agents.md` güncel karar; gelişmiş işler ertelendi. Bu bir doküman işidir, çalışan reseller değildir.
+- [ ] **RS-01 — Kaynak politika çekirdeği.** Tek bayi seviyesi, güncel/aktif actor ve hesap kontrolü, açık müşteri–site ilişkisi, Owner kapsamı, başka bayi/müşteri reddi, limit girdisi ve ekleme kontrolü. Saf Node testleri; HTTP/persistence yetkisi yerine geçmez.
+- [ ] **RS-02 — Mevcut auth/state entegrasyonu.** Mevcut kullanıcı/Website depolarına küçük ve sürümlü ilişki katmanı; idempotent migration, rollback, eşzamanlı adet kontrolü. Rolü açmadan bütün API/list/job/AI/tool/gateway/WS hedeflerini canlı ilişki üzerinden doğrula. Askıya alma/ilişki değişiminde oturum ve açık erişimleri iptal et.
+- [ ] **RS-03 — Basit hesap API'si.** Owner bayi/müşteri oluşturur ve adet sınırı verir; bayi yalnız kendi müşterisini ekler/düzenler. Kimlik/parent/rol mass-assignment engeli, sunucu tarafında liste filtreleme, audit ve revizyon çakışması. Bağlı müşterisi/sitesi olan hesabı sessiz cascade-delete etme; açık engel ve çözüm göster.
+- [ ] **RS-04 — Mevcut UI'yi bağla.** Owner için Bayiler/Müşteriler, bayi için Müşterilerim/Sitelerim; tek basit hesap formu, mevcut site araçları. Paket/abonelik seçtirme, boş buton ekleme, Files girişlerini kaldırma. Kullanıcıya yalnız gerçekten çalışan limitleri göster.
+- [ ] **RS-05 — Gerçek kabul.** Owner, iki bayi, her bayide iki müşteri ve doğrudan Owner müşterisi. Başka tenant kimliğiyle API/job/Files/DB/AI/WS denemeleri; yetki iptali; paralel limit yarışları; restart ve migration rollback; gerçek tarayıcı. Hedef Node24/npm11 tam check ayrı çalıştırılır.
+
+## Kapanış sınırı
+
+İlk sürüm RS-01–05 ile kapanır; gelişmiş reseller özellikleri beklenmez. Reseller dışındaki site/OS/premium yol haritası iptal edilmez. Kaynak testi geçti diye reseller login açılmaz veya production-ready denmez. Gerçek ortam işleri `development-todo.md` ve kök `todo.md` içinde açık kalır.
