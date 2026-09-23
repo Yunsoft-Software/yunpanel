@@ -13,6 +13,7 @@ import { promisify } from 'node:util';
 import { createMailDataBackupManager } from './mail-data-backup-manager.js';
 import { createMailDataInspector } from './mail-data-inspector.js';
 import { parseManagedVmailIdentity } from './mail-vmail-identity.js';
+import { createMailboxAccessGuard } from './mailbox-access-guard.js';
 
 const execFileAsync = promisify(execFile);
 const GETENT = '/usr/bin/getent';
@@ -60,6 +61,7 @@ function missing(error) {
 export function createMailDataDeleteManager({
   backupManager = createMailDataBackupManager(),
   mailDataInspector = createMailDataInspector(),
+  mailboxAccessGuard = null,
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
     timeout: 10_000,
@@ -83,6 +85,17 @@ export function createMailDataDeleteManager({
   }
   if (typeof run !== 'function') {
     throw new MailDataDeleteError('mail_data_delete_runtime_invalid', 'Mail data delete runtime is unavailable');
+  }
+  const accessGuard = mailboxAccessGuard ?? createMailboxAccessGuard({ run });
+  if (typeof accessGuard.quiesce !== 'function' || typeof accessGuard.verify !== 'function') {
+    throw new MailDataDeleteError('mailbox_access_guard_invalid', 'Mailbox access guard is unavailable');
+  }
+  async function verifyMailboxAccess(scope, identity, quiesce = false) {
+    if (scope !== 'mailbox') return;
+    const proof = await accessGuard[quiesce ? 'quiesce' : 'verify'](identity);
+    if (!proof || proof.identity !== identity || proof.accessDisabled !== true || proof.sessionsCleared !== true) {
+      throw new MailDataDeleteError('mailbox_access_unverified', 'Selected mailbox access is not confirmed disabled');
+    }
   }
   let mutation = Promise.resolve();
 
@@ -191,6 +204,7 @@ export function createMailDataDeleteManager({
       throw new MailDataDeleteError('mail_data_delete_backup_mismatch', 'Mail data backup does not match the delete target');
     }
 
+    await verifyMailboxAccess(scope, identity, true);
     const target = await inspectTarget(scope, identity);
     if (target.snapshotSha256 !== expectedSnapshot || target.dataPath !== selected.manifest.sourcePath) {
       throw new MailDataDeleteError('mail_data_delete_target_stale', 'Mail data target changed after delete preview');
@@ -208,6 +222,7 @@ export function createMailDataDeleteManager({
     }
 
     if (!target.present) {
+      await verifyMailboxAccess(scope, identity);
       return Object.freeze({
         version: 1,
         transactionId: tx,
@@ -232,6 +247,7 @@ export function createMailDataDeleteManager({
 
     let renamed = false;
     try {
+      await verifyMailboxAccess(scope, identity);
       await renameFn(targetPath, tombstone);
       renamed = true;
       const targetAfterRename = await pathState(targetPath);
@@ -310,6 +326,8 @@ export function createMailDataDeleteManager({
       return Object.freeze({ satisfied: false, result: null });
     }
     if (target.present || pending.present) return Object.freeze({ satisfied: false, result: null });
+    try { await verifyMailboxAccess(scope, identity); }
+    catch { return Object.freeze({ satisfied: false, result: null }); }
     return Object.freeze({
       satisfied: true,
       result: Object.freeze({
