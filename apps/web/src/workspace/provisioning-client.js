@@ -39,29 +39,32 @@ export function getLatestWebsiteProvisioning(websiteId, { signal } = {}) {
   return panelRequest(`/sites/${encodeURIComponent(id)}/provisioning/latest`, { signal });
 }
 
-export function continueWebsiteProvisioning(operationId) {
+export function continueWebsiteProvisioning(operationId, { signal } = {}) {
   const id = uuid(operationId, 'provisioning operation id');
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
     method: 'POST',
     body: { confirmation: provisioningConfirmation('continue', id) },
+    ...(signal ? { signal } : {}),
   });
 }
 
-export function retryWebsiteProvisioningStep(operationId, provisioningStepId) {
+export function retryWebsiteProvisioningStep(operationId, provisioningStepId, { signal } = {}) {
   const id = uuid(operationId, 'provisioning operation id');
   const step = stepId(provisioningStepId);
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/retry`, {
     method: 'POST',
     body: { confirmation: provisioningConfirmation('retry', id, step) },
+    ...(signal ? { signal } : {}),
   });
 }
 
-export function compensateWebsiteProvisioningStep(operationId, provisioningStepId) {
+export function compensateWebsiteProvisioningStep(operationId, provisioningStepId, { signal } = {}) {
   const id = uuid(operationId, 'provisioning operation id');
   const step = stepId(provisioningStepId);
   return panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/steps/${encodeURIComponent(step)}/compensate`, {
     method: 'POST',
     body: { confirmation: provisioningConfirmation('compensate', id, step) },
+    ...(signal ? { signal } : {}),
   });
 }
 
