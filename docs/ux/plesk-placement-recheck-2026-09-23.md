@@ -1,44 +1,41 @@
-# Plesk yerleşimi — son kullanıcı teyidi ve uygulama sırası
+# Plesk yerleşimi — son kullanıcı teyidi ve uygulama kaydı
 
-2026-09-23; kaynak tabanı `development@bc5f0d40`. Kullanıcı yeniden açıkça istedi: günlük işlerin yeri, menüsü ve işleyişi Plesk gibi olacak; teknik/gereksiz ayrıntılar önde, gerekli araçlar gizli olmayacak. Bu karar yeni tema veya yeni backend motoru değildir.
+2026-09-23; kaynak tabanı `development@bc5f0d40`. Plan teyidi `aea72899`; ana gezinme `aa41cc24`; site görev grupları `6b755b28`. Kullanıcı yeniden açıkça istedi: günlük işlerin yeri, menüsü ve işleyişi Plesk gibi olacak; teknik/gereksiz ayrıntılar önde, gerekli araçlar gizli olmayacak. Yeni tema veya backend motoru kurulmadı.
 
 ## Doğrulama sonucu
 
-`plan.md` A bölümü, `ui-plan.md`, `plesk-ux-spec.md` ve `plesk-route-matrix.md` hedef olarak doğru yöndedir. **Mevcut kod henüz bu hedefe uygun değildir.** Kaynak taraması şu farkları doğruladı:
+`plan.md` A bölümü, `ui-plan.md`, `plesk-ux-spec.md` ve `plesk-route-matrix.md` hedef olarak doğru yöndedir. **Başlangıç kodu bu hedefe uygun değildi.** `/` dashboard açıyordu; menü Günlük kullanım / Kaynaklar / Sistem düzenindeydi; site DNS/Git/günlükleri Diğer içindeydi; provisioning recovery günlük araçların önündeydi; site ayarları kayıt kimlikleriyle başlıyordu. Bu kaynak dilimi aşağıdaki farkları düzeltti; bütün Plesk UI/iş akışı bitmiş değildir.
 
-- `WorkspaceApp.jsx`: `/` hâlâ `/dashboard` açıyor; hedef `/websites`.
-- `ui/ux-model.js`: ana menü eski Günlük kullanım / Kaynaklar / Sistem gruplarında; Kullanıcılar doğrudan görünmüyor. Site hesabının global Posta/Veritabanları girişi yok.
-- `ui/SiteNavigation.jsx`: DNS, Git, günlükler, barındırma ve erişim araçları `Diğer` içinde. Eski altı-gruplu model de kaynakta duruyor.
-- `SiteDetailPage.jsx`: genel bakışta günlük araçlardan önce provisioning recovery var. Hızlı erişimde DNS/Git yok; site ayarlarının ilk içeriği kayıt kimlikleri.
-- `workspace-resources.js`: `/websites` Website envanterini istemiyor; site ilişkisi/runtime ve sayaç bilgisi bu girişte eksik kalabiliyor.
-- Global `MailDomainsPage` sunucu düzeyinde yapılandırma ve kuyruk bileşenleri de taşıyor. Site hesabına sol menü eklemek, bu Owner ağırlıklı ekranı aynen açmak anlamına gelmeyecek; mevcut yetkili site mail/DB ekranına scope çözücüyle gidilecek.
+## Plesk kaynakları
 
-## Plesk kaynakları yeniden okundu
-
-1. [The Plesk GUI](https://docs.plesk.com/en-US/obsidian/administrator-guide/70562/): Power User'da host yönetimi Tools & Settings altında; Customer Panel site/mail/içerik odaklı. Power User ile Service Provider aynı görünüm değildir.
+1. [The Plesk GUI](https://docs.plesk.com/en-US/obsidian/administrator-guide/70562/): Power User'da host yönetimi Tools & Settings; Customer Panel site/mail/içerik odaklı. Power User ve Service Provider aynı görünüm değildir.
 2. [Plesk Tutorial](https://docs.plesk.com/en-US/obsidian/quick-start-guide/plesk-tutorial.74376/): domain → File Manager; global Databases ve Mail; domain kartı Hosting & DNS → DNS; Dashboard → Backup & Restore; üst kullanıcı menüsünden profil.
 3. [Managing Web Hosting](https://docs.plesk.com/en-US/obsidian/quick-start-guide/plesk-functionality-explained/managing-web-hosting.74401/) ve [General Settings](https://docs.plesk.com/en-US/obsidian/administrator-guide/website-management/websites-and-domains/hosting-settings/general-settings.72050/): domain altında Hosting & DNS → Hosting.
 
-Bu doğrulama görev konumlarına aittir. Dokümanın eski ekran görüntüsünü 2026 canlı build'i diye sunmaz. Bütün Plesk sürüm/edition/extension ekranları test edilmiş değildir. Son sade reseller kararı korunur: kullanıcı ve bayi yönetimi için ayrı paket/abonelik önkoşulu üretilmez; bu model Plesk Power User'ın birebir özelliği diye adlandırılmaz.
+Doğrulama görev konumlarına aittir. Eski ekran görüntüsü 2026 canlı build kanıtı değildir; bütün sürüm/edition/extension ekranları sınanmadı. Sade reseller kararı korunur: kullanıcı/bayi için ayrı paket/abonelik önkoşulu üretilmez; bu model Plesk Power User'ın birebir özelliği diye adlandırılmaz.
 
-## Bağlayıcı öncelik
+## Tamamlanan kaynak alt işleri
 
-**Bu tur UX-PL-03/04/06 kaynak yerleşimi, reseller/cleanup backend genişletmesinden önce gelir.** Güvenlik ve gerçek host kabulü ertelenmiş başarıya dönüşmez; önceki RS/BUG/PROD işleri silinmez.
+- [x] **UX-PL-03a — `aa41cc24`:** `/` → `/websites`; Owner sol menüsünde Web Siteleri ve Alan Adları, Posta, Dosyalar, Veritabanları, Araçlar ve Ayarlar, Kullanıcılar. Yeni araç dizini mevcut sunucu/Docker/ayar/envanter/denetim ekranlarına gider. Eski URL'ler korunur. Görünüm tercihleri başlangıçta kapalıdır; değerler ve bileşen silinmedi. Komut araması gerçek Owner bağlamını kullanır ve Owner araçlarını site hesabına önermez.
+- [x] **UX-PL-03b — `aa41cc24`:** site hesabının global Posta/DB girişi Owner konsolu yerine mevcut site aracına gider. Ready envanter, tekil Website/Domain, aynı sunucu ve açık ilişki doğrulanır. Tek siteye ait çok domain de seçim ister; yanlış/boş explicit kimlik başka siteye düşmez. Eksik ilişki görünürdür. `/websites` veri talebine eksik Website envanteri eklendi.
+- [x] **UX-PL-04a/06a — `6b755b28`:** site içinde Genel Bakış, Barındırma ve DNS, Posta aileleri. Alt araçlar gizli Diğer menüsü değil açık, sarılabilir bağlantılardır. Genel bakışta Dosya Yöneticisi/DB/SSL/runtime/Git/günlük/DNS/Posta araçları önce; recovery kaldırılmadan aşağıda. Hosting ailesi mevcut DNS, barındırma bilgisi, alan adı yönetimi ve terminale gider. Kayıt kimlikleri teknik ayrıntıda kalır.
+- [x] **Seçili model/kaynak kontrolleri:** 49 geçti / 0 başarısız / 0 atlandı; Node22.16.0/npm10.9.2. Komut aşağıdadır. Son kaynak hali tekrar çalıştırıldı; önceki Files/removal/reseller testleri bu toplama katılmadı.
+- [ ] **Üst UX-PL-03/04/06 kabulü açık:** gerçek React/HTTP/tarayıcı/host; genişleyen domain kartı ve tüm create/edit/return akışları; gerçek hosting düzenleme, PHP/cron/backup/istatistik araçları. Bu tur Website listesinin tablosu yeniden yazılmadı. `/settings` site sekmesindeki Barındırma bilgileri bir hosting düzenleme formu değildir.
 
-- Ana giriş Web Siteleri ve Alan Adları; Posta, Dosyalar ve Veritabanları sol menüde doğrudan. Kullanıcılar Owner'a görünür. Host servisleri, Docker ve teknik envanter Araçlar ve Ayarlar üzerinden erişilir; mevcut URL'ler korunur.
-- Site çalışma alanında Genel Bakış (Plesk Dashboard), Barındırma ve DNS, Posta görev aileleri. Dosyalar/DB/SSL/runtime/Git/günlükler görünür araçlardır; `Diğer` bunların tek erişimi olamaz.
-- Genel bakışta araçlar önce, durum ve gerekli hata bildirimi görünür, uzun recovery/kimlik/envanter ayrıntısı daha aşağıda. Eksik veya başarısız iş gizlenmez.
-- Sadece gerçekten mevcut UI/API'ye giden bağlantı eklenir. Henüz boş olan Backup CapabilityPage ve olmayan istatistik/PHP/cron arayüzleri çalışan araç diye vitrine konmaz; eksikler matriste ve TODO'da açık kalır.
-- Owner global mail/DB ekranı ile site hesabının scope'lu ekranı ayrılır. Hazır olmayan/stale/forbidden envanterden otomatik hedef çıkarılmaz. Website ile Domain ID karıştırılmaz. Yanlış explicit seçim başka siteye düşmez.
-- Mevcut Ember renk/font/radius, FilesPanel ve gateway, auth/CSRF/rol/Unix izolasyonu, eski deep linkler korunur. Dar ekranda araçlara yalnız yatay taşma veya gizli menü ile erişilmez; sarma ve klavye kabulü gerekir.
+```sh
+node --test apps/web/test/plesk-navigation.test.js apps/web/test/site-tool-entry-model.test.js apps/web/test/workspace-resources.test.js
+```
 
-## Uygulama / kabul
+19 Plesk gezinme/model/kaynak testi, 20 site aracı hedef çözümleme testi ve 10 veri-talebi regresyonu. Dört JS kaynak ve üç JS test dosyası `node --check` ile geçti. JSX yalnız metin bağlantıları açısından incelendi; gerçek parser/render/build çalıştırılmış değildir. Ortamda GitHub/npm DNS erişimi olmadığından tam checkout ve bağımlılıklar alınamadı. Node24/npm11 `npm run check`, gerçek API/oturum/CSRF/MFA/host/browser kabulü açık.
 
-- [x] Plan ve mevcut kaynak, resmî Plesk görev belgeleriyle karşılaştırıldı; farklar kaydedildi.
-- [ ] UX-PL-03a: ana menü, varsayılan giriş, Owner araç merkezi ve rol uyumlu komut araması.
-- [ ] UX-PL-03b: site hesabının global Posta/DB girişinden mevcut site aracına güvenli kapsam seçimi.
-- [ ] UX-PL-04a/06a: üç site görev ailesi, görünür araçlar ve günlük görevlerin teknik ayrıntıdan önce gelmesi.
-- [ ] Kaynak/model testleri; ardından Node >=24.11.1/npm >=11 tam check ve gerçek React/browser kabulü.
-- [ ] Genişleyen domain kartı, domain/subdomain/alias üst eylemleri, gerçek barındırma düzenleme ve kalan araçların tamamı. Bu dar dilim tüm Plesk UX'ini kapatmaz.
+## Korunan davranış ve sınırlar
 
-Gerçek ortam devri `docs/ux/development-todo.md` ve `todo.md` içindedir. Yalnız development, küçük commitler ve `[skip ci]`; main/Actions/canlı host işlemi yok. `.44` hiçbir amaçla kullanılmaz.
+FilesPanel, FilesPage, gateway ve dosya motoru değiştirilmedi. SiteFilesPanel'in doğrulanmış Domain→Website girişi, eski `/resources`, site terminali, uygulama seçimi ve mevcut işlem/onarım bileşenleri korunur. Sadece gezinme değişikliği tenant izolasyonu veya canlı servis sağlığının yeni kanıtı değildir. Eski `/mail/:mailDomainId` yolu ve backend guard'lar değiştirilmedi; tüm doğrudan yollar gerçek kabulde ayrıca sınanmalıdır.
+
+Boş Backup CapabilityPage ve olmayan istatistik/PHP/cron ekranları çalışan araç olarak menüye eklenmedi; bunlar açık iştir, kapsamdan çıkarılmadı. Ember tokenları, renk/font/radius ve backend izinleri değiştirilmedi. Yeni CSS yalnız görev gezinmesinin sarılma/boşluk yerleşimini düzenler; responsive görünüm henüz gerçek tarayıcıda doğrulanmadı.
+
+## Öncelik ve devir
+
+**Güncel sıra: UX-PL-03/04/06 yerleşimini ve görev akışlarını tamamla; sonra ayrı reseller/cleanup backend genişlemesine dön.** Önceki RS/BUG/PROD işleri silinmez ve güvenlik kabulü gevşetilmez. Kaynak kutusu canlı başarı değildir.
+
+Yeni kabul eki [T-DEV-PLESK-NAV](plesk-navigation-todo.md); mevcut `docs/ux/development-todo.md` ve kök `todo.md` geçerliliğini korur. Küçük commit, development ve `[skip ci]`; main/Actions/canlı host işlemi yok. `.44` hiçbir amaçla kullanılmadı.
