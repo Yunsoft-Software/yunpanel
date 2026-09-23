@@ -1,5 +1,18 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## JOB-UX-01–04 — İşlem göstergeleri ve güvenli kurulum ilerletme kaynağı tamamlandı
+
+- [x] **BUG-20260923-01a kaynak:** `47fbd830`, `e7f304b6`, `6dd4c17d`; İşlem geçmişi ve detayında sabit 1/3–3/3 kaldırıldı. Başarısız/iptal durumu tamamlanma oranı değildir. Yalnız API'nin bildirdiği geçerli deneme sayısı gösterilir; eksik/bozuk veri sıfır veya üç deneme bütçesi yapılmaz. Log, kaynak bağlantısı, tanılama, izleme ve kuyruktaki işi iptal etme erişimi korundu.
+- [x] **BUG-20260923-01b kaynak:** `7b73dcb5`, `6c5ca00f`; mevcut autoAdvance önce aynı operationId'nin güncel kaydını okur, yalnız doğrulanmış başarılı adım ilerlemesinden sonra devam eder. Hatalı POST yanıtı/ağ kopması, başarısız/bloke/kesintili adım veya yanlış/tekrarlanan sonuç kör tekrar üretmez. Oturum nesli değişimi ve abort bütün otomatik zinciri durdurur. Mevcut onaylı manuel continue/retry/compensate API'leri korunur; yeni backend motoru eklenmedi.
+- [x] **JOB-UX-04 seçili test:** `a701c628`, `e9a32ae1`, `c2de65b8`; Node22.16.0 altında **74 geçti / 0 başarısız / 0 atlandı**: 58 ilerletme + 11 sunum davranışı + 5 kaynak bağlantısı. İki JSX parse/dönüşüm ve JavaScript sözdizimi kontrolü geçti; sekiz kaynak/test dosyası GitHub blob'larıyla birebir eşleşir. Mock read/advance taşıması ve kaynak kontrolleri gerçek HTTP/React/host kabulü değildir.
+- [ ] **BUG-01 / UX-PL-07 kalan:** backend kaynaklı geçici-hata sınıflandırması, güvenli otomatik retry/backoff/kalıcı bütçe, limit sonrası manuel retry, ortak kilit ve gerçek kurulum/yeniden giriş/yarım iş kabulü açıktır. Bu dilimde güvensiz otomatik retry kaldırıldı; güvenli otomatik retry tamamlandı denmez. NewWebsitePage'de ilerletme hatası sonrasında yaratılmış sitenin sonuç/geri dönüş UX'i ve manuel recovery'nin stale/oturum/çift tıklama sınırları ayrıca doğrulanmalıdır. [Kaynak, commitler ve T-DEV-JOB-UX](docs/ux/job-progress-retry-flow.md); kök `todo.md` kabul listesine bağlıdır.
+
+## SSL BUG-04/05 — Önceki kaynak işaretlerinin eşitlenmesi
+
+- [x] **BUG-20260923-04a/b kaynak:** `36a46185` / `96db8b9b` mevcut; SSL formu gerçek kullanıcı değişikliği ile baseline'ı karşılaştırır, otomatik dolum tek başına dirty değildir. `SiteOperations.jsx` bağlantısı yeniden incelendi; bu tur SSL yeniden yazılmadı.
+- [x] **BUG-20260923-05a/b kaynak:** aynı önceki kaynak; `usePanelSession()` üzerinden etkin kullanıcı adresi ve kapsamlı taslak kimliği. [Önceki kaynak/test raporu](docs/ux/ssl-form-flow.md). Önceki 27 SSL testi bu tur yeniden çalıştırılmış sayılmaz.
+- [ ] **BUG-04/05 üst kabulü:** T-DEV-SSL-FORM gerçek React/API/ACME/browser kabulü açık; BUG-06 sertifika süresi/senkronizasyonu bu işaretlerle kapanmaz.
+
 ## FILES-CONT-01–04 — Files yol ve editör taslağı kaynağı tamamlandı
 
 - [x] **Bellekte kapsamlı durum:** `38c0004d`, `123a4a50`, `e34170f0`; aynı doğrulanmış Domain/Website bağındaki geçici envanter kesintisinde klasör yolu, editör içeriği ve özgün dosya özeti korunur. Stale envanterle Files açılmaz; kullanıcı/oturum/yetki, Website/sunucu/runtime değişiminde eski içerik yeni hedefe taşınmaz.
