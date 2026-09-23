@@ -47,7 +47,7 @@ export function mailboxRemovalSnapshot(mailbox, domain, impact, target) {
   });
 }
 export function mailboxRemovalEligible(snapshot, { allowData = true } = {}) {
-  return Boolean(snapshot && snapshot.domainStatus === 'disabled' && !snapshot.quota && !snapshot.forwarding
+  return Boolean(snapshot && snapshot.enabled === false && ['enabled', 'disabled'].includes(snapshot.domainStatus) && !snapshot.quota && !snapshot.forwarding
     && snapshot.aliases === 0 && snapshot.activeJobs === 0
     && snapshot.blockers.every((entry) => allowData && entry.code === 'mail_data_backup_required')
     && (allowData || snapshot.present === false));
