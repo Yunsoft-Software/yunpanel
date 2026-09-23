@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  jobAttemptCount,
   jobLifecycle,
   jobResourceTarget,
   jobSupportsDeployLogs,
@@ -30,13 +31,34 @@ test('job resource links prefer exact linked site routes when available', () => 
   });
 });
 
-test('job lifecycle reports queue, running and terminal progress without invented percentages', () => {
-  assert.deepEqual(jobLifecycle({ status: 'queued' }), {
-    stage: 'Kuyrukta', progress: '1 / 3', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.',
+for (const [status, stage] of [
+  ['queued', 'Kuyrukta'], ['running', 'Sunucuda çalışıyor'], ['succeeded', 'Tamamlandı'],
+  ['failed', 'Başarısız'], ['cancelled', 'İptal edildi'], ['unexpected', 'Bilinmiyor'],
+]) {
+  test(`${status} reports its actual state, never a fabricated fraction or attempt budget`, () => {
+    const job = Object.freeze({ status, attempts: 3, progress: 100 });
+    const value = jobLifecycle(job);
+    assert.equal(value.stage, stage);
+    assert.equal(value.progress, '—');
+    assert.doesNotMatch(value.detail, /[0-9]\s*\/\s*[0-9]|%|claim|terminal/);
+    assert.equal(Object.isFrozen(value), true);
   });
-  assert.equal(jobLifecycle({ status: 'running' }).progress, '2 / 3');
-  assert.equal(jobLifecycle({ status: 'succeeded' }).progress, '3 / 3');
-  assert.equal(jobLifecycle({ status: 'failed' }).stage, 'Başarısız');
+}
+
+test('missing job remains unknown instead of completed or zero attempts', () => {
+  assert.equal(jobLifecycle(null).stage, 'Bilinmiyor');
+  assert.equal(jobLifecycle().progress, '—');
+  assert.equal(jobAttemptCount(null), null);
+  assert.equal(jobAttemptCount(), null);
+});
+
+test('attempt counts preserve a real zero and never infer a maximum or coerce missing values', () => {
+  for (const attempts of [0, 1, 3, 12, Number.MAX_SAFE_INTEGER]) {
+    assert.equal(jobAttemptCount({ attempts }), attempts);
+  }
+  for (const attempts of [undefined, null, false, '', '3', -1, 1.5, Infinity, NaN, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(jobAttemptCount({ attempts }), null);
+  }
 });
 
 test('safe job metadata exposes only bounded allowlisted scalars', () => {
