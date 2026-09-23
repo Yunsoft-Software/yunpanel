@@ -4,6 +4,16 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-MAILBOX-REMOVE — Posta kutusu silme (2026-09-24)
+
+MR-01–04 kaynak bağlantısı `development` dalında; [kaynak, test kanıtı ve sınırlar](docs/ux/mailbox-removal-flow.md). Seçili Node22 koşusunda **53 geçti / 0 başarısız / 0 atlandı**: 35 frontend davranışı + 12 backend helper/impact davranışı + 6 kaynak bağlantısı. Bunlar gerçek React/HTTP/posta hostu kabulü değildir; dokuz kaynak/test blob'u eşleşti. Önceki test sayıları eklenmez.
+
+- [ ] Node >=24.11.1/npm >=11 tam checkout/npm ci/lint/test/build. `mailbox-removal.test.js`, `mailbox-removal-wiring.test.js`, `mailbox-alias-references.test.js` ile mevcut mailbox/mail-client/impact/data/finalizer/site-scope regresyonları. Doğrudan Git erişimi DNS hatasıyla engellendiğinden burada tam checkout ve hedef build yapılmadı; eski impact testinin eşitliği doğrulanmayan yerel kopyası raporlanan 53'e dahil edilmedi.
+- [ ] Gerçek SessionProvider/React/router/StrictMode ve HTTP/auth/CSRF ile Owner/Site A/Site B: başka posta kutusu/alan adı/backup/job kimliği reddi, logout/login, yetki iptali ve eski cevap/onayın yeni hedefe taşınmaması.
+- [ ] Gerçek doğrulanmış yedek → veri silme işi → mailbox finalize; 202/failed/cancelled ve veri silinmiş-kayıt kalmış durumlarında tam başarı gösterilmesin. Kayıp POST, iki hızlı onay, mevcut job kimliğiyle yalnız GET devamı ve finalize yanıtı kaybı/404 uzlaştırması; aynı yazma kör tekrarlanmasın.
+- [ ] Mevcut motorun bütün posta alan adını kapatma gereksinimini açıkça test et. Diğer hesaplar etkilenir; UI kendiliğinden kapatıp açmaz. Gerçek SMTP/IMAP/Postfix/Dovecot/Roundcube erişimi ve aktif oturumlar doğrulansın; disabled kayıt canlı kapanma kanıtı değildir. Diğer hesapları durdurmadan tek-kutu silme backend işi `plan.md` BUG-03 altında açık.
+- [ ] Yerel/yabancı alias referansları, kota/forwarding, eşzamanlı yeni mesaj ve çalışan iş engelleri; yabancı alias kimliği sızmasın. İki tarayıcı/proses yarışı, backend mutation anı yetkisi, yedekten gerçek geri dönüş ve kalan hesapların yeniden çalışması doğrulansın. Mobil/klavye/odak/koyu tema; `.44` hariç yalnız izinli host. GitHub Actions ve canlı deploy bu tur yapılmadı.
+
 ## T-DEV-ADMIN-RESULT — Site yöneticisi hesap sonucu (2026-09-24)
 
 Kaynak ADMIN-RESULT-01–04 ile `development` dalında tamamlandı; [kaynak/test raporu](docs/ux/site-admin-result-flow.md). Seçili Node22 koşusunda 39 test geçti; gerçek auth/Argon2/SQLite/React/host kabulü değildir. Rota testindeki engine/planner/guard/store bağımlılıkları açık fixture'dır.
