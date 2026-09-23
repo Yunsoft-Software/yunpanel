@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { AuthError } from './auth-error.js';
+import { createHostingAccountStore } from './hosting-account-store.js';
 
 const ROLES = new Set(['owner', 'read_only', 'site_manager']);
 const conflict = () => new AuthError('user_revision_conflict', 'This account changed. Reload it before saving.', 409);
@@ -54,6 +55,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
       );
     `);
   });
+  const hostingAccounts = createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser });
   const select = `SELECT u.id, u.username, u.role, u.active, u.created_at,
     COALESCE(r.revision, 1) AS revision, COALESCE(r.updated_at, u.created_at) AS updated_at,
     EXISTS(SELECT 1 FROM auth_mfa m WHERE m.user_id = u.id) AS mfa_enabled
@@ -107,6 +109,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
   }
 
   return {
+    hostingAccounts,
     hashPassword,
     revision(userId) { return read(userId)?.revision ?? null; },
     list(rawToken, requireManagement, { offset = 0, limit = 50 } = {}) {
@@ -173,6 +176,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
       const result = transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
+        hostingAccounts.assertLegacyMutationAllowed(id, input);
         const name = Object.hasOwn(input, 'username') ? normalizeUsername(input.username) : user.username;
         const nextRole = Object.hasOwn(input, 'role') ? role(input.role) : user.role;
         const nextActive = Object.hasOwn(input, 'active') ? active(input.active) : Boolean(user.active);
@@ -216,6 +220,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
       transaction(() => {
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
+        hostingAccounts.assertLegacyMutationAllowed(id);
         protectOwner(user, null, false);
         if (user.role === 'site_manager') {
           const bound = db.prepare('SELECT count(*) AS count FROM auth_user_websites WHERE user_id = ?').get(id)?.count ?? 0;
