@@ -12,6 +12,25 @@ export class WebsiteRemovalRuntimeError extends Error {
   }
 }
 
+function requireCleanupMethod(method) {
+  if (typeof method !== 'function') {
+    throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unavailable', 'The required cleanup adapter is unavailable.', 503);
+  }
+}
+function requireCleanupReceipt(receipt, expected, flag) {
+  if (!receipt || typeof receipt !== 'object' || Array.isArray(receipt) || receipt[flag] !== true
+    || Object.entries(expected).some(([key, value]) => receipt[key] !== value)) {
+    throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Cleanup of this Website could not be verified.', 409);
+  }
+}
+function cleanupInventory(value) {
+  if (!Array.isArray(value) || value.some((item) => !item || typeof item.id !== 'string' || !SAFE_ID.test(item.id))
+    || new Set(value.map((item) => item.id)).size !== value.length) {
+    throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'The cleanup inventory could not be verified.', 409);
+  }
+  return value;
+}
+
 function stepContinuationConfirmation(operation, step) {
   return `continue-website-remove-step:${operation.websiteId}:${operation.id}:${step.id}:${operation.updatedAt}`;
 }
@@ -120,8 +139,30 @@ export function createWebsiteRemovalRuntime({
     }
   }
 
+  function cleanupBlockers(plan) {
+    const missing = [];
+    const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
+    require('file_cleanup_unavailable', fileCleanupHandler);
+    require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.deleteMigrationWebsite);
+    if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler);
+    if (plan?.additional?.crons?.ids?.length) require('cron_cleanup_unavailable', websiteCronRegistry?.listTasks, websiteCronRegistry?.removeTask);
+    if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
+    if (plan?.additional?.databases?.ids?.length) {
+      require('database_cleanup_unavailable', databaseBindingRegistry?.listBindings,
+        databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding,
+        databaseCredentialRegistry?.getForBinding, databaseCredentialRegistry?.deleteCredential);
+    }
+    if (plan?.additional?.runtimeBindings?.ids?.length) require('runtime_cleanup_unavailable', runtimeBindingRegistry?.getBinding, runtimeBindingRegistry?.removeOwnedPassenger);
+    return missing;
+  }
+
   async function preview({ websiteId } = {}) {
-    return previewProvider({ websiteId });
+    const current = await previewProvider({ websiteId });
+    const missing = cleanupBlockers(current?.plan);
+    if (!missing.length) return current;
+    // No destructive confirmation when this deployment cannot finish the planned cleanup.
+    return Object.freeze({ ...current, readyToStart: false, confirmation: null,
+      hardBlockers: Object.freeze([...new Set([...(current?.hardBlockers ?? []), ...missing])]) });
   }
 
   async function start({ websiteId, previewDigest, confirmation } = {}) {
@@ -146,6 +187,16 @@ export function createWebsiteRemovalRuntime({
       );
     }
 
+    requireCleanupMethod(registry.listForWebsite);
+    const prior = await registry.listForWebsite(websiteId);
+    if (!Array.isArray(prior) || prior.some((operation) => operation?.websiteId !== websiteId)) {
+      throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'The removal operation history could not be verified.', 409);
+    }
+    // A failed operation may have partially removed resources. Continue it explicitly;
+    // starting a second operation must not erase its unfinished cleanup history.
+    if (prior.some((operation) => operation.status !== 'removed')) {
+      throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
+    }
     const op = await registry.create(currentPreview);
     return runNextStep(op.id);
   }
@@ -258,8 +309,10 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'cron_cleanup': {
+          requireCleanupMethod(websiteCronRegistry?.listTasks);
+          requireCleanupMethod(websiteCronRegistry?.removeTask);
           if (websiteCronRegistry && typeof websiteCronRegistry.listTasks === 'function') {
-            const tasks = await websiteCronRegistry.listTasks({ websiteId: op.websiteId });
+            const tasks = cleanupInventory(await websiteCronRegistry.listTasks({ websiteId: op.websiteId }));
             for (const task of tasks) {
               if (typeof websiteCronRegistry.removeTask === 'function') {
                 await websiteCronRegistry.removeTask(task.id);
@@ -271,39 +324,28 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'sftp_key_cleanup': {
-          if (websiteSftpKeyRegistry && typeof websiteSftpKeyRegistry.listKeys === 'function') {
-            let keys = [];
-            try {
-              keys = await websiteSftpKeyRegistry.listKeys({ websiteId: op.websiteId });
-            } catch {
-              keys = await websiteSftpKeyRegistry.listKeys(op.websiteId);
+          requireCleanupMethod(websiteSftpKeyRegistry?.listKeys);
+          requireCleanupMethod(websiteSftpKeyRegistry?.revokeKey);
+          const keys = cleanupInventory(await websiteSftpKeyRegistry.listKeys({ websiteId: op.websiteId }));
+          for (const key of keys) {
+            if (!Number.isSafeInteger(key.revision) || key.revision < 1) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Reload the current SFTP key revision.', 409);
             }
-            for (const key of (keys || [])) {
-              if (typeof websiteSftpKeyRegistry.revokeKey === 'function') {
-                if (websiteSftpKeyRegistry.revokeKey.length === 1) {
-                  await websiteSftpKeyRegistry.revokeKey(key.id);
-                } else {
-                  try {
-                    await websiteSftpKeyRegistry.revokeKey({
-                      websiteId: op.websiteId,
-                      keyId: key.id,
-                      expectedRevision: key.revision ?? 1,
-                    });
-                  } catch {
-                    await websiteSftpKeyRegistry.revokeKey(key.id);
-                  }
-                }
-              }
-            }
+            // Use the actual registry signature once. Never retry an exception with a weaker signature.
+            await websiteSftpKeyRegistry.revokeKey({ websiteId: op.websiteId, keyId: key.id, expectedRevision: key.revision });
           }
           op = await registry.succeedStep(op.id, step.id, { sftpKeysCleaned: true });
           break;
         }
 
         case 'database_binding_cleanup': {
+          requireCleanupMethod(databaseBindingRegistry?.listBindings);
+          requireCleanupMethod(databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding);
+          requireCleanupMethod(databaseCredentialRegistry?.getForBinding);
+          requireCleanupMethod(databaseCredentialRegistry?.deleteCredential);
           const unboundBindings = [];
           if (databaseBindingRegistry && typeof databaseBindingRegistry.listBindings === 'function') {
-            const bindings = await databaseBindingRegistry.listBindings({ websiteId: op.websiteId });
+            const bindings = cleanupInventory(await databaseBindingRegistry.listBindings({ websiteId: op.websiteId }));
             for (const binding of bindings) {
               if (databaseCredentialRegistry && typeof databaseCredentialRegistry.getForBinding === 'function') {
                 const credential = await databaseCredentialRegistry.getForBinding(binding.id);
@@ -342,6 +384,8 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'runtime_cleanup': {
+          requireCleanupMethod(runtimeBindingRegistry?.getBinding);
+          requireCleanupMethod(runtimeBindingRegistry?.removeOwnedPassenger);
           if (runtimeBindingRegistry && typeof runtimeBindingRegistry.getBinding === 'function') {
             const binding = await runtimeBindingRegistry.getBinding(op.applicationId);
             if (binding && typeof runtimeBindingRegistry.removeOwnedPassenger === 'function') {
@@ -356,40 +400,51 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'file_cleanup': {
-          let cleanupResult = null;
-          if (typeof fileCleanupHandler === 'function') {
-            cleanupResult = await fileCleanupHandler({
-              websiteId: op.websiteId,
-              applicationId: op.applicationId,
-              retainedBackups: op.plan?.additional?.backups?.ids ?? [],
-            });
+          requireCleanupMethod(fileCleanupHandler);
+          const retainedBackups = [...(op.plan?.additional?.backups?.ids ?? [])];
+          const cleanupResult = await fileCleanupHandler({
+            websiteId: op.websiteId, applicationId: op.applicationId, retainedBackups: [...retainedBackups],
+          });
+          requireCleanupReceipt(cleanupResult, { websiteId: op.websiteId, applicationId: op.applicationId }, 'filesCleaned');
+          if (!Array.isArray(cleanupResult.retainedBackups)
+            || cleanupResult.retainedBackups.length !== retainedBackups.length
+            || [...cleanupResult.retainedBackups].sort().some((id, index) => id !== [...retainedBackups].sort()[index])) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Retained backup scope was not verified.', 409);
           }
+          // Do not copy arbitrary adapter fields or secrets into the public operation result.
           op = await registry.succeedStep(op.id, step.id, {
-            filesCleaned: true,
-            retainedBackups: op.plan?.additional?.backups?.ids ?? [],
-            ...(cleanupResult && typeof cleanupResult === 'object' ? cleanupResult : {}),
+            filesCleaned: true, retainedBackups,
+            ...(Number.isSafeInteger(cleanupResult.cleanedFilesCount) && cleanupResult.cleanedFilesCount >= 0
+              ? { cleanedFilesCount: cleanupResult.cleanedFilesCount } : {}),
           });
           break;
         }
 
         case 'unix_identity_cleanup': {
-          if (typeof unixIdentityCleanupHandler === 'function') {
-            await unixIdentityCleanupHandler({
-              systemUser: step.resourceId,
-              websiteId: op.websiteId,
-            });
-          }
+          requireCleanupMethod(unixIdentityCleanupHandler);
+          const expected = { systemUser: step.resourceId, websiteId: op.websiteId };
+          const result = await unixIdentityCleanupHandler({ ...expected });
+          requireCleanupReceipt(result, expected, 'unixIdentityCleaned');
           op = await registry.succeedStep(op.id, step.id, { unixIdentityCleaned: true });
           break;
         }
 
         case 'metadata_finalization': {
-          if (websiteRegistry && typeof websiteRegistry.deleteMigrationWebsite === 'function') {
+          requireCleanupMethod(websiteRegistry?.getWebsite);
+          requireCleanupMethod(websiteRegistry?.deleteMigrationWebsite);
+          const current = await websiteRegistry.getWebsite(op.websiteId);
+          if (current !== null) {
+            if (!current || current.id !== op.websiteId || current.serverId !== op.serverId
+              || current.applicationId !== op.applicationId) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website identity changed during removal.', 409);
+            }
             await websiteRegistry.deleteMigrationWebsite({
-              websiteId: op.websiteId,
-              applicationId: op.applicationId,
-              serverId: op.serverId,
-            }).catch(() => {}); // tolerate already removed
+              websiteId: op.websiteId, applicationId: op.applicationId, serverId: op.serverId,
+            });
+          }
+          // A delete response or exception is not evidence that persistence is gone.
+          if (await websiteRegistry.getWebsite(op.websiteId) !== null) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website metadata is still present or unavailable.', 409);
           }
           op = await registry.succeedStep(op.id, step.id, { finalized: true });
           break;
@@ -403,10 +458,13 @@ export function createWebsiteRemovalRuntime({
           );
       }
     } catch (err) {
-      op = await registry.failStep(op.id, step.id, {
-        code: err.code ?? 'step_execution_failed',
-        message: err.message,
-      });
+      const known = err instanceof WebsiteRemovalRuntimeError;
+      const error = {
+        code: typeof err?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(err.code) ? err.code : 'website_removal_step_failed',
+        message: known ? err.message : 'Cleanup failed. Check the server diagnostics before explicitly continuing.',
+      };
+      const blocked = known && ['website_removal_cleanup_unavailable', 'website_removal_cleanup_unverified'].includes(err.code);
+      op = await registry[blocked ? 'blockStep' : 'failStep'](op.id, step.id, error);
     }
 
     return publicOperation(op);

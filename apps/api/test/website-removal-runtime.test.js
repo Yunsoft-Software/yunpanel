@@ -75,13 +75,15 @@ test('website-removal-runtime coordinates domain removal child operation before 
     registry,
     previewProvider: async () => mockPreview(),
     domainRemovalRuntime,
+    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
     websiteCronRegistry: {
       listTasks: async () => [{ id: 'cron-1' }],
       removeTask: async (id) => actionsCalled.push(`removeCron:${id}`),
     },
     websiteSftpKeyRegistry: {
-      listKeys: async () => [{ id: 'key-1' }],
-      revokeKey: async (id) => actionsCalled.push(`revokeKey:${id}`),
+      listKeys: async () => [{ id: 'key-1', revision: 1 }],
+      revokeKey: async ({ keyId }) => actionsCalled.push(`revokeKey:${keyId}`),
     },
     databaseBindingRegistry: {
       listBindings: async () => [{ id: 'db-1' }],
@@ -91,8 +93,8 @@ test('website-removal-runtime coordinates domain removal child operation before 
       getBinding: async () => ({ revision: 1 }),
       removeOwnedPassenger: async () => actionsCalled.push('removePassenger'),
     },
-    fileCleanupHandler: async () => actionsCalled.push('cleanFiles'),
-    unixIdentityCleanupHandler: async () => actionsCalled.push('cleanUnix'),
+    fileCleanupHandler: async (input) => { actionsCalled.push('cleanFiles'); return { ...input, filesCleaned: true }; },
+    unixIdentityCleanupHandler: async (input) => { actionsCalled.push('cleanUnix'); return { ...input, unixIdentityCleaned: true }; },
   });
 
   const preview = mockPreview();
@@ -174,6 +176,11 @@ test('website-removal-runtime cleans up database credentials and passes retained
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
+    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    websiteCronRegistry: { listTasks: async () => [], removeTask: async () => {} },
+    websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
+    runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {} },
+    unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
     databaseCredentialRegistry: {
       getForBinding: async (bindingId) => ({ id: `cred-${bindingId}`, revision: 2 }),
       deleteCredential: async (credId, opts) => {
@@ -188,7 +195,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
     },
     fileCleanupHandler: async ({ websiteId, applicationId, retainedBackups }) => {
       actions.push({ type: 'fileCleanup', websiteId, applicationId, retainedBackups });
-      return { cleanedFilesCount: 42 };
+      return { websiteId, applicationId, retainedBackups, filesCleaned: true, cleanedFilesCount: 42 };
     },
   });
 
