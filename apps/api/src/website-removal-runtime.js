@@ -1,4 +1,7 @@
-import { createHash } from 'node:crypto';
+const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+// Shared by runtime instances using the same registry, not by other processes or writers.
+const activeRemovals = new WeakMap();
 
 export class WebsiteRemovalRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -7,10 +10,6 @@ export class WebsiteRemovalRuntimeError extends Error {
     this.code = code;
     this.status = status;
   }
-}
-
-function digest(value) {
-  return createHash('sha256').update(JSON.stringify(value)).digest('hex');
 }
 
 function stepContinuationConfirmation(operation, step) {
@@ -74,6 +73,23 @@ export function createWebsiteRemovalRuntime({
     );
   }
 
+  let active = activeRemovals.get(registry);
+  if (!active) { active = new Set(); activeRemovals.set(registry, active); }
+  async function withWebsiteMutation(input, action) {
+    const websiteId = input?.websiteId;
+    if (typeof websiteId !== 'string' || !SAFE_ID.test(websiteId)) {
+      throw new WebsiteRemovalRuntimeError('website_removal_target_invalid', 'An explicit Website target is required.');
+    }
+    // Do not queue a stale destructive confirmation for later execution.
+    if (active.has(websiteId)) {
+      throw new WebsiteRemovalRuntimeError('website_removal_busy', 'A removal step for this Website is already running.', 409);
+    }
+    const submitted = structuredClone(input);
+    active.add(websiteId);
+    try { return await action(submitted); }
+    finally { active.delete(websiteId); }
+  }
+
   async function loadOperation(operationId) {
     const op = await registry.get(operationId);
     if (!op) {
@@ -108,8 +124,10 @@ export function createWebsiteRemovalRuntime({
     return previewProvider({ websiteId });
   }
 
-  async function start({ confirmation } = {}) {
-    if (typeof confirmation !== 'string' || !confirmation.startsWith('start-website-remove:')) {
+  async function start({ websiteId, previewDigest, confirmation } = {}) {
+    if (typeof websiteId !== 'string' || !SAFE_ID.test(websiteId)
+      || typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
+      || typeof confirmation !== 'string' || !confirmation.startsWith(`start-website-remove:${websiteId}:`)) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_confirmation_invalid',
         'Valid website removal confirmation is required',
@@ -117,18 +135,10 @@ export function createWebsiteRemovalRuntime({
       );
     }
 
-    const parts = confirmation.split(':');
-    const websiteId = parts[1];
-    if (!websiteId) {
-      throw new WebsiteRemovalRuntimeError(
-        'website_removal_confirmation_invalid',
-        'Website removal confirmation is malformed',
-        400,
-      );
-    }
-
     const currentPreview = await preview({ websiteId });
-    if (!currentPreview || currentPreview.confirmation !== confirmation || !currentPreview.readyToStart) {
+    if (!currentPreview || currentPreview.website?.id !== websiteId
+      || currentPreview.previewDigest !== previewDigest
+      || currentPreview.confirmation !== confirmation || currentPreview.readyToStart !== true) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_preview_stale',
         'Website removal state has changed since preview; request a new preview',
@@ -153,8 +163,8 @@ export function createWebsiteRemovalRuntime({
     }
 
     const step = firstIncomplete(op);
-    const expectedConf = stepContinuationConfirmation(op, step);
-    if (!step || step.id !== stepId || op.updatedAt !== expectedUpdatedAt
+    const expectedConf = step ? stepContinuationConfirmation(op, step) : null;
+    if (!step || op.status === 'removed' || step.id !== stepId || op.updatedAt !== expectedUpdatedAt
       || confirmation !== expectedConf) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_step_continuation_stale',
@@ -414,8 +424,8 @@ export function createWebsiteRemovalRuntime({
   return Object.freeze({
     init,
     preview,
-    start,
-    continueStep,
+    start: (input) => withWebsiteMutation(input, start),
+    continueStep: (input) => withWebsiteMutation(input, continueStep),
     get,
     listForWebsite,
   });

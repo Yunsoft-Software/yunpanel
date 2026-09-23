@@ -116,9 +116,9 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
   }));
 
   app.get('/api/websites/:websiteId/removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const { operationId } = request.params;
+    const { websiteId, operationId } = request.params;
     const operation = await runtime.get(operationId);
-    if (!operation) {
+    if (!operation || operation.websiteId !== websiteId) {
       throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
     }
     response.json({ operation });

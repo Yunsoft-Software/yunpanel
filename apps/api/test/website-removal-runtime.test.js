@@ -97,7 +97,7 @@ test('website-removal-runtime coordinates domain removal child operation before 
 
   const preview = mockPreview();
   // 1. Start operation -> should execute step 1 (domain_removal) and wait for domain to complete
-  let op = await runtime.start({ confirmation: preview.confirmation });
+  let op = await runtime.start({ websiteId: preview.website.id, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
   assert.equal(op.status, 'running');
   assert.equal(op.steps[0].kind, 'domain_removal');
   // At this point, files or unix have NOT been touched because domain removal is not completed!
@@ -192,7 +192,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
     },
   });
 
-  let op = await runtime.start({ confirmation: preview.confirmation });
+  let op = await runtime.start({ websiteId: preview.website.id, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
   // Step through until database_binding_cleanup
   while (op.status === 'running') {
     const nextStep = op.steps.find((s) => s.status !== 'succeeded');
