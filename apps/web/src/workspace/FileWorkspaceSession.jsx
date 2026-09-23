@@ -25,7 +25,7 @@ export function useFileWorkspaceSession({ websiteId, runtimeType }) {
   const shared = useContext(FileSessionContext);
   const [localEditor, setLocalEditor] = useState(null);
   const ignorePath = useCallback(() => {}, []);
-  const matching = shared?.binding?.websiteId === websiteId && shared?.binding?.runtimeType === runtimeType;
+  const matching = Boolean(shared?.binding && shared.binding.websiteId === websiteId && shared.binding.runtimeType === runtimeType);
   // FileWorkspace is keyed by Website/runtime, so a successful navigation must
   // not restart its initial listing every time the remembered path is updated.
   const initialPath = useRef(matching ? shared.path : '').current;
