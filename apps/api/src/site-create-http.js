@@ -2,6 +2,7 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create-isolation-guard.js';
 import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from './site-create-dns-provisioning.js';
 import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from './site-create-mail-provisioning.js';
+import { provisionSiteAdmin } from './site-admin-provisioning.js';
 
 const PREVIEW_FIELDS = new Set(['input']);
 const APPLY_FIELDS = new Set(['input', 'previewDigest', 'confirmation']);
@@ -89,23 +90,15 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       confirmation: body.confirmation,
       ...dependencies,
     });
-    if (input.siteAdmin && dependencies.userAdminStore && result.website?.id) {
-      try {
-        await dependencies.userAdminStore.createSiteManager({
-          username: input.siteAdmin.email,
-          password: input.siteAdmin.password,
-          websiteId: result.website.id,
-          actorId: request.auth?.user?.id ?? 'system',
-        });
-      } catch (adminError) {
-        console.error('Failed to create site manager:', adminError);
-      }
-    }
+    const siteAdmin = await provisionSiteAdmin({
+      input, result, userAdminStore: dependencies.userAdminStore, actorId: request.auth?.user?.id,
+    });
     const current = await previewWithProvisioning({ input, dependencies });
     const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
     return response.status(result.created ? 201 : 200).json({
       data: Object.freeze({
         ...result,
+        siteAdmin,
         provisioning,
       }),
     });
