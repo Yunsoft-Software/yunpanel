@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## UX-PL-04c / 06d — Alias kaynak aktarımı tamamlandı
+
+- [x] **Kaynak / development:** önceki yerel paket `027b664f` ve `e3ac0fc9` ile dalda. Barındırma ve DNS → Alan adları; görünür ekle/çıkar/iptal, SSL etkili önizleme ve aynı mevcut API üzerinden kaydetme. SiteDetailPage bağlantısı yalnız iki import satırıdır; Files/SSL motorları değişmedi.
+- [x] **Yayın akışı kaynağı:** mevcut stage/activate işleri tek Yayına uygula eyleminde; hedef/revizyon/son kayıt doğrulaması, belirsiz sonuçta otomatik tekrar yok. Aynı yönlendirme sürümünün güncel yayın/askı durumu taslak silinmeden yenilenir.
+- [x] **Seçili test:** Node22.16.0 altında 49 geçti / 0 başarısız / 0 atlandı (40 model/istemci + 9 UI dosyası kontrolü; bunların biri hata mesajı davranışıdır). İki JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası GitHub blob'larıyla eşleşir. Önceki 44 test bu 49'un içinde; toplamlar toplanmaz.
+- [ ] **Gerçek kabul:** Node24/npm11 tam check, React/Vite, gerçek API/browser/host ve T-DEV-DOMAIN-ALIASES. Kaynak aktarım engeli kapandı; canlı kabul, DNS/mail alias senkronizasyonu ve ortak backend kilidi kapanmadı. [Güncel rapor ve TODO](docs/ux/domain-alias-flow.md). Eski ZIP patchleri tekrar uygulanmaz.
+
 ## Son kullanıcı teyidi ve UX ilerlemesi — 2026-09-23
 
 **Güncel sıra: Plesk görev yerleşimi ve site araçlarının kullanım akışları önce gelir.** Aşağıdaki eski “bu tur önce reseller” sırası bu son teyitle değiştirilmiştir. Ayrı reseller/cleanup backend genişlemesi günlük site araçlarının önüne geçmez; güvenlik ve üretim kabulü gevşetilmez. Mevcut Ember görsel dili ve çalışan motorlar korunur.
@@ -8,7 +15,7 @@
 - [x] **UX-PL-04a/06a kaynak:** Genel Bakış / Barındırma ve DNS / Posta; görünür site araçları, teknik kimlikler ikinci planda; `6b755b28`. Önceki testler bu tur yeniden çalıştırılmış sayılmaz.
 - [x] **UX-PL-04b.1–3 kaynak:** liste artık doğrudan Dosyalar/DB/SSL/DNS/Posta/Günlükler ve barındırma/uygulama/Git erişimli kartlar kullanıyor. Arama/alias, filtreler, hiyerarşi, grup sayfalaması ve yoğunluk korundu. Doğrulanmış aynı-sunucu bağlantısı, görünür eksik/stale durum, Owner alt alan adı eylemi ve bütün kaynakları yenileme; `660e8162`, `deeb700c`.
 - [x] **UX-PL-04b.4 seçili kaynak testleri:** **51 geçti / 0 başarısız / 0 atlandı**, Node22.16.0. 33 hedef/etiket, 7 hiyerarşi/sertifika, 7 kaynak bağlantısı ve mevcut 4 liste regresyonu. [Kaynak raporu ve T-DEV-SITE-CARDS](docs/ux/website-task-cards.md). JSX parser/render/build veya gerçek API/browser kabulü değildir.
-- [ ] **UX-PL-04/06 kalan:** gerçek alias düzenleme, hosting formu, silme/askı akışları, PHP/cron/backup/istatistik görevleri ve uçtan uca kabul. Kart kaynağı tamamlandığı için üst UX kutuları kapanmaz. Files taslak/yol korunması ve önceki production/RS kapıları açık kalır.
+- [ ] **UX-PL-04/06 kalan:** alias gerçek ortam/DNS/posta kabulü, hosting formu, silme/askı akışları, PHP/cron/backup/istatistik görevleri ve uçtan uca kabul. Kart kaynağı tamamlandığı için üst UX kutuları kapanmaz. Files taslak/yol korunması ve önceki production/RS kapıları açık kalır.
 
 Bu bölüm, `ui-plan.md` ve önceki navigasyon raporundaki “kart/liste kaynak işi henüz yapılmadı” notunun güncel karşılığıdır. Sonraki dilim yeni bir dashboard veya reseller paket motoru değil, mevcut site araçlarının oluşturma/düzenleme/sonuç/geri dönüş akışıdır.
 
