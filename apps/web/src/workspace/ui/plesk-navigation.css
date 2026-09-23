@@ -1,0 +1,5 @@
+/* Layout only: shared Ember colors, type, radius and focus tokens stay in place. */
+.ws-plesk-site-navigation { display: grid; gap: 0.5rem; min-width: 0; margin-bottom: 1rem; }
+.ws-plesk-site-navigation .ws-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; overflow: visible; margin: 0; }
+.ws-plesk-site-navigation .ws-tabs a { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
+.ws-plesk-site-navigation .ws-tabs a svg { flex-shrink: 0; }

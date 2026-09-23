@@ -1,10 +1,10 @@
 const DAY = 86400000;
 const ACTIVE_JOBS = new Set(['queued', 'running']);
 export const SITE_TABS = [
-  ['overview', 'Genel bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Deploy'],
-  ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL'], ['files', 'Dosyalar'],
-  ['databases', 'Veritabanları'], ['mail', 'E-posta'], ['logs', 'Loglar'],
-  ['terminal', 'Terminal'], ['settings', 'Ayarlar'],
+  ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
+  ['hosting', 'Barındırma ve DNS'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
+  ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'],
+  ['terminal', 'Terminal'], ['settings', 'Barındırma bilgileri'],
 ];
 export const siteHref = (id, tab = 'overview') => `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === tab) ? tab : 'overview'}`;
 export function certificateState(domain, certificates, now = Date.now()) {
