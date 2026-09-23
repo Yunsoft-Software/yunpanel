@@ -4,6 +4,7 @@ import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, EmptyState, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
 import {
+  jobAttemptCount,
   jobLifecycle,
   jobResourceTarget,
   jobSupportsDeployLogs,
@@ -63,9 +64,8 @@ function JobObservation({ id, close, update, refresh }) {
         ['Kaynak', target?.href ? <Link key="resource" to={target.href} onClick={close}>{target.label}</Link> : target?.label ?? job.resourceType ?? '—'],
         ['Kaynak kimliği', job.resourceId ?? '—'],
         ['Aşama', lifecycle.stage],
-        ['İlerleme', lifecycle.progress],
-        ['Aşama açıklaması', lifecycle.detail],
-        ['Deneme', Number.isSafeInteger(job.attempts) ? job.attempts : '—'],
+        ['Durum açıklaması', lifecycle.detail],
+        ['Deneme sayısı', jobAttemptCount(job) ?? 'Bildirilmedi'],
         ['Oluşturulma', formatDate(job.createdAt)],
         ['Başlama', formatDate(job.startedAt)],
         ['Tamamlanma', formatDate(jobFinishedAt(job))],
