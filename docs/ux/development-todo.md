@@ -43,6 +43,16 @@ RS-02d turunda `hosting-site-*.test.js` dosyaları: **65 geçti / 0 başarısız
 - [ ] Gerçek tarayıcı: Owner Bayiler/Müşteriler; bayi Müşterilerim/Sitelerim; müşteri kendi site araçları. Files iki girişi, hata/retry, reload/back, yanlış ID ve oturum değişimi. Paket/abonelik açtırılmasın; henüz bağlanmamış eylem çalışıyor gösterilmesin.
 - [ ] Entegrasyon/test bitmeden reseller login'i açma ve production'a dağıtma. Sonucu güncel commit/build kimliğiyle kaydet; kaynak testini canlı kabul sayma. Şema/legacy geçiş korumalarını bütün erişim yolları bağlanmadan kaldırma.
 
+## T-DEV-REMOVAL-SAFETY — RS-02e.1/2 kaynak sonrası
+
+`1e59771e` / `d3e16942`: hedef/onay bağlama, aynı registry içi örtüşme engeli ve cleanup doğrulama kontrolleri. Kanıt: `docs/history/website-removal-safety-2026-09-23.md`. Seçili kaynakta 70 test geçti; host adaptörleri kontrollü test verisidir. RS-02e ve BUG-20260923-02 üst kabulleri açık kalır.
+
+- [ ] Node24/npm11 tam check ve mevcut removal/provisioning/site-create regresyonları. Yeni `website-removal-target.test.js` / `website-removal-cleanup.test.js` ve güncel runtime testlerini hedef sürümde çalıştır. Gerçek Express + auth/Origin/CSRF/MFA üzerinden Owner/Site A/Site B ile farklı URL Website/confirmation/operationId kombinasyonlarını reddet; işlem sırasında yetki/oturum kaybını sınayarak hiçbir başka-site sonucu döndürülmediğini doğrula.
+- [ ] İzinli hostta gerçek fileCleanupHandler/unixIdentityCleanupHandler ve cron kaldırma job adaptörleri bağlandıktan sonra sonuçları bağımsız doğrula. Mevcut `index.js` ilk ikisini vermiyor; cron registry `deleteTask` metadata işlemidir, host temizliği değildir. Eksik adaptör varken önizlemede blocker ve null confirmation görünmeli; domain silme dahil kısmi işe başlanmamalı. Geliştirilebilir adapter kaynak işi root plan RS-02e/BUG-02'de açıktır.
+- [ ] Dosya/Unix temizliğinde gerçek hedef, korunan yedekler ve erişim kapanmasını doğrula; SFTP/DB/runtime kaydının silinmesi host temizliği sayılmasın. Receipt alanlarını istemci veya saf metadata çıktısından üretme. Kısmi temizlik, yanlış hedefli receipt, başarısız key revoke ve izin/disk/servis hatası silmeyi tamamlandı göstermemeli; düzeltilmiş aynı iş açık onayla devam etmeli.
+- [ ] Website registry disk yazma hatası ve cache tutarlılığı; metadata silme sonrası süreç kapat/aç ve soğuk disk yeniden okuması. `getWebsite() === null` tek başına kalıcı disk temizliğini kanıtlamaz. Eski removed kayıtlarını kota release kanıtı sayma; uygulama/domain/mail/Unix kalıntıları ayrıca kontrol edilsin.
+- [ ] Bağımsız API/CLI/create/provisioning/removal yazıcıları ortak kalıcı kilit altında yarışsın. Same-registry WeakMap yalnız aynı süreçte örtüşen removal çağrılarını reddeder; diğer yazıcıların kilidi değildir. Başarısız silmenin yerine yeni operation açılamamalı; restart sonrasında doğru önceki iş uzlaştırılmalı. Eski yürütücünün yeniden yazması engellenmeden ve gerçek cleanup doğrulanmadan kontenjan bırakılmamalı; release hâlâ açık kaynak işidir.
+
 ## T-DEV-PARITY — korunmuş uzun vadeli kapsam
 
 - [ ] Envanterdeki satırlara mevcut YunPanel dosya/API/servis kanıtı ve rol bazlı canlı kabul bağla; checkbox sayısından tamamlanma yüzdesi üretme. Sade reseller için RS-00–05 geçerli; tam paket/abonelik/overselling/markalama sonraki fazdır ve MVP engeli değildir.

@@ -1,21 +1,34 @@
 # RS-02e / BUG-20260923-02 — Silme hedefi ve temizlik kanıtı
 
-2026-09-23; `development`, başlangıç `c19ead60`. Sade reseller kapsamı değişmez. Mevcut Website silme runtime'ı ve HTTP yolları düzeltilir; yeni silme motoru, rol veya otomatik kontenjan bırakma eklenmez.
+2026-09-23; `development`, başlangıç `c19ead60`. İlk sözleşme `862ca7c3`; kaynak düzeltmeleri `1e59771e` ve `d3e16942`. Mevcut Website removal runtime ve HTTP yolu kullanıldı. Yeni silme motoru, rol, tenant yetkisi veya kontenjan bırakma API'si eklenmedi.
 
-## İnceleme ve bu dilimin sırası
+## Tamamlanan kaynak alt işleri
 
-`website-removal-http.js`, başlangıçta URL Website kimliği ve previewDigest'i runtime'a gönderiyor; mevcut `start` bunları kullanmayıp hedefi yalnız confirmation'dan çıkarıyor. İşlem ayrıntısı GET yolu da dönen operation'ın Website bağını doğrulamıyor. `continueStep` tamamlanmış işte null step üzerinden confirmation üretmeye çalışıyor.
+- [x] **RS-02e.1 / BUG-20260923-02a — `1e59771e`:** başlangıçta explicit URL Website, güncel previewDigest ve confirmation birlikte doğrulanır. İşlem ayrıntısında başka Website kimliği 404 verir; tamamlanmış/stale devam güvenli 409 olur. Aynı registry nesnesini paylaşan runtime'larda örtüşen silme çağrısı reddedilir; bekletilip eski destructive onay sonradan çalıştırılmaz. Girdi await öncesi kopyalanır. Bu koruma aynı süreç/registry içindir, bütün Website yazıcıları için ortak kilit değildir.
+- [x] **RS-02e.2 / BUG-20260923-02b — `d3e16942`:** eksik cleanup metodu önizlemede görünür blocker ve null confirmation üretir; eski kayıtların devamında da kontrol edilir. Dosya ve Unix cleanup sonucu hedef kimliğini ve true tamamlanma alanını taşımalıdır; dosyada korunan yedek kümesi eşleşir. Metadata delete hatası yutulmaz; Website registry yeniden okunup null doğrulanmadan finalization başarılı sayılmaz. Geçersiz envanter boş listeye çevrilmez. SFTP gerçek object imzasıyla bir kez çağrılır; hata sonrası farklı imzayla tekrar yoktur. Başarısız silmenin yerine ikinci removal operation açılmaz. Harici hata mesajı ve rastgele adapter alanları genel işlem sonucuna kopyalanmaz.
+- [x] **Seçili kaynak regresyonları:** 3 mevcut runtime testi + 25 hedef/örtüşme/route testi + 42 cleanup testi. Mevcut pozitif fixture'lar artık eksik servislerle sahte başarıya dayanmaz; gerekli adapter ve doğru sonuç verisini sağlar.
+- [ ] **Üst kabul açık:** gerçek host cleanup adaptörleri, bütün create/provisioning/removal yazıcılarının ortak kilidi ve canlı yetkisi, güvenli quota release, veri içeren migration/rollback ve uçtan uca tarayıcı kabulü.
 
-`website-removal-runtime.js` bazı cleanup bağımlılıkları yokken başarı yazıyor; metadata silme hatasını yutuyor. Bu sonuçlar güvenli reseller kontenjanı bırakma kanıtı olamaz. Önce bu somut silme engelleri düzeltilir; bütün Website yazıcılarının süreçler arası ortak kilidi ve canlı yetki entegrasyonu RS-02e'de açık kalır.
+## Çalıştırılan kontroller
 
-## Kaynak alt işleri
+Ortam: **Node v22.16.0 / npm 10.9.2**.
 
-- [ ] **RS-02e.1 / BUG-20260923-02a:** URL Website, güncel previewDigest ve confirmation aynı hedefe bağlanır. İşlem GET/continue yanlış Website ve tamamlanmış/stale adımda güvenli hata verir; hiçbir cleanup yan etkisi oluşmaz.
-- [ ] **RS-02e.2 / BUG-20260923-02b:** Dosya/Unix temizliği eksik handler veya doğrulanmamış sonuçla tamamlanmaz. Metadata silme hatası yutulmaz; Website gerçekten kaldırılmadan işlem removed sayılmaz. Diğer cleanup adımlarında eksik bağımlılık başarı değildir. Mevcut adapter sözleşmeleri korunur; exception sonrası farklı imzayla kör tekrar yapılmaz.
-- [ ] **Kaynak regresyonu:** Gerçek mevcut silme runtime'ı, registry ve HTTP route bağlantısı; yanlış hedef, eksik bağımlılık, hata/kısmi sonuç ve devam senaryoları yerelde sınanır. Native auth, gerçek host temizliği ve tarayıcı ayrıca kabul edilir.
+```sh
+node --test apps/api/test/website-removal-runtime.test.js apps/api/test/website-removal-target.test.js apps/api/test/website-removal-cleanup.test.js
+```
 
-## Açık kalan yayın kapıları
+**70 geçti / 0 başarısız / 0 atlandı.** Son kaynak haline karşı tekrar çalıştırıldı. İki değişen JS kaynak dosyası, yeni test helper'ı ve üç test dosyası `node --check` ile geçti. Önceki reseller/UI/API test toplamları bu sayıya eklenmedi ve bu tur yeniden çalıştırılmış sayılmaz.
 
-Ortak create/provisioning/removal kilidi, bütün API/job/AI/tool/gateway/WS yollarında canlı yetki, güvenli compensation/release ve veri içeren migration açık kalır. Bu değişiklik eski removed kayıtlarını geriye dönük doğrulamaz. Eski yürütücünün tekrar yazamayacağı ve gerçek kaynak temizliği kanıtlanmadan rezervasyon bırakılmaz. Yeni reseller erişimi veya site create HTTP yolu açılmaz.
+Gerçek mevcut plan üreticisi, removal operation registry ve runtime çalıştırıldı; bir test gerçek geçici JSON dosyasını yeniden açıp blokajın korunduğunu doğruladı. Host cleanup ve Website registry adaptörleri kontrollü fixture'dır. HTTP testleri gerçek route callback'ini çağırır; Express listener, cookie/CSRF/MFA veya browser kabulü değildir. Tam checkout/bağımlılıklar, hedef Node24/npm11 `npm run check`, native Argon2, gerçek dosya/Unix/DB/mail servisleri ve canlı deployment çalıştırılmadı.
 
-Node24/npm11 tam check; yalnız izinli hedefte gerçek disk/Unix/DB/mail/runtime/silme-restart kabulü; Owner/Site A/Site B tarayıcı ve doğrudan API testleri yapılmadan production-ready denmez. `.44` Plesk hostuna dokunulmaz. GitHub Actions ve main değişikliği yok.
+## Önemli mevcut kurulum sınırı
+
+`apps/api/src/index.js` Website removal composition'ı halen fileCleanupHandler ve unixIdentityCleanupHandler vermiyor. Cron kaydı `deleteTask` sunarken removal host-adaptörü `removeTask` bekliyor; salt metadata silmeyi host crontab temizliği diye yeniden adlandırmadık. Bu kurulum artık ilgili eksik adaptörleri önizlemede gösterir ve kısmi silmeye başlamaz. Bu değişiklik gerçek host temizliğinin tamamlandığı iddiası değildir.
+
+Dosya/Unix receipt'i güvenilir host adaptöründen gelmelidir; HTTP body kanıt sayılamaz. SFTP/DB/runtime metadata sonucu host erişiminin kapandığını tek başına kanıtlamaz. Registry yeniden okuması da soğuk disk yeniden açılışı ve yazma-hatası kabulünün yerine geçmez: cache/persist hata durumları ayrıca sınanmalıdır. Eski removed kayıtları geriye dönük güvenilir temizlik kanıtına dönüşmez.
+
+Same-registry WeakMap yalnız örtüşen removal çağrılarını önler. Ayrı API/CLI süreçleri, site create, provisioning, child domain işleri ve diğer yazarlar için kalıcı ortak kilit/yeniden yetkilendirme hâlâ gereklidir. Eski yürütücünün tekrar yazamayacağı ve gerçek kaynak temizliği kanıtlanmadan hiçbir rezervasyon bırakılmaz; bu tur release API'si açılmadı.
+
+## Gerçek ortam devri
+
+`docs/ux/development-todo.md` içindeki T-DEV-REMOVAL-SAFETY ve mevcut T-DEV-RESELLER birlikte geçmelidir. Owner/Site A/Site B URL/onay/operationId sınırı, işlem sırasında logout/izin kaybı, gerçek adapter sonuçları, korunmuş yedekler, restart/yarım temizlik ve bağımsız yazıcı yarışları kabul edilir. BUG-20260923-02 ve RS-02e üst kutuları açık kalır. GitHub Actions, main değişikliği, Files/UI/tema değişikliği veya canlı sunucu işlemi yapılmadı; `.44` Plesk hostuna dokunulmadı.
