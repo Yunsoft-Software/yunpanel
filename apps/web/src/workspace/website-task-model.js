@@ -56,7 +56,7 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
     }
     return {
       domainReady: !domainProblem,
-      runtimeLabel: website ? (runtimeLabels[website.runtimeType] ?? 'Tür bilgisi alınamadı') : 'Tür bilgisi doğrulanamadı',
+      runtimeLabel: website ? (Object.hasOwn(runtimeLabels, website.runtimeType) ? runtimeLabels[website.runtimeType] : 'Tür bilgisi alınamadı') : 'Tür bilgisi doğrulanamadı',
       applicationName: typeof application?.name === 'string' ? application.name : null,
       bindingProblem,
       tools,

@@ -1,0 +1,36 @@
+/* Scoped layout using existing Ember tokens, not a second theme. */
+.ws-website-task-list { display: grid; gap: 1rem; list-style: none; margin: 0; padding: 1rem; }
+.ws-website-task-list > li { min-width: 0; }
+.ws-website-task-card { min-width: 0; margin-inline-start: calc(var(--ws-card-depth, 0) * 1rem); padding: 1rem; border: 1px solid var(--ws-border); border-radius: var(--ws-radius); background: var(--ws-surface); }
+.ws-website-task-header { display: flex; flex-wrap: wrap; align-items: center; gap: 0.75rem 1rem; margin-bottom: 1rem; }
+.ws-website-task-title { flex: 1 1 14rem; min-width: 0; }
+.ws-website-task-title h3 { margin: 0; font-size: 1rem; overflow-wrap: anywhere; }
+.ws-website-task-title p { margin: 0.25rem 0 0; color: var(--ws-muted); font-size: 0.8rem; }
+.ws-website-task-title small { display: block; color: var(--ws-muted); }
+.ws-website-task-status { display: flex; flex-wrap: wrap; gap: 0.5rem; min-width: 0; }
+.ws-website-task-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 10rem), 1fr)); gap: 0.75rem; }
+.ws-website-task { display: flex; flex-direction: column; min-width: 0; gap: 0.35rem; }
+.ws-website-task .ws-button { justify-content: flex-start; width: 100%; min-height: 44px; white-space: normal; overflow-wrap: anywhere; }
+.ws-website-task small { color: var(--ws-muted); font-size: 0.75rem; overflow-wrap: anywhere; }
+.ws-website-task-secondary { display: flex; flex-wrap: wrap; gap: 0.75rem; margin-top: 0.75rem; }
+.ws-website-task-secondary > .ws-website-task { flex: 0 1 15rem; }
+.ws-website-task-footer { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-start; gap: 0.75rem; margin-top: 1rem; }
+.ws-website-task-footer .ws-button { white-space: normal; min-height: 44px; overflow-wrap: anywhere; }
+.ws-website-task-details { min-width: 0; max-width: 100%; }
+.ws-website-task-details summary { min-height: 44px; padding-block: 0.6rem; cursor: pointer; color: var(--ws-muted); }
+.ws-website-task-details > summary:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 3px; }
+.ws-website-task-details[open] { flex-basis: 100%; }
+.ws-website-task-details dl { margin: 0; display: grid; gap: 0.5rem; }
+.ws-website-task-details dt { color: var(--ws-muted); }
+.ws-website-task-details dd { margin: 0; overflow-wrap: anywhere; }
+.ws-website-task-warning { display: flex; gap: 0.5rem; align-items: center; }
+.ws-site-table-compact .ws-website-task-list { gap: 0.6rem; }
+.ws-site-table-compact .ws-website-task-card { padding: 0.75rem; }
+.ws-site-table-compact .ws-website-task-header { margin-bottom: 0.6rem; }
+@media (max-width: 720px) {
+  .ws-website-task-list { padding: 0.75rem; }
+  .ws-website-task-card { margin-inline-start: calc(var(--ws-card-depth, 0) * 0.35rem); }
+  .ws-website-task-secondary > .ws-website-task { flex: 1 1 12rem; }
+  .ws-website-task-footer .ws-actions { width: 100%; }
+  .ws-website-task-footer .ws-button { flex: 1 1 10rem; }
+}
