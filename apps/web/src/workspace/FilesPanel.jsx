@@ -1,20 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { panelRequest, uploadSiteFile } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { useFileWorkspaceSession } from './FileWorkspaceSession.jsx';
 import { formatBytes, formatDate } from './site-model.js';
 import { Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, Modal, Section } from './PanelKit.jsx';
 import { fileChild, fileCrumbs, fileKind, fileListing, fileParent, toggleVisibleSelection, validFileName, visibleFiles } from './ui/file-workspace-model.js';
 import './ui/file-workspace.css';
 
 // A changed Website must discard caches, selection, in-flight reads and editor state.
-export default function FilesPanel({ websiteId, runtimeType }) {
-  return <FileWorkspace key={`${websiteId}:${runtimeType}`} websiteId={websiteId} runtimeType={runtimeType} />;
+export default function FilesPanel({ websiteId, serverId, runtimeType }) {
+  return <FileWorkspace key={`${websiteId}:${serverId}:${runtimeType}`} websiteId={websiteId} runtimeType={runtimeType} />;
 }
 function FileWorkspace({ websiteId, runtimeType }) {
   const { canManage } = useWorkspace();
   const supported = ['static', 'node', 'php', 'python'].includes(runtimeType);
   const base = `/websites/${encodeURIComponent(websiteId)}/files`;
-  const [view, setView] = useState({ path: '', entries: [], loading: true, loaded: false, error: null });
+  const { initialPath, editor, setEditor, rememberPath } = useFileWorkspaceSession({ websiteId, runtimeType });
+  const [view, setView] = useState({ path: initialPath, entries: [], loading: true, loaded: false, error: null });
   const [folders, setFolders] = useState({});
   const [expanded, setExpanded] = useState(() => new Set(['']));
   const [treeLoading, setTreeLoading] = useState(() => new Set());
@@ -26,7 +28,6 @@ function FileWorkspace({ websiteId, runtimeType }) {
   const [layout, setLayout] = useState('list');
   const [selected, setSelected] = useState([]);
   const [dialog, setDialog] = useState(null);
-  const [editor, setEditor] = useState(null);
   const [discard, setDiscard] = useState(false);
   const [editorLoading, setEditorLoading] = useState(false);
   const [upload, setUpload] = useState(null);
@@ -64,6 +65,7 @@ function FileWorkspace({ websiteId, runtimeType }) {
       const items = fileListing(result, nextPath);
       if (!alive.current || current !== generation.current) return;
       setView({ path: nextPath, entries: items, loading: false, loaded: true, error: null });
+      rememberPath(nextPath);
       setSelected([]); cacheFolders(nextPath, items);
       setExpanded((value) => new Set([...value, '', ...fileCrumbs(nextPath).map((crumb) => crumb.path)]));
     } catch (failure) {
@@ -71,8 +73,8 @@ function FileWorkspace({ websiteId, runtimeType }) {
         setView((value) => ({ ...value, loading: false, error: failure.message }));
       }
     }
-  }, [base, cacheFolders]);
-  useEffect(() => { if (supported && websiteId) void load(''); }, [supported, websiteId, load]);
+  }, [base, cacheFolders, rememberPath]);
+  useEffect(() => { if (supported && websiteId) void load(initialPath); }, [supported, websiteId, load, initialPath]);
   async function expand(path) {
     if (expanded.has(path)) { setExpanded((value) => { const next = new Set(value); next.delete(path); return next; }); return; }
     setTreeError(null);
