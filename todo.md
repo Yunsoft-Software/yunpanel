@@ -4,6 +4,16 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-JOB-UX — İşlem durumu ve kurulum ilerletme (2026-09-23)
+
+Aktif çalışma dalı `development`; aşağıdaki eski tarihli `main` ifadeleri bu dilimin hedefi değildir. Kaynak ve ayrıntılı kabul: [job-progress-retry-flow.md](docs/ux/job-progress-retry-flow.md). Seçili Node22 testleri gerçek ortam kabulünü kapatmaz.
+
+- [ ] Node >=24.11.1/npm >=11 tam checkout'ta `npm ci` ve tam lint/test/build. `job-presentation.test.js`, `provisioning-advance.test.js`, `job-progress-wiring.test.js` ve mevcut job/provisioning/session regresyonlarını birlikte çalıştır. Bu ortamda GitHub DNS çözümlemesi başarısız olduğundan tam checkout yapılamadı; 74 seçili test ve iki JSX sözdizimi kontrolüyle sınırlı kalındı.
+- [ ] Gerçek React/Vite ile İşlem geçmişi, site içi işler ve detay penceresi: failed/cancelled 3/3 veya yüzde yüz görünmesin; gerçek 0 deneme korunsun, eksik/bozuk bilgi sıfır sayılmasın. Kaynak/log/iptal bağlantıları, mobil ve klavye korunsun.
+- [ ] Gerçek HTTP/auth/CSRF ile başarılı adım zinciri, zaten tamamlanmış işlem, 401/403/409/429/5xx, yanıt kaybı, yanlış işlem/site sonucu, logout/login ve abort. Belirsiz POST otomatik tekrarlanmamalı; sunucudaki kaynak güncel kayıtla uzlaştırılmalı. İlerlemenin durması host işini iptal etmek değildir.
+- [ ] Yaratılmış site sonrasında ilerletme hatasında yeni site oluşturmadan mevcut sonuca/Genel Bakış recovery'ye dön. Manuel continue/retry/compensate, stale kayıt, çift tıklama, oturum kaybı, ortak kilit, idempotency ve restart kabulünü tamamla. Otomatik hata tekrarı bu dilimde güvenli durduruldu; backend sınıflandırmalı bounded retry/backoff ve limit sonrası manuel retry kaynak/host işi `plan.md` BUG-01 içinde açık.
+- [ ] `.44` kesinlikle hariç izinli test hostunda güncel API/web build kimliğiyle doğrula. Files/hosting/alias ve önceki SSL formu kabulleri ayrıca açık; eski test sayılarını bu turun sonucuna ekleme.
+
 ## T-EMBER — 2026-09-22 görsel dil ve gerçek tipografi kabulü
 
 Güncel görsel karar ve test sınırları: `docs/history/ember-visual-language-2026-09-22.md`. Grafit/mandalina/kırık beyaz dil, önceki lacivert/mavi renk hedefinin yerini alır; UX ve güvenlik kriterleri değişmez. Bu turdaki 14 kaynak testi ve 45 temsilî HTML görsel kontrolü production React/host kabulü değildir. Önizlemelerde font indirmesi engellendiğinden Lato yedek fontu kullanılmıştır.
