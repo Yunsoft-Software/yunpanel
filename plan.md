@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## ADMIN-RESULT-01–04 — Site yöneticisi hesap sonucu kaynağı tamamlandı
+
+- [x] **ADMIN-RESULT-01/02 kaynak:** `4c16030d`, `4ecac47e`; mevcut kullanıcı deposu çağrısı beklenir, doğru hesap rolü/aktifliği/tek Website bağı doğrulanır. Hesap hatası ham log yerine dar `siteAdmin` sonucu olarak mevcut site cevabında görünür. Replay/yarım devam hesabı yeniden yaratmaz, parola değiştirmez veya başka kullanıcıya site bağlamaz. Mevcut rota/await/parametreler zaten doğruydu; yeniden yazılmadı.
+- [x] **ADMIN-RESULT-03 arayüz:** `20119534`, `55192541`, `975837d1`; hesap sonucu mevcut oluşturma kartında ayrı gösterilir. Eksik/eski/yanlış-site cevabı hesap başarısı sayılmaz; host planı tamamlansa bile hesap uyarısı ve mevcut kullanıcı yönetimi bağlantısı kalır.
+- [x] **ADMIN-RESULT-04 seçili test:** `7333a1c6`, `34c588cc`, `633f17a9`; Node22.16.0 altında **39 geçti / 0 başarısız / 0 atlandı**: 22 backend helper + 15 frontend davranışı + 1 açık bağımlılık fixture'lı gerçek rota modülü + 1 kaynak bağlantısı. Bir JSX dönüşümü ve dört kaynak JS sözdizimi kontrolü geçti; sekiz kaynak/test dosyası GitHub blob'larıyla eşleşti. Gerçek React/auth/Argon2/SQLite/host kabulü değildir. [Kaynak ve T-DEV-ADMIN-RESULT](docs/ux/site-admin-result-flow.md).
+- [ ] **Kalan kaynak/kabul:** kalıcı operation→user uzlaştırması, hash sırasında canlı yetki/Website kontrolü, süreçler arası kilit, hesap sonrası provisioning kayıt hataları ve Node24/npm11 tam API/React/browser/host kabulü. Aşağıdaki önceki “site-admin hata yayılımı açık” notlarının yalnız dar create-cevabı/arayüz kaynağı bu bölümle güncellenir; uçtan uca hesap lifecycle veya PROD-06 kapanmaz.
+
 ## RECOVERY-01–04 — Manuel kurulum kurtarma kaynağı tamamlandı
 
 - [x] **RECOVERY-01/02 kaynak:** `fcfb6ffc`; Website/operation/adım/yetenek doğrulaması, sabit hedefli onay ve POST öncesi güncel kayıt kontrolü. Kayıt değişiminde yeni açık onay gerekir; aynı controller'da çift tıklama tek POST üretir. Belirsiz yanıt otomatik tekrarlanmaz; yenileme salt GET'tir. Stale kayıt salt okunur, 401/403 ve yetki kaybında eski veri/onay temizlenir.
