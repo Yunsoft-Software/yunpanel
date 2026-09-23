@@ -31,7 +31,7 @@ test('page parser checks pagination identity, counts and duplicate IDs', () => {
 test('create/edit inputs normalize names without persisting or resubmitting passwords on edit', () => {
   const form = { username: ' OWNER ', password: 'test-only-long-password', active: false, role: 'read_only' };
   assert.deepEqual(userAdminInput(form), { username: 'owner', password: form.password, active: false, role: 'read_only' });
-  assert.deepEqual(userAdminInput(form, user), { username: 'owner', active: false, role: 'read_only', revision: 1 });
+  assert.deepEqual(userAdminInput(form, user), { active: false, role: 'read_only', revision: 1 });
   assert.throws(() => userAdminInput({ ...form, password: 'short' }), { code: 'invalid_password' });
   assert.throws(() => userAdminInput({ ...form, password: '🦉'.repeat(257) }), { code: 'invalid_password' });
   assert.throws(() => userAdminInput({ ...form, username: 'bad/name' }), { code: 'invalid_username' });

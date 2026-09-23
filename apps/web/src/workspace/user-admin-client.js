@@ -17,6 +17,9 @@ export function userAdminMessage(error) {
     invalid_active: 'Geçerli bir hesap durumu seçin.',
     user_not_found: 'Hesap artık bulunmuyor. Formu kapatıp listeyi yenileyin.',
     invalid_revision: 'Güncel hesap sürümü alınamadı. Kaydı yeniden açın.',
+    empty_user_update: 'Kaydedilecek bir hesap değişikliği yok.',
+    invalid_website_ids: 'Site seçimi doğrulanamadı. Formu kapatıp listeyi yenileyin.',
+    hosting_account_managed: 'Bu hesaba bayi veya müşteri profili bağlı. Rol, durum ve site yetkilerini buradan değiştiremezsiniz; Bayi / müşteri profilini açın.',
     user_page_invalid: 'API geçerli bir kullanıcı listesi döndürmedi. API ve arayüz sürümlerini kontrol edin.',
     user_result_invalid: 'İşlem yanıtı doğrulanamadı. Yeniden göndermeden önce listeyi kontrol edin.',
     user_request_busy: 'Bir hesap işlemi zaten devam ediyor.',
@@ -56,6 +59,8 @@ export function userAdminInput(form, user = null) {
   if (!USERNAME.test(username)) throw problem('invalid_username');
   if (!['owner', 'read_only', 'site_manager'].includes(form.role)) throw problem('invalid_role');
   if (typeof form.active !== 'boolean') throw problem('invalid_active');
+  if (form.role === 'site_manager' && form.websiteIds !== undefined
+    && (!Array.isArray(form.websiteIds) || form.websiteIds.some((id) => typeof id !== 'string' || !ID.test(id)))) throw problem('invalid_website_ids');
   const input = {
     username,
     role: form.role,
@@ -64,7 +69,19 @@ export function userAdminInput(form, user = null) {
   };
   if (user) {
     if (!integer(user.revision, 1)) throw problem('invalid_revision');
-    return { ...input, revision: user.revision };
+    // PATCH only changed fields. Unchanged role/active/grants must not block a
+    // harmless name edit on a managed hosting profile, or overwrite newer state.
+    const changes = { revision: user.revision };
+    for (const key of ['username', 'role', 'active']) {
+      if (input[key] !== user[key]) changes[key] = input[key];
+    }
+    if (Object.hasOwn(input, 'websiteIds')) {
+      const next = [...new Set(input.websiteIds)].sort();
+      const previous = [...new Set(user.websiteIds ?? [])].sort();
+      if (user.role !== 'site_manager' || JSON.stringify(next) !== JSON.stringify(previous)) changes.websiteIds = next;
+    }
+    if (Object.keys(changes).length === 1) throw problem('empty_user_update');
+    return changes;
   }
   if (typeof form.password !== 'string' || [...form.password].length < 12 || new TextEncoder().encode(form.password).length > 1024) throw problem('invalid_password');
   return { ...input, password: form.password };
