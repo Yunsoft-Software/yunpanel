@@ -2,11 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { workspaceResources } from '../src/workspace/workspace-resources.js';
 const selected = (path, options) => Object.entries(workspaceResources(path, options)).filter(([, enabled]) => enabled).map(([key]) => key).sort();
-test('dashboard requests all summary sources, server/settings/database pages only servers', () => {
+test('dashboard retains summaries; server/settings request servers; databases has site scope', () => {
   assert.equal(selected('/dashboard').length, 5);
   assert.deepEqual(selected('/settings'), ['servers']);
   assert.deepEqual(selected('/servers/'), ['servers']);
-  assert.deepEqual(selected('/databases'), ['servers']);
+  assert.deepEqual(selected('/databases'), ['domains', 'servers', 'websites']);
 });
 test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
   for (const path of ['/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
@@ -15,14 +15,15 @@ test('docker workspace requests server and job dependencies', () => {
   assert.deepEqual(selected('/docker'), ['jobs', 'servers']);
   assert.deepEqual(selected('/docker/proj-123'), ['jobs', 'servers']);
 });
-test('mail workspace requests its implemented inventory and job dependencies', () => {
-  assert.deepEqual(selected('/mail'), ['domains', 'jobs', 'servers']);
+test('mail entry requests site scope; existing mail details retain their dependencies', () => {
+  assert.deepEqual(selected('/mail'), ['domains', 'jobs', 'servers', 'websites']);
+  assert.deepEqual(selected('/mail/mail-domain'), ['domains', 'jobs', 'servers']);
 });
 test('audit owns its bounded history request instead of polling workspace collections', () => {
   assert.deepEqual(selected('/audit'), []);
 });
 test('website list and creation request their dependencies without a job inventory', () => {
-  assert.deepEqual(selected('/websites'), ['applications', 'certificates', 'domains', 'servers']);
+  assert.deepEqual(selected('/websites'), ['applications', 'certificates', 'domains', 'servers', 'websites']);
   assert.deepEqual(selected('/websites/new'), ['applications', 'domains', 'servers', 'websites']);
 });
 test('site operation tabs retain required locks and job history', () => {
@@ -42,4 +43,9 @@ test('observed or active jobs keep monitoring after navigation, without unrelate
   assert.deepEqual(selected('/invalid', { observingJob: true }), ['jobs']);
   assert.deepEqual(selected('/invalid', { activeJob: true }), ['jobs']);
   assert.deepEqual(selected('/invalid', { activeJob: false, observingJob: false }), []);
+});
+test('home requests website relations and the tool directory has no global inventory side effect', () => {
+  assert.deepEqual(selected('/'), selected('/websites'));
+  assert.deepEqual(selected('/tools-settings'), []);
+  assert.deepEqual(selected('/tools-settings', { activeJob: true }), ['jobs']);
 });

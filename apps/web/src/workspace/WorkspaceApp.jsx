@@ -7,6 +7,8 @@ import WebsitesPage from './WebsitesPage.jsx';
 import NewWebsitePage from './NewWebsitePage.jsx';
 import SiteDetailPage from './SiteDetailPage.jsx';
 import FilesPage from './FilesPage.jsx';
+import SiteToolEntryPage from './SiteToolEntryPage.jsx';
+import ToolsSettingsPage from './ToolsSettingsPage.jsx';
 import ApplicationsPage from './ApplicationsPage.jsx';
 import AuditPage from './AuditPage.jsx';
 import DatabasesPage from './DatabasesPage.jsx';
@@ -34,6 +36,11 @@ function ScopedRoute({ management, readOnly }) {
   const { canManage } = usePanelSession();
   return canManage ? management : readOnly;
 }
+function GlobalSiteTool({ tool, ownerView }) {
+  const { isOwner } = usePanelSession();
+  // The site account enters its existing scoped tool, not the host-wide console.
+  return isOwner ? ownerView : <SiteToolEntryPage tool={tool} />;
+}
 const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
@@ -41,20 +48,21 @@ function createWorkspaceRouter() {
   return createBrowserRouter([{
     element: <WorkspaceLayout />, errorElement: <RouteFailure />,
     children: [
-      { index: true, element: <Navigate to="/dashboard" replace /> },
+      { index: true, element: <Navigate to="/websites" replace /> },
       { path: 'dashboard', element: scoped(<DashboardPage />, <ReadOnlyDashboardPage />) },
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'websites/new', element: manage(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'files', element: manage(<FilesPage />) },
+      { path: 'tools-settings', element: owner(<ToolsSettingsPage />) },
       { path: 'applications', element: owner(<ApplicationsPage />) },
       { path: 'applications/new', element: owner(<ApplicationsPage create />) },
       { path: 'domains', element: owner(<AdvancedDomainsPage />) },
       { path: 'servers', element: owner(<ServersPage />) },
-      { path: 'databases', element: manage(<DatabasesPage />) },
+      { path: 'databases', element: manage(<GlobalSiteTool tool="databases" ownerView={<DatabasesPage />} />) },
       { path: 'docker', element: manage(<DockerProjectsPage />) },
       { path: 'docker/:dockerProjectId', element: manage(<DockerProjectsPage />) },
-      { path: 'mail', element: manage(<MailDomainsPage />) },
+      { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) },
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },

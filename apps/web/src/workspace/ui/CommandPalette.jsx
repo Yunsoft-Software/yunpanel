@@ -3,12 +3,12 @@ import { Link, useNavigate } from 'react-router';
 import { Icon, Modal } from '../PanelKit.jsx';
 import { commandEntries } from './ux-model.js';
 
-export default function CommandPalette({ domains, canManage, onClose }) {
+export default function CommandPalette({ domains, canManage, isOwner = false, onClose }) {
   const [query, setQuery] = useState('');
   const [index, setIndex] = useState(0);
   const id = useId();
   const navigate = useNavigate();
-  const entries = useMemo(() => commandEntries({ query, canManage, domains }), [query, canManage, domains]);
+  const entries = useMemo(() => commandEntries({ query, canManage, isOwner, domains }), [query, canManage, isOwner, domains]);
   const selected = Math.min(index, Math.max(entries.length - 1, 0));
   function open(entry) { if (entry) { onClose(); navigate(entry.to); } }
   function keydown(event) {

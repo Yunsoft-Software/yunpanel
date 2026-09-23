@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import { NavLink, Outlet, useLocation } from 'react-router';
+import { Link, Outlet, useLocation } from 'react-router';
 import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx';
 import { UnsavedChangesProvider } from './UnsavedChanges.jsx';
 import { Button, Icon, LinkButton } from './PanelKit.jsx';
 import { knownCount } from './resource-model.js';
-import { navigationGroups, websiteCount } from './ui/ux-model.js';
+import { navigationGroups, navigationItemActive, websiteCount } from './ui/ux-model.js';
 import Preferences from './ui/Preferences.jsx';
 import CommandPalette from './ui/CommandPalette.jsx';
 import JobDrawer from './JobDrawer.jsx';
@@ -71,8 +71,8 @@ function Shell() {
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>SUNUCU YÖNETİMİ</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
-      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <NavLink key={to} to={to}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</NavLink>)}</div></div>)}</nav>
-      <details className="ws-appearance" open><summary>Görünüm tercihleri</summary><Preferences /></details>
+      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Link key={to} to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>)}</div></div>)}</nav>
+      <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
       <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>
@@ -87,7 +87,7 @@ function Shell() {
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>
-    {paletteOpen && <CommandPalette domains={domains} canManage={canManage} onClose={() => setPaletteOpen(false)} />}
+    {paletteOpen && <CommandPalette domains={domains} canManage={canManage} isOwner={isOwner} onClose={() => setPaletteOpen(false)} />}
     {canManage && <JobDrawer />}
     {canManage && <AiDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
   </div>;
