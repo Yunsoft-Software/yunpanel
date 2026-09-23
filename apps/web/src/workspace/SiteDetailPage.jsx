@@ -5,6 +5,7 @@ import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValu
 import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
 import { ApplicationOperations, SslOperations } from './SiteOperations.jsx';
 import DomainOperations from './DomainOperations.jsx';
+import DomainHostingPanel from './DomainHostingPanel.jsx';
 import DnsPanel from './DnsPanel.jsx';
 import EnvironmentPanel from './EnvironmentPanel.jsx';
 import JobsTable from './JobsTable.jsx';
@@ -90,7 +91,7 @@ function SiteWorkspace({ websiteId, tab }) {
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = [
-    ['settings', 'Barındırma bilgileri', 'settings'], ['dns', 'DNS', 'globe'],
+    ['settings', 'Barındırma ayarları', 'settings'], ['dns', 'DNS', 'globe'],
     ['domains', 'Alan adı ve yayın yönetimi', 'globe'], ['terminal', 'Site terminali', 'terminal'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
@@ -125,6 +126,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel title="Site terminali" description={`${domain.primaryDomain} · Bu siteye ait kullanıcıyla terminal oturumu.`} target={{ scope: 'site', websiteId: domain.websiteId }} /> : <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} />)}
     {tab === 'files' && <SiteFilesPanel domainId={domain.id} legacyRepair={legacyManagedTarget ? <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} /> : null} />}
     {tab === 'settings' && <>
+      <DomainHostingPanel domain={domain} />
       <Section title="Barındırma bilgileri"><KeyValues items={[
         ['Alan adı', domain.primaryDomain],
         ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
