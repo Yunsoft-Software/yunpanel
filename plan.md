@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## MAILBOX-REMOVE / MR-01–04 — Posta kutusu silme bağlantısı kaynağı tamamlandı
+
+- [x] **MR-01/02 kaynak:** `193c532a`, `59c4b8f3`; mevcut etki/yedek/veri silme/finalize API'leri aynı posta kutusu ve revizyona bağlı. Ayrı açık onaylar, güncel önizleme kontrolü, başarılı job kanıtı, çift gönderim koruması ve belirsiz yazmada otomatik tekrar yapmama. Veri silme başarısı tek başına hesap silme başarısı değildir.
+- [x] **MR-03 ekran ve alias engeli:** `ed56f721`, `4cdd104f`, `465bbc4f`, `8e41e85f`; mevcut posta kutusu satırında Sil… girişi, politika/takma ad/Yapılandırma dönüşleri ve iş kimliğiyle salt okunur devam. Yabancı alan adından gelen alias referansları da silmeyi engeller; yabancı kimlikler yayımlanmaz. Mevcut oluştur/parola/policy/enable eylemleri korunur.
+- [x] **MR-04 seçili kontrol:** `c08a7bb1`, `e3014b1d`, `a4e58484`; Node22.16.0 altında **53 geçti / 0 başarısız / 0 atlandı**: 35 frontend davranışı + 12 backend helper/impact davranışı + 6 kaynak bağlantısı. İki JSX ve dört kaynak JS sözdizimi kontrolü geçti; dokuz kaynak/test blob'u GitHub ile eşleşti. Gerçek React/HTTP/auth/posta hostu testi değildir. [Kaynak ve T-DEV-MAILBOX-REMOVE](docs/ux/mailbox-removal-flow.md).
+- [ ] **BUG-03 kalan:** mevcut motor silmeden önce bütün posta alan adının kapatılmasını ister; bu sınırlama kaldırılmadı ve arayüz bunu otomatik yapmaz. Diğer hesapları durdurmadan tek-kutu erişimini kapatma, aktif SMTP/IMAP/Roundcube oturumları, atomik backend yarış/izin sınırı, gerçek yedek geri dönüşü ve Node24/npm11 tam build/browser/host kabulü açık. Üst BUG-03/UX-PL-06/production kapanmaz; Website silme/askı işleri ayrı kalır.
+
 ## ADMIN-RESULT-01–04 — Site yöneticisi hesap sonucu kaynağı tamamlandı
 
 - [x] **ADMIN-RESULT-01/02 kaynak:** `4c16030d`, `4ecac47e`; mevcut kullanıcı deposu çağrısı beklenir, doğru hesap rolü/aktifliği/tek Website bağı doğrulanır. Hesap hatası ham log yerine dar `siteAdmin` sonucu olarak mevcut site cevabında görünür. Replay/yarım devam hesabı yeniden yaratmaz, parola değiştirmez veya başka kullanıcıya site bağlamaz. Mevcut rota/await/parametreler zaten doğruydu; yeniden yazılmadı.
