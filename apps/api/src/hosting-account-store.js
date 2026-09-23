@@ -1,4 +1,6 @@
 import { AuthError } from './auth-error.js';
+import { createHostingSiteAllocationStore } from './hosting-site-allocation-store.js';
+import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
 import { initializeHostingAccountSchema } from './hosting-account-schema.js';
 import { assertCustomerCreationScope, assertResellerManagement, validateHostingAccount } from './reseller-scope.js';
 import { assertResellerCapacity, countResellerUsage, validateResellerLimits } from './reseller-limits.js';
@@ -68,14 +70,17 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     return countResellerUsage({
       reseller: projection(row),
       customers: db.prepare(`${select} WHERE h.kind = 'customer'`).all().map(projection),
-      websites: db.prepare('SELECT website_id AS id, customer_id AS customerId FROM auth_customer_websites').all(),
+      websites: hostingWebsitesForCapacity(db),
     });
   }
   function view(row) {
+    const hasReservedSites = row.kind === 'reseller' && db.prepare(`SELECT 1 FROM auth_hosting_site_allocations a
+      JOIN auth_hosting_accounts h ON h.user_id = a.customer_id
+      WHERE h.reseller_id = ? AND a.state = 'reserved' LIMIT 1`).get(row.user_id);
     return {
       ...projection(row), username: row.username, revision: row.revision, userRevision: row.user_revision,
       createdAt: row.created_at, updatedAt: row.updated_at, stage: 'profile_only',
-      ...(row.kind === 'reseller' ? { limits: limits(row.user_id), usage: usage(row), usageScope: 'registered_ownership' } : {}),
+      ...(row.kind === 'reseller' ? { limits: limits(row.user_id), usage: usage(row), usageScope: hasReservedSites ? 'registered_and_reserved_ownership' : 'registered_ownership' } : {}),
     };
   }
   function candidate(id, expectedUserRevision) {
@@ -108,7 +113,11 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     audit(actor.id, `hosting.${kind}_registered`, { type: 'user', id: user.id });
     return view(existing(user.id));
   }
+  const siteAllocations = createHostingSiteAllocationStore({
+    db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser,
+  });
   return {
+    siteAllocations,
     registerReseller(rawToken, requireManagement, input) {
       const result = transaction(() => {
         const actor = owner(rawToken, requireManagement);
@@ -182,6 +191,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         existing(id, revision(input.revision));
         if (db.prepare('SELECT 1 FROM auth_hosting_accounts WHERE reseller_id = ? LIMIT 1').get(id)
           || db.prepare('SELECT 1 FROM auth_customer_websites WHERE customer_id = ? LIMIT 1').get(id)
+          || db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE customer_id = ? LIMIT 1').get(id)
           || db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? LIMIT 1').get(id)) {
           throw error('hosting_account_in_use', 'Detach account resources through an explicit migration before removing this profile.', 409);
         }
