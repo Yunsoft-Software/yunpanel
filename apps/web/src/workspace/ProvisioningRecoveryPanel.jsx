@@ -1,20 +1,16 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
+import { usePanelSession } from '../panel-session.jsx';
+import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { Badge, Button, ConfirmDialog, ErrorNotice, Section } from './PanelKit.jsx';
 import {
-  compensateWebsiteProvisioningStep,
-  continueWebsiteProvisioning,
-  getLatestWebsiteProvisioning,
-  provisioningConfirmation,
-  retryWebsiteProvisioningStep,
+  compensateWebsiteProvisioningStep, continueWebsiteProvisioning,
+  getLatestWebsiteProvisioning, retryWebsiteProvisioningStep,
 } from './provisioning-client.js';
 import {
-  canContinueProvisioning,
-  provisioningBadgeState,
-  provisioningOperationLabel,
-  provisioningRemediation,
-  provisioningStepLabel,
-  provisioningStepStateLabel,
+  provisioningBadgeState, provisioningOperationLabel, provisioningRemediation,
+  provisioningStepLabel, provisioningStepStateLabel,
 } from './provisioning-model.js';
+import { createProvisioningRecovery, EMPTY_RECOVERY, recoveryAllowed, recoveryBusy } from './provisioning-recovery.js';
 
 function operationBadgeState(operation) {
   if (operation?.ready) return 'succeeded';
@@ -23,145 +19,111 @@ function operationBadgeState(operation) {
   if ((operation?.steps ?? []).some((step) => ['applying', 'compensating'].includes(step.state))) return 'running';
   return 'pending';
 }
-
 function actionCopy(action, step) {
   const label = provisioningStepLabel(step);
   if (action === 'retry') return {
     title: `${label} adımını tekrar dene`,
-    message: 'Başarısız adım durable registry içinde yeniden pending duruma alınacak ve yalnız normal inspect/apply yolu üzerinden tekrar değerlendirilecek.',
+    message: 'Başarısız adım yeniden değerlendirilecek. Sunucu önce mevcut durumu kontrol eder; tamamlanmış kaynaklar körlemesine yeniden oluşturulmaz.',
     confirmLabel: 'Adımı tekrar dene',
   };
   if (action === 'compensate') return {
     title: `${label} adımını geri al`,
-    message: 'Bu geri alma host durumunu değiştirebilir. Yalnız bu provisioning operation tarafından sahiplenildiği kanıtlanan kaynaklar kaldırılabilir; ownership doğrulanamazsa işlem fail-closed kalır.',
+    message: 'Bu adımın oluşturduğu kaynaklar kaldırılabilir. Sunucu yalnız bu işleme ait olduğu doğrulanan kaynakları geri alır. İlgili hizmet etkilenebilir.',
     confirmLabel: 'Geri almayı başlat',
   };
   return {
-    title: 'Provisioning’e devam et',
-    message: 'Sıradaki pending, blocked veya kesintiye uğramış adım durable durum ve host inspection sonucuna göre değerlendirilecek. Kör mutation tekrarı yapılmaz.',
-    confirmLabel: 'Provisioning’e devam et',
+    title: 'Site kurulumuna devam et',
+    message: 'Sunucu sıradaki bekleyen veya kesintiye uğramış adımı kontrol edecek. Kayıt değişmişse bu onayla işlem yapılmayacak.',
+    confirmLabel: 'Kuruluma devam et',
   };
 }
 
 export default function ProvisioningRecoveryPanel({ websiteId, canManage = false, onChanged }) {
-  const [operation, setOperation] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(null);
-  const [confirm, setConfirm] = useState(null);
-  const generation = useRef(0);
-
-  const load = useCallback(async ({ signal, showLoading = true } = {}) => {
-    if (!websiteId) return;
-    const current = ++generation.current;
-    if (showLoading) setLoading(true);
-    setError(null);
-    try {
-      const latest = await getLatestWebsiteProvisioning(websiteId, { signal });
-      if (current !== generation.current) return;
-      setOperation(latest);
-    } catch (failure) {
-      if (failure.name === 'AbortError' || current !== generation.current) return;
-      setError(failure.message);
-    } finally {
-      if (current === generation.current) setLoading(false);
-    }
-  }, [websiteId]);
-
-  useEffect(() => {
-    if (!websiteId) {
-      setOperation(null);
-      setLoading(false);
-      return undefined;
-    }
-    const controller = new AbortController();
-    load({ signal: controller.signal });
-    return () => {
-      generation.current += 1;
-      controller.abort();
-    };
-  }, [websiteId, load]);
-
-  async function perform(action, step = null) {
-    if (busy || !operation) return;
-    setBusy(true);
-    setError(null);
-    try {
-      let result;
-      if (action === 'retry') result = await retryWebsiteProvisioningStep(operation.operationId, step.id);
-      else if (action === 'compensate') result = await compensateWebsiteProvisioningStep(operation.operationId, step.id);
-      else result = await continueWebsiteProvisioning(operation.operationId);
-      if (result?.operation) setOperation(result.operation);
-      else await load({ showLoading: false });
-      setConfirm(null);
-      if (typeof onChanged === 'function') onChanged();
-    } catch (failure) {
-      if (failure.name !== 'AbortError') setError(failure.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
+  const { session } = usePanelSession();
+  const identity = JSON.stringify([websiteId, session?.user?.id, session?.user?.role, sessionVersion(), canManage]);
   if (!websiteId) return null;
-  if (loading && !operation) {
-    return <Section title="Provisioning durumu"><div className="ws-loading" role="status"><span className="ws-spinner" />Provisioning kaydı yükleniyor…</div></Section>;
-  }
-  if (!operation && !error) return null;
+  return <RecoveryPanel key={identity} websiteId={websiteId} canManage={canManage} onChanged={onChanged} />;
+}
+function RecoveryPanel({ websiteId, canManage, onChanged }) {
+  const [state, setState] = useState(EMPTY_RECOVERY);
+  const client = useRef(null);
+  const changed = useRef(onChanged);
+  useEffect(() => { changed.current = onChanged; }, [onChanged]);
+  useEffect(() => {
+    const version = sessionVersion();
+    const flow = createProvisioningRecovery({
+      websiteId, canManage: () => canManage,
+      isCurrent: () => version === sessionVersion() && !sessionTransitionPending(),
+      read: (options) => getLatestWebsiteProvisioning(websiteId, options),
+      execute: (approval, options) => approval.action === 'retry'
+        ? retryWebsiteProvisioningStep(approval.operationId, approval.stepId, options)
+        : approval.action === 'compensate'
+          ? compensateWebsiteProvisioningStep(approval.operationId, approval.stepId, options)
+          : continueWebsiteProvisioning(approval.operationId, options),
+      onState: setState,
+    });
+    client.current = flow;
+    void flow.load();
+    return () => { flow.dispose(); if (client.current === flow) client.current = null; };
+  }, [websiteId, canManage]);
+  useEffect(() => {
+    if (state.changes > 0 && typeof changed.current === 'function') changed.current();
+  }, [state.changes]);
 
-  const progress = operation?.progress;
-  const continueAllowed = canManage && canContinueProvisioning(operation);
-  const activeConfirmation = confirm && operation
-    ? provisioningConfirmation(confirm.action, operation.operationId, confirm.step?.id ?? null)
-    : null;
-  const copy = confirm ? actionCopy(confirm.action, confirm.step) : null;
+  const { operation, approval, error, notice } = state;
+  const busy = recoveryBusy(state);
+  const available = canManage && state.status === 'ready' && !busy;
+  const step = approval ? operation?.steps.find((item) => item.id === approval.stepId) : null;
+  const copy = approval ? actionCopy(approval.action, step) : null;
+  if (['idle', 'loading'].includes(state.status) && !operation) {
+    return <Section title="Site kurulumu"><div className="ws-loading" role="status"><span className="ws-spinner" />Kurulum kaydı yükleniyor…</div></Section>;
+  }
+  if (state.status === 'ready' && !operation) return null;
 
   return <>
-    <Section
-      title="Site provisioning"
-      description="Website oluşturma akışının durable adımları ve güvenli recovery işlemleri."
+    <Section title="Site kurulumu" description="Kurulum adımlarını inceleyin; sorun giderildikten sonra devam edin veya ilgili adımı tekrar deneyin."
       actions={<div className="ws-actions">
-        {operation && <Badge state={operationBadgeState(operation)}>{provisioningOperationLabel(operation)}</Badge>}
-        <Button icon="refresh" disabled={busy || loading} onClick={() => load({ showLoading: false })}>Durumu yenile</Button>
-        {continueAllowed && <Button variant="primary" disabled={busy} onClick={() => setConfirm({ action: 'continue', step: null })}>Devam et</Button>}
+        {operation && <Badge state={state.status === 'ready' ? operationBadgeState(operation) : 'unknown'}>{state.status === 'ready' ? provisioningOperationLabel(operation) : 'Güncel durum doğrulanmalı'}</Badge>}
+        <Button icon="refresh" disabled={busy} onClick={() => client.current?.load()}>Durumu yenile</Button>
+        {canManage && recoveryAllowed(operation, 'continue') && <Button variant="primary" disabled={!available} onClick={() => client.current?.prepare('continue')}>Devam et</Button>}
       </div>}
     >
       <div className="ws-section-body">
         <ErrorNotice error={error} />
+        {notice && <p role="status">{notice}</p>}
+        {busy && <p role="status"><span className="ws-spinner" />{state.status === 'checking' ? 'Onayladığınız kayıt yeniden kontrol ediliyor…' : state.status === 'mutating' ? 'İşlem sonucu bekleniyor…' : 'Kurulum kaydı yenileniyor…'}</p>}
         {operation && <p className="ws-muted">
-          Operation <code>{operation.operationId}</code>{progress ? ` · ${progress.completed}/${progress.required} zorunlu adım tamamlandı` : ''}.
-          {operation.ready ? ' Site provisioning hazır.' : ' Hazır olmayan site başarılı kabul edilmez.'}
+          {state.status !== 'ready' ? 'Son doğrulanmış kayıt: ' : ''}{operation.progress.completed}/{operation.progress.required} zorunlu adım tamamlandı.
+          {' '}Bu sayı deneme sınırı değildir. {operation.ready ? 'Yayın, SSL ve posta durumunu ilgili araçlardan ayrıca doğrulayın.' : 'Kalan adımlar tamamlanmadan kurulum hazır sayılmaz.'}
         </p>}
       </div>
       {operation && <div className="ws-table-scroll"><table className="ws-table">
-        <thead><tr><th>Adım</th><th>Durum</th><th>Hata / recovery</th><th>İşlem</th></tr></thead>
-        <tbody>{operation.steps.map((step) => {
-          const remediation = provisioningRemediation(step);
-          return <tr key={step.id}>
-            <td><strong>{provisioningStepLabel(step)}</strong><div className="ws-muted"><code>{step.id}</code></div></td>
-            <td><Badge state={provisioningBadgeState(step)}>{provisioningStepStateLabel(step)}</Badge></td>
-            <td>
-              {step.error ? <code>{step.error}</code> : step.compensation?.error ? <code>{step.compensation.error}</code> : <span className="ws-muted">—</span>}
+        <thead><tr><th>Adım</th><th>Durum</th><th>Hata / çözüm</th><th>İşlem</th></tr></thead>
+        <tbody>{operation.steps.map((item) => {
+          const remediation = provisioningRemediation(item);
+          return <tr key={item.id}>
+            <td><strong>{provisioningStepLabel(item)}</strong><div className="ws-muted"><code>{item.id}</code></div></td>
+            <td><Badge state={provisioningBadgeState(item)}>{provisioningStepStateLabel(item)}</Badge></td>
+            <td>{item.error ? <code>{item.error}</code> : item.compensation.error ? <code>{item.compensation.error}</code> : <span className="ws-muted">—</span>}
               {remediation && <div className="ws-muted ws-provisioning-remediation">{remediation}</div>}
             </td>
             <td><div className="ws-actions">
-              {canManage && step.canRetry === true && <Button disabled={busy} onClick={() => setConfirm({ action: 'retry', step })}>Tekrar dene</Button>}
-              {canManage && step.canCompensate === true && <Button variant="danger" disabled={busy} onClick={() => setConfirm({ action: 'compensate', step })}>Geri al</Button>}
-              {(!canManage || (step.canRetry !== true && step.canCompensate !== true)) && <span className="ws-muted">—</span>}
+              {canManage && item.canRetry && <Button disabled={!available} onClick={() => client.current?.prepare('retry', item.id)}>Tekrar dene</Button>}
+              {canManage && item.canCompensate && <Button variant="danger" disabled={!available} onClick={() => client.current?.prepare('compensate', item.id)}>Geri al</Button>}
+              {(!canManage || (!item.canRetry && !item.canCompensate)) && <span className="ws-muted">—</span>}
             </div></td>
           </tr>;
         })}</tbody>
       </table></div>}
-      <div className="ws-section-body"><p className="ws-muted">Retry ve compensation yalnız operation + step’e bağlı yazılı onayla çalışır. Raw intent, evidence ve secret-bearing resource verileri bu ekrana gönderilmez.</p></div>
+      <div className="ws-section-body">
+        <p className="ws-muted">Durumu yenile yalnızca kayıt okur; işlemi tekrar başlatmaz. Sayfadan ayrılmak sunucuda başlamış bir işi geri almaz.</p>
+        {operation && <details><summary>Teknik bilgiler</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Tekrar deneme ve geri alma onayı bu işlem ve seçilen adımla sınırlıdır.</p></details>}
+      </div>
     </Section>
-    {confirm && copy && activeConfirmation && <ConfirmDialog
-      title={copy.title}
-      message={copy.message}
-      confirmation={activeConfirmation}
-      error={error}
-      busy={busy}
-      onCancel={() => { if (!busy) setConfirm(null); }}
-      onConfirm={() => perform(confirm.action, confirm.step)}
-      confirmLabel={copy.confirmLabel}
+    {approval && copy && <ConfirmDialog key={`${approval.confirmation}:${approval.snapshot}`}
+      title={copy.title} message={copy.message} confirmation={approval.confirmation}
+      error={error} busy={busy} onCancel={() => client.current?.cancel()}
+      onConfirm={() => client.current?.perform(approval, approval.confirmation)} confirmLabel={copy.confirmLabel}
     />}
   </>;
 }
