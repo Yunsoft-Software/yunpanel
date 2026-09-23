@@ -300,18 +300,32 @@ export function createMailDataOperationsService({
     return Object.freeze({ previewDigest: current.previewDigest, job });
   }
 
+  function deleteTargetDisabled(target) {
+    // A mailbox is independent of sibling accounts. Domain-wide data deletion
+    // still requires disabling the domain; restore keeps its existing contract.
+    return target.scope === 'mailbox'
+      ? target.mailbox.enabled === false
+      : target.mailDomain.status === 'disabled';
+  }
+
   async function previewDelete({ scope, resourceId, backupId: requestedBackupId } = {}) {
     const target = await resource(scope, resourceId);
-    if (target.mailDomain.status !== 'disabled') {
+    if (!deleteTargetDisabled(target)) {
       throw new MailDataOperationsError(
-        'mail_data_delete_domain_disable_required',
-        'Disable and apply the mail domain configuration before deleting mail data',
+        target.scope === 'mailbox' ? 'mail_data_delete_mailbox_disable_required' : 'mail_data_delete_domain_disable_required',
+        target.scope === 'mailbox'
+          ? 'Disable only this mailbox and apply the unchanged domain status before deleting its data'
+          : 'Disable and apply the mail domain configuration before deleting mail data',
         409,
       );
     }
     await assertMailDomainIdle(target.mailDomain.id);
     const impact = await inspectDeleteImpact(target);
-    const unsafeBlockers = (impact?.blockers ?? []).filter((entry) => !ALLOWED_DELETE_BLOCKERS.has(entry.code));
+    if (!impact || !Array.isArray(impact.blockers)
+      || impact.blockers.some((entry) => !entry || typeof entry.code !== 'string')) {
+      throw new MailDataOperationsError('mail_data_delete_impact_unavailable', 'Mail delete impact is unavailable', 503);
+    }
+    const unsafeBlockers = impact.blockers.filter((entry) => !ALLOWED_DELETE_BLOCKERS.has(entry.code));
     if (unsafeBlockers.length > 0) {
       throw new MailDataOperationsError(
         'mail_data_delete_dependencies_exist',
@@ -372,7 +386,7 @@ export function createMailDataOperationsService({
       throw new MailDataOperationsError('mail_data_delete_confirmation_invalid', 'Mail data delete confirmation is invalid', 409);
     }
     const target = await resource(scope, resourceId);
-    if (!sameTarget(target, current) || target.mailDomain.status !== 'disabled') {
+    if (!sameTarget(target, current) || !deleteTargetDisabled(target)) {
       throw new MailDataOperationsError('mail_data_delete_preview_stale', 'Mail data delete resource changed before enqueue', 409);
     }
     const job = await jobRegistry.enqueue({
