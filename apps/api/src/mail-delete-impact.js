@@ -1,3 +1,5 @@
+import { mailboxAliasReferences } from './mailbox-alias-references.js';
+
 const MAX_REFERENCES = 50;
 const ACTIVE_JOB_STATUSES = new Set(['queued', 'running']);
 
@@ -94,7 +96,7 @@ export function createMailDeleteImpactService({
       [quota, forwarding, aliases, jobs, data] = await Promise.all([
         mailboxQuotaRegistry.getQuota(mailbox.id),
         mailboxForwardingRegistry.getForwarding(mailbox.id),
-        mailAliasRegistry.listAliases({ mailDomainId: mailbox.mailDomainId }),
+        mailboxAliasReferences(mailAliasRegistry, mailbox),
         activeMailJobs(mailbox.mailDomainId),
         mailDataInspector.inspectMailbox(mailbox.address),
       ]);
@@ -102,7 +104,7 @@ export function createMailDeleteImpactService({
       if (error instanceof MailDeleteImpactError) throw error;
       throw new MailDeleteImpactError('mail_delete_impact_unavailable', 'Mailbox delete impact could not be inspected', 503);
     }
-    const aliasReferences = aliases.filter((alias) => alias.destinations?.includes(mailbox.address));
+    const aliasReferences = aliases;
     const blockers = [];
     if (quota) blockers.push(blocker('mailbox_quota_configured'));
     if (forwarding) blockers.push(blocker('mailbox_forwarding_configured'));
