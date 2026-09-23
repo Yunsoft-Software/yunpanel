@@ -1,3 +1,5 @@
+import { siteAdminResult } from './site-admin-result.js';
+
 // Presentation sequencing for the existing site-create API, not a host/retry engine.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const STEP_STATES = new Set(['pending', 'applying', 'succeeded', 'failed', 'blocked', 'compensating', 'compensated']);
@@ -5,7 +7,7 @@ const record = (value) => Boolean(value && typeof value === 'object' && !Array.i
 const validId = (value) => typeof value === 'string' && UUID.test(value);
 const invalid = () => new Error('Site oluşturma sonucu doğrulanamadı.');
 
-export const EMPTY_SITE_SUBMISSION = Object.freeze({ phase: 'idle', created: null, steps: Object.freeze([]), error: null });
+export const EMPTY_SITE_SUBMISSION = Object.freeze({ phase: 'idle', created: null, steps: Object.freeze([]), error: null, siteAdmin: null });
 export function siteSubmissionBusy(state) {
   return ['previewing', 'creating', 'provisioning'].includes(state.phase);
 }
@@ -89,8 +91,9 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       });
       if (!current()) return state;
       const created = createdRecord(result, expected);
+      const siteAdmin = siteAdminResult(result.siteAdmin, { requested: snapshot.siteAdmin != null, websiteId: expected.websiteId });
       // Commit the verified record to the screen BEFORE any further await.
-      publish({ phase: 'recorded', created, error: null });
+      publish({ phase: 'recorded', created, siteAdmin, error: null });
       stage = 'provisioning';
       const initial = provisioningState(result.provisioning, expected);
       publish({ steps: initial.steps, phase: initial.ready ? 'ready' : 'provisioning' });
