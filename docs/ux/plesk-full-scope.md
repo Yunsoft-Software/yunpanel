@@ -18,7 +18,9 @@ Ayrı bir reseller dashboard, tema, paket editörü veya abonelik ekranı gerekm
 
 Mevcut auth kullanıcıları ve Website kimlikleri tekrar oluşturulmaz. Müşteri sahipliği, site erişim üyeliği ve login rolü farklı kavramlardır: mevcut `site_manager` otomatik olarak reseller veya müşteri sahibi sayılmaz. Veri bağlantısı açık, sürümlü ve geri alınabilir olmalıdır; Unix kullanıcıları aynı kalır. Girdide gelen actor rolü veya sahiplik alanı tek başına yetki değildir.
 
-**Basit limit:** Owner'ın belirlediği toplam müşteri ve Website adedi. `null` sınırsız, `0` yeni kayıt açılamaz; negatif, kesirli veya bilinmeyen kullanım geçersizdir. Askıdaki kayıtlar da adet tüketir; askıya alıp sınır aşılamaz. Sınır düşürmek mevcut veriyi silmez, yeni eklemeyi engeller. Site limiti bayinin tüm müşterileri toplamıdır. Kontrol ve kayıt aynı işlem/kilit içinde yapılır; salt önizleme kota enforcement değildir. Disk/trafik/CPU/RAM için ikinci bir reseller ölçüm veya rezervasyon motoru kurulmaz; mevcut site düzeyindeki ölçüm/limit işleri PROD-15'te sürer.
+Kaynak politika sözleşmesi: trusted actor `{id, role, active}`; hesap profili `{id, kind, resellerId, active}`; Website sahiplik projeksiyonu `{id, customerId}`. Profil `id` mevcut auth kullanıcı kimliğiyle bağlanmalıdır; ayrı kopya login deposu kurulmaz. `kind` reseller/customer ayrımıdır; reseller'ın `resellerId` değeri açık `null` olur. Bunlar yeni HTTP body şeması veya uygulanmış DB migrasyonu değildir. Mevcut Website kaydı sadece bu yardımcı için yeniden oluşturulmaz; entegrasyon doğrulanmış mevcut kayıttan projeksiyon üretir.
+
+**Basit limit:** Owner'ın belirlediği toplam müşteri ve Website adedi. `null` sınırsız, `0` yeni kayıt açılamaz; negatif, kesirli veya bilinmeyen kullanım geçersizdir. İki limit de açık verilmelidir; eksik limit otomatik sınırsız değildir. Askıdaki kayıtlar da adet tüketir. Sınır düşürmek mevcut veriyi silmez, yeni eklemeyi engeller. Site limiti bayinin tüm müşterileri toplamıdır. Kontrol ve kayıt aynı işlem/kilit içinde yapılır; salt önizleme kota enforcement değildir. Disk/trafik/CPU/RAM için ikinci bir reseller ölçüm veya rezervasyon motoru kurulmaz; mevcut site ölçüm/limit işleri PROD-15'te sürer.
 
 ## İlk sürümde yapılmayacaklar
 
@@ -26,13 +28,15 @@ Alt bayi, reseller hizmet paketleri, add-on, zorunlu Subscription, paket sync/lo
 
 ## Küçük uygulama dilimleri
 
-- [x] **RS-00 — Kapsam sadeleştirildi.** Bu sözleşme ve `agents.md` güncel karar; gelişmiş işler ertelendi. Bu bir doküman işidir, çalışan reseller değildir.
-- [ ] **RS-01 — Kaynak politika çekirdeği.** Tek bayi seviyesi, güncel/aktif actor ve hesap kontrolü, açık müşteri–site ilişkisi, Owner kapsamı, başka bayi/müşteri reddi, limit girdisi ve ekleme kontrolü. Saf Node testleri; HTTP/persistence yetkisi yerine geçmez.
-- [ ] **RS-02 — Mevcut auth/state entegrasyonu.** Mevcut kullanıcı/Website depolarına küçük ve sürümlü ilişki katmanı; idempotent migration, rollback, eşzamanlı adet kontrolü. Rolü açmadan bütün API/list/job/AI/tool/gateway/WS hedeflerini canlı ilişki üzerinden doğrula. Askıya alma/ilişki değişiminde oturum ve açık erişimleri iptal et.
+- [x] **RS-00 — Kapsam sadeleştirildi.** `agents.md`, `plan.md`, `ui-plan.md`, bu sözleşme ve faz ayrımlı özellik envanteri güncel kararla uyumlu. Geniş envanterin tamamı ayrıca korundu. Doküman işidir, çalışan reseller değildir.
+- [x] **RS-01 — Kaynak politika çekirdeği.** Saf ve durum tutmayan kapsam/sayım/adet kontrolleri yazıldı ve test edildi; HTTP/persistence yetkisi yerine geçmez.
+  - [x] **RS-01a:** `apps/api/src/reseller-scope.js`, `cd89f8d8`. Tek bayi seviyesi, aktif actor/üst hesap, açık müşteri–Website bağı, Owner yönetimi/onarımı, başka bayi/müşteri reddi. `reseller-scope.test.js`: **41 geçti**. [Kaynak raporu](../history/reseller-scope-source-2026-09-23.md).
+  - [x] **RS-01b:** `apps/api/src/reseller-limits.js`, `87a23c2a`. İki açık adet limiti; tam snapshot'tan askıdaki kayıtları da sayma; duplicate/orphan/bilinmeyen veriyi reddetme; ekleme kapasitesi. `reseller-limits.test.js`: **66 geçti**. İki dosya birlikte **107 geçti / 0 başarısız**, Node22.16.0; syntax kontrolleri geçti. [Limit raporu](../history/reseller-limits-source-2026-09-23.md).
+- [ ] **RS-02 — Mevcut auth/state entegrasyonu.** Mevcut kullanıcı/Website depolarına küçük ve sürümlü ilişki katmanı; idempotent migration, rollback, eşzamanlı adet kontrolü. Rolü açmadan bütün API/list/job/AI/tool/gateway/WS hedeflerini canlı ilişki üzerinden doğrula. Askıya alma/ilişki değişiminde oturum ve açık erişimleri iptal et. Politika kayıtlarını request'ten değil güncel depodan üret.
 - [ ] **RS-03 — Basit hesap API'si.** Owner bayi/müşteri oluşturur ve adet sınırı verir; bayi yalnız kendi müşterisini ekler/düzenler. Kimlik/parent/rol mass-assignment engeli, sunucu tarafında liste filtreleme, audit ve revizyon çakışması. Bağlı müşterisi/sitesi olan hesabı sessiz cascade-delete etme; açık engel ve çözüm göster.
 - [ ] **RS-04 — Mevcut UI'yi bağla.** Owner için Bayiler/Müşteriler, bayi için Müşterilerim/Sitelerim; tek basit hesap formu, mevcut site araçları. Paket/abonelik seçtirme, boş buton ekleme, Files girişlerini kaldırma. Kullanıcıya yalnız gerçekten çalışan limitleri göster.
 - [ ] **RS-05 — Gerçek kabul.** Owner, iki bayi, her bayide iki müşteri ve doğrudan Owner müşterisi. Başka tenant kimliğiyle API/job/Files/DB/AI/WS denemeleri; yetki iptali; paralel limit yarışları; restart ve migration rollback; gerçek tarayıcı. Hedef Node24/npm11 tam check ayrı çalıştırılır.
 
 ## Kapanış sınırı
 
-İlk sürüm RS-01–05 ile kapanır; gelişmiş reseller özellikleri beklenmez. Reseller dışındaki site/OS/premium yol haritası iptal edilmez. Kaynak testi geçti diye reseller login açılmaz veya production-ready denmez. Gerçek ortam işleri `development-todo.md` ve kök `todo.md` içinde açık kalır.
+İlk sürüm RS-01–05 ile kapanır; gelişmiş reseller özellikleri beklenmez. Reseller dışındaki site/OS/premium yol haritası iptal edilmez. **Bu tur yalnız RS-00 ve RS-01 tamamlandı; yeni API/UI/login açılmadı.** Kaynak testi geçti diye production-ready denmez. Gerçek ortam işleri `development-todo.md` ve kök `todo.md` içinde açık kalır.
