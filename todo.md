@@ -4,6 +4,16 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-RECOVERY — Manuel kurulum kurtarma (2026-09-23)
+
+Kaynak `development` dalında RECOVERY-01–04 ile tamamlandı; [güncel kaynak ve test raporu](docs/ux/provisioning-recovery-flow.md). Son koşu 71 geçti / 0 başarısız / 0 atlandı: önceki 70 yeniden koşuldu + 1 optional compensation testi. Node22 seçili davranış/kaynak testleri gerçek React/API/host kabulü değildir. GitHub DNS hatası nedeniyle burada tam checkout alınamadı.
+
+- [ ] Node >=24.11.1/npm >=11 tam lint/test/build. Yeni `provisioning-recovery-controller.test.js`, `provisioning-recovery-wiring.test.js`, `provisioning-recovery-optional.test.js` ile korunan `provisioning-recovery.test.js` ve mevcut create/autoAdvance/session regresyonlarını birlikte çalıştır. Gerçek SessionProvider/React/router/StrictMode kullan.
+- [ ] Owner/Site A/Site B ve oturum/yetki/Website geçişlerinde eski GET/POST sonucu veya onay yeni hedefe taşınmasın. Stale/error sırasında mutation kapalı; 401/403'te eski kayıt temizlenmiş olsun. Gerçek backend tenant yetkisi ayrıca doğrulansın.
+- [ ] Onay açıkken işlem/adım/yetenek değişimi ve iki hızlı onay; yalnız aynı güncel hedefte tek POST. 409/429/5xx/yanıt kaybında otomatik tekrar olmasın. Durumu yenile yalnız GET yapsın; yeni mutasyon açık onay istesin. İki tarayıcı/prosesin ortak kaynakta yarışını backend atomik kilidiyle doğrula; istemci preflight yeterli kanıt değildir.
+- [ ] Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership ve restart. Yüksek eski deneme sayısı sunucunun izin verdiği manuel retry'yi istemcide engellemesin. İsteğe bağlı geri alma ile zorunlu adım readiness ayrışsın; failed/blocked/compensation_failed başarı sayılmasın.
+- [ ] Gerçek mobil/klavye/modal odağı/koyu tema ve hata/teknik bilgi görünürlüğü. Abort host rollback sayılmasın. `.44` dışında yalnız izinli test hostunda güncel API/web sürümüyle kabul yap. Güvenli otomatik retry/backoff/kalıcı bütçe ve site-admin hata yayılımı `plan.md` içinde açık backend işleridir.
+
 ## T-DEV-CREATE-RESULT — Site oluşturma sonucu sürekliliği (2026-09-23)
 
 Kaynak `development` dalında CREATE-RESULT-01–04 ile tamamlandı; [kaynak/test raporu ve ayrıntılı kabul](docs/ux/site-create-result-flow.md). Bu tur 62 seçili Node22 testi ve iki JSX sözdizimi kontrolü çalıştı; gerçek React/API/host kabulü değildir. Önceki test sayıları eklenmez.
@@ -11,7 +21,7 @@ Kaynak `development` dalında CREATE-RESULT-01–04 ile tamamlandı; [kaynak/tes
 - [ ] Node >=24.11.1/npm >=11 tam checkout, npm ci, lint/test/build. `site-create-submission.test.js`, `site-create-result-wiring.test.js` ve mevcut form/create/provisioning/session regresyonları birlikte çalışsın. GitHub/npm DNS hatası nedeniyle burada tam checkout ve hedef bağımlılık kurulumu yapılamadı.
 - [ ] Gerçek create 201/200 sonrasında provisioning hatası, timeout, yanlış/bozuk cevap ve blocked/failed/interrupted sonucu: oluşturulmuş site kartı, adımlar ve doğru Domain-ID Genel Bakış/Dosyalar bağlantısı korunsun. Kayıt başarısı çalışır site/SSL/mail/site-admin başarısı diye sunulmasın.
 - [ ] Create POST yanıt kaybı, 401/403/409/429/5xx ve çift gönderimde aynı form kör create tekrarı yapmasın. Önizleme hatası düzeltilebilir kalsın. Belirsiz sonucu mevcut site listesinden/backend kaydından uzlaştır; otomatik cleanup veya yeni site oluşturma yapma.
-- [ ] Gerçek React StrictMode, logout/login, yetki değişimi, unmount/abort ve yeni form bağlamında eski yanıt sızmasın. Parola alanının temizlenmesini, sonuç odağı/ekran okuyucu/mobil/klavye/koyu tema ve mevcut shared-site açık onayını doğrula. `.44` dışında yalnız izinli test hostunu kullan. Manuel recovery, backend site-admin hata yayılımı ve güvenli retry kaynak işleri `plan.md` içinde açık kalır.
+- [ ] Gerçek React StrictMode, logout/login, yetki değişimi, unmount/abort ve yeni form bağlamında eski yanıt sızmasın. Parola alanının temizlenmesini, sonuç odağı/ekran okuyucu/mobil/klavye/koyu tema ve mevcut shared-site açık onayını doğrula. `.44` dışında yalnız izinli test hostunu kullan. Manuel recovery istemci kaynağı RECOVERY-01–04 ile tamamlandı, gerçek kabulü yukarıda açık; backend site-admin hata yayılımı ve güvenli retry kaynak işleri `plan.md` içinde açık kalır.
 
 ## T-DEV-JOB-UX — İşlem durumu ve kurulum ilerletme (2026-09-23)
 
