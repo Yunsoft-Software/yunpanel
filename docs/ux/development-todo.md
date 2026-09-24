@@ -2,6 +2,13 @@
 
 Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri kaldırmaz. Aktif dal `development`. `.44` Plesk hostu her amaçla yasak; yalnız `.local/test-server.env` içindeki izinli hedef teyit edilerek kullanılabilir.
 
+## T-DEV-WEBSITE-REMOVE — cleanup adapter ve UI
+
+- [ ] `fileCleanupHandler` mevcut Website izolasyon/path sözleşmesiyle yalnız hedef Website dosya/veri köklerini silmeli; symlink/foreign path ve başka site kökü reddedilmeli, receipt exact Website/Application kimliği taşımalı.
+- [ ] `unixIdentityCleanupHandler` yalnız dedicated Website Unix identity için çalışmalı; shared/foreign kullanıcıyı silmemeli. Kullanıcı gerçekten yoksa idempotent doğrulanmış receipt dönebilmeli.
+- [ ] Production composition adapterları `createWebsiteRemovalRuntime`'a bağla; preview hard blocker'larının yalnız gerçek bağımlılık eksiklerinde kaldığını test et.
+- [ ] Ardından Website removal impact/typed confirmation/step continue UI; unknown POST replay yok. Node24/npm11 + gerçek host/browser/restart kabulü.
+
 ## T-DEV-SUSPEND-UI — Website suspension ekranı sonrası
 
 Kaynak: `482fb0e6`, `861ed2f9`; rapor `docs/ux/website-suspension-flow.md`. Mevcut journal/compensation motoru UI'ye bağlandı; yeni host motoru yazılmadı.

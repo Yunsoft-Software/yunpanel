@@ -1,5 +1,9 @@
 # YunPanel — Plesk UX Geçişi
 
+## 2026-09-25 — Website silme lifecycle
+
+- [x] **WR-01 teşhis:** removal runtime ve kalıcı step journal production'da mevcut; fakat file/unix cleanup adapterları production composition'a verilmediği için runtime bilinçli olarak silme confirmation'ı üretmiyor.
+- [ ] **WR-02/03:** önce cleanup adapterlarını doğrulanabilir receipt ile bağla; ardından yalnız `readyToStart` preview üzerinde impact → typed confirmation → step/continue UI'yi aç. Eksik backend varken sahte Sil butonu gösterme.
 ## 2026-09-25 — Site erişimi / askıya alma
 
 - [x] **SUSPEND-UI-01/02 kaynak:** `482fb0e6`, `861ed2f9`; Barındırma ayarlarında Site erişimi kartı, bağlı domain preview/blocker, domain adıyla açık onay, journal tabanlı suspend/retry/resume ve kayıp sonuçta replay yapmayan yenileme.
