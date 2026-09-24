@@ -85,7 +85,8 @@ export function createMailboxAccessGuard({
       });
     }
     for (const service of ['imap', 'pop3', 'lmtp', 'sieve']) {
-      await command(DOVEADM, ['user', '-u', '-x', `service=${service}`, '-f', 'uid', address], {
+      // Use a field-only lookup; -u and -f are mutually exclusive in the manual.
+      await command(DOVEADM, ['user', '-x', `service=${service}`, '-f', 'uid', address], {
         code: 67, stdout: '', stderr: `userdb lookup: user ${address} doesn't exist`,
       });
     }
