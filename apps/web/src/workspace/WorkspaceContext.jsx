@@ -6,6 +6,7 @@ import { useCollection } from './useCollection.js';
 import { jobActive, jobFromResponse } from './site-model.js';
 import { newerJob, trackJob } from './job-tracking.js';
 import { workspaceResources } from './workspace-resources.js';
+import { createSslJobRefresh } from './ssl-job-refresh.js';
 
 const WorkspaceContext = createContext(null);
 export function WorkspaceProvider({ children }) {
@@ -24,6 +25,7 @@ export function WorkspaceProvider({ children }) {
   const jobs = useCollection('/jobs', { enabled: demand.jobs && can('jobs.read') });
   const requests = useRef(null);
   const submitting = useRef(new Set());
+  const [sslJobRefresh] = useState(createSslJobRefresh);
   useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
   const refreshAll = useCallback(() => { domains.refresh(); websites.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); }, [domains.refresh, websites.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh]);
   useEffect(() => {
@@ -38,6 +40,11 @@ export function WorkspaceProvider({ children }) {
       return next;
     });
   }, [jobs.items, jobs.status]);
+  useEffect(() => {
+    if (sslJobRefresh(Object.values(tracked))) {
+      domains.refresh(); websites.refresh(); certificates.refresh();
+    }
+  }, [tracked, sslJobRefresh, domains.refresh, websites.refresh, certificates.refresh]);
   const observe = useCallback((job) => { setTracked((current) => trackJob(current, job)); setObservedId(job.id); setJobOpen(true); }, []);
   const updateJob = useCallback((job) => setTracked((current) => trackJob(current, job)), []);
   const runJob = useCallback(async (path, body = {}) => {
