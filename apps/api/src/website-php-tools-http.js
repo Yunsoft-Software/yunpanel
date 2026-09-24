@@ -1,7 +1,6 @@
 import express from 'express';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
-import { WebsitePhpToolActionError } from './website-php-tool-action.js';
 
 export function mountWebsitePhpToolsRoutes(app, {
   websitePhpToolsService,
