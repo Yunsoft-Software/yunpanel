@@ -14,6 +14,7 @@ import SiteFilesPanel from './SiteFilesPanel.jsx';
 import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
 import SiteCronPanel from './SiteCronPanel.jsx';
+import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
 import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
@@ -77,7 +78,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
-  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : label]);
+  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && application?.type === 'php' ? 'PHP / WordPress' : label]);
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
@@ -88,7 +89,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python', static: 'Statik site', docker: 'Docker / proxy' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
-    ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : 'Uygulama', 'code'],
+    ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
@@ -121,6 +122,7 @@ function SiteWorkspace({ websiteId, tab }) {
     </>}
     {tab === 'hosting' && <Section title="Barındırma ve DNS">{toolLinks(hostingTools)}</Section>}
     {['resources', 'databases', 'mail'].includes(tab) && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} activeTab={tab} />}
+    {tab === 'node' && canManage && (website?.runtimeType === 'php' || application?.type === 'php') && <SitePhpToolsPanel domainId={domain.id} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}
     {tab === 'domains' && <DomainOperations domain={domain} />}
