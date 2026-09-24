@@ -3,8 +3,9 @@
 ## WEBSITE-REMOVE-01–04 — Website silme lifecycle
 
 - [x] **WR-01 kaynak teşhisi (2026-09-25):** mevcut `website-removal-runtime` preview digest, kalıcı operation/step journal, explicit continue confirmation, interrupted-step fail-closed ve Domain removal child orchestration içeriyor. Production composition da runtime'ı bağlıyor.
-- [ ] **WR-02 blocker:** production `createWebsiteRemovalRuntime` çağrısında `fileCleanupHandler` ve `unixIdentityCleanupHandler` yok. Runtime bu yüzden `file_cleanup_unavailable` ve sistem kullanıcı varsa `unix_cleanup_unavailable` hard blocker üretip destructive confirmation'ı kapatıyor. UI'de Sil butonu açmadan önce mevcut host motorlarından doğrulanabilir cleanup adapterları bağlanacak.
-- [ ] **WR-03 UI:** backend cleanup tam ve preview `readyToStart=true` olduktan sonra Barındırma ayarlarına impact/step görünümü, typed confirmation, aynı operation üzerinden explicit continue ve unknown-result GET uzlaştırması bağlanacak. Site hesabının silme yetkisi ayrıca policy; mevcut tenant boundary gevşetilmeyecek.
+- [x] **WR-02 fail-closed kapsam:** `d80c3357`; file/unix cleanup eksiklerine ek olarak Application metadata cleanup lifecycle'ı da zorunlu blocker yapıldı. Application Registry'de güvenli `deleteApplication` bulunmadığı için Website dosyalarını silip kırık Application metadata bırakacak yarım removal artık `application_cleanup_unavailable` ile confirmation üretmez.
+- [x] **WR-03a Owner önizleme UI:** `befbe56f`; Barındırma ayarlarında Siteyi sil kartı yalnız GET ile impact/blocker/journal özeti gösterir. Site manager'a görünmez; destructive POST/continue istemcisi yok. Backend `readyToStart` dese bile bu dilimde Sil butonu açılmaz.
+- [ ] **WR-03b destructive lifecycle:** canonical file/unix cleanup receipt adapterları ve Application metadata/env/release cleanup lifecycle'ı tamamlandıktan sonra typed confirmation + aynı operation explicit continue + unknown-result GET uzlaştırması açılacak.
 - [ ] **WR-04 kabul:** Node24/npm11 tam test/build; gerçek files/unix identity/domain/database/SFTP/cron/runtime-binding cleanup, partial/restart/unknown-result ve Owner/Site A/Site B browser/host kabulü. `.44` kullanılmaz.
 ## SUSPEND-UI-01–03 — Website askıya alma / yeniden açma
 

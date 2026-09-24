@@ -6,8 +6,9 @@ Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri 
 
 - [ ] `fileCleanupHandler` mevcut Website izolasyon/path sözleşmesiyle yalnız hedef Website dosya/veri köklerini silmeli; symlink/foreign path ve başka site kökü reddedilmeli, receipt exact Website/Application kimliği taşımalı.
 - [ ] `unixIdentityCleanupHandler` yalnız dedicated Website Unix identity için çalışmalı; shared/foreign kullanıcıyı silmemeli. Kullanıcı gerçekten yoksa idempotent doğrulanmış receipt dönebilmeli.
-- [ ] Production composition adapterları `createWebsiteRemovalRuntime`'a bağla; preview hard blocker'larının yalnız gerçek bağımlılık eksiklerinde kaldığını test et.
-- [ ] Ardından Website removal impact/typed confirmation/step continue UI; unknown POST replay yok. Node24/npm11 + gerçek host/browser/restart kabulü.
+- [x] `d80c3357`: Application metadata lifecycle eksikliği `application_cleanup_unavailable` hard blocker olarak eklendi; yarım file cleanup ile kırık Application kaydı oluşmasına izin verme.
+- [x] `befbe56f`: Owner-only GET removal preview UI; impact/blocker/journal görünür, destructive POST yok.
+- [ ] Production cleanup adapterlarını ve gerçek Application silme lifecycle'ını tamamla; sonrasında typed confirmation/step continue UI ve unknown POST uzlaştırması aç. Node24/npm11 + gerçek host/browser/restart kabulü.
 
 ## T-DEV-SUSPEND-UI — Website suspension ekranı sonrası
 
