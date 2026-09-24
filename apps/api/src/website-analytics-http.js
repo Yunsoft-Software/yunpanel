@@ -84,7 +84,15 @@ function asyncRoute(handler) {
         return next(error);
       }
       if (error instanceof GoAccessManagerError) {
-        return next(new WebsiteAnalyticsHttpError(error.code, error.message, 500));
+        const message = ({
+          report_generation_failed: 'Analytics report could not be generated',
+          report_read_failed: 'Analytics report could not be read',
+          daemon_start_failed: 'Realtime analytics service could not be started',
+          daemon_verify_failed: 'Realtime analytics service could not be verified',
+          invalid_id: 'Analytics Website identity is invalid',
+          invalid_path: 'Analytics path configuration is invalid',
+        })[error.code] ?? 'Website analytics operation failed';
+        return next(new WebsiteAnalyticsHttpError(error.code, message, 500));
       }
       const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
       return next(new WebsiteAnalyticsHttpError(

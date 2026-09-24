@@ -12,3 +12,9 @@ test('JSON analytics response does not publish outputPath or pid/socket paths',a
  assert.doesNotMatch(jsonBlock,/outputPath/);
  assert.match(source,/analyticsStatusView/);
 });
+
+test('GoAccess runtime errors are not forwarded with raw host messages',async()=>{
+ const source=await readFile(new URL('../src/website-analytics-http.js',import.meta.url),'utf8');
+ assert.match(source,/report_generation_failed: 'Analytics report could not be generated'/);
+ assert.doesNotMatch(source,/WebsiteAnalyticsHttpError\(error\.code, error\.message/);
+});
