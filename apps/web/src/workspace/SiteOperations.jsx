@@ -8,6 +8,7 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { certificateState, formatDate, siteHref } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
+import SslRenewalPanel from './SslRenewalPanel.jsx';
 
 function useOperation() {
   const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const pending = useRef(false);
@@ -197,7 +198,9 @@ function SslOperationForm({ domain, session }) {
       ['Başlangıç', formatDate(certificate?.validFrom)], ['Bitiş', formatDate(certificate?.validTo)],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen' : 'Kapalı'],
     ]} />
-    {certificate?.state === 'active' ? <div className="ws-section-body"><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: true }))}>Yenilemeyi test et</Button><Button variant="primary" disabled={locked} onClick={() => setConfirm('renew')}>Sertifikayı yenile</Button></div><p className="ws-muted">Test işlemi production sertifikası üretmez. İş sonucunu işlem durumundan takip edin.</p></div> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue && validSslContactEmail(email)) setConfirm('issue'); }}>
+    {domain.certificateId ? <SslRenewalPanel
+      key={JSON.stringify([domain.id, domain.certificateId, domain.serverId, domain.websiteId, session?.user?.id, session?.user?.role, sessionVersion()])}
+      domain={domain} certificate={certificate} disabled={locked} /> : !domain.certificateId ? <form className="ws-form" onSubmit={(event) => { event.preventDefault(); if (canIssue && validSslContactEmail(email)) setConfirm('issue'); }}>
       <p className="ws-muted">Let's Encrypt ile ücretsiz SSL sertifikası alın. Alan adının DNS kayıtlarının bu sunucuya yönlendiğinden emin olun.</p>
       {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
       <label>Sertifika iletişim e-postası<input type="email" value={email} required maxLength={254} placeholder="E-posta adresiniz" aria-describedby={emailHintId} onChange={(event) => edit('email', event.target.value)} disabled={locked} /></label>
@@ -265,9 +268,8 @@ function SslOperationForm({ domain, session }) {
       <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !validSslContactEmail(email)}>SSL sertifikası al</Button><Button disabled={!canIssue || !validSslContactEmail(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button><Button type="button" disabled={locked || !dirty} onClick={() => dispatchDraft({ type: 'reset' })}>Değişiklikleri sıfırla</Button></div>
     </form> : <div className="ws-section-body"><p className="ws-muted">Sertifika kaydı henüz hazır değil veya okunamıyor. İşler ekranındaki sonucu kontrol edin.</p></div>}
     {domain.appliedRevision !== domain.desiredRevision && certificate?.state === 'active' && <div className="ws-section-body"><p className="ws-muted">Sertifika aktif edildi, Nginx yapılandırmasını güncelleyip etkinleştirin.</p><div className="ws-actions"><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div></div>}
-    {confirm && <ConfirmDialog title={confirm === 'renew' ? 'SSL yenilemesini başlat' : 'SSL sertifikası al'} message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
+    {confirm === 'issue' && <ConfirmDialog title="SSL sertifikası al" message={`${domain.primaryDomain} için gerçek ACME işlemi başlatılacak. DNS veya erişim hataları sağlayıcının deneme limitlerini tüketebilir.`} confirmation={domain.primaryDomain} error={operation.error} busy={operation.busy} onCancel={() => setConfirm(null)} onConfirm={async () => {
       if (confirm === 'issue') await issue(false);
-      else if (certificate) { const ok = await operation.perform(() => runJob(`/certificates/${encodeURIComponent(certificate.id)}/renew`, { dryRun: false })); if (ok) setConfirm(null); }
     }} confirmLabel="İşlemi başlat" />}
   </Section>;
 }
