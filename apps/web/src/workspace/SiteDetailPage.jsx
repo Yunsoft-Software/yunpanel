@@ -18,6 +18,7 @@ import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
 import SiteBackupPanel from './SiteBackupPanel.jsx';
 import SiteAnalyticsPanel from './SiteAnalyticsPanel.jsx';
 import WebsiteSuspensionPanel from './WebsiteSuspensionPanel.jsx';
+import WebsiteRemovalPanel from './WebsiteRemovalPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
 import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
@@ -148,6 +149,7 @@ function SiteWorkspace({ websiteId, tab }) {
         ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
       ]} /></Section>
       {website && isOwner && <WebsiteIsolationPanel websiteId={website.id} onChanged={refreshAll} />}
+      {website && isOwner && <WebsiteRemovalPanel domainId={domain.id} />}
       <details className="ws-section ws-disclosure"><summary>Teknik kayıt kimlikleri</summary><KeyValues items={[
         ['Alan adı kimliği', domain.id], ['Site kimliği', website?.id ?? 'Bağlı değil'], ['Hedef türü', domain.targetType],
       ]} />{isOwner && <div className="ws-section-body"><Link to="/domains">Gelişmiş alan adı araçları</Link></div>}</details>
