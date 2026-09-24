@@ -108,7 +108,13 @@ export function verifyWebsitePhpToolAction(preview, input = {}) {
     throw new WebsitePhpToolActionError('php_tool_action_stale', 'PHP tool action preview changed; inspect again before running', 409);
   }
   const expected = websitePhpToolActionPreview(preview, preview.actionId);
-  if (expected.previewDigest !== preview.previewDigest || expected.confirmation !== preview.confirmation) {
+  const scalarFields = [
+    'version', 'websiteId', 'serverId', 'applicationId', 'unixUser', 'websiteRevision',
+    'actionId', 'tool', 'command', 'timeout', 'label', 'impact', 'previewDigest', 'confirmation',
+  ];
+  const exactArgs = Array.isArray(preview.args) && preview.args.length === expected.args.length
+    && preview.args.every((value, index) => value === expected.args[index]);
+  if (scalarFields.some((field) => preview[field] !== expected[field]) || !exactArgs) {
     throw new WebsitePhpToolActionError('php_tool_preview_invalid', 'PHP tool preview integrity check failed', 409);
   }
   const definition = action(preview.actionId);
