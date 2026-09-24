@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## AI-HISTORY / AH-01–04 — Sohbet geçmişi kaynağı tamamlandı
+
+- [x] **AH-01/02 kaynak:** `b7e9ed51`, `c1d8a2e7`, `aba5c50a`; konuşma listesi/detayı/silme/mesaj erişimi oturum actorId'sine ve mevcut Website yetkilerine bağlı. Mevcut liste endpoint'inde imzalı kapsamlı cursor, 20 kayıtlık UI sayfası ve kararlı oluşturulma zamanı/kimlik sırası. Eski dizi cevabı auth kapsamıyla korunur. Sahipsiz eski kayıtlar silinmez veya otomatik atanmaz; V1 yedeği alınarak V2 sahiplik alanı saklanır, sessiz 100 kayıt budaması kaldırılır.
+- [x] **AH-03 ekran:** `e2bb7949`, `6cff6023`, `f71d4068`, `058f27a6`; geçmiş ve aktif sohbet ayrı yüklenir. Kaydırma sonunda/düğmeyle eski sayfa, açık pencere içinde konuşmaya özgü taslak, bağımsız mesaj/geçmiş scroll ve görünür composer. Domain URL'si gerçek Website'e çözülür; geç yanıt/oturum/yanlış kapsam ve sayfa hatası kontrolleri vardır. Mevcut araç sonucu/eylem kartları ve Ember dili korunur.
+- [x] **AH-04 seçili kontrol:** `52410a65`, `d3a450b8`, `562a566c`, `c8f4d22c`; Node22.16.0 altında **41 geçti / 0 başarısız / 0 atlandı**: 9 backend kapsam/sayfa + 26 frontend davranışı + 2 gerçek servis/dosya/route fixture grubu + 1 istemci modülü + 3 kaynak testi. Bir JSX ve beş kaynak JS sözdizimi kontrolü; 12 kaynak/test blob'u eşleşti. Chromium'da beş temsilî HTML/CSS yerleşimi ayrıca kontrol edildi; üretim React/host kabulü değildir. Eski dört konuşma regresyonu `39bac22f` ile auth fixture'ına uyarlandı, yeniden koşulmuş sayılmaz. [Kaynak ve T-DEV-AI-HISTORY](docs/ux/ai-history-flow.md).
+- [ ] **BUG-08 kalan:** sahibi bilinmeyen eski konuşmaların açık ve doğrulanmış migration/rollback'i, süreçler arası JSON yazma/crash sınırı, uzun provider çağrısı sırasında canlı yetki iptali ve Node24/npm11 tam React/API/provider/browser kabulü. Cursor restart'ta yenilenir. Taslak pencere/site/oturum kapanışından sonra kalıcı değildir. Üst BUG-08/UX-PL-08/production kapanmaz; diğer açık site/mail/SSL/reseller işleri bu kaynak dilimiyle bitmiş sayılmaz.
+
 ## SSL-RENEW / SR-01–04 — Yenileme sonucu ve sertifika verisi eşitleme kaynağı tamamlandı
 
 - [x] **SR-01/02 kaynak:** `3d06db13`; mevcut renew API'si tek POST ile kullanılır. Onaylı Domain/Website/sunucu/sertifika bağı ve güncel kayıt doğrulanır. İş kabulü başarı değildir; dry-run, aynı sertifika, gerçek değişen sertifika, başarısızlık ve gecikmiş depo kaydı ayrıdır. Tarih/parmak izi job ile kalıcı kayıtta eşleşmeden yenilendi denmez; geçerlilik süresine hayali gün eklenmez. Kayıp cevapta otomatik renewal tekrarı yoktur.
