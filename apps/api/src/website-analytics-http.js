@@ -14,7 +14,7 @@ async function resolvePrimaryDomain(websiteId, domainRegistry) {
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') return null;
   const domains = await domainRegistry.listDomains();
   const linked = domains.filter((d) => d.websiteId === websiteId);
-  const primary = linked.find((d) => !d.parentId) ?? linked[0] ?? null;
+  const primary = linked.find((d) => !d.parentDomainId) ?? linked[0] ?? null;
   return primary ? primary.primaryDomain : null;
 }
 
@@ -32,14 +32,19 @@ async function requireLocalWebsite(websiteRegistry, websiteId, localServerId) {
   return website;
 }
 
-function analyticsStatusView(status, websiteId, { owner = false } = {}) {
+function analyticsStatusView(status, tool, websiteId, { owner = false } = {}) {
   if (!status || typeof status !== 'object' || Array.isArray(status)
     || status.websiteId !== websiteId || typeof status.running !== 'boolean'
-    || typeof status.socketExists !== 'boolean') {
+    || typeof status.socketExists !== 'boolean'
+    || !tool || typeof tool !== 'object' || Array.isArray(tool)
+    || typeof tool.satisfied !== 'boolean'
+    || (tool.version !== null && (typeof tool.version !== 'string' || tool.version.length > 40))) {
     throw new WebsiteAnalyticsHttpError('analytics_status_invalid', 'Analytics status could not be verified', 503);
   }
   return Object.freeze({
     websiteId,
+    available: tool.satisfied,
+    version: tool.version ?? null,
     running: status.running,
     socketReady: status.socketExists,
     ...(owner ? { wsUrl: '/tools/goaccess/' + websiteId + '/ws' } : {}),
@@ -132,8 +137,11 @@ export function mountWebsiteAnalyticsRoutes(app, {
 
   app.get('/api/websites/:websiteId/analytics/status', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
-    const status = await goaccessManager.inspectDaemon({ websiteId: website.id });
-    return response.json({ data: analyticsStatusView(status, website.id, { owner: request.auth?.user?.role === 'owner' }) });
+    const [status, tool] = await Promise.all([
+      goaccessManager.inspectDaemon({ websiteId: website.id }),
+      goaccessManager.inspectGoAccess(),
+    ]);
+    return response.json({ data: analyticsStatusView(status, tool, website.id, { owner: request.auth?.user?.role === 'owner' }) });
   }));
 
   app.post('/api/websites/:websiteId/analytics/realtime/start', requireAnalyticsOwner, asyncRoute(async (request, response) => {
