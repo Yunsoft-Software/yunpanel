@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import { renderCronTaskFile } from '@yunpanel/config-templates';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { createCronRemovalRequest } from './website-cron-removal-request.js';
+import { verifyCronRemovalJob } from './website-cron-removal-proof.js';
 
 export class WebsiteCronApplyServiceError extends Error {
   constructor(code, message, status = 400) {
@@ -81,10 +83,10 @@ export function createWebsiteCronApplyService({
     const tasks = await websiteCronRegistry.listTasks({ websiteId });
     return Object.freeze({
       websiteId,
-      cronServiceActive: true,
+      cronServiceActive: null,
       tasks: Object.freeze(tasks),
-      summary: Object.freeze({ total: tasks.length, ready: tasks.length }),
-      reconciled: true,
+      summary: Object.freeze({ total: tasks.length, ready: 0, unknown: tasks.length }),
+      reconciled: false,
     });
   }
 
@@ -168,28 +170,16 @@ export function createWebsiteCronApplyService({
       throw new WebsiteCronApplyServiceError('cron_revision_conflict', 'Cron task changed after it was read', 409);
     }
 
-    const desiredStateSha256 = calculateDesiredStateDigest(task);
-    const job = await jobRegistry.enqueue({
-      serverId: task.serverId,
-      type: OPERATIONS.CRON_REMOVE,
-      operation: OPERATIONS.CRON_REMOVE,
-      payload: {
-        taskId: task.id,
-        websiteId: task.websiteId,
-        applicationId: task.applicationId,
-        unixUser: task.unixUser,
-        expectedRevision: task.revision,
-        desiredStateSha256,
-      },
-      resourceType: 'website_cron',
-      resourceId: task.id,
-      idempotencyKey: `cron.remove:${task.id}:${task.revision}:${desiredStateSha256}`,
-    });
+    const { identity, request } = createCronRemovalRequest(task);
+    const job = await jobRegistry.enqueue(request);
+    const proof = verifyCronRemovalJob(job, identity);
+    const deleted = proof.status === 'succeeded' && await websiteCronRegistry.getTask(task.id) === null;
 
     return Object.freeze({
       taskId: task.id,
       websiteId: task.websiteId,
-      deleted: true,
+      accepted: true,
+      deleted,
       job,
     });
   }

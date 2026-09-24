@@ -3,6 +3,7 @@ import { renderCronTaskFile } from '@yunpanel/config-templates';
 import { createWebsiteCronManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createWebsiteCronOperationReceiptStore } from './website-cron-operation-receipt.js';
+import { cronRemovalIdentity, verifyCronHostRemoval } from './website-cron-removal-proof.js';
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -53,7 +54,8 @@ export function createLocalWebsiteCronOperation({
     if (![OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE].includes(operation)) {
       throw new LocalWebsiteCronOperationError('website_cron_operation_invalid', 'Website cron operation is invalid');
     }
-    if (context.resourceId !== payload.taskId) {
+    if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+      || context.resourceId !== payload.taskId) {
       throw new LocalWebsiteCronOperationError(
         'website_cron_resource_mismatch',
         'Execution resourceId does not match the payload taskId',
@@ -69,7 +71,8 @@ export function createLocalWebsiteCronOperation({
       );
     }
 
-    if (task.websiteId !== payload.websiteId
+    if (task.id !== payload.taskId || task.serverId !== context.serverId
+      || task.websiteId !== payload.websiteId
       || task.applicationId !== payload.applicationId
       || task.unixUser !== payload.unixUser
       || task.revision !== payload.expectedRevision) {
@@ -121,6 +124,11 @@ export function createLocalWebsiteCronOperation({
         sideEffects: hostResult.sideEffects,
       });
     } else {
+      // A missing finalizer must be detected before touching the host.
+      if (typeof websiteCronRegistry.deleteTask !== 'function') {
+        throw new LocalWebsiteCronOperationError('website_cron_cleanup_unavailable', 'Cron metadata finalizer is unavailable', 503);
+      }
+      const identity = cronRemovalIdentity(task, calculatedSha256);
       hostResult = await websiteCronManager.remove({
         taskId: task.id,
         user: task.unixUser,
@@ -129,9 +137,11 @@ export function createLocalWebsiteCronOperation({
         enabled: task.enabled,
       });
 
-      // Remove from registry after host remove succeeds
-      if (typeof websiteCronRegistry.deleteTask === 'function') {
-        await websiteCronRegistry.deleteTask(task.id, { expectedRevision: task.revision });
+      verifyCronHostRemoval(hostResult, identity);
+      const deleted = await websiteCronRegistry.deleteTask(task.id, { expectedRevision: task.revision });
+      if (deleted?.deleted !== true || deleted.taskId !== task.id
+        || await websiteCronRegistry.getTask(task.id) !== null) {
+        throw new LocalWebsiteCronOperationError('website_cron_cleanup_unverified', 'Cron host removal completed, but metadata removal is unverified', 409);
       }
 
       safeResult = Object.freeze({
@@ -156,7 +166,12 @@ export function createLocalWebsiteCronOperation({
         result: safeResult,
       });
     } catch {
-      // Host mutation is complete. Receipt write failure must not recast successful host work as failed.
+      // Do not hide partial removal: the host may be clean while recovery proof
+      // is missing. The parent must remain blocked rather than retrying removal.
+      if (operation === OPERATIONS.CRON_REMOVE) {
+        throw new LocalWebsiteCronOperationError('website_cron_receipt_unavailable', 'Cron removal completed, but its recovery receipt could not be stored', 503);
+      }
+      // Preserve the existing apply-result contract outside this removal slice.
     }
 
     return safeResult;
