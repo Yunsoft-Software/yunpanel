@@ -50,6 +50,11 @@ function impact(currentWebsite = website(), overrides = {}) {
       id: currentWebsite.id,
       serverId: currentWebsite.serverId,
     },
+    application: currentWebsite.applicationId ? {
+      id: currentWebsite.applicationId,
+      serverId: currentWebsite.serverId,
+      desiredRevision: 7,
+    } : null,
     operation: 'delete',
     targetServerId: null,
     dependencies,
@@ -72,6 +77,7 @@ test('creates deterministic website removal preview with ordered domains', () =>
   assert.equal(preview.website.id, 'ws-1');
   assert.deepEqual(preview.plan.domainIds, ['dom-sub', 'dom-root']); // Subdomain before root domain
   assert.equal(preview.plan.applicationId, 'app-1');
+  assert.equal(preview.plan.applicationRevision, 7);
   assert.equal(preview.plan.systemUser, 'yunapp-site1');
   assert.equal(preview.plan.additional.databases.status, 'available');
   assert.deepEqual(preview.plan.additional.databases.ids, ['db-1']);
@@ -150,3 +156,13 @@ test('orchestratable website impact blockers do not prevent removal preview from
   assert.ok(preview.confirmation.startsWith('start-website-remove:ws-1:2:'));
 });
 
+
+test('rejects missing or mismatched Application revision evidence', () => {
+  const ws=website();
+  const missing=impact(ws); delete missing.application;
+  assert.throws(()=>createWebsiteRemovalPreview({website:ws,impact:missing}),
+    (err)=>err instanceof WebsiteRemovalPlanError && err.code==='website_removal_application_state_invalid');
+  const wrong=impact(ws); wrong.application={...wrong.application,id:'other'};
+  assert.throws(()=>createWebsiteRemovalPreview({website:ws,impact:wrong}),
+    (err)=>err instanceof WebsiteRemovalPlanError && err.code==='website_removal_application_state_invalid');
+});

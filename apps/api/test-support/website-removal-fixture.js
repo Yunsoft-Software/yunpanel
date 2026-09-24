@@ -9,6 +9,7 @@ export function removalPreview(id = 'site-a', buckets = {}, websiteChanges = {})
     .map((key) => [key, { status: 'available', items: buckets[key] ?? [] }]));
   return createWebsiteRemovalPreview({ website, impact: {
     version: 1, resourceType: 'website', operation: 'delete', resource: { id, serverId: website.serverId },
+    application: website.applicationId ? { id: website.applicationId, serverId: website.serverId, desiredRevision: 1 } : null,
     targetServerId: null, dependencies: { ...dependencies, domains: buckets.domains ?? [], activeJobs: [] },
     blockers: [], previewDigest: 'a'.repeat(64), confirmation: `delete:website:${id}:${'a'.repeat(64)}`,
   } });
@@ -32,6 +33,17 @@ export async function removalFixture(overrides = {}, preview = removalPreview())
     fileCleanupHandler: async (input) => { calls.push(input); return { ...input, filesCleaned: true }; },
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    applicationRegistry: (() => { let current = preview.website.applicationId ? {
+      id: preview.website.applicationId, serverId: preview.website.serverId,
+      desiredRevision: preview.plan.applicationRevision, activeDeploymentId: null,
+    } : null; return {
+      getApplication: async () => current,
+      deleteApplication: async () => { const before=current; current=null; return before ? { applicationId: before.id, deleted: true } : null; },
+    }; })(),
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async (applicationId) => ({ applicationId, variableCount: 0, environmentPresent: false }),
+      purgeApplication: async (applicationId) => ({ applicationId, variablesDeleted: 0, environmentDeleted: false, purged: true }),
+    },
     ...overrides,
   };
   return { registry, preview, calls, dependencies, runtime: createWebsiteRemovalRuntime(dependencies) };

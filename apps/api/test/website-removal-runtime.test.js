@@ -25,6 +25,7 @@ function mockPreview({ withDomains = true, backups = [] } = {}) {
     version: 1,
     resourceType: 'website',
     resource: { id: 'ws-1', serverId: 'srv-local' },
+    application: { id: 'app-1', serverId: 'srv-local', desiredRevision: 4 },
     operation: 'delete',
     targetServerId: null,
     dependencies: {
@@ -43,6 +44,20 @@ function mockPreview({ withDomains = true, backups = [] } = {}) {
     confirmation: `delete:website:ws-1:${'c'.repeat(64)}`,
   };
   return createWebsiteRemovalPreview({ website, impact });
+}
+
+function applicationCleanupDependencies(actions = null) {
+  let application = { id: 'app-1', serverId: 'srv-local', desiredRevision: 4, activeDeploymentId: null };
+  return {
+    applicationRegistry: {
+      getApplication: async () => application,
+      deleteApplication: async () => { if (actions) actions.push('removeApplication'); const prior=application; application=null; return { applicationId: prior.id, deleted: true }; },
+    },
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async (applicationId) => ({ applicationId, variableCount: 0, environmentPresent: false }),
+      purgeApplication: async (applicationId) => ({ applicationId, variablesDeleted: 0, environmentDeleted: false, purged: true }),
+    },
+  };
 }
 
 test('website-removal-runtime coordinates domain removal child operation before advancing to file/unix cleanup', async () => {
@@ -76,6 +91,7 @@ test('website-removal-runtime coordinates domain removal child operation before 
     previewProvider: async () => mockPreview(),
     domainRemovalRuntime,
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    ...applicationCleanupDependencies(actionsCalled),
     databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
     websiteCronRegistry: {
       listTasks: async () => [{ id: 'cron-1' }],
@@ -137,6 +153,7 @@ test('website-removal-runtime coordinates domain removal child operation before 
     'removePassenger',
     'cleanFiles',
     'cleanUnix',
+    'removeApplication',
   ]);
 });
 
@@ -177,6 +194,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    ...applicationCleanupDependencies(),
     websiteCronRegistry: { listTasks: async () => [], removeTask: async () => {} },
     websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
     runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {} },
