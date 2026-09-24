@@ -1,6 +1,7 @@
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { createPhpCliToolManager, PhpCliToolError } from '@yunpanel/host-runtime';
+import { websitePhpToolActionPreview } from './website-php-tool-action.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER = /^yunapp-[a-f0-9]{12}$/;
@@ -77,7 +78,9 @@ export function createWebsitePhpToolsService({
   async function revalidate(context) {
     const latest = await resolveWebsitePhpContext(context.website.id);
     const before = binding(context), after = binding(latest);
-    if (Object.keys(before).some((key) => before[key] !== after[key]) || context.cwd !== latest.cwd) throw contextConflict();
+    if (Object.keys(before).some((key) => before[key] !== after[key]) || context.cwd !== latest.cwd
+      || context.website.revision !== latest.website.revision) throw contextConflict();
+    return latest;
   }
   async function inspectTool(method) {
     try {
@@ -151,6 +154,16 @@ export function createWebsitePhpToolsService({
       projectLocation: project.state === 'present' ? (project.cwd === context.currentPath ? 'root' : 'public') : null,
       checks: Object.freeze({ project: project.state, lock, validation }), inspectedAt: new Date().toISOString() });
   }
+  async function getActionPreview(websiteId, actionId) {
+    const context = await resolveWebsitePhpContext(websiteId);
+    if (!Number.isSafeInteger(context.website.revision) || context.website.revision < 1) throw contextConflict();
+    const preview = websitePhpToolActionPreview({
+      ...binding(context),
+      websiteRevision: context.website.revision,
+    }, actionId);
+    await revalidate(context);
+    return preview;
+  }
   async function runTool(context, method, options) {
     await revalidate(context);
     try {
@@ -173,5 +186,5 @@ export function createWebsitePhpToolsService({
     // Status and execution must address the same project when root and public both exist.
     return runTool(context, 'runComposer', { cwd: project.cwd, command, args, timeout });
   }
-  return Object.freeze({ resolveWebsitePhpContext, getWpCliStatus, runWpCli, getComposerStatus, runComposer });
+  return Object.freeze({ resolveWebsitePhpContext, getWpCliStatus, getComposerStatus, getActionPreview, runWpCli, runComposer });
 }

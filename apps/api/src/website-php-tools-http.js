@@ -1,6 +1,7 @@
 import express from 'express';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
+import { WebsitePhpToolActionError } from './website-php-tool-action.js';
 
 export function mountWebsitePhpToolsRoutes(app, {
   websitePhpToolsService,
@@ -11,6 +12,29 @@ export function mountWebsitePhpToolsRoutes(app, {
   }
 
   const router = express.Router({ mergeParams: true });
+  const requireOwnerMutation = (req, res, next) => {
+    if (req.auth?.user?.role === 'owner' && req.auth?.access?.mode === 'management'
+      && req.auth?.security?.managementAllowed === true) return next();
+    return res.status(403).json({ error: {
+      code: 'php_tool_raw_run_owner_only',
+      message: 'Raw PHP tool execution is restricted to the Owner until reviewed durable actions are enabled.',
+    } });
+  };
+
+  router.post('/actions/preview', requirePanelRouteAccess, async (req, res, next) => {
+    try {
+      const body = req.body;
+      if (!body || typeof body !== 'object' || Array.isArray(body)
+        || Object.keys(body).length !== 1 || typeof body.actionId !== 'string') {
+        return res.status(400).json({ error: {
+          code: 'php_tool_action_preview_input_invalid',
+          message: 'actionId is required to preview a PHP tool action',
+        } });
+      }
+      const preview = await websitePhpToolsService.getActionPreview(req.params.websiteId, body.actionId);
+      return res.json({ data: preview });
+    } catch (error) { return next(error); }
+  });
 
   router.get('/wp-cli/status', requirePanelRouteAccess, async (req, res, next) => {
     try {
@@ -22,7 +46,7 @@ export function mountWebsitePhpToolsRoutes(app, {
     }
   });
 
-  router.post('/wp-cli/run', requirePanelRouteAccess, async (req, res, next) => {
+  router.post('/wp-cli/run', requirePanelRouteAccess, requireOwnerMutation, async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {
@@ -64,7 +88,7 @@ export function mountWebsitePhpToolsRoutes(app, {
     }
   });
 
-  router.post('/composer/run', requirePanelRouteAccess, async (req, res, next) => {
+  router.post('/composer/run', requirePanelRouteAccess, requireOwnerMutation, async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {
