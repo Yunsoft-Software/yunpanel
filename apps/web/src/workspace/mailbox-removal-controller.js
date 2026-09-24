@@ -4,7 +4,8 @@ import {
 } from './mailbox-removal-model.js';
 
 const ERROR_TEXT = Object.freeze({
-  mail_data_delete_domain_disable_required: 'Önce Yapılandırma bölümünde bu alan adının postasını kapatıp uygulayın. Diğer posta kutuları da etkilenir.',
+  mail_data_delete_mailbox_disable_required: 'Yalnız seçilen hesabı kapatıp değişikliği sunucuya uygulayın. Diğer hesapları kapatmanız gerekmez.',
+  mail_data_delete_domain_disable_required: 'Sunucudaki API/worker sürümü tek-hesap silme ile uyumlu değil. Alan adını kapatmayın; sunucu sürümünü kontrol edin.',
   mail_data_delete_backup_stale: 'Posta verisi yedekten sonra değişti. Önce güncel durumu kontrol edin; eski yedekle silme yapılmaz.',
   mail_data_delete_dependencies_exist: 'Kota, yönlendirme, takma ad veya çalışan iş engellerini kaldırıp durumu yenileyin.',
   mail_domain_job_conflict: 'Bu posta alan adında çalışan bir işlem var. Tamamlandıktan sonra durumu yenileyin.',
@@ -25,6 +26,7 @@ export function createMailboxRemoval({ target: input, request, isCurrent = () =>
   if ([request, isCurrent, canManage, onState].some((fn) => typeof fn !== 'function')) throw new TypeError('Posta istemcisi eksik.');
   const base = `/mailboxes/${encodeURIComponent(target.id)}`;
   let state = EMPTY_MAILBOX_REMOVAL, inFlight = false, disposed = false, ticket = null;
+  let pendingProof = null;
   const lifetime = new AbortController();
   const current = () => !disposed && !lifetime.signal.aborted && isCurrent() === true;
   const publish = (patch) => { if (current()) { state = Object.freeze({ ...state, ...patch }); onState(state); } };
@@ -52,6 +54,7 @@ export function createMailboxRemoval({ target: input, request, isCurrent = () =>
   function adopt(job) {
     const patch = { job };
     if (job.status === 'succeeded') {
+      pendingProof = null;
       patch.uncertain = false;
       if (job.action === 'backup') patch.backupId = job.backupId;
       else { patch.backupId = job.backupId; patch.receipt = job; }
@@ -70,7 +73,7 @@ export function createMailboxRemoval({ target: input, request, isCurrent = () =>
   function failed(error, sent) {
     if (!current()) return;
     if ([401, 403].includes(error?.status)) {
-      ticket = null;
+      ticket = null; pendingProof = null;
       publish({ ...EMPTY_MAILBOX_REMOVAL, status: 'forbidden', error: 'Bu posta kutusuna erişiminiz doğrulanamadı. Güncel oturumla yeniden kontrol edin.' });
       return;
     }
@@ -92,12 +95,15 @@ export function createMailboxRemoval({ target: input, request, isCurrent = () =>
   }
   async function resume(jobId) {
     if (inFlight || !current() || state.status === 'deleted') return state;
-    if (!mailboxRemovalJobId(jobId) || (state.receipt && state.receipt.id !== jobId)) return state;
+    if (!mailboxRemovalJobId(jobId) || (state.receipt && state.receipt.id !== jobId)
+      || (pendingProof && ticket && ticket.id !== jobId)) return state;
     inFlight = true; publish({ status: 'loading', approval: null, error: null });
     try {
       const value = await call(`/jobs/${encodeURIComponent(jobId)}`);
-      const job = mailboxRemovalJob(value, target, { id: jobId, action: value?.operation === 'mail.data.backup' ? 'backup' : 'delete' });
-      ticket = { id: job.id, action: job.action };
+      const expected = pendingProof ? { ...pendingProof, id: jobId }
+        : { id: jobId, action: value?.operation === 'mail.data.backup' ? 'backup' : 'delete' };
+      const job = mailboxRemovalJob(value, target, expected);
+      ticket = expected;
       adopt(job);
       publish({ snapshot: await snapshot(), status: waiting(job) ? 'waiting' : 'ready' });
     } catch (error) { failed(error, false); }
@@ -154,6 +160,7 @@ export function createMailboxRemoval({ target: input, request, isCurrent = () =>
           ...(approval.action === 'delete' ? { backupId: latest.backupId } : {}) };
         // A previous completed backup must not reconcile an unknown NEW write.
         ticket = null; publish({ status: 'sending', job: null }); check(true); sent = true;
+        pendingProof = { action: approval.action, preview: latest };
         const queued = await call(`${base}/data/${approval.action}`, { method: 'POST', body }, true);
         if (queued?.previewDigest !== expectedPreviewDigest || queued?.job?.operation !== `mail.data.${approval.action}`) throw mailboxRemovalInvalid();
         const expected = { id: queued.job.id, action: approval.action, preview: latest };
