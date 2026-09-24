@@ -4,6 +4,16 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-SSL-RENEW — SSL yenileme sonucu ve gerçek sertifika kabulü (2026-09-24)
+
+SR-01–04 kaynağı `development` dalında; [kaynak/test raporu ve sınırlar](docs/ux/ssl-renewal-result-flow.md). Aynı seçili Node22 koşusunda **73 geçti / 0 başarısız / 0 atlandı**: 59 yenileme davranışı + 8 koleksiyon yenileme davranışı + 6 kaynak bağlantısı. Sekiz kaynak/test blob'u eşleşti; üç JSX sözdizimi/dönüşüm kontrolü gerçek React veya tarayıcı kabulü değildir.
+
+- [ ] Node24/npm11 tam checkout/npm ci/lint/test/build. Yeni `ssl-renewal.test.js`, `ssl-job-refresh.test.js`, `ssl-renewal-wiring.test.js` ile mevcut SSL formu, koleksiyon, job, certificate registry/reconciliation testlerini birlikte çalıştır. Doğrudan Git erişimi bu ortamda DNS çözümleme hatasıyla başarısız oldu; tam checkout ve hedef bağımlılıklarla build yapılmadı.
+- [ ] Gerçek React/SessionProvider/router/StrictMode ve HTTP/auth/CSRF: gerçek yenileme, dry-run, aynı sertifika, failed/cancelled ve gecikmiş kalıcı kayıt. İş başarılı olsa bile fingerprint/tarih eşleşmeden yenilendi denmesin; aynı sertifikanın süresi yapay olarak uzamasın. Site listesi/Genel Bakış/SSL kalan gün bilgisi yenilensin; JobDrawer kapalıyken de takip edilen işin terminal geçişini test et.
+- [ ] Kayıp POST, yanlış job/sertifika/site kimliği, sertifika seçimi veya Website bağının değişmesi, logout/login ve yetki iptali: eski onay yeni hedefe yazmasın. Bilinen iş GET ile izlensin; bilinmeyen yanıt yeni renewal POST ile telafi edilmesin. Uzun iş ve metadata takip sınırından sonra elle yeniden okuma yalnız GET olsun.
+- [ ] Gerçek TLS bağlantısında sunulan sertifika ile panelin kayıtlı fingerprint/validFrom/validTo değerlerini karşılaştır. Nginx/mail reload, DNS/provider hatası, süreçler arası kaynak kilidi ve restart ayrıca doğrulansın. Panel metadata eşitliği canlı TLS kanıtı değildir; ilk issuance sonrası mail identity/stage/activate kısmi sonuçları PROD-06 kapsamında açık kalır.
+- [ ] Mobil, klavye, modal odağı, koyu tema, eski API cevabı ve mevcut issuance formu regresyonları. `.44` hariç yalnız izinli hostta güncel API/web sürümüyle kabul; GitHub Actions veya canlı deploy bu tur yapılmadı. Üst BUG-06/production kapıları açık.
+
 ## T-DEV-MR-SINGLE / T-DEV-ADMIN-LAYOUT — 2026-09-24 güncel kabul
 
 Tek posta kutusu için alan adı kapatma şartı kaynakta kaldırıldı; eski genel kapatma notları mailbox kapsamı için geçerli değildir. [MS-01–04 kaynak ve sınırlar](docs/ux/mailbox-single-removal.md), [BUG-07 kaynak ve görsel kabul](docs/ux/site-admin-field-alignment.md). Aynı son Node22 koşusunda 109 test geçti: 105 mail + 4 form kaynağı. Bu gerçek React/SMTP/IMAP/webmail kabulü değildir; önceki turların toplamı da değildir.
