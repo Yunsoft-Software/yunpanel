@@ -17,6 +17,7 @@ import { createNodeRestartReceiptStore } from './node-restart-receipt.js';
 import { createNodeRollbackReceiptStore } from './node-rollback-receipt.js';
 import { createRoundcubeConfigOperationReceiptStore } from './roundcube-config-operation-receipt.js';
 import { createSystemUpgradeReceiptStore } from './system-upgrade-receipt.js';
+import { createWebsitePhpToolOperationReceiptStore } from './website-php-tool-operation-receipt.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 

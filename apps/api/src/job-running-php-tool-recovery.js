@@ -48,7 +48,13 @@ export async function recoverRunningPhpTool({
     || !context || context.id !== jobId || context.serverId !== serverId || context.status !== 'running'
     || context.operation !== job.operation || context.resourceType !== job.resourceType || context.resourceId !== job.resourceId
     || !receipt || receipt.serverId !== serverId || receipt.jobId !== jobId
-    || JSON.stringify(receipt.payload) !== JSON.stringify(context.payload)
+    || receipt.payload.websiteId !== context.payload?.websiteId
+    || receipt.payload.applicationId !== context.payload?.applicationId
+    || receipt.payload.unixUser !== context.payload?.unixUser
+    || receipt.payload.expectedWebsiteRevision !== context.payload?.expectedWebsiteRevision
+    || receipt.payload.actionId !== context.payload?.actionId
+    || receipt.payload.previewDigest !== context.payload?.previewDigest
+    || receipt.payload.confirmation !== context.payload?.confirmation
     || receipt.result.applicationId !== job.resourceId) {
     throw new JobRunningPhpToolRecoveryError(
       receipt ? 'job_php_tool_recovery_evidence_mismatch' : 'job_php_tool_recovery_receipt_missing',
