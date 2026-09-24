@@ -144,6 +144,7 @@ export function createWebsiteRemovalRuntime({
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
     require('file_cleanup_unavailable', fileCleanupHandler);
     require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.deleteMigrationWebsite);
+    if (plan?.applicationId) require('application_cleanup_unavailable', applicationRegistry?.deleteApplication);
     if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler);
     if (plan?.additional?.crons?.ids?.length) require('cron_cleanup_unavailable', websiteCronRegistry?.listTasks, websiteCronRegistry?.removeTask);
     if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
