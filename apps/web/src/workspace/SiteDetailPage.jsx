@@ -13,6 +13,7 @@ import TerminalPanel from './LazyTerminalPanel.jsx';
 import SiteFilesPanel from './SiteFilesPanel.jsx';
 import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
+import SiteCronPanel from './SiteCronPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
 import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
@@ -72,6 +73,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
     if (key === 'files') return canManage;
+    if (key === 'cron') return canManage;
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
@@ -88,11 +90,12 @@ function SiteWorkspace({ websiteId, tab }) {
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'],
-    ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'],
+    ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = [
     ['settings', 'Barındırma ayarları', 'settings'], ['dns', 'DNS', 'globe'],
     ['domains', 'Alan adı ve yayın yönetimi', 'globe'], ['terminal', 'Site terminali', 'terminal'],
+    ['cron', 'Zamanlanmış Görevler', 'clock'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
@@ -119,6 +122,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'hosting' && <Section title="Barındırma ve DNS">{toolLinks(hostingTools)}</Section>}
     {['resources', 'databases', 'mail'].includes(tab) && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} activeTab={tab} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
+    {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'dns' && <DnsPanel key={domain.id} domain={domain} domains={domains.items} canManage={canManage} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
