@@ -12,3 +12,12 @@ test('Website removal production wiring supplies Application environment cleanup
   const block=source.slice(start,start+1600);
   assert.match(block,/applicationEnvironmentRegistry/);
 });
+
+test('Website removal preview journals Application revision separately from Website revision', async () => {
+  const source=await readFile(new URL('../src/website-removal-plan.js',import.meta.url),'utf8');
+  assert.match(source,/applicationRevision:/);
+  assert.match(source,/application\.desiredRevision/);
+  const runtime=await readFile(new URL('../src/website-removal-runtime.js',import.meta.url),'utf8');
+  assert.match(runtime,/expectedDesiredRevision: op\.applicationRevision/);
+  assert.doesNotMatch(runtime,/expectedDesiredRevision: op\.websiteRevision/);
+});

@@ -459,7 +459,8 @@ export function createWebsiteRemovalRuntime({
           requireCleanupMethod(applicationRegistry?.deleteApplication);
           requireCleanupMethod(applicationEnvironmentRegistry?.inspectApplicationState);
           requireCleanupMethod(applicationEnvironmentRegistry?.purgeApplication);
-          if (!op.applicationId || step.resourceId !== op.applicationId) {
+          if (!op.applicationId || !Number.isSafeInteger(op.applicationRevision) || op.applicationRevision < 1
+            || step.resourceId !== op.applicationId) {
             throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application cleanup identity does not match removal journal.', 409);
           }
           // Website metadata must already be gone before Application deletion.
@@ -470,7 +471,7 @@ export function createWebsiteRemovalRuntime({
           if (currentApplication !== null) {
             if (!currentApplication || currentApplication.id !== op.applicationId
               || currentApplication.serverId !== op.serverId
-              || currentApplication.desiredRevision !== op.websiteRevision
+              || currentApplication.desiredRevision !== op.applicationRevision
               || currentApplication.activeDeploymentId !== null) {
               throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application identity or revision changed during removal.', 409);
             }
@@ -482,7 +483,7 @@ export function createWebsiteRemovalRuntime({
             await applicationRegistry.deleteApplication({
               applicationId: op.applicationId,
               expectedServerId: op.serverId,
-              expectedDesiredRevision: op.websiteRevision,
+              expectedDesiredRevision: op.applicationRevision,
             });
           } else {
             // Explicit continuation after a crash may observe metadata already gone.

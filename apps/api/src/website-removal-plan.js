@@ -132,7 +132,7 @@ function orderDomains(domains) {
   ]);
 }
 
-function dependencyPlan(dependencies, currentWebsite) {
+function dependencyPlan(dependencies, currentWebsite, application = null) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new WebsiteRemovalPlanError(
       'website_removal_impact_invalid',
@@ -161,10 +161,25 @@ function dependencyPlan(dependencies, currentWebsite) {
 
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
 
+  if (currentWebsite.applicationId !== null) {
+    if (!application || typeof application !== 'object' || Array.isArray(application)
+      || application.id !== currentWebsite.applicationId || application.serverId !== currentWebsite.serverId
+      || !Number.isSafeInteger(application.desiredRevision) || application.desiredRevision < 1) {
+      throw new WebsiteRemovalPlanError(
+        'website_removal_application_state_invalid',
+        'Website Application removal state is invalid',
+        409,
+      );
+    }
+  } else if (application !== null && application !== undefined) {
+    throw new WebsiteRemovalPlanError('website_removal_application_state_invalid', 'Unexpected Application removal state', 409);
+  }
+
   return Object.freeze({
     domainIds: Object.freeze(orderedBoundDomains.map((d) => d.id)),
     domains: orderedBoundDomains,
     applicationId: currentWebsite.applicationId,
+    applicationRevision: currentWebsite.applicationId === null ? null : application.desiredRevision,
     systemUser: currentWebsite.systemUser,
     activeJobIds: activeJobs,
     additional,
@@ -237,7 +252,7 @@ export function createWebsiteRemovalPreview({ website, impact } = {}) {
   }
 
   const blockers = impactBlockers(impact);
-  const plan = dependencyPlan(impact.dependencies, currentWebsite);
+  const plan = dependencyPlan(impact.dependencies, currentWebsite, impact.application ?? null);
   const blocking = hardBlockers(blockers, plan);
 
   const previewCore = Object.freeze({
