@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## PHP-ACTION-01/02 — Reviewed WordPress/Composer mutation hattı
+
+- [x] **PHP-ACTION-01a kaynak:** `405d3cee`, `6a14d501`; raw command yerine üç sabit eylem kataloğu, Website revizyonu + tam bağ kimliğiyle digest/confirmation ve bütün preview alanlarının tekrar doğrulanması.
+- [x] **PHP-ACTION-01b HTTP sınırı:** `47053dfc`, `6a02d83f`; yalnız `actionId` alan preview endpoint'i. Mevcut ham `wp-cli/run` ve `composer/run` site_manager'dan kapatıldı, Owner-only kaldı. Reviewed execution endpoint'i henüz yok; UI mutation açılmadı.
+- [ ] **PHP-ACTION-02 kalan:** sabit eylemi JobRegistry/local executor'a operation olarak bağla; resource lock, exact Website/application/Unix/revizyon kontrolü, restart/unknown-result recovery, terminal result sanitizer, audit ve canlı yetki iptalini tamamla. Sonra PHP/WordPress ekranına review → queue → aynı job sonucu → refresh akışını ekle. Node24/npm11 tam test/build ve gerçek host/browser kabulü olmadan üst UX-PL-06/07/PROD-14 kapanmaz.
+- [ ] **Bu turun test kapısı:** yeni üç PHP action testi ve mevcut PHP regresyonları tam checkout'ta koşulmalı. Çalışma ortamında GitHub DNS çözülmedi; testler yazıldı ama çalıştırıldı denmez. [Ayrıntı ve T-DEV-PHP-UI](docs/ux/php-tools-flow.md).
+
 ## AI-HISTORY / AH-01–04 — Sohbet geçmişi kaynağı tamamlandı
 
 - [x] **AH-01/02 kaynak:** `b7e9ed51`, `c1d8a2e7`, `aba5c50a`; konuşma listesi/detayı/silme/mesaj erişimi oturum actorId'sine ve mevcut Website yetkilerine bağlı. Mevcut liste endpoint'inde imzalı kapsamlı cursor, 20 kayıtlık UI sayfası ve kararlı oluşturulma zamanı/kimlik sırası. Eski dizi cevabı auth kapsamıyla korunur. Sahipsiz eski kayıtlar silinmez veya otomatik atanmaz; V1 yedeği alınarak V2 sahiplik alanı saklanır, sessiz 100 kayıt budaması kaldırılır.

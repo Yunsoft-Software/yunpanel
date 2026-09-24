@@ -11,6 +11,13 @@ UX-PL-04/06/07 ve PROD-14 alt dilimi; mevcut Ember dili ve Files girişleri koru
 - [x] **PHP-UI-02 ekran:** `1e287437`; mevcut Site → Genel Bakış → Uygulama sekmesi PHP sitelerinde **PHP / WordPress** olarak etiketlenir. Aynı `/websites/:domainId/node` adresi korunur; yeni görev grubu veya paralel dashboard yoktur. WordPress/WP-CLI sürümü, eklenti/tema listeleri, bildirilen güncellemeler, Composer proje/kilit/doğrulama ve proje konumu görünür. Eklenti/tema listeleri 20 kayıtlık sayfalıdır. Ayrı Durumu kontrol et, son kontrol zamanı, eski veri/hata ve mevcut Dosyalar/terminal dönüşleri vardır. ApplicationOperations, EnvironmentPanel, Files, SSL ve cron bağlantıları korunur; global tema/CSS değiştirilmedi.
 - [x] **PHP-UI-03 seçili kontrol:** aşağıdaki aynı koşuda 83 geçti / 0 başarısız / 0 atlandı. Gerçek build/browser/host kabulü açık.
 
+## PHP-ACTION-01 — güvenli mutation sözleşmesi hazırlığı
+
+- [x] **Sabit eylem kataloğu kaynağı:** `405d3cee`, `6a14d501`; raw komut/argüman taşımayan üç dar eylem tanımlandı: WordPress cache flush, transient temizleme ve Composer optimized dump-autoload. Önizleme Website/sunucu/application/Unix kullanıcısı + Website revizyonu + action kimliğine bağlı SHA-256 digest ve açık confirmation üretir. Önizleme nesnesinin komut/argüman/etiket/etki dahil bütün alanları yeniden hesaplanıp doğrulanmadan çalıştırma parametresi üretilemez.
+- [x] **HTTP ve kapsam sertleştirmesi:** `47053dfc`, `6a02d83f`; `POST /api/websites/:websiteId/actions/preview` yalnız `actionId` kabul eder ve mevcut PHP Website bağını/revizyonunu iki kez doğrular. Eski ham `/wp-cli/run` ve `/composer/run` endpoint'leri site_manager için kapatıldı; Owner yönetim oturumu dışında 403 döner. Yeni reviewed action execution endpoint'i **bilerek eklenmedi**.
+- [ ] **PHP-ACTION-02 durable çalışma:** reviewed action için JobRegistry/yerel executor operation, resource lock, restart/unknown-result recovery, aynı job ile durum izleme ve mutasyon anında canlı auth/tenant yeniden doğrulaması eklenmeden site UI'sinde eylem düğmesi açılmayacak. Synchronous preview başarı değildir ve eski Owner raw endpoint'i Plesk-benzeri güvenli kullanıcı akışı sayılmaz.
+- [ ] **Kaynak testi:** yeni `website-php-tool-action.test.js`, `website-php-tool-preview.test.js`, `website-php-tool-http-source.test.js` ve mevcut PHP regresyonlarını Node24/npm11 tam checkout'ta çalıştır. Bu tur ağ ortamında GitHub DNS çözülmediği için yeni testler çalıştırılmış sayılmaz.
+
 ## Çalıştırılan kontroller ve kanıt sınırı
 
 Node **22.16.0** / npm **10.9.2**. Beş test dosyasında **83 test**: 29 yeni servis davranışı + 5 mevcut PHP servis regresyonu + 5 gerçek servis→UI veri sözleşmesi + 37 istemci/model davranışı + 7 kaynak bağlantısı. Önceki cron turunun 83 testi bu tur yeniden koşulmadı ve bu toplama eklenmedi.
@@ -27,7 +34,7 @@ node --test apps/api/test/website-php-tools-service.test.js apps/api/test/websit
 
 ## Ürün ve güvenlik sınırı
 
-Bu dilim salt durum/görünüm ve mevcut servis düzeltmesidir; PHP sürümü/FPM ayar formu veya tam WordPress Toolkit değildir. Yeni Composer install/update, WordPress kur/güncelle veya genel komut çalıştırma düğmesi eklenmedi. Mevcut doğrudan run endpoint'leri yeniden uygulanmadı; durable job/onay/kilit/yeniden yetkilendirme işleri ayrı kaynak dilimidir. Çağrı sonucunun bilinmemesi otomatik komut tekrarına gerekçe değildir.
+Bu dilim salt durum/görünüm ve mevcut servis düzeltmesidir; PHP sürümü/FPM ayar formu veya tam WordPress Toolkit değildir. Yeni Composer install/update, WordPress kur/güncelle veya genel komut çalıştırma düğmesi eklenmedi. Mevcut doğrudan run endpoint'leri Owner-only olacak şekilde daraltıldı; site hesabına açılmadı. Reviewed action önizleme/onay sözleşmesi kaynakta hazırlandı ancak durable job/kilit/restart recovery bağlanmadığı için çalıştırma endpoint'i ve UI düğmesi eklenmedi. Çağrı sonucunun bilinmemesi otomatik komut tekrarına gerekçe değildir.
 
 Durum GET'leri de mevcut CLI üzerinden site kodu yükleyebilir; bunlar dosya yazmayacağı garanti edilen pasif filesystem okumaları değildir. Arayüz periyodik polling yapmaz. İstek iptali hosttaki CLI sürecinin durduğunu kanıtlamaz. CLI manager'ın binary keşif içi davranışı değiştirilmedi; araç tespit edilmesi çalışan site veya sağlıklı runtime kanıtı değildir.
 

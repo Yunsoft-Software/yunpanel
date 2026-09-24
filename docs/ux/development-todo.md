@@ -2,6 +2,15 @@
 
 Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri kaldırmaz. Aktif dal `development`. `.44` Plesk hostu her amaçla yasak; yalnız `.local/test-server.env` içindeki izinli hedef teyit edilerek kullanılabilir.
 
+## T-DEV-PHP-ACTIONS — reviewed action sözleşmesi sonrası
+
+Kaynak: `405d3cee`, `6a14d501`, `47053dfc`, `6a02d83f`; ayrıntı `docs/ux/php-tools-flow.md`. Bu aşamada yalnız sabit action preview/onay sözleşmesi ve raw run endpoint daraltması vardır; site mutation UI/job execution açılmadı.
+
+- [ ] Node >=24.11.1/npm >=11 gerçek checkout'ta `node --test apps/api/test/website-php-tool-action.test.js apps/api/test/website-php-tool-preview.test.js apps/api/test/website-php-tool-http-source.test.js` ve mevcut tüm website-php-tools/http/host-runtime regresyonlarını çalıştır; ardından tam `npm ci` / check / build. Bu tur GitHub DNS çözülmediği için test koşulmadı.
+- [ ] Owner ve site_manager gerçek auth/CSRF: site_manager raw `wp-cli/run` ve `composer/run` için 403; action preview yalnız kendi Website kimliğiyle çalışmalı. Yabancı Website/Application/Unix kimliği ve revision değişimi 409/403 olmalı.
+- [ ] PHP-ACTION-02 sonrası bağlantı kopması, worker/API restartı, aynı action çift tıklaması, iki sekme ve terminalden eşzamanlı çalışma. Unknown sonuçta yeni komut otomatik başlamamalı; durable job/recovery kanıtı incelenmeli.
+- [ ] İzinli test hostunda yalnız sabit katalog eylemlerinin doğru dedicated site Unix kullanıcısı ve doğru release/proje dizininde çalıştığını doğrula. `.44` Plesk hostuna dokunma.
+
 ## T-DEV-FILES — 256d991f ve 72a16712 kaynak sonrası
 
 Kaynak kanıtı: `docs/history/development-files-entry-2026-09-23.md` ve `docs/history/site-files-visible-access-2026-09-23.md`. Global giriş ve site sekmesinin görünürlüğü kaynakta uygulandı. Node22 model/kaynak testleri gerçek dosya işlemi veya React render kabulü değildir.

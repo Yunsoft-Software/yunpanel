@@ -4,6 +4,12 @@
 
 Önceki aaPanel/Plesk/CyberPanel birleşimi ve özel altı-gruplu workspace yaklaşımı iptal edilmiştir. Mevcut Ember renkleri, fontlar, radius/element biçimleri ve ortak bileşenler korunur. Neyin nerede olduğu ve nasıl yönetildiği Plesk'e taşınır; marka/CSS kopyalanmaz. Global Dosyalar ve domain File Manager girişleri kaldırılmaz.
 
+## 2026-09-25 — PHP mutation güvenlik hazırlığı
+
+- [x] **PHP-ACTION-01 sözleşme:** `405d3cee`, `6a14d501`; üç sabit düşük-kapsam eylem için Website revizyonuna bağlı önizleme digest/confirmation. Raw komut girişi reviewed action kataloğuna giremez; bütün önizleme alanları çalıştırma öncesi yeniden hesaplanacak şekilde doğrulanır.
+- [x] **Preview/kapsam:** `47053dfc`, `6a02d83f`; PHP action preview endpoint'i eklendi. Eski raw WP-CLI/Composer run uçları site_manager'a kapatılıp Owner-only bırakıldı. **Site ekranına mutation butonu eklenmedi.**
+- [ ] **PHP-ACTION-02:** reviewed actionları mevcut durable JobRegistry + local executor + resource lock/recovery hattına bağla; aynı job sonucu ve canlı yetki doğrulaması olmadan kullanıcıya başarı gösterme. Yeni kaynak testleri bu tur GitHub DNS/checkout engeli nedeniyle çalıştırılmadı; T-DEV-PHP-UI içinde açık.
+
 ## 2026-09-25 — PHP / WordPress araç durumu kaynak dilimi
 
 - [x] **PHP-UI-01 kaynak:** `6c212843`; mevcut PHP servisinde bağ/sonuç doğrulaması, WordPress/Composer unknown ayrımı, panel `data` zarfı ve Composer durum/çalıştırma için aynı proje seçimi. CLI/hosting motoru yeniden yazılmadı.
