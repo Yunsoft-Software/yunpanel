@@ -258,26 +258,34 @@ export function mountAiRoutes(app, {
 
   if (conversationService) {
     app.get('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-      const websiteId = typeof request.query.websiteId === 'string' ? request.query.websiteId : null;
-      const list = await conversationService.listConversations({ websiteId });
+      const query = normalizeBody(request.query, new Set(['websiteId', 'limit', 'cursor']));
+      const websiteId = query.websiteId ?? null;
+      if ((websiteId !== null && typeof websiteId !== 'string')
+        || (query.limit !== undefined && (typeof query.limit !== 'string' || !/^[1-9][0-9]?$/.test(query.limit)))
+        || (query.cursor !== undefined && typeof query.cursor !== 'string')) {
+        throw new AiHttpError('invalid_ai_history_query', 'History query is invalid.');
+      }
+      const options = { websiteId, auth: request.auth };
+      const list = query.limit !== undefined || query.cursor !== undefined
+        ? await conversationService.listConversationPage({ ...options, limit: query.limit === undefined ? 20 : Number(query.limit), cursor: query.cursor ?? null })
+        : await conversationService.listConversations(options);
       return response.json({ data: list });
     }));
 
     app.post('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-      const title = typeof request.body?.title === 'string' ? request.body.title : undefined;
-      const websiteId = typeof request.body?.websiteId === 'string' ? request.body.websiteId : null;
-      const conversation = await conversationService.createConversation({ title, websiteId });
+      const body = normalizeBody(request.body, new Set(['title', 'websiteId']));
+      const conversation = await conversationService.createConversation({ title: body.title, websiteId: body.websiteId ?? null, auth: request.auth });
       return response.status(201).json({ data: conversation });
     }));
 
     app.get('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-      const conversation = await conversationService.getConversation(request.params.conversationId);
+      const conversation = await conversationService.getConversation(request.params.conversationId, { auth: request.auth });
       if (!conversation) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
       return response.json({ data: conversation });
     }));
 
     app.delete('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-      const deleted = await conversationService.deleteConversation(request.params.conversationId);
+      const deleted = await conversationService.deleteConversation(request.params.conversationId, { auth: request.auth });
       if (!deleted) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
       return response.json({ data: { success: true } });
     }));
