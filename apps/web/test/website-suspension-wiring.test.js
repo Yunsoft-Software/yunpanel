@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import test from 'node:test';
+const source=(name)=>readFile(new URL('../src/workspace/'+name,import.meta.url),'utf8');
+test('hosting settings mounts Website suspension without removing existing hosting panel',async()=>{const text=await source('SiteDetailPage.jsx');assert.match(text,/<DomainHostingPanel domain=\{domain\}/);assert.match(text,/<WebsiteSuspensionPanel domainId=\{domain.id\}/);});
+test('suspension client never auto-replays unknown POST',async()=>{const text=await source('website-suspension-client.js');assert.match(text,/İşlem tekrar gönderilmedi/);assert.equal((text.match(/method:'POST'/g)||[]).length,1);assert.doesNotMatch(text,/setInterval/);});
+test('suspension UI requires typed domain confirmation',async()=>{const text=await source('WebsiteSuspensionPanel.jsx');assert.match(text,/confirmation=\{scope.label\}/);assert.match(text,/posta kutularını, veritabanlarını veya site dosyalarını silmez/);});

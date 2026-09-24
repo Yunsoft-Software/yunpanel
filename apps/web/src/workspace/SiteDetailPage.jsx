@@ -17,6 +17,7 @@ import SiteCronPanel from './SiteCronPanel.jsx';
 import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
 import SiteBackupPanel from './SiteBackupPanel.jsx';
 import SiteAnalyticsPanel from './SiteAnalyticsPanel.jsx';
+import WebsiteSuspensionPanel from './WebsiteSuspensionPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
 import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
@@ -139,6 +140,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'files' && <SiteFilesPanel domainId={domain.id} legacyRepair={legacyManagedTarget ? <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} /> : null} />}
     {tab === 'settings' && <>
       <DomainHostingPanel domain={domain} />
+      {website && <WebsiteSuspensionPanel domainId={domain.id} onChanged={refreshAll} />}
       <Section title="Barındırma bilgileri"><KeyValues items={[
         ['Alan adı', domain.primaryDomain],
         ['Üst alan adı', domains.items.find((item) => item.id === domain.parentDomainId)?.primaryDomain ?? 'Bağımsız kayıt'],
