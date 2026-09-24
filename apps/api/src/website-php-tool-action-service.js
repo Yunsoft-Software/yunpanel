@@ -1,5 +1,6 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { verifyWebsitePhpToolAction } from './website-php-tool-action.js';
+import { jobPublicView } from './job-registry.js';
 
 export class WebsitePhpToolActionServiceError extends Error {
   constructor(code, message, status = 400) {
@@ -106,7 +107,7 @@ export function createWebsitePhpToolActionService({
           applicationId: lockedCurrent.applicationId,
           websiteRevision: lockedCurrent.websiteRevision,
         }),
-        job,
+        job: jobPublicView(job),
       });
     });
   }

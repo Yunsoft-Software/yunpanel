@@ -77,5 +77,71 @@ export function phpToolsErrorMessage(error) {
     website_php_context_changed: 'Site bağlantısı kontrol sırasında değişti. Site bilgilerini yenileyin.',
     website_php_path_unavailable: 'PHP çalışma klasörü okunamadı. İzinleri ve site kurulumunu kontrol edin.',
     php_tools_denied: 'Oturum veya site erişim izni geçerli değil. Eski bilgiler temizlendi.',
+    php_tool_action_actor_forbidden: 'Oturum veya site yetkisi işlem başlamadan değişti. İşlem kuyruğa alınmadı.',
+    website_php_action_actor_forbidden: 'Oturum veya site yetkisi işlem başlamadan değişti. İşlem çalıştırılmadı.',
+    website_php_action_job_conflict: 'Bu uygulamada başka bir işlem devam ediyor. Tamamlandıktan sonra yeniden deneyin.',
+    website_php_action_locked: 'Bu uygulama için başka bir işlem hazırlanıyor. İşlemler ekranını kontrol edin.',
+    php_tool_action_stale: 'İşlem önizlemesi artık güncel değil. Yeniden inceleyin.',
+    php_tool_preview_invalid: 'İşlem önizlemesi doğrulanamadı. Yeniden inceleyin.',
   })[error?.code] ?? 'Araç bilgisi alınamadı. Yeniden kontrol edin; bu hata aracın kurulu olmadığını göstermez.';
 }
+
+
+const ACTION_IDS = new Set(['wp.cache.flush', 'wp.transients.delete-all', 'composer.dump-autoload']);
+const SHA = /^[a-f0-9]{64}$/;
+const JOB_ID = /^[A-Za-z0-9._:-]{8,128}$/;
+export function phpToolActionPreview(value, scope, expectedActionId = null) {
+  requireValue(record(value) && value.version === 1
+    && Object.keys(scope).every((key) => value[key] === scope[key])
+    && Number.isSafeInteger(value.websiteRevision) && value.websiteRevision > 0
+    && typeof value.actionId === 'string' && ACTION_IDS.has(value.actionId)
+    && (expectedActionId === null || value.actionId === expectedActionId)
+    && ['wp-cli', 'composer'].includes(value.tool)
+    && text(value.label, 160) && value.label.length > 0
+    && text(value.impact, 500) && value.impact.length > 0
+    && typeof value.previewDigest === 'string' && SHA.test(value.previewDigest)
+    && value.confirmation === `php-tool:${scope.websiteId}:${value.actionId}:${value.previewDigest}`);
+  return Object.freeze({
+    version: 1,
+    ...scope,
+    websiteRevision: value.websiteRevision,
+    actionId: value.actionId,
+    tool: value.tool,
+    label: value.label,
+    impact: value.impact,
+    previewDigest: value.previewDigest,
+    confirmation: value.confirmation,
+  });
+}
+export function phpToolActionJob(value, scope, actionId = null) {
+  requireValue(record(value) && typeof value.id === 'string' && JOB_ID.test(value.id)
+    && value.serverId === scope.serverId && value.operation === 'website.php.action'
+    && value.resourceType === 'application' && value.resourceId === scope.applicationId
+    && ['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(value.status)
+    && !Object.hasOwn(value, 'payload'));
+  if (value.status === 'succeeded') {
+    requireValue(record(value.result) && value.result.version === 1
+      && value.result.websiteId === scope.websiteId
+      && value.result.applicationId === scope.applicationId
+      && (actionId === null || value.result.actionId === actionId)
+      && value.result.completed === true && value.result.sideEffects === true);
+  }
+  return Object.freeze({ ...value });
+}
+export function phpToolQueueResult(value, scope, preview) {
+  requireValue(record(value) && record(value.action) && record(value.job)
+    && value.action.actionId === preview.actionId
+    && value.action.websiteId === scope.websiteId
+    && value.action.applicationId === scope.applicationId
+    && value.action.websiteRevision === preview.websiteRevision
+    && value.action.tool === preview.tool);
+  return Object.freeze({
+    action: Object.freeze({ ...value.action }),
+    job: phpToolActionJob(value.job, scope, preview.actionId),
+  });
+}
+export const PHP_TOOL_ACTIONS = Object.freeze([
+  Object.freeze({ id: 'wp.cache.flush', tool: 'wordpress', label: 'Önbelleği temizle' }),
+  Object.freeze({ id: 'wp.transients.delete-all', tool: 'wordpress', label: 'Transient kayıtlarını temizle' }),
+  Object.freeze({ id: 'composer.dump-autoload', tool: 'composer', label: 'Autoload dosyalarını yenile' }),
+]);

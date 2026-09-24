@@ -3,9 +3,9 @@ import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
 import { formatDate, siteHref } from './site-model.js';
-import { resolvePhpToolsAccess } from './php-tools-model.js';
+import { PHP_TOOL_ACTIONS, resolvePhpToolsAccess } from './php-tools-model.js';
 import { createPhpToolsClient } from './php-tools-client.js';
 
 const ACCESS = { forbidden: 'Bu siteye erişim izniniz yok.', unavailable: 'Güncel site bilgileri bekleniyor.',
@@ -23,32 +23,68 @@ export default function SitePhpToolsPanel({ domainId }) {
   return <PhpToolsWorkspace key={identity} domainId={domainId} scope={access.scope} generation={generation} />;
 }
 function PhpToolsWorkspace({ domainId, scope, generation }) {
-  const { canManage } = useWorkspace();
+  const { canManage, jobs, resourceBusy, observe, updateJob } = useWorkspace();
   const ref = useRef(null), live = useRef(canManage); live.current = canManage;
   const [state, setState] = useState(null);
   useEffect(() => {
     const client = createPhpToolsClient({ scope, request: panelRequest,
-      isCurrent: () => live.current && generation === sessionVersion() && !sessionTransitionPending() });
+      isCurrent: () => live.current && generation === sessionVersion() && !sessionTransitionPending(),
+      onJob: (job, first) => { if (first) { observe(job); jobs.refresh(); } else updateJob(job); },
+    });
     ref.current = client;
     const unsubscribe = client.subscribe(setState);
     setState(client.getSnapshot()); void client.loadAll();
     return () => { unsubscribe(); client.dispose(); ref.current = null; };
-  }, [scope.websiteId, scope.serverId, scope.applicationId, scope.unixUser, generation]);
+  }, [scope.websiteId, scope.serverId, scope.applicationId, scope.unixUser, generation, observe, updateJob, jobs.refresh]);
+  useEffect(() => {
+    const job = state?.action?.job;
+    if (!job || !['queued', 'running'].includes(job.status)) return undefined;
+    const timer = setInterval(() => { void ref.current?.refreshAction(); }, 3000);
+    return () => clearInterval(timer);
+  }, [state?.action?.job?.id, state?.action?.job?.status]);
+  const actionBusy = state?.action?.busy || jobs.status !== 'ready' || resourceBusy('application', scope.applicationId);
+  const actionsFor = (tool) => PHP_TOOL_ACTIONS.filter((item) => item.tool === tool);
   return <>
     <Section title="PHP araçları" description="WordPress ve Composer durumunu bu site kapsamında kontrol edin.">
       <div className="ws-section-body"><div className="ws-actions"><LinkButton to={siteHref(domainId, 'files')} icon="folder">Dosya Yöneticisi</LinkButton><LinkButton to={siteHref(domainId, 'terminal')} icon="terminal">Site terminali</LinkButton></div>
-        <p className="ws-muted">Bu ekran kurulum veya güncelleme başlatmaz. Durum kontrolleri mevcut PHP araçlarını site kullanıcısıyla çağırır.</p></div>
+        <p className="ws-muted">Durum kontrolleri mevcut PHP araçlarını site kullanıcısıyla çağırır. Yazma etkili eylemler sabit katalogdan seçilir, açık onaydan sonra durable işlem kuyruğuna alınır; paket/eklenti güncellemesi veya serbest komut çalıştırma sunulmaz.</p></div>
     </Section>
-    <ToolSection title="WordPress" tool="wordpress" status={state?.wordpress} denied={state?.denied} client={ref}>
+    <ToolSection title="WordPress" tool="wordpress" status={state?.wordpress} denied={state?.denied} client={ref}
+      actions={actionsFor('wordpress')} actionBusy={actionBusy} onAction={(id) => void ref.current?.prepareAction(id)}>
       {state?.wordpress?.data && <WordPressStatus data={state.wordpress.data} fresh={state.wordpress.fresh} />}
     </ToolSection>
-    <ToolSection title="Composer" tool="composer" status={state?.composer} denied={state?.denied} client={ref}>
+    <ToolSection title="Composer" tool="composer" status={state?.composer} denied={state?.denied} client={ref}
+      actions={actionsFor('composer')} actionBusy={actionBusy} onAction={(id) => void ref.current?.prepareAction(id)}>
       {state?.composer?.data && <ComposerStatus data={state.composer.data} />}
     </ToolSection>
+    {state?.action?.job && <Section title="Son PHP araç işlemi"><div className="ws-section-body">
+      <p><Badge state={state.action.job.status} /> <code>{state.action.job.id}</code></p>
+      <p className="ws-muted">{state.action.job.status === 'succeeded'
+        ? 'İşlem doğrulandı; WordPress ve Composer durumu yeniden okundu.'
+        : state.action.job.status === 'failed' || state.action.job.status === 'cancelled'
+          ? 'İşlem tamamlanmadı. Teknik ayrıntı için işlem kaydını açın.'
+          : 'İşlem sunucuda yürütülmek üzere takip ediliyor.'}</p>
+      <Button onClick={() => observe(state.action.job)}>İşlem kaydını aç</Button>
+    </div></Section>}
+    <ErrorNotice error={state?.action?.error} />
+    {state?.action?.preview && <ConfirmDialog
+      title={state.action.preview.label}
+      message={`${state.action.preview.impact} İşlem yalnız bu sitenin sistem kullanıcısıyla çalıştırılır. Kuyruğa alındıktan sonra sonuç İşlem Geçmişi üzerinden takip edilir.`}
+      confirmation={state.action.preview.label}
+      busy={state.action.busy}
+      error={state.action.error}
+      onCancel={() => ref.current?.dismissPreview()}
+      onConfirm={() => void ref.current?.queueAction()}
+      confirmLabel="İşlemi kuyruğa al"
+    />}
   </>;
 }
-function ToolSection({ title, tool, status, denied, client, children }) {
-  return <Section title={title} actions={<Button icon="refresh" disabled={!status || status.loading || denied} onClick={() => void client.current?.load(tool)}>Durumu kontrol et</Button>}>
+function ToolSection({ title, tool, status, denied, client, children, actions = [], actionBusy = false, onAction }) {
+  return <Section title={title} actions={<div className="ws-actions">
+    <Button icon="refresh" disabled={!status || status.loading || denied} onClick={() => void client.current?.load(tool)}>Durumu kontrol et</Button>
+    {actions.map((item) => <Button key={item.id} disabled={denied || actionBusy || !status?.fresh}
+      onClick={() => onAction(item.id)}>{item.label}</Button>)}
+  </div>}>
     <div className="ws-section-body"><ErrorNotice error={status?.error} />
       {(!status || status.loading) && <p role="status">Araç durumu kontrol ediliyor…</p>}
       {status?.data && <p className="ws-muted" role="status">{status.fresh ? 'Son kontrol' : 'Önceki kontrol; güncel durumu doğrulanmadı'}: {formatDate(status.data.inspectedAt)}</p>}
