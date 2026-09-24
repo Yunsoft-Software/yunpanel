@@ -1,5 +1,11 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## BACKUP-UI-01–04 — Site Backup Manager
+
+- [x] **BACKUP-UI-01 site-scope kaynak:** `06bc9fc3`; global backup repository/remote rotaları site_manager'dan kapatıldı. Yeni Website-scoped browser yalnız aynı sunucunun dar repository metadata'sı ve yalnız `website:<id>` snapshotlarını döndürür; target/path/hostname/username/raw error yayımlamaz.
+- [x] **BACKUP-UI-02 ekran:** `300f813a`; Plesk görev düzeninde Barındırma ve DNS → Yedekleme ve Geri Yükleme. Backup-set kapsam sayıları, depo durumu/retention, son kontrol ve site snapshotları. Mevcut Files/cron/PHP/SSL yolları korunur.
+- [ ] **BACKUP-UI-03:** mevcut senkron Owner backup/restore çağrılarını doğrudan UI'ye açma. Mevcut Restic + restore/pre-snapshot/health rollback motorunu durable job, exact preview/confirmation, restart evidence/recovery ve aynı-job sonuç akışına bağla; sonra Owner UI mutation ekle.
+- [ ] **BACKUP-UI-04:** Node24/npm11 tam test/build + gerçek Restic/browser/host kabulü. Bu turun yeni testleri DNS checkout engeli nedeniyle yazıldı ama çalıştırılmış sayılmaz. [Kaynak ve kabul](docs/ux/site-backup-manager.md).
 ## PHP-ACTION-01/02 — Reviewed WordPress/Composer mutation hattı
 
 - [x] **PHP-ACTION-01a kaynak:** `405d3cee`, `6a14d501`; raw command yerine üç sabit eylem kataloğu, Website revizyonu + tam bağ kimliğiyle digest/confirmation ve bütün preview alanlarının tekrar doğrulanması.

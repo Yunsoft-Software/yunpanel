@@ -14,6 +14,15 @@ Kaynak: `405d3cee`, `6a14d501`, `47053dfc`, `6a02d83f`; ayrıntı `docs/ux/php-t
 - [ ] İki bağımsız API processini aynı job store üzerinde aynı Application action'ına yarıştır. Application hazırlık lock'u eşzamanlı pencereyi kapatsa da ikinci processin stale in-memory JobRegistry state'ini yeniden yüklediği kanıtlanmadı. Production tek API writer ile çalışıyorsa bunu paket/service kabulünde doğrula; çok writer desteklenecekse ortak durable job-store process lock/reload kaynak işi ekle.
 - [ ] İzinli test hostunda yalnız sabit katalog eylemlerinin doğru dedicated site Unix kullanıcısı ve doğru release/proje dizininde çalıştığını doğrula. `.44` Plesk hostuna dokunma.
 
+## T-DEV-BACKUP-UI — site backup browser sonrası
+
+Kaynak: `06bc9fc3`, `300f813a`; rapor `docs/ux/site-backup-manager.md`. Bu aşamada siteye özel yedek envanteri görünür; senkron backup/restore mutation UI'ye bağlanmadı.
+
+- [ ] Node24/npm11 gerçek checkout'ta yeni browser/model/wiring testleri ve mevcut website-backup/restore/restic/site-resource-boundary regresyonları; tam npm ci/check/build.
+- [ ] Owner/Site A/Site B: global backup repository/remotes/snapshot rotaları site_manager için kapalı, Website-scoped browser yalnız kendi site etiketini döndürmeli. Repository target/path/raw error/host/user bilgisi sızmamalı.
+- [ ] 100+ snapshot, locked/error/uninitialized repository, stale site binding, session revoke ve site değişimi.
+- [ ] Chromium/Firefox responsive/zoom/klavye/reload/back-forward; Files/cron/PHP/SSL regresyonları.
+- [ ] Durable mutation sonrası gerçek backup → restart/kayıp cevap → receipt/recovery → restore → health failure → rollback kabulü. `.44` kullanılmaz.
 ## T-DEV-FILES — 256d991f ve 72a16712 kaynak sonrası
 
 Kaynak kanıtı: `docs/history/development-files-entry-2026-09-23.md` ve `docs/history/site-files-visible-access-2026-09-23.md`. Global giriş ve site sekmesinin görünürlüğü kaynakta uygulandı. Node22 model/kaynak testleri gerçek dosya işlemi veya React render kabulü değildir.
