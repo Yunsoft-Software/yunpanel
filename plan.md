@@ -1,5 +1,12 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## SSL-RENEW / SR-01–04 — Yenileme sonucu ve sertifika verisi eşitleme kaynağı tamamlandı
+
+- [x] **SR-01/02 kaynak:** `3d06db13`; mevcut renew API'si tek POST ile kullanılır. Onaylı Domain/Website/sunucu/sertifika bağı ve güncel kayıt doğrulanır. İş kabulü başarı değildir; dry-run, aynı sertifika, gerçek değişen sertifika, başarısızlık ve gecikmiş depo kaydı ayrıdır. Tarih/parmak izi job ile kalıcı kayıtta eşleşmeden yenilendi denmez; geçerlilik süresine hayali gün eklenmez. Kayıp cevapta otomatik renewal tekrarı yoktur.
+- [x] **SR-03 ekran ve ortak veri:** `eb788819`, `0ac00991`, `ea0ed310`, `40532f89`; mevcut SSL ekranı yenileme sonucu/önceki-yeni tarih/parmak izi ve mevcut JobDrawer bağlantısını korur. Takip edilen SSL işi terminal olduğunda Domain/Website/certificate koleksiyonları pencere kapalıyken de yenilenir; aynı terminal cevap döngü üretmez. İlk issuance formu, e-posta/taslak ve mevcut sertifika/ACME motorları değişmedi.
+- [x] **SR-04 seçili kontrol:** `7d190650`, `11a6cfae`, `ff69521a`; Node22.16.0/npm10.9.2 altında **73 geçti / 0 başarısız / 0 atlandı**: 59 yenileme davranışı + 8 koleksiyon yenileme davranışı + 6 kaynak bağlantısı. Üç JSX parse/dönüşümü ve iki kaynak JS sözdizimi kontrolü geçti; sekiz kaynak/test blob'u GitHub ile eşleşti. [Kaynak raporu ve T-DEV-SSL-RENEW](docs/ux/ssl-renewal-result-flow.md).
+- [ ] **BUG-06 kalan kabul/kapsam:** Node24/npm11 tam React/API/ACME/host kabulü, gerçek TLS bağlantısında sunulan sertifika, Nginx/mail reload, süreçler arası kilit ve restart açık. Kalıcı metadata eşitliği canlı TLS kanıtı değildir. İlk issuance sonrası mail identity ve stage/activate kısmi sonuçları PROD-06 kapsamında açık kalır. Üst BUG-06/production kapanmaz; eski test sayıları bu 73'e eklenmez.
+
 ## 2026-09-24 — Tek posta hesabı silme ve form hizası
 
 - [x] **MR-SINGLE / MS-01 kaynak:** `ff824077` başlangıcındaki API/worker ayrımı korundu: mailbox silmede yalnız seçilen hesap disabled olmalıdır; domain-scope silmede domain disabled şartı sürer. Etkin komşu hesapları veya domaini kapatma zorunluluğu mailbox akışından kaldırıldı. Önceki MR-01–04 notlarının bu sınırlaması artık güncel değildir.
@@ -54,7 +61,7 @@
 
 - [x] **Bellekte kapsamlı durum:** `38c0004d`, `123a4a50`, `e34170f0`; aynı doğrulanmış Domain/Website bağındaki geçici envanter kesintisinde klasör yolu, editör içeriği ve özgün dosya özeti korunur. Stale envanterle Files açılmaz; kullanıcı/oturum/yetki, Website/sunucu/runtime değişiminde eski içerik yeni hedefe taşınmaz.
 - [x] **Files bağlantısı:** `7ed7c7fb`, `2e10eed2`; mevcut dosya motoru ve Ember görünümü korunarak başarılı listeleme yolu hatırlanır. Mevcut UnsavedChanges mekanizması editör taslağını sayfa/site geçişi ve tarayıcı yenilemesinde koruyan ayrılma uyarısına bağlandı. Yerel kalıcı depolama, otomatik yeniden kaydetme veya dosya işlemi tekrarı yoktur.
-- [x] **Seçili test:** `9ac8c94b`, `5c0974c1`; Node22.16.0 altında **43 geçti / 0 başarısız / 0 atlandı**: 35 saf model + 8 kaynak bağlantısı testi. Üç JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası ve iki değişmemiş test bağımlılığı GitHub blob'larıyla eşleşir. React render testi değildir.
+- [x] **Seçili test:** `9ac8c94b`, `5c0974c1`; Node22.16.0 altında **43 geçti / 0 başarısız / 0 atlandı**: 35 saf model + 8 kaynak bağlantısı testi. Üç JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası GitHub blob'larıyla eşleşir. React render testi değildir.
 - [ ] **Kalan kabul:** Node24/npm11 tam lint/test/build, gerçek React/router/tarayıcı/API/host, T-DEV-FILES ve T-DEV-FILES-CONT açıktır. Paket kurulumu registry DNS hatası (`EAI_AGAIN`) nedeniyle yapılamadı. Kalıcı taslak yedeklemesi eklenmedi; açıkça ayrılmayı onaylamak veya sekmeyi kaybetmek bellek taslağını siler. [Kaynak raporu ve Codex kabul listesi](docs/ux/files-session-continuity.md). Üst UX-PL-01/05/08 kapanmaz.
 
 ## HST-UI-01–04 — Barındırma yönlendirme formu kaynağı tamamlandı
