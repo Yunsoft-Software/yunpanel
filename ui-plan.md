@@ -8,7 +8,8 @@
 
 - [x] **PHP-ACTION-01 sözleşme:** `405d3cee`, `6a14d501`; üç sabit düşük-kapsam eylem için Website revizyonuna bağlı önizleme digest/confirmation. Raw komut girişi reviewed action kataloğuna giremez; bütün önizleme alanları çalıştırma öncesi yeniden hesaplanacak şekilde doğrulanır.
 - [x] **Preview/kapsam:** `47053dfc`, `6a02d83f`; PHP action preview endpoint'i eklendi. Eski raw WP-CLI/Composer run uçları site_manager'a kapatılıp Owner-only bırakıldı. **Site ekranına mutation butonu eklenmedi.**
-- [ ] **PHP-ACTION-02:** reviewed actionları mevcut durable JobRegistry + local executor + resource lock/recovery hattına bağla; aynı job sonucu ve canlı yetki doğrulaması olmadan kullanıcıya başarı gösterme. Yeni kaynak testleri bu tur GitHub DNS/checkout engeli nedeniyle çalıştırılmadı; T-DEV-PHP-UI içinde açık.
+- [x] **PHP-ACTION-02a/b durable kaynak:** `2c9c3df8`, `130b17d1`, `b8ca6443`, `26962a8a`, `aa48a67d`; reviewed action operation'ı JobRegistry/local executor'a bağlandı, terminal sonuç daraltıldı, 0600 receipt ve receipt-only packaged recovery eklendi. Receipt yoksa çalışan komut tekrar edilmez; running job unresolved kalır.
+- [ ] **PHP-ACTION-02c UI/HTTP:** queue servisi kaynakta hazır fakat reviewed execution route'u ve site butonu kasıtlı olarak kapalı. Canlı tenant/yetki yeniden doğrulaması, süreçler arası Application enqueue yarışı ve gerçek restart/host kabulü tamamlanmadan açılmayacak. Yeni kaynak testleri bu tur GitHub DNS/checkout engeli nedeniyle çalıştırılmadı; T-DEV-PHP-ACTIONS içinde açık.
 
 ## 2026-09-25 — PHP / WordPress araç durumu kaynak dilimi
 
