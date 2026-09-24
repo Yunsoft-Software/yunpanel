@@ -170,10 +170,11 @@ function WebsiteForm({ parentId }) {
         {form.mode === 'domain' && <div className="ws-form-divider" style={{ marginTop: 24 }}>
           <h3>Site Yöneticisi</h3>
           <p className="ws-muted">Bu web sitesi için tam yetkili site yöneticisi hesabı oluşturulur. Site silinmeden bu yönetici hesabı silinemez.</p>
-          <div className="ws-form-grid" style={{ marginTop: 16 }}>
+          <div className="ws-form-grid ws-site-admin-fields" style={{ marginTop: 16, alignItems: 'start' }}>
             <label>Yönetici e-posta adresi
               <input
                 type="email"
+                aria-describedby="website-admin-email-hint"
                 required
                 placeholder="yonetici@example.com"
                 autoCapitalize="none"
@@ -181,10 +182,12 @@ function WebsiteForm({ parentId }) {
                 value={form.adminEmail}
                 onChange={(event) => update('adminEmail', event.target.value)}
               />
+              <span id="website-admin-email-hint" className="ws-field-hint">Panel girişi için kullanılır; posta kutusu hesabından ayrıdır.</span>
             </label>
             <label>Yönetici parolası
               <input
                 type="password"
+                aria-describedby="website-admin-password-hint"
                 required
                 minLength={12}
                 placeholder="En az 12 karakter"
@@ -192,7 +195,7 @@ function WebsiteForm({ parentId }) {
                 value={form.adminPassword}
                 onChange={(event) => update('adminPassword', event.target.value)}
               />
-              <span className="ws-field-hint">En az 12 karakter ve güvenli bir parola seçin.</span>
+              <span id="website-admin-password-hint" className="ws-field-hint">En az 12 karakter ve güvenli bir parola seçin.</span>
             </label>
           </div>
         </div>}
