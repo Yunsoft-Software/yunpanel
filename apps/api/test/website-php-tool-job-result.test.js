@@ -9,6 +9,10 @@ const job = Object.freeze({
   payload: Object.freeze({
     websiteId: '11111111-1111-4111-8111-111111111111',
     applicationId: '22222222-2222-4222-8222-222222222222',
+    unixUser: 'yunapp-123456789abc',
+    actorSessionId: '44444444-4444-4444-8444-444444444444',
+    actorUserId: '55555555-5555-4555-8555-555555555555',
+    actorRole: 'site_manager',
     actionId: 'wp.cache.flush',
     expectedWebsiteRevision: 4,
     previewDigest: 'a'.repeat(64),
@@ -18,6 +22,7 @@ const result = Object.freeze({
   version: 1,
   websiteId: job.payload.websiteId,
   applicationId: job.payload.applicationId,
+  unixUser: job.payload.unixUser,
   actionId: job.payload.actionId,
   websiteRevision: 4,
   previewDigest: job.payload.previewDigest,

@@ -7,6 +7,9 @@ const payload = Object.freeze({
   applicationId: '22222222-2222-4222-8222-222222222222',
   unixUser: 'yunapp-123456789abc',
   expectedWebsiteRevision: 4,
+  actorSessionId: '44444444-4444-4444-8444-444444444444',
+  actorUserId: '55555555-5555-4555-8555-555555555555',
+  actorRole: 'site_manager',
   actionId: 'wp.cache.flush',
   previewDigest: 'a'.repeat(64),
   confirmation: `php-tool:11111111-1111-4111-8111-111111111111:wp.cache.flush:${'a'.repeat(64)}`,
@@ -46,6 +49,7 @@ test('local PHP action runs only the reviewed fixed action and returns no stdout
       },
       runComposer: async () => { throw new Error('unexpected composer'); },
     },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }),
   });
   const result = await operation.execute(payload, execution);
   assert.equal(calls.length, 1);
@@ -65,6 +69,7 @@ test('local PHP action rejects a mismatched Application execution context before
       runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
       runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
     },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }),
   });
   await assert.rejects(() => operation.execute(payload, { ...execution, resourceId: payload.websiteId }));
   assert.equal(ran, false);
@@ -78,6 +83,7 @@ test('local PHP action refuses stale preview identity', async () => {
       runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
       runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
     },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }),
   });
   await assert.rejects(() => operation.execute(payload, execution));
   assert.equal(ran, false);
@@ -90,6 +96,7 @@ test('failed command is a failed local operation, not a succeeded job with succe
       runWpCli: async () => ({ success: false, exitCode: 1, stdout: '', stderr: 'private' }),
       runComposer: async () => ({ success: false, exitCode: 1 }),
     },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }),
   });
   await assert.rejects(
     () => operation.execute(payload, execution),

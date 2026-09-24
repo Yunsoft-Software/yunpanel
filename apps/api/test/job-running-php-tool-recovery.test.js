@@ -3,7 +3,7 @@ import test from 'node:test';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
 
 const serverId='33333333-3333-4333-8333-333333333333', jobId='php-action-job-01', applicationId='22222222-2222-4222-8222-222222222222';
-const payload={websiteId:'11111111-1111-4111-8111-111111111111',applicationId,unixUser:'yunapp-123456789abc',expectedWebsiteRevision:4,actionId:'wp.cache.flush',previewDigest:'a'.repeat(64),confirmation:`php-tool:11111111-1111-4111-8111-111111111111:wp.cache.flush:${'a'.repeat(64)}`};
+const payload={websiteId:'11111111-1111-4111-8111-111111111111',applicationId,unixUser:'yunapp-123456789abc',expectedWebsiteRevision:4,actorSessionId:'44444444-4444-4444-8444-444444444444',actorUserId:'55555555-5555-4555-8555-555555555555',actorRole:'site_manager',actionId:'wp.cache.flush',previewDigest:'a'.repeat(64),confirmation:`php-tool:11111111-1111-4111-8111-111111111111:wp.cache.flush:${'a'.repeat(64)}`};
 const result={version:1,websiteId:payload.websiteId,applicationId,unixUser:payload.unixUser,actionId:payload.actionId,websiteRevision:4,previewDigest:payload.previewDigest,completed:true,sideEffects:true};
 
 function harness({ receipt=true }={}) {

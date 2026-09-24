@@ -52,6 +52,9 @@ export async function recoverRunningPhpTool({
     || receipt.payload.applicationId !== context.payload?.applicationId
     || receipt.payload.unixUser !== context.payload?.unixUser
     || receipt.payload.expectedWebsiteRevision !== context.payload?.expectedWebsiteRevision
+    || receipt.payload.actorSessionId !== context.payload?.actorSessionId
+    || receipt.payload.actorUserId !== context.payload?.actorUserId
+    || receipt.payload.actorRole !== context.payload?.actorRole
     || receipt.payload.actionId !== context.payload?.actionId
     || receipt.payload.previewDigest !== context.payload?.previewDigest
     || receipt.payload.confirmation !== context.payload?.confirmation

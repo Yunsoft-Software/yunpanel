@@ -25,35 +25,45 @@ const input = Object.freeze({
   previewDigest: preview.previewDigest,
   confirmation: preview.confirmation,
 });
+const actor = Object.freeze({
+  sessionId: '44444444-4444-4444-8444-444444444444',
+  userId: '55555555-5555-4555-8555-555555555555',
+  role: 'site_manager',
+});
+const dependencies = (jobs = []) => ({
+  websitePhpToolsService: { getActionPreview: async () => preview },
+  jobRegistry: {
+    listJobs: async () => jobs,
+    enqueue: async (value) => ({ id: 'php-action-job-01', status: 'queued', ...value }),
+  },
+  authorizeActor: async () => actor,
+  withApplicationLock: async (_id, operation) => operation(),
+});
 
 test('action service enqueues exactly one application-scoped durable operation', async () => {
   const enqueued = [];
-  const service = createWebsitePhpToolActionService({
-    websitePhpToolsService: { getActionPreview: async () => preview },
-    jobRegistry: {
-      listJobs: async () => [],
-      enqueue: async (value) => { enqueued.push(value); return { id: 'php-action-job-01', status: 'queued', ...value }; },
-    },
-  });
-  const result = await service.queue(preview.websiteId, input);
+  const deps = dependencies();
+  deps.jobRegistry.enqueue = async (value) => { enqueued.push(value); return { id: 'php-action-job-01', status: 'queued', ...value }; };
+  const service = createWebsitePhpToolActionService(deps);
+  const result = await service.queue(preview.websiteId, input, actor);
   assert.equal(enqueued.length, 1);
   assert.equal(enqueued[0].operation, 'website.php.action');
   assert.equal(enqueued[0].resourceType, 'application');
   assert.equal(enqueued[0].resourceId, preview.applicationId);
   assert.equal(enqueued[0].payload.actionId, preview.actionId);
+  assert.equal(enqueued[0].payload.actorSessionId, actor.sessionId);
   assert.equal(Object.hasOwn(enqueued[0].payload, 'command'), false);
   assert.equal(result.job.status, 'queued');
 });
 
 test('action service blocks when another Application job is active', async () => {
   let enqueued = false;
-  const service = createWebsitePhpToolActionService({
-    websitePhpToolsService: { getActionPreview: async () => preview },
-    jobRegistry: {
-      listJobs: async () => [{ id: 'existing-job', status: 'running' }],
-      enqueue: async () => { enqueued = true; },
-    },
-  });
-  await assert.rejects(() => service.queue(preview.websiteId, input), (error) => error.code === 'website_php_action_job_conflict');
+  const deps = dependencies([{ id: 'existing-job', status: 'running' }]);
+  deps.jobRegistry.enqueue = async () => { enqueued = true; };
+  const service = createWebsitePhpToolActionService(deps);
+  await assert.rejects(
+    () => service.queue(preview.websiteId, input, actor),
+    (error) => error.code === 'website_php_action_job_conflict',
+  );
   assert.equal(enqueued, false);
 });

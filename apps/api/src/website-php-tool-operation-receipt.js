@@ -29,6 +29,8 @@ function normalized(value) {
   if (!p || typeof p !== 'object' || Array.isArray(p)
     || !UUID.test(p.websiteId ?? '') || !UUID.test(p.applicationId ?? '') || !USER.test(p.unixUser ?? '')
     || !Number.isSafeInteger(p.expectedWebsiteRevision) || p.expectedWebsiteRevision < 1
+    || !UUID.test(p.actorSessionId ?? '') || !UUID.test(p.actorUserId ?? '')
+    || !['owner', 'site_manager'].includes(p.actorRole)
     || !ACTIONS.has(p.actionId) || !SHA.test(p.previewDigest ?? '')
     || p.confirmation !== `php-tool:${p.websiteId}:${p.actionId}:${p.previewDigest}`
     || !r || typeof r !== 'object' || Array.isArray(r)
@@ -48,6 +50,9 @@ function normalized(value) {
       applicationId: p.applicationId.toLowerCase(),
       unixUser: p.unixUser,
       expectedWebsiteRevision: p.expectedWebsiteRevision,
+      actorSessionId: p.actorSessionId.toLowerCase(),
+      actorUserId: p.actorUserId.toLowerCase(),
+      actorRole: p.actorRole,
       actionId: p.actionId,
       previewDigest: p.previewDigest,
       confirmation: p.confirmation,
