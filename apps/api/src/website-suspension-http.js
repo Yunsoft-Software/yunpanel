@@ -87,7 +87,9 @@ export function mountWebsiteSuspensionRoutes(app, { runtime } = {}) {
       runtime.preview({ websiteId }),
       runtime.listForWebsite(websiteId),
     ]);
-    response.json({ preview, operations });
+    const data = { preview, operations };
+    response.set('Cache-Control', 'no-store');
+    response.json({ preview, operations, data });
   }));
 
   app.post('/api/websites/:websiteId/suspension/start', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -98,7 +100,7 @@ export function mountWebsiteSuspensionRoutes(app, { runtime } = {}) {
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
     });
-    response.status(201).json({ operation });
+    response.status(201).json({ operation, data: operation });
   }));
 
   app.post('/api/websites/:websiteId/suspension/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -110,7 +112,7 @@ export function mountWebsiteSuspensionRoutes(app, { runtime } = {}) {
       expectedUpdatedAt: body.expectedUpdatedAt,
       confirmation: body.confirmation,
     });
-    response.json({ operation });
+    response.json({ operation, data: operation });
   }));
 
   app.post('/api/websites/:websiteId/suspension/resume', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -122,7 +124,7 @@ export function mountWebsiteSuspensionRoutes(app, { runtime } = {}) {
       expectedUpdatedAt: body.expectedUpdatedAt,
       confirmation: body.confirmation,
     });
-    response.json({ operation });
+    response.json({ operation, data: operation });
   }));
 
   app.post('/api/websites/:websiteId/suspension/resume-retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -134,6 +136,6 @@ export function mountWebsiteSuspensionRoutes(app, { runtime } = {}) {
       expectedUpdatedAt: body.expectedUpdatedAt,
       confirmation: body.confirmation,
     });
-    response.json({ operation });
+    response.json({ operation, data: operation });
   }));
 }
