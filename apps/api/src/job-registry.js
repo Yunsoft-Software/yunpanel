@@ -39,6 +39,7 @@ import { JOB_RESOURCE_TYPES } from './job-resource-types.js';
 import { sanitizeNodePassengerMigrationResult } from './node-passenger-migration-job-result.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { sanitizeWebsiteCronJobResult } from './website-cron-job-result.js';
+import { sanitizeWebsitePhpToolJobResult } from './website-php-tool-job-result.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -1010,6 +1011,9 @@ function sanitizeResult(job, result) {
   if (job.operation === OPERATIONS.ROUNDCUBE_CONFIG_APPLY) return sanitizeRoundcubeConfigResult(job, result);
   if ([OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE].includes(job.operation)) {
     return sanitizeWebsiteCronJobResult(job, result);
+  }
+  if (job.operation === OPERATIONS.WEBSITE_PHP_ACTION) {
+    return sanitizeWebsitePhpToolJobResult(job, result);
   }
   if (job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) return sanitizeNodePassengerMigrationJobResult(job, result);
   if (!result || typeof result !== 'object' || Array.isArray(result)) {
