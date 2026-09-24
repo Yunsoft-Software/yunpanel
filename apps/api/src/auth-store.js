@@ -299,7 +299,7 @@ export function createAuthStore({
     },
     getSession,
     getSessionById(sessionId) {
-      if (typeof sessionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
+      if (typeof sessionId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) return null;
       const row = db.prepare(`SELECT s.*, u.username, u.role, u.active FROM sessions s
         JOIN users u ON u.id = s.user_id WHERE s.id = ?`).get(sessionId);
       if (!row) return null;

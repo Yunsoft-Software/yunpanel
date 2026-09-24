@@ -22,11 +22,13 @@ test('PHP panel retains session and binding guard plus cleanup', async () => {
   assert.match(text, /!sessionTransitionPending\(\)/); assert.match(text, /client.dispose\(\)/);
   assert.match(text, /scope.applicationId, scope.unixUser/);
 });
-test('status panels are independent and have no install/run or periodic poll', async () => {
+test('status panels remain independent while reviewed actions use one known-job poll', async () => {
   const text = await source('SitePhpToolsPanel.jsx');
   assert.match(text, /tool="wordpress"/); assert.match(text, /tool="composer"/);
   assert.match(text, /client.current\?\.load\(tool\)/);
-  assert.doesNotMatch(text, /setInterval|setTimeout|\/run|method:\s*['"]POST|dangerouslySetInnerHTML/);
+  assert.match(text, /setInterval\(\(\) => \{ void ref\.current\?\.refreshAction\(\); \}, 3000\)/);
+  assert.match(text, /ConfirmDialog/); assert.match(text, /İşlemi kuyruğa al/);
+  assert.doesNotMatch(text, /wp-cli\/run|composer\/run|dangerouslySetInnerHTML/);
 });
 test('long plugin/theme inventories are paginated and failed lists are not empty', async () => {
   const text = await source('SitePhpToolsPanel.jsx');
