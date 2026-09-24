@@ -56,27 +56,38 @@ export function listAiConversations(websiteId = null) {
   return panelRequest(`/ai/conversations${query}`);
 }
 
-export function createAiConversation({ title, websiteId = null } = {}) {
+export function listAiConversationPage(websiteId = null, { limit = 20, cursor = null, signal } = {}) {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (websiteId !== null) query.set('websiteId', websiteId);
+  if (cursor !== null) query.set('cursor', cursor);
+  return panelRequest(`/ai/conversations?${query}`, { signal });
+}
+
+export function createAiConversation({ title, websiteId = null } = {}, { signal } = {}) {
   return panelRequest('/ai/conversations', {
     method: 'POST',
     body: { title, websiteId },
+    ...(signal ? { signal } : {}),
   });
 }
 
-export function getAiConversation(conversationId) {
-  return panelRequest(`/ai/conversations/${encodeURIComponent(conversationId)}`);
+export function getAiConversation(conversationId, { signal } = {}) {
+  const path = `/ai/conversations/${encodeURIComponent(conversationId)}`;
+  return signal ? panelRequest(path, { signal }) : panelRequest(path);
 }
 
-export function deleteAiConversation(conversationId) {
+export function deleteAiConversation(conversationId, { signal } = {}) {
   return panelRequest(`/ai/conversations/${encodeURIComponent(conversationId)}`, {
     method: 'DELETE',
+    ...(signal ? { signal } : {}),
   });
 }
 
-export function sendAiMessage({ conversationId, text }) {
+export function sendAiMessage({ conversationId, text }, { signal } = {}) {
   return panelRequest(`/ai/conversations/${encodeURIComponent(conversationId)}/messages`, {
     method: 'POST',
     body: { text },
+    ...(signal ? { signal } : {}),
   });
 }
 
