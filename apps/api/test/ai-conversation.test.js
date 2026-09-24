@@ -12,31 +12,32 @@ const ownerAuth = Object.freeze({
   access: Object.freeze({ mode: 'management', permissions: Object.freeze(['*']) }),
   security: Object.freeze({ managementAllowed: true }),
 });
+const websiteId = '11111111-1111-4111-8111-111111111111';
 
 test('AiConversationService manages persistent conversations', async () => {
   const tempDir = await mkdtemp(path.join(os.tmpdir(), 'ai-conversation-test-'));
   const filePath = path.join(tempDir, 'conversations.json');
 
   try {
-    const service = createAiConversationService({ filePath });
-    const emptyList = await service.listConversations();
+    const service = createAiConversationService({ filePath, websiteRegistry: { getWebsite: async (id) => id === websiteId ? { id } : null } });
+    const emptyList = await service.listConversations({ auth: ownerAuth });
     assert.deepEqual(emptyList, []);
 
-    const created = await service.createConversation({ title: 'Deploy Help', websiteId: 'site-1' });
+    const created = await service.createConversation({ title: 'Deploy Help', websiteId, auth: ownerAuth });
     assert.equal(created.title, 'Deploy Help');
-    assert.equal(created.websiteId, 'site-1');
+    assert.equal(created.websiteId, websiteId);
 
-    const list = await service.listConversations();
+    const list = await service.listConversations({ auth: ownerAuth });
     assert.equal(list.length, 1);
     assert.equal(list[0].id, created.id);
 
-    const retrieved = await service.getConversation(created.id);
+    const retrieved = await service.getConversation(created.id, { auth: ownerAuth });
     assert.equal(retrieved.id, created.id);
     assert.deepEqual(retrieved.messages, []);
 
-    const deleted = await service.deleteConversation(created.id);
+    const deleted = await service.deleteConversation(created.id, { auth: ownerAuth });
     assert.equal(deleted, true);
-    assert.equal(await service.getConversation(created.id), null);
+    assert.equal(await service.getConversation(created.id, { auth: ownerAuth }), null);
   } finally {
     await rm(tempDir, { recursive: true, force: true });
   }
@@ -88,7 +89,7 @@ test('AiConversationService multi-turn agent executes read tools and returns fin
       toolRegistry,
     });
 
-    const conv = await service.createConversation({ title: 'Check sites' });
+    const conv = await service.createConversation({ title: 'Check sites', auth: ownerAuth });
     const response = await service.sendMessage({
       conversationId: conv.id,
       text: 'What sites do I have?',
@@ -109,7 +110,7 @@ test('AiConversationService multi-turn agent executes read tools and returns fin
     assert.ok(events.some((e) => e.type === 'done'));
 
     // Check conversation history
-    const updated = await service.getConversation(conv.id);
+    const updated = await service.getConversation(conv.id, { auth: ownerAuth });
     assert.equal(updated.messages.length, 2);
     assert.equal(updated.messages[0].role, 'user');
     assert.equal(updated.messages[0].text, 'What sites do I have?');
@@ -154,7 +155,7 @@ test('AiConversationService intercepts write operations and returns action propo
       toolRegistry,
     });
 
-    const conv = await service.createConversation({ title: 'Restart site' });
+    const conv = await service.createConversation({ title: 'Restart site', auth: ownerAuth });
     const response = await service.sendMessage({
       conversationId: conv.id,
       text: 'Please restart website site-alpha',
