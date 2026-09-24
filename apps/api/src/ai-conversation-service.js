@@ -3,8 +3,9 @@ import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createAiOrchestrator } from './ai-orchestrator.js';
 import { createProviderFromConfig } from './ai-provider-adapters.js';
+import { conversationScope, conversationVisible, conversationSummary, createConversationPager } from './ai-conversation-history.js';
 
-const STORE_VERSION = 1;
+const STORE_VERSION = 2;
 const MAX_TURNS = 5;
 const MAX_CONVERSATIONS = 100;
 const MAX_MESSAGES_PER_CONVERSATION = 50;
@@ -57,90 +58,112 @@ export function createAiConversationService({
   now = () => new Date().toISOString(),
 } = {}) {
   const conversations = new Map();
-  let initialized = false;
+  let initialization = null;
+  let writes = Promise.resolve();
+  let storageFailed = false;
+  let legacySource = null;
+  const page = createConversationPager();
 
   async function init() {
-    if (initialized) return;
-    try {
-      const raw = await readFile(filePath, 'utf8');
-      const data = JSON.parse(raw);
-      if (data && typeof data === 'object' && Array.isArray(data.conversations)) {
+    if (!initialization) initialization = (async () => {
+      try {
+        const raw = await readFile(filePath, 'utf8');
+        const data = JSON.parse(raw);
+        if (!data || ![1, STORE_VERSION].includes(data.version) || !Array.isArray(data.conversations)) throw new Error('Invalid store');
+        const loaded = new Map();
         for (const item of data.conversations) {
-          if (item && typeof item.id === 'string') {
-            conversations.set(item.id, {
-              id: item.id,
-              title: item.title || 'New Conversation',
-              websiteId: item.websiteId || null,
-              messages: Array.isArray(item.messages) ? item.messages : [],
-              createdAt: item.createdAt || now(),
-              updatedAt: item.updatedAt || now(),
-            });
-          }
+          if (!item || typeof item.id !== 'string' || loaded.has(item.id)
+            || typeof item.title !== 'string' || !Array.isArray(item.messages)
+            || !Number.isFinite(Date.parse(item.createdAt)) || !Number.isFinite(Date.parse(item.updatedAt))
+            || (item.actorId != null && typeof item.actorId !== 'string')) throw new Error('Invalid record');
+          // Preserve legacy records and all their fields; never guess an owner.
+          loaded.set(item.id, { ...item, actorId: item.actorId ?? null, websiteId: item.websiteId ?? null });
         }
+        for (const [id, item] of loaded) conversations.set(id, item);
+        if (data.version === 1) legacySource = raw;
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw new AiConversationError('ai_history_store_unavailable', 'Conversation history could not be read safely.', 503);
       }
-    } catch (err) {
-      if (err.code !== 'ENOENT') {
-        // Silently recover if store file was missing or empty
-      }
-    }
-    initialized = true;
+    })();
+    await initialization;
+    await writes;
+    if (storageFailed) throw new AiConversationError('ai_history_store_unavailable', 'Conversation storage needs recovery.', 503);
   }
 
   async function persist() {
-    const dir = path.dirname(filePath);
-    await mkdir(dir, { recursive: true, mode: 0o700 });
-    const payload = JSON.stringify({
-      version: STORE_VERSION,
-      conversations: Array.from(conversations.values()).slice(-MAX_CONVERSATIONS),
-    }, null, 2);
-    const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
-    await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
-    await chmod(tempPath, 0o600);
-    await rename(tempPath, filePath);
+    const task = writes.then(async () => {
+      if (storageFailed) throw new Error('Storage unavailable');
+      const dir = path.dirname(filePath);
+      await mkdir(dir, { recursive: true, mode: 0o700 });
+      if (legacySource !== null) {
+        const backup = `${filePath}.v1-backup`;
+        try { await writeFile(backup, legacySource, { encoding: 'utf8', mode: 0o600, flag: 'wx' }); }
+        catch (error) {
+          if (error.code !== 'EEXIST' || await readFile(backup, 'utf8') !== legacySource) throw error;
+        }
+        await chmod(backup, 0o600);
+        legacySource = null;
+      }
+      const payload = JSON.stringify({ version: STORE_VERSION, conversations: Array.from(conversations.values()) }, null, 2);
+      const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
+      await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
+      await chmod(tempPath, 0o600);
+      await rename(tempPath, filePath);
+    });
+    writes = task.catch(() => { storageFailed = true; });
+    try { await task; }
+    catch { throw new AiConversationError('ai_history_store_unavailable', 'Conversation changes could not be stored.', 503); }
   }
 
-  async function listConversations({ websiteId = null } = {}) {
+  async function listConversations({ websiteId = null, auth } = {}) {
+    const scope = conversationScope(auth, websiteId);
     await init();
-    return Array.from(conversations.values())
-      .filter((conv) => !websiteId || conv.websiteId === websiteId)
-      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
-      .map((conv) => Object.freeze({
-        id: conv.id,
-        title: conv.title,
-        websiteId: conv.websiteId,
-        messageCount: conv.messages.length,
-        createdAt: conv.createdAt,
-        updatedAt: conv.updatedAt,
-      }));
+    return Array.from(conversations.values()).filter((conv) => conversationVisible(conv, scope))
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map(conversationSummary);
   }
 
-  async function getConversation(id) {
+  async function listConversationPage({ websiteId = null, auth, limit = 20, cursor = null } = {}) {
+    const scope = conversationScope(auth, websiteId);
+    await init();
+    return page(Array.from(conversations.values()), scope, { limit, cursor });
+  }
+
+  function publicConversation(conv) {
+    return Object.freeze({ ...conversationSummary(conv), messages: Object.freeze(structuredClone(conv.messages)) });
+  }
+
+  async function getConversation(id, { auth } = {}) {
+    const scope = conversationScope(auth);
     await init();
     const conv = conversations.get(id);
-    if (!conv) return null;
-    return Object.freeze({ ...conv, messages: Object.freeze([...conv.messages]) });
+    return conversationVisible(conv, scope) ? publicConversation(conv) : null;
   }
 
-  async function createConversation({ title = 'New Conversation', websiteId = null } = {}) {
+  async function createConversation({ title = 'New Conversation', websiteId = null, auth } = {}) {
+    const scope = conversationScope(auth, websiteId);
+    if (!scope.owner && websiteId === null) throw new AiConversationError('forbidden', 'A permitted Website is required.', 403);
+    if (typeof title !== 'string') throw new AiConversationError('invalid_conversation_title', 'Conversation title must be text.');
     await init();
+    if (websiteId !== null && (!websiteRegistry || !(await websiteRegistry.getWebsite(websiteId)))) {
+      throw new AiConversationError('conversation_not_found', 'Website not found.', 404);
+    }
+    conversationScope(auth, websiteId);
+    if (Array.from(conversations.values()).filter((conv) => conv.actorId === scope.actorId).length >= MAX_CONVERSATIONS) {
+      throw new AiConversationError('ai_conversation_limit', '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti açıkça silin.', 409);
+    }
     const id = randomUUID();
-    const timestamp = now();
-    const record = {
-      id,
-      title: (title || 'New Conversation').slice(0, 100),
-      websiteId: websiteId || null,
-      messages: [],
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
+    const timestamp = new Date(now()).toISOString();
+    const record = { id, actorId: scope.actorId, title: (title || 'New Conversation').slice(0, 100),
+      websiteId, messages: [], createdAt: timestamp, updatedAt: timestamp };
     conversations.set(id, record);
     await persist();
-    return Object.freeze({ ...record });
+    return publicConversation(record);
   }
 
-  async function deleteConversation(id) {
+  async function deleteConversation(id, { auth } = {}) {
+    const scope = conversationScope(auth);
     await init();
-    if (!conversations.has(id)) return false;
+    if (!conversationVisible(conversations.get(id), scope)) return false;
     conversations.delete(id);
     await persist();
     return true;
@@ -178,9 +201,10 @@ export function createAiConversationService({
     onEvent = null,
     signal = null,
   }) {
+    const scope = conversationScope(auth);
     await init();
     const conv = conversations.get(conversationId);
-    if (!conv) {
+    if (!conversationVisible(conv, scope)) {
       throw new AiConversationError('conversation_not_found', 'Conversation not found', 404);
     }
     if (!text || typeof text !== 'string' || text.trim().length === 0) {
@@ -325,6 +349,7 @@ export function createAiConversationService({
   return Object.freeze({
     init,
     listConversations,
+    listConversationPage,
     getConversation,
     createConversation,
     deleteConversation,
