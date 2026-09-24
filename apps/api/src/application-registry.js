@@ -1215,6 +1215,34 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
+  async function deleteApplication({ applicationId, expectedServerId, expectedDesiredRevision } = {}) {
+    await ensureInitialized();
+    const id = normalizeApplicationId(applicationId);
+    const application = state.applications.find((candidate) => candidate.id === id) ?? null;
+    if (!application) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    const current = hydrateApplication(application);
+    if (typeof expectedServerId !== 'string' || current.serverId !== expectedServerId) {
+      throw new ApplicationRegistryError('application_delete_scope_mismatch', 'Application server identity changed before deletion', 409);
+    }
+    if (!Number.isSafeInteger(expectedDesiredRevision) || expectedDesiredRevision < 1
+      || current.desiredRevision !== expectedDesiredRevision) {
+      throw new ApplicationRegistryError('application_revision_conflict', 'Application changed before deletion', 409);
+    }
+    if (current.activeDeploymentId !== null) {
+      throw new ApplicationRegistryError('deployment_in_progress', 'Application has an active operation', 409);
+    }
+    const index = state.applications.findIndex((candidate) => candidate.id === id);
+    if (index < 0) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
+    state.applications.splice(index, 1);
+    await persist();
+    return Object.freeze({
+      applicationId: current.id,
+      serverId: current.serverId,
+      desiredRevision: current.desiredRevision,
+      deleted: true,
+    });
+  }
+
   async function getApplication(applicationId) {
     await ensureInitialized();
     const application = state.applications.find((candidate) => candidate.id === applicationId);
@@ -1245,6 +1273,7 @@ export function createApplicationRegistry({
     markFailed,
     previewNodeConfiguration,
     updateNodeConfiguration,
+    deleteApplication,
     getApplication,
     listApplications,
   };

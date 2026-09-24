@@ -62,6 +62,7 @@ export function createWebsiteRemovalRuntime({
   domainRemovalRuntime,
   websiteRegistry = null,
   applicationRegistry = null,
+  applicationEnvironmentRegistry = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
   websiteSftpKeyRegistry = null,
@@ -144,7 +145,9 @@ export function createWebsiteRemovalRuntime({
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
     require('file_cleanup_unavailable', fileCleanupHandler);
     require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.deleteMigrationWebsite);
-    if (plan?.applicationId) require('application_cleanup_unavailable', applicationRegistry?.deleteApplication);
+    if (plan?.applicationId) require('application_cleanup_unavailable',
+      applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
+      applicationEnvironmentRegistry?.inspectApplicationState, applicationEnvironmentRegistry?.purgeApplication);
     if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler);
     if (plan?.additional?.crons?.ids?.length) require('cron_cleanup_unavailable', websiteCronRegistry?.listTasks, websiteCronRegistry?.removeTask);
     if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
@@ -448,6 +451,50 @@ export function createWebsiteRemovalRuntime({
             throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website metadata is still present or unavailable.', 409);
           }
           op = await registry.succeedStep(op.id, step.id, { finalized: true });
+          break;
+        }
+
+        case 'application_cleanup': {
+          requireCleanupMethod(applicationRegistry?.getApplication);
+          requireCleanupMethod(applicationRegistry?.deleteApplication);
+          requireCleanupMethod(applicationEnvironmentRegistry?.inspectApplicationState);
+          requireCleanupMethod(applicationEnvironmentRegistry?.purgeApplication);
+          if (!op.applicationId || step.resourceId !== op.applicationId) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application cleanup identity does not match removal journal.', 409);
+          }
+          // Website metadata must already be gone before Application deletion.
+          if (await websiteRegistry.getWebsite(op.websiteId) !== null) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website metadata must be removed before Application cleanup.', 409);
+          }
+          const currentApplication = await applicationRegistry.getApplication(op.applicationId);
+          if (currentApplication !== null) {
+            if (!currentApplication || currentApplication.id !== op.applicationId
+              || currentApplication.serverId !== op.serverId
+              || currentApplication.desiredRevision !== op.websiteRevision
+              || currentApplication.activeDeploymentId !== null) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application identity or revision changed during removal.', 409);
+            }
+            await applicationEnvironmentRegistry.purgeApplication(op.applicationId);
+            const environmentAfter = await applicationEnvironmentRegistry.inspectApplicationState(op.applicationId);
+            if (environmentAfter.variableCount !== 0 || environmentAfter.environmentPresent) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application environment state is still present.', 409);
+            }
+            await applicationRegistry.deleteApplication({
+              applicationId: op.applicationId,
+              expectedServerId: op.serverId,
+              expectedDesiredRevision: op.websiteRevision,
+            });
+          } else {
+            // Explicit continuation after a crash may observe metadata already gone.
+            const environmentAfter = await applicationEnvironmentRegistry.inspectApplicationState(op.applicationId);
+            if (environmentAfter.variableCount !== 0 || environmentAfter.environmentPresent) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application metadata is absent but environment state remains.', 409);
+            }
+          }
+          if (await applicationRegistry.getApplication(op.applicationId) !== null) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application metadata is still present.', 409);
+          }
+          op = await registry.succeedStep(op.id, step.id, { applicationCleaned: true });
           break;
         }
 

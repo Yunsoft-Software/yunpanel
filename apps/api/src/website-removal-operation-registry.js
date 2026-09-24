@@ -14,6 +14,7 @@ const STEP_KINDS = new Set([
   'file_cleanup',
   'unix_identity_cleanup',
   'metadata_finalization',
+  'application_cleanup',
 ]);
 
 export class WebsiteRemovalOperationRegistryError extends Error {
@@ -152,8 +153,15 @@ export function createWebsiteRemovalOperationRegistry({
       add('unix_identity_cleanup', preview.website.systemUser);
     }
 
-    // 8. Final metadata removal
+    // 8. Website metadata removal. This must happen before Application metadata:
+    // a crash after Application deletion would otherwise leave a persisted Website
+    // referencing a missing Application and could block registry startup.
     add('metadata_finalization', preview.website.id);
+
+    // 9. Application environment/secrets and metadata cleanup after Website is absent.
+    if (preview.website.applicationId) {
+      add('application_cleanup', preview.website.applicationId);
+    }
 
     return steps;
   }

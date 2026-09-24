@@ -863,6 +863,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     domainRemovalRuntime,
     websiteRegistry,
     applicationRegistry,
+    applicationEnvironmentRegistry,
     databaseBindingRegistry,
     databaseCredentialRegistry,
     websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,

@@ -626,6 +626,36 @@ export function createApplicationEnvironmentRegistry({
     };
   }
 
+  async function inspectApplicationState(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    return Object.freeze({
+      applicationId: normalizedApplicationId,
+      variableCount: state.variables.filter((candidate) => candidate.applicationId === normalizedApplicationId).length,
+      environmentPresent: state.environments.some((candidate) => candidate.applicationId === normalizedApplicationId),
+    });
+  }
+
+  async function purgeApplication(applicationId) {
+    await ensureInitialized();
+    const normalizedApplicationId = normalizeApplicationId(applicationId);
+    const before = await inspectApplicationState(normalizedApplicationId);
+    state.variables = state.variables.filter((candidate) => candidate.applicationId !== normalizedApplicationId);
+    state.environments = state.environments.filter((candidate) => candidate.applicationId !== normalizedApplicationId);
+    const changed = before.variableCount > 0 || before.environmentPresent;
+    if (changed) await persist();
+    const after = await inspectApplicationState(normalizedApplicationId);
+    if (after.variableCount !== 0 || after.environmentPresent) {
+      throw new ApplicationEnvironmentRegistryError('application_environment_purge_unverified', 'Application environment state could not be removed', 409);
+    }
+    return Object.freeze({
+      applicationId: normalizedApplicationId,
+      variablesDeleted: before.variableCount,
+      environmentDeleted: before.environmentPresent,
+      purged: true,
+    });
+  }
+
   async function environmentStatus(applicationId, { currentReleaseId = null } = {}) {
     await ensureInitialized();
     const normalizedApplicationId = normalizeApplicationId(applicationId);
@@ -696,6 +726,8 @@ export function createApplicationEnvironmentRegistry({
     init,
     setVariable,
     importVariables,
+    inspectApplicationState,
+    purgeApplication,
     environmentStatus,
     markApplied,
     setDeploymentCredential,
