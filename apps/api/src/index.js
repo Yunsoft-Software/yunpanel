@@ -117,6 +117,8 @@ import { createLocalWebsiteCronOperation } from './local-website-cron-operation.
 import { createWebsiteCronReconciliationProvider } from './website-cron-reconciliation.js';
 import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsitePhpToolsService } from './website-php-tools-service.js';
+import { createLocalWebsitePhpToolOperation } from './local-website-php-tool-operation.js';
+import { createWebsitePhpToolActionService } from './website-php-tool-action-service.js';
 import { createWebsiteCachePolicyRegistry } from './website-cache-policy-registry.js';
 import { createWebsiteCacheService } from './website-cache-service.js';
 import { createPanelSettingsRegistry } from './panel-settings-registry.js';
@@ -349,6 +351,13 @@ const websitePhpToolsService = createWebsitePhpToolsService({
   websiteRegistry,
   applicationRegistry,
   phpCliToolManager,
+});
+const websitePhpToolActionService = createWebsitePhpToolActionService({
+  websitePhpToolsService,
+  jobRegistry,
+});
+const localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
+  websitePhpToolsService,
 });
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
   filePath: websiteCachePolicyStorePath,
@@ -1117,6 +1126,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     databaseManager,
     databaseCredentialOperation: localDatabaseCredentialOperation,
     websiteCronOperation: localWebsiteCronOperation,
+    websitePhpToolOperation: localWebsitePhpToolOperation,
   })),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,

@@ -17,6 +17,7 @@ import {
 } from './index-docker.js';
 
 const APP_NODE_PASSENGER_MIGRATE = 'app.node.passenger-migrate';
+const WEBSITE_PHP_ACTION = 'website.php.action';
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const PHP_SOCKET_PATTERN = /^\/run\/php\/yunpanel-yunapp-[a-f0-9]{12}\.sock$/;
 const DOMAIN_FIELDS = new Set([
@@ -35,14 +36,26 @@ const AUTHORITY_FIELDS = new Set([
   'domainDesiredRevision',
   'domainAppliedRevision',
 ]);
+const PHP_ACTION_FIELDS = new Set([
+  'websiteId', 'applicationId', 'unixUser', 'expectedWebsiteRevision',
+  'actionId', 'previewDigest', 'confirmation',
+]);
+const PHP_ACTION_IDS = new Set([
+  'wp.cache.flush',
+  'wp.transients.delete-all',
+  'composer.dump-autoload',
+]);
+const PHP_ACTION_USER = /^yunapp-[a-f0-9]{12}$/;
+const SHA256 = /^[a-f0-9]{64}$/;
 
 export const OPERATIONS = Object.freeze({
   ...DOCKER_OPERATIONS,
   APP_NODE_PASSENGER_MIGRATE,
+  WEBSITE_PHP_ACTION,
 });
 
 export function isKnownOperation(operation) {
-  return isDockerKnownOperation(operation) || operation === APP_NODE_PASSENGER_MIGRATE;
+  return isDockerKnownOperation(operation) || operation === APP_NODE_PASSENGER_MIGRATE || operation === WEBSITE_PHP_ACTION;
 }
 
 function validateSafeAbsolutePath(value, field, errors) {
@@ -148,6 +161,38 @@ function validateNodePassengerMigration(payload, errors) {
   validateNode(payload.node, errors);
   validateDomain(payload.domain, errors);
   validateAuthority(payload.authority, errors);
+}
+
+
+function validateWebsitePhpAction(payload, errors) {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)
+    || Object.keys(payload).length !== PHP_ACTION_FIELDS.size
+    || Object.keys(payload).some((field) => !PHP_ACTION_FIELDS.has(field))) {
+    errors.push(`${WEBSITE_PHP_ACTION} contains unsupported arguments`);
+    return;
+  }
+  try {
+    if (assertUuid(payload.websiteId, 'websiteId') !== payload.websiteId
+      || assertUuid(payload.applicationId, 'applicationId') !== payload.applicationId) throw new Error('noncanonical');
+  } catch {
+    errors.push(`${WEBSITE_PHP_ACTION} identities are invalid`);
+  }
+  if (typeof payload.unixUser !== 'string' || !PHP_ACTION_USER.test(payload.unixUser)) {
+    errors.push(`${WEBSITE_PHP_ACTION} unixUser is invalid`);
+  }
+  if (!Number.isSafeInteger(payload.expectedWebsiteRevision) || payload.expectedWebsiteRevision < 1) {
+    errors.push(`${WEBSITE_PHP_ACTION} expectedWebsiteRevision is invalid`);
+  }
+  if (typeof payload.actionId !== 'string' || !PHP_ACTION_IDS.has(payload.actionId)) {
+    errors.push(`${WEBSITE_PHP_ACTION} actionId is invalid`);
+  }
+  if (typeof payload.previewDigest !== 'string' || !SHA256.test(payload.previewDigest)) {
+    errors.push(`${WEBSITE_PHP_ACTION} previewDigest is invalid`);
+  }
+  const confirmation = `php-tool:${payload.websiteId}:${payload.actionId}:${payload.previewDigest}`;
+  if (payload.confirmation !== confirmation) {
+    errors.push(`${WEBSITE_PHP_ACTION} confirmation is invalid`);
+  }
 }
 
 function isPassengerDomainStage(value) {
@@ -256,6 +301,15 @@ function validatePhpDomainStage(value) {
 }
 
 export function validateOperationEnvelope(value) {
+  if (value?.operation === WEBSITE_PHP_ACTION) {
+    const errors = [];
+    if (typeof value.id !== 'string' || value.id.length < 8 || value.id.length > 128) {
+      errors.push('id must be a string between 8 and 128 characters');
+    }
+    validateWebsitePhpAction(value.payload, errors);
+    if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) errors.push(`protocolVersion must equal ${AGENT_PROTOCOL_VERSION}`);
+    return { ok: errors.length === 0, errors };
+  }
   if (isPassengerDomainStage(value)) return validatePassengerDomainStage(value);
   if (isPhpDomainStage(value)) return validatePhpDomainStage(value);
   if (isPythonDomainStage(value)) return validatePythonDomainStage(value);
@@ -281,7 +335,7 @@ export function validateOperationEnvelope(value) {
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const specialDomainStage = operation === DOCKER_OPERATIONS.DOMAIN_STAGE
     && ['passenger', 'php', 'python'].includes(payload?.targetType);
-  if (operation !== APP_NODE_PASSENGER_MIGRATE && !specialDomainStage) {
+  if (operation !== APP_NODE_PASSENGER_MIGRATE && operation !== WEBSITE_PHP_ACTION && !specialDomainStage) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };
@@ -292,6 +346,8 @@ export function createOperationEnvelope({ id, operation, payload = {} }) {
 
 export const nodePassengerProtocolInternals = Object.freeze({
   operation: APP_NODE_PASSENGER_MIGRATE,
+  phpActionOperation: WEBSITE_PHP_ACTION,
+  validateWebsitePhpAction,
   validateNodePassengerMigration,
   validateNode,
   validateDomain,

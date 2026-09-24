@@ -170,6 +170,7 @@ export function createLocalHostOperations({
   mailDataDeleteManager = null,
   roundcubeConfigOperation = null,
   websiteCronOperation = null,
+  websitePhpToolOperation = null,
   loadManagedMailConfiguration = null,
   loadManagedMailRollbackConfiguration = null,
   loadManagedDkimConfiguration = null,
@@ -209,6 +210,9 @@ export function createLocalHostOperations({
   }
   if (websiteCronOperation !== null && typeof websiteCronOperation?.execute !== 'function') {
     throw new Error('websiteCronOperation must provide execute() when configured');
+  }
+  if (websitePhpToolOperation !== null && typeof websitePhpToolOperation?.execute !== 'function') {
+    throw new Error('websitePhpToolOperation must provide execute() when configured');
   }
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
@@ -751,6 +755,9 @@ export function createLocalHostOperations({
   if (websiteCronOperation) {
     handlers.set(OPERATIONS.CRON_APPLY, (payload, execution) => websiteCronOperation.execute(OPERATIONS.CRON_APPLY, payload, execution));
     handlers.set(OPERATIONS.CRON_REMOVE, (payload, execution) => websiteCronOperation.execute(OPERATIONS.CRON_REMOVE, payload, execution));
+  }
+  if (websitePhpToolOperation) {
+    handlers.set(OPERATIONS.WEBSITE_PHP_ACTION, (payload, execution) => websitePhpToolOperation.execute(payload, execution));
   }
 
   return {
