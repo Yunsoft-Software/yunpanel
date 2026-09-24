@@ -3,6 +3,7 @@ import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { Button, ConfirmDialog, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
+import MailboxAccessPreparation from './MailboxAccessPreparation.jsx';
 import { createMailboxRemoval, EMPTY_MAILBOX_REMOVAL } from './mailbox-removal-controller.js';
 import { mailboxRemovalBusy, mailboxRemovalEligible, mailboxRemovalJobId } from './mailbox-removal-model.js';
 
@@ -22,6 +23,7 @@ export default function MailboxRemovalPanel(props) {
 function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClose }) {
   const [state, setState] = useState(EMPTY_MAILBOX_REMOVAL);
   const [jobId, setJobId] = useState('');
+  const [accessBusy, setAccessBusy] = useState(false);
   const client = useRef(null), changed = useRef(onChanged), notified = useRef(false);
   useEffect(() => { changed.current = onChanged; }, [onChanged]);
   useEffect(() => {
@@ -42,9 +44,10 @@ function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClo
   useEffect(() => {
     if (state.status === 'deleted' && !notified.current) { notified.current = true; changed.current?.(); }
   }, [state.status]);
-  const busy = mailboxRemovalBusy(state);
+  const removalBusy = mailboxRemovalBusy(state);
+  const busy = removalBusy || accessBusy;
   const snapshot = state.snapshot;
-  const usable = canManage && state.status === 'ready' && !state.uncertain;
+  const usable = canManage && !accessBusy && state.status === 'ready' && !state.uncertain;
   const prepared = usable && mailboxRemovalEligible(snapshot);
   const approval = state.approval;
   const copy = approval ? ACTIONS[approval.action] : null;
@@ -57,16 +60,16 @@ function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClo
       {busy && <p role="status"><span className="ws-spinner" />{state.status === 'sending' ? 'İşlem yanıtı bekleniyor…' : 'Güncel kayıt ve işlem durumu doğrulanıyor…'}</p>}
       {state.status === 'deleted' ? <>
         <p role="status">Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı. Yedek korundu.</p>
-        <p>Diğer hesapların yeniden çalışması için bu alan adının posta yapılandırmasını kontrol edin. Posta hizmeti kendiliğinden açılmaz.</p>
+        <p>Bu silme akışı diğer posta hesaplarını veya alan adını kapatmaz. Önceden kapalı olan alan adı da kendiliğinden açılmaz.</p>
         <LinkButton to={href('configuration')}>Posta yapılandırmasını aç</LinkButton>
       </> : <>
-        <div className="ws-notice ws-notice-warn"><div><strong>Alan adındaki diğer posta hesapları da etkilenir</strong>
-          <p>Mevcut silme motoru önce {domain.domainName} postasının kapatılıp sunucuya uygulanmasını ister. Bu ekran alan adını otomatik kapatmaz veya açmaz.</p>
-          <LinkButton to={href('configuration')}>Posta yapılandırmasını aç</LinkButton>
-        </div></div>
+        {!state.receipt && state.status !== 'absent' && <MailboxAccessPreparation mailbox={mailbox} domain={domain} canManage={canManage}
+          blocked={removalBusy || state.status === 'waiting' || Boolean(state.approval) || state.uncertain}
+          onBusyChange={setAccessBusy} onChanged={() => client.current?.refresh()} />}
         {snapshot && <>
           <KeyValues items={[
-            ['Alan adı posta kaydı', snapshot.domainStatus === 'disabled' ? 'Kapalı kaydedilmiş; canlı uygulama sunucu tarafından ayrıca denetlenir' : 'Etkin — silmeden önce kapatılmalı'],
+            ['Seçilen posta hesabı', snapshot.enabled ? 'Etkin — yalnız bu hesap kapatılmalı' : 'Kapalı kaydedildi; canlı erişim silme işinde denetlenir'],
+            ['Alan adı posta kaydı', snapshot.domainStatus === 'disabled' ? 'Önceden kapalı; durumu korunur' : 'Etkin kalır'],
             ['Posta verisi', snapshot.present ? `${snapshot.bytes.toLocaleString('tr-TR')} bayt` : 'Veri bulunamadı; doğrulanmış boş yedek yine gereklidir'],
             ['Kota / yönlendirme', `${snapshot.quota ? 'Kota var' : 'Kota yok'} · ${snapshot.forwarding ? 'Yönlendirme var' : 'Yönlendirme yok'}`],
             ['Bağlı takma adlar', snapshot.aliases], ['Çalışan posta işlemleri', snapshot.activeJobs],
