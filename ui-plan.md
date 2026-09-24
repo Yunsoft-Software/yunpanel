@@ -1,5 +1,9 @@
 # YunPanel — Plesk UX Geçişi
 
+## 2026-09-25 — Site erişimi / askıya alma
+
+- [x] **SUSPEND-UI-01/02 kaynak:** `482fb0e6`, `861ed2f9`; Barındırma ayarlarında Site erişimi kartı, bağlı domain preview/blocker, domain adıyla açık onay, journal tabanlı suspend/retry/resume ve kayıp sonuçta replay yapmayan yenileme.
+- [ ] **SUSPEND-UI-03 kabul:** gerçek multi-domain Nginx, partial child, restart, Owner/Site A/Site B ve browser kabulü. Bu akış web yayınını askıya alır; mail/DB/dosya silmez ve Website removal yerine geçmez. [Ayrıntı](docs/ux/website-suspension-flow.md).
 ## 2026-09-25 — Site İstatistikleri
 
 - [x] **AN-01/02 kaynak:** `a99ccaf1`, `0848080f`, `cedec1a0`, `b3db42d2`; Genel Bakış → İstatistikler. Site hesabına kendi statik GoAccess raporu ve güvenli status; Owner'a ayrıca realtime lifecycle/gateway. PID/socket/path/raw hata görünmez ve belirsiz POST otomatik replay edilmez.

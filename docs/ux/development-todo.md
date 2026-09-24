@@ -2,6 +2,15 @@
 
 Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri kaldırmaz. Aktif dal `development`. `.44` Plesk hostu her amaçla yasak; yalnız `.local/test-server.env` içindeki izinli hedef teyit edilerek kullanılabilir.
 
+## T-DEV-SUSPEND-UI — Website suspension ekranı sonrası
+
+Kaynak: `482fb0e6`, `861ed2f9`; rapor `docs/ux/website-suspension-flow.md`. Mevcut journal/compensation motoru UI'ye bağlandı; yeni host motoru yazılmadı.
+
+- [ ] Node24/npm11 tam checkout: Website/Domain suspension HTTP/runtime/registry + yeni panel/model/wiring testleri; tam npm ci/check/build.
+- [ ] Owner/Site A/Site B tenant sınırı, session/grant revoke, stale preview/updatedAt, typed confirmation ve doğrudan API.
+- [ ] Multi-domain partial suspend/resume, explicit retry, Nginx host/control-plane drift, API/process restart ve kayıp mutation cevabı. Kör replay olmamalı.
+- [ ] Browser responsive/zoom/klavye/reload/back-forward/site değişimi ve Files/cron/PHP/backup/analytics/SSL regresyonu.
+- [ ] Yalnız izinli test hostu; `.44` kullanılmaz.
 ## T-DEV-ANALYTICS — site GoAccess ekranı sonrası
 
 Kaynak: `a99ccaf1`, `0848080f`, `cedec1a0`, `b3db42d2`; rapor `docs/ux/site-analytics-flow.md`. Yeni testler kaynakta var, bu oturumda tam checkout/test çalıştırılmadı.

@@ -1,5 +1,10 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## SUSPEND-UI-01–03 — Website askıya alma / yeniden açma
+
+- [x] **SUSPEND-UI-01 API:** `482fb0e6`; mevcut Website suspension lifecycle cevapları panel `data` sözleşmesine eklendi, legacy alanlar korundu.
+- [x] **SUSPEND-UI-02 ekran:** `861ed2f9`; Barındırma ayarları → Site erişimi. Preview/blocker, typed domain confirmation, suspend/partial retry/resume/resume-retry ve unknown-result GET uzlaştırması. Mevcut kalıcı Website/Domain suspension journal ve compensation motoru kullanılır; yeni motor yok.
+- [ ] **SUSPEND-UI-03:** Node24/npm11 tam test/build ve gerçek multi-domain Nginx/auth/browser/restart kabulü. Website silme ayrı BUG-02 işidir. [Kaynak ve T-DEV](docs/ux/website-suspension-flow.md).
 ## ANALYTICS-UI-01–03 — Site İstatistikleri
 
 - [x] **AN-01 güvenli API/rol kaynağı:** `a99ccaf1`, `0848080f`, `b3db42d2`; site status/statik rapor kendi Website kapsamına bağlı, PID/socket/path/outputPath/raw runtime error yayımlamaz. Realtime daemon lifecycle Owner-only; site hesabı statik rapor/status kullanabilir.
