@@ -11,8 +11,8 @@ const base = `/mailboxes/${id}`;
 const sha = (n) => String(n).repeat(64);
 const deferred = () => { let resolve; let reject; const promise = new Promise((a, b) => { resolve = a; reject = b; }); return { promise, resolve, reject }; };
 function backend() {
-  const db = { revision: 1, domainStatus: 'disabled', present: true, bytes: 25, snapshot: sha(1), quota: false, forwarding: false, aliases: 0, removed: false, jobs: new Map(), autoFinish: true };
-  const mailbox = () => ({ ...target, revision: db.revision, enabled: true });
+  const db = { revision: 1, domainStatus: 'enabled', enabled: false, present: true, bytes: 25, snapshot: sha(1), quota: false, forwarding: false, aliases: 0, removed: false, jobs: new Map(), autoFinish: true };
+  const mailbox = () => ({ ...target, revision: db.revision, enabled: db.enabled });
   const domain = () => ({ id: domainId, domainName: 'example.test', managementMode: 'local', status: db.domainStatus, revision: 2 });
   function impact() {
     const activeJobs = [...db.jobs.values()].filter((job) => ['queued', 'running'].includes(job.status)).length;
@@ -21,7 +21,7 @@ function backend() {
       [db.forwarding, 'mailbox_forwarding_configured', 1], [db.aliases, 'mailbox_alias_reference_configured', db.aliases], [activeJobs, 'mail_domain_job_active', activeJobs]]) {
       if (condition) blockers.push({ code, count });
     }
-    return { version: 1, resourceType: 'mailbox', resourceId: id, address: target.address, revision: db.revision, enabled: true,
+    return { version: 1, resourceType: 'mailbox', resourceId: id, address: target.address, revision: db.revision, enabled: db.enabled,
       dependencies: { quotaConfigured: db.quota, forwardingConfigured: db.forwarding, aliasReferences: { count: db.aliases }, activeJobs: { count: activeJobs } },
       mailData: { present: db.present, bytes: db.bytes, snapshotSha256: db.snapshot }, requiresDataBackup: db.present,
       safeToDelete: !blockers.length, blockers, confirmation: `delete-mailbox:${target.address}`, sideEffects: false };
@@ -101,6 +101,7 @@ test('existing backup → delete job → guarded finalize stays explicitly stage
   assert.equal(mutations(run).length, 2);
   state = await action(run, 'finalize');
   assert.equal(state.status, 'deleted'); assert.equal(run.db.removed, true);
+  assert.equal(run.db.domainStatus, 'enabled');
   assert.deepEqual(mutations(run)[2].body, { confirmation: `delete-mailbox:${target.address}`, expectedRevision: 1, deleteJobId: 'delete-job-2' });
   assert.equal(mutations(run).some((call) => call.path.startsWith('/mail-domains/')), false);
 });
@@ -111,7 +112,7 @@ test('a verified backup is still required when the mailbox data directory is abs
   await run.flow.refresh(); await action(run, 'backup'); await action(run, 'delete'); await action(run, 'finalize');
   assert.equal(run.flow.getState().status, 'deleted');
 });
-for (const [field, value] of [['domainStatus', 'enabled'], ['quota', true], ['forwarding', true], ['aliases', 2]]) {
+for (const [field, value] of [['enabled', true], ['quota', true], ['forwarding', true], ['aliases', 2]]) {
   test(`${field} blocks mutation without disabling the domain or silently removing dependencies`, async () => {
     const run = setup(); run.db[field] = value; await run.flow.refresh(); await run.flow.prepare('backup');
     assert.equal(run.flow.getState().approval, null); assert.equal(mutations(run).length, 0);
@@ -136,7 +137,7 @@ for (const status of ['failed', 'cancelled']) {
 for (const change of ['revision', 'snapshot', 'domainStatus', 'aliases']) {
   test(`changed ${change} invalidates an already displayed confirmation before POST`, async () => {
     const run = setup(); await run.flow.refresh(); await run.flow.prepare('backup'); const old = run.flow.getState().approval;
-    run.db[change] = { revision: 2, snapshot: sha(6), domainStatus: 'enabled', aliases: 1 }[change];
+    run.db[change] = { revision: 2, snapshot: sha(6), domainStatus: 'disabled', aliases: 1 }[change];
     await run.flow.confirm(old, old.data.confirmation);
     assert.equal(run.flow.getState().approval, null); assert.equal(mutations(run).length, 0);
   });
@@ -279,4 +280,38 @@ test('job public projection excludes payloads, arbitrary error text and secret d
   const run = setup(); await backedUp(run); const job = run.db.jobs.get('backup-job-1');
   const data = mailboxRemovalJob({ ...job, error: { message: 'private-sql-password' }, payload: { password: 'private-sql-password' }, result: { ...job.result, privateKey: 'private-sql-password' } }, target);
   assert.equal(JSON.stringify(data).includes('private-sql'), false); assert.equal(Object.isFrozen(data), true);
+});
+
+test('manually resuming an old backup cannot unlock an unknown delete request', async () => {
+  const run = setup(); await backedUp(run);
+  run.intercept(async (path, options, next) => {
+    if (path.endsWith('/data/delete')) { await next(path, options); throw new Error('reply lost'); }
+    return next(path, options);
+  });
+  await action(run, 'delete');
+  await run.flow.resume('backup-job-1');
+  assert.equal(run.flow.getState().uncertain, true); assert.equal(run.flow.getState().receipt, null);
+  assert.equal(mutations(run).length, 2);
+  await run.flow.resume('delete-job-2'); assert.equal(run.flow.getState().receipt.id, 'delete-job-2');
+});
+
+test('resumed delete receipt must match the approved backup and mailbox revision', async () => {
+  const run = setup(); await backedUp(run);
+  run.intercept(async (path, options, next) => {
+    if (path.endsWith('/data/delete')) { await next(path, options); throw new Error('reply lost'); }
+    const value = await next(path, options);
+    if (path === '/jobs/delete-job-2') value.result.backupId = 'wrong-backup-job';
+    return value;
+  });
+  await action(run, 'delete'); await run.flow.resume('delete-job-2');
+  assert.equal(run.flow.getState().uncertain, true); assert.equal(run.flow.getState().receipt, null);
+  assert.equal(mutations(run).length, 2);
+});
+
+test('a known running job cannot be replaced by another historical job', async () => {
+  const run = setup(); await backedUp(run); run.db.autoFinish = false;
+  await action(run, 'delete');
+  assert.equal(run.flow.getState().job.id, 'delete-job-2');
+  await run.flow.resume('backup-job-1');
+  assert.equal(run.flow.getState().job.id, 'delete-job-2'); assert.equal(run.flow.getState().status, 'waiting');
 });
