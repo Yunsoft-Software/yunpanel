@@ -4,6 +4,16 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-AI-HISTORY — Kullanıcıya bağlı geçmiş ve sayfalama (2026-09-24)
+
+AH-01–04 kaynağı `development` dalında; [kaynak/test ve veri geçişi raporu](docs/ux/ai-history-flow.md). Son aynı Node22 koşusu **41 geçti / 0 başarısız / 0 atlandı**: 9 backend kapsam/sayfa, 26 frontend davranışı, 2 servis/dosya/route fixture grubu, 1 istemci modülü ve 3 kaynak testi. Bir JSX ve beş kaynak JS kontrolü; 12 kaynak/test blob'u eşleşti. Beş temsilî HTML/CSS Chromium senaryosu gerçek React/Ember kabulü değildir ve test sayısına eklenmez.
+
+- [ ] Node24/npm11 tam checkout/npm ci/lint/test/build. Yeni ai-conversation-history, ai-conversation-storage, ai-history ve ai-history-wiring testleriyle mevcut ai-conversation/ai-conversation-http/ai-http/ai-client/provider/tool/session regresyonları birlikte çalışsın. Eski dört konuşma testi auth/Website fixture'ına uyarlandı, bu tur yeniden koşulmadı. Git DNS engeli nedeniyle tam checkout ve üretim bağımlılıklarıyla build yapılmadı.
+- [ ] Gerçek HTTP/auth/CSRF ve React/SessionProvider/router ile iki kullanıcı/iki Website: liste, detay, silme, mesaj ve stream erişimi; client actorId taklidi, başka konuşma kimliği, kaldırılmış Website yetkisi ve oturum değişimi. Uzun provider/tool çağrısında canlı yetki iptali ayrıca denetlensin; dış yetki katmanı gevşetilmesin.
+- [ ] 20'den fazla sohbet, eşit oluşturulma zamanı, eski sayfa sırasında yeni mesaj/yeni kayıt/silme; cursor restart/örnek değişimi, son sayfa, tekrar/circular cursor ve hata/retry. Aktif sohbet, açık pencere taslağı ve bağımsız scroll korunmalı. Kayıp mutation cevabı otomatik tekrar üretmemeli; pencere kapanınca bellek taslağı kalıcıymış gibi sunulmamalı.
+- [ ] Üretim React/Vite/Ember fontlarıyla 320/390/834/1440 px, yüzde200 zoom, kısa/yatay ekran ve mobil klavye. Uzun başlık/mesaj/hata, ekran okuyucu/klavye/modal odağı, composer ve arka sayfa konumu; beş temsilî HTML kontrolü canlı ürün kanıtı yerine geçmez.
+- [ ] V1 ham yedeğinin 0600 ve birebir korunması, V2 sahiplik alanı ve 100 kullanıcı konuşması sınırında sessiz silme olmaması. Sahipsiz eski sohbetleri güvenilir kanıtla eşleştiren açık migration/rollback tamamlanmalı; rastgele Owner ataması yapılmamalı. Süreçler arası JSON yazma/crash ve gerçek provider kabulü açık. `.44` hariç yalnız izinli host; GitHub Actions/canlı deploy yok.
+
 ## T-DEV-SSL-RENEW — SSL yenileme sonucu ve gerçek sertifika kabulü (2026-09-24)
 
 SR-01–04 kaynağı `development` dalında; [kaynak/test raporu ve sınırlar](docs/ux/ssl-renewal-result-flow.md). Aynı seçili Node22 koşusunda **73 geçti / 0 başarısız / 0 atlandı**: 59 yenileme davranışı + 8 koleksiyon yenileme davranışı + 6 kaynak bağlantısı. Sekiz kaynak/test blob'u eşleşti; üç JSX sözdizimi/dönüşüm kontrolü gerçek React veya tarayıcı kabulü değildir.
