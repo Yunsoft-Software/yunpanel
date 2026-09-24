@@ -129,6 +129,7 @@ import { createWebsiteSuspensionOperationRegistry } from './website-suspension-o
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
 import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
+import { createWebsiteRemovalCleanupAdapters } from './website-removal-cleanup-adapters.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
 import { previewResourceImpact } from './resource-impact.js';
 import { createAllWebsiteImpactProviders } from './website-delete-impact-providers.js';
@@ -823,6 +824,13 @@ if (domainRemovalRuntime) await domainRemovalRuntime.init();
 const websiteRemovalOperationRegistry = createWebsiteRemovalOperationRegistry({
   filePath: websiteRemovalOperationStorePath,
 });
+const websiteRemovalCleanupAdapters = localServerId
+  ? createWebsiteRemovalCleanupAdapters({
+    websiteRegistry,
+    applicationRegistry,
+    websiteProvisioningRuntime,
+  })
+  : null;
 const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
   ? createWebsiteRemovalRuntime({
     registry: websiteRemovalOperationRegistry,
@@ -869,6 +877,8 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
     runtimeBindingRegistry,
     websiteCronRegistry,
+    fileCleanupHandler: websiteRemovalCleanupAdapters?.fileCleanupHandler ?? null,
+    unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();

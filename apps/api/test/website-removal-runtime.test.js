@@ -151,8 +151,8 @@ test('website-removal-runtime coordinates domain removal child operation before 
     'revokeKey:key-1',
     'removeDb:db-1',
     'removePassenger',
-    'cleanFiles',
     'cleanUnix',
+    'cleanFiles',
     'removeApplication',
   ]);
 });
