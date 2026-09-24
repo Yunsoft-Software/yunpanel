@@ -120,6 +120,7 @@ function applicationReference(application) {
     name: application.name,
     type: application.type,
     state: application.state,
+    desiredRevision: Number.isSafeInteger(application.desiredRevision) ? application.desiredRevision : 1,
     currentReleaseId: application.currentReleaseId ?? null,
     activeDeploymentId: application.activeDeploymentId ?? null,
   });
