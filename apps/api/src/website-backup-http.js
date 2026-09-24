@@ -1,6 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteBackupSetError } from './website-backup-set.js';
 import { isWebsiteBackupError } from './website-backup-service.js';
+import { WebsiteBackupBrowserError } from './website-backup-browser.js';
 
 export class WebsiteBackupHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -14,7 +15,8 @@ export class WebsiteBackupHttpError extends Error {
 export function isWebsiteBackupHttpError(error) {
   return error instanceof WebsiteBackupHttpError
     || error instanceof WebsiteBackupSetError
-    || isWebsiteBackupError(error);
+    || isWebsiteBackupError(error)
+    || error instanceof WebsiteBackupBrowserError;
 }
 
 function asyncRoute(handler) {
@@ -41,6 +43,7 @@ function requireOwner(request, response, next) {
 export function mountWebsiteBackupRoutes(app, {
   websiteBackupSetProvider,
   websiteBackupService = null,
+  websiteBackupBrowser = null,
   localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function') {
@@ -48,6 +51,13 @@ export function mountWebsiteBackupRoutes(app, {
   }
   if (!websiteBackupSetProvider || typeof websiteBackupSetProvider.getWebsiteBackupSet !== 'function') {
     throw new Error('Website backup set provider is required');
+  }
+
+  if (websiteBackupBrowser) {
+    app.get('/api/websites/:websiteId/backups', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const result = await websiteBackupBrowser.browse(request.params.websiteId);
+      return response.json({ data: result });
+    }));
   }
 
   app.get('/api/websites/:websiteId/backup-set', requirePanelRouteAccess, asyncRoute(async (request, response) => {

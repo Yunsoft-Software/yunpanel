@@ -174,6 +174,7 @@ import { WebsiteCachePolicyRegistryError } from './website-cache-policy-registry
 import { mountPanelSettingsRoutes, PanelSettingsHttpError } from './panel-settings-http.js';
 import { PanelSettingsRegistryError } from './panel-settings-registry.js';
 import { createWebsiteBackupSetProvider } from './website-backup-set.js';
+import { createWebsiteBackupBrowser } from './website-backup-browser.js';
 import { isWebsiteBackupHttpError, mountWebsiteBackupRoutes } from './website-backup-http.js';
 import { createWebsiteBackupService, WebsiteBackupError } from './website-backup-service.js';
 import { createResticRepositoryRegistry, ResticRepositoryRegistryError } from './restic-repository-registry.js';
@@ -853,6 +854,14 @@ export function createApp(allOptions = {}) {
       dockerComposeProjectRegistry,
       localServerId,
     });
+    const websiteBackupBrowser = resolvedResticRepositoryRegistry
+      ? createWebsiteBackupBrowser({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        websiteBackupSetProvider,
+        localServerId,
+      })
+      : null;
     const resolvedWebsiteBackupService = websiteBackupService ?? (
       resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteBackupService({
         websiteRegistry,
@@ -866,6 +875,7 @@ export function createApp(allOptions = {}) {
     mountWebsiteBackupRoutes(app, {
       websiteBackupSetProvider,
       websiteBackupService: resolvedWebsiteBackupService,
+      websiteBackupBrowser,
       localServerId,
     });
     const resolvedWebsiteRestoreService = websiteRestoreService ?? (

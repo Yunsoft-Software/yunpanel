@@ -192,7 +192,7 @@ export function createSiteResourceBoundary(options = {}) {
         if (!(await sites()).some((v) => v.applicationId === decodeId(match[1]))) throw new ScopeError(); return next();
       }
       if (path === '/api/phpmyadmin-gateway-access' && readOnly(method)) return next();
-      if (/^\/api\/(?:mail(?:\/|$)|mail-service-identity|roundcube|users|audit|panel\/settings|system\/packages)/.test(path)) throw new ScopeError();
+      if (/^\/api\/(?:mail(?:\/|$)|mail-service-identity|roundcube|users|audit|panel\/settings|system\/packages|backups(?:\/|$))/.test(path)) throw new ScopeError();
       if (/^\/api\/servers\//.test(path)) throw new ScopeError();
       // Unrelated integrations still have their existing guards. This boundary
       // does not claim to replace a full review of terminal, DNS and AI policies.
