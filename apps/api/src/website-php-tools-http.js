@@ -15,7 +15,8 @@ export function mountWebsitePhpToolsRoutes(app, {
   router.get('/wp-cli/status', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getWpCliStatus(req.params.websiteId);
-      res.json(status);
+      // Preserve legacy top-level fields while supporting the panel JSON client.
+      res.json({ ...status, data: status });
     } catch (error) {
       next(error);
     }
@@ -56,7 +57,8 @@ export function mountWebsitePhpToolsRoutes(app, {
   router.get('/composer/status', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getComposerStatus(req.params.websiteId);
-      res.json(status);
+      // Preserve legacy top-level fields while supporting the panel JSON client.
+      res.json({ ...status, data: status });
     } catch (error) {
       next(error);
     }

@@ -8,16 +8,19 @@ import {
 const WEBSITE_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
 const APP_ID = '11111111-1111-4111-8111-111111111111';
 const UNIX_USER = 'yunapp-0123456789ab';
+const SERVER_ID = '22222222-2222-4222-8222-222222222222';
 
 function createMockRegistries({
   website = {
     id: WEBSITE_ID,
     applicationId: APP_ID,
+    serverId: SERVER_ID,
     unixUser: UNIX_USER,
     runtimeType: 'php',
   },
   application = {
     id: APP_ID,
+    serverId: SERVER_ID,
     type: 'php',
   },
 } = {}) {
@@ -180,7 +183,10 @@ test('runComposer executes command via phpCliToolManager', async () => {
     websiteRegistry,
     applicationRegistry,
     phpCliToolManager: mockPhpCliToolManager,
-    lstatFn: async () => ({ isFile: () => false, isDirectory: () => true }),
+    lstatFn: async (p) => {
+      if (p.endsWith('composer.json')) throw Object.assign(new Error('missing fixture file'), { code: 'ENOENT' });
+      return { isFile: () => false, isDirectory: () => true };
+    },
   });
 
   const result = await service.runComposer(WEBSITE_ID, {
