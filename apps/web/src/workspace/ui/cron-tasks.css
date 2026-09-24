@@ -1,0 +1,5 @@
+.ws-cron-command { display: block; max-width: 40rem; white-space: pre-wrap; overflow-wrap: anywhere; }
+.ws-cron-fields { display: grid; gap: 1rem; min-width: 0; padding: 0; margin: 0; border: 0; }
+.ws-cron-fields label { display: grid; gap: .4rem; }
+.ws-cron-fields label:has(input[type="checkbox"]) { display: flex; align-items: center; }
+.ws-cron-fields input:not([type="checkbox"]), .ws-cron-fields select { width: 100%; min-width: 0; }
