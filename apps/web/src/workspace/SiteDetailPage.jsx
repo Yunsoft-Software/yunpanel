@@ -15,6 +15,7 @@ import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
 import SiteCronPanel from './SiteCronPanel.jsx';
 import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
+import SiteBackupPanel from './SiteBackupPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
 import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
@@ -75,6 +76,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (['node', 'deploy'].includes(key)) return Boolean(application);
     if (key === 'files') return canManage;
     if (key === 'cron') return canManage;
+    if (key === 'backup') return canManage && Boolean(website);
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
@@ -91,12 +93,12 @@ function SiteWorkspace({ websiteId, tab }) {
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'],
-    ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'],
+    ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = [
     ['settings', 'Barındırma ayarları', 'settings'], ['dns', 'DNS', 'globe'],
     ['domains', 'Alan adı ve yayın yönetimi', 'globe'], ['terminal', 'Site terminali', 'terminal'],
-    ['cron', 'Zamanlanmış Görevler', 'clock'],
+    ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
@@ -125,6 +127,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'node' && canManage && (website?.runtimeType === 'php' || application?.type === 'php') && <SitePhpToolsPanel domainId={domain.id} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}
+    {tab === 'backup' && <SiteBackupPanel domainId={domain.id} />}
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'dns' && <DnsPanel key={domain.id} domain={domain} domains={domains.items} canManage={canManage} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}

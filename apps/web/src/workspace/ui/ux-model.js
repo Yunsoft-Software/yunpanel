@@ -79,7 +79,7 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
 
 const siteGroups = [
   { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs'] },
-  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron'] },
+  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
 export function groupSiteTabs(tabs) {
