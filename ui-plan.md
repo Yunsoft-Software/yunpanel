@@ -1,9 +1,14 @@
 # YunPanel — Plesk UX Geçişi
 
+## 2026-09-25 — Site İstatistikleri
+
+- [x] **AN-01/02 kaynak:** `a99ccaf1`, `0848080f`, `cedec1a0`, `b3db42d2`; Genel Bakış → İstatistikler. Site hesabına kendi statik GoAccess raporu ve güvenli status; Owner'a ayrıca realtime lifecycle/gateway. PID/socket/path/raw hata görünmez ve belirsiz POST otomatik replay edilmez.
+- [ ] **AN-03 kabul:** Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu. Eski `.28` kabulü yeni source head'in canlı kanıtı değildir. [Ayrıntı](docs/ux/site-analytics-flow.md).
 ## 2026-09-25 — Site Backup Manager
 
 - [x] **BACKUP-UI-01/02 kaynak:** `06bc9fc3`, `300f813a`; site-scope repository/snapshot browser ve Barındırma ve DNS → Yedekleme ve Geri Yükleme ekranı. Site hesabına global repository target/path veya başka sitenin snapshotı açılmaz. Yedek kapsamı, retention, depo durumu ve site snapshotları görünür.
 - [ ] **BACKUP-UI-03/04:** mevcut senkron backup/restore motorunu durable job/recovery hattına taşıdıktan sonra Owner oluştur/restore eylemlerini UI'ye bağla. Gerçek Restic/browser/host kabulü ve Node24/npm11 tam check açık. [Ayrıntı](docs/ux/site-backup-manager.md).
+
 **Güncel karar: 2026-09-23. Dal: `development`. Plesk görev düzeni korunur; reseller ilk sürümü sadeleştirilir.**
 
 Önceki aaPanel/Plesk/CyberPanel birleşimi ve özel altı-gruplu workspace yaklaşımı iptal edilmiştir. Mevcut Ember renkleri, fontlar, radius/element biçimleri ve ortak bileşenler korunur. Neyin nerede olduğu ve nasıl yönetildiği Plesk'e taşınır; marka/CSS kopyalanmaz. Global Dosyalar ve domain File Manager girişleri kaldırılmaz.

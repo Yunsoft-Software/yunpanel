@@ -2,6 +2,16 @@
 
 Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri kaldırmaz. Aktif dal `development`. `.44` Plesk hostu her amaçla yasak; yalnız `.local/test-server.env` içindeki izinli hedef teyit edilerek kullanılabilir.
 
+## T-DEV-ANALYTICS — site GoAccess ekranı sonrası
+
+Kaynak: `a99ccaf1`, `0848080f`, `cedec1a0`, `b3db42d2`; rapor `docs/ux/site-analytics-flow.md`. Yeni testler kaynakta var, bu oturumda tam checkout/test çalıştırılmadı.
+
+- [ ] Node24/npm11 gerçek checkout: analytics safety/source/model/wiring + GoAccess manager/gateway/site-resource-boundary regresyonları; tam npm ci/check/build.
+- [ ] Owner/Site A/Site B auth/CSRF: yalnız atanmış Website statik raporu/status. JSON/HTML/gateway yanıtlarında başka site verisi ve host PID/socket/path bilgisi olmamalı.
+- [ ] Realtime lifecycle site_manager 403; Owner start/restart/stop. Ağ cevabı kaybolursa POST replay yok; status GET sonrası gerçek durum.
+- [ ] GoAccess missing, rotated/empty log, report generation failure, stale daemon socket ve log izolasyonu. Raw host error kullanıcı cevabına çıkmamalı.
+- [ ] Chromium/Firefox responsive/zoom/klavye/reload/site değişimi; mevcut Files/cron/PHP/backup/SSL yolları.
+- [ ] Yalnız izinli test hostu; `.44` kullanılmaz. `docs/history/goaccess-live-acceptance-2026-09-20.md` geçmiş kanıttır.
 ## T-DEV-PHP-ACTIONS — reviewed action sözleşmesi sonrası
 
 Kaynak: `405d3cee`, `6a14d501`, `47053dfc`, `6a02d83f`; ayrıntı `docs/ux/php-tools-flow.md`. Bu aşamada yalnız sabit action preview/onay sözleşmesi ve raw run endpoint daraltması vardır; site mutation UI/job execution açılmadı.

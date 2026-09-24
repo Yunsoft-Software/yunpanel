@@ -1,5 +1,10 @@
 # YunPanel — Kalan Ürün / Kod Planı
 
+## ANALYTICS-UI-01–03 — Site İstatistikleri
+
+- [x] **AN-01 güvenli API/rol kaynağı:** `a99ccaf1`, `0848080f`, `b3db42d2`; site status/statik rapor kendi Website kapsamına bağlı, PID/socket/path/outputPath/raw runtime error yayımlamaz. Realtime daemon lifecycle Owner-only; site hesabı statik rapor/status kullanabilir.
+- [x] **AN-02 ekran:** `cedec1a0`; Genel Bakış görev ailesinde İstatistikler. GoAccess kullanılabilirlik/sürüm, servis durumu, statik rapor ve Owner realtime kontrolü. Belirsiz realtime POST otomatik tekrar edilmez; status GET ile uzlaştırılır.
+- [ ] **AN-03:** Node24/npm11 tam test/build + gerçek Owner/Site A/Site B API/browser/GoAccess kabulü. 2026-09-20 `.28` canlı raporu tarihsel kanıttır, mevcut head kabulü değildir. [Kaynak ve T-DEV](docs/ux/site-analytics-flow.md).
 ## BACKUP-UI-01–04 — Site Backup Manager
 
 - [x] **BACKUP-UI-01 site-scope kaynak:** `06bc9fc3`; global backup repository/remote rotaları site_manager'dan kapatıldı. Yeni Website-scoped browser yalnız aynı sunucunun dar repository metadata'sı ve yalnız `website:<id>` snapshotlarını döndürür; target/path/hostname/username/raw error yayımlamaz.
