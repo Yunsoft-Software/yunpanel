@@ -3,7 +3,7 @@ const ACTIVE_JOBS = new Set(['queued', 'running']);
 export const SITE_TABS = [
   ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
   ['hosting', 'Barındırma ve DNS'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
-  ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'],
+  ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
   ['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'], ['settings', 'Barındırma bilgileri'],
 ];
 export const siteHref = (id, tab = 'overview') => `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === tab) ? tab : 'overview'}`;
