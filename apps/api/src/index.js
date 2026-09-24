@@ -118,6 +118,8 @@ import { createWebsiteCronReconciliationProvider } from './website-cron-reconcil
 import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsitePhpToolsService } from './website-php-tools-service.js';
 import { createLocalWebsitePhpToolOperation } from './local-website-php-tool-operation.js';
+import { createWebsitePhpToolActionService } from './website-php-tool-action-service.js';
+import { createWebsitePhpToolActionLock } from './website-php-tool-action-lock.js';
 import { createWebsiteCachePolicyRegistry } from './website-cache-policy-registry.js';
 import { createWebsiteCacheService } from './website-cache-service.js';
 import { createPanelSettingsRegistry } from './panel-settings-registry.js';
@@ -351,8 +353,28 @@ const websitePhpToolsService = createWebsitePhpToolsService({
   applicationRegistry,
   phpCliToolManager,
 });
+const authorizeWebsitePhpActor = async (actor, websiteId) => {
+  if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
+    || !['owner', 'site_manager'].includes(actor.role)) return null;
+  const session = authStore.getSessionById(actor.sessionId);
+  if (!session || session.user.id !== actor.userId || session.user.role !== actor.role) return null;
+  if (actor.role === 'owner') {
+    if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
+  } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
+  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
+};
+const websitePhpActionLock = createWebsitePhpToolActionLock({
+  root: path.join(controlPlaneStateRoot, 'locks', 'php-actions'),
+});
+const websitePhpToolActionService = createWebsitePhpToolActionService({
+  websitePhpToolsService,
+  jobRegistry,
+  authorizeActor: authorizeWebsitePhpActor,
+  withApplicationLock: websitePhpActionLock.withApplicationLock,
+});
 const localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
+  authorizeActor: authorizeWebsitePhpActor,
 });
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
   filePath: websiteCachePolicyStorePath,
@@ -1085,6 +1107,7 @@ const listener = createAuthenticatedApi({
       websiteCronImpactProvider,
       websiteCronApplyService,
       websitePhpToolsService,
+      websitePhpToolActionService,
       websiteCacheService,
       panelSettingsService,
       localServerId,

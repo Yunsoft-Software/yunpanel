@@ -4,6 +4,7 @@ import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 
 export function mountWebsitePhpToolsRoutes(app, {
   websitePhpToolsService,
+  websitePhpToolActionService = null,
 } = {}) {
   if (!app || typeof app.use !== 'function'
     || !websitePhpToolsService) {
@@ -34,6 +35,20 @@ export function mountWebsitePhpToolsRoutes(app, {
       return res.json({ data: preview });
     } catch (error) { return next(error); }
   });
+
+  if (websitePhpToolActionService) {
+    router.post('/actions/queue', requirePanelRouteAccess, async (req, res, next) => {
+      try {
+        const actor = {
+          sessionId: req.auth?.id,
+          userId: req.auth?.user?.id,
+          role: req.auth?.user?.role,
+        };
+        const result = await websitePhpToolActionService.queue(req.params.websiteId, req.body, actor);
+        return res.status(202).json({ data: result });
+      } catch (error) { return next(error); }
+    });
+  }
 
   router.get('/wp-cli/status', requirePanelRouteAccess, async (req, res, next) => {
     try {

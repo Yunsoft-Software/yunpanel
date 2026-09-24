@@ -38,6 +38,7 @@ const AUTHORITY_FIELDS = new Set([
 ]);
 const PHP_ACTION_FIELDS = new Set([
   'websiteId', 'applicationId', 'unixUser', 'expectedWebsiteRevision',
+  'actorSessionId', 'actorUserId', 'actorRole',
   'actionId', 'previewDigest', 'confirmation',
 ]);
 const PHP_ACTION_IDS = new Set([
@@ -46,6 +47,9 @@ const PHP_ACTION_IDS = new Set([
   'composer.dump-autoload',
 ]);
 const PHP_ACTION_USER = /^yunapp-[a-f0-9]{12}$/;
+const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const USER_ID = SESSION_ID;
+const ACTOR_ROLES = new Set(['owner', 'site_manager']);
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export const OPERATIONS = Object.freeze({
@@ -182,6 +186,11 @@ function validateWebsitePhpAction(payload, errors) {
   }
   if (!Number.isSafeInteger(payload.expectedWebsiteRevision) || payload.expectedWebsiteRevision < 1) {
     errors.push(`${WEBSITE_PHP_ACTION} expectedWebsiteRevision is invalid`);
+  }
+  if (typeof payload.actorSessionId !== 'string' || !SESSION_ID.test(payload.actorSessionId)
+    || typeof payload.actorUserId !== 'string' || !USER_ID.test(payload.actorUserId)
+    || typeof payload.actorRole !== 'string' || !ACTOR_ROLES.has(payload.actorRole)) {
+    errors.push(`${WEBSITE_PHP_ACTION} actor identity is invalid`);
   }
   if (typeof payload.actionId !== 'string' || !PHP_ACTION_IDS.has(payload.actionId)) {
     errors.push(`${WEBSITE_PHP_ACTION} actionId is invalid`);

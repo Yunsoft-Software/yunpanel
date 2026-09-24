@@ -10,9 +10,10 @@ export class WebsitePhpToolActionServiceError extends Error {
   }
 }
 
-export function createWebsitePhpToolActionService({ websitePhpToolsService, jobRegistry } = {}) {
+export function createWebsitePhpToolActionService({ websitePhpToolsService, jobRegistry, authorizeActor, withApplicationLock } = {}) {
   if (!websitePhpToolsService || typeof websitePhpToolsService.getActionPreview !== 'function'
-    || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
+    || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function'
+    || typeof authorizeActor !== 'function' || typeof withApplicationLock !== 'function') {
     throw new WebsitePhpToolActionServiceError(
       'website_php_action_service_dependencies_invalid',
       'PHP tool action service dependencies are invalid',
@@ -24,11 +25,25 @@ export function createWebsitePhpToolActionService({ websitePhpToolsService, jobR
     return websitePhpToolsService.getActionPreview(websiteId, actionId);
   }
 
-  async function queue(websiteId, input) {
+  async function queue(websiteId, input, actor) {
     const current = await preview(websiteId, input?.actionId);
     const action = verifyWebsitePhpToolAction(current, input);
-    const jobs = await jobRegistry.listJobs({
-      serverId: current.serverId,
+    const firstActor = await authorizeActor(actor, current.websiteId);
+    if (!firstActor || firstActor.sessionId !== actor?.sessionId || firstActor.userId !== actor?.userId
+      || firstActor.role !== actor?.role) {
+      throw new WebsitePhpToolActionServiceError('website_php_action_actor_forbidden', 'Live panel access changed before the action could be queued', 403);
+    }
+    return withApplicationLock(current.applicationId, async () => {
+      const lockedCurrent = await preview(websiteId, input?.actionId);
+      verifyWebsitePhpToolAction(lockedCurrent, input);
+      const lockedActor = await authorizeActor(actor, lockedCurrent.websiteId);
+      if (!lockedActor || lockedActor.sessionId !== firstActor.sessionId || lockedActor.userId !== firstActor.userId
+        || lockedActor.role !== firstActor.role
+        || lockedCurrent.applicationId !== current.applicationId || lockedCurrent.serverId !== current.serverId) {
+        throw new WebsitePhpToolActionServiceError('website_php_action_actor_forbidden', 'Live panel access or Website binding changed before enqueue', 403);
+      }
+      const jobs = await jobRegistry.listJobs({
+      serverId: lockedCurrent.serverId,
       resourceType: 'application',
       resourceId: current.applicationId,
     });
@@ -47,14 +62,17 @@ export function createWebsitePhpToolActionService({ websitePhpToolsService, jobR
       );
     }
 
-    const payload = Object.freeze({
-      websiteId: current.websiteId,
-      applicationId: current.applicationId,
-      unixUser: current.unixUser,
-      expectedWebsiteRevision: current.websiteRevision,
-      actionId: current.actionId,
-      previewDigest: current.previewDigest,
-      confirmation: current.confirmation,
+      const payload = Object.freeze({
+      websiteId: lockedCurrent.websiteId,
+      applicationId: lockedCurrent.applicationId,
+      unixUser: lockedCurrent.unixUser,
+      expectedWebsiteRevision: lockedCurrent.websiteRevision,
+      actorSessionId: lockedActor.sessionId,
+      actorUserId: lockedActor.userId,
+      actorRole: lockedActor.role,
+      actionId: lockedCurrent.actionId,
+      previewDigest: lockedCurrent.previewDigest,
+      confirmation: lockedCurrent.confirmation,
     });
     const job = await jobRegistry.enqueue({
       serverId: current.serverId,
@@ -62,18 +80,19 @@ export function createWebsitePhpToolActionService({ websitePhpToolsService, jobR
       operation: OPERATIONS.WEBSITE_PHP_ACTION,
       payload,
       resourceType: 'application',
-      resourceId: current.applicationId,
-      idempotencyKey: `website.php.action:${current.applicationId}:${current.actionId}:${current.previewDigest}`,
+      resourceId: lockedCurrent.applicationId,
+      idempotencyKey: `website.php.action:${lockedCurrent.applicationId}:${lockedCurrent.actionId}:${lockedCurrent.previewDigest}:${lockedActor.sessionId}`,
     });
     return Object.freeze({
       action: Object.freeze({
         tool: action.tool,
-        actionId: current.actionId,
-        websiteId: current.websiteId,
-        applicationId: current.applicationId,
-        websiteRevision: current.websiteRevision,
+        actionId: lockedCurrent.actionId,
+        websiteId: lockedCurrent.websiteId,
+        applicationId: lockedCurrent.applicationId,
+        websiteRevision: lockedCurrent.websiteRevision,
       }),
       job,
+      });
     });
   }
 

@@ -316,6 +316,7 @@ export function createApp(allOptions = {}) {
   websiteSftpKeyService = null,
   websiteCronApplyService = null,
   websitePhpToolsService = null,
+  websitePhpToolActionService = null,
   websiteCacheService = null,
   panelSettingsService = null,
   databaseBackupService = null,
@@ -903,6 +904,7 @@ export function createApp(allOptions = {}) {
   if (websitePhpToolsService) {
     mountWebsitePhpToolsRoutes(app, {
       websitePhpToolsService,
+      websitePhpToolActionService,
     });
   }
   if (websiteCacheService) {

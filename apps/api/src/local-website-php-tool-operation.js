@@ -26,11 +26,12 @@ function executionContext(payload, execution) {
   return execution;
 }
 
-export function createLocalWebsitePhpToolOperation({ websitePhpToolsService } = {}) {
+export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, authorizeActor } = {}) {
   if (!websitePhpToolsService
     || typeof websitePhpToolsService.getActionPreview !== 'function'
     || typeof websitePhpToolsService.runWpCli !== 'function'
-    || typeof websitePhpToolsService.runComposer !== 'function') {
+    || typeof websitePhpToolsService.runComposer !== 'function'
+    || typeof authorizeActor !== 'function') {
     throw new LocalWebsitePhpToolOperationError(
       'website_php_action_dependencies_invalid',
       'PHP tool local operation dependencies are invalid',
@@ -40,6 +41,19 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService } = 
 
   async function execute(payload, execution) {
     const context = executionContext(payload, execution);
+    const actor = await authorizeActor({
+      sessionId: payload.actorSessionId,
+      userId: payload.actorUserId,
+      role: payload.actorRole,
+    }, payload.websiteId);
+    if (!actor || actor.sessionId !== payload.actorSessionId || actor.userId !== payload.actorUserId
+      || actor.role !== payload.actorRole) {
+      throw new LocalWebsitePhpToolOperationError(
+        'website_php_action_actor_forbidden',
+        'Panel access changed before PHP tool execution',
+        403,
+      );
+    }
     const preview = await websitePhpToolsService.getActionPreview(payload.websiteId, payload.actionId);
     if (preview.serverId !== context.serverId
       || preview.applicationId !== payload.applicationId

@@ -298,6 +298,31 @@ export function createAuthStore({
       return result;
     },
     getSession,
+    getSessionById(sessionId) {
+      if (typeof sessionId !== 'string' || !/^[0-9a-f-]{36}$/i.test(sessionId)) return null;
+      const row = db.prepare(`SELECT s.*, u.username, u.role, u.active FROM sessions s
+        JOIN users u ON u.id = s.user_id WHERE s.id = ?`).get(sessionId);
+      if (!row) return null;
+      if (!row.active || row.expires_at <= now() || row.last_active_at + idleMs <= now()) {
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+        revokeLiveSession(row.id, row.active ? 'session_expired' : 'user_disabled');
+        return null;
+      }
+      const websiteIds = row.role === 'site_manager'
+        ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
+        : null;
+      return Object.freeze({
+        id: row.id,
+        user: Object.freeze({
+          id: row.user_id,
+          username: row.username,
+          role: row.role,
+          ...(websiteIds !== null ? { websiteIds: Object.freeze(websiteIds) } : {}),
+        }),
+        expiresAt: row.expires_at,
+        idleExpiresAt: Math.min(row.expires_at, row.last_active_at + idleMs),
+      });
+    },
     listSessions(rawToken) {
       const current = getSession(rawToken);
       if (!current) throw invalid();
