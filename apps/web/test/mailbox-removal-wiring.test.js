@@ -34,8 +34,9 @@ test('explicit confirmations preserve the exact current backend token', () => {
   assert.match(flow, /signature\(view\) !== approval.snapshot/);
 });
 
-test('domain-wide impact and policy/alias/configuration return paths remain explicit', () => {
-  assert.match(panel, /diğer posta hesapları da etkilenir/);
+test('selected-account preparation replaces domain-wide shutdown and retains return paths', () => {
+  assert.match(panel, /<MailboxAccessPreparation mailbox=\{mailbox\} domain=\{domain\}/);
+  assert.doesNotMatch(panel, /diğer posta hesapları da etkilenir|Etkin — silmeden önce kapatılmalı/);
   assert.match(panel, /href\('configuration'\)/);
   assert.match(panel, /href\('aliases'\)/);
   assert.match(panel, /onClick=\{onPolicy\}/);
