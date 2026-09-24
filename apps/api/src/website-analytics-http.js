@@ -32,6 +32,44 @@ async function requireLocalWebsite(websiteRegistry, websiteId, localServerId) {
   return website;
 }
 
+function analyticsStatusView(status, websiteId, { owner = false } = {}) {
+  if (!status || typeof status !== 'object' || Array.isArray(status)
+    || status.websiteId !== websiteId || typeof status.running !== 'boolean'
+    || typeof status.socketExists !== 'boolean') {
+    throw new WebsiteAnalyticsHttpError('analytics_status_invalid', 'Analytics status could not be verified', 503);
+  }
+  return Object.freeze({
+    websiteId,
+    running: status.running,
+    socketReady: status.socketExists,
+    ...(owner ? { wsUrl: '/tools/goaccess/' + websiteId + '/ws' } : {}),
+  });
+}
+
+function realtimeView(value, websiteId, action) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.websiteId !== websiteId) {
+    throw new WebsiteAnalyticsHttpError('analytics_realtime_result_invalid', 'Analytics realtime result could not be verified', 503);
+  }
+  if (action === 'stop') return Object.freeze({ websiteId, running: false, stopped: value.stopped === true });
+  if (value.running !== true) {
+    throw new WebsiteAnalyticsHttpError('analytics_realtime_result_invalid', 'Analytics realtime daemon did not confirm running state', 503);
+  }
+  return Object.freeze({
+    websiteId,
+    running: true,
+    alreadyRunning: value.alreadyRunning === true,
+  });
+}
+
+function requireAnalyticsOwner(request, response, next) {
+  return requirePanelRouteAccess(request, response, () => {
+    if (request.auth?.user?.role !== 'owner') {
+      return response.status(403).json({ error: { code: 'forbidden', message: 'Owner access is required.' } });
+    }
+    return next();
+  });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try {
@@ -87,7 +125,6 @@ export function mountWebsiteAnalyticsRoutes(app, {
       data: {
         websiteId: website.id,
         primaryDomain,
-        outputPath: result.outputPath,
         generatedAt: result.generatedAt,
       },
     });
@@ -96,15 +133,10 @@ export function mountWebsiteAnalyticsRoutes(app, {
   app.get('/api/websites/:websiteId/analytics/status', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const status = await goaccessManager.inspectDaemon({ websiteId: website.id });
-    return response.json({
-      data: {
-        ...status,
-        wsUrl: `/tools/goaccess/${website.id}/ws`,
-      },
-    });
+    return response.json({ data: analyticsStatusView(status, website.id, { owner: request.auth?.user?.role === 'owner' }) });
   }));
 
-  app.post('/api/websites/:websiteId/analytics/realtime/start', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/analytics/realtime/start', requireAnalyticsOwner, asyncRoute(async (request, response) => {
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const primaryDomain = await resolvePrimaryDomain(website.id, domainRegistry) ?? website.name;
 
@@ -113,16 +145,16 @@ export function mountWebsiteAnalyticsRoutes(app, {
       primaryDomain,
     });
 
-    return response.json({ data: result });
+    return response.json({ data: realtimeView(result, website.id, 'start') });
   }));
 
-  app.post('/api/websites/:websiteId/analytics/realtime/stop', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/analytics/realtime/stop', requireAnalyticsOwner, asyncRoute(async (request, response) => {
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const result = await goaccessManager.stopRealtimeDaemon({ websiteId: website.id });
-    return response.json({ data: result });
+    return response.json({ data: realtimeView(result, website.id, 'stop') });
   }));
 
-  app.post('/api/websites/:websiteId/analytics/realtime/restart', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/analytics/realtime/restart', requireAnalyticsOwner, asyncRoute(async (request, response) => {
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const primaryDomain = await resolvePrimaryDomain(website.id, domainRegistry) ?? website.name;
 
@@ -131,6 +163,12 @@ export function mountWebsiteAnalyticsRoutes(app, {
       primaryDomain,
     });
 
-    return response.json({ data: result });
+    return response.json({ data: realtimeView(result, website.id, 'restart') });
   }));
 }
+
+
+export const websiteAnalyticsHttpInternals = Object.freeze({
+  analyticsStatusView,
+  realtimeView,
+});
