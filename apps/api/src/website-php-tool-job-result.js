@@ -16,7 +16,7 @@ export class WebsitePhpToolJobResultError extends Error {
 
 export function sanitizeWebsitePhpToolJobResult(job, result) {
   const fields = [
-    'version', 'websiteId', 'applicationId', 'actionId', 'websiteRevision',
+    'version', 'websiteId', 'applicationId', 'unixUser', 'actionId', 'websiteRevision',
     'previewDigest', 'completed', 'sideEffects',
   ];
   if (!job || job.operation !== 'website.php.action'
@@ -28,12 +28,14 @@ export function sanitizeWebsitePhpToolJobResult(job, result) {
     || typeof result.websiteId !== 'string' || !UUID.test(result.websiteId)
     || typeof result.applicationId !== 'string' || !UUID.test(result.applicationId)
     || result.applicationId !== job.resourceId
+    || typeof result.unixUser !== 'string' || !/^yunapp-[a-f0-9]{12}$/.test(result.unixUser)
     || typeof result.actionId !== 'string' || !ACTIONS.has(result.actionId)
     || !Number.isSafeInteger(result.websiteRevision) || result.websiteRevision < 1
     || typeof result.previewDigest !== 'string' || !SHA.test(result.previewDigest)
     || result.completed !== true || result.sideEffects !== true
     || job.payload?.websiteId !== result.websiteId
     || job.payload?.applicationId !== result.applicationId
+    || job.payload?.unixUser !== result.unixUser
     || job.payload?.actionId !== result.actionId
     || job.payload?.expectedWebsiteRevision !== result.websiteRevision
     || job.payload?.previewDigest !== result.previewDigest) {
@@ -43,6 +45,7 @@ export function sanitizeWebsitePhpToolJobResult(job, result) {
     version: 1,
     websiteId: result.websiteId.toLowerCase(),
     applicationId: result.applicationId.toLowerCase(),
+    unixUser: result.unixUser,
     actionId: result.actionId,
     websiteRevision: result.websiteRevision,
     previewDigest: result.previewDigest,

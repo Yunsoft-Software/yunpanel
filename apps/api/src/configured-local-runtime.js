@@ -67,6 +67,7 @@ export async function startConfiguredLocalRuntime({
   createNodeRollbackReceipts = createNodeRollbackReceiptStore,
   createRoundcubeConfigOperationReceipts = createRoundcubeConfigOperationReceiptStore,
   createSystemUpgradeReceipts = createSystemUpgradeReceiptStore,
+  createWebsitePhpToolReceipts = createWebsitePhpToolOperationReceiptStore,
   inspectInventory = inspectHostInventory,
   inspectServices = null,
   inspectDocker = null,
@@ -120,6 +121,7 @@ export async function startConfiguredLocalRuntime({
     || typeof createNodeRollbackReceipts !== 'function'
     || typeof createRoundcubeConfigOperationReceipts !== 'function'
     || typeof createSystemUpgradeReceipts !== 'function'
+    || typeof createWebsitePhpToolReceipts !== 'function'
     || typeof inspectInventory !== 'function'
     || (inspectServices !== null && typeof inspectServices !== 'function')
     || (inspectDocker !== null && typeof inspectDocker !== 'function')
@@ -238,6 +240,10 @@ export async function startConfiguredLocalRuntime({
   const systemUpgradeReceipts = createSystemUpgradeReceipts();
   if (!systemUpgradeReceipts || typeof systemUpgradeReceipts.write !== 'function') {
     throw new ConfiguredLocalRuntimeError('local_system_upgrade_receipts_invalid', 'Local runtime system upgrade receipt store is invalid');
+  }
+  const websitePhpToolReceipts = createWebsitePhpToolReceipts();
+  if (!websitePhpToolReceipts || typeof websitePhpToolReceipts.write !== 'function') {
+    throw new ConfiguredLocalRuntimeError('local_website_php_tool_receipts_invalid', 'Local runtime PHP tool receipt store is invalid');
   }
 
   const recordExecutionEvidence = async ({ serverId, jobId, operation, resourceType, resourceId, payload, result }) => {
@@ -522,6 +528,22 @@ export async function startConfiguredLocalRuntime({
         applicationId: payload.applicationId,
         result,
       });
+      return;
+    }
+
+    if (operation === OPERATIONS.WEBSITE_PHP_ACTION) {
+      if (resourceType !== 'application' || resourceId !== payload?.applicationId
+        || result?.version !== 1
+        || result.websiteId !== payload.websiteId
+        || result.applicationId !== payload.applicationId
+        || result.unixUser !== payload.unixUser
+        || result.actionId !== payload.actionId
+        || result.websiteRevision !== payload.expectedWebsiteRevision
+        || result.previewDigest !== payload.previewDigest
+        || result.completed !== true || result.sideEffects !== true) {
+        throw new Error('PHP tool action result is not safe recovery evidence');
+      }
+      await websitePhpToolReceipts.write({ serverId, jobId, payload, result });
       return;
     }
 
