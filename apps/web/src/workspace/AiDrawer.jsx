@@ -1,315 +1,188 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
+import { panelRequest } from '../api.js';
+import { usePanelSession } from '../panel-session.jsx';
+import { sessionVersion, sessionTransitionPending } from '../session-client.js';
 import { Badge, Button, ErrorNotice, Icon, Modal } from './PanelKit.jsx';
-import {
-  createAiConversation,
-  deleteAiConversation,
-  executeAiTool,
-  getAiConversation,
-  listAiConversations,
-  sendAiMessage,
-} from './ai-client.js';
+import { createAiConversation, deleteAiConversation, executeAiTool, getAiConversation, listAiConversationPage, sendAiMessage } from './ai-client.js';
+import { createAiHistory, createAiConversationReader, EMPTY_AI_HISTORY, resolveAiWebsiteContext } from './ai-history.js';
+import './ai-history.css';
 
 export default function AiDrawer({ open, onClose }) {
   const location = useLocation();
-  const [conversations, setConversations] = useState([]);
+  const { session } = usePanelSession();
+  const match = location.pathname.match(/^\/websites\/([^/]+)/);
+  const domainId = match && match[1] !== 'new' ? match[1] : null;
+  const identity = JSON.stringify([domainId, session?.user?.id, session?.user?.role, session?.user?.websiteIds, sessionVersion()]);
+  if (!open || !session?.user?.id) return null;
+  return <AiScope key={identity} domainId={domainId} actorId={session.user.id} onClose={onClose} />;
+}
+
+function AiScope({ domainId, actorId, onClose }) {
+  const [context, setContext] = useState({ ready: !domainId, websiteId: null, error: null });
+  const [attempt, setAttempt] = useState(0);
+  useEffect(() => {
+    if (!domainId) return undefined;
+    const controller = new AbortController(), version = sessionVersion();
+    const current = () => !controller.signal.aborted && version === sessionVersion() && !sessionTransitionPending();
+    setContext({ ready: false, websiteId: null, error: null });
+    resolveAiWebsiteContext(domainId, panelRequest, { signal: controller.signal }).then((websiteId) => {
+      if (current()) setContext({ ready: true, websiteId, error: null });
+    }).catch(() => {
+      if (current()) setContext({ ready: false, websiteId: null, error: 'Sitenin Website bağı doğrulanamadı. Başka site veya genel bağlam kullanılmadı.' });
+    });
+    return () => controller.abort();
+  }, [domainId, attempt]);
+  if (!context.ready) return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+    {context.error ? <><ErrorNotice error={context.error} /><Button onClick={() => setAttempt((n) => n + 1)}>Yeniden kontrol et</Button></>
+      : <p role="status">Site bağlamı doğrulanıyor…</p>}
+  </Modal>;
+  return <ConversationPanel actorId={actorId} websiteId={context.websiteId} onClose={onClose} />;
+}
+
+function ConversationPanel({ actorId, websiteId, onClose }) {
+  const [history, setHistory] = useState(EMPTY_AI_HISTORY);
   const [activeConvId, setActiveConvId] = useState(null);
-  const [activeConversation, setActiveConversation] = useState(null);
-  const [loading, setLoading] = useState(false);
+  const [detail, setDetail] = useState({ id: null, status: 'idle', conversation: null, error: null });
   const [sending, setSending] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const [error, setError] = useState(null);
-  const messagesEndRef = useRef(null);
-
-  // Detect active websiteId from URL e.g. /websites/:websiteId/...
-  const websiteMatch = location.pathname.match(/\/websites\/([^/]+)/);
-  const currentWebsiteId = websiteMatch && websiteMatch[1] !== 'new' ? websiteMatch[1] : null;
-
-  const loadConversations = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const res = await listAiConversations(currentWebsiteId);
-      const items = Array.isArray(res) ? res : (res?.data || []);
-      setConversations(items);
-      if (items.length > 0 && !activeConvId) {
-        setActiveConvId(items[0].id);
-      }
-    } catch (err) {
-      setError(err.message || 'Sohbetler yüklenemedi');
-    } finally {
-      setLoading(false);
-    }
-  }, [currentWebsiteId, activeConvId]);
-
-  const loadActiveConversation = useCallback(async (id) => {
-    if (!id) return;
-    try {
-      const res = await getAiConversation(id);
-      setActiveConversation(res?.messages ? res : (res?.data || null));
-    } catch (err) {
-      setError(err.message || 'Sohbet detayları yüklenemedi');
-    }
-  }, []);
-
+  const scope = useRef(null), active = useRef(null), pending = useRef(false), drafts = useRef(new Map());
+  const messagesRef = useRef(null);
+  function select(id) {
+    active.current = id; setActiveConvId(id); setInputVal(drafts.current.get(id ?? 'new') ?? '');
+  }
   useEffect(() => {
-    if (open) {
-      loadConversations();
+    const life = new AbortController(), version = sessionVersion();
+    const current = () => !life.signal.aborted && version === sessionVersion() && !sessionTransitionPending();
+    let list, reader;
+    function denied() {
+      life.abort(); list.dispose(); reader.dispose();
+      setHistory({ ...EMPTY_AI_HISTORY, status: 'forbidden', error: 'Sohbet erişiminiz değişti. Pencereyi güncel oturumla yeniden açın.' });
+      setDetail({ id: null, status: 'forbidden', conversation: null, error: null });
+      setInputVal(''); drafts.current.clear();
     }
-  }, [open, loadConversations]);
-
+    list = createAiHistory({ actorId, websiteId, isCurrent: current,
+      read: (options) => listAiConversationPage(websiteId, options),
+      onState: (value) => {
+        if (value.status === 'forbidden') { denied(); return; }
+        setHistory(value);
+        if (value.status === 'ready' && !active.current && value.items.length) select(value.items[0].id);
+      },
+    });
+    reader = createAiConversationReader({ websiteId, isCurrent: current, read: getAiConversation,
+      onState: (value) => {
+        if (value.status === 'forbidden') { denied(); return; }
+        setDetail(value);
+        if (value.conversation) list.upsert(value.conversation);
+      },
+    });
+    scope.current = { list, reader, current, signal: life.signal };
+    void list.load();
+    return () => { life.abort(); list.dispose(); reader.dispose(); scope.current = null; };
+  }, [actorId, websiteId]);
+  useEffect(() => { void scope.current?.reader.load(activeConvId); }, [activeConvId]);
+  const activeConversation = detail.id === activeConvId ? detail.conversation : null;
   useEffect(() => {
-    if (activeConvId) {
-      loadActiveConversation(activeConvId);
-    } else {
-      setActiveConversation(null);
-    }
-  }, [activeConvId, loadActiveConversation]);
-
-  useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    // Do not scroll the modal or the background document with scrollIntoView.
+    const element = messagesRef.current;
+    if (element) element.scrollTop = element.scrollHeight;
   }, [activeConversation?.messages, sending]);
-
-  const handleNewChat = async () => {
-    setError(null);
-    try {
-      const res = await createAiConversation({
-        title: 'Yeni Sohbet',
-        websiteId: currentWebsiteId,
-      });
-      const created = res?.id ? res : res?.data;
-      if (created?.id) {
-        setConversations((prev) => [created, ...prev]);
-        setActiveConvId(created.id);
-      }
-    } catch (err) {
-      setError(err.message || 'Yeni sohbet oluşturulamadı');
-    }
-  };
-
-  const handleDeleteChat = async (id, e) => {
-    e.stopPropagation();
-    try {
-      await deleteAiConversation(id);
-      setConversations((prev) => prev.filter((c) => c.id !== id));
-      if (activeConvId === id) {
-        const remaining = conversations.filter((c) => c.id !== id);
-        setActiveConvId(remaining[0]?.id || null);
-      }
-    } catch (err) {
-      setError(err.message || 'Sohbet silinemedi');
-    }
-  };
-
-  const handleSend = async (textToSend) => {
+  async function mutate(action) {
+    const client = scope.current;
+    if (pending.current || !client?.current()) return;
+    pending.current = true; setSending(true); setError(null);
+    try { await action(client); }
+    catch (failure) {
+      if (client.current()) setError(failure?.code === 'ai_conversation_limit'
+        ? '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti silin.'
+        : 'İşlem sonucu doğrulanamadı. Tekrar göndermeden önce geçmişi yenileyin.');
+    } finally { pending.current = false; if (client.current()) setSending(false); }
+  }
+  async function newConversation(client, title) {
+    const created = await createAiConversation({ title, websiteId }, { signal: client.signal });
+    if (!client.current()) return null;
+    client.list.upsert(created); select(created.id); return created.id;
+  }
+  const handleNewChat = () => mutate((client) => newConversation(client, 'Yeni Sohbet'));
+  const handleDeleteChat = (id) => mutate(async (client) => {
+    const result = await deleteAiConversation(id, { signal: client.signal });
+    if (!client.current()) return;
+    if (result?.success !== true) throw new Error('Unverified deletion');
+    client.list.remove(id); drafts.current.delete(id);
+    if (active.current === id) select(client.list.getState().items[0]?.id ?? null);
+  });
+  const handleSend = (textToSend) => {
     const query = (textToSend || inputVal).trim();
-    if (!query || sending) return;
-
-    setInputVal('');
-    setError(null);
-    setSending(true);
-
-    let targetConvId = activeConvId;
-    if (!targetConvId) {
-      try {
-        const res = await createAiConversation({
-          title: query.slice(0, 30),
-          websiteId: currentWebsiteId,
-        });
-        const created = res?.id ? res : res?.data;
-        targetConvId = created?.id;
-        if (!targetConvId) {
-          throw new Error('Sohbet başlatılamadı: kimlik alınamadı');
-        }
-        setActiveConvId(targetConvId);
-        setConversations((prev) => [created, ...prev.filter((c) => c?.id !== targetConvId)]);
-      } catch (err) {
-        setError(err.message || 'Sohbet başlatılamadı');
-        setSending(false);
-        return;
-      }
-    }
-
-    try {
-      const res = await sendAiMessage({ conversationId: targetConvId, text: query });
-      const msgResult = res?.data ?? res;
-      if (msgResult) {
-        await loadActiveConversation(targetConvId);
-      }
-    } catch (err) {
-      setError(err.message || 'İstek işlenirken hata oluştu');
-    } finally {
-      setSending(false);
-    }
+    if (!query) return;
+    return mutate(async (client) => {
+      const id = active.current || await newConversation(client, query.slice(0, 30));
+      if (!id || !client.current()) return;
+      await sendAiMessage({ conversationId: id, text: query }, { signal: client.signal });
+      if (!client.current()) return;
+      drafts.current.delete(id); drafts.current.delete('new');
+      if (active.current === id) { setInputVal(''); await client.reader.load(id); }
+    });
   };
-
-  if (!open) return null;
-
-  return (
-    <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
-      <div className="ws-ai-layout" style={{ display: 'grid', gridTemplateColumns: '240px 1fr', gap: '16px', minHeight: '520px' }}>
-        {/* Sidebar: Conversation history */}
-        <aside style={{ borderRight: '1px solid var(--border-color, #e5e7eb)', paddingRight: '12px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-muted, #6b7280)' }}>SOHBETLER</span>
-            <Button variant="primary" icon="plus" style={{ padding: '4px 8px', fontSize: '12px' }} onClick={handleNewChat}>
-              Yeni
-            </Button>
-          </div>
-
-          {currentWebsiteId && (
-            <div style={{ fontSize: '12px', padding: '6px 8px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: '6px' }}>
-              📍 Site bağlamı aktif
-            </div>
-          )}
-
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-            {loading && <p style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)' }}>Yükleniyor…</p>}
-            {!loading && conversations.length === 0 && (
-              <p style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)' }}>Kayıtlı sohbet bulunamadı.</p>
-            )}
-            {conversations.map((conv) => (
-              <div
-                key={conv.id}
-                onClick={() => setActiveConvId(conv.id)}
-                style={{
-                  padding: '8px 10px',
-                  borderRadius: '6px',
-                  cursor: 'pointer',
-                  fontSize: '13px',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  background: conv.id === activeConvId ? 'var(--bg-highlight, #e0e7ff)' : 'transparent',
-                  color: conv.id === activeConvId ? 'var(--text-highlight, #4338ca)' : 'inherit',
-                  fontWeight: conv.id === activeConvId ? 600 : 400,
-                }}
-              >
-                <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '160px' }}>
-                  {conv.title || 'Yeni Sohbet'}
-                </span>
-                <button
-                  type="button"
-                  style={{ background: 'none', border: 'none', cursor: 'pointer', opacity: 0.6 }}
-                  title="Sohbeti sil"
-                  onClick={(e) => handleDeleteChat(conv.id, e)}
-                >
-                  ✕
-                </button>
-              </div>
-            ))}
-          </div>
-        </aside>
-
-        {/* Chat area */}
-        <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-          {error && <ErrorNotice error={error} />}
-
-          {/* Messages list */}
-          <div style={{ flex: 1, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '14px', paddingBottom: '16px', maxHeight: '420px' }}>
-            {(!activeConversation || activeConversation.messages.length === 0) && (
-              <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted, #6b7280)' }}>
-                <Icon name="terminal" size={32} />
-                <h3 style={{ margin: '12px 0 6px 0', fontSize: '16px', color: 'inherit' }}>Nasıl yardımcı olabilirim?</h3>
-                <p style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto 16px auto' }}>
-                  Sunucu sağlığı, Website logları, DNS, sertifika durumu veya yedekleri güvenle kontrol edebilir; onaylayacağınız yönetim işlemlerini başlatabilirsiniz.
-                </p>
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', justifyContent: 'center' }}>
-                  <Button variant="secondary" onClick={() => handleSend('Sunucu sağlığını kontrol et')}>
-                    ⚡ Sunucu sağlığı
-                  </Button>
-                  {currentWebsiteId && (
-                    <Button variant="secondary" onClick={() => handleSend('Bu sitenin loglarını incele')}>
-                      📄 Site logları
-                    </Button>
-                  )}
-                  <Button variant="secondary" onClick={() => handleSend('Yedek durumunu incele')}>
-                    💾 Yedek durumu
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {activeConversation?.messages.map((msg) => (
-              <div
-                key={msg.id}
-                style={{
-                  display: 'flex',
-                  flexDirection: 'column',
-                  alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start',
-                  maxWidth: '85%',
-                }}
-              >
-                <div
-                  style={{
-                    padding: '10px 14px',
-                    borderRadius: '10px',
-                    fontSize: '14px',
-                    lineHeight: '1.5',
-                    whiteSpace: 'pre-wrap',
-                    background: msg.role === 'user' ? 'var(--primary-color, #2563eb)' : 'var(--bg-secondary, #f3f4f6)',
-                    color: msg.role === 'user' ? '#ffffff' : 'inherit',
-                  }}
-                >
-                  {msg.text}
-                </div>
-
-                {/* Executed read tools details */}
-                {Array.isArray(msg.toolExecutions) && msg.toolExecutions.length > 0 && (
-                  <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-                    {msg.toolExecutions.map((tool, idx) => (
-                      <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                        <span style={{ color: '#10b981' }}>✓</span>
-                        <code>{tool.name}</code> çalıştırıldı
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {/* Action proposal cards */}
-                {Array.isArray(msg.proposals) && msg.proposals.length > 0 && (
-                  <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {msg.proposals.map((prop) => (
-                      <ActionProposalCard key={prop.id || prop.callId} proposal={prop} onExecuted={() => loadActiveConversation(activeConvId)} />
-                    ))}
-                  </div>
-                )}
-              </div>
-            ))}
-
-            {sending && (
-              <div role="status" style={{ alignSelf: 'flex-start', padding: '8px 12px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: '8px', fontSize: '13px', color: 'var(--text-muted, #6b7280)' }}>
-                <span className="ws-spinner" style={{ marginRight: '6px' }} /> AI düşünüyor ve araçları değerlendiriyor…
-              </div>
-            )}
-            <div ref={messagesEndRef} />
-          </div>
-
-          {/* Input form */}
-          <form
-            onSubmit={(e) => {
-              e.preventDefault();
-              handleSend();
-            }}
-            style={{ display: 'flex', gap: '8px', marginTop: 'auto', paddingTop: '12px', borderTop: '1px solid var(--border-color, #e5e7eb)' }}
-          >
-            <input
-              type="text"
-              className="ws-input"
-              style={{ flex: 1, padding: '10px 12px', borderRadius: '6px', border: '1px solid var(--border-color, #d1d5db)' }}
-              placeholder={currentWebsiteId ? 'Site veya sunucu hakkında bir soru sorun ya da işlem isteyin…' : 'Sunucu hakkında bir soru sorun ya da işlem isteyin…'}
-              value={inputVal}
-              disabled={sending}
-              onChange={(e) => setInputVal(e.target.value)}
-            />
-            <Button variant="primary" type="submit" disabled={sending || !inputVal.trim()}>
-              {sending ? 'Gönderiliyor…' : 'Gönder'}
-            </Button>
-          </form>
+  const loading = ['loading', 'loadingMore'].includes(history.status);
+  const denied = history.status === 'forbidden' || detail.status === 'forbidden';
+  const loadMore = () => scope.current?.list.more();
+  return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+    <div className="ws-ai-layout ws-ai-history-layout">
+      <aside className="ws-ai-sidebar" aria-label="Sohbet geçmişi">
+        <div className="ws-actions"><strong>SOHBETLER</strong><Button variant="primary" icon="plus" disabled={sending || denied} onClick={handleNewChat}>Yeni</Button><Button disabled={loading || denied} icon="refresh" aria-label="Geçmişi yenile" title="Geçmişi yenile" onClick={() => scope.current?.list.load()} /></div>
+        <small>{websiteId ? 'Site bağlamı · ' : ''}En yeni oluşturulanlar önce</small>
+        <div className="ws-ai-history-list" tabIndex={0} aria-label="Kaydırılabilir sohbet listesi" aria-busy={loading}
+          onScroll={(event) => {
+            const node = event.currentTarget;
+            if (!loading && !history.error && history.hasMore && node.scrollHeight - node.clientHeight - node.scrollTop < 64) void loadMore();
+          }}>
+          {history.items.map((conv) => <div key={conv.id} className="ws-ai-history-row">
+            <Button className="ws-ai-conversation-select" variant={conv.id === activeConvId ? 'primary' : 'secondary'}
+              aria-current={conv.id === activeConvId ? 'true' : undefined} disabled={sending || denied} title={conv.title}
+              onClick={() => select(conv.id)}><span>{conv.title || 'Yeni Sohbet'}</span></Button>
+            <Button disabled={sending || denied} aria-label={`${conv.title || 'Sohbet'} sohbetini sil`} title="Sohbeti sil" onClick={() => handleDeleteChat(conv.id)}>✕</Button>
+          </div>)}
+          {loading && <p role="status">Sohbetler yükleniyor…</p>}
+          {!loading && !history.items.length && !history.error && <p>Kayıtlı sohbet bulunamadı.</p>}
+          {history.error && <ErrorNotice error={history.error} />}
+          {history.hasMore && !history.reloadRequired && <Button disabled={loading || denied} onClick={loadMore}>{history.error ? 'Eski sayfayı yeniden dene' : 'Daha eski sohbetler'}</Button>}
+          {!history.hasMore && history.items.length > 0 && <p className="ws-muted">Geçmişin sonuna ulaşıldı.</p>}
+          {history.legacyUnassigned && <p className="ws-muted">Eski sohbetler dosyada korundu. Sahiplik bilgisi olmayan kayıtlar güvenli eşleştirme yapılana kadar burada gösterilmez.</p>}
         </div>
+      </aside>
+      <div className="ws-ai-chat">
+        {error && <ErrorNotice error={error} />}
+        {detail.error && <div><ErrorNotice error={detail.error} /><Button onClick={() => scope.current?.reader.load(activeConvId)}>Sohbeti yeniden oku</Button></div>}
+        <div className="ws-ai-messages" ref={messagesRef} role="log" aria-label="Sohbet mesajları" aria-live="polite">
+          {detail.status === 'loading' && <p role="status">Sohbet açılıyor…</p>}
+          {!denied && detail.status !== 'loading' && (!activeConversation || !activeConversation.messages.length) && <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted, #6b7280)' }}>
+            <Icon name="terminal" size={32} /><h3 style={{ margin: '12px 0 6px 0', fontSize: '16px', color: 'inherit' }}>Nasıl yardımcı olabilirim?</h3>
+            <p style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto 16px auto' }}>Sunucu sağlığı, Website logları, DNS, sertifika durumu veya yedekleri güvenle kontrol edebilir; onaylayacağınız yönetim işlemlerini başlatabilirsiniz.</p>
+            <div className="ws-actions"><Button disabled={sending} onClick={() => handleSend('Sunucu sağlığını kontrol et')}>⚡ Sunucu sağlığı</Button>
+              {websiteId && <Button disabled={sending} onClick={() => handleSend('Bu sitenin loglarını incele')}>📄 Site logları</Button>}
+              <Button disabled={sending} onClick={() => handleSend('Yedek durumunu incele')}>💾 Yedek durumu</Button></div>
+          </div>}
+          {!denied && activeConversation?.messages.map((msg) => <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
+            <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '14px', lineHeight: '1.5', whiteSpace: 'pre-wrap',
+              background: msg.role === 'user' ? 'var(--primary-color, #2563eb)' : 'var(--bg-secondary, #f3f4f6)', color: msg.role === 'user' ? '#ffffff' : 'inherit' }}>{msg.text}</div>
+            {Array.isArray(msg.toolExecutions) && msg.toolExecutions.length > 0 && <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              {msg.toolExecutions.map((tool, idx) => <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ color: '#10b981' }}>✓</span><code>{tool.name}</code> çalıştırıldı</div>)}
+            </div>}
+            {Array.isArray(msg.proposals) && msg.proposals.length > 0 && <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              {msg.proposals.map((prop) => <ActionProposalCard key={prop.id || prop.callId} proposal={prop} onExecuted={() => scope.current?.reader.load(active.current)} />)}
+            </div>}
+          </div>)}
+          {sending && <p role="status"><span className="ws-spinner" /> İstek işleniyor…</p>}
+        </div>
+        <form className="ws-ai-composer" onSubmit={(event) => { event.preventDefault(); void handleSend(); }}>
+          <input type="text" className="ws-input" aria-label="AI mesajınız" placeholder={websiteId ? 'Site veya sunucu hakkında sorun…' : 'Sunucu hakkında sorun…'} value={inputVal}
+            disabled={sending || denied} onChange={(event) => { setInputVal(event.target.value); drafts.current.set(activeConvId ?? 'new', event.target.value); }} />
+          <Button variant="primary" type="submit" disabled={sending || denied || !inputVal.trim()}>{sending ? 'Gönderiliyor…' : 'Gönder'}</Button>
+        </form>
       </div>
-    </Modal>
-  );
+    </div>
+  </Modal>;
 }
 
 function ActionProposalCard({ proposal, onExecuted }) {
