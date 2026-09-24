@@ -1,0 +1,48 @@
+/* Only constrain layout. Existing Ember colors, typography and controls remain. */
+.ws-ai-layout.ws-ai-history-layout {
+  display: grid;
+  grid-template-columns: minmax(170px, 240px) minmax(0, 1fr);
+  gap: 16px;
+  height: min(68vh, 680px);
+  height: min(68dvh, 680px);
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+.ws-ai-sidebar, .ws-ai-chat {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  gap: 8px;
+}
+.ws-ai-history-list, .ws-ai-messages {
+  flex: 1 1 0;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.ws-ai-history-list { display: flex; flex-direction: column; gap: 4px; }
+.ws-ai-history-row { display: flex; align-items: center; min-width: 0; flex: 0 0 auto; gap: 4px; }
+.ws-ai-history-row > .ws-ai-conversation-select { flex: 1; min-width: 0; overflow: hidden; text-align: start; }
+.ws-ai-conversation-select > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ws-ai-history-list > p, .ws-ai-history-list > button { flex-shrink: 0; }
+.ws-ai-messages { display: flex; flex-direction: column; gap: 14px; padding-bottom: 16px; overflow-wrap: anywhere; }
+.ws-ai-messages > * { flex-shrink: 0; }
+.ws-ai-composer { display: flex; gap: 8px; flex: 0 0 auto; padding-top: 12px; }
+.ws-ai-composer input { flex: 1; min-width: 0; }
+@media (max-width: 700px) {
+  .ws-ai-layout.ws-ai-history-layout {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: minmax(110px, 32%) minmax(0, 1fr);
+    gap: 12px;
+    height: 70vh;
+    height: 70dvh;
+  }
+}
+
+.ws-ai-sidebar > small { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; flex-shrink: 0; }
+.ws-ai-sidebar > .ws-actions { flex-shrink: 0; }
