@@ -61,7 +61,7 @@
 
 - [x] **Bellekte kapsamlı durum:** `38c0004d`, `123a4a50`, `e34170f0`; aynı doğrulanmış Domain/Website bağındaki geçici envanter kesintisinde klasör yolu, editör içeriği ve özgün dosya özeti korunur. Stale envanterle Files açılmaz; kullanıcı/oturum/yetki, Website/sunucu/runtime değişiminde eski içerik yeni hedefe taşınmaz.
 - [x] **Files bağlantısı:** `7ed7c7fb`, `2e10eed2`; mevcut dosya motoru ve Ember görünümü korunarak başarılı listeleme yolu hatırlanır. Mevcut UnsavedChanges mekanizması editör taslağını sayfa/site geçişi ve tarayıcı yenilemesinde koruyan ayrılma uyarısına bağlandı. Yerel kalıcı depolama, otomatik yeniden kaydetme veya dosya işlemi tekrarı yoktur.
-- [x] **Seçili test:** `9ac8c94b`, `5c0974c1`; Node22.16.0 altında **43 geçti / 0 başarısız / 0 atlandı**: 35 saf model + 8 kaynak bağlantısı testi. Üç JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası GitHub blob'larıyla eşleşir. React render testi değildir.
+- [x] **Seçili test:** `9ac8c94b`, `5c0974c1`; Node22.16.0 altında **43 geçti / 0 başarısız / 0 atlandı**: 35 saf model + 8 kaynak bağlantısı testi. Üç JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası ve iki değişmemiş test bağımlılığı GitHub blob'larıyla eşleşir. React render testi değildir.
 - [ ] **Kalan kabul:** Node24/npm11 tam lint/test/build, gerçek React/router/tarayıcı/API/host, T-DEV-FILES ve T-DEV-FILES-CONT açıktır. Paket kurulumu registry DNS hatası (`EAI_AGAIN`) nedeniyle yapılamadı. Kalıcı taslak yedeklemesi eklenmedi; açıkça ayrılmayı onaylamak veya sekmeyi kaybetmek bellek taslağını siler. [Kaynak raporu ve Codex kabul listesi](docs/ux/files-session-continuity.md). Üst UX-PL-01/05/08 kapanmaz.
 
 ## HST-UI-01–04 — Barındırma yönlendirme formu kaynağı tamamlandı
