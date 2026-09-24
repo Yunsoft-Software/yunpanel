@@ -43,7 +43,14 @@ function PhpToolsWorkspace({ domainId, scope, generation }) {
     return () => clearInterval(timer);
   }, [state?.action?.job?.id, state?.action?.job?.status]);
   const actionBusy = state?.action?.busy || jobs.status !== 'ready' || resourceBusy('application', scope.applicationId);
-  const actionsFor = (tool) => PHP_TOOL_ACTIONS.filter((item) => item.tool === tool);
+  const actionReady = (item) => {
+    const status = state?.[item.tool];
+    if (!status?.fresh || !status.data) return false;
+    if (item.tool === 'wordpress') return status.data.available === true && status.data.installed === true;
+    return status.data.available === true && status.data.hasComposerJson === true;
+  };
+  const actionsFor = (tool) => PHP_TOOL_ACTIONS.filter((item) => item.tool === tool)
+    .map((item) => ({ ...item, ready: actionReady(item) }));
   return <>
     <Section title="PHP araçları" description="WordPress ve Composer durumunu bu site kapsamında kontrol edin.">
       <div className="ws-section-body"><div className="ws-actions"><LinkButton to={siteHref(domainId, 'files')} icon="folder">Dosya Yöneticisi</LinkButton><LinkButton to={siteHref(domainId, 'terminal')} icon="terminal">Site terminali</LinkButton></div>
@@ -82,7 +89,7 @@ function PhpToolsWorkspace({ domainId, scope, generation }) {
 function ToolSection({ title, tool, status, denied, client, children, actions = [], actionBusy = false, onAction }) {
   return <Section title={title} actions={<div className="ws-actions">
     <Button icon="refresh" disabled={!status || status.loading || denied} onClick={() => void client.current?.load(tool)}>Durumu kontrol et</Button>
-    {actions.map((item) => <Button key={item.id} disabled={denied || actionBusy || !status?.fresh}
+    {actions.map((item) => <Button key={item.id} disabled={denied || actionBusy || !item.ready}
       onClick={() => onAction(item.id)}>{item.label}</Button>)}
   </div>}>
     <div className="ws-section-body"><ErrorNotice error={status?.error} />

@@ -3,7 +3,7 @@ import {
   phpToolActionPreview, phpToolActionJob, phpToolQueueResult,
 } from './php-tools-model.js';
 const empty = () => Object.freeze({ data: null, loading: false, fresh: false, error: null });
-const emptyAction = () => Object.freeze({ preview: null, job: null, busy: false, error: null });
+const emptyAction = () => Object.freeze({ preview: null, job: null, actionId: null, busy: false, error: null });
 
 // Status + reviewed mutation adapter. It never retries a POST automatically.
 export function createPhpToolsClient({ scope: input, request, isCurrent = () => true, onJob = () => {} }) {
@@ -80,7 +80,7 @@ export function createPhpToolsClient({ scope: input, request, isCurrent = () => 
       });
       if (!current() || state.denied) return null;
       const queued = phpToolQueueResult(value, scope, preview);
-      action({ preview: null, job: queued.job });
+      action({ preview: null, job: queued.job, actionId: queued.action.actionId });
       try { onJob(queued.job, true); } catch {}
       return queued.job;
     } catch (error) {
@@ -97,7 +97,7 @@ export function createPhpToolsClient({ scope: input, request, isCurrent = () => 
     try {
       const value = await request(`/jobs/${encodeURIComponent(known.id)}`);
       if (!current() || state.denied) return null;
-      const job = phpToolActionJob(value, scope, state.action.preview?.actionId ?? null);
+      const job = phpToolActionJob(value, scope, state.action.actionId, known.id);
       action({ job });
       try { onJob(job, false); } catch {}
       if (job.status === 'succeeded') await Promise.all([load('wordpress'), load('composer')]);

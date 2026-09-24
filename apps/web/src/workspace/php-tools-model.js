@@ -113,8 +113,9 @@ export function phpToolActionPreview(value, scope, expectedActionId = null) {
     confirmation: value.confirmation,
   });
 }
-export function phpToolActionJob(value, scope, actionId = null) {
+export function phpToolActionJob(value, scope, actionId = null, expectedJobId = null) {
   requireValue(record(value) && typeof value.id === 'string' && JOB_ID.test(value.id)
+    && (expectedJobId === null || value.id === expectedJobId)
     && value.serverId === scope.serverId && value.operation === 'website.php.action'
     && value.resourceType === 'application' && value.resourceId === scope.applicationId
     && ['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(value.status)
