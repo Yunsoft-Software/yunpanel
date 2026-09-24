@@ -6,7 +6,7 @@ const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
 const systemUser='yunapp-123456789abc';
 function fixture({otherWebsite=false,symlink=false}={}) {
-  const removed=[]; const compensated=[];
+  const removed=[]; const removedSet=new Set(); const compensated=[];
   const adapters=createWebsiteRemovalCleanupAdapters({
     websiteRegistry:{
       getWebsite:async()=>({id:websiteId,serverId:'33333333-3333-4333-8333-333333333333',applicationId,unixUser:systemUser}),
@@ -22,8 +22,11 @@ function fixture({otherWebsite=false,symlink=false}={}) {
         inspectCompensation:async()=>({satisfied:true,removedUser:true,removedGroup:true}),
       }},
     },
-    lstatFn:async(path)=>({isSymbolicLink:()=>symlink,isDirectory:()=>!symlink}),
-    rmFn:async(path)=>{removed.push(path);},
+    lstatFn:async(path)=>{
+      if(removedSet.has(path)) throw Object.assign(new Error('missing'),{code:'ENOENT'});
+      return {isSymbolicLink:()=>symlink,isDirectory:()=>!symlink};
+    },
+    rmFn:async(path)=>{removed.push(path);removedSet.add(path);},
   });
   return {adapters,removed,compensated};
 }
@@ -46,4 +49,12 @@ test('Unix cleanup requires exact provisioning journal identity and verifies com
  const f=fixture();const value=await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
  assert.deepEqual(value,{websiteId,systemUser,unixIdentityCleaned:true});assert.equal(f.compensated.length,1);
  assert.equal(f.compensated[0].operationId,'55555555-5555-4555-8555-555555555555');
+});
+
+test('file cleanup is idempotent when canonical roots are already absent',async()=>{
+ const f=fixture();
+ await f.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:[]});
+ const first=f.removed.length;
+ await f.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:[]});
+ assert.equal(f.removed.length,first);
 });
