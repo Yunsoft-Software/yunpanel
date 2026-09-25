@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const OPERATION_STATUSES = new Set(['pending', 'running', 'blocked', 'failed', 'removed']);
@@ -69,31 +70,71 @@ export function websiteRemovalOperationPublicView(operation) {
 export function createWebsiteRemovalOperationRegistry({
   filePath = null,
   now = () => new Date().toISOString(),
+  storeLockFactory = createProcessStoreLock,
 } = {}) {
   let operations = new Map();
   let initialized = false;
+  const storeLock = filePath
+    ? storeLockFactory({ filePath: path.resolve(filePath) })
+    : null;
+  if (filePath && (!storeLock || typeof storeLock.withLock !== 'function')) {
+    throw new WebsiteRemovalOperationRegistryError(
+      'website_removal_store_lock_invalid',
+      'Website removal store lock is invalid',
+      503,
+    );
+  }
+
+  async function reload() {
+    if (!filePath) { initialized = true; return; }
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const list = JSON.parse(raw);
+      if (!Array.isArray(list)) throw new Error('invalid Website removal registry state');
+      operations = new Map(list.map((op) => [op.id, op]));
+    } catch (err) {
+      if (err.code === 'ENOENT') operations = new Map();
+      else throw err;
+    }
+    initialized = true;
+  }
 
   async function persist() {
     if (!filePath) return;
-    const data = JSON.stringify(Array.from(operations.values()), null, 2);
-    await mkdir(path.dirname(filePath), { recursive: true });
-    await writeFile(filePath, data, 'utf8');
+    const data = `${JSON.stringify(Array.from(operations.values()), null, 2)}\n`;
+    const directory = path.dirname(filePath);
+    const temporary = `${filePath}.${process.pid}.tmp`;
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(temporary, data, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporary, filePath);
   }
 
   async function init() {
     if (initialized) return;
-    if (filePath) {
-      try {
-        const raw = await readFile(filePath, 'utf8');
-        const list = JSON.parse(raw);
-        if (Array.isArray(list)) {
-          operations = new Map(list.map((op) => [op.id, op]));
-        }
-      } catch (err) {
-        if (err.code !== 'ENOENT') throw err;
+    if (!storeLock) { await reload(); return; }
+    await storeLock.withLock(reload);
+  }
+
+  async function withMutation(action) {
+    requireInit();
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      try { return await action(); }
+      catch (error) {
+        await reload().catch(() => {});
+        throw error;
       }
-    }
-    initialized = true;
+    });
+  }
+
+  async function withRead(action) {
+    requireInit();
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      return action();
+    });
   }
 
   function requireInit() {
@@ -170,7 +211,7 @@ export function createWebsiteRemovalOperationRegistry({
   }
 
   async function create(preview) {
-    requireInit();
+    return withMutation(async () => {
     if (!preview || preview.operation !== 'website_remove' || !preview.readyToStart) {
       throw new WebsiteRemovalOperationRegistryError(
         'website_removal_operation_not_ready',
@@ -214,31 +255,31 @@ export function createWebsiteRemovalOperationRegistry({
     operations.set(id, operation);
     await persist();
     return websiteRemovalOperationPublicView(operation);
+    });
   }
 
   async function get(operationId) {
-    requireInit();
     safeId(operationId, 'operationId');
-    const op = operations.get(operationId);
-    if (!op) return null;
-    return websiteRemovalOperationPublicView(op);
+    return withRead(() => {
+      const op = operations.get(operationId);
+      if (!op) return null;
+      return websiteRemovalOperationPublicView(op);
+    });
   }
 
   async function list() {
-    requireInit();
-    return Array.from(operations.values()).map(websiteRemovalOperationPublicView);
+    return withRead(() => Array.from(operations.values()).map(websiteRemovalOperationPublicView));
   }
 
   async function listForWebsite(websiteId) {
-    requireInit();
     safeId(websiteId, 'websiteId');
-    return Array.from(operations.values())
+    return withRead(() => Array.from(operations.values())
       .filter((op) => op.websiteId === websiteId)
-      .map(websiteRemovalOperationPublicView);
+      .map(websiteRemovalOperationPublicView));
   }
 
   async function updateStep(operationId, stepId, updater) {
-    requireInit();
+    return withMutation(async () => {
     safeId(operationId, 'operationId');
     safeId(stepId, 'stepId');
     const op = operations.get(operationId);
@@ -267,6 +308,7 @@ export function createWebsiteRemovalOperationRegistry({
 
     await persist();
     return websiteRemovalOperationPublicView(op);
+    });
   }
 
   async function markStepRunning(operationId, stepId) {
