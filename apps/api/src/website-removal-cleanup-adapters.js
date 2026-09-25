@@ -115,11 +115,21 @@ export function createWebsiteRemovalCleanupAdapters({
     return Object.freeze({ websiteId, systemUser, unixIdentityCleaned: true });
   }
 
+  function canonicalFileCleanupTargets(websiteId, applicationId) {
+    const contract = createWebsitePathContract({ websiteId, applicationId });
+    return Object.freeze([
+      contract.runtime.applicationRoot,
+      contract.workspace.homeDirectory,
+      contract.static.buildRoot,
+      contract.static.publishRoot,
+    ]);
+  }
+
   async function inspectFileCleanup({ websiteId, applicationId } = {}) {
     await currentTarget(websiteId, applicationId);
-    const targets = inspection.targets;
+    const targets = canonicalFileCleanupTargets(websiteId, applicationId);
     for (const target of targets) await absentOrDirectory(target, lstatFn);
-    return Object.freeze({ ready: true, websiteId, applicationId, targets: Object.freeze([...targets]) });
+    return Object.freeze({ ready: true, websiteId, applicationId, targets });
   }
 
   async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [], retainedLogScopes = [] } = {}) {
@@ -128,15 +138,8 @@ export function createWebsiteRemovalCleanupAdapters({
       || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
     }
-    const contract = createWebsitePathContract({ websiteId, applicationId });
-    const targets = [
-      contract.runtime.applicationRoot,
-      contract.workspace.homeDirectory,
-      contract.static.buildRoot,
-      contract.static.publishRoot,
-    ];
     let removed = 0;
-    for (const target of targets) {
+    for (const target of inspection.targets) {
       if (await absentOrDirectory(target, lstatFn)) continue;
       await rmFn(target, { recursive: true, force: false, maxRetries: 0 });
       if (!(await absentOrDirectory(target, lstatFn))) {
