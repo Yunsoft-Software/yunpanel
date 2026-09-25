@@ -12,7 +12,7 @@ import {
   createWebsiteRemovalPreview,
 } from '../src/website-removal-plan.js';
 
-function mockPreview({ withDomains = true, backups = [], withCrons = false } = {}) {
+function mockPreview({ withDomains = true, backups = [], withCrons = false, withRuntimeBinding = true } = {}) {
   const website = {
     id: 'ws-1',
     name: 'test-site',
@@ -32,7 +32,7 @@ function mockPreview({ withDomains = true, backups = [], withCrons = false } = {
       domains: withDomains ? [{ id: 'dom-1', primaryDomain: 'example.com', parentDomainId: null }] : [],
       databases: { status: 'available', items: [{ id: 'db-1', state: 'mydb' }] },
       sftpKeys: { status: 'available', items: [{ id: 'key-1', state: 'active' }] },
-      runtimeBindings: { status: 'available', items: [{ id: 'rb-1', state: 'active' }] },
+      runtimeBindings: { status: 'available', items: withRuntimeBinding ? [{ id: 'app-1', state: 'active' }] : [] },
       unixIdentities: { status: 'available', items: [{ id: 'yunapp-site1', state: 'active' }] },
       logScopes: { status: 'available', items: [{ id: 'ws-1', state: 'managed' }] },
       crons: { status: 'available', items: withCrons ? [{ id: 'cron-1', state: 'active' }] : [] },
@@ -86,6 +86,7 @@ test('website-removal-runtime coordinates domain removal child operation before 
   };
 
   const actionsCalled = [];
+  let runtimeBinding = { revision: 1, adapter: 'passenger', sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
   const runtime = createWebsiteRemovalRuntime({
     registry,
     previewProvider: async () => mockPreview(),
@@ -102,15 +103,18 @@ test('website-removal-runtime coordinates domain removal child operation before 
       removeBinding: async (id) => actionsCalled.push(`removeDb:${id}`),
     },
     runtimeBindingRegistry: {
-      getBinding: async () => ({ revision: 1, adapter: 'passenger', sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }),
+      getBinding: async () => runtimeBinding,
       removeOwnedPassenger: async (_id, options) => {
         assert.equal(options.sourceOperationId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
         actionsCalled.push('removePassenger');
+        runtimeBinding = null;
       },
       removeOwnedStatic: async () => { throw new Error('unexpected static'); },
     },
     fileCleanupHandler: async (input) => { actionsCalled.push('cleanFiles'); return { ...input, filesCleaned: true }; },
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
     unixIdentityCleanupHandler: async (input) => { actionsCalled.push('cleanUnix'); return { ...input, unixIdentityCleaned: true }; },
+    unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
   });
 
   const preview = mockPreview();
@@ -150,8 +154,8 @@ test('website-removal-runtime coordinates domain removal child operation before 
     'revokeKey:key-1',
     'removeDb:db-1',
     'removePassenger',
-    'cleanUnix',
     'cleanFiles',
+    'cleanUnix',
     'removeApplication',
   ]);
 });
@@ -184,6 +188,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
 
   const preview = mockPreview({
     withDomains: false,
+    withRuntimeBinding: false,
     backups: [{ id: 'backup-1' }, { id: 'backup-2' }],
   });
 
@@ -197,6 +202,8 @@ test('website-removal-runtime cleans up database credentials and passes retained
     websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
     runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
+    unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
     databaseCredentialRegistry: {
       getForBinding: async (bindingId) => ({ id: `cred-${bindingId}`, revision: 2 }),
       deleteCredential: async (credId, opts) => {
@@ -209,9 +216,9 @@ test('website-removal-runtime cleans up database credentials and passes retained
         actions.push({ type: 'unbindDatabase', bindingId, confirmation: opts.confirmation });
       },
     },
-    fileCleanupHandler: async ({ websiteId, applicationId, retainedBackups }) => {
+    fileCleanupHandler: async ({ websiteId, applicationId, retainedBackups, retainedLogScopes }) => {
       actions.push({ type: 'fileCleanup', websiteId, applicationId, retainedBackups });
-      return { websiteId, applicationId, retainedBackups, filesCleaned: true, cleanedFilesCount: 42 };
+      return { websiteId, applicationId, retainedBackups, retainedLogScopes, filesCleaned: true, cleanedFilesCount: 42 };
     },
   });
 
