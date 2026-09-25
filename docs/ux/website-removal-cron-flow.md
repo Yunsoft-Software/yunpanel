@@ -19,3 +19,11 @@ Canonical file cleanup ve provisioning receipt-owned Unix identity cleanup artı
 - [ ] Gerçek site silme ekranında queued/blocked/failed/complete ayrımı, mevcut cron işine dönüş ve kontrollü devam; `direct-systemd`, legacy/unowned Unix receipt veya unsafe path blockerları fail-closed kalmalı.
 
 GitHub Actions, main değişikliği ve canlı deploy yapılmaz. Kaynak alt işleri tamamlanınca üst BUG-02/production otomatik kapanmaz.
+
+
+## 2026-09-25 devam — worker authorization
+
+- [x] User cron create/update/delete exact session/user/role ile queue edilir.
+- [x] Local cron worker site mutation lock sonrasında canlı session, role, Owner MFA veya site_manager Website grant'ını yeniden doğrular; revoke olmuş actor hosta dokunamaz.
+- [x] Website removal cron cleanup ayrı `system_removal` authorization modu kullanır; protocol ve worker bu modu yalnız `cron.remove` için kabul eder.
+- [ ] Gerçek logout/grant revoke ile queued job, iki process worker ve Node24/npm11 acceptance çalıştırılmalı.
