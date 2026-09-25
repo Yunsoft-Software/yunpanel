@@ -298,6 +298,28 @@ export function createWebsiteRemovalOperationRegistry({
   }
 
 
+  async function refreshActor(operationId, actor) {
+    const normalized = privateActor(actor);
+    return withMutation(async () => {
+      safeId(operationId, 'operationId');
+      const operation = operations.get(operationId);
+      if (!operation) {
+        throw new WebsiteRemovalOperationRegistryError('operation_not_found', 'Operation not found', 404);
+      }
+      const current = privateActor(operation.actor, { optional: true });
+      if (!current || current.userId !== normalized.userId || current.role !== normalized.role) {
+        throw new WebsiteRemovalOperationRegistryError(
+          'website_removal_actor_conflict',
+          'Website removal actor identity cannot be replaced',
+          409,
+        );
+      }
+      operation.actor = normalized;
+      await persist();
+      return privateActor(operation.actor);
+    });
+  }
+
   async function list() {
     return withRead(() => Array.from(operations.values()).map(websiteRemovalOperationPublicView));
   }
@@ -404,6 +426,7 @@ export function createWebsiteRemovalOperationRegistry({
     create,
     get,
     getActor,
+    refreshActor,
     list,
     listForWebsite,
     markStepRunning,
