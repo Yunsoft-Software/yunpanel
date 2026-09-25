@@ -171,6 +171,8 @@ const messages = Object.freeze({
   mail_rollback_recovery_current: 'The interrupted mail rollback was safely returned to the current configuration.',
   local_operation_not_migrated: 'This operation has not been migrated to the local runtime.',
   invalid_local_operation_payload: 'The local operation payload is invalid.',
+  website_provisioning_job_authorization_unavailable: 'Website provisioning authorization could not be verified before host execution.',
+  website_provisioning_job_actor_forbidden: 'Website access changed before the queued provisioning operation could execute.',
   legacy_operation_failed: 'The legacy host operation failed.',
   EACCES: 'The host denied access to a required resource.',
   EPERM: 'The host rejected a required operation.',
