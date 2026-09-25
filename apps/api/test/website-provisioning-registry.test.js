@@ -402,3 +402,29 @@ test('earlier compensation can begin after later steps are inactive or already c
     assert.equal(compensating.steps[0].compensation.state, 'applying');
   }
 });
+
+
+test('independent provisioning registries preserve concurrent journal writes', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-shared-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  try {
+    const left = createWebsiteProvisioningRegistry({
+      filePath,
+      now: () => Date.parse('2026-09-14T01:00:00.000Z'),
+    });
+    const right = createWebsiteProvisioningRegistry({
+      filePath,
+      now: () => Date.parse('2026-09-14T01:00:01.000Z'),
+    });
+    await Promise.all([left.init(), right.init()]);
+    await Promise.all([
+      left.create(input({ operation: operationId })),
+      right.create(input({ operation: secondOperationId })),
+    ]);
+    const expected = [operationId, secondOperationId].sort();
+    assert.deepEqual((await left.listForWebsite(websiteId)).map((item) => item.operationId).sort(), expected);
+    assert.deepEqual((await right.listForWebsite(websiteId)).map((item) => item.operationId).sort(), expected);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
