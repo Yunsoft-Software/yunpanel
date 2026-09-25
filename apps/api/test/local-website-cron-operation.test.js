@@ -263,3 +263,59 @@ test('system_removal cron authorization cannot be used for cron.apply', async ()
   );
   assert.equal(f.getAppliedInput(), null);
 });
+
+
+test('system_removal cron remove requires live removal-journal authorization before host mutation', async () => {
+  const f = createFixtures();
+  const systemPayload = {
+    ...f.payload,
+    authorizationMode: 'system_removal',
+  };
+  delete systemPayload.actorSessionId;
+  delete systemPayload.actorUserId;
+  delete systemPayload.actorRole;
+  const authorizations = [];
+  const operation = createLocalWebsiteCronOperation({
+    websiteCronRegistry: f.websiteCronRegistry,
+    websiteCronManager: f.websiteCronManager,
+    receiptStore: f.receiptStore,
+    authorizeSystemRemoval: async (input) => {
+      authorizations.push(input);
+      return { authorized: true, operationId: 'ws-rem-test', userId: 'owner-test' };
+    },
+  });
+  const result = await operation.execute(OPERATIONS.CRON_REMOVE, systemPayload, f.execution);
+  assert.equal(result.removed, true);
+  assert.equal(f.getRemovedInput().taskId, taskId);
+  assert.deepEqual(authorizations, [{
+    taskId,
+    websiteId,
+    applicationId,
+    serverId,
+    jobId: f.execution.jobId,
+  }]);
+});
+
+test('system_removal cron remove is denied before host mutation when removal Owner is no longer live', async () => {
+  const f = createFixtures();
+  const systemPayload = {
+    ...f.payload,
+    authorizationMode: 'system_removal',
+  };
+  delete systemPayload.actorSessionId;
+  delete systemPayload.actorUserId;
+  delete systemPayload.actorRole;
+  const operation = createLocalWebsiteCronOperation({
+    websiteCronRegistry: f.websiteCronRegistry,
+    websiteCronManager: f.websiteCronManager,
+    receiptStore: f.receiptStore,
+    authorizeSystemRemoval: async () => null,
+  });
+  await assert.rejects(
+    () => operation.execute(OPERATIONS.CRON_REMOVE, systemPayload, f.execution),
+    (error) => error.code === 'website_cron_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(f.getRemovedInput(), null);
+  assert.equal(f.getDeletedTask(), null);
+  assert.equal(f.getWrittenReceipt(), null);
+});
