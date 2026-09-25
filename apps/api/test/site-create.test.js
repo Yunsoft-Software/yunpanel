@@ -612,3 +612,32 @@ test('preflight detects package/service blockers and prevents site mutation', as
   );
 });
 
+
+
+test('site creation holds the process-shared site lock across metadata writes', async () => {
+  const state = await fixture();
+  const input = inputFor(state.serverId, {
+    operationId: '0b9853c0-876a-49f3-9b93-d6b17dd0e2f2',
+    primaryDomain: 'locked.example.com',
+  });
+  const preview = await previewSiteCreate({ input, ...dependencies(state) });
+  const locks = [];
+  const result = await createSite({
+    input,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+    ...dependencies(state, {
+      siteMutationLock: {
+        withSiteLock: async (identity, action) => {
+          locks.push(identity);
+          return action();
+        },
+      },
+    }),
+  });
+  assert.equal(result.website.id, preview.ids.websiteId);
+  assert.deepEqual(locks, [{
+    applicationId: preview.ids.applicationId,
+    websiteId: preview.ids.websiteId,
+  }]);
+});
