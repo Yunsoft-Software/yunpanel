@@ -71,6 +71,67 @@ test('agent jobs move through queued, running and succeeded states exactly once'
   );
 });
 
+test('private Website provisioning authorization survives durable claim without entering public job views', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-job-auth-'));
+  const filePath = path.join(directory, 'jobs.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'domain_activation',
+  };
+  const input = {
+    serverId: 'server-1',
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example.com', checksum: 'b'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-1',
+    idempotencyKey: 'website.domain.activate:test-operation',
+    authorization,
+  };
+  const registry = createJobRegistry({ filePath });
+  const queued = await registry.enqueue(input);
+  assert.equal(Object.hasOwn(queued, 'authorization'), false);
+  assert.doesNotMatch(JSON.stringify(queued), /website_provisioning|9ae512c0/);
+
+  const reopened = createJobRegistry({ filePath });
+  const claim = await reopened.claimNext('server-1');
+  assert.equal(claim.job.id, queued.id);
+  assert.equal(Object.hasOwn(claim.job, 'authorization'), false);
+  assert.deepEqual(claim.authorization, authorization);
+  assert.deepEqual(claim.envelope.payload, input.payload);
+});
+
+test('idempotent enqueue may add missing private provisioning authorization without changing work digest', async () => {
+  const registry = createJobRegistry();
+  const base = {
+    serverId: 'server-1',
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example.com', checksum: 'c'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-2',
+    idempotencyKey: 'website.domain.activate:authorization-upgrade',
+  };
+  const first = await registry.enqueue(base);
+  const second = await registry.enqueue({
+    ...base,
+    authorization: {
+      kind: 'website_provisioning',
+      version: 1,
+      operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+      websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+      stepId: 'domain_activation',
+    },
+  });
+  assert.equal(second.id, first.id);
+  const claim = await registry.claimNext('server-1');
+  assert.equal(claim.authorization.operationId, '9ae512c0-a717-4611-943c-6ce2ab0abf16');
+});
+
 test('DNS record jobs retain only provider-safe confirmed state', async () => {
   const registry = createJobRegistry();
   const payload = {
