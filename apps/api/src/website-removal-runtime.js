@@ -228,8 +228,7 @@ export function createWebsiteRemovalRuntime({
     const operations = await registry.list();
     for (const op of operations) {
       if (op.status === 'running') {
-        const liveActor = await requireLiveActor(actor, op.websiteId, { operationId: op.id });
-    const step = firstIncomplete(op);
+        const step = firstIncomplete(op);
         if (step && step.status === 'running') {
           // Fail-closed/inspect-only: do not blindly replay mutation
           await registry.blockStep(op.id, step.id, {
@@ -377,6 +376,7 @@ export function createWebsiteRemovalRuntime({
       throw new WebsiteRemovalRuntimeError('operation_not_found', 'Operation not found', 404);
     }
 
+    const liveActor = await requireLiveActor(actor, op.websiteId, { operationId: op.id });
     const step = firstIncomplete(op);
     const expectedConf = step ? stepContinuationConfirmation(op, step) : null;
     if (!step || op.status === 'removed' || step.id !== stepId || op.updatedAt !== expectedUpdatedAt
