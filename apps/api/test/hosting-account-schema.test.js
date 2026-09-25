@@ -26,8 +26,8 @@ test('additive install is idempotent and does not mutate existing auth data/vers
   f.db.exec("PRAGMA user_version = 2; INSERT INTO auth_user_websites VALUES ('legacy', 'website-old'); INSERT INTO auth_mfa VALUES ('owner', 'fixture-secret');");
   f.session('owner');
   const before = snapshot(f.db);
-  assert.deepEqual(initialize(f), { version: 1, created: true });
-  assert.deepEqual(initialize(f), { version: 1, created: false });
+  assert.deepEqual(initialize(f), { version: 2, created: true });
+  assert.deepEqual(initialize(f), { version: 2, created: false });
   assert.deepEqual(snapshot(f.db), before);
   assert.equal(f.db.prepare('PRAGMA user_version').get().user_version, 2);
 });
@@ -49,11 +49,62 @@ test('initialization requires the existing auth tables, not a second login store
 });
 test('unknown future version is not downgraded', (t) => {
   const f = setup(t); initialize(f);
-  f.db.exec('UPDATE auth_hosting_schema SET version = 2');
+  f.db.exec('UPDATE auth_hosting_schema SET version = 3');
   assert.throws(() => initialize(f), code('hosting_schema_invalid'));
   assert.throws(() => rollback(f), code('hosting_schema_invalid'));
-  assert.equal(f.db.prepare('SELECT version FROM auth_hosting_schema').get().version, 2);
+  assert.equal(f.db.prepare('SELECT version FROM auth_hosting_schema').get().version, 3);
 });
+test('populated v1 schema migrates to v2 without rewriting account identity or auth data', (t) => {
+  const f = setup(t);
+  initialize(f);
+  profile(f.db, 'reseller-a');
+  f.db.exec(`
+    DROP TRIGGER auth_hosting_lifecycle_intent_consume;
+    DROP TRIGGER auth_hosting_legacy_user_guard;
+    DROP TRIGGER auth_hosting_lifecycle_intent_immutable;
+    DROP TRIGGER auth_hosting_lifecycle_intent_insert;
+    DROP TABLE auth_hosting_lifecycle_intents;
+    CREATE TRIGGER auth_hosting_legacy_user_guard BEFORE UPDATE OF role, active ON users
+      WHEN (NEW.role IS NOT OLD.role OR NEW.active IS NOT OLD.active)
+        AND EXISTS(SELECT 1 FROM auth_hosting_accounts WHERE user_id = OLD.id) BEGIN
+        SELECT RAISE(ABORT, 'hosting_account_lifecycle_not_enabled');
+      END;
+    UPDATE auth_hosting_schema SET version = 1;
+  `);
+  const before = f.db.prepare("SELECT * FROM auth_hosting_accounts WHERE user_id = 'reseller-a'").get();
+  assert.deepEqual(initialize(f), { version: 2, created: false });
+  assert.deepEqual(f.db.prepare("SELECT * FROM auth_hosting_accounts WHERE user_id = 'reseller-a'").get(), before);
+  assert.equal(f.db.prepare('SELECT version FROM auth_hosting_schema').get().version, 2);
+  assert.ok(f.db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_hosting_lifecycle_intents'").get());
+});
+
+test('hosting active lifecycle requires a one-shot live Owner intent and never permits role mutation', (t) => {
+  const f = setup(t); initialize(f); profile(f.db, 'reseller-a');
+  assert.throws(() => f.db.exec("UPDATE users SET active = 0 WHERE id = 'reseller-a'"), /lifecycle_not_enabled/);
+  assert.throws(() => f.db.exec("UPDATE users SET role = 'owner' WHERE id = 'reseller-a'"), /lifecycle_not_enabled/);
+
+  f.db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)').run('reseller-a', 0, 'owner', 1000);
+  f.db.exec("UPDATE users SET active = 0 WHERE id = 'reseller-a'");
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'reseller-a'").get().active, 0);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM auth_hosting_lifecycle_intents").get().n, 0);
+
+  assert.throws(() => f.db.exec("UPDATE users SET active = 1 WHERE id = 'reseller-a'"), /lifecycle_not_enabled/);
+  f.db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)').run('reseller-a', 1, 'owner', 1001);
+  f.db.exec("UPDATE users SET active = 1 WHERE id = 'reseller-a'");
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'reseller-a'").get().active, 1);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM auth_hosting_lifecycle_intents").get().n, 0);
+});
+
+test('lifecycle intent requires a live Owner actor and cannot be rewritten in place', (t) => {
+  const f = setup(t); initialize(f); profile(f.db, 'reseller-a');
+  assert.throws(
+    () => f.db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)').run('reseller-a', 0, 'viewer', 1000),
+    /hosting_lifecycle_owner_required/,
+  );
+  f.db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)').run('reseller-a', 0, 'owner', 1000);
+  assert.throws(() => f.db.exec("UPDATE auth_hosting_lifecycle_intents SET target_active = 1 WHERE user_id = 'reseller-a'"), /intent_immutable/);
+});
+
 test('missing trigger is detected instead of silently repairing an incomplete schema', (t) => {
   const f = setup(t); initialize(f);
   f.db.exec('DROP TRIGGER auth_hosting_identity_immutable');
