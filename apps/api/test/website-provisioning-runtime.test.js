@@ -79,13 +79,19 @@ async function persistedFile(t, prefix) {
   return path.join(directory, 'operations.json');
 }
 
-function runtime({ filePath = null, manager = identityManager(), siteMutationLock = null } = {}) {
+function runtime({
+  filePath = null,
+  manager = identityManager(),
+  siteMutationLock = null,
+  authorizeActor = null,
+} = {}) {
   return createWebsiteProvisioningRuntime({
     filePath,
     identityManager: manager,
     passengerSiteManager: passengerSiteManager(),
     nginxManager: nginxManager(),
     siteMutationLock,
+    authorizeActor,
   });
 }
 
@@ -451,4 +457,97 @@ test('runtime takes the process-shared site lock before provisioning mutation', 
   const result = await provisioning.runNext(operationId);
   assert.equal(result.outcome, 'ready');
   assert.deepEqual(locks, [{ applicationId: null, websiteId }]);
+});
+
+
+test('runtime reauthorizes provisioning actor under the site lock before host apply', async () => {
+  const actor = {
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    role: 'site_manager',
+  };
+  let allowed = false;
+  let applyCalls = 0;
+  const events = [];
+  const provisioning = runtime({
+    manager: identityManager({
+      apply: async (intent) => {
+        applyCalls += 1;
+        return { satisfied: true, ...intent, uid: 1201, gid: 1201 };
+      },
+    }),
+    authorizeActor: async (candidate, targetWebsiteId) => {
+      events.push(`auth:${targetWebsiteId}`);
+      return allowed ? Object.freeze({ ...candidate }) : null;
+    },
+    siteMutationLock: {
+      withSiteLock: async (identity, action) => {
+        events.push(`lock:${identity.websiteId}`);
+        return action();
+      },
+    },
+  });
+  await provisioning.init();
+  await provisioning.create(plan());
+
+  await assert.rejects(
+    () => provisioning.runNext(operationId, actor),
+    (error) => error.code === 'website_provisioning_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(applyCalls, 0);
+  assert.deepEqual(events, [`lock:${websiteId}`, `auth:${websiteId}`]);
+
+  allowed = true;
+  const result = await provisioning.runNext(operationId, actor);
+  assert.equal(result.outcome, 'ready');
+  assert.equal(applyCalls, 1);
+});
+
+test('runtime requires actor when production authorization callback is configured', async () => {
+  const provisioning = runtime({
+    authorizeActor: async () => null,
+  });
+  await provisioning.init();
+  await provisioning.create(plan());
+  await assert.rejects(
+    () => provisioning.runNext(operationId),
+    (error) => error.code === 'website_provisioning_actor_required' && error.status === 403,
+  );
+});
+
+test('startup interrupted reconciliation remains inspect-only and does not require a user session', async (t) => {
+  const filePath = await persistedFile(t, 'yunpanel-provisioning-auth-restart-');
+  const beforeRestart = runtime({ filePath });
+  await beforeRestart.init();
+  await beforeRestart.create(plan());
+  await beforeRestart.registry.beginStep({ operationId, stepId: 'unix_identity' });
+
+  let authorizationCalls = 0;
+  let applyCalls = 0;
+  const afterRestart = runtime({
+    filePath,
+    authorizeActor: async () => {
+      authorizationCalls += 1;
+      return null;
+    },
+    manager: identityManager({
+      inspect: async (intent) => ({ satisfied: true, ...intent, uid: 1201, gid: 1201 }),
+      apply: async () => {
+        applyCalls += 1;
+        throw new Error('startup auth recovery must not reapply');
+      },
+    }),
+  });
+  const startup = await afterRestart.init();
+  assert.equal(startup[0].outcome, 'ready');
+  assert.equal(authorizationCalls, 0);
+  assert.equal(applyCalls, 0);
+});
+
+test('runtime exposes compensation capability through the guarded HTTP surface', () => {
+  const provisioning = runtime();
+  assert.equal(provisioning.supportsCompensation('unix_identity'), true);
+  assert.equal(typeof provisioning.runNext, 'function');
+  assert.equal(typeof provisioning.retryStep, 'function');
+  assert.equal(typeof provisioning.compensateStep, 'function');
 });
