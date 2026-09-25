@@ -2,6 +2,8 @@ import { createHash } from 'node:crypto';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const NODE_SERVICE_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
+const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 
 export class WebsiteRemovalPlanError extends Error {
   constructor(code, message, status = 400) {
@@ -132,7 +134,57 @@ function orderDomains(domains) {
   ]);
 }
 
-function dependencyPlan(dependencies, currentWebsite, application = null) {
+function applicationRuntimePlan(application, applicationState, currentWebsite) {
+  if (currentWebsite.applicationId === null || applicationState === null || applicationState === undefined) return null;
+  if (!applicationState || typeof applicationState !== 'object' || Array.isArray(applicationState)
+    || applicationState.id !== application.id
+    || applicationState.serverId !== application.serverId
+    || applicationState.type !== application.type
+    || applicationState.desiredRevision !== application.desiredRevision
+    || (applicationState.currentReleaseId ?? null) !== (application.currentReleaseId ?? null)) {
+    throw new WebsiteRemovalPlanError(
+      'website_removal_application_runtime_state_invalid',
+      'Website Application runtime state changed during removal preview',
+      409,
+    );
+  }
+  const adapter = applicationState.type === 'node' ? (applicationState.runtimeAdapter ?? null) : null;
+  if (adapter !== null && !['direct-systemd', 'passenger'].includes(adapter)) {
+    throw new WebsiteRemovalPlanError(
+      'website_removal_application_runtime_state_invalid',
+      'Website Application runtime adapter is invalid',
+      409,
+    );
+  }
+  const releaseId = applicationState.currentReleaseId ?? null;
+  const serviceName = applicationState.serviceName ?? null;
+  const currentCommitSha = applicationState.currentCommitSha ?? null;
+  const servicePort = applicationState.servicePort ?? null;
+  const healthPath = applicationState.healthPath ?? null;
+  if (adapter === 'direct-systemd' && releaseId !== null) {
+    if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName)
+      || typeof currentCommitSha !== 'string' || !COMMIT_PATTERN.test(currentCommitSha)
+      || !Number.isSafeInteger(servicePort) || servicePort < 1 || servicePort > 65535
+      || typeof healthPath !== 'string' || !healthPath.startsWith('/') || /[\u0000\r\n]/.test(healthPath)) {
+      throw new WebsiteRemovalPlanError(
+        'website_removal_application_runtime_state_invalid',
+        'Deployed direct-systemd Application runtime evidence is incomplete',
+        409,
+      );
+    }
+  }
+  return Object.freeze({
+    type: applicationState.type,
+    adapter,
+    releaseId,
+    serviceName,
+    currentCommitSha,
+    servicePort,
+    healthPath,
+  });
+}
+
+function dependencyPlan(dependencies, currentWebsite, application = null, applicationState = null) {
   if (!dependencies || typeof dependencies !== 'object' || Array.isArray(dependencies)) {
     throw new WebsiteRemovalPlanError(
       'website_removal_impact_invalid',
@@ -180,6 +232,7 @@ function dependencyPlan(dependencies, currentWebsite, application = null) {
     domains: orderedBoundDomains,
     applicationId: currentWebsite.applicationId,
     applicationRevision: currentWebsite.applicationId === null ? null : application.desiredRevision,
+    applicationRuntime: applicationRuntimePlan(application, applicationState, currentWebsite),
     systemUser: currentWebsite.systemUser,
     activeJobIds: activeJobs,
     additional,
@@ -227,7 +280,7 @@ function hardBlockers(blockers, plan) {
   return Object.freeze([...new Set(hard)].sort());
 }
 
-export function createWebsiteRemovalPreview({ website, impact } = {}) {
+export function createWebsiteRemovalPreview({ website, impact, applicationState = null } = {}) {
   const currentWebsite = websiteSnapshot(website);
   if (!impact || impact.version !== 1 || impact.resourceType !== 'website'
     || impact.operation !== 'delete' || impact.targetServerId !== null
@@ -252,7 +305,7 @@ export function createWebsiteRemovalPreview({ website, impact } = {}) {
   }
 
   const blockers = impactBlockers(impact);
-  const plan = dependencyPlan(impact.dependencies, currentWebsite, impact.application ?? null);
+  const plan = dependencyPlan(impact.dependencies, currentWebsite, impact.application ?? null, applicationState);
   const blocking = hardBlockers(blockers, plan);
 
   const previewCore = Object.freeze({
@@ -288,6 +341,7 @@ export const websiteRemovalPlanInternals = Object.freeze({
   normalizedIds,
   normalizedBucket,
   dependencyPlan,
+  applicationRuntimePlan,
   hardBlockers,
   orderDomains,
   orchestratableWebsiteImpactBlockers: ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS,
