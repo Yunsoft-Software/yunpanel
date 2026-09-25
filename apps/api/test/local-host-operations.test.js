@@ -171,6 +171,68 @@ test('DNS certificate operations materialize provider credentials only for host 
   assert.equal(Object.hasOwn(payload, 'dnsCredential'), false);
 });
 
+test('private provisioning authorization is rechecked before a local host mutation', async () => {
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'certificate',
+  };
+  const execution = {
+    jobId: '12345678-1234-4234-8234-123456789012',
+    serverId: 'server-1',
+    resourceType: 'certificate',
+    resourceId: 'certificate-1',
+    authorization,
+  };
+  const payload = { domains: ['example.com'], email: 'owner@example.com', staging: false };
+  let hostCalls = 0;
+  const withoutAuthorizer = createLocalHostOperations({
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await assert.rejects(
+    withoutAuthorizer.executeOperation(OPERATIONS.SSL_ISSUE, payload, execution),
+    { code: 'website_provisioning_job_authorization_unavailable' },
+  );
+  assert.equal(hostCalls, 0);
+
+  const authorizationCalls = [];
+  const denied = createLocalHostOperations({
+    authorizeWebsiteProvisioning: async (...args) => {
+      authorizationCalls.push(args);
+      return false;
+    },
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await assert.rejects(
+    denied.executeOperation(OPERATIONS.SSL_ISSUE, payload, execution),
+    { code: 'website_provisioning_job_actor_forbidden' },
+  );
+  assert.equal(hostCalls, 0);
+  assert.deepEqual(authorizationCalls[0][0], authorization);
+
+  const allowed = createLocalHostOperations({
+    authorizeWebsiteProvisioning: async (scope, context) => {
+      authorizationCalls.push([scope, context]);
+      return true;
+    },
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await allowed.executeOperation(OPERATIONS.SSL_ISSUE, payload, execution);
+  assert.equal(hostCalls, 1);
+  assert.equal(authorizationCalls.at(-1)[1].jobId, execution.jobId);
+});
+
 test('DNS record mutations materialize a provider credential only for the guarded adapter', async () => {
   const credentialId = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
   const payload = {
