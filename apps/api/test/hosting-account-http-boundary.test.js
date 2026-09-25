@@ -87,6 +87,27 @@ test('limit updates preserve optimistic revision and stale changes do not apply'
   assert.equal(stale.status, 409); assert.equal(stale.body.error.code, 'hosting_account_revision_conflict');
   assert.equal((await f.request('GET', `${root}/reseller-a`)).body.data.limits.maxWebsites, 0);
 });
+test('Owner status HTTP suspends login access without claiming Website suspension', async (t) => {
+  const f = await fixture(t);
+  await f.request('POST', root, seller());
+  const targetToken = f.session('reseller-a');
+  assert.ok(f.getSession(targetToken));
+
+  const response = await f.request('PATCH', `${root}/reseller-a/status`, { revision: 1, active: false });
+  assert.equal(response.status, 200);
+  assert.equal(response.body.data.account.active, false);
+  assert.equal(response.body.data.account.revision, 2);
+  assert.equal(response.body.data.hostSitesSuspended, false);
+  assert.equal(response.body.data.accessGranted, false);
+  assert.equal(f.getSession(targetToken), null);
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'reseller-a'").get().active, 0);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM auth_hosting_accounts WHERE user_id = 'reseller-a'").get().n, 1);
+
+  const stale = await f.request('PATCH', `${root}/reseller-a/status`, { revision: 1, active: true });
+  assert.equal(stale.status, 409);
+  assert.equal(stale.body.error.code, 'hosting_account_revision_conflict');
+});
+
 test('empty profile removal retains login and refuses a parent with customers', async (t) => {
   const f = await fixture(t); await f.request('POST', root, seller()); await f.request('POST', root, customer());
   const removal = (id) => f.request('DELETE', `${root}/${id}/profile`, { revision: 1, confirmation: `unregister-hosting-profile:${id}:1` });
