@@ -179,3 +179,86 @@ test('fingerprint ignores key order/timestamps but not Unix identity or missing 
   assert.equal(hostingWebsiteDigest(a), hostingWebsiteDigest(b));
   delete b.unixUser; assert.throws(() => hostingWebsiteDigest(b), code('invalid_hosting_site_input'));
 });
+
+
+function removalProof(overrides = {}) {
+  return {
+    operationId: 'ws-rem-11111111-1111-4111-8111-111111111111',
+    websiteId: uuid(1),
+    serverId: uuid(100),
+    applicationId: uuid(300),
+    websiteAbsent: true,
+    applicationAbsent: true,
+    ...overrides,
+  };
+}
+
+test('verified Website removal releases attached ownership and reseller capacity exactly once', (t) => {
+  const f = siteFixture(t);
+  f.reserve();
+  f.complete();
+  const customerToken = f.session('customer-a');
+  const resellerToken = f.session('reseller-a');
+  assert.equal(f.get().usage.websites, 1);
+
+  const receipt = f.store.siteAllocations.releaseRemoved(removalProof());
+  assert.equal(receipt.websiteId, uuid(1));
+  assert.equal(receipt.customerId, 'customer-a');
+  assert.equal(receipt.released, true);
+  assert.equal(receipt.quotaReleased, true);
+  assert.equal(f.count('auth_customer_websites'), 0);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+  assert.equal(f.get().usage.websites, 0);
+  assert.equal(f.getSession(customerToken), null);
+  assert.equal(f.getSession(resellerToken), null);
+
+  const retry = f.store.siteAllocations.releaseRemoved(removalProof());
+  assert.deepEqual(retry, { websiteId: uuid(1), released: false, quotaReleased: false });
+});
+
+test('verified removal can release a reserved hold without pretending ownership was attached', (t) => {
+  const f = siteFixture(t);
+  f.reserve();
+  assert.equal(f.count('auth_customer_websites'), 0);
+  const receipt = f.store.siteAllocations.releaseRemoved(removalProof());
+  assert.equal(receipt.released, true);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+  assert.equal(f.count('auth_customer_websites'), 0);
+  assert.equal(f.get().usage.websites, 0);
+});
+
+for (const patch of [
+  { websiteAbsent: false },
+  { applicationAbsent: false },
+  { operationId: '' },
+  { serverId: uuid(999) },
+]) {
+  test(`quota release rejects invalid or mismatched removal evidence: ${JSON.stringify(patch)}`, (t) => {
+    const f = siteFixture(t);
+    f.reserve();
+    f.complete();
+    assert.throws(
+      () => f.store.siteAllocations.releaseRemoved(removalProof(patch)),
+      (error) => ['hosting_site_release_evidence_invalid', 'hosting_site_identity_conflict'].includes(error.code),
+    );
+    assert.equal(f.count('auth_hosting_site_allocations'), 1);
+    assert.equal(f.count('auth_customer_websites'), 1);
+    assert.equal(f.get().usage.websites, 1);
+  });
+}
+
+test('release audit failure rolls back ownership and quota deletion', (t) => {
+  let fail = false;
+  const f = siteFixture(t, {
+    audit: (_actor, action) => {
+      if (fail && action === 'hosting.website_released') throw new Error('audit unavailable');
+    },
+  });
+  f.reserve();
+  f.complete();
+  fail = true;
+  assert.throws(() => f.store.siteAllocations.releaseRemoved(removalProof()), /audit unavailable/);
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.count('auth_customer_websites'), 1);
+  assert.equal(f.get().usage.websites, 1);
+});
