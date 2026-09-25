@@ -274,7 +274,7 @@ export function createWebsiteRoundcubeProvisioningHandler({
     return record;
   }
 
-  async function driveApply(request, record) {
+  async function driveApply(request, record, context) {
     let state = await roundcubeDomainMappingService.inspect(request.mailDomainId);
     if (!state || state.mapping.operationId !== record.operationId) {
       throw new WebsiteRoundcubeProvisioningError(
@@ -289,7 +289,7 @@ export function createWebsiteRoundcubeProvisioningHandler({
         operationId: state.mapping.operationId,
         expectedUpdatedAt: state.mapping.updatedAt,
         confirmation: state.actions.continuation,
-      });
+      }, { authorization: websiteProvisioningJobAuthorization(context) });
     }
     if (state.job && ['queued', 'running'].includes(state.job.status)) {
       const child = await jobRegistry.getJob(state.job.id);
@@ -316,7 +316,7 @@ export function createWebsiteRoundcubeProvisioningHandler({
         operationId: state.mapping.operationId,
         expectedUpdatedAt: state.mapping.updatedAt,
         confirmation: state.actions.continuation,
-      });
+      }, { authorization: websiteProvisioningJobAuthorization(context) });
     }
     if (!state?.mapping || state.mapping.state !== 'active') {
       throw new WebsiteRoundcubeProvisioningError(
@@ -336,7 +336,7 @@ export function createWebsiteRoundcubeProvisioningHandler({
     if (existing) return existing;
 
     const record = await beginOrResume(context, request, certificate.certificateId);
-    const active = record.state === 'active' ? record : await driveApply(request, record);
+    const active = record.state === 'active' ? record : await driveApply(request, record, context);
     const endpoint = await roundcubeWebmailEndpointResolver.resolve(scoped);
     return activeEvidence(active, endpoint, request, certificate.certificateId);
   }
