@@ -831,8 +831,8 @@ export function createWebsiteProvisioningRuntime({
       ?? operation.resources?.website?.applicationId
       ?? null;
     const execute = async () => {
-      if (authorize) await requireLiveActor(actor, operation.websiteId);
-      return action();
+      const liveActor = authorize ? await requireLiveActor(actor, operation.websiteId) : null;
+      return action(liveActor);
     };
     if (!siteMutationLock) return execute();
     if (typeof siteMutationLock.withSiteLock !== 'function') {
@@ -852,14 +852,14 @@ export function createWebsiteProvisioningRuntime({
     return withOperationMutationLock(
       operationId,
       actor,
-      () => orchestrator.runNext(operationId),
+      (liveActor) => orchestrator.runNext(operationId, liveActor),
     );
   }
 
   async function retryStep(operationId, stepId, actor = null) {
-    return withOperationMutationLock(operationId, actor, async () => {
+    return withOperationMutationLock(operationId, actor, async (liveActor) => {
       await registry.retryStep({ operationId, stepId });
-      return orchestrator.runNext(operationId);
+      return orchestrator.runNext(operationId, liveActor);
     });
   }
 
@@ -867,7 +867,7 @@ export function createWebsiteProvisioningRuntime({
     return withOperationMutationLock(
       operationId,
       actor,
-      () => orchestrator.compensateStep(operationId, stepId),
+      (liveActor) => orchestrator.compensateStep(operationId, stepId, liveActor),
     );
   }
 
