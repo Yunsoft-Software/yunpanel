@@ -80,6 +80,7 @@ export function createWebsiteRemovalRuntime({
   unixIdentityCleanupInspector = null,
   siteMutationLock = null,
   hostingAllocationReleaseHandler = null,
+  authorizeActor = null,
 } = {}) {
   if (!registry || typeof registry.create !== 'function' || typeof registry.get !== 'function') {
     throw new WebsiteRemovalRuntimeError(
@@ -105,6 +106,83 @@ export function createWebsiteRemovalRuntime({
 
   let active = activeRemovals.get(registry);
   if (!active) { active = new Set(); activeRemovals.set(registry, active); }
+  function submittedActor(value) {
+    if (value === null || value === undefined) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || typeof value.sessionId !== 'string' || !SAFE_ID.test(value.sessionId)
+      || typeof value.userId !== 'string' || !SAFE_ID.test(value.userId)
+      || value.role !== 'owner') {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_actor_invalid',
+        'Valid Owner actor evidence is required.',
+        400,
+      );
+    }
+    return Object.freeze({
+      sessionId: value.sessionId,
+      userId: value.userId,
+      role: 'owner',
+    });
+  }
+
+  async function requireLiveActor(actor, websiteId, { operationId = null } = {}) {
+    const submitted = submittedActor(actor);
+    if (authorizeActor === null) return submitted;
+    if (typeof authorizeActor !== 'function') {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_actor_authorizer_unavailable',
+        'Website removal actor authorization is unavailable.',
+        503,
+      );
+    }
+    if (!submitted) {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_actor_required',
+        'Live Owner authorization is required for Website removal.',
+        403,
+      );
+    }
+    if (operationId !== null) {
+      if (typeof registry.getActor !== 'function') {
+        throw new WebsiteRemovalRuntimeError(
+          'website_removal_actor_evidence_unavailable',
+          'Website removal actor journal evidence is unavailable.',
+          503,
+        );
+      }
+      const original = await registry.getActor(operationId);
+      if (!original || original.userId !== submitted.userId || original.role !== submitted.role) {
+        throw new WebsiteRemovalRuntimeError(
+          'website_removal_actor_mismatch',
+          'Website removal must be continued by the Owner account that started it.',
+          403,
+        );
+      }
+    }
+    let current;
+    try { current = await authorizeActor(submitted, websiteId); }
+    catch {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_actor_forbidden',
+        'Owner authorization changed before Website removal could continue.',
+        403,
+      );
+    }
+    if (!current || current.userId !== submitted.userId || current.role !== 'owner'
+      || current.sessionId !== submitted.sessionId) {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_actor_forbidden',
+        'Owner authorization changed before Website removal could continue.',
+        403,
+      );
+    }
+    return Object.freeze({
+      sessionId: current.sessionId,
+      userId: current.userId,
+      role: 'owner',
+    });
+  }
+
   async function withWebsiteMutation(input, action) {
     const websiteId = input?.websiteId;
     if (typeof websiteId !== 'string' || !SAFE_ID.test(websiteId)) {
@@ -150,7 +228,8 @@ export function createWebsiteRemovalRuntime({
     const operations = await registry.list();
     for (const op of operations) {
       if (op.status === 'running') {
-        const step = firstIncomplete(op);
+        const liveActor = await requireLiveActor(actor, op.websiteId, { operationId: op.id });
+    const step = firstIncomplete(op);
         if (step && step.status === 'running') {
           // Fail-closed/inspect-only: do not blindly replay mutation
           await registry.blockStep(op.id, step.id, {
@@ -242,7 +321,7 @@ export function createWebsiteRemovalRuntime({
       hardBlockers: Object.freeze([...new Set([...(current?.hardBlockers ?? []), ...missing])]) });
   }
 
-  async function start({ websiteId, previewDigest, confirmation } = {}) {
+  async function start({ websiteId, previewDigest, confirmation, actor = null } = {}) {
     if (typeof websiteId !== 'string' || !SAFE_ID.test(websiteId)
       || typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)
       || typeof confirmation !== 'string' || !confirmation.startsWith(`start-website-remove:${websiteId}:`)) {
@@ -253,6 +332,7 @@ export function createWebsiteRemovalRuntime({
       );
     }
 
+    const liveActor = await requireLiveActor(actor, websiteId);
     const currentPreview = await preview({ websiteId });
     if (!currentPreview || currentPreview.website?.id !== websiteId
       || currentPreview.previewDigest !== previewDigest
@@ -278,8 +358,9 @@ export function createWebsiteRemovalRuntime({
       if (prior.some((operation) => operation.status !== 'removed')) {
         throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
       }
-      const op = await registry.create(currentPreview);
-      return runNextStep(op.id);
+      const lockedActor = await requireLiveActor(liveActor, websiteId);
+      const op = await registry.create(currentPreview, { actor: lockedActor });
+      return runNextStep(op.id, lockedActor);
     });
   }
 
@@ -289,6 +370,7 @@ export function createWebsiteRemovalRuntime({
     stepId,
     expectedUpdatedAt,
     confirmation,
+    actor = null,
   } = {}) {
     const op = await loadOperation(operationId);
     if (op.websiteId !== websiteId) {
@@ -309,7 +391,7 @@ export function createWebsiteRemovalRuntime({
     return withProcessMutationLock({
       websiteId: op.websiteId,
       applicationId: op.applicationId ?? null,
-    }, () => runNextStep(op.id));
+    }, () => runNextStep(op.id, liveActor));
   }
 
   async function releaseHostingAllocation(op, applicationAbsent) {
@@ -421,8 +503,11 @@ export function createWebsiteRemovalRuntime({
     return registry.get(op.id);
   }
 
-  async function runNextStep(operationId) {
+  async function runNextStep(operationId, actor = null) {
     let op = await loadOperation(operationId);
+    if (authorizeActor !== null) {
+      await requireLiveActor(actor, op.websiteId, { operationId: op.id });
+    }
     const step = firstIncomplete(op);
     if (!step) return publicOperation(op);
 
