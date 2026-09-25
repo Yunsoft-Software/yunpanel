@@ -6,3 +6,10 @@ const preview={version:1,operation:'website_remove',website:{id:scope.websiteId,
 test('blocked removal state validates exact Website scope',()=>{const v=removalState({preview,operations:[]},scope);assert.equal(v.preview.readyToStart,false);assert.match(removalBlockerLabel('application_cleanup_unavailable'),/Uygulama kaydı/);});
 test('foreign Website preview is rejected',()=>assert.throws(()=>removalState({preview:{...preview,website:{...preview.website,id:'44444444-4444-4444-8444-444444444444'}},operations:[]},scope)));
 test('removal access is Owner-only',()=>{const input={domainId:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',domains:{status:'ready',items:[{id:'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',websiteId:scope.websiteId,serverId:scope.serverId,primaryDomain:scope.label}]},websites:{status:'ready',items:[{id:scope.websiteId,serverId:scope.serverId}]}};assert.equal(resolveRemovalAccess({...input,isOwner:false}).state,'forbidden');assert.deepEqual(resolveRemovalAccess({...input,isOwner:true}),{state:'ready',scope});});
+
+test('removal operation rejects non-ISO journal revision timestamp', async()=>{
+ const {removalOperation}=await import('../src/workspace/website-removal-model.js');
+ const op={id:'ws-rem-12345678',websiteId:scope.websiteId,serverId:scope.serverId,previewDigest:'b'.repeat(64),status:'running',updatedAt:'bad',
+  steps:[],actions:{stepContinuationConfirmation:null}};
+ assert.throws(()=>removalOperation(op,scope));
+});

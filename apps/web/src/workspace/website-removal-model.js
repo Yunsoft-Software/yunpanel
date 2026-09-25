@@ -3,6 +3,7 @@ const SAFE=/^[A-Za-z0-9._:-]{1,128}$/;
 const SHA=/^[a-f0-9]{64}$/;
 const record=(v)=>Boolean(v&&typeof v==='object'&&!Array.isArray(v));
 const text=(v,max=160)=>typeof v==='string'&&v.length>0&&v.length<=max&&!/[\u0000-\u001f\u007f]/u.test(v);
+const iso=(v)=>typeof v==='string'&&Number.isFinite(Date.parse(v))&&new Date(v).toISOString()===v;
 const need=(v)=>{if(!v)throw new WebsiteRemovalModelError();};
 export class WebsiteRemovalModelError extends Error{constructor(code='website_removal_response_invalid'){super(code);this.code=code;}}
 export function removalScope(value){
@@ -41,7 +42,7 @@ export function removalPreview(value,scope){
 export function removalOperation(value,scope){
  need(record(value)&&SAFE.test(value.id??'')&&value.websiteId===scope.websiteId&&value.serverId===scope.serverId
   &&['pending','running','blocked','failed','removed'].includes(value.status)&&Array.isArray(value.steps)&&value.steps.length<=200
-  &&SHA.test(value.previewDigest??'')&&record(value.actions));
+  &&SHA.test(value.previewDigest??'')&&iso(value.updatedAt)&&record(value.actions));
  const confirmation=value.actions.stepContinuationConfirmation;
  need(confirmation===null||text(confirmation,700));
  return Object.freeze({id:value.id,websiteId:value.websiteId,serverId:value.serverId,

@@ -1,5 +1,27 @@
-import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import test from 'node:test';
+import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import test from 'node:test';
 const source=(name)=>readFile(new URL('../src/workspace/'+name,import.meta.url),'utf8');
-test('Owner hosting settings shows removal preview after suspension/isolation controls',async()=>{const text=await source('SiteDetailPage.jsx');assert.match(text,/website && isOwner && <WebsiteRemovalPanel/);assert.match(text,/WebsiteSuspensionPanel/);assert.match(text,/WebsiteIsolationPanel/);});
-test('removal preview client is GET-only and cannot fire destructive POST',async()=>{const text=await source('website-removal-client.js');assert.match(text,/\/removal/);assert.doesNotMatch(text,/method:\s*['"]POST|\/continue/);});
-test('removal panel has no destructive button while blocker exists',async()=>{const text=await source('WebsiteRemovalPanel.jsx');assert.match(text,/Sil butonu gösterilmez/);assert.doesNotMatch(text,/onClick=.*remove|onClick=.*delete/);});
+
+test('Owner hosting settings keeps removal preview and enables only reviewed journal mutations',async()=>{
+ const text=await source('SiteDetailPage.jsx');
+ assert.match(text,/website && isOwner && <WebsiteRemovalPanel/);
+ const client=await source('website-removal-client.js');
+ assert.match(client,/previewDigest:preview\.previewDigest/);
+ assert.match(client,/stepId:step\.stepId/);
+ assert.match(client,/\/website-removal-operations/);
+ assert.doesNotMatch(client,/setInterval|setTimeout/);
+});
+test('removal UI requires typed domain confirmation and explicit per-step continuation',async()=>{
+ const text=await source('WebsiteRemovalPanel.jsx');
+ assert.match(text,/confirmation=\{scope.label\}/);
+ assert.match(text,/Sonraki silme adımını çalıştır/);
+ assert.match(text,/Her çağrı yalnız journal'daki mevcut adımı ilerletir/);
+});
+test('global recovery remains available after Website metadata disappears',async()=>{
+ const page=await source('WebsitesPage.jsx');
+ assert.match(page,/WebsiteRemovalRecoveryPanel/);
+ const recovery=await source('WebsiteRemovalRecoveryPanel.jsx');
+ assert.match(recovery,/website-removal-operations/);
+ assert.match(recovery,/POST tekrar edilmedi/);
+});
