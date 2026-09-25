@@ -119,7 +119,7 @@ import { createWebsiteCronApplyService } from './website-cron-apply-service.js';
 import { createWebsitePhpToolsService } from './website-php-tools-service.js';
 import { createLocalWebsitePhpToolOperation } from './local-website-php-tool-operation.js';
 import { createWebsitePhpToolActionService } from './website-php-tool-action-service.js';
-import { createWebsitePhpToolActionLock } from './website-php-tool-action-lock.js';
+import { createSiteMutationLock } from './site-mutation-lock.js';
 import { createWebsiteCachePolicyRegistry } from './website-cache-policy-registry.js';
 import { createWebsiteCacheService } from './website-cache-service.js';
 import { createPanelSettingsRegistry } from './panel-settings-registry.js';
@@ -364,14 +364,11 @@ const authorizeWebsitePhpActor = async (actor, websiteId) => {
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
 };
-const websitePhpActionLock = createWebsitePhpToolActionLock({
-  root: path.join(controlPlaneStateRoot, 'locks', 'php-actions'),
-});
 const websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
   jobRegistry,
   authorizeActor: authorizeWebsitePhpActor,
-  withApplicationLock: websitePhpActionLock.withApplicationLock,
+  withApplicationLock: siteMutationLock.withApplicationLock,
 });
 const localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
@@ -389,9 +386,13 @@ const websiteCacheService = createWebsiteCacheService({
   cachePolicyRegistry: websiteCachePolicyRegistry,
   cacheIsolationManager,
 });
+const siteMutationLock = createSiteMutationLock({
+  root: path.join(controlPlaneStateRoot, 'locks', 'site-mutations'),
+});
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
   isolationMigrationFilePath: websiteIsolationMigrationStorePath,
+  siteMutationLock,
 });
 const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
   filePath: websiteSftpKeyStorePath,
@@ -887,6 +888,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
     unixIdentityCleanupInspector: websiteRemovalCleanupAdapters?.inspectUnixIdentityCleanup ?? null,
+    siteMutationLock,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
@@ -1129,6 +1131,7 @@ const listener = createAuthenticatedApi({
       websitePhpToolActionService,
       websiteCacheService,
       panelSettingsService,
+      siteMutationLock,
       localServerId,
       terminalCapabilityRegistry,
       ttydSessionManager,
