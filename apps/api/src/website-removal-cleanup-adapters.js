@@ -117,13 +117,13 @@ export function createWebsiteRemovalCleanupAdapters({
 
   async function inspectFileCleanup({ websiteId, applicationId } = {}) {
     await currentTarget(websiteId, applicationId);
-    const targets = (await inspectFileCleanup({ websiteId, applicationId })).targets;
+    const targets = inspection.targets;
     for (const target of targets) await absentOrDirectory(target, lstatFn);
     return Object.freeze({ ready: true, websiteId, applicationId, targets: Object.freeze([...targets]) });
   }
 
   async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [], retainedLogScopes = [] } = {}) {
-    await inspectFileCleanup({ websiteId, applicationId });
+    const inspection = await inspectFileCleanup({ websiteId, applicationId });
     if (!Array.isArray(retainedBackups) || retainedBackups.some((id) => typeof id !== 'string' || !id)
       || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
