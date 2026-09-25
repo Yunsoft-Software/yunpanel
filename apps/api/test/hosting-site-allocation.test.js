@@ -186,9 +186,9 @@ function removalProof(overrides = {}) {
     operationId: 'ws-rem-11111111-1111-4111-8111-111111111111',
     websiteId: uuid(1),
     serverId: uuid(100),
-    applicationId: uuid(300),
+    applicationId: null,
     websiteAbsent: true,
-    applicationAbsent: true,
+    applicationAbsent: false,
     ...overrides,
   };
 }
@@ -229,7 +229,7 @@ test('verified removal can release a reserved hold without pretending ownership 
 
 for (const patch of [
   { websiteAbsent: false },
-  { applicationAbsent: false },
+  { applicationAbsent: true },
   { operationId: '' },
   { serverId: uuid(999) },
 ]) {
