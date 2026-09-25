@@ -48,6 +48,113 @@ test('active status is read from users, not supplied as profile data', (t) => {
   const f = setup(t); f.db.exec("UPDATE users SET active = 0 WHERE id = 'customer-a'");
   f.reseller(); assert.equal(f.customer().active, false);
 });
+test('Owner can suspend and reactivate a hosting account without changing profile identity', (t) => {
+  const f = setup(t);
+  const profile = f.customer('direct', null);
+  const targetToken = f.session('direct');
+  f.db.exec("INSERT INTO fixture_pending_mfa VALUES ('direct'); INSERT INTO auth_mfa VALUES ('direct', 'fixture-enrollment');");
+  f.revoked.length = 0;
+
+  const suspended = f.store.setActive(f.token, f.requireManagement, 'direct', {
+    revision: profile.revision,
+    active: false,
+  });
+  assert.equal(suspended.active, false);
+  assert.equal(suspended.revision, 2);
+  assert.equal(suspended.userRevision, 3);
+  assert.equal(f.getSession(targetToken), null);
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'direct'").get().active, 0);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM fixture_pending_mfa WHERE user_id = 'direct'").get().n, 0);
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM auth_mfa WHERE user_id = 'direct'").get().n, 1);
+  assert.deepEqual(f.revoked, [{ id: 'direct', reason: 'hosting_account_suspended' }]);
+
+  const staleWhileInactive = f.session('direct');
+  assert.equal(f.getSession(staleWhileInactive), null);
+  f.revoked.length = 0;
+  const reactivated = f.store.setActive(f.token, f.requireManagement, 'direct', {
+    revision: suspended.revision,
+    active: true,
+  });
+  assert.equal(reactivated.active, true);
+  assert.equal(reactivated.revision, 3);
+  assert.equal(reactivated.userRevision, 4);
+  assert.equal(f.getSession(staleWhileInactive), null);
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'direct'").get().active, 1);
+  assert.deepEqual(f.revoked, [{ id: 'direct', reason: 'hosting_account_reactivated' }]);
+});
+
+test('suspending a reseller revokes descendant sessions without silently disabling customer accounts or sites', (t) => {
+  const f = setup(t);
+  const reseller = f.reseller();
+  f.customer('customer-a', 'reseller-a');
+  f.customer('customer-b', 'reseller-a');
+  f.customer('direct', null);
+  const resellerToken = f.session('reseller-a');
+  const customerAToken = f.session('customer-a');
+  const customerBToken = f.session('customer-b');
+  const directToken = f.session('direct');
+  f.db.exec("INSERT INTO auth_customer_websites VALUES ('site-a', 'customer-a', 1000)");
+  f.revoked.length = 0;
+
+  const result = f.store.setActive(f.token, f.requireManagement, 'reseller-a', {
+    revision: reseller.revision,
+    active: false,
+  });
+  assert.equal(result.active, false);
+  assert.equal(f.getSession(resellerToken), null);
+  assert.equal(f.getSession(customerAToken), null);
+  assert.equal(f.getSession(customerBToken), null);
+  assert.ok(f.getSession(directToken));
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'customer-a'").get().active, 1);
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'customer-b'").get().active, 1);
+  assert.equal(f.db.prepare("SELECT customer_id FROM auth_customer_websites WHERE website_id = 'site-a'").get().customer_id, 'customer-a');
+  assert.deepEqual(f.revoked, [
+    { id: 'reseller-a', reason: 'hosting_account_suspended' },
+    { id: 'customer-a', reason: 'hosting_parent_suspended' },
+    { id: 'customer-b', reason: 'hosting_parent_suspended' },
+  ]);
+});
+
+test('unchanged hosting active state is a no-op without revision, session or audit churn', (t) => {
+  const f = setup(t);
+  const reseller = f.reseller();
+  const targetToken = f.session('reseller-a');
+  f.revoked.length = 0;
+  const audits = f.db.prepare('SELECT count(*) AS n FROM fixture_audit').get().n;
+  const same = f.store.setActive(f.token, f.requireManagement, 'reseller-a', {
+    revision: reseller.revision,
+    active: true,
+  });
+  assert.equal(same.revision, reseller.revision);
+  assert.ok(f.getSession(targetToken));
+  assert.deepEqual(f.revoked, []);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM fixture_audit').get().n, audits);
+});
+
+test('hosting lifecycle validates revision, active value and mass-assignment fields', (t) => {
+  const f = setup(t); f.reseller();
+  assert.throws(() => f.store.setActive(f.token, f.requireManagement, 'reseller-a', { revision: 2, active: false }), code('hosting_account_revision_conflict'));
+  assert.throws(() => f.store.setActive(f.token, f.requireManagement, 'reseller-a', { revision: 1, active: 0 }), code('invalid_active'));
+  assert.throws(() => f.store.setActive(f.token, f.requireManagement, 'reseller-a', { revision: 1, active: false, role: 'owner' }), code('invalid_hosting_account_input'));
+});
+
+test('hosting lifecycle audit failure rolls back active state, revision, sessions and lifecycle intent', (t) => {
+  const f = setup(t);
+  const reseller = f.reseller();
+  const targetToken = f.session('reseller-a');
+  f.revoked.length = 0;
+  const store = createHostingAccountStore({ ...f, audit: () => { throw new Error('audit unavailable'); } });
+  assert.throws(
+    () => store.setActive(f.token, f.requireManagement, 'reseller-a', { revision: reseller.revision, active: false }),
+    /audit unavailable/,
+  );
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'reseller-a'").get().active, 1);
+  assert.equal(f.get().revision, reseller.revision);
+  assert.ok(f.getSession(targetToken));
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM auth_hosting_lifecycle_intents').get().n, 0);
+  assert.deepEqual(f.revoked, []);
+});
+
 for (const extra of ['role', 'actor', 'active', 'websiteIds', 'customerCount', 'resellerId']) {
   test(`reseller registration rejects mass-assignment field ${extra}`, (t) => {
     const f = setup(t);
@@ -153,7 +260,7 @@ for (const input of [{ limit: 101 }, { offset: -1 }, { limit: '2' }, { kind: 'ow
     const f = setup(t); assert.throws(() => f.store.list(f.token, f.requireManagement, input));
   });
 }
-for (const name of ['registerReseller', 'registerCustomer', 'get', 'list', 'updateLimits', 'unregister']) {
+for (const name of ['registerReseller', 'registerCustomer', 'get', 'list', 'updateLimits', 'setActive', 'unregister']) {
   test(`${name} is Owner-only even with valid existing profile IDs`, (t) => {
     const f = setup(t); f.reseller();
     const viewer = f.session('viewer'); const reseller = f.session('reseller-a');
