@@ -45,7 +45,8 @@ function fixture({ unmanagedDatabase = false } = {}) {
   const jobRegistry = {
     async enqueue(input) {
       if (byKey.has(input.idempotencyKey)) return jobs.get(byKey.get(input.idempotencyKey));
-      if ([OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(input.operation)) {
+      if ([OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE,
+        OPERATIONS.DATABASE_CREDENTIAL_APPLY, OPERATIONS.DATABASE_CREDENTIAL_DELETE].includes(input.operation)) {
         assert.deepEqual(input.authorization, {
           kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'website_database',
         });
@@ -155,7 +156,7 @@ function fixture({ unmanagedDatabase = false } = {}) {
       confirmation: `${operation}:${desiredStateSha256}`,
     };
   };
-  const queueCredential = async (operation, input) => ({
+  const queueCredential = async (operation, input, { authorization = null } = {}) => ({
     desiredStateSha256: input.expectedDesiredStateSha256,
     job: await jobRegistry.enqueue({
       serverId,
@@ -165,13 +166,14 @@ function fixture({ unmanagedDatabase = false } = {}) {
       resourceType: 'database',
       resourceId: databaseName,
       idempotencyKey: `${operation}:${credentialId}:${input.expectedDesiredStateSha256}`,
+      authorization,
     }),
   });
   const databaseCredentialApplyService = {
     previewApply: async () => preview(OPERATIONS.DATABASE_CREDENTIAL_APPLY),
-    queueApply: (input) => queueCredential(OPERATIONS.DATABASE_CREDENTIAL_APPLY, input),
+    queueApply: (input, options) => queueCredential(OPERATIONS.DATABASE_CREDENTIAL_APPLY, input, options),
     previewDelete: async () => preview(OPERATIONS.DATABASE_CREDENTIAL_DELETE),
-    queueDelete: (input) => queueCredential(OPERATIONS.DATABASE_CREDENTIAL_DELETE, input),
+    queueDelete: (input, options) => queueCredential(OPERATIONS.DATABASE_CREDENTIAL_DELETE, input, options),
   };
   const databaseCredentialMaterializer = {
     async materializePublic(payload) {
