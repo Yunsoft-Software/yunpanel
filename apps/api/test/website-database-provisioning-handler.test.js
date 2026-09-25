@@ -45,6 +45,11 @@ function fixture({ unmanagedDatabase = false } = {}) {
   const jobRegistry = {
     async enqueue(input) {
       if (byKey.has(input.idempotencyKey)) return jobs.get(byKey.get(input.idempotencyKey));
+      if ([OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(input.operation)) {
+        assert.deepEqual(input.authorization, {
+          kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'website_database',
+        });
+      }
       const id = nextId();
       let status = 'succeeded';
       let result;
@@ -213,7 +218,7 @@ function fixture({ unmanagedDatabase = false } = {}) {
   });
   return {
     handler,
-    context: { operationId, websiteId, intent: intent(), evidence: null },
+    context: { operationId, websiteId, stepId: 'website_database', intent: intent(), evidence: null },
     state: () => ({ databaseExists, binding, credential, accountApplied, jobs: [...jobs.values()] }),
   };
 }
