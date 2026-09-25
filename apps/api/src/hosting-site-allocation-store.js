@@ -151,6 +151,9 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
         hostingWebsitesForCapacity(db);
         const row = read(proof.operationId);
         if (!row) {
+          const conflicting = db.prepare('SELECT operation_id FROM auth_hosting_site_allocations WHERE website_id = ?')
+            .get(proof.websiteId);
+          if (conflicting) throw conflict();
           return { receipt: Object.freeze({
             websiteId: proof.websiteId,
             allocationOperationId: proof.operationId,
