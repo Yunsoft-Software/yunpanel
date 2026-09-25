@@ -239,3 +239,38 @@ test('operation-owned static binding removal is revision-bound and idempotent', 
     expectedRevision: created.revision,
   }), null);
 });
+
+
+test('operation-owned direct-systemd binding removal is revision-bound and idempotent', async () => {
+  const registry = createApplicationRuntimeBindingRegistry();
+  const created = await registry.activate(activation({
+    adapter: 'direct-systemd',
+    passengerTarget: null,
+  }), { expectedRevision: 0 });
+
+  await assert.rejects(
+    registry.removeOwnedDirectSystemd(applicationId, {
+      sourceOperationId: '1af41a08-a03d-41dc-afef-a9d1af96785d',
+      expectedRevision: created.revision,
+    }),
+    (error) => error?.code === 'runtime_binding_ownership_conflict',
+  );
+  await assert.rejects(
+    registry.removeOwnedDirectSystemd(applicationId, {
+      sourceOperationId: operationId,
+      expectedRevision: created.revision + 1,
+    }),
+    (error) => error?.code === 'runtime_binding_revision_conflict',
+  );
+
+  const removed = await registry.removeOwnedDirectSystemd(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  });
+  assert.equal(removed.adapter, 'direct-systemd');
+  assert.equal(await registry.getBinding(applicationId), null);
+  assert.equal(await registry.removeOwnedDirectSystemd(applicationId, {
+    sourceOperationId: operationId,
+    expectedRevision: created.revision,
+  }), null);
+});
