@@ -251,6 +251,13 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
         404,
       );
     }
+    if (operation.status === 'abandoned') {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_abandoned',
+        'Provisioning operation is abandoned and cannot mutate resources',
+        409,
+      );
+    }
     if (operation.ready) return Object.freeze({ operation, outcome: 'ready', stepId: null });
 
     const interrupted = operation.steps.find((step) => step.state === 'applying');
@@ -339,6 +346,13 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
         'website_provisioning_not_found',
         'Website provisioning operation was not found',
         404,
+      );
+    }
+    if (operation.status === 'abandoned') {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_abandoned',
+        'Provisioning operation is abandoned and cannot mutate resources',
+        409,
       );
     }
     const step = operation.steps.find((candidate) => candidate.id === stepId);
