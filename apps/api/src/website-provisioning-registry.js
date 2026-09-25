@@ -601,6 +601,17 @@ export function createWebsiteProvisioningRegistry({
       .map(publicOperation));
   }
 
+  async function listAuthorizationSensitive() {
+    await ensureInitialized();
+    return Object.freeze(state.operations
+      .filter((operation) => operation.terminalState !== 'abandoned'
+        && operation.steps.some((step) => (
+          ['applying', 'failed', 'blocked', 'compensating'].includes(step.state)
+          || ['applying', 'failed'].includes(step.compensation?.state)
+        )))
+      .map(publicOperation));
+  }
+
   return Object.freeze({
     init,
     create: (...args) => withStoreMutation(() => create(...args)),
@@ -620,5 +631,6 @@ export function createWebsiteProvisioningRegistry({
     failCompensation: (...args) => withStoreMutation(() => failCompensation(...args)),
     abandonUncreated: (...args) => withStoreMutation(() => abandonUncreated(...args)),
     listInterrupted: (...args) => withStoreRead(() => listInterrupted(...args)),
+    listAuthorizationSensitive: (...args) => withStoreRead(() => listAuthorizationSensitive(...args)),
   });
 }
