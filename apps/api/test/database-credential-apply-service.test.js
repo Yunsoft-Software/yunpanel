@@ -61,13 +61,20 @@ test('database credential apply preview queues only secret-free pinned metadata'
   assert.match(preview.desiredStateSha256, /^[a-f0-9]{64}$/);
   assert.equal(preview.sideEffects, false);
 
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId,
+    stepId: 'website_database',
+  };
   const queued = await state.service.queueApply({
     credentialId,
     expectedCredentialRevision: 4,
     expectedBindingRevision: 2,
     expectedDesiredStateSha256: preview.desiredStateSha256,
     confirmation: preview.confirmation,
-  });
+  }, { authorization });
   assert.equal(queued.job.operation, OPERATIONS.DATABASE_CREDENTIAL_APPLY);
   assert.deepEqual(state.enqueued[0].payload, {
     databaseCredentialId: credentialId,
@@ -78,6 +85,7 @@ test('database credential apply preview queues only secret-free pinned metadata'
   });
   assert.equal(state.enqueued[0].resourceType, 'database');
   assert.equal(state.enqueued[0].resourceId, 'app_main');
+  assert.deepEqual(state.enqueued[0].authorization, authorization);
   assert.doesNotMatch(JSON.stringify(state.enqueued[0]), /password|ciphertext|siteUnixUser/);
 });
 
