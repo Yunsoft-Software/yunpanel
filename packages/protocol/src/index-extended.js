@@ -123,12 +123,22 @@ function validateDatabaseCredentialMutation(payload, operation, errors) {
 }
 
 function validateCronMutation(payload, operation, errors) {
-  const allowed = new Set([
+  const common = [
     'taskId', 'websiteId', 'applicationId', 'unixUser',
-    'expectedRevision', 'desiredStateSha256',
-  ]);
+    'expectedRevision', 'desiredStateSha256', 'authorizationMode',
+  ];
+  const userFields = ['actorSessionId', 'actorUserId', 'actorRole'];
+  const userMode = payload.authorizationMode === 'user';
+  const systemMode = payload.authorizationMode === 'system_removal';
+  const allowed = new Set([...common, ...(userMode ? userFields : [])]);
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${operation} contains unsupported arguments`);
+  }
+  if (!userMode && !systemMode) {
+    errors.push(`${operation} authorizationMode is invalid`);
+  }
+  if (systemMode && operation !== CRON_REMOVE) {
+    errors.push(`${operation} system removal authorization is invalid`);
   }
   try {
     if (assertUuid(payload.taskId, 'taskId') !== payload.taskId
@@ -138,6 +148,19 @@ function validateCronMutation(payload, operation, errors) {
     }
   } catch {
     errors.push(`${operation} identities are invalid`);
+  }
+  if (userMode) {
+    try {
+      if (assertUuid(payload.actorSessionId, 'actorSessionId') !== payload.actorSessionId
+        || assertUuid(payload.actorUserId, 'actorUserId') !== payload.actorUserId) {
+        throw new Error('noncanonical');
+      }
+    } catch {
+      errors.push(`${operation} actor identity is invalid`);
+    }
+    if (!['owner', 'site_manager'].includes(payload.actorRole)) {
+      errors.push(`${operation} actorRole is invalid`);
+    }
   }
   if (typeof payload.unixUser !== 'string' || !APP_USER_PATTERN.test(payload.unixUser)) {
     errors.push(`${operation} unixUser is invalid`);
