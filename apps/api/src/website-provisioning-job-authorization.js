@@ -41,3 +41,47 @@ export function websiteProvisioningJobAuthorization(context = {}) {
     stepId: context.stepId,
   });
 }
+
+export function createWebsiteProvisioningJobAuthorizer({
+  registry,
+  websiteRegistry,
+  authorizeActor,
+  localServerId = null,
+} = {}) {
+  if (!registry || typeof registry.get !== 'function' || typeof registry.getActor !== 'function'
+    || !websiteRegistry || typeof websiteRegistry.getWebsite !== 'function'
+    || typeof authorizeActor !== 'function'
+    || (localServerId !== null && (typeof localServerId !== 'string' || !localServerId))) {
+    throw new WebsiteProvisioningJobAuthorizationError(
+      'website_provisioning_job_authorizer_dependencies_invalid',
+      'Website provisioning child-job authorizer dependencies are invalid',
+      503,
+    );
+  }
+
+  return async function authorizeWebsiteProvisioningJob(value) {
+    let scope;
+    try {
+      scope = normalizeWebsiteProvisioningJobAuthorization(value);
+      const operation = await registry.get(scope.operationId);
+      if (!operation || operation.websiteId !== scope.websiteId
+        || operation.terminalState === 'abandoned' || operation.status === 'abandoned') return false;
+      const step = operation.steps?.find((candidate) => candidate.id === scope.stepId);
+      if (!step || !['applying', 'compensating'].includes(step.state)) return false;
+
+      const website = await websiteRegistry.getWebsite(scope.websiteId);
+      if (!website || website.id !== scope.websiteId
+        || (localServerId !== null && website.serverId !== localServerId)) return false;
+
+      const actor = await registry.getActor(scope.operationId);
+      if (!actor) return false;
+      const live = await authorizeActor(actor, scope.websiteId);
+      return Boolean(live
+        && live.sessionId === actor.sessionId
+        && live.userId === actor.userId
+        && live.role === actor.role);
+    } catch {
+      return false;
+    }
+  };
+}
