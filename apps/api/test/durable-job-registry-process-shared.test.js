@@ -55,3 +55,36 @@ test('simultaneous independent enqueues do not lose either committed job', async
   assert.deepEqual(jobs.map((job) => job.id).sort(), [first.id, second.id].sort());
   assert.equal((await right.listJobs()).length, 2);
 });
+
+
+test('terminal reconciliation sidecar is visible and acknowledgeable across registry instances', async (t) => {
+  const { left, right } = await fixture(t);
+  const queued = await left.enqueue(request('system-recovery'));
+  const claim = await left.claimNext('server-a');
+  assert.equal(claim.job.id, queued.id);
+  const pending = await left.beginReconciliation({ serverId: 'server-a', jobId: queued.id });
+  assert.equal(pending.pending, true);
+
+  const terminal = await left.complete({
+    serverId: 'server-a',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'host_failed', message: 'Host operation failed' },
+  });
+  assert.equal(terminal.status, 'failed');
+
+  const visible = await right.getReconciliationJob(queued.id);
+  assert.equal(visible.id, queued.id);
+  assert.equal(visible.status, 'failed');
+  assert.deepEqual(visible.payload, {});
+
+  const acknowledged = await right.acknowledgeReconciliation({
+    serverId: 'server-a',
+    jobId: queued.id,
+  });
+  assert.equal(acknowledged.acknowledged, true);
+
+  assert.equal((await left.getJob(queued.id)).status, 'failed');
+  assert.equal(left.recovery(), null);
+  assert.deepEqual(left.recoveryRecord(), { version: 1, detectedAt: null, jobs: [] });
+});
