@@ -56,6 +56,32 @@ test('orchestrator persists applying state before invoking a mutating handler', 
   assert.equal(result.operation.steps[1].state, 'pending');
 });
 
+test('orchestrator carries the authorized actor into mutating handler context', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  const actor = Object.freeze({
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    role: 'site_manager',
+  });
+  let observedActor = null;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async (context) => {
+          observedActor = context.actor;
+          return { satisfied: true, uid: 1201, gid: 1201 };
+        },
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId, actor);
+  assert.equal(result.outcome, 'progressed');
+  assert.deepEqual(observedActor, actor);
+});
+
 test('orchestrator never blindly re-applies an interrupted step', async () => {
   const registry = createWebsiteProvisioningRegistry();
   await registry.create(plan());
@@ -321,22 +347,30 @@ test('compensation intent is persisted before invoking the compensating handler'
   });
   let observedState = null;
   let observedEvidence = null;
+  let observedActor = null;
+  const actor = Object.freeze({
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    userId: '44444444-4444-4444-8444-444444444444',
+    role: 'owner',
+  });
   const orchestrator = createWebsiteProvisioningOrchestrator({
     registry,
     handlers: {
       unix_identity: {
         apply: async () => ({ satisfied: true, uid: 1201 }),
-        compensate: async ({ evidence: stepEvidence }) => {
+        compensate: async ({ evidence: stepEvidence, actor: contextActor }) => {
           observedState = (await registry.get(operationId)).steps[0].state;
           observedEvidence = stepEvidence;
+          observedActor = contextActor;
           return { satisfied: true, removedUser: true };
         },
       },
     },
   });
 
-  const result = await orchestrator.compensateStep(operationId, 'unix_identity');
+  const result = await orchestrator.compensateStep(operationId, 'unix_identity', actor);
   assert.equal(observedState, 'compensating');
+  assert.deepEqual(observedActor, actor);
   assert.deepEqual(observedEvidence, { satisfied: true, uid: 1201, gid: 1201 });
   assert.equal(result.outcome, 'compensated');
   assert.equal(result.operation.steps[0].state, 'compensated');
