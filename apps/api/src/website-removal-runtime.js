@@ -1,4 +1,5 @@
 import { advanceWebsiteRemovalCronCleanup, WebsiteRemovalCronCleanupError } from './website-removal-cron-cleanup.js';
+import { WebsiteRemovalCleanupAdapterError } from './website-removal-cleanup-adapters.js';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -71,6 +72,8 @@ export function createWebsiteRemovalRuntime({
   runtimeBindingRegistry = null,
   websiteCronRegistry = null,
   jobRegistry = null,
+  directSystemdCleanupHandler = null,
+  directSystemdCleanupInspector = null,
   fileCleanupHandler = null,
   unixIdentityCleanupHandler = null,
   fileCleanupInspector = null,
@@ -177,6 +180,26 @@ export function createWebsiteRemovalRuntime({
       try { await unixIdentityCleanupInspector({ websiteId: current.website.id, systemUser: plan.systemUser }); }
       catch { missing.push('unix_cleanup_evidence_unavailable'); }
     }
+    const directSystemd = plan?.applicationRuntime?.adapter === 'direct-systemd';
+    if (directSystemd) {
+      require('runtime_cleanup_unavailable', directSystemdCleanupHandler, directSystemdCleanupInspector);
+      if (typeof directSystemdCleanupInspector === 'function') {
+        try {
+          await directSystemdCleanupInspector({
+            websiteId: current.website.id,
+            applicationId: plan.applicationId,
+            serverId: current.website.serverId,
+            releaseId: plan.applicationRuntime.releaseId,
+            serviceName: plan.applicationRuntime.serviceName,
+            currentCommitSha: plan.applicationRuntime.currentCommitSha,
+            servicePort: plan.applicationRuntime.servicePort,
+            healthPath: plan.applicationRuntime.healthPath,
+          });
+        } catch {
+          missing.push('runtime_cleanup_direct_systemd_evidence_unavailable');
+        }
+      }
+    }
     if (plan?.additional?.runtimeBindings?.ids?.length) {
       require('runtime_cleanup_unavailable', runtimeBindingRegistry?.getBinding);
       if (typeof runtimeBindingRegistry?.getBinding === 'function') {
@@ -186,7 +209,10 @@ export function createWebsiteRemovalRuntime({
         if (!binding) missing.push('runtime_cleanup_unverified');
         else if (binding.adapter === 'passenger') require('runtime_cleanup_unavailable', runtimeBindingRegistry?.removeOwnedPassenger);
         else if (binding.adapter === 'static') require('runtime_cleanup_unavailable', runtimeBindingRegistry?.removeOwnedStatic);
-        else missing.push('runtime_cleanup_adapter_unsupported');
+        else if (binding.adapter === 'direct-systemd') {
+          require('runtime_cleanup_unavailable', runtimeBindingRegistry?.removeOwnedDirectSystemd);
+          if (!directSystemd) missing.push('runtime_cleanup_authority_conflict');
+        } else missing.push('runtime_cleanup_adapter_unsupported');
       }
     }
     return missing;
@@ -422,8 +448,53 @@ export function createWebsiteRemovalRuntime({
 
         case 'runtime_cleanup': {
           requireCleanupMethod(runtimeBindingRegistry?.getBinding);
-          const binding = await runtimeBindingRegistry.getBinding(op.applicationId);
-          if (binding) {
+          const runtimePlan = op.plan?.applicationRuntime ?? null;
+          let binding = await runtimeBindingRegistry.getBinding(op.applicationId);
+          let adapter = binding?.adapter ?? runtimePlan?.adapter ?? null;
+
+          if (runtimePlan?.adapter === 'direct-systemd') {
+            requireCleanupMethod(directSystemdCleanupHandler);
+            const cleanupResult = await directSystemdCleanupHandler({
+              websiteId: op.websiteId,
+              applicationId: op.applicationId,
+              serverId: op.serverId,
+              releaseId: runtimePlan.releaseId,
+              serviceName: runtimePlan.serviceName,
+              currentCommitSha: runtimePlan.currentCommitSha,
+              servicePort: runtimePlan.servicePort,
+              healthPath: runtimePlan.healthPath,
+            });
+            requireCleanupReceipt(cleanupResult, {
+              websiteId: op.websiteId,
+              applicationId: op.applicationId,
+              serverId: op.serverId,
+              releaseId: runtimePlan.releaseId,
+              serviceName: runtimePlan.serviceName,
+            }, 'directSystemdCleaned');
+            if (binding) {
+              if (binding.adapter !== 'direct-systemd') {
+                throw new WebsiteRemovalRuntimeError(
+                  'website_removal_cleanup_unverified',
+                  'Runtime binding no longer matches direct-systemd Application authority.',
+                  409,
+                );
+              }
+              requireCleanupMethod(runtimeBindingRegistry?.removeOwnedDirectSystemd);
+              await runtimeBindingRegistry.removeOwnedDirectSystemd(op.applicationId, {
+                sourceOperationId: binding.sourceOperationId,
+                expectedRevision: binding.revision,
+              });
+              binding = await runtimeBindingRegistry.getBinding(op.applicationId);
+              if (binding !== null) {
+                throw new WebsiteRemovalRuntimeError(
+                  'website_removal_cleanup_unverified',
+                  'direct-systemd runtime binding remained after cleanup.',
+                  409,
+                );
+              }
+            }
+            adapter = 'direct-systemd';
+          } else if (binding) {
             const options = {
               sourceOperationId: binding.sourceOperationId,
               expectedRevision: binding.revision,
@@ -441,10 +512,19 @@ export function createWebsiteRemovalRuntime({
                 409,
               );
             }
+            const remainingBinding = await runtimeBindingRegistry.getBinding(op.applicationId);
+            if (remainingBinding !== null) {
+              throw new WebsiteRemovalRuntimeError(
+                'website_removal_cleanup_unverified',
+                'Runtime binding remained after cleanup.',
+                409,
+              );
+            }
           }
+
           op = await registry.succeedStep(op.id, step.id, {
             runtimeCleaned: true,
-            adapter: binding?.adapter ?? null,
+            adapter,
           });
           break;
         }
@@ -560,16 +640,18 @@ export function createWebsiteRemovalRuntime({
           );
       }
     } catch (err) {
-      const known = err instanceof WebsiteRemovalRuntimeError || err instanceof WebsiteRemovalCronCleanupError;
+      const known = err instanceof WebsiteRemovalRuntimeError
+        || err instanceof WebsiteRemovalCronCleanupError
+        || err instanceof WebsiteRemovalCleanupAdapterError;
       const error = {
         code: typeof err?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(err.code) ? err.code : 'website_removal_step_failed',
         message: known ? err.message : 'Cleanup failed. Check the server diagnostics before explicitly continuing.',
       };
-      const blocked = known && [
+      const blocked = (err instanceof WebsiteRemovalCleanupAdapterError) || (known && [
         'website_removal_cleanup_unavailable',
         'website_removal_cleanup_unverified',
         'website_removal_cron_job_failed',
-      ].includes(err.code);
+      ].includes(err.code));
       op = await registry[blocked ? 'blockStep' : 'failStep'](op.id, step.id, error);
     }
 
