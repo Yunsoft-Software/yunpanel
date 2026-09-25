@@ -8,18 +8,18 @@
 - [x] `d80c3357`: panel `data` zarfları eklendi. Ayrıca Application'a bağlı Website removal için `applicationRegistry.deleteApplication` zorunlu lifecycle dependency yapıldı. Böylece Application metadata cleanup uygulanmadan confirmation verilmez.
 - [x] `befbe56f`: Owner Barındırma ayarlarında **Siteyi sil** güvenlik önizlemesi. Domain/DB/SFTP/cron/yedek etkisi, hard blockerlar ve önceki journal durumu okunur. İstemci GET-only'dir; destructive POST veya continue yolu yoktur.
 
-## Neden gerçek Sil hâlâ kapalı?
+## Güncel destructive kaynak durumu
 
-Production removal composition'da doğrulanabilir `fileCleanupHandler` ve `unixIdentityCleanupHandler` henüz bağlı değil. Unix kimliği için host-runtime receipt tabanlı `website-identity-manager` reuse edilebilir; legacy/unowned kimlik silinmemelidir. Daha önemlisi Application Registry'de güvenli Application metadata/env/release silme lifecycle'ı yoktur. Canonical app/data dizinlerini silip Application kaydını bırakmak kırık control-plane state üretir.
+Production composition artık Application cleanup, canonical file cleanup ve provisioning receipt-owned Unix identity cleanup adapterlarını bağlıyor. Passenger/Static runtime cleanup gerçek binding ownership kanıtıyla çalışıyor; Owner typed confirmation, explicit journal-step continuation ve metadata silindikten sonra global recovery akışı da kaynakta mevcut.
 
-Bu nedenle backend `application_cleanup_unavailable`, `file_cleanup_unavailable` ve gerektiğinde `unix_cleanup_unavailable` blockerlarıyla `readyToStart=false` kalır. UI bu durumu gösterir ama silme eylemi sunmaz.
+Silme yine fail-closed kalır: `direct-systemd` binding için doğrulanmış service/process cleanup lifecycle'ı bulunmadığında `runtime_cleanup_adapter_unsupported`; legacy/unowned Unix identity için sahiplik receipt'i yoksa `unix_cleanup_evidence_unavailable`; unsafe/symlink/foreign path preflight'ında cleanup blocker üretilir.
 
-## Sıradaki kaynak işi
+## Tamamlanan kaynak işi
 
-- [ ] Application deletion lifecycle: Application kaydı, environment/secrets, release metadata/runtime-specific state ve varsa retain policy birlikte preview/journal/cleanup ile ele alınmalı. Basit `deleteApplication()` eklemek yeterli kanıt sayılmaz.
-- [ ] File cleanup adapter: yalnız canonical Website/Application path contract kökleri; foreign/symlink/shared state reddi; retained backup kapsamı korunmalı; exact receipt dönmeli.
-- [ ] Unix identity cleanup adapter: provisioning journal'daki operation-owned `unix_identity` intent/evidence üzerinden compensation; receipt yoksa legacy identity korunmalı/fail-closed.
-- [ ] Bunlar tamamlandıktan sonra Owner typed confirmation + aynı removal operation explicit step continue + unknown-result GET reconciliation açılabilir.
+- [x] Application deletion lifecycle: environment/internal secret state purge + exact Application revision delete, Website metadata sonrasında ayrı journal adımı.
+- [x] File cleanup adapter: yalnız canonical direct-child Website/Application path contract kökleri; foreign/shared/symlink state fail-closed; backup ve log scope retention doğrulanır.
+- [x] Unix identity cleanup adapter: provisioning journal'daki operation-owned `unix_identity` evidence üzerinden compensation; receipt yoksa legacy identity korunur.
+- [x] Owner destructive akışı: domain adıyla typed confirmation, aynı operation üzerinde explicit step continue, unknown-result durumda POST replay yerine global journal GET reconciliation.
 
 ## T-DEV-WEBSITE-REMOVE
 
