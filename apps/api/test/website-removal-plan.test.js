@@ -53,7 +53,12 @@ function impact(currentWebsite = website(), overrides = {}) {
     application: currentWebsite.applicationId ? {
       id: currentWebsite.applicationId,
       serverId: currentWebsite.serverId,
+      name: 'app',
+      type: 'node',
+      state: 'active',
       desiredRevision: 7,
+      currentReleaseId: null,
+      activeDeploymentId: null,
     } : null,
     operation: 'delete',
     targetServerId: null,
@@ -165,4 +170,70 @@ test('rejects missing or mismatched Application revision evidence', () => {
   const wrong=impact(ws); wrong.application={...wrong.application,id:'other'};
   assert.throws(()=>createWebsiteRemovalPreview({website:ws,impact:wrong}),
     (err)=>err instanceof WebsiteRemovalPlanError && err.code==='website_removal_application_state_invalid');
+});
+
+
+test('pins direct-systemd Application evidence even without a runtime binding dependency', () => {
+  const ws = website();
+  const imp = impact(ws, {
+    dependencies: {
+      runtimeBindings: { status: 'available', items: [] },
+    },
+  });
+  const releaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
+  imp.application = { ...imp.application, currentReleaseId: releaseId };
+  const preview = createWebsiteRemovalPreview({
+    website: ws,
+    impact: imp,
+    applicationState: {
+      id: 'app-1',
+      serverId: 'srv-local',
+      name: 'app',
+      type: 'node',
+      state: 'active',
+      desiredRevision: 7,
+      currentReleaseId: releaseId,
+      activeDeploymentId: null,
+      runtimeAdapter: 'direct-systemd',
+      serviceName: 'yunpanel-node-aaaaaaaaaaaaaaaa.service',
+      currentCommitSha: 'b'.repeat(40),
+      servicePort: 3100,
+      healthPath: '/health',
+    },
+  });
+  assert.deepEqual(preview.plan.additional.runtimeBindings.ids, []);
+  assert.deepEqual(preview.plan.applicationRuntime, {
+    type: 'node',
+    adapter: 'direct-systemd',
+    releaseId,
+    serviceName: 'yunpanel-node-aaaaaaaaaaaaaaaa.service',
+    currentCommitSha: 'b'.repeat(40),
+    servicePort: 3100,
+    healthPath: '/health',
+  });
+});
+
+test('rejects Application runtime evidence that moved after resource-impact capture', () => {
+  const ws = website();
+  const imp = impact(ws);
+  assert.throws(
+    () => createWebsiteRemovalPreview({
+      website: ws,
+      impact: imp,
+      applicationState: {
+        id: 'app-1',
+        serverId: 'srv-local',
+        type: 'node',
+        desiredRevision: 8,
+        currentReleaseId: null,
+        runtimeAdapter: 'direct-systemd',
+        serviceName: null,
+        currentCommitSha: null,
+        servicePort: 3100,
+        healthPath: '/health',
+      },
+    }),
+    (error) => error instanceof WebsiteRemovalPlanError
+      && error.code === 'website_removal_application_runtime_state_invalid',
+  );
 });
