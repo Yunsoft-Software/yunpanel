@@ -132,6 +132,63 @@ test('idempotent enqueue may add missing private provisioning authorization with
   assert.equal(claim.authorization.operationId, '9ae512c0-a717-4611-943c-6ce2ab0abf16');
 });
 
+test('idempotent enqueue safely requeues only provisioning auth-preflight failures', async () => {
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'domain_activation',
+  };
+  const input = {
+    serverId: 'server-1',
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example.com', checksum: 'd'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-auth-retry',
+    idempotencyKey: 'website.domain.activate:auth-preflight-retry',
+    authorization,
+  };
+  const registry = createJobRegistry();
+  const queued = await registry.enqueue(input);
+  const firstClaim = await registry.claimNext('server-1');
+  assert.equal(firstClaim.job.id, queued.id);
+  assert.equal(firstClaim.job.attempts, 1);
+  const denied = await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'website_provisioning_job_actor_forbidden' },
+  });
+  assert.equal(denied.status, 'failed');
+  assert.equal(denied.error.code, 'website_provisioning_job_actor_forbidden');
+
+  const retried = await registry.enqueue(input);
+  assert.equal(retried.id, queued.id);
+  assert.equal(retried.status, 'queued');
+  assert.equal(retried.error, null);
+  assert.equal(retried.finishedAt, null);
+  assert.equal(retried.attempts, 1);
+  const secondClaim = await registry.claimNext('server-1');
+  assert.equal(secondClaim.job.id, queued.id);
+  assert.equal(secondClaim.job.attempts, 2);
+  assert.deepEqual(secondClaim.authorization, authorization);
+
+  const other = createJobRegistry();
+  const otherQueued = await other.enqueue({ ...input, resourceId: 'domain-real-failure', idempotencyKey: 'website.domain.activate:real-failure' });
+  await other.claimNext('server-1');
+  await other.complete({
+    serverId: 'server-1',
+    jobId: otherQueued.id,
+    status: 'failed',
+    error: { code: 'nginx_config_invalid' },
+  });
+  const unchanged = await other.enqueue({ ...input, resourceId: 'domain-real-failure', idempotencyKey: 'website.domain.activate:real-failure' });
+  assert.equal(unchanged.status, 'failed');
+  assert.equal(unchanged.error.code, 'nginx_config_invalid');
+});
+
 test('DNS record jobs retain only provider-safe confirmed state', async () => {
   const registry = createJobRegistry();
   const payload = {
