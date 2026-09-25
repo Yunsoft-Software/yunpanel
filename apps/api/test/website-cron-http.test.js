@@ -13,7 +13,8 @@ function createApp({ serviceOverrides = {} } = {}) {
   // Simulate authentication
   app.use((req, res, next) => {
     req.auth = {
-      user: { role: 'owner' },
+      id: '32345678-1234-4234-8234-123456789012',
+      user: { id: '42345678-1234-4234-8234-123456789012', role: 'owner' },
       access: { mode: 'management', permissions: ['*'] },
       security: { managementAllowed: true },
     };
@@ -32,15 +33,18 @@ function createApp({ serviceOverrides = {} } = {}) {
       name: 'Backup',
       revision: 1,
     }),
-    createCron: async (input) => ({
+    createCron: async (input, actor) => ({
+      actor,
       task: { id: taskId, ...input, revision: 1 },
       job: { id: 'job-1', operation: 'cron.apply' },
     }),
-    updateCron: async (id, input) => ({
+    updateCron: async (id, input, actor) => ({
+      actor,
       task: { id, websiteId, ...input, revision: 2 },
       job: { id: 'job-2', operation: 'cron.apply' },
     }),
-    deleteCron: async (id) => ({
+    deleteCron: async (id, _input, actor) => ({
+      actor,
       taskId: id,
       deleted: true,
       job: { id: 'job-3', operation: 'cron.remove' },
@@ -98,6 +102,7 @@ test('POST /api/websites/:websiteId/crons creates a cron task', async () => {
   assert.equal(res.status, 201);
   assert.equal(res.body.data.task.name, 'Backup');
   assert.equal(res.body.data.job.operation, 'cron.apply');
+  assert.equal(res.body.data.actor.userId, '42345678-1234-4234-8234-123456789012');
 });
 
 test('POST /api/websites/:websiteId/crons rejects missing required fields', async () => {
