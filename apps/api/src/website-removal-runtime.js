@@ -1,3 +1,5 @@
+import { advanceWebsiteRemovalCronCleanup, WebsiteRemovalCronCleanupError } from './website-removal-cron-cleanup.js';
+
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 // Shared by runtime instances using the same registry, not by other processes or writers.
@@ -68,6 +70,7 @@ export function createWebsiteRemovalRuntime({
   websiteSftpKeyRegistry = null,
   runtimeBindingRegistry = null,
   websiteCronRegistry = null,
+  jobRegistry = null,
   fileCleanupHandler = null,
   unixIdentityCleanupHandler = null,
   fileCleanupInspector = null,
@@ -152,7 +155,14 @@ export function createWebsiteRemovalRuntime({
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
       applicationEnvironmentRegistry?.inspectApplicationState, applicationEnvironmentRegistry?.purgeApplication);
     if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler, unixIdentityCleanupInspector);
-    if (plan?.additional?.crons?.ids?.length) require('cron_cleanup_unavailable', websiteCronRegistry?.listTasks, websiteCronRegistry?.removeTask);
+    if (plan?.additional?.crons?.ids?.length) require(
+      'cron_cleanup_unavailable',
+      registry?.checkpointStep,
+      websiteCronRegistry?.listTasks,
+      websiteCronRegistry?.getTask,
+      jobRegistry?.enqueue,
+      jobRegistry?.findIdempotentJob,
+    );
     if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
     if (plan?.additional?.databases?.ids?.length) {
       require('database_cleanup_unavailable', databaseBindingRegistry?.listBindings,
@@ -335,17 +345,18 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'cron_cleanup': {
-          requireCleanupMethod(websiteCronRegistry?.listTasks);
-          requireCleanupMethod(websiteCronRegistry?.removeTask);
-          if (websiteCronRegistry && typeof websiteCronRegistry.listTasks === 'function') {
-            const tasks = cleanupInventory(await websiteCronRegistry.listTasks({ websiteId: op.websiteId }));
-            for (const task of tasks) {
-              if (typeof websiteCronRegistry.removeTask === 'function') {
-                await websiteCronRegistry.removeTask(task.id);
-              }
-            }
+          const progress = await advanceWebsiteRemovalCronCleanup({
+            operation: op,
+            step,
+            operationRegistry: registry,
+            websiteCronRegistry,
+            jobRegistry,
+          });
+          if (!progress.complete) {
+            op = progress.operation;
+            break;
           }
-          op = await registry.succeedStep(op.id, step.id, { cronsCleaned: true });
+          op = await registry.succeedStep(op.id, step.id, progress.result);
           break;
         }
 
@@ -549,12 +560,16 @@ export function createWebsiteRemovalRuntime({
           );
       }
     } catch (err) {
-      const known = err instanceof WebsiteRemovalRuntimeError;
+      const known = err instanceof WebsiteRemovalRuntimeError || err instanceof WebsiteRemovalCronCleanupError;
       const error = {
         code: typeof err?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(err.code) ? err.code : 'website_removal_step_failed',
         message: known ? err.message : 'Cleanup failed. Check the server diagnostics before explicitly continuing.',
       };
-      const blocked = known && ['website_removal_cleanup_unavailable', 'website_removal_cleanup_unverified'].includes(err.code);
+      const blocked = known && [
+        'website_removal_cleanup_unavailable',
+        'website_removal_cleanup_unverified',
+        'website_removal_cron_job_failed',
+      ].includes(err.code);
       op = await registry[blocked ? 'blockStep' : 'failStep'](op.id, step.id, error);
     }
 
