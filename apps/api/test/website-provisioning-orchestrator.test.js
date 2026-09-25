@@ -436,3 +436,45 @@ test('orchestrator reports compensation support from concrete handlers only', ()
   assert.equal(orchestrator.supportsCompensation('runtime'), false);
   assert.equal(orchestrator.supportsCompensation('certificate'), false);
 });
+
+
+test('abandoned provisioning journal is terminal and never invokes handlers', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.abandonUncreated({
+    operationId,
+    websiteId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+
+  let applyCalls = 0;
+  let compensateCalls = 0;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => { applyCalls += 1; return { satisfied: true }; },
+        compensate: async () => { compensateCalls += 1; return { satisfied: true }; },
+      },
+    },
+  });
+
+  await assert.rejects(
+    orchestrator.runNext(operationId),
+    (error) => error instanceof WebsiteProvisioningOrchestratorError
+      && error.code === 'website_provisioning_abandoned',
+  );
+  await assert.rejects(
+    orchestrator.retryStep(operationId, 'unix_identity'),
+    (error) => ['website_provisioning_abandoned', 'website_provisioning_retry_invalid'].includes(error.code),
+  );
+  await assert.rejects(
+    orchestrator.compensateStep(operationId, 'unix_identity'),
+    (error) => error instanceof WebsiteProvisioningOrchestratorError
+      && error.code === 'website_provisioning_abandoned',
+  );
+  assert.equal(applyCalls, 0);
+  assert.equal(compensateCalls, 0);
+});
