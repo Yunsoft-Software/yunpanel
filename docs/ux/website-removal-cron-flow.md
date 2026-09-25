@@ -3,9 +3,9 @@
 2026-09-24; başlangıç `development@fd1a5642`. BUG-20260923-02 / UX-PL-06 kaynak dilimi. Mevcut website-removal, cron.remove, job registry ve /etc/cron.d yöneticisi kullanılır; yeni cron veya root komut motoru kurulmaz.
 
 - [x] RC-01: `6e2aa1c2`; cron silme `accepted/deleted` ayrımını korur. `cron.remove` worker exact host resultini doğrular, metadata'yı revision ile kaldırır, yokluğu yeniden okur ve durable receipt yazar; queued/running job silinmiş sayılmaz.
-- [ ] RC-02: Website silmedeki yanlış removeTask metadata çağrısını mevcut cron.remove işiyle değiştir. Planlı görev kapsamı, kalıcı işlem kanıtı, mevcut işi okumayla devam ve silinmiş görevin kanıtı korunsun.
-- [ ] RC-03: Gerçek üretim bileşimine gerekli cron servis/job bağlantısını ekle; eksik dosya/Unix temizliği kapıları gevşetilmesin. Mevcut cron ekranı ve response sözleşmesi yeni queued durumuyla uyumlu kalsın.
-- [ ] RC-04: Yapılabilen davranış/gerçek geçici dosya ve modül entegrasyon testlerini çalıştır; çalıştırılmayanları ayrı yaz.
+- [x] RC-02: `dedb4848`, `8876be3d`, `2d92f9cc`; Website removal artık metadata-only `removeTask` çağırmıyor. Planlı task identity journal checkpoint'e yazılır; deterministic `cron.remove` idempotency key ile mevcut job bulunur/oluşturulur; queued/running parent step'i bitirmez, succeeded job + metadata yokluğu doğrulanmadan `cronsCleaned` üretilmez.
+- [x] RC-03: `2ead7dc2`; production Website removal runtime ortak audited/durable `jobRegistry` ile bağlandı. Önizleme cron planı varken checkpoint/list/get/enqueue/idempotent-lookup bağımlılıklarını start öncesi fail-closed doğrular; mevcut cron ekranı/tekil delete response sözleşmesi değiştirilmedi.
+- [ ] RC-04: `ea53f6d3`, `54882e9b`, `c1f04c24` ile queued→succeeded, enqueue/checkpoint crash recovery, inventory drift, failed/cancelled job, dependency gate ve journal checkpoint kaynak testleri eklendi/güncellendi. Bu oturumda gerçek checkout olmadığı için çalıştırılmış sayılmaz; Node24/npm11 kapısı aşağıda açık.
 
 ## Açık sınırlar
 
