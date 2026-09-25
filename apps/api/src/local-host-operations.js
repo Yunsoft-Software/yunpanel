@@ -31,6 +31,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
 import { createLocalNodePassengerMigrationOperation } from './local-node-passenger-migration-operation.js';
 import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
+import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -179,6 +180,7 @@ export function createLocalHostOperations({
   loadDeploymentCredential = null,
   loadDnsProviderCredential = null,
   jobLogStore = null,
+  authorizeWebsiteProvisioning = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
@@ -222,6 +224,9 @@ export function createLocalHostOperations({
   }
   if (jobLogStore !== null && typeof jobLogStore.record !== 'function') {
     throw new Error('jobLogStore must provide record() when configured');
+  }
+  if (authorizeWebsiteProvisioning !== null && typeof authorizeWebsiteProvisioning !== 'function') {
+    throw new Error('authorizeWebsiteProvisioning must be a function when configured');
   }
   if (!staticDeploymentReceiptStore || typeof staticDeploymentReceiptStore.write !== 'function') {
     throw new Error('staticDeploymentReceiptStore must provide write()');
@@ -695,6 +700,42 @@ export function createLocalHostOperations({
     });
   }
 
+  async function authorizeExecution(operation, execution) {
+    const authorization = normalizeWebsiteProvisioningJobAuthorization(
+      execution?.authorization,
+      { optional: true },
+    );
+    const hostExecution = execution && typeof execution === 'object'
+      ? Object.freeze(Object.fromEntries(
+        Object.entries(execution).filter(([key]) => key !== 'authorization'),
+      ))
+      : execution;
+    if (!authorization) return hostExecution;
+    if (!authorizeWebsiteProvisioning) {
+      const error = new Error('Website provisioning child-job authorization is unavailable');
+      error.code = 'website_provisioning_job_authorization_unavailable';
+      throw error;
+    }
+    let authorized = false;
+    try {
+      authorized = await authorizeWebsiteProvisioning(authorization, Object.freeze({
+        operation,
+        jobId: hostExecution?.jobId ?? null,
+        serverId: hostExecution?.serverId ?? null,
+        resourceType: hostExecution?.resourceType ?? null,
+        resourceId: hostExecution?.resourceId ?? null,
+      })) === true;
+    } catch {
+      authorized = false;
+    }
+    if (!authorized) {
+      const error = new Error('Website provisioning access changed before the child job could execute');
+      error.code = 'website_provisioning_job_actor_forbidden';
+      throw error;
+    }
+    return hostExecution;
+  }
+
   const handlers = new Map([
     [OPERATIONS.SYSTEM_PACKAGES_INSPECT, () => packageManager.inspect()],
     [OPERATIONS.SYSTEM_SERVICES_INSPECT, (payload) => resolvedManagedServiceManager.inspect(payload.serviceId ?? null)],
@@ -777,7 +818,8 @@ export function createLocalHostOperations({
         error.code = 'invalid_local_operation_payload';
         throw error;
       }
-      return handler(payload, execution);
+      const authorizedExecution = await authorizeExecution(operation, execution);
+      return handler(payload, authorizedExecution);
     },
   };
 }
