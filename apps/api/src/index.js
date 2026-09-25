@@ -364,6 +364,9 @@ const authorizeWebsitePhpActor = async (actor, websiteId) => {
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
 };
+const siteMutationLock = createSiteMutationLock({
+  root: path.join(controlPlaneStateRoot, 'locks', 'site-mutations'),
+});
 const websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
   jobRegistry,
@@ -385,9 +388,6 @@ const websiteCacheService = createWebsiteCacheService({
   applicationRegistry,
   cachePolicyRegistry: websiteCachePolicyRegistry,
   cacheIsolationManager,
-});
-const siteMutationLock = createSiteMutationLock({
-  root: path.join(controlPlaneStateRoot, 'locks', 'site-mutations'),
 });
 const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   filePath: websiteProvisioningStorePath,
