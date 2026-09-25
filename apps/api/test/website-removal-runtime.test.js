@@ -106,8 +106,12 @@ test('website-removal-runtime coordinates domain removal child operation before 
       removeBinding: async (id) => actionsCalled.push(`removeDb:${id}`),
     },
     runtimeBindingRegistry: {
-      getBinding: async () => ({ revision: 1 }),
-      removeOwnedPassenger: async () => actionsCalled.push('removePassenger'),
+      getBinding: async () => ({ revision: 1, adapter: 'passenger', sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' }),
+      removeOwnedPassenger: async (_id, options) => {
+        assert.equal(options.sourceOperationId, 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa');
+        actionsCalled.push('removePassenger');
+      },
+      removeOwnedStatic: async () => { throw new Error('unexpected static'); },
     },
     fileCleanupHandler: async (input) => { actionsCalled.push('cleanFiles'); return { ...input, filesCleaned: true }; },
     unixIdentityCleanupHandler: async (input) => { actionsCalled.push('cleanUnix'); return { ...input, unixIdentityCleaned: true }; },
@@ -197,7 +201,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
     ...applicationCleanupDependencies(),
     websiteCronRegistry: { listTasks: async () => [], removeTask: async () => {} },
     websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
-    runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {} },
+    runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
     databaseCredentialRegistry: {
       getForBinding: async (bindingId) => ({ id: `cred-${bindingId}`, revision: 2 }),

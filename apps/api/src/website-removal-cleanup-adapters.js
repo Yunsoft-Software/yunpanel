@@ -98,10 +98,11 @@ export function createWebsiteRemovalCleanupAdapters({
     return Object.freeze({ websiteId, systemUser, unixIdentityCleaned: true });
   }
 
-  async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [] } = {}) {
+  async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [], retainedLogScopes = [] } = {}) {
     await currentTarget(websiteId, applicationId);
-    if (!Array.isArray(retainedBackups) || retainedBackups.some((id) => typeof id !== 'string' || !id)) {
-      unavailable('website_cleanup_backup_scope_invalid', 'Retained backup scope is invalid');
+    if (!Array.isArray(retainedBackups) || retainedBackups.some((id) => typeof id !== 'string' || !id)
+      || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
+      unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
     }
     const contract = createWebsitePathContract({ websiteId, applicationId });
     const targets = [
@@ -123,6 +124,7 @@ export function createWebsiteRemovalCleanupAdapters({
       websiteId,
       applicationId,
       retainedBackups: Object.freeze([...retainedBackups]),
+      retainedLogScopes: Object.freeze([...retainedLogScopes]),
       filesCleaned: true,
       cleanedFilesCount: removed,
     });

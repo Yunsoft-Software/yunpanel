@@ -13,7 +13,7 @@ const readyAdapters = () => ({
   websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
   databaseBindingRegistry: { listBindings: async () => [], unbindDatabase: async () => {} },
   databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
-  runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {} },
+  runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
 });
 for (const [dependency, bucket, blocker] of [
   ['fileCleanupHandler', null, 'file_cleanup_unavailable'],

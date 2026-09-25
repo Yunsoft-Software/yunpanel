@@ -140,7 +140,7 @@ export function createWebsiteRemovalRuntime({
     }
   }
 
-  function cleanupBlockers(plan) {
+  async function cleanupBlockers(plan) {
     const missing = [];
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
     require('file_cleanup_unavailable', fileCleanupHandler);
@@ -156,13 +156,24 @@ export function createWebsiteRemovalRuntime({
         databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding,
         databaseCredentialRegistry?.getForBinding, databaseCredentialRegistry?.deleteCredential);
     }
-    if (plan?.additional?.runtimeBindings?.ids?.length) require('runtime_cleanup_unavailable', runtimeBindingRegistry?.getBinding, runtimeBindingRegistry?.removeOwnedPassenger);
+    if (plan?.additional?.runtimeBindings?.ids?.length) {
+      require('runtime_cleanup_unavailable', runtimeBindingRegistry?.getBinding);
+      if (typeof runtimeBindingRegistry?.getBinding === 'function') {
+        let binding;
+        try { binding = await runtimeBindingRegistry.getBinding(plan.applicationId); }
+        catch { missing.push('runtime_cleanup_unavailable'); }
+        if (!binding) missing.push('runtime_cleanup_unverified');
+        else if (binding.adapter === 'passenger') require('runtime_cleanup_unavailable', runtimeBindingRegistry?.removeOwnedPassenger);
+        else if (binding.adapter === 'static') require('runtime_cleanup_unavailable', runtimeBindingRegistry?.removeOwnedStatic);
+        else missing.push('runtime_cleanup_adapter_unsupported');
+      }
+    }
     return missing;
   }
 
   async function preview({ websiteId } = {}) {
     const current = await previewProvider({ websiteId });
-    const missing = cleanupBlockers(current?.plan);
+    const missing = await cleanupBlockers(current?.plan);
     if (!missing.length) return current;
     // No destructive confirmation when this deployment cannot finish the planned cleanup.
     return Object.freeze({ ...current, readyToStart: false, confirmation: null,
@@ -389,35 +400,55 @@ export function createWebsiteRemovalRuntime({
 
         case 'runtime_cleanup': {
           requireCleanupMethod(runtimeBindingRegistry?.getBinding);
-          requireCleanupMethod(runtimeBindingRegistry?.removeOwnedPassenger);
-          if (runtimeBindingRegistry && typeof runtimeBindingRegistry.getBinding === 'function') {
-            const binding = await runtimeBindingRegistry.getBinding(op.applicationId);
-            if (binding && typeof runtimeBindingRegistry.removeOwnedPassenger === 'function') {
-              await runtimeBindingRegistry.removeOwnedPassenger(op.applicationId, {
-                operationId: op.id,
-                expectedRevision: binding.revision,
-              });
+          const binding = await runtimeBindingRegistry.getBinding(op.applicationId);
+          if (binding) {
+            const options = {
+              sourceOperationId: binding.sourceOperationId,
+              expectedRevision: binding.revision,
+            };
+            if (binding.adapter === 'passenger') {
+              requireCleanupMethod(runtimeBindingRegistry?.removeOwnedPassenger);
+              await runtimeBindingRegistry.removeOwnedPassenger(op.applicationId, options);
+            } else if (binding.adapter === 'static') {
+              requireCleanupMethod(runtimeBindingRegistry?.removeOwnedStatic);
+              await runtimeBindingRegistry.removeOwnedStatic(op.applicationId, options);
+            } else {
+              throw new WebsiteRemovalRuntimeError(
+                'website_removal_cleanup_unavailable',
+                'Runtime adapter does not have a verified Website removal cleanup path.',
+                409,
+              );
             }
           }
-          op = await registry.succeedStep(op.id, step.id, { runtimeCleaned: true });
+          op = await registry.succeedStep(op.id, step.id, {
+            runtimeCleaned: true,
+            adapter: binding?.adapter ?? null,
+          });
           break;
         }
 
         case 'file_cleanup': {
           requireCleanupMethod(fileCleanupHandler);
           const retainedBackups = [...(op.plan?.additional?.backups?.ids ?? [])];
+          const retainedLogScopes = [...(op.plan?.additional?.logScopes?.ids ?? [])];
           const cleanupResult = await fileCleanupHandler({
-            websiteId: op.websiteId, applicationId: op.applicationId, retainedBackups: [...retainedBackups],
+            websiteId: op.websiteId,
+            applicationId: op.applicationId,
+            retainedBackups: [...retainedBackups],
+            retainedLogScopes: [...retainedLogScopes],
           });
           requireCleanupReceipt(cleanupResult, { websiteId: op.websiteId, applicationId: op.applicationId }, 'filesCleaned');
           if (!Array.isArray(cleanupResult.retainedBackups)
             || cleanupResult.retainedBackups.length !== retainedBackups.length
-            || [...cleanupResult.retainedBackups].sort().some((id, index) => id !== [...retainedBackups].sort()[index])) {
-            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Retained backup scope was not verified.', 409);
+            || [...cleanupResult.retainedBackups].sort().some((id, index) => id !== [...retainedBackups].sort()[index])
+            || !Array.isArray(cleanupResult.retainedLogScopes)
+            || cleanupResult.retainedLogScopes.length !== retainedLogScopes.length
+            || [...cleanupResult.retainedLogScopes].sort().some((id, index) => id !== [...retainedLogScopes].sort()[index])) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Retained backup or log scope was not verified.', 409);
           }
           // Do not copy arbitrary adapter fields or secrets into the public operation result.
           op = await registry.succeedStep(op.id, step.id, {
-            filesCleaned: true, retainedBackups,
+            filesCleaned: true, retainedBackups, retainedLogScopes,
             ...(Number.isSafeInteger(cleanupResult.cleanedFilesCount) && cleanupResult.cleanedFilesCount >= 0
               ? { cleanedFilesCount: cleanupResult.cleanedFilesCount } : {}),
           });
