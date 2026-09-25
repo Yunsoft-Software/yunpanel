@@ -9,7 +9,11 @@ import { removalFixture, removalPreview, removalStart, removalContinue } from '.
 
 const code = (expected) => (error) => error.code === expected;
 const readyAdapters = () => ({
-  websiteCronRegistry: { listTasks: async () => [], removeTask: async () => {} },
+  websiteCronRegistry: { listTasks: async () => [], getTask: async () => null },
+  jobRegistry: {
+    enqueue: async () => { throw new Error('unexpected cron enqueue'); },
+    findIdempotentJob: async () => { throw new Error('unexpected cron lookup'); },
+  },
   websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
   databaseBindingRegistry: { listBindings: async () => [], unbindDatabase: async () => {} },
   databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
@@ -20,6 +24,7 @@ for (const [dependency, bucket, blocker] of [
   ['websiteRegistry', null, 'metadata_cleanup_unavailable'],
   ['unixIdentityCleanupHandler', null, 'unix_cleanup_unavailable'],
   ['websiteCronRegistry', 'crons', 'cron_cleanup_unavailable'],
+  ['jobRegistry', 'crons', 'cron_cleanup_unavailable'],
   ['websiteSftpKeyRegistry', 'sftpKeys', 'sftp_cleanup_unavailable'],
   ['databaseBindingRegistry', 'databases', 'database_cleanup_unavailable'],
   ['databaseCredentialRegistry', 'databases', 'database_cleanup_unavailable'],
@@ -142,7 +147,10 @@ test('SFTP exceptions are never retried with a string or fabricated revision', a
 for (const inventory of [undefined, null, {}, [{ id: 'x' }, { id: 'x' }], [null]]) {
   test(`invalid cleanup inventory is not an empty successful cleanup: ${JSON.stringify(inventory)}`, async () => {
     let removals = 0;
-    const f = await removalFixture({ ...readyAdapters(), websiteCronRegistry: { listTasks: async () => inventory, removeTask: async () => { removals++; } } },
+    const f = await removalFixture({ ...readyAdapters(), websiteCronRegistry: {
+      listTasks: async () => inventory,
+      getTask: async () => null,
+    } },
       removalPreview('site-a', { crons: [{ id: 'cron-a' }] }));
     const op = await f.runtime.start(removalStart(f.preview));
     assert.equal(op.status, 'blocked'); assert.equal(removals, 0);
