@@ -30,6 +30,7 @@ export function createHostingSiteCreateService({
   applicationRegistry = null,
   domainRegistry = null,
   mailDomainRegistry = null,
+  websiteProvisioningRegistry = null,
   siteMutationLock = null,
   localServerId,
   previewSiteCreate,
@@ -155,6 +156,7 @@ export function createHostingSiteCreateService({
     if (typeof allocations?.releaseUncreated !== 'function'
       || typeof websiteRegistry?.getWebsite !== 'function'
       || typeof domainRegistry?.getDomain !== 'function'
+      || typeof websiteProvisioningRegistry?.get !== 'function'
       || typeof siteMutationLock?.withSiteLock !== 'function') {
       throw fail('hosting_site_recovery_unavailable', 'Hosted site reservation recovery is unavailable.', 503);
     }
@@ -182,12 +184,13 @@ export function createHostingSiteCreateService({
       throw fail('hosting_site_recovery_plan_invalid', 'The site-create recovery identities are invalid.', 503);
     }
 
-    const [website, application, primaryDomain, wwwDomain, mailDomain] = await Promise.all([
+    const [website, application, primaryDomain, wwwDomain, mailDomain, provisioningOperation] = await Promise.all([
       websiteRegistry.getWebsite(websiteId),
       applicationId === null ? Promise.resolve(null) : applicationRegistry.getApplication(applicationId),
       domainRegistry.getDomain(primaryDomainId),
       wwwDomainId === null ? Promise.resolve(null) : domainRegistry.getDomain(wwwDomainId),
       mailDomainId === null ? Promise.resolve(null) : mailDomainRegistry.getMailDomain(mailDomainId),
+      websiteProvisioningRegistry.get(prepared.allocationInput.operationId),
     ]);
     return Object.freeze({
       applicationId,
@@ -196,6 +199,7 @@ export function createHostingSiteCreateService({
       primaryDomainPresent: primaryDomain !== null,
       wwwDomainPresent: wwwDomain !== null,
       mailDomainPresent: mailDomain !== null,
+      provisioningOperationPresent: provisioningOperation !== null,
     });
   }
 
@@ -225,6 +229,13 @@ export function createHostingSiteCreateService({
         );
       }
       const residuals = await inspectRecoveryResiduals(prepared);
+      if (residuals.provisioningOperationPresent) {
+        throw fail(
+          'hosting_site_recovery_provisioning_present',
+          'A Website provisioning journal exists for this reservation; reconcile or compensate it before releasing capacity.',
+          409,
+        );
+      }
       if (residuals.websitePresent || residuals.applicationPresent
         || residuals.primaryDomainPresent || residuals.wwwDomainPresent || residuals.mailDomainPresent) {
         throw fail(
