@@ -141,8 +141,10 @@ export function createWebsiteRemovalOperationRegistry({
       add('database_binding_cleanup', preview.website.id);
     }
 
-    // 5. Runtime binding cleanup
-    if (preview.plan.additional.runtimeBindings?.ids?.length > 0) {
+    // 5. Runtime cleanup. direct-systemd is Application-owned host state and
+    // must be removed even when no runtime-binding registry record exists.
+    if (preview.plan.additional.runtimeBindings?.ids?.length > 0
+      || preview.plan.applicationRuntime?.adapter === 'direct-systemd') {
       add('runtime_cleanup', preview.website.applicationId ?? preview.website.id);
     }
 
