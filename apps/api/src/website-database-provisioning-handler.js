@@ -1,6 +1,7 @@
 import { createDatabaseCredentialEvidenceInspector } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
+import { websiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
@@ -282,7 +283,7 @@ export function createWebsiteDatabaseProvisioningHandler({
     });
   }
 
-  async function enqueueDatabase(intent, operationId, operation) {
+  async function enqueueDatabase(intent, context, operation) {
     const action = operation === OPERATIONS.DATABASE_CREATE ? 'create' : 'delete';
     const job = await jobRegistry.enqueue({
       serverId: intent.serverId,
@@ -291,7 +292,8 @@ export function createWebsiteDatabaseProvisioningHandler({
       payload: { name: intent.databaseName },
       resourceType: 'database',
       resourceId: intent.databaseName,
-      idempotencyKey: `website.database.${action}:${operationId}`,
+      idempotencyKey: `website.database.${action}:${context.operationId}`,
+      authorization: websiteProvisioningJobAuthorization(context),
     });
     return successfulDatabaseJob(
       await waitForTerminalJob(databaseJobIdentity(job, intent, operation)),
@@ -365,7 +367,7 @@ export function createWebsiteDatabaseProvisioningHandler({
   async function apply(context = {}) {
     const intent = databaseIntent(context.intent, context.websiteId);
     assertSecurity(await databaseHealthProvider(intent.serverId));
-    const createJob = await enqueueDatabase(intent, context.operationId, OPERATIONS.DATABASE_CREATE);
+    const createJob = await enqueueDatabase(intent, context, OPERATIONS.DATABASE_CREATE);
     let current = await state(intent);
     if (!current.exists) {
       throw new WebsiteDatabaseProvisioningError(
@@ -497,7 +499,7 @@ export function createWebsiteDatabaseProvisioningHandler({
           databaseName: intent.databaseName,
         });
       }
-      await enqueueDatabase(intent, context.operationId, OPERATIONS.DATABASE_DELETE);
+      await enqueueDatabase(intent, context, OPERATIONS.DATABASE_DELETE);
     }
     return inspectCompensation(context);
   }
