@@ -125,6 +125,60 @@ function publicResult(result, supportsCompensation = () => false) {
   });
 }
 
+function requestActor(request) {
+  const sessionId = request.auth?.id;
+  const userId = request.auth?.user?.id;
+  const role = request.auth?.user?.role;
+  if (typeof sessionId !== 'string' || typeof userId !== 'string'
+    || !['owner', 'site_manager'].includes(role)) {
+    throw new WebsiteProvisioningHttpError(
+      'website_provisioning_actor_invalid',
+      'Live Website provisioning session identity is required',
+      403,
+    );
+  }
+  return Object.freeze({ sessionId, userId, role });
+}
+
+function provisioningNotFound() {
+  return new WebsiteProvisioningHttpError(
+    'website_provisioning_not_found',
+    'Website provisioning operation was not found',
+    404,
+  );
+}
+
+async function requireWebsiteAccess(request, targetWebsiteId, { websiteRegistry, localServerId } = {}) {
+  const actor = requestActor(request);
+  if (actor.role === 'owner') return actor;
+  const auth = request.auth;
+  if (auth?.access?.mode !== 'site_management' || auth?.security?.managementAllowed !== true
+    || !Array.isArray(auth.user?.websiteIds) || !auth.user.websiteIds.includes(targetWebsiteId)) {
+    throw provisioningNotFound();
+  }
+  if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {
+    throw new WebsiteProvisioningHttpError(
+      'website_provisioning_scope_unavailable',
+      'Website provisioning scope could not be verified',
+      503,
+    );
+  }
+  let website;
+  try { website = await websiteRegistry.getWebsite(targetWebsiteId); }
+  catch {
+    throw new WebsiteProvisioningHttpError(
+      'website_provisioning_scope_unavailable',
+      'Website provisioning scope could not be verified',
+      503,
+    );
+  }
+  if (!website || website.id !== targetWebsiteId
+    || (localServerId !== null && localServerId !== undefined && website.serverId !== localServerId)) {
+    throw provisioningNotFound();
+  }
+  return actor;
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -153,6 +207,7 @@ export function mountWebsiteProvisioningRoutes(app, {
 
   app.get('/api/sites/:websiteId/provisioning/latest', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = websiteId(request.params.websiteId);
+    await requireWebsiteAccess(request, id, { websiteRegistry, localServerId });
     const operation = await registry.getLatestForWebsite(id);
     return response.json({ data: projectOperation(operation) });
   }));
@@ -160,13 +215,8 @@ export function mountWebsiteProvisioningRoutes(app, {
   app.get('/api/sites/provisioning/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = operationId(request.params.operationId);
     const operation = await registry.get(id);
-    if (!operation) {
-      throw new WebsiteProvisioningHttpError(
-        'website_provisioning_not_found',
-        'Website provisioning operation was not found',
-        404,
-      );
-    }
+    if (!operation) throw provisioningNotFound();
+    await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
     return response.json({ data: projectOperation(operation) });
   }));
 
@@ -183,7 +233,10 @@ export function mountWebsiteProvisioningRoutes(app, {
   app.post('/api/sites/provisioning/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = operationId(request.params.operationId);
     continueBody(request.body, id);
-    const result = await orchestrator.runNext(id);
+    const operation = await registry.get(id);
+    if (!operation) throw provisioningNotFound();
+    const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
+    const result = await orchestrator.runNext(id, actor);
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
     return response.status(status).json({ data: projectResult(result) });
   }));
@@ -192,7 +245,10 @@ export function mountWebsiteProvisioningRoutes(app, {
     const id = operationId(request.params.operationId);
     const provisioningStepId = stepId(request.params.stepId);
     retryBody(request.body, id, provisioningStepId);
-    const result = await orchestrator.retryStep(id, provisioningStepId);
+    const operation = await registry.get(id);
+    if (!operation) throw provisioningNotFound();
+    const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
+    const result = await orchestrator.retryStep(id, provisioningStepId, actor);
     const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
     return response.status(status).json({ data: projectResult(result) });
   }));
@@ -201,7 +257,10 @@ export function mountWebsiteProvisioningRoutes(app, {
     const id = operationId(request.params.operationId);
     const provisioningStepId = stepId(request.params.stepId);
     compensateBody(request.body, id, provisioningStepId);
-    const result = await orchestrator.compensateStep(id, provisioningStepId);
+    const operation = await registry.get(id);
+    if (!operation) throw provisioningNotFound();
+    const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
+    const result = await orchestrator.compensateStep(id, provisioningStepId, actor);
     return response.status(200).json({ data: projectResult(result) });
   }));
 }
@@ -215,4 +274,6 @@ export const websiteProvisioningHttpInternals = Object.freeze({
   compensateBody,
   publicOperation,
   publicResult,
+  requestActor,
+  requireWebsiteAccess,
 });
