@@ -59,6 +59,7 @@ export function createWebsiteProvisioningRuntime({
   domainRegistry = null,
   runtimeBindingRegistry = null,
   sftpKeyService = null,
+  siteMutationLock = null,
 } = {}) {
   const resolvedIdentityManager = identityManager ?? createWebsiteIdentityPathManager();
   const workspaceMigrationManager = isolationWorkspaceManager ?? (
@@ -759,6 +760,37 @@ export function createWebsiteProvisioningRuntime({
 
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
+  async function withOperationMutationLock(operationId, action) {
+    if (!siteMutationLock) return action();
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new Error('Website provisioning site mutation lock is invalid');
+    }
+    const operation = await registry.get(operationId);
+    if (!operation) return action();
+    const applicationId = operation.resources?.application?.id
+      ?? operation.resources?.website?.applicationId
+      ?? null;
+    return siteMutationLock.withSiteLock({
+      applicationId,
+      websiteId: operation.websiteId,
+    }, action);
+  }
+
+  async function runNext(operationId) {
+    return withOperationMutationLock(operationId, () => orchestrator.runNext(operationId));
+  }
+
+  async function retryStep(operationId, stepId) {
+    return withOperationMutationLock(operationId, async () => {
+      await registry.retryStep({ operationId, stepId });
+      return orchestrator.runNext(operationId);
+    });
+  }
+
+  async function compensateStep(operationId, stepId) {
+    return withOperationMutationLock(operationId, () => orchestrator.compensateStep(operationId, stepId));
+  }
+
   async function init() {
     await registry.init();
     if (isolationMigration) await isolationMigration.init();
@@ -767,7 +799,7 @@ export function createWebsiteProvisioningRuntime({
     for (const operation of interrupted) {
       // listInterrupted only returns applying/compensating operations. runNext therefore
       // takes the inspect-first reconciliation path and never starts a new pending host mutation.
-      reconciled.push(await orchestrator.runNext(operation.operationId));
+      reconciled.push(await runNext(operation.operationId));
     }
     return Object.freeze(reconciled);
   }
@@ -797,9 +829,9 @@ export function createWebsiteProvisioningRuntime({
     get: (operationId) => registry.get(operationId),
     create: (plan) => registry.create(plan),
     auditIsolation,
-    runNext: (operationId) => orchestrator.runNext(operationId),
-    retryStep: (operationId, stepId) => orchestrator.retryStep(operationId, stepId),
-    compensateStep: (operationId, stepId) => orchestrator.compensateStep(operationId, stepId),
+    runNext,
+    retryStep,
+    compensateStep,
     listInterrupted: () => registry.listInterrupted(),
   });
 }
