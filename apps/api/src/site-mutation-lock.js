@@ -87,11 +87,13 @@ export function createSiteMutationLock({
 
     for (let attempt = 0; attempt < 2; attempt += 1) {
       let handle = null;
+      let acquired = false;
       try {
         handle = await open(target, 'wx', 0o600);
         await writeFile(handle, value, { encoding: 'utf8' });
         await handle.close();
         handle = null;
+        acquired = true;
 
         try {
           return await action();
@@ -104,6 +106,7 @@ export function createSiteMutationLock({
         }
       } catch (error) {
         await handle?.close().catch(() => {});
+        if (acquired) throw error;
         if (error instanceof SiteMutationLockError) throw error;
         if (error?.code !== 'EEXIST') {
           throw new SiteMutationLockError('site_mutation_lock_failed', 'Site mutation lock could not be acquired', 503);
