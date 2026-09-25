@@ -6,7 +6,8 @@
 - [x] **WR-02/03a güvenli önizleme:** `d80c3357`, `befbe56f`; Application cleanup dahil eksik lifecycle fail-closed blocker. Owner Barındırma ayarlarında impact/blocker/journal görünür; GET-only istemci kullanılır ve destructive buton yok.
 - [x] **WR-03b kaynak:** `b45a8830` → `94b3eac4`; güvenli Application/env cleanup, provisioning receipt-owned Unix cleanup, canonical file roots, runtime binding ownership, start preflight, Owner-only global recovery journal ve typed confirmation + explicit step continuation UI. Site metadata kaybolduktan sonra kalan Application cleanup global recovery ekranından sürdürülebilir.
 - [x] **WR-03c source:** direct-systemd host service cleanup `53afe904` → `2455cc38` ile Application evidence + deployment receipt + deterministic unit/env/current-release ownership üzerinden bağlandı; runtime-binding kaydı olmasa da adım zorunlu. Receipt'siz legacy state fail-closed.
-- [ ] **WR-04 kabul:** Node24/npm11 + gerçek Passenger/Static/direct-systemd host/browser/restart/partial/unknown-result kabulü, process-shared kilit ve live auth sınırları geçmeden tam Site Silme tamamlandı sayılmaz.
+- [x] **WR-03d shared-lock source:** `2fa0a7bf` → `bbf4774f`; site-create/provisioning/removal ile PHP/cron worker mutation'ları aynı filesystem Application/Website lock alanına taşındı.
+- [ ] **WR-04 kabul:** Node24/npm11 + gerçek Passenger/Static/direct-systemd host/browser/restart/partial/unknown-result, iki process/crash lock ve live auth sınırları geçmeden tam Site Silme tamamlandı sayılmaz.
 ## 2026-09-25 — Site erişimi / askıya alma
 
 - [x] **SUSPEND-UI-01/02 kaynak:** `482fb0e6`, `861ed2f9`; Barındırma ayarlarında Site erişimi kartı, bağlı domain preview/blocker, domain adıyla açık onay, journal tabanlı suspend/retry/resume ve kayıp sonuçta replay yapmayan yenileme.
