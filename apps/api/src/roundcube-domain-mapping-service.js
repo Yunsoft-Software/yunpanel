@@ -181,7 +181,7 @@ export function createRoundcubeDomainMappingService({
     }
   }
 
-  async function enqueueApply(mapping, { replacingJobId = null } = {}) {
+  async function enqueueApply(mapping, { replacingJobId = null, authorization = null } = {}) {
     await assertNoConcurrentApply(mapping.serverId, replacingJobId);
     const preview = await desiredPreview(mapping);
     const idempotencyKey = [
@@ -204,6 +204,7 @@ export function createRoundcubeDomainMappingService({
         resourceType: 'server',
         resourceId: mapping.serverId,
         idempotencyKey,
+        authorization,
       });
     } catch (error) {
       if (Number.isInteger(error?.status)) throw error;
@@ -271,7 +272,7 @@ export function createRoundcubeDomainMappingService({
     operationId,
     expectedUpdatedAt,
     confirmation,
-  } = {}) {
+  } = {}, { authorization = null } = {}) {
     const mapping = await registry.getRecordForMailDomain(mailDomainId);
     if (!mapping || !['pending', 'removing'].includes(mapping.state)
       || mapping.operationId !== operationId
@@ -284,7 +285,7 @@ export function createRoundcubeDomainMappingService({
     }
 
     const job = await jobFor(mapping);
-    if (job === null) return enqueueApply(mapping);
+    if (job === null) return enqueueApply(mapping, { authorization });
     if (['queued', 'running'].includes(job.status)) return publicState(mapping, job);
     if (job.status === 'succeeded') {
       const completed = await registry.completeApply(mailDomainId, {
@@ -306,7 +307,7 @@ export function createRoundcubeDomainMappingService({
       const currentPreview = await desiredPreview(mapping);
       if (currentPreview.sha256 === mapping.expectedRoundcubePreviewSha256
         && currentPreview.nginxSha256 === mapping.expectedRoundcubeNginxSha256) {
-        return enqueueApply(mapping, { replacingJobId: job.id });
+        return enqueueApply(mapping, { replacingJobId: job.id, authorization });
       }
       fail(
         'roundcube_mapping_retry_preview_drift',
