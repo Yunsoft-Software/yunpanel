@@ -332,12 +332,7 @@ const websiteCronRegistry = createWebsiteCronRegistry({
 await websiteCronRegistry.init();
 const websiteCronManager = createWebsiteCronManager();
 const websiteCronOperationReceiptStore = createWebsiteCronOperationReceiptStore();
-const localWebsiteCronOperation = createLocalWebsiteCronOperation({
-  websiteCronRegistry,
-  websiteCronManager,
-  receiptStore: websiteCronOperationReceiptStore,
-  siteMutationLock,
-});
+let localWebsiteCronOperation = null;
 const websiteCronReconciliationProvider = localServerId
   ? createWebsiteCronReconciliationProvider({
     websiteCronRegistry,
@@ -368,17 +363,8 @@ const authorizeWebsitePhpActor = async (actor, websiteId) => {
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
 };
-const websitePhpToolActionService = createWebsitePhpToolActionService({
-  websitePhpToolsService,
-  jobRegistry,
-  authorizeActor: authorizeWebsitePhpActor,
-  withApplicationLock: siteMutationLock.withApplicationLock,
-});
-const localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
-  websitePhpToolsService,
-  authorizeActor: authorizeWebsitePhpActor,
-  siteMutationLock,
-});
+let websitePhpToolActionService = null;
+let localWebsitePhpToolOperation = null;
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
   filePath: websiteCachePolicyStorePath,
   masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY,
@@ -645,6 +631,25 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   applicationRegistry,
   runtimeBindingRegistry,
 });
+localWebsiteCronOperation = createLocalWebsiteCronOperation({
+  websiteCronRegistry,
+  websiteCronManager,
+  receiptStore: websiteCronOperationReceiptStore,
+  siteMutationLock,
+  authorizeActor: authorizeWebsitePhpActor,
+});
+websitePhpToolActionService = createWebsitePhpToolActionService({
+  websitePhpToolsService,
+  jobRegistry,
+  authorizeActor: authorizeWebsitePhpActor,
+  withApplicationLock: siteMutationLock.withApplicationLock,
+});
+localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
+  websitePhpToolsService,
+  authorizeActor: authorizeWebsitePhpActor,
+  siteMutationLock,
+});
+
 const aiToolRegistry = createAiToolRuntime({
   serverRegistry: registry,
   websiteRegistry,
