@@ -44,6 +44,7 @@ function executionContext(job, serverId, authorization = null) {
   return Object.freeze({
     jobId: job.id,
     serverId,
+    type: job.type,
     resourceType: job.resourceType,
     resourceId: job.resourceId,
     authorization: cloneEvidenceValue(authorization),
