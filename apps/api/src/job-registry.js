@@ -40,6 +40,7 @@ import { sanitizeNodePassengerMigrationResult } from './node-passenger-migration
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { sanitizeWebsiteCronJobResult } from './website-cron-job-result.js';
 import { sanitizeWebsitePhpToolJobResult } from './website-php-tool-job-result.js';
+import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -1107,7 +1108,16 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (!initialized) await init();
   }
 
-  async function enqueue({ serverId, type, operation, payload, resourceType, resourceId, idempotencyKey = null }) {
+  async function enqueue({
+    serverId,
+    type,
+    operation,
+    payload,
+    resourceType,
+    resourceId,
+    idempotencyKey = null,
+    authorization = null,
+  }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
     if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
@@ -1118,6 +1128,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey))) {
       throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
     }
+    const privateAuthorization = normalizeWebsiteProvisioningJobAuthorization(authorization, { optional: true });
 
     const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
       serverId, type, operation, payload, resourceType, resourceId,
@@ -1126,6 +1137,22 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     if (existing) {
       if (existing.idempotencyDigest !== requestDigest) {
         throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+      }
+      const existingAuthorization = normalizeWebsiteProvisioningJobAuthorization(
+        existing.authorization,
+        { optional: true },
+      );
+      if (existingAuthorization && privateAuthorization
+        && JSON.stringify(existingAuthorization) !== JSON.stringify(privateAuthorization)) {
+        throw new JobRegistryError(
+          'job_authorization_conflict',
+          'Job idempotency key is already bound to a different private authorization scope',
+          409,
+        );
+      }
+      if (!existingAuthorization && privateAuthorization) {
+        existing.authorization = privateAuthorization;
+        await persist();
       }
       return enqueueResult(existing, false);
     }
@@ -1163,6 +1190,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       error: null,
       idempotencyKey,
       idempotencyDigest: requestDigest,
+      authorization: privateAuthorization,
     };
     state.jobs.push(job);
     await persist();
@@ -1190,11 +1218,19 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     const claim = claimChain.catch(() => {}).then(async () => {
       const job = state.jobs.find((candidate) => candidate.serverId === serverId && candidate.status === 'queued');
       if (!job) return null;
+      const privateAuthorization = normalizeWebsiteProvisioningJobAuthorization(
+        job.authorization,
+        { optional: true },
+      );
       job.status = 'running';
       job.startedAt = new Date(now()).toISOString();
       job.attempts += 1;
       await persist();
-      return { job: publicJob(job), envelope: createOperationEnvelope({ id: job.id, operation: job.operation, payload: job.payload }) };
+      return {
+        job: publicJob(job),
+        envelope: createOperationEnvelope({ id: job.id, operation: job.operation, payload: job.payload }),
+        authorization: privateAuthorization,
+      };
     });
     claimChain = claim;
     return claim;
