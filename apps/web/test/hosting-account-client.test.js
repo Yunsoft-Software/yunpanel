@@ -113,6 +113,37 @@ test('successful limits response must match submitted limits', async (t) => {
   const f = fixture(t, async () => ({ account: reseller, accessGranted: false }));
   await assert.rejects(f.client.mutate({ action: 'limits', account: reseller, form: { maxCustomers: '5', maxWebsites: '8' } }), (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile);
 });
+test('status mutation binds revision, exact target state and explicit non-host-suspension result', async (t) => {
+  const suspended = { ...customer, active: false, revision: 2, userRevision: 3, updatedAt: 1001 };
+  const f = fixture(t, async () => ({ account: suspended, accessGranted: false, hostSitesSuspended: false }));
+  assert.deepEqual(
+    await f.client.mutate({ action: 'status', account: customer, form: { active: false } }),
+    { account: suspended, accessGranted: false, hostSitesSuspended: false },
+  );
+  assert.equal(f.calls[0][0], '/users/hosting/accounts/customer/status');
+  assert.equal(f.calls[0][1].method, 'PATCH');
+  assert.deepEqual(f.calls[0][1].body, { revision: 1, active: false });
+
+  const wrongHostClaim = fixture(t, async () => ({ account: suspended, accessGranted: false, hostSitesSuspended: true }));
+  await assert.rejects(
+    wrongHostClaim.client.mutate({ action: 'status', account: customer, form: { active: false } }),
+    (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
+  );
+
+  const wrongState = fixture(t, async () => ({ account: { ...suspended, active: true }, accessGranted: false, hostSitesSuspended: false }));
+  await assert.rejects(
+    wrongState.client.mutate({ action: 'status', account: customer, form: { active: false } }),
+    (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
+  );
+});
+
+test('status mutation rejects no-op or non-boolean target before network write', async (t) => {
+  const f = fixture(t, async () => assert.fail('must not request'));
+  await assert.rejects(f.client.mutate({ action: 'status', account: customer, form: { active: true } }), { code: 'hosting_result_invalid' });
+  await assert.rejects(f.client.mutate({ action: 'status', account: customer, form: { active: 0 } }), { code: 'hosting_result_invalid' });
+  assert.equal(f.calls.length, 0);
+});
+
 test('profile removal sends revision confirmation and does not accept login deletion', async (t) => {
   const f = fixture(t, async () => ({ id: 'customer', unregistered: true, loginDeleted: false, accessGranted: false, token: 'drop' }));
   assert.deepEqual(await f.client.mutate({ action: 'unregister', account: customer }), { id: 'customer', unregistered: true, loginDeleted: false, accessGranted: false });
