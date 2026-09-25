@@ -319,6 +319,7 @@ export function createApp(allOptions = {}) {
   websitePhpToolsService = null,
   websitePhpToolActionService = null,
   websiteCacheService = null,
+  siteMutationLock = null,
   panelSettingsService = null,
   databaseBackupService = null,
   domainSuspensionRuntime = null,
@@ -612,6 +613,7 @@ export function createApp(allOptions = {}) {
     localServerId,
     userAdminStore,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
+    siteMutationLock,
   });
   if (websiteProvisioningRuntime) {
     mountWebsiteProvisioningRoutes(app, {
