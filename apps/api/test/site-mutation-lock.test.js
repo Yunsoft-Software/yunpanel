@@ -96,3 +96,19 @@ test('site lock prefers Application identity and falls back to Website identity'
     await rm(root, { recursive: true, force: true });
   }
 });
+
+
+test('mutation callback errors are preserved and the lock is still released', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-site-lock-'));
+  try {
+    const lock = createSiteMutationLock({ root });
+    const failure = Object.assign(new Error('domain mutation failed'), { code: 'domain_mutation_failed' });
+    await assert.rejects(
+      () => lock.withApplicationLock(applicationId, async () => { throw failure; }),
+      (error) => error === failure,
+    );
+    assert.equal(await lock.withApplicationLock(applicationId, async () => 'after-failure'), 'after-failure');
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
