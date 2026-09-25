@@ -891,6 +891,9 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
     unixIdentityCleanupInspector: websiteRemovalCleanupAdapters?.inspectUnixIdentityCleanup ?? null,
     siteMutationLock,
+    hostingAllocationReleaseHandler: typeof authStore.users?.hostingAccounts?.siteAllocations?.releaseRemoved === 'function'
+      ? (proof) => authStore.users.hostingAccounts.siteAllocations.releaseRemoved(proof)
+      : null,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
