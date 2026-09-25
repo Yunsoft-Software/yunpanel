@@ -30,6 +30,32 @@ test('existing user store mounts the same-DB hosting store without exposing a ne
   users.hostingAccounts.registerReseller(f.token, f.requireManagement, { userId: login.id, expectedUserRevision: login.revision, limits: { maxCustomers: 1, maxWebsites: 1 } });
   assert.equal(users.list(f.token, f.requireManagement).users.find((user) => user.id === login.id).role, 'site_manager');
 });
+test('hosting lifecycle updates the shared login state while legacy users PATCH remains blocked', (t) => {
+  const f = setup(t);
+  const users = createUserAdminStore({ ...f, hashPassword: async () => '', normalizeUsername: (name) => name });
+  const profile = f.reseller();
+  const targetToken = f.session('reseller-a');
+
+  const suspended = users.hostingAccounts.setActive(f.token, f.requireManagement, 'reseller-a', {
+    revision: profile.revision,
+    active: false,
+  });
+  assert.equal(suspended.active, false);
+  assert.equal(users.list(f.token, f.requireManagement).users.find((user) => user.id === 'reseller-a').active, false);
+  assert.equal(f.getSession(targetToken), null);
+  assert.throws(
+    () => users.update(f.token, f.requireManagement, 'reseller-a', { revision: suspended.userRevision, active: true }),
+    code('hosting_account_managed'),
+  );
+
+  const reactivated = users.hostingAccounts.setActive(f.token, f.requireManagement, 'reseller-a', {
+    revision: suspended.revision,
+    active: true,
+  });
+  assert.equal(reactivated.active, true);
+  assert.equal(users.list(f.token, f.requireManagement).users.find((user) => user.id === 'reseller-a').active, true);
+});
+
 for (const change of [{ role: 'owner' }, { active: false }, { websiteIds: ['other-site'] }]) {
   test(`legacy users PATCH cannot bypass hosting lifecycle: ${JSON.stringify(change)}`, (t) => {
     const f = setup(t); const users = createUserAdminStore({ ...f, hashPassword: async () => '', normalizeUsername: (name) => name });
