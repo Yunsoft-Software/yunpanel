@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { websiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
@@ -413,6 +414,7 @@ export function createWebsiteCertificateProvisioningHandler({
         resourceType: 'certificate',
         resourceId: certificate.id,
         idempotencyKey: `website.cert.issue:${context.operationId}:${certificate.id}`,
+        authorization: websiteProvisioningJobAuthorization(context),
       });
       jobs = [...jobs, child];
     }
