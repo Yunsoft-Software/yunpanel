@@ -189,6 +189,49 @@ test('idempotent enqueue safely requeues only provisioning auth-preflight failur
   assert.equal(unchanged.error.code, 'nginx_config_invalid');
 });
 
+test('legacy unscoped provisioning failure upgrades in place on explicit authorized retry', async () => {
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'certificate',
+  };
+  const base = {
+    serverId: 'server-1',
+    type: 'website.ssl.issue:9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    operation: OPERATIONS.SSL_ISSUE,
+    payload: { domains: ['example.com'], email: 'owner@example.com', staging: false },
+    resourceType: 'certificate',
+    resourceId: 'certificate-legacy',
+    idempotencyKey: 'website.cert.issue:legacy:certificate',
+  };
+  const registry = createJobRegistry();
+  const legacy = await registry.enqueue(base);
+  const claimed = await registry.claimNext('server-1');
+  assert.equal(claimed.job.id, legacy.id);
+  assert.equal(claimed.authorization, null);
+  const quarantined = await registry.complete({
+    serverId: 'server-1',
+    jobId: legacy.id,
+    status: 'failed',
+    error: { code: 'website_provisioning_job_authorization_required' },
+  });
+  assert.equal(quarantined.status, 'failed');
+  assert.equal(quarantined.error.code, 'website_provisioning_job_authorization_required');
+
+  const recovered = await registry.enqueue({ ...base, authorization });
+  assert.equal(recovered.id, legacy.id);
+  assert.equal(recovered.status, 'queued');
+  assert.equal(recovered.error, null);
+  assert.equal(recovered.attempts, 1);
+
+  const retryClaim = await registry.claimNext('server-1');
+  assert.equal(retryClaim.job.id, legacy.id);
+  assert.equal(retryClaim.job.attempts, 2);
+  assert.deepEqual(retryClaim.authorization, authorization);
+});
+
 test('DNS record jobs retain only provider-safe confirmed state', async () => {
   const registry = createJobRegistry();
   const payload = {
