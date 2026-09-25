@@ -363,6 +363,14 @@ const authorizeWebsitePhpActor = async (actor, websiteId) => {
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
 };
+const authorizeWebsiteRemovalActor = async (actor) => {
+  if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
+    || actor.role !== 'owner') return null;
+  const session = authStore.getSessionById(actor.sessionId);
+  if (!session || session.user.id !== actor.userId || session.user.role !== 'owner') return null;
+  if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
+  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: 'owner' });
+};
 let websitePhpToolActionService = null;
 let localWebsitePhpToolOperation = null;
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
@@ -899,6 +907,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     hostingAllocationReleaseHandler: typeof authStore.users?.hostingAccounts?.siteAllocations?.releaseRemoved === 'function'
       ? (proof) => authStore.users.hostingAccounts.siteAllocations.releaseRemoved(proof)
       : null,
+    authorizeActor: authorizeWebsiteRemovalActor,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
