@@ -154,3 +154,68 @@ test('running step checkpoints persist across registry restart without marking t
     assert.equal(restoredStep.result.tasks[0].status, 'queued');
   });
 });
+
+
+test('direct-systemd Application creates a runtime cleanup step without runtime-binding metadata', async () => {
+  const website = {
+    id: 'ws-direct',
+    name: 'direct-site',
+    serverId: 'srv-local',
+    applicationId: 'app-direct',
+    systemUser: null,
+    desiredRevision: 1,
+  };
+  const releaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
+  const impact = {
+    version: 1,
+    resourceType: 'website',
+    resource: { id: website.id, serverId: website.serverId },
+    application: {
+      id: website.applicationId,
+      serverId: website.serverId,
+      name: 'direct-app',
+      type: 'node',
+      state: 'active',
+      desiredRevision: 3,
+      currentReleaseId: releaseId,
+      activeDeploymentId: null,
+    },
+    operation: 'delete',
+    targetServerId: null,
+    dependencies: {
+      domains: [],
+      databases: { status: 'available', items: [] },
+      sftpKeys: { status: 'available', items: [] },
+      runtimeBindings: { status: 'available', items: [] },
+      unixIdentities: { status: 'available', items: [] },
+      logScopes: { status: 'available', items: [] },
+      crons: { status: 'available', items: [] },
+      backups: { status: 'available', items: [] },
+      activeJobs: [],
+    },
+    blockers: [],
+    previewDigest: 'd'.repeat(64),
+    confirmation: `delete:website:${website.id}:${'d'.repeat(64)}`,
+  };
+  const preview = createWebsiteRemovalPreview({
+    website,
+    impact,
+    applicationState: {
+      ...impact.application,
+      runtimeAdapter: 'direct-systemd',
+      serviceName: 'yunpanel-node-aaaaaaaaaaaaaaaa.service',
+      currentCommitSha: 'b'.repeat(40),
+      servicePort: 3100,
+      healthPath: '/health',
+    },
+  });
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+  const operation = await registry.create(preview);
+  assert.deepEqual(operation.steps.map((step) => step.kind), [
+    'runtime_cleanup',
+    'file_cleanup',
+    'metadata_finalization',
+    'application_cleanup',
+  ]);
+});
