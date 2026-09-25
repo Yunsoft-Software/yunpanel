@@ -269,3 +269,27 @@ test('independent removal registries reload under the store lock and preserve di
     assert.deepEqual((await right.list()).map((entry) => entry.websiteId).sort(), ['site-a', 'site-b']);
   });
 });
+
+
+test('private Owner actor evidence survives restart without entering public operation views', async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, 'actor-removals.json');
+    const actor = {
+      sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      role: 'owner',
+    };
+    const registry = createWebsiteRemovalOperationRegistry({ filePath });
+    await registry.init();
+    const operation = await registry.create(bareRemovalPreview('site-actor'), { actor });
+    assert.equal(Object.hasOwn(operation, 'actor'), false);
+    assert.deepEqual(await registry.getActor(operation.id), actor);
+
+    const reopened = createWebsiteRemovalOperationRegistry({ filePath });
+    await reopened.init();
+    assert.deepEqual(await reopened.getActor(operation.id), actor);
+    const publicOperation = await reopened.get(operation.id);
+    assert.equal(Object.hasOwn(publicOperation, 'actor'), false);
+    assert.doesNotMatch(JSON.stringify(publicOperation), /aaaaaaaa-aaaa|bbbbbbbb-bbbb/);
+  });
+});
