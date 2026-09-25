@@ -232,7 +232,8 @@ export function createDurableJobRegistry({
       registry = await initialize(replacement);
       initialized = true;
       if (typeof recoveryStore.refresh === 'function') await recoveryStore.refresh();
-      if (inspectRecovery || recovery) await detectRecovery(registry);
+      const storedRecovery = recoverySnapshotJobs();
+      if (inspectRecovery || recovery || storedRecovery.length > 0) await detectRecovery(registry);
     } catch (error) {
       if (error instanceof DurableJobRegistryError && fatal) throw error;
       latch('durable_job_recovery_failed', 'Durable job registry could not recover committed state');
@@ -265,7 +266,7 @@ export function createDurableJobRegistry({
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
       // Another API/worker process may have committed since this instance last
       // touched the store. Reload only after acquiring the store-wide lock.
-      await reloadDurableState({ inspectRecovery: true });
+      await reloadDurableState({ inspectRecovery: false });
       assertMutationAllowed(method);
       if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
       try {
@@ -285,7 +286,7 @@ export function createDurableJobRegistry({
         return result;
       } catch (error) {
         if (fatal) throw error;
-        await reloadDurableState({ inspectRecovery: true });
+        await reloadDurableState({ inspectRecovery: method === 'claimNext' || method === 'complete' });
         throw error;
       }
     }));
@@ -296,7 +297,7 @@ export function createDurableJobRegistry({
   async function beginReconciliation({ serverId, jobId } = {}) {
     await init();
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
-      await reloadDurableState({ inspectRecovery: true });
+      await reloadDurableState({ inspectRecovery: false });
       assertHealthy();
       const identity = safeRecoveryJob({ id: jobId, serverId });
       if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
@@ -324,7 +325,7 @@ export function createDurableJobRegistry({
   async function acknowledgeReconciliation({ serverId, jobId } = {}) {
     await init();
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
-      await reloadDurableState({ inspectRecovery: true });
+      await reloadDurableState({ inspectRecovery: false });
       assertHealthy();
       const identity = safeRecoveryJob({ id: jobId, serverId });
       if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
