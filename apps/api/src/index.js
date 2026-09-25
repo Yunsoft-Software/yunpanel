@@ -877,6 +877,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
     runtimeBindingRegistry,
     websiteCronRegistry,
+    jobRegistry,
     fileCleanupHandler: websiteRemovalCleanupAdapters?.fileCleanupHandler ?? null,
     unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
