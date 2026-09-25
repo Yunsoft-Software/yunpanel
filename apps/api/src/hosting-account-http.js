@@ -95,7 +95,6 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
         account,
         accessGranted: false,
         hostSitesSuspended: false,
-        sessionsRevoked: true,
       },
     });
   }
