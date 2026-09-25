@@ -3,6 +3,7 @@ import {
   ensureMailConfigurationIdle,
   rollbackPreview,
 } from './mail-configuration-http.js';
+import { websiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -511,6 +512,7 @@ export function createWebsiteMailProvisioningHandler({
           resourceType: 'mail_domain',
           resourceId: intent.mailDomainId,
           idempotencyKey: idempotencyKey(context.operationId, 'apply', attempt),
+          authorization: websiteProvisioningJobAuthorization(context),
         });
         terminal = await waitForTerminalJob(applyJobIdentity(queued, intent, context.operationId));
       }
@@ -650,6 +652,7 @@ export function createWebsiteMailProvisioningHandler({
           resourceType: 'mail_domain',
           resourceId: intent.mailDomainId,
           idempotencyKey: idempotencyKey(context.operationId, 'rollback', attempt),
+          authorization: websiteProvisioningJobAuthorization(context),
         });
         terminal = await waitForTerminalJob(rollbackJobIdentity(queued, intent, context.operationId));
       }
