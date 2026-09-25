@@ -18,6 +18,7 @@ export function hostingAccountMessage(error) {
     reseller_limit_reached: 'Bayinin adet sınırı doldu. Yeni kayıt eklenmedi.',
     reseller_scope_forbidden: 'Seçilen bayinin etkin olduğunu kontrol edin; bu ilişki kurulamadı.',
     hosting_account_not_found: 'Profil artık bulunmuyor. Listeyi yenileyin.',
+    invalid_active: 'Hesap durumu geçersiz. Profili yenileyip işlemi tekrar seçin.',
     hosting_user_not_found: 'Kullanıcı hesabı artık bulunmuyor. Listeyi yenileyin.',
     invalid_reseller_limits: 'Her iki adet sınırını da girin veya ayrı ayrı Sınırsız seçin. Sıfır yeni kayıt eklenmesini engeller.',
     invalid_hosting_parent: 'Müşterinin bağlı olacağı bayiyi seçin veya doğrudan yönetimi işaretleyin.',
@@ -151,6 +152,9 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
         if (action === 'limits' && account.kind === 'reseller') {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/limits`;
           body = { revision: account.revision, limits: hostingLimitsInput(form) };
+        } else if (action === 'status' && typeof form?.active === 'boolean' && form.active !== account.active) {
+          method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/status`;
+          body = { revision: account.revision, active: form.active };
         } else if (action === 'unregister') {
           method = 'DELETE'; path = `${ROOT}/${encodeURIComponent(target)}/profile`;
           body = { revision: account.revision, confirmation: `unregister-hosting-profile:${target}:${account.revision}` };
@@ -165,12 +169,16 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
           if (result.id !== target || result.unregistered !== true || result.loginDeleted !== false) throw problem('hosting_result_invalid');
           return { id: target, unregistered: true, loginDeleted: false, accessGranted: false };
         }
+        if (action === 'status' && result.hostSitesSuspended !== false) throw problem('hosting_result_invalid');
         const next = readHostingAccount(result.account);
         if (next.id !== target || next.kind !== expectedKind || next.resellerId !== expectedParent
           || (action === 'register' && next.userRevision <= user.revision)
           || (action === 'register' && expectedKind === 'reseller' && (next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
-          || (action === 'limits' && (next.revision < account.revision || next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))) throw problem('hosting_result_invalid');
-        return { account: next, accessGranted: false };
+          || (action === 'limits' && (next.revision < account.revision || next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
+          || (action === 'status' && (next.active !== body.active || next.revision <= account.revision))) throw problem('hosting_result_invalid');
+        return action === 'status'
+          ? { account: next, accessGranted: false, hostSitesSuspended: false }
+          : { account: next, accessGranted: false };
       } catch (error) {
         if (!live() || controller.signal.aborted) throw obsolete();
         if (!error.status || error.status >= 500 || ['user_revision_conflict', 'hosting_account_revision_conflict', 'hosting_account_exists', 'hosting_account_not_found'].includes(error.code)) {
