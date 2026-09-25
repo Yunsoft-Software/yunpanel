@@ -25,5 +25,5 @@ GitHub Actions, main değişikliği ve canlı deploy yapılmaz. Kaynak alt işle
 
 - [x] User cron create/update/delete exact session/user/role ile queue edilir.
 - [x] Local cron worker site mutation lock sonrasında canlı session, role, Owner MFA veya site_manager Website grant'ını yeniden doğrular; revoke olmuş actor hosta dokunamaz.
-- [x] Website removal cron cleanup ayrı `system_removal` authorization modu kullanır; protocol ve worker bu modu yalnız `cron.remove` için kabul eder.
-- [ ] Gerçek logout/grant revoke ile queued job, iki process worker ve Node24/npm11 acceptance çalıştırılmalı.
+- [x] Website removal cron cleanup ayrı `system_removal` authorization modu kullanır; protocol ve worker bu modu yalnız `cron.remove` için kabul eder. `d954417d` / `9a2cc2c6`: production worker bu modu kör sistem bypass'ı saymaz; aktif removal journal'ında task/Application/server eşleşmesi + private Owner actor bulunmalı ve actor auth store'da live Owner/MFA olarak yeniden doğrulanmalıdır. Aksi halde host remove başlamaz.
+- [ ] Gerçek logout/session revoke/MFA değişimi ile queued user/removal job, iki process worker ve Node24/npm11 acceptance çalıştırılmalı. Kaynak testleri live journal deny durumunda host remove/metadata delete/receipt olmadığını kontrol ediyor; canlı kabul değildir.
