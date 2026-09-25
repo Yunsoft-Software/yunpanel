@@ -102,6 +102,7 @@ function durable(fake) {
     filePath: '/virtual/jobs.json',
     registryFactory: fake.factory,
     recoveryStoreFactory: fake.recoveryStoreFactory,
+    storeLockFactory: () => ({ withLock: async (action) => action() }),
   });
 }
 
@@ -135,7 +136,7 @@ test('failed mutation discards dirty in-memory state and reloads last committed 
   await assert.rejects(registry.enqueue({ id: 'dirty-job', serverId: 'server-1' }), /before commit/);
   assert.deepEqual(await registry.listJobs(), [committed]);
   assert.deepEqual(fake.disk(), [committed]);
-  assert.equal(fake.factoryCount(), 2);
+  assert.equal(fake.factoryCount(), 3);
   assert.equal(registry.failure(), null);
 });
 
@@ -244,4 +245,5 @@ test('constructor rejects non-durable usage and invalid factories', () => {
   assert.throws(() => createDurableJobRegistry({ registryFactory: () => ({}) }), { code: 'durable_job_store_required' });
   assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json' }), { code: 'durable_job_factory_required' });
   assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json', registryFactory: () => ({}), recoveryStoreFactory: null }), { code: 'durable_job_recovery_factory_required' });
+  assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json', registryFactory: () => ({}), recoveryStoreFactory: () => ({}), storeLockFactory: null }), { code: 'durable_job_store_lock_invalid' });
 });
