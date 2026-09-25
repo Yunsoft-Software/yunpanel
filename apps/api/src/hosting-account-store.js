@@ -20,6 +20,10 @@ function revision(value) {
   if (!Number.isSafeInteger(value) || value < 1) throw error('invalid_revision', 'A current account revision is required.');
   return value;
 }
+function active(value) {
+  if (typeof value !== 'boolean') throw error('invalid_active', 'Active must be a boolean.');
+  return value;
+}
 
 /** RS-02 storage integration, deliberately Owner-only and NOT mounted as HTTP.
  * Same auth DB/BEGIN IMMEDIATE transaction; no duplicated users or new login roles.
@@ -183,6 +187,44 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         audit(actor.id, 'hosting.limits_updated', { type: 'user', id });
         return view(existing(id));
       });
+    },
+    setActive(rawToken, requireManagement, id, input) {
+      const outcome = transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        fields(input, ['revision', 'active']);
+        const row = existing(id, revision(input.revision));
+        const nextActive = active(input.active);
+        if (Boolean(row.active) === nextActive) {
+          return { account: view(row), revoked: [] };
+        }
+        if (row.revision === Number.MAX_SAFE_INTEGER) throw conflict();
+
+        db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)')
+          .run(id, Number(nextActive), actor.id, now());
+        db.prepare('UPDATE users SET active = ? WHERE id = ?').run(Number(nextActive), id);
+        if (db.prepare('SELECT 1 FROM auth_hosting_lifecycle_intents WHERE user_id = ?').get(id)) {
+          throw error('hosting_account_state_invalid', 'Hosting lifecycle intent was not consumed.', 503);
+        }
+
+        db.prepare('UPDATE auth_hosting_accounts SET revision = revision + 1, updated_at = ? WHERE user_id = ?')
+          .run(now(), id);
+        invalidate(id);
+        const revoked = [{ id, reason: nextActive ? 'hosting_account_reactivated' : 'hosting_account_suspended' }];
+
+        if (row.kind === 'reseller' && !nextActive) {
+          const children = db.prepare("SELECT user_id FROM auth_hosting_accounts WHERE kind = 'customer' AND reseller_id = ? ORDER BY user_id")
+            .all(id);
+          for (const child of children) {
+            invalidate(child.user_id);
+            revoked.push({ id: child.user_id, reason: 'hosting_parent_suspended' });
+          }
+        }
+
+        audit(actor.id, nextActive ? 'hosting.account_reactivated' : 'hosting.account_suspended', { type: 'user', id });
+        return { account: view(existing(id)), revoked };
+      });
+      for (const item of outcome.revoked) revokeLiveUser(item.id, item.reason);
+      return outcome.account;
     },
     unregister(rawToken, requireManagement, id, input) {
       transaction(() => {
