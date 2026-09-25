@@ -52,6 +52,41 @@ test('local executor claims, sanitizes, completes and reconciles a queued job', 
   assert.equal((await jobRegistry.getJob(queued.id)).status, 'succeeded');
 });
 
+test('local executor carries private authorization only in execution context', async () => {
+  const jobRegistry = createJobRegistry();
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'runtime',
+  };
+  const queued = await jobRegistry.enqueue({
+    serverId,
+    type: 'system.packages.inspect',
+    operation: OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+    payload: {},
+    resourceType: 'system',
+    resourceId: 'system-auth',
+    authorization,
+  });
+  let execution = null;
+  const executor = createLocalJobExecutor({
+    serverId,
+    jobRegistry,
+    executeOperation: async (_operation, _payload, context) => {
+      execution = context;
+      return packageResult;
+    },
+    reconcileCompletedJob: async () => ({ reconciled: true }),
+  });
+
+  const result = await executor.runOnce();
+  assert.equal(result.job.id, queued.id);
+  assert.deepEqual(execution.authorization, authorization);
+  assert.equal(Object.hasOwn(result.job, 'authorization'), false);
+});
+
 test('local operation failure becomes a terminal failed job and still reconciles', async () => {
   const jobRegistry = createJobRegistry();
   const queued = await queuedJob(jobRegistry, 'system-2');
