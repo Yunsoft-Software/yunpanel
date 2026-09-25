@@ -12,11 +12,24 @@ const conflict = () => new AuthError('hosting_site_identity_conflict', 'This ope
 const fields = ['operationId', 'websiteId', 'customerId', 'serverId', 'intentDigest', 'websiteDigest'];
 const columns = ['operation_id', 'website_id', 'customer_id', 'server_id', 'intent_digest', 'website_digest'];
 const websiteFields = ['id', 'serverId', 'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'documentRoot', 'unixUser', 'proxyTarget', 'revision'];
+const removalFields = ['operationId', 'websiteId', 'serverId', 'applicationId', 'websiteAbsent', 'applicationAbsent'];
 function input(value) {
   if (!plain(value) || Object.keys(value).length !== fields.length || !fields.every((key) => Object.hasOwn(value, key))
     || !['operationId', 'websiteId', 'serverId'].every((key) => uuid(value[key])) || !identifier(value.customerId)
     || !digest(value.intentDigest) || !digest(value.websiteDigest)) throw invalid();
   return Object.fromEntries(fields.map((key) => [key, value[key]]));
+}
+function removalEvidence(value) {
+  if (!plain(value) || Object.keys(value).length !== removalFields.length
+    || !removalFields.every((key) => Object.hasOwn(value, key))
+    || !identifier(value.operationId)
+    || !uuid(value.websiteId) || !uuid(value.serverId)
+    || (value.applicationId !== null && !uuid(value.applicationId))
+    || value.websiteAbsent !== true
+    || value.applicationAbsent !== (value.applicationId !== null)) {
+    throw new AuthError('hosting_site_release_evidence_invalid', 'Verified Website removal evidence is required before releasing capacity.', 409);
+  }
+  return Object.fromEntries(removalFields.map((key) => [key, value[key]]));
 }
 function canonical(value) {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -111,7 +124,68 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
       for (const id of result.revoke) revokeLiveUser(id, 'hosting_website_attached');
       return result.allocation;
     },
-    // There is intentionally no timer, catch-delete or release API. A site may
-    // already exist after a timeout; cleanup evidence must precede quota release.
+    /** Internal lifecycle hook only. No timer, HTTP endpoint or catch-delete.
+     * Capacity is released only after the Website removal runtime independently
+     * proves Website absence and, when applicable, Application absence.
+     */
+    releaseRemoved(value) {
+      const proof = removalEvidence(value);
+      const result = transaction(() => {
+        hostingWebsitesForCapacity(db);
+        const row = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE website_id = ?').get(proof.websiteId);
+        if (!row) return { receipt: Object.freeze({ websiteId: proof.websiteId, released: false, quotaReleased: false }), revoke: [] };
+        if (row.server_id !== proof.serverId) throw conflict();
+
+        const ownership = db.prepare('SELECT customer_id FROM auth_customer_websites WHERE website_id = ?').get(proof.websiteId) ?? null;
+        if (row.state === 'attached') {
+          if (!ownership || ownership.customer_id !== row.customer_id) {
+            throw new AuthError('hosting_site_state_invalid', 'Attached Website ownership requires reconciliation before capacity release.', 503);
+          }
+        } else if (row.state === 'reserved') {
+          if (ownership !== null) {
+            throw new AuthError('hosting_site_state_invalid', 'Reserved Website ownership requires reconciliation before capacity release.', 503);
+          }
+        } else {
+          throw new AuthError('hosting_site_state_invalid', 'Site allocation state requires reconciliation.', 503);
+        }
+
+        const account = projection(existing(row.customer_id));
+        const revoke = [account.id];
+        if (account.resellerId !== null) {
+          const parent = projection(existing(account.resellerId));
+          if (parent.kind !== 'reseller') throw new AuthError('hosting_site_state_invalid', 'Hosting parent state requires reconciliation.', 503);
+          revoke.push(parent.id);
+        }
+
+        if (row.state === 'attached') {
+          db.prepare('DELETE FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?').run(proof.websiteId, row.customer_id);
+        }
+        const deleted = db.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ? AND website_id = ?')
+          .run(row.operation_id, proof.websiteId);
+        if (deleted.changes !== 1) {
+          throw new AuthError('hosting_site_release_unverified', 'Site allocation capacity release could not be verified.', 503);
+        }
+        if (db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE website_id = ?').get(proof.websiteId)
+          || db.prepare('SELECT 1 FROM auth_customer_websites WHERE website_id = ?').get(proof.websiteId)) {
+          throw new AuthError('hosting_site_release_unverified', 'Site ownership remained after capacity release.', 503);
+        }
+
+        for (const id of revoke) invalidate(id);
+        audit(null, 'hosting.website_released', { type: 'website', id: proof.websiteId });
+        return {
+          receipt: Object.freeze({
+            websiteId: proof.websiteId,
+            customerId: row.customer_id,
+            allocationOperationId: row.operation_id,
+            removalOperationId: proof.operationId,
+            released: true,
+            quotaReleased: true,
+          }),
+          revoke,
+        };
+      });
+      for (const id of result.revoke) revokeLiveUser(id, 'hosting_website_released');
+      return result.receipt;
+    },
   });
 }
