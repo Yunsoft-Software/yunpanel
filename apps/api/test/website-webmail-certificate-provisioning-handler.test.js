@@ -94,6 +94,7 @@ function context({ dnsSucceeded = true } = {}) {
   return {
     operationId,
     websiteId,
+    stepId: 'webmail_certificate',
     intent: intent(),
     evidence: null,
     operation: {
@@ -219,6 +220,9 @@ test('fresh Website issues an operation-owned purpose:webmail certificate after 
   assert.equal(f.createdInput().provisioningOperationId, operationId);
   assert.deepEqual(f.enqueueInput().payload.domains, ['webmail.example.com']);
   assert.equal(f.enqueueInput().resourceId, webmailCertificateId);
+  assert.deepEqual(f.enqueueInput().authorization, {
+    kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'webmail_certificate',
+  });
   assert.equal(f.mutations(), 3);
 });
 
