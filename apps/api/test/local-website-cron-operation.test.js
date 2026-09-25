@@ -13,6 +13,11 @@ const taskId = '22345678-1234-4234-8234-123456789012';
 const websiteId = '32345678-1234-4234-8234-123456789012';
 const applicationId = '42345678-1234-4234-8234-123456789012';
 const unixUser = 'yunapp-0123456789ab';
+const actor = Object.freeze({
+  sessionId: '52345678-1234-4234-8234-123456789012',
+  userId: '62345678-1234-4234-8234-123456789012',
+  role: 'site_manager',
+});
 
 function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
@@ -45,10 +50,12 @@ function createFixtures({ taskOverrides = {} } = {}) {
   const desiredStateSha256 = sha256(rendered);
 
   let deletedTask = null;
+  let currentTask = task;
   const websiteCronRegistry = {
-    getTask: async (id) => (id === task.id ? task : null),
+    getTask: async (id) => (id === task.id ? currentTask : null),
     deleteTask: async (id) => {
       deletedTask = id;
+      currentTask = null;
       return { deleted: true, taskId: id };
     },
   };
@@ -62,7 +69,7 @@ function createFixtures({ taskOverrides = {} } = {}) {
     },
     remove: async (input) => {
       removedInput = input;
-      return { previousSha256: desiredStateSha256, sideEffects: true };
+      return { taskId, removed: true, previousSha256: desiredStateSha256, sideEffects: true };
     },
   };
 
@@ -88,6 +95,10 @@ function createFixtures({ taskOverrides = {} } = {}) {
     unixUser,
     expectedRevision: task.revision,
     desiredStateSha256,
+    authorizationMode: 'user',
+    actorSessionId: actor.sessionId,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
   };
 
   return {
@@ -102,6 +113,12 @@ function createFixtures({ taskOverrides = {} } = {}) {
     getRemovedInput: () => removedInput,
     getWrittenReceipt: () => writtenReceipt,
     getDeletedTask: () => deletedTask,
+    authorizeActor: async (candidate, targetWebsiteId) => (
+      candidate.sessionId === actor.sessionId
+      && candidate.userId === actor.userId
+      && candidate.role === actor.role
+      && targetWebsiteId === websiteId ? actor : null
+    ),
   };
 }
 
@@ -111,6 +128,7 @@ test('LocalWebsiteCronOperation executes CRON_APPLY and writes receipt', async (
     websiteCronRegistry: f.websiteCronRegistry,
     websiteCronManager: f.websiteCronManager,
     receiptStore: f.receiptStore,
+    authorizeActor: f.authorizeActor,
   });
 
   const result = await operation.execute(OPERATIONS.CRON_APPLY, f.payload, f.execution);
@@ -132,6 +150,7 @@ test('LocalWebsiteCronOperation executes CRON_REMOVE, deletes from registry and 
     websiteCronRegistry: f.websiteCronRegistry,
     websiteCronManager: f.websiteCronManager,
     receiptStore: f.receiptStore,
+    authorizeActor: f.authorizeActor,
   });
 
   const result = await operation.execute(OPERATIONS.CRON_REMOVE, f.payload, f.execution);
@@ -153,6 +172,7 @@ test('LocalWebsiteCronOperation rejects invalid execution context or mismatched 
     websiteCronRegistry: f.websiteCronRegistry,
     websiteCronManager: f.websiteCronManager,
     receiptStore: f.receiptStore,
+    authorizeActor: f.authorizeActor,
   });
 
   // Invalid execution
@@ -194,6 +214,7 @@ test('LocalWebsiteCronOperation holds the shared site lock during host mutation'
     websiteCronRegistry: f.websiteCronRegistry,
     websiteCronManager: f.websiteCronManager,
     receiptStore: f.receiptStore,
+    authorizeActor: f.authorizeActor,
     siteMutationLock: {
       withSiteLock: async (identity, action) => {
         locks.push(identity);
@@ -203,4 +224,42 @@ test('LocalWebsiteCronOperation holds the shared site lock during host mutation'
   });
   await operation.execute(OPERATIONS.CRON_APPLY, f.payload, f.execution);
   assert.deepEqual(locks, [{ applicationId, websiteId }]);
+});
+
+
+test('LocalWebsiteCronOperation refuses host mutation after live Website grant is revoked', async () => {
+  const f = createFixtures();
+  const operation = createLocalWebsiteCronOperation({
+    websiteCronRegistry: f.websiteCronRegistry,
+    websiteCronManager: f.websiteCronManager,
+    receiptStore: f.receiptStore,
+    authorizeActor: async () => null,
+  });
+  await assert.rejects(
+    () => operation.execute(OPERATIONS.CRON_APPLY, f.payload, f.execution),
+    (error) => error.code === 'website_cron_actor_forbidden',
+  );
+  assert.equal(f.getAppliedInput(), null);
+  assert.equal(f.getWrittenReceipt(), null);
+});
+
+test('system_removal cron authorization cannot be used for cron.apply', async () => {
+  const f = createFixtures();
+  const operation = createLocalWebsiteCronOperation({
+    websiteCronRegistry: f.websiteCronRegistry,
+    websiteCronManager: f.websiteCronManager,
+    receiptStore: f.receiptStore,
+  });
+  const systemPayload = {
+    ...f.payload,
+    authorizationMode: 'system_removal',
+  };
+  delete systemPayload.actorSessionId;
+  delete systemPayload.actorUserId;
+  delete systemPayload.actorRole;
+  await assert.rejects(
+    () => operation.execute(OPERATIONS.CRON_APPLY, systemPayload, f.execution),
+    (error) => error.code === 'website_cron_authorization_invalid',
+  );
+  assert.equal(f.getAppliedInput(), null);
 });
