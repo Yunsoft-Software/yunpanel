@@ -26,7 +26,7 @@ function executionContext(payload, execution) {
   return execution;
 }
 
-export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, authorizeActor } = {}) {
+export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, authorizeActor, siteMutationLock = null } = {}) {
   if (!websitePhpToolsService
     || typeof websitePhpToolsService.getActionPreview !== 'function'
     || typeof websitePhpToolsService.runWpCli !== 'function'
@@ -39,7 +39,7 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
     );
   }
 
-  async function execute(payload, execution) {
+  async function executeUnlocked(payload, execution) {
     const context = executionContext(payload, execution);
     const actor = await authorizeActor({
       sessionId: payload.actorSessionId,
@@ -94,6 +94,21 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
       completed: true,
       sideEffects: true,
     });
+  }
+
+  async function execute(payload, execution) {
+    if (!siteMutationLock) return executeUnlocked(payload, execution);
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new LocalWebsitePhpToolOperationError(
+        'website_php_action_dependencies_invalid',
+        'Site mutation lock is unavailable for PHP tool execution',
+        503,
+      );
+    }
+    return siteMutationLock.withSiteLock({
+      applicationId: payload?.applicationId ?? null,
+      websiteId: payload?.websiteId ?? null,
+    }, () => executeUnlocked(payload, execution));
   }
 
   return Object.freeze({ execute });
