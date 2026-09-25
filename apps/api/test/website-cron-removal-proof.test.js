@@ -6,6 +6,12 @@ import { createLocalWebsiteCronOperation } from '../src/local-website-cron-opera
 import { createWebsiteCronApplyService } from '../src/website-cron-apply-service.js';
 import { task, website, taskId, otherId, serverId, jobId, jobFor } from './fixtures/cron-removal-fixture.js';
 
+const actor = Object.freeze({
+  sessionId: '77777777-7777-4777-8777-777777777777',
+  userId: '88888888-8888-4888-8888-888888888888',
+  role: 'owner',
+});
+
 function operationHarness() {
   let current = task(); const calls = [];
   const hash = createCronRemovalRequest(current).identity.desiredStateSha256;
@@ -85,9 +91,9 @@ test('standalone delete queues the existing request but does not claim deletion 
   const registry = { getTask: async () => value, createTask() {}, updateTask() {}, deleteTask() {} };
   const service = createWebsiteCronApplyService({ websiteCronRegistry: registry, websiteRegistry: { getWebsite: async () => website() },
     jobRegistry: { enqueue: async (request) => { queued = request; return jobFor(); } } });
-  const result = await service.deleteCron(taskId, { expectedRevision: value.revision });
+  const result = await service.deleteCron(taskId, { expectedRevision: value.revision }, actor);
   assert.equal(result.accepted, true); assert.equal(result.deleted, false); assert.equal(result.job.id, jobId);
-  assert.deepEqual(queued, createCronRemovalRequest(value).request);
+  assert.deepEqual(queued, createCronRemovalRequest(value, actor).request);
 });
 test('missing reconciliation cannot report the cron service and all tasks as healthy', async () => {
   const registry = { getTask() {}, createTask() {}, updateTask() {}, deleteTask() {}, listTasks: async () => [task()] };
