@@ -84,6 +84,7 @@ test('local executor carries private authorization only in execution context', a
   const result = await executor.runOnce();
   assert.equal(result.job.id, queued.id);
   assert.deepEqual(execution.authorization, authorization);
+  assert.equal(execution.type, 'system.packages.inspect');
   assert.equal(Object.hasOwn(result.job, 'authorization'), false);
 });
 
