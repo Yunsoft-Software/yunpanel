@@ -832,6 +832,16 @@ export function createWebsiteProvisioningRuntime({
       ?? null;
     const execute = async () => {
       const liveActor = authorize ? await requireLiveActor(actor, operation.websiteId) : null;
+      if (liveActor) {
+        if (typeof registry.refreshActor !== 'function') {
+          throw new WebsiteProvisioningOrchestratorError(
+            'website_provisioning_actor_journal_unavailable',
+            'Website provisioning actor journal is unavailable',
+            503,
+          );
+        }
+        await registry.refreshActor({ operationId, actor: liveActor });
+      }
       return action(liveActor);
     };
     if (!siteMutationLock) return execute();
