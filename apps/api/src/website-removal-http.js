@@ -70,6 +70,20 @@ function requireRemovalOwner(request, response, next) {
   });
 }
 
+function removalActor(request) {
+  const sessionId = request.auth?.id;
+  const userId = request.auth?.user?.id;
+  const role = request.auth?.user?.role;
+  if (typeof sessionId !== 'string' || typeof userId !== 'string' || role !== 'owner') {
+    throw new WebsiteRemovalHttpError(
+      'website_removal_actor_invalid',
+      'Live Owner session identity is required.',
+      403,
+    );
+  }
+  return Object.freeze({ sessionId, userId, role });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -119,6 +133,7 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
       expectedUpdatedAt: body.expectedUpdatedAt,
       stepId: body.stepId,
       confirmation: body.confirmation,
+      actor: removalActor(request),
     });
     response.set('Cache-Control', 'no-store');
     response.json({ data: updated });
@@ -149,6 +164,7 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
       websiteId,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
+      actor: removalActor(request),
     });
     response.status(201).json({ operation, data: operation });
   }));
@@ -178,6 +194,7 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
       expectedUpdatedAt: body.expectedUpdatedAt,
       stepId: body.stepId,
       confirmation: body.confirmation,
+      actor: removalActor(request),
     });
     response.json({ operation, data: operation });
   }));
