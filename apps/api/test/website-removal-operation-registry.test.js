@@ -81,6 +81,7 @@ test('creates durable website removal operation with ordered reverse-order steps
       'file_cleanup',
       'unix_identity_cleanup',
       'metadata_finalization',
+      'application_cleanup',
     ]);
 
     // Step resources match
@@ -89,6 +90,7 @@ test('creates durable website removal operation with ordered reverse-order steps
     assert.equal(op.steps[2].resourceId, 'ws-1');
     assert.equal(op.steps[7].resourceId, 'yunapp-site1');
     assert.equal(op.steps[8].resourceId, 'ws-1');
+    assert.equal(op.steps[9].resourceId, 'app-1');
 
     // Test persistence across restart
     const registry2 = createWebsiteRemovalOperationRegistry({ filePath });
@@ -123,5 +125,32 @@ test('transitions steps and updates overall status to removed when all succeed',
 
     const completed = await registry.get(op.id);
     assert.equal(completed.status, 'removed');
+  });
+});
+
+
+test('running step checkpoints persist across registry restart without marking the step complete', async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, 'operations.json');
+    const registry = createWebsiteRemovalOperationRegistry({ filePath });
+    await registry.init();
+    const op = await registry.create(mockPreview());
+    const step = op.steps.find((entry) => entry.kind === 'cron_cleanup');
+    const checkpoint = {
+      version: 1,
+      tasks: [{ identity: { taskId: 'cron-1' }, jobId: 'job-cron-1', status: 'queued' }],
+    };
+    const running = await registry.checkpointStep(op.id, step.id, checkpoint);
+    assert.equal(running.status, 'running');
+    assert.equal(running.steps.find((entry) => entry.id === step.id).status, 'running');
+    assert.deepEqual(running.steps.find((entry) => entry.id === step.id).result, checkpoint);
+
+    checkpoint.tasks[0].status = 'failed';
+    const reopened = createWebsiteRemovalOperationRegistry({ filePath });
+    await reopened.init();
+    const restored = await reopened.get(op.id);
+    const restoredStep = restored.steps.find((entry) => entry.id === step.id);
+    assert.equal(restoredStep.status, 'running');
+    assert.equal(restoredStep.result.tasks[0].status, 'queued');
   });
 });
