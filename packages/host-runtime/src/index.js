@@ -278,6 +278,11 @@ export {
   nodeProcessManager,
 } from './node-process-manager.js';
 export {
+  createNodeServiceRemovalManager,
+  NodeServiceRemovalError,
+  nodeServiceRemovalInternals,
+} from './node-service-removal-manager.js';
+export {
   createNodeRuntimeManager,
   NodeRuntimeManagerError,
   nodeRuntimeInternals,
