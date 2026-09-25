@@ -118,7 +118,7 @@ test('worker authorizer rejects invalid or mismatched scopes without consulting 
 test('legacy guard quarantines provisioning-specific job types without trusting old queue state', async () => {
   let reads = 0;
   const guard = createWebsiteProvisioningLegacyJobGuard({
-    registry: { async listInterrupted() { reads += 1; return []; } },
+    registry: { async listAuthorizationSensitive() { reads += 1; return []; } },
   });
   for (const type of [
     `website.ssl.issue:${operationId}`,
@@ -159,7 +159,7 @@ test('legacy guard detects unscoped database and Roundcube jobs only against act
     ],
   }];
   const guard = createWebsiteProvisioningLegacyJobGuard({
-    registry: { async listInterrupted() { return active; } },
+    registry: { async listAuthorizationSensitive() { return active; } },
   });
 
   assert.equal(await guard({
@@ -201,7 +201,7 @@ test('legacy guard detects unscoped database and Roundcube jobs only against act
 
 test('legacy guard surfaces unreadable candidate provisioning state to the caller', async () => {
   const guard = createWebsiteProvisioningLegacyJobGuard({
-    registry: { async listInterrupted() { throw new Error('unreadable'); } },
+    registry: { async listAuthorizationSensitive() { throw new Error('unreadable'); } },
   });
   await assert.rejects(
     guard({
