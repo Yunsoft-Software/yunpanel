@@ -178,3 +178,28 @@ test('bounded adapter error code remains useful without publishing its private m
   const op = await f.runtime.start(removalStart(f.preview));
   assert.equal(op.error.code, 'website_cleanup_busy'); assert.doesNotMatch(JSON.stringify(op), /credential details/);
 });
+
+
+test('Website removal takes the process-shared site lock before every destructive journal step', async () => {
+  const locks = [];
+  const f = await removalFixture({
+    siteMutationLock: {
+      withSiteLock: async (identity, action) => {
+        locks.push(identity);
+        return action();
+      },
+    },
+  });
+  let op = await f.runtime.start(removalStart(f.preview));
+  while (op.status === 'running') {
+    op = await f.runtime.continueStep(removalContinue(op));
+  }
+  assert.equal(op.status, 'removed');
+  assert.ok(locks.length >= 1);
+  assert.deepEqual(locks[0], {
+    websiteId: f.preview.website.id,
+    applicationId: f.preview.website.applicationId,
+  });
+  assert.equal(locks.every((entry) => entry.websiteId === f.preview.website.id
+    && entry.applicationId === f.preview.website.applicationId), true);
+});
