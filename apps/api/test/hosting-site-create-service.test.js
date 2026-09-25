@@ -87,6 +87,25 @@ test('completed retry does not invoke create again or double-charge quota', asyn
   const f = setup(t); await f.createHosted(); const again = await f.createHosted();
   assert.equal(again.created, false); assert.equal(f.calls.length, 1); assert.equal(f.get().usage.websites, 1);
 });
+test('customer or parent suspension after preview blocks hosted create before host mutation', async (t) => {
+  for (const target of ['customer-a', 'reseller-a']) {
+    const f = setup(t);
+    const submitted = await f.submit();
+    let creates = 0;
+    f.createAdapter = async () => { creates += 1; return { created: true, website: f.site }; };
+    f.store.setActive(f.token, f.requireManagement, target, { revision: 1, active: false });
+
+    await assert.rejects(
+      f.createHosted(submitted),
+      code('hosting_account_inactive'),
+      `${target} suspension must invalidate the confirmed create`,
+    );
+    assert.equal(creates, 0);
+    assert.equal(f.count('auth_hosting_site_allocations'), 0);
+    assert.equal(f.count('auth_customer_websites'), 0);
+  }
+});
+
 test('customer substitution invalidates a prior confirmation before quota is reserved', async (t) => {
   const f = setup(t); const input = await f.submit();
   await assert.rejects(f.createHosted({ ...input, customerId: 'customer-b' }), code('hosting_site_preview_stale'));
