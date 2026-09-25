@@ -277,6 +277,27 @@ export function createWebsiteRemovalOperationRegistry({
     });
   }
 
+  async function checkpointStep(operationId, stepId, result = {}) {
+    if (!result || typeof result !== 'object' || Array.isArray(result)) {
+      throw new WebsiteRemovalOperationRegistryError(
+        'step_checkpoint_invalid',
+        'Step checkpoint must be an object',
+        400,
+      );
+    }
+    const checkpoint = structuredClone(result);
+    return updateStep(operationId, stepId, (op, step) => {
+      if (step.status === 'succeeded') {
+        throw new WebsiteRemovalOperationRegistryError('step_already_succeeded', 'Step has already succeeded', 409);
+      }
+      step.status = 'running';
+      step.result = checkpoint;
+      step.error = null;
+      op.status = 'running';
+      op.error = null;
+    });
+  }
+
   async function succeedStep(operationId, stepId, result = {}) {
     return updateStep(operationId, stepId, (op, step) => {
       step.status = 'succeeded';
@@ -310,6 +331,7 @@ export function createWebsiteRemovalOperationRegistry({
     list,
     listForWebsite,
     markStepRunning,
+    checkpointStep,
     succeedStep,
     blockStep,
     failStep,
