@@ -8,6 +8,8 @@ import {
 } from './website-provisioning-plan.js';
 
 const STORE_VERSION = 1;
+const TERMINAL_STATES = new Set(['abandoned']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export class WebsiteProvisioningRegistryError extends Error {
   constructor(code, message, status = 409) {
@@ -47,8 +49,12 @@ function publicOperation(operation) {
     resources: operation.resources,
     steps: operation.steps,
   });
+  const abandoned = operation.terminalState === 'abandoned';
   return Object.freeze({
     ...plan,
+    ...(abandoned ? { status: 'abandoned', ready: false } : {}),
+    terminalState: operation.terminalState ?? null,
+    abandonedAt: operation.abandonedAt ?? null,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
   });
@@ -56,7 +62,10 @@ function publicOperation(operation) {
 
 function normalizeStoredOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid Website provisioning registry state');
-  const allowed = new Set(['operationId', 'websiteId', 'resources', 'steps', 'createdAt', 'updatedAt']);
+  const allowed = new Set([
+    'operationId', 'websiteId', 'resources', 'steps',
+    'terminalState', 'abandonedAt', 'createdAt', 'updatedAt',
+  ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid Website provisioning registry state');
   let plan;
   try {
@@ -70,11 +79,21 @@ function normalizeStoredOperation(value) {
     if (error instanceof WebsiteProvisioningPlanError) throw new Error('invalid Website provisioning registry state');
     throw error;
   }
+  const terminalState = value.terminalState ?? null;
+  if (terminalState !== null && !TERMINAL_STATES.has(terminalState)) {
+    throw new Error('invalid Website provisioning registry state');
+  }
+  const abandonedAt = value.abandonedAt ?? null;
+  if ((terminalState === 'abandoned') !== (abandonedAt !== null)) {
+    throw new Error('invalid Website provisioning registry state');
+  }
   return {
     operationId: plan.operationId,
     websiteId: plan.websiteId,
     resources: { ...plan.resources },
     steps: plan.steps.map(mutableStep),
+    terminalState,
+    abandonedAt: abandonedAt === null ? null : timestamp(abandonedAt),
     createdAt: timestamp(value.createdAt),
     updatedAt: timestamp(value.updatedAt),
   };
@@ -225,6 +244,17 @@ export function createWebsiteProvisioningRegistry({
     }
     return operation;
   }
+  function requireActive(operation) {
+    if (operation.terminalState === 'abandoned') {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_abandoned',
+        'Provisioning operation is abandoned and cannot mutate resources',
+        409,
+      );
+    }
+    return operation;
+  }
+
 
   function requireStep(operation, stepId) {
     const step = operation.steps.find((candidate) => candidate.id === stepId);
@@ -248,6 +278,8 @@ export function createWebsiteProvisioningRegistry({
       websiteId: plan.websiteId,
       resources: { ...plan.resources },
       steps: plan.steps.map(mutableStep),
+      terminalState: null,
+      abandonedAt: null,
     };
     if (existing) {
       if (!samePlan(existing, candidate)) {
@@ -334,7 +366,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function beginStep({ operationId, stepId } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state === 'applying') return publicOperation(operation);
     if (step.state !== 'pending' && step.state !== 'blocked') {
@@ -349,7 +381,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function completeStep({ operationId, stepId, evidence } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state === 'succeeded') return publicOperation(operation);
     if (step.state !== 'applying') {
@@ -365,7 +397,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function blockStep({ operationId, stepId, error, evidence = null } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state !== 'applying') {
       throw new WebsiteProvisioningRegistryError('website_provisioning_transition_invalid', 'Only an applying provisioning step can block');
@@ -380,7 +412,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function failStep({ operationId, stepId, error, evidence = null } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state !== 'applying') {
       throw new WebsiteProvisioningRegistryError('website_provisioning_transition_invalid', 'Only an applying provisioning step can fail');
@@ -395,7 +427,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function retryStep({ operationId, stepId } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state !== 'failed'
       || !['pending', 'not_required'].includes(step.compensation.state)) {
@@ -414,7 +446,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function beginCompensation({ operationId, stepId } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.compensation.state === 'applying') return publicOperation(operation);
     if (!['succeeded', 'failed'].includes(step.state)
@@ -437,7 +469,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function completeCompensation({ operationId, stepId, evidence } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state === 'compensated' && step.compensation.state === 'succeeded') return publicOperation(operation);
     if (step.state !== 'compensating' || step.compensation.state !== 'applying') {
@@ -454,7 +486,7 @@ export function createWebsiteProvisioningRegistry({
 
   async function failCompensation({ operationId, stepId, error } = {}) {
     await ensureInitialized();
-    const operation = requireOperation(operationId);
+    const operation = requireActive(requireOperation(operationId));
     const step = requireStep(operation, stepId);
     if (step.state !== 'compensating' || step.compensation.state !== 'applying') {
       throw new WebsiteProvisioningRegistryError('website_provisioning_transition_invalid', 'Only an applying compensation can fail');
@@ -467,10 +499,70 @@ export function createWebsiteProvisioningRegistry({
     return publicOperation(operation);
   }
 
+  async function abandonUncreated({
+    operationId,
+    websiteId,
+    applicationId = null,
+    websiteAbsent,
+    applicationAbsent,
+  } = {}) {
+    await ensureInitialized();
+    if (typeof operationId !== 'string' || !UUID_PATTERN.test(operationId)
+      || typeof websiteId !== 'string' || !UUID_PATTERN.test(websiteId)
+      || (applicationId !== null && (typeof applicationId !== 'string' || !UUID_PATTERN.test(applicationId)))
+      || websiteAbsent !== true
+      || applicationAbsent !== (applicationId !== null)) {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_abandon_evidence_invalid',
+        'Verified uncreated Website evidence is required before abandoning provisioning',
+        409,
+      );
+    }
+    const operation = requireOperation(operationId);
+    if (operation.websiteId !== websiteId) {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_abandon_identity_conflict',
+        'Provisioning recovery identity does not match the journal',
+        409,
+      );
+    }
+    if (applicationId !== null) {
+      if (operation.resources?.application?.id !== applicationId
+        || operation.resources?.website?.applicationId !== applicationId) {
+        throw new WebsiteProvisioningRegistryError(
+          'website_provisioning_abandon_identity_conflict',
+          'Provisioning Application identity does not match recovery evidence',
+          409,
+        );
+      }
+    }
+    if (operation.terminalState === 'abandoned') return publicOperation(operation);
+
+    const unsafe = operation.steps.find((step) => (
+      step.state !== 'pending'
+      && !(step.state === 'compensated' && step.compensation?.state === 'succeeded')
+    ));
+    if (unsafe) {
+      throw new WebsiteProvisioningRegistryError(
+        'website_provisioning_abandon_requires_compensation',
+        'Provisioning journal still contains active, failed, blocked, or uncompensated work',
+        409,
+      );
+    }
+
+    const time = nowIso();
+    operation.terminalState = 'abandoned';
+    operation.abandonedAt = time;
+    operation.updatedAt = time;
+    await persist();
+    return publicOperation(operation);
+  }
+
   async function listInterrupted() {
     await ensureInitialized();
     return Object.freeze(state.operations
-      .filter((operation) => operation.steps.some((step) => step.state === 'applying' || step.state === 'compensating'))
+      .filter((operation) => operation.terminalState !== 'abandoned'
+        && operation.steps.some((step) => step.state === 'applying' || step.state === 'compensating'))
       .map(publicOperation));
   }
 
@@ -489,6 +581,7 @@ export function createWebsiteProvisioningRegistry({
     beginCompensation: (...args) => withStoreMutation(() => beginCompensation(...args)),
     completeCompensation: (...args) => withStoreMutation(() => completeCompensation(...args)),
     failCompensation: (...args) => withStoreMutation(() => failCompensation(...args)),
+    abandonUncreated: (...args) => withStoreMutation(() => abandonUncreated(...args)),
     listInterrupted: (...args) => withStoreRead(() => listInterrupted(...args)),
   });
 }
