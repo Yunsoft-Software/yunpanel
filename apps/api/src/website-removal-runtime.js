@@ -79,6 +79,7 @@ export function createWebsiteRemovalRuntime({
   fileCleanupInspector = null,
   unixIdentityCleanupInspector = null,
   siteMutationLock = null,
+  hostingAllocationReleaseHandler = null,
 } = {}) {
   if (!registry || typeof registry.create !== 'function' || typeof registry.get !== 'function') {
     throw new WebsiteRemovalRuntimeError(
@@ -309,6 +310,49 @@ export function createWebsiteRemovalRuntime({
       websiteId: op.websiteId,
       applicationId: op.applicationId ?? null,
     }, () => runNextStep(op.id));
+  }
+
+  async function releaseHostingAllocation(op, applicationAbsent) {
+    if (hostingAllocationReleaseHandler === null) return null;
+    if (typeof hostingAllocationReleaseHandler !== 'function') {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_allocation_release_unavailable',
+        'Hosting allocation release handler is unavailable.',
+        503,
+      );
+    }
+    let receipt;
+    try {
+      receipt = await hostingAllocationReleaseHandler({
+        operationId: op.id,
+        websiteId: op.websiteId,
+        serverId: op.serverId,
+        applicationId: op.applicationId ?? null,
+        websiteAbsent: true,
+        applicationAbsent: op.applicationId !== null ? applicationAbsent === true : false,
+      });
+    } catch {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_allocation_release_failed',
+        'Hosting allocation capacity could not be released after verified cleanup.',
+        503,
+      );
+    }
+    if (!receipt || receipt.websiteId !== op.websiteId
+      || typeof receipt.released !== 'boolean' || typeof receipt.quotaReleased !== 'boolean'
+      || receipt.quotaReleased !== receipt.released) {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_allocation_release_unverified',
+        'Hosting allocation release receipt is invalid.',
+        503,
+      );
+    }
+    return Object.freeze({
+      released: receipt.released,
+      quotaReleased: receipt.quotaReleased,
+      ...(receipt.customerId ? { customerId: receipt.customerId } : {}),
+      ...(receipt.allocationOperationId ? { allocationOperationId: receipt.allocationOperationId } : {}),
+    });
   }
 
   async function runDomainRemovalStep(op, step) {
@@ -605,7 +649,13 @@ export function createWebsiteRemovalRuntime({
           if (await websiteRegistry.getWebsite(op.websiteId) !== null) {
             throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website metadata is still present or unavailable.', 409);
           }
-          op = await registry.succeedStep(op.id, step.id, { finalized: true });
+          const hostingAllocation = op.applicationId === null
+            ? await releaseHostingAllocation(op, false)
+            : null;
+          op = await registry.succeedStep(op.id, step.id, {
+            finalized: true,
+            ...(hostingAllocation ? { hostingAllocation } : {}),
+          });
           break;
         }
 
@@ -650,7 +700,11 @@ export function createWebsiteRemovalRuntime({
           if (await applicationRegistry.getApplication(op.applicationId) !== null) {
             throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Application metadata is still present.', 409);
           }
-          op = await registry.succeedStep(op.id, step.id, { applicationCleaned: true });
+          const hostingAllocation = await releaseHostingAllocation(op, true);
+          op = await registry.succeedStep(op.id, step.id, {
+            applicationCleaned: true,
+            ...(hostingAllocation ? { hostingAllocation } : {}),
+          });
           break;
         }
 
@@ -673,6 +727,9 @@ export function createWebsiteRemovalRuntime({
         'website_removal_cleanup_unavailable',
         'website_removal_cleanup_unverified',
         'website_removal_cron_job_failed',
+        'website_removal_allocation_release_unavailable',
+        'website_removal_allocation_release_failed',
+        'website_removal_allocation_release_unverified',
       ].includes(err.code));
       op = await registry[blocked ? 'blockStep' : 'failStep'](op.id, step.id, error);
     }
