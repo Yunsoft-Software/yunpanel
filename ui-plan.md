@@ -4,7 +4,8 @@
 
 - [x] **WR-01 teşhis:** removal runtime ve kalıcı step journal production'da mevcut; fakat file/unix cleanup adapterları production composition'a verilmediği için runtime bilinçli olarak silme confirmation'ı üretmiyor.
 - [x] **WR-02/03a güvenli önizleme:** `d80c3357`, `befbe56f`; Application cleanup dahil eksik lifecycle fail-closed blocker. Owner Barındırma ayarlarında impact/blocker/journal görünür; GET-only istemci kullanılır ve destructive buton yok.
-- [ ] **WR-03b:** file/unix receipt adapterları + gerçek Application metadata/env/release cleanup tamamlanmadan Sil/continue eylemi açma.
+- [x] **WR-03b kaynak:** `b45a8830` → `94b3eac4`; güvenli Application/env cleanup, provisioning receipt-owned Unix cleanup, canonical file roots, runtime binding ownership, start preflight, Owner-only global recovery journal ve typed confirmation + explicit step continuation UI. Site metadata kaybolduktan sonra kalan Application cleanup global recovery ekranından sürdürülebilir.
+- [ ] **WR-03c/04:** direct-systemd host service removal hâlâ bilinçli blocker. Node24/npm11 + gerçek host/browser/restart/partial kabul olmadan tam Site Silme tamamlandı sayılmaz.
 ## 2026-09-25 — Site erişimi / askıya alma
 
 - [x] **SUSPEND-UI-01/02 kaynak:** `482fb0e6`, `861ed2f9`; Barındırma ayarlarında Site erişimi kartı, bağlı domain preview/blocker, domain adıyla açık onay, journal tabanlı suspend/retry/resume ve kayıp sonuçta replay yapmayan yenileme.

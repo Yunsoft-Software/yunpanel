@@ -8,7 +8,12 @@ Bu dosya kök `todo.md` ve T-PL kabul listesini tamamlar; eski açık kabulleri 
 - [ ] `unixIdentityCleanupHandler` yalnız dedicated Website Unix identity için çalışmalı; shared/foreign kullanıcıyı silmemeli. Kullanıcı gerçekten yoksa idempotent doğrulanmış receipt dönebilmeli.
 - [x] `d80c3357`: Application metadata lifecycle eksikliği `application_cleanup_unavailable` hard blocker olarak eklendi; yarım file cleanup ile kırık Application kaydı oluşmasına izin verme.
 - [x] `befbe56f`: Owner-only GET removal preview UI; impact/blocker/journal görünür, destructive POST yok.
-- [ ] Production cleanup adapterlarını ve gerçek Application silme lifecycle'ını tamamla; sonrasında typed confirmation/step continue UI ve unknown POST uzlaştırması aç. Node24/npm11 + gerçek host/browser/restart kabulü.
+- [x] Application/env lifecycle: app-scoped variables/internal deployment credential/webhook secret purge + exact server/Application revision delete; Website metadata önce, Application metadata sonra olacak crash-safe sıra.
+- [x] Host cleanup: provisioning receipt-owned Unix identity compensation; canonical app/data/build/publish direct-child file cleanup; backup/log scope retention evidence. Symlink/foreign/shared Application fail-closed.
+- [x] Runtime cleanup: Passenger/Static exact `sourceOperationId + revision`; direct-systemd bilinçli blocker.
+- [x] Owner-only destructive UI + global recovery: domain adıyla typed confirmation, her çağrıda tek journal adımı, metadata kaybolduktan sonra global continue, unknown POST replay yok.
+- [ ] Node24/npm11 gerçek checkout: tüm website-removal/application/environment/resource-impact + yeni cleanup/preflight/owner-recovery/frontend model/wiring regresyonları ve tam npm ci/check/build.
+- [ ] Gerçek izinli host: Passenger/Static site removal; multi-domain, cron/SFTP/DB credential/binding, Unix receipt, four canonical roots, Website→Application metadata sırası, restart/blocked/failed continuation. direct-systemd ayrı kaynak işi. `.44` kullanılmaz.
 
 ## T-DEV-SUSPEND-UI — Website suspension ekranı sonrası
 
