@@ -115,6 +115,7 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
   const [retry, setRetry] = useState(0); const [error, setError] = useState(null);
   const [busy, setBusy] = useState(false); const pending = useRef(false); const mounted = useRef(true);
   const [removing, setRemoving] = useState(false); const [confirmation, setConfirmation] = useState('');
+  const [statusTarget, setStatusTarget] = useState(null);
   const [discard, setDiscard] = useState(false);
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
   useEffect(() => {
@@ -130,7 +131,8 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
   }, [targetId, retry]);
   const account = loaded.account;
   const ready = loaded.status === 'ready';
-  const dirty = ready && (JSON.stringify(form) !== JSON.stringify(baseline.current) || confirmation.length > 0);
+  const dirty = ready && (JSON.stringify(form) !== JSON.stringify(baseline.current)
+    || confirmation.length > 0 || statusTarget !== null);
   useUnsavedChanges(dirty || busy);
   const reload = Boolean(error?.reconcile);
   const eligible = Boolean(account || (user?.role === 'site_manager' && Array.isArray(user.websiteIds) && user.websiteIds.length === 0));
@@ -153,6 +155,27 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
     } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
     finally { pending.current = false; if (mounted.current) setBusy(false); }
   }
+  async function changeStatus() {
+    if (pending.current || !ready || !account || reload || typeof statusTarget !== 'boolean'
+      || statusTarget === account.active) return;
+    pending.current = true; setBusy(true); setError(null);
+    const generation = sessionGeneration();
+    try {
+      const result = await client.current.mutate({
+        action: 'status',
+        account,
+        form: { active: statusTarget },
+      });
+      if (mounted.current && sessionGeneration() === generation) {
+        onSaved(result.account.active
+          ? 'Giriş hesabı yeniden etkinleştirildi. Site ve host çalışma durumu değiştirilmedi.'
+          : account.kind === 'reseller'
+            ? 'Bayi hesabı askıya alındı. Bayi ve bağlı müşteri oturumları kapatıldı; siteler otomatik durdurulmadı.'
+            : 'Müşteri hesabı askıya alındı. Oturumları kapatıldı; siteler otomatik durdurulmadı.');
+      }
+    } catch (failure) { if (mounted.current && failure.name !== 'AbortError') setError(failure); }
+    finally { pending.current = false; if (mounted.current) setBusy(false); }
+  }
   const canSubmit = ready && eligible && (removing ? confirmation === account.username
     : account ? account.kind === 'reseller' && dirty : form.kind !== 'customer' || form.resellerId !== '');
   return <Modal title="Bayi / müşteri profili" onClose={close} busy={busy}>
@@ -167,7 +190,14 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
       {reload && <p role="alert">İşlemi yeniden göndermeyin. Pencereyi kapatıp güncel kullanıcı ve profil kaydını yeniden açın.</p>}
       {ready && !eligible && <p role="alert">Mevcut site yetkileri otomatik sahipliğe çevrilmez. Site atanmamış bir Site Yöneticisi hesabı kullanın.</p>}
       {ready && eligible && <fieldset disabled={busy || reload}>
-        {removing ? <>
+        {statusTarget !== null ? <>
+          <p><strong>{statusTarget ? 'Girişi yeniden etkinleştir' : 'Hesabı askıya al'}</strong></p>
+          {statusTarget
+            ? <p>Bu işlem yalnız giriş hesabını yeniden açar. Site, servis veya host çalışma durumu değiştirilmez.</p>
+            : account.kind === 'reseller'
+              ? <p>Bayi ve bu bayiye bağlı müşterilerin mevcut oturumları kapatılır. Müşteri kayıtları ve siteler silinmez veya otomatik durdurulmaz.</p>
+              : <p>Bu hesabın mevcut oturumları kapatılır. Profil ve siteler korunur; siteler otomatik durdurulmaz.</p>}
+        </> : removing ? <>
           <p>Yalnız profil bağlantısı kaldırılır; giriş hesabı ve siteler silinmez. Bağlı müşteri, site veya kontenjan varsa sunucu kaldırmayı engeller.</p>
           <label>Onaylamak için {account.username} yazın<input value={confirmation} onChange={(event) => setConfirmation(event.target.value)} autoComplete="off" spellCheck={false} required /></label>
         </> : <>
@@ -181,13 +211,22 @@ export function HostingProfileDialog({ user = null, accountId, onClose, onSaved,
             </select></label>
             {form.resellerId !== null && <ResellerPicker client={client} value={form.resellerId} onChange={(value) => update('resellerId', value)} disabled={busy || reload} customerId={user.id} />}
           </>)}
-          {account && <Button variant="danger" onClick={() => { setRemoving(true); setError(null); }}>Profili kaldır</Button>}
+          {account && <div className="ws-actions">
+            <Button variant={account.active ? 'danger' : 'primary'} onClick={() => { setStatusTarget(!account.active); setError(null); }}>
+              {account.active ? 'Hesabı askıya al' : 'Girişi yeniden etkinleştir'}
+            </Button>
+            <Button variant="danger" onClick={() => { setRemoving(true); setStatusTarget(null); setError(null); }}>Profili kaldır</Button>
+          </div>}
         </>}
       </fieldset>}
       <footer className="ws-modal-footer">
+        {statusTarget !== null && <Button disabled={busy || reload} onClick={() => { setStatusTarget(null); setError(null); }}>Profile dön</Button>}
         {removing && <Button disabled={busy || reload} onClick={() => { setRemoving(false); setConfirmation(''); setError(null); }}>Profile dön</Button>}
         <Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Kapat'}</Button>
-        {ready && eligible && (!account || account.kind === 'reseller' || removing) && <Button type="submit" variant={removing ? 'danger' : 'primary'} disabled={busy || reload || !canSubmit}>{busy ? 'Kaydediliyor…' : removing ? 'Profili kaldır' : account ? 'Sınırları kaydet' : 'Profili bağla'}</Button>}
+        {statusTarget !== null && <Button type="button" variant={statusTarget ? 'primary' : 'danger'} disabled={busy || reload} onClick={changeStatus}>
+          {busy ? 'Uygulanıyor…' : statusTarget ? 'Girişi etkinleştir' : 'Hesabı askıya al'}
+        </Button>}
+        {statusTarget === null && ready && eligible && (!account || account.kind === 'reseller' || removing) && <Button type="submit" variant={removing ? 'danger' : 'primary'} disabled={busy || reload || !canSubmit}>{busy ? 'Kaydediliyor…' : removing ? 'Profili kaldır' : account ? 'Sınırları kaydet' : 'Profili bağla'}</Button>}
       </footer>
     </form>}
   </Modal>;
