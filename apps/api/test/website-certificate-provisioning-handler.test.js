@@ -141,6 +141,7 @@ test('Website certificate apply reuses the durable SSL issue queue and returns s
   const result = await handler.apply({
     operationId,
     websiteId,
+    stepId: 'certificate',
     intent,
   });
 
@@ -174,6 +175,9 @@ test('Website certificate apply reuses the durable SSL issue queue and returns s
     staging: false,
   });
   assert.equal(calls[1][1].idempotencyKey, `website.cert.issue:${operationId}:${certificateId}`);
+  assert.deepEqual(calls[1][1].authorization, {
+    kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'certificate',
+  });
   assert.deepEqual(calls[2], ['state', certificateId, 'issuing']);
 });
 
