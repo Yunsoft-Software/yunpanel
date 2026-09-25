@@ -182,7 +182,8 @@ export function createWebsiteRemovalRuntime({
     }
     const directSystemd = plan?.applicationRuntime?.adapter === 'direct-systemd';
     if (directSystemd) {
-      require('runtime_cleanup_unavailable', directSystemdCleanupHandler, directSystemdCleanupInspector);
+      require('runtime_cleanup_unavailable',
+        directSystemdCleanupHandler, directSystemdCleanupInspector, runtimeBindingRegistry?.getBinding);
       if (typeof directSystemdCleanupInspector === 'function') {
         try {
           await directSystemdCleanupInspector({
