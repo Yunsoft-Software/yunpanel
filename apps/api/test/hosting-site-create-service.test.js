@@ -7,16 +7,35 @@ import { siteFixture, website, uuid } from '../test-support/hosting-site-fixture
 const code = (expected) => (error) => error.code === expected;
 function setup(t, changes = {}) {
   const f = siteFixture(t, changes);
-  f.calls = []; f.sites = new Map(); f.site = website();
+  f.calls = []; f.sites = new Map(); f.applications = new Map(); f.domains = new Map(); f.mailDomains = new Map();
+  f.lockCalls = []; f.site = website();
   f.value = { customerId: 'customer-a', input: { operationId: uuid(1001), serverId: uuid(100) } };
-  f.base = () => ({ operationId: f.value.input.operationId, ids: { websiteId: f.site.id },
+  f.base = () => ({ operationId: f.value.input.operationId, ids: {
+    websiteId: f.site.id,
+    applicationId: f.site.applicationId,
+    primaryDomainId: uuid(2),
+    wwwDomainId: null,
+    mailDomainId: null,
+  },
     previewDigest: 'b'.repeat(64), confirmation: 'original-confirmation',
-    blockers: [], steps: { websiteReady: f.sites.has(f.site.id) }, source: { kind: 'external_proxy' }, plan: { website: f.site } });
+    blockers: [], steps: { websiteReady: f.sites.has(f.site.id) }, source: { kind: 'external_proxy' },
+    plan: { website: f.site, application: null } });
   f.previewAdapter = async () => f.base();
   f.createAdapter = async (args) => { f.calls.push(args); f.sites.set(f.site.id, structuredClone(f.site)); return { created: true, website: f.site }; };
   f.readAdapter = async (id) => f.sites.get(id) ?? null;
+  f.siteMutationLock = {
+    withSiteLock: async (identity, action) => {
+      f.lockCalls.push(structuredClone(identity));
+      return action();
+    },
+  };
   f.service = createHostingSiteCreateService({ hostingAccounts: f.store,
-    websiteRegistry: { getWebsite: (id) => f.readAdapter(id) }, localServerId: uuid(100),
+    websiteRegistry: { getWebsite: (id) => f.readAdapter(id) },
+    applicationRegistry: { getApplication: async (id) => f.applications.get(id) ?? null },
+    domainRegistry: { getDomain: async (id) => f.domains.get(id) ?? null },
+    mailDomainRegistry: { getMailDomain: async (id) => f.mailDomains.get(id) ?? null },
+    siteMutationLock: f.siteMutationLock,
+    localServerId: uuid(100),
     previewSiteCreate: (input) => f.previewAdapter(input), createSite: (apply) => f.createAdapter(apply) });
   f.previewHosted = () => f.service.preview(f.token, f.requireManagement, f.value);
   f.submit = async () => {
@@ -24,6 +43,7 @@ function setup(t, changes = {}) {
     return { ...f.value, previewDigest: preview.previewDigest, confirmation: preview.confirmation };
   };
   f.createHosted = async (value) => f.service.create(f.token, f.requireManagement, value ?? await f.submit());
+  f.recoverHosted = async (value) => f.service.recoverReservation(f.token, f.requireManagement, value ?? await f.submit());
   return f;
 }
 test('read-only preview binds customer and plan; create reuses the existing adapters', async (t) => {
@@ -134,4 +154,111 @@ test('simultaneous repeats on the same service invoke the existing creator only 
   const [first, second] = await Promise.all([f.createHosted(submitted), f.createHosted(submitted)]);
   assert.equal(first.ownership.state, 'attached'); assert.equal(second.ownership.state, 'attached');
   assert.equal(f.calls.length, 1); assert.equal(f.count('auth_hosting_site_allocations'), 1);
+});
+
+
+test('hosted create holds the shared site lock across reserve, metadata creation and ownership attach', async (t) => {
+  const f = setup(t);
+  const result = await f.createHosted();
+  assert.equal(result.ownership.state, 'attached');
+  assert.deepEqual(f.lockCalls, [{ applicationId: null, websiteId: f.site.id }]);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.calls[0].siteMutationLock, null);
+});
+
+test('explicit recovery releases a reserved hold only when operation-owned metadata is absent', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  f.createAdapter = async () => ({ created: true, website: f.site });
+  await assert.rejects(f.createHosted(submitted), code('hosting_site_persistence_unverified'));
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.get().usage.websites, 1);
+
+  const recovered = await f.recoverHosted(submitted);
+  assert.equal(recovered.recovered, true);
+  assert.equal(recovered.stage, 'reservation_released');
+  assert.equal(recovered.ownership.released, true);
+  assert.equal(recovered.ownership.quotaReleased, true);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+  assert.equal(f.get().usage.websites, 0);
+});
+
+test('reservation recovery refuses a persisted Website and keeps capacity reserved', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  const create = f.createAdapter;
+  f.createAdapter = async (args) => {
+    await create(args);
+    throw new Error('reply lost after Website persistence');
+  };
+  await assert.rejects(f.createHosted(submitted), /reply lost/);
+  await assert.rejects(
+    f.recoverHosted(submitted),
+    code('hosting_site_recovery_partial_resources_present'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.get().usage.websites, 1);
+});
+
+test('reservation recovery refuses planned Domain residue even when Website metadata is absent', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  f.createAdapter = async () => ({ created: true, website: f.site });
+  await assert.rejects(f.createHosted(submitted), code('hosting_site_persistence_unverified'));
+  f.domains.set(uuid(2), { id: uuid(2) });
+  await assert.rejects(
+    f.recoverHosted(submitted),
+    code('hosting_site_recovery_partial_resources_present'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+});
+
+test('reservation recovery refuses an operation-owned Application residue', async (t) => {
+  const f = setup(t);
+  const applicationId = uuid(3);
+  f.site = {
+    ...f.site,
+    applicationId,
+    runtimeType: 'static',
+    documentRoot: `/var/www/yunpanel/apps/${applicationId}/current`,
+    unixUser: 'yunapp-123456789abc',
+    proxyTarget: null,
+  };
+  f.base = () => ({
+    operationId: f.value.input.operationId,
+    ids: {
+      websiteId: f.site.id,
+      applicationId,
+      primaryDomainId: uuid(2),
+      wwwDomainId: null,
+      mailDomainId: null,
+    },
+    previewDigest: 'b'.repeat(64),
+    confirmation: 'original-confirmation',
+    blockers: [],
+    steps: { websiteReady: false },
+    source: { kind: 'new_static' },
+    plan: { website: f.site, application: { id: applicationId } },
+  });
+  const submitted = await f.submit();
+  f.createAdapter = async () => ({ created: true, website: f.site });
+  f.applications.set(applicationId, { id: applicationId });
+  await assert.rejects(f.createHosted(submitted), code('hosting_site_persistence_unverified'));
+  await assert.rejects(
+    f.recoverHosted(submitted),
+    code('hosting_site_recovery_partial_resources_present'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+});
+
+test('attached ownership cannot use reservation recovery and must use Website removal', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  await f.createHosted(submitted);
+  await assert.rejects(
+    f.recoverHosted(submitted),
+    code('hosting_site_recovery_requires_removal'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.count('auth_customer_websites'), 1);
 });
