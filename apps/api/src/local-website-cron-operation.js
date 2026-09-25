@@ -40,6 +40,7 @@ export function createLocalWebsiteCronOperation({
   receiptStore = createWebsiteCronOperationReceiptStore(),
   siteMutationLock = null,
   authorizeActor = null,
+  authorizeSystemRemoval = null,
 } = {}) {
   if (!websiteCronRegistry || typeof websiteCronRegistry.getTask !== 'function'
     || !websiteCronManager || typeof websiteCronManager.apply !== 'function' || typeof websiteCronManager.remove !== 'function'
@@ -51,7 +52,7 @@ export function createLocalWebsiteCronOperation({
     );
   }
 
-  async function authorizeMutation(operation, payload) {
+  async function authorizeMutation(operation, payload, execution) {
     if (payload?.authorizationMode === 'system_removal') {
       if (operation !== OPERATIONS.CRON_REMOVE) {
         throw new LocalWebsiteCronOperationError(
@@ -59,6 +60,22 @@ export function createLocalWebsiteCronOperation({
           'System Website removal authorization is valid only for cron removal',
           403,
         );
+      }
+      if (typeof authorizeSystemRemoval === 'function') {
+        const authorization = await authorizeSystemRemoval({
+          taskId: payload.taskId,
+          websiteId: payload.websiteId,
+          applicationId: payload.applicationId,
+          serverId: execution.serverId,
+          jobId: execution.jobId,
+        });
+        if (!authorization || authorization.authorized !== true) {
+          throw new LocalWebsiteCronOperationError(
+            'website_cron_actor_forbidden',
+            'Website removal authorization changed before cron execution',
+            403,
+          );
+        }
       }
       return Object.freeze({ mode: 'system_removal' });
     }
@@ -102,7 +119,7 @@ export function createLocalWebsiteCronOperation({
       );
     }
 
-    await authorizeMutation(operation, payload);
+    await authorizeMutation(operation, payload, context);
 
     const task = await websiteCronRegistry.getTask(payload.taskId);
     if (!task) {
