@@ -12,10 +12,10 @@ function fixture(options = {}) {
     if (current.user.role !== 'owner') throw new AuthError('forbidden', 'Owner only.', 403);
     return current;
   };
-  const accounts = Object.fromEntries(['list', 'get', 'registerCustomer', 'registerReseller', 'updateLimits', 'unregister'].map((name) => [name, (token, policy, ...args) => {
+  const accounts = Object.fromEntries(['list', 'get', 'registerCustomer', 'registerReseller', 'updateLimits', 'setActive', 'unregister'].map((name) => [name, (token, policy, ...args) => {
     assert.equal(token, 'cookie-token'); assert.equal(policy, requireManagement);
     requireManagement(session); calls.push({ name, args });
-    return name === 'unregister' ? { id: args[0], unregistered: true } : { id: name === 'get' || name === 'updateLimits' ? args[0] : 'customer-a', kind: 'customer', stage: 'profile_only' };
+    return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
   }]));
   const headers = {};
   const store = { getSession: () => session, users: { hostingAccounts: accounts } };
@@ -70,6 +70,17 @@ test('PATCH limits keeps revision and fields for the existing store to validate'
   assert.equal(result.data.accessGranted, false);
   assert.deepEqual(f.calls[0], { name: 'updateLimits', args: ['reseller-a', body] });
 });
+test('PATCH status delegates exact lifecycle input and does not claim Website suspension', async () => {
+  const f = fixture();
+  const body = { revision: 3, active: false };
+  const result = await f.run('PATCH', '/api/users/hosting/accounts/customer-a/status', body);
+  assert.equal(result.status, 200);
+  assert.equal(result.data.account.active, false);
+  assert.equal(result.data.accessGranted, false);
+  assert.equal(result.data.hostSitesSuspended, false);
+  assert.deepEqual(f.calls[0], { name: 'setActive', args: ['customer-a', body] });
+});
+
 test('profile removal requires bound confirmation and does not claim login deletion', async () => {
   const f = fixture(); const result = await f.run('DELETE', '/api/users/hosting/accounts/customer-a/profile', { revision: 2, confirmation: 'unregister-hosting-profile:customer-a:2' });
   assert.deepEqual(result, { status: 200, data: { id: 'customer-a', unregistered: true, loginDeleted: false, accessGranted: false } });
@@ -83,7 +94,7 @@ for (const body of [{ revision: 2 }, { revision: 2, confirmation: 'unregister-ho
   });
 }
 for (const [method, path, expected] of [['DELETE', '/api/users/hosting/accounts/a', 'method_not_allowed'],
-  ['POST', '/api/users/hosting/accounts/a/limits', 'method_not_allowed'], ['PATCH', '/api/users/hosting/accounts/a/profile', 'method_not_allowed'],
+  ['POST', '/api/users/hosting/accounts/a/limits', 'method_not_allowed'], ['POST', '/api/users/hosting/accounts/a/status', 'method_not_allowed'], ['PATCH', '/api/users/hosting/accounts/a/profile', 'method_not_allowed'],
   ['GET', '/api/users/hosting/accounts/a/transfer', 'not_found'], ['POST', '/api/users/hosting/accounts/a/sites', 'not_found'],
   ['GET', '/api/users/hosting/accounts/a%2Fb', 'not_found'], ['HEAD', '/api/users/hosting/accounts', 'method_not_allowed']]) {
   test(`unsupported operation cannot fall through: ${method} ${path}`, async () => {
