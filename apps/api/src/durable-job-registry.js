@@ -1,6 +1,8 @@
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { createOperationEnvelope } from '@yunpanel/protocol';
 import { createJobRecoveryStore } from './job-recovery-store.js';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const automaticReconciliationAcks = new WeakMap();
 
@@ -60,13 +62,19 @@ export function createDurableJobRegistry({
   recoveryStoreFactory = createJobRecoveryStore,
   automaticReconciliation = false,
   now = () => Date.now(),
+  storeLockFactory = createProcessStoreLock,
 } = {}) {
   if (typeof filePath !== 'string' || !filePath) throw new DurableJobRegistryError('durable_job_store_required', 'Durable job registry requires a file path');
   if (typeof registryFactory !== 'function') throw new DurableJobRegistryError('durable_job_factory_required', 'Durable job registry requires a registry factory');
   if (typeof recoveryStoreFactory !== 'function') throw new DurableJobRegistryError('durable_job_recovery_factory_required', 'Durable job registry requires a recovery store factory');
   if (typeof automaticReconciliation !== 'boolean') throw new DurableJobRegistryError('durable_job_reconciliation_mode_invalid', 'Durable job automatic reconciliation mode is invalid');
+  if (typeof storeLockFactory !== 'function') throw new DurableJobRegistryError('durable_job_store_lock_invalid', 'Durable job store lock factory is invalid');
 
   const recoveryFilePath = `${filePath}.recovery.json`;
+  const storeLock = storeLockFactory({ filePath: path.resolve(filePath), now });
+  if (!storeLock || typeof storeLock.withLock !== 'function') {
+    throw new DurableJobRegistryError('durable_job_store_lock_invalid', 'Durable job store lock is invalid');
+  }
   let registry = registryFactory({ filePath, now });
   const recoveryStore = recoveryStoreFactory({ filePath: recoveryFilePath, now });
   let initialized = false;
@@ -253,7 +261,10 @@ export function createDurableJobRegistry({
 
   async function mutate(method, args) {
     await init();
-    const operation = mutationTail.then(async () => {
+    const operation = mutationTail.then(() => storeLock.withLock(async () => {
+      // Another API/worker process may have committed since this instance last
+      // touched the store. Reload only after acquiring the store-wide lock.
+      await reloadDurableState({ inspectRecovery: true });
       assertMutationAllowed(method);
       if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
       try {
@@ -273,10 +284,10 @@ export function createDurableJobRegistry({
         return result;
       } catch (error) {
         if (fatal) throw error;
-        await reloadDurableState({ inspectRecovery: method === 'claimNext' || method === 'complete' });
+        await reloadDurableState({ inspectRecovery: true });
         throw error;
       }
-    });
+    }));
     mutationTail = operation.catch(() => {});
     return operation;
   }
@@ -389,9 +400,12 @@ export function createDurableJobRegistry({
   async function read(method, args) {
     await init();
     await mutationTail;
-    assertHealthy();
-    if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
-    return registry[method](...args);
+    return storeLock.withLock(async () => {
+      await reloadDurableState({ inspectRecovery: false });
+      assertHealthy();
+      if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
+      return registry[method](...args);
+    });
   }
 
   return {
