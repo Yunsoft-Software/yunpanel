@@ -107,6 +107,23 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     response.json({ data: operation });
   }));
 
+  app.post('/api/website-removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
+    const operation = await runtime.get(request.params.operationId);
+    if (!operation) {
+      throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
+    }
+    const body = continueStepBody(request.body);
+    const updated = await runtime.continueStep({
+      websiteId: operation.websiteId,
+      operationId: operation.id,
+      expectedUpdatedAt: body.expectedUpdatedAt,
+      stepId: body.stepId,
+      confirmation: body.confirmation,
+    });
+    response.set('Cache-Control', 'no-store');
+    response.json({ data: updated });
+  }));
+
   app.get('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const [preview, operations] = await Promise.all([
