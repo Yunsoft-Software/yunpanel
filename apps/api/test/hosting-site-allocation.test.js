@@ -262,3 +262,88 @@ test('release audit failure rolls back ownership and quota deletion', (t) => {
   assert.equal(f.count('auth_customer_websites'), 1);
   assert.equal(f.get().usage.websites, 1);
 });
+
+
+function uncreatedProof(overrides = {}) {
+  return {
+    operationId: uuid(1001),
+    websiteId: uuid(1),
+    serverId: uuid(100),
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+    ...overrides,
+  };
+}
+
+test('verified uncreated recovery releases only a reserved quota hold exactly once', (t) => {
+  const f = siteFixture(t);
+  f.reserve();
+  const customerToken = f.session('customer-a');
+  const resellerToken = f.session('reseller-a');
+  const receipt = f.store.siteAllocations.releaseUncreated(uncreatedProof());
+  assert.equal(receipt.websiteId, uuid(1));
+  assert.equal(receipt.allocationOperationId, uuid(1001));
+  assert.equal(receipt.released, true);
+  assert.equal(receipt.quotaReleased, true);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+  assert.equal(f.count('auth_customer_websites'), 0);
+  assert.equal(f.get().usage.websites, 0);
+  assert.equal(f.getSession(customerToken), null);
+  assert.equal(f.getSession(resellerToken), null);
+
+  const retry = f.store.siteAllocations.releaseUncreated(uncreatedProof());
+  assert.deepEqual(retry, {
+    websiteId: uuid(1),
+    allocationOperationId: uuid(1001),
+    released: false,
+    quotaReleased: false,
+  });
+});
+
+test('uncreated recovery refuses an attached allocation and preserves ownership', (t) => {
+  const f = siteFixture(t);
+  f.reserve();
+  f.complete();
+  assert.throws(
+    () => f.store.siteAllocations.releaseUncreated(uncreatedProof()),
+    code('hosting_site_recovery_requires_removal'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.count('auth_customer_websites'), 1);
+  assert.equal(f.get().usage.websites, 1);
+});
+
+for (const patch of [
+  { websiteAbsent: false },
+  { applicationAbsent: true },
+  { operationId: uuid(9999) },
+  { websiteId: uuid(9999) },
+  { serverId: uuid(9999) },
+]) {
+  test(`uncreated recovery rejects invalid/mismatched evidence: ${JSON.stringify(patch)}`, (t) => {
+    const f = siteFixture(t);
+    f.reserve();
+    assert.throws(
+      () => f.store.siteAllocations.releaseUncreated(uncreatedProof(patch)),
+      (error) => ['hosting_site_recovery_evidence_invalid', 'hosting_site_identity_conflict'].includes(error.code)
+        || (patch.operationId && error.code === undefined),
+    );
+    assert.equal(f.count('auth_hosting_site_allocations'), 1);
+    assert.equal(f.get().usage.websites, 1);
+  });
+}
+
+test('reservation recovery audit failure rolls back quota release', (t) => {
+  let fail = false;
+  const f = siteFixture(t, {
+    audit: (_actor, action) => {
+      if (fail && action === 'hosting.website_reservation_released') throw new Error('audit unavailable');
+    },
+  });
+  f.reserve();
+  fail = true;
+  assert.throws(() => f.store.siteAllocations.releaseUncreated(uncreatedProof()), /audit unavailable/);
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.get().usage.websites, 1);
+});
