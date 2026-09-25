@@ -3,6 +3,7 @@ import test from 'node:test';
 
 import {
   createWebsiteProvisioningJobAuthorizer,
+  createWebsiteProvisioningLegacyJobGuard,
   normalizeWebsiteProvisioningJobAuthorization,
   websiteProvisioningJobAuthorization,
 } from '../src/website-provisioning-job-authorization.js';
@@ -112,4 +113,104 @@ test('worker authorizer rejects invalid or mismatched scopes without consulting 
   assert.deepEqual(state.calls, []);
   assert.equal(await state.authorize(scope('other_step')), false);
   assert.deepEqual(state.calls, []);
+});
+
+test('legacy guard quarantines provisioning-specific job types without trusting old queue state', async () => {
+  let reads = 0;
+  const guard = createWebsiteProvisioningLegacyJobGuard({
+    registry: { async listInterrupted() { reads += 1; return []; } },
+  });
+  for (const type of [
+    `website.ssl.issue:${operationId}`,
+    `website.webmail.ssl.issue:${operationId}`,
+    `website_mail_apply:${operationId}`,
+    `website_mail_rollback:${operationId}`,
+    `website_dkim_apply:${operationId}`,
+    `website_dkim_cleanup:${operationId}`,
+  ]) {
+    assert.equal(await guard({
+      operation: 'ssl.issue',
+      type,
+      serverId,
+      resourceType: 'certificate',
+      resourceId: 'certificate-1',
+    }), true);
+  }
+  assert.equal(reads, 0);
+});
+
+test('legacy guard detects unscoped database and Roundcube jobs only against active provisioning steps', async () => {
+  const active = [{
+    operationId,
+    websiteId,
+    steps: [
+      {
+        id: 'database',
+        kind: 'website_database',
+        state: 'applying',
+        intent: { serverId, databaseName: 'yp_example' },
+      },
+      {
+        id: 'roundcube_mapping',
+        kind: 'roundcube_mapping',
+        state: 'compensating',
+        intent: { serverId },
+      },
+    ],
+  }];
+  const guard = createWebsiteProvisioningLegacyJobGuard({
+    registry: { async listInterrupted() { return active; } },
+  });
+
+  assert.equal(await guard({
+    operation: 'database.create',
+    type: 'database.create',
+    serverId,
+    resourceType: 'database',
+    resourceId: 'yp_example',
+  }), true);
+  assert.equal(await guard({
+    operation: 'database.credential.apply',
+    type: 'database.credential.apply',
+    serverId,
+    resourceType: 'database',
+    resourceId: 'yp_example',
+  }), true);
+  assert.equal(await guard({
+    operation: 'roundcube.config.apply',
+    type: 'roundcube.config.apply',
+    serverId,
+    resourceType: 'server',
+    resourceId: serverId,
+  }), true);
+  assert.equal(await guard({
+    operation: 'database.create',
+    type: 'database.create',
+    serverId,
+    resourceType: 'database',
+    resourceId: 'unrelated_database',
+  }), false);
+  assert.equal(await guard({
+    operation: 'system.packages.inspect',
+    type: 'system.packages.inspect',
+    serverId,
+    resourceType: 'system',
+    resourceId: serverId,
+  }), false);
+});
+
+test('legacy guard surfaces unreadable candidate provisioning state to the caller', async () => {
+  const guard = createWebsiteProvisioningLegacyJobGuard({
+    registry: { async listInterrupted() { throw new Error('unreadable'); } },
+  });
+  await assert.rejects(
+    guard({
+      operation: 'database.delete',
+      type: 'database.delete',
+      serverId,
+      resourceType: 'database',
+      resourceId: 'yp_example',
+    }),
+    /unreadable/,
+  );
 });
