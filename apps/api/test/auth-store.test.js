@@ -102,6 +102,63 @@ test('SQLite persists sessions without storing plaintext passwords or bearer tok
   }
 });
 
+test('suspended hosting parent blocks child sessions and new login without disabling the child account', async (t) => {
+  const notifications = [];
+  const liveSessions = {
+    revokeSession(sessionId, reason) { notifications.push(['session', sessionId, reason]); },
+    revokeUser(userId, reason) { notifications.push(['user', userId, reason]); },
+  };
+  const { store, filePath } = fixture(t, { liveSessions });
+  const ownerUser = await owner(store);
+  const encoded = await hashPassword(password);
+  const db = new DatabaseSync(filePath);
+  db.exec('PRAGMA foreign_keys = ON');
+  try {
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('reseller-login', 'reseller-login', encoded);
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('customer-login', 'customer-login', encoded);
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('reseller-login', 'reseller', null);
+    db.prepare('INSERT INTO auth_reseller_limits VALUES (?, NULL, NULL)').run('reseller-login');
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('customer-login', 'customer', 'reseller-login');
+  } finally { db.close(); }
+
+  const first = await store.login({ username: 'customer-login', password });
+  const second = await store.login({ username: 'customer-login', password });
+  assert.ok(store.getSession(first.token));
+  assert.ok(store.getSessionById(second.session.id));
+
+  const suspend = new DatabaseSync(filePath);
+  suspend.exec('PRAGMA foreign_keys = ON');
+  try {
+    suspend.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)')
+      .run('reseller-login', 0, ownerUser.id, 2000);
+    suspend.exec("UPDATE users SET active = 0 WHERE id = 'reseller-login'");
+    assert.equal(suspend.prepare("SELECT active FROM users WHERE id = 'customer-login'").get().active, 1);
+  } finally { suspend.close(); }
+
+  assert.equal(store.getSession(first.token), null);
+  assert.equal(store.getSessionById(second.session.id), null);
+  assert.equal(notifications.filter((entry) => entry[2] === 'hosting_scope_inactive').length, 2);
+  await assert.rejects(
+    store.login({ username: 'customer-login', password }),
+    { code: 'invalid_credentials', status: 401 },
+  );
+
+  const reactivate = new DatabaseSync(filePath);
+  reactivate.exec('PRAGMA foreign_keys = ON');
+  try {
+    reactivate.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)')
+      .run('reseller-login', 1, ownerUser.id, 3000);
+    reactivate.exec("UPDATE users SET active = 1 WHERE id = 'reseller-login'");
+  } finally { reactivate.close(); }
+
+  const restored = await store.login({ username: 'customer-login', password });
+  assert.equal(restored.session.user.username, 'customer-login');
+});
+
 test('successful login rotates an existing browser session', async (t) => {
   const { store } = fixture(t);
   await owner(store);
