@@ -44,5 +44,6 @@ Silme yine fail-closed kalır: receipt'siz legacy direct-systemd, legacy/unowned
 - Receipt'siz legacy direct-systemd Application otomatik temizlenmez; mevcut host state absent değilse veya deployment evidence eşleşmiyorsa fail-closed blocker kalır.
 - Legacy site için owned Unix provisioning receipt yoksa `unix_cleanup_evidence_unavailable`; otomatik `userdel` yapılmaz.
 - `2fa0a7bf` → `bbf4774f`: process-shared ortak site mutation lock artık site-create metadata, Website provisioning/retry/compensation, Website removal, PHP queue/worker ve cron worker yollarında aynı Application/Website identity ile kullanılır. Gerçek iki süreç/crash/permission kabulü çalıştırılmadı.
-- Worker anında live tenant auth gereken diğer host writer'lar, quota release, JSON registry/job cross-process transaction/reload, write-failure/cold-restart ve gerçek Node24/npm11/host/browser kabulü hâlâ açıktır.
+- `71f738bb` → `8267d036`: reseller/customer quota release yalnız verified Website/Application absence sonrası final removal journal adımında çalışır; release failure operation'ı removed yapmaz ve explicit continue ile tekrar edilir.
+- Worker anında live tenant auth gereken diğer host writer'lar, provisioning-reservation compensation recovery, JSON registry/job cross-process transaction/reload, write-failure/cold-restart ve gerçek Node24/npm11/host/browser kabulü hâlâ açıktır.
 - Bu source değişikliklerin testleri bu oturumda gerçek checkout üzerinde çalıştırılmadı. Node24/npm11 tam suite ve izinli host/browser kabulü zorunludur.
