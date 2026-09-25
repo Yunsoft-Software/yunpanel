@@ -317,11 +317,17 @@ export function createWebsiteDatabaseProvisioningHandler({
     return Object.freeze({ preview, payload, bundle });
   }
 
-  async function queueCredential(intent, credential, binding, operation) {
+  async function queueCredential(intent, credential, binding, operation, context) {
     const desired = await desiredBundle(intent, credential, binding, operation);
     const queued = operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY
-      ? await databaseCredentialApplyService.queueApply({ credentialId: credential.id, ...desired.payload })
-      : await databaseCredentialApplyService.queueDelete({ credentialId: credential.id, ...desired.payload });
+      ? await databaseCredentialApplyService.queueApply(
+        { credentialId: credential.id, ...desired.payload },
+        { authorization: websiteProvisioningJobAuthorization(context) },
+      )
+      : await databaseCredentialApplyService.queueDelete(
+        { credentialId: credential.id, ...desired.payload },
+        { authorization: websiteProvisioningJobAuthorization(context) },
+      );
     const job = successfulCredentialJob(
       await waitForTerminalJob(databaseJobIdentity(queued.job, intent, operation)),
       intent,
@@ -402,6 +408,7 @@ export function createWebsiteDatabaseProvisioningHandler({
       credential,
       binding,
       OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+      context,
     );
     const host = await evidenceInspector.inspectApplied(applied.bundle);
     if (host?.applied !== true || host.desiredStateSha256 !== applied.bundle.desiredStateSha256) {
@@ -468,6 +475,7 @@ export function createWebsiteDatabaseProvisioningHandler({
         current.credential,
         current.binding,
         OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+        context,
       );
       const host = await evidenceInspector.inspectDeleted(deleted.bundle);
       if (host?.deleted !== true) {
