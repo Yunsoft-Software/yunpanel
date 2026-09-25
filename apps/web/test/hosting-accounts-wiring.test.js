@@ -19,6 +19,18 @@ test('profile UI shares the existing API, session, modal and unsaved-change mech
   assert.match(source, /<Modal title="Bayi \/ müşteri profili"/);
   assert.doesNotMatch(source, /localStorage|sessionStorage|fetch\(|dangerouslySetInnerHTML/);
 });
+test('profile lifecycle UI separates login suspension from Website suspension', async () => {
+  const source = await read('HostingAccountsPanel.jsx');
+  const client = await read('hosting-account-client.js');
+  assert.match(source, /Hesabı askıya al/);
+  assert.match(source, /Girişi yeniden etkinleştir/);
+  assert.match(source, /siteler otomatik durdurulmadı/);
+  assert.match(source, /action: 'status'/);
+  assert.match(client, /\/status/);
+  assert.match(client, /hostSitesSuspended !== false/);
+  assert.doesNotMatch(source, /suspendWebsite|websiteSuspension|hostSitesSuspended:\s*true/);
+});
+
 test('profile removal requires username confirmation and does not delete login', async () => {
   const source = await read('HostingAccountsPanel.jsx');
   assert.match(source, /confirmation !== account.username/);
