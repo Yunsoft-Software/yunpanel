@@ -2,7 +2,7 @@ import { AuthError } from './auth-error.js';
 
 const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
-const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile))?$`);
+const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status))?$`);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
 const invalidQuery = () => new AuthError('invalid_hosting_account_query', 'Use documented, single-valued account filters.');
 
@@ -52,8 +52,9 @@ function requireOwner(store, rawToken, requireManagement) {
 
 /** Called by auth-http AFTER cookie, Origin, CSRF and management checks. The
  * persisted store repeats Owner/MFA authorization INSIDE each transaction.
- * Only profile administration is exposed: no site allocation, activation,
- * ownership transfer, new login role, or impersonation endpoint exists here.
+ * Only hosting-account administration is exposed: account login suspension is
+ * distinct from Website suspension. No site allocation, ownership transfer,
+ * new login role, or impersonation endpoint exists here.
  */
 export async function handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
   requireOwner(store, rawToken, requireManagement);
@@ -86,6 +87,18 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const body = await readJson(request);
     return json(response, 200, { data: { account: call('updateLimits', match[1], body), accessGranted: false } });
   }
+  if (match?.[2] === 'status' && request.method === 'PATCH') {
+    const body = await readJson(request);
+    const account = call('setActive', match[1], body);
+    return json(response, 200, {
+      data: {
+        account,
+        accessGranted: false,
+        hostSitesSuspended: false,
+        sessionsRevoked: true,
+      },
+    });
+  }
   if (match?.[2] === 'profile' && request.method === 'DELETE') {
     const body = await readJson(request);
     if (!body || Object.keys(body).length !== 2 || !Object.hasOwn(body, 'revision') || !Object.hasOwn(body, 'confirmation')
@@ -96,6 +109,6 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const result = call('unregister', match[1], { revision: body.revision });
     return json(response, 200, { data: { ...result, loginDeleted: false, accessGranted: false } });
   }
-  response.setHeader('allow', collection ? 'GET, POST' : match[2] === 'limits' ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
+  response.setHeader('allow', collection ? 'GET, POST' : ['limits', 'status'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
   throw new AuthError('method_not_allowed', 'Unsupported hosting account operation.', 405);
 }
