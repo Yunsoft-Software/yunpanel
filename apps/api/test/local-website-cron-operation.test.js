@@ -185,3 +185,22 @@ test('LocalWebsiteCronOperation rejects invalid execution context or mismatched 
     (err) => err instanceof LocalWebsiteCronOperationError && err.code === 'website_cron_digest_mismatch',
   );
 });
+
+
+test('LocalWebsiteCronOperation holds the shared site lock during host mutation', async () => {
+  const f = createFixtures();
+  const locks = [];
+  const operation = createLocalWebsiteCronOperation({
+    websiteCronRegistry: f.websiteCronRegistry,
+    websiteCronManager: f.websiteCronManager,
+    receiptStore: f.receiptStore,
+    siteMutationLock: {
+      withSiteLock: async (identity, action) => {
+        locks.push(identity);
+        return action();
+      },
+    },
+  });
+  await operation.execute(OPERATIONS.CRON_APPLY, f.payload, f.execution);
+  assert.deepEqual(locks, [{ applicationId, websiteId }]);
+});
