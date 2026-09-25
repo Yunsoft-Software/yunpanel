@@ -4,6 +4,8 @@ import { hostingPlanDigest, hostingWebsiteDigest } from './hosting-site-allocati
 const plain = (value) => value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value));
 const id = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const digest = (value) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value);
+const uuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
+const NEW_APPLICATION_SOURCES = new Set(['new_static', 'new_node', 'new_php', 'new_python']);
 const fail = (code, message, status = 409) => new AuthError(code, message, status);
 function request(value, apply = false) {
   const keys = apply ? ['customerId', 'input', 'previewDigest', 'confirmation'] : ['customerId', 'input'];
@@ -133,6 +135,128 @@ export function createHostingSiteCreateService({
       return performPreparedCreate(rawToken, policy, submitted, locked, { outerLock: true });
     });
   }
+  function operationOwnedApplicationId(prepared) {
+    const sourceKind = prepared.base?.source?.kind;
+    if (!NEW_APPLICATION_SOURCES.has(sourceKind)) return null;
+    const applicationId = prepared.base?.plan?.application?.id;
+    if (!uuid(applicationId)
+      || prepared.base?.plan?.website?.applicationId !== applicationId
+      || prepared.base?.ids?.applicationId !== applicationId) {
+      throw fail(
+        'hosting_site_recovery_plan_invalid',
+        'The site-create plan does not contain a canonical operation-owned Application.',
+        503,
+      );
+    }
+    return applicationId;
+  }
+
+  function requireRecoveryDependencies(prepared) {
+    if (typeof allocations?.releaseUncreated !== 'function'
+      || typeof websiteRegistry?.getWebsite !== 'function'
+      || typeof domainRegistry?.getDomain !== 'function'
+      || typeof siteMutationLock?.withSiteLock !== 'function') {
+      throw fail('hosting_site_recovery_unavailable', 'Hosted site reservation recovery is unavailable.', 503);
+    }
+    if (operationOwnedApplicationId(prepared) !== null
+      && typeof applicationRegistry?.getApplication !== 'function') {
+      throw fail('hosting_site_recovery_unavailable', 'Application recovery inspection is unavailable.', 503);
+    }
+    if (prepared.base?.ids?.mailDomainId !== null
+      && prepared.base?.ids?.mailDomainId !== undefined
+      && typeof mailDomainRegistry?.getMailDomain !== 'function') {
+      throw fail('hosting_site_recovery_unavailable', 'Mail Domain recovery inspection is unavailable.', 503);
+    }
+  }
+
+  async function inspectRecoveryResiduals(prepared) {
+    requireRecoveryDependencies(prepared);
+    const applicationId = operationOwnedApplicationId(prepared);
+    const websiteId = prepared.allocationInput.websiteId;
+    const primaryDomainId = prepared.base?.ids?.primaryDomainId ?? null;
+    const wwwDomainId = prepared.base?.ids?.wwwDomainId ?? null;
+    const mailDomainId = prepared.base?.ids?.mailDomainId ?? null;
+    if (!uuid(websiteId) || !uuid(primaryDomainId)
+      || (wwwDomainId !== null && !uuid(wwwDomainId))
+      || (mailDomainId !== null && !uuid(mailDomainId))) {
+      throw fail('hosting_site_recovery_plan_invalid', 'The site-create recovery identities are invalid.', 503);
+    }
+
+    const [website, application, primaryDomain, wwwDomain, mailDomain] = await Promise.all([
+      websiteRegistry.getWebsite(websiteId),
+      applicationId === null ? Promise.resolve(null) : applicationRegistry.getApplication(applicationId),
+      domainRegistry.getDomain(primaryDomainId),
+      wwwDomainId === null ? Promise.resolve(null) : domainRegistry.getDomain(wwwDomainId),
+      mailDomainId === null ? Promise.resolve(null) : mailDomainRegistry.getMailDomain(mailDomainId),
+    ]);
+    return Object.freeze({
+      applicationId,
+      websitePresent: website !== null,
+      applicationPresent: application !== null,
+      primaryDomainPresent: primaryDomain !== null,
+      wwwDomainPresent: wwwDomain !== null,
+      mailDomainPresent: mailDomain !== null,
+    });
+  }
+
+  async function recoverReservation(rawToken, policy, submitted) {
+    const initial = await prepare(rawToken, policy, submitted);
+    validateSubmission(submitted, initial);
+    requireRecoveryDependencies(initial);
+    if (initial.allocation.state === 'available') {
+      throw fail('hosting_site_recovery_not_found', 'There is no reserved site capacity to recover.', 404);
+    }
+    if (initial.allocation.state !== 'reserved') {
+      throw fail(
+        'hosting_site_recovery_requires_removal',
+        'Persisted Website ownership must use the Website removal lifecycle.',
+        409,
+      );
+    }
+
+    return siteMutationLock.withSiteLock(lockIdentity(initial), async () => {
+      const prepared = await prepare(rawToken, policy, submitted);
+      validateSubmission(submitted, prepared);
+      if (prepared.allocation.state !== 'reserved') {
+        throw fail(
+          'hosting_site_recovery_requires_removal',
+          'The site allocation changed and can no longer use reservation recovery.',
+          409,
+        );
+      }
+      const residuals = await inspectRecoveryResiduals(prepared);
+      if (residuals.websitePresent || residuals.applicationPresent
+        || residuals.primaryDomainPresent || residuals.wwwDomainPresent || residuals.mailDomainPresent) {
+        throw fail(
+          'hosting_site_recovery_partial_resources_present',
+          'Site resources exist for this reservation; compensate or remove them before releasing capacity.',
+          409,
+        );
+      }
+
+      const receipt = allocations.releaseUncreated({
+        operationId: prepared.allocationInput.operationId,
+        websiteId: prepared.allocationInput.websiteId,
+        serverId: prepared.allocationInput.serverId,
+        applicationId: residuals.applicationId,
+        websiteAbsent: true,
+        applicationAbsent: residuals.applicationId !== null,
+      });
+      if (!receipt || receipt.websiteId !== prepared.allocationInput.websiteId
+        || receipt.allocationOperationId !== prepared.allocationInput.operationId
+        || receipt.released !== true || receipt.quotaReleased !== true) {
+        throw fail('hosting_site_recovery_unverified', 'Site reservation recovery could not be verified.', 503);
+      }
+      return Object.freeze({
+        websiteId: receipt.websiteId,
+        ownership: receipt,
+        recovered: true,
+        stage: 'reservation_released',
+        accessGranted: false,
+      });
+    });
+  }
+
   return Object.freeze({
     async preview(rawToken, policy, value) {
       const prepared = await prepare(rawToken, policy, request(value));
@@ -149,6 +273,11 @@ export function createHostingSiteCreateService({
       pending.set(key, operation);
       try { return await operation; }
       finally { if (pending.get(key) === operation) pending.delete(key); }
+    },
+    async recoverReservation(rawToken, policy, value) {
+      const submitted = request(value, true);
+      hostingAccounts.get(rawToken, policy, submitted.customerId);
+      return recoverReservation(rawToken, policy, submitted);
     },
   });
 }
