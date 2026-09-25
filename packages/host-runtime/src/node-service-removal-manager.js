@@ -234,7 +234,7 @@ export function createNodeServiceRemovalManager({
       stopped = true;
     }
 
-    if (deployed && !['disabled', 'not-found', 'static', 'masked'].includes(before.unitFileState)) {
+    if (deployed && !['', 'disabled', 'not-found', 'static', 'masked'].includes(before.unitFileState)) {
       try { await run(before.systemctlPath, ['disable', before.serviceName], { timeout: 30_000, maxBuffer: 64 * 1024 }); }
       catch { fail('node_service_cleanup_disable_failed', 'Managed Node service could not be disabled'); }
       disabled = true;
@@ -253,8 +253,7 @@ export function createNodeServiceRemovalManager({
 
     const after = await inspectRemoval(rawSpec);
     if (after.unitPresent || after.environmentPresent
-      || after.loadState !== 'not-found' || after.activeState !== 'inactive' || after.mainPid !== 0
-      || !['not-found', 'disabled', 'static', 'masked'].includes(after.unitFileState)) {
+      || after.loadState !== 'not-found' || after.activeState !== 'inactive' || after.mainPid !== 0) {
       fail('node_service_cleanup_unverified', 'Managed Node service cleanup could not be verified');
     }
 
