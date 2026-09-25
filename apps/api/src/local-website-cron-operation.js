@@ -39,6 +39,7 @@ export function createLocalWebsiteCronOperation({
   websiteCronManager = createWebsiteCronManager(),
   receiptStore = createWebsiteCronOperationReceiptStore(),
   siteMutationLock = null,
+  authorizeActor = null,
 } = {}) {
   if (!websiteCronRegistry || typeof websiteCronRegistry.getTask !== 'function'
     || !websiteCronManager || typeof websiteCronManager.apply !== 'function' || typeof websiteCronManager.remove !== 'function'
@@ -48,6 +49,44 @@ export function createLocalWebsiteCronOperation({
       'Website cron local operation dependencies are invalid',
       500,
     );
+  }
+
+  async function authorizeMutation(operation, payload) {
+    if (payload?.authorizationMode === 'system_removal') {
+      if (operation !== OPERATIONS.CRON_REMOVE) {
+        throw new LocalWebsiteCronOperationError(
+          'website_cron_authorization_invalid',
+          'System Website removal authorization is valid only for cron removal',
+          403,
+        );
+      }
+      return Object.freeze({ mode: 'system_removal' });
+    }
+    if (payload?.authorizationMode !== 'user'
+      || typeof authorizeActor !== 'function'
+      || typeof payload.actorSessionId !== 'string'
+      || typeof payload.actorUserId !== 'string'
+      || !['owner', 'site_manager'].includes(payload.actorRole)) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_authorization_invalid',
+        'Live panel authorization is required before cron execution',
+        403,
+      );
+    }
+    const actor = await authorizeActor({
+      sessionId: payload.actorSessionId,
+      userId: payload.actorUserId,
+      role: payload.actorRole,
+    }, payload.websiteId);
+    if (!actor || actor.sessionId !== payload.actorSessionId
+      || actor.userId !== payload.actorUserId || actor.role !== payload.actorRole) {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_actor_forbidden',
+        'Panel access changed before cron execution',
+        403,
+      );
+    }
+    return Object.freeze({ mode: 'user', actor });
   }
 
   async function executeUnlocked(operation, payload, execution) {
@@ -62,6 +101,8 @@ export function createLocalWebsiteCronOperation({
         'Execution resourceId does not match the payload taskId',
       );
     }
+
+    await authorizeMutation(operation, payload);
 
     const task = await websiteCronRegistry.getTask(payload.taskId);
     if (!task) {
