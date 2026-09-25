@@ -69,6 +69,56 @@ function compensationOrderInput(operation, laterState) {
   };
 }
 
+test('registry keeps the latest provisioning actor private and durable', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-actor-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const registry = createWebsiteProvisioningRegistry({ filePath });
+  await registry.init();
+  const created = await registry.create(input());
+  const originalUpdatedAt = created.updatedAt;
+  const first = Object.freeze({
+    sessionId: '11111111-1111-4111-8111-111111111111',
+    userId: '22222222-2222-4222-8222-222222222222',
+    role: 'site_manager',
+  });
+  const second = Object.freeze({
+    sessionId: '33333333-3333-4333-8333-333333333333',
+    userId: '44444444-4444-4444-8444-444444444444',
+    role: 'owner',
+  });
+
+  assert.equal(await registry.getActor(operationId), null);
+  assert.equal(Object.hasOwn(await registry.get(operationId), 'actor'), false);
+  assert.deepEqual(await registry.refreshActor({ operationId, actor: first }), first);
+  assert.deepEqual(await registry.getActor(operationId), first);
+  assert.equal((await registry.get(operationId)).updatedAt, originalUpdatedAt);
+  assert.equal(Object.hasOwn(await registry.get(operationId), 'actor'), false);
+
+  await registry.refreshActor({ operationId, actor: second });
+  assert.deepEqual(await registry.getActor(operationId), second);
+  const raw = JSON.parse(await readFile(filePath, 'utf8'));
+  assert.deepEqual(raw.operations[0].actor, second);
+
+  const reopened = createWebsiteProvisioningRegistry({ filePath });
+  await reopened.init();
+  assert.deepEqual(await reopened.getActor(operationId), second);
+  assert.equal(Object.hasOwn(await reopened.get(operationId), 'actor'), false);
+
+  await reopened.abandonUncreated({
+    operationId,
+    websiteId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  await assert.rejects(
+    reopened.refreshActor({ operationId, actor: first }),
+    (error) => error instanceof WebsiteProvisioningRegistryError
+      && error.code === 'website_provisioning_abandoned',
+  );
+});
+
 test('registry persists applying intent before evidence and recovers interrupted work', async () => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-'));
   const filePath = path.join(directory, 'provisioning.json');
