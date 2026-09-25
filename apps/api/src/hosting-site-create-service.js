@@ -157,6 +157,7 @@ export function createHostingSiteCreateService({
       || typeof websiteRegistry?.getWebsite !== 'function'
       || typeof domainRegistry?.getDomain !== 'function'
       || typeof websiteProvisioningRegistry?.get !== 'function'
+      || typeof websiteProvisioningRegistry?.abandonUncreated !== 'function'
       || typeof siteMutationLock?.withSiteLock !== 'function') {
       throw fail('hosting_site_recovery_unavailable', 'Hosted site reservation recovery is unavailable.', 503);
     }
@@ -229,13 +230,6 @@ export function createHostingSiteCreateService({
         );
       }
       const residuals = await inspectRecoveryResiduals(prepared);
-      if (residuals.provisioningOperationPresent) {
-        throw fail(
-          'hosting_site_recovery_provisioning_present',
-          'A Website provisioning journal exists for this reservation; reconcile or compensate it before releasing capacity.',
-          409,
-        );
-      }
       if (residuals.websitePresent || residuals.applicationPresent
         || residuals.primaryDomainPresent || residuals.wwwDomainPresent || residuals.mailDomainPresent) {
         throw fail(
@@ -243,6 +237,37 @@ export function createHostingSiteCreateService({
           'Site resources exist for this reservation; compensate or remove them before releasing capacity.',
           409,
         );
+      }
+
+      if (residuals.provisioningOperationPresent) {
+        let abandoned;
+        try {
+          abandoned = await websiteProvisioningRegistry.abandonUncreated({
+            operationId: prepared.allocationInput.operationId,
+            websiteId: prepared.allocationInput.websiteId,
+            applicationId: residuals.applicationId,
+            websiteAbsent: true,
+            applicationAbsent: residuals.applicationId !== null,
+          });
+        } catch (error) {
+          if (error?.code === 'website_provisioning_abandon_requires_compensation') {
+            throw fail(
+              'hosting_site_recovery_provisioning_present',
+              'Provisioning work must be compensated before releasing reserved capacity.',
+              409,
+            );
+          }
+          throw error;
+        }
+        if (!abandoned || abandoned.operationId !== prepared.allocationInput.operationId
+          || abandoned.websiteId !== prepared.allocationInput.websiteId
+          || abandoned.status !== 'abandoned' || abandoned.terminalState !== 'abandoned') {
+          throw fail(
+            'hosting_site_recovery_provisioning_unverified',
+            'Provisioning journal could not be made inert before capacity release.',
+            503,
+          );
+        }
       }
 
       const receipt = allocations.releaseUncreated({
