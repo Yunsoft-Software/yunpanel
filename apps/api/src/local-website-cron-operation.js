@@ -38,6 +38,7 @@ export function createLocalWebsiteCronOperation({
   websiteCronRegistry,
   websiteCronManager = createWebsiteCronManager(),
   receiptStore = createWebsiteCronOperationReceiptStore(),
+  siteMutationLock = null,
 } = {}) {
   if (!websiteCronRegistry || typeof websiteCronRegistry.getTask !== 'function'
     || !websiteCronManager || typeof websiteCronManager.apply !== 'function' || typeof websiteCronManager.remove !== 'function'
@@ -49,7 +50,7 @@ export function createLocalWebsiteCronOperation({
     );
   }
 
-  async function execute(operation, payload, execution) {
+  async function executeUnlocked(operation, payload, execution) {
     const context = assertExecution(execution);
     if (![OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE].includes(operation)) {
       throw new LocalWebsiteCronOperationError('website_cron_operation_invalid', 'Website cron operation is invalid');
@@ -175,6 +176,21 @@ export function createLocalWebsiteCronOperation({
     }
 
     return safeResult;
+  }
+
+  async function execute(operation, payload, execution) {
+    if (!siteMutationLock) return executeUnlocked(operation, payload, execution);
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new LocalWebsiteCronOperationError(
+        'website_cron_operation_dependencies_invalid',
+        'Site mutation lock is unavailable for Website cron execution',
+        503,
+      );
+    }
+    return siteMutationLock.withSiteLock({
+      applicationId: payload?.applicationId ?? null,
+      websiteId: payload?.websiteId ?? null,
+    }, () => executeUnlocked(operation, payload, execution));
   }
 
   return Object.freeze({ execute });
