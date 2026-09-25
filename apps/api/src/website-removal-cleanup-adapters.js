@@ -1,5 +1,6 @@
 import { lstat, rm } from 'node:fs/promises';
-import { createWebsitePathContract } from '@yunpanel/host-runtime';
+import { createNodeServiceRemovalManager, createWebsitePathContract } from '@yunpanel/host-runtime';
+import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
 
 export class WebsiteRemovalCleanupAdapterError extends Error {
   constructor(code, message, status = 409) {
@@ -31,6 +32,8 @@ export function createWebsiteRemovalCleanupAdapters({
   websiteRegistry,
   applicationRegistry,
   websiteProvisioningRuntime,
+  nodeServiceRemovalManager = createNodeServiceRemovalManager(),
+  nodeDeploymentReceiptStore = createNodeDeploymentReceiptStore(),
   lstatFn = lstat,
   rmFn = rm,
 } = {}) {
@@ -39,6 +42,9 @@ export function createWebsiteRemovalCleanupAdapters({
     || !websiteProvisioningRuntime?.registry || typeof websiteProvisioningRuntime.registry.listForWebsite !== 'function'
     || typeof websiteProvisioningRuntime.handlers?.unix_identity?.compensate !== 'function'
     || typeof websiteProvisioningRuntime.handlers?.unix_identity?.inspectCompensation !== 'function'
+    || !nodeServiceRemovalManager || typeof nodeServiceRemovalManager.inspectRemoval !== 'function'
+    || typeof nodeServiceRemovalManager.removeService !== 'function'
+    || !nodeDeploymentReceiptStore || typeof nodeDeploymentReceiptStore.read !== 'function'
     || typeof lstatFn !== 'function' || typeof rmFn !== 'function') {
     throw new WebsiteRemovalCleanupAdapterError(
       'website_removal_cleanup_dependencies_invalid',
@@ -80,6 +86,104 @@ export function createWebsiteRemovalCleanupAdapters({
       if (step && typeof operation.operationId === 'string') return Object.freeze({ website, operation, step });
     }
     unavailable('website_cleanup_identity_evidence_unavailable', 'Owned Website Unix identity evidence is unavailable');
+  }
+
+  async function directSystemdSource(input = {}) {
+    const {
+      websiteId,
+      applicationId,
+      serverId,
+      releaseId = null,
+      serviceName = null,
+      currentCommitSha = null,
+      servicePort = null,
+      healthPath = null,
+    } = input;
+    const source = await currentTarget(websiteId, applicationId);
+    const application = source.application;
+    if (source.website.serverId !== serverId
+      || application.type !== 'node'
+      || application.runtimeAdapter !== 'direct-systemd'
+      || (application.currentReleaseId ?? null) !== releaseId
+      || (application.serviceName ?? null) !== serviceName
+      || (application.currentCommitSha ?? null) !== currentCommitSha
+      || (application.servicePort ?? null) !== servicePort
+      || (application.healthPath ?? null) !== healthPath) {
+      unavailable('website_cleanup_direct_systemd_drift', 'direct-systemd Application evidence changed after preview');
+    }
+
+    let deploymentReceipt = null;
+    if (releaseId !== null) {
+      try { deploymentReceipt = await nodeDeploymentReceiptStore.read(serverId, releaseId); }
+      catch { unavailable('website_cleanup_direct_systemd_evidence_unavailable', 'Node deployment receipt could not be read'); }
+      if (!deploymentReceipt
+        || deploymentReceipt.serverId !== serverId
+        || deploymentReceipt.jobId !== releaseId
+        || deploymentReceipt.releaseId !== releaseId
+        || deploymentReceipt.applicationId !== applicationId
+        || deploymentReceipt.serviceName !== serviceName
+        || deploymentReceipt.commitSha !== currentCommitSha
+        || deploymentReceipt.port !== servicePort
+        || deploymentReceipt.healthPath !== healthPath) {
+        unavailable('website_cleanup_direct_systemd_evidence_unavailable', 'Node deployment receipt does not match current Application state');
+      }
+    }
+
+    let host;
+    try {
+      host = await nodeServiceRemovalManager.inspectRemoval({ applicationId, releaseId, serviceName });
+    } catch {
+      unavailable('website_cleanup_direct_systemd_host_unverified', 'direct-systemd host state could not be verified');
+    }
+    if (!host || host.ready !== true || host.applicationId !== applicationId
+      || host.releaseId !== releaseId || typeof host.serviceName !== 'string') {
+      unavailable('website_cleanup_direct_systemd_host_unverified', 'direct-systemd host state does not match removal evidence');
+    }
+    if (releaseId !== null && host.serviceName !== serviceName) {
+      unavailable('website_cleanup_direct_systemd_host_unverified', 'direct-systemd service identity does not match removal evidence');
+    }
+    return Object.freeze({ ...source, deploymentReceipt, host });
+  }
+
+  async function inspectDirectSystemdCleanup(input = {}) {
+    const source = await directSystemdSource(input);
+    return Object.freeze({
+      ready: true,
+      websiteId: source.website.id,
+      applicationId: source.application.id,
+      serverId: source.website.serverId,
+      releaseId: source.application.currentReleaseId ?? null,
+      serviceName: source.application.serviceName ?? null,
+    });
+  }
+
+  async function directSystemdCleanupHandler(input = {}) {
+    const source = await directSystemdSource(input);
+    let result;
+    try {
+      result = await nodeServiceRemovalManager.removeService({
+        applicationId: source.application.id,
+        releaseId: source.application.currentReleaseId ?? null,
+        serviceName: source.application.serviceName ?? null,
+      });
+    } catch {
+      unavailable('website_cleanup_direct_systemd_remove_failed', 'direct-systemd host cleanup failed or could not be verified');
+    }
+    if (!result || result.directSystemdCleaned !== true
+      || result.applicationId !== source.application.id
+      || result.releaseId !== (source.application.currentReleaseId ?? null)
+      || typeof result.serviceName !== 'string'
+      || (source.application.currentReleaseId !== null && result.serviceName !== source.application.serviceName)) {
+      unavailable('website_cleanup_direct_systemd_host_unverified', 'direct-systemd cleanup receipt is invalid');
+    }
+    return Object.freeze({
+      websiteId: source.website.id,
+      applicationId: source.application.id,
+      serverId: source.website.serverId,
+      releaseId: source.application.currentReleaseId ?? null,
+      serviceName: source.application.serviceName ?? null,
+      directSystemdCleaned: true,
+    });
   }
 
   async function inspectUnixIdentityCleanup(input) {
@@ -158,6 +262,8 @@ export function createWebsiteRemovalCleanupAdapters({
   }
 
   return Object.freeze({
+    inspectDirectSystemdCleanup,
+    directSystemdCleanupHandler,
     inspectFileCleanup,
     inspectUnixIdentityCleanup,
     fileCleanupHandler,
