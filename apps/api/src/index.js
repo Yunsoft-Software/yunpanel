@@ -866,7 +866,10 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
           }),
         },
       });
-      return createWebsiteRemovalPreview({ website: ws, impact: imp });
+      const applicationState = ws.applicationId
+        ? await applicationRegistry.getApplication(ws.applicationId)
+        : null;
+      return createWebsiteRemovalPreview({ website: ws, impact: imp, applicationState });
     },
     domainRemovalRuntime,
     websiteRegistry,
@@ -878,6 +881,8 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     runtimeBindingRegistry,
     websiteCronRegistry,
     jobRegistry,
+    directSystemdCleanupHandler: websiteRemovalCleanupAdapters?.directSystemdCleanupHandler ?? null,
+    directSystemdCleanupInspector: websiteRemovalCleanupAdapters?.inspectDirectSystemdCleanup ?? null,
     fileCleanupHandler: websiteRemovalCleanupAdapters?.fileCleanupHandler ?? null,
     unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
