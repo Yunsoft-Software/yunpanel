@@ -1,0 +1,5 @@
+import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';import test from 'node:test';
+const source=(name)=>readFile(new URL('../src/workspace/'+name,import.meta.url),'utf8');
+test('removal UI uses typed domain confirmation and explicit step continuation',async()=>{const text=await source('WebsiteRemovalPanel.jsx');assert.match(text,/confirmation=\{scope.label\}/);assert.match(text,/Sonraki silme adımını çalıştır/);assert.match(text,/Yedek kayıtları silinmeyecek/);});
+test('unknown removal writes reconcile through GET without POST replay',async()=>{const text=await source('website-removal-client.js');assert.match(text,/requestGlobalList/);assert.match(text,/refreshOperation/);assert.match(text,/POST tekrar edilmedi/);});
+test('Websites page mounts Owner-only global removal recovery',async()=>{const page=await source('WebsitesPage.jsx');assert.match(page,/isOwner && canManage && <WebsiteRemovalRecoveryPanel/);const recovery=await source('WebsiteRemovalRecoveryPanel.jsx');assert.match(recovery,/\/website-removal-operations/);assert.match(recovery,/Domain\/Website metadata kaldırıldıktan sonra/);});

@@ -6,6 +6,7 @@ import { Button, CollectionNotice, EmptyState, LinkButton, PageHeading, Section 
 import { siteListPage } from './site-list-model.js';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from './website-task-model.js';
 import WebsiteTaskCard from './WebsiteTaskCard.jsx';
+import WebsiteRemovalRecoveryPanel from './WebsiteRemovalRecoveryPanel.jsx';
 import { useWebsitePreferences } from './useWebsitePreferences.js';
 import './website-preferences.css';
 import './ui/console-lists.css';
@@ -33,6 +34,7 @@ export default function WebsitesPage() {
   }
   return <>
     <PageHeading title="Web Siteleri ve Alan Adları" description="Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın." actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}</>} />
+    {isOwner && canManage && <WebsiteRemovalRecoveryPanel />}
     <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu` : 'Site listesi hazırlanıyor.'}>
       <div className="ws-filters">
         <label className="ws-filter-search">Site ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Alan adı veya alias" /></label>
