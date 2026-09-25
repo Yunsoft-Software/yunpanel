@@ -59,15 +59,19 @@ test('createRuntimeBindingImpactProvider returns runtime binding for application
   const provider = createRuntimeBindingImpactProvider({
     runtimeBindingRegistry: {
       async getBinding(appId) {
-        if (appId === 'app-1') return { id: 'rb-1', state: 'active' };
+        if (appId === 'app-1') return { applicationId: 'app-1', state: 'active' };
         return null;
       },
     },
   });
 
-  assert.deepEqual(await provider({ applicationId: 'app-1' }), [{ id: 'rb-1', state: 'active' }]);
+  assert.deepEqual(await provider({ applicationId: 'app-1' }), [{ id: 'app-1', state: 'active' }]);
   assert.deepEqual(await provider({ applicationId: 'app-2' }), []);
   assert.deepEqual(await provider({ applicationId: null }), []);
+  const drifted = createRuntimeBindingImpactProvider({
+    runtimeBindingRegistry: { async getBinding() { return { applicationId: 'other', state: 'active' }; } },
+  });
+  await assert.rejects(drifted({ applicationId: 'app-1' }), /identity/);
 });
 
 test('createUnixIdentityImpactProvider returns system user for website', async () => {
