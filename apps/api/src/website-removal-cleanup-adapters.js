@@ -64,27 +64,44 @@ export function createWebsiteRemovalCleanupAdapters({
     return Object.freeze({ website, application });
   }
 
-  async function unixIdentityCleanupHandler({ websiteId, systemUser } = {}) {
+  async function ownedIdentitySource({ websiteId, systemUser } = {}) {
     const website = await websiteRegistry.getWebsite(websiteId);
     if (!website || !website.applicationId || website.unixUser !== systemUser) {
       unavailable('website_cleanup_identity_drift', 'Website Unix identity changed');
     }
     const operations = await websiteProvisioningRuntime.registry.listForWebsite(websiteId);
     if (!Array.isArray(operations)) unavailable('website_cleanup_identity_evidence_unavailable', 'Website identity journal is unavailable');
-    let source = null;
-    let step = null;
     for (const operation of operations) {
-      const candidate = operation?.steps?.find((entry) => entry.kind === 'unix_identity'
+      const step = operation?.steps?.find((entry) => entry.kind === 'unix_identity'
         && entry.intent?.websiteId === websiteId
         && entry.intent?.applicationId === website.applicationId
         && entry.intent?.unixUser === systemUser
         && ['succeeded', 'compensated'].includes(entry.state));
-      if (candidate) { source = operation; step = candidate; break; }
+      if (step && typeof operation.operationId === 'string') return Object.freeze({ website, operation, step });
     }
-    if (!source || !step || typeof source.operationId !== 'string') {
-      unavailable('website_cleanup_identity_evidence_unavailable', 'Owned Website Unix identity evidence is unavailable');
-    }
-    const context = { intent: step.intent, operationId: source.operationId, evidence: step.evidence };
+    unavailable('website_cleanup_identity_evidence_unavailable', 'Owned Website Unix identity evidence is unavailable');
+  }
+
+  async function inspectUnixIdentityCleanup(input) {
+    const source = await ownedIdentitySource(input);
+    return Object.freeze({
+      ready: true,
+      websiteId: source.website.id,
+      applicationId: source.website.applicationId,
+      systemUser: input.systemUser,
+      operationId: source.operation.operationId,
+    });
+  }
+
+  async function unixIdentityCleanupHandler(input = {}) {
+    const source = await ownedIdentitySource(input);
+    const { websiteId, systemUser } = input;
+    const context = {
+      intent: source.step.intent,
+      operationId: source.operation.operationId,
+      evidence: source.step.evidence,
+    };
+    const step = source.step;
     let result;
     if (step.state === 'compensated') {
       result = await websiteProvisioningRuntime.handlers.unix_identity.inspectCompensation(context);
@@ -98,8 +115,15 @@ export function createWebsiteRemovalCleanupAdapters({
     return Object.freeze({ websiteId, systemUser, unixIdentityCleaned: true });
   }
 
-  async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [], retainedLogScopes = [] } = {}) {
+  async function inspectFileCleanup({ websiteId, applicationId } = {}) {
     await currentTarget(websiteId, applicationId);
+    const targets = (await inspectFileCleanup({ websiteId, applicationId })).targets;
+    for (const target of targets) await absentOrDirectory(target, lstatFn);
+    return Object.freeze({ ready: true, websiteId, applicationId, targets: Object.freeze([...targets]) });
+  }
+
+  async function fileCleanupHandler({ websiteId, applicationId, retainedBackups = [], retainedLogScopes = [] } = {}) {
+    await inspectFileCleanup({ websiteId, applicationId });
     if (!Array.isArray(retainedBackups) || retainedBackups.some((id) => typeof id !== 'string' || !id)
       || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
@@ -130,5 +154,10 @@ export function createWebsiteRemovalCleanupAdapters({
     });
   }
 
-  return Object.freeze({ fileCleanupHandler, unixIdentityCleanupHandler });
+  return Object.freeze({
+    inspectFileCleanup,
+    inspectUnixIdentityCleanup,
+    fileCleanupHandler,
+    unixIdentityCleanupHandler,
+  });
 }

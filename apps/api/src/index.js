@@ -879,6 +879,8 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     websiteCronRegistry,
     fileCleanupHandler: websiteRemovalCleanupAdapters?.fileCleanupHandler ?? null,
     unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
+    fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
+    unixIdentityCleanupInspector: websiteRemovalCleanupAdapters?.inspectUnixIdentityCleanup ?? null,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();

@@ -70,6 +70,8 @@ export function createWebsiteRemovalRuntime({
   websiteCronRegistry = null,
   fileCleanupHandler = null,
   unixIdentityCleanupHandler = null,
+  fileCleanupInspector = null,
+  unixIdentityCleanupInspector = null,
 } = {}) {
   if (!registry || typeof registry.create !== 'function' || typeof registry.get !== 'function') {
     throw new WebsiteRemovalRuntimeError(
@@ -140,21 +142,30 @@ export function createWebsiteRemovalRuntime({
     }
   }
 
-  async function cleanupBlockers(plan) {
+  async function cleanupBlockers(current) {
+    const plan = current?.plan;
     const missing = [];
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
-    require('file_cleanup_unavailable', fileCleanupHandler);
+    require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
     require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.deleteMigrationWebsite);
     if (plan?.applicationId) require('application_cleanup_unavailable',
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
       applicationEnvironmentRegistry?.inspectApplicationState, applicationEnvironmentRegistry?.purgeApplication);
-    if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler);
+    if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler, unixIdentityCleanupInspector);
     if (plan?.additional?.crons?.ids?.length) require('cron_cleanup_unavailable', websiteCronRegistry?.listTasks, websiteCronRegistry?.removeTask);
     if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
     if (plan?.additional?.databases?.ids?.length) {
       require('database_cleanup_unavailable', databaseBindingRegistry?.listBindings,
         databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding,
         databaseCredentialRegistry?.getForBinding, databaseCredentialRegistry?.deleteCredential);
+    }
+    if (typeof fileCleanupInspector === 'function' && current?.website?.id && plan?.applicationId) {
+      try { await fileCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId }); }
+      catch { missing.push('file_cleanup_preflight_failed'); }
+    }
+    if (plan?.systemUser && typeof unixIdentityCleanupInspector === 'function' && current?.website?.id) {
+      try { await unixIdentityCleanupInspector({ websiteId: current.website.id, systemUser: plan.systemUser }); }
+      catch { missing.push('unix_cleanup_evidence_unavailable'); }
     }
     if (plan?.additional?.runtimeBindings?.ids?.length) {
       require('runtime_cleanup_unavailable', runtimeBindingRegistry?.getBinding);
@@ -173,7 +184,7 @@ export function createWebsiteRemovalRuntime({
 
   async function preview({ websiteId } = {}) {
     const current = await previewProvider({ websiteId });
-    const missing = await cleanupBlockers(current?.plan);
+    const missing = await cleanupBlockers(current);
     if (!missing.length) return current;
     // No destructive confirmation when this deployment cannot finish the planned cleanup.
     return Object.freeze({ ...current, readyToStart: false, confirmation: null,
