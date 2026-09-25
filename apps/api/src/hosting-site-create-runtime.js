@@ -9,6 +9,10 @@ export function createHostingSiteCreateRuntime(dependencies = {}) {
   return createHostingSiteCreateService({
     hostingAccounts: dependencies.userAdminStore?.hostingAccounts,
     websiteRegistry: dependencies.websiteRegistry,
+    applicationRegistry: dependencies.applicationRegistry,
+    domainRegistry: dependencies.domainRegistry,
+    mailDomainRegistry: dependencies.mailDomainRegistry,
+    siteMutationLock: dependencies.siteMutationLock,
     localServerId: dependencies.localServerId,
     previewSiteCreate: (input) => previewSiteCreate({ ...dependencies, input }),
     createSite: (apply) => createSite({ ...dependencies, ...apply }),
