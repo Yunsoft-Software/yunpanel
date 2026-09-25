@@ -174,18 +174,26 @@ test('bind requires explicit continuation to queue and later finalize exact Roun
   assert.match(begun.actions.continuation, /^continue-roundcube-domain:/);
   assert.equal(await state.registry.getForMailDomain(mailDomainId), null);
 
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: provisioningOperationId,
+    websiteId: '66666666-6666-4666-8666-666666666666',
+    stepId: 'roundcube',
+  };
   const queued = await state.service.continueOperation({
     mailDomainId,
     operationId: begun.mapping.operationId,
     expectedUpdatedAt: begun.mapping.updatedAt,
     confirmation: begun.actions.continuation,
-  });
+  }, { authorization });
   assert.equal(queued.job.status, 'queued');
   assert.equal(queued.actions.continuation, null);
   assert.equal(
     state.jobs.get(queued.job.id).idempotencyKey,
     `roundcube.mapping.apply:${provisioningOperationId}:1:initial`,
   );
+  assert.deepEqual(state.jobs.get(queued.job.id).authorization, authorization);
 
   const attached = await state.registry.getRecordForMailDomain(mailDomainId);
   assert.equal(attached.updatedAt, begun.mapping.updatedAt);
