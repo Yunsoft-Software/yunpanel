@@ -8,7 +8,7 @@ const code = (expected) => (error) => error.code === expected;
 function setup(t, changes = {}) {
   const f = siteFixture(t, changes);
   f.calls = []; f.sites = new Map(); f.applications = new Map(); f.domains = new Map(); f.mailDomains = new Map();
-  f.provisioningOperations = new Map(); f.lockCalls = []; f.site = website();
+  f.provisioningOperations = new Map(); f.abandonCalls = []; f.lockCalls = []; f.site = website();
   f.value = { customerId: 'customer-a', input: { operationId: uuid(1001), serverId: uuid(100) } };
   f.base = () => ({ operationId: f.value.input.operationId, ids: {
     websiteId: f.site.id,
@@ -34,7 +34,33 @@ function setup(t, changes = {}) {
     applicationRegistry: { getApplication: async (id) => f.applications.get(id) ?? null },
     domainRegistry: { getDomain: async (id) => f.domains.get(id) ?? null },
     mailDomainRegistry: { getMailDomain: async (id) => f.mailDomains.get(id) ?? null },
-    websiteProvisioningRegistry: { get: async (id) => f.provisioningOperations.get(id) ?? null },
+    websiteProvisioningRegistry: {
+      get: async (id) => f.provisioningOperations.get(id) ?? null,
+      abandonUncreated: async (proof) => {
+        f.abandonCalls.push(structuredClone(proof));
+        const current = f.provisioningOperations.get(proof.operationId) ?? null;
+        if (!current) {
+          const error = new Error('journal missing');
+          error.code = 'website_provisioning_not_found';
+          throw error;
+        }
+        if (current.unsafe === true) {
+          const error = new Error('compensation required');
+          error.code = 'website_provisioning_abandon_requires_compensation';
+          throw error;
+        }
+        const abandoned = {
+          ...current,
+          operationId: proof.operationId,
+          websiteId: proof.websiteId,
+          status: 'abandoned',
+          ready: false,
+          terminalState: 'abandoned',
+        };
+        f.provisioningOperations.set(proof.operationId, abandoned);
+        return abandoned;
+      },
+    },
     siteMutationLock: f.siteMutationLock,
     localServerId: uuid(100),
     previewSiteCreate: (input) => f.previewAdapter(input), createSite: (apply) => f.createAdapter(apply) });
@@ -265,7 +291,7 @@ test('attached ownership cannot use reservation recovery and must use Website re
 });
 
 
-test('reservation recovery refuses an existing provisioning journal even when metadata is absent', async (t) => {
+test('reservation recovery abandons a pending provisioning journal before releasing capacity', async (t) => {
   const f = setup(t);
   const submitted = await f.submit();
   f.createAdapter = async () => ({ created: true, website: f.site });
@@ -274,7 +300,36 @@ test('reservation recovery refuses an existing provisioning journal even when me
     operationId: f.value.input.operationId,
     websiteId: f.site.id,
     status: 'pending',
+    steps: [{ id: 'runtime', state: 'pending' }],
   });
+
+  const recovered = await f.recoverHosted(submitted);
+  assert.equal(recovered.recovered, true);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+  assert.equal(f.get().usage.websites, 0);
+  assert.equal(f.provisioningOperations.get(f.value.input.operationId).status, 'abandoned');
+  assert.deepEqual(f.abandonCalls, [{
+    operationId: f.value.input.operationId,
+    websiteId: f.site.id,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  }]);
+});
+
+test('reservation recovery keeps quota when provisioning journal still requires compensation', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  f.createAdapter = async () => ({ created: true, website: f.site });
+  await assert.rejects(f.createHosted(submitted), code('hosting_site_persistence_unverified'));
+  f.provisioningOperations.set(f.value.input.operationId, {
+    operationId: f.value.input.operationId,
+    websiteId: f.site.id,
+    status: 'partial',
+    unsafe: true,
+    steps: [{ id: 'runtime', state: 'succeeded' }],
+  });
+
   await assert.rejects(
     f.recoverHosted(submitted),
     code('hosting_site_recovery_provisioning_present'),
