@@ -8,6 +8,7 @@ import {
 } from '../src/website-removal-http.js';
 
 function createMockRuntime() {
+  const calls = [];
   const op = {
     id: 'ws-rem-1',
     websiteId: 'ws-1',
@@ -26,10 +27,11 @@ function createMockRuntime() {
       previewDigest: 'a'.repeat(64),
       confirmation: `start-website-remove:${websiteId}:1:${'a'.repeat(64)}`,
     }),
-    start: async () => op,
-    continueStep: async () => ({ ...op, status: 'removed' }),
+    start: async (input) => { calls.push({ type: 'start', input }); return op; },
+    continueStep: async (input) => { calls.push({ type: 'continue', input }); return { ...op, status: 'removed' }; },
     get: async (id) => (id === 'ws-rem-1' ? op : null),
     listForWebsite: async (wsId) => (wsId === 'ws-1' ? [op] : []),
+    calls,
   };
 }
 
@@ -39,7 +41,8 @@ function createTestApp(runtime) {
   // Mock panel route access middleware
   app.use((req, res, next) => {
     req.auth = {
-      user: { role: 'owner' },
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
       access: { mode: 'management', permissions: ['*'] },
       security: { managementAllowed: true },
     };
@@ -79,6 +82,11 @@ test('website-removal-http mounts preview, start, continue and get routes', asyn
     assert.equal(resStart.status, 201);
     const dataStart = await resStart.json();
     assert.equal(dataStart.operation.id, 'ws-rem-1');
+    assert.deepEqual(runtime.calls.find((entry) => entry.type === 'start').input.actor, {
+      sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      role: 'owner',
+    });
 
     // 3. POST continue
     const resContinue = await fetch(`${baseUrl}/api/websites/ws-1/removal-operations/ws-rem-1/continue`, {
@@ -93,6 +101,11 @@ test('website-removal-http mounts preview, start, continue and get routes', asyn
     assert.equal(resContinue.status, 200);
     const dataContinue = await resContinue.json();
     assert.equal(dataContinue.operation.status, 'removed');
+    assert.deepEqual(runtime.calls.find((entry) => entry.type === 'continue').input.actor, {
+      sessionId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      userId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+      role: 'owner',
+    });
 
     // 4. GET operations
     const resOps = await fetch(`${baseUrl}/api/websites/ws-1/removal-operations`);
@@ -105,6 +118,38 @@ test('website-removal-http mounts preview, start, continue and get routes', asyn
     assert.equal(resSingle.status, 200);
     const dataSingle = await resSingle.json();
     assert.equal(dataSingle.operation.id, 'ws-rem-1');
+  } finally {
+    server.close();
+  }
+});
+
+
+test('website-removal-http rejects mutation when live Owner session identity is unavailable', async () => {
+  const runtime = createMockRuntime();
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    req.auth = { user: { role: 'owner' }, access: { mode: 'management', permissions: ['*'] } };
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, { runtime });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  try {
+    const response = await fetch(`${baseUrl}/api/websites/ws-1/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: 'a'.repeat(64),
+        confirmation: `start-website-remove:ws-1:1:${'a'.repeat(64)}`,
+      }),
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).error.code, 'website_removal_actor_invalid');
+    assert.equal(runtime.calls.length, 0);
   } finally {
     server.close();
   }
