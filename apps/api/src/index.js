@@ -108,7 +108,10 @@ import { createTtydSessionManager } from './ttyd-session-manager.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
-import { createWebsiteProvisioningJobAuthorizer } from './website-provisioning-job-authorization.js';
+import {
+  createWebsiteProvisioningJobAuthorizer,
+  createWebsiteProvisioningLegacyJobGuard,
+} from './website-provisioning-job-authorization.js';
 import { createWebsiteRegistry } from './website-registry.js';
 import { createSiteFileManager } from './site-file-manager.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
@@ -428,6 +431,9 @@ const authorizeWebsiteProvisioningChildJob = createWebsiteProvisioningJobAuthori
   websiteRegistry,
   authorizeActor: authorizeWebsitePhpActor,
   localServerId,
+});
+const requiresWebsiteProvisioningAuthorization = createWebsiteProvisioningLegacyJobGuard({
+  registry: websiteProvisioningRuntime.registry,
 });
 const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
   filePath: websiteSftpKeyStorePath,
@@ -1227,6 +1233,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     websiteCronOperation: localWebsiteCronOperation,
     websitePhpToolOperation: localWebsitePhpToolOperation,
     authorizeWebsiteProvisioning: authorizeWebsiteProvisioningChildJob,
+    requiresWebsiteProvisioningAuthorization,
   })),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
