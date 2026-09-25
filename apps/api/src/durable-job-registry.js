@@ -231,6 +231,7 @@ export function createDurableJobRegistry({
       const replacement = registryFactory({ filePath, now });
       registry = await initialize(replacement);
       initialized = true;
+      if (typeof recoveryStore.refresh === 'function') await recoveryStore.refresh();
       if (inspectRecovery || recovery) await detectRecovery(registry);
     } catch (error) {
       if (error instanceof DurableJobRegistryError && fatal) throw error;
@@ -294,7 +295,8 @@ export function createDurableJobRegistry({
 
   async function beginReconciliation({ serverId, jobId } = {}) {
     await init();
-    const operation = mutationTail.then(async () => {
+    const operation = mutationTail.then(() => storeLock.withLock(async () => {
+      await reloadDurableState({ inspectRecovery: true });
       assertHealthy();
       const identity = safeRecoveryJob({ id: jobId, serverId });
       if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
@@ -314,14 +316,15 @@ export function createDurableJobRegistry({
       explicitlyBegunReconciliation.add(key);
       setRecovery([...(recovery?.jobs ?? []), identity]);
       return { jobId, serverId, status: job.status, pending: true };
-    });
+    }));
     mutationTail = operation.catch(() => {});
     return operation;
   }
 
   async function acknowledgeReconciliation({ serverId, jobId } = {}) {
     await init();
-    const operation = mutationTail.then(async () => {
+    const operation = mutationTail.then(() => storeLock.withLock(async () => {
+      await reloadDurableState({ inspectRecovery: true });
       assertHealthy();
       const identity = safeRecoveryJob({ id: jobId, serverId });
       if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
@@ -350,7 +353,7 @@ export function createDurableJobRegistry({
       explicitlyBegunReconciliation.delete(key);
       setRecovery((recovery?.jobs ?? []).filter((candidate) => recoveryKey(candidate) !== key));
       return { jobId, serverId, status: job.status, acknowledged: true };
-    });
+    }));
     mutationTail = operation.catch(() => {});
     return operation;
   }
@@ -358,43 +361,46 @@ export function createDurableJobRegistry({
   async function getReconciliationJob(jobId) {
     await init();
     await mutationTail;
-    assertHealthy();
-    let job;
-    try {
-      job = await registry.getJob(jobId);
-    } catch {
-      throw new DurableJobRegistryError('durable_job_reconciliation_job_unavailable', 'Persisted reconciliation job could not be inspected');
-    }
-    if (!job) return null;
-    const identity = safeRecoveryJob(job);
-    if (!identity || !TERMINAL_STATUSES.has(job.status)
-      || !recovery?.jobs.some((candidate) => recoveryKey(candidate) === recoveryKey(identity))) {
-      throw new DurableJobRegistryError('durable_job_reconciliation_not_pending', 'Job is not a terminal pending reconciliation');
-    }
+    return storeLock.withLock(async () => {
+      await reloadDurableState({ inspectRecovery: true });
+      assertHealthy();
+      let job;
+      try {
+        job = await registry.getJob(jobId);
+      } catch {
+        throw new DurableJobRegistryError('durable_job_reconciliation_job_unavailable', 'Persisted reconciliation job could not be inspected');
+      }
+      if (!job) return null;
+      const identity = safeRecoveryJob(job);
+      if (!identity || !TERMINAL_STATUSES.has(job.status)
+        || !recovery?.jobs.some((candidate) => recoveryKey(candidate) === recoveryKey(identity))) {
+        throw new DurableJobRegistryError('durable_job_reconciliation_not_pending', 'Job is not a terminal pending reconciliation');
+      }
 
-    let parsed;
-    try {
-      parsed = JSON.parse(await readFile(filePath, 'utf8'));
-    } catch {
-      throw new DurableJobRegistryError('durable_job_reconciliation_payload_unavailable', 'Persisted reconciliation payload could not be read');
-    }
-    if (parsed?.version !== JOB_STORE_VERSION || !Array.isArray(parsed.jobs)) {
-      throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload store is invalid');
-    }
-    const stored = parsed.jobs.find((candidate) => candidate?.id === job.id);
-    if (!stored || stored.serverId !== job.serverId || stored.operation !== job.operation
-      || stored.resourceType !== job.resourceType || stored.resourceId !== job.resourceId
-      || stored.status !== job.status || !stored.payload || typeof stored.payload !== 'object'
-      || Array.isArray(stored.payload)) {
-      throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload identity is invalid');
-    }
-    let envelope;
-    try {
-      envelope = createOperationEnvelope({ id: stored.id, operation: stored.operation, payload: stored.payload });
-    } catch {
-      throw new DurableJobRegistryError('durable_job_reconciliation_payload_incompatible', 'Persisted reconciliation payload does not satisfy the current protocol');
-    }
-    return Object.freeze({ ...job, payload: structuredClone(envelope.payload) });
+      let parsed;
+      try {
+        parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      } catch {
+        throw new DurableJobRegistryError('durable_job_reconciliation_payload_unavailable', 'Persisted reconciliation payload could not be read');
+      }
+      if (parsed?.version !== JOB_STORE_VERSION || !Array.isArray(parsed.jobs)) {
+        throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload store is invalid');
+      }
+      const stored = parsed.jobs.find((candidate) => candidate?.id === job.id);
+      if (!stored || stored.serverId !== job.serverId || stored.operation !== job.operation
+        || stored.resourceType !== job.resourceType || stored.resourceId !== job.resourceId
+        || stored.status !== job.status || !stored.payload || typeof stored.payload !== 'object'
+        || Array.isArray(stored.payload)) {
+        throw new DurableJobRegistryError('durable_job_reconciliation_payload_invalid', 'Persisted reconciliation payload identity is invalid');
+      }
+      let envelope;
+      try {
+        envelope = createOperationEnvelope({ id: stored.id, operation: stored.operation, payload: stored.payload });
+      } catch {
+        throw new DurableJobRegistryError('durable_job_reconciliation_payload_incompatible', 'Persisted reconciliation payload does not satisfy the current protocol');
+      }
+      return Object.freeze({ ...job, payload: structuredClone(envelope.payload) });
+    });
   }
 
   async function read(method, args) {
