@@ -322,6 +322,9 @@ const siteFileManager = createSiteFileManager({
   websiteRegistry,
   localServerId,
 });
+const siteMutationLock = createSiteMutationLock({
+  root: path.join(controlPlaneStateRoot, 'locks', 'site-mutations'),
+});
 const websiteCronRegistry = createWebsiteCronRegistry({
   filePath: websiteCronStorePath,
   getWebsite: async (websiteId) => websiteRegistry.getWebsite(websiteId),
@@ -333,6 +336,7 @@ const localWebsiteCronOperation = createLocalWebsiteCronOperation({
   websiteCronRegistry,
   websiteCronManager,
   receiptStore: websiteCronOperationReceiptStore,
+  siteMutationLock,
 });
 const websiteCronReconciliationProvider = localServerId
   ? createWebsiteCronReconciliationProvider({
@@ -364,9 +368,6 @@ const authorizeWebsitePhpActor = async (actor, websiteId) => {
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
 };
-const siteMutationLock = createSiteMutationLock({
-  root: path.join(controlPlaneStateRoot, 'locks', 'site-mutations'),
-});
 const websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
   jobRegistry,
@@ -376,6 +377,7 @@ const websitePhpToolActionService = createWebsitePhpToolActionService({
 const localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
   authorizeActor: authorizeWebsitePhpActor,
+  siteMutationLock,
 });
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
   filePath: websiteCachePolicyStorePath,
