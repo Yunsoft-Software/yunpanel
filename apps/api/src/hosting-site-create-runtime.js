@@ -12,6 +12,8 @@ export function createHostingSiteCreateRuntime(dependencies = {}) {
     applicationRegistry: dependencies.applicationRegistry,
     domainRegistry: dependencies.domainRegistry,
     mailDomainRegistry: dependencies.mailDomainRegistry,
+    websiteProvisioningRegistry: dependencies.websiteProvisioningRuntime?.registry
+      ?? dependencies.websiteProvisioningRegistry,
     siteMutationLock: dependencies.siteMutationLock,
     localServerId: dependencies.localServerId,
     previewSiteCreate: (input) => previewSiteCreate({ ...dependencies, input }),
