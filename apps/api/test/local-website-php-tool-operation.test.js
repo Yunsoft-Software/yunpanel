@@ -103,3 +103,27 @@ test('failed command is a failed local operation, not a succeeded job with succe
     (error) => error.code === 'website_php_action_failed',
   );
 });
+
+
+test('local PHP action holds the shared site lock during command execution', async () => {
+  const locks = [];
+  const operation = createLocalWebsitePhpToolOperation({
+    websitePhpToolsService: {
+      getActionPreview: async () => preview,
+      runWpCli: async () => ({ success: true, exitCode: 0 }),
+      runComposer: async () => ({ success: true, exitCode: 0 }),
+    },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }),
+    siteMutationLock: {
+      withSiteLock: async (identity, action) => {
+        locks.push(identity);
+        return action();
+      },
+    },
+  });
+  await operation.execute(payload, execution);
+  assert.deepEqual(locks, [{
+    applicationId: payload.applicationId,
+    websiteId: payload.websiteId,
+  }]);
+});
