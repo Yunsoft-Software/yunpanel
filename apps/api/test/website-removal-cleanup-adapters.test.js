@@ -70,3 +70,103 @@ test('file cleanup preflight returns canonical direct-child roots without recurs
  ].sort());
  assert.equal(f.removed.length,0);
 });
+
+
+function directSystemdAdapterFixture({ receipt = true, applicationChanges = {} } = {}) {
+  const serverId = '33333333-3333-4333-8333-333333333333';
+  const releaseId = '55555555-5555-4555-8555-555555555555';
+  const serviceName = 'yunpanel-node-aaaaaaaaaaaaaaaa.service';
+  const commitSha = 'b'.repeat(40);
+  const hostCalls = [];
+  const application = {
+    id: applicationId,
+    serverId,
+    type: 'node',
+    runtimeAdapter: 'direct-systemd',
+    desiredRevision: 4,
+    currentReleaseId: releaseId,
+    serviceName,
+    currentCommitSha: commitSha,
+    servicePort: 3100,
+    healthPath: '/health',
+    ...applicationChanges,
+  };
+  const nodeServiceRemovalManager = {
+    inspectRemoval: async (input) => {
+      hostCalls.push({ type: 'inspect', input });
+      return { ready: true, ...input, serviceName: input.serviceName ?? serviceName };
+    },
+    removeService: async (input) => {
+      hostCalls.push({ type: 'remove', input });
+      return { ...input, serviceName: input.serviceName ?? serviceName, directSystemdCleaned: true };
+    },
+  };
+  const adapters = createWebsiteRemovalCleanupAdapters({
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId, applicationId, unixUser: systemUser }),
+      listWebsites: async () => [{ id: websiteId, applicationId }],
+    },
+    applicationRegistry: { getApplication: async () => application },
+    websiteProvisioningRuntime: {
+      registry: { listForWebsite: async () => [] },
+      handlers: { unix_identity: {
+        compensate: async () => ({ satisfied: true, removedUser: true, removedGroup: true }),
+        inspectCompensation: async () => ({ satisfied: true, removedUser: true, removedGroup: true }),
+      } },
+    },
+    nodeServiceRemovalManager,
+    nodeDeploymentReceiptStore: {
+      read: async () => receipt ? {
+        version: 1,
+        serverId,
+        jobId: releaseId,
+        applicationId,
+        releaseId,
+        previousReleaseId: null,
+        commitSha,
+        serviceName,
+        port: 3100,
+        healthPath: '/health',
+      } : null,
+    },
+    lstatFn: async () => { throw Object.assign(new Error('missing'), { code: 'ENOENT' }); },
+    rmFn: async () => {},
+  });
+  const input = {
+    websiteId,
+    applicationId,
+    serverId,
+    releaseId,
+    serviceName,
+    currentCommitSha: commitSha,
+    servicePort: 3100,
+    healthPath: '/health',
+  };
+  return { adapters, hostCalls, input };
+}
+
+test('direct-systemd cleanup requires matching deployment receipt and verified host result', async () => {
+  const f = directSystemdAdapterFixture();
+  const preflight = await f.adapters.inspectDirectSystemdCleanup(f.input);
+  assert.equal(preflight.ready, true);
+  const result = await f.adapters.directSystemdCleanupHandler(f.input);
+  assert.equal(result.directSystemdCleaned, true);
+  assert.equal(result.applicationId, applicationId);
+  assert.equal(f.hostCalls.filter((entry) => entry.type === 'remove').length, 1);
+});
+
+test('direct-systemd cleanup fails closed before host mutation when receipt is missing or state drifted', async () => {
+  const missing = directSystemdAdapterFixture({ receipt: false });
+  await assert.rejects(
+    missing.adapters.inspectDirectSystemdCleanup(missing.input),
+    (error) => error.code === 'website_cleanup_direct_systemd_evidence_unavailable',
+  );
+  assert.equal(missing.hostCalls.some((entry) => entry.type === 'remove'), false);
+
+  const drifted = directSystemdAdapterFixture({ applicationChanges: { currentReleaseId: '66666666-6666-4666-8666-666666666666' } });
+  await assert.rejects(
+    drifted.adapters.directSystemdCleanupHandler(drifted.input),
+    (error) => error.code === 'website_cleanup_direct_systemd_drift',
+  );
+  assert.equal(drifted.hostCalls.some((entry) => entry.type === 'remove'), false);
+});
