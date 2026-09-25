@@ -4,6 +4,7 @@ import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const OPERATION_STATUSES = new Set(['pending', 'running', 'blocked', 'failed', 'removed']);
 const STEP_STATUSES = new Set(['pending', 'running', 'succeeded', 'blocked', 'failed']);
 const STEP_KINDS = new Set([
@@ -36,6 +37,25 @@ function safeId(value, field) {
     );
   }
   return value;
+}
+
+function privateActor(value, { optional = false } = {}) {
+  if ((value === null || value === undefined) && optional) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.sessionId !== 'string' || !UUID.test(value.sessionId)
+    || typeof value.userId !== 'string' || !UUID.test(value.userId)
+    || value.role !== 'owner') {
+    throw new WebsiteRemovalOperationRegistryError(
+      'website_removal_actor_invalid',
+      'Website removal actor evidence is invalid',
+      400,
+    );
+  }
+  return Object.freeze({
+    sessionId: value.sessionId.toLowerCase(),
+    userId: value.userId.toLowerCase(),
+    role: 'owner',
+  });
 }
 
 export function websiteRemovalOperationPublicView(operation) {
@@ -210,7 +230,8 @@ export function createWebsiteRemovalOperationRegistry({
     return steps;
   }
 
-  async function create(preview) {
+  async function create(preview, { actor = null } = {}) {
+    const normalizedActor = privateActor(actor, { optional: true });
     return withMutation(async () => {
     if (!preview || preview.operation !== 'website_remove' || !preview.readyToStart) {
       throw new WebsiteRemovalOperationRegistryError(
@@ -246,6 +267,7 @@ export function createWebsiteRemovalOperationRegistry({
       previewDigest: preview.previewDigest,
       startConfirmation: preview.confirmation,
       plan: preview.plan,
+      actor: normalizedActor,
       steps,
       error: null,
       createdAt: timestamp,
@@ -266,6 +288,15 @@ export function createWebsiteRemovalOperationRegistry({
       return websiteRemovalOperationPublicView(op);
     });
   }
+  async function getActor(operationId) {
+    safeId(operationId, 'operationId');
+    return withRead(() => {
+      const op = operations.get(operationId);
+      if (!op) return null;
+      return privateActor(op.actor, { optional: true });
+    });
+  }
+
 
   async function list() {
     return withRead(() => Array.from(operations.values()).map(websiteRemovalOperationPublicView));
@@ -372,6 +403,7 @@ export function createWebsiteRemovalOperationRegistry({
     init,
     create,
     get,
+    getActor,
     list,
     listForWebsite,
     markStepRunning,
