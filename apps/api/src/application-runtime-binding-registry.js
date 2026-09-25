@@ -270,6 +270,28 @@ export function createApplicationRuntimeBindingRegistry({ filePath = null, now =
     return publicRecord(existing);
   }
 
+
+  async function removeOwnedDirectSystemd(applicationId, { sourceOperationId, expectedRevision } = {}) {
+    await ensureInitialized();
+    const id = uuid(applicationId, 'applicationId');
+    const operationId = uuid(sourceOperationId, 'sourceOperationId');
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_expected_revision_invalid', 'Expected runtime binding revision is invalid');
+    }
+    const index = state.bindings.findIndex((entry) => entry.applicationId === id);
+    if (index < 0) return null;
+    const existing = normalizeRecord(state.bindings[index]);
+    if (existing.adapter !== 'direct-systemd' || existing.sourceOperationId !== operationId) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_ownership_conflict', 'Runtime binding is not owned by the requested direct-systemd operation', 409);
+    }
+    if (existing.revision !== expectedRevision) {
+      throw new ApplicationRuntimeBindingRegistryError('runtime_binding_revision_conflict', 'Runtime binding changed after provisioning', 409);
+    }
+    state.bindings.splice(index, 1);
+    await persist();
+    return publicRecord(existing);
+  }
+
   async function removeOwnedStatic(applicationId, { sourceOperationId, expectedRevision } = {}) {
     await ensureInitialized();
     const id = uuid(applicationId, 'applicationId');
@@ -291,7 +313,7 @@ export function createApplicationRuntimeBindingRegistry({ filePath = null, now =
     return publicRecord(existing);
   }
 
-  return Object.freeze({ init, getBinding, activate, removeOwnedPassenger, removeOwnedStatic });
+  return Object.freeze({ init, getBinding, activate, removeOwnedPassenger, removeOwnedDirectSystemd, removeOwnedStatic });
 }
 
 export const applicationRuntimeBindingRegistryInternals = Object.freeze({
