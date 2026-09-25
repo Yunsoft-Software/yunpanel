@@ -233,6 +233,63 @@ test('private provisioning authorization is rechecked before a local host mutati
   assert.equal(authorizationCalls.at(-1)[1].jobId, execution.jobId);
 });
 
+test('legacy unscoped provisioning jobs are quarantined before host mutation', async () => {
+  const payload = { domains: ['example.com'], email: 'owner@example.com', staging: false };
+  const execution = {
+    jobId: '12345678-1234-4234-8234-123456789012',
+    serverId: 'server-1',
+    type: 'website.ssl.issue:9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    resourceType: 'certificate',
+    resourceId: 'certificate-1',
+    authorization: null,
+  };
+  let hostCalls = 0;
+  let guardCalls = 0;
+  const quarantined = createLocalHostOperations({
+    requiresWebsiteProvisioningAuthorization: async (candidate) => {
+      guardCalls += 1;
+      assert.equal(candidate.type, execution.type);
+      return true;
+    },
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await assert.rejects(
+    quarantined.executeOperation(OPERATIONS.SSL_ISSUE, payload, execution),
+    { code: 'website_provisioning_job_authorization_required' },
+  );
+  assert.equal(guardCalls, 1);
+  assert.equal(hostCalls, 0);
+
+  const ordinary = createLocalHostOperations({
+    requiresWebsiteProvisioningAuthorization: async () => false,
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await ordinary.executeOperation(OPERATIONS.SSL_ISSUE, payload, {
+    ...execution,
+    type: 'ssl.issue',
+  });
+  assert.equal(hostCalls, 1);
+
+  const unavailable = createLocalHostOperations({
+    requiresWebsiteProvisioningAuthorization: async () => { throw new Error('state unavailable'); },
+    acmeManager: {
+      issueCertificate: async () => { hostCalls += 1; return { status: 'issued' }; },
+      renewCertificate: async () => ({ status: 'renewed' }),
+    },
+  });
+  await assert.rejects(
+    unavailable.executeOperation(OPERATIONS.SSL_ISSUE, payload, execution),
+    { code: 'website_provisioning_job_authorization_unavailable' },
+  );
+  assert.equal(hostCalls, 1);
+});
+
 test('DNS record mutations materialize a provider credential only for the guarded adapter', async () => {
   const credentialId = '10714f5d-8646-4f9a-a8e9-b80439ff6305';
   const payload = {
