@@ -1,5 +1,6 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const STORE_VERSION = 1;
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -51,23 +52,40 @@ function identityKey(job) {
   return `${job.serverId}:${job.jobId}`;
 }
 
-export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}) {
+export function createJobRecoveryStore({
+  filePath,
+  now = () => Date.now(),
+  storeLockFactory = createProcessStoreLock,
+} = {}) {
   if (typeof filePath !== 'string' || !filePath) throw new JobRecoveryStoreError('job_recovery_store_path_required', 'Job recovery store requires a file path');
   let state = emptyState();
   let initialized = false;
   let mutationTail = Promise.resolve();
+  const storeLock = storeLockFactory({ filePath: path.resolve(filePath), now });
+  if (!storeLock || typeof storeLock.withLock !== 'function') {
+    throw new JobRecoveryStoreError('job_recovery_store_lock_invalid', 'Job recovery store lock is invalid');
+  }
 
-  async function init() {
-    if (initialized) return;
+  async function reload() {
     try {
       state = normalizeState(JSON.parse(await readFile(filePath, 'utf8')));
     } catch (error) {
-      if (error?.code !== 'ENOENT') {
-        if (error instanceof JobRecoveryStoreError) throw error;
-        throw new JobRecoveryStoreError('job_recovery_store_read_failed', 'Job recovery store could not be read');
-      }
+      if (error?.code === 'ENOENT') state = emptyState();
+      else if (error instanceof JobRecoveryStoreError) throw error;
+      else throw new JobRecoveryStoreError('job_recovery_store_read_failed', 'Job recovery store could not be read');
     }
     initialized = true;
+    return snapshot();
+  }
+
+  async function init() {
+    if (initialized) return;
+    await storeLock.withLock(reload);
+  }
+
+  async function refresh() {
+    await mutationTail.catch(() => {});
+    return storeLock.withLock(reload);
   }
 
   async function persist(next) {
@@ -83,10 +101,13 @@ export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}
   function queueMutation(transform) {
     const operation = mutationTail.catch(() => {}).then(async () => {
       await init();
-      const next = transform(state);
-      if (next === state) return snapshot();
-      await persist(next);
-      return snapshot();
+      return storeLock.withLock(async () => {
+        await reload();
+        const next = transform(state);
+        if (next === state) return snapshot();
+        await persist(next);
+        return snapshot();
+      });
     });
     mutationTail = operation;
     return operation;
@@ -137,7 +158,7 @@ export function createJobRecoveryStore({ filePath, now = () => Date.now() } = {}
     };
   }
 
-  return { init, replace, add, remove, snapshot };
+  return { init, refresh, replace, add, remove, snapshot };
 }
 
 export const jobRecoveryStoreInternals = Object.freeze({
