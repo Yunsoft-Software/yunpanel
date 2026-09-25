@@ -111,6 +111,10 @@ const MANAGED_SERVICE_CONFIGURATION_STATUS_SET = new Set([
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,200}$/;
+const RETRYABLE_PREFLIGHT_AUTH_FAILURES = new Set([
+  'website_provisioning_job_authorization_unavailable',
+  'website_provisioning_job_actor_forbidden',
+]);
 const enqueueCreated = Symbol('yunpanel.job.enqueueCreated');
 
 export class JobRegistryError extends Error {
@@ -1150,10 +1154,22 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
           409,
         );
       }
+      let changed = false;
       if (!existingAuthorization && privateAuthorization) {
         existing.authorization = privateAuthorization;
-        await persist();
+        changed = true;
       }
+      if (existing.status === 'failed'
+        && privateAuthorization
+        && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code)) {
+        existing.status = 'queued';
+        existing.startedAt = null;
+        existing.finishedAt = null;
+        existing.result = null;
+        existing.error = null;
+        changed = true;
+      }
+      if (changed) await persist();
       return enqueueResult(existing, false);
     }
     if (state.jobs.some((candidate) => candidate.resourceType === resourceType
