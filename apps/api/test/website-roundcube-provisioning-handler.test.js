@@ -169,8 +169,8 @@ test('Website Roundcube apply owns bind with the Website operation and completes
         job: job ? { id: job.id, status: job.status } : null,
         actions: { continuation: 'continue-roundcube-domain:test' },
       }),
-      continueOperation: async (input) => {
-        calls.push(['continue', input]);
+      continueOperation: async (input, options) => {
+        calls.push(['continue', input, options]);
         if (!job) {
           job = { id: applyJobId, status: 'queued' };
           return { mapping, job: { ...job }, actions: { continuation: null } };
@@ -197,6 +197,7 @@ test('Website Roundcube apply owns bind with the Website operation and completes
     operation: operation(),
     operationId,
     websiteId,
+    stepId: 'roundcube',
     intent,
   });
 
@@ -206,6 +207,11 @@ test('Website Roundcube apply owns bind with the Website operation and completes
   assert.equal(result.roundcubeApplyJobId, applyJobId);
   assert.equal(calls[1][1].operationId, operationId);
   assert.equal(calls.filter(([kind]) => kind === 'continue').length, 2);
+  for (const [, , options] of calls.filter(([kind]) => kind === 'continue')) {
+    assert.deepEqual(options.authorization, {
+      kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'roundcube',
+    });
+  }
 });
 
 test('Website Roundcube inspect reconciles successful pending apply metadata without enqueueing another apply', async () => {
