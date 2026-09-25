@@ -22,7 +22,10 @@ import { createWebsitePythonRuntimeProvisioningHandler } from './website-python-
 import { createWebsitePythonHealthProvisioningHandler } from './website-python-health-provisioning-handler.js';
 import { createWebsitePythonApplicationReleaseProvisioningHandler } from './website-python-application-release-provisioning-handler.js';
 import { createWebsiteProvisioningHandlers } from './website-provisioning-handlers-isolation.js';
-import { createWebsiteProvisioningOrchestrator } from './website-provisioning-orchestrator.js';
+import {
+  createWebsiteProvisioningOrchestrator,
+  WebsiteProvisioningOrchestratorError,
+} from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
 import { createWebsiteRoundcubeProvisioningHandler } from './website-roundcube-provisioning-handler.js';
 import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
@@ -60,6 +63,7 @@ export function createWebsiteProvisioningRuntime({
   runtimeBindingRegistry = null,
   sftpKeyService = null,
   siteMutationLock = null,
+  authorizeActor = null,
 } = {}) {
   const resolvedIdentityManager = identityManager ?? createWebsiteIdentityPathManager();
   const workspaceMigrationManager = isolationWorkspaceManager ?? (
@@ -760,35 +764,111 @@ export function createWebsiteProvisioningRuntime({
 
   const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
 
-  async function withOperationMutationLock(operationId, action) {
-    if (!siteMutationLock) return action();
-    if (typeof siteMutationLock.withSiteLock !== 'function') {
-      throw new Error('Website provisioning site mutation lock is invalid');
+  function submittedActor(value) {
+    if (value === null || value === undefined) return null;
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || typeof value.sessionId !== 'string' || value.sessionId.length < 1 || value.sessionId.length > 128
+      || typeof value.userId !== 'string' || value.userId.length < 1 || value.userId.length > 128
+      || !['owner', 'site_manager'].includes(value.role)) {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_actor_invalid',
+        'Website provisioning actor evidence is invalid',
+        400,
+      );
     }
+    return Object.freeze({
+      sessionId: value.sessionId,
+      userId: value.userId,
+      role: value.role,
+    });
+  }
+
+  async function requireLiveActor(actor, websiteId) {
+    const submitted = submittedActor(actor);
+    if (authorizeActor === null) return submitted;
+    if (typeof authorizeActor !== 'function') {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_actor_authorizer_unavailable',
+        'Website provisioning actor authorization is unavailable',
+        503,
+      );
+    }
+    if (!submitted) {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_actor_required',
+        'Live Website provisioning authorization is required',
+        403,
+      );
+    }
+    let current;
+    try { current = await authorizeActor(submitted, websiteId); }
+    catch {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_actor_forbidden',
+        'Website access changed before provisioning could continue',
+        403,
+      );
+    }
+    if (!current || current.sessionId !== submitted.sessionId
+      || current.userId !== submitted.userId || current.role !== submitted.role) {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_actor_forbidden',
+        'Website access changed before provisioning could continue',
+        403,
+      );
+    }
+    return Object.freeze({
+      sessionId: current.sessionId,
+      userId: current.userId,
+      role: current.role,
+    });
+  }
+
+  async function withOperationMutationLock(operationId, actor, action, { authorize = true } = {}) {
     const operation = await registry.get(operationId);
     if (!operation) return action();
     const applicationId = operation.resources?.application?.id
       ?? operation.resources?.website?.applicationId
       ?? null;
+    const execute = async () => {
+      if (authorize) await requireLiveActor(actor, operation.websiteId);
+      return action();
+    };
+    if (!siteMutationLock) return execute();
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new WebsiteProvisioningOrchestratorError(
+        'website_provisioning_lock_unavailable',
+        'Website provisioning site mutation lock is invalid',
+        503,
+      );
+    }
     return siteMutationLock.withSiteLock({
       applicationId,
       websiteId: operation.websiteId,
-    }, action);
+    }, execute);
   }
 
-  async function runNext(operationId) {
-    return withOperationMutationLock(operationId, () => orchestrator.runNext(operationId));
+  async function runNext(operationId, actor = null) {
+    return withOperationMutationLock(
+      operationId,
+      actor,
+      () => orchestrator.runNext(operationId),
+    );
   }
 
-  async function retryStep(operationId, stepId) {
-    return withOperationMutationLock(operationId, async () => {
+  async function retryStep(operationId, stepId, actor = null) {
+    return withOperationMutationLock(operationId, actor, async () => {
       await registry.retryStep({ operationId, stepId });
       return orchestrator.runNext(operationId);
     });
   }
 
-  async function compensateStep(operationId, stepId) {
-    return withOperationMutationLock(operationId, () => orchestrator.compensateStep(operationId, stepId));
+  async function compensateStep(operationId, stepId, actor = null) {
+    return withOperationMutationLock(
+      operationId,
+      actor,
+      () => orchestrator.compensateStep(operationId, stepId),
+    );
   }
 
   async function init() {
@@ -799,7 +879,12 @@ export function createWebsiteProvisioningRuntime({
     for (const operation of interrupted) {
       // listInterrupted only returns applying/compensating operations. runNext therefore
       // takes the inspect-first reconciliation path and never starts a new pending host mutation.
-      reconciled.push(await runNext(operation.operationId));
+      reconciled.push(await withOperationMutationLock(
+        operation.operationId,
+        null,
+        () => orchestrator.runNext(operation.operationId),
+        { authorize: false },
+      ));
     }
     return Object.freeze(reconciled);
   }
@@ -832,6 +917,7 @@ export function createWebsiteProvisioningRuntime({
     runNext,
     retryStep,
     compensateStep,
+    supportsCompensation: (stepKind) => orchestrator.supportsCompensation(stepKind),
     listInterrupted: () => registry.listInterrupted(),
   });
 }
