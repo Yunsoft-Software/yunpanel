@@ -8,7 +8,7 @@ const code = (expected) => (error) => error.code === expected;
 function setup(t, changes = {}) {
   const f = siteFixture(t, changes);
   f.calls = []; f.sites = new Map(); f.applications = new Map(); f.domains = new Map(); f.mailDomains = new Map();
-  f.lockCalls = []; f.site = website();
+  f.provisioningOperations = new Map(); f.lockCalls = []; f.site = website();
   f.value = { customerId: 'customer-a', input: { operationId: uuid(1001), serverId: uuid(100) } };
   f.base = () => ({ operationId: f.value.input.operationId, ids: {
     websiteId: f.site.id,
@@ -34,6 +34,7 @@ function setup(t, changes = {}) {
     applicationRegistry: { getApplication: async (id) => f.applications.get(id) ?? null },
     domainRegistry: { getDomain: async (id) => f.domains.get(id) ?? null },
     mailDomainRegistry: { getMailDomain: async (id) => f.mailDomains.get(id) ?? null },
+    websiteProvisioningRegistry: { get: async (id) => f.provisioningOperations.get(id) ?? null },
     siteMutationLock: f.siteMutationLock,
     localServerId: uuid(100),
     previewSiteCreate: (input) => f.previewAdapter(input), createSite: (apply) => f.createAdapter(apply) });
@@ -261,4 +262,23 @@ test('attached ownership cannot use reservation recovery and must use Website re
   );
   assert.equal(f.count('auth_hosting_site_allocations'), 1);
   assert.equal(f.count('auth_customer_websites'), 1);
+});
+
+
+test('reservation recovery refuses an existing provisioning journal even when metadata is absent', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  f.createAdapter = async () => ({ created: true, website: f.site });
+  await assert.rejects(f.createHosted(submitted), code('hosting_site_persistence_unverified'));
+  f.provisioningOperations.set(f.value.input.operationId, {
+    operationId: f.value.input.operationId,
+    websiteId: f.site.id,
+    status: 'pending',
+  });
+  await assert.rejects(
+    f.recoverHosted(submitted),
+    code('hosting_site_recovery_provisioning_present'),
+  );
+  assert.equal(f.count('auth_hosting_site_allocations'), 1);
+  assert.equal(f.get().usage.websites, 1);
 });
