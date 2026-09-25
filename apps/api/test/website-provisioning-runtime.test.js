@@ -503,6 +503,32 @@ test('runtime reauthorizes provisioning actor under the site lock before host ap
   assert.equal(applyCalls, 1);
 });
 
+test('runtime forwards the live reauthorized actor into mutating handler context', async () => {
+  const actor = Object.freeze({
+    sessionId: '55555555-5555-4555-8555-555555555555',
+    userId: '66666666-6666-4666-8666-666666666666',
+    role: 'site_manager',
+  });
+  let receivedActor = null;
+  const provisioning = runtime({
+    authorizeActor: async (candidate, targetWebsiteId) => (
+      targetWebsiteId === websiteId ? Object.freeze({ ...candidate }) : null
+    ),
+  });
+  provisioning.handlers.unix_identity = {
+    apply: async (context) => {
+      receivedActor = context.actor;
+      return { satisfied: true, uid: 1201, gid: 1201 };
+    },
+  };
+  await provisioning.init();
+  await provisioning.create(plan());
+
+  const result = await provisioning.runNext(operationId, actor);
+  assert.equal(result.outcome, 'ready');
+  assert.deepEqual(receivedActor, actor);
+});
+
 test('runtime requires actor when production authorization callback is configured', async () => {
   const provisioning = runtime({
     authorizeActor: async () => null,
