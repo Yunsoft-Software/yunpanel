@@ -42,9 +42,13 @@ export function createProcessStoreLock({
   pid = process.pid,
   now = Date.now,
   signalProcess = process.kill.bind(process),
+  waitMs = 5_000,
+  retryMs = 10,
 } = {}) {
   if (typeof filePath !== 'string' || !path.isAbsolute(filePath) || filePath.length > 500 || filePath.includes('\0')
-    || !Number.isSafeInteger(pid) || pid < 1 || typeof now !== 'function' || typeof signalProcess !== 'function') {
+    || !Number.isSafeInteger(pid) || pid < 1 || typeof now !== 'function' || typeof signalProcess !== 'function'
+    || !Number.isSafeInteger(waitMs) || waitMs < 0 || waitMs > 60_000
+    || !Number.isSafeInteger(retryMs) || retryMs < 1 || retryMs > 1_000) {
     throw new ProcessStoreLockError('process_store_lock_invalid', 'Process store lock configuration is invalid');
   }
   const lockPath = `${filePath}.lock`;
@@ -63,7 +67,8 @@ export function createProcessStoreLock({
     });
     const serialized = `${JSON.stringify(record)}\n`;
 
-    for (let attempt = 0; attempt < 2; attempt += 1) {
+    const deadline = Date.now() + waitMs;
+    while (true) {
       let handle = null;
       let acquired = false;
       try {
@@ -97,12 +102,15 @@ export function createProcessStoreLock({
           throw new ProcessStoreLockError('process_store_lock_unreadable', 'Existing process store lock is invalid');
         }
         if (processAlive(existing.pid, signalProcess)) {
-          throw new ProcessStoreLockError('process_store_locked', 'Another process is mutating this durable store', 409);
+          if (Date.now() >= deadline) {
+            throw new ProcessStoreLockError('process_store_locked', 'Timed out waiting for another process to finish mutating this durable store', 503);
+          }
+          await new Promise((resolve) => setTimeout(resolve, retryMs));
+          continue;
         }
         await rm(lockPath, { force: true });
       }
     }
-    throw new ProcessStoreLockError('process_store_lock_race', 'Process store lock changed while it was being acquired', 409);
   }
 
   return Object.freeze({ filePath, lockPath, withLock });
