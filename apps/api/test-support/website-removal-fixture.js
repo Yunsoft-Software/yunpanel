@@ -31,7 +31,9 @@ export async function removalFixture(overrides = {}, preview = removalPreview())
   const dependencies = {
     registry, previewProvider: async () => preview, domainRemovalRuntime: { start: async () => {} },
     fileCleanupHandler: async (input) => { calls.push(input); return { ...input, filesCleaned: true }; },
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
+    unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: preview.website.applicationId, systemUser }),
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
     applicationRegistry: (() => { let current = preview.website.applicationId ? {
       id: preview.website.applicationId, serverId: preview.website.serverId,
