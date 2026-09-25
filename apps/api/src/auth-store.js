@@ -170,6 +170,27 @@ export function createAuthStore({
   };
   const invalid = () => new AuthError('invalid_credentials', 'The credentials are invalid.', 401);
 
+  function hostingLoginAllowed(userId) {
+    const state = db.prepare(`SELECT h.kind, h.reseller_id,
+        u.role AS user_role, u.active AS user_active,
+        parent.kind AS parent_kind,
+        parent_user.role AS parent_role,
+        parent_user.active AS parent_active
+      FROM auth_hosting_accounts h
+      JOIN users u ON u.id = h.user_id
+      LEFT JOIN auth_hosting_accounts parent ON parent.user_id = h.reseller_id
+      LEFT JOIN users parent_user ON parent_user.id = parent.user_id
+      WHERE h.user_id = ?`).get(userId);
+    if (!state) return true;
+    if (state.user_role !== 'site_manager' || state.user_active !== 1) return false;
+    if (state.kind === 'reseller') return state.reseller_id === null;
+    if (state.kind !== 'customer') return false;
+    if (state.reseller_id === null) return true;
+    return state.parent_kind === 'reseller'
+      && state.parent_role === 'site_manager'
+      && state.parent_active === 1;
+  }
+
   function rateLimit(keys) {
     transaction(() => {
       db.prepare('DELETE FROM auth_limits WHERE expires_at <= ?').run(now());
@@ -195,6 +216,11 @@ export function createAuthStore({
       revokeLiveSession(row.id, row.active ? 'session_expired' : 'user_disabled');
       return null;
     }
+    if (!hostingLoginAllowed(row.user_id)) {
+      db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+      revokeLiveSession(row.id, 'hosting_scope_inactive');
+      return null;
+    }
     if (touch) {
       db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(now(), row.id);
       row.last_active_at = now();
@@ -217,6 +243,7 @@ export function createAuthStore({
   }
 
   function createSession(userId) {
+    if (!hostingLoginAllowed(userId)) throw invalid();
     const rawToken = token();
     db.prepare('DELETE FROM sessions WHERE expires_at <= ? OR last_active_at <= ?').run(now(), now() - idleMs);
     db.prepare('DELETE FROM sessions WHERE id IN (SELECT id FROM sessions WHERE user_id = ? ORDER BY created_at DESC LIMIT -1 OFFSET 9)').run(userId);
@@ -282,7 +309,8 @@ export function createAuthStore({
       const previousSession = getSession(previousToken);
       const result = transaction(() => {
         const current = user && db.prepare('SELECT * FROM users WHERE id = ?').get(user.id);
-        if (!valid || !current?.active || current.password_hash !== expected || users.revision(current.id) !== userRevision) return null;
+        if (!valid || !current?.active || current.password_hash !== expected
+          || users.revision(current.id) !== userRevision || !hostingLoginAllowed(current.id)) return null;
         if (typeof previousToken === 'string' && TOKEN_PATTERN.test(previousToken)) db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(digest(previousToken));
         if (mfa.enabled(current.id)) {
           event(current.id, 'login.password_verified');
@@ -306,6 +334,11 @@ export function createAuthStore({
       if (!row.active || row.expires_at <= now() || row.last_active_at + idleMs <= now()) {
         db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
         revokeLiveSession(row.id, row.active ? 'session_expired' : 'user_disabled');
+        return null;
+      }
+      if (!hostingLoginAllowed(row.user_id)) {
+        db.prepare('DELETE FROM sessions WHERE id = ?').run(row.id);
+        revokeLiveSession(row.id, 'hosting_scope_inactive');
         return null;
       }
       const websiteIds = row.role === 'site_manager'
