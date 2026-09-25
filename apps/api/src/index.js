@@ -108,6 +108,7 @@ import { createTtydSessionManager } from './ttyd-session-manager.js';
 import { createWebsiteMigrationLedger } from './website-migration-ledger.js';
 import { createWebsiteMigrationPolicyStore } from './website-migration-policy.js';
 import { createWebsiteProvisioningRuntime } from './website-provisioning-runtime.js';
+import { createWebsiteProvisioningJobAuthorizer } from './website-provisioning-job-authorization.js';
 import { createWebsiteRegistry } from './website-registry.js';
 import { createSiteFileManager } from './site-file-manager.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
@@ -422,27 +423,12 @@ const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   siteMutationLock,
   authorizeActor: authorizeWebsitePhpActor,
 });
-const authorizeWebsiteProvisioningChildJob = async (scope) => {
-  try {
-    const operation = await websiteProvisioningRuntime.registry.get(scope.operationId);
-    if (!operation || operation.websiteId !== scope.websiteId
-      || operation.terminalState === 'abandoned') return false;
-    const step = operation.steps.find((candidate) => candidate.id === scope.stepId);
-    if (!step || !['applying', 'compensating'].includes(step.state)) return false;
-    const website = await websiteRegistry.getWebsite(scope.websiteId);
-    if (!website || website.id !== scope.websiteId
-      || (localServerId && website.serverId !== localServerId)) return false;
-    const actor = await websiteProvisioningRuntime.registry.getActor(scope.operationId);
-    if (!actor) return false;
-    const live = await authorizeWebsitePhpActor(actor, scope.websiteId);
-    return Boolean(live
-      && live.userId === actor.userId
-      && live.role === actor.role
-      && live.sessionId === actor.sessionId);
-  } catch {
-    return false;
-  }
-};
+const authorizeWebsiteProvisioningChildJob = createWebsiteProvisioningJobAuthorizer({
+  registry: websiteProvisioningRuntime.registry,
+  websiteRegistry,
+  authorizeActor: authorizeWebsitePhpActor,
+  localServerId,
+});
 const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
   filePath: websiteSftpKeyStorePath,
   websiteRegistry,
