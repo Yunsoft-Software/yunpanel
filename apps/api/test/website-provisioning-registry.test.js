@@ -428,3 +428,148 @@ test('independent provisioning registries preserve concurrent journal writes', a
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+
+function abandonmentProof(overrides = {}) {
+  return {
+    operationId,
+    websiteId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+    ...overrides,
+  };
+}
+
+test('pending provisioning journal can be durably abandoned and never reactivated', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-provisioning-abandon-'));
+  const filePath = path.join(directory, 'provisioning.json');
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  let clock = Date.parse('2026-09-14T01:00:00.000Z');
+  const registry = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+  await registry.init();
+  await registry.create(input());
+
+  clock += 1_000;
+  const abandoned = await registry.abandonUncreated(abandonmentProof());
+  assert.equal(abandoned.status, 'abandoned');
+  assert.equal(abandoned.ready, false);
+  assert.equal(abandoned.terminalState, 'abandoned');
+  assert.equal(abandoned.abandonedAt, new Date(clock).toISOString());
+  assert.equal(abandoned.steps.every((step) => step.state === 'pending'), true);
+  assert.deepEqual(await registry.listInterrupted(), []);
+
+  await assert.rejects(
+    registry.beginStep({ operationId, stepId: 'unix_identity' }),
+    (error) => error instanceof WebsiteProvisioningRegistryError
+      && error.code === 'website_provisioning_abandoned',
+  );
+  await assert.rejects(
+    registry.retryStep({ operationId, stepId: 'unix_identity' }),
+    (error) => error instanceof WebsiteProvisioningRegistryError
+      && error.code === 'website_provisioning_abandoned',
+  );
+
+  const recreated = await registry.create(input());
+  assert.equal(recreated.status, 'abandoned');
+  assert.equal(recreated.terminalState, 'abandoned');
+
+  const reopened = createWebsiteProvisioningRegistry({ filePath, now: () => clock });
+  await reopened.init();
+  const restored = await reopened.get(operationId);
+  assert.equal(restored.status, 'abandoned');
+  assert.equal(restored.terminalState, 'abandoned');
+  assert.equal(restored.abandonedAt, abandoned.abandonedAt);
+
+  const raw = JSON.parse(await readFile(filePath, 'utf8'));
+  const stored = raw.operations.find((operation) => operation.operationId === operationId);
+  assert.equal(stored.terminalState, 'abandoned');
+  assert.equal(stored.abandonedAt, abandoned.abandonedAt);
+});
+
+test('fully compensated work plus pending steps may be abandoned', async () => {
+  const registry = createWebsiteProvisioningRegistry({
+    now: () => Date.parse('2026-09-14T01:00:00.000Z'),
+  });
+  await registry.create(input());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.completeStep({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { satisfied: true, uid: 1201 },
+  });
+  await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  await registry.completeCompensation({
+    operationId,
+    stepId: 'unix_identity',
+    evidence: { satisfied: true, removedUser: true },
+  });
+
+  const abandoned = await registry.abandonUncreated(abandonmentProof());
+  assert.equal(abandoned.status, 'abandoned');
+  assert.equal(abandoned.steps[0].state, 'compensated');
+  assert.equal(abandoned.steps[0].compensation.state, 'succeeded');
+  assert.equal(abandoned.steps[1].state, 'pending');
+});
+
+for (const unsafeState of ['applying', 'succeeded', 'failed', 'blocked', 'compensating']) {
+  test(`abandonment rejects ${unsafeState} provisioning work`, async () => {
+    const registry = createWebsiteProvisioningRegistry();
+    await registry.create(input());
+    await registry.beginStep({ operationId, stepId: 'unix_identity' });
+
+    if (unsafeState === 'succeeded' || unsafeState === 'compensating') {
+      await registry.completeStep({
+        operationId,
+        stepId: 'unix_identity',
+        evidence: { satisfied: true, uid: 1201 },
+      });
+      if (unsafeState === 'compensating') {
+        await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+      }
+    } else if (unsafeState === 'failed') {
+      await registry.failStep({
+        operationId,
+        stepId: 'unix_identity',
+        error: 'fixture_failed',
+      });
+    } else if (unsafeState === 'blocked') {
+      await registry.blockStep({
+        operationId,
+        stepId: 'unix_identity',
+        error: 'fixture_blocked',
+      });
+    }
+
+    await assert.rejects(
+      registry.abandonUncreated(abandonmentProof()),
+      (error) => error instanceof WebsiteProvisioningRegistryError
+        && error.code === 'website_provisioning_abandon_requires_compensation',
+    );
+    assert.notEqual((await registry.get(operationId)).status, 'abandoned');
+  });
+}
+
+test('abandonment evidence is identity-bound and idempotent only for the same operation', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(input());
+
+  for (const patch of [
+    { websiteId: secondOperationId },
+    { websiteAbsent: false },
+    { applicationId: secondOperationId, applicationAbsent: true },
+    { operationId: secondOperationId },
+  ]) {
+    await assert.rejects(
+      registry.abandonUncreated(abandonmentProof(patch)),
+      (error) => error instanceof WebsiteProvisioningRegistryError
+        && ['website_provisioning_abandon_evidence_invalid',
+          'website_provisioning_abandon_identity_conflict',
+          'website_provisioning_not_found'].includes(error.code),
+    );
+  }
+
+  const first = await registry.abandonUncreated(abandonmentProof());
+  const retry = await registry.abandonUncreated(abandonmentProof());
+  assert.deepEqual(retry, first);
+});
