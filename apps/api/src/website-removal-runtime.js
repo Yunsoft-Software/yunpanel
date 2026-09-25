@@ -142,6 +142,7 @@ export function createWebsiteRemovalRuntime({
         403,
       );
     }
+    let original = null;
     if (operationId !== null) {
       if (typeof registry.getActor !== 'function') {
         throw new WebsiteRemovalRuntimeError(
@@ -150,7 +151,7 @@ export function createWebsiteRemovalRuntime({
           503,
         );
       }
-      const original = await registry.getActor(operationId);
+      original = await registry.getActor(operationId);
       if (!original || original.userId !== submitted.userId || original.role !== submitted.role) {
         throw new WebsiteRemovalRuntimeError(
           'website_removal_actor_mismatch',
@@ -176,11 +177,22 @@ export function createWebsiteRemovalRuntime({
         403,
       );
     }
-    return Object.freeze({
+    const authorized = Object.freeze({
       sessionId: current.sessionId,
       userId: current.userId,
       role: 'owner',
     });
+    if (operationId !== null && original?.sessionId !== authorized.sessionId) {
+      if (typeof registry.refreshActor !== 'function') {
+        throw new WebsiteRemovalRuntimeError(
+          'website_removal_actor_evidence_unavailable',
+          'Website removal actor journal cannot refresh live session evidence.',
+          503,
+        );
+      }
+      await registry.refreshActor(operationId, authorized);
+    }
+    return authorized;
   }
 
   async function withWebsiteMutation(input, action) {
