@@ -181,6 +181,7 @@ export function createLocalHostOperations({
   loadDnsProviderCredential = null,
   jobLogStore = null,
   authorizeWebsiteProvisioning = null,
+  requiresWebsiteProvisioningAuthorization = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
     throw new Error('loadApplicationEnvironment must be a function when configured');
@@ -227,6 +228,10 @@ export function createLocalHostOperations({
   }
   if (authorizeWebsiteProvisioning !== null && typeof authorizeWebsiteProvisioning !== 'function') {
     throw new Error('authorizeWebsiteProvisioning must be a function when configured');
+  }
+  if (requiresWebsiteProvisioningAuthorization !== null
+    && typeof requiresWebsiteProvisioningAuthorization !== 'function') {
+    throw new Error('requiresWebsiteProvisioningAuthorization must be a function when configured');
   }
   if (!staticDeploymentReceiptStore || typeof staticDeploymentReceiptStore.write !== 'function') {
     throw new Error('staticDeploymentReceiptStore must provide write()');
@@ -710,7 +715,30 @@ export function createLocalHostOperations({
         Object.entries(execution).filter(([key]) => key !== 'authorization'),
       ))
       : execution;
-    if (!authorization) return hostExecution;
+    if (!authorization) {
+      if (!requiresWebsiteProvisioningAuthorization) return hostExecution;
+      let required;
+      try {
+        required = await requiresWebsiteProvisioningAuthorization(Object.freeze({
+          operation,
+          jobId: hostExecution?.jobId ?? null,
+          serverId: hostExecution?.serverId ?? null,
+          type: hostExecution?.type ?? null,
+          resourceType: hostExecution?.resourceType ?? null,
+          resourceId: hostExecution?.resourceId ?? null,
+        }));
+      } catch {
+        const error = new Error('Website provisioning authorization requirement could not be verified');
+        error.code = 'website_provisioning_job_authorization_unavailable';
+        throw error;
+      }
+      if (required === true) {
+        const error = new Error('Legacy Website provisioning child job requires explicit authorization recovery');
+        error.code = 'website_provisioning_job_authorization_required';
+        throw error;
+      }
+      return hostExecution;
+    }
     if (!authorizeWebsiteProvisioning) {
       const error = new Error('Website provisioning child-job authorization is unavailable');
       error.code = 'website_provisioning_job_authorization_unavailable';
