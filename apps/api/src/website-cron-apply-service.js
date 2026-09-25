@@ -17,6 +17,27 @@ function sha256(value) {
   return createHash('sha256').update(value).digest('hex');
 }
 
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+function userAuthorization(actor) {
+  if (!actor || typeof actor !== 'object' || Array.isArray(actor)
+    || typeof actor.sessionId !== 'string' || !UUID.test(actor.sessionId)
+    || typeof actor.userId !== 'string' || !UUID.test(actor.userId)
+    || !['owner', 'site_manager'].includes(actor.role)) {
+    throw new WebsiteCronApplyServiceError(
+      'website_cron_actor_invalid',
+      'Live panel actor context is required for cron mutation',
+      403,
+    );
+  }
+  return Object.freeze({
+    authorizationMode: 'user',
+    actorSessionId: actor.sessionId,
+    actorUserId: actor.userId,
+    actorRole: actor.role,
+  });
+}
+
 function calculateDesiredStateDigest(task) {
   const rendered = renderCronTaskFile({
     taskId: task.id,
@@ -99,7 +120,8 @@ export function createWebsiteCronApplyService({
     return task;
   }
 
-  async function createCron({ websiteId, name, schedule, command, enabled = true }) {
+  async function createCron({ websiteId, name, schedule, command, enabled = true }, actor) {
+    const authorization = userAuthorization(actor);
     await assertHostedWebsite(websiteId);
     const task = await websiteCronRegistry.createTask({
       websiteId,
@@ -121,6 +143,7 @@ export function createWebsiteCronApplyService({
         unixUser: task.unixUser,
         expectedRevision: task.revision,
         desiredStateSha256,
+        ...authorization,
       },
       resourceType: 'website_cron',
       resourceId: task.id,
@@ -130,7 +153,8 @@ export function createWebsiteCronApplyService({
     return Object.freeze({ task, job });
   }
 
-  async function updateCron(taskId, { expectedRevision, name, schedule, command, enabled }) {
+  async function updateCron(taskId, { expectedRevision, name, schedule, command, enabled }, actor) {
+    const authorization = userAuthorization(actor);
     const current = await getCron(taskId);
     const task = await websiteCronRegistry.updateTask(taskId, {
       expectedRevision,
@@ -152,6 +176,7 @@ export function createWebsiteCronApplyService({
         unixUser: task.unixUser,
         expectedRevision: task.revision,
         desiredStateSha256,
+        ...authorization,
       },
       resourceType: 'website_cron',
       resourceId: task.id,
@@ -161,7 +186,8 @@ export function createWebsiteCronApplyService({
     return Object.freeze({ task, job });
   }
 
-  async function deleteCron(taskId, { expectedRevision }) {
+  async function deleteCron(taskId, { expectedRevision }, actor) {
+    const authorization = userAuthorization(actor);
     const task = await getCron(taskId);
     if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
       throw new WebsiteCronApplyServiceError('cron_revision_invalid', 'expectedRevision must be a positive integer', 400);
@@ -170,7 +196,11 @@ export function createWebsiteCronApplyService({
       throw new WebsiteCronApplyServiceError('cron_revision_conflict', 'Cron task changed after it was read', 409);
     }
 
-    const { identity, request } = createCronRemovalRequest(task);
+    const { identity, request } = createCronRemovalRequest(task, {
+      sessionId: authorization.actorSessionId,
+      userId: authorization.actorUserId,
+      role: authorization.actorRole,
+    });
     const job = await jobRegistry.enqueue(request);
     const proof = verifyCronRemovalJob(job, identity);
     const deleted = proof.status === 'succeeded' && await websiteCronRegistry.getTask(task.id) === null;
