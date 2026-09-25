@@ -27,10 +27,16 @@ function fakeResponse() {
   };
 }
 
+const ownerAuth = Object.freeze({
+  id: '11111111-1111-4111-8111-111111111111',
+  user: Object.freeze({ id: '22222222-2222-4222-8222-222222222222', role: 'owner' }),
+});
+
 async function invoke(handler, request) {
   const response = fakeResponse();
   let nextError = null;
-  await handler(request, response, (error) => { nextError = error; });
+  const submitted = { auth: ownerAuth, ...request };
+  await handler(submitted, response, (error) => { nextError = error; });
   if (nextError) throw nextError;
   return response;
 }
@@ -388,5 +394,116 @@ test('retry helper rejects malformed step ids before any orchestration', () => {
     () => websiteProvisioningHttpInternals.stepId('../runtime'),
     (error) => error instanceof WebsiteProvisioningHttpError
       && error.code === 'website_provisioning_step_invalid',
+  );
+});
+
+
+test('site_manager cannot read or mutate a foreign provisioning operation by operationId', async () => {
+  const app = fakeApp();
+  let runCalls = 0;
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator({ runNext: async () => { runCalls += 1; return {}; } }),
+    websiteRegistry: {
+      getWebsite: async (id) => id === websiteId ? { id: websiteId, serverId: 'server-a' } : null,
+    },
+    localServerId: 'server-a',
+  });
+  const auth = {
+    id: '33333333-3333-4333-8333-333333333333',
+    user: { id: '44444444-4444-4444-8444-444444444444', role: 'site_manager', websiteIds: ['foreign-site'] },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+
+  await assert.rejects(
+    invoke(app.routes.get.get('/api/sites/provisioning/:operationId'), {
+      auth,
+      params: { operationId },
+    }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_not_found'
+      && error.status === 404,
+  );
+
+  await assert.rejects(
+    invoke(app.routes.post.get('/api/sites/provisioning/:operationId/continue'), {
+      auth,
+      params: { operationId },
+      body: { confirmation: `continue-site-provisioning:${operationId}` },
+    }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_not_found',
+  );
+  assert.equal(runCalls, 0);
+});
+
+test('site_manager provisioning mutation passes exact live session actor to runtime', async () => {
+  const app = fakeApp();
+  const calls = [];
+  const auth = {
+    id: '33333333-3333-4333-8333-333333333333',
+    user: { id: '44444444-4444-4444-8444-444444444444', role: 'site_manager', websiteIds: [websiteId] },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const result = { outcome: 'progressed', operation: durableOperation(), stepId: 'unix_identity' };
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator({
+      runNext: async (id, actor) => {
+        calls.push({ id, actor });
+        return result;
+      },
+    }),
+    websiteRegistry: {
+      getWebsite: async (id) => id === websiteId ? { id: websiteId, serverId: 'server-a' } : null,
+    },
+    localServerId: 'server-a',
+  });
+
+  const response = await invoke(
+    app.routes.post.get('/api/sites/provisioning/:operationId/continue'),
+    {
+      auth,
+      params: { operationId },
+      body: { confirmation: `continue-site-provisioning:${operationId}` },
+    },
+  );
+  assert.equal(response.statusCode, 202);
+  assert.deepEqual(calls, [{
+    id: operationId,
+    actor: {
+      sessionId: auth.id,
+      userId: auth.user.id,
+      role: 'site_manager',
+    },
+  }]);
+});
+
+test('site_manager latest route requires current Website grant and live local Website', async () => {
+  const app = fakeApp();
+  const auth = {
+    id: '33333333-3333-4333-8333-333333333333',
+    user: { id: '44444444-4444-4444-8444-444444444444', role: 'site_manager', websiteIds: [websiteId] },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  let websitePresent = true;
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator(),
+    websiteRegistry: {
+      getWebsite: async () => websitePresent ? { id: websiteId, serverId: 'server-a' } : null,
+    },
+    localServerId: 'server-a',
+  });
+  const handler = app.routes.get.get('/api/sites/:websiteId/provisioning/latest');
+  assert.equal((await invoke(handler, { auth, params: { websiteId } })).statusCode, 200);
+  websitePresent = false;
+  await assert.rejects(
+    invoke(handler, { auth, params: { websiteId } }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_not_found',
   );
 });
