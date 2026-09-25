@@ -6,13 +6,13 @@ import { mountWebsiteCronRoutes, WebsiteCronHttpError } from '../src/website-cro
 const websiteId = '12345678-1234-4234-8234-123456789012';
 const taskId = '22345678-1234-4234-8234-123456789012';
 
-function createApp({ serviceOverrides = {} } = {}) {
+function createApp({ serviceOverrides = {}, authOverride = null } = {}) {
   const app = express();
   app.use(express.json());
 
   // Simulate authentication
   app.use((req, res, next) => {
-    req.auth = {
+    req.auth = authOverride ?? {
       id: '32345678-1234-4234-8234-123456789012',
       user: { id: '42345678-1234-4234-8234-123456789012', role: 'owner' },
       access: { mode: 'management', permissions: ['*'] },
@@ -148,4 +148,22 @@ test('DELETE /api/websites/:websiteId/crons/:cronId deletes task', async () => {
   assert.equal(res.status, 200);
   assert.equal(res.body.data.deleted, true);
   assert.equal(res.body.data.job.operation, 'cron.remove');
+});
+
+
+test('cron mutation rejects an auth projection without live session/user identity', async () => {
+  const app = createApp({
+    authOverride: {
+      user: { role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    },
+  });
+  const res = await request(app, 'POST', `/api/websites/${websiteId}/crons`, {
+    name: 'Backup',
+    schedule: '0 3 * * *',
+    command: '/usr/bin/backup.sh',
+  });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error.code, 'cron_actor_invalid');
 });
