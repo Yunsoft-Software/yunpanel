@@ -559,12 +559,18 @@ export function createWebsiteRemovalRuntime({
     return list.map(publicOperation);
   }
 
+  async function list() {
+    const values = await registry.list();
+    return values.map(publicOperation);
+  }
+
   return Object.freeze({
     init,
     preview,
     start: (input) => withWebsiteMutation(input, start),
     continueStep: (input) => withWebsiteMutation(input, continueStep),
     get,
+    list,
     listForWebsite,
   });
 }

@@ -61,6 +61,15 @@ function continueStepBody(body) {
   return value;
 }
 
+function requireRemovalOwner(request, response, next) {
+  return requirePanelRouteAccess(request, response, () => {
+    if (request.auth?.user?.role !== 'owner') {
+      return response.status(403).json({ error: { code: 'forbidden', message: 'Owner access is required.' } });
+    }
+    return next();
+  });
+}
+
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
@@ -79,11 +88,26 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
   }
   if (!runtime || typeof runtime.preview !== 'function' || typeof runtime.start !== 'function'
     || typeof runtime.continueStep !== 'function' || typeof runtime.get !== 'function'
-    || typeof runtime.listForWebsite !== 'function') {
+    || typeof runtime.list !== 'function' || typeof runtime.listForWebsite !== 'function') {
     throw new Error('Website removal runtime is required');
   }
 
-  app.get('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/website-removal-operations', requireRemovalOwner, asyncRoute(async (_request, response) => {
+    const operations = await runtime.list();
+    response.set('Cache-Control', 'no-store');
+    response.json({ data: operations });
+  }));
+
+  app.get('/api/website-removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
+    const operation = await runtime.get(request.params.operationId);
+    if (!operation) {
+      throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
+    }
+    response.set('Cache-Control', 'no-store');
+    response.json({ data: operation });
+  }));
+
+  app.get('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const [preview, operations] = await Promise.all([
       runtime.preview({ websiteId }),
@@ -94,14 +118,14 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     response.json({ preview, operations, data });
   }));
 
-  app.post('/api/websites/:websiteId/removal-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-preview', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const preview = await runtime.preview({ websiteId });
     response.set('Cache-Control', 'no-store');
     response.json({ preview, data: preview });
   }));
 
-  app.post('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const body = startBody(request.body);
     const operation = await runtime.start({
@@ -112,14 +136,14 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     response.status(201).json({ operation, data: operation });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const operations = await runtime.listForWebsite(websiteId);
     response.set('Cache-Control', 'no-store');
     response.json({ operations, data: operations });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
     const operation = await runtime.get(operationId);
     if (!operation || operation.websiteId !== websiteId) {
@@ -128,7 +152,7 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     response.json({ operation, data: operation });
   }));
 
-  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
     const body = continueStepBody(request.body);
     const operation = await runtime.continueStep({
