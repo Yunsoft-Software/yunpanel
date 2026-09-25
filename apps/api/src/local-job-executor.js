@@ -40,12 +40,13 @@ function cloneEvidenceValue(value) {
   try { return structuredClone(value); }
   catch { return null; }
 }
-function executionContext(job, serverId) {
+function executionContext(job, serverId, authorization = null) {
   return Object.freeze({
     jobId: job.id,
     serverId,
     resourceType: job.resourceType,
     resourceId: job.resourceId,
+    authorization: cloneEvidenceValue(authorization),
   });
 }
 
@@ -152,7 +153,7 @@ export function createLocalJobExecutor({
       const result = await executeOperation(
         claim.envelope.operation,
         claim.envelope.payload,
-        executionContext(claim.job, serverId),
+        executionContext(claim.job, serverId, claim.authorization ?? null),
       );
       if (recordExecutionEvidence) {
         const payloadCopy = cloneEvidenceValue(reconciliationPayload);
