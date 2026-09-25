@@ -527,6 +527,8 @@ test('runtime forwards the live reauthorized actor into mutating handler context
   const result = await provisioning.runNext(operationId, actor);
   assert.equal(result.outcome, 'ready');
   assert.deepEqual(receivedActor, actor);
+  assert.deepEqual(await provisioning.registry.getActor(operationId), actor);
+  assert.equal(Object.hasOwn(await provisioning.get(operationId), 'actor'), false);
 });
 
 test('runtime requires actor when production authorization callback is configured', async () => {
