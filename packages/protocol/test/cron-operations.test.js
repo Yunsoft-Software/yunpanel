@@ -18,6 +18,10 @@ const payload = Object.freeze({
   unixUser,
   expectedRevision: 2,
   desiredStateSha256: 'a'.repeat(64),
+  authorizationMode: 'user',
+  actorSessionId: '42345678-1234-4234-8234-123456789012',
+  actorUserId: '52345678-1234-4234-8234-123456789012',
+  actorRole: 'site_manager',
 });
 
 for (const operation of [OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE]) {
@@ -38,6 +42,10 @@ for (const operation of [OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE]) {
       { ...payload, expectedRevision: 0 },
       { ...payload, expectedRevision: -1 },
       { ...payload, desiredStateSha256: 'short' },
+      { ...payload, authorizationMode: 'invalid' },
+      { ...payload, actorSessionId: 'bad' },
+      { ...payload, actorUserId: 'bad' },
+      { ...payload, actorRole: 'read_only' },
       { ...payload, extra: 'forbidden' },
     ]) {
       const validation = validateOperationEnvelope({
@@ -50,3 +58,27 @@ for (const operation of [OPERATIONS.CRON_APPLY, OPERATIONS.CRON_REMOVE]) {
     }
   });
 }
+
+
+test('cron.remove accepts the explicit internal Website-removal authorization mode without actor fields', () => {
+  const systemPayload = {
+    taskId,
+    websiteId,
+    applicationId,
+    unixUser,
+    expectedRevision: 2,
+    desiredStateSha256: 'a'.repeat(64),
+    authorizationMode: 'system_removal',
+  };
+  const envelope = createOperationEnvelope({
+    id: 'cron-job-system-remove',
+    operation: OPERATIONS.CRON_REMOVE,
+    payload: systemPayload,
+  });
+  assert.deepEqual(envelope.payload, systemPayload);
+  assert.equal(validateOperationEnvelope(envelope).ok, true);
+  assert.equal(validateOperationEnvelope({
+    ...envelope,
+    operation: OPERATIONS.CRON_APPLY,
+  }).ok, false);
+});
