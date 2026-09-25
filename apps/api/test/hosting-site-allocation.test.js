@@ -85,7 +85,7 @@ test('inactive customer and inactive parent reject reservation', (t) => {
   assert.throws(() => f.reserve(allocation(2, 'inactive')), code('hosting_account_inactive'));
   // Model an offline damaged/later lifecycle update; the real live guard is retained.
   f.db.exec('DROP TRIGGER auth_hosting_legacy_user_guard');
-  f.db.exec("UPDATE users SET active = 0 WHERE id = 'reseller-a'");
+  f.store.setActive(f.token, f.requireManagement, 'reseller-a', { revision: 1, active: false });
   assert.throws(() => f.reserve(), code('hosting_account_inactive'));
 });
 test('reseller profiles cannot be used as customers', (t) => {
