@@ -59,6 +59,9 @@ function fixture({ failFirstApply = false } = {}) {
       return jobs.find((job) => job.id === jobId) ?? null;
     },
     async enqueue(input) {
+      assert.deepEqual(input.authorization, {
+        kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'mail_config',
+      });
       const jobId = `00000000-0000-4000-8000-${String(++counter).padStart(12, '0')}`;
       const createdAt = `2026-09-19T03:00:${String(counter).padStart(2, '0')}.000Z`;
       if (input.operation === OPERATIONS.MAIL_CONFIG_APPLY) {
@@ -158,6 +161,7 @@ function fixture({ failFirstApply = false } = {}) {
     context: {
       operationId,
       websiteId,
+      stepId: 'mail_config',
       intent: intent(),
       evidence: null,
     },
