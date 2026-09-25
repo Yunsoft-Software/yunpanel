@@ -39,6 +39,15 @@ const UPDATE_REQUIRED = new Set(['expectedRevision']);
 const DELETE_ALLOWED = new Set(['expectedRevision']);
 const DELETE_REQUIRED = new Set(['expectedRevision']);
 
+function requestActor(request) {
+  const auth = request?.auth;
+  if (!auth || typeof auth.id !== 'string' || typeof auth.user?.id !== 'string'
+    || !['owner', 'site_manager'].includes(auth.user.role)) {
+    throw new WebsiteCronHttpError('cron_actor_invalid', 'Live panel actor context is required', 403);
+  }
+  return Object.freeze({ sessionId: auth.id, userId: auth.user.id, role: auth.user.role });
+}
+
 export function mountWebsiteCronRoutes(app, { websiteCronApplyService } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
     throw new Error('Express application is required');
@@ -68,7 +77,7 @@ export function mountWebsiteCronRoutes(app, { websiteCronApplyService } = {}) {
     const result = await websiteCronApplyService.createCron({
       websiteId: request.params.websiteId,
       ...body,
-    });
+    }, requestActor(request));
     return response.status(201).json({ data: result });
   }));
 
@@ -92,7 +101,7 @@ export function mountWebsiteCronRoutes(app, { websiteCronApplyService } = {}) {
     if (current.websiteId !== request.params.websiteId) {
       throw new WebsiteCronHttpError('cron_task_not_found', 'Cron task was not found for this website', 404);
     }
-    const result = await websiteCronApplyService.updateCron(request.params.cronId, body);
+    const result = await websiteCronApplyService.updateCron(request.params.cronId, body, requestActor(request));
     return response.json({ data: result });
   }));
 
@@ -111,7 +120,9 @@ export function mountWebsiteCronRoutes(app, { websiteCronApplyService } = {}) {
     }
     const result = await websiteCronApplyService.deleteCron(request.params.cronId, {
       expectedRevision: body.expectedRevision,
-    });
+    }, requestActor(request));
     return response.json({ data: result });
   }));
 }
+
+export const websiteCronHttpInternals = Object.freeze({ requestActor });
