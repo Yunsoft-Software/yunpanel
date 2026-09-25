@@ -268,3 +268,173 @@ test('website-removal-runtime cleans up database credentials and passes retained
   assert.equal(fileStep.result.cleanedFilesCount, 42);
 });
 
+
+
+function directSystemdPreview() {
+  const website = {
+    id: 'ws-direct',
+    name: 'direct-site',
+    serverId: 'srv-local',
+    applicationId: 'app-direct',
+    systemUser: null,
+    desiredRevision: 1,
+  };
+  const releaseId = 'ff830043-9752-4640-83b4-3a1998de78a0';
+  const impact = {
+    version: 1,
+    resourceType: 'website',
+    resource: { id: website.id, serverId: website.serverId },
+    application: {
+      id: website.applicationId,
+      serverId: website.serverId,
+      name: 'direct-app',
+      type: 'node',
+      state: 'active',
+      desiredRevision: 5,
+      currentReleaseId: releaseId,
+      activeDeploymentId: null,
+    },
+    operation: 'delete',
+    targetServerId: null,
+    dependencies: {
+      domains: [],
+      databases: { status: 'available', items: [] },
+      sftpKeys: { status: 'available', items: [] },
+      runtimeBindings: { status: 'available', items: [{ id: website.applicationId, state: 'active' }] },
+      unixIdentities: { status: 'available', items: [] },
+      logScopes: { status: 'available', items: [] },
+      crons: { status: 'available', items: [] },
+      backups: { status: 'available', items: [] },
+      activeJobs: [],
+    },
+    blockers: [],
+    previewDigest: 'e'.repeat(64),
+    confirmation: `delete:website:${website.id}:${'e'.repeat(64)}`,
+  };
+  return createWebsiteRemovalPreview({
+    website,
+    impact,
+    applicationState: {
+      ...impact.application,
+      runtimeAdapter: 'direct-systemd',
+      serviceName: 'yunpanel-node-aaaaaaaaaaaaaaaa.service',
+      currentCommitSha: 'b'.repeat(40),
+      servicePort: 3100,
+      healthPath: '/health',
+    },
+  });
+}
+
+test('website-removal-runtime verifies direct-systemd host cleanup before dropping optional binding metadata', async () => {
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+  const preview = directSystemdPreview();
+  const actions = [];
+  let websitePresent = true;
+  let application = {
+    id: 'app-direct',
+    serverId: 'srv-local',
+    desiredRevision: 5,
+    activeDeploymentId: null,
+  };
+  let binding = {
+    applicationId: 'app-direct',
+    revision: 2,
+    adapter: 'direct-systemd',
+    sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+  };
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { start: async () => {} },
+    websiteRegistry: {
+      getWebsite: async () => websitePresent ? { id: 'ws-direct', applicationId: 'app-direct', serverId: 'srv-local', desiredRevision: 1 } : null,
+      deleteMigrationWebsite: async () => { websitePresent = false; actions.push('websiteMetadata'); return { websiteId: 'ws-direct', deleted: true }; },
+    },
+    applicationRegistry: {
+      getApplication: async () => application,
+      deleteApplication: async () => { application = null; actions.push('applicationMetadata'); return { applicationId: 'app-direct', deleted: true }; },
+    },
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async () => ({ applicationId: 'app-direct', variableCount: 0, environmentPresent: false }),
+      purgeApplication: async () => { actions.push('applicationEnvironment'); return { applicationId: 'app-direct', variablesDeleted: 0, environmentDeleted: false, purged: true }; },
+    },
+    runtimeBindingRegistry: {
+      getBinding: async () => binding,
+      removeOwnedDirectSystemd: async (_applicationId, options) => {
+        assert.equal(options.sourceOperationId, binding.sourceOperationId);
+        assert.equal(options.expectedRevision, binding.revision);
+        actions.push('runtimeBinding');
+        binding = null;
+      },
+    },
+    directSystemdCleanupInspector: async (input) => ({ ready: true, ...input }),
+    directSystemdCleanupHandler: async (input) => {
+      actions.push('directSystemdHost');
+      return { ...input, directSystemdCleaned: true };
+    },
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
+    fileCleanupHandler: async (input) => { actions.push('files'); return { ...input, filesCleaned: true }; },
+  });
+
+  let op = await runtime.start({
+    websiteId: preview.website.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(op.steps[0].kind, 'runtime_cleanup');
+  assert.equal(op.steps[0].status, 'succeeded');
+  assert.deepEqual(actions.slice(0, 2), ['directSystemdHost', 'runtimeBinding']);
+
+  while (op.status !== 'removed') {
+    const step = op.steps.find((entry) => entry.status !== 'succeeded');
+    op = await runtime.continueStep({
+      websiteId: op.websiteId,
+      operationId: op.id,
+      stepId: step.id,
+      expectedUpdatedAt: op.updatedAt,
+      confirmation: op.actions.stepContinuationConfirmation,
+    });
+  }
+  assert.equal(binding, null);
+  assert.deepEqual(actions, [
+    'directSystemdHost',
+    'runtimeBinding',
+    'files',
+    'websiteMetadata',
+    'applicationEnvironment',
+    'applicationMetadata',
+  ]);
+});
+
+test('direct-systemd preview is blocked before mutation when host evidence inspector is unavailable', async () => {
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+  const preview = directSystemdPreview();
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { start: async () => {} },
+    runtimeBindingRegistry: {
+      getBinding: async () => ({
+        applicationId: 'app-direct',
+        revision: 1,
+        adapter: 'direct-systemd',
+        sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      }),
+      removeOwnedDirectSystemd: async () => {},
+    },
+    directSystemdCleanupHandler: async (input) => ({ ...input, directSystemdCleaned: true }),
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
+    fileCleanupHandler: async (input) => ({ ...input, filesCleaned: true }),
+    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    applicationRegistry: { getApplication: async () => ({ id: 'app-direct' }), deleteApplication: async () => {} },
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async () => ({ applicationId: 'app-direct', variableCount: 0, environmentPresent: false }),
+      purgeApplication: async () => ({ applicationId: 'app-direct', purged: true }),
+    },
+  });
+  const blocked = await runtime.preview({ websiteId: 'ws-direct' });
+  assert.equal(blocked.readyToStart, false);
+  assert.ok(blocked.hardBlockers.includes('runtime_cleanup_unavailable'));
+});
