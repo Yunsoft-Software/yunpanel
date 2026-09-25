@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { findBlockingLaterCompensationStep } from './website-provisioning-compensation-order.js';
+import { createProcessStoreLock } from './process-store-lock.js';
 import {
   createWebsiteProvisioningPlan,
   WebsiteProvisioningPlanError,
@@ -120,13 +121,25 @@ function failureCode(value, field = 'error') {
   return value.trim();
 }
 
-export function createWebsiteProvisioningRegistry({ filePath = null, now = () => Date.now() } = {}) {
+export function createWebsiteProvisioningRegistry({
+  filePath = null,
+  now = () => Date.now(),
+  storeLockFactory = createProcessStoreLock,
+} = {}) {
   if (typeof now !== 'function') {
     throw new WebsiteProvisioningRegistryError('website_provisioning_dependencies_invalid', 'Website provisioning registry dependencies are invalid', 503);
   }
   let state = { version: STORE_VERSION, operations: [] };
   let initialized = filePath === null;
   let writeChain = Promise.resolve();
+  const storeLock = filePath ? storeLockFactory({ filePath: path.resolve(filePath) }) : null;
+  if (filePath && (!storeLock || typeof storeLock.withLock !== 'function')) {
+    throw new WebsiteProvisioningRegistryError(
+      'website_provisioning_store_lock_invalid',
+      'Website provisioning store lock is invalid',
+      503,
+    );
+  }
 
   function nowIso() {
     const value = now();
@@ -149,8 +162,8 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
     return writeChain;
   }
 
-  async function init() {
-    if (initialized) return;
+  async function reload() {
+    if (!filePath) { initialized = true; return true; }
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)) throw new Error('invalid Website provisioning registry state');
@@ -159,11 +172,46 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
         throw new Error('duplicate Website provisioning operation');
       }
       state = { version: STORE_VERSION, operations };
+      initialized = true;
+      return true;
     } catch (error) {
       if (error?.code !== 'ENOENT') throw error;
-      await persist();
+      state = { version: STORE_VERSION, operations: [] };
+      initialized = true;
+      return false;
     }
-    initialized = true;
+  }
+
+  async function init() {
+    if (initialized) return;
+    const initialize = async () => {
+      const found = await reload();
+      if (!found) await persist();
+    };
+    if (storeLock) await storeLock.withLock(initialize);
+    else await initialize();
+  }
+
+  async function withStoreMutation(action) {
+    await ensureInitialized();
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      try { return await action(); }
+      catch (error) {
+        await reload().catch(() => {});
+        throw error;
+      }
+    });
+  }
+
+  async function withStoreRead(action) {
+    await ensureInitialized();
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      return action();
+    });
   }
 
   async function ensureInitialized() {
@@ -428,19 +476,19 @@ export function createWebsiteProvisioningRegistry({ filePath = null, now = () =>
 
   return Object.freeze({
     init,
-    create,
-    get,
-    getLatestForWebsite,
-    listForWebsite,
-    listForDnsZone,
-    beginStep,
-    completeStep,
-    blockStep,
-    failStep,
-    retryStep,
-    beginCompensation,
-    completeCompensation,
-    failCompensation,
-    listInterrupted,
+    create: (...args) => withStoreMutation(() => create(...args)),
+    get: (...args) => withStoreRead(() => get(...args)),
+    getLatestForWebsite: (...args) => withStoreRead(() => getLatestForWebsite(...args)),
+    listForWebsite: (...args) => withStoreRead(() => listForWebsite(...args)),
+    listForDnsZone: (...args) => withStoreRead(() => listForDnsZone(...args)),
+    beginStep: (...args) => withStoreMutation(() => beginStep(...args)),
+    completeStep: (...args) => withStoreMutation(() => completeStep(...args)),
+    blockStep: (...args) => withStoreMutation(() => blockStep(...args)),
+    failStep: (...args) => withStoreMutation(() => failStep(...args)),
+    retryStep: (...args) => withStoreMutation(() => retryStep(...args)),
+    beginCompensation: (...args) => withStoreMutation(() => beginCompensation(...args)),
+    completeCompensation: (...args) => withStoreMutation(() => completeCompensation(...args)),
+    failCompensation: (...args) => withStoreMutation(() => failCompensation(...args)),
+    listInterrupted: (...args) => withStoreRead(() => listInterrupted(...args)),
   });
 }
