@@ -101,7 +101,7 @@ export function createDatabaseCredentialApplyService({
     });
   }
 
-  async function queue(input, operation) {
+  async function queue(input, operation, { authorization = null } = {}) {
     const credentialRevision = positiveRevision(input.expectedCredentialRevision, 'expectedCredentialRevision');
     const bindingRevision = positiveRevision(input.expectedBindingRevision, 'expectedBindingRevision');
     const sha256 = expectedDigest(input.expectedDesiredStateSha256);
@@ -127,15 +127,16 @@ export function createDatabaseCredentialApplyService({
       resourceType: 'database',
       resourceId: current.databaseName,
       idempotencyKey: `${operation}:${current.databaseCredentialId}:${current.desiredStateSha256}`,
+      authorization,
     });
     return Object.freeze({ desiredStateSha256: current.desiredStateSha256, job });
   }
 
   return Object.freeze({
     previewApply: (credentialId) => preview(credentialId, OPERATIONS.DATABASE_CREDENTIAL_APPLY),
-    queueApply: (input) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_APPLY),
+    queueApply: (input, options) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_APPLY, options),
     previewDelete: (credentialId) => preview(credentialId, OPERATIONS.DATABASE_CREDENTIAL_DELETE),
-    queueDelete: (input) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_DELETE),
+    queueDelete: (input, options) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_DELETE, options),
   });
 }
 
