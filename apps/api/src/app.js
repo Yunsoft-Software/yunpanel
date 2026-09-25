@@ -618,7 +618,7 @@ export function createApp(allOptions = {}) {
   if (websiteProvisioningRuntime) {
     mountWebsiteProvisioningRoutes(app, {
       registry: websiteProvisioningRuntime.registry,
-      orchestrator: websiteProvisioningRuntime.orchestrator,
+      orchestrator: websiteProvisioningRuntime,
       isolationMigration: websiteProvisioningRuntime.isolationMigration,
       websiteRegistry,
       localServerId,
