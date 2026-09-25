@@ -203,3 +203,77 @@ test('Website removal takes the process-shared site lock before every destructiv
   assert.equal(locks.every((entry) => entry.websiteId === f.preview.website.id
     && entry.applicationId === f.preview.website.applicationId), true);
 });
+
+
+test('quota release failure keeps removal blocked after cleanup and explicit continue retries only finalization', async () => {
+  let releases = 0;
+  const proofs = [];
+  const f = await removalFixture({
+    hostingAllocationReleaseHandler: async (proof) => {
+      proofs.push(proof);
+      releases += 1;
+      if (releases === 1) throw new Error('auth store temporarily unavailable');
+      return {
+        websiteId: proof.websiteId,
+        customerId: 'customer-a',
+        allocationOperationId: '11111111-1111-4111-8111-111111111111',
+        released: true,
+        quotaReleased: true,
+      };
+    },
+  });
+
+  let op = await f.runtime.start(removalStart(f.preview));
+  while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
+
+  assert.equal(op.status, 'blocked');
+  const applicationStep = op.steps.find((step) => step.kind === 'application_cleanup');
+  assert.equal(applicationStep.status, 'blocked');
+  assert.equal(applicationStep.error.code, 'website_removal_allocation_release_failed');
+  assert.equal(releases, 1);
+  assert.equal(f.calls.length, 1);
+
+  op = await f.runtime.continueStep(removalContinue(op));
+  assert.equal(op.status, 'removed');
+  assert.equal(releases, 2);
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(proofs[1], {
+    operationId: op.id,
+    websiteId: 'site-a',
+    serverId: 'server-a',
+    applicationId: 'app-a',
+    websiteAbsent: true,
+    applicationAbsent: true,
+  });
+  assert.equal(op.steps.find((step) => step.kind === 'application_cleanup').result.hostingAllocation.quotaReleased, true);
+});
+
+test('non-Application Website releases hosting allocation after Website metadata absence', async () => {
+  const preview = removalPreview('site-proxy', {}, { applicationId: null, systemUser: null });
+  const proofs = [];
+  let websitePresent = true;
+  const f = await removalFixture({
+    websiteRegistry: {
+      getWebsite: async () => websitePresent ? { id: 'site-proxy', serverId: 'server-a', applicationId: null } : null,
+      deleteMigrationWebsite: async () => { websitePresent = false; },
+    },
+    hostingAllocationReleaseHandler: async (proof) => {
+      proofs.push(proof);
+      return { websiteId: proof.websiteId, released: false, quotaReleased: false };
+    },
+  }, preview);
+
+  let op = await f.runtime.start(removalStart(preview));
+  while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
+  assert.equal(op.status, 'removed');
+  assert.deepEqual(proofs, [{
+    operationId: op.id,
+    websiteId: 'site-proxy',
+    serverId: 'server-a',
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  }]);
+  const metadataStep = op.steps.find((step) => step.kind === 'metadata_finalization');
+  assert.equal(metadataStep.result.hostingAllocation.quotaReleased, false);
+});
