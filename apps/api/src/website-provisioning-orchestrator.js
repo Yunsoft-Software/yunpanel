@@ -48,7 +48,7 @@ function evidence(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : null;
 }
 
-function handlerContext(operation, step) {
+function handlerContext(operation, step, actor = null) {
   return Object.freeze({
     operation,
     operationId: operation.operationId,
@@ -57,6 +57,7 @@ function handlerContext(operation, step) {
     intent: step.intent,
     evidence: step.evidence,
     compensation: step.compensation,
+    actor,
   });
 }
 
@@ -242,7 +243,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     });
   }
 
-  async function runNext(operationId) {
+  async function runNext(operationId, actor = null) {
     const operation = await registry.get(operationId);
     if (!operation) {
       throw new WebsiteProvisioningOrchestratorError(
@@ -291,7 +292,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     const applying = await registry.beginStep({ operationId, stepId: step.id });
     const applyingStep = applying.steps.find((candidate) => candidate.id === step.id);
     try {
-      const result = evidence(await handler.apply(handlerContext(applying, applyingStep)));
+      const result = evidence(await handler.apply(handlerContext(applying, applyingStep, actor)));
       if (!result) {
         throw new WebsiteProvisioningOrchestratorError(
           'website_provisioning_evidence_required',
@@ -334,12 +335,12 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     }
   }
 
-  async function retryStep(operationId, stepId) {
+  async function retryStep(operationId, stepId, actor = null) {
     await registry.retryStep({ operationId, stepId });
-    return runNext(operationId);
+    return runNext(operationId, actor);
   }
 
-  async function compensateStep(operationId, stepId) {
+  async function compensateStep(operationId, stepId, actor = null) {
     const operation = await registry.get(operationId);
     if (!operation) {
       throw new WebsiteProvisioningOrchestratorError(
@@ -375,7 +376,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     const compensating = await registry.beginCompensation({ operationId, stepId });
     const compensatingStep = compensating.steps.find((candidate) => candidate.id === stepId);
     try {
-      const result = evidence(await handler.compensate(handlerContext(compensating, compensatingStep)));
+      const result = evidence(await handler.compensate(handlerContext(compensating, compensatingStep, actor)));
       if (!result || result.satisfied === false) {
         const code = publicErrorCode(
           { code: result?.reason },
