@@ -12,7 +12,7 @@ import {
   createWebsiteRemovalPreview,
 } from '../src/website-removal-plan.js';
 
-function mockPreview({ withDomains = true, backups = [] } = {}) {
+function mockPreview({ withDomains = true, backups = [], withCrons = false } = {}) {
   const website = {
     id: 'ws-1',
     name: 'test-site',
@@ -35,7 +35,7 @@ function mockPreview({ withDomains = true, backups = [] } = {}) {
       runtimeBindings: { status: 'available', items: [{ id: 'rb-1', state: 'active' }] },
       unixIdentities: { status: 'available', items: [{ id: 'yunapp-site1', state: 'active' }] },
       logScopes: { status: 'available', items: [{ id: 'ws-1', state: 'managed' }] },
-      crons: { status: 'available', items: [{ id: 'cron-1', state: 'active' }] },
+      crons: { status: 'available', items: withCrons ? [{ id: 'cron-1', state: 'active' }] : [] },
       backups: { status: 'available', items: backups },
       activeJobs: [],
     },
@@ -93,10 +93,6 @@ test('website-removal-runtime coordinates domain removal child operation before 
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
     ...applicationCleanupDependencies(actionsCalled),
     databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
-    websiteCronRegistry: {
-      listTasks: async () => [{ id: 'cron-1' }],
-      removeTask: async (id) => actionsCalled.push(`removeCron:${id}`),
-    },
     websiteSftpKeyRegistry: {
       listKeys: async () => [{ id: 'key-1', revision: 1 }],
       revokeKey: async ({ keyId }) => actionsCalled.push(`revokeKey:${keyId}`),
@@ -151,7 +147,6 @@ test('website-removal-runtime coordinates domain removal child operation before 
   // Verify all steps completed and exact actions called in reverse order!
   assert.equal(op.status, 'removed');
   assert.deepEqual(actionsCalled, [
-    'removeCron:cron-1',
     'revokeKey:key-1',
     'removeDb:db-1',
     'removePassenger',
@@ -199,7 +194,6 @@ test('website-removal-runtime cleans up database credentials and passes retained
     domainRemovalRuntime: { start: async () => {} },
     websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
     ...applicationCleanupDependencies(),
-    websiteCronRegistry: { listTasks: async () => [], removeTask: async () => {} },
     websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
     runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
