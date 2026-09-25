@@ -529,6 +529,7 @@ export async function previewSiteCreate({
   domainRegistry,
   mailDomainRegistry = null,
   serverDnsIdentityRegistry = null,
+  siteMutationLock = null,
 } = {}) {
   for (const [dependency, methods] of [
     [registry, ['getServer']],
@@ -1049,6 +1050,7 @@ export async function createSite({
     throw new SiteCreateError('site_create_confirmation_required', `Confirm site creation with ${preview.confirmation}`);
   }
   const normalized = normalizeInput(input);
+  const performCreate = async () => {
   let application = normalized.source.kind === 'existing_application'
     ? await applicationRegistry.getApplication(normalized.source.applicationId)
     : null;
@@ -1164,6 +1166,18 @@ export async function createSite({
     mailDomain,
     lifecycle: preview.lifecycle,
   });
+  };
+
+  if (siteMutationLock !== null) {
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new SiteCreateError('site_create_dependencies_invalid', 'Site mutation lock is unavailable', 503);
+    }
+    return siteMutationLock.withSiteLock({
+      applicationId: preview.plan.application?.id ?? null,
+      websiteId: preview.ids.websiteId,
+    }, performCreate);
+  }
+  return performCreate();
 }
 
 export const siteCreateInternals = Object.freeze({
