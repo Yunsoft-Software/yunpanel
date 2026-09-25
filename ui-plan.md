@@ -7,6 +7,7 @@
 - [x] **WR-03b kaynak:** `b45a8830` → `94b3eac4`; güvenli Application/env cleanup, provisioning receipt-owned Unix cleanup, canonical file roots, runtime binding ownership, start preflight, Owner-only global recovery journal ve typed confirmation + explicit step continuation UI. Site metadata kaybolduktan sonra kalan Application cleanup global recovery ekranından sürdürülebilir.
 - [x] **WR-03c source:** direct-systemd host service cleanup `53afe904` → `2455cc38` ile Application evidence + deployment receipt + deterministic unit/env/current-release ownership üzerinden bağlandı; runtime-binding kaydı olmasa da adım zorunlu. Receipt'siz legacy state fail-closed.
 - [x] **WR-03d shared-lock source:** `2fa0a7bf` → `bbf4774f`; site-create/provisioning/removal ile PHP/cron worker mutation'ları aynı filesystem Application/Website lock alanına taşındı.
+- [x] **WR-03e quota release source:** `71f738bb` → `8267d036`; verified final removal dışında hosting quota düşmez, release hatası removal journal'ını açık tutar.
 - [ ] **WR-04 kabul:** Node24/npm11 + gerçek Passenger/Static/direct-systemd host/browser/restart/partial/unknown-result, iki process/crash lock ve live auth sınırları geçmeden tam Site Silme tamamlandı sayılmaz.
 ## 2026-09-25 — Site erişimi / askıya alma
 
