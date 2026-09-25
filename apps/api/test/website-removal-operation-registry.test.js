@@ -219,3 +219,53 @@ test('direct-systemd Application creates a runtime cleanup step without runtime-
     'application_cleanup',
   ]);
 });
+
+
+function bareRemovalPreview(websiteId) {
+  return {
+    operation: 'website_remove',
+    readyToStart: true,
+    website: {
+      id: websiteId,
+      serverId: 'server-a',
+      applicationId: null,
+      systemUser: null,
+      desiredRevision: 1,
+    },
+    plan: {
+      domainIds: [],
+      applicationId: null,
+      applicationRevision: null,
+      applicationRuntime: null,
+      systemUser: null,
+      additional: {
+        databases: { status: 'available', ids: [] },
+        sftpKeys: { status: 'available', ids: [] },
+        runtimeBindings: { status: 'available', ids: [] },
+        unixIdentities: { status: 'available', ids: [] },
+        logScopes: { status: 'available', ids: [] },
+        crons: { status: 'available', ids: [] },
+        backups: { status: 'available', ids: [] },
+      },
+    },
+    previewDigest: 'f'.repeat(64),
+    confirmation: `start-website-remove:${websiteId}:1:${'f'.repeat(64)}`,
+  };
+}
+
+test('independent removal registries reload under the store lock and preserve different-site writes', async () => {
+  await withTempDir(async (tempDir) => {
+    const filePath = path.join(tempDir, 'shared-removals.json');
+    const left = createWebsiteRemovalOperationRegistry({ filePath });
+    const right = createWebsiteRemovalOperationRegistry({ filePath });
+    await Promise.all([left.init(), right.init()]);
+
+    const [first, second] = await Promise.all([
+      left.create(bareRemovalPreview('site-a')),
+      right.create(bareRemovalPreview('site-b')),
+    ]);
+    assert.notEqual(first.id, second.id);
+    assert.deepEqual((await left.list()).map((entry) => entry.websiteId).sort(), ['site-a', 'site-b']);
+    assert.deepEqual((await right.list()).map((entry) => entry.websiteId).sort(), ['site-a', 'site-b']);
+  });
+});
