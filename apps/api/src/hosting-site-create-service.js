@@ -22,7 +22,17 @@ function request(value, apply = false) {
  * The auth quota hold survives every await/crash. Existing resource creation keeps
  * its validation/idempotency; its host jobs and cleanup are not reimplemented here.
  */
-export function createHostingSiteCreateService({ hostingAccounts, websiteRegistry, localServerId, previewSiteCreate, createSite }) {
+export function createHostingSiteCreateService({
+  hostingAccounts,
+  websiteRegistry,
+  applicationRegistry = null,
+  domainRegistry = null,
+  mailDomainRegistry = null,
+  siteMutationLock = null,
+  localServerId,
+  previewSiteCreate,
+  createSite,
+}) {
   const allocations = hostingAccounts?.siteAllocations;
   if (!id(localServerId) || ![hostingAccounts?.get, allocations?.preview, allocations?.reserve, allocations?.complete,
     websiteRegistry?.getWebsite, previewSiteCreate, createSite].every((fn) => typeof fn === 'function')) {
@@ -51,14 +61,28 @@ export function createHostingSiteCreateService({ hostingAccounts, websiteRegistr
     const confirmation = `create-hosted-site:${base.operationId}:${previewDigest}`;
     return { base, allocationInput, allocation, previewDigest, confirmation };
   }
-  // In-flight serialization is local to this service, not a cross-process job lock.
+  // Local promise serialization remains useful for duplicate calls, while the
+  // shared site lock closes the cross-process reserve/create/attach race.
   const pending = new Map();
-  async function performCreate(rawToken, policy, submitted) {
-    const prepared = await prepare(rawToken, policy, submitted);
+
+  function lockIdentity(prepared) {
+    return Object.freeze({
+      applicationId: prepared.base?.plan?.website?.applicationId ?? null,
+      websiteId: prepared.allocationInput.websiteId,
+    });
+  }
+
+  function validateSubmission(submitted, prepared) {
     if (submitted.previewDigest !== prepared.previewDigest || submitted.confirmation !== prepared.confirmation) {
       throw fail('hosting_site_preview_stale', 'Confirm the current site plan for this customer before creating it.');
     }
-    if (prepared.base.blockers.length) throw fail('hosting_site_blocked', 'Resolve the site-create blockers before allocating capacity.');
+    if (prepared.base.blockers.length) {
+      throw fail('hosting_site_blocked', 'Resolve the site-create blockers before allocating capacity.');
+    }
+  }
+
+  async function performPreparedCreate(rawToken, policy, submitted, prepared, { outerLock = false } = {}) {
+    validateSubmission(submitted, prepared);
     if (prepared.allocation.state === 'available' && await websiteRegistry.getWebsite(prepared.allocationInput.websiteId)) {
       throw fail('hosting_site_migration_required', 'An existing Website requires explicit ownership migration.');
     }
@@ -66,8 +90,12 @@ export function createHostingSiteCreateService({ hostingAccounts, websiteRegistr
     const reserved = allocations.reserve(rawToken, policy, prepared.allocationInput);
     let created = false;
     if (reserved.state !== 'attached') {
-      const result = await createSite({ input: submitted.input,
-        previewDigest: prepared.base.previewDigest, confirmation: prepared.base.confirmation });
+      const result = await createSite({
+        input: submitted.input,
+        previewDigest: prepared.base.previewDigest,
+        confirmation: prepared.base.confirmation,
+        ...(outerLock ? { siteMutationLock: null } : {}),
+      });
       if (!result || typeof result.created !== 'boolean' || result.website?.id !== reserved.websiteId) {
         throw fail('hosting_site_result_invalid', 'Site creation did not return the allocated Website.', 503);
       }
@@ -75,10 +103,35 @@ export function createHostingSiteCreateService({ hostingAccounts, websiteRegistr
     }
     // Never accept createSite's response object as persistence evidence.
     const website = await websiteRegistry.getWebsite(reserved.websiteId);
-    if (!website) throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
+    if (!website) {
+      throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
+    }
     const allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
-    return Object.freeze({ website, ownership: allocation, created, accessGranted: false,
-      stage: 'ownership_recorded', provisioningReady: false });
+    return Object.freeze({
+      website,
+      ownership: allocation,
+      created,
+      accessGranted: false,
+      stage: 'ownership_recorded',
+      provisioningReady: false,
+    });
+  }
+
+  async function performCreate(rawToken, policy, submitted) {
+    const initial = await prepare(rawToken, policy, submitted);
+    validateSubmission(submitted, initial);
+    if (siteMutationLock === null) {
+      return performPreparedCreate(rawToken, policy, submitted, initial);
+    }
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw fail('hosting_site_lock_unavailable', 'Hosted site mutation lock is unavailable.', 503);
+    }
+    return siteMutationLock.withSiteLock(lockIdentity(initial), async () => {
+      // All preview/allocation reads are repeated under the same lock that owns
+      // reserve -> metadata create -> persistent verification -> ownership attach.
+      const locked = await prepare(rawToken, policy, submitted);
+      return performPreparedCreate(rawToken, policy, submitted, locked, { outerLock: true });
+    });
   }
   return Object.freeze({
     async preview(rawToken, policy, value) {
