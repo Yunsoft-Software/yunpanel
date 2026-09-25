@@ -79,12 +79,13 @@ async function persistedFile(t, prefix) {
   return path.join(directory, 'operations.json');
 }
 
-function runtime({ filePath = null, manager = identityManager() } = {}) {
+function runtime({ filePath = null, manager = identityManager(), siteMutationLock = null } = {}) {
   return createWebsiteProvisioningRuntime({
     filePath,
     identityManager: manager,
     passengerSiteManager: passengerSiteManager(),
     nginxManager: nginxManager(),
+    siteMutationLock,
   });
 }
 
@@ -429,4 +430,25 @@ test('runtime exposes the PHP pool migration lifecycle on the canonical PHP hand
   assert.equal(typeof provisioning.handlers.static_runtime.applyControlMigration, 'function');
   assert.equal(typeof provisioning.handlers.static_runtime.inspectControlMigrationCompensation, 'function');
   assert.equal(typeof provisioning.handlers.static_runtime.compensateControlMigration, 'function');
+});
+
+
+test('runtime takes the process-shared site lock before provisioning mutation', async () => {
+  const locks = [];
+  const provisioning = runtime({
+    manager: identityManager({
+      apply: async (intent) => ({ satisfied: true, ...intent, uid: 1201, gid: 1201 }),
+    }),
+    siteMutationLock: {
+      withSiteLock: async (identity, action) => {
+        locks.push(identity);
+        return action();
+      },
+    },
+  });
+  await provisioning.init();
+  await provisioning.create(plan());
+  const result = await provisioning.runNext(operationId);
+  assert.equal(result.outcome, 'ready');
+  assert.deepEqual(locks, [{ applicationId: null, websiteId }]);
 });
