@@ -78,6 +78,7 @@ export function createWebsiteRemovalRuntime({
   unixIdentityCleanupHandler = null,
   fileCleanupInspector = null,
   unixIdentityCleanupInspector = null,
+  siteMutationLock = null,
 } = {}) {
   if (!registry || typeof registry.create !== 'function' || typeof registry.get !== 'function') {
     throw new WebsiteRemovalRuntimeError(
@@ -116,6 +117,18 @@ export function createWebsiteRemovalRuntime({
     active.add(websiteId);
     try { return await action(submitted); }
     finally { active.delete(websiteId); }
+  }
+
+  async function withProcessMutationLock({ websiteId, applicationId = null } = {}, action) {
+    if (!siteMutationLock) return action();
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new WebsiteRemovalRuntimeError(
+        'website_removal_lock_unavailable',
+        'Site mutation lock is unavailable.',
+        503,
+      );
+    }
+    return siteMutationLock.withSiteLock({ websiteId, applicationId }, action);
   }
 
   async function loadOperation(operationId) {
@@ -250,18 +263,23 @@ export function createWebsiteRemovalRuntime({
       );
     }
 
-    requireCleanupMethod(registry.listForWebsite);
-    const prior = await registry.listForWebsite(websiteId);
-    if (!Array.isArray(prior) || prior.some((operation) => operation?.websiteId !== websiteId)) {
-      throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'The removal operation history could not be verified.', 409);
-    }
-    // A failed operation may have partially removed resources. Continue it explicitly;
-    // starting a second operation must not erase its unfinished cleanup history.
-    if (prior.some((operation) => operation.status !== 'removed')) {
-      throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
-    }
-    const op = await registry.create(currentPreview);
-    return runNextStep(op.id);
+    return withProcessMutationLock({
+      websiteId,
+      applicationId: currentPreview.plan?.applicationId ?? currentPreview.website?.applicationId ?? null,
+    }, async () => {
+      requireCleanupMethod(registry.listForWebsite);
+      const prior = await registry.listForWebsite(websiteId);
+      if (!Array.isArray(prior) || prior.some((operation) => operation?.websiteId !== websiteId)) {
+        throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'The removal operation history could not be verified.', 409);
+      }
+      // A failed operation may have partially removed resources. Continue it explicitly;
+      // starting a second operation must not erase its unfinished cleanup history.
+      if (prior.some((operation) => operation.status !== 'removed')) {
+        throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
+      }
+      const op = await registry.create(currentPreview);
+      return runNextStep(op.id);
+    });
   }
 
   async function continueStep({
@@ -287,7 +305,10 @@ export function createWebsiteRemovalRuntime({
       );
     }
 
-    return runNextStep(op.id);
+    return withProcessMutationLock({
+      websiteId: op.websiteId,
+      applicationId: op.applicationId ?? null,
+    }, () => runNextStep(op.id));
   }
 
   async function runDomainRemovalStep(op, step) {
