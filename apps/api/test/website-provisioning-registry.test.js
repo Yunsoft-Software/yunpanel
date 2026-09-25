@@ -419,6 +419,35 @@ test('failed compensation restores a failed provisioning step to failed', async 
   assert.equal(failedCompensation.steps[0].compensation.state, 'failed');
 });
 
+test('authorization-sensitive inventory retains failed and failed-compensation journals', async () => {
+  const registry = createWebsiteProvisioningRegistry({
+    now: () => Date.parse('2026-09-14T01:00:00.000Z'),
+  });
+  await registry.create(input());
+  assert.deepEqual(await registry.listAuthorizationSensitive(), []);
+
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  assert.equal((await registry.listAuthorizationSensitive()).length, 1);
+
+  await registry.failStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'fixture_failed',
+  });
+  assert.equal((await registry.listAuthorizationSensitive()).length, 1);
+
+  await registry.beginCompensation({ operationId, stepId: 'unix_identity' });
+  await registry.failCompensation({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'fixture_compensation_failed',
+  });
+  const sensitive = await registry.listAuthorizationSensitive();
+  assert.equal(sensitive.length, 1);
+  assert.equal(sensitive[0].operationId, operationId);
+  assert.equal(sensitive[0].steps[0].compensation.state, 'failed');
+});
+
 test('earlier compensation is blocked while a later step may still own host mutations', async () => {
   for (const laterState of ['applying', 'succeeded', 'failed', 'compensating']) {
     const registry = createWebsiteProvisioningRegistry({ now: () => Date.parse('2026-09-14T01:00:00.000Z') });
