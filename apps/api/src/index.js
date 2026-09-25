@@ -422,6 +422,27 @@ const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
   siteMutationLock,
   authorizeActor: authorizeWebsitePhpActor,
 });
+const authorizeWebsiteProvisioningChildJob = async (scope) => {
+  try {
+    const operation = await websiteProvisioningRuntime.registry.get(scope.operationId);
+    if (!operation || operation.websiteId !== scope.websiteId
+      || operation.terminalState === 'abandoned') return false;
+    const step = operation.steps.find((candidate) => candidate.id === scope.stepId);
+    if (!step || !['applying', 'compensating'].includes(step.state)) return false;
+    const website = await websiteRegistry.getWebsite(scope.websiteId);
+    if (!website || website.id !== scope.websiteId
+      || (localServerId && website.serverId !== localServerId)) return false;
+    const actor = await websiteProvisioningRuntime.registry.getActor(scope.operationId);
+    if (!actor) return false;
+    const live = await authorizeWebsitePhpActor(actor, scope.websiteId);
+    return Boolean(live
+      && live.userId === actor.userId
+      && live.role === actor.role
+      && live.sessionId === actor.sessionId);
+  } catch {
+    return false;
+  }
+};
 const websiteSftpKeyRuntime = await createWebsiteSftpKeyRuntime({
   filePath: websiteSftpKeyStorePath,
   websiteRegistry,
@@ -1219,6 +1240,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     databaseCredentialOperation: localDatabaseCredentialOperation,
     websiteCronOperation: localWebsiteCronOperation,
     websitePhpToolOperation: localWebsitePhpToolOperation,
+    authorizeWebsiteProvisioning: authorizeWebsiteProvisioningChildJob,
   })),
   inspectServices: inspectAllowlistedServices,
   inspectDocker,
