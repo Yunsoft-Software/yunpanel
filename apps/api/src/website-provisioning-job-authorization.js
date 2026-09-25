@@ -85,3 +85,69 @@ export function createWebsiteProvisioningJobAuthorizer({
     }
   };
 }
+
+const DIRECT_LEGACY_TYPES = Object.freeze([
+  /^website\.ssl\.issue:[0-9a-f-]{36}$/i,
+  /^website\.webmail\.ssl\.issue:[0-9a-f-]{36}$/i,
+  /^website_mail_(?:apply|rollback):[0-9a-f-]{36}$/i,
+  /^website_dkim_(?:apply|cleanup):[0-9a-f-]{36}$/i,
+]);
+
+const LEGACY_DATABASE_OPERATIONS = new Set([
+  'database.create',
+  'database.delete',
+  'database.credential.apply',
+  'database.credential.delete',
+]);
+
+function activeMutationStep(operation, kind) {
+  return operation?.steps?.find((step) => (
+    step?.kind === kind && ['applying', 'compensating'].includes(step.state)
+  )) ?? null;
+}
+
+export function createWebsiteProvisioningLegacyJobGuard({ registry } = {}) {
+  if (!registry || typeof registry.listInterrupted !== 'function') {
+    throw new WebsiteProvisioningJobAuthorizationError(
+      'website_provisioning_legacy_guard_dependencies_invalid',
+      'Website provisioning legacy-job guard dependencies are invalid',
+      503,
+    );
+  }
+
+  return async function requiresWebsiteProvisioningAuthorization(execution = {}) {
+    const type = typeof execution.type === 'string' ? execution.type : '';
+    if (DIRECT_LEGACY_TYPES.some((pattern) => pattern.test(type))) return true;
+
+    const operation = typeof execution.operation === 'string' ? execution.operation : '';
+    const resourceType = typeof execution.resourceType === 'string' ? execution.resourceType : '';
+    const resourceId = typeof execution.resourceId === 'string' ? execution.resourceId : '';
+    const serverId = typeof execution.serverId === 'string' ? execution.serverId : '';
+
+    const databaseCandidate = LEGACY_DATABASE_OPERATIONS.has(operation) && resourceType === 'database';
+    const roundcubeCandidate = operation === 'roundcube.config.apply' && resourceType === 'server';
+    if (!databaseCandidate && !roundcubeCandidate) return false;
+
+    const active = await registry.listInterrupted();
+    if (!Array.isArray(active)) {
+      throw new WebsiteProvisioningJobAuthorizationError(
+        'website_provisioning_legacy_guard_state_invalid',
+        'Website provisioning legacy-job state is invalid',
+        503,
+      );
+    }
+
+    return active.some((provisioning) => {
+      if (databaseCandidate) {
+        const step = activeMutationStep(provisioning, 'website_database');
+        return Boolean(step
+          && step.intent?.databaseName === resourceId
+          && step.intent?.serverId === serverId);
+      }
+      const step = activeMutationStep(provisioning, 'roundcube_mapping');
+      return Boolean(step
+        && step.intent?.serverId === serverId
+        && resourceId === serverId);
+    });
+  };
+}
