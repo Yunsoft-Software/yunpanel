@@ -25,6 +25,25 @@ function timestamp(value) {
   return value;
 }
 
+function privateActor(value, { optional = false } = {}) {
+  if ((value === null || value === undefined) && optional) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || typeof value.sessionId !== 'string' || value.sessionId.length < 1 || value.sessionId.length > 128
+    || typeof value.userId !== 'string' || value.userId.length < 1 || value.userId.length > 128
+    || !['owner', 'site_manager'].includes(value.role)) {
+    throw new WebsiteProvisioningRegistryError(
+      'website_provisioning_actor_invalid',
+      'Website provisioning actor evidence is invalid',
+      400,
+    );
+  }
+  return Object.freeze({
+    sessionId: value.sessionId,
+    userId: value.userId,
+    role: value.role,
+  });
+}
+
 function mutableStep(step) {
   return {
     id: step.id,
@@ -64,7 +83,7 @@ function normalizeStoredOperation(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('invalid Website provisioning registry state');
   const allowed = new Set([
     'operationId', 'websiteId', 'resources', 'steps',
-    'terminalState', 'abandonedAt', 'createdAt', 'updatedAt',
+    'actor', 'terminalState', 'abandonedAt', 'createdAt', 'updatedAt',
   ]);
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid Website provisioning registry state');
   let plan;
@@ -92,6 +111,7 @@ function normalizeStoredOperation(value) {
     websiteId: plan.websiteId,
     resources: { ...plan.resources },
     steps: plan.steps.map(mutableStep),
+    actor: privateActor(value.actor, { optional: true }),
     terminalState,
     abandonedAt: abandonedAt === null ? null : timestamp(abandonedAt),
     createdAt: timestamp(value.createdAt),
@@ -278,6 +298,7 @@ export function createWebsiteProvisioningRegistry({
       websiteId: plan.websiteId,
       resources: { ...plan.resources },
       steps: plan.steps.map(mutableStep),
+      actor: null,
       terminalState: null,
       abandonedAt: null,
     };
@@ -298,6 +319,20 @@ export function createWebsiteProvisioningRegistry({
     await ensureInitialized();
     const operation = state.operations.find((candidate) => candidate.operationId === operationId);
     return operation ? publicOperation(operation) : null;
+  }
+
+  async function getActor(operationId) {
+    await ensureInitialized();
+    const operation = state.operations.find((candidate) => candidate.operationId === operationId);
+    return operation ? privateActor(operation.actor, { optional: true }) : null;
+  }
+
+  async function refreshActor({ operationId, actor } = {}) {
+    await ensureInitialized();
+    const operation = requireActive(requireOperation(operationId));
+    operation.actor = privateActor(actor);
+    await persist();
+    return privateActor(operation.actor);
   }
 
   async function getLatestForWebsite(websiteId) {
@@ -570,6 +605,8 @@ export function createWebsiteProvisioningRegistry({
     init,
     create: (...args) => withStoreMutation(() => create(...args)),
     get: (...args) => withStoreRead(() => get(...args)),
+    getActor: (...args) => withStoreRead(() => getActor(...args)),
+    refreshActor: (...args) => withStoreMutation(() => refreshActor(...args)),
     getLatestForWebsite: (...args) => withStoreRead(() => getLatestForWebsite(...args)),
     listForWebsite: (...args) => withStoreRead(() => listForWebsite(...args)),
     listForDnsZone: (...args) => withStoreRead(() => listForDnsZone(...args)),
