@@ -107,7 +107,7 @@ function activeMutationStep(operation, kind) {
 }
 
 export function createWebsiteProvisioningLegacyJobGuard({ registry } = {}) {
-  if (!registry || typeof registry.listInterrupted !== 'function') {
+  if (!registry || typeof registry.listAuthorizationSensitive !== 'function') {
     throw new WebsiteProvisioningJobAuthorizationError(
       'website_provisioning_legacy_guard_dependencies_invalid',
       'Website provisioning legacy-job guard dependencies are invalid',
@@ -128,7 +128,7 @@ export function createWebsiteProvisioningLegacyJobGuard({ registry } = {}) {
     const roundcubeCandidate = operation === 'roundcube.config.apply' && resourceType === 'server';
     if (!databaseCandidate && !roundcubeCandidate) return false;
 
-    const active = await registry.listInterrupted();
+    const active = await registry.listAuthorizationSensitive();
     if (!Array.isArray(active)) {
       throw new WebsiteProvisioningJobAuthorizationError(
         'website_provisioning_legacy_guard_state_invalid',
