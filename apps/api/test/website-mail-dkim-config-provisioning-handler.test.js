@@ -136,6 +136,9 @@ function fixture({
       assert.equal(input.operation, OPERATIONS.MAIL_DKIM_APPLY);
       assert.equal(input.resourceType, 'mail_domain');
       assert.equal(input.resourceId, mailDomainId);
+      assert.deepEqual(input.authorization, {
+        kind: 'website_provisioning', version: 1, operationId, websiteId, stepId: 'mail_dkim_config',
+      });
       const phase = input.type.startsWith('website_dkim_cleanup:') ? 'cleanup' : 'apply';
       if (phase === 'apply') applyAttempts += 1;
       const failed = phase === 'apply' && failFirstApply && applyAttempts === 1;
