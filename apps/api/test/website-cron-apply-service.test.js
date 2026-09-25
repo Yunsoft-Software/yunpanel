@@ -11,6 +11,11 @@ const taskId = '22345678-1234-4234-8234-123456789012';
 const serverId = '32345678-1234-4234-8234-123456789012';
 const applicationId = '42345678-1234-4234-8234-123456789012';
 const unixUser = 'yunapp-0123456789ab';
+const actor = Object.freeze({
+  sessionId: '52345678-1234-4234-8234-123456789012',
+  userId: '62345678-1234-4234-8234-123456789012',
+  role: 'site_manager',
+});
 
 function createFixtures({ runtimeType = 'node' } = {}) {
   const websites = new Map([
@@ -98,7 +103,7 @@ test('WebsiteCronApplyService creates a task and enqueues CRON_APPLY job', async
     schedule: '0 3 * * *',
     command: '/usr/local/bin/backup.sh',
     enabled: true,
-  });
+  }, actor);
 
   assert.equal(result.task.id, taskId);
   assert.equal(result.task.name, 'Nightly Backup');
@@ -106,6 +111,8 @@ test('WebsiteCronApplyService creates a task and enqueues CRON_APPLY job', async
   assert.equal(result.job.resourceType, 'website_cron');
   assert.equal(result.job.resourceId, taskId);
   assert.equal(result.job.payload.expectedRevision, 1);
+  assert.equal(result.job.payload.authorizationMode, 'user');
+  assert.equal(result.job.payload.actorSessionId, actor.sessionId);
   assert.equal(typeof result.job.payload.desiredStateSha256, 'string');
 });
 
@@ -122,12 +129,12 @@ test('WebsiteCronApplyService updates a task and enqueues CRON_APPLY job', async
     name: 'Backup',
     schedule: '0 3 * * *',
     command: '/usr/local/bin/backup.sh',
-  });
+  }, actor);
 
   const updated = await service.updateCron(taskId, {
     expectedRevision: 1,
     schedule: '0 4 * * *',
-  });
+  }, actor);
 
   assert.equal(updated.task.revision, 2);
   assert.equal(updated.task.schedule, '0 4 * * *');
@@ -148,10 +155,10 @@ test('WebsiteCronApplyService deletes a task and enqueues CRON_REMOVE job', asyn
     name: 'Backup',
     schedule: '0 3 * * *',
     command: '/usr/local/bin/backup.sh',
-  });
+  }, actor);
 
-  const result = await service.deleteCron(taskId, { expectedRevision: 1 });
-  assert.equal(result.deleted, true);
+  const result = await service.deleteCron(taskId, { expectedRevision: 1 }, actor);
+  assert.equal(result.deleted, false);
   assert.equal(result.job.operation, OPERATIONS.CRON_REMOVE);
   assert.equal(result.job.resourceType, 'website_cron');
   assert.equal(result.job.resourceId, taskId);
@@ -171,7 +178,7 @@ test('WebsiteCronApplyService rejects unhosted website runtimes', async () => {
       name: 'Backup',
       schedule: '0 3 * * *',
       command: '/usr/local/bin/backup.sh',
-    }),
+    }, actor),
     (err) => err instanceof WebsiteCronApplyServiceError && err.code === 'website_cron_unsupported_runtime',
   );
 });
