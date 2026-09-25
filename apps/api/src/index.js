@@ -371,6 +371,37 @@ const authorizeWebsiteRemovalActor = async (actor) => {
   if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
   return Object.freeze({ sessionId: session.id, userId: session.user.id, role: 'owner' });
 };
+const authorizeWebsiteRemovalSystemCron = async ({
+  taskId,
+  websiteId,
+  applicationId,
+  serverId,
+} = {}) => {
+  let operations;
+  try { operations = await websiteRemovalOperationRegistry.listForWebsite(websiteId); }
+  catch { return null; }
+  if (!Array.isArray(operations)) return null;
+  const candidates = operations.filter((operation) => (
+    operation
+    && operation.websiteId === websiteId
+    && operation.applicationId === applicationId
+    && operation.serverId === serverId
+    && operation.status !== 'removed'
+    && Array.isArray(operation.plan?.additional?.crons?.ids)
+    && operation.plan.additional.crons.ids.includes(taskId)
+    && operation.steps?.some((step) => step.kind === 'cron_cleanup' && step.status !== 'succeeded')
+  ));
+  if (candidates.length !== 1 || typeof websiteRemovalOperationRegistry.getActor !== 'function') return null;
+  const operation = candidates[0];
+  const actor = await websiteRemovalOperationRegistry.getActor(operation.id);
+  const live = actor ? await authorizeWebsiteRemovalActor(actor) : null;
+  if (!live) return null;
+  return Object.freeze({
+    authorized: true,
+    operationId: operation.id,
+    userId: live.userId,
+  });
+};
 let websitePhpToolActionService = null;
 let localWebsitePhpToolOperation = null;
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
@@ -645,6 +676,7 @@ localWebsiteCronOperation = createLocalWebsiteCronOperation({
   receiptStore: websiteCronOperationReceiptStore,
   siteMutationLock,
   authorizeActor: authorizeWebsitePhpActor,
+  authorizeSystemRemoval: authorizeWebsiteRemovalSystemCron,
 });
 websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
