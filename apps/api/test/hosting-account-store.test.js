@@ -288,6 +288,123 @@ test('persisted reseller actor sees only itself and its direct customers with se
   }
 });
 
+const customerCredentials = {
+  hashPassword: async (password) => `fixture-customer-hash:${password}`,
+  normalizeUsername(value) {
+    if (typeof value !== 'string') throw Object.assign(new Error('invalid username'), { code: 'invalid_username' });
+    const normalized = value.trim().toLowerCase();
+    if (!/^[a-z0-9][a-z0-9._@+-]{2,127}$/.test(normalized)) throw Object.assign(new Error('invalid username'), { code: 'invalid_username' });
+    return normalized;
+  },
+};
+
+test('persisted reseller creates a new direct customer login and profile atomically', async (t) => {
+  const f = setup(t, customerCredentials);
+  f.reseller('reseller-a', { maxCustomers: 2, maxWebsites: 3 });
+  const token = f.session('reseller-a');
+  f.revoked.length = 0;
+  const account = await f.store.createCustomerLogin(token, f.requireManagement, {
+    username: ' NEW-CUSTOMER ', password: 'customer-password',
+  });
+  assert.equal(account.kind, 'customer');
+  assert.equal(account.resellerId, 'reseller-a');
+  assert.equal(account.username, 'new-customer');
+  assert.equal(account.revision, 1);
+  assert.equal(account.userRevision, 2);
+  const user = f.db.prepare("SELECT username, password_hash, role, active FROM users WHERE id = ?").get(account.id);
+  assert.deepEqual(user, { username: 'new-customer', password_hash: 'fixture-customer-hash:customer-password', role: 'site_manager', active: 1 });
+  assert.equal(f.get().usage.customers, 1);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM auth_user_websites WHERE user_id = ?').get(account.id).n, 0);
+  assert.equal(f.revoked.length, 0);
+  assert.deepEqual(
+    f.db.prepare("SELECT actor, action, resource FROM fixture_audit WHERE resource = ? ORDER BY rowid").all(account.id).map((row) => row.action),
+    ['hosting.customer_registered', 'hosting.customer_login_created'],
+  );
+});
+
+test('reseller customer creation rechecks live session, quota and username after password hashing', async (t) => {
+  let finish;
+  const f = setup(t, {
+    ...customerCredentials,
+    hashPassword: () => new Promise((resolve) => { finish = resolve; }),
+  });
+  f.reseller('reseller-a', { maxCustomers: 1, maxWebsites: 1 });
+  const token = f.session('reseller-a');
+  const creation = f.store.createCustomerLogin(token, f.requireManagement, { username: 'late-user', password: 'customer-password' });
+  f.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(token);
+  finish('late-hash');
+  await assert.rejects(creation, code('unauthorized'));
+  assert.equal(f.db.prepare("SELECT 1 FROM users WHERE username = 'late-user'").get(), undefined);
+
+  const token2 = f.session('reseller-a');
+  let finishRace;
+  const racingStore = createHostingAccountStore({
+    ...f, ...customerCredentials,
+    hashPassword: () => new Promise((resolve) => { finishRace = resolve; }),
+  });
+  const racing = racingStore.createCustomerLogin(token2, f.requireManagement, { username: 'raced-user', password: 'customer-password' });
+  f.addUser('raced-user');
+  finishRace('race-hash');
+  await assert.rejects(racing, code('username_taken'));
+});
+
+test('reseller customer creation rejects mass assignment and quota overflow without partial login rows', async (t) => {
+  const f = setup(t, customerCredentials);
+  f.reseller('reseller-a', { maxCustomers: 0, maxWebsites: 0 });
+  const token = f.session('reseller-a');
+  for (const extra of ['role', 'active', 'resellerId', 'userId', 'websiteIds']) {
+    await assert.rejects(
+      f.store.createCustomerLogin(token, f.requireManagement, { username: `child-${extra.toLowerCase()}`, password: 'customer-password', [extra]: 'spoofed' }),
+      code('invalid_hosting_account_input'),
+    );
+  }
+  await assert.rejects(
+    f.store.createCustomerLogin(token, f.requireManagement, { username: 'quota-child', password: 'customer-password' }),
+    code('reseller_limit_reached'),
+  );
+  assert.equal(f.db.prepare("SELECT count(*) AS n FROM users WHERE username LIKE 'child-%' OR username = 'quota-child'").get().n, 0);
+});
+
+test('reseller updates only its direct customer login identity and revokes target sessions', async (t) => {
+  const f = setup(t, customerCredentials);
+  f.reseller('reseller-a'); f.reseller('reseller-b');
+  const child = f.customer('customer-a', 'reseller-a');
+  f.customer('customer-b', 'reseller-b'); f.customer('direct', null);
+  const resellerToken = f.session('reseller-a');
+  const childToken = f.session('customer-a');
+  f.revoked.length = 0;
+
+  const renamed = await f.store.updateCustomerLogin(resellerToken, f.requireManagement, 'customer-a', {
+    revision: child.revision, username: ' customer-renamed ',
+  });
+  assert.equal(renamed.username, 'customer-renamed');
+  assert.equal(renamed.revision, 2);
+  assert.equal(renamed.userRevision, 3);
+  assert.equal(f.getSession(childToken), null);
+  assert.deepEqual(f.revoked, [{ id: 'customer-a', reason: 'hosting_customer_login_changed' }]);
+
+  const newChildToken = f.session('customer-a');
+  f.revoked.length = 0;
+  const passwordChanged = await f.store.updateCustomerLogin(resellerToken, f.requireManagement, 'customer-a', {
+    revision: renamed.revision, password: 'new-customer-password',
+  });
+  assert.equal(passwordChanged.revision, 3);
+  assert.equal(f.db.prepare("SELECT password_hash FROM users WHERE id = 'customer-a'").get().password_hash, 'fixture-customer-hash:new-customer-password');
+  assert.equal(f.getSession(newChildToken), null);
+  assert.deepEqual(f.revoked, [{ id: 'customer-a', reason: 'hosting_customer_login_changed' }]);
+
+  await assert.rejects(
+    f.store.updateCustomerLogin(resellerToken, f.requireManagement, 'customer-a', { revision: 1, username: 'stale-name' }),
+    code('hosting_account_revision_conflict'),
+  );
+  for (const id of ['reseller-a', 'reseller-b', 'customer-b', 'direct']) {
+    await assert.rejects(
+      f.store.updateCustomerLogin(resellerToken, f.requireManagement, id, { revision: 1, username: `blocked-${id}` }),
+      code('reseller_scope_forbidden'),
+    );
+  }
+});
+
 test('persisted reseller may suspend and reactivate only its direct customer login', (t) => {
   const f = setup(t);
   f.reseller('reseller-a'); f.reseller('reseller-b');
