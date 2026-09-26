@@ -2,7 +2,12 @@ import { AuthError } from './auth-error.js';
 
 const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
-const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status))?$`);
+const SELF_CUSTOMERS = `${ROOT}/self/customers`;
+const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status|login))?import { AuthError } from './auth-error.js';
+
+const ROOT = '/api/users/hosting/accounts';
+const ID = '[A-Za-z0-9_-]{1,128}';
+);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
 const invalidQuery = () => new AuthError('invalid_hosting_account_query', 'Use documented, single-valued account filters.');
 
@@ -47,18 +52,23 @@ function requireHostingActor(accounts, rawToken, requireManagement) {
 function requireOwnerActor(actor) {
   if (actor?.role !== 'owner') throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
 }
+function requireResellerActor(actor) {
+  if (actor?.role !== 'reseller') throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+}
 
 /** Called by auth-http AFTER cookie/Origin/CSRF and the session role boundary.
  * The persisted store derives Owner/reseller authority from current auth/profile
- * state inside every transaction. Resellers get scoped reads and direct-customer
- * login lifecycle only; registration, limits and unlinking remain Owner-only.
+ * state inside every transaction. Resellers get scoped reads, direct-customer
+ * login lifecycle and a dedicated own-customer login create/edit surface; generic
+ * registration, limits, unlinking and ownership transfer remain Owner-only.
  */
 export async function handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
   const accounts = store.users?.hostingAccounts;
   const actor = requireHostingActor(accounts, rawToken, requireManagement);
   const collection = pathname === ROOT;
+  const selfCustomers = pathname === SELF_CUSTOMERS;
   const match = ITEM.exec(pathname);
-  if (!collection && !match) throw new AuthError('not_found', 'Hosting account route not found.', 404);
+  if (!collection && !selfCustomers && !match) throw new AuthError('not_found', 'Hosting account route not found.', 404);
   const call = (method, ...args) => {
     if (typeof accounts?.[method] !== 'function') throw unavailable();
     return accounts[method](rawToken, requireManagement, ...args);
@@ -68,6 +78,12 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   }
   // Non-list routes accept no query modifiers, even for reads.
   if ([...query.keys()].length) throw invalidQuery();
+  if (selfCustomers && request.method === 'POST') {
+    requireResellerActor(actor);
+    const body = await readJson(request);
+    const account = await call('createCustomerLogin', body);
+    return json(response, 201, { data: { account, accessGranted: false, siteAccessGranted: false } });
+  }
   if (collection && request.method === 'POST') {
     requireOwnerActor(actor);
     const body = await readJson(request);
@@ -97,6 +113,11 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
       },
     });
   }
+  if (match?.[2] === 'login' && request.method === 'PATCH') {
+    const body = await readJson(request);
+    const account = await call('updateCustomerLogin', match[1], body);
+    return json(response, 200, { data: { account, accessGranted: false, siteAccessGranted: false } });
+  }
   if (match?.[2] === 'profile' && request.method === 'DELETE') {
     requireOwnerActor(actor);
     const body = await readJson(request);
@@ -108,6 +129,6 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const result = call('unregister', match[1], { revision: body.revision });
     return json(response, 200, { data: { ...result, loginDeleted: false, accessGranted: false } });
   }
-  response.setHeader('allow', collection ? 'GET, POST' : ['limits', 'status'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
+  response.setHeader('allow', collection || selfCustomers ? (collection ? 'GET, POST' : 'POST') : ['limits', 'status', 'login'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
   throw new AuthError('method_not_allowed', 'Unsupported hosting account operation.', 405);
 }
