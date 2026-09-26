@@ -29,4 +29,5 @@ test('real auth store shares hosting profiles and revokes a native login session
   const next = await store.login({ username: 'reseller-login', password });
   assert.equal(next.session.user.role, 'site_manager');
   assert.deepEqual(next.session.user.websiteIds, []);
+  assert.deepEqual(next.session.user.hosting, { kind: 'reseller', resellerId: null });
 });
