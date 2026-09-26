@@ -18,6 +18,11 @@ export function hostingAccountMessage(error) {
     reseller_limit_reached: 'Bayinin adet sınırı doldu. Yeni kayıt eklenmedi.',
     reseller_scope_forbidden: 'Seçilen bayinin etkin olduğunu kontrol edin; bu ilişki kurulamadı.',
     hosting_account_not_found: 'Profil artık bulunmuyor. Listeyi yenileyin.',
+    username_taken: 'Bu kullanıcı adı zaten kullanımda. Başka bir kullanıcı adı seçin.',
+    invalid_username: 'Kullanıcı adı 3–128 karakter olmalı; harf, rakam ve . _ @ + - kullanılabilir.',
+    invalid_password: 'Parola en az 12 karakter olmalı.',
+    empty_hosting_customer_update: 'Değiştirilecek bir kullanıcı adı veya yeni parola girin.',
+    hosting_customer_credentials_unavailable: 'Müşteri giriş hesabı yönetimi bu API sürümünde kullanılamıyor.',
     invalid_active: 'Hesap durumu geçersiz. Profili yenileyip işlemi tekrar seçin.',
     hosting_user_not_found: 'Kullanıcı hesabı artık bulunmuyor. Listeyi yenileyin.',
     invalid_reseller_limits: 'Her iki adet sınırını da girin veya ayrı ayrı Sınırsız seçin. Sıfır yeni kayıt eklenmesini engeller.',
@@ -83,6 +88,30 @@ export function hostingRegistrationInput(user, form) {
   return { ...base, kind: 'customer', resellerId: form.resellerId };
 }
 
+function normalizedCustomerUsername(value) {
+  if (typeof value !== 'string') throw problem('invalid_username');
+  const normalized = value.trim().toLowerCase();
+  if (!USERNAME.test(normalized)) throw problem('invalid_username');
+  return normalized;
+}
+function customerPassword(value) {
+  if (typeof value !== 'string' || [...value].length < 12 || new TextEncoder().encode(value).length > 1024) throw problem('invalid_password');
+  return value;
+}
+export function hostingCustomerCreateInput(form) {
+  return { username: normalizedCustomerUsername(form?.username), password: customerPassword(form?.password) };
+}
+export function hostingCustomerLoginInput(account, form) {
+  const body = { revision: account.revision };
+  if (form && Object.hasOwn(form, 'username')) {
+    const username = normalizedCustomerUsername(form.username);
+    if (username !== account.username) body.username = username;
+  }
+  if (form && typeof form.password === 'string' && form.password.length) body.password = customerPassword(form.password);
+  if (Object.keys(body).length === 1) throw problem('empty_hosting_customer_update');
+  return body;
+}
+
 /** Instance belongs to one mounted Owner component. No cache, storage, automatic
  * writes/retries or new auth mechanism. Separate read lanes keep picker/page reads
  * independent; generations also reject stale responses when abort is ignored.
@@ -143,7 +172,12 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
       if (writer) throw problem('hosting_request_busy');
       if (blockedTarget) throw problem('hosting_reconciliation_required');
       let method, path, body, target, expectedKind, expectedParent;
-      if (action === 'register') {
+      if (action === 'createCustomer') {
+        account = readHostingAccount(account);
+        if (account.kind !== 'reseller' || !account.active) throw problem('hosting_result_invalid');
+        body = hostingCustomerCreateInput(form); target = account.id; expectedKind = 'customer'; expectedParent = account.id;
+        method = 'POST'; path = `${ROOT}/self/customers`;
+      } else if (action === 'register') {
         body = hostingRegistrationInput(user, form); target = user.id; expectedKind = body.kind;
         expectedParent = body.kind === 'customer' ? body.resellerId : null;
         method = 'POST'; path = ROOT;
@@ -155,6 +189,9 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
         } else if (action === 'status' && typeof form?.active === 'boolean' && form.active !== account.active) {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/status`;
           body = { revision: account.revision, active: form.active };
+        } else if (action === 'login' && account.kind === 'customer') {
+          method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/login`;
+          body = hostingCustomerLoginInput(account, form);
         } else if (action === 'unregister') {
           method = 'DELETE'; path = `${ROOT}/${encodeURIComponent(target)}/profile`;
           body = { revision: account.revision, confirmation: `unregister-hosting-profile:${target}:${account.revision}` };
@@ -164,21 +201,26 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
       try {
         const result = await request(path, { method, body, signal: controller.signal });
         if (!live() || controller.signal.aborted) throw obsolete();
-        if (!object(result) || result.accessGranted !== false) throw problem('hosting_result_invalid');
+        if (!object(result) || result.accessGranted !== false
+          || (['createCustomer', 'login'].includes(action) && result.siteAccessGranted !== false)) throw problem('hosting_result_invalid');
         if (action === 'unregister') {
           if (result.id !== target || result.unregistered !== true || result.loginDeleted !== false) throw problem('hosting_result_invalid');
           return { id: target, unregistered: true, loginDeleted: false, accessGranted: false };
         }
         if (action === 'status' && result.hostSitesSuspended !== false) throw problem('hosting_result_invalid');
         const next = readHostingAccount(result.account);
-        if (next.id !== target || next.kind !== expectedKind || next.resellerId !== expectedParent
+        if ((action === 'createCustomer' ? next.id === target || next.username !== body.username : next.id !== target)
+          || next.kind !== expectedKind || next.resellerId !== expectedParent
+          || (action === 'createCustomer' && (next.revision !== 1 || next.userRevision < 2))
           || (action === 'register' && next.userRevision <= user.revision)
           || (action === 'register' && expectedKind === 'reseller' && (next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
           || (action === 'limits' && (next.revision < account.revision || next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
-          || (action === 'status' && (next.active !== body.active || next.revision <= account.revision))) throw problem('hosting_result_invalid');
-        return action === 'status'
-          ? { account: next, accessGranted: false, hostSitesSuspended: false }
-          : { account: next, accessGranted: false };
+          || (action === 'status' && (next.active !== body.active || next.revision <= account.revision))
+          || (action === 'login' && (next.revision <= account.revision || next.userRevision <= account.userRevision
+            || (body.username !== undefined && next.username !== body.username)))) throw problem('hosting_result_invalid');
+        if (action === 'status') return { account: next, accessGranted: false, hostSitesSuspended: false };
+        if (['createCustomer', 'login'].includes(action)) return { account: next, accessGranted: false, siteAccessGranted: false };
+        return { account: next, accessGranted: false };
       } catch (error) {
         if (!live() || controller.signal.aborted) throw obsolete();
         if (!error.status || error.status >= 500 || ['user_revision_conflict', 'hosting_account_revision_conflict', 'hosting_account_exists', 'hosting_account_not_found'].includes(error.code)) {
