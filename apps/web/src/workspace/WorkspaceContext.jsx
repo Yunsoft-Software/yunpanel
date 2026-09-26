@@ -11,7 +11,7 @@ import { createSslJobRefresh } from './ssl-job-refresh.js';
 const WorkspaceContext = createContext(null);
 export function WorkspaceProvider({ children }) {
   const { pathname } = useLocation();
-  const { can, canManage, isOwner, isSiteManager, readOnly } = usePanelSession();
+  const { can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly } = usePanelSession();
   const [tracked, setTracked] = useState({});
   const [observedId, setObservedId] = useState(null);
   const [jobOpen, setJobOpen] = useState(false);
@@ -59,7 +59,7 @@ export function WorkspaceProvider({ children }) {
     } finally { submitting.current.delete(path); }
   }, [canManage, observe, jobs.refresh]);
   const resourceBusy = (type, id) => Object.values({ ...Object.fromEntries(jobs.items.map((job) => [job.id, job])), ...tracked }).some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
-  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, readOnly }}>{children}</WorkspaceContext.Provider>;
+  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly }}>{children}</WorkspaceContext.Provider>;
 }
 export function useWorkspace() {
   const value = useContext(WorkspaceContext);
