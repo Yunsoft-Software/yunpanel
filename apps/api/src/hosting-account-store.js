@@ -2,7 +2,7 @@ import { AuthError } from './auth-error.js';
 import { createHostingSiteAllocationStore } from './hosting-site-allocation-store.js';
 import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
 import { initializeHostingAccountSchema } from './hosting-account-schema.js';
-import { assertCustomerCreationScope, assertResellerManagement, validateHostingAccount } from './reseller-scope.js';
+import { assertCustomerCreationScope, assertCustomerManagement, assertResellerManagement, validateHostingAccount } from './reseller-scope.js';
 import { assertResellerCapacity, countResellerUsage, validateResellerLimits } from './reseller-limits.js';
 
 const identifier = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
@@ -25,10 +25,10 @@ function active(value) {
   return value;
 }
 
-/** RS-02 storage integration, deliberately Owner-only and NOT mounted as HTTP.
- * Same auth DB/BEGIN IMMEDIATE transaction; no duplicated users or new login roles.
- * Website enrollment/provisioning and reseller access stay closed until the existing
- * Website registry, jobs, gateways and live sessions share the ownership boundary.
+/** RS-02 storage integration on the existing auth DB and login roles.
+ * Owner keeps full profile administration. A persisted, active reseller profile may
+ * read itself/its direct customers and change only those customers' login lifecycle.
+ * Registration, limits, unlinking and Website allocation remain Owner-only here.
  */
 export function createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser }) {
   if (![now, transaction, getSession, mfa?.invalidateUser, audit, revokeLiveUser].every((value) => typeof value === 'function')) {
@@ -64,6 +64,27 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(current.user.id);
     if (user?.role !== 'owner' || user.active !== 1) throw error('forbidden', 'Owner access is required.', 403);
     return { id: user.id, role: 'owner', active: true };
+  }
+  const scopeDenied = () => error('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+  function managementActor(rawToken, requireManagement) {
+    const current = getSession(rawToken);
+    if (!current?.id || !current.user?.id) throw error('unauthorized', 'Sign in to continue.', 401);
+    if (current.user.role === 'owner') return owner(rawToken, requireManagement);
+    const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(current.user.id);
+    if (user?.role !== 'site_manager' || user.active !== 1) throw scopeDenied();
+    const row = raw(user.id);
+    if (!row) throw scopeDenied();
+    const profile = projection(row);
+    if (profile.kind !== 'reseller' || profile.resellerId !== null || !profile.active) throw scopeDenied();
+    return { id: user.id, role: 'reseller', active: true };
+  }
+  function assertReadScope(actor, row) {
+    const account = projection(row);
+    if (actor.role === 'owner') return;
+    if (account.kind === 'reseller' && account.id === actor.id) return;
+    if (account.kind !== 'customer') throw scopeDenied();
+    const parent = account.resellerId === null ? null : existing(account.resellerId);
+    assertCustomerManagement({ actor, customer: account, reseller: parent ? projection(parent) : null });
   }
   function limits(id) {
     const row = db.prepare('SELECT max_customers AS maxCustomers, max_websites AS maxWebsites FROM auth_reseller_limits WHERE reseller_id = ?').get(id);
@@ -122,6 +143,9 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
   });
   return {
     siteAllocations,
+    authorizeActor(rawToken, requireManagement) {
+      return transaction(() => managementActor(rawToken, requireManagement));
+    },
     registerReseller(rawToken, requireManagement, input) {
       const result = transaction(() => {
         const actor = owner(rawToken, requireManagement);
@@ -147,11 +171,16 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       return result;
     },
     get(rawToken, requireManagement, id) {
-      return transaction(() => { owner(rawToken, requireManagement); return view(existing(id)); });
+      return transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        const row = existing(id);
+        assertReadScope(actor, row);
+        return view(row);
+      });
     },
     list(rawToken, requireManagement, input = {}) {
       return transaction(() => {
-        owner(rawToken, requireManagement);
+        const actor = managementActor(rawToken, requireManagement);
         fields(input, ['kind', 'resellerId', 'offset', 'limit'], []);
         const { kind, offset = 0, limit = 50 } = input;
         if (kind !== undefined && !['reseller', 'customer'].includes(kind)) throw error('invalid_hosting_kind', 'Choose reseller or customer.');
@@ -159,12 +188,18 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
           throw error('invalid_pagination', 'Use a nonnegative offset and a limit from 1 to 100.');
         }
         const where = []; const args = [];
-        if (kind !== undefined) { where.push('h.kind = ?'); args.push(kind); }
-        if (Object.hasOwn(input, 'resellerId')) {
-          if (kind !== 'customer' || (input.resellerId !== null && !identifier(input.resellerId))) {
-            throw error('invalid_hosting_parent', 'A parent filter requires customer kind and an explicit reseller ID or null.');
+        if (actor.role === 'reseller') {
+          if ((kind !== undefined && kind !== 'customer')
+            || (Object.hasOwn(input, 'resellerId') && input.resellerId !== actor.id)) throw scopeDenied();
+          where.push("h.kind = 'customer'", 'h.reseller_id = ?'); args.push(actor.id);
+        } else {
+          if (kind !== undefined) { where.push('h.kind = ?'); args.push(kind); }
+          if (Object.hasOwn(input, 'resellerId')) {
+            if (kind !== 'customer' || (input.resellerId !== null && !identifier(input.resellerId))) {
+              throw error('invalid_hosting_parent', 'A parent filter requires customer kind and an explicit reseller ID or null.');
+            }
+            where.push('h.reseller_id IS ?'); args.push(input.resellerId);
           }
-          where.push('h.reseller_id IS ?'); args.push(input.resellerId);
         }
         const filter = where.length ? ` WHERE ${where.join(' AND ')}` : '';
         const total = db.prepare(`SELECT count(*) AS total FROM auth_hosting_accounts h${filter}`).get(...args).total;
@@ -190,9 +225,14 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     },
     setActive(rawToken, requireManagement, id, input) {
       const outcome = transaction(() => {
-        const actor = owner(rawToken, requireManagement);
+        const actor = managementActor(rawToken, requireManagement);
         fields(input, ['revision', 'active']);
         const row = existing(id, revision(input.revision));
+        if (actor.role === 'reseller') {
+          if (row.kind !== 'customer') throw scopeDenied();
+          const parent = row.reseller_id === null ? null : existing(row.reseller_id);
+          assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
+        }
         const nextActive = active(input.active);
         if (Boolean(row.active) === nextActive) {
           return { account: view(row), revoked: [] };
