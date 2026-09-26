@@ -14,6 +14,23 @@ test('malformed or partial login responses fail closed', () => {
   assert.equal(loginOutcome(session).session, session);
 });
 
+test('optional hosting session context is accepted only for valid site-manager reseller/customer profiles', () => {
+  const site = { ...session, user: { id: 'site-user', username: 'site-user', role: 'site_manager', websiteIds: [] } };
+  assert.equal(requireSession(site), site);
+  const reseller = { ...site, user: { ...site.user, hosting: { kind: 'reseller', resellerId: null } } };
+  const customer = { ...site, user: { ...site.user, hosting: { kind: 'customer', resellerId: 'reseller-a' } } };
+  assert.equal(requireSession(reseller), reseller);
+  assert.equal(requireSession(customer), customer);
+  for (const hosting of [
+    { kind: 'reseller', resellerId: 'parent' },
+    { kind: 'customer' },
+    { kind: 'customer', resellerId: '../bad' },
+    { kind: 'customer', resellerId: 'site-user' },
+    { kind: 'owner', resellerId: null },
+  ]) assert.throws(() => requireSession({ ...site, user: { ...site.user, hosting } }));
+  assert.throws(() => requireSession({ ...session, user: { ...session.user, hosting: { kind: 'reseller', resellerId: null } } }));
+});
+
 test('password request preserves 202 MFA step without logging the user in', async (t) => {
   setSession(null);
   t.mock.method(globalThis, 'fetch', async (url, options) => {
