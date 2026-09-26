@@ -165,7 +165,11 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
       const query = new URLSearchParams({ kind, offset: String(offset), limit: String(limit) });
       if (resellerId === null) query.set('direct', 'true');
       else if (resellerId !== undefined) query.set('resellerId', resellerId);
-      return read(lane, `${ROOT}?${query}`, (value) => readHostingPage(value, { kind, offset, limit, resellerId }));
+      return read(lane, `${ROOT}?${query}`, (value) => {
+        const page = readHostingPage(value, { kind, offset, limit, resellerId });
+        if (blockedTarget && page.accounts.some((account) => account.id === blockedTarget)) blockedTarget = null;
+        return page;
+      });
     },
     async mutate({ action, user, account, form }) {
       if (!live()) throw obsolete();
