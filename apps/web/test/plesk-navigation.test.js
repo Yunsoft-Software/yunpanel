@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { navigationGroups, navigationItemActive, TOOLS_SETTINGS_GROUPS, commandEntries, groupSiteTabs, normalizePreferences, readPreferences, writePreferences, websiteCount } from '../src/workspace/ui/ux-model.js';
 import { SITE_TABS, siteHref, selectedApplication } from '../src/workspace/site-model.js';
-const menu = (manage, owner) => navigationGroups(manage, owner).flatMap((group) => group.items).map(([to]) => to);
+const menu = (manage, owner, reseller = false) => navigationGroups(manage, owner, reseller).flatMap((group) => group.items).map(([to]) => to);
 const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.meta.url), 'utf8');
 
 test('Owner menu puts site tasks first in Plesk order, not runtime inventory', () => {
@@ -12,6 +12,10 @@ test('Owner menu puts site tasks first in Plesk order, not runtime inventory', (
 });
 test('site manager gets the four scoped task entries without Owner tools', () => {
   assert.deepEqual(menu(true, false), ['/websites', '/mail', '/files', '/databases']);
+});
+test('reseller gets Müşterilerim without changing the ordinary site-manager menu', () => {
+  assert.deepEqual(menu(true, false, true), ['/customers', '/websites', '/mail', '/files', '/databases']);
+  assert.equal(navigationGroups(true, false, true)[0].items[0][1], 'Müşterilerim');
 });
 test('read-only states do not receive management or file handoff links', () => {
   assert.deepEqual(menu(false, false), ['/websites']);
@@ -43,6 +47,8 @@ test('command search is Owner-aware and defaults to the restricted context', () 
   }
   assert.ok(commandEntries({ canManage: true, isOwner: true, query: 'Docker' }).some((entry) => entry.to === '/docker'));
   assert.ok(!commandEntries({ canManage: false, isOwner: true, query: 'Docker' }).some((entry) => entry.to === '/docker'));
+  assert.ok(commandEntries({ canManage: true, isReseller: true, query: 'müşteri' }).some((entry) => entry.to === '/customers'));
+  assert.ok(!commandEntries({ canManage: true, isReseller: false, query: 'müşteri' }).some((entry) => entry.to === '/customers'));
 });
 test('Owner directory and sidebar search results are deduplicated by destination', () => {
   const entries = commandEntries({ canManage: true, isOwner: true });
@@ -92,7 +98,9 @@ test('source: home is websites, legacy URLs and Owner guards stay mounted', asyn
   const app = await source('WorkspaceApp.jsx');
   assert.match(app, /index: true, element: <Navigate to="\/websites" replace/);
   assert.match(app, /path: 'tools-settings', element: owner\(<ToolsSettingsPage \/>\)/);
-  for (const path of ['dashboard', 'applications', 'domains', 'servers', 'settings', 'settings/users', 'backups', 'mail/:mailDomainId', 'websites/:websiteId/:tab?']) assert.ok(app.includes(`path: '${path}'`), path);
+  for (const path of ['dashboard', 'applications', 'domains', 'servers', 'settings', 'settings/users', 'backups', 'customers', 'mail/:mailDomainId', 'websites/:websiteId/:tab?']) assert.ok(app.includes(`path: '${path}'`), path);
+  assert.match(app, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>\)/);
+  assert.match(app, /function ResellerRoute/);
   for (const tool of ['mail', 'databases']) assert.ok(app.includes(`manage(<GlobalSiteTool tool="${tool}"`));
   assert.match(app, /return isOwner \? ownerView : <SiteToolEntryPage tool=\{tool\}/);
 });
@@ -104,12 +112,12 @@ test('source: global chooser does not render server mail/database consoles', asy
 });
 test('source: command palette uses actual Owner context and preferences are not open by default', async () => {
   const layout = await source('WorkspaceLayout.jsx');
-  assert.match(layout, /<CommandPalette[^>]+isOwner=\{isOwner\}/);
+  assert.match(layout, /<CommandPalette[^>]+isOwner=\{isOwner\}[^>]+isReseller=\{isReseller\}/);
   assert.match(layout, /<details className="ws-appearance">/);
   assert.match(layout, /<Preferences \/>/);
   assert.match(layout, /inert=\{narrow && !menuOpen\}/);
   const palette = await source('ui/CommandPalette.jsx');
-  assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, domains \}\)/);
+  assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, isReseller, domains \}\)/);
 });
 test('source: no More-only site navigation and tools wrap on narrow screens', async () => {
   const nav = await source('ui/SiteNavigation.jsx');
