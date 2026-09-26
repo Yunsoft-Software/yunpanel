@@ -7,23 +7,43 @@ const code = (expected) => (error) => error.code === expected;
 function fixture(options = {}) {
   let session = { id: 'session-owner', user: { id: 'owner', role: 'owner' } };
   const calls = [];
-  const requireManagement = (current) => {
+  const defaultRequireManagement = (current) => {
     if (!current) throw new AuthError('unauthorized', 'Sign in.', 401);
     if (current.user.role !== 'owner') throw new AuthError('forbidden', 'Owner only.', 403);
     return current;
   };
-  const accounts = Object.fromEntries(['list', 'get', 'registerCustomer', 'registerReseller', 'updateLimits', 'setActive', 'unregister'].map((name) => [name, (token, policy, ...args) => {
-    assert.equal(token, 'cookie-token'); assert.equal(policy, requireManagement);
-    requireManagement(session); calls.push({ name, args });
-    return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
-  }]));
+  const requireManagement = options.requireManagement ?? defaultRequireManagement;
+  const accounts = {
+    authorizeActor(token, policy) {
+      assert.equal(token, 'cookie-token'); assert.equal(policy, requireManagement);
+      if (!session) throw new AuthError('unauthorized', 'Sign in.', 401);
+      if (session.user.role === 'owner') {
+        const approved = policy(session);
+        if (approved?.id !== session.id || approved?.user?.id !== session.user.id || approved.user.role !== 'owner') {
+          throw new AuthError('forbidden', 'Owner only.', 403);
+        }
+        return { id: session.user.id, role: 'owner', active: true };
+      }
+      if (session.user.role === 'site_manager' && session.user.id === 'reseller-a') {
+        return { id: 'reseller-a', role: 'reseller', active: true };
+      }
+      throw new AuthError('reseller_scope_forbidden', 'Scoped reseller access denied.', 403);
+    },
+  };
+  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'updateLimits', 'setActive', 'unregister']) {
+    accounts[name] = (token, policy, ...args) => {
+      accounts.authorizeActor(token, policy);
+      calls.push({ name, args });
+      return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
+    };
+  }
   const headers = {};
-  const store = { getSession: () => session, users: { hostingAccounts: accounts } };
+  const store = { users: { hostingAccounts: accounts } };
   const run = async (method, path = '/api/users/hosting/accounts', body = {}) => {
     const url = new URL(path, 'http://local');
     return handleHostingAccountAdmin({ request: { method }, response: { setHeader: (key, value) => { headers[key] = value; } },
       pathname: url.pathname, query: url.searchParams, store, rawToken: 'cookie-token', requireManagement,
-      readJson: async () => body, json: (_, status, payload) => ({ status, ...payload }), ...options });
+      readJson: options.readJson ?? (async () => body), json: (_, status, payload) => ({ status, ...payload }) });
   };
   return { run, calls, accounts, store, headers, setSession: (value) => { session = value; }, requireManagement };
 }
@@ -102,21 +122,41 @@ for (const [method, path, expected] of [['DELETE', '/api/users/hosting/accounts/
     if (expected === 'method_not_allowed') assert.ok(f.headers.allow);
   });
 }
+test('active persisted reseller can read scoped accounts and change customer status but not use Owner-only mutations', async () => {
+  const f = fixture();
+  f.setSession({ id: 'session-reseller-a', user: { id: 'reseller-a', role: 'site_manager' } });
+  assert.equal((await f.run('GET', '/api/users/hosting/accounts?kind=customer')).status, 200);
+  assert.equal((await f.run('GET', '/api/users/hosting/accounts/customer-a')).status, 200);
+  assert.equal((await f.run('PATCH', '/api/users/hosting/accounts/customer-a/status', { revision: 1, active: false })).status, 200);
+  assert.deepEqual(f.calls.map((item) => item.name), ['list', 'get', 'setActive']);
+  for (const [method, path, body] of [
+    ['POST', '/api/users/hosting/accounts', { kind: 'customer' }],
+    ['PATCH', '/api/users/hosting/accounts/reseller-a/limits', { revision: 1, limits: { maxCustomers: 1, maxWebsites: 1 } }],
+    ['DELETE', '/api/users/hosting/accounts/customer-a/profile', { revision: 1, confirmation: 'unregister-hosting-profile:customer-a:1' }],
+  ]) {
+    await assert.rejects(f.run(method, path, body), code('reseller_scope_forbidden'));
+  }
+  assert.deepEqual(f.calls.map((item) => item.name), ['list', 'get', 'setActive']);
+});
+
 for (const method of ['GET', 'POST', 'PATCH', 'DELETE']) {
-  test(`${method} rechecks live Owner before route parsing, reads or writes`, async () => {
+  test(`${method} rechecks a live persisted hosting actor before route parsing, reads or writes`, async () => {
     const f = fixture(); f.setSession(null); await assert.rejects(f.run(method), code('unauthorized'));
-    for (const role of ['site_manager', 'read_only', 'reseller', 'customer']) {
-      f.setSession({ id: 'session-other', user: { id: 'other', role } }); await assert.rejects(f.run(method), code('forbidden'));
+    for (const role of ['read_only', 'reseller', 'customer']) {
+      f.setSession({ id: 'session-other', user: { id: 'other', role } }); await assert.rejects(f.run(method), code('reseller_scope_forbidden'));
     }
+    f.setSession({ id: 'session-other', user: { id: 'other', role: 'site_manager' } });
+    await assert.rejects(f.run(method), code('reseller_scope_forbidden'));
     assert.equal(f.calls.length, 0);
   });
 }
-test('forged policy return cannot bless a different user or missing session', async () => {
+test('forged Owner policy return cannot bless a different live session', async () => {
   const f = fixture({ requireManagement: () => ({ id: 'other-session', user: { id: 'owner', role: 'owner' } }) });
   await assert.rejects(f.run('GET'), code('forbidden'));
 });
 test('expired session after body read is rechecked by the store before mutation', async () => {
-  const f = fixture({ readJson: async () => { f.setSession(null); return { kind: 'customer' }; } });
+  let f;
+  f = fixture({ readJson: async () => { f.setSession(null); return { kind: 'customer' }; } });
   await assert.rejects(f.run('POST'), code('unauthorized')); assert.equal(f.calls.length, 0);
 });
 test('missing store gives unavailable instead of a fabricated empty/success response', async () => {
