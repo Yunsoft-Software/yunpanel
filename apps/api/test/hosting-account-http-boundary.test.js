@@ -21,10 +21,20 @@ async function fixture(t) {
   const getSession = (token) => { const session = f.getSession(token); return session ? { ...session, csrfToken: 'fixture-csrf' } : null; };
   const mfa = { ...f.mfa, enabled: (id) => Boolean(f.db.prepare('SELECT 1 FROM auth_mfa WHERE user_id = ?').get(id)) };
   let auditFailure = false;
-  const accounts = createHostingAccountStore({ ...f, getSession, mfa, audit: (...args) => {
-    if (auditFailure) throw new Error('private database details must not reach HTTP');
-    return f.audit(...args);
-  } });
+  const accounts = createHostingAccountStore({
+    ...f, getSession, mfa,
+    hashPassword: async (password) => `fixture-http-hash:${password}`,
+    normalizeUsername(input) {
+      if (typeof input !== 'string' || !/^[a-z0-9][a-z0-9._@+-]{2,127}$/.test(input.trim().toLowerCase())) {
+        throw new Error('invalid username fixture input');
+      }
+      return input.trim().toLowerCase();
+    },
+    audit: (...args) => {
+      if (auditFailure) throw new Error('private database details must not reach HTTP');
+      return f.audit(...args);
+    },
+  });
   const store = { getSession, mfa, users: { hostingAccounts: accounts } };
   let fallbackCalls = 0;
   const handler = createAuthenticatedApi({ publicOrigin: origin, store, createHandler: () => (_, response) => {
@@ -132,6 +142,58 @@ for (const role of ['reader', 'reseller-a', 'customer-a']) {
     });
   }
 }
+test('persisted reseller creates and edits only its own customer login through full auth boundary', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.request('POST', root, seller('reseller-a'))).status, 201);
+  assert.equal((await f.request('POST', root, seller('reseller-b'))).status, 201);
+  const resellerToken = f.session('reseller-a');
+  const asReseller = { cookie: `__Host-yunpanel_session=${resellerToken}` };
+
+  const created = await f.request('POST', `${root}/self/customers`, {
+    username: ' Reseller-Child ', password: 'customer-password',
+  }, asReseller);
+  assert.equal(created.status, 201);
+  assert.equal(created.body.data.account.username, 'reseller-child');
+  assert.equal(created.body.data.account.resellerId, 'reseller-a');
+  assert.equal(created.body.data.accessGranted, false);
+  assert.equal(created.body.data.siteAccessGranted, false);
+  const childId = created.body.data.account.id;
+  assert.deepEqual(
+    f.db.prepare('SELECT username, password_hash, role, active FROM users WHERE id = ?').get(childId),
+    { username: 'reseller-child', password_hash: 'fixture-http-hash:customer-password', role: 'site_manager', active: 1 },
+  );
+
+  const childToken = f.session(childId);
+  const updated = await f.request('PATCH', `${root}/${childId}/login`, {
+    revision: 1, username: 'reseller-child-renamed', password: 'new-customer-password',
+  }, asReseller);
+  assert.equal(updated.status, 200);
+  assert.equal(updated.body.data.account.username, 'reseller-child-renamed');
+  assert.equal(updated.body.data.account.revision, 2);
+  assert.equal(updated.body.data.accessGranted, false);
+  assert.equal(updated.body.data.siteAccessGranted, false);
+  assert.equal(f.getSession(childToken), null);
+  assert.equal(f.db.prepare('SELECT password_hash FROM users WHERE id = ?').get(childId).password_hash, 'fixture-http-hash:new-customer-password');
+
+  for (const body of [
+    { username: 'bad-role', password: 'customer-password', role: 'owner' },
+    { username: 'bad-parent', password: 'customer-password', resellerId: 'reseller-b' },
+    { username: 'bad-grant', password: 'customer-password', websiteIds: ['site-a'] },
+  ]) {
+    const denied = await f.request('POST', `${root}/self/customers`, body, asReseller);
+    assert.equal(denied.status, 400);
+    assert.equal(denied.body.error.code, 'invalid_hosting_account_input');
+  }
+
+  assert.equal((await f.request('POST', root, customer('customer-b', 'reseller-b'))).status, 201);
+  const foreign = await f.request('PATCH', `${root}/customer-b/login`, {
+    revision: 1, username: 'stolen-child-name',
+  }, asReseller);
+  assert.equal(foreign.status, 403);
+  assert.equal(foreign.body.error.code, 'reseller_scope_forbidden');
+  assert.equal(f.db.prepare("SELECT username FROM users WHERE id = 'customer-b'").get().username, 'customer-b');
+});
+
 test('persisted reseller reaches only own customer reads and child lifecycle through the full auth boundary', async (t) => {
   const f = await fixture(t);
   assert.equal((await f.request('POST', root, seller('reseller-a'))).status, 201);
