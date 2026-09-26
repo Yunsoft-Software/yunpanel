@@ -3,11 +3,7 @@ import { AuthError } from './auth-error.js';
 const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
 const SELF_CUSTOMERS = `${ROOT}/self/customers`;
-const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status|login))?import { AuthError } from './auth-error.js';
-
-const ROOT = '/api/users/hosting/accounts';
-const ID = '[A-Za-z0-9_-]{1,128}';
-);
+const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status|login))?$`);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
 const invalidQuery = () => new AuthError('invalid_hosting_account_query', 'Use documented, single-valued account filters.');
 
