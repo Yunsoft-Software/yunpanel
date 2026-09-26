@@ -30,6 +30,28 @@ test('existing user store mounts the same-DB hosting store without exposing a ne
   users.hostingAccounts.registerReseller(f.token, f.requireManagement, { userId: login.id, expectedUserRevision: login.revision, limits: { maxCustomers: 1, maxWebsites: 1 } });
   assert.equal(users.list(f.token, f.requireManagement).users.find((user) => user.id === login.id).role, 'site_manager');
 });
+test('user admin composition supplies the existing password and username helpers to reseller customer creation', async (t) => {
+  const f = setup(t);
+  const users = createUserAdminStore({
+    ...f,
+    hashPassword: async (password) => `composed-hash:${password}`,
+    normalizeUsername: (name) => name.trim().toLowerCase(),
+  });
+  users.hostingAccounts.registerReseller(f.token, f.requireManagement, {
+    userId: 'reseller-a', expectedUserRevision: 1, limits: { maxCustomers: 2, maxWebsites: 2 },
+  });
+  const resellerToken = f.session('reseller-a');
+  const account = await users.hostingAccounts.createCustomerLogin(resellerToken, f.requireManagement, {
+    username: ' COMPOSED-CHILD ', password: 'customer-password',
+  });
+  assert.equal(account.username, 'composed-child');
+  assert.equal(account.resellerId, 'reseller-a');
+  assert.deepEqual(
+    f.db.prepare('SELECT password_hash, role, active FROM users WHERE id = ?').get(account.id),
+    { password_hash: 'composed-hash:customer-password', role: 'site_manager', active: 1 },
+  );
+});
+
 test('hosting lifecycle updates the shared login state while legacy users PATCH remains blocked', (t) => {
   const f = setup(t);
   const users = createUserAdminStore({ ...f, hashPassword: async () => '', normalizeUsername: (name) => name });
