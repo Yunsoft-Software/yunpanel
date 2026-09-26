@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createHostingAccountClient, readHostingAccount, readHostingPage, hostingLimitsInput, hostingRegistrationInput, hostingAccountMessage } from '../src/workspace/hosting-account-client.js';
+import { createHostingAccountClient, readHostingAccount, readHostingPage, hostingLimitsInput, hostingRegistrationInput, hostingCustomerCreateInput, hostingCustomerLoginInput, hostingAccountMessage } from '../src/workspace/hosting-account-client.js';
 const reseller = { id: 'bayi', username: 'bayi', kind: 'reseller', resellerId: null, active: true, revision: 1, userRevision: 2, createdAt: 1000, updatedAt: 1000, stage: 'profile_only', limits: { maxCustomers: 2, maxWebsites: null }, usage: { customers: 1, websites: 3 }, usageScope: 'registered_and_reserved_ownership' };
 const customer = { id: 'customer', username: 'customer', kind: 'customer', resellerId: 'bayi', active: true, revision: 1, userRevision: 2, createdAt: 1000, updatedAt: 1000, stage: 'profile_only' };
 const user = { id: 'customer', role: 'site_manager', revision: 1, websiteIds: [] };
@@ -53,6 +53,22 @@ for (const change of [{ role: 'owner' }, { role: 'read_only' }, { revision: 0 },
 test('customer needs explicit parent and cannot choose itself', () => {
   for (const resellerId of [undefined, '', '../x', 'customer']) assert.throws(() => hostingRegistrationInput(user, { kind: 'customer', resellerId }));
 });
+test('reseller customer credential inputs normalize username and never pass role, parent or grants', () => {
+  assert.deepEqual(
+    hostingCustomerCreateInput({ username: ' CHILD.User ', password: 'long-enough-password', role: 'owner', resellerId: 'other', websiteIds: ['site'] }),
+    { username: 'child.user', password: 'long-enough-password' },
+  );
+  assert.deepEqual(hostingCustomerLoginInput(customer, { username: ' CUSTOMER ', password: '' }), { revision: 1 });
+  assert.deepEqual(hostingCustomerLoginInput(customer, { username: 'renamed', password: 'new-long-password', active: false }), {
+    revision: 1, username: 'renamed', password: 'new-long-password',
+  });
+  for (const form of [
+    { username: 'x', password: 'long-enough-password' },
+    { username: 'valid-user', password: 'short' },
+  ]) assert.throws(() => hostingCustomerCreateInput(form));
+  assert.throws(() => hostingCustomerLoginInput(customer, { username: 'customer', password: '' }), { code: 'empty_hosting_customer_update' });
+});
+
 test('current namespace, direct=true and literal null ID query', async (t) => {
   const f = fixture(t, async () => page([]));
   await f.client.list({ kind: 'customer', resellerId: null });
@@ -133,6 +149,47 @@ test('status mutation binds revision, exact target state and explicit non-host-s
   const wrongState = fixture(t, async () => ({ account: { ...suspended, active: true }, accessGranted: false, hostSitesSuspended: false }));
   await assert.rejects(
     wrongState.client.mutate({ action: 'status', account: customer, form: { active: false } }),
+    (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
+  );
+});
+
+test('reseller customer create requires exact parent, normalized login and no site-access claim', async (t) => {
+  const created = { ...customer, id: 'child-new', username: 'child.new', revision: 1, userRevision: 2 };
+  const f = fixture(t, async () => ({ account: created, accessGranted: false, siteAccessGranted: false }));
+  assert.deepEqual(
+    await f.client.mutate({ action: 'createCustomer', account: reseller, form: { username: ' CHILD.NEW ', password: 'long-enough-password', role: 'owner' } }),
+    { account: created, accessGranted: false, siteAccessGranted: false },
+  );
+  assert.equal(f.calls[0][0], '/users/hosting/accounts/self/customers');
+  assert.equal(f.calls[0][1].method, 'POST');
+  assert.deepEqual(f.calls[0][1].body, { username: 'child.new', password: 'long-enough-password' });
+
+  for (const result of [
+    { account: { ...created, resellerId: 'other' }, accessGranted: false, siteAccessGranted: false },
+    { account: { ...created, id: 'bayi' }, accessGranted: false, siteAccessGranted: false },
+    { account: created, accessGranted: false, siteAccessGranted: true },
+  ]) {
+    const bad = fixture(t, async () => result);
+    await assert.rejects(
+      bad.client.mutate({ action: 'createCustomer', account: reseller, form: { username: 'child.new', password: 'long-enough-password' } }),
+      (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
+    );
+  }
+});
+
+test('reseller customer login edit binds profile revision and rejects stale or unverified results', async (t) => {
+  const renamed = { ...customer, username: 'renamed', revision: 2, userRevision: 3, updatedAt: 1001 };
+  const f = fixture(t, async () => ({ account: renamed, accessGranted: false, siteAccessGranted: false }));
+  assert.deepEqual(
+    await f.client.mutate({ action: 'login', account: customer, form: { username: ' RENAMED ', password: '' } }),
+    { account: renamed, accessGranted: false, siteAccessGranted: false },
+  );
+  assert.equal(f.calls[0][0], '/users/hosting/accounts/customer/login');
+  assert.deepEqual(f.calls[0][1].body, { revision: 1, username: 'renamed' });
+
+  const stale = fixture(t, async () => ({ account: { ...renamed, revision: 1, userRevision: 2 }, accessGranted: false, siteAccessGranted: false }));
+  await assert.rejects(
+    stale.client.mutate({ action: 'login', account: customer, form: { password: 'new-long-password' } }),
     (failure) => failure.code === 'hosting_result_invalid' && failure.reconcile === true,
   );
 });
