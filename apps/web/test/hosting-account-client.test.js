@@ -227,6 +227,26 @@ test('uncertain write blocks replay until that same target is explicitly reloade
   await f.client.get('customer');
   await assert.rejects(register(f)); assert.equal(writes, 2);
 });
+test('uncertain child login write can be reconciled by a fresh scoped customer page without replay', async (t) => {
+  let writes = 0;
+  const f = fixture(t, async (_path, options) => {
+    if (options.method) { writes += 1; throw new TypeError('offline'); }
+    return page([customer]);
+  });
+  await assert.rejects(
+    f.client.mutate({ action: 'login', account: customer, form: { username: 'renamed', password: '' } }),
+    (failure) => failure.reconcile === true,
+  );
+  await assert.rejects(
+    f.client.mutate({ action: 'login', account: customer, form: { username: 'renamed', password: '' } }),
+    { code: 'hosting_reconciliation_required' },
+  );
+  const refreshed = await f.client.list({ kind: 'customer', resellerId: 'bayi' });
+  assert.equal(refreshed.accounts[0].id, 'customer');
+  await assert.rejects(f.client.mutate({ action: 'login', account: customer, form: { username: 'renamed', password: '' } }));
+  assert.equal(writes, 2);
+});
+
 test('known quota failure does not pretend success or retry', async (t) => {
   const f = fixture(t, async () => { throw error(409, 'reseller_limit_reached'); });
   await assert.rejects(register(f), (failure) => failure.code === 'reseller_limit_reached' && !failure.reconcile);
