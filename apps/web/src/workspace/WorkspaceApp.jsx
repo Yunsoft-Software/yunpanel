@@ -20,6 +20,7 @@ import ReadOnlySitePage from './ReadOnlySitePage.jsx';
 import ReadOnlyServersPage from './ReadOnlyServersPage.jsx';
 import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
 import UsersPage from './UsersPage.jsx';
+import ResellerCustomersPage from './ResellerCustomersPage.jsx';
 
 function RouteFailure() {
   return <main className="ws-content"><h1>Sayfa yüklenemedi</h1><p>Beklenmeyen bir arayüz veya veri hatası oluştu. Sayfayı yeniden yükleyin; sorun sürerse API ve web sürümlerini birlikte kontrol edin.</p><button type="button" className="ws-button" onClick={() => window.location.reload()}>Yeniden yükle</button></main>;
@@ -27,6 +28,10 @@ function RouteFailure() {
 function OwnerRoute({ children }) {
   const { isOwner } = usePanelSession();
   return isOwner ? children : <Navigate to="/websites" replace />;
+}
+function ResellerRoute({ children }) {
+  const { isReseller } = usePanelSession();
+  return isReseller ? children : <Navigate to="/websites" replace />;
 }
 function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
@@ -42,6 +47,7 @@ function GlobalSiteTool({ tool, ownerView }) {
   return isOwner ? ownerView : <SiteToolEntryPage tool={tool} />;
 }
 const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
+const reseller = (element) => <ResellerRoute>{element}</ResellerRoute>;
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
 function createWorkspaceRouter() {
@@ -51,6 +57,7 @@ function createWorkspaceRouter() {
       { index: true, element: <Navigate to="/websites" replace /> },
       { path: 'dashboard', element: scoped(<DashboardPage />, <ReadOnlyDashboardPage />) },
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
+      { path: 'customers', element: reseller(<ResellerCustomersPage />) },
       { path: 'websites/new', element: manage(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'files', element: manage(<FilesPage />) },
