@@ -40,28 +40,25 @@ export function hostingAccountQuery(query) {
   return input;
 }
 
-function requireOwner(store, rawToken, requireManagement) {
-  if (typeof store?.getSession !== 'function' || typeof requireManagement !== 'function') throw unavailable();
-  const session = store.getSession(rawToken);
-  const approved = requireManagement(session);
-  if (!session?.id || !session.user?.id || session.user.role !== 'owner'
-    || approved?.id !== session.id || approved.user?.id !== session.user.id || approved.user.role !== 'owner') {
-    throw new AuthError('forbidden', 'Owner access is required.', 403);
-  }
+function requireHostingActor(accounts, rawToken, requireManagement) {
+  if (typeof accounts?.authorizeActor !== 'function' || typeof requireManagement !== 'function') throw unavailable();
+  return accounts.authorizeActor(rawToken, requireManagement);
+}
+function requireOwnerActor(actor) {
+  if (actor?.role !== 'owner') throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
 }
 
-/** Called by auth-http AFTER cookie, Origin, CSRF and management checks. The
- * persisted store repeats Owner/MFA authorization INSIDE each transaction.
- * Only hosting-account administration is exposed: account login suspension is
- * distinct from Website suspension. No site allocation, ownership transfer,
- * new login role, or impersonation endpoint exists here.
+/** Called by auth-http AFTER cookie/Origin/CSRF and the session role boundary.
+ * The persisted store derives Owner/reseller authority from current auth/profile
+ * state inside every transaction. Resellers get scoped reads and direct-customer
+ * login lifecycle only; registration, limits and unlinking remain Owner-only.
  */
 export async function handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
-  requireOwner(store, rawToken, requireManagement);
+  const accounts = store.users?.hostingAccounts;
+  const actor = requireHostingActor(accounts, rawToken, requireManagement);
   const collection = pathname === ROOT;
   const match = ITEM.exec(pathname);
   if (!collection && !match) throw new AuthError('not_found', 'Hosting account route not found.', 404);
-  const accounts = store.users?.hostingAccounts;
   const call = (method, ...args) => {
     if (typeof accounts?.[method] !== 'function') throw unavailable();
     return accounts[method](rawToken, requireManagement, ...args);
@@ -72,6 +69,7 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   // Non-list routes accept no query modifiers, even for reads.
   if ([...query.keys()].length) throw invalidQuery();
   if (collection && request.method === 'POST') {
+    requireOwnerActor(actor);
     const body = await readJson(request);
     if (!body || typeof body !== 'object' || Array.isArray(body) || !['reseller', 'customer'].includes(body.kind)) {
       throw new AuthError('invalid_hosting_kind', 'Choose reseller or customer.');
@@ -84,6 +82,7 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     return json(response, 200, { data: call('get', match[1]) });
   }
   if (match?.[2] === 'limits' && request.method === 'PATCH') {
+    requireOwnerActor(actor);
     const body = await readJson(request);
     return json(response, 200, { data: { account: call('updateLimits', match[1], body), accessGranted: false } });
   }
@@ -99,6 +98,7 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     });
   }
   if (match?.[2] === 'profile' && request.method === 'DELETE') {
+    requireOwnerActor(actor);
     const body = await readJson(request);
     if (!body || Object.keys(body).length !== 2 || !Object.hasOwn(body, 'revision') || !Object.hasOwn(body, 'confirmation')
       || !Number.isSafeInteger(body.revision) || body.revision < 1
