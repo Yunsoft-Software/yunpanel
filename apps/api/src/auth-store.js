@@ -191,6 +191,17 @@ export function createAuthStore({
       && state.parent_active === 1;
   }
 
+  function hostingSessionProfile(userId) {
+    const row = db.prepare('SELECT kind, reseller_id AS resellerId FROM auth_hosting_accounts WHERE user_id = ?').get(userId);
+    if (!row) return null;
+    if (!['reseller', 'customer'].includes(row.kind)
+      || (row.kind === 'reseller' && row.resellerId !== null)
+      || (row.resellerId !== null && (typeof row.resellerId !== 'string' || !row.resellerId))) {
+      throw new AuthError('hosting_account_state_invalid', 'Hosting account state requires recovery.', 503);
+    }
+    return { kind: row.kind, resellerId: row.resellerId };
+  }
+
   function rateLimit(keys) {
     transaction(() => {
       db.prepare('DELETE FROM auth_limits WHERE expires_at <= ?').run(now());
@@ -228,6 +239,7 @@ export function createAuthStore({
     const websiteIds = row.role === 'site_manager'
       ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
       : null;
+    const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
     return {
       id: row.id,
       user: {
@@ -235,6 +247,7 @@ export function createAuthStore({
         username: row.username,
         role: row.role,
         ...(websiteIds !== null ? { websiteIds } : {}),
+        ...(hosting !== null ? { hosting } : {}),
       },
       expiresAt: row.expires_at,
       idleExpiresAt: Math.min(row.expires_at, row.last_active_at + idleMs),
@@ -344,6 +357,7 @@ export function createAuthStore({
       const websiteIds = row.role === 'site_manager'
         ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
         : null;
+      const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
       return Object.freeze({
         id: row.id,
         user: Object.freeze({
@@ -351,6 +365,7 @@ export function createAuthStore({
           username: row.username,
           role: row.role,
           ...(websiteIds !== null ? { websiteIds: Object.freeze(websiteIds) } : {}),
+          ...(hosting !== null ? { hosting: Object.freeze(hosting) } : {}),
         }),
         expiresAt: row.expires_at,
         idleExpiresAt: Math.min(row.expires_at, row.last_active_at + idleMs),
