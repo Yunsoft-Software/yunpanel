@@ -260,19 +260,76 @@ for (const input of [{ limit: 101 }, { offset: -1 }, { limit: '2' }, { kind: 'ow
     const f = setup(t); assert.throws(() => f.store.list(f.token, f.requireManagement, input));
   });
 }
-for (const name of ['registerReseller', 'registerCustomer', 'get', 'list', 'updateLimits', 'setActive', 'unregister']) {
-  test(`${name} is Owner-only even with valid existing profile IDs`, (t) => {
+for (const name of ['registerReseller', 'registerCustomer', 'updateLimits', 'unregister']) {
+  test(`${name} remains Owner-only even for an active persisted reseller`, (t) => {
     const f = setup(t); f.reseller();
     const viewer = f.session('viewer'); const reseller = f.session('reseller-a');
     for (const token of [viewer, reseller]) assert.throws(() => f.store[name](token, f.requireManagement, 'reseller-a', {}), code('forbidden'));
     assert.throws(() => f.store[name]('unknown-token', f.requireManagement, 'reseller-a', {}), code('unauthorized'));
   });
 }
-test('a forged policy return cannot turn an absent or site-scoped session into Owner', (t) => {
+
+test('persisted reseller actor sees only itself and its direct customers with server-side filtering', (t) => {
+  const f = setup(t);
+  f.reseller('reseller-a'); f.reseller('reseller-b');
+  f.customer('customer-a', 'reseller-a'); f.customer('customer-b', 'reseller-a');
+  f.customer('customer-c', 'reseller-b'); f.customer('direct', null);
+  const token = f.session('reseller-a');
+  assert.deepEqual(f.store.authorizeActor(token, f.requireManagement), { id: 'reseller-a', role: 'reseller', active: true });
+  assert.equal(f.store.get(token, f.requireManagement, 'reseller-a').id, 'reseller-a');
+  assert.equal(f.store.get(token, f.requireManagement, 'customer-a').resellerId, 'reseller-a');
+  assert.deepEqual(f.store.list(token, f.requireManagement, { kind: 'customer' }).accounts.map((item) => item.id), ['customer-a', 'customer-b']);
+  assert.deepEqual(f.store.list(token, f.requireManagement, { kind: 'customer', resellerId: 'reseller-a' }).accounts.map((item) => item.id), ['customer-a', 'customer-b']);
+  for (const id of ['reseller-b', 'customer-c', 'direct']) {
+    assert.throws(() => f.store.get(token, f.requireManagement, id), code('reseller_scope_forbidden'));
+  }
+  for (const input of [{ kind: 'reseller' }, { kind: 'customer', resellerId: 'reseller-b' }, { kind: 'customer', resellerId: null }]) {
+    assert.throws(() => f.store.list(token, f.requireManagement, input), code('reseller_scope_forbidden'));
+  }
+});
+
+test('persisted reseller may suspend and reactivate only its direct customer login', (t) => {
+  const f = setup(t);
+  f.reseller('reseller-a'); f.reseller('reseller-b');
+  const child = f.customer('customer-a', 'reseller-a');
+  f.customer('customer-b', 'reseller-b'); f.customer('direct', null);
+  const resellerToken = f.session('reseller-a');
+  const childToken = f.session('customer-a');
+  f.revoked.length = 0;
+
+  const suspended = f.store.setActive(resellerToken, f.requireManagement, 'customer-a', { revision: child.revision, active: false });
+  assert.equal(suspended.active, false);
+  assert.equal(f.getSession(childToken), null);
+  assert.deepEqual(f.revoked, [{ id: 'customer-a', reason: 'hosting_account_suspended' }]);
+  assert.deepEqual(
+    f.db.prepare("SELECT actor, action, resource FROM fixture_audit WHERE action = 'hosting.account_suspended' ORDER BY rowid DESC LIMIT 1").get(),
+    { actor: 'reseller-a', action: 'hosting.account_suspended', resource: 'customer-a' },
+  );
+
+  f.revoked.length = 0;
+  const reactivated = f.store.setActive(resellerToken, f.requireManagement, 'customer-a', { revision: suspended.revision, active: true });
+  assert.equal(reactivated.active, true);
+  assert.deepEqual(f.revoked, [{ id: 'customer-a', reason: 'hosting_account_reactivated' }]);
+  for (const id of ['reseller-a', 'reseller-b', 'customer-b', 'direct']) {
+    assert.throws(() => f.store.setActive(resellerToken, f.requireManagement, id, { revision: 1, active: false }), code('reseller_scope_forbidden'));
+  }
+});
+
+test('non-reseller site sessions and missing sessions cannot use scoped account reads', (t) => {
+  const f = setup(t); f.reseller(); f.customer();
+  const viewer = f.session('viewer'); const customer = f.session('customer-a');
+  for (const token of [viewer, customer]) {
+    assert.throws(() => f.store.get(token, f.requireManagement, 'customer-a'), code('reseller_scope_forbidden'));
+    assert.throws(() => f.store.list(token, f.requireManagement, { kind: 'customer' }), code('reseller_scope_forbidden'));
+  }
+  assert.throws(() => f.store.get('unknown-token', f.requireManagement, 'customer-a'), code('unauthorized'));
+});
+
+test('a forged Owner policy cannot turn an absent or ordinary site session into a hosting actor', (t) => {
   const f = setup(t); f.reseller();
   const forged = () => ({ id: 'forged', user: { id: 'owner', role: 'owner' } });
-  assert.throws(() => f.store.get(null, forged, 'reseller-a'), code('forbidden'));
-  assert.throws(() => f.store.get(f.session('customer-a'), forged, 'reseller-a'), code('forbidden'));
+  assert.throws(() => f.store.get(null, forged, 'reseller-a'), code('unauthorized'));
+  assert.throws(() => f.store.get(f.session('customer-a'), forged, 'reseller-a'), code('reseller_scope_forbidden'));
 });
 test('revoked Owner sessions and policy/MFA denial cannot use previously loaded records', (t) => {
   const f = setup(t); f.reseller();
