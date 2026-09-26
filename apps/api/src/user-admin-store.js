@@ -55,7 +55,7 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
       );
     `);
   });
-  const hostingAccounts = createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser });
+  const hostingAccounts = createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser, hashPassword, normalizeUsername });
   const select = `SELECT u.id, u.username, u.role, u.active, u.created_at,
     COALESCE(r.revision, 1) AS revision, COALESCE(r.updated_at, u.created_at) AS updated_at,
     EXISTS(SELECT 1 FROM auth_mfa m WHERE m.user_id = u.id) AS mfa_enabled
