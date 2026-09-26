@@ -10,6 +10,9 @@ export function PanelSessionProvider({ session, children }) {
     canManage: panelPermission(session, '*'),
     isOwner: session?.user?.role === 'owner',
     isSiteManager: session?.user?.role === 'site_manager',
+    isReseller: session?.user?.hosting?.kind === 'reseller',
+    isCustomer: session?.user?.hosting?.kind === 'customer',
+    hostingProfile: session?.user?.hosting ?? null,
     readOnly: session?.access?.mode === 'read_only',
   }), [session]);
   return <PanelSessionContext.Provider value={value}>{children}</PanelSessionContext.Provider>;
