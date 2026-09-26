@@ -10,8 +10,9 @@ function pagination(query) {
   return { limit: query.has('limit') ? Number(query.get('limit')) : 50, offset: query.has('offset') ? Number(query.get('offset')) : 0 };
 }
 
-/** Called only AFTER the shared HTTP session, Origin, CSRF and Owner/MFA checks.
- * The store repeats live authorization inside the write transaction / after KDF.
+/** Called only AFTER the shared HTTP session, Origin/CSRF and role boundary.
+ * Hosting-account subroutes derive live Owner/reseller scope in their own store;
+ * generic user administration still repeats Owner/MFA authorization on writes.
  */
 export async function handleUserAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
   if (isHostingAccountPath(pathname)) {
