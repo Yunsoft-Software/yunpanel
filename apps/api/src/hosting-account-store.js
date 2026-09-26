@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { AuthError } from './auth-error.js';
 import { createHostingSiteAllocationStore } from './hosting-site-allocation-store.js';
 import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
@@ -30,7 +31,7 @@ function active(value) {
  * read itself/its direct customers and change only those customers' login lifecycle.
  * Registration, limits, unlinking and Website allocation remain Owner-only here.
  */
-export function createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser }) {
+export function createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser, hashPassword = null, normalizeUsername = null }) {
   if (![now, transaction, getSession, mfa?.invalidateUser, audit, revokeLiveUser].every((value) => typeof value === 'function')) {
     throw new TypeError('Hosting accounts require the live auth transaction, MFA, audit and revocation services');
   }
@@ -138,6 +139,22 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     audit(actor.id, `hosting.${kind}_registered`, { type: 'user', id: user.id });
     return view(existing(user.id));
   }
+  function customerCredentialServices() {
+    if (typeof hashPassword !== 'function' || typeof normalizeUsername !== 'function') {
+      throw error('hosting_customer_credentials_unavailable', 'Customer login administration is unavailable.', 503);
+    }
+    return { hashPassword, normalizeUsername };
+  }
+  function uniqueUsername(name, excludingId = '') {
+    if (db.prepare('SELECT 1 FROM users WHERE username = ? AND id != ?').get(name, excludingId)) {
+      throw error('username_taken', 'An account with that username already exists.', 409);
+    }
+  }
+  function customerScope(actor, row) {
+    if (row.kind !== 'customer') throw scopeDenied();
+    const parent = row.reseller_id === null ? null : existing(row.reseller_id);
+    assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
+  }
   const siteAllocations = createHostingSiteAllocationStore({
     db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser,
   });
@@ -169,6 +186,70 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       });
       revokeLiveUser(result.id, 'hosting_account_linked');
       return result;
+    },
+    async createCustomerLogin(rawToken, requireManagement, input) {
+      const credentials = customerCredentialServices();
+      fields(input, ['username', 'password']);
+      const name = credentials.normalizeUsername(input.username);
+      // Expensive KDF happens outside the write transaction. The live actor, parent,
+      // quota and username are checked again after hashing before any row is written.
+      transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        if (actor.role !== 'reseller') throw scopeDenied();
+      });
+      const passwordHash = await credentials.hashPassword(input.password);
+      return transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        if (actor.role !== 'reseller') throw scopeDenied();
+        const parent = existing(actor.id);
+        assertCustomerCreationScope({ actor, reseller: projection(parent) });
+        assertResellerCapacity({ limits: limits(parent.user_id), usage: usage(parent), resource: 'customers' });
+        uniqueUsername(name);
+        const id = randomUUID();
+        const timestamp = now();
+        db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, 1, ?, ?)')
+          .run(id, name, passwordHash, 'site_manager', timestamp, timestamp);
+        const account = insert(actor, { id }, 'customer', actor.id);
+        audit(actor.id, 'hosting.customer_login_created', { type: 'user', id });
+        return account;
+      });
+    },
+    async updateCustomerLogin(rawToken, requireManagement, id, input) {
+      const credentials = customerCredentialServices();
+      fields(input, ['revision', 'username', 'password'], ['revision']);
+      if (!Object.hasOwn(input, 'username') && !Object.hasOwn(input, 'password')) {
+        throw error('empty_hosting_customer_update', 'Choose a customer login field to change.');
+      }
+      const expectedRevision = revision(input.revision);
+      const name = Object.hasOwn(input, 'username') ? credentials.normalizeUsername(input.username) : null;
+      transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        const row = existing(id, expectedRevision);
+        customerScope(actor, row);
+      });
+      const passwordHash = Object.hasOwn(input, 'password') ? await credentials.hashPassword(input.password) : null;
+      const outcome = transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        const row = existing(id, expectedRevision);
+        customerScope(actor, row);
+        const nextName = name ?? row.username;
+        uniqueUsername(nextName, id);
+        if (nextName === row.username && passwordHash === null) return { account: view(row), changed: false };
+        if (row.revision === Number.MAX_SAFE_INTEGER) throw conflict();
+        if (passwordHash !== null) {
+          db.prepare('UPDATE users SET username = ?, password_hash = ?, password_changed_at = ? WHERE id = ?')
+            .run(nextName, passwordHash, now(), id);
+        } else {
+          db.prepare('UPDATE users SET username = ? WHERE id = ?').run(nextName, id);
+        }
+        db.prepare('UPDATE auth_hosting_accounts SET revision = revision + 1, updated_at = ? WHERE user_id = ?')
+          .run(now(), id);
+        invalidate(id);
+        audit(actor.id, passwordHash !== null ? 'hosting.customer_password_reset' : 'hosting.customer_login_updated', { type: 'user', id });
+        return { account: view(existing(id)), changed: true };
+      });
+      if (outcome.changed) revokeLiveUser(id, 'hosting_customer_login_changed');
+      return outcome.account;
     },
     get(rawToken, requireManagement, id) {
       return transaction(() => {
