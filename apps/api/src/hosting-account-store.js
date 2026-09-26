@@ -188,15 +188,14 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       return result;
     },
     async createCustomerLogin(rawToken, requireManagement, input) {
-      const credentials = customerCredentialServices();
-      fields(input, ['username', 'password']);
-      const name = credentials.normalizeUsername(input.username);
-      // Expensive KDF happens outside the write transaction. The live actor, parent,
-      // quota and username are checked again after hashing before any row is written.
+      // Authenticate before parsing credentials, then recheck after the expensive KDF.
       transaction(() => {
         const actor = managementActor(rawToken, requireManagement);
         if (actor.role !== 'reseller') throw scopeDenied();
       });
+      const credentials = customerCredentialServices();
+      fields(input, ['username', 'password']);
+      const name = credentials.normalizeUsername(input.username);
       const passwordHash = await credentials.hashPassword(input.password);
       return transaction(() => {
         const actor = managementActor(rawToken, requireManagement);
@@ -215,6 +214,9 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       });
     },
     async updateCustomerLogin(rawToken, requireManagement, id, input) {
+      // Actor existence is checked before input details; target scope is checked again
+      // with the supplied revision before and after any asynchronous password hashing.
+      transaction(() => managementActor(rawToken, requireManagement));
       const credentials = customerCredentialServices();
       fields(input, ['revision', 'username', 'password'], ['revision']);
       if (!Object.hasOwn(input, 'username') && !Object.hasOwn(input, 'password')) {
