@@ -16,7 +16,7 @@ export default function WorkspaceLayout() {
   return <WorkspaceProvider><UnsavedChangesProvider><Shell /></UnsavedChangesProvider></WorkspaceProvider>;
 }
 function Shell() {
-  const { domains, websites, jobs, notice, setNotice, canManage, isOwner } = useWorkspace();
+  const { domains, websites, jobs, notice, setNotice, canManage, isOwner, isReseller } = useWorkspace();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
@@ -25,7 +25,7 @@ function Shell() {
   const menu = useRef(null); const content = useRef(null);
   const sites = websiteCount(websites);
   const jobCount = canManage ? knownCount(jobs, (job) => ['queued', 'running'].includes(job.status)) : null;
-  const groups = navigationGroups(canManage, isOwner);
+  const groups = navigationGroups(canManage, isOwner, isReseller);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
     const change = () => { setNarrow(media.matches); if (!media.matches) setMenuOpen(false); };
@@ -73,7 +73,7 @@ function Shell() {
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>SUNUCU YÖNETİMİ</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Link key={to} to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>)}</div></div>)}</nav>
       <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
-      <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : 'Yetkili olduğunuz web siteleri'}</span></div>
+      <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : isReseller ? 'Bayi yönetimi' : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : isReseller ? 'Müşterileriniz ve izinli site araçları' : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>
       <div className="ws-toolbar">
@@ -87,7 +87,7 @@ function Shell() {
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>
-    {paletteOpen && <CommandPalette domains={domains} canManage={canManage} isOwner={isOwner} onClose={() => setPaletteOpen(false)} />}
+    {paletteOpen && <CommandPalette domains={domains} canManage={canManage} isOwner={isOwner} isReseller={isReseller} onClose={() => setPaletteOpen(false)} />}
     {canManage && <JobDrawer />}
     {canManage && <AiDrawer open={aiOpen} onClose={() => setAiOpen(false)} />}
   </div>;
