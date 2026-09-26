@@ -1,9 +1,22 @@
 import { announceSessionChange, authRequest, beginSessionTransition, setSession } from './session-client.js';
 
+function validHostingProfile(user) {
+  if (user?.hosting === undefined) return true;
+  const hosting = user.hosting;
+  if (user.role !== 'site_manager' || !hosting || typeof hosting !== 'object' || Array.isArray(hosting)
+    || !['reseller', 'customer'].includes(hosting.kind)
+    || !Object.hasOwn(hosting, 'resellerId')
+    || (hosting.resellerId !== null && (typeof hosting.resellerId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(hosting.resellerId)))
+    || (hosting.kind === 'reseller' && hosting.resellerId !== null)
+    || (hosting.kind === 'customer' && hosting.resellerId === user.id)) return false;
+  return true;
+}
+
 export function requireSession(value) {
   if (!value || typeof value.id !== 'string' || !value.id || !value.user
     || typeof value.user.id !== 'string' || typeof value.user.username !== 'string'
     || !['owner', 'read_only', 'site_manager'].includes(value.user.role)
+    || !validHostingProfile(value.user)
     || typeof value.csrfToken !== 'string' || !value.csrfToken
     || !Number.isFinite(value.expiresAt) || !Number.isFinite(value.idleExpiresAt)) {
     throw new Error('Sunucudan geçerli bir oturum alınamadı.');
