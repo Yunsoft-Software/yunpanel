@@ -58,7 +58,7 @@ test('reseller customer credential inputs normalize username and never pass role
     hostingCustomerCreateInput({ username: ' CHILD.User ', password: 'long-enough-password', role: 'owner', resellerId: 'other', websiteIds: ['site'] }),
     { username: 'child.user', password: 'long-enough-password' },
   );
-  assert.deepEqual(hostingCustomerLoginInput(customer, { username: ' CUSTOMER ', password: '' }), { revision: 1 });
+  assert.deepEqual(hostingCustomerLoginInput(customer, { username: ' CHILD-RENAMED ', password: '' }), { revision: 1, username: 'child-renamed' });
   assert.deepEqual(hostingCustomerLoginInput(customer, { username: 'renamed', password: 'new-long-password', active: false }), {
     revision: 1, username: 'renamed', password: 'new-long-password',
   });
