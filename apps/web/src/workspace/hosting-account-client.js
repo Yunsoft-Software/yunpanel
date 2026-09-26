@@ -112,9 +112,10 @@ export function hostingCustomerLoginInput(account, form) {
   return body;
 }
 
-/** Instance belongs to one mounted Owner component. No cache, storage, automatic
- * writes/retries or new auth mechanism. Separate read lanes keep picker/page reads
- * independent; generations also reject stale responses when abort is ignored.
+/** Instance belongs to one mounted Owner or persisted-reseller component.
+ * It adds no cache/storage/new auth mechanism and never retries writes automatically.
+ * Separate read lanes keep picker/page reads independent; generations reject stale
+ * responses after session changes, and explicit fresh reads reconcile uncertain writes.
  */
 export function createHostingAccountClient({ request, generation, onAccessLost }) {
   const readers = new Map();
