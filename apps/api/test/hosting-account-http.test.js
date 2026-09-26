@@ -30,11 +30,11 @@ function fixture(options = {}) {
       throw new AuthError('reseller_scope_forbidden', 'Scoped reseller access denied.', 403);
     },
   };
-  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'updateLimits', 'setActive', 'unregister']) {
+  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'createCustomerLogin', 'updateCustomerLogin', 'updateLimits', 'setActive', 'unregister']) {
     accounts[name] = (token, policy, ...args) => {
       accounts.authorizeActor(token, policy);
       calls.push({ name, args });
-      return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
+      return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateCustomerLogin', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
     };
   }
   const headers = {};
@@ -101,6 +101,33 @@ test('PATCH status delegates exact lifecycle input and does not claim Website su
   assert.deepEqual(f.calls[0], { name: 'setActive', args: ['customer-a', body] });
 });
 
+test('reseller self customer create and child login edit delegate exact credential bodies without exposing site access', async () => {
+  const f = fixture();
+  f.setSession({ id: 'session-reseller-a', user: { id: 'reseller-a', role: 'site_manager' } });
+  const createBody = { username: 'child-a', password: 'secret-password' };
+  const created = await f.run('POST', '/api/users/hosting/accounts/self/customers', createBody);
+  assert.equal(created.status, 201);
+  assert.equal(created.data.accessGranted, false);
+  assert.equal(created.data.siteAccessGranted, false);
+  assert.deepEqual(f.calls[0], { name: 'createCustomerLogin', args: [createBody] });
+
+  const updateBody = { revision: 2, username: 'child-renamed', password: 'new-secret-password' };
+  const updated = await f.run('PATCH', '/api/users/hosting/accounts/customer-a/login', updateBody);
+  assert.equal(updated.status, 200);
+  assert.equal(updated.data.accessGranted, false);
+  assert.equal(updated.data.siteAccessGranted, false);
+  assert.deepEqual(f.calls[1], { name: 'updateCustomerLogin', args: ['customer-a', updateBody] });
+});
+
+test('Owner cannot use reseller self-customer creation route while generic Owner registration stays separate', async () => {
+  const f = fixture();
+  await assert.rejects(
+    f.run('POST', '/api/users/hosting/accounts/self/customers', { username: 'child-a', password: 'secret-password' }),
+    code('reseller_scope_forbidden'),
+  );
+  assert.equal(f.calls.length, 0);
+});
+
 test('profile removal requires bound confirmation and does not claim login deletion', async () => {
   const f = fixture(); const result = await f.run('DELETE', '/api/users/hosting/accounts/customer-a/profile', { revision: 2, confirmation: 'unregister-hosting-profile:customer-a:2' });
   assert.deepEqual(result, { status: 200, data: { id: 'customer-a', unregistered: true, loginDeleted: false, accessGranted: false } });
@@ -114,7 +141,7 @@ for (const body of [{ revision: 2 }, { revision: 2, confirmation: 'unregister-ho
   });
 }
 for (const [method, path, expected] of [['DELETE', '/api/users/hosting/accounts/a', 'method_not_allowed'],
-  ['POST', '/api/users/hosting/accounts/a/limits', 'method_not_allowed'], ['POST', '/api/users/hosting/accounts/a/status', 'method_not_allowed'], ['PATCH', '/api/users/hosting/accounts/a/profile', 'method_not_allowed'],
+  ['POST', '/api/users/hosting/accounts/a/limits', 'method_not_allowed'], ['POST', '/api/users/hosting/accounts/a/status', 'method_not_allowed'], ['GET', '/api/users/hosting/accounts/self/customers', 'method_not_allowed'], ['POST', '/api/users/hosting/accounts/a/login', 'method_not_allowed'], ['PATCH', '/api/users/hosting/accounts/a/profile', 'method_not_allowed'],
   ['GET', '/api/users/hosting/accounts/a/transfer', 'not_found'], ['POST', '/api/users/hosting/accounts/a/sites', 'not_found'],
   ['GET', '/api/users/hosting/accounts/a%2Fb', 'not_found'], ['HEAD', '/api/users/hosting/accounts', 'method_not_allowed']]) {
   test(`unsupported operation cannot fall through: ${method} ${path}`, async () => {
