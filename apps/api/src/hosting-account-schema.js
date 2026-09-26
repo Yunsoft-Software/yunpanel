@@ -1,7 +1,7 @@
 import { AuthError } from './auth-error.js';
 import { initializeHostingSiteAllocationSchema, rollbackEmptyHostingSiteAllocationSchema } from './hosting-site-allocation-schema.js';
 
-const version = 2;
+const version = 3;
 const safeInteger = '9007199254740991';
 const objects = [
   ['table', 'auth_hosting_schema', `CREATE TABLE auth_hosting_schema (
@@ -63,9 +63,18 @@ const objects = [
   END`],
   // General user writes remain blocked. Hosting lifecycle changes require a
   // same-transaction Owner intent that is consumed by the active-state update.
-  ['trigger', 'auth_hosting_lifecycle_intent_insert', `CREATE TRIGGER auth_hosting_lifecycle_intent_insert BEFORE INSERT ON auth_hosting_lifecycle_intents
-    WHEN NOT EXISTS(SELECT 1 FROM users WHERE id = NEW.actor_id AND role = 'owner' AND active = 1) BEGIN
-      SELECT RAISE(ABORT, 'hosting_lifecycle_owner_required');
+  ['trigger', 'auth_hosting_lifecycle_intent_insert', `CREATE TRIGGER auth_hosting_lifecycle_intent_insert BEFORE INSERT ON auth_hosting_lifecycle_intents BEGIN
+    SELECT CASE WHEN NOT (
+      EXISTS(SELECT 1 FROM users WHERE id = NEW.actor_id AND role = 'owner' AND active = 1)
+      OR EXISTS(
+        SELECT 1 FROM users actor
+        JOIN auth_hosting_accounts reseller ON reseller.user_id = actor.id
+        JOIN auth_hosting_accounts customer ON customer.user_id = NEW.user_id
+        WHERE actor.id = NEW.actor_id AND actor.role = 'site_manager' AND actor.active = 1
+          AND reseller.kind = 'reseller' AND reseller.reseller_id IS NULL
+          AND customer.kind = 'customer' AND customer.reseller_id = reseller.user_id
+      )
+    ) THEN RAISE(ABORT, 'hosting_lifecycle_actor_required') END;
   END`],
   ['trigger', 'auth_hosting_lifecycle_intent_immutable', `CREATE TRIGGER auth_hosting_lifecycle_intent_immutable BEFORE UPDATE ON auth_hosting_lifecycle_intents BEGIN
       SELECT RAISE(ABORT, 'hosting_lifecycle_intent_immutable');
@@ -77,8 +86,17 @@ const objects = [
       SELECT CASE WHEN NEW.active IS NOT OLD.active AND NOT EXISTS(
         SELECT 1 FROM auth_hosting_lifecycle_intents i
         JOIN users actor ON actor.id = i.actor_id
+        LEFT JOIN auth_hosting_accounts reseller ON reseller.user_id = actor.id
+        LEFT JOIN auth_hosting_accounts customer ON customer.user_id = OLD.id
         WHERE i.user_id = OLD.id AND i.target_active = NEW.active
-          AND actor.role = 'owner' AND actor.active = 1
+          AND (
+            (actor.role = 'owner' AND actor.active = 1)
+            OR (
+              actor.role = 'site_manager' AND actor.active = 1
+              AND reseller.kind = 'reseller' AND reseller.reseller_id IS NULL
+              AND customer.kind = 'customer' AND customer.reseller_id = reseller.user_id
+            )
+          )
       ) THEN RAISE(ABORT, 'hosting_account_lifecycle_not_enabled') END;
   END`],
   ['trigger', 'auth_hosting_lifecycle_intent_consume', `CREATE TRIGGER auth_hosting_lifecycle_intent_consume AFTER UPDATE OF active ON users
@@ -95,12 +113,32 @@ const objects = [
       SELECT RAISE(ABORT, 'hosting_website_grants_not_enabled');
   END`],
 ];
+const v2LifecycleIntentInsert = ['trigger', 'auth_hosting_lifecycle_intent_insert', `CREATE TRIGGER auth_hosting_lifecycle_intent_insert BEFORE INSERT ON auth_hosting_lifecycle_intents
+    WHEN NOT EXISTS(SELECT 1 FROM users WHERE id = NEW.actor_id AND role = 'owner' AND active = 1) BEGIN
+      SELECT RAISE(ABORT, 'hosting_lifecycle_owner_required');
+  END`];
+const v2LegacyUserGuard = ['trigger', 'auth_hosting_legacy_user_guard', `CREATE TRIGGER auth_hosting_legacy_user_guard BEFORE UPDATE OF role, active ON users
+    WHEN EXISTS(SELECT 1 FROM auth_hosting_accounts WHERE user_id = OLD.id) BEGIN
+      SELECT CASE WHEN NEW.role IS NOT OLD.role
+        THEN RAISE(ABORT, 'hosting_account_lifecycle_not_enabled') END;
+      SELECT CASE WHEN NEW.active IS NOT OLD.active AND NOT EXISTS(
+        SELECT 1 FROM auth_hosting_lifecycle_intents i
+        JOIN users actor ON actor.id = i.actor_id
+        WHERE i.user_id = OLD.id AND i.target_active = NEW.active
+          AND actor.role = 'owner' AND actor.active = 1
+      ) THEN RAISE(ABORT, 'hosting_account_lifecycle_not_enabled') END;
+  END`];
+const v2Objects = objects.map((entry) => {
+  if (entry[1] === 'auth_hosting_lifecycle_intent_insert') return v2LifecycleIntentInsert;
+  if (entry[1] === 'auth_hosting_legacy_user_guard') return v2LegacyUserGuard;
+  return entry;
+});
 const legacyV1Guard = ['trigger', 'auth_hosting_legacy_user_guard', `CREATE TRIGGER auth_hosting_legacy_user_guard BEFORE UPDATE OF role, active ON users
     WHEN (NEW.role IS NOT OLD.role OR NEW.active IS NOT OLD.active)
       AND EXISTS(SELECT 1 FROM auth_hosting_accounts WHERE user_id = OLD.id) BEGIN
       SELECT RAISE(ABORT, 'hosting_account_lifecycle_not_enabled');
   END`];
-const v1Objects = objects
+const v1Objects = v2Objects
   .filter(([, name]) => ![
     'auth_hosting_lifecycle_intents',
     'auth_hosting_lifecycle_intent_insert',
@@ -113,6 +151,7 @@ const invalid = () => new AuthError('hosting_schema_invalid', 'Hosting account s
 
 function expectedObjects(schemaVersion) {
   if (schemaVersion === 1) return v1Objects;
+  if (schemaVersion === 2) return v2Objects;
   if (schemaVersion === version) return objects;
   throw invalid();
 }
@@ -152,7 +191,7 @@ function inspect(db) {
 
 function migrateV1ToV2(db) {
   db.exec('DROP TRIGGER auth_hosting_legacy_user_guard');
-  const additions = objects.filter(([, name]) => [
+  const additions = v2Objects.filter(([, name]) => [
     'auth_hosting_lifecycle_intents',
     'auth_hosting_lifecycle_intent_insert',
     'auth_hosting_lifecycle_intent_immutable',
@@ -160,7 +199,16 @@ function migrateV1ToV2(db) {
     'auth_hosting_lifecycle_intent_consume',
   ].includes(name));
   for (const [, , sql] of additions) db.exec(sql);
-  db.prepare('UPDATE auth_hosting_schema SET version = ? WHERE id = 1 AND version = 1').run(version);
+  db.prepare('UPDATE auth_hosting_schema SET version = 2 WHERE id = 1 AND version = 1').run();
+}
+
+function migrateV2ToV3(db) {
+  db.exec('DROP TRIGGER auth_hosting_lifecycle_intent_insert; DROP TRIGGER auth_hosting_legacy_user_guard;');
+  for (const [, , sql] of objects.filter(([, name]) => [
+    'auth_hosting_lifecycle_intent_insert',
+    'auth_hosting_legacy_user_guard',
+  ].includes(name))) db.exec(sql);
+  db.prepare('UPDATE auth_hosting_schema SET version = 3 WHERE id = 1 AND version = 2').run();
 }
 
 /** Additive sidecar in the EXISTING auth DB. Never rebuild users, change their IDs,
@@ -174,8 +222,13 @@ export function initializeHostingAccountSchema({ db, transaction }) {
     if (created) {
       for (const [, , sql] of objects) db.exec(sql);
       db.prepare('INSERT INTO auth_hosting_schema VALUES (1, ?)').run(version);
-    } else if (current === 1) {
-      migrateV1ToV2(db);
+    } else {
+      let migrated = current;
+      if (migrated === 1) {
+        migrateV1ToV2(db);
+        migrated = 2;
+      }
+      if (migrated === 2) migrateV2ToV3(db);
     }
     initializeHostingSiteAllocationSchema(db);
     if (inspect(db) !== version) throw invalid();
@@ -191,7 +244,7 @@ export function rollbackEmptyHostingAccountSchema({ db, transaction }) {
     const current = inspect(db);
     if (current === false) return { removed: false };
     const dataTables = ['auth_hosting_accounts', 'auth_reseller_limits', 'auth_customer_websites'];
-    if (current === version) dataTables.push('auth_hosting_lifecycle_intents');
+    if (current >= 2) dataTables.push('auth_hosting_lifecycle_intents');
     for (const table of dataTables) {
       if (db.prepare(`SELECT 1 FROM ${table} LIMIT 1`).get()) {
         throw new AuthError('hosting_schema_in_use', 'Hosting account data must be migrated before rollback.', 409);
@@ -200,7 +253,7 @@ export function rollbackEmptyHostingAccountSchema({ db, transaction }) {
     rollbackEmptyHostingSiteAllocationSchema(db);
     const expected = expectedObjects(current);
     for (const [type, name] of [...expected].reverse().filter(([type]) => type === 'trigger')) db.exec(`DROP ${type} ${name}`);
-    if (current === version) db.exec('DROP TABLE auth_hosting_lifecycle_intents');
+    if (current >= 2) db.exec('DROP TABLE auth_hosting_lifecycle_intents');
     for (const name of ['auth_customer_websites', 'auth_reseller_limits', 'auth_hosting_accounts', 'auth_hosting_schema']) db.exec(`DROP TABLE ${name}`);
     return { removed: true };
   });
