@@ -157,6 +157,7 @@ test('suspended hosting parent blocks child sessions and new login without disab
 
   const restored = await store.login({ username: 'customer-login', password });
   assert.equal(restored.session.user.username, 'customer-login');
+  assert.deepEqual(restored.session.user.hosting, { kind: 'customer', resellerId: 'reseller-login' });
 });
 
 test('successful login rotates an existing browser session', async (t) => {
