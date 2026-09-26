@@ -62,7 +62,8 @@ const objects = [
       SELECT RAISE(ABORT, 'hosting_ownership_transfer_not_enabled');
   END`],
   // General user writes remain blocked. Hosting lifecycle changes require a
-  // same-transaction Owner intent that is consumed by the active-state update.
+  // same-transaction intent from an active Owner or the exact active parent reseller
+  // of a direct customer; the active-state update consumes that one-shot intent.
   ['trigger', 'auth_hosting_lifecycle_intent_insert', `CREATE TRIGGER auth_hosting_lifecycle_intent_insert BEFORE INSERT ON auth_hosting_lifecycle_intents BEGIN
     SELECT CASE WHEN NOT (
       EXISTS(SELECT 1 FROM users WHERE id = NEW.actor_id AND role = 'owner' AND active = 1)
