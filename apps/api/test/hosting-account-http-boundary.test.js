@@ -132,6 +132,46 @@ for (const role of ['reader', 'reseller-a', 'customer-a']) {
     });
   }
 }
+test('persisted reseller reaches only own customer reads and child lifecycle through the full auth boundary', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.request('POST', root, seller('reseller-a'))).status, 201);
+  assert.equal((await f.request('POST', root, seller('reseller-b'))).status, 201);
+  assert.equal((await f.request('POST', root, customer('customer-a', 'reseller-a'))).status, 201);
+  assert.equal((await f.request('POST', root, customer('customer-b', 'reseller-b'))).status, 201);
+  assert.equal((await f.request('POST', root, customer('direct', null))).status, 201);
+  const resellerToken = f.session('reseller-a');
+  const childToken = f.session('customer-a');
+  const asReseller = { cookie: `__Host-yunpanel_session=${resellerToken}` };
+
+  const list = await f.request('GET', `${root}?kind=customer`, undefined, asReseller);
+  assert.equal(list.status, 200);
+  assert.deepEqual(list.body.data.accounts.map((account) => account.id), ['customer-a']);
+  assert.equal((await f.request('GET', `${root}/reseller-a`, undefined, asReseller)).status, 200);
+
+  for (const id of ['reseller-b', 'customer-b', 'direct']) {
+    const denied = await f.request('GET', `${root}/${id}`, undefined, asReseller);
+    assert.equal(denied.status, 403); assert.equal(denied.body.error.code, 'reseller_scope_forbidden');
+  }
+
+  const suspended = await f.request('PATCH', `${root}/customer-a/status`, { revision: 1, active: false }, asReseller);
+  assert.equal(suspended.status, 200);
+  assert.equal(suspended.body.data.account.active, false);
+  assert.equal(suspended.body.data.hostSitesSuspended, false);
+  assert.equal(f.getSession(childToken), null);
+  assert.ok(f.getSession(resellerToken));
+
+  for (const [method, path, body] of [
+    ['POST', root, customer('legacy', 'reseller-a')],
+    ['PATCH', `${root}/reseller-a/limits`, { revision: 1, limits: { maxCustomers: 2, maxWebsites: 2 } }],
+    ['DELETE', `${root}/customer-a/profile`, { revision: 2, confirmation: 'unregister-hosting-profile:customer-a:2' }],
+  ]) {
+    const denied = await f.request(method, path, body, asReseller);
+    assert.equal(denied.status, 403); assert.equal(denied.body.error.code, 'reseller_scope_forbidden');
+  }
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'customer-b'").get().active, 1);
+  assert.equal(f.db.prepare("SELECT active FROM users WHERE id = 'direct'").get().active, 1);
+});
+
 for (const [headers, expected, code] of [
   [{ cookie: '' }, 401, 'unauthorized'], [{ cookie: '__Host-yunpanel_session=bad' }, 401, 'unauthorized'],
   [{ cookie: '__Host-yunpanel_session=token-owner; __Host-yunpanel_session=token-owner' }, 400, 'invalid_cookie'],
