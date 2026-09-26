@@ -17,8 +17,10 @@ export function writePreferences(storage, value) {
 export const resolveTheme = (theme, darkSystem = false) => themes.has(theme) && theme !== 'system' ? theme : darkSystem ? 'dark' : 'light';
 
 // Plesk task order; these links do not grant API permissions.
-export function navigationGroups(canManage, isOwner = true) {
-  const items = [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
+export function navigationGroups(canManage, isOwner = true, isReseller = false) {
+  const items = isReseller && !isOwner
+    ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Web Siteleri ve Alan Adları', 'globe']]
+    : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
   if (canManage) {
     items.push(['/mail', 'Posta', 'mail'], ['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database']);
     if (isOwner) items.push(['/tools-settings', 'Araçlar ve Ayarlar', 'settings'], ['/settings/users', 'Kullanıcılar', 'user']);
@@ -60,11 +62,11 @@ export function websiteCount(resource) {
   if (!['ready', 'stale'].includes(resource?.status) || !Array.isArray(resource.items)) return null;
   return new Set(resource.items.filter((item) => typeof item.id === 'string' && item.id).map((item) => item.id)).size;
 }
-export function commandEntries({ query = '', canManage = false, isOwner = false, domains } = {}) {
+export function commandEntries({ query = '', canManage = false, isOwner = false, isReseller = false, domains } = {}) {
   const term = String(query).trim().slice(0, 253);
   const normalized = term.toLocaleLowerCase('tr-TR');
   const matches = (value) => String(value ?? '').toLocaleLowerCase('tr-TR').includes(normalized);
-  const sources = navigationGroups(canManage, isOwner);
+  const sources = navigationGroups(canManage, isOwner, isReseller);
   if (canManage && isOwner) sources.push(...TOOLS_SETTINGS_GROUPS);
   const seen = new Set();
   const entries = sources.flatMap((group) => group.items.map(([to, label, icon]) => ({ id: to, to, label, icon, detail: group.label })))
