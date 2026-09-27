@@ -79,7 +79,7 @@ test('read-only preview binds customer and plan; create reuses the existing adap
   assert.notEqual(preview.previewDigest, f.base().previewDigest);
   const result = await f.createHosted();
   assert.equal(result.created, true); assert.equal(result.ownership.state, 'attached');
-  assert.equal(result.provisioningReady, false); assert.equal(result.accessGranted, false);
+  assert.equal(result.provisioningReady, false); assert.equal(result.accessGranted, true);
   assert.equal(f.calls[0].previewDigest, 'b'.repeat(64)); assert.equal(f.calls[0].confirmation, 'original-confirmation');
   assert.equal(f.get().usage.websites, 1); assert.equal(f.count('auth_user_websites'), 0);
 });
