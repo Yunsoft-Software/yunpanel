@@ -3,8 +3,11 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { assertUuid } from '@yunpanel/shared';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const DEFAULT_TTL_MS = 30_000;
 const DEFAULT_LIMIT = 100;
+const DEFAULT_GATEWAY_TTL_MS = 60 * 60_000;
+const DEFAULT_GATEWAY_LIMIT = 100;
 const CREDENTIAL_OPERATIONS = new Set([
   OPERATIONS.DATABASE_CREDENTIAL_APPLY,
   OPERATIONS.DATABASE_CREDENTIAL_DELETE,
@@ -97,6 +100,8 @@ export function createPhpMyAdminHandoffService({
   now = Date.now,
   ttlMs = DEFAULT_TTL_MS,
   maxHandoffs = DEFAULT_LIMIT,
+  gatewayTtlMs = DEFAULT_GATEWAY_TTL_MS,
+  maxGatewaySessions = DEFAULT_GATEWAY_LIMIT,
 } = {}) {
   if (!databaseBindingRegistry || typeof databaseBindingRegistry.getBinding !== 'function'
     || !databaseCredentialRegistry || typeof databaseCredentialRegistry.getCredential !== 'function'
@@ -114,11 +119,14 @@ export function createPhpMyAdminHandoffService({
   }
   if (typeof now !== 'function'
     || !Number.isSafeInteger(ttlMs) || ttlMs < 5_000 || ttlMs > 60_000
-    || !Number.isSafeInteger(maxHandoffs) || maxHandoffs < 1 || maxHandoffs > 1_000) {
+    || !Number.isSafeInteger(maxHandoffs) || maxHandoffs < 1 || maxHandoffs > 1_000
+    || !Number.isSafeInteger(gatewayTtlMs) || gatewayTtlMs < 60_000 || gatewayTtlMs > 12 * 60 * 60_000
+    || !Number.isSafeInteger(maxGatewaySessions) || maxGatewaySessions < 1 || maxGatewaySessions > 1_000) {
     throw new TypeError('phpMyAdmin handoff policy is invalid');
   }
 
   const handoffs = new Map();
+  const gatewaySessions = new Map();
 
   function remove(key) {
     const record = handoffs.get(key);
@@ -132,6 +140,31 @@ export function createPhpMyAdminHandoffService({
     const current = now();
     for (const [key, record] of handoffs) if (record.expiresAt <= current) remove(key);
     while (handoffs.size >= maxHandoffs) remove(handoffs.keys().next().value);
+  }
+
+  function removeGateway(key) {
+    const record = gatewaySessions.get(key);
+    if (!record) return false;
+    gatewaySessions.delete(key);
+    record.unregister?.();
+    return true;
+  }
+
+  function pruneGateway() {
+    const current = now();
+    for (const [key, record] of gatewaySessions) {
+      if (record.expiresAt <= current) removeGateway(key);
+    }
+    while (gatewaySessions.size >= maxGatewaySessions) {
+      removeGateway(gatewaySessions.keys().next().value);
+    }
+  }
+
+  function sameState(left, right) {
+    return [
+      'serverId', 'websiteId', 'databaseCredentialId', 'databaseBindingId',
+      'credentialRevision', 'bindingRevision', 'databaseName', 'username', 'host', 'desiredStateSha256',
+    ].every((field) => left?.[field] === right?.[field]);
   }
 
   async function resolveState({ serverId, websiteId, credentialId }) {
@@ -226,9 +259,16 @@ export function createPhpMyAdminHandoffService({
     return state;
   }
 
-  async function issue({ sessionId, userId, serverId, websiteId, credentialId } = {}) {
+  async function issue({ sessionId, userId, sessionDigest, serverId, websiteId, credentialId } = {}) {
     const normalizedSessionId = boundedIdentity(sessionId, 'sessionId');
     const normalizedUserId = boundedIdentity(userId, 'userId');
+    if (typeof sessionDigest !== 'string' || !DIGEST_PATTERN.test(sessionDigest)) {
+      throw new PhpMyAdminHandoffError(
+        'phpmyadmin_handoff_session_binding_invalid',
+        'Panel session binding is invalid',
+        403,
+      );
+    }
     const state = await resolveState({ serverId, websiteId, credentialId });
     prune();
 
@@ -238,6 +278,7 @@ export function createPhpMyAdminHandoffService({
     const record = {
       sessionId: normalizedSessionId,
       userId: normalizedUserId,
+      sessionDigest,
       state,
       expiresAt,
       unregister: null,
@@ -264,7 +305,7 @@ export function createPhpMyAdminHandoffService({
     });
   }
 
-  async function consume(capability) {
+  async function consume(capability, { sessionDigest } = {}) {
     if (typeof capability !== 'string' || !TOKEN_PATTERN.test(capability)) {
       throw new PhpMyAdminHandoffError(
         'phpmyadmin_handoff_invalid',
@@ -282,6 +323,14 @@ export function createPhpMyAdminHandoffService({
       );
     }
     remove(key);
+    if (typeof sessionDigest !== 'string' || !DIGEST_PATTERN.test(sessionDigest)
+      || sessionDigest !== record.sessionDigest) {
+      throw new PhpMyAdminHandoffError(
+        'phpmyadmin_handoff_session_mismatch',
+        'phpMyAdmin handoff does not belong to this panel session',
+        403,
+      );
+    }
     if (record.expiresAt <= now()) {
       throw new PhpMyAdminHandoffError(
         'phpmyadmin_handoff_expired',
@@ -295,17 +344,12 @@ export function createPhpMyAdminHandoffService({
       websiteId: record.state.websiteId,
       credentialId: record.state.databaseCredentialId,
     });
-    for (const field of [
-      'serverId', 'websiteId', 'databaseCredentialId', 'databaseBindingId',
-      'credentialRevision', 'bindingRevision', 'databaseName', 'username', 'host', 'desiredStateSha256',
-    ]) {
-      if (current[field] !== record.state[field]) {
-        throw new PhpMyAdminHandoffError(
-          'phpmyadmin_handoff_stale',
-          'phpMyAdmin handoff became stale before use',
-          409,
-        );
-      }
+    if (!sameState(current, record.state)) {
+      throw new PhpMyAdminHandoffError(
+        'phpmyadmin_handoff_stale',
+        'phpMyAdmin handoff became stale before use',
+        409,
+      );
     }
 
     let privateCredential;
@@ -335,6 +379,26 @@ export function createPhpMyAdminHandoffService({
       );
     }
 
+    pruneGateway();
+    const gatewaySession = randomBytes(32).toString('base64url');
+    const gatewayKey = digest(gatewaySession);
+    const gatewayExpiresAt = now() + gatewayTtlMs;
+    const gatewayRecord = {
+      sessionId: record.sessionId,
+      userId: record.userId,
+      state: current,
+      expiresAt: gatewayExpiresAt,
+      unregister: null,
+    };
+    gatewaySessions.set(gatewayKey, gatewayRecord);
+    if (liveSessions) {
+      gatewayRecord.unregister = liveSessions.register({
+        sessionId: record.sessionId,
+        userId: record.userId,
+        terminate: () => removeGateway(gatewayKey),
+      }).unregister;
+    }
+
     return Object.freeze({
       version: 1,
       protocol: 'yunpanel-phpmyadmin-signon-v1',
@@ -348,16 +412,73 @@ export function createPhpMyAdminHandoffService({
       username: current.username,
       password: privateCredential.password,
       host: current.host,
+      gatewaySession,
+      expiresAt: gatewayExpiresAt,
+    });
+  }
+
+  async function authorizeGatewaySession(gatewaySession, {
+    sessionId,
+    userId,
+    role,
+    websiteIds,
+  } = {}) {
+    if (typeof gatewaySession !== 'string' || !TOKEN_PATTERN.test(gatewaySession)) return null;
+    pruneGateway();
+    const key = digest(gatewaySession);
+    const record = gatewaySessions.get(key);
+    if (!record || record.expiresAt <= now()
+      || record.sessionId !== sessionId || record.userId !== userId
+      || !['owner', 'site_manager'].includes(role)) return null;
+    if (role === 'site_manager'
+      && (!Array.isArray(websiteIds) || !websiteIds.includes(record.state.websiteId))) {
+      removeGateway(key);
+      return null;
+    }
+    let current;
+    try {
+      current = await resolveState({
+        serverId: record.state.serverId,
+        websiteId: record.state.websiteId,
+        credentialId: record.state.databaseCredentialId,
+      });
+    } catch {
+      removeGateway(key);
+      return null;
+    }
+    if (!sameState(current, record.state)) {
+      removeGateway(key);
+      return null;
+    }
+    return Object.freeze({
+      websiteId: record.state.websiteId,
+      databaseCredentialId: record.state.databaseCredentialId,
       expiresAt: record.expiresAt,
     });
   }
 
-  return Object.freeze({ issue, consume, size: () => handoffs.size });
+  function revokeGatewaySession(gatewaySession) {
+    if (typeof gatewaySession !== 'string' || !TOKEN_PATTERN.test(gatewaySession)) return false;
+    return removeGateway(digest(gatewaySession));
+  }
+
+  return Object.freeze({
+    issue,
+    consume,
+    authorizeGatewaySession,
+    revokeGatewaySession,
+    size: () => handoffs.size,
+    gatewaySize: () => gatewaySessions.size,
+  });
 }
 
 export const phpMyAdminHandoffInternals = Object.freeze({
   defaultTtlMs: DEFAULT_TTL_MS,
   defaultLimit: DEFAULT_LIMIT,
+  defaultGatewayTtlMs: DEFAULT_GATEWAY_TTL_MS,
+  defaultGatewayLimit: DEFAULT_GATEWAY_LIMIT,
+  tokenPattern: TOKEN_PATTERN,
+  digestPattern: DIGEST_PATTERN,
   latestCredentialJob,
   assertAppliedEvidence,
 });
