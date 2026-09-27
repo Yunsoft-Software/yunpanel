@@ -531,7 +531,7 @@ test('phpMyAdmin gateway canonicalizes the trailing slash without touching the v
 });
 
 
-test('elFinder gateway consumes a fragment handoff once and injects only server-verified Website identity', async (t) => {
+test('elFinder gateway binds handoff and vendor requests to the live Website session', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-web-'));
   const gatewaySocketPath = path.join(directory, 'elfinder-http.sock');
   const handoffSocketPath = path.join(directory, 'elfinder-handoff.sock');
@@ -540,6 +540,8 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
   const serverId = '32345678-1234-4234-8234-123456789012';
   const unixUser = `yunapp-${createHash('sha256').update(applicationId).digest('hex').slice(0, 12)}`;
   const capability = 'c'.repeat(43);
+  const panelCookie = '__Host-yunpanel_session=owner';
+  const panelDigest = createHash('sha256').update('owner').digest('hex');
   const handoffRequests = [];
 
   const handoff = http.createServer((request, response) => {
@@ -579,6 +581,8 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       unixUser: request.headers['x-yunpanel-elfinder-unix-user'],
       websiteId: request.headers['x-yunpanel-elfinder-website-id'],
       applicationId: request.headers['x-yunpanel-elfinder-application-id'],
+      serverId: request.headers['x-yunpanel-elfinder-server-id'],
+      websiteRevision: request.headers['x-yunpanel-elfinder-website-revision'],
       cookie: request.headers.cookie,
     });
     response.writeHead(200, { 'content-type': 'application/json' });
@@ -589,19 +593,36 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
 
   const accessRequests = [];
   const api = http.createServer((request, response) => {
-    accessRequests.push({
+    const record = {
       url: request.url,
       cookie: request.headers.cookie,
+      serverId: request.headers['x-yunpanel-elfinder-server-id'],
+      websiteId: request.headers['x-yunpanel-elfinder-website-id'],
+      websiteRevision: request.headers['x-yunpanel-elfinder-website-revision'],
+      applicationId: request.headers['x-yunpanel-elfinder-application-id'],
+      unixUser: request.headers['x-yunpanel-elfinder-unix-user'],
       proxyToken: request.headers['x-yunpanel-proxy-token'],
       clientIp: request.headers['x-yunpanel-client-ip'],
-    });
-    if (request.url !== '/api/elfinder-gateway-access') {
-      response.writeHead(404);
+    };
+    accessRequests.push(record);
+    const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
+    const panelAllowed = cookies.includes(panelCookie);
+    if (request.url === '/api/elfinder-bootstrap-access') {
+      response.writeHead(panelAllowed ? 204 : 403);
       response.end();
       return;
     }
-    const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
-    response.writeHead(cookies.includes('__Host-yunpanel_session=owner') ? 204 : 403);
+    if (request.url === '/api/elfinder-gateway-access') {
+      const stateAllowed = record.serverId === serverId
+        && record.websiteId === websiteId
+        && record.websiteRevision === '7'
+        && record.applicationId === applicationId
+        && record.unixUser === unixUser;
+      response.writeHead(panelAllowed && stateAllowed ? 204 : 403);
+      response.end();
+      return;
+    }
+    response.writeHead(404);
     response.end();
   });
   const apiPort = await listen(api);
@@ -635,7 +656,7 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       method: 'POST',
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: '__Host-yunpanel_session=owner',
+        cookie: panelCookie,
         origin: 'https://panel.example.com',
         'content-type': 'application/json',
       },
@@ -654,9 +675,12 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
   assert.deepEqual(handoffRequests, [{
     method: 'POST',
     url: '/consume',
-    body: { capability },
+    body: { capability, sessionDigest: panelDigest },
   }]);
   assert.equal(vendorRequests.length, 0);
+  assert.equal(accessRequests[0].url, '/api/elfinder-bootstrap-access');
+  assert.equal(accessRequests[0].serverId, undefined);
+  assert.equal(accessRequests[0].websiteId, undefined);
 
   const connector = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
@@ -664,12 +688,14 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       method: 'POST',
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: `__Host-yunpanel_session=owner; ${toolCookie}`,
+        cookie: `${panelCookie}; ${toolCookie}`,
         origin: 'https://panel.example.com',
         'content-type': 'application/x-www-form-urlencoded',
         'x-yunpanel-elfinder-unix-user': 'yunapp-ffffffffffff',
         'x-yunpanel-elfinder-website-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
         'x-yunpanel-elfinder-application-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        'x-yunpanel-elfinder-server-id': 'ffffffff-ffff-4fff-8fff-ffffffffffff',
+        'x-yunpanel-elfinder-website-revision': '999',
       },
       body: 'cmd=open&target=l1_Lw',
     },
@@ -681,8 +707,21 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
     unixUser,
     websiteId,
     applicationId,
+    serverId: undefined,
+    websiteRevision: undefined,
     cookie: undefined,
   }]);
+  assert.deepEqual(accessRequests[1], {
+    url: '/api/elfinder-gateway-access',
+    cookie: `${panelCookie}; ${toolCookie}`,
+    serverId,
+    websiteId,
+    websiteRevision: '7',
+    applicationId,
+    unixUser,
+    proxyToken,
+    clientIp: '203.0.113.8',
+  });
 
   const missingToolSession = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
@@ -690,7 +729,7 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       method: 'POST',
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: '__Host-yunpanel_session=owner',
+        cookie: panelCookie,
         origin: 'https://panel.example.com',
         'content-type': 'application/x-www-form-urlencoded',
       },
@@ -705,7 +744,7 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
     {
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: '__Host-yunpanel_session=owner',
+        cookie: panelCookie,
       },
     },
   );
@@ -717,7 +756,7 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
     {
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: `__Host-yunpanel_session=owner; ${toolCookie}`,
+        cookie: `${panelCookie}; ${toolCookie}`,
       },
     },
   );
@@ -726,6 +765,8 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
   assert.equal(vendorRequests[1].url, '/vendor/js/elfinder.min.js');
   assert.equal(vendorRequests[1].unixUser, undefined);
   assert.equal(vendorRequests[1].cookie, undefined);
+  assert.equal(accessRequests[2].url, '/api/elfinder-gateway-access');
+  assert.equal(accessRequests[2].websiteId, websiteId);
 
   const wrongPanelSession = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
@@ -740,11 +781,9 @@ test('elFinder gateway consumes a fragment handoff once and injects only server-
       body: 'cmd=open',
     },
   );
-  assert.equal(wrongPanelSession.status, 403);
+  assert.equal(wrongPanelSession.status, 401);
   assert.equal(vendorRequests.length, 2);
-
-  assert.ok(accessRequests.length >= 4);
-  assert.ok(accessRequests.every((entry) => entry.url === '/api/elfinder-gateway-access'));
+  assert.equal(accessRequests.length, 3);
   assert.ok(accessRequests.every((entry) => entry.proxyToken === proxyToken));
   assert.ok(accessRequests.every((entry) => entry.clientIp === '203.0.113.8'));
 });
