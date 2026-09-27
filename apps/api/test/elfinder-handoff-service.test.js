@@ -200,6 +200,7 @@ test('elFinder handoff rejects remote, unsupported and forged Website targets be
       fx.service.issue({
         sessionId: 'owner-session',
         userId: 'owner-user',
+        sessionDigest: SESSION_DIGEST,
         serverId,
         websiteId,
       }),
@@ -230,6 +231,7 @@ test('elFinder handoff fails closed when the per-Website Files runtime is not pr
       fx.service.issue({
         sessionId: 'owner-session',
         userId: 'owner-user',
+        sessionDigest: SESSION_DIGEST,
         serverId,
         websiteId,
       }),
