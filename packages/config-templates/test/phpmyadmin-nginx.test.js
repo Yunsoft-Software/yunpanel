@@ -18,6 +18,7 @@ test('phpMyAdmin Nginx template is reachable only through the managed Unix gatew
   assert.match(content, /^  location = \/__yunpanel\/signon \{$/m);
   assert.match(content, /^  location = \/__yunpanel\/logout \{$/m);
   assert.match(content, /fastcgi_param YUNPANEL_SIGNON_ACTION signon;/);
+  assert.match(content, /fastcgi_param HTTP_X_YUNPANEL_PANEL_SESSION_DIGEST \$http_x_yunpanel_panel_session_digest;/);
   assert.match(content, /fastcgi_param YUNPANEL_SIGNON_ACTION logout;/);
   assert.match(content, /fastcgi_param SCRIPT_FILENAME \/usr\/lib\/yunpanel\/phpmyadmin\/signon\.php;/);
   assert.match(content, /limit_except POST/);
