@@ -202,6 +202,22 @@ export function createAuthStore({
     return { kind: row.kind, resellerId: row.resellerId };
   }
 
+  function websiteIdsForSession(userId, hosting) {
+    if (hosting?.kind === 'reseller') return [];
+    if (hosting?.kind === 'customer') {
+      const owned = db.prepare('SELECT website_id FROM auth_customer_websites WHERE customer_id = ? ORDER BY website_id')
+        .all(userId).map((row) => row.website_id);
+      const attached = db.prepare("SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'attached' ORDER BY website_id")
+        .all(userId).map((row) => row.website_id);
+      if (owned.length !== attached.length || owned.some((websiteId, index) => websiteId !== attached[index])) {
+        throw new AuthError('hosting_site_state_invalid', 'Site ownership state requires reconciliation.', 503);
+      }
+      return owned;
+    }
+    return db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ? ORDER BY website_id')
+      .all(userId).map((row) => row.website_id);
+  }
+
   function rateLimit(keys) {
     transaction(() => {
       db.prepare('DELETE FROM auth_limits WHERE expires_at <= ?').run(now());
@@ -236,10 +252,8 @@ export function createAuthStore({
       db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(now(), row.id);
       row.last_active_at = now();
     }
-    const websiteIds = row.role === 'site_manager'
-      ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
-      : null;
     const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
+    const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
     return {
       id: row.id,
       user: {
@@ -354,10 +368,8 @@ export function createAuthStore({
         revokeLiveSession(row.id, 'hosting_scope_inactive');
         return null;
       }
-      const websiteIds = row.role === 'site_manager'
-        ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all(row.user_id).map((r) => r.website_id)
-        : null;
       const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
+      const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
       return Object.freeze({
         id: row.id,
         user: Object.freeze({
