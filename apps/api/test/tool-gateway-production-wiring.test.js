@@ -35,6 +35,10 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(web, /ELFINDER_GATEWAY\.publicPrefix/);
   assert.match(web, /ELFINDER_GATEWAY\.accessPath/);
   assert.match(web, /ELFINDER_GATEWAY\.socketPath/);
+  assert.match(web, /ELFINDER_BOOTSTRAP_ACCESS_PATH/);
+  assert.match(web, /x-yunpanel-elfinder-server-id/);
+  assert.match(web, /x-yunpanel-elfinder-website-revision/);
+  assert.match(web, /consumeElFinderHandoff\(capability, \{[\s\S]*sessionDigest: authDigest/);
   assert.match(web, /TTYD_GATEWAY\.publicPrefix/);
   assert.match(web, /TTYD_GATEWAY\.accessPath/);
   assert.match(web, /TTYD_GATEWAY\.socketRoot/);
@@ -49,5 +53,7 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(apiIndex, /gateway\.id === 'phpmyadmin'/);
   assert.match(apiIndex, /phpMyAdminHandoffService\.authorizeGatewaySession/);
   assert.match(apiIndex, /websiteIds: session\.user\.websiteIds/);
+  assert.match(apiIndex, /gateway\.id === 'elfinder'/);
+  assert.match(apiIndex, /elFinderHandoffService\.authorizeGatewayState/);
 });
 
