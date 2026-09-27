@@ -138,7 +138,8 @@ function browserProxyHeaders(request) {
         'x-yunpanel-tool-transport', 'x-yunpanel-ttyd-auth',
         'x-yunpanel-phpmyadmin-session', 'x-yunpanel-panel-session-digest',
         'x-yunpanel-elfinder-unix-user', 'x-yunpanel-elfinder-website-id',
-        'x-yunpanel-elfinder-application-id'].includes(name)) {
+        'x-yunpanel-elfinder-application-id', 'x-yunpanel-elfinder-server-id',
+        'x-yunpanel-elfinder-website-revision'].includes(name)) {
       headers[name] = value;
     }
   }
