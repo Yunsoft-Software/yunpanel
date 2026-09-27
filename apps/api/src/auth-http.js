@@ -101,6 +101,18 @@ function createBrowserAuthBoundary({
     return authorized;
   }
 
+  function currentSiteManagement(rawToken, expected = null, { touch = false } = {}) {
+    const session = store.getSession(rawToken, { touch });
+    if (!session) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+    const authorized = session.user?.role === 'owner'
+      ? ownerPolicy.requireManagement(session)
+      : ownerPolicy.requireSiteManagement(session);
+    if (expected && (authorized.id !== expected.sessionId || authorized.user.id !== expected.userId)) {
+      throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+    }
+    return authorized;
+  }
+
   return Object.freeze({
     localDevelopment,
     ownerPolicy,
@@ -117,6 +129,14 @@ function createBrowserAuthBoundary({
       return Object.freeze({ rawToken, session, peer });
     },
     reauthorizeLiveOwner: (rawToken, expected, options) => currentOwner(rawToken, expected, options),
+    authenticateLiveSiteManagement(request) {
+      checkOrigin(request);
+      const peer = requestPeer(request, { proxyToken, trustedProxies });
+      const rawToken = readCookie(request, cookieName);
+      const session = currentSiteManagement(rawToken);
+      return Object.freeze({ rawToken, session, peer });
+    },
+    reauthorizeLiveSiteManagement: (rawToken, expected, options) => currentSiteManagement(rawToken, expected, options),
   });
 }
 
@@ -369,8 +389,8 @@ export function createAuthenticatedApi({
 export function createLiveConnectionAuthenticator(options) {
   const boundary = createBrowserAuthBoundary(options);
   return Object.freeze({
-    authenticate: boundary.authenticateLiveOwner,
-    reauthorize: boundary.reauthorizeLiveOwner,
+    authenticate: boundary.authenticateLiveSiteManagement,
+    reauthorize: boundary.reauthorizeLiveSiteManagement,
   });
 }
 
