@@ -12,6 +12,8 @@ import {
 import { PhpMyAdminHandoffError } from '../src/phpmyadmin-handoff-service.js';
 
 const capability = 'A'.repeat(43);
+const sessionDigest = 'd'.repeat(64);
+const gatewaySession = 'G'.repeat(43);
 
 async function listenHandler(t, service) {
   const server = http.createServer(createPhpMyAdminHandoffConsumerHandler({
@@ -29,8 +31,8 @@ async function listenHandler(t, service) {
 test('private consumer returns the DB secret only after consuming an exact capability', async (t) => {
   const calls = [];
   const base = await listenHandler(t, {
-    async consume(value) {
-      calls.push(value);
+    async consume(value, options) {
+      calls.push([value, structuredClone(options)]);
       return {
         version: 1,
         protocol: 'yunpanel-phpmyadmin-signon-v1',
@@ -44,6 +46,7 @@ test('private consumer returns the DB secret only after consuming an exact capab
         username: 'ydb_0123456789abcdef01234567',
         password: 'database-secret-value',
         host: 'localhost',
+        gatewaySession,
         expiresAt: 50_000,
       };
     },
@@ -52,7 +55,7 @@ test('private consumer returns the DB secret only after consuming an exact capab
   const response = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability }),
+    body: JSON.stringify({ capability, sessionDigest }),
   });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
@@ -66,10 +69,11 @@ test('private consumer returns the DB secret only after consuming an exact capab
       username: 'ydb_0123456789abcdef01234567',
       password: 'database-secret-value',
       host: 'localhost',
+      gatewaySession,
       expiresAt: 50_000,
     },
   });
-  assert.deepEqual(calls, [capability]);
+  assert.deepEqual(calls, [[capability, { sessionDigest }]]);
 });
 
 test('private consumer rejects non-consume routes, malformed bodies and service errors without broadening the interface', async (t) => {
@@ -92,7 +96,7 @@ test('private consumer rejects non-consume routes, malformed bodies and service 
   const extra = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability, password: 'forbidden' }),
+    body: JSON.stringify({ capability, sessionDigest, password: 'forbidden' }),
   });
   assert.equal(extra.status, 400);
   assert.equal((await extra.json()).error.code, 'phpmyadmin_handoff_consume_request_invalid');
@@ -100,7 +104,7 @@ test('private consumer rejects non-consume routes, malformed bodies and service 
   const invalid = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability }),
+    body: JSON.stringify({ capability, sessionDigest }),
   });
   assert.equal(invalid.status, 401);
   assert.equal((await invalid.json()).error.code, 'phpmyadmin_handoff_invalid');
@@ -127,8 +131,9 @@ test('socket runtime uses a dedicated root-owned phpMyAdmin runtime boundary and
 
   const runtime = await startPhpMyAdminHandoffSocket({
     phpMyAdminHandoffService: {
-      async consume(value) {
+      async consume(value, options) {
         assert.equal(value, capability);
+        assert.deepEqual(options, { sessionDigest });
         return {
           version: 1,
           protocol: 'yunpanel-phpmyadmin-signon-v1',
@@ -154,7 +159,7 @@ test('socket runtime uses a dedicated root-owned phpMyAdmin runtime boundary and
   assert.equal(runtime.mode, 0o660);
   assert.equal(runtime.directoryMode, 0o750);
 
-  const payload = JSON.stringify({ capability });
+  const payload = JSON.stringify({ capability, sessionDigest });
   const result = await new Promise((resolve, reject) => {
     const request = http.request({
       socketPath,
