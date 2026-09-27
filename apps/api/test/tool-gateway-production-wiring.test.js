@@ -3,11 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const authUrl = new URL('../src/auth-http.js', import.meta.url);
+const apiIndexUrl = new URL('../src/index.js', import.meta.url);
 const webServerUrl = new URL('../../web/server.js', import.meta.url);
 
 test('API auth and public web gateway share the reusable integrated-tool descriptor contract', async () => {
-  const [auth, web] = await Promise.all([
+  const [auth, apiIndex, web] = await Promise.all([
     readFile(authUrl, 'utf8'),
+    readFile(apiIndexUrl, 'utf8'),
     readFile(webServerUrl, 'utf8'),
   ]);
 
@@ -26,6 +28,10 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(web, /PHPMYADMIN_GATEWAY\.publicPrefix/);
   assert.match(web, /PHPMYADMIN_GATEWAY\.accessPath/);
   assert.match(web, /PHPMYADMIN_GATEWAY\.socketPath/);
+  assert.match(web, /PHPMYADMIN_SIGNON_ACCESS_PATH/);
+  assert.match(web, /x-yunpanel-phpmyadmin-session/);
+  assert.match(web, /x-yunpanel-panel-session-digest/);
+  assert.match(web, /phpMyAdminVendorCookieHeader/);
   assert.match(web, /ELFINDER_GATEWAY\.publicPrefix/);
   assert.match(web, /ELFINDER_GATEWAY\.accessPath/);
   assert.match(web, /ELFINDER_GATEWAY\.socketPath/);
@@ -39,5 +45,9 @@ test('API auth and public web gateway share the reusable integrated-tool descrip
   assert.match(web, /GOACCESS_GATEWAY\.publicPrefix/);
   assert.match(web, /GOACCESS_GATEWAY\.accessPath/);
   assert.match(web, /GOACCESS_GATEWAY\.socketRoot/);
+
+  assert.match(apiIndex, /gateway\.id === 'phpmyadmin'/);
+  assert.match(apiIndex, /phpMyAdminHandoffService\.authorizeGatewaySession/);
+  assert.match(apiIndex, /websiteIds: session\.user\.websiteIds/);
 });
 
