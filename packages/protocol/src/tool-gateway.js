@@ -50,7 +50,7 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     audience: 'elfinder',
     publicPrefix: '/tools/elfinder',
     accessPath: '/api/elfinder-gateway-access',
-    accessMode: 'owner',
+    accessMode: 'session',
     socketPath: '/run/yunpanel/elfinder-http.sock',
   }),
   ttyd: descriptor({
