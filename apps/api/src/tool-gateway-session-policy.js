@@ -1,18 +1,16 @@
 import { AuthError } from './auth-error.js';
 
-// The legacy phpMyAdmin proxy keeps a separate SQL session cookie. Merely
-// accepting a panel role here is NOT enough: after switching panel accounts in
-// the same browser that cookie could still represent the previous SQL account.
-// Keep the existing Owner gate until the proxy can bind every vendor request to
-// the current panel session AND its current Website assignment. A scoped signon
-// capability protects issuance, but does not supply this ongoing binding.
+// phpMyAdmin is the only integrated vendor session that can be opened from a
+// Website-scoped account. The public gateway must still prove the vendor cookie
+// through the session authorizer on every request; this policy only chooses the
+// correct panel authorization class before that per-request binding check runs.
 export function requireToolGatewaySession(policy, session, gateway) {
   if (gateway?.id === 'phpmyadmin'
-    && gateway.accessPath === '/api/phpmyadmin-gateway-access'
-    && session?.user?.role === 'site_manager') {
-    policy.requireSiteManagement(session);
-    throw new AuthError('phpmyadmin_site_session_binding_required',
-      'Site phpMyAdmin access requires a panel-bound SQL session. Database controls remain available in the website workspace.', 403);
+    && gateway.accessPath === '/api/phpmyadmin-gateway-access') {
+    if (session?.user?.role === 'site_manager') {
+      return policy.requireSiteManagement(session);
+    }
+    return policy.requireManagement(session);
   }
   return policy.requireManagement(session);
 }
