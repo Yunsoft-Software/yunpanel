@@ -42,7 +42,7 @@ export const INTEGRATED_TOOL_GATEWAYS = Object.freeze({
     audience: 'phpmyadmin',
     publicPrefix: '/tools/phpmyadmin',
     accessPath: '/api/phpmyadmin-gateway-access',
-    accessMode: 'owner',
+    accessMode: 'session',
     socketPath: '/run/yunpanel/phpmyadmin-http.sock',
   }),
   elfinder: descriptor({
