@@ -812,7 +812,7 @@ test('elFinder gateway rejects query handoff, cross-origin bootstrap and direct 
 
   const api = http.createServer((request, response) => {
     response.writeHead(
-      request.url === '/api/elfinder-gateway-access'
+      request.url === '/api/elfinder-bootstrap-access'
         && request.headers.cookie === '__Host-yunpanel_session=owner'
         ? 204 : 403,
     );
