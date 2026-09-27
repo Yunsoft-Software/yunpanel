@@ -20,7 +20,7 @@ test('integrated tool gateway descriptors keep unique audience, prefix, access p
     audience: 'phpmyadmin',
     publicPrefix: '/tools/phpmyadmin',
     accessPath: '/api/phpmyadmin-gateway-access',
-    accessMode: 'owner',
+    accessMode: 'session',
     socketPath: '/run/yunpanel/phpmyadmin-http.sock',
     socketRoot: null,
     loopbackPort: null,
