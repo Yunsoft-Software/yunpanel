@@ -238,6 +238,48 @@ test('session-bound phpMyAdmin delegates exact panel session context to its auth
   assert.equal(app.calls(), 0);
 });
 
+test('site manager phpMyAdmin gateway receives the current Website grants', async (t) => {
+  const store = fakeStore();
+  const getSession = store.getSession;
+  store.getSession = (token) => {
+    const session = getSession(token);
+    return session && {
+      ...session,
+      user: {
+        ...session.user,
+        id: 'site-user',
+        role: 'site_manager',
+        websiteIds: ['site-a'],
+      },
+    };
+  };
+  const calls = [];
+  const app = await fixture(t, {
+    store,
+    toolGatewayAuthorizer: async ({ gateway, request, session }) => {
+      calls.push({
+        id: gateway.id,
+        gatewaySession: request.headers['x-yunpanel-phpmyadmin-session'],
+        role: session.user.role,
+        websiteIds: session.user.websiteIds,
+      });
+      return true;
+    },
+  });
+
+  const response = await app.request('/api/phpmyadmin-gateway-access', {
+    headers: { cookie, 'x-yunpanel-phpmyadmin-session': 'gateway-session' },
+  });
+  assert.equal(response.status, 204);
+  assert.deepEqual(calls, [{
+    id: 'phpmyadmin',
+    gatewaySession: 'gateway-session',
+    role: 'site_manager',
+    websiteIds: ['site-a'],
+  }]);
+  assert.equal(app.calls(), 0);
+});
+
 test('session-bound ttyd gateway delegates exact Owner session context to its authorizer', async (t) => {
   const calls = [];
   const app = await fixture(t, {
