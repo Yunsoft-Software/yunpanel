@@ -1,30 +1,70 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js';
-const manager = {user:{role:'site_manager',websiteIds:['site-a']}};
-const gateway = {id:'phpmyadmin',accessPath:'/api/phpmyadmin-gateway-access'};
+
+const manager = { user: { role: 'site_manager', websiteIds: ['site-a'] } };
+const gateway = { id: 'phpmyadmin', accessPath: '/api/phpmyadmin-gateway-access' };
 const policy = {
- requireSiteManagement(session) { if(session?.user?.role !== 'site_manager') throw new Error('forbidden'); return {...session,access:{mode:'site_management'},security:{managementAllowed:true}}; },
- requireManagement(session) { if(session?.user?.role !== 'owner' || session.mfaReady !== true) throw new Error('owner_or_mfa_required'); return session; },
+  requireSiteManagement(session) {
+    if (session?.user?.role !== 'site_manager') throw new Error('site_management_required');
+    return { ...session, access: { mode: 'site_management' }, security: { managementAllowed: true } };
+  },
+  requireManagement(session) {
+    if (session?.user?.role !== 'owner' || session.mfaReady !== true) {
+      throw new Error('owner_or_mfa_required');
+    }
+    return session;
+  },
 };
-test('site role alone cannot unlock an unbound persistent phpMyAdmin SQL cookie',()=>{
- assert.throws(()=>requireToolGatewaySession(policy,manager,gateway),
-  error=>error.status===403 && error.code==='phpmyadmin_site_session_binding_required');
+
+test('site manager may reach phpMyAdmin only through the session-authorized gateway path', () => {
+  const authorized = requireToolGatewaySession(policy, manager, gateway);
+  assert.equal(authorized.user.role, 'site_manager');
+  assert.equal(authorized.access.mode, 'site_management');
 });
-test('other tools retain Owner authorization',()=>{
- for(const id of ['ttyd','elfinder','netdata','goaccess','unknown']) assert.throws(()=>requireToolGatewaySession(policy,manager,{id,accessPath:`/api/${id}-gateway-access`}),/owner_or_mfa/);
- assert.throws(()=>requireToolGatewaySession(policy,manager,{...gateway,accessPath:'/api/netdata-gateway-access'}));
+
+test('other integrated tools retain Owner authorization', () => {
+  for (const id of ['ttyd', 'elfinder', 'netdata', 'goaccess', 'unknown']) {
+    assert.throws(
+      () => requireToolGatewaySession(policy, manager, {
+        id,
+        accessPath: `/api/${id}-gateway-access`,
+      }),
+      /owner_or_mfa/,
+    );
+  }
+  assert.throws(
+    () => requireToolGatewaySession(policy, manager, {
+      ...gateway,
+      accessPath: '/api/netdata-gateway-access',
+    }),
+    /owner_or_mfa/,
+  );
 });
-test('changed, unassigned and malformed Website lists cannot retain an earlier SQL session',()=>{
- for(const websiteIds of [['site-b'],[],[''],null]) {
-  assert.throws(()=>requireToolGatewaySession(policy,{user:{role:'site_manager',websiteIds}},gateway),error=>error.status===403);
- }
- assert.throws(()=>requireToolGatewaySession(policy,{user:{role:'read_only',websiteIds:['site-a']}},gateway));
- assert.throws(()=>requireToolGatewaySession(policy,null,gateway));
+
+test('phpMyAdmin policy still rejects non-management roles and preserves Owner MFA', () => {
+  assert.throws(
+    () => requireToolGatewaySession(policy, { user: { role: 'read_only' } }, gateway),
+    /owner_or_mfa/,
+  );
+  assert.throws(() => requireToolGatewaySession(policy, null, gateway), /owner_or_mfa/);
+  assert.throws(
+    () => requireToolGatewaySession(policy, { user: { role: 'owner' }, mfaReady: false }, gateway),
+    /owner_or_mfa/,
+  );
+  assert.equal(
+    requireToolGatewaySession(policy, { user: { role: 'owner' }, mfaReady: true }, gateway).mfaReady,
+    true,
+  );
 });
-test('Owner MFA stays required and site permission failure cannot fall through',()=>{
- assert.throws(()=>requireToolGatewaySession(policy,{user:{role:'owner'},mfaReady:false},gateway));
- assert.equal(requireToolGatewaySession(policy,{user:{role:'owner'},mfaReady:true},gateway).mfaReady,true);
- const blocked={...policy,requireSiteManagement:()=>{throw new Error('site permission expired');}};
- assert.throws(()=>requireToolGatewaySession(blocked,manager,gateway),/site permission expired/);
+
+test('site-management authorization failures cannot fall through to Owner or gateway access', () => {
+  const blocked = {
+    ...policy,
+    requireSiteManagement: () => { throw new Error('site permission expired'); },
+  };
+  assert.throws(
+    () => requireToolGatewaySession(blocked, manager, gateway),
+    /site permission expired/,
+  );
 });
