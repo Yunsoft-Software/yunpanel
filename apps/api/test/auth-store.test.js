@@ -168,6 +168,8 @@ test('hosting customer and reseller sessions derive live site scope from attache
   const legacyWebsiteId = '22222222-2222-4222-8222-222222222222';
   const operationId = '33333333-3333-4333-8333-333333333333';
   const serverId = '44444444-4444-4444-8444-444444444444';
+  const foreignWebsiteId = '55555555-5555-4555-8555-555555555555';
+  const directWebsiteId = '66666666-6666-4666-8666-666666666666';
   const db = new DatabaseSync(filePath);
   db.exec('PRAGMA foreign_keys = ON');
   try {
@@ -177,11 +179,21 @@ test('hosting customer and reseller sessions derive live site scope from attache
       .run('customer-login', 'customer-login', encoded);
     db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
       .run('legacy-login', 'legacy-login', encoded);
+    for (const id of ['other-reseller', 'foreign-customer', 'direct-customer']) {
+      db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)").run(id, id, encoded);
+    }
     db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
       .run('reseller-login', 'reseller', null);
     db.prepare('INSERT INTO auth_reseller_limits VALUES (?, NULL, NULL)').run('reseller-login');
     db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
       .run('customer-login', 'customer', 'reseller-login');
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('other-reseller', 'reseller', null);
+    db.prepare('INSERT INTO auth_reseller_limits VALUES (?, NULL, NULL)').run('other-reseller');
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('foreign-customer', 'customer', 'other-reseller');
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('direct-customer', 'customer', null);
     db.prepare('INSERT INTO auth_user_websites VALUES (?, ?)').run('legacy-login', legacyWebsiteId);
     db.prepare(`INSERT INTO auth_hosting_site_allocations
       (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
@@ -190,6 +202,17 @@ test('hosting customer and reseller sessions derive live site scope from attache
     db.prepare('INSERT INTO auth_customer_websites VALUES (?, ?, ?)').run(websiteId, 'customer-login', 1000);
     db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = 1000 WHERE operation_id = ?")
       .run(operationId);
+    for (const [op, site, customer, digest] of [
+      ['77777777-7777-4777-8777-777777777777', foreignWebsiteId, 'foreign-customer', 'c'],
+      ['88888888-8888-4888-8888-888888888888', directWebsiteId, 'direct-customer', 'd'],
+    ]) {
+      db.prepare(`INSERT INTO auth_hosting_site_allocations
+        (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`)
+        .run(op, site, customer, serverId, digest.repeat(64), 'e'.repeat(64), 1000);
+      db.prepare('INSERT INTO auth_customer_websites VALUES (?, ?, ?)').run(site, customer, 1000);
+      db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = 1000 WHERE operation_id = ?").run(op);
+    }
   } finally { db.close(); }
 
   const customer = await store.login({ username: 'customer-login', password });
@@ -199,6 +222,8 @@ test('hosting customer and reseller sessions derive live site scope from attache
 
   const reseller = await store.login({ username: 'reseller-login', password });
   assert.deepEqual(reseller.session.user.websiteIds, [websiteId]);
+  assert.equal(reseller.session.user.websiteIds.includes(foreignWebsiteId), false);
+  assert.equal(reseller.session.user.websiteIds.includes(directWebsiteId), false);
   assert.deepEqual(store.getSessionById(reseller.session.id).user.websiteIds, [websiteId]);
   assert.deepEqual(reseller.session.user.hosting, { kind: 'reseller', resellerId: null });
 
