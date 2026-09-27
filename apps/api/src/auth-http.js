@@ -1,4 +1,5 @@
 import { handleAuditRead } from './audit-http.js';
+import { createHash } from 'node:crypto';
 import { isIP } from 'node:net';
 import { withAuditActor } from './audit-request-context.js';
 import { AuthError, safeEqual } from './auth-error.js';
@@ -17,6 +18,10 @@ const SAFE_METHODS = new Set(['GET', 'HEAD']);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
 const AGENT_ROUTES = Object.freeze([]);
+
+const sessionDigest = (value) => typeof value === 'string' && value.length > 0
+  ? createHash('sha256').update(value).digest('hex')
+  : null;
 
 export function isAgentRoute() {
   return false;
@@ -363,6 +368,12 @@ export function createAuthenticatedApi({
         : ownerPolicy.requireManagement(session);
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
     request.auth = authorized;
+    Object.defineProperty(request, 'authSessionDigest', {
+      value: sessionDigest(rawToken),
+      enumerable: false,
+      configurable: false,
+      writable: false,
+    });
     return withAuditActor(authorized.user.id, () => {
       attachManagementAudit({ request, response, pathname, audit: store.audit });
       if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
