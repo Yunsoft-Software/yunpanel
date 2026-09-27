@@ -173,22 +173,13 @@ test('session listing and logout use the same backend-verified session', async (
   assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 401);
 });
 
-test('Owner-only tool gateway access gates keep requiring the live management session', async (t) => {
+test('session-bound Website and ttyd gateways fail closed without an authorizer', async (t) => {
   const app = await fixture(t);
-  const pathname = '/api/elfinder-gateway-access';
-  assert.equal((await app.request(pathname)).status, 401);
-  assert.equal((await app.request(pathname, { headers: { cookie } })).status, 204);
-  assert.equal((await app.request(pathname, {
-    method: 'POST',
-    headers: mutationHeaders,
-    body: {},
-  })).status, 405);
-  assert.equal(app.calls(), 0);
-});
-
-test('session-bound phpMyAdmin and ttyd gateways fail closed without an authorizer', async (t) => {
-  const app = await fixture(t);
-  for (const pathname of ['/api/phpmyadmin-gateway-access', '/api/ttyd-gateway-access']) {
+  for (const pathname of [
+    '/api/phpmyadmin-gateway-access',
+    '/api/elfinder-gateway-access',
+    '/api/ttyd-gateway-access',
+  ]) {
     const response = await app.request(pathname, { headers: { cookie } });
     assert.equal(response.status, 503);
   }
@@ -276,6 +267,64 @@ test('site manager phpMyAdmin gateway receives the current Website grants', asyn
     gatewaySession: 'gateway-session',
     role: 'site_manager',
     websiteIds: ['site-a'],
+  }]);
+  assert.equal(app.calls(), 0);
+});
+
+test('site manager elFinder gateway receives current Website grants and target state', async (t) => {
+  const store = fakeStore();
+  const getSession = store.getSession;
+  store.getSession = (token) => {
+    const session = getSession(token);
+    return session && {
+      ...session,
+      user: {
+        ...session.user,
+        id: 'site-user',
+        role: 'site_manager',
+        websiteIds: ['22345678-1234-4234-8234-123456789012'],
+      },
+    };
+  };
+  const calls = [];
+  const app = await fixture(t, {
+    store,
+    toolGatewayAuthorizer: async ({ gateway, request, session }) => {
+      calls.push({
+        id: gateway.id,
+        accessMode: gateway.accessMode,
+        serverId: request.headers['x-yunpanel-elfinder-server-id'],
+        websiteId: request.headers['x-yunpanel-elfinder-website-id'],
+        websiteRevision: request.headers['x-yunpanel-elfinder-website-revision'],
+        applicationId: request.headers['x-yunpanel-elfinder-application-id'],
+        unixUser: request.headers['x-yunpanel-elfinder-unix-user'],
+        role: session.user.role,
+        websiteIds: session.user.websiteIds,
+      });
+      return true;
+    },
+  });
+
+  const headers = {
+    cookie,
+    'x-yunpanel-elfinder-server-id': '12345678-1234-4234-8234-123456789012',
+    'x-yunpanel-elfinder-website-id': '22345678-1234-4234-8234-123456789012',
+    'x-yunpanel-elfinder-website-revision': '7',
+    'x-yunpanel-elfinder-application-id': '32345678-1234-4234-8234-123456789012',
+    'x-yunpanel-elfinder-unix-user': 'yunapp-abcdef012345',
+  };
+  const response = await app.request('/api/elfinder-gateway-access', { headers });
+  assert.equal(response.status, 204);
+  assert.deepEqual(calls, [{
+    id: 'elfinder',
+    accessMode: 'session',
+    serverId: '12345678-1234-4234-8234-123456789012',
+    websiteId: '22345678-1234-4234-8234-123456789012',
+    websiteRevision: '7',
+    applicationId: '32345678-1234-4234-8234-123456789012',
+    unixUser: 'yunapp-abcdef012345',
+    role: 'site_manager',
+    websiteIds: ['22345678-1234-4234-8234-123456789012'],
   }]);
   assert.equal(app.calls(), 0);
 });
