@@ -1,5 +1,3 @@
-import { AuthError } from './auth-error.js';
-
 // phpMyAdmin is the only integrated vendor session that can be opened from a
 // Website-scoped account. The public gateway must still prove the vendor cookie
 // through the session authorizer on every request; this policy only chooses the
