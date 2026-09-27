@@ -592,6 +592,7 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
   await once(gateway, 'listening');
 
   const accessRequests = [];
+  let gatewayAllowed = true;
   const api = http.createServer((request, response) => {
     const record = {
       url: request.url,
@@ -618,7 +619,7 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
         && record.websiteRevision === '7'
         && record.applicationId === applicationId
         && record.unixUser === unixUser;
-      response.writeHead(panelAllowed && stateAllowed ? 204 : 403);
+      response.writeHead(panelAllowed && stateAllowed && gatewayAllowed ? 204 : 403);
       response.end();
       return;
     }
@@ -768,6 +769,25 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
   assert.equal(accessRequests[2].url, '/api/elfinder-gateway-access');
   assert.equal(accessRequests[2].websiteId, websiteId);
 
+  gatewayAllowed = false;
+  const revokedGrant = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
+    {
+      method: 'POST',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: `${panelCookie}; ${toolCookie}`,
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded',
+      },
+      body: 'cmd=open',
+    },
+  );
+  assert.equal(revokedGrant.status, 403);
+  assert.equal(vendorRequests.length, 2);
+  assert.equal(accessRequests[3].url, '/api/elfinder-gateway-access');
+  assert.equal(accessRequests[3].websiteId, websiteId);
+
   const wrongPanelSession = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
     {
@@ -783,7 +803,7 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
   );
   assert.equal(wrongPanelSession.status, 401);
   assert.equal(vendorRequests.length, 2);
-  assert.equal(accessRequests.length, 3);
+  assert.equal(accessRequests.length, 4);
   assert.ok(accessRequests.every((entry) => entry.proxyToken === proxyToken));
   assert.ok(accessRequests.every((entry) => entry.clientIp === '203.0.113.8'));
 });
