@@ -3,6 +3,7 @@ import { createWebsitePathContract } from '@yunpanel/host-runtime';
 import { assertUuid } from '@yunpanel/shared';
 
 const TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const SUPPORTED_RUNTIMES = new Set(['static', 'node', 'php']);
 const DEFAULT_TTL_MS = 30_000;
@@ -40,6 +41,22 @@ function applicationUser(applicationId) {
 
 function digest(value) {
   return createHash('sha256').update(value).digest('hex');
+}
+
+function exactSessionDigest(value) {
+  if (typeof value !== 'string' || !DIGEST_PATTERN.test(value)) {
+    throw new ElFinderHandoffError(
+      'elfinder_handoff_session_invalid',
+      'elFinder handoff panel session binding is invalid',
+      401,
+    );
+  }
+  return value;
+}
+
+function sameGatewayState(current, expected) {
+  return ['serverId', 'websiteId', 'websiteRevision', 'applicationId', 'unixUser']
+    .every((field) => current?.[field] === expected?.[field]);
 }
 
 export function createElFinderHandoffService({
@@ -199,9 +216,16 @@ export function createElFinderHandoffService({
     });
   }
 
-  async function issue({ sessionId, userId, serverId, websiteId } = {}) {
+  async function issue({
+    sessionId,
+    userId,
+    sessionDigest,
+    serverId,
+    websiteId,
+  } = {}) {
     const normalizedSessionId = identity(sessionId, 'sessionId');
     const normalizedUserId = identity(userId, 'userId');
+    const normalizedSessionDigest = exactSessionDigest(sessionDigest);
     const state = await resolveState({ serverId, websiteId });
     prune();
 
@@ -211,6 +235,7 @@ export function createElFinderHandoffService({
     const record = {
       sessionId: normalizedSessionId,
       userId: normalizedUserId,
+      sessionDigest: normalizedSessionDigest,
       state,
       expiresAt,
       unregister: null,
@@ -236,7 +261,8 @@ export function createElFinderHandoffService({
     });
   }
 
-  async function consume(capability) {
+  async function consume(capability, { sessionDigest } = {}) {
+    const normalizedSessionDigest = exactSessionDigest(sessionDigest);
     if (typeof capability !== 'string' || !TOKEN_PATTERN.test(capability)) {
       throw new ElFinderHandoffError('elfinder_handoff_invalid', 'elFinder handoff is invalid', 401);
     }
@@ -246,6 +272,13 @@ export function createElFinderHandoffService({
       throw new ElFinderHandoffError('elfinder_handoff_invalid', 'elFinder handoff is invalid', 401);
     }
     remove(key);
+    if (record.sessionDigest !== normalizedSessionDigest) {
+      throw new ElFinderHandoffError(
+        'elfinder_handoff_session_mismatch',
+        'elFinder handoff does not belong to this panel session',
+        401,
+      );
+    }
     if (record.expiresAt <= now()) {
       throw new ElFinderHandoffError('elfinder_handoff_expired', 'elFinder handoff expired', 401);
     }
@@ -280,9 +313,41 @@ export function createElFinderHandoffService({
     });
   }
 
+  async function authorizeGatewayState(state, {
+    role,
+    websiteIds,
+  } = {}) {
+    if (!state || typeof state !== 'object' || Array.isArray(state)
+      || !['owner', 'site_manager'].includes(role)
+      || !Number.isSafeInteger(state.websiteRevision) || state.websiteRevision < 1
+      || typeof state.applicationId !== 'string'
+      || typeof state.unixUser !== 'string' || !APP_USER_PATTERN.test(state.unixUser)) return null;
+    if (role === 'site_manager'
+      && (!Array.isArray(websiteIds) || !websiteIds.includes(state.websiteId))) return null;
+
+    let current;
+    try {
+      current = await resolveState({
+        serverId: state.serverId,
+        websiteId: state.websiteId,
+      });
+    } catch {
+      return null;
+    }
+    if (!sameGatewayState(current, state)) return null;
+    return Object.freeze({
+      serverId: current.serverId,
+      websiteId: current.websiteId,
+      websiteRevision: current.websiteRevision,
+      applicationId: current.applicationId,
+      unixUser: current.unixUser,
+    });
+  }
+
   return Object.freeze({
     issue,
     consume,
+    authorizeGatewayState,
     size: () => handoffs.size,
   });
 }
@@ -292,6 +357,8 @@ export const elFinderHandoffInternals = Object.freeze({
   audience: AUDIENCE,
   defaultTtlMs: DEFAULT_TTL_MS,
   defaultLimit: DEFAULT_LIMIT,
+  tokenPattern: TOKEN_PATTERN,
+  digestPattern: DIGEST_PATTERN,
   supportedRuntimes: Object.freeze([...SUPPORTED_RUNTIMES]),
   applicationUser,
   digest,
