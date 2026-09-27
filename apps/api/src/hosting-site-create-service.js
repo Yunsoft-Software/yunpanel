@@ -114,7 +114,7 @@ export function createHostingSiteCreateService({
       website,
       ownership: allocation,
       created,
-      accessGranted: false,
+      accessGranted: allocation.accessGranted === true,
       stage: 'ownership_recorded',
       provisioningReady: false,
     });
