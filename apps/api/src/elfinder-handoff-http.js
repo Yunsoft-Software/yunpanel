@@ -30,11 +30,38 @@ export function mountElFinderHandoffRoutes(app, {
   registry,
   elFinderHandoffService,
 } = {}) {
-  if (!app || typeof app.post !== 'function'
+  if (!app || typeof app.post !== 'function' || typeof app.get !== 'function'
     || !registry || typeof registry.getServer !== 'function'
     || !elFinderHandoffService || typeof elFinderHandoffService.issue !== 'function') {
     throw new TypeError('elFinder handoff HTTP dependencies are required');
   }
+
+  app.get(
+    '/api/elfinder-bootstrap-access',
+    requirePanelRouteAccess,
+    asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      const auth = request.auth;
+      const isOwner = auth?.user?.role === 'owner'
+        && auth?.access?.mode === 'management'
+        && auth?.security?.managementAllowed === true;
+      const isSiteManager = auth?.user?.role === 'site_manager'
+        && auth?.access?.mode === 'site_management'
+        && Array.isArray(auth?.user?.websiteIds)
+        && auth.user.websiteIds.length > 0;
+      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
+        || (!isOwner && !isSiteManager)) {
+        throw new ElFinderHandoffError(
+          'elfinder_bootstrap_authorized_required',
+          'elFinder requires an authorized Website management session',
+          403,
+        );
+      }
+      response.set('Cache-Control', 'no-store');
+      response.set('Pragma', 'no-cache');
+      return response.status(204).end();
+    }),
+  );
 
   app.post(
     '/api/servers/:serverId/websites/:websiteId/elfinder-handoffs',
@@ -59,6 +86,7 @@ export function mountElFinderHandoffRoutes(app, {
       const handoff = await elFinderHandoffService.issue({
         sessionId: auth.id,
         userId: auth.user.id,
+        sessionDigest: request.authSessionDigest,
         serverId: server.id,
         websiteId: request.params.websiteId,
       });
