@@ -12,21 +12,31 @@ import {
 const serverId = randomUUID();
 const websiteId = randomUUID();
 const capability = 'A'.repeat(43);
+const SESSION_DIGEST = 'd'.repeat(64);
 
 function auth(role = 'owner') {
-  return role === 'owner'
-    ? {
+  if (role === 'owner') {
+    return {
       id: 'owner-session',
       user: { id: 'owner-user', role: 'owner' },
       access: { mode: 'management', permissions: ['*'] },
       security: { managementAllowed: true },
-    }
-    : {
-      id: 'readonly-session',
-      user: { id: 'readonly-user', role: 'read_only' },
-      access: { mode: 'read_only', permissions: [] },
-      security: { managementAllowed: false },
     };
+  }
+  if (role === 'site_manager') {
+    return {
+      id: 'site-session',
+      user: { id: 'site-user', role: 'site_manager', websiteIds: [websiteId] },
+      access: { mode: 'site_management', permissions: ['website:manage'] },
+      security: { managementAllowed: true },
+    };
+  }
+  return {
+    id: 'readonly-session',
+    user: { id: 'readonly-user', role: 'read_only' },
+    access: { mode: 'read_only', permissions: [] },
+    security: { managementAllowed: false },
+  };
 }
 
 async function listen(t, { role = 'owner', serverExists = true } = {}) {
@@ -35,6 +45,7 @@ async function listen(t, { role = 'owner', serverExists = true } = {}) {
   app.use(express.json());
   app.use((request, _response, next) => {
     request.auth = auth(role);
+    request.authSessionDigest = SESSION_DIGEST;
     next();
   });
   mountElFinderHandoffRoutes(app, {
@@ -101,14 +112,45 @@ test('Owner receives only a no-store Website-scoped elFinder capability', async 
     ['issue', {
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
     }],
   ]);
 });
 
-test('Read Only cannot mint elFinder handoffs', async (t) => {
+test('Site Manager can bootstrap and mint elFinder only for an assigned Website', async (t) => {
+  const { base, calls } = await listen(t, { role: 'site_manager' });
+
+  const bootstrap = await fetch(`${base}/api/elfinder-bootstrap-access`);
+  assert.equal(bootstrap.status, 204);
+  assert.equal(bootstrap.headers.get('cache-control'), 'no-store');
+  assert.equal(bootstrap.headers.get('pragma'), 'no-cache');
+
+  const response = await fetch(
+    `${base}/api/servers/${serverId}/websites/${websiteId}/elfinder-handoffs`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    },
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(calls, [
+    ['server', serverId],
+    ['issue', {
+      sessionId: 'site-session',
+      userId: 'site-user',
+      sessionDigest: SESSION_DIGEST,
+      serverId,
+      websiteId,
+    }],
+  ]);
+});
+
+test('Read Only cannot enter elFinder bootstrap or mint handoffs', async (t) => {
   const { base, calls } = await listen(t, { role: 'read_only' });
+  assert.equal((await fetch(`${base}/api/elfinder-bootstrap-access`)).status, 403);
   const response = await fetch(
     `${base}/api/servers/${serverId}/websites/${websiteId}/elfinder-handoffs`,
     {
