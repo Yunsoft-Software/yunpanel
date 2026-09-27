@@ -270,9 +270,11 @@ test('terminal WebSocket gateway rejects wrong Origin, client IP, path and query
 });
 
 
-test('phpMyAdmin gateway authenticates Owner access before proxying the vendor Unix socket', async (t) => {
+test('phpMyAdmin gateway requires the panel-bound vendor session before proxying the Unix socket', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-web-'));
   const socketPath = path.join(directory, 'phpmyadmin.sock');
+  const gatewaySession = 'G'.repeat(43);
+  const browserCookie = `__Host-yunpanel_session=owner; YunPanelPhpMyAdminGateway=${gatewaySession}; phpMyAdmin=browser-vendor`;
   const vendorRequests = [];
   const vendor = http.createServer((request, response) => {
     vendorRequests.push({
@@ -300,6 +302,7 @@ test('phpMyAdmin gateway authenticates Owner access before proxying the vendor U
       method: request.method,
       url: request.url,
       cookie: request.headers.cookie,
+      gatewaySession: request.headers['x-yunpanel-phpmyadmin-session'],
       proxyToken: request.headers['x-yunpanel-proxy-token'],
       clientIp: request.headers['x-yunpanel-client-ip'],
     });
@@ -308,9 +311,10 @@ test('phpMyAdmin gateway authenticates Owner access before proxying the vendor U
       response.end();
       return;
     }
-    response.writeHead(request.headers.cookie === '__Host-yunpanel_session=owner' ? 204 : 403, {
-      'cache-control': 'no-store',
-    });
+    const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
+    const allowed = cookies.includes('__Host-yunpanel_session=owner')
+      && request.headers['x-yunpanel-phpmyadmin-session'] === gatewaySession;
+    response.writeHead(allowed ? 204 : 403, { 'cache-control': 'no-store' });
     response.end();
   });
   const apiPort = await listen(api);
@@ -339,7 +343,8 @@ test('phpMyAdmin gateway authenticates Owner access before proxying the vendor U
       redirect: 'manual',
       headers: {
         'x-real-ip': '203.0.113.8',
-        cookie: '__Host-yunpanel_session=owner',
+        cookie: browserCookie,
+        'x-yunpanel-phpmyadmin-session': 'browser-spoof',
       },
     },
   );
@@ -351,7 +356,8 @@ test('phpMyAdmin gateway authenticates Owner access before proxying the vendor U
   assert.deepEqual(accessRequests, [{
     method: 'GET',
     url: '/api/phpmyadmin-gateway-access',
-    cookie: '__Host-yunpanel_session=owner',
+    cookie: browserCookie,
+    gatewaySession,
     proxyToken,
     clientIp: '203.0.113.8',
   }]);
@@ -359,16 +365,104 @@ test('phpMyAdmin gateway authenticates Owner access before proxying the vendor U
     method: 'GET',
     url: '/index.php?route=/sql',
     host: 'panel.example.com',
-    cookie: '__Host-yunpanel_session=owner',
+    cookie: 'phpMyAdmin=browser-vendor',
     internalToken: undefined,
     forwardedPrefix: '/tools/phpmyadmin/',
     forwardedProto: 'https',
   }]);
 });
 
-test('phpMyAdmin vendor socket is not reached for unauthenticated or cross-origin browser requests', async (t) => {
+test('phpMyAdmin signon derives the handoff digest from the current panel cookie', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-signon-web-'));
+  const socketPath = path.join(directory, 'phpmyadmin.sock');
+  const vendorRequests = [];
+  const vendor = http.createServer((request, response) => {
+    const chunks = [];
+    request.on('data', (chunk) => chunks.push(chunk));
+    request.on('end', () => {
+      vendorRequests.push({
+        method: request.method,
+        url: request.url,
+        cookie: request.headers.cookie,
+        panelDigest: request.headers['x-yunpanel-panel-session-digest'],
+        body: Buffer.concat(chunks).toString('utf8'),
+      });
+      response.writeHead(303, { location: '/' });
+      response.end();
+    });
+  });
+  vendor.listen(socketPath);
+  await once(vendor, 'listening');
+
+  const accessRequests = [];
+  const api = http.createServer((request, response) => {
+    accessRequests.push({
+      url: request.url,
+      cookie: request.headers.cookie,
+      panelDigest: request.headers['x-yunpanel-panel-session-digest'],
+      proxyToken: request.headers['x-yunpanel-proxy-token'],
+    });
+    const allowed = request.url === '/api/phpmyadmin-signon-access'
+      && request.headers.cookie === '__Host-yunpanel_session=owner';
+    response.writeHead(allowed ? 204 : 403);
+    response.end();
+  });
+  const apiPort = await listen(api);
+  const webRoot = path.join(directory, 'web');
+  await import('node:fs/promises').then(({ mkdir }) => mkdir(webRoot));
+  await writeFile(path.join(webRoot, 'index.html'), '<title>YunPanel</title>');
+  const panel = createPanelServer({
+    allowedClientIps: '203.0.113.8',
+    apiPort,
+    proxyToken,
+    publicOrigin: 'https://panel.example.com',
+    phpMyAdminSocketPath: socketPath,
+    webRoot,
+  });
+  const panelPort = await listen(panel);
+  t.after(async () => {
+    await close(panel);
+    await close(api);
+    await new Promise((resolve) => vendor.close(() => resolve()));
+    await rm(directory, { recursive: true, force: true });
+  });
+
+  const response = await fetch(
+    `http://127.0.0.1:${panelPort}/tools/phpmyadmin/__yunpanel/signon`,
+    {
+      method: 'POST',
+      redirect: 'manual',
+      headers: {
+        'x-real-ip': '203.0.113.8',
+        cookie: '__Host-yunpanel_session=owner',
+        origin: 'https://panel.example.com',
+        'content-type': 'application/x-www-form-urlencoded;charset=UTF-8',
+        'x-yunpanel-panel-session-digest': 'browser-spoof',
+      },
+      body: `capability=${'A'.repeat(43)}`,
+    },
+  );
+  assert.equal(response.status, 303);
+  assert.equal(response.headers.get('location'), '/tools/phpmyadmin/');
+  assert.deepEqual(accessRequests, [{
+    url: '/api/phpmyadmin-signon-access',
+    cookie: '__Host-yunpanel_session=owner',
+    panelDigest: undefined,
+    proxyToken,
+  }]);
+  assert.deepEqual(vendorRequests, [{
+    method: 'POST',
+    url: '/__yunpanel/signon',
+    cookie: undefined,
+    panelDigest: createHash('sha256').update('owner').digest('hex'),
+    body: `capability=${'A'.repeat(43)}`,
+  }]);
+});
+
+test('phpMyAdmin vendor socket is not reached without a gateway session or on cross-origin mutation', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-web-deny-'));
   const socketPath = path.join(directory, 'phpmyadmin.sock');
+  const gatewaySession = 'G'.repeat(43);
   let vendorRequests = 0;
   const vendor = http.createServer((_request, response) => {
     vendorRequests += 1;
@@ -379,7 +473,9 @@ test('phpMyAdmin vendor socket is not reached for unauthenticated or cross-origi
 
   const api = http.createServer((request, response) => {
     const cookies = request.headers.cookie?.split(';').map((value) => value.trim()) ?? [];
-    response.writeHead(cookies.includes('__Host-yunpanel_session=owner') ? 204 : 403);
+    const allowed = cookies.includes('__Host-yunpanel_session=owner')
+      && request.headers['x-yunpanel-phpmyadmin-session'] === gatewaySession;
+    response.writeHead(allowed ? 204 : 403);
     response.end();
   });
   const apiPort = await listen(api);
@@ -403,15 +499,18 @@ test('phpMyAdmin vendor socket is not reached for unauthenticated or cross-origi
   });
   const url = `http://127.0.0.1:${panelPort}/tools/phpmyadmin/index.php`;
   const denied = await fetch(url, {
-    headers: { 'x-real-ip': '203.0.113.8' },
+    headers: {
+      'x-real-ip': '203.0.113.8',
+      cookie: '__Host-yunpanel_session=owner',
+    },
   });
-  assert.equal(denied.status, 403);
+  assert.equal(denied.status, 401);
 
   const crossOrigin = await fetch(url, {
     method: 'POST',
     headers: {
       'x-real-ip': '203.0.113.8',
-      cookie: '__Host-yunpanel_session=owner',
+      cookie: `__Host-yunpanel_session=owner; YunPanelPhpMyAdminGateway=${gatewaySession}`,
       origin: 'https://attacker.example',
       'content-type': 'application/x-www-form-urlencoded',
     },
