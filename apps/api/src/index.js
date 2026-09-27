@@ -1105,6 +1105,29 @@ const listener = createAuthenticatedApi({
         websiteIds: session.user.websiteIds,
       }));
     }
+    if (gateway.id === 'elfinder') {
+      if (!elFinderHandoffService) return false;
+      const serverId = request.headers['x-yunpanel-elfinder-server-id'];
+      const websiteId = request.headers['x-yunpanel-elfinder-website-id'];
+      const websiteRevisionRaw = request.headers['x-yunpanel-elfinder-website-revision'];
+      const applicationId = request.headers['x-yunpanel-elfinder-application-id'];
+      const unixUser = request.headers['x-yunpanel-elfinder-unix-user'];
+      if ([serverId, websiteId, websiteRevisionRaw, applicationId, unixUser]
+        .some((value) => typeof value !== 'string' || value.includes(','))) return false;
+      if (!/^[1-9][0-9]*$/.test(websiteRevisionRaw)) return false;
+      const websiteRevision = Number.parseInt(websiteRevisionRaw, 10);
+      if (!Number.isSafeInteger(websiteRevision)) return false;
+      return Boolean(await elFinderHandoffService.authorizeGatewayState({
+        serverId,
+        websiteId,
+        websiteRevision,
+        applicationId,
+        unixUser,
+      }, {
+        role: session.user.role,
+        websiteIds: session.user.websiteIds,
+      }));
+    }
     if (gateway.id !== 'ttyd') return false;
     const toolSessionId = request.headers['x-yunpanel-tool-session'];
     const transport = request.headers['x-yunpanel-tool-transport'];
