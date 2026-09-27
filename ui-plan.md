@@ -1,5 +1,10 @@
 # YunPanel — Plesk UX Geçişi
 
+## 2026-09-27 — Customer→Website canlı membership
+
+- [ ] **RS-02e.6 kaynak:** `auth_customer_websites` içindeki doğrulanmış attached sahipliği customer oturumunun mevcut site araçlarına erişim kapsamına bağla. Legacy site_manager grant tablosu korunur; reseller child siteleri otomatik devralmaz; preview/reservation erişim sayılmaz.
+- [ ] **RS-02e.6 kabul:** Node24/npm11, gerçek customer login/browser ve başka customer/reseller kimliğiyle Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu. Kaynak köprü tamamlanınca bile geniş tenant kabulü ayrı açık kalır.
+
 ## 2026-09-25 — Website silme lifecycle
 
 - [x] **WR-01 teşhis:** removal runtime ve kalıcı step journal production'da mevcut; fakat file/unix cleanup adapterları production composition'a verilmediği için runtime bilinçli olarak silme confirmation'ı üretmiyor.
