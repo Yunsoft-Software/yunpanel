@@ -4,6 +4,15 @@ Bu dosyada yalnız kaynak testleriyle güvenilir biçimde tamamlanamayacak gerç
 
 IP adresi `.44` ile biten Plesk sunucusu kesinlikle kapsam dışıdır. Bütün SSH/package/deploy testleri yalnız repo dışı `.local/test-server.env` içindeki açık YunPanel test sunucusunda, hedef adresin `.44` olmadığı doğrulandıktan sonra yapılır. Secret/parola/cookie/MFA/private key ekran görüntüsü, rapor, log veya repoya yazılmaz.
 
+## T-DEV-RESELLER-LIVE — Customer/Sitelerim/terminal gerçek kabulü (2026-09-27)
+
+Kaynak raporu: [reseller Sitelerim + live Website scope](docs/history/reseller-sites-scope-2026-09-27.md). Customer attached ownership live `websiteIds` kapsamına, reseller yalnız direct-child attached sitelere bağlandı; reseller menüsünde **Sitelerim** var. Site terminal WebSocket current Website grant'ini upgrade ve periyodik reauth'ta tekrar doğrular; root terminal Owner-only. Bu turun yeni testleri yazıldı fakat çalıştırılmadı.
+
+- [ ] Node24/npm11 tam checkout/npm ci/check/build ve yeni auth/hosting allocation/navigation/terminal policy testlerini mevcut auth/site/job/tool regresyonlarıyla birlikte çalıştır. Native Argon2 testi atlanmamalı; shim sonucu native auth kabulü sayılmaz.
+- [ ] Owner + iki reseller + her reseller iki customer + direct Owner customer: customer yalnız kendi attached sitelerini, reseller yalnız direct-child sitelerini görsün. Foreign reseller/direct Owner customer Website ID'siyle Website/Files/DB/Mail/DNS/job/log/backup/analytics/PHP/Cron/SFTP/elFinder/terminal istekleri 403/404 ile fail-closed olsun; response body başka tenant metadata sızdırmasın.
+- [ ] Ownership removal, customer suspend, reseller suspend ve logout sırasında açık site terminal/elFinder capability/socket davranışı gerçek HTTP/WebSocket ile doğrulansın. Yeni request kadar mevcut açık bağlantı da düşmeli; Website host sürecinin hesap askısıyla otomatik durmadığı ayrıca doğrulanmalı.
+- [ ] YP-04 tamamlanmadan `phpmyadmin_site_session_binding_required` kaldırılmasın. Panel session + current Website assignment ile vendor SQL session'ı her gateway request'inde bağlayacak tasarım; Owner→Site A→Site B hesap değişimi, stale vendor cookie, logout/rotation, grant removal, replay ve doğrudan vendor URL ile kabul edilsin.
+- [ ] Veri içeren ownership migration/rollback, iki OS process/crash/write-failure ve long-running job mutation başlangıcında canlı tenant reauthorization. Kaynak audit veya connector üzerinden dosya inceleme production kabulü değildir; `.44` kullanılmaz.
 ## T-DEV-AI-HISTORY — Kullanıcıya bağlı geçmiş ve sayfalama (2026-09-24)
 
 AH-01–04 kaynağı `development` dalında; [kaynak/test ve veri geçişi raporu](docs/ux/ai-history-flow.md). Son aynı Node22 koşusu **41 geçti / 0 başarısız / 0 atlandı**: 9 backend kapsam/sayfa, 26 frontend davranışı, 2 servis/dosya/route fixture grubu, 1 istemci modülü ve 3 kaynak testi. Bir JSX ve beş kaynak JS kontrolü; 12 kaynak/test blob'u eşleşti. Beş temsilî HTML/CSS Chromium senaryosu gerçek React/Ember kabulü değildir ve test sayısına eklenmez.
