@@ -30,7 +30,7 @@ test('integrated tool gateway descriptors keep unique audience, prefix, access p
     audience: 'elfinder',
     publicPrefix: '/tools/elfinder',
     accessPath: '/api/elfinder-gateway-access',
-    accessMode: 'owner',
+    accessMode: 'session',
     socketPath: '/run/yunpanel/elfinder-http.sock',
     socketRoot: null,
     loopbackPort: null,
