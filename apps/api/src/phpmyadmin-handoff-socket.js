@@ -14,6 +14,7 @@ const SOCKET_MODE = 0o660;
 const ROOT_UID = 0;
 const GROUP_NAME_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const MAX_BODY_BYTES = 1024;
 const GETENT = '/usr/bin/getent';
 
@@ -40,8 +41,9 @@ function parseGroupIdentity(value, expectedName) {
 
 function exactBody(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== 1 || typeof value.capability !== 'string'
-    || !CAPABILITY_PATTERN.test(value.capability)) {
+    || Object.keys(value).length !== 2
+    || typeof value.capability !== 'string' || !CAPABILITY_PATTERN.test(value.capability)
+    || typeof value.sessionDigest !== 'string' || !DIGEST_PATTERN.test(value.sessionDigest)) {
     throw socketError(
       'phpmyadmin_handoff_consume_request_invalid',
       'phpMyAdmin handoff consume request is invalid',
@@ -140,12 +142,16 @@ export function createPhpMyAdminHandoffConsumerHandler({ phpMyAdminHandoffServic
         return;
       }
       const body = await readJsonBody(request);
-      const bundle = await phpMyAdminHandoffService.consume(body.capability);
+      const bundle = await phpMyAdminHandoffService.consume(body.capability, {
+        sessionDigest: body.sessionDigest,
+      });
       if (!bundle || typeof bundle !== 'object' || Array.isArray(bundle)
         || bundle.version !== 1 || bundle.protocol !== 'yunpanel-phpmyadmin-signon-v1'
         || typeof bundle.databaseName !== 'string' || !bundle.databaseName
         || typeof bundle.username !== 'string' || !bundle.username
         || typeof bundle.password !== 'string' || !bundle.password
+        || typeof bundle.gatewaySession !== 'string' || !CAPABILITY_PATTERN.test(bundle.gatewaySession)
+        || !Number.isSafeInteger(bundle.expiresAt)
         || bundle.host !== 'localhost') {
         throw socketError(
           'phpmyadmin_handoff_consume_bundle_invalid',
@@ -160,6 +166,7 @@ export function createPhpMyAdminHandoffConsumerHandler({ phpMyAdminHandoffServic
           username: bundle.username,
           password: bundle.password,
           host: 'localhost',
+          gatewaySession: bundle.gatewaySession,
           expiresAt: bundle.expiresAt,
         },
       });
