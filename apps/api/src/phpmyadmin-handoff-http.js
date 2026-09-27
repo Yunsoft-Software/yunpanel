@@ -74,6 +74,7 @@ export function mountPhpMyAdminHandoffRoutes(app, {
       const handoff = await phpMyAdminHandoffService.issue({
         sessionId: auth.id,
         userId: auth.user.id,
+        sessionDigest: request.authSessionDigest,
         serverId: server.id,
         websiteId: request.params.websiteId,
         credentialId: body.credentialId,
@@ -81,6 +82,18 @@ export function mountPhpMyAdminHandoffRoutes(app, {
       response.set('Cache-Control', 'no-store');
       response.set('Pragma', 'no-cache');
       return response.status(201).json({ data: handoff });
+    }),
+  );
+
+  app.get(
+    '/api/phpmyadmin-signon-access',
+    requirePanelRouteAccess,
+    asyncRoute(async (request, response) => {
+      emptyQuery(request.query);
+      requireAuthorizedManagement(request.auth);
+      response.set('Cache-Control', 'no-store');
+      response.set('Pragma', 'no-cache');
+      return response.status(204).end();
     }),
   );
 
