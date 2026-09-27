@@ -13,9 +13,10 @@ test('Owner menu puts site tasks first in Plesk order, not runtime inventory', (
 test('site manager gets the four scoped task entries without Owner tools', () => {
   assert.deepEqual(menu(true, false), ['/websites', '/mail', '/files', '/databases']);
 });
-test('reseller gets Müşterilerim without changing the ordinary site-manager menu', () => {
+test('reseller gets Müşterilerim and Sitelerim without changing the ordinary site-manager menu', () => {
   assert.deepEqual(menu(true, false, true), ['/customers', '/websites', '/mail', '/files', '/databases']);
   assert.equal(navigationGroups(true, false, true)[0].items[0][1], 'Müşterilerim');
+  assert.equal(navigationGroups(true, false, true)[0].items[1][1], 'Sitelerim');
 });
 test('read-only states do not receive management or file handoff links', () => {
   assert.deepEqual(menu(false, false), ['/websites']);
@@ -48,6 +49,7 @@ test('command search is Owner-aware and defaults to the restricted context', () 
   assert.ok(commandEntries({ canManage: true, isOwner: true, query: 'Docker' }).some((entry) => entry.to === '/docker'));
   assert.ok(!commandEntries({ canManage: false, isOwner: true, query: 'Docker' }).some((entry) => entry.to === '/docker'));
   assert.ok(commandEntries({ canManage: true, isReseller: true, query: 'müşteri' }).some((entry) => entry.to === '/customers'));
+  assert.ok(commandEntries({ canManage: true, isReseller: true, query: 'sitelerim' }).some((entry) => entry.to === '/websites'));
   assert.ok(!commandEntries({ canManage: true, isReseller: false, query: 'müşteri' }).some((entry) => entry.to === '/customers'));
 });
 test('Owner directory and sidebar search results are deduplicated by destination', () => {
