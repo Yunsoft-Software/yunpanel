@@ -19,7 +19,7 @@ export const resolveTheme = (theme, darkSystem = false) => themes.has(theme) && 
 // Plesk task order; these links do not grant API permissions.
 export function navigationGroups(canManage, isOwner = true, isReseller = false) {
   const items = isReseller && !isOwner
-    ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Web Siteleri ve Alan Adları', 'globe']]
+    ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Sitelerim', 'globe']]
     : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
   if (canManage) {
     items.push(['/mail', 'Posta', 'mail'], ['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database']);
