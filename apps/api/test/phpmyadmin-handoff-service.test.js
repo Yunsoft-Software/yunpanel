@@ -8,6 +8,8 @@ import {
   PhpMyAdminHandoffError,
 } from '../src/phpmyadmin-handoff-service.js';
 
+const SESSION_DIGEST = 'd'.repeat(64);
+
 function fixture({ liveSessions = null, now = () => 10_000 } = {}) {
   const serverId = randomUUID();
   const websiteId = randomUUID();
@@ -136,6 +138,7 @@ test('phpMyAdmin handoff is short-lived, single-use and materializes the DB secr
   const issued = await current.service.issue({
     sessionId: 'owner-session',
     userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
     serverId: current.ids.serverId,
     websiteId: current.ids.websiteId,
     credentialId: current.ids.credentialId,
@@ -153,15 +156,80 @@ test('phpMyAdmin handoff is short-lived, single-use and materializes the DB secr
   assert.equal(Object.hasOwn(issued, 'password'), false);
   assert.equal(current.calls.some(([name]) => name === 'materialize'), false);
 
-  const consumed = await current.service.consume(issued.capability);
+  const consumed = await current.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST });
   assert.equal(consumed.username, 'ydb_0123456789abcdef01234567');
   assert.equal(consumed.password, current.state.password);
   assert.equal(consumed.websiteId, current.ids.websiteId);
   assert.equal(current.calls.filter(([name]) => name === 'materialize').length, 1);
   await assert.rejects(
-    current.service.consume(issued.capability),
+    current.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }),
     (error) => error instanceof PhpMyAdminHandoffError && error.code === 'phpmyadmin_handoff_invalid',
   );
+});
+
+test('handoff consume is bound to the exact panel cookie digest and remains single-use on mismatch', async () => {
+  const current = fixture();
+  const issued = await current.service.issue({
+    sessionId: 'owner-session',
+    userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+
+  await assert.rejects(
+    current.service.consume(issued.capability, { sessionDigest: 'e'.repeat(64) }),
+    (error) => error instanceof PhpMyAdminHandoffError
+      && error.code === 'phpmyadmin_handoff_session_mismatch',
+  );
+  assert.equal(current.calls.some(([name]) => name === 'materialize'), false);
+  await assert.rejects(
+    current.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }),
+    { code: 'phpmyadmin_handoff_invalid' },
+  );
+});
+
+test('gateway session stays bound to panel identity and current Website grant', async () => {
+  const current = fixture();
+  const issued = await current.service.issue({
+    sessionId: 'site-session',
+    userId: 'site-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+  const consumed = await current.service.consume(issued.capability, {
+    sessionDigest: SESSION_DIGEST,
+  });
+
+  const allowed = await current.service.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: 'site-session',
+    userId: 'site-user',
+    role: 'site_manager',
+    websiteIds: [current.ids.websiteId],
+  });
+  assert.deepEqual(allowed, {
+    websiteId: current.ids.websiteId,
+    databaseCredentialId: current.ids.credentialId,
+    expiresAt: consumed.expiresAt,
+  });
+
+  assert.equal(await current.service.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: 'another-session',
+    userId: 'site-user',
+    role: 'site_manager',
+    websiteIds: [current.ids.websiteId],
+  }), null);
+
+  assert.equal(await current.service.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: 'site-session',
+    userId: 'site-user',
+    role: 'site_manager',
+    websiteIds: [],
+  }), null);
+  assert.equal(current.service.gatewaySize(), 0);
 });
 
 test('handoff requires the latest database credential job to be the exact current successful apply', async () => {
@@ -182,6 +250,7 @@ test('handoff requires the latest database credential job to be the exact curren
     current.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
       serverId: current.ids.serverId,
       websiteId: current.ids.websiteId,
       credentialId: current.ids.credentialId,
@@ -205,6 +274,7 @@ test('handoff requires the latest database credential job to be the exact curren
     current.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
       serverId: current.ids.serverId,
       websiteId: current.ids.websiteId,
       credentialId: current.ids.credentialId,
@@ -218,6 +288,7 @@ test('credential revision drift after issue consumes and rejects the stale hando
   const issued = await current.service.issue({
     sessionId: 'owner-session',
     userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
     serverId: current.ids.serverId,
     websiteId: current.ids.websiteId,
     credentialId: current.ids.credentialId,
@@ -228,11 +299,11 @@ test('credential revision drift after issue consumes and rejects the stale hando
   current.jobs.splice(0, 1, current.appliedJob());
 
   await assert.rejects(
-    current.service.consume(issued.capability),
+    current.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }),
     (error) => error instanceof PhpMyAdminHandoffError && error.code === 'phpmyadmin_handoff_stale',
   );
   assert.equal(current.calls.some(([name]) => name === 'materialize'), false);
-  await assert.rejects(current.service.consume(issued.capability), { code: 'phpmyadmin_handoff_invalid' });
+  await assert.rejects(current.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }), { code: 'phpmyadmin_handoff_invalid' });
 });
 
 test('logout revokes unused handoffs and expiration fails closed', async () => {
@@ -242,6 +313,7 @@ test('logout revokes unused handoffs and expiration fails closed', async () => {
   const issued = await revoked.service.issue({
     sessionId: 'owner-session',
     userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
     serverId: revoked.ids.serverId,
     websiteId: revoked.ids.websiteId,
     credentialId: revoked.ids.credentialId,
@@ -249,17 +321,18 @@ test('logout revokes unused handoffs and expiration fails closed', async () => {
   assert.equal(revoked.service.size(), 1);
   liveSessions.revokeSession('owner-session');
   assert.equal(revoked.service.size(), 0);
-  await assert.rejects(revoked.service.consume(issued.capability), { code: 'phpmyadmin_handoff_invalid' });
+  await assert.rejects(revoked.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }), { code: 'phpmyadmin_handoff_invalid' });
 
   const expired = fixture({ now: () => now });
   const expiring = await expired.service.issue({
     sessionId: 'owner-session',
     userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
     serverId: expired.ids.serverId,
     websiteId: expired.ids.websiteId,
     credentialId: expired.ids.credentialId,
   });
   now = expiring.expiresAt;
-  await assert.rejects(expired.service.consume(expiring.capability), { code: 'phpmyadmin_handoff_expired' });
+  await assert.rejects(expired.service.consume(expiring.capability, { sessionDigest: SESSION_DIGEST }), { code: 'phpmyadmin_handoff_expired' });
   assert.equal(expired.calls.some(([name]) => name === 'materialize'), false);
 });
