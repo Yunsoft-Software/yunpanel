@@ -18,6 +18,7 @@ const PHPMYADMIN_SOCKET_PATH = PHPMYADMIN_GATEWAY.socketPath;
 const ELFINDER_GATEWAY = integratedToolGateway('elfinder');
 const ELFINDER_PREFIX = ELFINDER_GATEWAY.publicPrefix;
 const ELFINDER_GATEWAY_ACCESS_PATH = ELFINDER_GATEWAY.accessPath;
+const ELFINDER_BOOTSTRAP_ACCESS_PATH = '/api/elfinder-bootstrap-access';
 const ELFINDER_GATEWAY_SOCKET_PATH = ELFINDER_GATEWAY.socketPath;
 const TTYD_GATEWAY = integratedToolGateway('ttyd');
 const TTYD_PREFIX = TTYD_GATEWAY.publicPrefix;
@@ -40,6 +41,7 @@ const ELFINDER_HANDOFF_PATH = '/__yunpanel/handoff';
 const ELFINDER_SESSION_TTL_MS = 60 * 60 * 1000;
 const ELFINDER_SESSION_LIMIT = 100;
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const HOP_BY_HOP_HEADERS = new Set([
@@ -201,11 +203,27 @@ function authorizePhpMyAdminGateway(request, options) {
   });
 }
 
-function authorizeElFinderGateway(request, options) {
+function authorizeElFinderBootstrap(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: ELFINDER_BOOTSTRAP_ACCESS_PATH,
+    label: 'elFinder bootstrap',
+  });
+}
+
+function authorizeElFinderGateway(request, bundle, options) {
+  if (!validElFinderBundle(bundle)) return Promise.resolve(401);
   return authorizeToolGateway(request, {
     ...options,
     accessPath: ELFINDER_GATEWAY_ACCESS_PATH,
     label: 'elFinder',
+    extraHeaders: {
+      'x-yunpanel-elfinder-server-id': bundle.serverId,
+      'x-yunpanel-elfinder-website-id': bundle.websiteId,
+      'x-yunpanel-elfinder-website-revision': String(bundle.websiteRevision),
+      'x-yunpanel-elfinder-application-id': bundle.applicationId,
+      'x-yunpanel-elfinder-unix-user': bundle.unixUser,
+    },
   });
 }
 
@@ -317,7 +335,7 @@ function createElFinderGatewaySessions({
 
   function issue(bundle, authDigest) {
     if (!validElFinderBundle(bundle) || typeof authDigest !== 'string'
-      || !/^[a-f0-9]{64}$/.test(authDigest)) {
+      || !DIGEST_PATTERN.test(authDigest)) {
       throw new TypeError('elFinder gateway session input is invalid');
     }
     pruneExpired();
@@ -330,7 +348,7 @@ function createElFinderGatewaySessions({
 
   function resolve(token, authDigest) {
     if (typeof token !== 'string' || !CAPABILITY_PATTERN.test(token)
-      || typeof authDigest !== 'string' || !/^[a-f0-9]{64}$/.test(authDigest)) return null;
+      || typeof authDigest !== 'string' || !DIGEST_PATTERN.test(authDigest)) return null;
     pruneExpired();
     const record = sessions.get(sha256(token));
     if (!record || record.expiresAt <= now() || record.authDigest !== authDigest) return null;
@@ -418,10 +436,12 @@ function readElFinderHandoffBody(request) {
 }
 
 function consumeElFinderHandoff(capability, {
+  sessionDigest,
   handoffSocketPath = ELFINDER_HANDOFF_SOCKET_PATH,
   requestImpl = http.request,
 } = {}) {
-  if (typeof capability !== 'string' || !CAPABILITY_PATTERN.test(capability)) {
+  if (typeof capability !== 'string' || !CAPABILITY_PATTERN.test(capability)
+    || typeof sessionDigest !== 'string' || !DIGEST_PATTERN.test(sessionDigest)) {
     return Promise.reject(new ElFinderGatewayError(
       400,
       'elfinder_gateway_capability_invalid',
@@ -437,7 +457,7 @@ function consumeElFinderHandoff(capability, {
     ));
   }
 
-  const body = JSON.stringify({ capability });
+  const body = JSON.stringify({ capability, sessionDigest });
   return new Promise((resolve, reject) => {
     let settled = false;
     const fail = (error) => {
@@ -700,7 +720,10 @@ async function establishElFinderGatewaySession(request, response, {
     );
   }
   const capability = await readElFinderHandoffBody(request);
-  const bundle = await consumeElFinderHandoff(capability, { handoffSocketPath });
+  const bundle = await consumeElFinderHandoff(capability, {
+    handoffSocketPath,
+    sessionDigest: authDigest,
+  });
   const session = sessions.issue(bundle, authDigest);
   response.writeHead(204, {
     'cache-control': 'no-store',
@@ -1384,52 +1407,69 @@ export function createPanelServer(options = {}) {
       return;
     }
     if (requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/`)) {
-      const accessStatus = await authorizeElFinderGateway(request, {
+      const handoffRequest = requestUrl.pathname === `${ELFINDER_PREFIX}${ELFINDER_HANDOFF_PATH}`;
+      const bootstrapRequest = handoffRequest
+        || requestUrl.pathname === `${ELFINDER_PREFIX}/`
+        || requestUrl.pathname === `${ELFINDER_PREFIX}/index.html`
+        || requestUrl.pathname === `${ELFINDER_PREFIX}/yunpanel-client.js`;
+
+      if (bootstrapRequest) {
+        const accessStatus = await authorizeElFinderBootstrap(request, {
+          apiHost, apiPort, clientIp, proxyToken,
+        });
+        if (accessStatus !== 204) {
+          const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
+          reply(response, status, status === 401 ? 'Authentication required.' : 'elFinder access denied.');
+          return;
+        }
+
+        if (handoffRequest) {
+          if (requestUrl.search) {
+            reply(response, 400, 'elFinder handoff does not accept query parameters.');
+            return;
+          }
+          try {
+            await establishElFinderGatewaySession(request, response, {
+              sessions: elFinderGatewaySessions,
+              publicOrigin,
+              handoffSocketPath: elFinderHandoffSocketPath,
+            });
+          } catch (error) {
+            if (response.headersSent || response.destroyed) {
+              response.destroy();
+              return;
+            }
+            if (error instanceof ElFinderGatewayError) {
+              reply(response, error.status, error.message);
+            } else {
+              reply(response, 503, 'elFinder handoff is unavailable.');
+            }
+          }
+          return;
+        }
+
+        proxyElFinder(request, response, {
+          elFinderSocketPath,
+          publicOrigin,
+          bundle: null,
+        });
+        return;
+      }
+
+      const bundle = resolveElFinderGatewayBundle(request, {
+        sessions: elFinderGatewaySessions,
+        publicOrigin,
+      });
+      if (!bundle) {
+        reply(response, 401, 'Open Website Files from YunPanel again.');
+        return;
+      }
+      const accessStatus = await authorizeElFinderGateway(request, bundle, {
         apiHost, apiPort, clientIp, proxyToken,
       });
       if (accessStatus !== 204) {
         const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
         reply(response, status, status === 401 ? 'Authentication required.' : 'elFinder access denied.');
-        return;
-      }
-
-      if (requestUrl.pathname === `${ELFINDER_PREFIX}${ELFINDER_HANDOFF_PATH}`) {
-        if (requestUrl.search) {
-          reply(response, 400, 'elFinder handoff does not accept query parameters.');
-          return;
-        }
-        try {
-          await establishElFinderGatewaySession(request, response, {
-            sessions: elFinderGatewaySessions,
-            publicOrigin,
-            handoffSocketPath: elFinderHandoffSocketPath,
-          });
-        } catch (error) {
-          if (response.headersSent || response.destroyed) {
-            response.destroy();
-            return;
-          }
-          if (error instanceof ElFinderGatewayError) {
-            reply(response, error.status, error.message);
-          } else {
-            reply(response, 503, 'elFinder handoff is unavailable.');
-          }
-        }
-        return;
-      }
-
-      const connector = requestUrl.pathname === `${ELFINDER_PREFIX}/connector.php`;
-      const protectedAsset = connector
-        || requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/vendor/`)
-        || requestUrl.pathname.startsWith(`${ELFINDER_PREFIX}/assets/`);
-      const bundle = protectedAsset
-        ? resolveElFinderGatewayBundle(request, {
-            sessions: elFinderGatewaySessions,
-            publicOrigin,
-          })
-        : null;
-      if (protectedAsset && !bundle) {
-        reply(response, 401, 'Open Website Files from YunPanel again.');
         return;
       }
       proxyElFinder(request, response, {
