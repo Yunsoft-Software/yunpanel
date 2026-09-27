@@ -27,10 +27,12 @@ test('phpMyAdmin signon config disables root and passwordless login and uses the
   assert.equal(preview.artifact.bytes, Buffer.byteLength(content));
 });
 
-test('phpMyAdmin signon bridge consumes only a capability over the private Unix socket', () => {
+test('phpMyAdmin signon bridge binds capability consume to the panel session digest', () => {
   const content = renderPhpMyAdminSignonBridge();
   assert.ok(content.includes(`const YUNPANEL_HANDOFF_SOCKET = '${phpMyAdminSignonTemplatePolicy.handoffSocketPath}';`));
   assert.match(content, /\$_POST\['capability'\]/);
+  assert.match(content, /HTTP_X_YUNPANEL_PANEL_SESSION_DIGEST/);
+  assert.match(content, /'sessionDigest' => \$sessionDigest/);
   assert.match(content, /count\(\$_POST\) !== 1/);
   assert.doesNotMatch(content, /\$_POST\['databaseName'\]/);
   assert.match(content, /POST \/consume HTTP\/1\.1/);
@@ -42,6 +44,8 @@ test('phpMyAdmin signon bridge consumes only a capability over the private Unix 
   assert.match(content, /YUNPANEL_SIGNON_ACTION/);
   assert.match(content, /session_destroy\(\)/);
   assert.match(content, /setcookie\(YUNPANEL_SIGNON_SESSION/);
+  assert.match(content, /setcookie\(YUNPANEL_GATEWAY_SESSION_COOKIE/);
+  assert.match(content, /\$data\['gatewaySession'\]/);
   assert.match(content, /header\('Location: \/', true, 303\);/);
   assert.match(content, /Location: ' \. YUNPANEL_GATEWAY_BASE/);
   assert.equal(content.includes('root\', \'\''), false);
@@ -49,6 +53,7 @@ test('phpMyAdmin signon bridge consumes only a capability over the private Unix 
   const preview = previewPhpMyAdminSignonBridge();
   assert.equal(preview.artifact.path, '/usr/lib/yunpanel/phpmyadmin/signon.php');
   assert.equal(preview.handoffSocketPath, '/run/yunpanel-phpmyadmin/handoff.sock');
+  assert.equal(preview.gatewaySessionCookie, 'YunPanelPhpMyAdminGateway');
   assert.equal(preview.internalSignonPath, '/__yunpanel/signon');
   assert.equal(preview.internalLogoutPath, '/__yunpanel/logout');
   assert.equal(preview.gatewayBasePath, '/tools/phpmyadmin/');
