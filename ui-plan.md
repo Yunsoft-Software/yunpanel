@@ -4,7 +4,7 @@
 
 - [x] **RS-02e.6 kaynak:** `f876476b`, `91621532`, `b6e973f4`; verified attached customer ownership live customer session `websiteIds` kapsamına bağlı. Legacy site_manager grant korunur, drift fail-closed, reservation erişim değildir.
 - [x] **RS-02e.7 / RS-04c kaynak:** `f19495e2`, `b221e9ac`; reseller yalnız direct-child attached siteleri için **Sitelerim** kapsamı alır. Başka reseller/direct Owner customer siteleri dışarıda. `08b63566` / `f78b9372` canlı site terminalini current Website grant'ine bağlar; root terminal Owner-only.
-- [ ] **YP-04 / RS-02e.8:** site-manager phpMyAdmin vendor session'ı panel session + current Website assignment'a bağlanmadan mevcut `phpmyadmin_site_session_binding_required` korumasını kaldırma.
+- [x] **YP-04 / RS-02e.8 kaynak:** `b86455fb` → `05161d50`, `deea0d8e` → `95e31a98`, `b556fa94`, `ee0c7d99`; phpMyAdmin handoff exact panel session digest'e, vendor gateway cookie'si current panel session id/user + live `websiteIds` + current DB binding/credential state'e bağlandı. Site grant drift gateway token'ını revoke eder; panel auth cookie vendor upstream'e taşınmaz. Kaynak/test raporu: [phpMyAdmin site session binding](docs/history/phpmyadmin-site-session-binding-2026-09-27.md).
 - [ ] **RS-02e/RS-05 gerçek kabul:** Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding. Kaynak audit veya yazılmış test production kabulü değildir.
 
 ## 2026-09-25 — Website silme lifecycle
