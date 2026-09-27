@@ -141,6 +141,7 @@ test('socket runtime uses a dedicated root-owned phpMyAdmin runtime boundary and
           username: 'ydb_0123456789abcdef01234567',
           password: 'database-secret-value',
           host: 'localhost',
+          gatewaySession,
           expiresAt: 50_000,
         };
       },
@@ -183,6 +184,7 @@ test('socket runtime uses a dedicated root-owned phpMyAdmin runtime boundary and
   assert.equal(result.status, 200);
   assert.equal(result.body.data.username, 'ydb_0123456789abcdef01234567');
   assert.equal(result.body.data.password, 'database-secret-value');
+  assert.equal(result.body.data.gatewaySession, gatewaySession);
 
   await runtime.close();
   await assert.rejects(lstat(socketPath), { code: 'ENOENT' });
