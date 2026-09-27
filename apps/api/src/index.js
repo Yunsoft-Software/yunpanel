@@ -1094,7 +1094,17 @@ const listener = createAuthenticatedApi({
   ownerMfaRequired,
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
-  toolGatewayAuthorizer: ({ gateway, request, session }) => {
+  toolGatewayAuthorizer: async ({ gateway, request, session }) => {
+    if (gateway.id === 'phpmyadmin') {
+      const gatewaySession = request.headers['x-yunpanel-phpmyadmin-session'];
+      if (typeof gatewaySession !== 'string' || gatewaySession.includes(',')) return false;
+      return Boolean(await phpMyAdminHandoffService.authorizeGatewaySession(gatewaySession, {
+        sessionId: session.id,
+        userId: session.user.id,
+        role: session.user.role,
+        websiteIds: session.user.websiteIds,
+      }));
+    }
     if (gateway.id !== 'ttyd') return false;
     const toolSessionId = request.headers['x-yunpanel-tool-session'];
     const transport = request.headers['x-yunpanel-tool-transport'];
