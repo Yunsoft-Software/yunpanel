@@ -18,6 +18,7 @@ export const phpMyAdminSignonTemplatePolicy = Object.freeze({
   bridgeDirectory: '/usr/lib/yunpanel/phpmyadmin',
   handoffSocketPath: '/run/yunpanel-phpmyadmin/handoff.sock',
   signonSession: 'YunPanelPhpMyAdminSignon',
+  gatewaySessionCookie: 'YunPanelPhpMyAdminGateway',
   internalSignonPath: '/__yunpanel/signon',
   internalLogoutPath: '/__yunpanel/logout',
   gatewayBasePath: '/tools/phpmyadmin/',
@@ -69,6 +70,7 @@ declare(strict_types=1);
 
 const YUNPANEL_HANDOFF_SOCKET = '${policy.handoffSocketPath}';
 const YUNPANEL_SIGNON_SESSION = '${policy.signonSession}';
+const YUNPANEL_GATEWAY_SESSION_COOKIE = '${policy.gatewaySessionCookie}';
 const YUNPANEL_GATEWAY_BASE = '${policy.gatewayBasePath}';
 const YUNPANEL_MAX_HANDOFF_RESPONSE = 16384;
 
@@ -114,6 +116,14 @@ if ($action === 'logout') {
         'httponly' => true,
         'samesite' => 'Strict',
     ]);
+    setcookie(YUNPANEL_GATEWAY_SESSION_COOKIE, '', [
+        'expires' => time() - 3600,
+        'path' => YUNPANEL_GATEWAY_BASE,
+        'domain' => '',
+        'secure' => true,
+        'httponly' => true,
+        'samesite' => 'Strict',
+    ]);
     header('Cache-Control: no-store');
     header('Pragma: no-cache');
     header('Referrer-Policy: no-referrer');
@@ -129,7 +139,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
 }
 
 $capability = $_POST['capability'] ?? null;
+$sessionDigest = $_SERVER['HTTP_X_YUNPANEL_PANEL_SESSION_DIGEST'] ?? null;
 if (! is_string($capability) || preg_match('/\\A[A-Za-z0-9_-]{43}\\z/', $capability) !== 1
+    || ! is_string($sessionDigest) || preg_match('/\\A[a-f0-9]{64}\\z/', $sessionDigest) !== 1
     || count($_POST) !== 1) {
     yunpanel_fail(400);
 }
@@ -146,7 +158,7 @@ if (! is_resource($socket)) {
 }
 stream_set_timeout($socket, 2);
 
-$body = json_encode(['capability' => $capability], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);
+$body = json_encode([\n    'capability' => $capability,\n    'sessionDigest' => $sessionDigest,\n], JSON_UNESCAPED_SLASHES | JSON_THROW_ON_ERROR);\nunset($sessionDigest);
 $request = "POST /consume HTTP/1.1\\r\\n"
     . "Host: localhost\\r\\n"
     . "Content-Type: application/json\\r\\n"
@@ -202,7 +214,7 @@ try {
 unset($responseBody);
 $data = $decoded['data'] ?? null;
 if (! is_array($decoded) || count($decoded) !== 1 || ! is_array($data)
-    || count($data) !== 7
+    || count($data) !== 8
     || ($data['version'] ?? null) !== 1
     || ($data['protocol'] ?? null) !== 'yunpanel-phpmyadmin-signon-v1'
     || ! is_string($data['databaseName'] ?? null)
@@ -211,6 +223,8 @@ if (! is_array($decoded) || count($decoded) !== 1 || ! is_array($data)
     || preg_match('/\\Aydb_[a-f0-9]{24}\\z/', $data['username']) !== 1
     || ! is_string($data['password'] ?? null) || $data['password'] === '' || strlen($data['password']) > 1024
     || ($data['host'] ?? null) !== 'localhost'
+    || ! is_string($data['gatewaySession'] ?? null)
+    || preg_match('/\\A[A-Za-z0-9_-]{43}\\z/', $data['gatewaySession']) !== 1
     || ! is_int($data['expiresAt'] ?? null)
     || $data['expiresAt'] <= (int) floor(microtime(true) * 1000)) {
     yunpanel_fail(503);
@@ -247,10 +261,7 @@ $_SESSION['PMA_single_signon_cfgupdate'] = [
     'AllowRoot' => false,
     'AllowNoPassword' => false,
 ];
-unset($data, $decoded);
-if (! @session_write_close()) {
-    yunpanel_fail(503);
-}
+if (! setcookie(YUNPANEL_GATEWAY_SESSION_COOKIE, $data['gatewaySession'], [\n    'expires' => (int) floor($data['expiresAt'] / 1000),\n    'path' => YUNPANEL_GATEWAY_BASE,\n    'domain' => '',\n    'secure' => true,\n    'httponly' => true,\n    'samesite' => 'Strict',\n])) {\n    $_SESSION = [];\n    @session_destroy();\n    yunpanel_fail(503);\n}\nunset($data, $decoded);\nif (! @session_write_close()) {\n    yunpanel_fail(503);\n}
 
 header('Cache-Control: no-store');
 header('Pragma: no-cache');
@@ -296,6 +307,7 @@ export function previewPhpMyAdminSignonBridge() {
     ),
     handoffSocketPath: phpMyAdminSignonTemplatePolicy.handoffSocketPath,
     signonSession: phpMyAdminSignonTemplatePolicy.signonSession,
+    gatewaySessionCookie: phpMyAdminSignonTemplatePolicy.gatewaySessionCookie,
     internalSignonPath: phpMyAdminSignonTemplatePolicy.internalSignonPath,
     internalLogoutPath: phpMyAdminSignonTemplatePolicy.internalLogoutPath,
     gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
