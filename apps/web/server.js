@@ -11,6 +11,9 @@ const DEFAULT_WEB_ROOT = '/usr/share/yunpanel/web';
 const PHPMYADMIN_GATEWAY = integratedToolGateway('phpmyadmin');
 const PHPMYADMIN_PREFIX = PHPMYADMIN_GATEWAY.publicPrefix;
 const PHPMYADMIN_GATEWAY_ACCESS_PATH = PHPMYADMIN_GATEWAY.accessPath;
+const PHPMYADMIN_SIGNON_ACCESS_PATH = '/api/phpmyadmin-signon-access';
+const PHPMYADMIN_GATEWAY_SESSION_COOKIE = 'YunPanelPhpMyAdminGateway';
+const PHPMYADMIN_SIGNON_ROUTE = `${PHPMYADMIN_PREFIX}/__yunpanel/signon`;
 const PHPMYADMIN_SOCKET_PATH = PHPMYADMIN_GATEWAY.socketPath;
 const ELFINDER_GATEWAY = integratedToolGateway('elfinder');
 const ELFINDER_PREFIX = ELFINDER_GATEWAY.publicPrefix;
@@ -131,6 +134,7 @@ function browserProxyHeaders(request) {
       && !['authorization', 'forwarded', 'host', 'x-forwarded-for', 'x-real-ip',
         'x-yunpanel-client-ip', 'x-yunpanel-proxy-token', 'x-yunpanel-tool-session',
         'x-yunpanel-tool-transport', 'x-yunpanel-ttyd-auth',
+        'x-yunpanel-phpmyadmin-session', 'x-yunpanel-panel-session-digest',
         'x-yunpanel-elfinder-unix-user', 'x-yunpanel-elfinder-website-id',
         'x-yunpanel-elfinder-application-id'].includes(name)) {
       headers[name] = value;
@@ -176,11 +180,24 @@ function authorizeToolGateway(request, {
   });
 }
 
+function authorizePhpMyAdminSignon(request, options) {
+  return authorizeToolGateway(request, {
+    ...options,
+    accessPath: PHPMYADMIN_SIGNON_ACCESS_PATH,
+    label: 'phpMyAdmin signon',
+  });
+}
+
 function authorizePhpMyAdminGateway(request, options) {
+  const gatewaySession = readSingleCookie(request, PHPMYADMIN_GATEWAY_SESSION_COOKIE);
+  if (!gatewaySession || !CAPABILITY_PATTERN.test(gatewaySession)) return Promise.resolve(401);
   return authorizeToolGateway(request, {
     ...options,
     accessPath: PHPMYADMIN_GATEWAY_ACCESS_PATH,
     label: 'phpMyAdmin',
+    extraHeaders: {
+      'x-yunpanel-phpmyadmin-session': gatewaySession,
+    },
   });
 }
 
@@ -254,6 +271,23 @@ function panelSessionDigest(request) {
   if (production && development) return null;
   const value = production ?? development;
   return value ? sha256(value) : null;
+}
+
+function phpMyAdminVendorCookieHeader(request) {
+  const entries = String(request.headers.cookie ?? '')
+    .split(';')
+    .map((entry) => entry.trim())
+    .filter(Boolean)
+    .filter((entry) => {
+      const separator = entry.indexOf('=');
+      if (separator <= 0) return false;
+      const name = entry.slice(0, separator);
+      return name !== PHPMYADMIN_GATEWAY_SESSION_COOKIE
+        && !name.startsWith('__Host-yunpanel_')
+        && !name.startsWith('__Secure-yunpanel_')
+        && !name.startsWith('yunpanel_');
+    });
+  return entries.length > 0 ? entries.join('; ') : null;
 }
 
 function elFinderSessionCookieName(publicOrigin) {
@@ -500,7 +534,7 @@ function scopePhpMyAdminSetCookie(value) {
 }
 
 function proxyPhpMyAdmin(request, response, {
-  phpMyAdminSocketPath, publicOrigin,
+  phpMyAdminSocketPath, publicOrigin, panelDigest = null,
 }) {
   if (!sameOriginMutation(request, publicOrigin)) {
     reply(response, 403, 'Cross-origin phpMyAdmin mutations are not allowed.');
@@ -518,6 +552,10 @@ function proxyPhpMyAdmin(request, response, {
   }
   const publicUrl = new URL(publicOrigin);
   const headers = browserProxyHeaders(request);
+  const vendorCookie = phpMyAdminVendorCookieHeader(request);
+  delete headers.cookie;
+  if (vendorCookie) headers.cookie = vendorCookie;
+  if (panelDigest) headers['x-yunpanel-panel-session-digest'] = panelDigest;
   headers.host = publicUrl.host;
   headers['x-forwarded-proto'] = 'https';
   headers['x-forwarded-host'] = publicUrl.host;
@@ -1410,15 +1448,29 @@ export function createPanelServer(options = {}) {
       return;
     }
     if (requestUrl.pathname.startsWith(`${PHPMYADMIN_PREFIX}/`)) {
-      const accessStatus = await authorizePhpMyAdminGateway(request, {
-        apiHost, apiPort, clientIp, proxyToken,
-      });
+      const signonRequest = requestUrl.pathname === PHPMYADMIN_SIGNON_ROUTE;
+      const panelDigest = signonRequest ? panelSessionDigest(request) : null;
+      if (signonRequest && !panelDigest) {
+        reply(response, 401, 'Authentication required.');
+        return;
+      }
+      const accessStatus = signonRequest
+        ? await authorizePhpMyAdminSignon(request, {
+          apiHost, apiPort, clientIp, proxyToken,
+        })
+        : await authorizePhpMyAdminGateway(request, {
+          apiHost, apiPort, clientIp, proxyToken,
+        });
       if (accessStatus !== 204) {
         const status = accessStatus === 401 || accessStatus === 403 ? accessStatus : 503;
         reply(response, status, status === 401 ? 'Authentication required.' : 'phpMyAdmin access denied.');
         return;
       }
-      proxyPhpMyAdmin(request, response, { phpMyAdminSocketPath, publicOrigin });
+      proxyPhpMyAdmin(request, response, {
+        phpMyAdminSocketPath,
+        publicOrigin,
+        panelDigest,
+      });
       return;
     }
     if (requestUrl.pathname === NETDATA_PREFIX) {
@@ -1577,6 +1629,7 @@ export const panelServerInternals = Object.freeze({
   isGithubWebhookPath,
   proxyWebSocket,
   browserProxyHeaders,
+  authorizePhpMyAdminSignon,
   authorizePhpMyAdminGateway,
   authorizeElFinderGateway,
   authorizeTtydGateway,
@@ -1599,6 +1652,7 @@ export const panelServerInternals = Object.freeze({
   scopePhpMyAdminSetCookie,
   scopeNetdataSetCookie,
   panelSessionDigest,
+  phpMyAdminVendorCookieHeader,
   createElFinderGatewaySessions,
   validElFinderBundle,
   readElFinderHandoffBody,
@@ -1607,6 +1661,9 @@ export const panelServerInternals = Object.freeze({
   elFinderSessionCookieName,
   phpMyAdminPrefix: PHPMYADMIN_PREFIX,
   phpMyAdminGatewayAccessPath: PHPMYADMIN_GATEWAY_ACCESS_PATH,
+  phpMyAdminSignonAccessPath: PHPMYADMIN_SIGNON_ACCESS_PATH,
+  phpMyAdminGatewaySessionCookie: PHPMYADMIN_GATEWAY_SESSION_COOKIE,
+  phpMyAdminSignonRoute: PHPMYADMIN_SIGNON_ROUTE,
   phpMyAdminSocketPath: PHPMYADMIN_SOCKET_PATH,
   elFinderPrefix: ELFINDER_PREFIX,
   elFinderGatewayAccessPath: ELFINDER_GATEWAY_ACCESS_PATH,
