@@ -10,6 +10,7 @@ import { createLiveSessionRegistry } from '../src/live-session-registry.js';
 const serverId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';
 const applicationId = '32345678-1234-4234-8234-123456789012';
+const SESSION_DIGEST = 'd'.repeat(64);
 
 function website(overrides = {}) {
   return {
@@ -64,6 +65,7 @@ test('elFinder handoff exposes only an audience-bound Website capability and kee
   const handoff = await fx.service.issue({
     sessionId: 'owner-session',
     userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
     serverId,
     websiteId,
   });
@@ -76,7 +78,7 @@ test('elFinder handoff exposes only an audience-bound Website capability and kee
   assert.equal(JSON.stringify(handoff).includes('yunapp-'), false);
   assert.equal(JSON.stringify(handoff).includes(applicationId), false);
 
-  const privateState = await fx.service.consume(handoff.capability);
+  const privateState = await fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST });
   assert.equal(privateState.protocol, 'yunpanel-elfinder-handoff-v1');
   assert.equal(privateState.audience, 'elfinder');
   assert.equal(privateState.websiteRevision, 7);
@@ -86,9 +88,69 @@ test('elFinder handoff exposes only an audience-bound Website capability and kee
   assert.equal(fx.service.size(), 0);
 
   await assert.rejects(
-    fx.service.consume(handoff.capability),
+    fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST }),
     (error) => error instanceof ElFinderHandoffError && error.code === 'elfinder_handoff_invalid',
   );
+});
+
+test('elFinder handoff consume is bound to the exact panel session digest and mismatch is single-use', async () => {
+  const fx = fixture();
+  const handoff = await fx.service.issue({
+    sessionId: 'owner-session',
+    userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId,
+    websiteId,
+  });
+
+  await assert.rejects(
+    fx.service.consume(handoff.capability, { sessionDigest: 'e'.repeat(64) }),
+    (error) => error instanceof ElFinderHandoffError
+      && error.code === 'elfinder_handoff_session_mismatch',
+  );
+  await assert.rejects(
+    fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST }),
+    (error) => error instanceof ElFinderHandoffError && error.code === 'elfinder_handoff_invalid',
+  );
+});
+
+test('elFinder gateway state revalidates current Website grant and runtime identity', async () => {
+  const fx = fixture();
+  const handoff = await fx.service.issue({
+    sessionId: 'site-session',
+    userId: 'site-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId,
+    websiteId,
+  });
+  const bundle = await fx.service.consume(handoff.capability, {
+    sessionDigest: SESSION_DIGEST,
+  });
+  const state = {
+    serverId: bundle.serverId,
+    websiteId: bundle.websiteId,
+    websiteRevision: bundle.websiteRevision,
+    applicationId: bundle.applicationId,
+    unixUser: bundle.unixUser,
+  };
+
+  assert.equal((await fx.service.authorizeGatewayState(state, {
+    role: 'owner',
+  }))?.websiteId, websiteId);
+  assert.equal((await fx.service.authorizeGatewayState(state, {
+    role: 'site_manager',
+    websiteIds: [websiteId],
+  }))?.applicationId, applicationId);
+  assert.equal(await fx.service.authorizeGatewayState(state, {
+    role: 'site_manager',
+    websiteIds: [],
+  }), null);
+
+  fx.setWebsite(website({ revision: 8 }));
+  assert.equal(await fx.service.authorizeGatewayState(state, {
+    role: 'site_manager',
+    websiteIds: [websiteId],
+  }), null);
 });
 
 test('elFinder handoff becomes stale if Website revision or filesystem identity changes before consume', async () => {
@@ -101,12 +163,13 @@ test('elFinder handoff becomes stale if Website revision or filesystem identity 
     const handoff = await fx.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
     });
     fx.setWebsite(changed);
     await assert.rejects(
-      fx.service.consume(handoff.capability),
+      fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST }),
       (error) => error instanceof ElFinderHandoffError
         && ['elfinder_handoff_stale', 'elfinder_handoff_site_user_drift'].includes(error.code),
     );
@@ -120,6 +183,7 @@ test('elFinder handoff rejects remote, unsupported and forged Website targets be
     remote.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId: '52345678-1234-4234-8234-123456789012',
       websiteId,
     }),
@@ -183,6 +247,7 @@ test('elFinder handoff fails closed when the per-Website Files runtime is not pr
     unavailable.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
     }),
@@ -199,12 +264,13 @@ test('elFinder handoff expires and is revoked with its Owner session', async () 
     const handoff = await fx.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
     });
     fx.setNow(handoff.expiresAt);
     await assert.rejects(
-      fx.service.consume(handoff.capability),
+      fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST }),
       (error) => error instanceof ElFinderHandoffError && error.code === 'elfinder_handoff_expired',
     );
   }
@@ -215,6 +281,7 @@ test('elFinder handoff expires and is revoked with its Owner session', async () 
     const handoff = await fx.service.issue({
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
     });
@@ -222,7 +289,7 @@ test('elFinder handoff expires and is revoked with its Owner session', async () 
     assert.equal(liveSessions.revokeSession('owner-session'), 1);
     assert.equal(fx.service.size(), 0);
     await assert.rejects(
-      fx.service.consume(handoff.capability),
+      fx.service.consume(handoff.capability, { sessionDigest: SESSION_DIGEST }),
       (error) => error instanceof ElFinderHandoffError && error.code === 'elfinder_handoff_invalid',
     );
   }
