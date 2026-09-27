@@ -160,6 +160,71 @@ test('suspended hosting parent blocks child sessions and new login without disab
   assert.deepEqual(restored.session.user.hosting, { kind: 'customer', resellerId: 'reseller-login' });
 });
 
+test('hosting customer sessions derive site scope from attached ownership without legacy grants', async (t) => {
+  const { store, filePath } = fixture(t);
+  await owner(store);
+  const encoded = await hashPassword(password);
+  const websiteId = '11111111-1111-4111-8111-111111111111';
+  const legacyWebsiteId = '22222222-2222-4222-8222-222222222222';
+  const operationId = '33333333-3333-4333-8333-333333333333';
+  const serverId = '44444444-4444-4444-8444-444444444444';
+  const db = new DatabaseSync(filePath);
+  db.exec('PRAGMA foreign_keys = ON');
+  try {
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('reseller-login', 'reseller-login', encoded);
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('customer-login', 'customer-login', encoded);
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('legacy-login', 'legacy-login', encoded);
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('reseller-login', 'reseller', null);
+    db.prepare('INSERT INTO auth_reseller_limits VALUES (?, NULL, NULL)').run('reseller-login');
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('customer-login', 'customer', 'reseller-login');
+    db.prepare('INSERT INTO auth_user_websites VALUES (?, ?)').run('legacy-login', legacyWebsiteId);
+    db.prepare(`INSERT INTO auth_hosting_site_allocations
+      (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`)
+      .run(operationId, websiteId, 'customer-login', serverId, 'a'.repeat(64), 'b'.repeat(64), 1000);
+    db.prepare('INSERT INTO auth_customer_websites VALUES (?, ?, ?)').run(websiteId, 'customer-login', 1000);
+    db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = 1000 WHERE operation_id = ?")
+      .run(operationId);
+  } finally { db.close(); }
+
+  const customer = await store.login({ username: 'customer-login', password });
+  assert.deepEqual(customer.session.user.websiteIds, [websiteId]);
+  assert.deepEqual(store.getSessionById(customer.session.id).user.websiteIds, [websiteId]);
+  assert.deepEqual(customer.session.user.hosting, { kind: 'customer', resellerId: 'reseller-login' });
+
+  const reseller = await store.login({ username: 'reseller-login', password });
+  assert.deepEqual(reseller.session.user.websiteIds, []);
+  assert.deepEqual(reseller.session.user.hosting, { kind: 'reseller', resellerId: null });
+
+  const legacy = await store.login({ username: 'legacy-login', password });
+  assert.deepEqual(legacy.session.user.websiteIds, [legacyWebsiteId]);
+  assert.equal(legacy.session.user.hosting, undefined);
+
+  const remove = new DatabaseSync(filePath);
+  remove.exec('PRAGMA foreign_keys = ON; BEGIN IMMEDIATE');
+  try {
+    remove.prepare('DELETE FROM auth_customer_websites WHERE website_id = ?').run(websiteId);
+    remove.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ?').run(operationId);
+    remove.exec('COMMIT');
+  } catch (error) {
+    remove.exec('ROLLBACK');
+    throw error;
+  } finally { remove.close(); }
+  assert.deepEqual(store.getSession(customer.token).user.websiteIds, []);
+
+  const corrupt = new DatabaseSync(filePath);
+  corrupt.exec('PRAGMA foreign_keys = ON');
+  try {
+    corrupt.prepare('INSERT INTO auth_customer_websites VALUES (?, ?, ?)').run(websiteId, 'customer-login', 2000);
+  } finally { corrupt.close(); }
+  assert.throws(() => store.getSession(customer.token), { code: 'hosting_site_state_invalid', status: 503 });
+});
+
 test('successful login rotates an existing browser session', async (t) => {
   const { store } = fixture(t);
   await owner(store);
