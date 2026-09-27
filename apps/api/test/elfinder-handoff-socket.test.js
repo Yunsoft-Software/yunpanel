@@ -12,6 +12,7 @@ import {
 import { ElFinderHandoffError } from '../src/elfinder-handoff-service.js';
 
 const capability = 'A'.repeat(43);
+const sessionDigest = 'd'.repeat(64);
 const serverId = '12345678-1234-4234-8234-123456789012';
 const websiteId = '22345678-1234-4234-8234-123456789012';
 const applicationId = '32345678-1234-4234-8234-123456789012';
@@ -49,8 +50,8 @@ async function listenHandler(t, service) {
 test('private consumer returns canonical Website filesystem scope only after exact capability consume', async (t) => {
   const calls = [];
   const base = await listenHandler(t, {
-    async consume(value) {
-      calls.push(value);
+    async consume(value, options) {
+      calls.push([value, structuredClone(options)]);
       return bundle();
     },
   });
@@ -58,14 +59,14 @@ test('private consumer returns canonical Website filesystem scope only after exa
   const response = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability }),
+    body: JSON.stringify({ capability, sessionDigest }),
   });
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('pragma'), 'no-cache');
   assert.equal(response.headers.get('referrer-policy'), 'no-referrer');
   assert.deepEqual(await response.json(), { data: bundle() });
-  assert.deepEqual(calls, [capability]);
+  assert.deepEqual(calls, [[capability, { sessionDigest }]]);
 });
 
 test('private consumer rejects interface expansion and invalid service bundles', async (t) => {
@@ -84,7 +85,7 @@ test('private consumer rejects interface expansion and invalid service bundles',
   const extra = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability, root: '/etc' }),
+    body: JSON.stringify({ capability, sessionDigest, root: '/etc' }),
   });
   assert.equal(extra.status, 400);
   assert.equal((await extra.json()).error.code, 'elfinder_handoff_consume_request_invalid');
@@ -92,7 +93,7 @@ test('private consumer rejects interface expansion and invalid service bundles',
   const invalid = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability }),
+    body: JSON.stringify({ capability, sessionDigest }),
   });
   assert.equal(invalid.status, 400);
   assert.equal((await invalid.json()).error.code, 'elfinder_handoff_consume_bundle_invalid');
@@ -108,7 +109,7 @@ test('private consumer preserves handoff service authorization errors', async (t
   const response = await fetch(`${base}/consume`, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ capability }),
+    body: JSON.stringify({ capability, sessionDigest }),
   });
   assert.equal(response.status, 401);
   assert.equal((await response.json()).error.code, 'elfinder_handoff_invalid');
@@ -134,8 +135,9 @@ test('socket runtime uses a dedicated root-owned elFinder boundary and cleans it
 
   const runtime = await startElFinderHandoffSocket({
     elFinderHandoffService: {
-      async consume(value) {
+      async consume(value, options) {
         assert.equal(value, capability);
+        assert.deepEqual(options, { sessionDigest });
         return bundle();
       },
     },
@@ -153,7 +155,7 @@ test('socket runtime uses a dedicated root-owned elFinder boundary and cleans it
   assert.equal(runtime.mode, 0o660);
   assert.equal(runtime.directoryMode, 0o750);
 
-  const payload = JSON.stringify({ capability });
+  const payload = JSON.stringify({ capability, sessionDigest });
   const result = await new Promise((resolve, reject) => {
     const request = http.request({
       socketPath,
