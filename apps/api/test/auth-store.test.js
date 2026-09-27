@@ -160,7 +160,7 @@ test('suspended hosting parent blocks child sessions and new login without disab
   assert.deepEqual(restored.session.user.hosting, { kind: 'customer', resellerId: 'reseller-login' });
 });
 
-test('hosting customer sessions derive site scope from attached ownership without legacy grants', async (t) => {
+test('hosting customer and reseller sessions derive live site scope from attached ownership without legacy grants', async (t) => {
   const { store, filePath } = fixture(t);
   await owner(store);
   const encoded = await hashPassword(password);
@@ -198,7 +198,8 @@ test('hosting customer sessions derive site scope from attached ownership withou
   assert.deepEqual(customer.session.user.hosting, { kind: 'customer', resellerId: 'reseller-login' });
 
   const reseller = await store.login({ username: 'reseller-login', password });
-  assert.deepEqual(reseller.session.user.websiteIds, []);
+  assert.deepEqual(reseller.session.user.websiteIds, [websiteId]);
+  assert.deepEqual(store.getSessionById(reseller.session.id).user.websiteIds, [websiteId]);
   assert.deepEqual(reseller.session.user.hosting, { kind: 'reseller', resellerId: null });
 
   const legacy = await store.login({ username: 'legacy-login', password });
@@ -216,6 +217,7 @@ test('hosting customer sessions derive site scope from attached ownership withou
     throw error;
   } finally { remove.close(); }
   assert.deepEqual(store.getSession(customer.token).user.websiteIds, []);
+  assert.deepEqual(store.getSession(reseller.token).user.websiteIds, []);
 
   const corrupt = new DatabaseSync(filePath);
   corrupt.exec('PRAGMA foreign_keys = ON');
@@ -223,6 +225,7 @@ test('hosting customer sessions derive site scope from attached ownership withou
     corrupt.prepare('INSERT INTO auth_customer_websites VALUES (?, ?, ?)').run(websiteId, 'customer-login', 2000);
   } finally { corrupt.close(); }
   assert.throws(() => store.getSession(customer.token), { code: 'hosting_site_state_invalid', status: 503 });
+  assert.throws(() => store.getSession(reseller.token), { code: 'hosting_site_state_invalid', status: 503 });
 });
 
 test('successful login rotates an existing browser session', async (t) => {
