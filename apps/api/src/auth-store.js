@@ -202,17 +202,31 @@ export function createAuthStore({
     return { kind: row.kind, resellerId: row.resellerId };
   }
 
+  function verifiedWebsiteIds(owned, attached) {
+    if (owned.length !== attached.length || owned.some((websiteId, index) => websiteId !== attached[index])) {
+      throw new AuthError('hosting_site_state_invalid', 'Site ownership state requires reconciliation.', 503);
+    }
+    return owned;
+  }
+
   function websiteIdsForSession(userId, hosting) {
-    if (hosting?.kind === 'reseller') return [];
+    if (hosting?.kind === 'reseller') {
+      const owned = db.prepare(`SELECT w.website_id FROM auth_customer_websites w
+        JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+        WHERE h.kind = 'customer' AND h.reseller_id = ? ORDER BY w.website_id`)
+        .all(userId).map((row) => row.website_id);
+      const attached = db.prepare(`SELECT a.website_id FROM auth_hosting_site_allocations a
+        JOIN auth_hosting_accounts h ON h.user_id = a.customer_id
+        WHERE h.kind = 'customer' AND h.reseller_id = ? AND a.state = 'attached' ORDER BY a.website_id`)
+        .all(userId).map((row) => row.website_id);
+      return verifiedWebsiteIds(owned, attached);
+    }
     if (hosting?.kind === 'customer') {
       const owned = db.prepare('SELECT website_id FROM auth_customer_websites WHERE customer_id = ? ORDER BY website_id')
         .all(userId).map((row) => row.website_id);
       const attached = db.prepare("SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'attached' ORDER BY website_id")
         .all(userId).map((row) => row.website_id);
-      if (owned.length !== attached.length || owned.some((websiteId, index) => websiteId !== attached[index])) {
-        throw new AuthError('hosting_site_state_invalid', 'Site ownership state requires reconciliation.', 503);
-      }
-      return owned;
+      return verifiedWebsiteIds(owned, attached);
     }
     return db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ? ORDER BY website_id')
       .all(userId).map((row) => row.website_id);
