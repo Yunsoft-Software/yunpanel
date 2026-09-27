@@ -173,26 +173,68 @@ test('session listing and logout use the same backend-verified session', async (
   assert.equal((await app.request('/api/servers', { headers: { cookie } })).status, 401);
 });
 
-test('tool gateway access gates require the live management Owner session and bypass core handlers', async (t) => {
+test('Owner-only tool gateway access gates keep requiring the live management session', async (t) => {
   const app = await fixture(t);
-  for (const pathname of ['/api/phpmyadmin-gateway-access', '/api/elfinder-gateway-access']) {
-    assert.equal((await app.request(pathname)).status, 401);
-    assert.equal((await app.request(pathname, { headers: { cookie } })).status, 204);
-    assert.equal((await app.request(pathname, {
-      method: 'POST',
-      headers: mutationHeaders,
-      body: {},
-    })).status, 405);
+  const pathname = '/api/elfinder-gateway-access';
+  assert.equal((await app.request(pathname)).status, 401);
+  assert.equal((await app.request(pathname, { headers: { cookie } })).status, 204);
+  assert.equal((await app.request(pathname, {
+    method: 'POST',
+    headers: mutationHeaders,
+    body: {},
+  })).status, 405);
+  assert.equal(app.calls(), 0);
+});
+
+test('session-bound phpMyAdmin and ttyd gateways fail closed without an authorizer', async (t) => {
+  const app = await fixture(t);
+  for (const pathname of ['/api/phpmyadmin-gateway-access', '/api/ttyd-gateway-access']) {
+    const response = await app.request(pathname, { headers: { cookie } });
+    assert.equal(response.status, 503);
   }
   assert.equal(app.calls(), 0);
 });
 
-test('session-bound ttyd gateway fails closed without an authorizer', async (t) => {
-  const app = await fixture(t);
-  const response = await app.request('/api/ttyd-gateway-access', {
-    headers: { cookie },
+test('session-bound phpMyAdmin delegates exact panel session context to its authorizer', async (t) => {
+  const calls = [];
+  const app = await fixture(t, {
+    toolGatewayAuthorizer: async ({ gateway, request, session }) => {
+      calls.push({
+        id: gateway.id,
+        accessMode: gateway.accessMode,
+        gatewaySession: request.headers['x-yunpanel-phpmyadmin-session'],
+        sessionId: session.id,
+        userId: session.user.id,
+        role: session.user.role,
+      });
+      return request.headers['x-yunpanel-phpmyadmin-session'] === 'gateway-session';
+    },
   });
-  assert.equal(response.status, 503);
+
+  assert.equal((await app.request('/api/phpmyadmin-gateway-access', {
+    headers: { cookie, 'x-yunpanel-phpmyadmin-session': 'wrong' },
+  })).status, 403);
+  assert.equal((await app.request('/api/phpmyadmin-gateway-access', {
+    headers: { cookie, 'x-yunpanel-phpmyadmin-session': 'gateway-session' },
+  })).status, 204);
+  assert.deepEqual(calls, [
+    {
+      id: 'phpmyadmin',
+      accessMode: 'session',
+      gatewaySession: 'wrong',
+      sessionId: '12345678-1234-1234-1234-123456789012',
+      userId: 'owner-id',
+      role: 'owner',
+    },
+    {
+      id: 'phpmyadmin',
+      accessMode: 'session',
+      gatewaySession: 'gateway-session',
+      sessionId: '12345678-1234-1234-1234-123456789012',
+      userId: 'owner-id',
+      role: 'owner',
+    },
+  ]);
   assert.equal(app.calls(), 0);
 });
 
