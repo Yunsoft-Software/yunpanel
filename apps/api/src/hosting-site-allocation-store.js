@@ -65,7 +65,7 @@ export function hostingWebsiteDigest(website) {
 }
 function view(row) {
   return Object.freeze({ ...Object.fromEntries(fields.map((key, index) => [key, row[columns[index]]])),
-    state: row.state, createdAt: row.created_at, attachedAt: row.attached_at, accessGranted: false });
+    state: row.state, createdAt: row.created_at, attachedAt: row.attached_at, accessGranted: row.state === 'attached' });
 }
 
 /** Private Owner-only store; receives the PARENT store's live policy and transaction.
