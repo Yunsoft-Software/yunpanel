@@ -14,6 +14,7 @@ const SOCKET_MODE = 0o660;
 const ROOT_UID = 0;
 const GROUP_NAME_PATTERN = /^[a-z_][a-z0-9_-]{0,31}$/;
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const DIGEST_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const ROOT_PATTERN = /^\/var\/lib\/yunpanel\/data\/[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -43,8 +44,9 @@ function parseGroupIdentity(value, expectedName) {
 
 function exactBody(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== 1 || typeof value.capability !== 'string'
-    || !CAPABILITY_PATTERN.test(value.capability)) {
+    || Object.keys(value).length !== 2
+    || typeof value.capability !== 'string' || !CAPABILITY_PATTERN.test(value.capability)
+    || typeof value.sessionDigest !== 'string' || !DIGEST_PATTERN.test(value.sessionDigest)) {
     throw socketError(
       'elfinder_handoff_consume_request_invalid',
       'elFinder handoff consume request is invalid',
@@ -157,7 +159,9 @@ export function createElFinderHandoffConsumerHandler({ elFinderHandoffService } 
         return;
       }
       const body = await readJsonBody(request);
-      const bundle = await elFinderHandoffService.consume(body.capability);
+      const bundle = await elFinderHandoffService.consume(body.capability, {
+        sessionDigest: body.sessionDigest,
+      });
       if (!validBundle(bundle)) {
         throw socketError(
           'elfinder_handoff_consume_bundle_invalid',
