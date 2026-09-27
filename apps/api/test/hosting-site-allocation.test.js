@@ -92,11 +92,11 @@ test('reseller profiles cannot be used as customers', (t) => {
   const f = siteFixture(t);
   assert.throws(() => f.reserve(allocation(2, 'reseller-a')), code('hosting_site_requires_customer'));
 });
-test('completion records verified ownership once, revokes affected sessions, never grants access', (t) => {
+test('completion records verified ownership once, revokes affected sessions and grants customer membership', (t) => {
   const f = siteFixture(t); f.reserve();
   const customerToken = f.session('customer-a'), resellerToken = f.session('reseller-a');
   const allocationResult = f.complete();
-  assert.equal(allocationResult.state, 'attached'); assert.equal(allocationResult.accessGranted, false);
+  assert.equal(allocationResult.state, 'attached'); assert.equal(allocationResult.accessGranted, true);
   assert.equal(f.count('auth_customer_websites'), 1); assert.equal(f.count('auth_user_websites'), 0);
   assert.equal(f.get().usage.websites, 1); assert.equal(f.get().usageScope, 'registered_ownership');
   assert.equal(f.getSession(customerToken), null); assert.equal(f.getSession(resellerToken), null);
