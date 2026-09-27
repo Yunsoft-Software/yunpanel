@@ -323,6 +323,27 @@ test('logout revokes unused handoffs and expiration fails closed', async () => {
   assert.equal(revoked.service.size(), 0);
   await assert.rejects(revoked.service.consume(issued.capability, { sessionDigest: SESSION_DIGEST }), { code: 'phpmyadmin_handoff_invalid' });
 
+  const active = fixture({ liveSessions, now: () => now });
+  const activeHandoff = await active.service.issue({
+    sessionId: 'active-session',
+    userId: 'active-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: active.ids.serverId,
+    websiteId: active.ids.websiteId,
+    credentialId: active.ids.credentialId,
+  });
+  const activeBundle = await active.service.consume(activeHandoff.capability, {
+    sessionDigest: SESSION_DIGEST,
+  });
+  assert.equal(active.service.gatewaySize(), 1);
+  liveSessions.revokeSession('active-session');
+  assert.equal(active.service.gatewaySize(), 0);
+  assert.equal(await active.service.authorizeGatewaySession(activeBundle.gatewaySession, {
+    sessionId: 'active-session',
+    userId: 'active-user',
+    role: 'owner',
+  }), null);
+
   const expired = fixture({ now: () => now });
   const expiring = await expired.service.issue({
     sessionId: 'owner-session',
