@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
-import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthenticatedApi, createLiveConnectionAuthenticator } from '../src/auth-http.js';
 
 const origin = 'https://panel.example.test';
 const cookie = '__Host-yunpanel_session=valid-session';
@@ -53,6 +53,34 @@ async function fixture(t, options = {}) {
   };
 }
 const mutationHeaders = { cookie, origin, 'content-type': 'application/json', 'x-csrf-token': csrfToken };
+
+test('live terminal authenticator accepts site management sessions and returns current Website grants', () => {
+  let websiteIds = ['11111111-1111-4111-8111-111111111111'];
+  const session = {
+    id: '22345678-1234-4234-8234-123456789012',
+    user: { id: 'site-user', username: 'site-user', role: 'site_manager', get websiteIds() { return websiteIds; } },
+    csrfToken: 'site-csrf',
+  };
+  const store = {
+    getSession(token) { return token === 'site-session' ? session : null; },
+    mfa: { enabled() { return false; } },
+  };
+  const live = createLiveConnectionAuthenticator({ store, publicOrigin: origin });
+  const request = {
+    headers: { origin, cookie: '__Host-yunpanel_session=site-session' },
+    socket: { remoteAddress: '127.0.0.1' },
+  };
+  const authenticated = live.authenticate(request);
+  assert.equal(authenticated.session.user.role, 'site_manager');
+  assert.deepEqual(authenticated.session.user.websiteIds, websiteIds);
+
+  websiteIds = [];
+  const current = live.reauthorize(authenticated.rawToken, {
+    sessionId: authenticated.session.id,
+    userId: authenticated.session.user.id,
+  });
+  assert.deepEqual(current.user.websiteIds, []);
+});
 
 test('all management paths reject anonymous and bootstrap-bearer requests before the handler', async (t) => {
   const app = await fixture(t);
