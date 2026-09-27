@@ -13,21 +13,31 @@ const serverId = randomUUID();
 const websiteId = randomUUID();
 const credentialId = randomUUID();
 const capability = 'A'.repeat(43);
+const SESSION_DIGEST = 'd'.repeat(64);
 
 function auth(role = 'owner') {
-  return role === 'owner'
-    ? {
+  if (role === 'owner') {
+    return {
       id: 'owner-session',
       user: { id: 'owner-user', role: 'owner' },
       access: { mode: 'management', permissions: ['*'] },
       security: { managementAllowed: true },
-    }
-    : {
-      id: 'readonly-session',
-      user: { id: 'readonly-user', role: 'read_only' },
-      access: { mode: 'read_only', permissions: [] },
-      security: { managementAllowed: false },
     };
+  }
+  if (role === 'site_manager') {
+    return {
+      id: 'site-session',
+      user: { id: 'site-user', role: 'site_manager', websiteIds: [websiteId] },
+      access: { mode: 'site_management', permissions: ['website:manage'] },
+      security: { managementAllowed: true },
+    };
+  }
+  return {
+    id: 'readonly-session',
+    user: { id: 'readonly-user', role: 'read_only' },
+    access: { mode: 'read_only', permissions: [] },
+    security: { managementAllowed: false },
+  };
 }
 
 async function listen(t, { role = 'owner', serverExists = true } = {}) {
@@ -36,6 +46,7 @@ async function listen(t, { role = 'owner', serverExists = true } = {}) {
   app.use(express.json());
   app.use((request, _response, next) => {
     request.auth = auth(role);
+    request.authSessionDigest = SESSION_DIGEST;
     next();
   });
   mountPhpMyAdminHandoffRoutes(app, {
@@ -103,11 +114,40 @@ test('Owner receives only a no-store short-lived phpMyAdmin capability for the r
     ['issue', {
       sessionId: 'owner-session',
       userId: 'owner-user',
+      sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
       credentialId,
     }],
   ]);
+});
+
+test('Site Manager can mint and enter signon only for an assigned Website', async (t) => {
+  const { base, calls } = await listen(t, { role: 'site_manager' });
+  const response = await fetch(
+    `${base}/api/servers/${serverId}/websites/${websiteId}/phpmyadmin-handoffs`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ credentialId }),
+    },
+  );
+  assert.equal(response.status, 201);
+  assert.deepEqual(calls, [
+    ['server', serverId],
+    ['issue', {
+      sessionId: 'site-session',
+      userId: 'site-user',
+      sessionDigest: SESSION_DIGEST,
+      serverId,
+      websiteId,
+      credentialId,
+    }],
+  ]);
+
+  const signon = await fetch(`${base}/api/phpmyadmin-signon-access`);
+  assert.equal(signon.status, 204);
+  assert.equal(signon.headers.get('cache-control'), 'no-store');
 });
 
 test('Read Only cannot mint phpMyAdmin handoffs', async (t) => {
