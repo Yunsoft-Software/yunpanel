@@ -2,8 +2,10 @@
 
 ## 2026-09-27 — Customer→Website canlı membership
 
-- [ ] **RS-02e.6 kaynak:** `auth_customer_websites` içindeki doğrulanmış attached sahipliği customer oturumunun mevcut site araçlarına erişim kapsamına bağla. Legacy site_manager grant tablosu korunur; reseller child siteleri otomatik devralmaz; preview/reservation erişim sayılmaz.
-- [ ] **RS-02e.6 kabul:** Node24/npm11, gerçek customer login/browser ve başka customer/reseller kimliğiyle Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu. Kaynak köprü tamamlanınca bile geniş tenant kabulü ayrı açık kalır.
+- [x] **RS-02e.6 kaynak:** `f876476b`, `91621532`, `b6e973f4`; verified attached customer ownership live customer session `websiteIds` kapsamına bağlı. Legacy site_manager grant korunur, drift fail-closed, reservation erişim değildir.
+- [x] **RS-02e.7 / RS-04c kaynak:** `f19495e2`, `b221e9ac`; reseller yalnız direct-child attached siteleri için **Sitelerim** kapsamı alır. Başka reseller/direct Owner customer siteleri dışarıda. `08b63566` / `f78b9372` canlı site terminalini current Website grant'ine bağlar; root terminal Owner-only.
+- [ ] **YP-04 / RS-02e.8:** site-manager phpMyAdmin vendor session'ı panel session + current Website assignment'a bağlanmadan mevcut `phpmyadmin_site_session_binding_required` korumasını kaldırma.
+- [ ] **RS-02e/RS-05 gerçek kabul:** Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding. Kaynak audit veya yazılmış test production kabulü değildir.
 
 ## 2026-09-25 — Website silme lifecycle
 
@@ -102,7 +104,7 @@ Mevcut API/kimlik/auth/CSRF/gateway/Unix izolasyonu ve kalıcı iş/onay/rollbac
 - [x] UX-PL-04c/06d kaynak ve aktarım: görünür alias düzenleme, SSL etkili önizleme, kaydetme ve tek yayın eylemi; `027b664f`, `e3ac0fc9`. **49 seçili test geçti / 0 başarısız / 0 atlandı**; önceki paketin 44 testi bu sayının içindedir. İki JSX sözdizimi/dönüşüm kontrolü geçti; gerçek React/HTTP/browser/host kabulü değildir. [Rapor ve T-DEV-DOMAIN-ALIASES](docs/ux/domain-alias-flow.md).
 - [ ] Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır.
 - [ ] Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.
-- [ ] RS-02–05 kalan: Customer→Website canlı sahiplik/membership bağlantısı, bayi Sitelerim, customer self-service site araçları, bütün Files/DB/Mail/job/log/backup/AI/gateway/WS tenant izolasyonu ve gerçek Node24/browser/host kabulü. Owner profil API/UI, hesap lifecycle ve reseller Müşterilerim/create-edit kaynak alt işleri tamamlanmış olarak korunur.
+- [ ] RS-02–05 kalan: phpMyAdmin panel-bound site session, long-running job/gateway/WS revoke/suspend/removal kabulü, veri içeren migration/rollback ve gerçek Node24/browser/host tenant matrisi. Customer→Website membership, reseller direct-child Sitelerim ve canlı site terminal kaynak alt işleri tamamlandı.
 
 Sonraki dilimler: UX-PL-03/04/06/07 kullanıcı görevlerini tamamla → T-DEV-PLESK-NAV, T-DEV-SSL-FORM, T-DEV-DOMAIN-ALIASES, T-DEV-CRON-UI, T-DEV-PHP-UI ve Files taslak/gerçek kabul → RS-02e–05 içinde Customer→Website/site-tool tenant bağlantıları ve gerçek kabul. Müşterilerim kaynak işi yeniden yazılmaz; ertelenmiş paket/abonelik/markalama işleri ilk sürüme sessizce geri eklenmez.
 
