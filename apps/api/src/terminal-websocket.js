@@ -48,6 +48,25 @@ function auditResource(target) {
     : { resourceType: 'website', resourceId: target.websiteId, scope: 'site' };
 }
 
+function requireTerminalTargetAccess(session, target) {
+  const owner = session?.user?.role === 'owner'
+    && session?.access?.mode === 'management'
+    && session?.security?.managementAllowed === true;
+  if (target?.scope === 'server') {
+    if (!owner) throw new AuthError('terminal_server_forbidden', 'Only server owner can access root terminal.', 403);
+    return session;
+  }
+  const siteManager = session?.user?.role === 'site_manager'
+    && session?.access?.mode === 'site_management'
+    && session?.security?.managementAllowed === true
+    && Array.isArray(session?.user?.websiteIds)
+    && session.user.websiteIds.includes(target?.websiteId);
+  if (target?.scope !== 'site' || (!owner && !siteManager)) {
+    throw new AuthError('terminal_site_forbidden', 'Website terminal access is no longer authorized.', 403);
+  }
+  return session;
+}
+
 function safeSend(websocket, payload) {
   if (websocket.readyState !== WebSocket.OPEN) return false;
   websocket.send(JSON.stringify(payload));
@@ -193,7 +212,8 @@ export function createTerminalWebSocketServer({
       try {
         const timestamp = now();
         if (timestamp - record.lastTouchAt >= 30_000) {
-          reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId }, { touch: true });
+          const current = reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId }, { touch: true });
+          requireTerminalTargetAccess(current, record.target);
           record.lastTouchAt = timestamp;
         }
         const message = decodeMessage(data, isBinary);
@@ -243,8 +263,12 @@ export function createTerminalWebSocketServer({
       const timestamp = now();
       if (timestamp - record.startedAt >= lifetimeMs) { terminate(record, 'session_timeout', 4008); return; }
       if (timestamp - record.lastActivityAt >= idleMs) { terminate(record, 'idle_timeout', 4008); return; }
-      try { reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId }); }
-      catch { terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' }); }
+      try {
+        const current = reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId });
+        requireTerminalTargetAccess(current, record.target);
+      } catch {
+        terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' });
+      }
     }, authCheckMs);
     record.interval?.unref?.();
   }
@@ -267,6 +291,7 @@ export function createTerminalWebSocketServer({
         sessionId: auth.session.id,
         userId: auth.session.user.id,
       });
+      requireTerminalTargetAccess(auth.session, consumed.target);
       websocketServer.handleUpgrade(request, socket, head, (websocket) => {
         void begin(websocket, auth, consumed).catch(() => websocket.close(1011, 'terminal_unavailable'));
       });
@@ -289,4 +314,5 @@ export const terminalWebSocketInternals = Object.freeze({
   capabilityPrefix: CAPABILITY_PREFIX,
   parseProtocols,
   auditResource,
+  requireTerminalTargetAccess,
 });
