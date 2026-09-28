@@ -111,17 +111,17 @@ export function createWebsiteRemovalRuntime({
     if (!value || typeof value !== 'object' || Array.isArray(value)
       || typeof value.sessionId !== 'string' || !SAFE_ID.test(value.sessionId)
       || typeof value.userId !== 'string' || !SAFE_ID.test(value.userId)
-      || value.role !== 'owner') {
+      || !['owner', 'site_manager', 'reseller', 'customer'].includes(value.role)) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_actor_invalid',
-        'Valid Owner actor evidence is required.',
+        'Valid actor evidence is required.',
         400,
       );
     }
     return Object.freeze({
       sessionId: value.sessionId,
       userId: value.userId,
-      role: 'owner',
+      role: value.role,
     });
   }
 
@@ -138,7 +138,7 @@ export function createWebsiteRemovalRuntime({
     if (!submitted) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_actor_required',
-        'Live Owner authorization is required for Website removal.',
+        'Live authorization is required for Website removal.',
         403,
       );
     }
@@ -155,7 +155,7 @@ export function createWebsiteRemovalRuntime({
       if (!original || original.userId !== submitted.userId || original.role !== submitted.role) {
         throw new WebsiteRemovalRuntimeError(
           'website_removal_actor_mismatch',
-          'Website removal must be continued by the Owner account that started it.',
+          'Website removal must be continued by the account that started it.',
           403,
         );
       }
@@ -165,22 +165,22 @@ export function createWebsiteRemovalRuntime({
     catch {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_actor_forbidden',
-        'Owner authorization changed before Website removal could continue.',
+        'Authorization changed before Website removal could continue.',
         403,
       );
     }
-    if (!current || current.userId !== submitted.userId || current.role !== 'owner'
+    if (!current || current.userId !== submitted.userId || current.role !== submitted.role
       || current.sessionId !== submitted.sessionId) {
       throw new WebsiteRemovalRuntimeError(
         'website_removal_actor_forbidden',
-        'Owner authorization changed before Website removal could continue.',
+        'Authorization changed before Website removal could continue.',
         403,
       );
     }
     const authorized = Object.freeze({
       sessionId: current.sessionId,
       userId: current.userId,
-      role: 'owner',
+      role: current.role,
     });
     if (operationId !== null && original?.sessionId !== authorized.sessionId) {
       if (typeof registry.refreshActor !== 'function') {
@@ -856,5 +856,6 @@ export function createWebsiteRemovalRuntime({
     get,
     list,
     listForWebsite,
+    hasSiteMutationLock: Boolean(siteMutationLock),
   });
 }

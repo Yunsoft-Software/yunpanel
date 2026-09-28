@@ -1,5 +1,6 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRemovalRuntimeError } from './website-removal-runtime.js';
+import { extractActorTenant } from './tenant-boundary.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -61,27 +62,71 @@ function continueStepBody(body) {
   return value;
 }
 
-function requireRemovalOwner(request, response, next) {
-  return requirePanelRouteAccess(request, response, () => {
-    if (request.auth?.user?.role !== 'owner') {
-      return response.status(403).json({ error: { code: 'forbidden', message: 'Owner access is required.' } });
-    }
-    return next();
-  });
-}
-
 function removalActor(request) {
   const sessionId = request.auth?.id;
   const userId = request.auth?.user?.id;
   const role = request.auth?.user?.role;
-  if (typeof sessionId !== 'string' || typeof userId !== 'string' || role !== 'owner') {
+  if (typeof sessionId !== 'string' || typeof userId !== 'string'
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(role)) {
     throw new WebsiteRemovalHttpError(
       'website_removal_actor_invalid',
-      'Live Owner session identity is required.',
+      'Live Website removal session identity is required.',
       403,
     );
   }
   return Object.freeze({ sessionId, userId, role });
+}
+
+function removalNotFound() {
+  return new WebsiteRemovalHttpError(
+    'website_removal_operation_not_found',
+    'Website removal operation was not found',
+    404,
+  );
+}
+
+async function requireWebsiteAccess(request, targetWebsiteId, { websiteRegistry = null, localServerId = null, allowDeleted = false } = {}) {
+  const actor = removalActor(request);
+  const auth = request.auth;
+  const actorTenant = extractActorTenant(auth);
+  if (!actorTenant.active) {
+    throw new WebsiteRemovalHttpError(
+      'tenant_actor_inactive',
+      'Inactive account cannot access tenant resources.',
+      403,
+    );
+  }
+  if (actor.role === 'owner') return actor;
+  if (auth?.access?.mode !== 'site_management' || auth?.security?.managementAllowed !== true
+    || !Array.isArray(actorTenant.websiteIds) || !actorTenant.websiteIds.includes(targetWebsiteId)) {
+    throw removalNotFound();
+  }
+  if (websiteRegistry && typeof websiteRegistry.getWebsite === 'function') {
+    let website;
+    try { website = await websiteRegistry.getWebsite(targetWebsiteId); }
+    catch {
+      throw new WebsiteRemovalHttpError(
+        'website_removal_scope_unavailable',
+        'Website removal scope could not be verified',
+        503,
+      );
+    }
+    if (website) {
+      if (website.id !== targetWebsiteId
+        || (localServerId !== null && localServerId !== undefined && website.serverId !== localServerId)) {
+        throw removalNotFound();
+      }
+    } else if (!allowDeleted) {
+      throw removalNotFound();
+    }
+  } else if (!websiteRegistry) {
+    throw new WebsiteRemovalHttpError(
+      'website_removal_scope_unavailable',
+      'Website removal scope could not be verified',
+      503,
+    );
+  }
+  return actor;
 }
 
 function asyncRoute(handler) {
@@ -96,7 +141,12 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
+export function mountWebsiteRemovalRoutes(app, {
+  runtime,
+  siteMutationLock = null,
+  websiteRegistry = null,
+  localServerId = null,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
     throw new Error('Express application is required');
   }
@@ -106,41 +156,66 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     throw new Error('Website removal runtime is required');
   }
 
-  app.get('/api/website-removal-operations', requireRemovalOwner, asyncRoute(async (_request, response) => {
+  async function withOptionalLock(websiteId, action) {
+    if (!siteMutationLock || runtime?.hasSiteMutationLock) {
+      return action();
+    }
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new WebsiteRemovalHttpError(
+        'website_removal_lock_unavailable',
+        'Site mutation lock is unavailable.',
+        503,
+      );
+    }
+    return siteMutationLock.withSiteLock({ websiteId }, action);
+  }
+
+  app.get('/api/website-removal-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const actor = removalActor(request);
+    const actorTenant = extractActorTenant(request.auth);
+    if (!actorTenant.active) {
+      throw new WebsiteRemovalHttpError('tenant_actor_inactive', 'Inactive account cannot access tenant resources.', 403);
+    }
     const operations = await runtime.list();
+    const filtered = actor.role === 'owner'
+      ? operations
+      : operations.filter((op) => actorTenant.websiteIds.includes(op.websiteId));
     response.set('Cache-Control', 'no-store');
-    response.json({ data: operations });
+    response.json({ data: filtered });
   }));
 
-  app.get('/api/website-removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.get('/api/website-removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const operation = await runtime.get(request.params.operationId);
     if (!operation) {
-      throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
+      throw removalNotFound();
     }
+    await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     response.set('Cache-Control', 'no-store');
     response.json({ data: operation });
   }));
 
-  app.post('/api/website-removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.post('/api/website-removal-operations/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const operation = await runtime.get(request.params.operationId);
     if (!operation) {
-      throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
+      throw removalNotFound();
     }
+    const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const body = continueStepBody(request.body);
-    const updated = await runtime.continueStep({
+    const updated = await withOptionalLock(operation.websiteId, () => runtime.continueStep({
       websiteId: operation.websiteId,
       operationId: operation.id,
       expectedUpdatedAt: body.expectedUpdatedAt,
       stepId: body.stepId,
       confirmation: body.confirmation,
-      actor: removalActor(request),
-    });
+      actor,
+    }));
     response.set('Cache-Control', 'no-store');
     response.json({ data: updated });
   }));
 
-  app.get('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
+    await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const [preview, operations] = await Promise.all([
       runtime.preview({ websiteId }),
       runtime.listForWebsite(websiteId),
@@ -150,52 +225,66 @@ export function mountWebsiteRemovalRoutes(app, { runtime } = {}) {
     response.json({ preview, operations, data });
   }));
 
-  app.post('/api/websites/:websiteId/removal-preview', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
+    await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const preview = await runtime.preview({ websiteId });
     response.set('Cache-Control', 'no-store');
     response.json({ preview, data: preview });
   }));
 
-  app.post('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
+    const actor = await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const body = startBody(request.body);
-    const operation = await runtime.start({
+    const operation = await withOptionalLock(websiteId, () => runtime.start({
       websiteId,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
-      actor: removalActor(request),
-    });
+      actor,
+    }));
     response.status(201).json({ operation, data: operation });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
+    await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const operations = await runtime.listForWebsite(websiteId);
     response.set('Cache-Control', 'no-store');
     response.json({ operations, data: operations });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
+    await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const operation = await runtime.get(operationId);
     if (!operation || operation.websiteId !== websiteId) {
-      throw new WebsiteRemovalHttpError('website_removal_operation_not_found', 'Website removal operation was not found', 404);
+      throw removalNotFound();
     }
     response.json({ operation, data: operation });
   }));
 
-  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
+    const actor = await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const body = continueStepBody(request.body);
-    const operation = await runtime.continueStep({
+    const operation = await withOptionalLock(websiteId, () => runtime.continueStep({
       websiteId,
       operationId,
       expectedUpdatedAt: body.expectedUpdatedAt,
       stepId: body.stepId,
       confirmation: body.confirmation,
-      actor: removalActor(request),
-    });
+      actor,
+    }));
     response.json({ operation, data: operation });
   }));
 }
+
+export const websiteRemovalHttpInternals = Object.freeze({
+  exactBody,
+  startBody,
+  continueStepBody,
+  removalActor,
+  requireWebsiteAccess,
+  removalNotFound,
+});

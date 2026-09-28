@@ -372,6 +372,7 @@ export function createAuthenticatedApi({
         : ownerPolicy.requireManagement(session);
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
     request.auth = authorized;
+    request.rawToken = rawToken;
     Object.defineProperty(request, 'authSessionDigest', {
       value: sessionDigest(rawToken),
       enumerable: false,
