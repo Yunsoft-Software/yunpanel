@@ -41,7 +41,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     LEFT JOIN auth_user_revisions r ON r.user_id = h.user_id`;
   const raw = (id) => db.prepare(`${select} WHERE h.user_id = ?`).get(id);
   function projection(row) {
-    if (!row || row.role !== 'site_manager' || ![0, 1].includes(row.active)) {
+    if (!row || !['site_manager', 'reseller', 'customer'].includes(row.role) || ![0, 1].includes(row.active)) {
       throw error('hosting_account_state_invalid', 'Hosting account state requires recovery.', 503);
     }
     return validateHostingAccount({ id: row.user_id, kind: row.kind, resellerId: row.reseller_id, active: row.active === 1 }, row.kind);
@@ -72,12 +72,12 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     if (!current?.id || !current.user?.id) throw error('unauthorized', 'Sign in to continue.', 401);
     if (current.user.role === 'owner') return owner(rawToken, requireManagement);
     const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(current.user.id);
-    if (user?.role !== 'site_manager' || user.active !== 1) throw scopeDenied();
+    if (!['site_manager', 'reseller'].includes(user?.role) || user.active !== 1) throw scopeDenied();
     const row = raw(user.id);
     if (!row) throw scopeDenied();
     const profile = projection(row);
     if (profile.kind !== 'reseller' || profile.resellerId !== null || !profile.active) throw scopeDenied();
-    return { id: user.id, role: 'reseller', active: true };
+    return { id: user.id, role: 'reseller', kind: 'reseller', active: true };
   }
   function assertReadScope(actor, row) {
     const account = projection(row);
@@ -156,7 +156,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
   }
   const siteAllocations = createHostingSiteAllocationStore({
-    db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser,
+    db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser, managementActor,
   });
   return {
     siteAllocations,

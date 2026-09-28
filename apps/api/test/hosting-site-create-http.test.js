@@ -6,7 +6,8 @@ import {
   SiteCreateError,
   siteCreateHttpInternals,
 } from '../src/site-create-http.js';
-import { siteFixture, website, uuid } from '../test-support/hosting-site-fixture.js';
+import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
+import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
 import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
@@ -661,4 +662,235 @@ test('authorizeWebsiteRemovalActor validates active tenant context, MFA, and ass
 
   const omittedWebsiteSm = await authorizeRemovalActor({ sessionId: 'session-sm-active', userId: 'sm-a', role: 'site_manager' });
   assert.equal(omittedWebsiteSm, null);
+});
+
+test('reseller self-service hosted site allocation enforces tenant boundary, customer scope, and quotas', async (t) => {
+  const env = setupTestEnvironment(t, { maxWebsites: 1, maxCustomers: 5 });
+  const app = fakeApp();
+  mountSiteCreateRoutes(app, env.dependencies);
+
+  const resellerToken = env.f.session('reseller-a');
+  const resellerAuth = {
+    id: 'session-reseller-a',
+    token: resellerToken,
+    rawToken: resellerToken,
+    user: { id: 'reseller-a', role: 'site_manager', active: true, hosting: { kind: 'reseller', resellerId: null } },
+  };
+
+  const previewHandler = app.routes.post.get('/api/sites/hosted/create-preview');
+  const applyHandler = app.routes.post.get('/api/sites/hosted');
+
+  // 1. Reseller previews hosted site for own direct customer (customer-a)
+  const opId1 = uuid(1101);
+  const previewBody1 = {
+    customerId: 'customer-a',
+    input: { operationId: opId1, serverId: env.serverId },
+  };
+  const previewRes = await invoke(previewHandler, {
+    auth: resellerAuth,
+    rawToken: resellerToken,
+    body: previewBody1,
+  });
+  assert.equal(previewRes.statusCode, 200);
+  assert.equal(previewRes.payload.data.customerId, 'customer-a');
+  assert.equal(previewRes.payload.data.state, 'available');
+  const previewDigest = previewRes.payload.data.previewDigest;
+  const confirmation = previewRes.payload.data.confirmation;
+
+  // 2. Reseller applies hosted site creation for customer-a
+  const applyRes = await invoke(applyHandler, {
+    auth: resellerAuth,
+    rawToken: resellerToken,
+    body: {
+      customerId: 'customer-a',
+      input: { operationId: opId1, serverId: env.serverId },
+      previewDigest,
+      confirmation,
+    },
+  });
+  assert.equal(applyRes.statusCode, 201);
+  assert.equal(applyRes.payload.data.created, true);
+  assert.equal(applyRes.payload.data.allocation.state, 'attached');
+  assert.equal(applyRes.payload.data.allocation.customerId, 'customer-a');
+  assert.equal(env.f.get('reseller-a').usage.websites, 1);
+
+  // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
+  const opId2 = uuid(1102);
+  const previewBody2 = {
+    customerId: 'customer-b',
+    input: { operationId: opId2, serverId: env.serverId },
+  };
+  await assert.rejects(
+    async () => {
+      await invoke(previewHandler, {
+        auth: resellerAuth,
+        rawToken: resellerToken,
+        body: previewBody2,
+      });
+    },
+    (err) => err instanceof AuthError && err.code === 'reseller_capacity_exceeded',
+  );
+
+  // 4. Reseller attempts site preview for customer-c belonging to foreign reseller-b
+  const opIdForeign = uuid(1103);
+  await assert.rejects(
+    async () => {
+      await invoke(previewHandler, {
+        auth: resellerAuth,
+        rawToken: resellerToken,
+        body: { customerId: 'customer-c', input: { operationId: opIdForeign, serverId: env.serverId } },
+      });
+    },
+    (err) => err instanceof AuthError && (err.code === 'reseller_scope_forbidden' || err.status === 403),
+  );
+
+  // 5. Reseller attempts site preview for direct Owner customer
+  const opIdDirect = uuid(1104);
+  await assert.rejects(
+    async () => {
+      await invoke(previewHandler, {
+        auth: resellerAuth,
+        rawToken: resellerToken,
+        body: { customerId: 'direct', input: { operationId: opIdDirect, serverId: env.serverId } },
+      });
+    },
+    (err) => err instanceof AuthError && (err.code === 'reseller_scope_forbidden' || err.status === 403),
+  );
+
+  // 6. Reseller attempts site preview for non-existent customer
+  await assert.rejects(
+    async () => {
+      await invoke(previewHandler, {
+        auth: resellerAuth,
+        rawToken: resellerToken,
+        body: { customerId: 'non-existent', input: { operationId: uuid(1105), serverId: env.serverId } },
+      });
+    },
+    (err) => err instanceof AuthError && err.code === 'hosting_account_not_found',
+  );
+
+  // 7. Customer attempting site allocation is rejected (management access required)
+  const customerToken = env.f.session('customer-a');
+  const customerAuth = {
+    id: 'session-customer-a',
+    token: customerToken,
+    rawToken: customerToken,
+    user: { id: 'customer-a', role: 'site_manager', active: true, hosting: { kind: 'customer', resellerId: 'reseller-a' } },
+  };
+  await assert.rejects(
+    async () => {
+      await invoke(previewHandler, {
+        auth: customerAuth,
+        rawToken: customerToken,
+        body: previewBody1,
+      });
+    },
+    (err) => err instanceof AuthError && (err.code === 'forbidden' || err.code === 'reseller_scope_forbidden'),
+  );
+});
+
+test('hosting-site-allocation-store enforces customer ownership for site_manager reseller actors', async (t) => {
+  const env = setupTestEnvironment(t, { maxWebsites: 2, maxCustomers: 5 });
+
+  // 1. Custom allocation store with managementActor returning role: 'site_manager' and kind: 'reseller'
+  const storeWithKind = createHostingSiteAllocationStore({
+    db: env.f.db,
+    now: env.f.now,
+    transaction: env.f.transaction,
+    owner: () => ({ id: 'owner-user', role: 'owner', active: true }),
+    existing: (id) => env.f.db.prepare('SELECT u.id AS user_id, u.username, u.active, h.kind, h.reseller_id, h.revision, 1 AS user_revision, 1000 AS created_at, 1000 AS updated_at FROM users u LEFT JOIN auth_hosting_accounts h ON h.user_id = u.id WHERE u.id = ?').get(id),
+    projection: (row) => ({ id: row.user_id, kind: row.kind, resellerId: row.reseller_id, active: Boolean(row.active) }),
+    limits: () => ({ maxCustomers: 5, maxWebsites: 2 }),
+    usage: () => ({ customers: 1, websites: 0 }),
+    invalidate: () => {},
+    audit: () => {},
+    revokeLiveUser: () => {},
+    managementActor: () => ({ id: 'reseller-a', role: 'site_manager', kind: 'reseller', active: true }),
+  });
+
+  // 2. Custom allocation store with managementActor returning role: 'site_manager' and hosting: { kind: 'reseller' }
+  const storeWithHostingKind = createHostingSiteAllocationStore({
+    db: env.f.db,
+    now: env.f.now,
+    transaction: env.f.transaction,
+    owner: () => ({ id: 'owner-user', role: 'owner', active: true }),
+    existing: (id) => env.f.db.prepare('SELECT u.id AS user_id, u.username, u.active, h.kind, h.reseller_id, h.revision, 1 AS user_revision, 1000 AS created_at, 1000 AS updated_at FROM users u LEFT JOIN auth_hosting_accounts h ON h.user_id = u.id WHERE u.id = ?').get(id),
+    projection: (row) => ({ id: row.user_id, kind: row.kind, resellerId: row.reseller_id, active: Boolean(row.active) }),
+    limits: () => ({ maxCustomers: 5, maxWebsites: 2 }),
+    usage: () => ({ customers: 1, websites: 0 }),
+    invalidate: () => {},
+    audit: () => {},
+    revokeLiveUser: () => {},
+    managementActor: () => ({ id: 'reseller-a', role: 'site_manager', hosting: { kind: 'reseller' }, active: true }),
+  });
+
+  // 3. Reject cross-reseller customer access for site_manager actor with kind: 'reseller'
+  assert.throws(
+    () => storeWithKind.preview('token', () => {}, allocation(1, 'customer-c')),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // 4. Reject direct Owner customer access for site_manager actor with kind: 'reseller'
+  assert.throws(
+    () => storeWithKind.preview('token', () => {}, allocation(1, 'direct')),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // 5. Reject cross-reseller customer access for site_manager actor with hosting.kind: 'reseller'
+  assert.throws(
+    () => storeWithHostingKind.preview('token', () => {}, allocation(1, 'customer-c')),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // 6. Allow own customer access for site_manager actor with kind: 'reseller'
+  const ownPreviewKind = storeWithKind.preview('token', () => {}, allocation(1, 'customer-a'));
+  assert.equal(ownPreviewKind.customerId, 'customer-a');
+  assert.equal(ownPreviewKind.state, 'available');
+
+  // 7. Allow own customer access for site_manager actor with hosting.kind: 'reseller'
+  const ownPreviewHosting = storeWithHostingKind.preview('token', () => {}, allocation(1, 'customer-a'));
+  assert.equal(ownPreviewHosting.customerId, 'customer-a');
+  assert.equal(ownPreviewHosting.state, 'available');
+});
+
+test('hosting-site-allocation-store supports role: reseller actor and customer role in projection', async (t) => {
+  const env = setupTestEnvironment(t, { maxWebsites: 2, maxCustomers: 5 });
+
+  const storeWithResellerRole = createHostingSiteAllocationStore({
+    db: env.f.db,
+    now: env.f.now,
+    transaction: env.f.transaction,
+    owner: () => ({ id: 'owner-user', role: 'owner', active: true }),
+    existing: (id) => env.f.db.prepare('SELECT u.id AS user_id, u.username, u.active, h.kind, h.reseller_id, h.revision, 1 AS user_revision, 1000 AS created_at, 1000 AS updated_at FROM users u LEFT JOIN auth_hosting_accounts h ON h.user_id = u.id WHERE u.id = ?').get(id),
+    projection: (row) => ({ id: row.user_id, kind: row.kind, resellerId: row.reseller_id, active: Boolean(row.active) }),
+    limits: () => ({ maxCustomers: 5, maxWebsites: 2 }),
+    usage: () => ({ customers: 1, websites: 0 }),
+    invalidate: () => {},
+    audit: () => {},
+    revokeLiveUser: () => {},
+    managementActor: () => ({ id: 'reseller-a', role: 'reseller', active: true }),
+  });
+
+  // Cross-reseller customer access rejected
+  assert.throws(
+    () => storeWithResellerRole.preview('token', () => {}, allocation(1, 'customer-c')),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // Direct Owner customer access rejected
+  assert.throws(
+    () => storeWithResellerRole.preview('token', () => {}, allocation(1, 'direct')),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // Own customer access allowed
+  const ownPreview = storeWithResellerRole.preview('token', () => {}, allocation(1, 'customer-a'));
+  assert.equal(ownPreview.customerId, 'customer-a');
+  assert.equal(ownPreview.state, 'available');
+
+  // Verify hosting account store accepts users with role: 'customer'
+  env.f.db.prepare("UPDATE users SET role = 'customer' WHERE id = 'customer-a'").run();
+  const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
+  assert.equal(customerAccount.id, 'customer-a');
+  assert.equal(customerAccount.kind, 'customer');
 });

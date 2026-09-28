@@ -224,6 +224,8 @@ export function createApp({
     applicationExists: async (applicationId) => Boolean(await applicationRegistry.getApplication(applicationId)),
   }),
   applicationDeployQueue = null,
+  websiteRegistry = null,
+  customerLookup = null,
 } = {}) {
   const app = express();
   const reconciliationJobs = new Map();
@@ -256,12 +258,58 @@ export function createApp({
     if (!inLocalScope(application)) throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     return application;
   };
+
+  const isWebsiteIdAllowedForRequest = async (websiteId, request) => {
+    if (!websiteId) return false;
+    const user = request?.auth?.user;
+    if (!user) return false;
+    const role = user.role;
+    if (role === 'owner' || role === 'read_only') return true;
+    const isReseller = role === 'reseller' || user.hosting?.kind === 'reseller';
+    const allowed = new Set(user.websiteIds ?? []);
+
+    if (allowed.has(websiteId)) {
+      if (isReseller && websiteRegistry) {
+        try {
+          const site = await websiteRegistry.getWebsite(websiteId);
+          if (site && site.resellerId !== undefined && site.resellerId !== user.id) {
+            return false;
+          }
+        } catch {}
+      }
+      return true;
+    }
+
+    if (isReseller && websiteRegistry) {
+      try {
+        const site = await websiteRegistry.getWebsite(websiteId);
+        if (site) {
+          if (site.resellerId && site.resellerId === user.id) {
+            return true;
+          }
+          if (site.customerId && typeof customerLookup === 'function') {
+            const cust = await Promise.resolve(customerLookup(site.customerId));
+            if (cust && cust.resellerId === user.id) {
+              return true;
+            }
+          }
+        }
+      } catch {}
+    }
+
+    return false;
+  };
+
   const requireDomain = async (domainId, request = null) => {
     const domain = await domainRegistry.getDomain(domainId);
     if (!inLocalScope(domain)) throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
-    if (request?.auth?.user?.role === 'site_manager') {
-      const allowed = new Set(request.auth.user.websiteIds ?? []);
-      if (!domain.websiteId || !allowed.has(domain.websiteId)) {
+    const role = request?.auth?.user?.role;
+    if (role && !['owner', 'read_only'].includes(role)) {
+      if (!domain.websiteId) {
+        throw new DomainRegistryError('forbidden', 'Access denied to this domain', 403);
+      }
+      const allowed = await isWebsiteIdAllowedForRequest(domain.websiteId, request);
+      if (!allowed) {
         throw new DomainRegistryError('forbidden', 'Access denied to this domain', 403);
       }
     }
@@ -570,9 +618,15 @@ export function createApp({
 
   app.get('/api/domains', requirePanelRouteAccess, async (request, response) => {
     let domains = localOnly(await domainRegistry.listDomains());
-    if (request.auth?.user?.role === 'site_manager') {
-      const allowed = new Set(request.auth.user.websiteIds ?? []);
-      domains = domains.filter((domain) => domain.websiteId && allowed.has(domain.websiteId));
+    const role = request.auth?.user?.role;
+    if (role && !['owner', 'read_only'].includes(role)) {
+      const filtered = [];
+      for (const domain of domains) {
+        if (domain.websiteId && (await isWebsiteIdAllowedForRequest(domain.websiteId, request))) {
+          filtered.push(domain);
+        }
+      }
+      domains = filtered;
     }
     return response.json({ data: domains });
   });
@@ -587,10 +641,14 @@ export function createApp({
       const parent = await domainRegistry.getDomain(parentDomainId).catch(() => null);
       if (parent?.websiteId) websiteId = parent.websiteId;
     }
-    if (request.auth?.user?.role === 'site_manager') {
-      const allowed = new Set(request.auth.user.websiteIds ?? []);
-      if (!websiteId || !allowed.has(websiteId)) {
-        throw new DomainRegistryError('forbidden', 'Site manager must create domains within their assigned website', 403);
+    const role = request.auth?.user?.role;
+    if (role && !['owner', 'read_only'].includes(role)) {
+      if (!websiteId) {
+        throw new DomainRegistryError('forbidden', 'Domains must be created within an assigned website', 403);
+      }
+      const allowed = await isWebsiteIdAllowedForRequest(websiteId, request);
+      if (!allowed) {
+        throw new DomainRegistryError('forbidden', 'Domains must be created within an assigned website', 403);
       }
     }
     const requestedServerId = request.body?.serverId ?? null;

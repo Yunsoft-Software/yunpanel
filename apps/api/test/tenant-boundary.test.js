@@ -14,6 +14,8 @@ import { handleAuditRead } from '../src/audit-http.js';
 import { mountTerminalCapabilityRoutes } from '../src/terminal-capability-http.js';
 import { classifyManagementMutation, attachManagementAudit } from '../src/management-audit.js';
 import { withAuditActor, currentAuditTenant } from '../src/audit-request-context.js';
+import { mountWebsiteRoutes } from '../src/website-http.js';
+import { createApp } from '../src/core-app.js';
 
 const owner = Object.freeze({ id: 'owner-user', role: 'owner', active: true });
 const readOnly = Object.freeze({ id: 'readonly-user', role: 'read_only', active: true });
@@ -1634,3 +1636,416 @@ test('negative scenarios: permission boundaries for Plesk non-global roles fail-
   assert.equal(custResForReseller.called, true);
 });
 
+test('RS-03-05: reseller self-service site allocation, customer data isolation and tenant boundary enforcement', async () => {
+  const customerDatabase = {
+    'customer-a1': customerA1,
+    'customer-a2': customerA2,
+    'customer-b1': customerB1,
+    'customer-direct': customerDirect,
+  };
+
+  const middleware = createTenantBoundaryMiddleware({
+    customerLookup: async (id) => customerDatabase[id] ?? null,
+  });
+
+  const run = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const headers = {};
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader(k, v) { headers[k] = v; },
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody, headers };
+  };
+
+  // --- 1. Reseller Self-Service Site Allocation ---
+
+  // 1a. Reseller A creates/previews hosted sites for own direct customer (customer-a1) -> allowed
+  for (const path of [
+    '/api/sites/hosted',
+    '/api/sites/hosted/create-preview',
+    '/api/sites/hosted/recover-reservation',
+    '/api/sites',
+    '/api/sites/create-preview',
+    '/api/sites/recover-reservation',
+  ]) {
+    const res = await run(resellerA, path, 'POST', { customerId: 'customer-a1', input: { name: 'mysite' } });
+    assert.equal(res.called, true, `Expected reseller to be permitted for hosted route ${path}`);
+  }
+
+  // 1b. Reseller A attempting hosted site allocation for another reseller's customer (customer-b1) -> 403
+  for (const path of ['/api/sites/hosted', '/api/sites']) {
+    const res = await run(resellerA, path, 'POST', { customerId: 'customer-b1', input: {} });
+    assert.equal(res.called, false);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+    assert.equal(res.responseBody.error.message, 'This customer belongs to another reseller.');
+  }
+
+  // 1c. Reseller A attempting hosted site allocation for direct Owner customer -> 403
+  for (const path of ['/api/sites/hosted', '/api/sites']) {
+    const res = await run(resellerA, path, 'POST', { customerId: 'customer-direct', input: {} });
+    assert.equal(res.called, false);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+    assert.equal(res.responseBody.error.message, 'Direct Owner customers are outside reseller tenant boundary.');
+  }
+
+  // 1d. Reseller A attempting hosted site allocation for non-existent customer -> 404
+  const notFoundRes = await run(resellerA, '/api/sites/hosted', 'POST', { customerId: 'unknown-customer', input: {} });
+  assert.equal(notFoundRes.called, false);
+  assert.equal(notFoundRes.statusCode, 404);
+  assert.equal(notFoundRes.responseBody.error.code, 'customer_not_found');
+
+  // 1e. Reseller A attempting unhosted site creation -> 403
+  const unhostedSites = await run(resellerA, '/api/sites', 'POST', { input: { name: 'unhosted' } });
+  assert.equal(unhostedSites.called, false);
+  assert.equal(unhostedSites.statusCode, 403);
+  assert.equal(unhostedSites.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  const unhostedWebsites = await run(resellerA, '/api/websites', 'POST', { name: 'test' });
+  assert.equal(unhostedWebsites.called, false);
+  assert.equal(unhostedWebsites.statusCode, 403);
+
+  const unhostedApps = await run(resellerA, '/api/applications', 'POST', { name: 'test' });
+  assert.equal(unhostedApps.called, false);
+  assert.equal(unhostedApps.statusCode, 403);
+
+  // 1f. Inactive Reseller is rejected -> 403 tenant_actor_inactive
+  const inactiveReseller = { ...resellerA, active: false };
+  const inactiveRes = await run(inactiveReseller, '/api/sites/hosted', 'POST', { customerId: 'customer-a1', input: {} });
+  assert.equal(inactiveRes.called, false);
+  assert.equal(inactiveRes.statusCode, 403);
+  assert.equal(inactiveRes.responseBody.error.code, 'tenant_actor_inactive');
+
+  // --- 2. Customer Self-Service & Data Isolation ---
+
+  // 2a. Customer A1 attempting any site creation -> 403
+  for (const path of ['/api/sites/hosted', '/api/sites', '/api/websites', '/api/applications']) {
+    const custSiteRes = await run(customerA1Actor, path, 'POST', { customerId: 'customer-a1', input: {} });
+    assert.equal(custSiteRes.called, false);
+    assert.equal(custSiteRes.statusCode, 403);
+    assert.equal(custSiteRes.responseBody.error.code, 'tenant_boundary_forbidden');
+  }
+
+  // 2b. Customer A1 attempting customer management -> 403
+  const custColl = await run(customerA1Actor, '/api/customers');
+  assert.equal(custColl.called, false);
+  assert.equal(custColl.statusCode, 403);
+
+  const foreignCust = await run(customerA1Actor, '/api/customers/customer-b1');
+  assert.equal(foreignCust.called, false);
+  assert.equal(foreignCust.statusCode, 403);
+  assert.equal(foreignCust.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  // 2c. Customer A1 accessing own customer record -> allowed
+  const ownCust = await run(customerA1Actor, '/api/customers/customer-a1');
+  assert.equal(ownCust.called, true);
+
+  // 2d. Customer A1 website and domain access
+  const ownSite = await run(customerA1Actor, '/api/websites/site-a1');
+  assert.equal(ownSite.called, true);
+
+  const foreignSite = await run(customerA1Actor, '/api/websites/site-b1');
+  assert.equal(foreignSite.called, false);
+  assert.equal(foreignSite.statusCode, 403);
+
+  const foreignServerSite = await run(customerA1Actor, '/api/servers/srv-1/websites/site-b1/files');
+  assert.equal(foreignServerSite.called, false);
+  assert.equal(foreignServerSite.statusCode, 403);
+
+  const validDomain = await run(customerA1Actor, '/api/domains', 'POST', { websiteId: 'site-a1' });
+  assert.equal(validDomain.called, true);
+
+  const foreignDomain = await run(customerA1Actor, '/api/domains', 'POST', { websiteId: 'site-b1' });
+  assert.equal(foreignDomain.called, false);
+  assert.equal(foreignDomain.statusCode, 403);
+
+  // 2e. Legacy site manager cannot allocate sites
+  const smSiteRes = await run(legacySmActor, '/api/sites/hosted', 'POST', { customerId: 'customer-a1', input: {} });
+  assert.equal(smSiteRes.called, false);
+  assert.equal(smSiteRes.statusCode, 403);
+});
+
+test('RS-03-05: reseller with role: reseller accesses child customer websites and domains via customer relationships', async () => {
+  const customerDatabase = {
+    'customer-a1': customerA1,
+    'customer-a2': customerA2,
+    'customer-b1': customerB1,
+    'customer-direct': customerDirect,
+  };
+  const websiteDatabase = {
+    'site-a1': { id: 'site-a1', customerId: 'customer-a1' },
+    'site-a2': { id: 'site-a2', customerId: 'customer-a2' },
+    'site-b1': { id: 'site-b1', customerId: 'customer-b1' },
+    'site-direct': { id: 'site-direct', customerId: 'customer-direct' },
+  };
+
+  const middleware = createTenantBoundaryMiddleware({
+    customerLookup: async (id) => customerDatabase[id] ?? null,
+    websiteLookup: async (id) => websiteDatabase[id] ?? null,
+  });
+
+  const run = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const headers = {};
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader(k, v) { headers[k] = v; },
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody, headers };
+  };
+
+  // Reseller actor with role: 'reseller' and NO direct websiteIds on user session
+  const directResellerActor = Object.freeze({
+    id: 'reseller-a',
+    role: 'reseller',
+    active: true,
+  });
+
+  // 1. Reseller accessing child customer websites -> allowed
+  const ownSite1 = await run(directResellerActor, '/api/websites/site-a1');
+  assert.equal(ownSite1.called, true);
+
+  const ownSite2 = await run(directResellerActor, '/api/websites/site-a2');
+  assert.equal(ownSite2.called, true);
+
+  const ownServerSite = await run(directResellerActor, '/api/servers/srv-1/websites/site-a1');
+  assert.equal(ownServerSite.called, true);
+
+  // 2. Reseller accessing foreign customer website -> 403
+  const foreignSite = await run(directResellerActor, '/api/websites/site-b1');
+  assert.equal(foreignSite.called, false);
+  assert.equal(foreignSite.statusCode, 403);
+  assert.equal(foreignSite.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  // 3. Reseller accessing direct Owner customer website -> 403
+  const directSite = await run(directResellerActor, '/api/websites/site-direct');
+  assert.equal(directSite.called, false);
+  assert.equal(directSite.statusCode, 403);
+  assert.equal(directSite.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  // 4. Reseller creating domain for child customer website -> allowed
+  const ownDomain = await run(directResellerActor, '/api/domains', 'POST', { websiteId: 'site-a1' });
+  assert.equal(ownDomain.called, true);
+
+  // 5. Reseller creating domain for foreign customer website -> 403
+  const foreignDomain = await run(directResellerActor, '/api/domains', 'POST', { websiteId: 'site-b1' });
+  assert.equal(foreignDomain.called, false);
+  assert.equal(foreignDomain.statusCode, 403);
+  assert.equal(foreignDomain.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  // 6. Reseller creating domain for direct Owner customer website -> 403
+  const directDomain = await run(directResellerActor, '/api/domains', 'POST', { websiteId: 'site-direct' });
+  assert.equal(directDomain.called, false);
+  assert.equal(directDomain.statusCode, 403);
+  assert.equal(directDomain.responseBody.error.code, 'tenant_boundary_forbidden');
+
+  // 7. Audit query for child customer website -> allowed
+  const ownAuditSite = await run(directResellerActor, '/api/audit?resourceType=website&resourceId=site-a1');
+  assert.equal(ownAuditSite.called, true);
+
+  // 8. Audit query for foreign customer website -> 403
+  const foreignAuditSite = await run(directResellerActor, '/api/audit?resourceType=website&resourceId=site-b1');
+  assert.equal(foreignAuditSite.called, false);
+  assert.equal(foreignAuditSite.statusCode, 403);
+});
+
+test('RS-03-05: website-http and core-app enforce tenant boundary for reseller on websites and domains', async () => {
+  const customerDatabase = {
+    'customer-a1': customerA1,
+    'customer-a2': customerA2,
+    'customer-b1': customerB1,
+    'customer-direct': customerDirect,
+  };
+  const allWebsites = [
+    { id: 'site-a1', serverId: 'server-1', customerId: 'customer-a1', name: 'Site A1' },
+    { id: 'site-a2', serverId: 'server-1', customerId: 'customer-a2', name: 'Site A2' },
+    { id: 'site-b1', serverId: 'server-1', customerId: 'customer-b1', name: 'Site B1' },
+    { id: 'site-direct', serverId: 'server-1', customerId: 'customer-direct', name: 'Site Direct' },
+  ];
+  const allDomains = [
+    { id: 'domain-a1', serverId: 'server-1', websiteId: 'site-a1', primaryDomain: 'a1.example.com' },
+    { id: 'domain-a2', serverId: 'server-1', websiteId: 'site-a2', primaryDomain: 'a2.example.com' },
+    { id: 'domain-b1', serverId: 'server-1', websiteId: 'site-b1', primaryDomain: 'b1.example.com' },
+    { id: 'domain-direct', serverId: 'server-1', websiteId: 'site-direct', primaryDomain: 'direct.example.com' },
+  ];
+
+  const websiteRegistry = {
+    listWebsites: async () => [...allWebsites],
+    getWebsite: async (id) => allWebsites.find((w) => w.id === id) ?? null,
+    createWebsite: async (data) => ({ id: 'new-site', ...data }),
+    previewWebsiteUpdate: async () => ({}),
+    updateWebsite: async () => ({}),
+  };
+  const domainRegistry = {
+    listDomains: async () => [...allDomains],
+    getDomain: async (id) => allDomains.find((d) => d.id === id) ?? null,
+    createDomain: async (data) => ({ id: 'new-domain', ...data }),
+  };
+
+  const fakeAppInstance = () => {
+    const routes = { get: new Map(), post: new Map(), patch: new Map() };
+    return {
+      routes,
+      get(path, ...handlers) { routes.get.set(path, handlers.at(-1)); },
+      post(path, ...handlers) { routes.post.set(path, handlers.at(-1)); },
+      patch(path, ...handlers) { routes.patch.set(path, handlers.at(-1)); },
+    };
+  };
+  const invokeFake = async (handler, req) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const res = {
+      status(c) { statusCode = c; return this; },
+      json(b) { responseBody = b; return this; },
+    };
+    await handler(req, res, (err) => {
+      if (err) {
+        statusCode = err.status || 500;
+        responseBody = { error: { code: err.code, message: err.message } };
+      }
+    });
+    return { statusCode, responseBody };
+  };
+
+  const app = fakeAppInstance();
+  mountWebsiteRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId: 'server-1',
+    customerLookup: async (id) => customerDatabase[id] ?? null,
+  });
+
+  const resellerActor = {
+    user: {
+      id: 'reseller-a',
+      role: 'reseller',
+      websiteIds: ['site-a1', 'site-a2'],
+      active: true,
+    },
+  };
+
+  // 1. GET /api/websites returns only child customer websites for reseller
+  const getWebsitesHandler = app.routes.get.get('/api/websites');
+  const websitesRes = await invokeFake(getWebsitesHandler, { auth: resellerActor, query: {} });
+  assert.equal(websitesRes.statusCode, 200);
+  const returnedWebsiteIds = websitesRes.responseBody.data.map((w) => w.id);
+  assert.deepEqual(returnedWebsiteIds.sort(), ['site-a1', 'site-a2']);
+  assert.equal(returnedWebsiteIds.includes('site-b1'), false);
+  assert.equal(returnedWebsiteIds.includes('site-direct'), false);
+
+  // 2. GET /api/websites/:websiteId allows own child site, rejects foreign and direct sites
+  const getSingleWebsiteHandler = app.routes.get.get('/api/websites/:websiteId');
+  const ownSiteRes = await invokeFake(getSingleWebsiteHandler, { auth: resellerActor, params: { websiteId: 'site-a1' } });
+  assert.equal(ownSiteRes.statusCode, 200);
+  assert.equal(ownSiteRes.responseBody.data.id, 'site-a1');
+
+  const foreignSiteRes = await invokeFake(getSingleWebsiteHandler, { auth: resellerActor, params: { websiteId: 'site-b1' } });
+  assert.equal(foreignSiteRes.statusCode, 403);
+  assert.equal(foreignSiteRes.responseBody.error.code, 'forbidden');
+
+  const directSiteRes = await invokeFake(getSingleWebsiteHandler, { auth: resellerActor, params: { websiteId: 'site-direct' } });
+  assert.equal(directSiteRes.statusCode, 403);
+  assert.equal(directSiteRes.responseBody.error.code, 'forbidden');
+
+  // 3. Core app domain isolation: GET /api/domains and requireDomain
+  const coreApp = createApp({
+    localServerId: 'server-1',
+    domainRegistry,
+    websiteRegistry,
+    customerLookup: async (id) => customerDatabase[id] ?? null,
+  });
+
+  const requestExpress = (core, { method = 'GET', url = '/', body = null, auth = null }) => {
+    return new Promise((resolve) => {
+      const u = new URL(url, 'http://panel.internal');
+      const req = {
+        method,
+        url,
+        originalUrl: url,
+        headers: { host: 'panel.internal', 'content-type': 'application/json' },
+        body,
+        auth,
+        query: Object.fromEntries(u.searchParams),
+        params: {},
+      };
+      let statusCode = 200;
+      let responsePayload = null;
+      const res = {
+        statusCode: 200,
+        headersSent: false,
+        setHeader() {},
+        status(code) { statusCode = code; this.statusCode = code; return this; },
+        json(payload) { responsePayload = payload; resolve({ statusCode, body: payload }); return this; },
+        end() { resolve({ statusCode, body: responsePayload }); return this; },
+      };
+      core.handle(req, res, (err) => {
+        if (err) {
+          resolve({ statusCode: err.status || 500, body: { error: { code: err.code, message: err.message } } });
+        } else {
+          resolve({ statusCode: 404, body: null });
+        }
+      });
+    });
+  };
+
+  // GET /api/domains returns only reseller's child customer domains
+  const domainsRes = await requestExpress(coreApp, { url: '/api/domains', auth: resellerActor });
+  assert.equal(domainsRes.statusCode, 200);
+  const returnedDomainIds = domainsRes.body.data.map((d) => d.id);
+  assert.deepEqual(returnedDomainIds.sort(), ['domain-a1', 'domain-a2']);
+  assert.equal(returnedDomainIds.includes('domain-b1'), false);
+  assert.equal(returnedDomainIds.includes('domain-direct'), false);
+
+  // GET /api/domains/:domainId: own allowed, foreign & direct 403
+  const ownDomainRes = await requestExpress(coreApp, { url: '/api/domains/domain-a1', auth: resellerActor });
+  assert.equal(ownDomainRes.statusCode, 200);
+  assert.equal(ownDomainRes.body.data.id, 'domain-a1');
+
+  const foreignDomainRes = await requestExpress(coreApp, { url: '/api/domains/domain-b1', auth: resellerActor });
+  assert.equal(foreignDomainRes.statusCode, 403);
+  assert.equal(foreignDomainRes.body.error.code, 'forbidden');
+
+  const directDomainRes = await requestExpress(coreApp, { url: '/api/domains/domain-direct', auth: resellerActor });
+  assert.equal(directDomainRes.statusCode, 403);
+  assert.equal(directDomainRes.body.error.code, 'forbidden');
+
+  // POST /api/domains: cross-reseller blocked, direct owner blocked, own allowed
+  const postForeignRes = await requestExpress(coreApp, {
+    method: 'POST',
+    url: '/api/domains',
+    auth: resellerActor,
+    body: { websiteId: 'site-b1', primaryDomain: 'new.b1.com' },
+  });
+  assert.equal(postForeignRes.statusCode, 403);
+  assert.equal(postForeignRes.body.error.code, 'forbidden');
+
+  const postDirectRes = await requestExpress(coreApp, {
+    method: 'POST',
+    url: '/api/domains',
+    auth: resellerActor,
+    body: { websiteId: 'site-direct', primaryDomain: 'new.direct.com' },
+  });
+  assert.equal(postDirectRes.statusCode, 403);
+  assert.equal(postDirectRes.body.error.code, 'forbidden');
+
+  const postOwnRes = await requestExpress(coreApp, {
+    method: 'POST',
+    url: '/api/domains',
+    auth: resellerActor,
+    body: { websiteId: 'site-a1', primaryDomain: 'new.a1.com' },
+  });
+  assert.equal(postOwnRes.statusCode, 201);
+  assert.equal(postOwnRes.body.data.primaryDomain, 'new.a1.com');
+});

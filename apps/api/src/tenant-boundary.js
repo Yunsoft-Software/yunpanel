@@ -142,19 +142,38 @@ export function assertWebsiteBelongsToTenant({ actor, website, customer = null, 
   }
 
   if (actorTenant.isReseller) {
+    if (reseller !== null) {
+      const normalizedReseller = normalizeResellerAccount(reseller);
+      if (normalizedReseller.id !== actorTenant.actorId || !normalizedReseller.active) {
+        throw denied('tenant_boundary_forbidden', 'Parent reseller is invalid or inactive.');
+      }
+    }
     if (customer !== null) {
       const normalizedCustomer = normalizeCustomerAccount(customer);
       if (normalizedCustomer.id !== normalizedWebsite.customerId) {
         throw denied('tenant_boundary_forbidden', 'Website customer ID does not match supplied customer.');
       }
+      if (normalizedCustomer.resellerId === null) {
+        throw denied('tenant_boundary_forbidden', 'Direct Owner websites are outside reseller tenant boundary.');
+      }
       if (normalizedCustomer.resellerId !== actorTenant.actorId) {
         throw denied('tenant_boundary_forbidden', 'This website belongs to another tenant.');
       }
+      return;
     }
-    if (!actorTenant.websiteIds.includes(normalizedWebsite.id)) {
-      throw denied('tenant_boundary_forbidden', 'This website is outside your reseller tenant boundary.');
+    if (website.resellerId !== undefined) {
+      if (website.resellerId === null) {
+        throw denied('tenant_boundary_forbidden', 'Direct Owner resources are outside reseller tenant boundary.');
+      }
+      if (website.resellerId === actorTenant.actorId) {
+        return;
+      }
+      throw denied('tenant_boundary_forbidden', 'This website belongs to another reseller.');
     }
-    return;
+    if (actorTenant.websiteIds.includes(normalizedWebsite.id)) {
+      return;
+    }
+    throw denied('tenant_boundary_forbidden', 'This website is outside your reseller tenant boundary.');
   }
 
   throw denied();
@@ -207,17 +226,17 @@ export function assertEntityTenantBoundary({
       throw denied('tenant_boundary_forbidden', 'This entity belongs to another reseller.');
     }
 
-    // Website-scoped entity must be in reseller's allowed websiteIds
-    if (websiteId) {
-      if (!actorTenant.websiteIds.includes(websiteId)) {
-        throw denied('tenant_boundary_forbidden', 'This entity is outside your reseller tenant boundary.');
-      }
+    // If entity belongs to reseller's direct-child customer
+    if (resellerId === actorTenant.actorId) {
       return true;
     }
 
-    // If there is no websiteId, must belong to reseller's direct-child customer
-    if (resellerId === actorTenant.actorId) {
-      return true;
+    // Website-scoped entity must be in reseller's allowed websiteIds
+    if (websiteId) {
+      if (actorTenant.websiteIds.includes(websiteId)) {
+        return true;
+      }
+      throw denied('tenant_boundary_forbidden', 'This entity is outside your reseller tenant boundary.');
     }
 
     throw denied('tenant_boundary_forbidden', 'This entity is outside your reseller tenant boundary.');
@@ -300,15 +319,61 @@ export function createTenantBoundaryMiddleware(options = {}) {
         throw denied('tenant_boundary_forbidden', 'Global backup management is outside tenant boundary.');
       }
 
-      if (method === 'POST' && (
-        path === '/api/websites'
-        || path === '/api/applications'
-        || path === '/api/sites'
+      const isHostedPath = path === '/api/sites/hosted' || path.startsWith('/api/sites/hosted/');
+      const isSitesPathWithCustomer = (
+        path === '/api/sites'
         || path === '/api/sites/create-preview'
         || path === '/api/sites/recover-reservation'
-        || path.startsWith('/api/sites/hosted')
-      )) {
+      ) && request.body && typeof request.body === 'object' && 'customerId' in request.body;
+
+      const isHostedSiteCreation = method === 'POST' && (isHostedPath || isSitesPathWithCustomer);
+      const isTopLevelCreation = method === 'POST' && (
+        path === '/api/websites'
+        || path === '/api/applications'
+        || ((path === '/api/sites' || path === '/api/sites/create-preview' || path === '/api/sites/recover-reservation') && !isSitesPathWithCustomer)
+      );
+
+      if (isTopLevelCreation) {
         throw denied('tenant_boundary_forbidden', 'Direct top-level website or application creation is outside tenant boundary.');
+      }
+
+      if (isHostedSiteCreation) {
+        if (actorTenant.isCustomer || actorTenant.isLegacySiteManager) {
+          throw denied('tenant_boundary_forbidden', 'Site allocation is outside customer tenant boundary.');
+        }
+
+        if (actorTenant.isReseller) {
+          const targetCustomerId = request.body?.customerId;
+          if (!targetCustomerId || typeof targetCustomerId !== 'string') {
+            throw denied('tenant_boundary_forbidden', 'Site allocation requires an explicit customer within your tenant boundary.');
+          }
+
+          if (typeof customerLookup !== 'function') {
+            throw denied(
+              'tenant_boundary_forbidden',
+              'Site allocation requires customer verification.',
+            );
+          }
+
+          let customer;
+          try {
+            customer = await Promise.resolve(customerLookup(targetCustomerId));
+          } catch (err) {
+            if (err instanceof AuthError) throw err;
+            throw new TenantBoundaryError(
+              'tenant_boundary_dependency_unavailable',
+              'Customer lookup is unavailable.',
+              503,
+            );
+          }
+
+          if (!customer) {
+            response.setHeader?.('Cache-Control', 'no-store');
+            return response.status(404).json({ error: { code: 'customer_not_found', message: 'Customer not found.' } });
+          }
+
+          assertCustomerBelongsToReseller({ actor: auth.user, customer });
+        }
       }
 
       if (/^\/api\/servers\/[^/]+\/databases(?:\/|$)/.test(path)) {
@@ -364,11 +429,48 @@ export function createTenantBoundaryMiddleware(options = {}) {
         }
       }
 
+      const isWebsiteInTenant = async (targetWebsiteId) => {
+        if (!targetWebsiteId || typeof targetWebsiteId !== 'string') return false;
+        if (actorTenant.websiteIds.includes(targetWebsiteId)) {
+          return true;
+        }
+        if (actorTenant.isReseller) {
+          const getSite = websiteLookup ?? (websiteRegistry ? (id) => websiteRegistry.getWebsite(id) : null);
+          if (typeof getSite === 'function') {
+            let site = null;
+            try {
+              site = await Promise.resolve(getSite(targetWebsiteId));
+            } catch {
+              site = null;
+            }
+            if (site) {
+              if (site.resellerId === actorTenant.actorId) {
+                return true;
+              }
+              const custId = site.customerId;
+              if (custId && typeof customerLookup === 'function') {
+                let cust = null;
+                try {
+                  cust = await Promise.resolve(customerLookup(custId));
+                } catch {
+                  cust = null;
+                }
+                if (cust && cust.resellerId === actorTenant.actorId) {
+                  return true;
+                }
+              }
+            }
+          }
+        }
+        return false;
+      };
+
       // Check website route parameter
       const websiteMatch = /^\/api\/websites\/([^/]+)(?:\/|$)/.exec(path);
       if (websiteMatch) {
         const targetWebsiteId = websiteMatch[1];
-        if (!actorTenant.websiteIds.includes(targetWebsiteId)) {
+        const allowed = await isWebsiteInTenant(targetWebsiteId);
+        if (!allowed) {
           throw denied('tenant_boundary_forbidden', 'This website is outside your tenant boundary.');
         }
       }
@@ -376,7 +478,8 @@ export function createTenantBoundaryMiddleware(options = {}) {
       const serverWebsiteMatch = /^\/api\/servers\/[^/]+\/websites\/([^/]+)(?:\/|$)/.exec(path);
       if (serverWebsiteMatch) {
         const targetWebsiteId = serverWebsiteMatch[1];
-        if (!actorTenant.websiteIds.includes(targetWebsiteId)) {
+        const allowed = await isWebsiteInTenant(targetWebsiteId);
+        if (!allowed) {
           throw denied('tenant_boundary_forbidden', 'This website is outside your tenant boundary.');
         }
       }
@@ -384,7 +487,11 @@ export function createTenantBoundaryMiddleware(options = {}) {
       // Domain creation website validation
       if (method === 'POST' && path === '/api/domains') {
         const websiteId = request.body?.websiteId;
-        if (!websiteId || !actorTenant.websiteIds.includes(websiteId)) {
+        if (!websiteId) {
+          throw denied('tenant_boundary_forbidden', 'Domain must be created within an assigned website in your tenant.');
+        }
+        const allowed = await isWebsiteInTenant(websiteId);
+        if (!allowed) {
           throw denied('tenant_boundary_forbidden', 'Domain must be created within an assigned website in your tenant.');
         }
       }
@@ -420,7 +527,8 @@ export function createTenantBoundaryMiddleware(options = {}) {
         const queriedResourceId = query.get('resourceId');
         if (queriedResourceType && queriedResourceId) {
           if (queriedResourceType === 'website') {
-            if (!actorTenant.websiteIds.includes(queriedResourceId)) {
+            const allowed = await isWebsiteInTenant(queriedResourceId);
+            if (!allowed) {
               throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign website.');
             }
           } else if (queriedResourceType === 'customer') {

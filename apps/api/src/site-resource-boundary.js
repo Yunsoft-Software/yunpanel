@@ -18,13 +18,15 @@ function routeUrl(request) {
 }
 const decodeId = (value) => { try { return identity(decodeURIComponent(value)); } catch { throw new ScopeError(); } };
 export function needsSiteResourceJson(request) {
+  if (readOnly(request.method)) return false;
   const role = request.auth?.user?.role;
   const isSiteScoped = role === 'site_manager' || role === 'reseller' || role === 'customer'
     || request.auth?.user?.hosting?.kind === 'reseller'
-    || request.auth?.user?.hosting?.kind === 'customer';
-  if (!isSiteScoped || readOnly(request.method)) return false;
+    || request.auth?.user?.hosting?.kind === 'customer'
+    || (role && !['owner', 'read_only'].includes(role));
+  if (!isSiteScoped) return false;
   const path = new URL(request.originalUrl ?? request.url, 'http://panel.internal').pathname.replace(/\/$/, '');
-  return /^\/api\/(?:mailboxes|mail-aliases|domains)$/.test(path)
+  return /^\/api\/(?:mailboxes|mail-aliases|domains|sites(?:\/|$))/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path);
 }
 function replaceCollection(response, accept, project = (value) => value) {
@@ -37,7 +39,8 @@ function replaceCollection(response, accept, project = (value) => value) {
 }
 export function createSiteResourceBoundary(options = {}) {
   const { websiteRegistry, domainRegistry, databaseBindingRegistry, databaseCredentialRegistry,
-    mailDomainRegistry, mailboxRegistry, mailAliasRegistry, jobRegistry, localServerId = null } = options;
+    mailDomainRegistry, mailboxRegistry, mailAliasRegistry, jobRegistry, localServerId = null,
+    customerLookup = null } = options;
   const get = async (registry, method, value) => {
     if (typeof registry?.[method] !== 'function') throw new ScopeError(503);
     try { return await registry[method](value); } catch { throw new ScopeError(503); }
@@ -51,17 +54,50 @@ export function createSiteResourceBoundary(options = {}) {
       response.setHeader?.('Cache-Control', 'no-store');
       return response.status(403).json({ error: { code: 'site_scope_forbidden', message: 'Inactive account cannot access site resources.' } });
     }
+    const url = routeUrl(request), path = url.pathname.replace(/\/$/, '');
+    if (path.startsWith('/api/sites')) return next();
     try {
-      if (auth.access?.mode !== 'site_management' || auth.security?.managementAllowed !== true || !Array.isArray(auth.user.websiteIds)) throw new ScopeError();
-      const allowed = new Set(auth.user.websiteIds);
+      const mode = auth.access?.mode ?? (actorTenant.isReseller || actorTenant.isCustomer || actorTenant.isLegacySiteManager ? 'site_management' : null);
+      if (mode !== 'site_management' || auth.security?.managementAllowed === false) throw new ScopeError();
+      const websiteIds = Array.isArray(auth.user.websiteIds) ? auth.user.websiteIds : (actorTenant.isReseller ? [] : null);
+      if (websiteIds === null) throw new ScopeError();
+      const allowed = new Set(websiteIds);
       const url = routeUrl(request), path = url.pathname.replace(/\/$/, '');
       const method = request.method;
       const cachedSites = new Map();
+
+      const isAllowedSiteId = async (id, siteObj = null) => {
+        if (allowed.has(id)) {
+          if (actorTenant.isReseller) {
+            const s = siteObj ?? cachedSites.get(id) ?? (await get(websiteRegistry, 'getWebsite', id).catch(() => null));
+            if (s && s.resellerId !== undefined && s.resellerId !== actorTenant.actorId) {
+              return false;
+            }
+          }
+          return true;
+        }
+        if (actorTenant.isReseller) {
+          const s = siteObj ?? cachedSites.get(id) ?? (await get(websiteRegistry, 'getWebsite', id).catch(() => null));
+          if (s) {
+            if (s.resellerId && s.resellerId === actorTenant.actorId) return true;
+            if (s.customerId && typeof customerLookup === 'function') {
+              try {
+                const cust = await Promise.resolve(customerLookup(s.customerId));
+                if (cust && cust.resellerId === actorTenant.actorId) return true;
+              } catch {}
+            }
+          }
+        }
+        return false;
+      };
+
       const site = async (id, serverId = null) => {
-        identity(id); if (!allowed.has(id)) throw new ScopeError();
+        identity(id);
         let value = cachedSites.get(id);
         if (!value) { value = await get(websiteRegistry, 'getWebsite', id); if (value) cachedSites.set(id, value); }
         if (!value || value.id !== id || (localServerId && value.serverId !== localServerId) || (serverId && value.serverId !== serverId)) throw new ScopeError();
+        const ok = await isAllowedSiteId(id, value);
+        if (!ok) throw new ScopeError();
         return value;
       };
       const domain = async (id) => {
@@ -92,7 +128,26 @@ export function createSiteResourceBoundary(options = {}) {
       const sites = async () => {
         if (siteList) return siteList;
         siteList = [];
-        for (const id of allowed) { try { siteList.push(await site(id)); } catch (error) { if (error.status === 503) throw error; } }
+        if (actorTenant.isReseller && allowed.size === 0 && typeof websiteRegistry?.listWebsites === 'function') {
+          try {
+            const allSites = await websiteRegistry.listWebsites(localServerId ? { serverId: localServerId } : {});
+            for (const s of allSites) {
+              if (await isAllowedSiteId(s.id, s)) {
+                siteList.push(s);
+              }
+            }
+          } catch (error) {
+            if (error.status === 503) throw error;
+          }
+        } else {
+          for (const id of allowed) {
+            try {
+              siteList.push(await site(id));
+            } catch (error) {
+              if (error.status === 503) throw error;
+            }
+          }
+        }
         return siteList;
       };
       const domains = async () => {
@@ -201,7 +256,9 @@ export function createSiteResourceBoundary(options = {}) {
       // Scope other site context reads, without changing their lifecycle handlers.
       if (method === 'POST' && path === '/api/domains') {
         const websiteId = request.body?.websiteId;
-        if (!websiteId || !allowed.has(websiteId)) throw new ScopeError();
+        if (!websiteId) throw new ScopeError();
+        const ok = await isAllowedSiteId(websiteId);
+        if (!ok) throw new ScopeError();
       }
       if (method === 'POST' && (path === '/api/websites' || path === '/api/applications')) {
         throw new ScopeError();
