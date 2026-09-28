@@ -7,7 +7,7 @@ const phpMyAdminGateway = { id: 'phpmyadmin', accessPath: '/api/phpmyadmin-gatew
 const elFinderGateway = { id: 'elfinder', accessPath: '/api/elfinder-gateway-access' };
 const policy = {
   requireSiteManagement(session) {
-    if (session?.user?.role !== 'site_manager') throw new Error('site_management_required');
+    if (!['site_manager', 'reseller', 'customer'].includes(session?.user?.role)) throw new Error('site_management_required');
     return { ...session, access: { mode: 'site_management' }, security: { managementAllowed: true } };
   },
   requireManagement(session) {
@@ -18,11 +18,15 @@ const policy = {
   },
 };
 
-test('site manager may reach Website-scoped vendor session authorizers only on exact paths', () => {
-  for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
-    const authorized = requireToolGatewaySession(policy, manager, gateway);
-    assert.equal(authorized.user.role, 'site_manager');
-    assert.equal(authorized.access.mode, 'site_management');
+test('site manager, reseller, and customer may reach Website-scoped vendor session authorizers only on exact paths', () => {
+  const reseller = { user: { role: 'reseller', websiteIds: ['site-a'] } };
+  const customer = { user: { role: 'customer', websiteIds: ['site-a'] } };
+  for (const session of [manager, reseller, customer]) {
+    for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
+      const authorized = requireToolGatewaySession(policy, session, gateway);
+      assert.equal(authorized.user.role, session.user.role);
+      assert.equal(authorized.access.mode, 'site_management');
+    }
   }
 });
 

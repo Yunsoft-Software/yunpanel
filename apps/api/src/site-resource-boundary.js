@@ -196,11 +196,18 @@ export function createSiteResourceBoundary(options = {}) {
       if ((match = /^\/api\/servers\/([^/]+)\/websites\/([^/]+)(?:\/|$)/.exec(path))) {
         const serverId = decodeId(match[1]), websiteId = decodeId(match[2]); await site(websiteId, serverId);
         const nestedBinding = /\/database-bindings\/([^/]+)/.exec(path);
-        if (nestedBinding) await binding(decodeId(nestedBinding[1]), serverId, websiteId);
+        if (nestedBinding) {
+          if (method === 'DELETE') throw new ScopeError();
+          await binding(decodeId(nestedBinding[1]), serverId, websiteId);
+        }
         if (path.endsWith('/phpmyadmin-handoffs')) await credential(request.body?.credentialId, serverId, websiteId);
         return next();
       }
-      if ((match = /^\/api\/servers\/([^/]+)\/database-bindings\/([^/]+)(?:\/|$)/.exec(path))) { await binding(decodeId(match[2]), decodeId(match[1])); return next(); }
+      if ((match = /^\/api\/servers\/([^/]+)\/database-bindings\/([^/]+)(?:\/|$)/.exec(path))) {
+        if (method === 'DELETE') throw new ScopeError();
+        await binding(decodeId(match[2]), decodeId(match[1]));
+        return next();
+      }
       if ((match = /^\/api\/servers\/([^/]+)\/database-credentials\/([^/]+)(?:\/|$)/.exec(path))) { await credential(decodeId(match[2]), decodeId(match[1])); return next(); }
       if (/^\/api\/servers\/[^/]+\/(?:databases|database-bindings|database-credentials)(?:\/|$)/.test(path)) throw new ScopeError();
       if (path === '/api/mail-domains') {

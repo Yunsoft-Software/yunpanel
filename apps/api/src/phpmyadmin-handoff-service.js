@@ -429,8 +429,8 @@ export function createPhpMyAdminHandoffService({
     const record = gatewaySessions.get(key);
     if (!record || record.expiresAt <= now()
       || record.sessionId !== sessionId || record.userId !== userId
-      || !['owner', 'site_manager'].includes(role)) return null;
-    if (role === 'site_manager'
+      || !['owner', 'site_manager', 'reseller', 'customer'].includes(role)) return null;
+    if (role !== 'owner'
       && (!Array.isArray(websiteIds) || !websiteIds.includes(record.state.websiteId))) {
       removeGateway(key);
       return null;
