@@ -135,3 +135,14 @@ export const localApiHealthInternals = Object.freeze({
   normalizePort,
   normalizeTimeout,
 });
+
+export {
+  createSiteHealthService,
+  SiteHealthError,
+  siteHealthInternals,
+} from './site-health-service.js';
+export {
+  mountSiteHealthRoutes,
+  SiteHealthHttpError,
+  siteHealthHttpInternals,
+} from './site-health-http.js';
