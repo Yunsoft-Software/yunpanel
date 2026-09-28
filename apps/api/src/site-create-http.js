@@ -105,10 +105,22 @@ function resolveRequireManagement(dependencies, request) {
     return dependencies.requireManagement;
   }
   if (typeof dependencies.ownerPolicy?.requireManagement === 'function') {
-    return dependencies.ownerPolicy.requireManagement;
+    const ownerRequire = dependencies.ownerPolicy.requireManagement;
+    return (session) => {
+      if (session?.user?.role === 'owner') {
+        return ownerRequire(session);
+      }
+      if (session?.user?.role === 'reseller' || session?.user?.hosting?.kind === 'reseller') {
+        if (session.user.active === false) {
+          throw new AuthError('tenant_actor_inactive', 'Inactive reseller cannot perform account operations.', 403);
+        }
+        return session;
+      }
+      return ownerRequire(session);
+    };
   }
   return (session) => {
-    if (!session || session.user?.role !== 'owner') {
+    if (!session || (session.user?.role !== 'owner' && session.user?.role !== 'reseller' && session.user?.hosting?.kind !== 'reseller')) {
       throw new AuthError('forbidden', 'Owner access is required.', 403);
     }
     return session;

@@ -337,6 +337,12 @@ export function createApp(allOptions = {}) {
   pleskImporter = null,
   ...options
 } = allOptions;
+  const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
+  const customerLookup = typeof options.customerLookup === 'function'
+    ? options.customerLookup
+    : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
+      ? (id) => hostingAccounts.getCustomer(id)
+      : null;
   const core = createCoreApp({
     ...options,
     registry,
@@ -349,6 +355,8 @@ export function createApp(allOptions = {}) {
     localServerId,
     dnsHostingRegistry,
     dnsProviderCredentialRegistry,
+    websiteRegistry,
+    customerLookup,
   });
   const app = express();
   app.disable('x-powered-by');
@@ -357,12 +365,6 @@ export function createApp(allOptions = {}) {
     if (needsSiteResourceJson(request)) return smallJson(request, response, next);
     return next();
   });
-  const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
-  const customerLookup = typeof options.customerLookup === 'function'
-    ? options.customerLookup
-    : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
-      ? (id) => hostingAccounts.getCustomer(id)
-      : null;
   app.use(createTenantBoundaryMiddleware({
     ...options,
     websiteRegistry,
@@ -380,6 +382,7 @@ export function createApp(allOptions = {}) {
     mailAliasRegistry,
     jobRegistry,
     localServerId,
+    customerLookup,
   }));
   const localRegistry = localServerRegistryView(registry, localServerId);
   const applicationEnvironmentRegistry = options.applicationEnvironmentRegistry ?? null;
@@ -861,7 +864,7 @@ export function createApp(allOptions = {}) {
       migrationService: passengerMigrationService,
     });
   }
-  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId, customerLookup });
   mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
 
   if (databaseBindingRegistry) {

@@ -72,7 +72,7 @@ function view(row) {
  * This does not dispatch host work, grant site access, or accept a request-body actor.
  * Registry evidence is loaded by hosting-site-create-service, not an HTTP caller.
  */
-export function createHostingSiteAllocationStore({ db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser }) {
+export function createHostingSiteAllocationStore({ db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser, managementActor }) {
   const read = (operationId) => db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE operation_id = ?').get(operationId);
   function customer(id) {
     const current = projection(existing(id));
@@ -84,9 +84,18 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
     return { current, parent };
   }
   function check(rawToken, policy, value, requireExisting = false) {
-    const actor = owner(rawToken, policy);
+    const resolveActor = typeof managementActor === 'function' ? managementActor : owner;
+    const actor = resolveActor(rawToken, policy);
     const plan = input(value);
     const chain = customer(plan.customerId);
+    const isReseller = actor.role === 'reseller' || actor.kind === 'reseller' || actor.hosting?.kind === 'reseller';
+    if (isReseller) {
+      if (chain.current.resellerId !== actor.id) {
+        throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+      }
+    } else if (actor.role !== 'owner') {
+      throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+    }
     hostingWebsitesForCapacity(db);
     const prior = read(plan.operationId);
     if (prior) {

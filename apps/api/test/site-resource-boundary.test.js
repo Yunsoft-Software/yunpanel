@@ -111,3 +111,106 @@ test('site config preview preserves exact apply tokens but omits global domain a
  const v=await run('/api/mail-domains/mail-a/config-preview',{method:'POST',output:{data}});
  assert.equal(v.called,1);assert.equal(v.res.body.data.previewDigest,'digest');assert.deepEqual(v.res.body.data.configuration,{sha256:'hash'});assert.equal(v.res.body.data.domains,undefined);assert.doesNotMatch(JSON.stringify(v.res.body),/other\.test|1000|private/);
 });
+
+test('reseller actor site resource boundary enforces child customer scope and rejects foreign/owner resources', async () => {
+ const resellerSession = {
+  user: { id: 'reseller-1', role: 'reseller', websiteIds: ['site-a'], active: true },
+  access: { mode: 'site_management' },
+  security: { managementAllowed: true },
+ };
+
+ // 1. Mailbox access: own mail domain allowed, foreign mail domain 403
+ assert.equal((await run('/api/mailboxes?mailDomainId=mail-a', { session: resellerSession })).called, 1);
+ const foreignMailboxes = await run('/api/mailboxes?mailDomainId=mail-b', { session: resellerSession });
+ assert.equal(foreignMailboxes.called, 0);
+ assert.equal(foreignMailboxes.res.statusCode, 403);
+
+ // 2. Mailbox create: own mail domain allowed, foreign mail domain 403
+ assert.equal((await run('/api/mailboxes', { session: resellerSession, method: 'POST', body: { mailDomainId: 'mail-a' } })).called, 1);
+ const foreignCreate = await run('/api/mailboxes', { session: resellerSession, method: 'POST', body: { mailDomainId: 'mail-b' } });
+ assert.equal(foreignCreate.called, 0);
+ assert.equal(foreignCreate.res.statusCode, 403);
+
+ // 3. Mailbox individual read: own mailbox allowed, foreign mailbox 403
+ assert.equal((await run('/api/mailboxes/box-a', { session: resellerSession })).called, 1);
+ const foreignBox = await run('/api/mailboxes/box-b', { session: resellerSession });
+ assert.equal(foreignBox.called, 0);
+ assert.equal(foreignBox.res.statusCode, 403);
+
+ // 4. Mail alias access: own alias allowed, foreign alias 403
+ assert.equal((await run('/api/mail-aliases/alias-a', { session: resellerSession })).called, 1);
+ const foreignAlias = await run('/api/mail-aliases/alias-b', { session: resellerSession, method: 'PATCH' });
+ assert.equal(foreignAlias.called, 0);
+ assert.equal(foreignAlias.res.statusCode, 403);
+
+ // 5. phpMyAdmin handoff: own website allowed with credential, foreign website 403
+ const ownHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+  session: resellerSession,
+  method: 'POST',
+  body: { credentialId: 'credential-a' },
+ });
+ assert.equal(ownHandoff.called, 1);
+
+ const foreignHandoff = await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs', {
+  session: resellerSession,
+  method: 'POST',
+  body: { credentialId: 'credential-b' },
+ });
+ assert.equal(foreignHandoff.called, 0);
+ assert.equal(foreignHandoff.res.statusCode, 403);
+
+ // 6. Database bindings and credentials: cross-reseller blocked
+ const foreignBinding = await run('/api/servers/server/database-bindings/binding-b/credential', {
+  session: resellerSession,
+  method: 'POST',
+ });
+ assert.equal(foreignBinding.called, 0);
+ assert.equal(foreignBinding.res.statusCode, 403);
+
+ // 7. Domain creation on foreign website blocked
+ const foreignDomain = await run('/api/domains', {
+  session: resellerSession,
+  method: 'POST',
+  body: { websiteId: 'site-b' },
+ });
+ assert.equal(foreignDomain.called, 0);
+ assert.equal(foreignDomain.res.statusCode, 403);
+
+ const ownDomain = await run('/api/domains', {
+  session: resellerSession,
+  method: 'POST',
+  body: { websiteId: 'site-a' },
+ });
+ assert.equal(ownDomain.called, 1);
+
+ // 8. Dynamic customerLookup support when websiteIds is not in session
+ const dynamicDeps = {
+  ...options,
+  websiteRegistry: {
+   getWebsite: async (id) => (id === 'site-a' ? { ...websites[0], customerId: 'cust-a' } : { ...websites[1], customerId: 'cust-b' }),
+  },
+  customerLookup: async (id) => (id === 'cust-a' ? { id: 'cust-a', resellerId: 'reseller-dyn' } : { id: 'cust-b', resellerId: 'other-reseller' }),
+ };
+ const dynamicSession = {
+  user: { id: 'reseller-dyn', role: 'reseller', active: true },
+  access: { mode: 'site_management' },
+  security: { managementAllowed: true },
+ };
+
+ const dynamicOwnHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+  session: dynamicSession,
+  dependencies: dynamicDeps,
+  method: 'POST',
+  body: { credentialId: 'credential-a' },
+ });
+ assert.equal(dynamicOwnHandoff.called, 1);
+
+ const dynamicForeignHandoff = await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs', {
+  session: dynamicSession,
+  dependencies: dynamicDeps,
+  method: 'POST',
+  body: { credentialId: 'credential-b' },
+ });
+ assert.equal(dynamicForeignHandoff.called, 0);
+ assert.equal(dynamicForeignHandoff.res.statusCode, 403);
+});

@@ -145,7 +145,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null } = {}) {
+export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null, customerLookup = null } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.patch !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
     || typeof websiteRegistry.getWebsite !== 'function' || typeof websiteRegistry.createWebsite !== 'function'
@@ -154,10 +154,48 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }
   if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') throw new Error('Domain registry is required for Website relationships');
 
-  function checkWebsiteAccess(request, websiteId) {
-    if (request.auth?.user?.role === 'site_manager') {
-      const allowed = new Set(request.auth.user.websiteIds ?? []);
-      if (!allowed.has(websiteId)) {
+  async function isWebsiteAllowedForRequest(website, request) {
+    if (!website) return false;
+    const user = request.auth?.user;
+    if (!user) return false;
+    const role = user.role;
+    if (role === 'owner' || role === 'read_only') return true;
+    const isReseller = role === 'reseller' || user.hosting?.kind === 'reseller';
+    const allowed = new Set(user.websiteIds ?? []);
+
+    if (allowed.has(website.id)) {
+      if (isReseller && website.resellerId !== undefined && website.resellerId !== user.id) {
+        return false;
+      }
+      return true;
+    }
+
+    if (isReseller) {
+      if (website.resellerId && website.resellerId === user.id) {
+        return true;
+      }
+      if (website.customerId && typeof customerLookup === 'function') {
+        try {
+          const cust = await Promise.resolve(customerLookup(website.customerId));
+          if (cust && cust.resellerId === user.id) {
+            return true;
+          }
+        } catch {}
+      }
+    }
+
+    return false;
+  }
+
+  async function checkWebsiteAccess(request, websiteId) {
+    const role = request.auth?.user?.role;
+    if (role && !['owner', 'read_only'].includes(role)) {
+      const website = await websiteRegistry.getWebsite(websiteId).catch(() => null);
+      if (!website) {
+        throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
+      }
+      const allowed = await isWebsiteAllowedForRequest(website, request);
+      if (!allowed) {
         throw new WebsiteRegistryError('forbidden', 'Access denied to this website', 403);
       }
     }
@@ -165,29 +203,36 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
 
   app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     let websites = await websiteRegistry.listWebsites(localListFilter(request.query, localServerId));
-    if (request.auth?.user?.role === 'site_manager') {
-      const allowed = new Set(request.auth.user.websiteIds ?? []);
-      websites = websites.filter((w) => allowed.has(w.id));
+    const role = request.auth?.user?.role;
+    if (role && !['owner', 'read_only'].includes(role)) {
+      const filtered = [];
+      for (const w of websites) {
+        if (await isWebsiteAllowedForRequest(w, request)) {
+          filtered.push(w);
+        }
+      }
+      websites = filtered;
     }
     return response.json({ data: websites });
   }));
 
   app.get('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    checkWebsiteAccess(request, request.params.websiteId);
+    await checkWebsiteAccess(request, request.params.websiteId);
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     return response.json({ data: website });
   }));
 
   app.get('/api/websites/:websiteId/domains', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    checkWebsiteAccess(request, request.params.websiteId);
+    await checkWebsiteAccess(request, request.params.websiteId);
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
     return response.json({ data: domains });
   }));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    if (request.auth?.user?.role === 'site_manager') {
-      throw new WebsiteRegistryError('forbidden', 'Site manager cannot create top-level websites', 403);
+    const role = request.auth?.user?.role;
+    if (role && !['owner'].includes(role)) {
+      throw new WebsiteRegistryError('forbidden', 'Only owner can create top-level websites', 403);
     }
     const body = assertCreateBody(request.body);
     if (localServerId && body.serverId !== undefined && body.serverId !== localServerId) {
@@ -206,7 +251,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }));
 
   app.post('/api/websites/:websiteId/update-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    checkWebsiteAccess(request, request.params.websiteId);
+    await checkWebsiteAccess(request, request.params.websiteId);
     const changes = assertPreviewBody(request.body);
     await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({
@@ -219,7 +264,7 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
   }));
 
   app.patch('/api/websites/:websiteId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    checkWebsiteAccess(request, request.params.websiteId);
+    await checkWebsiteAccess(request, request.params.websiteId);
     const input = assertApplyBody(request.body);
     await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const preview = await currentUpdatePreview({
