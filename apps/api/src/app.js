@@ -186,6 +186,8 @@ import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-
 import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from './website-analytics-http.js';
 import { isPleskImporterHttpError, mountPleskImporterRoutes } from './plesk-importer-http.js';
 import { PleskImporterError } from './plesk-importer.js';
+import { createSiteHealthService, SiteHealthError } from './site-health-service.js';
+import { mountSiteHealthRoutes, SiteHealthHttpError } from './site-health-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -866,6 +868,20 @@ export function createApp(allOptions = {}) {
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId, customerLookup });
   mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  const siteHealthService = options.siteHealthService ?? createSiteHealthService({
+    websiteRegistry,
+    domainRegistry,
+    serverRegistry: registry,
+    certificateRegistry,
+    dnsReadinessService: readiness,
+    dnsRecordManager,
+  });
+  mountSiteHealthRoutes(app, {
+    siteHealthService,
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+  });
 
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
@@ -1146,6 +1162,8 @@ export function createApp(allOptions = {}) {
       || error instanceof PanelSettingsRegistryError
       || error instanceof PanelSettingsHttpError
       || error instanceof WebsiteAnalyticsHttpError
+      || error instanceof SiteHealthError
+      || error instanceof SiteHealthHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

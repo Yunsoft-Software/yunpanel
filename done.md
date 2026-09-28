@@ -57,3 +57,10 @@
 - HTTP uç noktaları (`/api/auth/reset-password/request`, `/api/auth/reset-password`, `/api/auth/recovery-email`), CLI komutları (`scripts/auth.mjs set-recovery-email / get-recovery-email`), istemci protokolü (`auth-protocol.js`, `auth-message.js`) ve arayüz akışları (`LoginForm.jsx`, `AccountDialog.jsx`, `auth.css`) tamamlandı.
 - Kapsamlı birim ve entegrasyon testleri `apps/api/test/auth-password-reset.test.js`, `apps/api/test/auth-mailer.test.js` ve `apps/web/test/auth-protocol.test.js` dosyalarıyla eksiksiz doğrulandı.
 
+## 2026-09-28 — PROD-11: Site sağlık kontrolü, katmanlı tanılama ve güvenli otomatik onarım akışı
+- Alan adı ve web sitelerinin DNS, SSL sertifikası, Nginx, uygulama runtime'ı, dosya sistemi izinleri ve HTTP yanıt durumunu uçtan uca denetleyen `site-health-service.js` geliştirildi.
+- Katman bazında hata tespiti (DNS: kayıt yokluğu, IP uyuşmazlığı, çözümleyici hatası, sunucu yapılandırma eksikliği; SSL: sertifika yokluğu, süre sonu, yaklaşan bitiş, alan adı uyuşmazlığı, hata durumu; Nginx: eksik konfigürasyon/drift, sözdizimi hatası; Runtime: passenger/node symlink yokluğu; Filesystem: eksik yollar, izin sapması, 0777/world-writable güvensiz izinler; HTTP: durum kodu ve erişilebilirlik) uygulandı.
+- Otomatik onarım eylemleri (`repair_permissions`, `repair_nginx_config`, `repair_runtime`, `repair_ssl_certificate`, `repair_dns_records`, `repair_all`) kontrollü adaptör işlemleriyle sınırlandırıldı; chmod 777 veya genel güvenlik gevşetmeleri kesin olarak fail-closed (`permissions_loosening_forbidden`) reddedildi ve onarım sonrası doğrulama (`verified`) sağlandı.
+- Express HTTP rotaları (`GET /api/websites/:websiteId/health`, `POST /api/websites/:websiteId/health/repair`, `GET /api/domains/:domainId/health`, `POST /api/domains/:domainId/health/repair`) ve yönetim rolü korumaları (`site-health-http.js`) `apps/api/src/app.js` üzerine entegre edildi.
+- Kapsamlı birim ve entegrasyon testleri harici express paket bağımlılığı olmaksızın saf Node.js test ve HTTP sunucu yapısıyla `apps/api/test/local-api-health.test.js` içine eklenerek doğrulandı.
+
