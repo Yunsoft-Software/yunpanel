@@ -1,5 +1,7 @@
 // An additional boundary for site-scoped UI resources. It does not replace
 // authentication/CSRF, the existing route guards or lifecycle validation.
+import { extractActorTenant } from './tenant-boundary.js';
+
 class ScopeError extends Error {
   constructor(status = 403) { super('Site resource access denied'); this.status = status; }
 }
@@ -16,9 +18,13 @@ function routeUrl(request) {
 }
 const decodeId = (value) => { try { return identity(decodeURIComponent(value)); } catch { throw new ScopeError(); } };
 export function needsSiteResourceJson(request) {
-  if (request.auth?.user?.role !== 'site_manager' || readOnly(request.method)) return false;
+  const role = request.auth?.user?.role;
+  const isSiteScoped = role === 'site_manager' || role === 'reseller' || role === 'customer'
+    || request.auth?.user?.hosting?.kind === 'reseller'
+    || request.auth?.user?.hosting?.kind === 'customer';
+  if (!isSiteScoped || readOnly(request.method)) return false;
   const path = new URL(request.originalUrl ?? request.url, 'http://panel.internal').pathname.replace(/\/$/, '');
-  return /^\/api\/(?:mailboxes|mail-aliases)$/.test(path)
+  return /^\/api\/(?:mailboxes|mail-aliases|domains)$/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path);
 }
 function replaceCollection(response, accept, project = (value) => value) {
@@ -38,7 +44,13 @@ export function createSiteResourceBoundary(options = {}) {
   };
   return async function siteResourceBoundary(request, response, next) {
     const auth = request.auth;
-    if (auth?.user?.role !== 'site_manager') return next();
+    if (!auth?.user) return next();
+    const actorTenant = extractActorTenant(auth);
+    if (actorTenant.isGlobal) return next();
+    if (!actorTenant.active) {
+      response.setHeader?.('Cache-Control', 'no-store');
+      return response.status(403).json({ error: { code: 'site_scope_forbidden', message: 'Inactive account cannot access site resources.' } });
+    }
     try {
       if (auth.access?.mode !== 'site_management' || auth.security?.managementAllowed !== true || !Array.isArray(auth.user.websiteIds)) throw new ScopeError();
       const allowed = new Set(auth.user.websiteIds);
@@ -187,12 +199,24 @@ export function createSiteResourceBoundary(options = {}) {
         return next();
       }
       // Scope other site context reads, without changing their lifecycle handlers.
+      if (method === 'POST' && path === '/api/domains') {
+        const websiteId = request.body?.websiteId;
+        if (!websiteId || !allowed.has(websiteId)) throw new ScopeError();
+      }
+      if (method === 'POST' && (path === '/api/websites' || path === '/api/applications')) {
+        throw new ScopeError();
+      }
       if ((match = /^\/api\/domains\/([^/]+)(?:\/|$)/.exec(path))) { await domain(decodeId(match[1])); return next(); }
       if ((match = /^\/api\/applications\/([^/]+)(?:\/|$)/.exec(path))) {
         if (!(await sites()).some((v) => v.applicationId === decodeId(match[1]))) throw new ScopeError(); return next();
       }
       if (path === '/api/phpmyadmin-gateway-access' && readOnly(method)) return next();
-      if (/^\/api\/(?:mail(?:\/|$)|mail-service-identity|roundcube|users|audit|panel\/settings|system\/packages|backups(?:\/|$))/.test(path)) throw new ScopeError();
+      if (/^\/api\/(?:mail(?:\/|$)|mail-service-identity|roundcube|panel\/settings|system\/packages|backups(?:\/|$))/.test(path)) throw new ScopeError();
+      if (/^\/api\/audit(?:\/|$)/.test(path)) {
+        if (actorTenant.isLegacySiteManager) throw new ScopeError();
+        return next();
+      }
+      if (/^\/api\/users(?:\/|$)/.test(path) && !path.startsWith('/api/users/hosting/accounts')) throw new ScopeError();
       if (/^\/api\/servers\//.test(path)) throw new ScopeError();
       // Unrelated integrations still have their existing guards. This boundary
       // does not claim to replace a full review of terminal, DNS and AI policies.

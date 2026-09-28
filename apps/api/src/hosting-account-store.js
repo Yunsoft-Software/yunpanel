@@ -374,5 +374,20 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         throw error('hosting_account_managed', 'Hosting profiles cannot change role, activation, site grants or be deleted through the general users API.', 409);
       }
     },
+    getCustomer(id) {
+      if (!identifier(id)) return null;
+      return transaction(() => {
+        const row = raw(id);
+        if (!row || row.kind !== 'customer') return null;
+        return projection(row);
+      });
+    },
+    listChildCustomerIds(resellerId) {
+      if (!identifier(resellerId)) return [];
+      return transaction(() => {
+        const rows = db.prepare("SELECT user_id FROM auth_hosting_accounts WHERE kind = 'customer' AND reseller_id = ?").all(resellerId);
+        return rows.map((r) => r.user_id);
+      });
+    },
   };
 }

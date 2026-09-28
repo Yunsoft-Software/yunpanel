@@ -278,8 +278,46 @@ export function createTenantBoundaryMiddleware(options = {}) {
       const actorTenant = extractActorTenant(auth);
       if (actorTenant.isGlobal) return next();
 
+      if (!actorTenant.active) {
+        throw denied('tenant_actor_inactive', 'Inactive account cannot access tenant resources.');
+      }
+
       const url = new URL(request.originalUrl ?? request.url, 'http://panel.internal');
       const path = url.pathname.replace(/\/$/, '');
+      const method = request.method;
+
+      // Plesk permission boundaries for non-global accounts
+      if (/^\/api\/(?:panel\/settings|settings(?:\/|$))/.test(path)) {
+        throw denied('tenant_boundary_forbidden', 'Global server settings are outside tenant boundary.');
+      }
+
+      if (/^\/api\/(?:system\/packages|system\/upgrade)/.test(path)
+        || /^\/api\/servers\/[^/]+\/(?:system\/packages|system\/upgrade|services|node-runtimes)/.test(path)) {
+        throw denied('tenant_boundary_forbidden', 'Server package and service management is outside tenant boundary.');
+      }
+
+      if (/^\/api\/backups(?:\/|$)/.test(path)) {
+        throw denied('tenant_boundary_forbidden', 'Global backup management is outside tenant boundary.');
+      }
+
+      if (method === 'POST' && (path === '/api/websites' || path === '/api/applications')) {
+        throw denied('tenant_boundary_forbidden', 'Direct top-level website or application creation is outside tenant boundary.');
+      }
+
+      if (/^\/api\/servers\/[^/]+\/databases(?:\/|$)/.test(path)) {
+        throw denied('tenant_boundary_forbidden', 'Server-level database administration is outside tenant boundary.');
+      }
+
+      if (/^\/api\/users(?:\/|$)/.test(path) && !path.startsWith('/api/users/hosting/accounts')) {
+        throw denied('tenant_boundary_forbidden', 'User administration is outside tenant boundary.');
+      }
+
+      // Customer collection
+      if (path === '/api/customers' || path === '/api/customers/') {
+        if (actorTenant.isCustomer || actorTenant.isLegacySiteManager) {
+          throw denied('tenant_boundary_forbidden', 'Customer collection is outside tenant scope.');
+        }
+      }
 
       // Check customer route parameter
       const customerMatch = /^\/api\/customers\/([^/]+)(?:\/|$)/.exec(path);
@@ -311,7 +349,7 @@ export function createTenantBoundaryMiddleware(options = {}) {
           assertCustomerBelongsToReseller({ actor: auth.user, customer });
         } else if (actorTenant.isCustomer) {
           if (targetCustomerId !== actorTenant.actorId) {
-            throw denied();
+            throw denied('tenant_boundary_forbidden', 'This customer is outside your tenant boundary.');
           }
         } else {
           // Unauthorized roles (such as legacy site_manager) cannot access customer management routes
@@ -324,7 +362,82 @@ export function createTenantBoundaryMiddleware(options = {}) {
       if (websiteMatch) {
         const targetWebsiteId = websiteMatch[1];
         if (!actorTenant.websiteIds.includes(targetWebsiteId)) {
-          throw denied();
+          throw denied('tenant_boundary_forbidden', 'This website is outside your tenant boundary.');
+        }
+      }
+
+      const serverWebsiteMatch = /^\/api\/servers\/[^/]+\/websites\/([^/]+)(?:\/|$)/.exec(path);
+      if (serverWebsiteMatch) {
+        const targetWebsiteId = serverWebsiteMatch[1];
+        if (!actorTenant.websiteIds.includes(targetWebsiteId)) {
+          throw denied('tenant_boundary_forbidden', 'This website is outside your tenant boundary.');
+        }
+      }
+
+      // Domain creation website validation
+      if (method === 'POST' && path === '/api/domains') {
+        const websiteId = request.body?.websiteId;
+        if (!websiteId || !actorTenant.websiteIds.includes(websiteId)) {
+          throw denied('tenant_boundary_forbidden', 'Domain must be created within an assigned website in your tenant.');
+        }
+      }
+
+      // Audit query validation
+      if (path === '/api/audit' || path.startsWith('/api/audit/')) {
+        if (actorTenant.isLegacySiteManager) {
+          throw denied('tenant_boundary_forbidden', 'Site manager cannot access audit history.');
+        }
+        const query = url.searchParams;
+        const queriedActorId = query.get('actorId');
+        if (queriedActorId) {
+          if (actorTenant.isCustomer && queriedActorId !== actorTenant.actorId) {
+            throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign actor.');
+          }
+          if (actorTenant.isReseller && queriedActorId !== actorTenant.actorId) {
+            if (typeof customerLookup === 'function') {
+              let cust = null;
+              try {
+                cust = await Promise.resolve(customerLookup(queriedActorId));
+              } catch {
+                cust = null;
+              }
+              if (!cust || cust.resellerId !== actorTenant.actorId) {
+                throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign actor.');
+              }
+            } else {
+              throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign actor.');
+            }
+          }
+        }
+        const queriedResourceType = query.get('resourceType');
+        const queriedResourceId = query.get('resourceId');
+        if (queriedResourceType && queriedResourceId) {
+          if (queriedResourceType === 'website') {
+            if (!actorTenant.websiteIds.includes(queriedResourceId)) {
+              throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign website.');
+            }
+          } else if (queriedResourceType === 'customer') {
+            if (actorTenant.isCustomer && queriedResourceId !== actorTenant.actorId) {
+              throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign customer.');
+            }
+            if (actorTenant.isReseller) {
+              if (typeof customerLookup === 'function') {
+                let cust = null;
+                try {
+                  cust = await Promise.resolve(customerLookup(queriedResourceId));
+                } catch {
+                  cust = null;
+                }
+                if (!cust || cust.resellerId !== actorTenant.actorId) {
+                  throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign customer.');
+                }
+              } else {
+                throw denied('tenant_boundary_forbidden', 'Cannot query audit history for foreign customer.');
+              }
+            }
+          } else if (!['domain', 'mailbox', 'database', 'application'].includes(queriedResourceType)) {
+            throw denied('tenant_boundary_forbidden', `Cannot query audit history for ${queriedResourceType}.`);
+          }
         }
       }
 
@@ -335,7 +448,7 @@ export function createTenantBoundaryMiddleware(options = {}) {
       return response.status(status).json({
         error: {
           code: error.code ?? 'tenant_boundary_forbidden',
-          message: error.status === 403 ? 'This resource is outside your tenant boundary.' : error.message,
+          message: error.message || 'This resource is outside your tenant boundary.',
         },
       });
     }
