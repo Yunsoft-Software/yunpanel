@@ -530,6 +530,7 @@ test('phpMyAdmin gateway canonicalizes the trailing slash without touching the v
   assert.equal(response.headers.get('location'), '/tools/phpmyadmin/?db=test');
 });
 
+
 test('elFinder gateway binds handoff and vendor requests to the live Website session', async (t) => {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-web-'));
   const gatewaySocketPath = path.join(directory, 'elfinder-http.sock');
@@ -590,8 +591,8 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
   gateway.listen(gatewaySocketPath);
   await once(gateway, 'listening');
 
-  let gatewayAllowed = true;
   const accessRequests = [];
+  let gatewayAllowed = true;
   const api = http.createServer((request, response) => {
     const record = {
       url: request.url,
@@ -769,7 +770,7 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
   assert.equal(accessRequests[2].websiteId, websiteId);
 
   gatewayAllowed = false;
-  const revokedAccess = await fetch(
+  const revokedGrant = await fetch(
     `http://127.0.0.1:${panelPort}/tools/elfinder/connector.php`,
     {
       method: 'POST',
@@ -782,7 +783,7 @@ test('elFinder gateway binds handoff and vendor requests to the live Website ses
       body: 'cmd=open',
     },
   );
-  assert.equal(revokedAccess.status, 403);
+  assert.equal(revokedGrant.status, 403);
   assert.equal(vendorRequests.length, 2);
   assert.equal(accessRequests[3].url, '/api/elfinder-gateway-access');
   assert.equal(accessRequests[3].websiteId, websiteId);
@@ -1278,3 +1279,5 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
   unauthResp.resume();
   unauthWs.terminate();
 });
+
+
