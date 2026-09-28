@@ -245,7 +245,7 @@ export function normalizeWebsiteOwnership(record, { allowUnassigned = false } = 
  * - Legacy site_manager without hosting: { type: 'legacy_site_manager', isGlobal: false, actorId, websiteIds }
  */
 export function createTenantContext(actor) {
-  if (!isPlainRecord(actor) || !actor.id) {
+  if (!isPlainRecord(actor) || actor.id === undefined || actor.id === null) {
     throw new TenantValidationError('invalid_actor', 'Actor must be a valid object with an id.');
   }
 

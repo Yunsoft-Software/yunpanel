@@ -16,3 +16,10 @@
 - Audit okuma katmanında `resolveHostingAccounts` eklenerek ve `authStore.hostingAccounts` erişimi sağlanarak bayi alt müşteri audit kayıtlarının görünürlüğü güvenceye alındı (`apps/api/src/audit-http.js`, `apps/api/src/auth-store.js`).
 - `attachManagementAudit` mutasyon kayıtlarına `currentAuditTenant` üzerinden tenant bağlamı eklendi (`apps/api/src/management-audit.js`).
 - Kapsamlı test senaryoları yazılarak tenant rol izolasyonu, endpoint yetki sınırları, audit güvenliği ve müşteri kaynak sınırları, terminal kabiliyetleri (root Owner-only, site terminal Reseller ve Customer doğrulaması), senkron lookup ve üst seviye hosting store entegrasyonu doğrulandı (`apps/api/test/tenant-boundary.test.js`).
+
+## 2026-09-28 — RS-02e: Rol izolasyonu ve tenant sınırları için birim ve entegrasyon testleri
+- Çapraz tenant veri sızıntısı girişimlerini test eden negatif senaryolar (aynı bayi altındaki müşteriler arası izolasyon, bayi ve yabancı bayi/doğrudan Owner müşterisi sınırları, aktif olmayan hesapların reddi ve bilgi sızıntısını engelleyen başlık/hata korumaları) `@yunpanel/shared` ve `@yunpanel/api` test paketlerine eklendi.
+- Bayi ve müşteri izin sınırlarını doğrulayan birim ve entegrasyon testleri (Plesk yönetim uç noktaları fail-closed denetimleri, çok kiracılı audit log filtrelemesi, terminal yetki izolasyonu ve varlık tenant kapsam çözümlemeleri) tamamlandı.
+- `packages/shared/test/tenant.test.js` ve `apps/api/test/tenant-boundary.test.js` geliştirilerek development ortamında çalışacak şekilde eksiksiz doğrulandı.
+- `packages/shared/src/tenant.js` içindeki `createTenantContext` doğrulamasında eksik id (`invalid_actor`) ile geçersiz tanımlayıcı (`invalid_identifier`) ayrımı netleştirilerek boş string'in `invalid_identifier` fırlatması ve testlerin hatasız geçmesi sağlandı.
+
