@@ -10,7 +10,7 @@ export function requireToolGatewaySession(policy, session, gateway) {
   const siteScoped = typeof gateway?.id === 'string'
     && SITE_SCOPED_GATEWAY_PATHS[gateway.id] === gateway.accessPath;
   if (siteScoped) {
-    if (session?.user?.role === 'site_manager') {
+    if (['site_manager', 'reseller', 'customer'].includes(session?.user?.role)) {
       return policy.requireSiteManagement(session);
     }
     return policy.requireManagement(session);

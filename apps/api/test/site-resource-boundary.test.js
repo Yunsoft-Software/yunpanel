@@ -42,11 +42,15 @@ test('handoff requires both assigned site and matching credential',async()=>{
  assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-a'}})).called,1);
  assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
  assert.equal((await run(path,{method:'POST',body:{}})).res.statusCode,403);
+ assert.equal((await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs',{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
+ assert.equal((await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs',{method:'POST',body:{credentialId:'credential-a'}})).res.statusCode,403);
 });
-test('unbound and global database inventories and mutations are unavailable to site managers',async()=>{
+test('unbound and global database inventories, mutations, and database unbinding are unavailable to site managers',async()=>{
  for(const path of ['/api/servers/server/databases','/api/servers/server/databases/unbound/bind','/api/servers/server/database-bindings']){
   for(const method of ['GET','POST','DELETE'])assert.equal((await run(path,{method})).res.statusCode,403);
  }
+ assert.equal((await run('/api/servers/server/database-bindings/binding-a',{method:'DELETE'})).res.statusCode,403);
+ assert.equal((await run('/api/servers/server/websites/site-a/database-bindings/binding-a',{method:'DELETE'})).res.statusCode,403);
 });
 test('nested database actions cannot substitute another binding',async()=>{
  assert.equal((await run('/api/servers/server/websites/site-a/database-bindings/binding-b/backup',{method:'POST'})).res.statusCode,403);
@@ -96,8 +100,10 @@ test('stale Website bindings and credential reassignment fail closed',async()=>{
  const drift={...options,websiteRegistry:{getWebsite:async()=>({...websites[0],applicationId:'reassigned'})}};
  assert.equal((await run('/api/servers/server/database-bindings/binding-a/credential',{dependencies:drift})).res.statusCode,403);
 });
-test('owner and read-only still use their existing authorization boundaries',async()=>{
+test('owner and read-only still use their existing authorization boundaries; owner is authorized on all database operations and unbinding',async()=>{
  for(const role of ['owner','read_only'])assert.equal((await run('/api/servers/server/databases',{session:{user:{role}},dependencies:{}})).called,1);
+ assert.equal((await run('/api/servers/server/database-bindings/binding-a',{method:'DELETE',session:{user:{role:'owner'}},dependencies:{}})).called,1);
+ assert.equal((await run('/api/servers/server/database-bindings/binding-b',{method:'DELETE',session:{user:{role:'owner'}},dependencies:{}})).called,1);
  assert.equal((await run('/api/websites/site-a/files',{session:{...auth,security:{managementAllowed:false}}})).res.statusCode,403);
 });
 test('only small identity-bearing JSON bodies are parsed ahead of the inner app',()=>{
@@ -213,4 +219,62 @@ test('reseller actor site resource boundary enforces child customer scope and re
  });
  assert.equal(dynamicForeignHandoff.called, 0);
  assert.equal(dynamicForeignHandoff.res.statusCode, 403);
+});
+
+test('customer actor site resource boundary manages own website DB credentials/password/phpmyadmin but cannot unbind or cross-access foreign site DB resources', async () => {
+ const customerSession = {
+  user: { id: 'customer-1', role: 'customer', websiteIds: ['site-a'], active: true },
+  access: { mode: 'site_management' },
+  security: { managementAllowed: true },
+ };
+
+ // 1. Own database resources allowed, foreign site 403
+ assert.equal((await run('/api/servers/server/websites/site-a/database-resources', { session: customerSession })).called, 1);
+ const foreignDbRes = await run('/api/servers/server/websites/site-b/database-resources', { session: customerSession });
+ assert.equal(foreignDbRes.called, 0);
+ assert.equal(foreignDbRes.res.statusCode, 403);
+
+ // 2. Credential actions on own binding allowed, foreign binding 403
+ assert.equal((await run('/api/servers/server/database-bindings/binding-a/credential', { session: customerSession, method: 'POST' })).called, 1);
+ const foreignBinding = await run('/api/servers/server/database-bindings/binding-b/credential', { session: customerSession, method: 'POST' });
+ assert.equal(foreignBinding.called, 0);
+ assert.equal(foreignBinding.res.statusCode, 403);
+
+ // 3. Database unbind is forbidden even on own site binding
+ const unbindAttempt = await run('/api/servers/server/database-bindings/binding-a', { session: customerSession, method: 'DELETE' });
+ assert.equal(unbindAttempt.called, 0);
+ assert.equal(unbindAttempt.res.statusCode, 403);
+
+ const nestedUnbindAttempt = await run('/api/servers/server/websites/site-a/database-bindings/binding-a', { session: customerSession, method: 'DELETE' });
+ assert.equal(nestedUnbindAttempt.called, 0);
+ assert.equal(nestedUnbindAttempt.res.statusCode, 403);
+
+ // 4. Password rotation on own credential allowed, foreign credential 403
+ assert.equal((await run('/api/servers/server/database-credentials/credential-a/password/rotate', { session: customerSession, method: 'POST' })).called, 1);
+ const foreignRotate = await run('/api/servers/server/database-credentials/credential-b/password/rotate', { session: customerSession, method: 'POST' });
+ assert.equal(foreignRotate.called, 0);
+ assert.equal(foreignRotate.res.statusCode, 403);
+
+ // 5. phpMyAdmin handoff: own website allowed with credential, foreign website 403
+ const ownHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+  session: customerSession,
+  method: 'POST',
+  body: { credentialId: 'credential-a' },
+ });
+ assert.equal(ownHandoff.called, 1);
+
+ const foreignHandoff = await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs', {
+  session: customerSession,
+  method: 'POST',
+  body: { credentialId: 'credential-b' },
+ });
+ assert.equal(foreignHandoff.called, 0);
+ assert.equal(foreignHandoff.res.statusCode, 403);
+
+ // 6. Global databases and unbind forbidden
+ for (const p of ['/api/servers/server/databases', '/api/servers/server/databases/alpha/bind', '/api/servers/server/database-bindings']) {
+  const r = await run(p, { session: customerSession });
+  assert.equal(r.called, 0);
+  assert.equal(r.res.statusCode, 403);
+ }
 });

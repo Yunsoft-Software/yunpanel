@@ -15,7 +15,7 @@ const credentialId = randomUUID();
 const capability = 'A'.repeat(43);
 const SESSION_DIGEST = 'd'.repeat(64);
 
-function auth(role = 'owner') {
+function auth(role = 'owner', { websiteIds: customWebsiteIds } = {}) {
   if (role === 'owner') {
     return {
       id: 'owner-session',
@@ -24,10 +24,10 @@ function auth(role = 'owner') {
       security: { managementAllowed: true },
     };
   }
-  if (role === 'site_manager') {
+  if (role === 'site_manager' || role === 'reseller' || role === 'customer') {
     return {
-      id: 'site-session',
-      user: { id: 'site-user', role: 'site_manager', websiteIds: [websiteId] },
+      id: `${role}-session`,
+      user: { id: `${role}-user`, role, websiteIds: customWebsiteIds ?? [websiteId] },
       access: { mode: 'site_management', permissions: ['website:manage'] },
       security: { managementAllowed: true },
     };
@@ -40,12 +40,12 @@ function auth(role = 'owner') {
   };
 }
 
-async function listen(t, { role = 'owner', serverExists = true } = {}) {
+async function listen(t, { role = 'owner', serverExists = true, websiteIds } = {}) {
   const calls = [];
   const app = express();
   app.use(express.json());
   app.use((request, _response, next) => {
-    request.auth = auth(role);
+    request.auth = auth(role, { websiteIds });
     request.authSessionDigest = SESSION_DIGEST;
     next();
   });
@@ -136,8 +136,8 @@ test('Site Manager can mint and enter signon only for an assigned Website', asyn
   assert.deepEqual(calls, [
     ['server', serverId],
     ['issue', {
-      sessionId: 'site-session',
-      userId: 'site-user',
+      sessionId: 'site_manager-session',
+      userId: 'site_manager-user',
       sessionDigest: SESSION_DIGEST,
       serverId,
       websiteId,
@@ -148,6 +148,67 @@ test('Site Manager can mint and enter signon only for an assigned Website', asyn
   const signon = await fetch(`${base}/api/phpmyadmin-signon-access`);
   assert.equal(signon.status, 204);
   assert.equal(signon.headers.get('cache-control'), 'no-store');
+
+  const gateway = await fetch(`${base}/api/phpmyadmin-gateway-access`);
+  assert.equal(gateway.status, 204);
+
+  // Unassigned website is rejected for site_manager
+  const unassigned = await listen(t, { role: 'site_manager', websiteIds: ['foreign-site'] });
+  const denied = await fetch(
+    `${unassigned.base}/api/servers/${serverId}/websites/${websiteId}/phpmyadmin-handoffs`,
+    {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ credentialId }),
+    },
+  );
+  assert.equal(denied.status, 403);
+  assert.equal((await denied.json()).error.code, 'phpmyadmin_handoff_authorized_required');
+});
+
+test('Customer and Reseller can mint and enter signon only for an assigned Website', async (t) => {
+  for (const role of ['customer', 'reseller']) {
+    const { base, calls } = await listen(t, { role });
+    const response = await fetch(
+      `${base}/api/servers/${serverId}/websites/${websiteId}/phpmyadmin-handoffs`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ credentialId }),
+      },
+    );
+    assert.equal(response.status, 201);
+    assert.deepEqual(calls, [
+      ['server', serverId],
+      ['issue', {
+        sessionId: `${role}-session`,
+        userId: `${role}-user`,
+        sessionDigest: SESSION_DIGEST,
+        serverId,
+        websiteId,
+        credentialId,
+      }],
+    ]);
+
+    const signon = await fetch(`${base}/api/phpmyadmin-signon-access`);
+    assert.equal(signon.status, 204);
+
+    const gateway = await fetch(`${base}/api/phpmyadmin-gateway-access`);
+    assert.equal(gateway.status, 204);
+
+    // Unassigned website is rejected
+    const unassigned = await listen(t, { role, websiteIds: ['foreign-site'] });
+    const denied = await fetch(
+      `${unassigned.base}/api/servers/${serverId}/websites/${websiteId}/phpmyadmin-handoffs`,
+      {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ credentialId }),
+      },
+    );
+    assert.equal(denied.status, 403);
+    assert.equal((await denied.json()).error.code, 'phpmyadmin_handoff_authorized_required');
+  }
 });
 
 test('Read Only cannot mint phpMyAdmin handoffs', async (t) => {

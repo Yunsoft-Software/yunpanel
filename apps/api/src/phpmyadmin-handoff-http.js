@@ -34,7 +34,9 @@ function asyncRoute(handler) {
 
 function requireAuthorizedManagement(auth, websiteId = null) {
   const isOwner = auth?.user?.role === 'owner' && auth?.access?.mode === 'management' && auth?.security?.managementAllowed === true;
-  const isSiteManager = auth?.user?.role === 'site_manager' && auth?.access?.mode === 'site_management' && (!websiteId || (auth?.user?.websiteIds ?? []).includes(websiteId));
+  const isSiteManager = ['site_manager', 'reseller', 'customer'].includes(auth?.user?.role)
+    && auth?.access?.mode === 'site_management'
+    && (!websiteId || (auth?.user?.websiteIds ?? []).includes(websiteId));
   if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || (!isOwner && !isSiteManager)) {
     throw new PhpMyAdminHandoffError(
       'phpmyadmin_handoff_authorized_required',

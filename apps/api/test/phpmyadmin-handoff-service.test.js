@@ -227,9 +227,105 @@ test('gateway session stays bound to panel identity and current Website grant', 
     sessionId: 'site-session',
     userId: 'site-user',
     role: 'site_manager',
-    websiteIds: [],
+    websiteIds: ['foreign-site'],
   }), null);
   assert.equal(current.service.gatewaySize(), 0);
+});
+
+test('gateway session authorizes Owner across all sites and supports reseller and customer with active grant', async () => {
+  const current = fixture();
+  const issued = await current.service.issue({
+    sessionId: 'owner-session',
+    userId: 'owner-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+  const consumed = await current.service.consume(issued.capability, {
+    sessionDigest: SESSION_DIGEST,
+  });
+
+  // Owner authorized without websiteIds restriction
+  const ownerAllowed = await current.service.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: 'owner-session',
+    userId: 'owner-user',
+    role: 'owner',
+  });
+  assert.deepEqual(ownerAllowed, {
+    websiteId: current.ids.websiteId,
+    databaseCredentialId: current.ids.credentialId,
+    expiresAt: consumed.expiresAt,
+  });
+
+  // Reseller with website grant
+  const resellerHandoff = await current.service.issue({
+    sessionId: 'reseller-session',
+    userId: 'reseller-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+  const resellerConsumed = await current.service.consume(resellerHandoff.capability, { sessionDigest: SESSION_DIGEST });
+  const resellerAllowed = await current.service.authorizeGatewaySession(resellerConsumed.gatewaySession, {
+    sessionId: 'reseller-session',
+    userId: 'reseller-user',
+    role: 'reseller',
+    websiteIds: [current.ids.websiteId],
+  });
+  assert.deepEqual(resellerAllowed, {
+    websiteId: current.ids.websiteId,
+    databaseCredentialId: current.ids.credentialId,
+    expiresAt: resellerConsumed.expiresAt,
+  });
+
+  // Customer with website grant
+  const customerHandoff = await current.service.issue({
+    sessionId: 'cust-session',
+    userId: 'cust-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+  const customerConsumed = await current.service.consume(customerHandoff.capability, { sessionDigest: SESSION_DIGEST });
+  const customerAllowed = await current.service.authorizeGatewaySession(customerConsumed.gatewaySession, {
+    sessionId: 'cust-session',
+    userId: 'cust-user',
+    role: 'customer',
+    websiteIds: [current.ids.websiteId],
+  });
+  assert.deepEqual(customerAllowed, {
+    websiteId: current.ids.websiteId,
+    databaseCredentialId: current.ids.credentialId,
+    expiresAt: customerConsumed.expiresAt,
+  });
+
+  // Customer attempting access without matching websiteIds is revoked
+  assert.equal(await current.service.authorizeGatewaySession(customerConsumed.gatewaySession, {
+    sessionId: 'cust-session',
+    userId: 'cust-user',
+    role: 'customer',
+    websiteIds: ['other-site'],
+  }), null);
+
+  // Read only role is denied
+  const roHandoff = await current.service.issue({
+    sessionId: 'ro-session',
+    userId: 'ro-user',
+    sessionDigest: SESSION_DIGEST,
+    serverId: current.ids.serverId,
+    websiteId: current.ids.websiteId,
+    credentialId: current.ids.credentialId,
+  });
+  const roConsumed = await current.service.consume(roHandoff.capability, { sessionDigest: SESSION_DIGEST });
+  assert.equal(await current.service.authorizeGatewaySession(roConsumed.gatewaySession, {
+    sessionId: 'ro-session',
+    userId: 'ro-user',
+    role: 'read_only',
+    websiteIds: [current.ids.websiteId],
+  }), null);
 });
 
 test('handoff requires the latest database credential job to be the exact current successful apply', async () => {
