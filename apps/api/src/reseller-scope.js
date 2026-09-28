@@ -83,3 +83,11 @@ export function assertCustomerWebsiteAccess({ actor, customer, reseller = null, 
   if (actor.role === 'reseller' && chain.reseller && actor.id === chain.reseller.id) return;
   throw denied();
 }
+
+export {
+  extractActorTenant,
+  assertCustomerBelongsToReseller,
+  assertWebsiteBelongsToTenant,
+  assertEntityTenantBoundary,
+  sanitizeTenantCollection,
+} from './tenant-boundary.js';
