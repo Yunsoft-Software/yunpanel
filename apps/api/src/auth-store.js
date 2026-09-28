@@ -5,9 +5,11 @@ import { promisify } from 'node:util';
 import { DatabaseSync } from 'node:sqlite';
 import { createAuditStore } from './audit-store.js';
 import { AuthError, safeEqual } from './auth-error.js';
+import { createAuthMailer, validateEmail } from './auth-mailer.js';
 import { createMfaStore } from './mfa-store.js';
 import { createUserAdminStore } from './user-admin-store.js';
 export { AuthError, safeEqual } from './auth-error.js';
+export { validateEmail } from './auth-mailer.js';
 
 const derive = promisify(argon2);
 const PASSWORD_PREFIX = '$argon2id$v=19$m=65536,t=3,p=1$';
@@ -76,7 +78,9 @@ export function createAuthStore({
   absoluteMs = 12 * 60 * 60_000,
   masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
   liveSessions = null,
+  mailer: customMailer = null,
 } = {}) {
+  const mailer = customMailer ?? createAuthMailer();
   if (![idleMs, absoluteMs].every((value) => Number.isSafeInteger(value) && value > 0) || idleMs > absoluteMs) {
     throw new Error('Invalid authentication session lifetime');
   }
@@ -146,6 +150,22 @@ export function createAuthStore({
       PRIMARY KEY (user_id, website_id)
     );
     CREATE INDEX IF NOT EXISTS idx_auth_user_websites_user ON auth_user_websites(user_id);
+    CREATE TABLE IF NOT EXISTS auth_recovery_emails (
+      user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+      email TEXT NOT NULL,
+      verified INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL,
+      updated_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_recovery_emails_email ON auth_recovery_emails(email);
+    CREATE TABLE IF NOT EXISTS auth_password_resets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      token_hash TEXT UNIQUE NOT NULL,
+      expires_at INTEGER NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_password_resets_user ON auth_password_resets(user_id);
   `);
   let dummyHash;
   const publicUser = (row) => ({ id: row.id, username: row.username, role: row.role });
@@ -268,12 +288,14 @@ export function createAuthStore({
     }
     const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
     const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
+    const recovery = db.prepare('SELECT email, verified FROM auth_recovery_emails WHERE user_id = ?').get(row.user_id);
     return {
       id: row.id,
       user: {
         id: row.user_id,
         username: row.username,
         role: row.role,
+        ...(recovery?.email ? { email: recovery.email, emailVerified: Boolean(recovery.verified) } : {}),
         ...(websiteIds !== null ? { websiteIds } : {}),
         ...(hosting !== null ? { hosting } : {}),
       },
@@ -319,7 +341,7 @@ export function createAuthStore({
         return { token: rawToken, expiresAt };
       });
     },
-    async completeSetup({ setupToken, username: input, password, peer = 'local' }) {
+    async completeSetup({ setupToken, username: input, password, email = null, peer = 'local' }) {
       rateLimit([['setup:global', 30], [`setup:${digest(peer)}`, 10]]);
       const check = () => {
         if (db.prepare('SELECT 1 FROM users LIMIT 1').get()) throw new AuthError('already_configured', 'An owner already exists.', 409);
@@ -328,11 +350,15 @@ export function createAuthStore({
       };
       check();
       const name = username(input);
+      const validatedEmail = email ? validateEmail(email) : null;
       const passwordHash = await hashPassword(password);
       return transaction(() => {
         check();
         const id = randomUUID();
         db.prepare("INSERT INTO users VALUES (?, ?, ?, 'owner', 1, ?, ?)").run(id, name, passwordHash, now(), now());
+        if (validatedEmail) {
+          db.prepare('INSERT INTO auth_recovery_emails(user_id, email, verified, created_at, updated_at) VALUES (?, ?, 1, ?, ?)').run(id, validatedEmail, now(), now());
+        }
         db.prepare('DELETE FROM setup').run();
         event(id, 'owner.setup');
         return publicUser({ id, username: name, role: 'owner' });
@@ -385,12 +411,14 @@ export function createAuthStore({
       }
       const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
       const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
+      const recovery = db.prepare('SELECT email, verified FROM auth_recovery_emails WHERE user_id = ?').get(row.user_id);
       return Object.freeze({
         id: row.id,
         user: Object.freeze({
           id: row.user_id,
           username: row.username,
           role: row.role,
+          ...(recovery?.email ? { email: recovery.email, emailVerified: Boolean(recovery.verified) } : {}),
           ...(websiteIds !== null ? { websiteIds: Object.freeze(websiteIds) } : {}),
           ...(hosting !== null ? { hosting: Object.freeze(hosting) } : {}),
         }),
@@ -454,6 +482,168 @@ export function createAuthStore({
         return user.id;
       });
       revokeLiveUser(userId, 'password_recovered');
+    },
+    mailer,
+    getRecoveryEmail(userId) {
+      if (typeof userId !== 'string' || !userId) throw new AuthError('invalid_user', 'A valid user ID is required.');
+      const row = db.prepare('SELECT email, verified, updated_at FROM auth_recovery_emails WHERE user_id = ?').get(userId);
+      return {
+        email: row?.email ?? null,
+        verified: Boolean(row?.verified),
+        updatedAt: row?.updated_at ?? null,
+      };
+    },
+    setRecoveryEmail(userId, inputEmail, { verified = true } = {}) {
+      if (typeof userId !== 'string' || !userId) throw new AuthError('invalid_user', 'A valid user ID is required.');
+      const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(userId);
+      if (!user || user.role !== 'owner' || !user.active) {
+        throw new AuthError('forbidden', 'Owner access is required.', 403);
+      }
+      if (inputEmail === null || inputEmail === undefined || inputEmail === '') {
+        return transaction(() => {
+          db.prepare('DELETE FROM auth_recovery_emails WHERE user_id = ?').run(userId);
+          event(userId, 'owner.recovery_email_removed');
+          return { email: null, verified: false };
+        });
+      }
+      const normalized = validateEmail(inputEmail);
+      return transaction(() => {
+        const existing = db.prepare('SELECT user_id FROM auth_recovery_emails WHERE email = ? AND user_id != ?').get(normalized, userId);
+        if (existing) {
+          throw new AuthError('email_in_use', 'Bu e-posta adresi başka bir hesap tarafından kullanılıyor.', 409);
+        }
+        db.prepare('INSERT INTO auth_recovery_emails (user_id, email, verified, created_at, updated_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET email = excluded.email, verified = excluded.verified, updated_at = excluded.updated_at')
+          .run(userId, normalized, verified ? 1 : 0, now(), now());
+        event(userId, 'owner.recovery_email_updated');
+        return { email: normalized, verified: Boolean(verified) };
+      });
+    },
+    getRecoveryEmailByUsername(input) {
+      const name = username(input);
+      const user = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1').get(name);
+      if (!user) throw new AuthError('user_not_found', 'Active user not found.', 404);
+      return this.getRecoveryEmail(user.id);
+    },
+    setRecoveryEmailByUsername(input, emailInput, options) {
+      const name = username(input);
+      const user = db.prepare('SELECT id FROM users WHERE username = ? AND active = 1').get(name);
+      if (!user) throw new AuthError('user_not_found', 'Active user not found.', 404);
+      return this.setRecoveryEmail(user.id, emailInput, options);
+    },
+    async requestPasswordReset({ identifier, peer = 'local', origin = null }) {
+      if (typeof identifier !== 'string' || !identifier.trim()) {
+        throw new AuthError('invalid_identifier', 'Kullanıcı adı veya kurtarma e-postası girin.');
+      }
+      const cleanId = identifier.trim().toLowerCase();
+      rateLimit([
+        ['reset_request:global', 30],
+        [`reset_request:peer:${digest(peer)}`, 10],
+        [`reset_request:user:${digest(cleanId)}`, 5],
+      ]);
+
+      const smtpReady = await mailer.isAvailable();
+      if (!smtpReady) {
+        throw new AuthError('smtp_unavailable', 'E-posta servisi şu anda kullanılamıyor. Parola sıfırlama e-postası gönderilemiyor.', 503);
+      }
+
+      const candidate = db.prepare(`
+        SELECT u.id, u.username, u.role, u.active, r.email AS recovery_email, r.verified AS email_verified
+        FROM users u
+        LEFT JOIN auth_recovery_emails r ON r.user_id = u.id
+        WHERE (u.username = ? OR LOWER(r.email) = ?)
+          AND u.role = 'owner'
+          AND u.active = 1
+      `).get(cleanId, cleanId);
+
+      if (candidate?.recovery_email && candidate.email_verified) {
+        const rawToken = token();
+        const tokenHash = digest(rawToken);
+        const expiresAt = now() + 15 * 60_000;
+
+        transaction(() => {
+          db.prepare('DELETE FROM auth_password_resets WHERE user_id = ? OR expires_at <= ?').run(candidate.id, now());
+          db.prepare('INSERT INTO auth_password_resets (id, user_id, token_hash, expires_at, created_at) VALUES (?, ?, ?, ?, ?)')
+            .run(randomUUID(), candidate.id, tokenHash, expiresAt, now());
+          event(candidate.id, 'password_reset.requested');
+        });
+
+        try {
+          await mailer.sendPasswordResetEmail({
+            to: candidate.recovery_email,
+            username: candidate.username,
+            token: rawToken,
+            expiresAt,
+            origin,
+          });
+        } catch (error) {
+          db.prepare('DELETE FROM auth_password_resets WHERE token_hash = ?').run(tokenHash);
+          event(candidate.id, 'password_reset.delivery_failed', null, 'failed', 'delivery_failed');
+          throw new AuthError('mail_delivery_failed', 'Kurtarma e-postası gönderilemedi.', 503);
+        }
+      } else {
+        dummyHash ??= hashPassword(token()).catch((error) => { dummyHash = null; throw error; });
+        await dummyHash;
+      }
+
+      return { sent: true };
+    },
+    async resetPasswordWithToken({ token: rawToken, newPassword, peer = 'local' }) {
+      if (typeof rawToken !== 'string' || !TOKEN_PATTERN.test(rawToken)) {
+        throw new AuthError('invalid_reset_token', 'Geçersiz veya süresi dolmuş parola sıfırlama bağlantısı.', 400);
+      }
+      validatePassword(newPassword);
+      rateLimit([
+        ['reset_confirm:global', 60],
+        [`reset_confirm:peer:${digest(peer)}`, 20],
+        [`reset_confirm:token:${digest(rawToken)}`, 5],
+      ]);
+
+      const tokenHash = digest(rawToken);
+      const row = db.prepare(`
+        SELECT r.id AS reset_id, r.expires_at, u.id AS user_id, u.username, u.role, u.active
+        FROM auth_password_resets r
+        JOIN users u ON u.id = r.user_id
+        WHERE r.token_hash = ?
+      `).get(tokenHash);
+
+      if (!row) {
+        throw new AuthError('invalid_reset_token', 'Geçersiz veya süresi dolmuş parola sıfırlama bağlantısı.', 400);
+      }
+      if (row.expires_at <= now()) {
+        db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);
+        throw new AuthError('reset_token_expired', 'Parola sıfırlama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı talep edin.', 400);
+      }
+      if (!row.active || row.role !== 'owner') {
+        db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);
+        throw new AuthError('invalid_reset_token', 'Bu hesap devre dışı veya yetkisiz.', 401);
+      }
+
+      const encoded = await hashPassword(newPassword);
+
+      const result = transaction(() => {
+        const current = db.prepare('SELECT * FROM auth_password_resets WHERE token_hash = ?').get(tokenHash);
+        if (!current || current.expires_at <= now()) {
+          throw new AuthError('invalid_reset_token', 'Geçersiz veya süresi dolmuş parola sıfırlama bağlantısı.', 400);
+        }
+        db.prepare('UPDATE users SET password_hash = ?, password_changed_at = ? WHERE id = ?')
+          .run(encoded, now(), row.user_id);
+        db.prepare('DELETE FROM auth_password_resets WHERE user_id = ?').run(row.user_id);
+        db.prepare('DELETE FROM sessions WHERE user_id = ?').run(row.user_id);
+        mfa.invalidateUser(row.user_id);
+        try {
+          const revRow = db.prepare('SELECT revision FROM auth_user_revisions WHERE user_id = ?').get(row.user_id);
+          if (revRow) {
+            db.prepare('UPDATE auth_user_revisions SET revision = revision + 1, updated_at = ? WHERE user_id = ?')
+              .run(now(), row.user_id);
+          }
+        } catch {}
+        db.prepare('DELETE FROM auth_limits WHERE key = ?').run(`login:user:${digest(row.username)}`);
+        event(row.user_id, 'password.reset_via_token');
+        return { userId: row.user_id, username: row.username };
+      });
+
+      revokeLiveUser(result.userId, 'password_reset');
+      return { reset: true, username: result.username };
     },
   };
 }

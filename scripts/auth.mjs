@@ -31,9 +31,11 @@ let store;
 try {
   const valid = (command === 'setup-token' && !username && extra.length === 0)
     || (command === 'reset-password' && username && extra.length === 0)
-    || (command === 'reset-mfa' && username && extra.length === 1 && extra[0] === '--confirm');
+    || (command === 'reset-mfa' && username && extra.length === 1 && extra[0] === '--confirm')
+    || (command === 'set-recovery-email' && username && extra.length === 1)
+    || (command === 'get-recovery-email' && username && extra.length === 0);
   if (!valid) {
-    throw new Error('Usage: node scripts/auth.mjs setup-token | reset-password <username> | reset-mfa <username> --confirm (password via hidden prompt or stdin, never argv)');
+    throw new Error('Usage: node scripts/auth.mjs setup-token | reset-password <username> | reset-mfa <username> --confirm | set-recovery-email <username> <email> | get-recovery-email <username>');
   }
   const serverStore = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');
   const filePath = process.env.YUNPANEL_AUTH_DB ?? path.join(path.dirname(serverStore), 'auth', 'auth.sqlite');
@@ -49,6 +51,17 @@ try {
       ? 'Password-only Owner login is enabled by this host policy.'
       : 'Re-enroll the authenticator after signing in.';
     console.log(`MFA removed; recovery codes, sessions and login challenges revoked. Password unchanged. ${nextStep}`);
+  } else if (command === 'set-recovery-email') {
+    const email = extra[0];
+    const res = store.setRecoveryEmailByUsername(username, email);
+    console.log(`Recovery email set to ${res.email} for user ${username}.`);
+  } else if (command === 'get-recovery-email') {
+    const res = store.getRecoveryEmailByUsername(username);
+    if (res.email) {
+      console.log(`Recovery email for ${username}: ${res.email} (${res.verified ? 'verified' : 'unverified'})`);
+    } else {
+      console.log(`No recovery email configured for ${username}.`);
+    }
   } else {
     await store.resetPassword(username, await readPassword());
     console.log('Password updated; all sessions for this user have been revoked.');

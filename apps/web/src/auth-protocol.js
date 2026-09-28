@@ -80,3 +80,37 @@ export async function endAuthenticatedSession(operation, body, signal) {
     return result;
   } finally { finish(); announceSessionChange(); }
 }
+
+export async function requestPasswordReset(identifier, signal) {
+  if (typeof identifier !== 'string' || !identifier.trim()) throw new Error('Kullanıcı adı veya kurtarma e-postası girin.');
+  return authRequest('reset-password/request', { method: 'POST', body: { identifier: identifier.trim() }, signal, notifyExpired: false });
+}
+
+export async function resetPasswordWithToken(token, newPassword, signal) {
+  if (typeof token !== 'string' || !token.trim()) throw new Error('Sıfırlama anahtarı eksik.');
+  if (typeof newPassword !== 'string' || newPassword.length < 12) throw new Error('Yeni parola en az 12 karakter olmalıdır.');
+  const finish = beginSessionTransition();
+  try {
+    const result = await authRequest('reset-password', {
+      method: 'POST',
+      body: { token: token.trim(), newPassword },
+      signal,
+      allowDuringTransition: true,
+      notifyExpired: false,
+    });
+    setSession(null);
+    return result;
+  } finally {
+    finish();
+    announceSessionChange();
+  }
+}
+
+export async function getRecoveryEmail(signal) {
+  return authRequest('recovery-email', { method: 'GET', signal });
+}
+
+export async function setRecoveryEmail(email, signal) {
+  return authRequest('recovery-email', { method: 'POST', body: { email: email?.trim() || null }, signal });
+}
+
