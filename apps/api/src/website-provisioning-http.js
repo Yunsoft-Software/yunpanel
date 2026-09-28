@@ -1,6 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { mountWebsiteIsolationAuditRoutes } from './website-isolation-audit-http.js';
 import { canBeginCompensationInOrder } from './website-provisioning-compensation-order.js';
+import { extractActorTenant } from './tenant-boundary.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -130,7 +131,7 @@ function requestActor(request) {
   const userId = request.auth?.user?.id;
   const role = request.auth?.user?.role;
   if (typeof sessionId !== 'string' || typeof userId !== 'string'
-    || !['owner', 'site_manager'].includes(role)) {
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(role)) {
     throw new WebsiteProvisioningHttpError(
       'website_provisioning_actor_invalid',
       'Live Website provisioning session identity is required',
@@ -152,8 +153,16 @@ async function requireWebsiteAccess(request, targetWebsiteId, { websiteRegistry,
   const actor = requestActor(request);
   if (actor.role === 'owner') return actor;
   const auth = request.auth;
+  const actorTenant = extractActorTenant(auth);
+  if (!actorTenant.active) {
+    throw new WebsiteProvisioningHttpError(
+      'tenant_actor_inactive',
+      'Inactive account cannot access tenant resources.',
+      403,
+    );
+  }
   if (auth?.access?.mode !== 'site_management' || auth?.security?.managementAllowed !== true
-    || !Array.isArray(auth.user?.websiteIds) || !auth.user.websiteIds.includes(targetWebsiteId)) {
+    || !Array.isArray(actorTenant.websiteIds) || !actorTenant.websiteIds.includes(targetWebsiteId)) {
     throw provisioningNotFound();
   }
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {

@@ -359,21 +359,33 @@ const websitePhpToolsService = createWebsitePhpToolsService({
 });
 const authorizeWebsitePhpActor = async (actor, websiteId) => {
   if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
-    || !['owner', 'site_manager'].includes(actor.role)) return null;
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(actor.role)) return null;
   const session = authStore.getSessionById(actor.sessionId);
-  if (!session || session.user.id !== actor.userId || session.user.role !== actor.role) return null;
+  if (!session || session.user.id !== actor.userId) return null;
+  if (session.user.active === false) return null;
+  const validRole = session.user.role === actor.role
+    || (session.user.role === 'site_manager' && ['reseller', 'customer'].includes(actor.role));
+  if (!validRole) return null;
   if (actor.role === 'owner') {
     if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
   } else if (!Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) return null;
-  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: session.user.role });
+  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: actor.role });
 };
-const authorizeWebsiteRemovalActor = async (actor) => {
+const authorizeWebsiteRemovalActor = async (actor, websiteId = null) => {
   if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
-    || actor.role !== 'owner') return null;
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(actor.role)) return null;
   const session = authStore.getSessionById(actor.sessionId);
-  if (!session || session.user.id !== actor.userId || session.user.role !== 'owner') return null;
-  if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
-  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: 'owner' });
+  if (!session || session.user.id !== actor.userId) return null;
+  if (session.user.active === false) return null;
+  const validRole = session.user.role === actor.role
+    || (session.user.role === 'site_manager' && ['reseller', 'customer'].includes(actor.role));
+  if (!validRole) return null;
+  if (actor.role === 'owner') {
+    if (ownerMfaRequired && !authStore.mfa.enabled(actor.userId)) return null;
+  } else if (!websiteId || !Array.isArray(session.user.websiteIds) || !session.user.websiteIds.includes(websiteId)) {
+    return null;
+  }
+  return Object.freeze({ sessionId: session.id, userId: session.user.id, role: actor.role });
 };
 const authorizeWebsiteRemovalSystemCron = async ({
   taskId,
@@ -398,7 +410,7 @@ const authorizeWebsiteRemovalSystemCron = async ({
   if (candidates.length !== 1 || typeof websiteRemovalOperationRegistry.getActor !== 'function') return null;
   const operation = candidates[0];
   const actor = await websiteRemovalOperationRegistry.getActor(operation.id);
-  const live = actor ? await authorizeWebsiteRemovalActor(actor) : null;
+  const live = actor ? await authorizeWebsiteRemovalActor(actor, websiteId) : null;
   if (!live) return null;
   return Object.freeze({
     authorized: true,
@@ -950,8 +962,8 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
     unixIdentityCleanupInspector: websiteRemovalCleanupAdapters?.inspectUnixIdentityCleanup ?? null,
     siteMutationLock,
-    hostingAllocationReleaseHandler: typeof authStore.users?.hostingAccounts?.siteAllocations?.releaseRemoved === 'function'
-      ? (proof) => authStore.users.hostingAccounts.siteAllocations.releaseRemoved(proof)
+    hostingAllocationReleaseHandler: typeof (authStore.hostingAccounts ?? authStore.users?.hostingAccounts)?.siteAllocations?.releaseRemoved === 'function'
+      ? (proof) => (authStore.hostingAccounts ?? authStore.users.hostingAccounts).siteAllocations.releaseRemoved(proof)
       : null,
     authorizeActor: authorizeWebsiteRemovalActor,
   })

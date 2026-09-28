@@ -1601,6 +1601,12 @@ test('negative scenarios: permission boundaries for Plesk non-global roles fail-
     { path: '/api/users', method: 'GET' },
     { path: '/api/websites', method: 'POST', body: { name: 'test' } },
     { path: '/api/applications', method: 'POST', body: { name: 'test' } },
+    { path: '/api/sites', method: 'POST', body: { input: {} } },
+    { path: '/api/sites/create-preview', method: 'POST', body: { input: {} } },
+    { path: '/api/sites/hosted', method: 'POST', body: { customerId: 'c1', input: {} } },
+    { path: '/api/sites/hosted/create-preview', method: 'POST', body: { customerId: 'c1', input: {} } },
+    { path: '/api/sites/hosted/recover-reservation', method: 'POST', body: { customerId: 'c1', input: {} } },
+    { path: '/api/sites/recover-reservation', method: 'POST', body: { customerId: 'c1', input: {} } },
   ];
 
   const testActors = [resellerA, customerA1Actor, legacySmActor];

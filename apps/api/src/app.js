@@ -587,7 +587,12 @@ export function createApp(allOptions = {}) {
     mountDomainRemovalRoutes(app, { runtime: domainRemovalRuntime });
   }
   if (websiteRemovalRuntime) {
-    mountWebsiteRemovalRoutes(app, { runtime: websiteRemovalRuntime });
+    mountWebsiteRemovalRoutes(app, {
+      runtime: websiteRemovalRuntime,
+      siteMutationLock,
+      websiteRegistry,
+      localServerId,
+    });
   }
   if (websiteProvisioningRuntime) {
     if (typeof websiteProvisioningRuntime.configureDomainControlPlane !== 'function') {
@@ -626,6 +631,7 @@ export function createApp(allOptions = {}) {
     localServerId,
     userAdminStore,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
+    websiteProvisioningRuntime,
     siteMutationLock,
   });
   if (websiteProvisioningRuntime) {

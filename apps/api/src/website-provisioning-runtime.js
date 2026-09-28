@@ -769,7 +769,7 @@ export function createWebsiteProvisioningRuntime({
     if (!value || typeof value !== 'object' || Array.isArray(value)
       || typeof value.sessionId !== 'string' || value.sessionId.length < 1 || value.sessionId.length > 128
       || typeof value.userId !== 'string' || value.userId.length < 1 || value.userId.length > 128
-      || !['owner', 'site_manager'].includes(value.role)) {
+      || !['owner', 'site_manager', 'reseller', 'customer'].includes(value.role)) {
       throw new WebsiteProvisioningOrchestratorError(
         'website_provisioning_actor_invalid',
         'Website provisioning actor evidence is invalid',

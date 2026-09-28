@@ -300,7 +300,14 @@ export function createTenantBoundaryMiddleware(options = {}) {
         throw denied('tenant_boundary_forbidden', 'Global backup management is outside tenant boundary.');
       }
 
-      if (method === 'POST' && (path === '/api/websites' || path === '/api/applications')) {
+      if (method === 'POST' && (
+        path === '/api/websites'
+        || path === '/api/applications'
+        || path === '/api/sites'
+        || path === '/api/sites/create-preview'
+        || path === '/api/sites/recover-reservation'
+        || path.startsWith('/api/sites/hosted')
+      )) {
         throw denied('tenant_boundary_forbidden', 'Direct top-level website or application creation is outside tenant boundary.');
       }
 

@@ -507,3 +507,130 @@ test('site_manager latest route requires current Website grant and live local We
       && error.code === 'website_provisioning_not_found',
   );
 });
+
+test('reseller and customer actors with website grant can advance provisioning', async () => {
+  const app = fakeApp();
+  const calls = [];
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator({
+      runNext: async (id, actor) => {
+        calls.push({ id, actor });
+        return { outcome: 'progressed', operation: durableOperation() };
+      },
+    }),
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId: 'server-a' }),
+    },
+    localServerId: 'server-a',
+  });
+  const handler = app.routes.post.get('/api/sites/provisioning/:operationId/continue');
+
+  const resellerAuth = {
+    id: 'reseller-sess-1',
+    user: {
+      id: 'reseller-1',
+      role: 'reseller',
+      active: true,
+      websiteIds: [websiteId],
+      hosting: { kind: 'reseller', resellerId: null },
+    },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const resResponse = await invoke(
+    handler,
+    {
+      auth: resellerAuth,
+      params: { operationId },
+      body: { confirmation: `continue-site-provisioning:${operationId}` },
+    },
+  );
+  assert.equal(resResponse.statusCode, 202);
+  assert.equal(calls[0].actor.role, 'reseller');
+
+  const customerAuth = {
+    id: 'customer-sess-1',
+    user: {
+      id: 'cust-1',
+      role: 'customer',
+      active: true,
+      websiteIds: [websiteId],
+      hosting: { kind: 'customer', resellerId: 'reseller-1' },
+    },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const custResponse = await invoke(
+    handler,
+    {
+      auth: customerAuth,
+      params: { operationId },
+      body: { confirmation: `continue-site-provisioning:${operationId}` },
+    },
+  );
+  assert.equal(custResponse.statusCode, 202);
+  assert.equal(calls[1].actor.role, 'customer');
+});
+
+test('inactive or suspended tenant actor is rejected with tenant_actor_inactive (403)', async () => {
+  const app = fakeApp();
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator(),
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId: 'server-a' }),
+    },
+    localServerId: 'server-a',
+  });
+  const handler = app.routes.get.get('/api/sites/:websiteId/provisioning/latest');
+  const inactiveAuth = {
+    id: 'inactive-sess-1',
+    user: {
+      id: 'cust-inactive',
+      role: 'customer',
+      active: false,
+      websiteIds: [websiteId],
+      hosting: { kind: 'customer', resellerId: null },
+    },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  await assert.rejects(
+    invoke(handler, { auth: inactiveAuth, params: { websiteId } }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'tenant_actor_inactive'
+      && error.status === 403,
+  );
+});
+
+test('tenant actor without website grant is rejected with website_provisioning_not_found (404)', async () => {
+  const app = fakeApp();
+  mountWebsiteProvisioningRoutes(app, {
+    registry: registry(),
+    orchestrator: orchestrator(),
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId: 'server-a' }),
+    },
+    localServerId: 'server-a',
+  });
+  const handler = app.routes.get.get('/api/sites/:websiteId/provisioning/latest');
+  const foreignAuth = {
+    id: 'foreign-sess-1',
+    user: {
+      id: 'cust-other',
+      role: 'customer',
+      active: true,
+      websiteIds: ['other-website-id'],
+      hosting: { kind: 'customer', resellerId: null },
+    },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  await assert.rejects(
+    invoke(handler, { auth: foreignAuth, params: { websiteId } }),
+    (error) => error instanceof WebsiteProvisioningHttpError
+      && error.code === 'website_provisioning_not_found'
+      && error.status === 404,
+  );
+});
