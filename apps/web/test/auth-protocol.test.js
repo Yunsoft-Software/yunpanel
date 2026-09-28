@@ -100,3 +100,64 @@ test('unsupported session termination actions do not start a transition', async 
   await assert.rejects(endAuthenticatedSession('servers/delete', {}), /Invalid session/);
   assert.equal(sessionTransitionPending(), false);
 });
+
+test('requestPasswordReset validates input and calls reset-password/request endpoint', async (t) => {
+  const { requestPasswordReset } = await import('../src/auth-protocol.js');
+  await assert.rejects(requestPasswordReset(''), /Kullanıcı adı/);
+  await assert.rejects(requestPasswordReset('   '), /Kullanıcı adı/);
+
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    assert.equal(url, '/api/auth/reset-password/request');
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body), { identifier: 'owner@example.com' });
+    return new Response(JSON.stringify({ data: { sent: true } }), { status: 200 });
+  });
+
+  const res = await requestPasswordReset('  owner@example.com  ');
+  assert.deepEqual(res, { sent: true });
+});
+
+test('resetPasswordWithToken validates token length, password length and terminates session', async (t) => {
+  const { resetPasswordWithToken } = await import('../src/auth-protocol.js');
+  const { sessionTransitionPending } = await import('../src/session-client.js');
+  setSession({ csrfToken: 'active-token' });
+
+  await assert.rejects(resetPasswordWithToken('', 'new-password-1234'), /Sıfırlama anahtarı/);
+  await assert.rejects(resetPasswordWithToken('some-token', 'short'), /en az 12/);
+
+  let fetchCalled = false;
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    fetchCalled = true;
+    assert.equal(url, '/api/auth/reset-password');
+    assert.equal(options.method, 'POST');
+    assert.deepEqual(JSON.parse(options.body), { token: 'reset-token-123', newPassword: 'long-secure-password-123' });
+    return new Response(JSON.stringify({ data: { reset: true } }), { status: 200 });
+  });
+
+  const res = await resetPasswordWithToken(' reset-token-123 ', 'long-secure-password-123');
+  assert.equal(fetchCalled, true);
+  assert.deepEqual(res, { reset: true });
+  assert.equal(sessionTransitionPending(), false);
+});
+
+test('recovery email helpers query and mutate recovery-email endpoint', async (t) => {
+  const { getRecoveryEmail, setRecoveryEmail } = await import('../src/auth-protocol.js');
+
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    if (url === '/api/auth/recovery-email' && options.method === 'GET') {
+      return new Response(JSON.stringify({ data: { email: 'owner@example.com', verified: true } }), { status: 200 });
+    }
+    if (url === '/api/auth/recovery-email' && options.method === 'POST') {
+      assert.deepEqual(JSON.parse(options.body), { email: 'new-owner@example.com' });
+      return new Response(JSON.stringify({ data: { email: 'new-owner@example.com', verified: true } }), { status: 200 });
+    }
+    throw new Error(`Unexpected request: ${url}`);
+  });
+
+  const current = await getRecoveryEmail();
+  assert.deepEqual(current, { email: 'owner@example.com', verified: true });
+
+  const updated = await setRecoveryEmail('  new-owner@example.com  ');
+  assert.deepEqual(updated, { email: 'new-owner@example.com', verified: true });
+});
+

@@ -18,6 +18,10 @@
 .auth-form input:focus-visible, .auth-dialog input:focus-visible, .auth-page button:focus-visible, .auth-sessionbar button:focus-visible, .auth-dialog button:focus-visible { outline: 3px solid #a6c4ff; outline-offset: 2px; }
 .auth-primary { border: 0; border-radius: 7px; background: #225ccb; color: white; min-height: 46px; padding: 12px 20px; font: inherit; font-size: 14px; font-weight: 650; cursor: pointer; }
 .auth-primary:hover { background: #194aa8; }
+.auth-secondary { border: 1px solid #cbd4e0; border-radius: 7px; background: #fff; color: #27364e; min-height: 46px; padding: 12px 20px; font: inherit; font-size: 14px; font-weight: 600; cursor: pointer; }
+.auth-secondary:hover { background: #f0f4fa; }
+.auth-link { background: none; border: 0; color: #225ccb; cursor: pointer; font: inherit; font-size: 13px; padding: 0; text-align: right; text-decoration: underline; }
+.auth-link:hover { color: #194aa8; }
 .auth-page button:disabled, .auth-dialog button:disabled, .auth-sessionbar button:disabled { opacity: .6; cursor: wait; }
 .auth-help { font-size: 12px; line-height: 1.7; color: #637187; margin-top: 24px; }
 .auth-error, .auth-notice, .auth-banner { padding: 12px 14px; border: 1px solid #e1b5b7; border-radius: 7px; background: #fff3f3; color: #982f39; font-size: 14px; line-height: 1.6; overflow-wrap: anywhere; }

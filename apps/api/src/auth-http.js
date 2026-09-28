@@ -240,12 +240,30 @@ export function createAuthenticatedApi({
     const rawToken = readCookie(request, cookieName);
     const challengeToken = readCookie(request, mfaCookieName);
     const peer = boundary.peer(request);
+    if (pathname === '/api/auth/reset-password/request' || pathname === '/api/auth/forgot-password') {
+      if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
+      checkOrigin(request);
+      const body = await readJson(request);
+      const identifier = body.identifier ?? body.username ?? body.email;
+      const result = await store.requestPasswordReset({ identifier, peer, origin: publicOrigin });
+      return json(response, 200, { data: result });
+    }
+    if (pathname === '/api/auth/reset-password') {
+      if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
+      checkOrigin(request);
+      const body = await readJson(request);
+      const newPassword = body.newPassword ?? body.password;
+      const result = await store.resetPasswordWithToken({ token: body.token, newPassword, peer });
+      setCookie(response, '');
+      setMfaCookie(response, '');
+      return json(response, 200, { data: result });
+    }
     if (pathname === '/api/auth/login' || pathname === '/api/auth/setup') {
       if (request.method !== 'POST') throw new AuthError('method_not_allowed', 'Use POST.', 405);
       checkOrigin(request);
       const body = await readJson(request);
       if (pathname === '/api/auth/setup') {
-        const user = await store.completeSetup({ setupToken: body.setupToken, username: body.username, password: body.password, peer });
+        const user = await store.completeSetup({ setupToken: body.setupToken, username: body.username, password: body.password, email: body.email, peer });
         return json(response, 201, { data: user });
       }
       const result = await store.login({ username: body.username, password: body.password, peer, previousToken: rawToken });
@@ -353,6 +371,21 @@ export function createAuthenticatedApi({
         setCookie(response, '');
         setMfaCookie(response, '');
         return json(response, 204);
+      }
+      if (pathname === '/api/auth/recovery-email' && request.method === 'GET') {
+        ownerPolicy.requireManagement(session);
+        return json(response, 200, { data: store.getRecoveryEmail(session.user.id) });
+      }
+      if (pathname === '/api/auth/recovery-email' && (request.method === 'POST' || request.method === 'PUT')) {
+        ownerPolicy.requireManagement(session);
+        const body = await readJson(request);
+        const result = store.setRecoveryEmail(session.user.id, body.email);
+        return json(response, 200, { data: result });
+      }
+      if (pathname === '/api/auth/recovery-email' && request.method === 'DELETE') {
+        ownerPolicy.requireManagement(session);
+        const result = store.setRecoveryEmail(session.user.id, null);
+        return json(response, 200, { data: result });
       }
       const sessionMatch = /^\/api\/auth\/sessions\/([a-f0-9-]{36})$/.exec(pathname);
       if (sessionMatch && request.method === 'DELETE') {
