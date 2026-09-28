@@ -36,19 +36,24 @@ export function requirePanelRouteAccess(request, response, next) {
     return next();
   }
 
+  const isSiteManagement = ['site_manager', 'reseller', 'customer'].includes(auth.user.role)
+    || auth.user.hosting?.kind === 'reseller'
+    || auth.user.hosting?.kind === 'customer';
+
   if (
-    auth.user.role === 'site_manager'
+    isSiteManagement
     && auth.access.mode === 'site_management'
     && auth.security.managementAllowed === true
   ) {
     const path = pathname(request);
+    const isLegacySiteManager = auth.user.role === 'site_manager' && !auth.user.hosting;
     if (
-      path.startsWith('/api/users')
-      || path.startsWith('/api/audit')
+      (path.startsWith('/api/users') && !path.startsWith('/api/users/hosting/accounts'))
+      || (isLegacySiteManager && path.startsWith('/api/audit'))
       || path.startsWith('/api/panel/settings')
       || path.startsWith('/api/system/packages')
     ) {
-      return deny(response, 403, 'forbidden', 'Site manager cannot access global server management.');
+      return deny(response, 403, 'forbidden', 'Site-scoped role cannot access global server management.');
     }
     return next();
   }

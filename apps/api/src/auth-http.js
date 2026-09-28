@@ -4,6 +4,7 @@ import { isIP } from 'node:net';
 import { withAuditActor } from './audit-request-context.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { attachManagementAudit } from './management-audit.js';
+import { extractActorTenant } from './tenant-boundary.js';
 import { createOwnerMfaPolicy } from './owner-mfa-policy.js';
 import { requireToolGatewaySession } from './tool-gateway-session-policy.js';
 import { requireReadOnlyRequest } from './panel-access.js';
@@ -361,9 +362,12 @@ export function createAuthenticatedApi({
       }
       return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
     }
+    const siteCapable = ['site_manager', 'reseller', 'customer'].includes(session.user.role)
+      || session.user.hosting?.kind === 'reseller'
+      || session.user.hosting?.kind === 'customer';
     const authorized = session.user.role === 'read_only'
       ? requireReadOnlyRequest(ownerPolicy.describe(session), request.method, pathname)
-      : session.user.role === 'site_manager'
+      : siteCapable
         ? ownerPolicy.requireSiteManagement(session)
         : ownerPolicy.requireManagement(session);
     if (!SAFE_METHODS.has(request.method)) store.getSession(rawToken, { touch: true });
@@ -374,6 +378,7 @@ export function createAuthenticatedApi({
       configurable: false,
       writable: false,
     });
+    const actorTenant = extractActorTenant(authorized);
     return withAuditActor(authorized.user.id, () => {
       attachManagementAudit({ request, response, pathname, audit: store.audit });
       if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
@@ -381,7 +386,7 @@ export function createAuthenticatedApi({
       }
       if (pathname === '/api/audit') return handleAuditRead({ request, response, query: url.searchParams, store, json });
       return handler(request, response);
-    });
+    }, { tenant: actorTenant });
   }
 
   return (request, response) => {

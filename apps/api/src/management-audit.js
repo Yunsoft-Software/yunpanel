@@ -1,4 +1,5 @@
 import { AuthError } from './auth-error.js';
+import { currentAuditTenant } from './audit-request-context.js';
 
 const MUTATION_METHODS = new Set(['POST', 'PUT', 'PATCH', 'DELETE']);
 
@@ -121,6 +122,17 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases$/)) && method === 'POST') return { action: 'database.create', resourceType: 'server', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases\/([^/]+)\/backup$/)) && method === 'POST') return { action: 'database.backup', resourceType: 'database', resourceId: parts[1] };
   if ((parts = match(pathname, /^\/api\/servers\/([^/]+)\/databases\/([^/]+)$/)) && method === 'DELETE') return { action: 'database.delete', resourceType: 'database', resourceId: parts[1] };
+  if ((parts = match(pathname, /^\/api\/users\/hosting\/accounts\/self\/customers\/([^/]+)\/login$/)) && method === 'PATCH') return { action: 'hosting.customer.login.update', resourceType: 'customer', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/users\/hosting\/accounts\/self\/customers\/([^/]+)\/status$/)) && method === 'PATCH') return { action: 'hosting.customer.status.update', resourceType: 'customer', resourceId: parts[0] };
+  if (method === 'POST' && pathname === '/api/users/hosting/accounts/self/customers') return { action: 'hosting.customer.create', resourceType: 'customer', resourceId: 'new' };
+  if (method === 'POST' && pathname === '/api/users/hosting/accounts/self/sites') return { action: 'hosting.site.create', resourceType: 'website', resourceId: 'new' };
+  if ((parts = match(pathname, /^\/api\/users\/hosting\/accounts\/([^/]+)\/limits$/)) && method === 'PATCH') return { action: 'hosting.limits.update', resourceType: 'hosting_account', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/users\/hosting\/accounts\/([^/]+)\/status$/)) && method === 'PATCH') return { action: 'hosting.status.update', resourceType: 'hosting_account', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/users\/hosting\/accounts\/([^/]+)\/profile$/)) && method === 'DELETE') return { action: 'hosting.account.unregister', resourceType: 'hosting_account', resourceId: parts[0] };
+  if (method === 'POST' && pathname === '/api/users/hosting/accounts') return { action: 'hosting.account.register', resourceType: 'hosting_account', resourceId: 'new' };
+  if ((parts = match(pathname, /^\/api\/customers\/([^/]+)$/)) && method === 'PATCH') return { action: 'customer.update', resourceType: 'customer', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/customers\/([^/]+)$/)) && method === 'DELETE') return { action: 'customer.delete', resourceType: 'customer', resourceId: parts[0] };
+  if (method === 'POST' && pathname === '/api/customers') return { action: 'customer.create', resourceType: 'customer', resourceId: 'new' };
   return null;
 }
 
@@ -161,7 +173,8 @@ export function attachManagementAudit({ request, response, pathname, audit, onAu
       try { onAuditError({ action: classification.action, resourceType: classification.resourceType, outcome }); } catch {}
     }
   });
-  return Object.freeze({ actorId, ...classification });
+  const tenant = currentAuditTenant();
+  return Object.freeze({ actorId, ...classification, ...(tenant ? { tenant } : {}) });
 }
 
 export const managementAuditInternals = Object.freeze({

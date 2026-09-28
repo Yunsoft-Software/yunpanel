@@ -1,4 +1,5 @@
 import { createSiteResourceBoundary, needsSiteResourceJson } from './site-resource-boundary.js';
+import { createTenantBoundaryMiddleware } from './tenant-boundary.js';
 import express from 'express';
 import { mountAiRoutes } from './ai-http.js';
 import {
@@ -356,6 +357,18 @@ export function createApp(allOptions = {}) {
     if (needsSiteResourceJson(request)) return smallJson(request, response, next);
     return next();
   });
+  const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
+  const customerLookup = typeof options.customerLookup === 'function'
+    ? options.customerLookup
+    : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
+      ? (id) => hostingAccounts.getCustomer(id)
+      : null;
+  app.use(createTenantBoundaryMiddleware({
+    ...options,
+    websiteRegistry,
+    customerLookup,
+    websiteLookup: async (id) => websiteRegistry.getWebsite(id),
+  }));
   app.use(createSiteResourceBoundary({
     ...options,
     websiteRegistry,

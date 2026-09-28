@@ -306,6 +306,7 @@ export function createAuthStore({
   return {
     mfa,
     users,
+    hostingAccounts: users.hostingAccounts,
     audit,
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),

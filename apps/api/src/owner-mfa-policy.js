@@ -13,6 +13,9 @@ export function createOwnerMfaPolicy({ store, required = true }) {
       enrolled = store.mfa.enabled(session.user.id);
       if (typeof enrolled !== 'boolean') throw new Error('MFA enrollment state is unavailable');
     }
+    const siteCapable = ['site_manager', 'reseller', 'customer'].includes(session.user?.role)
+      || session.user?.hosting?.kind === 'reseller'
+      || session.user?.hosting?.kind === 'customer';
     // The optional development policy does not inspect crypto state. Login still
     // requires a second factor whenever the underlying account has one enrolled.
     return describePanelAccess({
@@ -20,7 +23,7 @@ export function createOwnerMfaPolicy({ store, required = true }) {
       security: {
         ownerMfaRequired: owner && required,
         enrollmentRequired: owner && required && !enrolled,
-        managementAllowed: owner ? (!required || enrolled) : session.user?.role === 'site_manager',
+        managementAllowed: owner ? (!required || enrolled) : siteCapable,
       },
     });
   }
@@ -38,7 +41,10 @@ export function createOwnerMfaPolicy({ store, required = true }) {
   function requireSiteManagement(session) {
     const current = describe(session);
     if (!current) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
-    if (!['owner', 'site_manager'].includes(current.user.role)) throw new AuthError('forbidden', 'Management access is required.', 403);
+    const siteCapable = ['owner', 'site_manager', 'reseller', 'customer'].includes(current.user.role)
+      || current.user.hosting?.kind === 'reseller'
+      || current.user.hosting?.kind === 'customer';
+    if (!siteCapable) throw new AuthError('forbidden', 'Management access is required.', 403);
     return current;
   }
 
