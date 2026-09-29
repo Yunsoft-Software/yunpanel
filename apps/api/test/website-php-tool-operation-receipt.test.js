@@ -26,6 +26,16 @@ test('receipt normalizes exact reviewed execution evidence', () => {
   assert.equal(value.payload.unixUser, 'yunapp-123456789abc');
 });
 
+test('receipt preserves reseller and customer actor evidence for crash recovery', () => {
+  for (const actorRole of ['reseller', 'customer']) {
+    const value = websitePhpToolOperationReceiptInternals.normalized({
+      ...base,
+      payload: { ...base.payload, actorRole },
+    });
+    assert.equal(value.payload.actorRole, actorRole);
+  }
+});
+
 for (const patch of [
   { result: { ...base.result, actionId: 'composer.dump-autoload' } },
   { result: { ...base.result, unixUser: 'root' } },
