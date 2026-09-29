@@ -23,10 +23,14 @@ function auth(role = 'owner') {
       security: { managementAllowed: true },
     };
   }
-  if (role === 'site_manager') {
+  if (['site_manager', 'reseller', 'customer'].includes(role)) {
     return {
-      id: 'site-session',
-      user: { id: 'site-user', role: 'site_manager', websiteIds: [websiteId] },
+      id: role === 'site_manager' ? 'site-session' : `${role}-session`,
+      user: {
+        id: role === 'site_manager' ? 'site-user' : `${role}-user`,
+        role,
+        websiteIds: [websiteId],
+      },
       access: { mode: 'site_management', permissions: ['website:manage'] },
       security: { managementAllowed: true },
     };
@@ -146,6 +150,34 @@ test('Site Manager can bootstrap and mint elFinder only for an assigned Website'
       websiteId,
     }],
   ]);
+});
+
+test('Reseller and Customer can bootstrap and mint elFinder only through their Website grant', async (t) => {
+  for (const role of ['reseller', 'customer']) {
+    await t.test(role, async (t) => {
+      const { base, calls } = await listen(t, { role });
+      assert.equal((await fetch(`${base}/api/elfinder-bootstrap-access`)).status, 204);
+      const response = await fetch(
+        `${base}/api/servers/${serverId}/websites/${websiteId}/elfinder-handoffs`,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: '{}',
+        },
+      );
+      assert.equal(response.status, 201);
+      assert.deepEqual(calls, [
+        ['server', serverId],
+        ['issue', {
+          sessionId: `${role}-session`,
+          userId: `${role}-user`,
+          sessionDigest: SESSION_DIGEST,
+          serverId,
+          websiteId,
+        }],
+      ]);
+    });
+  }
 });
 
 test('Read Only cannot enter elFinder bootstrap or mint handoffs', async (t) => {
