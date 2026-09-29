@@ -49,19 +49,22 @@ function auditResource(target) {
 }
 
 function requireTerminalTargetAccess(session, target) {
-  const owner = session?.user?.role === 'owner'
+  const active = session?.user?.active !== false && session?.user?.active !== 0;
+  const owner = active
+    && session?.user?.role === 'owner'
     && session?.access?.mode === 'management'
     && session?.security?.managementAllowed === true;
   if (target?.scope === 'server') {
     if (!owner) throw new AuthError('terminal_server_forbidden', 'Only server owner can access root terminal.', 403);
     return session;
   }
-  const siteManager = session?.user?.role === 'site_manager'
+  const siteActor = active
+    && ['site_manager', 'reseller', 'customer'].includes(session?.user?.role)
     && session?.access?.mode === 'site_management'
     && session?.security?.managementAllowed === true
     && Array.isArray(session?.user?.websiteIds)
     && session.user.websiteIds.includes(target?.websiteId);
-  if (target?.scope !== 'site' || (!owner && !siteManager)) {
+  if (target?.scope !== 'site' || (!owner && !siteActor)) {
     throw new AuthError('terminal_site_forbidden', 'Website terminal access is no longer authorized.', 403);
   }
   return session;
