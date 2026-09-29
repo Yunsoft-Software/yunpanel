@@ -13,9 +13,9 @@ function owner() {
   };
 }
 
-function siteManager(websiteIds = [WEBSITE_ID]) {
+function siteActor(role = 'site_manager', websiteIds = [WEBSITE_ID], active = true) {
   return {
-    user: { id: 'manager', role: 'site_manager', websiteIds },
+    user: { id: `${role}-user`, role, websiteIds, active },
     access: { mode: 'site_management', permissions: ['sites.manage'] },
     security: { managementAllowed: true },
   };
@@ -32,20 +32,36 @@ test('terminal WebSocket target policy keeps root Owner-only and site access bou
     'owner',
   );
   assert.equal(
-    requireTerminalTargetAccess(siteManager(), { scope: 'site', websiteId: WEBSITE_ID }).user.role,
+    requireTerminalTargetAccess(siteActor(), { scope: 'site', websiteId: WEBSITE_ID }).user.role,
     'site_manager',
   );
+  for (const role of ['reseller', 'customer']) {
+    assert.equal(
+      requireTerminalTargetAccess(siteActor(role), { scope: 'site', websiteId: WEBSITE_ID }).user.role,
+      role,
+    );
+    assert.throws(
+      () => requireTerminalTargetAccess(siteActor(role), { scope: 'site', websiteId: OTHER_WEBSITE_ID }),
+      { code: 'terminal_site_forbidden', status: 403 },
+    );
+  }
 
   assert.throws(
-    () => requireTerminalTargetAccess(siteManager(), { scope: 'server', serverId: 'local-server' }),
+    () => requireTerminalTargetAccess(siteActor(), { scope: 'server', serverId: 'local-server' }),
     { code: 'terminal_server_forbidden', status: 403 },
   );
   assert.throws(
-    () => requireTerminalTargetAccess(siteManager(), { scope: 'site', websiteId: OTHER_WEBSITE_ID }),
+    () => requireTerminalTargetAccess(siteActor(), { scope: 'site', websiteId: OTHER_WEBSITE_ID }),
     { code: 'terminal_site_forbidden', status: 403 },
   );
   assert.throws(
-    () => requireTerminalTargetAccess(siteManager([]), { scope: 'site', websiteId: WEBSITE_ID }),
+    () => requireTerminalTargetAccess(siteActor('site_manager', []), { scope: 'site', websiteId: WEBSITE_ID }),
     { code: 'terminal_site_forbidden', status: 403 },
   );
+  for (const role of ['site_manager', 'reseller', 'customer']) {
+    assert.throws(
+      () => requireTerminalTargetAccess(siteActor(role, [WEBSITE_ID], false), { scope: 'site', websiteId: WEBSITE_ID }),
+      { code: 'terminal_site_forbidden', status: 403 },
+    );
+  }
 });
