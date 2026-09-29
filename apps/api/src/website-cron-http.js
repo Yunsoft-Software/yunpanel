@@ -42,7 +42,8 @@ const DELETE_REQUIRED = new Set(['expectedRevision']);
 function requestActor(request) {
   const auth = request?.auth;
   if (!auth || typeof auth.id !== 'string' || typeof auth.user?.id !== 'string'
-    || !['owner', 'site_manager'].includes(auth.user.role)) {
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(auth.user.role)
+    || auth.user.active === false || auth.user.active === 0) {
     throw new WebsiteCronHttpError('cron_actor_invalid', 'Live panel actor context is required', 403);
   }
   return Object.freeze({ sessionId: auth.id, userId: auth.user.id, role: auth.user.role });
