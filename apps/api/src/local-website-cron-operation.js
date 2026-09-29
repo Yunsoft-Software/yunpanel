@@ -83,7 +83,7 @@ export function createLocalWebsiteCronOperation({
       || typeof authorizeActor !== 'function'
       || typeof payload.actorSessionId !== 'string'
       || typeof payload.actorUserId !== 'string'
-      || !['owner', 'site_manager'].includes(payload.actorRole)) {
+      || !['owner', 'site_manager', 'reseller', 'customer'].includes(payload.actorRole)) {
       throw new LocalWebsiteCronOperationError(
         'website_cron_authorization_invalid',
         'Live panel authorization is required before cron execution',
