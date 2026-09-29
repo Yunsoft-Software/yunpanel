@@ -30,7 +30,7 @@ function normalized(value) {
     || !UUID.test(p.websiteId ?? '') || !UUID.test(p.applicationId ?? '') || !USER.test(p.unixUser ?? '')
     || !Number.isSafeInteger(p.expectedWebsiteRevision) || p.expectedWebsiteRevision < 1
     || !UUID.test(p.actorSessionId ?? '') || !UUID.test(p.actorUserId ?? '')
-    || !['owner', 'site_manager'].includes(p.actorRole)
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(p.actorRole)
     || !ACTIONS.has(p.actionId) || !SHA.test(p.previewDigest ?? '')
     || p.confirmation !== `php-tool:${p.websiteId}:${p.actionId}:${p.previewDigest}`
     || !r || typeof r !== 'object' || Array.isArray(r)
