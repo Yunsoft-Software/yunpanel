@@ -227,6 +227,31 @@ test('LocalWebsiteCronOperation holds the shared site lock during host mutation'
 });
 
 
+test('LocalWebsiteCronOperation accepts reseller and customer only after live Website reauthorization', async (t) => {
+  for (const role of ['reseller', 'customer']) {
+    await t.test(role, async () => {
+      const f = createFixtures();
+      const payload = { ...f.payload, actorRole: role };
+      const operation = createLocalWebsiteCronOperation({
+        websiteCronRegistry: f.websiteCronRegistry,
+        websiteCronManager: f.websiteCronManager,
+        receiptStore: f.receiptStore,
+        authorizeActor: async (candidate, targetWebsiteId) => (
+          candidate.sessionId === payload.actorSessionId
+          && candidate.userId === payload.actorUserId
+          && candidate.role === role
+          && targetWebsiteId === websiteId
+            ? { ...candidate }
+            : null
+        ),
+      });
+      const result = await operation.execute(OPERATIONS.CRON_APPLY, payload, f.execution);
+      assert.equal(result.applied, true);
+      assert.equal(f.getAppliedInput().taskId, taskId);
+    });
+  }
+});
+
 test('LocalWebsiteCronOperation refuses host mutation after live Website grant is revoked', async () => {
   const f = createFixtures();
   const operation = createLocalWebsiteCronOperation({
