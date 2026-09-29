@@ -141,6 +141,16 @@ test('elFinder gateway state revalidates current Website grant and runtime ident
     role: 'site_manager',
     websiteIds: [websiteId],
   }))?.applicationId, applicationId);
+  for (const role of ['reseller', 'customer']) {
+    assert.equal((await fx.service.authorizeGatewayState(state, {
+      role,
+      websiteIds: [websiteId],
+    }))?.applicationId, applicationId);
+    assert.equal(await fx.service.authorizeGatewayState(state, {
+      role,
+      websiteIds: [],
+    }), null);
+  }
   assert.equal(await fx.service.authorizeGatewayState(state, {
     role: 'site_manager',
     websiteIds: [],
