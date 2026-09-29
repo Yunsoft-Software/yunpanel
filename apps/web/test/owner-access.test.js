@@ -16,6 +16,19 @@ test('missing or malformed policy metadata fails closed', () => {
   for (const value of [null, {}, { ...session, security: {} }, { ...session, access: undefined }, { ...session, access: { mode: 'self_service', permissions: 'none' } }]) assert.equal(ownerAccess(value), 'unknown');
 });
 
+test('site manager, reseller, and customer sessions use site-management access only', () => {
+  for (const role of ['site_manager', 'reseller', 'customer']) {
+    const tenant = {
+      user: { role },
+      security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+    };
+    assert.equal(ownerAccess(tenant), 'site_management');
+    assert.equal(panelPermission(tenant, '*'), true);
+    assert.equal(ownerAccess({ ...tenant, access: { mode: 'management', permissions: ['*'] } }), 'denied');
+  }
+});
+
 test('non-Owners cannot inherit management wildcard or inconsistent metadata', () => {
   assert.equal(ownerAccess({ ...ready, user: { role: 'read_only' } }), 'denied');
   assert.equal(ownerAccess({ ...reader, access: { mode: 'read_only', permissions: ['*'] } }), 'denied');
