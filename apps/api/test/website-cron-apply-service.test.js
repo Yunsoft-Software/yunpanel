@@ -164,6 +164,29 @@ test('WebsiteCronApplyService deletes a task and enqueues CRON_REMOVE job', asyn
   assert.equal(result.job.resourceId, taskId);
 });
 
+test('WebsiteCronApplyService preserves reseller and customer authorization in queued jobs', async (t) => {
+  for (const role of ['reseller', 'customer']) {
+    await t.test(role, async () => {
+      const f = createFixtures();
+      const service = createWebsiteCronApplyService({
+        websiteCronRegistry: f.websiteCronRegistry,
+        jobRegistry: f.jobRegistry,
+        websiteRegistry: f.websiteRegistry,
+      });
+      const tenantActor = { ...actor, role };
+      const result = await service.createCron({
+        websiteId,
+        name: 'Tenant Cron',
+        schedule: '15 2 * * *',
+        command: '/usr/bin/true',
+      }, tenantActor);
+      assert.equal(result.job.payload.authorizationMode, 'user');
+      assert.equal(result.job.payload.actorRole, role);
+      assert.equal(result.job.payload.actorSessionId, tenantActor.sessionId);
+    });
+  }
+});
+
 test('WebsiteCronApplyService rejects unhosted website runtimes', async () => {
   const f = createFixtures({ runtimeType: 'docker' });
   const service = createWebsiteCronApplyService({
