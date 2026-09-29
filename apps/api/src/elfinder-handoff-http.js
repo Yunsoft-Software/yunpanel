@@ -45,12 +45,15 @@ export function mountElFinderHandoffRoutes(app, {
       const isOwner = auth?.user?.role === 'owner'
         && auth?.access?.mode === 'management'
         && auth?.security?.managementAllowed === true;
-      const isSiteManager = auth?.user?.role === 'site_manager'
+      const active = auth?.user?.active !== false && auth?.user?.active !== 0;
+      const isSiteActor = active
+        && ['site_manager', 'reseller', 'customer'].includes(auth?.user?.role)
         && auth?.access?.mode === 'site_management'
+        && auth?.security?.managementAllowed === true
         && Array.isArray(auth?.user?.websiteIds)
         && auth.user.websiteIds.length > 0;
       if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string'
-        || (!isOwner && !isSiteManager)) {
+        || (!isOwner && !isSiteActor)) {
         throw new ElFinderHandoffError(
           'elfinder_bootstrap_authorized_required',
           'elFinder requires an authorized Website management session',
@@ -70,9 +73,14 @@ export function mountElFinderHandoffRoutes(app, {
       emptyQuery(request.query);
       emptyBody(request.body);
       const auth = request.auth;
-      const isOwner = auth?.user?.role === 'owner' && auth?.access?.mode === 'management' && auth?.security?.managementAllowed === true;
-      const isSiteManager = auth?.user?.role === 'site_manager' && auth?.access?.mode === 'site_management' && (auth?.user?.websiteIds ?? []).includes(request.params.websiteId);
-      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || (!isOwner && !isSiteManager)) {
+      const active = auth?.user?.active !== false && auth?.user?.active !== 0;
+      const isOwner = active && auth?.user?.role === 'owner' && auth?.access?.mode === 'management' && auth?.security?.managementAllowed === true;
+      const isSiteActor = active
+        && ['site_manager', 'reseller', 'customer'].includes(auth?.user?.role)
+        && auth?.access?.mode === 'site_management'
+        && auth?.security?.managementAllowed === true
+        && (auth?.user?.websiteIds ?? []).includes(request.params.websiteId);
+      if (typeof auth?.id !== 'string' || typeof auth?.user?.id !== 'string' || (!isOwner && !isSiteActor)) {
         throw new ElFinderHandoffError(
           'elfinder_handoff_authorized_required',
           'elFinder requires an authorized session for this website',
