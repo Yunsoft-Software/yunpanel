@@ -318,11 +318,11 @@ export function createElFinderHandoffService({
     websiteIds,
   } = {}) {
     if (!state || typeof state !== 'object' || Array.isArray(state)
-      || !['owner', 'site_manager'].includes(role)
+      || !['owner', 'site_manager', 'reseller', 'customer'].includes(role)
       || !Number.isSafeInteger(state.websiteRevision) || state.websiteRevision < 1
       || typeof state.applicationId !== 'string'
       || typeof state.unixUser !== 'string' || !APP_USER_PATTERN.test(state.unixUser)) return null;
-    if (role === 'site_manager'
+    if (role !== 'owner'
       && (!Array.isArray(websiteIds) || !websiteIds.includes(state.websiteId))) return null;
 
     let current;
