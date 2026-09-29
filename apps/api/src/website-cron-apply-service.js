@@ -23,7 +23,7 @@ function userAuthorization(actor) {
   if (!actor || typeof actor !== 'object' || Array.isArray(actor)
     || typeof actor.sessionId !== 'string' || !UUID.test(actor.sessionId)
     || typeof actor.userId !== 'string' || !UUID.test(actor.userId)
-    || !['owner', 'site_manager'].includes(actor.role)) {
+    || !['owner', 'site_manager', 'reseller', 'customer'].includes(actor.role)) {
     throw new WebsiteCronApplyServiceError(
       'website_cron_actor_invalid',
       'Live panel actor context is required for cron mutation',
