@@ -105,6 +105,33 @@ test('POST /api/websites/:websiteId/crons creates a cron task', async () => {
   assert.equal(res.body.data.actor.userId, '42345678-1234-4234-8234-123456789012');
 });
 
+test('Reseller and Customer cron mutations preserve their live tenant actor role', async (t) => {
+  for (const role of ['reseller', 'customer']) {
+    await t.test(role, async () => {
+      const app = createApp({
+        authOverride: {
+          id: '32345678-1234-4234-8234-123456789012',
+          user: {
+            id: '42345678-1234-4234-8234-123456789012',
+            role,
+            websiteIds: [websiteId],
+            active: true,
+          },
+          access: { mode: 'site_management', permissions: ['sites.manage'] },
+          security: { managementAllowed: true },
+        },
+      });
+      const res = await request(app, 'POST', `/api/websites/${websiteId}/crons`, {
+        name: 'Backup',
+        schedule: '0 3 * * *',
+        command: '/usr/bin/backup.sh',
+      });
+      assert.equal(res.status, 201);
+      assert.equal(res.body.data.actor.role, role);
+    });
+  }
+});
+
 test('POST /api/websites/:websiteId/crons rejects missing required fields', async () => {
   const app = createApp();
   const res = await request(app, 'POST', `/api/websites/${websiteId}/crons`, {
@@ -150,6 +177,29 @@ test('DELETE /api/websites/:websiteId/crons/:cronId deletes task', async () => {
   assert.equal(res.body.data.job.operation, 'cron.remove');
 });
 
+
+test('cron mutation rejects an inactive tenant actor', async () => {
+  const app = createApp({
+    authOverride: {
+      id: '32345678-1234-4234-8234-123456789012',
+      user: {
+        id: '42345678-1234-4234-8234-123456789012',
+        role: 'customer',
+        websiteIds: [websiteId],
+        active: false,
+      },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+      security: { managementAllowed: true },
+    },
+  });
+  const res = await request(app, 'POST', `/api/websites/${websiteId}/crons`, {
+    name: 'Backup',
+    schedule: '0 3 * * *',
+    command: '/usr/bin/backup.sh',
+  });
+  assert.equal(res.status, 403);
+  assert.equal(res.body.error.code, 'cron_actor_invalid');
+});
 
 test('cron mutation rejects an auth projection without live session/user identity', async () => {
   const app = createApp({
