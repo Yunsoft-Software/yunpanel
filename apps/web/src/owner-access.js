@@ -16,7 +16,7 @@ export function ownerAccess(session) {
   if (session?.user?.role === 'read_only') {
     return session.access.mode === 'read_only' && !session.access.permissions.includes('*') ? 'read_only' : 'denied';
   }
-  if (session?.user?.role === 'site_manager') {
+  if (['site_manager', 'reseller', 'customer'].includes(session?.user?.role)) {
     return session.access.mode === 'site_management' ? 'site_management' : 'denied';
   }
   if (session?.user?.role !== 'owner') return 'denied';
