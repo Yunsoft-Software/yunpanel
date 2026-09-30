@@ -6,7 +6,10 @@ export const SITE_TABS = [
   ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
   ['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'], ['settings', 'Barındırma bilgileri'],
 ];
-export const siteHref = (id, tab = 'overview') => `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === tab) ? tab : 'overview'}`;
+export const siteHref = (id, tab = 'overview') => {
+  const normalized = tab === 'statistics' ? 'analytics' : tab;
+  return `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === normalized) ? normalized : 'overview'}`;
+};
 export function certificateState(domain, certificates, now = Date.now()) {
   if (!Array.isArray(certificates)) return { state: 'unknown', label: 'SSL bilgisi alınamadı' };
   const certificate = certificates.find((item) => item.id === domain.certificateId);

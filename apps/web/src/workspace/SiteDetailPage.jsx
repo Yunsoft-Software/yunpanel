@@ -61,7 +61,8 @@ function LegacyWebsiteRepair({ domain, canManage, onChanged }) {
 }
 export default function SiteDetailPage() {
   const { websiteId, tab = 'overview' } = useParams();
-  return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={tab} />;
+  const normalizedTab = tab === 'statistics' ? 'analytics' : tab;
+  return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={normalizedTab} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
   const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isReseller } = useWorkspace();

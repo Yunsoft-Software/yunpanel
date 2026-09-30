@@ -3,11 +3,18 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { CollectionNotice, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { resolveSiteToolEntry } from './site-tool-entry-model.js';
 
+const TOOL_META = {
+  mail: { title: 'Posta', icon: 'mail' },
+  databases: { title: 'Veritabanları', icon: 'database' },
+  statistics: { title: 'İstatistikler', icon: 'dashboard' },
+};
+
 export default function SiteToolEntryPage({ tool }) {
   const { websites, domains, canManage } = useWorkspace();
   const [params] = useSearchParams();
-  const title = tool === 'mail' ? 'Posta' : 'Veritabanları';
-  const icon = tool === 'mail' ? 'mail' : 'database';
+  const meta = TOOL_META[tool] ?? { title: 'Araç', icon: 'box' };
+  const title = meta.title;
+  const icon = meta.icon;
   const entry = resolveSiteToolEntry({ tool, websites, domains, canManage,
     requestedSiteId: params.has('site') ? params.get('site') : null });
   if (entry.state === 'ready') return <Navigate to={entry.target.href} replace />;
