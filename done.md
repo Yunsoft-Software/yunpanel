@@ -294,3 +294,21 @@
 - `apps/web/src/workspace/site-model.js` içinde `normalizeSiteTab` fonksiyonunda bilinmeyen veya geçersiz sekme adlarının (`non-existent-tab`) `lower` döndürmek yerine güvenli bir şekilde `overview` sekmesine düşmesi sağlandı (`return 'overview'`).
 - `apps/web/test/route-transitions.test.js` test dosyasındaki `siteHref` testi, `overview` sekmesi ve varsayılan sekme parametresi için üretilen kanonik URL (`/websites/dom-123/overview`) beklentisine hizalanarak `navigation.test.js` ile tutarlı hale getirildi.
 - Testler (`apps/web/test/route-transitions.test.js`, `apps/web/test/server.test.js`, `apps/web/test/file-workspace-model.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — Posta kutusu silme işlemi sırasında komşu hesapların sürekliliği, oturum izolasyonu, yarış durumları ve yedek/geri dönüş akışının doğrulanması
+- Aynı etkin etki alanında posta kutusu A silinirken posta kutusu B'nin SMTP, IMAP ve webmail erişim sürekliliği kesintiye uğramadan korundu; alan adı durumunun ve komşu hesapların değişmeden kaldığı, Postfix/Dovecot erişim denetimlerinin yalnız hedef posta kutusunu etkilediği doğrulandı (`apps/api/test/mailbox-removal.test.js`).
+- Önceden kimlik doğrulaması yapılmış SMTP, LMTP ve webmail oturumlarının silme işlemi sırasındaki fail-closed izolasyon davranışı doğrulandı; aktif oturumların sonlandırılması, passdb/userdb ve teslimat haritası yokluğunun teyidi ve inatçı veya yeniden beliren oturumlarda işlemin durdurulması test edildi.
+- Silme mutasyonu anında yetki kontrolü (rol/kiracı sınırları), yeniden etkinleştirme (re-activation) ve yerel/yabancı alias referans yarış durumlarının güvenli yönetimi ile yabancı alias kimliklerinin gizliliği doğrulandı (`apps/api/test/mailbox-removal.test.js`, `apps/api/test/mailbox-alias-references.test.js`).
+- Silme işlemi öncesinde doğrulanmış yedek zorunluluğu, bayat/uyuşmayan yedeklerin reddi, host silme hatası anında dosya sistemi düzeyinde otomatik geri dönüş (rollback) ve silme sonrası veri kurtarma (restore) akışının doğrulanabilirliği sağlandı.
+- Doğrulama testleri (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+- `apps/api/test/mailbox-removal.test.js` içindeki `mailbox-access-guard.js` ve `mail-data-delete-manager.js` modül içe aktarım yolları (`../../../packages/host-runtime/src/...`) düzeltilerek `ERR_MODULE_NOT_FOUND` hatası giderildi (pending orchestrator verification).
+
+## 2026-09-30 — Mailbox removal testi MailboxRegistryError içe ve dışa aktarım onarımı
+- `apps/api/src/mailbox-http.js` modülünden `MailboxRegistryError` dışa aktarımı (`export { MailboxRegistryError };`) eklendi.
+- `apps/api/test/mailbox-removal.test.js` dosyasında `MailboxRegistryError` içe aktarımı kanonik kaynağı olan `../src/mailbox-registry.js` ile uyumlu hale getirildi, `SyntaxError: The requested module '../src/mailbox-http.js' does not provide an export named 'MailboxRegistryError'` hatası giderildi.
+- Doğrulama testleri (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — Mailbox removal testi test harness ve access guard komut mock onarımı
+- `apps/api/test/mailbox-removal.test.js` dosyasındaki test harness `mailboxRegistry` nesnesine `mountMailboxRoutes` arayüz gereksinimleri olan `createMailbox` ve `rotatePassword` metodları eklendi, `Mailbox registry is required` hatası giderildi.
+- `stubbornRunner` ve `raceRunner` komut çalıştırıcılarında hata nesnelerine eksik `stdout: ''` ve `stderr` alanları tanımlandı; `stubbornRunner` içinde `postconf` çağrısında `smtpd_sender_login_maps` parametresi desteklenerek `mailbox_access_output_invalid` hatası giderildi ve `mailbox_access_sessions_remaining` ile `mailbox_access_still_enabled` fail-closed izolasyon doğrulaması sağlandı.
+- Doğrulama testleri (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
