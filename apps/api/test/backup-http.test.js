@@ -258,3 +258,414 @@ test('operation view strips durable execution input and work references while re
   assert.deepEqual(view.progress, { total: 1, pending: 0, dispatched: 0, succeeded: 1, failed: 0 });
   assert.doesNotMatch(JSON.stringify(view), /privatePath|must\/not\/leak|workRef|idempotencyKey|executorKind/);
 });
+
+// ============================================================================
+// BACKUP-UI-03: Website Backup & Restore Durable Operations & Recovery Tests
+// ============================================================================
+
+import {
+  createWebsiteBackupOperationRegistry,
+  WebsiteBackupOperationRegistryError,
+  websiteBackupOperationPublicView,
+} from '../src/website-backup-operation-registry.js';
+import {
+  createWebsiteBackupOperationService,
+  WebsiteBackupOperationServiceError,
+} from '../src/website-backup-operation-service.js';
+import {
+  mountWebsiteBackupRoutes,
+  WebsiteBackupHttpError,
+  isWebsiteBackupHttpError,
+} from '../src/website-backup-http.js';
+
+function websiteFixture() {
+  const targetWebsiteId = '550e8400-e29b-41d4-a716-446655440000';
+  const targetRepoId = '660e8400-e29b-41d4-a716-446655440001';
+  const targetSnapshotId = '770e8400-e29b-41d4-a716-446655440002';
+  const backupDigest = 'b'.repeat(64);
+  const restoreDigest = 'f'.repeat(64);
+
+  const mockBackupPreview = {
+    websiteId: targetWebsiteId,
+    repositoryId: targetRepoId,
+    backupSetDigest: backupDigest,
+    targetPaths: ['/var/lib/yunpanel/apps/target'],
+    excludePatterns: ['.git'],
+    tags: [`website:${targetWebsiteId}`],
+    databases: ['novasis'],
+    composeHooksEnabled: false,
+    confirmation: `backup:${targetWebsiteId}:${targetRepoId}:${backupDigest}`,
+  };
+
+  const mockRestorePreview = {
+    websiteId: targetWebsiteId,
+    websiteRevision: 1,
+    repositoryId: targetRepoId,
+    snapshotId: targetSnapshotId,
+    snapshotTime: '2026-09-30T00:00:00.000Z',
+    snapshotTags: [`website:${targetWebsiteId}`],
+    snapshotPaths: ['/var/lib/yunpanel/apps/target'],
+    healthSpec: { primaryDomain: 'example.com', healthPath: '/health', timeoutSeconds: 30 },
+    previewDigest: restoreDigest,
+    confirmation: `restore:${targetWebsiteId}:${targetSnapshotId}:${restoreDigest}`,
+  };
+
+  const mockBackupService = {
+    async previewBackup({ websiteId, repositoryId }) {
+      assert.equal(websiteId, targetWebsiteId);
+      return mockBackupPreview;
+    },
+    async executeBackup({ websiteId, repositoryId, expectedPreviewDigest, confirmation }) {
+      return {
+        status: 'succeeded',
+        websiteId,
+        repositoryId,
+        snapshot: { snapshotId: 'snap-created-123' },
+        backupSetDigest: expectedPreviewDigest,
+        createdAt: '2026-09-30T01:00:00.000Z',
+      };
+    },
+  };
+
+  const mockRestoreService = {
+    healthSatisfied: true,
+    async previewRestore({ websiteId, repositoryId, snapshotId }) {
+      assert.equal(websiteId, targetWebsiteId);
+      return mockRestorePreview;
+    },
+    async executeRestore({ websiteId, repositoryId, snapshotId, expectedPreviewDigest, confirmation }) {
+      if (!this.healthSatisfied) {
+        return {
+          status: 'rolled_back',
+          websiteId,
+          snapshotId,
+          preRestoreSnapshotId: 'pre-snap-rollback-1',
+          rollbackReason: 'health_check_failed',
+          healthCheck: { satisfied: false, statusCode: 500, error: 'Health check failed' },
+          rolledBackAt: '2026-09-30T01:05:00.000Z',
+        };
+      }
+      return {
+        status: 'succeeded',
+        websiteId,
+        snapshotId,
+        preRestoreSnapshotId: 'pre-snap-success-1',
+        healthCheck: { satisfied: true, statusCode: 200, attempts: 1 },
+        restoredAt: '2026-09-30T01:05:00.000Z',
+      };
+    },
+  };
+
+  const registry = createWebsiteBackupOperationRegistry();
+  const operationService = createWebsiteBackupOperationService({
+    registry,
+    websiteBackupService: mockBackupService,
+    websiteRestoreService: mockRestoreService,
+  });
+
+  const routes = [];
+  const fakeApp = {
+    get(path, ...handlers) { routes.push({ method: 'get', path, handlers }); },
+    post(path, ...handlers) { routes.push({ method: 'post', path, handlers }); },
+  };
+
+  mountWebsiteBackupRoutes(fakeApp, {
+    websiteBackupSetProvider: { async getWebsiteBackupSet() { return {}; } },
+    websiteBackupService: mockBackupService,
+    websiteBackupOperationService: operationService,
+  });
+
+  return {
+    targetWebsiteId,
+    targetRepoId,
+    targetSnapshotId,
+    backupDigest,
+    restoreDigest,
+    mockBackupPreview,
+    mockRestorePreview,
+    mockBackupService,
+    mockRestoreService,
+    registry,
+    operationService,
+    routes,
+  };
+}
+
+test('website backup durable queue route enforces owner permission and exact typed confirmation', async () => {
+  const fixture = websiteFixture();
+  const queueRoute = fixture.routes.find((r) => r.path === '/api/websites/:websiteId/backup-operations' && r.method === 'post');
+  assert.ok(queueRoute, 'backup-operations route should be registered');
+
+  // Verify non-owner is rejected with 403
+  let authDenied = null;
+  const nonOwnerResponse = {
+    statusCode: 200,
+    status(code) { this.statusCode = code; return this; },
+    json(body) { authDenied = body; return this; },
+  };
+  queueRoute.handlers[0]({
+    auth: { user: { role: 'viewer' }, access: { mode: 'view' }, security: { managementAllowed: true } },
+  }, nonOwnerResponse, () => {});
+  assert.equal(nonOwnerResponse.statusCode, 403);
+  assert.equal(authDenied.error.code, 'forbidden');
+
+  // Verify typed confirmation mismatch is rejected
+  await assert.rejects(
+    async () => fixture.operationService.queueBackup({
+      websiteId: fixture.targetWebsiteId,
+      repositoryId: fixture.targetRepoId,
+      expectedPreviewDigest: fixture.backupDigest,
+      confirmation: 'backup:wrong:confirmation',
+    }),
+    (err) => err instanceof WebsiteBackupOperationServiceError && err.code === 'backup_confirmation_invalid' && err.status === 409,
+  );
+
+  // Verify stale preview digest is rejected
+  await assert.rejects(
+    async () => fixture.operationService.queueBackup({
+      websiteId: fixture.targetWebsiteId,
+      repositoryId: fixture.targetRepoId,
+      expectedPreviewDigest: '0'.repeat(64),
+      confirmation: fixture.mockBackupPreview.confirmation,
+    }),
+    (err) => err instanceof WebsiteBackupOperationServiceError && err.code === 'backup_preview_stale' && err.status === 409,
+  );
+
+  // Verify exact typed confirmation is accepted with 202
+  const handler = queueRoute.handlers[1];
+  const { response, forwarded } = await invoke(handler, {
+    kind: 'backup',
+    repositoryId: fixture.targetRepoId,
+    expectedPreviewDigest: fixture.backupDigest,
+    confirmation: fixture.mockBackupPreview.confirmation,
+  }, {
+    params: { websiteId: fixture.targetWebsiteId },
+    auth: { user: { role: 'owner', id: 'owner-1' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } },
+  });
+
+  assert.equal(forwarded, null);
+  assert.equal(response.statusCode, 202);
+  assert.equal(response.body.data.websiteId, fixture.targetWebsiteId);
+  assert.equal(response.body.data.kind, 'backup');
+  assert.ok(['queued', 'running', 'succeeded'].includes(response.body.data.status));
+  assert.equal(response.body.data.previewDigest, fixture.backupDigest);
+});
+
+test('website backup same-job result flow tracks progress and rejects concurrent operations', async () => {
+  const fixture = websiteFixture();
+  const queueRoute = fixture.routes.find((r) => r.path === '/api/websites/:websiteId/backup-operations' && r.method === 'post');
+  const getRoute = fixture.routes.find((r) => r.path === '/api/websites/:websiteId/backup-operations/:operationId' && r.method === 'get');
+
+  // Start operation
+  const { response } = await invoke(queueRoute.handlers[1], {
+    kind: 'backup',
+    repositoryId: fixture.targetRepoId,
+    expectedPreviewDigest: fixture.backupDigest,
+    confirmation: fixture.mockBackupPreview.confirmation,
+  }, {
+    params: { websiteId: fixture.targetWebsiteId },
+    auth: { user: { role: 'owner', id: 'owner-1' } },
+  });
+  const operationId = response.body.data.id;
+
+  // Poll same job via getRoute
+  const pollResult = await invoke(getRoute.handlers[1], {}, {
+    params: { websiteId: fixture.targetWebsiteId, operationId },
+    auth: { user: { role: 'owner', id: 'owner-1' } },
+  });
+  assert.equal(pollResult.forwarded, null);
+  assert.equal(pollResult.response.statusCode, 200);
+  assert.equal(pollResult.response.body.data.id, operationId);
+  assert.equal(pollResult.response.body.data.kind, 'backup');
+
+  // Verify concurrent operation for the same website is rejected with 409
+  // Put active operation in running status
+  await fixture.registry.updateOperation(operationId, { status: 'running' });
+  await assert.rejects(
+    async () => fixture.operationService.queueBackup({
+      websiteId: fixture.targetWebsiteId,
+      repositoryId: fixture.targetRepoId,
+      expectedPreviewDigest: fixture.backupDigest,
+      confirmation: fixture.mockBackupPreview.confirmation,
+    }),
+    (err) => err.code === 'website_backup_operation_conflict' && err.status === 409,
+  );
+});
+
+test('website restore durable queue route supports health check rollback', async () => {
+  const fixture = websiteFixture();
+  fixture.mockRestoreService.healthSatisfied = false; // Trigger unhealthy rollback
+
+  const op = await fixture.operationService.queueRestore({
+    websiteId: fixture.targetWebsiteId,
+    repositoryId: fixture.targetRepoId,
+    snapshotId: fixture.targetSnapshotId,
+    expectedPreviewDigest: fixture.restoreDigest,
+    confirmation: fixture.mockRestorePreview.confirmation,
+  });
+
+  assert.equal(op.kind, 'restore');
+  assert.equal(op.websiteId, fixture.targetWebsiteId);
+  assert.equal(op.snapshotId, fixture.targetSnapshotId);
+
+  // Wait for background execution
+  await new Promise((resolve) => setTimeout(resolve, 50));
+
+  const completed = await fixture.operationService.getOperation(op.id);
+  assert.equal(completed.status, 'rolled_back');
+  assert.equal(completed.result.status, 'rolled_back');
+  assert.equal(completed.result.rollbackReason, 'health_check_failed');
+  assert.equal(completed.result.healthCheck.satisfied, false);
+});
+
+test('restart recovery reconciles interrupted restore operations using receipt store', async () => {
+  const registry = createWebsiteBackupOperationRegistry();
+  const websiteId = '550e8400-e29b-41d4-a716-446655440000';
+  const repoId = '660e8400-e29b-41d4-a716-446655440001';
+  const snapId = '770e8400-e29b-41d4-a716-446655440002';
+  const previewDigest = 'c'.repeat(64);
+
+  // 1. Interrupted restore with succeeded receipt
+  const op1 = await registry.createOperation({
+    websiteId,
+    repositoryId: repoId,
+    kind: 'restore',
+    snapshotId: snapId,
+    previewDigest,
+    confirmation: `restore:${websiteId}:${snapId}:${previewDigest}`,
+  });
+  await registry.updateOperation(op1.id, { status: 'running', startedAt: '2026-09-30T00:00:00.000Z' });
+
+  const mockReceiptStore = {
+    async read(txId) {
+      if (txId === `restore:${websiteId}:${previewDigest.slice(0, 32)}`) {
+        return {
+          status: 'succeeded',
+          snapshotId: snapId,
+          preRestoreSnapshotId: 'pre-snap-123',
+          healthCheck: { satisfied: true, statusCode: 200 },
+          committedAt: '2026-09-30T00:01:00.000Z',
+        };
+      }
+      return null;
+    },
+  };
+
+  const reconciled = await registry.reconcileInterruptedOperations({
+    receiptStore: mockReceiptStore,
+  });
+
+  const recoveredOp1 = await registry.getOperation(op1.id);
+  assert.equal(recoveredOp1.status, 'succeeded');
+  assert.equal(recoveredOp1.restartEvidence.status, 'reconciled_from_receipt');
+  assert.equal(recoveredOp1.restartEvidence.receiptStatus, 'succeeded');
+  assert.equal(recoveredOp1.result.preRestoreSnapshotId, 'pre-snap-123');
+
+  // 2. Interrupted restore with in-flight pre_restore_created receipt triggers automatic rollback
+  const op2 = await registry.createOperation({
+    websiteId,
+    repositoryId: repoId,
+    kind: 'restore',
+    snapshotId: snapId,
+    previewDigest: 'd'.repeat(64),
+    confirmation: `restore:${websiteId}:${snapId}:${'d'.repeat(64)}`,
+  });
+  await registry.updateOperation(op2.id, { status: 'running', startedAt: '2026-09-30T00:05:00.000Z' });
+
+  let rollbackRestoredSnapshot = null;
+  const mockResticManager = {
+    async restore({ repository, snapshotId }) {
+      rollbackRestoredSnapshot = snapshotId;
+      return { ok: true };
+    },
+  };
+  const mockRepoRegistry = {
+    async getRepository() { return { id: repoId, target: '/var/lib/restic-repo' }; },
+    async revealPassword() { return 'secret-password'; },
+  };
+  const inFlightReceiptStore = {
+    async read() {
+      return {
+        status: 'pre_restore_created',
+        snapshotId: snapId,
+        preRestoreSnapshotId: 'pre-snap-rollback-target',
+      };
+    },
+    async write() {},
+  };
+
+  await registry.reconcileInterruptedOperations({
+    receiptStore: inFlightReceiptStore,
+    resticManager: mockResticManager,
+    resticRepositoryRegistry: mockRepoRegistry,
+  });
+
+  const recoveredOp2 = await registry.getOperation(op2.id);
+  assert.equal(recoveredOp2.status, 'rolled_back');
+  assert.equal(recoveredOp2.restartEvidence.status, 'recovered_via_rollback');
+  assert.equal(rollbackRestoredSnapshot, 'pre-snap-rollback-target');
+});
+
+test('restart recovery reconciles interrupted backup operations from restic snapshots', async () => {
+  const registry = createWebsiteBackupOperationRegistry();
+  const websiteId = '550e8400-e29b-41d4-a716-446655440000';
+  const repoId = '660e8400-e29b-41d4-a716-446655440001';
+
+  const op = await registry.createOperation({
+    websiteId,
+    repositoryId: repoId,
+    kind: 'backup',
+    previewDigest: 'e'.repeat(64),
+    confirmation: `backup:${websiteId}:${repoId}:${'e'.repeat(64)}`,
+  });
+  await registry.updateOperation(op.id, { status: 'running', startedAt: '2026-09-30T02:00:00.000Z' });
+
+  const mockResticManager = {
+    async listSnapshots() {
+      return [{ id: 'snap-reconciled-789', time: '2026-09-30T02:00:05.000Z' }];
+    },
+  };
+  const mockRepoRegistry = {
+    async getRepository() { return { id: repoId, target: '/var/lib/restic-repo' }; },
+    async revealPassword() { return 'secret-password'; },
+  };
+
+  await registry.reconcileInterruptedOperations({
+    resticManager: mockResticManager,
+    resticRepositoryRegistry: mockRepoRegistry,
+  });
+
+  const recovered = await registry.getOperation(op.id);
+  assert.equal(recovered.status, 'succeeded');
+  assert.equal(recovered.snapshotId, 'snap-reconciled-789');
+  assert.equal(recovered.restartEvidence.status, 'reconciled_from_snapshot');
+});
+
+test('operation public view strips repository target and private filesystem paths', () => {
+  const rawOperation = {
+    id: '550e8400-e29b-41d4-a716-446655440000',
+    websiteId: '660e8400-e29b-41d4-a716-446655440001',
+    serverId: '770e8400-e29b-41d4-a716-446655440002',
+    repositoryId: '880e8400-e29b-41d4-a716-446655440003',
+    kind: 'backup',
+    snapshotId: 'snap-1',
+    preRestoreSnapshotId: null,
+    previewDigest: 'a'.repeat(64),
+    confirmation: 'backup:...',
+    status: 'succeeded',
+    progress: { phase: 'succeeded', percent: 100 },
+    steps: [{ name: 'snapshot', status: 'succeeded' }],
+    result: { status: 'succeeded' },
+    target: '/private/repository/target/must/not/leak',
+    targetPaths: ['/private/path/must/not/leak'],
+    password: 'secretPassword',
+    createdAt: '2026-09-30T00:00:00.000Z',
+    updatedAt: '2026-09-30T00:01:00.000Z',
+  };
+
+  const view = websiteBackupOperationPublicView(rawOperation);
+  const serialized = JSON.stringify(view);
+  assert.doesNotMatch(serialized, /private|must\/not\/leak|secretPassword/);
+  assert.equal(view.id, rawOperation.id);
+  assert.equal(view.status, 'succeeded');
+});

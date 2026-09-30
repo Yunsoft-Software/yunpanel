@@ -1,5 +1,10 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRestoreError } from './website-restore-service.js';
+import {
+  isWebsiteBackupOperationError,
+  WebsiteBackupOperationServiceError,
+} from './website-backup-operation-service.js';
+import { WebsiteBackupOperationRegistryError } from './website-backup-operation-registry.js';
 
 export class WebsiteRestoreHttpError extends Error {
   constructor(code, message, status = 400, details = null) {
@@ -12,7 +17,11 @@ export class WebsiteRestoreHttpError extends Error {
 }
 
 export function isWebsiteRestoreHttpError(error) {
-  return error instanceof WebsiteRestoreHttpError || error instanceof WebsiteRestoreError;
+  return error instanceof WebsiteRestoreHttpError
+    || error instanceof WebsiteRestoreError
+    || isWebsiteBackupOperationError(error)
+    || error instanceof WebsiteBackupOperationServiceError
+    || error instanceof WebsiteBackupOperationRegistryError;
 }
 
 function asyncRoute(handler) {
@@ -38,6 +47,7 @@ function requireOwner(request, response, next) {
 
 export function mountWebsiteRestoreRoutes(app, {
   websiteRestoreService,
+  websiteBackupOperationService = null,
 } = {}) {
   if (!app || typeof app.post !== 'function') {
     throw new Error('Express application is required');
