@@ -100,6 +100,18 @@ test('Customer Quota Helper: assertCustomerQuotaCapacity throws customer_quota_e
     () => assertCustomerQuotaCapacity({ quotas, usage: { websites: 2 }, resource: 'websites', amount: 1 }),
     (err) => err.code === 'customer_quota_exceeded' && err.status === 409,
   );
+  // Disk under limit and exceeded
+  assert.doesNotThrow(() => assertCustomerQuotaCapacity({ quotas, usage: { diskMb: 500 }, resource: 'diskMb', amount: 500 }));
+  assert.throws(
+    () => assertCustomerQuotaCapacity({ quotas, usage: { diskMb: 900 }, resource: 'diskMb', amount: 200 }),
+    (err) => err.code === 'customer_quota_exceeded' && err.status === 409,
+  );
+  // Databases under limit and exceeded
+  assert.doesNotThrow(() => assertCustomerQuotaCapacity({ quotas, usage: { databases: 0 }, resource: 'databases', amount: 1 }));
+  assert.throws(
+    () => assertCustomerQuotaCapacity({ quotas, usage: { databases: 1 }, resource: 'databases', amount: 1 }),
+    (err) => err.code === 'customer_quota_exceeded' && err.status === 409,
+  );
   // Unlimited resource allows any amount
   assert.doesNotThrow(() => assertCustomerQuotaCapacity({ quotas, usage: { trafficMb: 99999 }, resource: 'trafficMb', amount: 5000 }));
 });
@@ -113,6 +125,13 @@ test('Customer Quota Helper: assertCustomerQuotaWithinResellerCapacity checks re
   assert.throws(
     () => assertCustomerQuotaWithinResellerCapacity({
       customerQuotas: { maxWebsites: 5 },
+      resellerLimits,
+    }),
+    (err) => err.code === 'reseller_limit_reached' && err.status === 409,
+  );
+  assert.throws(
+    () => assertCustomerQuotaWithinResellerCapacity({
+      customerQuotas: { maxWebsites: null },
       resellerLimits,
     }),
     (err) => err.code === 'reseller_limit_reached' && err.status === 409,

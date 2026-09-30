@@ -238,3 +238,34 @@ test('source: WebsitesPage contains customer quota section and resource locking 
   assert.match(page, /Kota Sınırı/);
   assert.match(page, /hostingProfile\?\.quotas/);
 });
+
+test('navigationGroups: strict role isolation ensures non-overlapping permission surfaces', () => {
+  // Reseller isolation
+  const resellerNav = navigationGroups(true, false, true, false)[0].items.map(([path]) => path);
+  assert.ok(resellerNav.includes('/customers'));
+  assert.ok(resellerNav.includes('/websites'));
+  assert.ok(!resellerNav.includes('/dashboard'));
+  assert.ok(!resellerNav.includes('/docker'));
+  assert.ok(!resellerNav.includes('/tools-settings'));
+  assert.ok(!resellerNav.includes('/settings/users'));
+
+  // Customer isolation
+  const customerNav = navigationGroups(true, false, false, true)[0].items.map(([path]) => path);
+  assert.ok(!customerNav.includes('/customers'));
+  assert.ok(customerNav.includes('/websites'));
+  assert.ok(!customerNav.includes('/dashboard'));
+  assert.ok(!customerNav.includes('/docker'));
+  assert.ok(!customerNav.includes('/tools-settings'));
+  assert.ok(!customerNav.includes('/settings/users'));
+
+  // Command palette isolation: customer cannot access /customers
+  const custCmds = commandEntries({ canManage: true, isCustomer: true }).map((c) => c.to);
+  assert.ok(!custCmds.includes('/customers'));
+  assert.ok(!custCmds.includes('/tools-settings'));
+
+  // Command palette isolation: reseller cannot access owner settings or docker
+  const resCmds = commandEntries({ canManage: true, isReseller: true }).map((c) => c.to);
+  assert.ok(resCmds.includes('/customers'));
+  assert.ok(!resCmds.includes('/docker'));
+  assert.ok(!resCmds.includes('/tools-settings'));
+});
