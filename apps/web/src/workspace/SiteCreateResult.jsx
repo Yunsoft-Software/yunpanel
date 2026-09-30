@@ -13,7 +13,8 @@ const STEP_LABELS = Object.freeze({
   webmail_certificate: 'Webmail sertifikası',
 });
 const STATE_LABELS = Object.freeze({
-  pending: 'Bekliyor', applying: 'İşleniyor', succeeded: 'Tamamlandı',
+  pending: 'Bekliyor', saving: 'Kaydediliyor', applying: 'İşleniyor', verifying: 'Doğrulanıyor',
+  succeeded: 'Tamamlandı', partial: 'Kısmi başarılı',
   failed: 'Başarısız', blocked: 'Engel var', compensating: 'Geri alınıyor', compensated: 'Geri alındı',
 });
 export function SiteCreateProgress({ state }) {
@@ -22,14 +23,17 @@ export function SiteCreateProgress({ state }) {
   return <div className="ws-section-body" aria-label="Site kurulum durumu">
     {busy && <p role="status"><span className="ws-spinner" /> {state.phase === 'previewing'
       ? 'Site yapılandırması doğrulanıyor…' : state.phase === 'creating'
-        ? 'Site kaydı oluşturuluyor…' : 'Kayıt oluşturuldu; kurulum adımları işleniyor…'}</p>}
+        ? 'Site kaydı kaydediliyor…' : state.phase === 'verifying'
+          ? 'Kurulum doğrulanıyor…' : 'Kayıt oluşturuldu; kurulum adımları işleniyor…'}</p>}
     {state.steps.length > 0 && <><h3>Kurulum adımları</h3><KeyValues items={state.steps.map((step) => [
       STEP_LABELS[step.id] ?? step.id,
       `${STATE_LABELS[step.state] ?? 'Bilinmiyor'}${step.required ? '' : ' · İsteğe bağlı'}`,
     ])} /></>}
     {!busy && state.created && <p role="status">{state.phase === 'ready'
       ? 'Kurulum planındaki zorunlu adımlar tamamlandı. Yayın, SSL ve posta durumunu ilgili site araçlarından doğrulayın.'
-      : 'Site kaydı korundu. Tamamlanmayan veya doğrulanamayan adımları Genel Bakış bölümünden inceleyin.'}</p>}
+      : state.phase === 'partial'
+        ? 'Kayıt oluşturuldu, bazı adımlar kısmi başarıyla tamamlandı. Detayları Genel Bakış bölümünden inceleyin.'
+        : 'Site kaydı korundu. Tamamlanmayan veya doğrulanamayan adımları Genel Bakış bölümünden inceleyin.'}</p>}
   </div>;
 }
 export default function SiteCreateResult({ state }) {
@@ -53,5 +57,11 @@ export default function SiteCreateResult({ state }) {
       <p className="ws-muted">Bu sayfadan ayrılmak sunucuda başlamış işlemleri geri almaz.</p>
     </div>
     <SiteCreateProgress state={state} />
+    <details className="ws-section ws-disclosure"><summary>Kurulum teknik ayrıntıları</summary><KeyValues items={[
+      ['İşlem kimliği', state.operationId ?? domain?.operationId ?? '—'],
+      ['Alan adı kimliği', domain?.id ?? '—'],
+      ['Web sitesi kimliği', domain?.websiteId ?? '—'],
+      ['Aşama (phase)', state.phase],
+    ]} /></details>
   </Section>;
 }
