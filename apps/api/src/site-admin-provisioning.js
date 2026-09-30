@@ -3,10 +3,15 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const record = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const CODES = Object.freeze({
   username_taken: 'site_admin_conflict',
+  operation_user_conflict: 'site_admin_conflict',
   invalid_username: 'site_admin_input_invalid',
   invalid_password: 'site_admin_input_invalid',
   invalid_website_ids: 'site_admin_result_unverified',
   auth_busy: 'site_admin_busy',
+  website_not_found: 'site_admin_website_deleted',
+  forbidden: 'site_admin_actor_forbidden',
+  auth_store_locked: 'site_admin_locked',
+  store_locked: 'site_admin_locked',
 });
 
 export async function provisionSiteAdmin({ input, result, userAdminStore, actorId } = {}) {

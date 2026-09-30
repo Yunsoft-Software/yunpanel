@@ -83,11 +83,13 @@ export function siteListFilterParams(current, name, value) {
   const next = new URLSearchParams(current);
   if (!['q', 'type', 'status', 'sort', 'page'].includes(name)) return next;
   if (value && value !== 'all') next.set(name, value); else next.delete(name);
+  if (name === 'q') { next.delete('search'); next.delete('query'); }
+  if (name === 'status') { next.delete('state'); }
   if (name !== 'page') next.delete('page');
   return next;
 }
 export function clearSiteListFilters(current) {
   const next = new URLSearchParams(current);
-  for (const name of ['q', 'type', 'status', 'sort', 'page']) next.delete(name);
+  for (const name of ['q', 'search', 'query', 'type', 'status', 'state', 'sort', 'page']) next.delete(name);
   return next;
 }

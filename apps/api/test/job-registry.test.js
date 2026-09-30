@@ -490,3 +490,85 @@ test('idempotent enqueue identity survives reopening the private job store', asy
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('job registry enforces persistent retry budget and bounded backoff for preflight auth retries', async () => {
+  let clock = Date.parse('2026-09-30T10:00:00.000Z');
+  const authorization = {
+    kind: 'website_provisioning',
+    version: 1,
+    operationId: '9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    stepId: 'domain_stage',
+  };
+  const input = {
+    serverId: 'server-1',
+    type: 'website.domain.stage:9ae512c0-a717-4611-943c-6ce2ab0abf16',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3000 } },
+    resourceType: 'domain',
+    resourceId: 'domain-retry-budget',
+    idempotencyKey: 'website.domain.stage:auth-preflight-budget-test',
+    authorization,
+  };
+  const registry = createJobRegistry({
+    now: () => clock,
+    retryBudget: 3,
+    retryBackoffBaseMs: 1000,
+    retryBackoffMaxMs: 4000,
+  });
+
+  const queued = await registry.enqueue(input);
+  assert.equal(queued.status, 'queued');
+
+  // Attempt 1: claim and fail with retryable preflight auth error
+  const claim1 = await registry.claimNext('server-1');
+  assert.equal(claim1.job.attempts, 1);
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'website_provisioning_job_actor_forbidden' },
+  });
+
+  // Retry 1 (attempts = 1 < 3): requeued with backoff
+  clock += 500;
+  const retry1 = await registry.enqueue(input);
+  assert.equal(retry1.status, 'queued');
+  assert.equal(retry1.attempts, 1);
+  // Before backoff expires (delay = 1000ms, elapsed = 500ms), cannot be claimed yet
+  assert.equal(await registry.claimNext('server-1'), null);
+
+  // Advance time past backoff
+  clock += 1000;
+  const claim2 = await registry.claimNext('server-1');
+  assert.equal(claim2.job.id, queued.id);
+  assert.equal(claim2.job.attempts, 2);
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'website_provisioning_job_actor_forbidden' },
+  });
+
+  // Retry 2 (attempts = 2 < 3): requeued with exponential backoff (2000ms)
+  const retry2 = await registry.enqueue(input);
+  assert.equal(retry2.status, 'queued');
+  assert.equal(retry2.attempts, 2);
+
+  clock += 2500;
+  const claim3 = await registry.claimNext('server-1');
+  assert.equal(claim3.job.attempts, 3);
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'website_provisioning_job_actor_forbidden' },
+  });
+
+  // Retry 3 (attempts = 3 >= 3): persistent budget exhausted! Retains failure and does not requeue
+  const exhausted = await registry.enqueue(input);
+  assert.equal(exhausted.status, 'failed');
+  assert.equal(exhausted.error.code, 'website_provisioning_job_actor_forbidden');
+  assert.equal(exhausted.attempts, 3);
+  assert.equal(await registry.claimNext('server-1'), null);
+});

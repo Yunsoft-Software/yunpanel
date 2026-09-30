@@ -1280,4 +1280,32 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
   unauthWs.terminate();
 });
 
+test('panel gateway forwards file permission mutations and preserves backend validation', async (t) => {
+  const upstreamRequests = [];
+  const app = await fixture(t, async (request, response) => {
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    const body = JSON.parse(Buffer.concat(chunks).toString());
+    upstreamRequests.push({ method: request.method, url: request.url, cookie: request.headers.cookie, proxyToken: request.headers['x-yunpanel-proxy-token'], body });
+    const unsafe = body.mode === '0777';
+    response.writeHead(unsafe ? 400 : 200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify(unsafe ? { error: { code: 'site_file_mode_unsafe' } } : { data: { path: body.path, mode: body.mode, updated: true } }));
+  });
+  const url = '/api/panel/websites/site-123/files/permissions';
+  const headers = { origin: 'https://panel.example.com', cookie: '__Host-yunpanel_session=valid-session', 'content-type': 'application/json' };
+  const cross = await app.request(url, { method: 'POST', headers: { ...headers, origin: 'https://evil.example.com' }, body: JSON.stringify({ path: 'index.php', mode: '0640' }) });
+  assert.equal(cross.status, 403); assert.equal(upstreamRequests.length, 0);
+  const success = await app.request(url, { method: 'POST', headers, body: JSON.stringify({ path: 'index.php', mode: '0640' }) });
+  assert.equal(success.status, 200); assert.deepEqual((await success.json()).data, { path: 'index.php', mode: '0640', updated: true });
+  assert.equal(upstreamRequests[0].method, 'POST'); assert.equal(upstreamRequests[0].url, '/api/websites/site-123/files/permissions');
+  assert.equal(upstreamRequests[0].cookie, headers.cookie); assert.equal(upstreamRequests[0].proxyToken, proxyToken);
+  assert.deepEqual(upstreamRequests[0].body, { path: 'index.php', mode: '0640' });
+  const unsafe = await app.request(url, { method: 'POST', headers, body: JSON.stringify({ path: 'index.php', mode: '0777' }) });
+  assert.equal(unsafe.status, 400); assert.equal((await unsafe.json()).error.code, 'site_file_mode_unsafe');
+  assert.equal(upstreamRequests.length, 2);
+});
 
+test('panel file permission gateway cannot turn a denied backend mutation into success', async (t) => {
+  const app = await fixture(t, (request, response) => { request.resume(); response.writeHead(403, { 'content-type': 'application/json' }); response.end(JSON.stringify({ error: { code: 'site_file_permission_denied' } })); });
+  const response = await app.request('/api/panel/websites/site-123/files/permissions', { method: 'POST', headers: { origin: 'https://panel.example.com', 'content-type': 'application/json' }, body: JSON.stringify({ path: 'index.php', mode: '0640' }) });
+  assert.equal(response.status, 403); assert.equal((await response.json()).error.code, 'site_file_permission_denied');
+});

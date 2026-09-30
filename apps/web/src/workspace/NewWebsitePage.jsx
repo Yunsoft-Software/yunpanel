@@ -144,7 +144,25 @@ function WebsiteForm({ parentId }) {
       if (!current.isCurrent()) return;
       setCreated(result); setSharedConfirmation(null); setDirty(false);
       setForm((value) => ({ ...value, adminPassword: '' })); refreshAll();
-    } catch (failure) { if (current.isCurrent() && failure.name !== 'AbortError') setError(failure.message); }
+    } catch (failure) {
+      if (current.isCurrent() && failure.name !== 'AbortError') {
+        try {
+          const list = await panelRequest('/domains', { signal: current.signal });
+          const existing = Array.isArray(list)
+            ? list.find((item) => item.primaryDomain === sharedConfirmation.input.primaryDomain && item.websiteId === sharedConfirmation.input.websiteId)
+            : null;
+          if (existing && current.isCurrent()) {
+            setCreated(existing);
+            setSharedConfirmation(null);
+            setDirty(false);
+            setForm((value) => ({ ...value, adminPassword: '' }));
+            refreshAll();
+            return;
+          }
+        } catch {}
+        if (current.isCurrent()) setError(failure.message);
+      }
+    }
     finally { pending.current = false; if (current.isCurrent()) setSharedBusy(false); }
   }
   return <>

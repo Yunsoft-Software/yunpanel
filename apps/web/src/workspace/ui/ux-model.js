@@ -64,7 +64,25 @@ export function navigationItemActive(to, pathname) {
       || currentPath === '/settings/users' || currentPath.startsWith('/settings/users/');
   }
   if (to === '/statistics') {
-    return currentPath === '/statistics' || currentPath.startsWith('/statistics/');
+    return currentPath === '/statistics' || currentPath.startsWith('/statistics/')
+      || currentPath === '/stats' || currentPath.startsWith('/stats/')
+      || currentPath === '/analytics' || currentPath.startsWith('/analytics/');
+  }
+  if (to === '/files') {
+    return currentPath === '/files' || currentPath.startsWith('/files/')
+      || currentPath === '/file-manager' || currentPath.startsWith('/file-manager/')
+      || currentPath === '/file' || currentPath.startsWith('/file/');
+  }
+  if (to === '/mail') {
+    return currentPath === '/mail' || currentPath.startsWith('/mail/')
+      || currentPath === '/email' || currentPath.startsWith('/email/')
+      || currentPath === '/mailboxes' || currentPath.startsWith('/mailboxes/')
+      || currentPath === '/mailbox' || currentPath.startsWith('/mailbox/');
+  }
+  if (to === '/databases') {
+    return currentPath === '/databases' || currentPath.startsWith('/databases/')
+      || currentPath === '/database' || currentPath.startsWith('/database/')
+      || currentPath === '/db' || currentPath.startsWith('/db/');
   }
   if (to === '/tools-settings') {
     return (['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
@@ -107,8 +125,8 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
 export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
-  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics'] },
-  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup'] },
+  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics'] },
+  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
 export function groupSiteTabs(tabs = []) {

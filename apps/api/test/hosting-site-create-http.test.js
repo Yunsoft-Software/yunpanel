@@ -444,7 +444,7 @@ test('inactive customer or suspended parent reseller cannot reserve site quota',
   const app = fakeApp();
   mountSiteCreateRoutes(app, env.dependencies);
 
-  // Deactivate customer-a in SQLite DB
+  // Deactivate customer-a via hosting account store
   env.f.store.setActive(env.f.token, env.f.requireManagement, 'customer-a', { revision: 1, active: false });
 
   const previewHandler = app.routes.post.get('/api/sites/hosted/create-preview');
@@ -475,7 +475,7 @@ test('invalid hosted site requests are rejected with appropriate error codes', a
       rawToken: env.ownerAuth.rawToken,
       body: { input: { operationId: uuid(1004) } },
     }),
-    (error) => error.code === 'invalid_hosting_site_request' && error.status === 400,
+    (error) => error instanceof SiteCreateError && error.code === 'invalid_hosting_site_request' && error.status === 400,
   );
 
   // Stale preview on create
@@ -491,8 +491,9 @@ test('invalid hosted site requests are rejected with appropriate error codes', a
         confirmation: 'invalid-confirmation',
       },
     }),
-    (error) => (error.code === 'hosting_site_preview_stale' || error.code === 'site_create_confirmation_required'),
+    (error) => (error instanceof SiteCreateError || error instanceof AuthError) && (error.code === 'hosting_site_preview_stale' || error.code === 'site_create_confirmation_required'),
   );
+
 });
 
 test('website removal HTTP routes enforce tenant authorization, active tenant context, and resource locking', async (t) => {
@@ -783,6 +784,14 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   assert.equal(alloc.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
+  // Invalidate and refresh reseller session after site completion
+  const freshResellerToken = env.f.session('reseller-a');
+  const freshResellerAuth = {
+    ...resellerAuth,
+    token: freshResellerToken,
+    rawToken: freshResellerToken,
+  };
+
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
   // Re-issue session token as completion revokes live session on attached ownership
   const activeResellerToken = env.f.session('reseller-a');
@@ -988,4 +997,121 @@ test('hosting-site-allocation-store supports role: reseller actor and customer r
   const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
   assert.equal(customerAccount.id, 'customer-a');
   assert.equal(customerAccount.kind, 'customer');
+});
+
+test('standard site create via /api/sites propagates siteAdmin and siteAdminError when admin creation fails without failing site creation', async (t) => {
+  const env = setupTestEnvironment(t);
+  const app = fakeApp();
+
+  const failingUserAdminStore = {
+    ...env.dependencies.userAdminStore,
+    createSiteManager: async () => {
+      const error = new Error('Database locked');
+      error.code = 'store_locked';
+      throw error;
+    },
+  };
+
+  const createAdapter = async (apply) => {
+    env.sites.set(env.site.id, structuredClone(env.site));
+    return {
+      created: true,
+      operationId: apply.input.operationId,
+      website: env.site,
+      primaryDomain: { websiteId: env.site.id },
+    };
+  };
+
+  mountSiteCreateRoutes(app, {
+    ...env.dependencies,
+    userAdminStore: failingUserAdminStore,
+    createSite: createAdapter,
+  });
+
+  const createHandler = app.routes.post.get('/api/sites');
+  const operationId = uuid(1005);
+  const input = {
+    operationId,
+    serverId: env.serverId,
+    siteAdmin: { email: 'admin@example.test', password: 'Password123!@#' },
+  };
+
+  const response = await invoke(createHandler, {
+    auth: env.ownerAuth,
+    body: {
+      input,
+      previewDigest: 'b'.repeat(64),
+      confirmation: `create-site:${operationId}:${'b'.repeat(64)}`,
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.data.created, true);
+  assert.equal(response.payload.data.website.id, env.site.id);
+  assert.equal(response.payload.data.siteAdmin.status, 'attention');
+  assert.equal(response.payload.data.siteAdmin.code, 'site_admin_locked');
+  assert.equal(response.payload.data.siteAdminError.code, 'site_admin_locked');
+  assert.equal(response.payload.data.siteAdminError.status, 400);
+});
+
+test('standard site create via /api/sites attaches successful siteAdmin without siteAdminError', async (t) => {
+  const env = setupTestEnvironment(t);
+  const app = fakeApp();
+
+  const successfulUserAdminStore = {
+    ...env.dependencies.userAdminStore,
+    createSiteManager: async ({ username, websiteId }) => ({
+      id: uuid(900),
+      username,
+      role: 'site_manager',
+      active: true,
+      websiteIds: [websiteId],
+    }),
+  };
+
+  const createAdapter = async (apply) => {
+    env.sites.set(env.site.id, structuredClone(env.site));
+    return {
+      created: true,
+      operationId: apply.input.operationId,
+      website: env.site,
+      primaryDomain: { websiteId: env.site.id },
+    };
+  };
+
+  mountSiteCreateRoutes(app, {
+    ...env.dependencies,
+    userAdminStore: successfulUserAdminStore,
+    createSite: createAdapter,
+  });
+
+  const createHandler = app.routes.post.get('/api/sites');
+  const operationId = uuid(1006);
+  const input = {
+    operationId,
+    serverId: env.serverId,
+    siteAdmin: { email: 'admin@example.test', password: 'Password123!@#' },
+  };
+
+  const response = await invoke(createHandler, {
+    auth: env.ownerAuth,
+    body: {
+      input,
+      previewDigest: 'b'.repeat(64),
+      confirmation: `create-site:${operationId}:${'b'.repeat(64)}`,
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.data.created, true);
+  assert.equal(response.payload.data.siteAdmin.status, 'created');
+  assert.equal(response.payload.data.siteAdminError, undefined);
+});
+
+test('siteCreateHttp exports SiteCreateError constructor', () => {
+  assert.equal(typeof SiteCreateError, 'function');
+  const err = new SiteCreateError('invalid_preview', 'Preview error', 400);
+  assert.ok(err instanceof Error);
+  assert.equal(err.code, 'invalid_preview');
+  assert.equal(err.status, 400);
 });

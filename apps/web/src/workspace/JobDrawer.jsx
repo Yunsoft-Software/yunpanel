@@ -58,7 +58,7 @@ function JobObservation({ id, close, update, refresh }) {
   return <Modal title="İşlem durumu" onClose={close}>
     {!job && !error && <div className="ws-loading" role="status"><span className="ws-spinner" />İşlem kaydı doğrulanıyor…</div>}
     <ErrorNotice error={error ?? (job?.status === 'failed' ? job.error?.message ?? job.error?.code ?? 'İşlem başarısız.' : null)} />
-    {job && <><div className="ws-job-status"><Badge state={job.status} /><h3>{job.type ?? job.operation}</h3><p>{jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : 'İşlem sonucunu aşağıdan inceleyin.'}</p></div>
+    {job && <><div className="ws-job-status"><Badge state={job.status} /><h3>{job.type ?? job.operation}</h3><p>{jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : ['partial', 'partial_success'].includes(job.status) ? 'İşlem kısmen tamamlandı. Bazı adımlar tamamlandı; kalanlar için müdahale veya doğrulama gerekebilir.' : 'İşlem sonucunu aşağıdan inceleyin.'}</p></div>
       <KeyValues items={[
         ['İş kimliği', job.id],
         ['Kaynak', target?.href ? <Link key="resource" to={target.href} onClick={close}>{target.label}</Link> : target?.label ?? job.resourceType ?? '—'],
@@ -73,6 +73,12 @@ function JobObservation({ id, close, update, refresh }) {
       ]} />
       {job.diagnosis && <div className="ws-notice ws-notice-warn"><div><strong>{job.diagnosis.message}</strong><p>{job.diagnosis.action}</p><small>{job.diagnosis.code}</small></div></div>}
       {job.error?.code && <div className="ws-section-body"><strong>Güvenli hata kodu</strong><p><code>{job.error.code}</code></p></div>}
+      <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik işlem ayrıntıları</summary><KeyValues items={[
+        ['Ham durum (raw status)', job.status ?? '—'],
+        ['İşlem tipi (operation)', job.operation ?? job.type ?? '—'],
+        ['Kaynak türü (resourceType)', job.resourceType ?? '—'],
+        ['Kaynak kimliği (resourceId)', job.resourceId ?? '—'],
+      ]} /></details>
       {supportsLogs && <div className="ws-section-body"><div className="ws-actions"><strong>Deploy logu</strong><Button icon="refresh" disabled={logs.status === 'loading' || logs.status === 'refreshing'} onClick={loadLogs}>Yenile</Button></div><ErrorNotice error={logs.error} />{logs.status === 'loading' && !logs.data && <div className="ws-loading" role="status"><span className="ws-spinner" />Deploy logu yükleniyor…</div>}{logs.data?.entries?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Zaman</th><th>Seviye</th><th>Aşama</th><th>Mesaj</th></tr></thead><tbody>{logs.data.entries.map((entry, index) => <tr key={entry.cursor ?? `${entry.timestamp}:${index}`}><td>{formatDate(entry.timestamp)}</td><td>{entry.level}</td><td>{entry.stage ?? '—'}</td><td><code>{entry.message}</code></td></tr>)}</tbody></table></div> : logs.data && <EmptyState icon="file" title="Deploy logu yok" detail="Bu iş için saklanan bounded deploy log kaydı bulunamadı." />}</div>}
     </>}
     <footer className="ws-modal-footer"><Button onClick={close}>Kapat</Button></footer>
