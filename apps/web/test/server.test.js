@@ -1279,5 +1279,3 @@ test('goaccess gateway proxies WebSocket upgrade over Unix domain socket', async
   unauthResp.resume();
   unauthWs.terminate();
 });
-
-
