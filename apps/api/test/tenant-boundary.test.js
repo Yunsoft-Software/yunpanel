@@ -1928,11 +1928,20 @@ test('RS-03-05: website-http and core-app enforce tenant boundary for reseller o
   });
 
   const resellerActor = {
+    id: '32345678-1234-4234-8234-123456789012',
     user: {
       id: 'reseller-a',
       role: 'reseller',
+      hosting: { kind: 'reseller', resellerId: null },
       websiteIds: ['site-a1', 'site-a2'],
       active: true,
+    },
+    access: {
+      mode: 'site_management',
+      permissions: ['site_management'],
+    },
+    security: {
+      managementAllowed: true,
     },
   };
 
@@ -1944,6 +1953,31 @@ test('RS-03-05: website-http and core-app enforce tenant boundary for reseller o
   assert.deepEqual(returnedWebsiteIds.sort(), ['site-a1', 'site-a2']);
   assert.equal(returnedWebsiteIds.includes('site-b1'), false);
   assert.equal(returnedWebsiteIds.includes('site-direct'), false);
+
+  // 1b. Customer A1 GET /api/websites returns only attached website
+  const custWebsitesRes = await invokeFake(getWebsitesHandler, { auth: { user: customerA1Actor }, query: {} });
+  assert.equal(custWebsitesRes.statusCode, 200);
+  assert.deepEqual(custWebsitesRes.responseBody.data.map((w) => w.id), ['site-a1']);
+
+  // 1c. Customer Direct GET /api/websites returns only direct owner website
+  const directCustWebsitesRes = await invokeFake(getWebsitesHandler, { auth: { user: customerDirectActor }, query: {} });
+  assert.equal(directCustWebsitesRes.statusCode, 200);
+  assert.deepEqual(directCustWebsitesRes.responseBody.data.map((w) => w.id), ['site-direct']);
+
+  // 1d. Reseller B GET /api/websites returns only Reseller B child site
+  const resBWebsitesRes = await invokeFake(getWebsitesHandler, { auth: { user: resellerB }, query: {} });
+  assert.equal(resBWebsitesRes.statusCode, 200);
+  assert.deepEqual(resBWebsitesRes.responseBody.data.map((w) => w.id), ['site-b1']);
+
+  // 1e. Owner GET /api/websites returns all websites
+  const ownerWebsitesRes = await invokeFake(getWebsitesHandler, { auth: { user: owner }, query: {} });
+  assert.equal(ownerWebsitesRes.statusCode, 200);
+  assert.equal(ownerWebsitesRes.responseBody.data.length, 4);
+
+  // 1f. Inactive customer GET /api/websites returns empty
+  const inactiveCustWebsitesRes = await invokeFake(getWebsitesHandler, { auth: { user: { ...customerA1Actor, active: false } }, query: {} });
+  assert.equal(inactiveCustWebsitesRes.statusCode, 200);
+  assert.deepEqual(inactiveCustWebsitesRes.responseBody.data, []);
 
   // 2. GET /api/websites/:websiteId allows own child site, rejects foreign and direct sites
   const getSingleWebsiteHandler = app.routes.get.get('/api/websites/:websiteId');
@@ -1958,6 +1992,26 @@ test('RS-03-05: website-http and core-app enforce tenant boundary for reseller o
   const directSiteRes = await invokeFake(getSingleWebsiteHandler, { auth: resellerActor, params: { websiteId: 'site-direct' } });
   assert.equal(directSiteRes.statusCode, 403);
   assert.equal(directSiteRes.responseBody.error.code, 'forbidden');
+
+  // 2b. Customer single website and domains route access
+  const custOwnSite = await invokeFake(getSingleWebsiteHandler, { auth: { user: customerA1Actor }, params: { websiteId: 'site-a1' } });
+  assert.equal(custOwnSite.statusCode, 200);
+  assert.equal(custOwnSite.responseBody.data.id, 'site-a1');
+
+  const custSiblingSite = await invokeFake(getSingleWebsiteHandler, { auth: { user: customerA1Actor }, params: { websiteId: 'site-a2' } });
+  assert.equal(custSiblingSite.statusCode, 403);
+  assert.equal(custSiblingSite.responseBody.error.code, 'forbidden');
+
+  const custForeignSite = await invokeFake(getSingleWebsiteHandler, { auth: { user: customerA1Actor }, params: { websiteId: 'site-b1' } });
+  assert.equal(custForeignSite.statusCode, 403);
+
+  const getWebsiteDomainsHandler = app.routes.get.get('/api/websites/:websiteId/domains');
+  const custOwnDomains = await invokeFake(getWebsiteDomainsHandler, { auth: { user: customerA1Actor }, params: { websiteId: 'site-a1' } });
+  assert.equal(custOwnDomains.statusCode, 200);
+  assert.deepEqual(custOwnDomains.responseBody.data.map((d) => d.id), ['domain-a1']);
+
+  const custForeignDomains = await invokeFake(getWebsiteDomainsHandler, { auth: { user: customerA1Actor }, params: { websiteId: 'site-b1' } });
+  assert.equal(custForeignDomains.statusCode, 403);
 
   // 3. Core app domain isolation: GET /api/domains and requireDomain
   const coreApp = createApp({
@@ -2048,4 +2102,516 @@ test('RS-03-05: website-http and core-app enforce tenant boundary for reseller o
   });
   assert.equal(postOwnRes.statusCode, 201);
   assert.equal(postOwnRes.body.data.primaryDomain, 'new.a1.com');
+});
+
+test('multi-tenant topology (Owner, 2 Resellers, 4 Customers, 1 Direct Owner Customer) full isolation and fail-closed validation', async () => {
+  // Test matrix entities
+  const ownerUser = Object.freeze({ id: 'matrix-owner', role: 'owner', active: true });
+
+  const reseller1User = Object.freeze({
+    id: 'reseller-1',
+    role: 'reseller',
+    hosting: { kind: 'reseller', resellerId: null },
+    active: true,
+    websiteIds: ['site-1a', 'site-1b'],
+  });
+
+  const reseller2User = Object.freeze({
+    id: 'reseller-2',
+    role: 'reseller',
+    hosting: { kind: 'reseller', resellerId: null },
+    active: true,
+    websiteIds: ['site-2a', 'site-2b'],
+  });
+
+  const customer1A = Object.freeze({
+    id: 'customer-1a',
+    kind: 'customer',
+    resellerId: 'reseller-1',
+    active: true,
+  });
+
+  const customer1B = Object.freeze({
+    id: 'customer-1b',
+    kind: 'customer',
+    resellerId: 'reseller-1',
+    active: true,
+  });
+
+  const customer2A = Object.freeze({
+    id: 'customer-2a',
+    kind: 'customer',
+    resellerId: 'reseller-2',
+    active: true,
+  });
+
+  const customer2B = Object.freeze({
+    id: 'customer-2b',
+    kind: 'customer',
+    resellerId: 'reseller-2',
+    active: true,
+  });
+
+  const customerDirectRecord = Object.freeze({
+    id: 'customer-direct',
+    kind: 'customer',
+    resellerId: null,
+    active: true,
+  });
+
+  const customer1AActor = Object.freeze({
+    id: 'customer-1a',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: 'reseller-1' },
+    active: true,
+    websiteIds: ['site-1a'],
+  });
+
+  const customer1BActor = Object.freeze({
+    id: 'customer-1b',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: 'reseller-1' },
+    active: true,
+    websiteIds: ['site-1b'],
+  });
+
+  const customer2AActor = Object.freeze({
+    id: 'customer-2a',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: 'reseller-2' },
+    active: true,
+    websiteIds: ['site-2a'],
+  });
+
+  const customer2BActor = Object.freeze({
+    id: 'customer-2b',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: 'reseller-2' },
+    active: true,
+    websiteIds: ['site-2b'],
+  });
+
+  const customerDirectActorObj = Object.freeze({
+    id: 'customer-direct',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: null },
+    active: true,
+    websiteIds: ['site-direct'],
+  });
+
+  const site1A = Object.freeze({ id: 'site-1a', customerId: 'customer-1a', resellerId: 'reseller-1', serverId: 'srv-1', name: 'Site 1A' });
+  const site1B = Object.freeze({ id: 'site-1b', customerId: 'customer-1b', resellerId: 'reseller-1', serverId: 'srv-1', name: 'Site 1B' });
+  const site2A = Object.freeze({ id: 'site-2a', customerId: 'customer-2a', resellerId: 'reseller-2', serverId: 'srv-1', name: 'Site 2A' });
+  const site2B = Object.freeze({ id: 'site-2b', customerId: 'customer-2b', resellerId: 'reseller-2', serverId: 'srv-1', name: 'Site 2B' });
+  const siteDirectRecord = Object.freeze({ id: 'site-direct', customerId: 'customer-direct', resellerId: null, serverId: 'srv-1', name: 'Site Direct' });
+
+  const customerMap = {
+    'customer-1a': customer1A,
+    'customer-1b': customer1B,
+    'customer-2a': customer2A,
+    'customer-2b': customer2B,
+    'customer-direct': customerDirectRecord,
+  };
+
+  const websiteMap = {
+    'site-1a': site1A,
+    'site-1b': site1B,
+    'site-2a': site2A,
+    'site-2b': site2B,
+    'site-direct': siteDirectRecord,
+  };
+
+  // 1. assertCustomerBelongsToReseller
+  // Owner can manage all
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: ownerUser, customer: customer1A }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: ownerUser, customer: customer1B }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: ownerUser, customer: customer2A }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: ownerUser, customer: customer2B }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: ownerUser, customer: customerDirectRecord }));
+
+  // Reseller 1 manages own child customers (1A, 1B)
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: reseller1User, customer: customer1A }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: reseller1User, customer: customer1B }));
+
+  // Reseller 1 CANNOT manage Reseller 2 customers (2A, 2B) or Direct Owner customer
+  for (const c of [customer2A, customer2B, customerDirectRecord]) {
+    assert.throws(
+      () => assertCustomerBelongsToReseller({ actor: reseller1User, customer: c }),
+      (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+    );
+  }
+
+  // Reseller 2 manages own child customers (2A, 2B)
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: reseller2User, customer: customer2A }));
+  assert.doesNotThrow(() => assertCustomerBelongsToReseller({ actor: reseller2User, customer: customer2B }));
+
+  // Reseller 2 CANNOT manage Reseller 1 customers (1A, 1B) or Direct Owner customer
+  for (const c of [customer1A, customer1B, customerDirectRecord]) {
+    assert.throws(
+      () => assertCustomerBelongsToReseller({ actor: reseller2User, customer: c }),
+      (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+    );
+  }
+
+  // Customers cannot manage any customer accounts
+  for (const actor of [customer1AActor, customer1BActor, customer2AActor, customer2BActor, customerDirectActorObj]) {
+    assert.throws(
+      () => assertCustomerBelongsToReseller({ actor, customer: customer1A }),
+      (err) => err.status === 403,
+    );
+  }
+
+  // 2. assertWebsiteBelongsToTenant
+  // Owner allowed on all 5 sites
+  for (const w of [site1A, site1B, site2A, site2B, siteDirectRecord]) {
+    assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: ownerUser, website: w }));
+  }
+
+  // Customer 1A: only site-1a
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: customer1AActor, website: site1A }));
+  for (const w of [site1B, site2A, site2B, siteDirectRecord]) {
+    assert.throws(
+      () => assertWebsiteBelongsToTenant({ actor: customer1AActor, website: w }),
+      (err) => err.status === 403,
+    );
+  }
+
+  // Customer 1B: only site-1b
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: customer1BActor, website: site1B }));
+  for (const w of [site1A, site2A, site2B, siteDirectRecord]) {
+    assert.throws(
+      () => assertWebsiteBelongsToTenant({ actor: customer1BActor, website: w }),
+      (err) => err.status === 403,
+    );
+  }
+
+  // Customer Direct: only site-direct
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: customerDirectActorObj, website: siteDirectRecord }));
+  for (const w of [site1A, site1B, site2A, site2B]) {
+    assert.throws(
+      () => assertWebsiteBelongsToTenant({ actor: customerDirectActorObj, website: w }),
+      (err) => err.status === 403,
+    );
+  }
+
+  // Reseller 1: site-1a and site-1b allowed; site-2a, site-2b, site-direct DENIED
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: reseller1User, website: site1A, customer: customer1A }));
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: reseller1User, website: site1B, customer: customer1B }));
+  for (const w of [site2A, site2B, siteDirectRecord]) {
+    assert.throws(
+      () => assertWebsiteBelongsToTenant({ actor: reseller1User, website: w, customer: customerMap[w.customerId] }),
+      (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+    );
+  }
+
+  // Reseller 2: site-2a and site-2b allowed; site-1a, site-1b, site-direct DENIED
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: reseller2User, website: site2A, customer: customer2A }));
+  assert.doesNotThrow(() => assertWebsiteBelongsToTenant({ actor: reseller2User, website: site2B, customer: customer2B }));
+  for (const w of [site1A, site1B, siteDirectRecord]) {
+    assert.throws(
+      () => assertWebsiteBelongsToTenant({ actor: reseller2User, website: w, customer: customerMap[w.customerId] }),
+      (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+    );
+  }
+
+  // 3. assertEntityTenantBoundary
+  // Reseller 1 accessing direct Owner entity (resellerId === null) -> 403
+  assert.throws(
+    () => assertEntityTenantBoundary({ actor: reseller1User, entityType: 'domain', websiteId: 'site-direct', resellerId: null }),
+    (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+  );
+  // Reseller 1 accessing Reseller 2 entity -> 403
+  assert.throws(
+    () => assertEntityTenantBoundary({ actor: reseller1User, entityType: 'domain', websiteId: 'site-2a', resellerId: 'reseller-2' }),
+    (err) => err.status === 403 && err.code === 'tenant_boundary_forbidden',
+  );
+
+  // 4. sanitizeTenantCollection
+  const allItems = [
+    { id: 'site-1a', websiteId: 'site-1a', customerId: 'customer-1a', resellerId: 'reseller-1' },
+    { id: 'site-1b', websiteId: 'site-1b', customerId: 'customer-1b', resellerId: 'reseller-1' },
+    { id: 'site-2a', websiteId: 'site-2a', customerId: 'customer-2a', resellerId: 'reseller-2' },
+    { id: 'site-2b', websiteId: 'site-2b', customerId: 'customer-2b', resellerId: 'reseller-2' },
+    { id: 'site-direct', websiteId: 'site-direct', customerId: 'customer-direct', resellerId: null },
+  ];
+  assert.equal(sanitizeTenantCollection(allItems, ownerUser).length, 5);
+  assert.deepEqual(sanitizeTenantCollection(allItems, reseller1User).map((i) => i.id).sort(), ['site-1a', 'site-1b']);
+  assert.deepEqual(sanitizeTenantCollection(allItems, reseller2User).map((i) => i.id).sort(), ['site-2a', 'site-2b']);
+  assert.deepEqual(sanitizeTenantCollection(allItems, customer1AActor).map((i) => i.id), ['site-1a']);
+  assert.deepEqual(sanitizeTenantCollection(allItems, customer1BActor).map((i) => i.id), ['site-1b']);
+  assert.deepEqual(sanitizeTenantCollection(allItems, customerDirectActorObj).map((i) => i.id), ['site-direct']);
+
+  // 5. createTenantBoundaryMiddleware HTTP enforcement
+  const middleware = createTenantBoundaryMiddleware({
+    customerLookup: async (id) => customerMap[id] ?? null,
+    websiteLookup: async (id) => websiteMap[id] ?? null,
+  });
+
+  const runHttp = async (actor, url, { method = 'GET', body = null } = {}) => {
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    let called = false;
+    let statusCode = 200;
+    let responseBody = null;
+    const headers = {};
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader(k, v) { headers[k] = v; },
+      json(b) { responseBody = b; return this; },
+    };
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody, headers };
+  };
+
+  const assertHttpDeniedNoLeak = (result, forbiddenTokens = []) => {
+    assert.equal(result.called, false);
+    assert.ok(result.statusCode === 403 || result.statusCode === 404);
+    assert.equal(result.headers['Cache-Control'], 'no-store');
+    const bodyStr = JSON.stringify(result.responseBody ?? {});
+    for (const token of forbiddenTokens) {
+      assert.equal(bodyStr.includes(token), false, `Response leaked sensitive metadata: ${token}`);
+    }
+  };
+
+  // Test Customer 1A:
+  // - Own site allowed
+  const ownReq = await runHttp(customer1AActor, '/api/websites/site-1a');
+  assert.equal(ownReq.called, true);
+  assert.equal((await runHttp(customer1AActor, '/api/servers/srv-1/websites/site-1a')).called, true);
+
+  // - All 14 resource endpoints with foreign / unauthorized Website IDs rejected with 403/404 and NO metadata leakage:
+  const foreignWebsiteIds = ['site-1b', 'site-2a', 'site-2b', 'site-direct', 'site-non-existent'];
+  const leakTokens = ['site-1b', 'site-2a', 'site-2b', 'site-direct', 'customer-1b', 'customer-2a', 'customer-direct', 'reseller-2'];
+
+  for (const foreignId of foreignWebsiteIds) {
+    // 1. Website
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/domains`), leakTokens);
+
+    // 2. Files
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/files?path=`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/files?path=`), leakTokens);
+
+    // 3. DB
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/database-resources`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/phpmyadmin-handoffs`, { method: 'POST', body: {} }), leakTokens);
+
+    // 4. Mail
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/mail`), leakTokens);
+
+    // 5. DNS (Domain creation with foreign websiteId)
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, '/api/domains', { method: 'POST', body: { websiteId: foreignId } }), leakTokens);
+
+    // 6. Job (Audit for foreign website)
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/audit?resourceType=website&resourceId=${foreignId}`), leakTokens);
+
+    // 7. Log
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/logs`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/logs`), leakTokens);
+
+    // 8. Backup
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/backups`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/backups`), leakTokens);
+
+    // 9. Analytics
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/analytics/status`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/analytics`), leakTokens);
+
+    // 10. PHP
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/wp-cli/status`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/wp-cli/status`), leakTokens);
+
+    // 11. Cron
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/crons`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/crons`), leakTokens);
+
+    // 12. SFTP
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/sftp/keys`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/sftp/keys`), leakTokens);
+
+    // 13. elFinder
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/elfinder-handoffs`, { method: 'POST' }), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/elfinder-handoffs`, { method: 'POST' }), leakTokens);
+
+    // 14. Terminal
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, '/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: foreignId },
+    }), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/websites/${foreignId}/terminal`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customer1AActor, `/api/servers/srv-1/websites/${foreignId}/terminal`), leakTokens);
+  }
+
+  // Root terminal denied for non-owner
+  assertHttpDeniedNoLeak(await runHttp(customer1AActor, '/api/terminal/capabilities', { method: 'POST', body: { scope: 'server', serverId: 'srv-1' } }));
+  assertHttpDeniedNoLeak(await runHttp(reseller1User, '/api/terminal/capabilities', { method: 'POST', body: { scope: 'server', serverId: 'srv-1' } }));
+
+  // Test Reseller 1 permissions and boundaries:
+  // - Allowed on own child customer sites: site-1a, site-1b
+  assert.equal((await runHttp(reseller1User, '/api/websites/site-1a')).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/websites/site-1b')).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/servers/srv-1/websites/site-1a')).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/servers/srv-1/websites/site-1b')).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/domains', { method: 'POST', body: { websiteId: 'site-1a' } })).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/domains', { method: 'POST', body: { websiteId: 'site-1b' } })).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/terminal/capabilities', { method: 'POST', body: { scope: 'site', websiteId: 'site-1a' } })).called, true);
+  assert.equal((await runHttp(reseller1User, '/api/terminal/capabilities', { method: 'POST', body: { scope: 'site', websiteId: 'site-1b' } })).called, true);
+
+  // - DENIED on Reseller 2 sites (site-2a, site-2b) and Direct Owner site (site-direct) across all resource types:
+  const resellerForeignIds = ['site-2a', 'site-2b', 'site-direct', 'site-non-existent'];
+  const resellerLeakTokens = ['site-2a', 'site-2b', 'site-direct', 'customer-2a', 'customer-2b', 'customer-direct', 'reseller-2'];
+
+  for (const foreignId of resellerForeignIds) {
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/servers/srv-1/websites/${foreignId}`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/files?path=`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/servers/srv-1/websites/${foreignId}/files?path=`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/servers/srv-1/websites/${foreignId}/database-resources`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/domains`, { method: 'POST', body: { websiteId: foreignId } }), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/audit?resourceType=website&resourceId=${foreignId}`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/backups`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/analytics/status`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/wp-cli/status`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/crons`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/websites/${foreignId}/sftp/keys`), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, `/api/servers/srv-1/websites/${foreignId}/elfinder-handoffs`, { method: 'POST' }), resellerLeakTokens);
+    assertHttpDeniedNoLeak(await runHttp(reseller1User, '/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: foreignId },
+    }), resellerLeakTokens);
+  }
+
+  // - Direct Owner customer denied on Reseller 1 and Reseller 2 sites
+  for (const foreignId of ['site-1a', 'site-1b', 'site-2a', 'site-2b']) {
+    assertHttpDeniedNoLeak(await runHttp(customerDirectActorObj, `/api/websites/${foreignId}`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customerDirectActorObj, `/api/servers/srv-1/websites/${foreignId}`), leakTokens);
+    assertHttpDeniedNoLeak(await runHttp(customerDirectActorObj, '/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: foreignId },
+    }), leakTokens);
+  }
+
+  // 6. mountWebsiteRoutes collection filtering and concrete route isolation verification
+  const fakeApp = () => {
+    const routes = { get: new Map(), post: new Map(), patch: new Map() };
+    return {
+      routes,
+      get(path, ...handlers) { routes.get.set(path, handlers.at(-1)); },
+      post(path, ...handlers) { routes.post.set(path, handlers.at(-1)); },
+      patch(path, ...handlers) { routes.patch.set(path, handlers.at(-1)); },
+    };
+  };
+  const invokeHandler = async (handler, req) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const res = {
+      status(c) { statusCode = c; return this; },
+      json(b) { responseBody = b; return this; },
+    };
+    await handler(req, res, (err) => {
+      if (err) {
+        statusCode = err.status || 500;
+        responseBody = { error: { code: err.code, message: err.message } };
+      }
+    });
+    return { statusCode, responseBody };
+  };
+
+  const matrixApp = fakeApp();
+  const allMatrixWebsites = [site1A, site1B, site2A, site2B, siteDirectRecord];
+  const matrixWebsiteRegistry = {
+    listWebsites: async (filter = {}) => {
+      if (filter.serverId) {
+        return allMatrixWebsites.filter((w) => w.serverId === filter.serverId);
+      }
+      return [...allMatrixWebsites];
+    },
+    getWebsite: async (id) => allMatrixWebsites.find((w) => w.id === id) ?? null,
+    createWebsite: async (data) => ({ id: 'new-site', ...data }),
+    previewWebsiteUpdate: async () => ({}),
+    updateWebsite: async () => ({}),
+  };
+  const matrixDomainRegistry = {
+    listDomains: async () => [],
+    getDomain: async () => null,
+  };
+
+  mountWebsiteRoutes(matrixApp, {
+    websiteRegistry: matrixWebsiteRegistry,
+    domainRegistry: matrixDomainRegistry,
+    localServerId: 'srv-1',
+    customerLookup: async (id) => customerMap[id] ?? null,
+  });
+
+  const getWebsitesHandler = matrixApp.routes.get.get('/api/websites');
+  const getSingleWebsiteHandler = matrixApp.routes.get.get('/api/websites/:websiteId');
+
+  // Owner GET /api/websites returns all 5 sites
+  const ownerListRes = await invokeHandler(getWebsitesHandler, { auth: { user: ownerUser }, query: {} });
+  assert.equal(ownerListRes.statusCode, 200);
+  assert.equal(ownerListRes.responseBody.data.length, 5);
+
+  // Reseller 1 GET /api/websites returns only site-1a, site-1b
+  const res1ListRes = await invokeHandler(getWebsitesHandler, { auth: { user: reseller1User }, query: {} });
+  assert.equal(res1ListRes.statusCode, 200);
+  assert.deepEqual(res1ListRes.responseBody.data.map((w) => w.id).sort(), ['site-1a', 'site-1b']);
+
+  // Reseller 2 GET /api/websites returns only site-2a, site-2b
+  const res2ListRes = await invokeHandler(getWebsitesHandler, { auth: { user: reseller2User }, query: {} });
+  assert.equal(res2ListRes.statusCode, 200);
+  assert.deepEqual(res2ListRes.responseBody.data.map((w) => w.id).sort(), ['site-2a', 'site-2b']);
+
+  // Customer 1A GET /api/websites returns only site-1a
+  const cust1AListRes = await invokeHandler(getWebsitesHandler, { auth: { user: customer1AActor }, query: {} });
+  assert.equal(cust1AListRes.statusCode, 200);
+  assert.deepEqual(cust1AListRes.responseBody.data.map((w) => w.id), ['site-1a']);
+
+  // Customer 1B GET /api/websites returns only site-1b
+  const cust1BListRes = await invokeHandler(getWebsitesHandler, { auth: { user: customer1BActor }, query: {} });
+  assert.equal(cust1BListRes.statusCode, 200);
+  assert.deepEqual(cust1BListRes.responseBody.data.map((w) => w.id), ['site-1b']);
+
+  // Customer 2A GET /api/websites returns only site-2a
+  const cust2AListRes = await invokeHandler(getWebsitesHandler, { auth: { user: customer2AActor }, query: {} });
+  assert.equal(cust2AListRes.statusCode, 200);
+  assert.deepEqual(cust2AListRes.responseBody.data.map((w) => w.id), ['site-2a']);
+
+  // Customer 2B GET /api/websites returns only site-2b
+  const cust2BListRes = await invokeHandler(getWebsitesHandler, { auth: { user: customer2BActor }, query: {} });
+  assert.equal(cust2BListRes.statusCode, 200);
+  assert.deepEqual(cust2BListRes.responseBody.data.map((w) => w.id), ['site-2b']);
+
+  // Customer Direct GET /api/websites returns only site-direct
+  const custDirectListRes = await invokeHandler(getWebsitesHandler, { auth: { user: customerDirectActorObj }, query: {} });
+  assert.equal(custDirectListRes.statusCode, 200);
+  assert.deepEqual(custDirectListRes.responseBody.data.map((w) => w.id), ['site-direct']);
+
+  // Single website route access checks:
+  // Reseller 1: allowed site-1a, site-1b; forbidden 403 on site-2a, site-2b, site-direct
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller1User }, params: { websiteId: 'site-1a' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller1User }, params: { websiteId: 'site-1b' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller1User }, params: { websiteId: 'site-2a' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller1User }, params: { websiteId: 'site-2b' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller1User }, params: { websiteId: 'site-direct' } })).statusCode, 403);
+
+  // Reseller 2: allowed site-2a, site-2b; forbidden 403 on site-1a, site-1b, site-direct
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller2User }, params: { websiteId: 'site-2a' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller2User }, params: { websiteId: 'site-2b' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller2User }, params: { websiteId: 'site-1a' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller2User }, params: { websiteId: 'site-1b' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: reseller2User }, params: { websiteId: 'site-direct' } })).statusCode, 403);
+
+  // Customer 1A: allowed site-1a; forbidden 403 on site-1b, site-2a, site-2b, site-direct
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customer1AActor }, params: { websiteId: 'site-1a' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customer1AActor }, params: { websiteId: 'site-1b' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customer1AActor }, params: { websiteId: 'site-2a' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customer1AActor }, params: { websiteId: 'site-2b' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customer1AActor }, params: { websiteId: 'site-direct' } })).statusCode, 403);
+
+  // Customer Direct: allowed site-direct; forbidden 403 on site-1a, site-1b, site-2a, site-2b
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-direct' } })).statusCode, 200);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-1a' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-1b' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-2a' } })).statusCode, 403);
+  assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-2b' } })).statusCode, 403);
 });
