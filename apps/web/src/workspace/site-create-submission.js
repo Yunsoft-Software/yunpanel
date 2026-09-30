@@ -98,7 +98,9 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       if (result.provisioningError) {
         publish({
           phase: 'attention',
-          error: 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.',
+          error: (siteAdmin?.status === 'attention')
+            ? 'Site kaydı oluşturuldu, ancak yönetici hesabı doğrulanamadı ve kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.'
+            : 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.',
         });
         return state;
       }
@@ -137,7 +139,9 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
             ? 'Önizleme doğrulanamadı. Formu ve güncel site bilgilerini kontrol edip tekrar deneyin.'
             : (state.created || recoveredCreated)
               ? (err?.data?.provisioningError
-                  ? 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.'
+                  ? ((state.siteAdmin?.status === 'attention' || recoveredSiteAdmin?.status === 'attention')
+                      ? 'Site kaydı oluşturuldu, ancak yönetici hesabı doğrulanamadı ve kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.'
+                      : 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.')
                   : 'Site kaydı oluşturuldu, ancak kurulumun son durumu doğrulanamadı. Aynı siteyi yeniden oluşturmayın; Genel Bakış bölümünden kontrol edin.')
               : 'Oluşturma isteğinin sonucu doğrulanamadı. Sunucuda kayıt oluşmuş olabilir. Yeniden oluşturmadan önce Web Siteleri listesinden kontrol edin.',
         });

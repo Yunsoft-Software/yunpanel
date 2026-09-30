@@ -107,6 +107,13 @@ export function createHostingSiteCreateService({
       created = result.created;
       if (result.siteAdmin) {
         siteAdmin = result.siteAdmin;
+        if (!siteAdminError && siteAdmin.status === 'attention') {
+          siteAdminError = Object.freeze({
+            code: siteAdmin.code ?? 'site_admin_result_unverified',
+            message: 'Site administrator account creation requires attention.',
+            status: siteAdmin.code === 'site_admin_conflict' ? 409 : 400,
+          });
+        }
       }
       if (result.siteAdminError) {
         siteAdminError = result.siteAdminError;
@@ -139,6 +146,7 @@ export function createHostingSiteCreateService({
     return Object.freeze({
       website,
       ownership: allocation,
+      allocation,
       created,
       accessGranted: allocation.accessGranted === true,
       stage,
@@ -328,7 +336,7 @@ export function createHostingSiteCreateService({
       const prepared = await prepare(rawToken, policy, request(value));
       return Object.freeze({ ...prepared.base, customerId: prepared.allocationInput.customerId,
         previewDigest: prepared.previewDigest, confirmation: prepared.confirmation,
-        ownership: prepared.allocation, accessGranted: false });
+        ownership: prepared.allocation, state: prepared.allocation.state, accessGranted: false });
     },
     async create(rawToken, policy, value) {
       const submitted = request(value, true);
