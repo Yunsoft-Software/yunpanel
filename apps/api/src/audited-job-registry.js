@@ -64,11 +64,31 @@ export function createAuditedJobRegistry({
     return job;
   }
 
+  async function retryJob(...args) {
+    const actorId = actorProvider() ?? 'system';
+    const job = typeof registry.retryJob === 'function'
+      ? await registry.retryJob(...args)
+      : await registry.manualRetry(...args);
+    try {
+      audit.linkJob({
+        jobId: job.id,
+        actorId,
+        action: `job.retry.${job.operation}`,
+        resourceType: job.resourceType,
+        resourceId: job.resourceId,
+      });
+    } catch {
+      safeAuditFailure(onAuditError, 'retry', job.id);
+    }
+    return job;
+  }
+
   return new Proxy(registry, {
     get(target, property, receiver) {
       if (property === 'enqueue') return enqueue;
       if (property === 'complete') return complete;
       if (property === 'cancel') return cancel;
+      if (property === 'retryJob' || property === 'manualRetry') return retryJob;
       const value = Reflect.get(target, property, receiver);
       return typeof value === 'function' ? value.bind(target) : value;
     },
