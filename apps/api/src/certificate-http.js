@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CertificateMaterialError } from './certificate-material-manager.js';
-import { certificatePublicView, CertificateRegistryError } from './certificate-registry.js';
+import { certificatePublicView, CertificateRegistryError, compareTlsPresentation } from './certificate-registry.js';
+import { verifyCertificateRenewalOutcome, verifyRenewalOutcome } from './certificate-renewal-scheduler.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -296,6 +297,83 @@ export function mountCertificateRoutes(app, dependencies = {}) {
     } catch (error) { return next(error); }
   });
 
+  app.post('/api/certificates/:certificateId/verify-tls', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      const liveTls = request.body?.liveTls ?? request.body;
+      const result = await dependencies.certificateRegistry.verifyLiveTls(certificate.id, liveTls);
+      return response.json({
+        data: {
+          certificateId: certificate.id,
+          ...result,
+        },
+      });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/domains/:domainId/certificates/:certificateId/verify-tls', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const domain = await dependencies.domainRegistry.getDomain(request.params.domainId);
+      if (!domain) {
+        throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+      }
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate || certificate.domainId !== domain.id) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found for this Domain', 404);
+      }
+      const liveTls = request.body?.liveTls ?? request.body;
+      const result = await dependencies.certificateRegistry.verifyLiveTls(certificate.id, liveTls);
+      return response.json({
+        data: {
+          domainId: domain.id,
+          certificateId: certificate.id,
+          ...result,
+        },
+      });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/certificates/:certificateId/renewal-outcome', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const { jobId, before = null, liveTls = null, dryRun = false } = request.body ?? {};
+      if (typeof jobId !== 'string' || !jobId) {
+        throw new CertificateRegistryError('job_id_required', 'Renewal job ID is required');
+      }
+      const result = await verifyCertificateRenewalOutcome({
+        certificateId: request.params.certificateId,
+        certificateRegistry: dependencies.certificateRegistry,
+        jobRegistry: dependencies.jobRegistry,
+        jobId,
+        before,
+        liveTls,
+        dryRun: Boolean(dryRun),
+      });
+      return response.json({ data: result });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/certificates/:certificateId/reload-outcome', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const { service, status, error = null, stage = 'reload' } = request.body ?? {};
+      if (typeof service !== 'string' || !service) {
+        throw new CertificateRegistryError('invalid_reload_outcome_service', 'Reload outcome service is required');
+      }
+      if (!['succeeded', 'partial', 'failed'].includes(status)) {
+        throw new CertificateRegistryError('invalid_reload_outcome_status', 'Reload outcome status must be succeeded, partial, or failed');
+      }
+      const updated = await dependencies.certificateRegistry.recordReloadOutcome(request.params.certificateId, {
+        service,
+        status,
+        error,
+        stage,
+      });
+      return response.json({ data: { certificate: publicCertificate(updated) } });
+    } catch (error) { return next(error); }
+  });
+
   if (dependencies.certificateMaterialGc) {
     app.get('/api/certificates/gc/preview', requirePanelRouteAccess, async (request, response, next) => {
       try {
@@ -323,4 +401,6 @@ export const certificateHttpInternals = Object.freeze({
   customPreview,
   selectionPreview,
   publicCertificate,
+  compareTlsPresentation,
+  verifyRenewalOutcome,
 });

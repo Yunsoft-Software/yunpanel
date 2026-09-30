@@ -262,3 +262,161 @@ test('Certificate GC preview and sweep routes expose retention candidates and sw
   });
 });
 
+test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation checks and handle partial reloads gracefully', async () => {
+  const certificateRegistry = createCertificateRegistry();
+  const domainRegistry = createDomainRegistry();
+  const jobRegistry = createJobRegistry();
+  const localServerId = 'server-local-1';
+
+  const domain = await domainRegistry.createDomain({
+    serverId: localServerId,
+    primaryDomain: 'tls-probe.example.com',
+    aliases: [],
+    targetType: 'proxy',
+    target: { upstreamPort: 8080 },
+    httpsMode: 'managed',
+  });
+
+  const validFrom = '2026-09-01T00:00:00.000Z';
+  const validTo = '2026-12-01T00:00:00.000Z';
+  const fingerprint256 = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
+
+  const certificate = await certificateRegistry.createForDomain({
+    domainId: domain.id,
+    serverId: localServerId,
+    domains: ['tls-probe.example.com'],
+    email: 'admin@example.com',
+  });
+
+  await certificateRegistry.markActive(certificate.id, {
+    certName: 'tls-probe.example.com',
+    certificatePath: `/etc/letsencrypt/live/tls-probe.example.com/cert.pem`,
+    fullchainPath: `/etc/letsencrypt/live/tls-probe.example.com/fullchain.pem`,
+    privateKeyPath: `/etc/letsencrypt/live/tls-probe.example.com/privkey.pem`,
+    validFrom,
+    validTo,
+    fingerprint256,
+  });
+
+  const app = withPanelContext(createApp({
+    certificateRegistry,
+    domainRegistry,
+    jobRegistry,
+    localServerId,
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    // 1. Verify-TLS matching
+    const matchRes = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/verify-tls`, {
+      method: 'POST',
+      body: {
+        liveTls: {
+          validFrom,
+          validTo,
+          fingerprint256,
+        },
+      },
+    });
+    assert.equal(matchRes.response.status, 200);
+    assert.equal(matchRes.payload.data.matches, true);
+    assert.equal(matchRes.payload.data.fingerprint256, fingerprint256);
+
+    // 2. Verify-TLS mismatch
+    const mismatchRes = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/verify-tls`, {
+      method: 'POST',
+      body: {
+        liveTls: {
+          validFrom,
+          validTo,
+          fingerprint256: '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF',
+        },
+      },
+    });
+    assert.equal(mismatchRes.response.status, 200);
+    assert.equal(mismatchRes.payload.data.matches, false);
+    assert.equal(mismatchRes.payload.data.reason, 'fingerprint_mismatch');
+
+    // 3. Domain-scoped verify-tls
+    const domainScoped = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${certificate.id}/verify-tls`, {
+      method: 'POST',
+      body: {
+        liveTls: { validFrom, validTo, fingerprint256 },
+      },
+    });
+    assert.equal(domainScoped.response.status, 200);
+    assert.equal(domainScoped.payload.data.matches, true);
+    assert.equal(domainScoped.payload.data.domainId, domain.id);
+
+    // 4. Renewal outcome endpoint
+    const renewalJob = await jobRegistry.enqueue({
+      serverId: localServerId,
+      type: 'ssl.renew',
+      operation: 'ssl.renew',
+      payload: { certName: 'tls-probe.example.com', dryRun: false },
+      resourceType: 'certificate',
+      resourceId: certificate.id,
+    });
+    await jobRegistry.claimNext(localServerId);
+    await jobRegistry.complete({
+      serverId: localServerId,
+      jobId: renewalJob.id,
+      status: 'succeeded',
+      result: {
+        certName: 'tls-probe.example.com',
+        certificatePath: '/etc/letsencrypt/live/tls-probe.example.com/cert.pem',
+        fullchainPath: '/etc/letsencrypt/live/tls-probe.example.com/fullchain.pem',
+        privateKeyPath: '/etc/letsencrypt/live/tls-probe.example.com/privkey.pem',
+        status: 'renewed',
+        validFrom,
+        validTo,
+        fingerprint256,
+      },
+    });
+
+    const renewalOutcomeRes = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/renewal-outcome`, {
+      method: 'POST',
+      body: {
+        jobId: renewalJob.id,
+        liveTls: { validFrom, validTo, fingerprint256 },
+      },
+    });
+    assert.equal(renewalOutcomeRes.response.status, 200);
+    assert.equal(renewalOutcomeRes.payload.data.verified, true);
+
+    // 5. Reload outcome handling: partial reload gracefully handled without corrupting certificate
+    const partialReloadRes = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/reload-outcome`, {
+      method: 'POST',
+      body: {
+        service: 'nginx',
+        status: 'partial',
+        stage: 'stage',
+        error: 'nginx reload warning on secondary listener',
+      },
+    });
+    assert.equal(partialReloadRes.response.status, 200);
+    assert.equal(partialReloadRes.payload.data.certificate.state, 'active');
+    assert.equal(partialReloadRes.payload.data.certificate.lastReloadOutcome.status, 'partial');
+    assert.equal(partialReloadRes.payload.data.certificate.lastReloadOutcome.service, 'nginx');
+
+    const updatedCert = await certificateRegistry.getCertificate(certificate.id);
+    assert.equal(updatedCert.state, 'active');
+    assert.equal(updatedCert.diagnosis.code, 'certificate_reload_partial');
+    assert.equal(updatedCert.diagnosis.severity, 'warning');
+
+    // 6. Reload outcome: succeed clears warning
+    const successReloadRes = await requestJson(`${baseUrl}/api/certificates/${certificate.id}/reload-outcome`, {
+      method: 'POST',
+      body: {
+        service: 'nginx',
+        status: 'succeeded',
+      },
+    });
+    assert.equal(successReloadRes.response.status, 200);
+    assert.equal(successReloadRes.payload.data.certificate.lastReloadOutcome.status, 'succeeded');
+    assert.equal(successReloadRes.payload.data.certificate.diagnosis, null);
+
+    const clearedCert = await certificateRegistry.getCertificate(certificate.id);
+    assert.equal(clearedCert.state, 'active');
+    assert.equal(clearedCert.diagnosis, null);
+  });
+});
