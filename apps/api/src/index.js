@@ -140,6 +140,7 @@ import { createAllWebsiteImpactProviders } from './website-delete-impact-provide
 import { createPleskImporter } from './plesk-importer.js';
 import { createResticRepositoryRegistry } from './restic-repository-registry.js';
 import { createRcloneRemoteRegistry } from './rclone-remote-registry.js';
+import { createSystemWatchdogService } from './system-watchdog-service.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -1099,6 +1100,37 @@ const applicationPassengerMigrationService = createApplicationPassengerMigration
 const pleskImporter = localServerId
   ? createPleskImporter({ localServerId })
   : null;
+let localRuntimeInstance = null;
+const systemWatchdogService = createSystemWatchdogService({
+  serverRegistry: registry,
+  jobRegistry,
+  localRuntime: () => localRuntimeInstance,
+  inspectServices: inspectAllowlistedServices,
+  daemons: () => ({
+    renewalScheduler: {
+      name: 'renewalScheduler',
+      status: () => ({ healthy: true, status: 'active' }),
+    },
+    ...(phpMyAdminHandoffRuntime ? {
+      phpMyAdminHandoff: {
+        name: 'phpMyAdminHandoff',
+        status: () => ({ healthy: true, status: 'active' }),
+      },
+    } : {}),
+    ...(elFinderHandoffRuntime ? {
+      elFinderHandoff: {
+        name: 'elFinderHandoff',
+        status: () => ({ healthy: true, status: 'active' }),
+      },
+    } : {}),
+    ...(mailDiscoveryRuntime ? {
+      mailDiscovery: {
+        name: 'mailDiscovery',
+        status: () => ({ healthy: true, status: 'active' }),
+      },
+    } : {}),
+  }),
+});
 const listener = createAuthenticatedApi({
   store: authStore,
   publicOrigin,
@@ -1248,6 +1280,7 @@ const listener = createAuthenticatedApi({
       pleskImporter,
       resticRepositoryRegistry,
       rcloneRemoteRegistry,
+      systemWatchdogService,
     }),
   }),
 });
@@ -1292,6 +1325,8 @@ const renewalScheduler = startCertificateRenewalScheduler({
   intervalMs: certificateRenewalIntervalMs,
   renewBeforeMs: certificateRenewBeforeMs,
 });
+localRuntimeInstance = localRuntime;
+systemWatchdogService.startPeriodicSweep({ intervalMs: 60_000, serverId: localServerId });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 const terminalAuthenticator = createLiveConnectionAuthenticator({
   store: authStore,
@@ -1362,6 +1397,7 @@ server.listen(port, host, () => {
   console.log(`[yunpanel-api] plesk importer=${pleskImporter ? 'enabled' : 'disabled'}`);
   console.log(`[yunpanel-api] local execution=${localRuntime ? `enabled server=${localRuntime.serverId} operations=${localRuntime.operations.length}` : 'disabled'}`);
   console.log(`[yunpanel-api] site files=${localServerId ? `enabled server=${localServerId}` : 'disabled'}`);
+  console.log('[yunpanel-api] system watchdog=enabled');
 });
 
 let shuttingDown = false;
@@ -1369,6 +1405,7 @@ async function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
+  systemWatchdogService.stop();
   renewalScheduler.stop();
   if (phpMyAdminHandoffRuntime) {
     try { await phpMyAdminHandoffRuntime.close(); }

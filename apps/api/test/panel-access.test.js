@@ -14,6 +14,8 @@ test('describes owner and read-only capability surfaces without client input', (
 test('read-only inventory rules are exact and expose only safe Website nested domains', () => {
   for (const [path, permission] of [
     ['/api/servers', 'servers.read'], ['/api/servers/server-1', 'servers.read'],
+    ['/api/servers/server-1/watchdog/status', 'servers.read'],
+    ['/api/system/watchdog/status', 'servers.read'],
     ['/api/websites', 'websites.read'], ['/api/websites/website-1', 'websites.read'], ['/api/websites/website-1/domains', 'websites.read'],
     ['/api/websites/website-1/sftp/keys', 'websites.read'],
     ['/api/applications', 'applications.read'], ['/api/applications/app-1', 'applications.read'],

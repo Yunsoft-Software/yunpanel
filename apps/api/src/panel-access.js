@@ -16,6 +16,8 @@ const READ_ONLY_RULES = Object.freeze([
   ['servers.read', /^\/api\/servers(?:\/[^/%]+)?$/],
   ['servers.read', /^\/api\/panel\/settings$/],
   ['servers.read', /^\/api\/servers\/[^/%]+\/dns\/(?:identity|authoritative)$/],
+  ['servers.read', /^\/api\/servers\/[^/%]+\/watchdog\/status$/],
+  ['servers.read', /^\/api\/system\/watchdog\/status$/],
   ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/(?:domains|sftp\/keys))?)?$/],
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],

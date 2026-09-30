@@ -146,3 +146,13 @@ export {
   SiteHealthHttpError,
   siteHealthHttpInternals,
 } from './site-health-http.js';
+export {
+  createSystemWatchdogService,
+  SystemWatchdogError,
+  systemWatchdogInternals,
+} from './system-watchdog-service.js';
+export {
+  mountSystemWatchdogRoutes,
+  SystemWatchdogHttpError,
+  systemWatchdogHttpInternals,
+} from './system-watchdog-http.js';

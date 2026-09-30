@@ -188,10 +188,14 @@ import { isPleskImporterHttpError, mountPleskImporterRoutes } from './plesk-impo
 import { PleskImporterError } from './plesk-importer.js';
 import { createSiteHealthService, SiteHealthError } from './site-health-service.js';
 import { mountSiteHealthRoutes, SiteHealthHttpError } from './site-health-http.js';
+import { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
+import { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
 export { API_VERSION } from './core-app.js';
+export { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
+export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -882,6 +886,20 @@ export function createApp(allOptions = {}) {
     domainRegistry,
     localServerId,
   });
+  const systemWatchdogService = options.systemWatchdogService ?? createSystemWatchdogService({
+    serverRegistry: registry,
+    jobRegistry,
+    localRuntime: options.localRuntime ?? null,
+    localJobExecutor: options.localJobExecutor ?? null,
+    inspectServices: options.inspectServices ?? null,
+    serviceControl: options.serviceControl ?? null,
+    daemons: options.daemons ?? {},
+  });
+  mountSystemWatchdogRoutes(app, {
+    watchdogService: systemWatchdogService,
+    registry,
+    localServerId,
+  });
 
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
@@ -1164,6 +1182,8 @@ export function createApp(allOptions = {}) {
       || error instanceof WebsiteAnalyticsHttpError
       || error instanceof SiteHealthError
       || error instanceof SiteHealthHttpError
+      || error instanceof SystemWatchdogError
+      || error instanceof SystemWatchdogHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
