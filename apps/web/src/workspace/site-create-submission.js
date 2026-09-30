@@ -77,11 +77,12 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
     running = true;
     publish({ ...EMPTY_SITE_SUBMISSION, phase: 'previewing' });
     let stage = 'preview';
+    let expected = null;
     try {
       if (!current()) return state;
       const preview = await request('/sites/create-preview', { method: 'POST', body: { input: snapshot }, signal });
       if (!current()) return state;
-      const expected = expectedResult(preview, snapshot);
+      expected = expectedResult(preview, snapshot);
       sealed = true;
       stage = 'create';
       publish({ phase: 'creating' });
@@ -94,6 +95,13 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       const siteAdmin = siteAdminResult(result.siteAdmin, { requested: snapshot.siteAdmin != null, websiteId: expected.websiteId });
       // Commit the verified record to the screen BEFORE any further await.
       publish({ phase: 'recorded', created, siteAdmin, error: null });
+      if (result.provisioningError) {
+        publish({
+          phase: 'attention',
+          error: 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.',
+        });
+        return state;
+      }
       stage = 'provisioning';
       const initial = provisioningState(result.provisioning, expected);
       publish({ steps: initial.steps, phase: initial.ready ? 'ready' : 'provisioning' });
@@ -112,15 +120,28 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       last = provisioningState(final, expected);
       publish({ phase: last.ready ? 'ready' : 'attention', steps: last.steps, error: last.ready ? null
         : 'Site kaydı oluşturuldu; kurulumun kalan adımlarını Genel Bakış bölümünden kontrol edin.' });
-    } catch {
-      if (current()) publish({
-        phase: stage === 'preview' ? 'error' : state.created ? 'attention' : 'uncertain',
-        error: stage === 'preview'
-          ? 'Önizleme doğrulanamadı. Formu ve güncel site bilgilerini kontrol edip tekrar deneyin.'
-          : state.created
-            ? 'Site kaydı oluşturuldu, ancak kurulumun son durumu doğrulanamadı. Aynı siteyi yeniden oluşturmayın; Genel Bakış bölümünden kontrol edin.'
-            : 'Oluşturma isteğinin sonucu doğrulanamadı. Sunucuda kayıt oluşmuş olabilir. Yeniden oluşturmadan önce Web Siteleri listesinden kontrol edin.',
-      });
+    } catch (err) {
+      if (current()) {
+        let recoveredCreated = state.created;
+        let recoveredSiteAdmin = state.siteAdmin;
+        if (!recoveredCreated && err?.data && record(err.data) && expected) {
+          try {
+            recoveredCreated = createdRecord(err.data, expected);
+            recoveredSiteAdmin = siteAdminResult(err.data.siteAdmin, { requested: snapshot.siteAdmin != null, websiteId: expected.websiteId });
+          } catch {}
+        }
+        publish({
+          ...(recoveredCreated ? { created: recoveredCreated, siteAdmin: recoveredSiteAdmin } : {}),
+          phase: stage === 'preview' ? 'error' : (state.created || recoveredCreated) ? 'attention' : 'uncertain',
+          error: stage === 'preview'
+            ? 'Önizleme doğrulanamadı. Formu ve güncel site bilgilerini kontrol edip tekrar deneyin.'
+            : (state.created || recoveredCreated)
+              ? (err?.data?.provisioningError
+                  ? 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.'
+                  : 'Site kaydı oluşturuldu, ancak kurulumun son durumu doğrulanamadı. Aynı siteyi yeniden oluşturmayın; Genel Bakış bölümünden kontrol edin.')
+              : 'Oluşturma isteğinin sonucu doğrulanamadı. Sunucuda kayıt oluşmuş olabilir. Yeniden oluşturmadan önce Web Siteleri listesinden kontrol edin.',
+        });
+      }
     } finally {
       running = false;
     }

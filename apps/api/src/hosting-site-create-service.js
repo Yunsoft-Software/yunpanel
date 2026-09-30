@@ -110,13 +110,33 @@ export function createHostingSiteCreateService({
       throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
     }
     const allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
+    let provisioning = null;
+    let provisioningError = null;
+    let stage = 'ownership_recorded';
+    let provisioningReady = false;
+    if (typeof websiteProvisioningRegistry?.create === 'function' && prepared.base?.provisioning) {
+      try {
+        provisioning = await websiteProvisioningRegistry.create(prepared.base.provisioning);
+        stage = 'provisioning_registered';
+        provisioningReady = Boolean(provisioning?.ready);
+      } catch (err) {
+        provisioningError = Object.freeze({
+          code: err?.code ?? 'provisioning_registration_failed',
+          message: err?.message ?? 'Website provisioning registration failed.',
+          status: err?.status ?? 503,
+        });
+        stage = 'provisioning_registration_failed';
+      }
+    }
     return Object.freeze({
       website,
       ownership: allocation,
       created,
       accessGranted: allocation.accessGranted === true,
-      stage: 'ownership_recorded',
-      provisioningReady: false,
+      stage,
+      provisioningReady,
+      ...(provisioning ? { provisioning } : {}),
+      ...(provisioningError ? { provisioningError } : {}),
     });
   }
 
