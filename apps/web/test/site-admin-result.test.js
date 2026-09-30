@@ -32,7 +32,7 @@ test('unrequested account does not display unsolicited identities or success', (
 });
 
 test('bounded known error codes become local messages, not raw API text', () => {
-  for (const code of ['site_admin_conflict', 'site_admin_input_invalid', 'site_admin_busy', 'site_admin_unavailable', 'site_admin_actor_unavailable', 'site_admin_replay_requires_review']) {
+  for (const code of ['site_admin_conflict', 'site_admin_input_invalid', 'site_admin_busy', 'site_admin_unavailable', 'site_admin_actor_unavailable', 'site_admin_replay_requires_review', 'site_admin_website_deleted', 'site_admin_actor_forbidden', 'site_admin_locked', 'site_admin_provisioning_failed']) {
     const result = siteAdminResult({ status: 'attention', websiteId, code, message: 'private-password' }, options);
     assert.equal(result.code, code);
     assert.equal(siteAdminMessage(result).includes('private-password'), false);
