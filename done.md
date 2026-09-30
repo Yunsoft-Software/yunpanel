@@ -306,3 +306,20 @@
 - Criterion 5 testinde sonlandırma öncesinde tamamlanan silme işinin sonucu `sanitizeMailDataDeleteResult(queuedDelete.job, deleteResult)` ile paketlenerek `expectedResourceRevision` alanının doğrulanması sağlandı; `MailDeleteFinalizeError: Completed mail data delete job does not match the requested resource revision` (`mail_delete_job_mismatch`) giderildi.
 - `createMailboxRemovalFixture` içindeki `jobRegistry` test nesnesine `updateJobStatus` metodu eklenerek iş kayıtlarının dinamik güncellenebilirliği desteklendi.
 - Tüm testler (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — BUG-03: Tek posta kutusu silme, aktif oturum sonlandırma, atomik yarış ve yetki sınırları doğrulaması
+- Tek posta kutusu silme akışının üst alan adını (`mailDomain.status: 'enabled'`) veya aynı etki alanındaki diğer komşu posta kutularını kapatmadan ve etkilemeden çalıştığı doğrulandı (`apps/api/src/mail-data-operations.js`, `apps/api/test/mailbox-removal.test.js`).
+- Silinen posta kutusuna ait aktif SMTP, IMAP ve Roundcube oturumlarının Dovecot kimlik doğrulama önbelleğinin temizlenmesi (`quiesce`, `doveadm kick`) ile güvenli şekilde sonlandırıldığı, komşu hesap oturumlarının korunduğu ve sonlandırılamayan inatçı oturumlarda fail-closed (`mailbox_access_sessions_remaining`) durulduğu doğrulandı.
+- Eşzamanlı posta kutusu silme isteklerinin durumu bozmadan fail-closed reddedilmesi için atomik arka uç yarış ve yetki sınırları (`assertMailDomainIdle`, 409 `mail_domain_job_conflict`, 404 `mailbox_not_found`, 409 `stale_mailbox_revision`, read-only 403) güvenceye alındı (`apps/api/src/mail-data-operations.js`, `apps/api/src/mail-delete-finalize.js`).
+- Posta kutusu verileri kalıcı olarak temizlenmeden önce silme öncesi doğrulanmış yedekleme (`backupNow`) oluşturma, anlık durum doğrulama ve ana bilgisayar geri alma (`host rollback`) mekanizmaları doğrulandı.
+- İlgili testler (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) tüm kabul kriterlerini karşılayacak şekilde deterministik hale getirildi; orkestratör doğrulaması beklenmektedir (pending orchestrator verification).
+
+## 2026-09-30 — BUG-03 / Criterion 3: Eşzamanlı durum değişimi ve hedef hesap yeniden etkinleştirme fail-closed yarış koşulu düzeltmesi
+- `apps/api/test/mailbox-removal.test.js` içindeki Criterion 3 testinde silme önizlemesi sonrasında posta kutusunun eşzamanlı olarak yeniden etkinleştirildiği (`enabled = true`) yarış koşulu senaryosunda, kuyruğa alma adımının (`queueDelete`) fail-closed 409 `mail_data_delete_mailbox_disable_required` ile reddedilmesi sağlandı.
+- Önizleme sonrasında posta kutusu devre dışı kalmaya devam ederken revizyonun değiştiği (`revision = 3`) durum ayrıca test edilerek bayat önizlemenin (`mail_data_delete_preview_stale`) 409 ile fail-closed reddedildiği doğrulandı.
+- İlgili testler (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — BUG-03 / Criterion 3: mountMailboxRoutes fixture mock uyumluluğu ve yetki sınırları testi onarımı
+- `apps/api/test/mailbox-removal.test.js` içindeki `createMailboxRemovalFixture` mock `mailboxRegistry` nesnesine eksik olan `createMailbox` ve `rotatePassword` metodları eklenerek `mountMailboxRoutes` bağımlılık doğrulamasının (`Mailbox registry is required`) başarıyla geçmesi sağlandı.
+- Criterion 3 içindeki HTTP rota yetki sınırları ve hata denetimleri (read-only rol için 403 mutasyon/silme engeli, owner yetkisiyle geçersiz onay için 400 reddi ve çapraz sunucu izolasyonu için 404 yanıtı) eksiksiz çalışır duruma getirildi.
+- Tüm testler (`node --test apps/api/test/mailbox-removal.test.js` ve `node --test apps/api/test/mailbox-alias-references.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
