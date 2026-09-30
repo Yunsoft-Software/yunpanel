@@ -35,9 +35,13 @@ export function extractActorTenant(authOrUser) {
     throw new AuthError('unauthorized', 'Authentication required.', 401);
   }
 
+  if (user.actorId !== undefined && user.isGlobal !== undefined) {
+    return user;
+  }
+
   const role = user.role;
-  const hosting = user.hosting ?? null;
-  const actorId = user.id;
+  const hosting = user.hosting ?? (user.kind ? { kind: user.kind, resellerId: user.resellerId ?? null } : null);
+  const actorId = user.actorId ?? user.id;
   const active = user.active !== false;
   const websiteIds = Array.isArray(user.websiteIds) ? Object.freeze([...user.websiteIds]) : Object.freeze([]);
 
@@ -49,8 +53,10 @@ export function extractActorTenant(authOrUser) {
   const isDirectOwnerCustomer = isCustomer && hosting?.resellerId === null;
 
   return Object.freeze({
+    id: actorId,
     actorId,
     role,
+    hosting,
     kind: isReseller ? ACCOUNT_KINDS.RESELLER : isCustomer ? ACCOUNT_KINDS.CUSTOMER : null,
     resellerId: isCustomer ? (hosting?.resellerId ?? null) : null,
     customerId: isCustomer ? actorId : null,
@@ -431,37 +437,60 @@ export function createTenantBoundaryMiddleware(options = {}) {
 
       const isWebsiteInTenant = async (targetWebsiteId) => {
         if (!targetWebsiteId || typeof targetWebsiteId !== 'string') return false;
-        if (actorTenant.websiteIds.includes(targetWebsiteId)) {
+        const getSite = websiteLookup ?? (websiteRegistry ? (id) => websiteRegistry.getWebsite(id) : null);
+        let site = null;
+        if (typeof getSite === 'function') {
+          try {
+            site = await Promise.resolve(getSite(targetWebsiteId));
+          } catch {
+            site = null;
+          }
+        }
+
+        if (actorTenant.isCustomer) {
+          if (!actorTenant.websiteIds.includes(targetWebsiteId)) {
+            return false;
+          }
+          if (site && site.customerId && site.customerId !== actorTenant.actorId) {
+            return false;
+          }
           return true;
         }
+
         if (actorTenant.isReseller) {
-          const getSite = websiteLookup ?? (websiteRegistry ? (id) => websiteRegistry.getWebsite(id) : null);
-          if (typeof getSite === 'function') {
-            let site = null;
-            try {
-              site = await Promise.resolve(getSite(targetWebsiteId));
-            } catch {
-              site = null;
-            }
-            if (site) {
-              if (site.resellerId === actorTenant.actorId) {
-                return true;
+          if (site) {
+            if (site.resellerId !== undefined) {
+              if (site.resellerId === null || site.resellerId !== actorTenant.actorId) {
+                return false;
               }
-              const custId = site.customerId;
-              if (custId && typeof customerLookup === 'function') {
+              return true;
+            }
+            if (site.customerId) {
+              if (typeof customerLookup === 'function') {
                 let cust = null;
                 try {
-                  cust = await Promise.resolve(customerLookup(custId));
+                  cust = await Promise.resolve(customerLookup(site.customerId));
                 } catch {
                   cust = null;
                 }
-                if (cust && cust.resellerId === actorTenant.actorId) {
-                  return true;
+                if (!cust || cust.resellerId === null || cust.resellerId !== actorTenant.actorId) {
+                  return false;
                 }
+                return true;
               }
+              return false;
             }
           }
+          if (actorTenant.websiteIds.includes(targetWebsiteId)) {
+            return true;
+          }
+          return false;
         }
+
+        if (actorTenant.isLegacySiteManager) {
+          return actorTenant.websiteIds.includes(targetWebsiteId);
+        }
+
         return false;
       };
 
@@ -481,6 +510,25 @@ export function createTenantBoundaryMiddleware(options = {}) {
         const allowed = await isWebsiteInTenant(targetWebsiteId);
         if (!allowed) {
           throw denied('tenant_boundary_forbidden', 'This website is outside your tenant boundary.');
+        }
+      }
+
+      // Terminal capabilities validation
+      if (path === '/api/terminal/capabilities' && method === 'POST') {
+        const body = request.body;
+        if (body?.scope === 'server') {
+          if (!actorTenant.isOwner) {
+            throw denied('terminal_server_forbidden', 'Only server owner can access root terminal.');
+          }
+        } else if (body?.scope === 'site') {
+          const targetWebsiteId = body.websiteId;
+          if (!targetWebsiteId) {
+            throw denied('terminal_site_forbidden', 'Website ID is required for site terminal.');
+          }
+          const allowed = await isWebsiteInTenant(targetWebsiteId);
+          if (!allowed) {
+            throw denied('terminal_site_forbidden', 'This website is outside your tenant boundary.');
+          }
         }
       }
 
