@@ -5,7 +5,7 @@ import { groupSiteTabs, tabKey } from './ux-model.js';
 import './site-resource-workspace.css';
 import './plesk-navigation.css';
 
-const ICONS = { overview: 'dashboard', hosting: 'globe', files: 'folder', databases: 'database', mail: 'mail', ssl: 'shield', node: 'code', deploy: 'git', domains: 'globe', dns: 'globe', logs: 'file', analytics: 'dashboard', cron: 'clock', backup: 'archive', terminal: 'terminal', settings: 'settings', resources: 'box' };
+const ICONS = { overview: 'dashboard', hosting: 'globe', files: 'folder', databases: 'database', mail: 'mail', ssl: 'shield', node: 'code', deploy: 'git', domains: 'globe', dns: 'globe', logs: 'file', analytics: 'dashboard', cron: 'clock', backup: 'archive', terminal: 'terminal', php: 'code', access: 'shield', settings: 'settings', resources: 'box' };
 const LANDINGS = { dashboard: 'overview', hosting: 'hosting', mail: 'mail' };
 const tabLabel = (tab) => (Array.isArray(tab) ? tab[1] : (tab?.label ?? tab?.title ?? tabKey(tab)));
 
