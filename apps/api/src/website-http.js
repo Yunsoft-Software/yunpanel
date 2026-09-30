@@ -160,36 +160,43 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
     if (!user) return false;
     const role = user.role;
     if (role === 'owner' || role === 'read_only') return true;
+    if (user.active === false) return false;
     const isReseller = role === 'reseller' || user.hosting?.kind === 'reseller';
+    const isCustomer = role === 'customer' || user.hosting?.kind === 'customer';
     const allowed = new Set(user.websiteIds ?? []);
 
-    if (allowed.has(website.id)) {
-      if (isReseller && website.resellerId !== undefined && website.resellerId !== user.id) {
-        return false;
-      }
+    if (isCustomer) {
+      if (!allowed.has(website.id)) return false;
+      if (website.customerId && website.customerId !== user.id) return false;
       return true;
     }
 
     if (isReseller) {
-      if (website.resellerId && website.resellerId === user.id) {
+      if (website.resellerId !== undefined) {
+        if (website.resellerId === null || website.resellerId !== user.id) return false;
         return true;
       }
       if (website.customerId && typeof customerLookup === 'function') {
         try {
           const cust = await Promise.resolve(customerLookup(website.customerId));
-          if (cust && cust.resellerId === user.id) {
-            return true;
+          if (!cust || cust.resellerId === null || cust.resellerId !== user.id) {
+            return false;
           }
-        } catch {}
+          return true;
+        } catch {
+          return false;
+        }
       }
+      return allowed.has(website.id);
     }
 
-    return false;
+    return allowed.has(website.id);
   }
 
   async function checkWebsiteAccess(request, websiteId) {
-    const role = request.auth?.user?.role;
-    if (role && !['owner', 'read_only'].includes(role)) {
+    const user = request.auth?.user;
+    const isGlobal = user?.role === 'owner' || user?.role === 'read_only';
+    if (!isGlobal) {
       const website = await websiteRegistry.getWebsite(websiteId).catch(() => null);
       if (!website) {
         throw new WebsiteRegistryError('website_not_found', 'Website not found', 404);
@@ -203,8 +210,9 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
 
   app.get('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     let websites = await websiteRegistry.listWebsites(localListFilter(request.query, localServerId));
-    const role = request.auth?.user?.role;
-    if (role && !['owner', 'read_only'].includes(role)) {
+    const user = request.auth?.user;
+    const isGlobal = user?.role === 'owner' || user?.role === 'read_only';
+    if (!isGlobal) {
       const filtered = [];
       for (const w of websites) {
         if (await isWebsiteAllowedForRequest(w, request)) {
