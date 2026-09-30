@@ -110,6 +110,20 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
       throw new AuthError('hosting_site_migration_required', 'Existing Website grants require explicit ownership migration.', 409);
     }
     if (chain.parent) assertResellerCapacity({ limits: limits(chain.parent.user_id), usage: usage(chain.parent), resource: 'websites' });
+    const hasQuotaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_customer_quotas'").get();
+    if (hasQuotaTable) {
+      const customerQuotaRow = db.prepare('SELECT max_websites FROM auth_customer_quotas WHERE customer_id = ?').get(plan.customerId);
+      if (customerQuotaRow && customerQuotaRow.max_websites !== null) {
+        const currentWebsites = db.prepare(`SELECT count(DISTINCT website_id) AS total FROM (
+          SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
+          UNION
+          SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'reserved'
+        )`).get(plan.customerId, plan.customerId)?.total ?? 0;
+        if (currentWebsites >= customerQuotaRow.max_websites) {
+          throw new AuthError('customer_quota_exceeded', 'The customer website quota has been reached.', 409);
+        }
+      }
+    }
     return { actor, plan, chain, prior: null };
   }
   return Object.freeze({

@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { domainTreeRows } from '../domain-tree.js';
+import { usePanelSession } from '../panel-session.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { siteListPage } from './site-list-model.js';
@@ -13,10 +14,12 @@ import './ui/console-lists.css';
 import './ui/website-task-cards.css';
 
 export default function WebsitesPage() {
-  const { domains, websites, applications, certificates, isOwner, isReseller, isCustomer, canManage, refreshAll } = useWorkspace();
+  const { domains, websites, applications, certificates, isOwner, isReseller, isCustomer, hostingProfile, canManage, refreshAll } = useWorkspace();
+  const { session } = usePanelSession();
   const [params, setParams] = useSearchParams();
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
+
   const query = params.get('q') ?? '';
   const type = ['proxy', 'static'].includes(params.get('type')) ? params.get('type') : 'all';
   const status = ['active', 'draft', 'staged', 'error'].includes(params.get('status')) ? params.get('status') : 'all';
@@ -32,9 +35,53 @@ export default function WebsitesPage() {
   function toggle(id) {
     setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
+  const websiteCount = domains?.items?.length ?? 0;
+  const isSuspended = session?.user?.active === false || hostingProfile?.active === false;
+  const isQuotaReached = hostingProfile?.quotas?.maxWebsites !== null && hostingProfile?.quotas?.maxWebsites !== undefined && websiteCount >= hostingProfile.quotas.maxWebsites;
+
   return <>
     <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını ilgili sitenin kartından açın.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel />}
+    {isCustomer && (
+      <Section title="Barındırma Kaynakları ve Kotalar" description="Hesabınıza tahsis edilen kaynak kullanım durumu">
+        {isSuspended && (
+          <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '0.75rem', borderRadius: '4px' }}>
+            <strong>Kaynaklar Kilitli:</strong> Hesabınız askıya alınmıştır ve barındırma kaynaklarınız kilitli durumdadır. Yeniden etkinleştirmek için bayinizle iletişime geçin.
+          </div>
+        )}
+        {isQuotaReached && (
+          <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem', color: '#b45309', backgroundColor: '#fffbeb', padding: '0.75rem', borderRadius: '4px' }}>
+            <strong>Kota Sınırı:</strong> Web sitesi kotanız ({websiteCount} / {hostingProfile.quotas.maxWebsites}) sınırına ulaşmıştır. Yeni site talepleri için bayinizle iletişime geçin.
+          </div>
+        )}
+        <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Web Siteleri</span>
+            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
+              {websiteCount} / {hostingProfile?.quotas?.maxWebsites ?? 'Sınırsız'}
+            </div>
+          </div>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Disk Alanı</span>
+            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
+              0 MB / {hostingProfile?.quotas?.maxDiskMb ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
+            </div>
+          </div>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Aylık Trafik</span>
+            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
+              0 MB / {hostingProfile?.quotas?.maxTrafficMb ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
+            </div>
+          </div>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+            <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Veritabanları</span>
+            <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
+              0 / {hostingProfile?.quotas?.maxDatabases ?? 'Sınırsız'}
+            </div>
+          </div>
+        </div>
+      </Section>
+    )}
     <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu` : 'Site listesi hazırlanıyor.'}>
       <div className="ws-filters">
         <label className="ws-filter-search">Site ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Alan adı veya alias" /></label>

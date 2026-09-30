@@ -5,6 +5,11 @@ import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js'
 import { initializeHostingAccountSchema } from './hosting-account-schema.js';
 import { assertCustomerCreationScope, assertCustomerManagement, assertResellerManagement, validateHostingAccount } from './reseller-scope.js';
 import { assertResellerCapacity, countResellerUsage, validateResellerLimits } from './reseller-limits.js';
+import {
+  initializeCustomerQuotaSchema,
+  validateCustomerQuotas,
+  assertCustomerQuotaWithinResellerCapacity,
+} from './customer-quotas.js';
 
 const identifier = (value) => typeof value === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const plain = (value) => value !== null && typeof value === 'object' && [Object.prototype, null].includes(Object.getPrototypeOf(value));
@@ -36,6 +41,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     throw new TypeError('Hosting accounts require the live auth transaction, MFA, audit and revocation services');
   }
   initializeHostingAccountSchema({ db, transaction });
+  initializeCustomerQuotaSchema(db);
   const select = `SELECT h.*, u.username, u.role, u.active, COALESCE(r.revision, 1) AS user_revision
     FROM auth_hosting_accounts h LEFT JOIN users u ON u.id = h.user_id
     LEFT JOIN auth_user_revisions r ON r.user_id = h.user_id`;
@@ -72,17 +78,23 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     if (!current?.id || !current.user?.id) throw error('unauthorized', 'Sign in to continue.', 401);
     if (current.user.role === 'owner') return owner(rawToken, requireManagement);
     const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(current.user.id);
-    if (!['site_manager', 'reseller'].includes(user?.role) || user.active !== 1) throw scopeDenied();
+    if (!['site_manager', 'reseller', 'customer'].includes(user?.role) || user.active !== 1) throw scopeDenied();
     const row = raw(user.id);
     if (!row) throw scopeDenied();
     const profile = projection(row);
-    if (profile.kind !== 'reseller' || profile.resellerId !== null || !profile.active) throw scopeDenied();
-    return { id: user.id, role: 'reseller', kind: 'reseller', active: true };
+    if (profile.kind === 'reseller' && profile.resellerId === null && profile.active) {
+      return { id: user.id, role: 'reseller', kind: 'reseller', active: true };
+    }
+    if (profile.kind === 'customer' && profile.active) {
+      return { id: user.id, role: 'customer', kind: 'customer', active: true };
+    }
+    throw scopeDenied();
   }
   function assertReadScope(actor, row) {
     const account = projection(row);
     if (actor.role === 'owner') return;
     if (account.kind === 'reseller' && account.id === actor.id) return;
+    if (account.kind === 'customer' && account.id === actor.id) return;
     if (account.kind !== 'customer') throw scopeDenied();
     const parent = account.resellerId === null ? null : existing(account.resellerId);
     assertCustomerManagement({ actor, customer: account, reseller: parent ? projection(parent) : null });
@@ -99,6 +111,24 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       websites: hostingWebsitesForCapacity(db),
     });
   }
+  function customerQuotas(id) {
+    const row = db.prepare('SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?').get(id);
+    if (!row) return { maxWebsites: null, maxDiskMb: null, maxTrafficMb: null, maxDatabases: null };
+    return validateCustomerQuotas(row);
+  }
+  function customerUsage(id) {
+    const websiteRow = db.prepare(`SELECT count(DISTINCT website_id) AS total FROM (
+      SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
+      UNION
+      SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'reserved'
+    )`).get(id, id);
+    return {
+      websites: websiteRow?.total ?? 0,
+      diskMb: 0,
+      trafficMb: 0,
+      databases: 0,
+    };
+  }
   function view(row) {
     const hasReservedSites = row.kind === 'reseller' && db.prepare(`SELECT 1 FROM auth_hosting_site_allocations a
       JOIN auth_hosting_accounts h ON h.user_id = a.customer_id
@@ -107,6 +137,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       ...projection(row), username: row.username, revision: row.revision, userRevision: row.user_revision,
       createdAt: row.created_at, updatedAt: row.updated_at, stage: 'profile_only',
       ...(row.kind === 'reseller' ? { limits: limits(row.user_id), usage: usage(row), usageScope: hasReservedSites ? 'registered_and_reserved_ownership' : 'registered_ownership' } : {}),
+      ...(row.kind === 'customer' ? { quotas: customerQuotas(row.user_id), usage: customerUsage(row.user_id) } : {}),
     };
   }
   function candidate(id, expectedUserRevision) {
@@ -177,12 +208,21 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     registerCustomer(rawToken, requireManagement, input) {
       const result = transaction(() => {
         const actor = owner(rawToken, requireManagement);
-        fields(input, ['userId', 'expectedUserRevision', 'resellerId']);
+        fields(input, ['userId', 'expectedUserRevision', 'resellerId', 'quotas'], ['userId', 'expectedUserRevision', 'resellerId']);
         const user = candidate(input.userId, input.expectedUserRevision);
         const parent = input.resellerId === null ? null : existing(input.resellerId);
         assertCustomerCreationScope({ actor, reseller: parent ? projection(parent) : null });
         if (parent) assertResellerCapacity({ limits: limits(parent.user_id), usage: usage(parent), resource: 'customers' });
-        return insert(actor, user, 'customer', input.resellerId);
+        const account = insert(actor, user, 'customer', input.resellerId);
+        if (input.quotas) {
+          const validated = validateCustomerQuotas(input.quotas);
+          if (parent) assertCustomerQuotaWithinResellerCapacity({ customerQuotas: validated, resellerLimits: limits(parent.user_id) });
+          const timestamp = now();
+          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+            user.id, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp,
+          );
+        }
+        return view(existing(user.id));
       });
       revokeLiveUser(result.id, 'hosting_account_linked');
       return result;
@@ -194,7 +234,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         if (actor.role !== 'reseller') throw scopeDenied();
       });
       const credentials = customerCredentialServices();
-      fields(input, ['username', 'password']);
+      fields(input, ['username', 'password', 'quotas'], ['username', 'password']);
       const name = credentials.normalizeUsername(input.username);
       const passwordHash = await credentials.hashPassword(input.password);
       return transaction(() => {
@@ -208,9 +248,16 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         const timestamp = now();
         db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, 1, ?, ?)')
           .run(id, name, passwordHash, 'site_manager', timestamp, timestamp);
-        const account = insert(actor, { id }, 'customer', actor.id);
+        insert(actor, { id }, 'customer', actor.id);
+        if (input.quotas) {
+          const validated = validateCustomerQuotas(input.quotas);
+          assertCustomerQuotaWithinResellerCapacity({ customerQuotas: validated, resellerLimits: limits(parent.user_id) });
+          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+            id, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp,
+          );
+        }
         audit(actor.id, 'hosting.customer_login_created', { type: 'user', id });
-        return account;
+        return view(existing(id));
       });
     },
     async updateCustomerLogin(rawToken, requireManagement, id, input) {
@@ -264,6 +311,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     list(rawToken, requireManagement, input = {}) {
       return transaction(() => {
         const actor = managementActor(rawToken, requireManagement);
+        if (actor.role !== 'owner' && actor.role !== 'reseller') throw scopeDenied();
         fields(input, ['kind', 'resellerId', 'offset', 'limit'], []);
         const { kind, offset = 0, limit = 50 } = input;
         if (kind !== undefined && !['reseller', 'customer'].includes(kind)) throw error('invalid_hosting_kind', 'Choose reseller or customer.');
@@ -303,6 +351,53 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         db.prepare('UPDATE auth_reseller_limits SET max_customers = ?, max_websites = ? WHERE reseller_id = ?').run(next.maxCustomers, next.maxWebsites, id);
         db.prepare('UPDATE auth_hosting_accounts SET revision = revision + 1, updated_at = ? WHERE user_id = ?').run(now(), id);
         audit(actor.id, 'hosting.limits_updated', { type: 'user', id });
+        return view(existing(id));
+      });
+    },
+    updateCustomerQuotas(rawToken, requireManagement, id, input) {
+      return transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        fields(input, ['revision', 'quotas']);
+        const row = existing(id, revision(input.revision));
+        if (row.kind !== 'customer') throw scopeDenied();
+        const parent = row.reseller_id === null ? null : existing(row.reseller_id);
+        assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
+
+        const nextQuotas = validateCustomerQuotas(input.quotas);
+        if (actor.role === 'reseller' && parent) {
+          assertCustomerQuotaWithinResellerCapacity({ customerQuotas: nextQuotas, resellerLimits: limits(parent.user_id) });
+        }
+
+        const previous = customerQuotas(id);
+        const unchanged = ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].every(
+          (key) => nextQuotas[key] === previous[key],
+        );
+        if (unchanged) return view(row);
+
+        if (row.revision === Number.MAX_SAFE_INTEGER) throw conflict();
+        const timestamp = now();
+        db.prepare(`INSERT INTO auth_customer_quotas
+          (customer_id, max_websites, max_disk_mb, max_traffic_mb, max_databases, created_at, updated_at)
+          VALUES (?, ?, ?, ?, ?, ?, ?)
+          ON CONFLICT(customer_id) DO UPDATE SET
+            max_websites = excluded.max_websites,
+            max_disk_mb = excluded.max_disk_mb,
+            max_traffic_mb = excluded.max_traffic_mb,
+            max_databases = excluded.max_databases,
+            updated_at = excluded.updated_at
+        `).run(
+          id,
+          nextQuotas.maxWebsites,
+          nextQuotas.maxDiskMb,
+          nextQuotas.maxTrafficMb,
+          nextQuotas.maxDatabases,
+          timestamp,
+          timestamp,
+        );
+
+        db.prepare('UPDATE auth_hosting_accounts SET revision = revision + 1, updated_at = ? WHERE user_id = ?')
+          .run(timestamp, id);
+        audit(actor.id, 'hosting.customer_quotas_updated', { type: 'user', id });
         return view(existing(id));
       });
     },
@@ -360,6 +455,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
           || db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? LIMIT 1').get(id)) {
           throw error('hosting_account_in_use', 'Detach account resources through an explicit migration before removing this profile.', 409);
         }
+        db.prepare('DELETE FROM auth_customer_quotas WHERE customer_id = ?').run(id);
         db.prepare('DELETE FROM auth_reseller_limits WHERE reseller_id = ?').run(id);
         db.prepare('DELETE FROM auth_hosting_accounts WHERE user_id = ?').run(id);
         invalidate(id);
