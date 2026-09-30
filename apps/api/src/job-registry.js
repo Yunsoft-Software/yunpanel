@@ -111,11 +111,66 @@ const MANAGED_SERVICE_CONFIGURATION_STATUS_SET = new Set([
 const MAX_ARTIFACT_FILES = 100_000;
 const MAX_ARTIFACT_BYTES = 2 * 1024 * 1024 * 1024;
 const IDEMPOTENCY_KEY_PATTERN = /^[A-Za-z0-9._:-]{16,200}$/;
-const RETRYABLE_PREFLIGHT_AUTH_FAILURES = new Set([
+export const RETRYABLE_PREFLIGHT_AUTH_FAILURES = Object.freeze(new Set([
   'website_provisioning_job_authorization_unavailable',
   'website_provisioning_job_authorization_required',
   'website_provisioning_job_actor_forbidden',
-]);
+]));
+
+export const TRANSIENT_JOB_ERROR_CODES = Object.freeze(new Set([
+  ...RETRYABLE_PREFLIGHT_AUTH_FAILURES,
+  'dns_provider_rate_limited',
+  'dns_provider_unavailable',
+  'dns_provider_snapshot_stale',
+  'apt_update_failed',
+  'managed_service_apt_update_failed',
+  'managed_service_operation_in_progress',
+  'node_runtime_install_in_progress',
+  'upgrade_in_progress',
+  'database_connection_unavailable',
+  'database_operation_in_progress',
+  'process_store_locked',
+  'site_mutation_locked',
+  'ETIMEDOUT',
+  'ECONNRESET',
+  'ECONNREFUSED',
+  'EAI_AGAIN',
+  'EBUSY',
+]));
+
+function extractErrorCode(error) {
+  if (typeof error === 'string') return error;
+  if (!error || typeof error !== 'object') return null;
+  if (typeof error.code === 'string') return error.code;
+  if (typeof error.error?.code === 'string') return error.error.code;
+  if (typeof error.message === 'string') {
+    if (TRANSIENT_JOB_ERROR_CODES.has(error.message)) return error.message;
+    for (const code of TRANSIENT_JOB_ERROR_CODES) {
+      if (error.message === code || error.message.includes(code)) return code;
+    }
+    return error.message;
+  }
+  return null;
+}
+
+export function isTransientJobError(error) {
+  const code = extractErrorCode(error);
+  if (!code || typeof code !== 'string') return false;
+  return TRANSIENT_JOB_ERROR_CODES.has(code);
+}
+
+export function isPermanentJobError(error) {
+  const code = extractErrorCode(error);
+  if (!code || typeof code !== 'string') return false;
+  return !TRANSIENT_JOB_ERROR_CODES.has(code);
+}
+
+export function classifyJobError(error) {
+  const code = extractErrorCode(error);
+  if (!code || typeof code !== 'string') return 'unknown';
+  return TRANSIENT_JOB_ERROR_CODES.has(code) ? 'transient' : 'permanent';
+}
+
 const enqueueCreated = Symbol('yunpanel.job.enqueueCreated');
 
 export class JobRegistryError extends Error {
@@ -125,6 +180,56 @@ export class JobRegistryError extends Error {
     this.code = code;
     this.status = status;
   }
+}
+
+export function normalizeJobAuthorization(value, { optional = false } = {}) {
+  if (value === null || value === undefined) {
+    if (optional) return null;
+    throw new JobRegistryError('job_authorization_required', 'Job authorization is required', 403);
+  }
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new JobRegistryError('job_authorization_invalid', 'Job authorization is invalid', 400);
+  }
+  if (value.kind === 'website_provisioning') {
+    return normalizeWebsiteProvisioningJobAuthorization(value, { optional });
+  }
+  if (typeof value.actorId === 'string' && value.actorId.trim() && typeof value.role === 'string' && value.role.trim()) {
+    const norm = {
+      actorId: value.actorId.trim(),
+      role: value.role.trim(),
+    };
+    if (typeof value.websiteId === 'string' && value.websiteId.trim()) {
+      norm.websiteId = value.websiteId.trim();
+    }
+    if (typeof value.userId === 'string' && value.userId.trim()) {
+      norm.userId = value.userId.trim();
+    }
+    if (typeof value.sessionId === 'string' && value.sessionId.trim()) {
+      norm.sessionId = value.sessionId.trim();
+    }
+    return Object.freeze(norm);
+  }
+  return Object.freeze({ ...value });
+}
+
+function isAuthorizedActor(existingAuth, retryAuth) {
+  if (!existingAuth) return true;
+  if (!retryAuth) return false;
+  if (existingAuth.kind === 'website_provisioning') {
+    return retryAuth.kind === 'website_provisioning'
+      && existingAuth.operationId === retryAuth.operationId
+      && existingAuth.websiteId === retryAuth.websiteId
+      && existingAuth.stepId === retryAuth.stepId;
+  }
+  if (retryAuth.role === 'owner') return true;
+  if (existingAuth.role === 'owner' && retryAuth.role !== 'owner') return false;
+  if (existingAuth.websiteId && retryAuth.websiteId && existingAuth.websiteId !== retryAuth.websiteId) {
+    return false;
+  }
+  if (existingAuth.actorId && retryAuth.actorId && existingAuth.actorId !== retryAuth.actorId) {
+    return false;
+  }
+  return true;
 }
 
 function emptyState() {
@@ -147,6 +252,8 @@ function publicJob(job) {
     finishedAt: job.finishedAt,
     attempts: job.attempts,
     ...(job.availableAt ? { availableAt: job.availableAt } : {}),
+    ...(job.manualRetry ? { manualRetry: job.manualRetry } : {}),
+    ...(typeof job.retryExhausted === 'boolean' ? { retryExhausted: job.retryExhausted } : {}),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
   });
@@ -216,7 +323,13 @@ function idempotencyDigest(input) {
 }
 
 function validateError(error) {
-  return safeLocalOperationError(error);
+  const safe = safeLocalOperationError(error);
+  if (safe?.code === 'local_operation_failed' && typeof error?.code === 'string') {
+    if (['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'EBUSY'].includes(error.code)) {
+      return { code: error.code, message: `The host operation encountered a temporary network or system error (${error.code}).` };
+    }
+  }
+  return safe;
 }
 
 function boundedString(value, maxLength) {
@@ -1083,6 +1196,7 @@ export function createJobRegistry({
   retryBudget = 3,
   retryBackoffBaseMs = 0,
   retryBackoffMaxMs = 30000,
+  maxAttempts = 5,
 } = {}) {
   let state = emptyState();
   let initialized = false;
@@ -1130,6 +1244,8 @@ export function createJobRegistry({
     idempotencyKey = null,
     authorization = null,
     backoffMs = null,
+    manual = false,
+    manualRetry = false,
   }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
@@ -1141,7 +1257,7 @@ export function createJobRegistry({
     if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey))) {
       throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
     }
-    const privateAuthorization = normalizeWebsiteProvisioningJobAuthorization(authorization, { optional: true });
+    const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
 
     const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
       serverId, type, operation, payload, resourceType, resourceId,
@@ -1151,7 +1267,7 @@ export function createJobRegistry({
       if (existing.idempotencyDigest !== requestDigest) {
         throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
       }
-      const existingAuthorization = normalizeWebsiteProvisioningJobAuthorization(
+      const existingAuthorization = normalizeJobAuthorization(
         existing.authorization,
         { optional: true },
       );
@@ -1168,25 +1284,67 @@ export function createJobRegistry({
         existing.authorization = privateAuthorization;
         changed = true;
       }
-      if (existing.status === 'failed'
-        && privateAuthorization
-        && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code)) {
+      if (existing.status === 'failed') {
         const attempts = Number.isInteger(existing.attempts) ? existing.attempts : 0;
-        if (attempts < retryBudget) {
+        const isManual = manual === true || manualRetry === true;
+        const isAuthRetryable = privateAuthorization && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code);
+        const isTransient = isTransientJobError(existing.error?.code);
+
+        let canRetry = false;
+        if (isManual) {
+          if (attempts >= maxAttempts) {
+            throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
+          }
+          if (existingAuthorization && !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
+            throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
+          }
+          canRetry = true;
+        } else if ((isAuthRetryable || isTransient) && attempts < retryBudget) {
+          canRetry = true;
+        } else if (attempts >= retryBudget) {
+          if (!existing.retryExhausted) {
+            existing.retryExhausted = true;
+            changed = true;
+          }
+        }
+
+        if (canRetry) {
+          const conflict = state.jobs.some((candidate) => candidate.id !== existing.id
+            && candidate.resourceType === existing.resourceType
+            && candidate.resourceId === existing.resourceId
+            && ['queued', 'running'].includes(candidate.status));
+          if (conflict) {
+            throw new JobRegistryError(`${existing.resourceType}_job_conflict`, `A ${existing.resourceType} operation is already queued or running`, 409);
+          }
+
+          const failedAt = existing.finishedAt ? Date.parse(existing.finishedAt) : now();
+
           existing.status = 'queued';
           existing.startedAt = null;
           existing.finishedAt = null;
           existing.result = null;
           existing.error = null;
-          if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
-            const delay = Math.min(backoffMs, retryBackoffMaxMs);
-            existing.availableAt = new Date(now() + delay).toISOString();
-          } else if (retryBackoffBaseMs > 0) {
-            const exp = Math.max(0, attempts - 1);
-            const delay = Math.min(retryBackoffBaseMs * (2 ** exp), retryBackoffMaxMs);
-            existing.availableAt = new Date(now() + delay).toISOString();
+          existing.retryExhausted = false;
+          if (isManual) {
+            existing.manualRetry = true;
+            if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+              const delay = Math.min(backoffMs, retryBackoffMaxMs);
+              existing.availableAt = new Date(now() + delay).toISOString();
+            } else {
+              existing.availableAt = null;
+            }
           } else {
-            existing.availableAt = null;
+            existing.manualRetry = null;
+            if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+              const delay = Math.min(backoffMs, retryBackoffMaxMs);
+              existing.availableAt = new Date(failedAt + delay).toISOString();
+            } else if (retryBackoffBaseMs > 0) {
+              const exp = Math.max(0, attempts - 1);
+              const delay = Math.min(retryBackoffBaseMs * (2 ** exp), retryBackoffMaxMs);
+              existing.availableAt = new Date(failedAt + delay).toISOString();
+            } else {
+              existing.availableAt = null;
+            }
           }
           changed = true;
         }
@@ -1258,7 +1416,7 @@ export function createJobRegistry({
         && candidate.status === 'queued'
         && (!candidate.availableAt || Date.parse(candidate.availableAt) <= now()));
       if (!job) return null;
-      const privateAuthorization = normalizeWebsiteProvisioningJobAuthorization(
+      const privateAuthorization = normalizeJobAuthorization(
         job.authorization,
         { optional: true },
       );
@@ -1324,5 +1482,77 @@ export function createJobRegistry({
       .map(publicJob);
   }
 
-  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs };
+  async function retryJob(jobIdOrOptions, maybeOptions = {}) {
+    await ensureInitialized();
+    let jobId;
+    let serverId = null;
+    let authorization = null;
+    let backoffMs = null;
+
+    if (typeof jobIdOrOptions === 'string') {
+      jobId = jobIdOrOptions;
+      if (maybeOptions && typeof maybeOptions === 'object') {
+        serverId = maybeOptions.serverId ?? null;
+        authorization = maybeOptions.authorization ?? null;
+        backoffMs = maybeOptions.backoffMs ?? null;
+      }
+    } else if (jobIdOrOptions && typeof jobIdOrOptions === 'object') {
+      jobId = jobIdOrOptions.jobId;
+      serverId = jobIdOrOptions.serverId ?? null;
+      authorization = jobIdOrOptions.authorization ?? null;
+      backoffMs = jobIdOrOptions.backoffMs ?? null;
+    }
+
+    if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
+
+    const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
+    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+    if (job.status !== 'failed') {
+      throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);
+    }
+
+    const attempts = Number.isInteger(job.attempts) ? job.attempts : 0;
+    if (attempts >= maxAttempts) {
+      throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
+    }
+
+    const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
+    const existingAuthorization = normalizeJobAuthorization(job.authorization, { optional: true });
+
+    if (existingAuthorization) {
+      if (!privateAuthorization || !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
+        throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
+      }
+    } else if (privateAuthorization) {
+      job.authorization = privateAuthorization;
+    }
+
+    const conflict = state.jobs.some((candidate) => candidate.id !== job.id
+      && candidate.resourceType === job.resourceType
+      && candidate.resourceId === job.resourceId
+      && ['queued', 'running'].includes(candidate.status));
+    if (conflict) {
+      throw new JobRegistryError(`${job.resourceType}_job_conflict`, `A ${job.resourceType} operation is already queued or running`, 409);
+    }
+
+    job.status = 'queued';
+    job.startedAt = null;
+    job.finishedAt = null;
+    job.result = null;
+    job.error = null;
+    job.retryExhausted = false;
+    job.manualRetry = true;
+    if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+      const delay = Math.min(backoffMs, retryBackoffMaxMs);
+      job.availableAt = new Date(now() + delay).toISOString();
+    } else {
+      job.availableAt = null;
+    }
+    await persist();
+    return publicJob(job);
+  }
+
+  const manualRetry = retryJob;
+
+  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs, retryJob, manualRetry };
 }

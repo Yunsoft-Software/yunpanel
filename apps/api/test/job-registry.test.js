@@ -9,6 +9,10 @@ import {
   isNewlyEnqueuedJob,
   jobPublicView,
   JobRegistryError,
+  classifyJobError,
+  isTransientJobError,
+  isPermanentJobError,
+  TRANSIENT_JOB_ERROR_CODES,
 } from '../src/job-registry.js';
 
 test('agent jobs move through queued, running and succeeded states exactly once', async () => {
@@ -571,4 +575,281 @@ test('job registry enforces persistent retry budget and bounded backoff for pref
   assert.equal(exhausted.error.code, 'website_provisioning_job_actor_forbidden');
   assert.equal(exhausted.attempts, 3);
   assert.equal(await registry.claimNext('server-1'), null);
+});
+
+test('classifyJobError accurately distinguishes transient recoverable errors from permanent failures', () => {
+  for (const code of TRANSIENT_JOB_ERROR_CODES) {
+    assert.equal(isTransientJobError(code), true, `code ${code} should be transient`);
+    assert.equal(isPermanentJobError(code), false, `code ${code} should not be permanent`);
+    assert.equal(classifyJobError(code), 'transient');
+    assert.equal(classifyJobError({ code }), 'transient');
+  }
+
+  // OS networking transient error codes
+  for (const osCode of ['ETIMEDOUT', 'ECONNRESET', 'ECONNREFUSED', 'EAI_AGAIN', 'EBUSY']) {
+    assert.equal(isTransientJobError(osCode), true);
+    assert.equal(classifyJobError(osCode), 'transient');
+    assert.equal(classifyJobError(new Error(osCode)), 'transient');
+  }
+
+  // Permanent failure codes
+  const permanentCodes = [
+    'nginx_config_invalid',
+    'invalid_domain_spec',
+    'certbot_failed',
+    'job_not_found',
+    'job_status_conflict',
+    'unknown_error',
+  ];
+  for (const code of permanentCodes) {
+    assert.equal(isTransientJobError(code), false, `code ${code} should not be transient`);
+    assert.equal(isPermanentJobError(code), true, `code ${code} should be permanent`);
+    assert.equal(classifyJobError(code), 'permanent');
+    assert.equal(classifyJobError({ code }), 'permanent');
+  }
+});
+
+test('transient backend errors trigger automatic retry with bounded exponential backoff up to budget', async () => {
+  let clock = Date.parse('2026-09-30T10:00:00.000Z');
+  const input = {
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'transient.example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3000 } },
+    resourceType: 'domain',
+    resourceId: 'domain-transient-1',
+    idempotencyKey: 'transient-retry-test-key-1',
+  };
+  const registry = createJobRegistry({
+    now: () => clock,
+    retryBudget: 3,
+    retryBackoffBaseMs: 1000,
+    retryBackoffMaxMs: 4000,
+  });
+
+  const queued = await registry.enqueue(input);
+  assert.equal(queued.status, 'queued');
+
+  // Attempt 1: fails with transient error (dns_provider_rate_limited)
+  const claim1 = await registry.claimNext('server-1');
+  assert.equal(claim1.job.attempts, 1);
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'dns_provider_rate_limited' },
+  });
+
+  // Re-enqueue: transient error allows auto-retry; backoff delay is 1000ms
+  clock += 400;
+  const retry1 = await registry.enqueue(input);
+  assert.equal(retry1.status, 'queued');
+  assert.equal(retry1.attempts, 1);
+  assert.equal(await registry.claimNext('server-1'), null, 'cannot claim before backoff expires');
+
+  clock += 700; // total 1100ms elapsed >= 1000ms
+  const claim2 = await registry.claimNext('server-1');
+  assert.equal(claim2.job.id, queued.id);
+  assert.equal(claim2.job.attempts, 2);
+
+  // Attempt 2: fails with transient error (database_connection_unavailable)
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'database_connection_unavailable' },
+  });
+
+  // Re-enqueue: backoff is 2000ms
+  clock += 1000;
+  const retry2 = await registry.enqueue(input);
+  assert.equal(retry2.status, 'queued');
+  assert.equal(retry2.attempts, 2);
+  assert.equal(await registry.claimNext('server-1'), null);
+
+  clock += 1500; // 2500ms elapsed >= 2000ms
+  const claim3 = await registry.claimNext('server-1');
+  assert.equal(claim3.job.attempts, 3);
+
+  // Attempt 3: fails with transient error (apt_update_failed)
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'apt_update_failed' },
+  });
+
+  // Re-enqueue: persistent budget (3) is exhausted! Job stays failed, not requeued
+  const exhausted = await registry.enqueue(input);
+  assert.equal(exhausted.status, 'failed');
+  assert.equal(exhausted.retryExhausted, true);
+  assert.equal(exhausted.attempts, 3);
+  assert.equal(await registry.claimNext('server-1'), null);
+});
+
+test('permanent failures do NOT automatically retry regardless of attempt budget', async () => {
+  let clock = Date.parse('2026-09-30T10:00:00.000Z');
+  const input = {
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'permanent.example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3000 } },
+    resourceType: 'domain',
+    resourceId: 'domain-perm-1',
+    idempotencyKey: 'perm-no-retry-test-key-1',
+  };
+  const registry = createJobRegistry({
+    now: () => clock,
+    retryBudget: 5,
+  });
+
+  const queued = await registry.enqueue(input);
+  const claim1 = await registry.claimNext('server-1');
+  assert.equal(claim1.job.attempts, 1);
+
+  // Fails with a permanent error code
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'nginx_config_invalid' },
+  });
+
+  // Re-enqueuing should NOT requeue even though attempts (1) < retryBudget (5)
+  clock += 10000;
+  const result = await registry.enqueue(input);
+  assert.equal(result.status, 'failed');
+  assert.equal(result.error.code, 'nginx_config_invalid');
+  assert.equal(result.attempts, 1);
+  assert.equal(await registry.claimNext('server-1'), null, 'permanent failure must not be auto-reclaimed');
+});
+
+test('authorized users can initiate manual retry after automatic budget exhaustion without exceeding maxAttempts', async () => {
+  let clock = Date.parse('2026-09-30T10:00:00.000Z');
+  const authorization = {
+    actorId: 'user-admin',
+    role: 'site_manager',
+    websiteId: 'website-1',
+  };
+  const input = {
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'manual-retry.example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3000 } },
+    resourceType: 'domain',
+    resourceId: 'domain-manual-1',
+    idempotencyKey: 'manual-retry-test-key-1',
+    authorization,
+  };
+  const registry = createJobRegistry({
+    now: () => clock,
+    retryBudget: 2,
+    maxAttempts: 3,
+  });
+
+  const queued = await registry.enqueue(input);
+  // Attempt 1: fail transient
+  const claim1 = await registry.claimNext('server-1');
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'dns_provider_rate_limited' },
+  });
+
+  // Auto-retry 1
+  clock += 5000;
+  await registry.enqueue(input);
+  const claim2 = await registry.claimNext('server-1');
+  assert.equal(claim2.job.attempts, 2);
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'dns_provider_rate_limited' },
+  });
+
+  // Auto-retry budget (2) exhausted: re-enqueue returns failed
+  const exhausted = await registry.enqueue(input);
+  assert.equal(exhausted.status, 'failed');
+  assert.equal(exhausted.retryExhausted, true);
+
+  // Unauthorized actor fails to manual retry
+  await assert.rejects(
+    registry.retryJob(queued.id, { authorization: { actorId: 'stranger', role: 'site_manager', websiteId: 'website-other' } }),
+    (err) => err instanceof JobRegistryError && err.code === 'job_authorization_required' && err.status === 403,
+  );
+
+  // Authorized user initiates manual retry
+  const manualRetried = await registry.retryJob(queued.id, { authorization });
+  assert.equal(manualRetried.status, 'queued');
+  assert.equal(manualRetried.manualRetry, true);
+  assert.equal(manualRetried.retryExhausted, false);
+  assert.equal(manualRetried.attempts, 2);
+
+  // Can now be claimed
+  const claim3 = await registry.claimNext('server-1');
+  assert.equal(claim3.job.id, queued.id);
+  assert.equal(claim3.job.attempts, 3);
+
+  // Attempt 3 fails
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: queued.id,
+    status: 'failed',
+    error: { code: 'database_connection_unavailable' },
+  });
+
+  // maxAttempts (3) reached: further manual retry is rejected with 409 retry_limit_exceeded
+  await assert.rejects(
+    registry.retryJob(queued.id, { authorization }),
+    (err) => err instanceof JobRegistryError && err.code === 'retry_limit_exceeded' && err.status === 409,
+  );
+  await assert.rejects(
+    registry.manualRetry(queued.id, { authorization }),
+    (err) => err instanceof JobRegistryError && err.code === 'retry_limit_exceeded' && err.status === 409,
+  );
+});
+
+test('shared resource locking prevents concurrent retry when another job for the resource is active', async () => {
+  let clock = Date.parse('2026-09-30T10:00:00.000Z');
+  const authorization = { actorId: 'user-admin', role: 'owner' };
+  const registry = createJobRegistry({ now: () => clock, maxAttempts: 5 });
+
+  const jobA = await registry.enqueue({
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'lock-test.example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3000 } },
+    resourceType: 'domain',
+    resourceId: 'domain-shared-lock',
+    authorization,
+  });
+
+  // Claim and fail jobA
+  await registry.claimNext('server-1');
+  await registry.complete({
+    serverId: 'server-1',
+    jobId: jobA.id,
+    status: 'failed',
+    error: { code: 'dns_provider_rate_limited' },
+  });
+
+  // Enqueue a different jobB on the same resource which is now 'queued'
+  const jobB = await registry.enqueue({
+    serverId: 'server-1',
+    type: 'domain.stage',
+    operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { primaryDomain: 'lock-test.example.com', aliases: [], targetType: 'proxy', target: { upstreamPort: 3001 } },
+    resourceType: 'domain',
+    resourceId: 'domain-shared-lock',
+    authorization,
+  });
+  assert.equal(jobB.status, 'queued');
+
+  // Attempting manual retry on jobA must reject with resource conflict (409 domain_job_conflict)
+  await assert.rejects(
+    registry.retryJob(jobA.id, { authorization }),
+    (err) => err instanceof JobRegistryError && err.code === 'domain_job_conflict' && err.status === 409,
+  );
 });
