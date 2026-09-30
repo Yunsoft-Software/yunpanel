@@ -2,7 +2,7 @@ import { Fragment, useState } from 'react';
 import { Link, useParams, useSearchParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
-import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
+import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
 import { ApplicationOperations, SslOperations } from './SiteOperations.jsx';
 import DomainOperations from './DomainOperations.jsx';
 import DomainHostingPanel from './DomainHostingPanel.jsx';
@@ -17,6 +17,7 @@ import SiteCronPanel from './SiteCronPanel.jsx';
 import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
 import SiteBackupPanel from './SiteBackupPanel.jsx';
 import SiteAnalyticsPanel from './SiteAnalyticsPanel.jsx';
+import SiteAccessPanel from './SiteAccessPanel.jsx';
 import WebsiteSuspensionPanel from './WebsiteSuspensionPanel.jsx';
 import WebsiteRemovalPanel from './WebsiteRemovalPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
@@ -62,7 +63,7 @@ function LegacyWebsiteRepair({ domain, canManage, onChanged }) {
 export default function SiteDetailPage() {
   const { websiteId, tab = 'overview' } = useParams();
   const normalizedTab = tab === 'statistics' ? 'analytics' : tab;
-  return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={normalizedTab} />;
+  return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={normalizeSiteTab(normalizedTab)} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
   const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isReseller } = useWorkspace();
@@ -83,6 +84,8 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'backup') return canManage && Boolean(website);
     if (key === 'analytics') return canManage && Boolean(website);
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
+    if (key === 'php') return canManage && (website?.runtimeType === 'php' || application?.type === 'php' || tab === 'php');
+    if (key === 'access') return canManage && (Boolean(website) || tab === 'access');
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
   }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && application?.type === 'php' ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : label]);
@@ -97,13 +100,17 @@ function SiteWorkspace({ websiteId, tab }) {
   const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python (Ürün uzantısı)', static: 'Statik site', docker: 'Docker / proxy (Ürün uzantısı)' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
-    ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : 'Uygulama', 'code'],
+    ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
+    ['php', 'PHP / WordPress', 'code'],
+    ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
+    ['access', 'Erişim Hesapları', 'shield'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = [
     ['settings', 'Barındırma ayarları', 'settings'], ['dns', 'DNS', 'globe'],
     ['domains', 'Alan adı ve yayın yönetimi', 'globe'], ['terminal', 'Site terminali', 'terminal'],
+    ['access', 'Erişim Hesapları', 'shield'],
     ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
@@ -130,6 +137,8 @@ function SiteWorkspace({ websiteId, tab }) {
     </>}
     {tab === 'hosting' && <Section title="Barındırma ve DNS">{toolLinks(hostingTools)}</Section>}
     {['resources', 'databases', 'mail'].includes(tab) && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} activeTab={tab} />}
+    {tab === 'php' && <SitePhpToolsPanel domainId={domain.id} />}
+    {tab === 'access' && <SiteAccessPanel domain={domain} website={website} server={server} isOwner={isOwner} canManage={canManage} onChanged={refreshAll} />}
     {tab === 'node' && canManage && (website?.runtimeType === 'php' || application?.type === 'php') && <SitePhpToolsPanel domainId={domain.id} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}

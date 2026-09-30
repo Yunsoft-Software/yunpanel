@@ -107,8 +107,8 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
 export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
-  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics'] },
-  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup'] },
+  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics'] },
+  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
 export function groupSiteTabs(tabs = []) {

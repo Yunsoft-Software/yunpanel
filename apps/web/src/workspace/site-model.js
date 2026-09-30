@@ -4,10 +4,20 @@ export const SITE_TABS = [
   ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
   ['hosting', 'Barındırma ve DNS'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
   ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
-  ['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'], ['settings', 'Barındırma bilgileri'],
+  ['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],
+  ['php', 'PHP / WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Barındırma bilgileri'],
 ];
+export function normalizeSiteTab(tab) {
+  if (tab === 'statistics') return 'analytics';
+  if (tab === 'scheduled-tasks') return 'cron';
+  if (tab === 'backups') return 'backup';
+  if (tab === 'git') return 'deploy';
+  if (['sftp', 'ssh'].includes(tab)) return 'access';
+  if (['wp', 'wordpress'].includes(tab)) return 'php';
+  return tab;
+}
 export const siteHref = (id, tab = 'overview') => {
-  const normalized = tab === 'statistics' ? 'analytics' : tab;
+  const normalized = normalizeSiteTab(tab);
   return `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === normalized) ? normalized : 'overview'}`;
 };
 export function certificateState(domain, certificates, now = Date.now()) {
