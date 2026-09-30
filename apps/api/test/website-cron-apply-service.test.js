@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
 import {
@@ -75,7 +76,7 @@ function createFixtures({ runtimeType = 'node' } = {}) {
   const enqueuedJobs = [];
   const jobRegistry = {
     enqueue: async (jobInput) => {
-      const job = { id: `job-${enqueuedJobs.length + 1}`, ...jobInput, status: 'queued' };
+      const job = { id: randomUUID(), ...jobInput, status: 'queued' };
       enqueuedJobs.push(job);
       return job;
     },

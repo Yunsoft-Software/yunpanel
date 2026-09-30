@@ -86,7 +86,10 @@ async function listen(t, { role = 'owner', serverExists = true } = {}) {
     server.once('listening', resolve);
     server.once('error', reject);
   });
-  t.after(() => new Promise((resolve) => server.close(resolve)));
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections?.();
+  }));
   return { base: `http://127.0.0.1:${server.address().port}`, calls };
 }
 

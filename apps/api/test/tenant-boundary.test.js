@@ -1928,12 +1928,15 @@ test('RS-03-05: website-http and core-app enforce tenant boundary for reseller o
   });
 
   const resellerActor = {
+    id: '32345678-1234-4234-8234-123456789012',
     user: {
       id: 'reseller-a',
       role: 'reseller',
       websiteIds: ['site-a1', 'site-a2'],
       active: true,
     },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
   };
 
   // 1. GET /api/websites returns only child customer websites for reseller
