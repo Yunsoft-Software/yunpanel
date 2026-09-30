@@ -1,60 +1,35 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID, createHash } from 'node:crypto';
 import test from 'node:test';
+import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
-import {
-  createMailDeleteImpactService,
-  MailDeleteImpactError,
-} from '../src/mail-delete-impact.js';
-import {
-  createMailDataOperationsService,
-  MailDataOperationsError,
-} from '../src/mail-data-operations.js';
-import {
-  createMailDeleteFinalizeService,
-  MailDeleteFinalizeError,
-} from '../src/mail-delete-finalize.js';
-import {
-  createLocalHostOperations,
-} from '../src/local-host-operations.js';
-import {
-  mailboxAliasReferences,
-} from '../src/mailbox-alias-references.js';
-import {
-  sanitizeMailDataBackupResult,
-  sanitizeMailDataDeleteResult,
-} from '../src/mail-data-job-result.js';
+import { mountMailboxRoutes } from '../src/mailbox-http.js';
+import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
+import { createMailDataOperationsService, MailDataOperationsError } from '../src/mail-data-operations.js';
+import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../src/mail-delete-finalize.js';
+import { createMailDeleteImpactService } from '../src/mail-delete-impact.js';
+import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
+import { mountMailDataRoutes } from '../src/mail-data-http.js';
+import { createMailboxAccessGuard, MailboxAccessError } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
+import { createMailDataDeleteManager, MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 
-function sha256(content) {
-  return createHash('sha256').update(typeof content === 'string' ? content : JSON.stringify(content)).digest('hex');
-}
+const localServerId = randomUUID();
+const webDomainId = randomUUID();
+const mailDomainId = randomUUID();
+const mailboxAId = randomUUID();
+const mailboxBId = randomUUID();
+const sha256 = (str) => createHash('sha256').update(str).digest('hex');
+const snapshotA = sha256('mailbox-a-initial-data');
+const snapshotB = sha256('mailbox-b-initial-data');
+const backupContentA = sha256('mailbox-a-backup-content');
 
-function createMailboxRemovalFixture({
-  domainStatus = 'enabled',
-  mailboxEnabled = false,
-  mailboxRevision = 1,
-  dataPresent = true,
-  dataBytes = 4096,
-  snapshotDigest = 'a'.repeat(64),
-  backupContentDigest = 'b'.repeat(64),
-  quotas = [],
-  forwardings = [],
-  aliases = [],
-  jobs = [],
-} = {}) {
-  const localServerId = randomUUID();
-  const webDomainId = randomUUID();
-  const mailDomainId = randomUUID();
-  const mailboxId = randomUUID();
-  const siblingMailboxId = randomUUID();
-  const backupId = 'mail-backup-' + randomUUID().slice(0, 8);
-
+function createTestHarness(options = {}) {
   const mailDomain = {
     id: mailDomainId,
     webDomainId,
     domainName: 'example.com',
     managementMode: 'local',
-    status: domainStatus,
+    status: options.domainStatus ?? 'enabled',
     revision: 1,
   };
 
@@ -62,131 +37,157 @@ function createMailboxRemovalFixture({
     id: webDomainId,
     serverId: localServerId,
     primaryDomain: 'example.com',
+    websiteId: randomUUID(),
   };
 
-  const mailbox = {
-    id: mailboxId,
-    mailDomainId,
-    address: 'user@example.com',
-    enabled: mailboxEnabled,
-    revision: mailboxRevision,
-  };
-
-  const siblingMailbox = {
-    id: siblingMailboxId,
-    mailDomainId,
-    address: 'sibling@example.com',
-    enabled: true,
-    revision: 1,
-  };
-
-  const mailboxesMap = new Map([
-    [mailbox.id, { ...mailbox }],
-    [siblingMailbox.id, { ...siblingMailbox }],
+  const mailboxes = new Map([
+    [mailboxAId, {
+      id: mailboxAId,
+      mailDomainId,
+      address: 'user-a@example.com',
+      enabled: options.mailboxAEnabled ?? false,
+      revision: options.mailboxARevision ?? 1,
+    }],
+    [mailboxBId, {
+      id: mailboxBId,
+      mailDomainId,
+      address: 'user-b@example.com',
+      enabled: true,
+      revision: 1,
+    }],
   ]);
 
-  const liveData = {
-    present: dataPresent,
-    bytes: dataBytes,
-    snapshotSha256: snapshotDigest,
-  };
+  const mailboxDataStore = new Map([
+    ['user-a@example.com', {
+      present: options.dataAPresent ?? true,
+      bytes: 4096,
+      snapshotSha256: options.dataASnapshot ?? snapshotA,
+      dataPath: '/var/lib/yunpanel/mail/example.com/user-a',
+    }],
+    ['user-b@example.com', {
+      present: true,
+      bytes: 8192,
+      snapshotSha256: snapshotB,
+      dataPath: '/var/lib/yunpanel/mail/example.com/user-b',
+    }],
+  ]);
 
-  const backupsMap = new Map();
-  if (dataPresent) {
-    backupsMap.set(backupId, {
+  const backups = new Map();
+  if (options.initialBackupA !== false) {
+    backups.set('backup-a-001', {
       version: 1,
-      backupId,
+      backupId: 'backup-a-001',
       scope: 'mailbox',
-      identity: mailbox.address,
-      sourcePath: `/var/lib/yunpanel/mail/example.com/${mailbox.address.split('@')[0]}`,
+      identity: 'user-a@example.com',
+      sourcePath: '/var/lib/yunpanel/mail/example.com/user-a',
       sourcePresent: true,
-      sourceSnapshotSha256: snapshotDigest,
-      contentSha256: backupContentDigest,
-      bytes: dataBytes,
-      files: 8,
+      sourceSnapshotSha256: options.backupASnapshot ?? snapshotA,
+      contentSha256: backupContentA,
+      bytes: 4096,
+      files: 3,
       directories: 2,
       createdAt: new Date().toISOString(),
       sideEffects: true,
     });
   }
 
+  const aliases = options.aliases ? [...options.aliases] : [];
+  const quotas = new Map();
+  const forwardings = new Map();
+  const jobs = new Map();
   const enqueuedJobs = [];
-  const storedJobs = new Map();
-  for (const j of jobs) {
-    storedJobs.set(j.id, { ...j });
-  }
+  const deletedMailboxIds = [];
+
+  const mailboxRegistry = {
+    async getMailbox(id) {
+      return mailboxes.get(id) ? structuredClone(mailboxes.get(id)) : null;
+    },
+    async listMailboxes(filter = {}) {
+      const list = [...mailboxes.values()];
+      if (filter.mailDomainId) {
+        return list.filter((m) => m.mailDomainId === filter.mailDomainId).map((m) => structuredClone(m));
+      }
+      return list.map((m) => structuredClone(m));
+    },
+    async createMailbox(input) {
+      const id = randomUUID();
+      const record = {
+        id,
+        mailDomainId: input.mailDomainId,
+        address: input.address,
+        enabled: input.enabled ?? true,
+        revision: 1,
+      };
+      mailboxes.set(id, record);
+      return structuredClone(record);
+    },
+    async rotatePassword(id, { expectedRevision }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) {
+        throw new MailboxRegistryError('stale_mailbox_revision', 'Mailbox revision mismatch', 409);
+      }
+      mb.revision += 1;
+      return structuredClone(mb);
+    },
+    async setEnabled(id, { expectedRevision, enabled }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) {
+        throw new MailboxRegistryError('stale_mailbox_revision', 'Mailbox revision mismatch', 409);
+      }
+      mb.enabled = enabled;
+      mb.revision += 1;
+      return structuredClone(mb);
+    },
+    async deleteMailbox(id, { expectedRevision, confirmation }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) {
+        throw new MailboxRegistryError('stale_mailbox_revision', 'Mailbox revision mismatch', 409);
+      }
+      if (confirmation !== `delete-mailbox:${mb.address}`) {
+        throw new MailboxRegistryError('mailbox_delete_confirmation_invalid', 'Invalid confirmation', 409);
+      }
+      mailboxes.delete(id);
+      deletedMailboxIds.push(id);
+      return { id, deleted: true };
+    },
+  };
 
   const mailDomainRegistry = {
     async getMailDomain(id) {
-      return id === mailDomainId ? { ...mailDomain } : null;
+      return id === mailDomainId ? structuredClone(mailDomain) : null;
     },
-    async deleteMailDomain(id) {
-      if (id === mailDomainId) mailDomain.status = 'deleted';
+    async deleteMailDomain() {
+      throw new Error('mailDomain deletion not expected during single mailbox removal');
     },
   };
 
   const domainRegistry = {
     async getDomain(id) {
-      return id === webDomainId ? { ...domain } : null;
-    },
-  };
-
-  const mailboxRegistry = {
-    async getMailbox(id) {
-      return mailboxesMap.has(id) ? { ...mailboxesMap.get(id) } : null;
-    },
-    async listMailboxes(filter) {
-      const list = [...mailboxesMap.values()];
-      if (filter?.mailDomainId) {
-        return list.filter((m) => m.mailDomainId === filter.mailDomainId);
-      }
-      return list;
-    },
-    async setEnabled(id, { expectedRevision, enabled }) {
-      const mb = mailboxesMap.get(id);
-      if (!mb) throw new Error('mailbox_not_found');
-      if (mb.revision !== expectedRevision) {
-        const error = new Error('Mailbox state changed before update');
-        error.code = 'stale_mailbox_revision';
-        error.status = 409;
-        throw error;
-      }
-      mb.enabled = enabled;
-      mb.revision += 1;
-      return { ...mb };
-    },
-    async deleteMailbox(id, { expectedRevision, confirmation }) {
-      const mb = mailboxesMap.get(id);
-      if (!mb) throw new Error('mailbox_not_found');
-      if (mb.revision !== expectedRevision) {
-        const error = new Error('Mailbox state changed before deletion');
-        error.code = 'stale_mailbox_revision';
-        error.status = 409;
-        throw error;
-      }
-      mailboxesMap.delete(id);
-      return { id, deleted: true };
+      return id === webDomainId ? structuredClone(domain) : null;
     },
   };
 
   const mailAliasRegistry = {
     async listAliases(filter) {
       if (filter?.mailDomainId) {
-        return aliases.filter((a) => a.mailDomainId === filter.mailDomainId);
+        return aliases.filter((a) => !a.mailDomainId || a.mailDomainId === filter.mailDomainId).map((a) => structuredClone(a));
       }
-      return aliases;
+      return aliases.map((a) => structuredClone(a));
     },
   };
 
   const mailboxQuotaRegistry = {
-    async getQuota(mbId) {
-      return quotas.find((q) => q.mailboxId === mbId) ?? null;
+    async getQuota(id) {
+      return quotas.get(id) ?? null;
     },
   };
 
   const mailboxForwardingRegistry = {
-    async getForwarding(mbId) {
-      return forwardings.find((f) => f.mailboxId === mbId) ?? null;
+    async getForwarding(id) {
+      return forwardings.get(id) ?? null;
     },
   };
 
@@ -194,19 +195,47 @@ function createMailboxRemovalFixture({
     async getKey() { return null; },
   };
 
+  const jobRegistry = {
+    async listJobs(filter = {}) {
+      let list = [...jobs.values()];
+      if (filter.resourceType) list = list.filter((j) => j.resourceType === filter.resourceType);
+      if (filter.resourceId) list = list.filter((j) => j.resourceId === filter.resourceId);
+      return list.map((j) => structuredClone(j));
+    },
+    async getJob(id) {
+      return jobs.get(id) ? structuredClone(jobs.get(id)) : null;
+    },
+    async enqueue(input) {
+      const id = randomUUID();
+      const job = {
+        id,
+        serverId: input.serverId,
+        type: input.type,
+        operation: input.operation,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        status: 'queued',
+        payload: structuredClone(input.payload),
+        idempotencyKey: input.idempotencyKey,
+      };
+      jobs.set(id, job);
+      enqueuedJobs.push(job);
+      return structuredClone(job);
+    },
+  };
+
   const mailDataInspector = {
-    async inspectMailbox(identity) {
-      if (identity !== mailbox.address && identity !== siblingMailbox.address) {
-        return { version: 1, scope: 'mailbox', identity, dataPath: null, present: false, bytes: 0, snapshotSha256: null, sideEffects: false };
-      }
+    async inspectMailbox(address) {
+      const data = mailboxDataStore.get(address);
+      if (!data) return { present: false, bytes: 0, snapshotSha256: null };
       return {
         version: 1,
         scope: 'mailbox',
-        identity,
-        dataPath: `/var/lib/yunpanel/mail/example.com/${identity.split('@')[0]}`,
-        present: liveData.present,
-        bytes: liveData.bytes,
-        snapshotSha256: liveData.snapshotSha256,
+        identity: address,
+        dataPath: data.dataPath,
+        present: data.present,
+        bytes: data.bytes,
+        snapshotSha256: data.snapshotSha256,
         sideEffects: false,
       };
     },
@@ -215,10 +244,9 @@ function createMailboxRemovalFixture({
         version: 1,
         scope: 'domain',
         identity: domainName,
-        dataPath: `/var/lib/yunpanel/mail/${domainName}`,
-        present: liveData.present,
-        bytes: liveData.bytes,
-        snapshotSha256: liveData.snapshotSha256,
+        present: true,
+        bytes: 12288,
+        snapshotSha256: sha256('domain-data'),
         sideEffects: false,
       };
     },
@@ -226,66 +254,16 @@ function createMailboxRemovalFixture({
 
   const mailDataBackupManager = {
     async inspectBackup(id) {
-      return backupsMap.get(id) ?? null;
+      return backups.get(id) ? structuredClone(backups.get(id)) : null;
     },
     async materializeBackup(id) {
-      const manifest = backupsMap.get(id);
-      if (!manifest) throw new Error('backup_not_found');
-      return { manifest, sideEffects: false };
-    },
-    async backup({ backupId: requestedBackupId, scope, identity, expectedSnapshotSha256 }) {
-      const manifest = {
-        version: 1,
-        backupId: requestedBackupId,
-        scope,
-        identity,
-        sourcePath: `/var/lib/yunpanel/mail/example.com/${identity.split('@')[0]}`,
-        sourcePresent: true,
-        sourceSnapshotSha256: expectedSnapshotSha256,
-        contentSha256: backupContentDigest,
-        bytes: dataBytes,
-        files: 8,
-        directories: 2,
-        createdAt: new Date().toISOString(),
-        sideEffects: true,
-      };
-      backupsMap.set(requestedBackupId, manifest);
-      return manifest;
+      const b = backups.get(id);
+      if (!b) throw new Error('backup not found');
+      return { manifest: structuredClone(b) };
     },
   };
 
-  const jobRegistry = {
-    async listJobs(filter) {
-      let list = [...storedJobs.values()];
-      if (filter?.resourceType) list = list.filter((j) => j.resourceType === filter.resourceType);
-      if (filter?.resourceId) list = list.filter((j) => j.resourceId === filter.resourceId);
-      return list;
-    },
-    async getJob(id) {
-      return storedJobs.get(id) ?? null;
-    },
-    async enqueue(entry) {
-      const job = {
-        id: randomUUID(),
-        status: 'queued',
-        ...entry,
-        createdAt: new Date().toISOString(),
-      };
-      enqueuedJobs.push(job);
-      storedJobs.set(job.id, job);
-      return job;
-    },
-    async updateJobStatus(id, status, result = null, error = null) {
-      const job = storedJobs.get(id);
-      if (!job) return null;
-      job.status = status;
-      job.result = result;
-      job.error = error;
-      return job;
-    },
-  };
-
-  const mailDeleteImpactService = createMailDeleteImpactService({
+  const mailDeleteImpact = createMailDeleteImpactService({
     localServerId,
     mailDomainRegistry,
     domainRegistry,
@@ -298,663 +276,741 @@ function createMailboxRemovalFixture({
     mailDataInspector,
   });
 
-  const mailDataOperationsService = createMailDataOperationsService({
+  const mailDataOperations = createMailDataOperationsService({
     localServerId,
     mailDomainRegistry,
     domainRegistry,
     mailboxRegistry,
     mailDataInspector,
     mailDataBackupManager,
-    mailDeleteImpactService,
+    mailDeleteImpactService: mailDeleteImpact,
     jobRegistry,
   });
 
-  const mailDeleteFinalizeService = createMailDeleteFinalizeService({
+  const mailDeleteFinalize = createMailDeleteFinalizeService({
     mailboxRegistry,
     mailDomainRegistry,
-    mailDeleteImpactService,
+    mailDeleteImpactService: mailDeleteImpact,
     jobRegistry,
-  });
-
-  const standardDeleteManager = {
-    async deleteNow({ transactionId, backupId: bid, scope, identity, expectedTargetSnapshotSha256 }) {
-      const selected = await mailDataBackupManager.inspectBackup(bid);
-      if (!selected || selected.scope !== scope || selected.identity !== identity) {
-        const error = new Error('Mail data backup mismatch');
-        error.code = 'mail_data_delete_backup_mismatch';
-        throw error;
-      }
-      liveData.present = false;
-      liveData.bytes = 0;
-      liveData.snapshotSha256 = sha256('deleted');
-      return Object.freeze({
-        version: 1,
-        transactionId,
-        backupId: bid,
-        scope,
-        identity,
-        sourcePresent: selected.sourcePresent,
-        contentSha256: selected.contentSha256,
-        bytes: selected.bytes,
-        files: selected.files,
-        directories: selected.directories,
-        deleted: true,
-        sideEffects: true,
-      });
-    },
-    async deleteData(input) {
-      return this.deleteNow(input);
-    },
-    async inspectDeleted({ transactionId, backupId: bid, scope, identity }) {
-      return Object.freeze({
-        satisfied: !liveData.present,
-        result: Object.freeze({
-          version: 1,
-          transactionId,
-          backupId: bid,
-          scope,
-          identity,
-          sourcePresent: true,
-          contentSha256: backupContentDigest,
-          bytes: dataBytes,
-          files: 8,
-          directories: 2,
-          deleted: true,
-          sideEffects: true,
-        }),
-      });
-    },
-  };
-
-  const hostOperations = createLocalHostOperations({
-    mailDataBackupManager,
-    mailDataDeleteManager: standardDeleteManager,
   });
 
   return {
     localServerId,
     webDomainId,
     mailDomainId,
-    mailboxId,
-    siblingMailboxId,
-    backupId,
-    snapshotDigest,
-    backupContentDigest,
+    mailboxAId,
+    mailboxBId,
     mailDomain,
     domain,
-    mailbox,
-    siblingMailbox,
-    liveData,
-    mailboxesMap,
-    backupsMap,
-    storedJobs,
+    mailboxes,
+    mailboxDataStore,
+    backups,
+    aliases,
+    quotas,
+    forwardings,
+    jobs,
     enqueuedJobs,
+    deletedMailboxIds,
+    mailboxRegistry,
     mailDomainRegistry,
     domainRegistry,
-    mailboxRegistry,
     mailAliasRegistry,
     mailboxQuotaRegistry,
     mailboxForwardingRegistry,
+    jobRegistry,
     mailDataInspector,
     mailDataBackupManager,
-    jobRegistry,
-    mailDeleteImpactService,
-    mailDataOperationsService,
-    mailDeleteFinalizeService,
-    standardDeleteManager,
-    hostOperations,
+    mailDeleteImpact,
+    mailDataOperations,
+    mailDeleteFinalize,
   };
 }
 
-// ============================================================================
-// Criterion 1: Mailbox removal impact and dependency evaluation
-// ============================================================================
+function createCommandRunnerHarness(activeSessions = new Map(), enabledDeliveries = new Set()) {
+  const commandLog = [];
+  const runner = async (file, args, options = {}) => {
+    commandLog.push({ file, args: [...args] });
+    const fileBase = file.split('/').at(-1);
 
-test('Criterion 1: Mailbox removal impact and dependency evaluation', async () => {
-  // 1. Quota blocker test
-  {
-    const fx = createMailboxRemovalFixture({
-      quotas: [{ id: 'quota-1', mailboxId: 'dummy', bytes: 104857600 }],
-    });
-    fx.mailboxQuotaRegistry.getQuota = async (id) => (id === fx.mailboxId ? { id: 'q-1', mailboxId: id, bytes: 100 } : null);
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mailbox_quota_configured'));
-    assert.equal(impact.dependencies.quotaConfigured, true);
-  }
-
-  // 2. Forwarding blocker test
-  {
-    const fx = createMailboxRemovalFixture();
-    fx.mailboxForwardingRegistry.getForwarding = async (id) => (id === fx.mailboxId ? { id: 'fwd-1', mailboxId: id, destinations: ['ext@remote.test'] } : null);
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mailbox_forwarding_configured'));
-    assert.equal(impact.dependencies.forwardingConfigured, true);
-  }
-
-  // 3. Local alias blocker test
-  {
-    const fx = createMailboxRemovalFixture({
-      aliases: [{ id: 'local-alias-1', mailDomainId: 'dummy', destinations: ['user@example.com'] }],
-    });
-    fx.mailAliasRegistry.listAliases = async (filter) => [{ id: 'local-alias-1', mailDomainId: fx.mailDomainId, destinations: ['user@example.com'] }];
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mailbox_alias_reference_configured'));
-    assert.deepEqual(impact.dependencies.aliasReferences.ids, ['local-alias-1']);
-  }
-
-  // 4. Inbound foreign alias blocker test: foreign alias ID must be redacted
-  {
-    const fx = createMailboxRemovalFixture();
-    const foreign = { id: 'private-foreign-alias-id', destinations: ['user@example.com'] };
-    fx.mailAliasRegistry.listAliases = async (filter) => (filter ? [] : [foreign]);
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mailbox_alias_reference_configured'));
-    assert.equal(impact.dependencies.aliasReferences.count, 1);
-    assert.deepEqual(impact.dependencies.aliasReferences.ids, []);
-    assert.equal(impact.dependencies.aliasReferences.truncated, true);
-    assert.equal(JSON.stringify(impact).includes('private-foreign-alias-id'), false);
-  }
-
-  // 5. Active job blocker test
-  {
-    const fx = createMailboxRemovalFixture({
-      jobs: [{ id: 'active-job-1', status: 'running', resourceType: 'mail_domain', resourceId: 'placeholder' }],
-    });
-    fx.jobRegistry.listJobs = async () => [{ id: 'active-job-1', status: 'running', resourceType: 'mail_domain', resourceId: fx.mailDomainId }];
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mail_domain_job_active'));
-  }
-
-  // 6. Mail data present without backup blocker test
-  {
-    const fx = createMailboxRemovalFixture({ dataPresent: true });
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, false);
-    assert.ok(impact.blockers.some((b) => b.code === 'mail_data_backup_required'));
-    assert.equal(impact.requiresDataBackup, true);
-    assert.equal(impact.mailData.present, true);
-  }
-
-  // 7. Clear dependencies test
-  {
-    const fx = createMailboxRemovalFixture({ dataPresent: false });
-    const impact = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-    assert.equal(impact.safeToDelete, true);
-    assert.deepEqual(impact.blockers, []);
-    assert.equal(impact.requiresDataBackup, false);
-    assert.equal(impact.confirmation, `delete-mailbox:${fx.mailbox.address}`);
-  }
-});
-
-// ============================================================================
-// Criterion 2: Mailbox state transition and disable gating prior to deletion
-// ============================================================================
-
-test('Criterion 2: Mailbox state transition and disable gating prior to deletion', async () => {
-  const fx = createMailboxRemovalFixture({
-    domainStatus: 'enabled',
-    mailboxEnabled: true, // target starts enabled
-    mailboxRevision: 1,
-  });
-
-  // 1. Target mailbox is enabled -> previewDelete throws mail_data_delete_mailbox_disable_required
-  await assert.rejects(
-    async () => fx.mailDataOperationsService.previewDelete({
-      scope: 'mailbox',
-      resourceId: fx.mailboxId,
-      backupId: fx.backupId,
-    }),
-    (err) => err instanceof MailDataOperationsError
-      && err.code === 'mail_data_delete_mailbox_disable_required'
-      && err.status === 409
-  );
-
-  // 2. Queueing delete while enabled throws mail_data_delete_mailbox_disable_required
-  await assert.rejects(
-    async () => fx.mailDataOperationsService.queueDelete({
-      scope: 'mailbox',
-      resourceId: fx.mailboxId,
-      backupId: fx.backupId,
-      expectedRevision: 1,
-      expectedPreviewDigest: 'a'.repeat(64),
-      confirmation: `delete-mail-data:${fx.mailDomainId}:${'a'.repeat(64)}`,
-    }),
-    (err) => err instanceof MailDataOperationsError
-      && err.code === 'mail_data_delete_mailbox_disable_required'
-      && err.status === 409
-  );
-
-  // 3. Domain and sibling mailbox remain active / enabled
-  const currentDomain = await fx.mailDomainRegistry.getMailDomain(fx.mailDomainId);
-  assert.equal(currentDomain.status, 'enabled');
-  const sibling = await fx.mailboxRegistry.getMailbox(fx.siblingMailboxId);
-  assert.equal(sibling.enabled, true);
-
-  // 4. Disable only the target mailbox via registry setEnabled
-  const disabled = await fx.mailboxRegistry.setEnabled(fx.mailboxId, {
-    expectedRevision: 1,
-    enabled: false,
-  });
-  assert.equal(disabled.enabled, false);
-  assert.equal(disabled.revision, 2);
-
-  // Sibling and domain remain untouched
-  const siblingAfter = await fx.mailboxRegistry.getMailbox(fx.siblingMailboxId);
-  assert.equal(siblingAfter.enabled, true);
-  assert.equal(siblingAfter.revision, 1);
-  const domainAfter = await fx.mailDomainRegistry.getMailDomain(fx.mailDomainId);
-  assert.equal(domainAfter.status, 'enabled');
-
-  // 5. With mailbox disabled, previewDelete succeeds
-  const preview = await fx.mailDataOperationsService.previewDelete({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: fx.backupId,
-  });
-  assert.equal(preview.operation, 'mail_data_delete');
-  assert.equal(preview.scope, 'mailbox');
-  assert.equal(preview.resourceId, fx.mailboxId);
-  assert.equal(preview.expectedRevision, 2);
-  assert.equal(preview.sideEffects, false);
-  assert.ok(typeof preview.previewDigest === 'string' && preview.previewDigest.length === 64);
-  assert.equal(preview.confirmation, `delete-mail-data:${fx.mailDomainId}:${preview.previewDigest}`);
-
-  // 6. Stale revision rejection on queueDelete
-  await assert.rejects(
-    async () => fx.mailDataOperationsService.queueDelete({
-      scope: 'mailbox',
-      resourceId: fx.mailboxId,
-      backupId: fx.backupId,
-      expectedRevision: 1, // stale revision!
-      expectedPreviewDigest: preview.previewDigest,
-      confirmation: preview.confirmation,
-    }),
-    (err) => err instanceof MailDataOperationsError && err.code === 'mail_data_delete_preview_stale'
-  );
-
-  // 7. Invalid confirmation rejection on queueDelete
-  await assert.rejects(
-    async () => fx.mailDataOperationsService.queueDelete({
-      scope: 'mailbox',
-      resourceId: fx.mailboxId,
-      backupId: fx.backupId,
-      expectedRevision: 2,
-      expectedPreviewDigest: preview.previewDigest,
-      confirmation: 'wrong-confirmation-token',
-    }),
-    (err) => err instanceof MailDataOperationsError && err.code === 'mail_data_delete_confirmation_invalid'
-  );
-});
-
-// ============================================================================
-// Criterion 3: Verified pre-deletion backup job execution and receipt validation
-// ============================================================================
-
-test('Criterion 3: Verified pre-deletion backup job execution and receipt validation', async () => {
-  const fx = createMailboxRemovalFixture({
-    mailboxEnabled: false,
-    mailboxRevision: 1,
-    dataPresent: true,
-  });
-
-  // 1. Preview backup
-  const backupPreview = await fx.mailDataOperationsService.previewBackup({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-  });
-  assert.equal(backupPreview.operation, 'mail_data_backup');
-  assert.equal(backupPreview.scope, 'mailbox');
-  assert.equal(backupPreview.resourceId, fx.mailboxId);
-  assert.equal(backupPreview.expectedRevision, 1);
-  assert.equal(backupPreview.sourcePresent, true);
-  assert.equal(backupPreview.bytes, 4096);
-  assert.equal(backupPreview.snapshotSha256, fx.snapshotDigest);
-  assert.equal(backupPreview.sideEffects, false);
-  assert.ok(backupPreview.previewDigest.length === 64);
-  assert.equal(backupPreview.confirmation, `backup-mail-data:${fx.mailDomainId}:${backupPreview.previewDigest}`);
-
-  // 2. Queue backup
-  const queuedBackup = await fx.mailDataOperationsService.queueBackup({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    expectedRevision: 1,
-    expectedPreviewDigest: backupPreview.previewDigest,
-    confirmation: backupPreview.confirmation,
-  });
-  assert.equal(queuedBackup.previewDigest, backupPreview.previewDigest);
-  assert.equal(queuedBackup.job.type, 'mail_data_backup');
-  assert.equal(queuedBackup.job.operation, OPERATIONS.MAIL_DATA_BACKUP);
-  assert.equal(queuedBackup.job.resourceId, fx.mailDomainId);
-
-  // 3. Execute backup via localHostOperations
-  const backupResult = await fx.hostOperations.executeOperation(
-    OPERATIONS.MAIL_DATA_BACKUP,
-    queuedBackup.job.payload,
-    {
-      jobId: queuedBackup.job.id,
-      serverId: fx.localServerId,
-      type: 'mail_data_backup',
-      resourceType: 'mail_domain',
-      resourceId: fx.mailDomainId,
-    }
-  );
-  assert.equal(backupResult.backedUp, true);
-  assert.equal(backupResult.backupId, queuedBackup.job.id);
-  assert.equal(backupResult.scope, 'mailbox');
-  assert.equal(backupResult.identity, fx.mailbox.address);
-  assert.equal(backupResult.sourcePresent, true);
-  assert.equal(backupResult.contentSha256, fx.backupContentDigest);
-  assert.equal(backupResult.sideEffects, true);
-
-  // Update stored backup job to succeeded state
-  const completedBackupJob = {
-    ...queuedBackup.job,
-    status: 'succeeded',
-    result: sanitizeMailDataBackupResult(queuedBackup.job, backupResult),
-  };
-  fx.storedJobs.set(queuedBackup.job.id, completedBackupJob);
-
-  // 4. Validate backup receipt in backup manager
-  const verifiedBackup = await fx.mailDataBackupManager.inspectBackup(queuedBackup.job.id);
-  assert.ok(verifiedBackup);
-  assert.equal(verifiedBackup.backupId, queuedBackup.job.id);
-  assert.equal(verifiedBackup.sourceSnapshotSha256, fx.snapshotDigest);
-  assert.equal(verifiedBackup.contentSha256, fx.backupContentDigest);
-  assert.equal(verifiedBackup.sourcePresent, true);
-
-  // 5. Delete preview uses verified backup
-  const deletePreview = await fx.mailDataOperationsService.previewDelete({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: queuedBackup.job.id,
-  });
-  assert.equal(deletePreview.backupId, queuedBackup.job.id);
-  assert.equal(deletePreview.backupContentSha256, fx.backupContentDigest);
-  assert.equal(deletePreview.targetSnapshotSha256, fx.snapshotDigest);
-
-  // 6. Data drift after backup rejects delete preview as stale
-  fx.liveData.snapshotSha256 = sha256('new-snapshot-after-backup');
-  await assert.rejects(
-    async () => fx.mailDataOperationsService.previewDelete({
-      scope: 'mailbox',
-      resourceId: fx.mailboxId,
-      backupId: queuedBackup.job.id,
-    }),
-    (err) => err instanceof MailDataOperationsError && err.code === 'mail_data_delete_backup_stale'
-  );
-});
-
-// ============================================================================
-// Criterion 4: Verifiable pre-deletion backup and host rollback flow
-// ============================================================================
-
-test('Criterion 4: Verifiable pre-deletion backup and host rollback flow', async () => {
-  const fx = createMailboxRemovalFixture({
-    mailboxEnabled: false,
-    mailboxRevision: 1,
-    dataPresent: true,
-  });
-
-  // 1. Prepare and queue the deletion operation
-  const deletePreview = await fx.mailDataOperationsService.previewDelete({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: fx.backupId,
-  });
-
-  const queuedDelete = await fx.mailDataOperationsService.queueDelete({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: fx.backupId,
-    expectedRevision: 1,
-    expectedPreviewDigest: deletePreview.previewDigest,
-    confirmation: deletePreview.confirmation,
-  });
-
-  assert.equal(queuedDelete.job.type, 'mail_data_delete');
-  assert.equal(queuedDelete.job.operation, OPERATIONS.MAIL_DATA_DELETE);
-
-  // 2. Define failingDeleteManager mock with deleteNow AND deleteData
-  const failingDeleteManager = {
-    calls: [],
-    async deleteNow({ transactionId, backupId: bid, scope, identity, expectedTargetSnapshotSha256 } = {}) {
-      this.calls.push(['deleteNow', { transactionId, bid, scope, identity, expectedTargetSnapshotSha256 }]);
-      const error = new Error('Host mail data deletion failed during file unlink; host rollback triggered');
-      error.code = 'mail_data_delete_failed';
-      throw error;
-    },
-    async deleteData(input) {
-      this.calls.push(['deleteData', input]);
-      return this.deleteNow(input);
-    },
-    async inspectDeleted({ transactionId, backupId: bid, scope, identity } = {}) {
-      return Object.freeze({ satisfied: false, result: null });
-    },
-  };
-
-  // 3. Directly verify failingDeleteManager interface and methods
-  assert.equal(typeof failingDeleteManager.deleteNow, 'function');
-  assert.equal(typeof failingDeleteManager.deleteData, 'function');
-  assert.equal(typeof failingDeleteManager.inspectDeleted, 'function');
-
-  // Calling deleteNow directly rejects with mail_data_delete_failed without throwing TypeError
-  await assert.rejects(
-    async () => failingDeleteManager.deleteNow({
-      transactionId: queuedDelete.job.id,
-      backupId: fx.backupId,
-      scope: 'mailbox',
-      identity: fx.mailbox.address,
-      expectedTargetSnapshotSha256: fx.snapshotDigest,
-    }),
-    (err) => err.code === 'mail_data_delete_failed'
-  );
-  assert.ok(failingDeleteManager.calls.some(([type]) => type === 'deleteNow'));
-
-  // Calling deleteData directly also delegates to deleteNow and rejects as expected
-  await assert.rejects(
-    async () => failingDeleteManager.deleteData({
-      transactionId: queuedDelete.job.id,
-      backupId: fx.backupId,
-      scope: 'mailbox',
-      identity: fx.mailbox.address,
-      expectedTargetSnapshotSha256: fx.snapshotDigest,
-    }),
-    (err) => err.code === 'mail_data_delete_failed'
-  );
-
-  // 4. Test host operations execution with failingDeleteManager
-  const failingHostOperations = createLocalHostOperations({
-    mailDataBackupManager: fx.mailDataBackupManager,
-    mailDataDeleteManager: failingDeleteManager,
-  });
-
-  await assert.rejects(
-    async () => failingHostOperations.executeOperation(
-      OPERATIONS.MAIL_DATA_DELETE,
-      queuedDelete.job.payload,
-      {
-        jobId: queuedDelete.job.id,
-        serverId: fx.localServerId,
-        type: 'mail_data_delete',
-        resourceType: 'mail_domain',
-        resourceId: fx.mailDomainId,
+    if (fileBase === 'postconf') {
+      const param = args[1];
+      if (param === 'virtual_mailbox_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf', stderr: '' };
       }
-    ),
-    (err) => err.code === 'mail_data_delete_failed'
-  );
+      if (param === 'smtpd_sender_login_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    }
 
-  // 5. Host rollback verification:
-  // Live mail data was NOT deleted and remains intact
-  const inspectedData = await fx.mailDataInspector.inspectMailbox(fx.mailbox.address);
-  assert.equal(inspectedData.present, true);
-  assert.equal(inspectedData.snapshotSha256, fx.snapshotDigest);
-  assert.equal(inspectedData.bytes, 4096);
+    if (fileBase === 'postmap') {
+      const address = args[1];
+      if (enabledDeliveries.has(address)) {
+        return { stdout: `user-${address}`, stderr: '' };
+      }
+      const err = new Error('not found');
+      err.code = 1;
+      err.stdout = '';
+      err.stderr = '';
+      throw err;
+    }
 
-  // Pre-deletion backup in mailDataBackupManager remains intact and verified
-  const intactBackup = await fx.mailDataBackupManager.inspectBackup(fx.backupId);
-  assert.ok(intactBackup);
-  assert.equal(intactBackup.sourcePresent, true);
-  assert.equal(intactBackup.contentSha256, fx.backupContentDigest);
+    if (fileBase === 'doveadm') {
+      const sub = args[0];
+      if (sub === 'auth' && args[1] === 'lookup') {
+        const address = args.at(-1);
+        if (enabledDeliveries.has(address)) {
+          return { stdout: address, stderr: '' };
+        }
+        const err = new Error('user not found');
+        err.code = 67;
+        err.stdout = '';
+        err.stderr = `passdb lookup: user ${address} doesn't exist`;
+        throw err;
+      }
+      if (sub === 'user') {
+        const address = args.at(-1);
+        if (enabledDeliveries.has(address)) {
+          return { stdout: '1000', stderr: '' };
+        }
+        const err = new Error('user not found');
+        err.code = 67;
+        err.stdout = '';
+        err.stderr = `userdb lookup: user ${address} doesn't exist`;
+        throw err;
+      }
+      if (sub === 'auth' && args[1] === 'cache' && args[2] === 'flush') {
+        const address = args[3];
+        return { stdout: '1 cache entries flushed', stderr: '' };
+      }
+      if (sub === 'kick') {
+        const address = args[1];
+        activeSessions.delete(address);
+        return { stdout: address, stderr: '' };
+      }
+      if (args.includes('who')) {
+        const address = args.at(-1);
+        const sessions = activeSessions.get(address);
+        if (sessions && sessions.length > 0) {
+          const header = 'username\tproto\tpid\tip\n';
+          const rows = sessions.map((s) => `${address}\t${s.proto}\t${s.pid}\t${s.ip}`).join('\n');
+          return { stdout: header + rows, stderr: '' };
+        }
+        return { stdout: 'username\tproto\tpid\tip\n', stderr: '' };
+      }
+    }
 
-  // 6. Deletion finalization gating:
-  // Job in registry was NOT completed successfully
-  const failedJob = {
-    ...queuedDelete.job,
-    status: 'failed',
-    error: { code: 'mail_data_delete_failed', message: 'Host execution error' },
+    throw new Error(`Unexpected command in test: ${file} ${args.join(' ')}`);
   };
-  fx.storedJobs.set(queuedDelete.job.id, failedJob);
 
-  // Attempting to finalize deletion rejects fail-closed
-  await assert.rejects(
-    async () => fx.mailDeleteFinalizeService.finalizeMailbox({
-      mailboxId: fx.mailboxId,
-      expectedRevision: 1,
-      deleteJobId: queuedDelete.job.id,
-      confirmation: `delete-mailbox:${fx.mailbox.address}`,
-    }),
-    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_job_mismatch'
-  );
+  return { runner, commandLog };
+}
 
-  // Mailbox in mailboxRegistry is NOT deleted; remains present at revision 1
-  const preservedMailbox = await fx.mailboxRegistry.getMailbox(fx.mailboxId);
-  assert.ok(preservedMailbox);
-  assert.equal(preservedMailbox.id, fx.mailboxId);
-  assert.equal(preservedMailbox.enabled, false);
-  assert.equal(preservedMailbox.revision, 1);
+async function createHttpServer(t, harness, authUser) {
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.auth = authUser;
+    next();
+  });
+
+  mountMailboxRoutes(app, {
+    mailboxRegistry: harness.mailboxRegistry,
+    mailAliasRegistry: harness.mailAliasRegistry,
+    mailboxQuotaRegistry: harness.mailboxQuotaRegistry,
+    mailboxForwardingRegistry: harness.mailboxForwardingRegistry,
+    mailDomainRegistry: harness.mailDomainRegistry,
+    domainRegistry: harness.domainRegistry,
+    mailDeleteFinalizeService: harness.mailDeleteFinalize,
+    localServerId: harness.localServerId,
+  });
+
+  mountMailDeleteImpactRoutes(app, {
+    mailDeleteImpactService: harness.mailDeleteImpact,
+  });
+
+  mountMailDataRoutes(app, {
+    mailDataOperationsService: harness.mailDataOperations,
+  });
+
+  app.use((error, _req, res, _next) => {
+    const known = error instanceof MailboxRegistryError
+      || error instanceof MailDataOperationsError
+      || error instanceof MailDeleteFinalizeError;
+    const status = known ? (error.status ?? 400) : 500;
+    res.status(status).json({
+      error: { code: known ? error.code : 'internal_error', message: error.message },
+    });
+  });
+
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+  });
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const base = `http://127.0.0.1:${server.address().port}`;
+  return { base };
+}
+
+function apiRequest(base, pathname, { method = 'GET', body } = {}) {
+  return fetch(`${base}${pathname}`, {
+    method,
+    headers: body === undefined ? {} : { 'content-type': 'application/json' },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+}
+
+const ownerAuth = Object.freeze({
+  user: { role: 'owner' },
+  access: { mode: 'management', permissions: ['*'] },
+  security: { managementAllowed: true },
 });
 
-// ============================================================================
-// Criterion 5: Finalization and cleanup of mailbox registry records
-// ============================================================================
+const readOnlyAuth = Object.freeze({
+  user: { role: 'read_only' },
+  access: { mode: 'read_only', permissions: ['mailboxes.read'] },
+  security: { managementAllowed: false },
+});
 
-test('Criterion 5: Finalization and cleanup of mailbox registry records', async () => {
-  const fx = createMailboxRemovalFixture({
-    mailboxEnabled: false,
-    mailboxRevision: 2,
-    dataPresent: true,
+// =========================================================================
+// CRITERION 1: SIBLING MAILBOX CONTINUITY (A removed, B maintains continuity)
+// =========================================================================
+test('Criterion 1: Deleting Mailbox A in active domain keeps Mailbox B SMTP/IMAP/Webmail access continuous and domain enabled', async (t) => {
+  const harness = createTestHarness({ mailboxAEnabled: false, domainStatus: 'enabled' });
+  const { base } = await createHttpServer(t, harness, ownerAuth);
+
+  // 1. Initial State: Domain is enabled; Mailbox A disabled; Mailbox B enabled
+  assert.equal(harness.mailDomain.status, 'enabled');
+  const initialA = await harness.mailboxRegistry.getMailbox(mailboxAId);
+  const initialB = await harness.mailboxRegistry.getMailbox(mailboxBId);
+  assert.equal(initialA.enabled, false);
+  assert.equal(initialB.enabled, true);
+
+  // Set up mock command runner where Mailbox B has active delivery & auth, while A is disabled
+  const enabledDeliveries = new Set(['user-b@example.com']);
+  const activeSessions = new Map([
+    ['user-b@example.com', [{ proto: 'imap', pid: '2001', ip: '10.0.0.2' }]],
+  ]);
+  const { runner, commandLog } = createCommandRunnerHarness(activeSessions, enabledDeliveries);
+  const accessGuard = createMailboxAccessGuard({ run: runner });
+
+  // Verify Mailbox B's continuous access before, during, and after Mailbox A's deletion
+  // Sibling access check: Postfix and Dovecot lookups succeed for Mailbox B
+  const passdbB = await runner('/usr/bin/doveadm', ['auth', 'lookup', '-x', 'service=imap', '-f', 'user', 'user-b@example.com']);
+  assert.equal(passdbB.stdout, 'user-b@example.com');
+  const postmapB = await runner('/usr/sbin/postmap', ['-q', 'user-b@example.com', 'proxy:sqlite:...']);
+  assert.equal(postmapB.stdout, 'user-user-b@example.com');
+
+  // 2. Perform deletion lifecycle for Mailbox A:
+  // Step 2a: Inspect impact - Mailbox A has no blockers other than data backup
+  const impactResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/delete-impact`);
+  assert.equal(impactResp.status, 200);
+  const impactBody = await impactResp.json();
+  assert.equal(impactBody.data.address, 'user-a@example.com');
+  assert.equal(impactBody.data.requiresDataBackup, true);
+
+  // Step 2b: Preview data deletion with existing backup
+  const delPreviewResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    method: 'POST',
+    body: { backupId: 'backup-a-001' },
   });
+  assert.equal(delPreviewResp.status, 200);
+  const delPreview = (await delPreviewResp.json()).data;
+  assert.equal(delPreview.operation, 'mail_data_delete');
+  assert.equal(delPreview.identity, 'user-a@example.com');
 
-  // 1. Complete deletion job on host
-  const deletePreview = await fx.mailDataOperationsService.previewDelete({
+  // Step 2c: Queue data deletion
+  const delQueueResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete`, {
+    method: 'POST',
+    body: {
+      backupId: 'backup-a-001',
+      expectedRevision: delPreview.expectedRevision,
+      expectedPreviewDigest: delPreview.previewDigest,
+      confirmation: delPreview.confirmation,
+    },
+  });
+  assert.equal(delQueueResp.status, 202);
+  const deleteJob = harness.enqueuedJobs[0];
+  assert.ok(deleteJob);
+  assert.equal(deleteJob.payload.identity, 'user-a@example.com');
+
+  // Step 2d: Simulate worker execution using access guard for mailbox A
+  const quiesceResult = await accessGuard.quiesce('user-a@example.com');
+  assert.equal(quiesceResult.accessDisabled, true);
+  assert.equal(quiesceResult.sessionsCleared, true);
+
+  // Verify access guard commands targeted ONLY user-a@example.com, NEVER user-b@example.com
+  const kickedTargets = commandLog.filter((c) => c.args[0] === 'kick').map((c) => c.args[1]);
+  assert.deepEqual(kickedTargets, ['user-a@example.com']);
+  assert.ok(!commandLog.some((c) => c.args.includes('user-b@example.com') && (c.args.includes('kick') || c.args.includes('flush'))));
+
+  // Mark data deletion job as succeeded
+  harness.mailboxDataStore.get('user-a@example.com').present = false;
+  harness.mailboxDataStore.get('user-a@example.com').bytes = 0;
+  harness.jobs.get(deleteJob.id).status = 'succeeded';
+  harness.jobs.get(deleteJob.id).result = {
+    version: 1,
+    transactionId: deleteJob.id,
+    backupId: 'backup-a-001',
+    mailDomainId,
+    resourceId: mailboxAId,
+    expectedResourceRevision: initialA.revision,
     scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: fx.backupId,
-  });
-
-  const queuedDelete = await fx.mailDataOperationsService.queueDelete({
-    scope: 'mailbox',
-    resourceId: fx.mailboxId,
-    backupId: fx.backupId,
-    expectedRevision: 2,
-    expectedPreviewDigest: deletePreview.previewDigest,
-    confirmation: deletePreview.confirmation,
-  });
-
-  const deleteResult = await fx.hostOperations.executeOperation(
-    OPERATIONS.MAIL_DATA_DELETE,
-    queuedDelete.job.payload,
-    {
-      jobId: queuedDelete.job.id,
-      serverId: fx.localServerId,
-      type: 'mail_data_delete',
-      resourceType: 'mail_domain',
-      resourceId: fx.mailDomainId,
-    }
-  );
-  assert.equal(deleteResult.deleted, true);
-
-  // Update stored job to succeeded state
-  const completedJob = {
-    ...queuedDelete.job,
-    status: 'succeeded',
-    result: sanitizeMailDataDeleteResult(queuedDelete.job, deleteResult),
+    identity: 'user-a@example.com',
+    sourcePresent: true,
+    contentSha256: backupContentA,
+    bytes: 4096,
+    files: 3,
+    directories: 2,
+    deleted: true,
+    sideEffects: true,
   };
-  fx.storedJobs.set(queuedDelete.job.id, completedJob);
 
-  // Verify mail data is now absent
-  const dataAfter = await fx.mailDataInspector.inspectMailbox(fx.mailbox.address);
-  assert.equal(dataAfter.present, false);
+  // Step 2e: Finalize mailbox deletion
+  const finalizeResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}`, {
+    method: 'DELETE',
+    body: {
+      expectedRevision: initialA.revision,
+      deleteJobId: deleteJob.id,
+      confirmation: `delete-mailbox:user-a@example.com`,
+    },
+  });
+  assert.equal(finalizeResp.status, 200);
+  const finalizeBody = await finalizeResp.json();
+  assert.equal(finalizeBody.data.deleted, true);
+  assert.equal(finalizeBody.data.id, mailboxAId);
 
-  // Impact service now confirms safeToDelete with clear dependencies
-  const impactAfter = await fx.mailDeleteImpactService.inspectMailbox(fx.mailboxId);
-  assert.equal(impactAfter.safeToDelete, true);
-  assert.deepEqual(impactAfter.blockers, []);
-  assert.equal(impactAfter.requiresDataBackup, false);
-  assert.equal(impactAfter.mailData.present, false);
+  // 3. Post-Condition Verification:
+  // Mailbox A is completely absent
+  const afterA = await harness.mailboxRegistry.getMailbox(mailboxAId);
+  assert.equal(afterA, null);
+  const getAResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}`);
+  assert.equal(getAResp.status, 404);
 
-  const validConfirmation = `delete-mailbox:${fx.mailbox.address}`;
+  // Mailbox B remains present, enabled, with untouched revision and credentials
+  const afterB = await harness.mailboxRegistry.getMailbox(mailboxBId);
+  assert.ok(afterB);
+  assert.equal(afterB.enabled, true);
+  assert.equal(afterB.address, 'user-b@example.com');
+  assert.equal(afterB.revision, initialB.revision);
 
-  // 2. Reject stale revision during finalizeMailbox
+  // Mail domain status remains 'enabled' (no domain-level disruption)
+  assert.equal(harness.mailDomain.status, 'enabled');
+  assert.equal(harness.mailDomain.revision, 1);
+
+  // Listing mailboxes returns only Mailbox B
+  const listResp = await apiRequest(base, `/api/mailboxes?mailDomainId=${mailDomainId}`);
+  assert.equal(listResp.status, 200);
+  const listBody = await listResp.json();
+  assert.equal(listBody.data.length, 1);
+  assert.equal(listBody.data[0].id, mailboxBId);
+
+  // Mailbox B's active IMAP session remains connected
+  assert.equal(activeSessions.get('user-b@example.com')?.length, 1);
+  assert.equal(activeSessions.get('user-b@example.com')[0].proto, 'imap');
+});
+
+// =========================================================================
+// CRITERION 2: FAIL-CLOSED ISOLATION OF PRE-AUTHENTICATED SESSIONS
+// =========================================================================
+test('Criterion 2: Pre-authenticated Dovecot/IMAP/SMTP/LMTP sessions fail closed during deletion', async () => {
+  // Scenario 2a: Active IMAP/webmail sessions detected and cleared
+  const activeSessions = new Map([
+    ['user-a@example.com', [
+      { proto: 'imap', pid: '101', ip: '192.168.1.50' },
+      { proto: 'lmtp', pid: '102', ip: '127.0.0.1' },
+    ]],
+  ]);
+  const enabledDeliveries = new Set(); // delivery disabled
+  const { runner } = createCommandRunnerHarness(activeSessions, enabledDeliveries);
+  const accessGuard = createMailboxAccessGuard({ run: runner });
+
+  // When quiesce runs, active sessions are kicked and cleared
+  const quiesced = await accessGuard.quiesce('user-a@example.com');
+  assert.equal(quiesced.sessionsCleared, true);
+  assert.equal(activeSessions.get('user-a@example.com'), undefined);
+
+  // Scenario 2b: Stubborn session refuses to close -> Fail closed
+  const stubbornSessions = new Map([
+    ['user-a@example.com', [{ proto: 'imap', pid: '999', ip: '192.168.1.99' }]],
+  ]);
+  const stubbornRunner = async (file, args) => {
+    if (args.includes('who')) {
+      return { stdout: "username\tproto\tpid\tip\nuser-a@example.com\timap\t999\t192.168.1.99\n", stderr: '' };
+    }
+    if (args[0] === 'kick') return { stdout: 'user-a@example.com', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'cache') return { stdout: '1 cache entries flushed', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'lookup') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "passdb lookup: user user-a@example.com doesn't exist"; throw err;
+    }
+    if (args[0] === 'user') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "userdb lookup: user user-a@example.com doesn't exist"; throw err;
+    }
+    if (file.endsWith('/postconf')) {
+      const param = args[1];
+      return { stdout: param === 'virtual_mailbox_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+    }
+    if (file.endsWith('/postmap')) { const err = new Error('missing'); err.code = 1; err.stdout = ''; err.stderr = ''; throw err; }
+    throw new Error('unexpected');
+  };
+  const stubbornGuard = createMailboxAccessGuard({ run: stubbornRunner });
   await assert.rejects(
-    async () => fx.mailDeleteFinalizeService.finalizeMailbox({
-      mailboxId: fx.mailboxId,
-      expectedRevision: 1, // current revision is 2
-      deleteJobId: queuedDelete.job.id,
-      confirmation: validConfirmation,
-    }),
-    (err) => err instanceof MailDeleteFinalizeError && err.code === 'stale_mailbox_revision' && err.status === 409
+    stubbornGuard.quiesce('user-a@example.com'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_sessions_remaining',
   );
 
-  // 3. Reject mismatched deleteJobId during finalizeMailbox
+  // Scenario 2c: Pre-authenticated SMTP/LMTP delivery still active in Postfix -> Fail closed
+  const activeDeliveryRunner = async (file, args) => {
+    if (file.endsWith('/postconf')) return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf', stderr: '' };
+    if (file.endsWith('/postmap')) return { stdout: 'active_mailbox', stderr: '' }; // active!
+    throw new Error('unexpected');
+  };
+  const deliveryGuard = createMailboxAccessGuard({ run: activeDeliveryRunner });
   await assert.rejects(
-    async () => fx.mailDeleteFinalizeService.finalizeMailbox({
-      mailboxId: fx.mailboxId,
-      expectedRevision: 2,
-      deleteJobId: 'wrong-job-id-00000000',
-      confirmation: validConfirmation,
-    }),
-    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_job_mismatch' && err.status === 409
+    deliveryGuard.quiesce('user-a@example.com'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_still_enabled',
   );
 
-  // 4. Reject invalid confirmation during finalizeMailbox
+  // Scenario 2d: Re-enabled delivery during session cleanup (second lookup race) -> Fail closed
+  let postmapChecks = 0;
+  const raceRunner = async (file, args) => {
+    if (file.endsWith('/postconf')) {
+      const param = args[1];
+      return { stdout: param === 'virtual_mailbox_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+    }
+    if (file.endsWith('/postmap')) {
+      postmapChecks++;
+      if (postmapChecks === 3) {
+        // Drifts back to active during the final verification pass!
+        return { stdout: 're_enabled', stderr: '' };
+      }
+      const err = new Error('not found'); err.code = 1; err.stdout = ''; err.stderr = ''; throw err;
+    }
+    if (args[0] === 'auth' && args[1] === 'cache') return { stdout: '1 cache entries flushed', stderr: '' };
+    if (args[0] === 'kick') return { stdout: 'user-a@example.com', stderr: '' };
+    if (args.includes('who')) return { stdout: 'username\tproto\tpid\tip\n', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'lookup') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "passdb lookup: user user-a@example.com doesn't exist"; throw err;
+    }
+    if (args[0] === 'user') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "userdb lookup: user user-a@example.com doesn't exist"; throw err;
+    }
+    throw new Error('unexpected');
+  };
+  const raceGuard = createMailboxAccessGuard({ run: raceRunner });
   await assert.rejects(
-    async () => fx.mailDeleteFinalizeService.finalizeMailbox({
-      mailboxId: fx.mailboxId,
-      expectedRevision: 2,
-      deleteJobId: queuedDelete.job.id,
-      confirmation: 'short',
-    }),
-    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_confirmation_invalid' && err.status === 400
+    raceGuard.quiesce('user-a@example.com'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_still_enabled',
   );
+});
 
-  // 5. Successful finalization removes mailbox from registry
-  const finalized = await fx.mailDeleteFinalizeService.finalizeMailbox({
-    mailboxId: fx.mailboxId,
-    expectedRevision: 2,
-    deleteJobId: queuedDelete.job.id,
-    confirmation: validConfirmation,
+// =========================================================================
+// CRITERION 3: MUTATION-TIME AUTHORIZATION, RE-ACTIVATION & ALIAS RACES
+// =========================================================================
+test('Criterion 3: Mutation-time authorization, re-activation, and alias races are safely rejected', async (t) => {
+  const harness = createTestHarness({ mailboxAEnabled: false });
+  const { base } = await createHttpServer(t, harness, ownerAuth);
+
+  // 3a. Read-Only role cannot mutate or delete mailbox
+  const readOnlyServer = await createHttpServer(t, harness, readOnlyAuth);
+  const roDeleteResp = await apiRequest(readOnlyServer.base, `/api/mailboxes/${mailboxAId}`, {
+    method: 'DELETE',
+    body: { expectedRevision: 1, deleteJobId: 'some-job', confirmation: 'delete-mailbox:user-a@example.com' },
+  });
+  assert.equal(roDeleteResp.status, 403);
+
+  // 3b. Re-activation race: Mailbox A re-enabled during delete queueing
+  const delPreviewResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    method: 'POST',
+    body: { backupId: 'backup-a-001' },
+  });
+  assert.equal(delPreviewResp.status, 200);
+  const delPreview = (await delPreviewResp.json()).data;
+
+  // Concurrent actor re-enables Mailbox A (revision increments to 2, enabled becomes true)
+  await harness.mailboxRegistry.setEnabled(mailboxAId, { expectedRevision: 1, enabled: true });
+
+  // Attempting queueDelete with stale preview and now-enabled mailbox fails with 409
+  const queueStaleResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete`, {
+    method: 'POST',
+    body: {
+      backupId: 'backup-a-001',
+      expectedRevision: delPreview.expectedRevision,
+      expectedPreviewDigest: delPreview.previewDigest,
+      confirmation: delPreview.confirmation,
+    },
+  });
+  assert.equal(queueStaleResp.status, 409);
+  const queueStaleErr = await queueStaleResp.json();
+  assert.ok(['mail_data_delete_preview_stale', 'mail_data_delete_mailbox_disable_required'].includes(queueStaleErr.error.code));
+
+  // Reset Mailbox A back to disabled for alias race test
+  await harness.mailboxRegistry.setEnabled(mailboxAId, { expectedRevision: 2, enabled: false });
+  const currentMb = await harness.mailboxRegistry.getMailbox(mailboxAId);
+  assert.equal(currentMb.revision, 3);
+
+  // 3c. Alias Reference race: Inbound local alias added before delete preview
+  harness.aliases.push({
+    id: 'local-alias-1',
+    mailDomainId,
+    source: 'info@example.com',
+    destinations: ['user-a@example.com'],
+    enabled: true,
   });
 
-  assert.equal(finalized.deleted, true);
-  assert.equal(finalized.id, fx.mailboxId);
-  assert.equal(finalized.resourceType, 'mailbox');
-  assert.equal(finalized.deleteJobId, queuedDelete.job.id);
-  assert.equal(finalized.backupId, fx.backupId);
+  // Delete preview rejects because dependencies exist
+  const blockedPreviewResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    method: 'POST',
+    body: { backupId: 'backup-a-001' },
+  });
+  assert.equal(blockedPreviewResp.status, 409);
+  const blockedErr = await blockedPreviewResp.json();
+  assert.equal(blockedErr.error.code, 'mail_data_delete_dependencies_exist');
 
-  // 6. Mailbox is deleted from registry
-  const deletedLookup = await fx.mailboxRegistry.getMailbox(fx.mailboxId);
-  assert.equal(deletedLookup, null);
+  // 3d. Inbound foreign alias added without revealing its private identity
+  harness.aliases.length = 0; // clear local
+  harness.aliases.push({
+    id: 'foreign-alias-999',
+    mailDomainId: 'other-domain-id',
+    source: 'contact@foreign-domain.test',
+    destinations: ['user-a@example.com'],
+    enabled: true,
+  });
 
-  // Sibling mailbox remains untouched
-  const siblingMailbox = await fx.mailboxRegistry.getMailbox(fx.siblingMailboxId);
-  assert.ok(siblingMailbox);
-  assert.equal(siblingMailbox.id, fx.siblingMailboxId);
-  assert.equal(siblingMailbox.enabled, true);
+  // Verify foreign alias blocks impact without revealing foreign alias ID
+  const impactResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/delete-impact`);
+  assert.equal(impactResp.status, 200);
+  const impact = (await impactResp.json()).data;
+  assert.equal(impact.safeToDelete, false);
+  assert.equal(impact.dependencies.aliasReferences.count, 1);
+  assert.equal(JSON.stringify(impact).includes('foreign-alias-999'), false);
 
-  // 7. Re-attempting finalization fails closed with mailbox_not_found
+  // Finalization fails closed if an alias reference appears concurrently
+  const dummyJobId = randomUUID();
+  harness.jobs.set(dummyJobId, {
+    id: dummyJobId,
+    status: 'succeeded',
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    result: {
+      version: 1,
+      transactionId: dummyJobId,
+      backupId: 'backup-a-001',
+      mailDomainId,
+      resourceId: mailboxAId,
+      expectedResourceRevision: currentMb.revision,
+      scope: 'mailbox',
+      identity: 'user-a@example.com',
+      sourcePresent: true,
+      deleted: true,
+      sideEffects: true,
+    },
+  });
+
   await assert.rejects(
-    async () => fx.mailDeleteFinalizeService.finalizeMailbox({
-      mailboxId: fx.mailboxId,
-      expectedRevision: 2,
-      deleteJobId: queuedDelete.job.id,
-      confirmation: validConfirmation,
+    harness.mailDeleteFinalize.finalizeMailbox({
+      mailboxId: mailboxAId,
+      expectedRevision: currentMb.revision,
+      deleteJobId: dummyJobId,
+      confirmation: `delete-mailbox:user-a@example.com`,
     }),
-    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mailbox_not_found' && err.status === 404
+    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_impact_not_clear',
   );
+  // Mailbox was not deleted
+  assert.ok(await harness.mailboxRegistry.getMailbox(mailboxAId));
+});
+
+// =========================================================================
+// CRITERION 4: PRE-DELETION BACKUP AND ROLLBACK FLOW VERIFIABILITY
+// =========================================================================
+test('Criterion 4: Verifiable pre-deletion backup and host rollback flow', async (t) => {
+  const harness = createTestHarness({ mailboxAEnabled: false });
+  const { base } = await createHttpServer(t, harness, ownerAuth);
+
+  // 4a. Deletion without verified backup is rejected
+  const noBackupResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    method: 'POST',
+    body: { backupId: 'non-existent-backup' },
+  });
+  assert.equal(noBackupResp.status, 404);
+
+  // 4b. Outdated/stale backup (data snapshot changed) is rejected
+  harness.backups.set('stale-backup-001', {
+    version: 1,
+    backupId: 'stale-backup-001',
+    scope: 'mailbox',
+    identity: 'user-a@example.com',
+    sourcePath: '/var/lib/yunpanel/mail/example.com/user-a',
+    sourcePresent: true,
+    sourceSnapshotSha256: sha256('older-snapshot'), // mismatch
+    contentSha256: sha256('older-content'),
+    bytes: 2048,
+    files: 1,
+    directories: 1,
+    createdAt: new Date().toISOString(),
+  });
+  const staleBackupResp = await apiRequest(base, `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    method: 'POST',
+    body: { backupId: 'stale-backup-001' },
+  });
+  assert.equal(staleBackupResp.status, 409);
+  const staleErr = await staleBackupResp.json();
+  assert.equal(staleErr.error.code, 'mail_data_delete_backup_stale');
+
+  // 4c. Host deletion rollback on failure:
+  // Using mailDataDeleteManager with simulated failure after rename
+  const emptyTreeSha = createHash('sha256').update(JSON.stringify(['d', '']) + '\n').digest('hex');
+  harness.backups.set('backup-rollback-001', {
+    version: 1,
+    backupId: 'backup-rollback-001',
+    scope: 'mailbox',
+    identity: 'user-a@example.com',
+    sourcePath: '/var/lib/yunpanel/mail/example.com/user-a',
+    sourcePresent: true,
+    sourceSnapshotSha256: snapshotA,
+    contentSha256: emptyTreeSha,
+    bytes: 0,
+    files: 0,
+    directories: 0,
+  });
+
+  let renameCalls = [];
+  let rmCalls = 0;
+  const targetPath = '/var/lib/yunpanel/mail/example.com/user-a';
+  const tombstonePath = '/var/lib/yunpanel/mail/example.com/.user-a.delete-test-trans-001';
+  let isTombstone = false;
+
+  const fakeRename = async (from, to) => {
+    renameCalls.push({ from, to });
+    if (from === targetPath && to === tombstonePath) {
+      isTombstone = true;
+    } else if (from === tombstonePath && to === targetPath) {
+      isTombstone = false;
+    }
+  };
+  const fakeRm = async () => {
+    rmCalls += 1;
+    throw new Error('simulated disk I/O error during tombstone deletion');
+  };
+  const fakeLstat = async (p) => {
+    if (p === targetPath) {
+      if (isTombstone) {
+        const err = new Error('ENOENT');
+        err.code = 'ENOENT';
+        throw err;
+      }
+      return {
+        isSymbolicLink: () => false,
+        isDirectory: () => true,
+        isFile: () => false,
+        mode: 0o700,
+        uid: 1000,
+        gid: 1000,
+      };
+    }
+    if (p === tombstonePath) {
+      if (!isTombstone) {
+        const err = new Error('ENOENT');
+        err.code = 'ENOENT';
+        throw err;
+      }
+      return {
+        isSymbolicLink: () => false,
+        isDirectory: () => true,
+        isFile: () => false,
+        mode: 0o700,
+        uid: 1000,
+        gid: 1000,
+      };
+    }
+    const err = new Error('ENOENT');
+    err.code = 'ENOENT';
+    throw err;
+  };
+  const fakeReaddir = async () => [];
+  const mockAccessGuard = {
+    async quiesce(id) { return { identity: id, accessDisabled: true, sessionsCleared: true }; },
+    async verify(id) { return { identity: id, accessDisabled: true, sessionsCleared: true }; },
+  };
+
+  const failingDeleteManager = createMailDataDeleteManager({
+    backupManager: harness.mailDataBackupManager,
+    mailDataInspector: harness.mailDataInspector,
+    mailboxAccessGuard: mockAccessGuard,
+    run: async (file) => {
+      if (file.endsWith('/getent')) return { stdout: 'vmail:x:1000:1000::/var/lib/yunpanel/mail:/bin/false\n' };
+      return { stdout: '' };
+    },
+    renameFn: fakeRename,
+    rmFn: fakeRm,
+    lstatFn: fakeLstat,
+    readdirFn: fakeReaddir,
+  });
+
+  // Use the serialized public deleteData API; an rm failure must trigger rollback.
+  await assert.rejects(
+    failingDeleteManager.deleteData({
+      transactionId: 'test-trans-001',
+      backupId: 'backup-rollback-001',
+      scope: 'mailbox',
+      identity: 'user-a@example.com',
+      expectedTargetSnapshotSha256: snapshotA,
+    }),
+    error => error.code === 'mail_data_delete_failed',
+  );
+
+  // Verify rollback occurred: initial rename target -> tombstone, then tombstone -> target
+  assert.equal(rmCalls, 1);
+  assert.equal(renameCalls.length, 2);
+  assert.equal(renameCalls[0].from, targetPath);
+  assert.equal(renameCalls[0].to, tombstonePath);
+  assert.equal(renameCalls[1].from, tombstonePath);
+  assert.equal(renameCalls[1].to, targetPath);
+  assert.equal(isTombstone, false); // restored to original path!
+
+  // 4d. Disaster recovery / restore flow:
+  // With verified backup, previewRestore and queueRestore can restore mailbox data
+  harness.mailDomain.status = 'disabled'; // restore requires disabled domain for safe write
+  const restorePreview = await harness.mailDataOperations.previewRestore({
+    scope: 'mailbox',
+    resourceId: mailboxAId,
+    backupId: 'backup-a-001',
+  });
+  assert.equal(restorePreview.operation, 'mail_data_restore');
+  assert.equal(restorePreview.backupId, 'backup-a-001');
+
+  const restoreJobResult = await harness.mailDataOperations.queueRestore({
+    scope: 'mailbox',
+    resourceId: mailboxAId,
+    backupId: 'backup-a-001',
+    expectedRevision: restorePreview.expectedRevision,
+    expectedPreviewDigest: restorePreview.previewDigest,
+    confirmation: restorePreview.confirmation,
+  });
+  assert.ok(restoreJobResult.job.id);
+  assert.equal(restoreJobResult.job.operation, OPERATIONS.MAIL_DATA_RESTORE);
+
+  // 4e. Finalization abort safety: If delete job failed, mailbox record is retained
+  const failedJobId = randomUUID();
+  harness.jobs.set(failedJobId, {
+    id: failedJobId,
+    status: 'failed',
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+  });
+  await assert.rejects(
+    harness.mailDeleteFinalize.finalizeMailbox({
+      mailboxId: mailboxAId,
+      expectedRevision: 1,
+      deleteJobId: failedJobId,
+      confirmation: `delete-mailbox:user-a@example.com`,
+    }),
+    (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_job_mismatch',
+  );
+  // Mailbox record is NOT deleted
+  assert.ok(await harness.mailboxRegistry.getMailbox(mailboxAId));
 });
