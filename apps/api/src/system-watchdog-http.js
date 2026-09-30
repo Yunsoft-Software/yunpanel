@@ -27,7 +27,7 @@ function asyncRoute(handler) {
 
 function requireManagementRole(request, response, next) {
   const role = request.auth?.user?.role;
-  if (!role || role === 'read_only') {
+  if (role !== 'owner') {
     return response.status(403).json({
       error: { code: 'forbidden', message: 'Management permissions required for watchdog operations.' },
     });
