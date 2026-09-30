@@ -1,5 +1,5 @@
 // Entry resolution only; never authorizes a resource or calls a mutation.
-const TOOLS = new Set(['mail', 'databases']);
+const TOOLS = new Set(['mail', 'databases', 'statistics']);
 const hasId = (value) => typeof value === 'string' && value.length > 0;
 const uniqueIds = (items) => {
   const counts = new Map();
@@ -23,7 +23,7 @@ export function resolveSiteToolEntry({ tool, websites, domains, canManage = fals
     if (!bound.length) return [{ id: `site:${site.id}`, websiteId: site.id, domainId: null, label: hasId(site.name) ? site.name : site.id, href: null }];
     return bound.map((domain) => ({ id: `domain:${domain.id}`, websiteId: site.id, domainId: domain.id,
       label: hasId(domain.primaryDomain) ? domain.primaryDomain : hasId(site.name) ? site.name : site.id,
-      href: `/websites/${encodeURIComponent(domain.id)}/${tool}` }));
+      href: `/websites/${encodeURIComponent(domain.id)}/${tool === 'statistics' ? 'analytics' : tool}` }));
   }).sort((a, b) => a.label.localeCompare(b.label, 'tr'));
   if (!targets.length) return result('empty');
   if (targets.length === 1) return result(targets[0].href ? 'ready' : 'unbound', targets, targets[0]);

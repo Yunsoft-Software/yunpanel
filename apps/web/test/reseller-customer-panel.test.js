@@ -17,7 +17,7 @@ test('navigationGroups: Reseller sees Bayi Menüsü with Sitelerim, Müşteriler
   assert.equal(groups[0].title, 'Bayi Menüsü');
   assert.equal(groups[0].label, 'Bayi Menüsü');
   const paths = groups[0].items.map(([path]) => path);
-  assert.deepEqual(paths, ['/customers', '/websites', '/mail', '/files', '/databases']);
+  assert.deepEqual(paths, ['/customers', '/websites', '/mail', '/files', '/databases', '/statistics']);
   assert.equal(groups[0].items.find(([path]) => path === '/websites')[1], 'Sitelerim');
   assert.equal(groups[0].items.find(([path]) => path === '/customers')[1], 'Müşterilerim');
 
@@ -34,7 +34,7 @@ test('navigationGroups: Customer sees Müşteri Menüsü with Web Siteleri ve Al
   assert.equal(groups[0].title, 'Müşteri Menüsü');
   assert.equal(groups[0].label, 'Müşteri Menüsü');
   const paths = groups[0].items.map(([path]) => path);
-  assert.deepEqual(paths, ['/websites', '/mail', '/files', '/databases']);
+  assert.deepEqual(paths, ['/websites', '/mail', '/files', '/databases', '/statistics']);
   assert.equal(groups[0].items.find(([path]) => path === '/websites')[1], 'Web Siteleri ve Alan Adları');
 
   // Forbidden items for Customer
@@ -56,6 +56,7 @@ test('navigationGroups: Owner sees standard Panel navigation including tools and
   assert.ok(paths.includes('/settings/users'));
   assert.ok(paths.includes('/files'));
   assert.ok(paths.includes('/databases'));
+  assert.ok(paths.includes('/statistics'));
   assert.ok(!paths.includes('/customers'));
 });
 

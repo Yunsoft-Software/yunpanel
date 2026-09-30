@@ -22,7 +22,12 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false, 
     ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Sitelerim', 'globe']]
     : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
   if (canManage) {
-    items.push(['/mail', 'Posta', 'mail'], ['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database']);
+    items.push(
+      ['/mail', 'Posta', 'mail'],
+      ['/files', 'Dosyalar', 'folder'],
+      ['/databases', 'Veritabanları', 'database'],
+      ['/statistics', 'İstatistikler', 'dashboard'],
+    );
     if (isOwner) items.push(['/tools-settings', 'Araçlar ve Ayarlar', 'settings'], ['/settings/users', 'Kullanıcılar', 'user']);
   } else if (isOwner) items.push(['/dashboard', 'Genel bakış', 'dashboard']);
   const label = isReseller && !isOwner ? 'Bayi Menüsü' : isCustomer && !isOwner ? 'Müşteri Menüsü' : 'Panel';
@@ -51,12 +56,25 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
 ].map((group) => Object.freeze({ ...group, items: Object.freeze(group.items.map((item) => Object.freeze(item))) })));
 
 export function navigationItemActive(to, pathname) {
-  if (typeof pathname !== 'string') return false;
-  if (to === '/tools-settings') {
-    return ['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => pathname === path || pathname.startsWith(`${path}/`))
-      || (pathname === '/settings' || (pathname.startsWith('/settings/') && pathname !== '/settings/users' && !pathname.startsWith('/settings/users/')));
+  if (typeof pathname !== 'string' || typeof to !== 'string') return false;
+  if (pathname === to) return true;
+  const currentPath = pathname.split('?')[0].split('#')[0];
+  if (to === '/settings/users' || to === '/users') {
+    return currentPath === '/users' || currentPath.startsWith('/users/')
+      || currentPath === '/settings/users' || currentPath.startsWith('/settings/users/');
   }
-  return pathname === to || pathname.startsWith(`${to}/`);
+  if (to === '/statistics') {
+    return currentPath === '/statistics' || currentPath.startsWith('/statistics/');
+  }
+  if (to === '/tools-settings') {
+    return (['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
+      || (currentPath === '/settings' || (currentPath.startsWith('/settings/') && currentPath !== '/settings/users' && !currentPath.startsWith('/settings/users/'))))
+      && currentPath !== '/users' && !currentPath.startsWith('/users/');
+  }
+  if (to.includes('?') || to.includes('#')) {
+    return pathname === to || pathname.startsWith(`${to}&`) || pathname.startsWith(`${to}#`);
+  }
+  return currentPath === to || currentPath.startsWith(`${to}/`);
 }
 
 export function websiteCount(resource) {
