@@ -128,3 +128,18 @@
 ## 2026-09-30 — Test dosyaları EOF boş satır ve diff-check doğrulaması
 - `git diff --check HEAD --` denetiminde hata veren `apps/api/test/system-watchdog.test.js` ve `apps/web/test/reseller-customer-panel.test.js` dosyalarındaki dosya sonu gereksiz boş satırlar (blank line at EOF) temizlendi.
 - Değiştirilen dosyalar tam olarak tek bir yeni satır (`\n`) ile sonlandırıldı; testler ve diff kontrolü orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — Development dalındaki değişikliklerin staging ortamında uçtan uca doğrulanması ve dokümantasyonu
+- Reseller ve Customer rolleri için uçtan uca çok kiracılı akış (Owner → Reseller → Customer → Website tahsisi, kota yönetimi, self-service site araçları, negatif yetki ve fail-closed sınırları, hesap askıya alma ve kontenjan serbest bırakma döngüsü) test edildi (`apps/api/test/staging-e2e-verification.test.js`).
+- Müşteri kota sınırları (`maxWebsites`, `maxDiskMb`, `maxTrafficMb`, `maxDatabases`), negatif/geçersiz kota tipleri, bayi kapasite kontrolleri (`reseller_limit_reached` 409), kota dolumu engelleri (`customer_quota_exceeded` 409), askıya alınmış hesapların kaynak kilitlemesi (`hosting_account_inactive` 403) ve iptal/silme sonrası kontenjan serbest bırakma (uncreated/removed quota release lifecycle) doğrulandı.
+- Kiracılar arası sınır ihlalleri, doğrudan Owner müşterileri ve yabancı bayi varlıklarına yönelik yetkisiz isteklerin (`tenant_boundary_forbidden` 403), root terminal girişimlerinin (`terminal_server_forbidden` 403) ve pasif hesapların (`tenant_actor_inactive` 403) fail-closed engellendiği ve koleksiyon filtrelemesinde metadata sızdırılmadığı test edildi.
+- Sistem servislerinin (Nginx, MariaDB, PHP-FPM) durum izleme telemetrisi, watchdog arıza tespiti ve otomatik kurtarma, flap koruması (`maxRecoveriesPerWindow`, `recoveryWindowMs`), manuel on-demand onay jetonu (`recover:service:<serviceId>`) doğrulamaları ve zaman aşımına uğrayan işlerin temizlenmesi (`job_stalled_timeout`) uçtan uca doğrulandı.
+- Panel loopback sağlık (`/api/health`) erişilebilirliği, güvenli loopback bağlama denetimi (`resolveLocalApiHealthTarget`, `checkLocalApiHealth`) ve watchdog HTTP rotaları rol yetkilendirmesi (Owner tam yetki, Read-Only salt okunur durum 200 / mutasyon 403, Reseller ve Customer fail-closed 403) doğrulandı.
+- `plan.md` ve `todo.md` belgeleri tamamlanan adımlar, test paketleri ve son durum ile güncellendi; testler orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — Staging uçtan uca doğrulama testleri hata düzeltmesi
+- `apps/api/test/staging-e2e-verification.test.js` dosyasında `registerReseller` ve `registerCustomer` çağrılarından dönen nesnelerdeki `kind` özelliği ('reseller', 'customer') doğrulanacak şekilde test güncellendi (`r1.kind`, `r2.kind`, `c1a.kind`).
+- Watchdog HTTP rota testi için `mockWatchdogService` mock nesnesine `mountSystemWatchdogRoutes` sözleşmesine uygun `getStatus` metodu eklendi, `callRoute` istek nesnesine `originalUrl` eklenerek tam rota eşleşmesi sağlandı; testler orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — Staging uçtan uca doğrulama site tahsis girdi doğrulaması düzeltmesi
+- `apps/api/test/staging-e2e-verification.test.js` dosyasında `siteAllocations` akışında kullanılan `serverId`, plan ve kurtarma `operationId` değerleri `hosting-site-allocation-store` ve `hostingWebsiteDigest` modüllerinin gerektirdiği kesin UUID formatına (`44444444-4444-4444-8444-444444444444`, `a1111111-1111-4111-8111-111111111111` vb.) uygun hale getirilerek `invalid_hosting_site_input` hatası giderildi; testler orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
