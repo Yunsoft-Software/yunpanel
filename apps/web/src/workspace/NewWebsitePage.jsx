@@ -28,9 +28,10 @@ export default function NewWebsitePage() {
   return <WebsiteForm key={identity} parentId={parentId} />;
 }
 function WebsiteForm({ parentId }) {
+  const [params] = useSearchParams();
   const { domains, websites, servers, applications, refreshAll } = useWorkspace();
   const [form, setForm] = useState({
-    mode: parentId ? 'subdomain' : 'domain',
+    mode: parentId || params.get('mode') === 'subdomain' ? 'subdomain' : 'domain',
     parentDomainId: parentId,
     prefix: '',
     primaryDomain: '',
