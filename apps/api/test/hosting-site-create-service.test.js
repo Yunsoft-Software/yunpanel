@@ -379,6 +379,7 @@ test('hosted site create propagates siteAdmin and siteAdminError from creation r
   const result = await f.createHosted(submitted);
   assert.equal(result.created, true);
   assert.deepEqual(result.siteAdmin, siteAdminOutcome);
+  assert.equal(result.siteAdminError.code, 'site_admin_result_unverified');
 });
 
 test('hosted site create rejects explicit siteAdmin input to avoid conflicting logins', async (t) => {

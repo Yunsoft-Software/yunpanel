@@ -7,7 +7,7 @@ import {
   siteCreateHttpInternals,
 } from '../src/site-create-http.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
-import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
+import { createHostingSiteAllocationStore, hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
 import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
@@ -30,6 +30,7 @@ function fakeResponse() {
     payload: null,
     headers: {},
     setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+    set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
     status(value) { this.statusCode = value; return this; },
     json(value) { this.payload = value; return this; },
   };
@@ -54,11 +55,19 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
   const provisioningOperations = new Map();
   const lockCalls = [];
 
-  const basePlan = (operationId = uuid(1001)) => ({
+  const operationSites = new Map();
+  const siteForOperation = (operationId) => {
+    if (!operationSites.has(operationId)) operationSites.set(operationId,
+      operationSites.size === 0 ? site : website(9000 + operationSites.size, { serverId }));
+    return operationSites.get(operationId);
+  };
+  const basePlan = (operationId = uuid(1001)) => {
+    const plannedSite = siteForOperation(operationId);
+    return ({
     operationId,
     ids: {
-      websiteId: site.id,
-      applicationId: site.applicationId,
+      websiteId: plannedSite.id,
+      applicationId: plannedSite.applicationId,
       primaryDomainId: uuid(2),
       wwwDomainId: null,
       mailDomainId: null,
@@ -66,15 +75,17 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     previewDigest: 'b'.repeat(64),
     confirmation: 'original-confirmation',
     blockers: [],
-    steps: { websiteReady: sites.has(site.id) },
+    steps: { websiteReady: sites.has(plannedSite.id) },
     source: { kind: 'external_proxy' },
-    plan: { website: site, application: null },
-  });
+    plan: { website: plannedSite, application: null },
+    });
+  };
 
   const previewAdapter = async (input) => basePlan(input.operationId);
   const createAdapter = async (apply) => {
-    sites.set(site.id, structuredClone(site));
-    return { created: true, website: site };
+    const plannedSite = siteForOperation(apply.input.operationId);
+    sites.set(plannedSite.id, structuredClone(plannedSite));
+    return { created: true, website: plannedSite };
   };
 
   const siteMutationLock = {
@@ -376,8 +387,8 @@ test('inactive customer or suspended parent reseller cannot reserve site quota',
   const app = fakeApp();
   mountSiteCreateRoutes(app, env.dependencies);
 
-  // Deactivate customer-a in SQLite DB
-  env.f.db.prepare('UPDATE users SET active = 0 WHERE id = ?').run('customer-a');
+  // Deactivate customer-a via hosting account store
+  env.f.store.setActive(env.f.token, env.f.requireManagement, 'customer-a', { revision: 1, active: false });
 
   const previewHandler = app.routes.post.get('/api/sites/hosted/create-preview');
   await assert.rejects(
@@ -407,7 +418,7 @@ test('invalid hosted site requests are rejected with appropriate error codes', a
       rawToken: env.ownerAuth.rawToken,
       body: { input: { operationId: uuid(1004) } },
     }),
-    (error) => error.code === 'invalid_hosting_site_request' && error.status === 400,
+    (error) => error instanceof SiteCreateError && error.code === 'invalid_hosting_site_request' && error.status === 400,
   );
 
   // Stale preview on create
@@ -423,8 +434,9 @@ test('invalid hosted site requests are rejected with appropriate error codes', a
         confirmation: 'invalid-confirmation',
       },
     }),
-    (error) => (error.code === 'hosting_site_preview_stale' || error.code === 'site_create_confirmation_required'),
+    (error) => (error instanceof SiteCreateError || error instanceof AuthError) && (error.code === 'hosting_site_preview_stale' || error.code === 'site_create_confirmation_required'),
   );
+
 });
 
 test('website removal HTTP routes enforce tenant authorization, active tenant context, and resource locking', async (t) => {
@@ -557,7 +569,7 @@ test('website removal releases reseller and customer quotas via releaseRemoved a
     customerId: 'customer-a',
     serverId: env.serverId,
     intentDigest: 'f'.repeat(64),
-    websiteDigest: 'e'.repeat(64),
+    websiteDigest: hostingWebsiteDigest(env.site),
   };
   env.f.preview(alloc);
   env.f.reserve(alloc);
@@ -714,6 +726,14 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   assert.equal(applyRes.payload.data.allocation.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
+  // Invalidate and refresh reseller session after site completion
+  const freshResellerToken = env.f.session('reseller-a');
+  const freshResellerAuth = {
+    ...resellerAuth,
+    token: freshResellerToken,
+    rawToken: freshResellerToken,
+  };
+
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
   const opId2 = uuid(1102);
   const previewBody2 = {
@@ -723,25 +743,28 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: resellerAuth,
-        rawToken: resellerToken,
+        auth: freshResellerAuth,
+        rawToken: freshResellerToken,
         body: previewBody2,
       });
     },
-    (err) => err instanceof AuthError && err.code === 'reseller_capacity_exceeded',
+    (err) => err instanceof AuthError && err.code === 'reseller_limit_reached' && err.status === 409,
   );
+  assert.equal(env.sites.size, 1, 'a rejected second site cannot mutate Website metadata');
+  assert.equal(env.f.get('reseller-a').usage.websites, 1);
+  assert.notEqual((await env.dependencies.previewSiteCreate(previewBody2.input)).ids.websiteId, env.site.id);
 
   // 4. Reseller attempts site preview for customer-c belonging to foreign reseller-b
   const opIdForeign = uuid(1103);
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: resellerAuth,
-        rawToken: resellerToken,
+        auth: freshResellerAuth,
+        rawToken: freshResellerToken,
         body: { customerId: 'customer-c', input: { operationId: opIdForeign, serverId: env.serverId } },
       });
     },
-    (err) => err instanceof AuthError && (err.code === 'reseller_scope_forbidden' || err.status === 403),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
   );
 
   // 5. Reseller attempts site preview for direct Owner customer
@@ -749,20 +772,20 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: resellerAuth,
-        rawToken: resellerToken,
+        auth: freshResellerAuth,
+        rawToken: freshResellerToken,
         body: { customerId: 'direct', input: { operationId: opIdDirect, serverId: env.serverId } },
       });
     },
-    (err) => err instanceof AuthError && (err.code === 'reseller_scope_forbidden' || err.status === 403),
+    (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
   );
 
   // 6. Reseller attempts site preview for non-existent customer
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: resellerAuth,
-        rawToken: resellerToken,
+        auth: freshResellerAuth,
+        rawToken: freshResellerToken,
         body: { customerId: 'non-existent', input: { operationId: uuid(1105), serverId: env.serverId } },
       });
     },
@@ -889,8 +912,142 @@ test('hosting-site-allocation-store supports role: reseller actor and customer r
   assert.equal(ownPreview.state, 'available');
 
   // Verify hosting account store accepts users with role: 'customer'
+  env.f.db.exec(`
+    PRAGMA legacy_alter_table = ON;
+    PRAGMA foreign_keys = OFF;
+    DROP TRIGGER IF EXISTS auth_hosting_account_insert;
+    DROP TRIGGER IF EXISTS auth_hosting_lifecycle_intent_insert;
+    DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard;
+    CREATE TABLE users_temp (
+      id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+      role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+      created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
+    );
+    INSERT INTO users_temp SELECT * FROM users;
+    DROP TABLE users;
+    ALTER TABLE users_temp RENAME TO users;
+    PRAGMA foreign_keys = ON;
+    PRAGMA legacy_alter_table = OFF;
+  `);
   env.f.db.prepare("UPDATE users SET role = 'customer' WHERE id = 'customer-a'").run();
   const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
   assert.equal(customerAccount.id, 'customer-a');
   assert.equal(customerAccount.kind, 'customer');
+});
+
+test('standard site create via /api/sites propagates siteAdmin and siteAdminError when admin creation fails without failing site creation', async (t) => {
+  const env = setupTestEnvironment(t);
+  const app = fakeApp();
+
+  const failingUserAdminStore = {
+    ...env.dependencies.userAdminStore,
+    createSiteManager: async () => {
+      const error = new Error('Database locked');
+      error.code = 'store_locked';
+      throw error;
+    },
+  };
+
+  const createAdapter = async (apply) => {
+    env.sites.set(env.site.id, structuredClone(env.site));
+    return {
+      created: true,
+      operationId: apply.input.operationId,
+      website: env.site,
+      primaryDomain: { websiteId: env.site.id },
+    };
+  };
+
+  mountSiteCreateRoutes(app, {
+    ...env.dependencies,
+    userAdminStore: failingUserAdminStore,
+    createSite: createAdapter,
+  });
+
+  const createHandler = app.routes.post.get('/api/sites');
+  const operationId = uuid(1005);
+  const input = {
+    operationId,
+    serverId: env.serverId,
+    siteAdmin: { email: 'admin@example.test', password: 'Password123!@#' },
+  };
+
+  const response = await invoke(createHandler, {
+    auth: env.ownerAuth,
+    body: {
+      input,
+      previewDigest: 'b'.repeat(64),
+      confirmation: `create-site:${operationId}:${'b'.repeat(64)}`,
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.data.created, true);
+  assert.equal(response.payload.data.website.id, env.site.id);
+  assert.equal(response.payload.data.siteAdmin.status, 'attention');
+  assert.equal(response.payload.data.siteAdmin.code, 'site_admin_locked');
+  assert.equal(response.payload.data.siteAdminError.code, 'site_admin_locked');
+  assert.equal(response.payload.data.siteAdminError.status, 400);
+});
+
+test('standard site create via /api/sites attaches successful siteAdmin without siteAdminError', async (t) => {
+  const env = setupTestEnvironment(t);
+  const app = fakeApp();
+
+  const successfulUserAdminStore = {
+    ...env.dependencies.userAdminStore,
+    createSiteManager: async ({ username, websiteId }) => ({
+      id: uuid(900),
+      username,
+      role: 'site_manager',
+      active: true,
+      websiteIds: [websiteId],
+    }),
+  };
+
+  const createAdapter = async (apply) => {
+    env.sites.set(env.site.id, structuredClone(env.site));
+    return {
+      created: true,
+      operationId: apply.input.operationId,
+      website: env.site,
+      primaryDomain: { websiteId: env.site.id },
+    };
+  };
+
+  mountSiteCreateRoutes(app, {
+    ...env.dependencies,
+    userAdminStore: successfulUserAdminStore,
+    createSite: createAdapter,
+  });
+
+  const createHandler = app.routes.post.get('/api/sites');
+  const operationId = uuid(1006);
+  const input = {
+    operationId,
+    serverId: env.serverId,
+    siteAdmin: { email: 'admin@example.test', password: 'Password123!@#' },
+  };
+
+  const response = await invoke(createHandler, {
+    auth: env.ownerAuth,
+    body: {
+      input,
+      previewDigest: 'b'.repeat(64),
+      confirmation: `create-site:${operationId}:${'b'.repeat(64)}`,
+    },
+  });
+
+  assert.equal(response.statusCode, 201);
+  assert.equal(response.payload.data.created, true);
+  assert.equal(response.payload.data.siteAdmin.status, 'created');
+  assert.equal(response.payload.data.siteAdminError, undefined);
+});
+
+test('siteCreateHttp exports SiteCreateError constructor', () => {
+  assert.equal(typeof SiteCreateError, 'function');
+  const err = new SiteCreateError('invalid_preview', 'Preview error', 400);
+  assert.ok(err instanceof Error);
+  assert.equal(err.code, 'invalid_preview');
+  assert.equal(err.status, 400);
 });
