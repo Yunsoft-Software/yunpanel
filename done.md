@@ -208,3 +208,20 @@
 - Eksik bağımlılık, yükleme (`loading`) ve yetkisiz durumlarda arayüzün sessizce kaybolması engellenerek açıklayıcı durum ve hata mesajları (`EmptyState`, `CollectionNotice`, `MESSAGES`) sağlandı.
 - Güvenli dosya operasyonları (`FilesPanel.jsx`), elFinder gateway oturum korumaları ve handoff servisleri (`apps/api/src/elfinder-handoff-http.js`, `apps/api/src/elfinder-handoff-service.js`, `apps/api/src/elfinder-handoff-socket.js`) incelendi; sunucu root dizin izolasyonu, tenant Unix kullanıcısı (`yunapp-*`) ve `/var/lib/yunpanel/data/:appId` sınırları fail-closed olarak korundu.
 - Doğrulama testleri (`node --test apps/api/test/elfinder-handoff-http.test.js` ve `node --test apps/api/test/elfinder-handoff-service.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — UX-PL-02: Plesk görev bağlamlarının sade Reseller ve Customer rolleriyle uygulanması ve ürün uzantısı işaretlemeleri
+- Mevcut Owner ve site çalışma düzeni korunarak sade Reseller ve Customer rolleri RS-01–05 doğrulanmış sahiplik ve yetki sınırlarıyla bağlandı.
+- İlk reseller sürümü için karmaşık paket/abonelik modelleri veya alt bayi zincirleri kurulmadan doğrudan müşteri ve site adet sınırları (`limits: { maxCustomers, maxWebsites }`, `quotas: { maxWebsites, maxDiskMb, ... }`) kullanıldı.
+- Rol izolasyonu yalnızca arayüz menü gizlemesiyle sınırlı kalmayıp auth ve servis katmanında fail-closed tenant izolasyonu (`tenant-boundary`, `hosting-account-store`, `hosting-site-allocation-store`, `customer-quotas`) ile güvenceye alındı.
+- Plesk'te doğrudan karşılığı bulunmayan AI yetenekleri (AI yönetim asistanı, model sağlayıcıları) ve özel runtime yetenekleri (Docker projeleri, Python runtime) arayüzde ve menülerde açıkça "Ürün uzantısı" (product extension) olarak işaretlendi (`ux-model.js`, `WorkspaceLayout.jsx`, `AiDrawer.jsx`, `AiSettingsPanel.jsx`, `DockerProjectsPage.jsx`, `SiteDetailPage.jsx`).
+- Geriye dönük uyumluluk ve rol sürekliliği test paketlerinde (`apps/web/test/reseller-customer-panel.test.js` ve `apps/api/test/staging-e2e-verification.test.js`) doğrulanarak orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — UX-PL-02: Staging E2E site tahsis ve müşteri tenant izolasyon doğrulaması düzeltmesi
+- `apps/api/src/hosting-site-allocation-store.js` içine `allocateCustomerSite` metodu eklenerek müşteriye doğrudan web sitesi tahsisi, yetki denetimi (`owner`/`reseller`), kota sınırları ve sahiplik iliştirme (`auth_customer_websites`) mekanizması bağlandı.
+- `apps/api/src/hosting-account-store.js` mağaza arabirimine `allocateCustomerSite` fonksiyonu dahil edildi.
+- `apps/api/test/staging-e2e-verification.test.js` içindeki test 7 (`Staging E2E: Plesk task contexts, simple Reseller & Customer roles, fail-closed boundaries and product extensions`) senaryosunda `customerBoundary` aktörüne `websiteIds: [site.id]` tanımlanarak ve `sanitizeTenantCollection` kapsam çıkarıcısı yapılandırılarak `siteAllocations.allocateCustomerSite` TypeError hatası ile kiracı izolasyonu fail-closed doğrulaması giderildi; testler orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — UX-PL-02: Ürün uzantıları ve site sekmeleri gruplaması nesne desteği düzeltmesi
+- `apps/web/src/workspace/ui/ux-model.js` içindeki `groupSiteTabs` fonksiyonunda sekme girdilerinin hem demet `[key, label]` hem de nesne `{ id, label }` biçiminde desteklenmesini sağlayan `tabKey` yardımcı fonksiyonu uygulandı; destructuring kaynaklı `TypeError: object is not iterable` hatası giderildi.
+- `apps/web/src/workspace/ui/SiteNavigation.jsx` bileşeni `tabKey` ve `tabLabel` ile hem demet hem nesne sekme formatlarıyla güvenle çalışacak şekilde güncellendi.
+- `apps/web/test/reseller-customer-panel.test.js` doğrulama testi için ürün uzantıları (`Ürün uzantıları`) sekme gruplama akışı orkestratör doğrulaması için hazırlandı (pending orchestrator verification).

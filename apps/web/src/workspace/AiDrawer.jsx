@@ -33,7 +33,7 @@ function AiScope({ domainId, actorId, onClose }) {
     });
     return () => controller.abort();
   }, [domainId, attempt]);
-  if (!context.ready) return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+  if (!context.ready) return <Modal title="YunPanel AI Yönetim Asistanı (Ürün Uzantısı)" onClose={onClose} wide>
     {context.error ? <><ErrorNotice error={context.error} /><Button onClick={() => setAttempt((n) => n + 1)}>Yeniden kontrol et</Button></>
       : <p role="status">Site bağlamı doğrulanıyor…</p>}
   </Modal>;
@@ -127,11 +127,11 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
   const loading = ['loading', 'loadingMore'].includes(history.status);
   const denied = history.status === 'forbidden' || detail.status === 'forbidden';
   const loadMore = () => scope.current?.list.more();
-  return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+  return <Modal title="YunPanel AI Yönetim Asistanı (Ürün Uzantısı)" onClose={onClose} wide>
     <div className="ws-ai-layout ws-ai-history-layout">
       <aside className="ws-ai-sidebar" aria-label="Sohbet geçmişi">
         <div className="ws-actions"><strong>SOHBETLER</strong><Button variant="primary" icon="plus" disabled={sending || denied} onClick={handleNewChat}>Yeni</Button><Button disabled={loading || denied} icon="refresh" aria-label="Geçmişi yenile" title="Geçmişi yenile" onClick={() => scope.current?.list.load()} /></div>
-        <small>{websiteId ? 'Site bağlamı · ' : ''}En yeni oluşturulanlar önce</small>
+        <small>{websiteId ? 'Site bağlamı · ' : ''}Ürün uzantısı · En yeni oluşturulanlar önce</small>
         <div className="ws-ai-history-list" tabIndex={0} aria-label="Kaydırılabilir sohbet listesi" aria-busy={loading}
           onScroll={(event) => {
             const node = event.currentTarget;
