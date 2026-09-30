@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
+import { constants } from 'node:fs';
 import {
   chmod, lstat, mkdir, open, readdir, readFile, realpath, rename, rm, stat,
 } from 'node:fs/promises';
@@ -19,7 +20,7 @@ const MAX_TEXT_BYTES = 512 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const OPERATIONS = new Set([
   'list', 'download', 'read_text', 'upload', 'write_text',
-  'create_file', 'mkdir', 'rename', 'delete', 'batch_delete',
+  'create_file', 'mkdir', 'rename', 'delete', 'batch_delete', 'permissions',
 ]);
 
 export class SiteFileWorkerError extends Error {
@@ -173,6 +174,43 @@ function safeMode(info) {
   return (info.mode & 0o777) | 0o640;
 }
 
+function permissionMode(value, { isDirectory = false } = {}) {
+  if (typeof value !== 'string' || !/^0?[0-7]{3}$/.test(value)) {
+    fail('site_file_mode_invalid', 'Permissions must contain three octal digits');
+  }
+  const mode = Number.parseInt(value, 8);
+  if ((mode & 0o002) !== 0 || (mode & 0o400) === 0 || (isDirectory && (mode & 0o100) === 0)) {
+    fail('site_file_mode_unsafe', 'Permissions require owner access and cannot allow world write');
+  }
+  return mode;
+}
+
+async function changePermissions(root, itemPath, modeValue, dependencies) {
+  const entry = await walk(root, itemPath, dependencies);
+  if (!entry.info.isFile() && !entry.info.isDirectory()) fail('site_file_type_invalid', 'Permissions require a file or directory', 409);
+  const mode = permissionMode(modeValue, { isDirectory: entry.info.isDirectory() });
+  if (entry.info.isFile() && entry.info.nlink !== 1) fail('site_file_hardlink_rejected', 'Hard links cannot have permissions changed', 409);
+  const handle = await dependencies.open(entry.absolute, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
+  try {
+    const actual = await handle.stat();
+    const uid = (dependencies.getuid ?? process.getuid.bind(process))();
+    if (actual.ino !== entry.info.ino || actual.dev !== entry.info.dev || actual.uid !== uid
+      || (!actual.isFile() && !actual.isDirectory()) || (actual.isFile() && actual.nlink !== 1)) {
+      fail('site_file_changed', 'File identity or ownership changed', 409);
+    }
+    // Inspect the opened descriptor, so a swapped parent cannot redirect chmod outside the Website.
+    if (await dependencies.realpath(`/proc/self/fd/${handle.fd}`) !== entry.absolute) {
+      fail('site_file_changed', 'File target changed', 409);
+    }
+    await handle.chmod(mode);
+    const changed = await handle.stat();
+    if ((changed.mode & 0o7777) !== mode) fail('site_file_permissions_not_applied', 'Permissions could not be applied', 503);
+    return Object.freeze({ path: itemPath, mode: mode.toString(8).padStart(4, '0'), updated: true });
+  } finally {
+    await handle.close();
+  }
+}
+
 function creationModes() {
   return {
     file: 0o640,
@@ -202,6 +240,12 @@ export async function executeSiteFileOperation(request, dependencies = {
   const modes = creationModes();
   try {
     const root = await managedRoot(request.root, dependencies);
+
+    if (request.operation === 'permissions') {
+      if (!exactRequest(request, ['operation', 'root', 'path', 'mode'])) fail('site_file_request_invalid', 'Permission request fields are invalid');
+      const itemPath = relativePath(request.path);
+      return await changePermissions(root, itemPath, request.mode, dependencies);
+    }
 
     if (request.operation === 'list') {
       if (!exactRequest(request, ['operation', 'root', 'path'])) fail('site_file_request_invalid', 'List request fields are invalid');
@@ -368,6 +412,7 @@ export const siteFileWorkerInternals = Object.freeze({
   maxTextBytes: MAX_TEXT_BYTES,
   maxTransferBytes: MAX_TRANSFER_BYTES,
   creationModes,
+  permissionMode,
   relativePath,
   releaseRootPattern: ROOT_PATTERN,
 });

@@ -27,8 +27,9 @@ test('only a validated current listing updates the remembered path and failed re
   const fence = files.indexOf('if (!alive.current || current !== generation.current) return;', validation);
   const remember = files.indexOf('rememberPath(nextPath);');
   assert.ok(validation >= 0 && fence > validation && remember > fence);
-  assert.match(files, /useState\(\{ path: initialPath,/);
-  assert.match(files, /void load\(initialPath\)/);
+  assert.match(files, /const effectiveInitialPath = validUrlPath \?\? initialPath;/);
+  assert.match(files, /useState\(\{ path: effectiveInitialPath,/);
+  assert.match(files, /void load\(effectiveInitialPath\)/);
   assert.doesNotMatch(files, /void load\(''\)/);
 });
 test('draft navigation registration survives a transient child unmount', () => {

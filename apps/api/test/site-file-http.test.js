@@ -12,6 +12,7 @@ async function fixture(t, customFileManager) {
   const defaultFileManager = {
     execute: async (websiteId, op) => {
       operations.push({ websiteId, op });
+      if (op.operation === 'permissions') return { path: op.path, mode: op.mode, updated: true };
       if (op.operation === 'list') {
         return { path: op.path, entries: [{ name: 'index.html', path: 'index.html', type: 'file', size: 100, mode: '0644' }] };
       }
@@ -169,4 +170,36 @@ test('site-file-http: delete single and batch_delete', async (t) => {
   assert.equal(batchRes.status, 200);
   const batchData = (await batchRes.json()).data;
   assert.equal(batchData.deleted.length, 2);
+});
+
+
+test('permissions use the existing Website file manager and reject malformed requests before dispatch', async (t) => {
+  const { request, operations } = await fixture(t);
+  const url = `/api/websites/${WEBSITE_ID}/files/permissions`;
+  const response = await request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'index.html', mode: '640' }) });
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json()).data, { path: 'index.html', mode: '0640', updated: true });
+  assert.deepEqual(operations, [{ websiteId: WEBSITE_ID, op: { operation: 'permissions', path: 'index.html', mode: '0640' } }]);
+  for (const body of [{ path: 'index.html', mode: '0777' }, { path: '../secret', mode: '0640' }, { path: 'index.html', mode: '0640', root: '/other' }]) {
+    const rejected = await request(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    assert.equal(rejected.status, 400);
+  }
+  assert.equal(operations.length, 1);
+});
+
+test('permissions preserve the file manager failure instead of returning updated success', async (t) => {
+  const { SiteFileWorkerError } = await import('../src/site-file-worker.js');
+  const { request } = await fixture(t, { execute: async () => { throw new SiteFileWorkerError('site_file_permission_denied', 'Permission denied', 403); } });
+  const response = await request(`/api/websites/${WEBSITE_ID}/files/permissions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'index.html', mode: '0640' }) });
+  assert.equal(response.status, 403);
+  const body = await response.json(); assert.equal(body.error.code, 'site_file_permission_denied'); assert.equal(body.data, undefined);
+});
+
+test('permissions require authenticated management context before file access', async (t) => {
+  let calls = 0;
+  const server = http.createServer(createApp({ environment: 'production', siteFileManager: { execute: async () => { calls++; } } })).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
+  const response = await fetch(`http://127.0.0.1:${server.address().port}/api/websites/${WEBSITE_ID}/files/permissions`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ path: 'index.html', mode: '0640' }) });
+  assert.equal(response.status, 401); assert.equal(calls, 0);
 });
