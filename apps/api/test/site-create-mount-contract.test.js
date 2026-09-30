@@ -33,7 +33,7 @@ test('mounted site create route awaits users, preserves partial results and exis
     const routes = new Map(); let resolveUser;
     const store = { createSiteManager: (args) => { calls++; assert.equal(args.username, 'admin@example.test'); assert.equal(args.actorId, 'owner-id'); return new Promise((resolve) => { resolveUser = resolve; }); } };
     mountSiteCreateRoutes({ post: (path, ...handlers) => routes.set(path, handlers) }, { localServerId: input.serverId, userAdminStore: store, websiteProvisioningRegistry: { create: async (plan) => ({ ...plan, persisted: true }) } });
-    assert.deepEqual([...routes.keys()], ['/api/sites/create-preview', '/api/sites']);
+    assert.deepEqual([...routes.keys()], ['/api/sites/create-preview', '/api/sites', '/api/sites/hosted/create-preview', '/api/sites/hosted', '/api/sites/hosted/recover-reservation', '/api/sites/recover-reservation']);
     for (const handlers of routes.values()) assert.equal(handlers[0], guard);
     const invoke = async (body, path = '/api/sites') => {
       const res = { statusCode: 200, status(n) { this.statusCode = n; return this; }, json(value) { this.body = value; return this; } };
@@ -45,7 +45,7 @@ test('mounted site create route awaits users, preserves partial results and exis
     resolveUser({ id: '33333333-3333-4333-8333-333333333333', username: 'admin@example.test', role: 'site_manager', active: true, websiteIds: [websiteId] });
     let response = await pending; assert.equal(response.statusCode, 201); assert.equal(response.body.data.siteAdmin.status, 'created'); assert.equal(response.body.data.provisioning.persisted, true); assert.equal(planner, 'dns');
     store.createSiteManager = async () => { calls++; throw new Error('private-password-and-sql-error'); };
-    response = await invoke(body); assert.equal(response.statusCode, 201); assert.equal(response.body.data.website.id, websiteId); assert.equal(response.body.data.siteAdmin.status, 'attention'); assert.equal(JSON.stringify(response).includes('private-password'), false);
+    response = await invoke(body); assert.equal(response.statusCode, 201); assert.equal(response.body.data.website.id, websiteId); assert.equal(response.body.data.siteAdmin.status, 'attention'); assert.equal(response.body.data.siteAdminError.code, 'site_admin_result_unverified'); assert.equal(JSON.stringify(response).includes('private-password'), false);
     replay = true; const prior = calls; response = await invoke(body); assert.equal(response.statusCode, 200); assert.equal(calls, prior); assert.equal(response.body.data.siteAdmin.code, 'site_admin_replay_requires_review');
     const before = creates;
     for (const invalid of [{ ...body, unexpected: true }, { ...body, previewDigest: 'invalid' }, { ...body, input: { ...input, serverId: 'other-host' } }]) {
