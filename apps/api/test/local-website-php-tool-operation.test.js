@@ -1,41 +1,33 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createLocalWebsitePhpToolOperation } from '../src/local-website-php-tool-operation.js';
+import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
 
-const payload = Object.freeze({
+const preview = websitePhpToolActionPreview({
   websiteId: '11111111-1111-4111-8111-111111111111',
+  serverId: '33333333-3333-4333-8333-333333333333',
   applicationId: '22222222-2222-4222-8222-222222222222',
   unixUser: 'yunapp-123456789abc',
-  expectedWebsiteRevision: 4,
+  websiteRevision: 4,
+}, 'wp.cache.flush');
+
+const payload = Object.freeze({
+  websiteId: preview.websiteId,
+  applicationId: preview.applicationId,
+  unixUser: preview.unixUser,
+  expectedWebsiteRevision: preview.websiteRevision,
   actorSessionId: '44444444-4444-4444-8444-444444444444',
   actorUserId: '55555555-5555-4555-8555-555555555555',
   actorRole: 'site_manager',
-  actionId: 'wp.cache.flush',
-  previewDigest: 'a'.repeat(64),
-  confirmation: `php-tool:11111111-1111-4111-8111-111111111111:wp.cache.flush:${'a'.repeat(64)}`,
+  actionId: preview.actionId,
+  previewDigest: preview.previewDigest,
+  confirmation: preview.confirmation,
 });
 const execution = Object.freeze({
   jobId: 'php-action-job-01',
-  serverId: '33333333-3333-4333-8333-333333333333',
+  serverId: preview.serverId,
   resourceType: 'application',
   resourceId: payload.applicationId,
-});
-const preview = Object.freeze({
-  version: 1,
-  websiteId: payload.websiteId,
-  serverId: execution.serverId,
-  applicationId: payload.applicationId,
-  unixUser: payload.unixUser,
-  websiteRevision: payload.expectedWebsiteRevision,
-  actionId: payload.actionId,
-  tool: 'wp-cli',
-  command: 'cache',
-  args: Object.freeze(['flush']),
-  timeout: 60000,
-  label: 'WordPress önbelleğini temizle',
-  impact: 'WordPress nesne önbelleği temizlenir. Site dosyaları ve veritabanı şeması değiştirilmez.',
-  previewDigest: payload.previewDigest,
-  confirmation: payload.confirmation,
 });
 
 test('local PHP action runs only the reviewed fixed action and returns no stdout', async () => {
@@ -126,4 +118,36 @@ test('local PHP action holds the shared site lock during command execution', asy
     applicationId: payload.applicationId,
     websiteId: payload.websiteId,
   }]);
+});
+
+test('local PHP action rejects revoked sessions or altered actor roles before execution', async () => {
+  let ran = false;
+  const operation = createLocalWebsitePhpToolOperation({
+    websitePhpToolsService: {
+      getActionPreview: async () => preview,
+      runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
+      runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
+    },
+    authorizeActor: async () => null, // Revoked session or deactivated account
+  });
+  await assert.rejects(
+    () => operation.execute(payload, execution),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(ran, false);
+
+  // Mismatched role at execution time fails closed
+  const mismatchedOp = createLocalWebsitePhpToolOperation({
+    websitePhpToolsService: {
+      getActionPreview: async () => preview,
+      runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
+      runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
+    },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: 'customer' }),
+  });
+  await assert.rejects(
+    () => mismatchedOp.execute(payload, execution),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(ran, false);
 });
