@@ -10,8 +10,12 @@ export default function FilesPage() {
     websites, domains, canManage,
     requestedSiteId: params.has('site') ? params.get('site') : null,
   });
+  const forwardParams = new URLSearchParams(params);
+  forwardParams.delete('site');
+  const forwardQuery = forwardParams.toString() ? `?${forwardParams.toString()}` : '';
+
   // Keep the existing site route, FilesPanel, API and Website-user isolation.
-  if (entry.state === 'ready') return <Navigate to={entry.target.href} replace />;
+  if (entry.state === 'ready') return <Navigate to={`${entry.target.href}${forwardQuery}`} replace />;
   return <>
     <PageHeading title="Dosyalar" description="Dosya yöneticisini açmak için web sitesini seçin." />
     {entry.state === 'unavailable' && <>
@@ -26,7 +30,7 @@ export default function FilesPage() {
         <thead><tr><th scope="col">Web sitesi</th><th scope="col">Dosya erişimi</th></tr></thead>
         <tbody>{(entry.target ? [entry.target] : entry.targets).map((target) => <tr key={target.websiteId}>
           <td><strong>{target.label}</strong></td>
-          <td>{target.href ? <LinkButton to={target.href} icon="folder">Dosya Yöneticisi</LinkButton> : <>
+          <td>{target.href ? <LinkButton to={`${target.href}${forwardQuery}`} icon="folder">Dosya Yöneticisi</LinkButton> : <>
             <p>{target.reason === 'unbound' ? 'Site ile alan adı bağlantısı doğrulanamadı.' : 'Bu çalışma türü için dosya erişimi henüz desteklenmiyor.'}</p>
             <LinkButton to={target.domainId ? `/websites/${encodeURIComponent(target.domainId)}/overview` : '/websites'}>Siteyi incele</LinkButton>
           </>}</td>

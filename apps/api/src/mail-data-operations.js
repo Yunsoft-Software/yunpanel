@@ -190,6 +190,7 @@ export function createMailDataOperationsService({
     if (!sameTarget(target, current)) {
       throw new MailDataOperationsError('mail_data_backup_preview_stale', 'Mail data backup resource changed before enqueue', 409);
     }
+    await assertMailDomainIdle(target.mailDomain.id);
     const job = await jobRegistry.enqueue({
       serverId: target.domain.serverId,
       type: 'mail_data_backup',
@@ -280,6 +281,7 @@ export function createMailDataOperationsService({
     if (!sameTarget(target, current) || target.mailDomain.status !== 'disabled') {
       throw new MailDataOperationsError('mail_data_restore_preview_stale', 'Mail data restore resource changed before enqueue', 409);
     }
+    await assertMailDomainIdle(target.mailDomain.id);
     const job = await jobRegistry.enqueue({
       serverId: target.domain.serverId,
       type: 'mail_data_restore',
@@ -389,6 +391,7 @@ export function createMailDataOperationsService({
     if (!sameTarget(target, current) || !deleteTargetDisabled(target)) {
       throw new MailDataOperationsError('mail_data_delete_preview_stale', 'Mail data delete resource changed before enqueue', 409);
     }
+    await assertMailDomainIdle(target.mailDomain.id);
     const job = await jobRegistry.enqueue({
       serverId: target.domain.serverId,
       type: 'mail_data_delete',

@@ -127,10 +127,24 @@ export function createMailDeleteFinalizeService({
       expectedRevision: expected,
       expectedConfirmation: confirmed,
     });
-    await mailboxRegistry.deleteMailbox(mailbox.id, {
-      expectedRevision: expected,
-      confirmation: confirmed,
-    });
+    try {
+      await mailboxRegistry.deleteMailbox(mailbox.id, {
+        expectedRevision: expected,
+        confirmation: confirmed,
+      });
+    } catch (error) {
+      if (error instanceof MailDeleteFinalizeError) throw error;
+      if (error?.code === 'mailbox_not_found') {
+        throw new MailDeleteFinalizeError('mailbox_not_found', 'Mailbox was not found', 404);
+      }
+      if (error?.code === 'stale_mailbox_revision') {
+        throw new MailDeleteFinalizeError('stale_mailbox_revision', 'Mailbox state changed before deletion finalization', 409);
+      }
+      if (error?.code === 'mailbox_confirmation_mismatch') {
+        throw new MailDeleteFinalizeError('mail_delete_confirmation_invalid', 'Deletion confirmation is invalid', 400);
+      }
+      throw error;
+    }
     return Object.freeze({
       id: mailbox.id,
       resourceType: 'mailbox',
@@ -162,10 +176,21 @@ export function createMailDeleteFinalizeService({
       expectedRevision: expected,
       expectedConfirmation: confirmed,
     });
-    await mailDomainRegistry.deleteMailDomain(mailDomain.id, {
-      expectedRevision: expected,
-      confirmation: confirmed,
-    });
+    try {
+      await mailDomainRegistry.deleteMailDomain(mailDomain.id, {
+        expectedRevision: expected,
+        confirmation: confirmed,
+      });
+    } catch (error) {
+      if (error instanceof MailDeleteFinalizeError) throw error;
+      if (error?.code === 'mail_domain_not_found') {
+        throw new MailDeleteFinalizeError('mail_domain_not_found', 'Mail domain was not found', 404);
+      }
+      if (error?.code === 'mail_domain_revision_conflict') {
+        throw new MailDeleteFinalizeError('mail_domain_revision_conflict', 'Mail domain state changed before deletion finalization', 409);
+      }
+      throw error;
+    }
     return Object.freeze({
       id: mailDomain.id,
       resourceType: 'mail_domain',

@@ -6,9 +6,10 @@ import {
   navigationItemActive,
   commandEntries,
   TOOLS_SETTINGS_GROUPS,
+  groupSiteTabs,
 } from '../src/workspace/ui/ux-model.js';
 import { resolveSiteToolEntry } from '../src/workspace/site-tool-entry-model.js';
-import { siteHref, SITE_TABS } from '../src/workspace/site-model.js';
+import { siteHref, SITE_TABS, normalizeSiteTab } from '../src/workspace/site-model.js';
 import { workspaceResources } from '../src/workspace/workspace-resources.js';
 
 const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.meta.url), 'utf8');
@@ -379,4 +380,132 @@ test('source: SiteToolEntryPage supports statistics with title and icon metadata
   const toolEntrySource = await source('SiteToolEntryPage.jsx');
   assert.match(toolEntrySource, /statistics: \{ title: 'İstatistikler', icon: 'dashboard' \}/);
   assert.match(toolEntrySource, /const meta = TOOL_META\[tool\]/);
+});
+
+// --- 6. UX-PL-06: Unified Site Tool Screen Transitions and Routing Matrix ---
+
+test('site-model: normalizeSiteTab and siteHref support all 11 Plesk site tools and legacy aliases', () => {
+  // Mail
+  assert.equal(normalizeSiteTab('mail'), 'mail');
+  assert.equal(siteHref('dom-1', 'mail'), '/websites/dom-1/mail');
+
+  // Databases
+  assert.equal(normalizeSiteTab('databases'), 'databases');
+  assert.equal(siteHref('dom-1', 'databases'), '/websites/dom-1/databases');
+
+  // SSL/TLS
+  assert.equal(normalizeSiteTab('ssl'), 'ssl');
+  assert.equal(siteHref('dom-1', 'ssl'), '/websites/dom-1/ssl');
+
+  // DNS
+  assert.equal(normalizeSiteTab('dns'), 'dns');
+  assert.equal(siteHref('dom-1', 'dns'), '/websites/dom-1/dns');
+
+  // Hosting / PHP
+  assert.equal(normalizeSiteTab('hosting'), 'hosting');
+  assert.equal(siteHref('dom-1', 'hosting'), '/websites/dom-1/hosting');
+  assert.equal(normalizeSiteTab('php'), 'php');
+  assert.equal(siteHref('dom-1', 'php'), '/websites/dom-1/php');
+  assert.equal(normalizeSiteTab('wp'), 'php');
+  assert.equal(siteHref('dom-1', 'wp'), '/websites/dom-1/php');
+  assert.equal(normalizeSiteTab('wordpress'), 'php');
+  assert.equal(siteHref('dom-1', 'wordpress'), '/websites/dom-1/php');
+
+  // Node.js
+  assert.equal(normalizeSiteTab('node'), 'node');
+  assert.equal(siteHref('dom-1', 'node'), '/websites/dom-1/node');
+
+  // Git / Deploy
+  assert.equal(normalizeSiteTab('deploy'), 'deploy');
+  assert.equal(siteHref('dom-1', 'deploy'), '/websites/dom-1/deploy');
+  assert.equal(normalizeSiteTab('git'), 'deploy');
+  assert.equal(siteHref('dom-1', 'git'), '/websites/dom-1/deploy');
+
+  // Logs
+  assert.equal(normalizeSiteTab('logs'), 'logs');
+  assert.equal(siteHref('dom-1', 'logs'), '/websites/dom-1/logs');
+
+  // Cron
+  assert.equal(normalizeSiteTab('cron'), 'cron');
+  assert.equal(siteHref('dom-1', 'cron'), '/websites/dom-1/cron');
+  assert.equal(normalizeSiteTab('scheduled-tasks'), 'cron');
+  assert.equal(siteHref('dom-1', 'scheduled-tasks'), '/websites/dom-1/cron');
+
+  // Backup / Restore
+  assert.equal(normalizeSiteTab('backup'), 'backup');
+  assert.equal(siteHref('dom-1', 'backup'), '/websites/dom-1/backup');
+  assert.equal(normalizeSiteTab('backups'), 'backup');
+  assert.equal(siteHref('dom-1', 'backups'), '/websites/dom-1/backup');
+
+  // Access Accounts
+  assert.equal(normalizeSiteTab('access'), 'access');
+  assert.equal(siteHref('dom-1', 'access'), '/websites/dom-1/access');
+  assert.equal(normalizeSiteTab('sftp'), 'access');
+  assert.equal(siteHref('dom-1', 'sftp'), '/websites/dom-1/access');
+  assert.equal(normalizeSiteTab('ssh'), 'access');
+  assert.equal(siteHref('dom-1', 'ssh'), '/websites/dom-1/access');
+
+  // Analytics / Statistics
+  assert.equal(normalizeSiteTab('analytics'), 'analytics');
+  assert.equal(siteHref('dom-1', 'analytics'), '/websites/dom-1/analytics');
+  assert.equal(normalizeSiteTab('statistics'), 'analytics');
+  assert.equal(siteHref('dom-1', 'statistics'), '/websites/dom-1/analytics');
+
+  // Unknown fallback
+  assert.equal(siteHref('dom-1', 'unknown-tool'), '/websites/dom-1/overview');
+});
+
+test('ux-model: groupSiteTabs places php in dashboard and access in hosting', () => {
+  const groups = groupSiteTabs(SITE_TABS);
+  const dashboardGroup = groups.find((g) => g.id === 'dashboard');
+  const hostingGroup = groups.find((g) => g.id === 'hosting');
+  const mailGroup = groups.find((g) => g.id === 'mail');
+
+  assert.ok(dashboardGroup);
+  assert.ok(hostingGroup);
+  assert.ok(mailGroup);
+
+  const dashboardTabKeys = dashboardGroup.tabs.map(([k]) => k);
+  const hostingTabKeys = hostingGroup.tabs.map(([k]) => k);
+
+  assert.ok(dashboardTabKeys.includes('php'));
+  assert.ok(dashboardTabKeys.includes('node'));
+  assert.ok(dashboardTabKeys.includes('deploy'));
+  assert.ok(dashboardTabKeys.includes('databases'));
+  assert.ok(dashboardTabKeys.includes('ssl'));
+  assert.ok(dashboardTabKeys.includes('logs'));
+
+  assert.ok(hostingTabKeys.includes('access'));
+  assert.ok(hostingTabKeys.includes('cron'));
+  assert.ok(hostingTabKeys.includes('backup'));
+  assert.ok(hostingTabKeys.includes('dns'));
+  assert.ok(hostingTabKeys.includes('hosting'));
+});
+
+test('source: SiteDetailPage integrates all 11 Plesk site tool panels and access controls', async () => {
+  const siteDetailSource = await source('SiteDetailPage.jsx');
+  assert.match(siteDetailSource, /import SiteAccessPanel from '\.\/SiteAccessPanel\.jsx';/);
+  assert.match(siteDetailSource, /tab === 'php' && <SitePhpToolsPanel domainId=\{domain\.id\} \/>/);
+  assert.match(siteDetailSource, /tab === 'access' && <SiteAccessPanel/);
+  assert.match(siteDetailSource, /\['resources', 'databases', 'mail'\]\.includes\(tab\) && <SiteResourcesPanel/);
+  assert.match(siteDetailSource, /tab === 'ssl' && <><CollectionNotice resource=\{certificates\} label="Sertifikalar" \/><SslOperations/);
+  assert.match(siteDetailSource, /tab === 'dns' && <DnsPanel/);
+  assert.match(siteDetailSource, /<DomainHostingPanel domain=\{domain\} \/>/);
+  assert.match(siteDetailSource, /tab === 'cron' && <SiteCronPanel/);
+  assert.match(siteDetailSource, /tab === 'backup' && <SiteBackupPanel/);
+  assert.match(siteDetailSource, /tab === 'logs' && <><LogsPanel/);
+  assert.match(siteDetailSource, /tab === 'files' && <SiteFilesPanel/);
+});
+
+test('source: MailboxRemovalPanel preserves active site context and return navigation', async () => {
+  const removalSource = await source('MailboxRemovalPanel.jsx');
+  assert.match(removalSource, /\/websites\/\$\{encodeURIComponent\(domainId\)\}\/mail\?mailTab=mailboxes/);
+  assert.match(removalSource, /Posta kutularına dön/);
+});
+
+test('source: SiteAccessPanel provides diagnostic and access control states', async () => {
+  const accessSource = await source('SiteAccessPanel.jsx');
+  assert.match(accessSource, /Site bağlantısı gerekli/);
+  assert.match(accessSource, /WebsiteIsolationPanel/);
+  assert.match(accessSource, /SFTP \/ SSH/);
 });
