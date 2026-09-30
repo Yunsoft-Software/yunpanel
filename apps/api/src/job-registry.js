@@ -146,6 +146,7 @@ function publicJob(job) {
     startedAt: job.startedAt,
     finishedAt: job.finishedAt,
     attempts: job.attempts,
+    ...(job.availableAt ? { availableAt: job.availableAt } : {}),
     result: job.result == null ? null : structuredClone(job.result),
     error: job.error == null ? null : structuredClone(job.error),
   });
@@ -1076,7 +1077,13 @@ function sanitizeResult(job, result) {
   throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
 }
 
-export function createJobRegistry({ filePath = null, now = () => Date.now() } = {}) {
+export function createJobRegistry({
+  filePath = null,
+  now = () => Date.now(),
+  retryBudget = 3,
+  retryBackoffBaseMs = 0,
+  retryBackoffMaxMs = 30000,
+} = {}) {
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
@@ -1122,6 +1129,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
     resourceId,
     idempotencyKey = null,
     authorization = null,
+    backoffMs = null,
   }) {
     await ensureInitialized();
     if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
@@ -1163,12 +1171,25 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       if (existing.status === 'failed'
         && privateAuthorization
         && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code)) {
-        existing.status = 'queued';
-        existing.startedAt = null;
-        existing.finishedAt = null;
-        existing.result = null;
-        existing.error = null;
-        changed = true;
+        const attempts = Number.isInteger(existing.attempts) ? existing.attempts : 0;
+        if (attempts < retryBudget) {
+          existing.status = 'queued';
+          existing.startedAt = null;
+          existing.finishedAt = null;
+          existing.result = null;
+          existing.error = null;
+          if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+            const delay = Math.min(backoffMs, retryBackoffMaxMs);
+            existing.availableAt = new Date(now() + delay).toISOString();
+          } else if (retryBackoffBaseMs > 0) {
+            const exp = Math.max(0, attempts - 1);
+            const delay = Math.min(retryBackoffBaseMs * (2 ** exp), retryBackoffMaxMs);
+            existing.availableAt = new Date(now() + delay).toISOString();
+          } else {
+            existing.availableAt = null;
+          }
+          changed = true;
+        }
       }
       if (changed) await persist();
       return enqueueResult(existing, false);
@@ -1233,7 +1254,9 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
   async function claimNext(serverId) {
     await ensureInitialized();
     const claim = claimChain.catch(() => {}).then(async () => {
-      const job = state.jobs.find((candidate) => candidate.serverId === serverId && candidate.status === 'queued');
+      const job = state.jobs.find((candidate) => candidate.serverId === serverId
+        && candidate.status === 'queued'
+        && (!candidate.availableAt || Date.parse(candidate.availableAt) <= now()));
       if (!job) return null;
       const privateAuthorization = normalizeWebsiteProvisioningJobAuthorization(
         job.authorization,
@@ -1242,6 +1265,7 @@ export function createJobRegistry({ filePath = null, now = () => Date.now() } = 
       job.status = 'running';
       job.startedAt = new Date(now()).toISOString();
       job.attempts += 1;
+      job.availableAt = null;
       await persist();
       return {
         job: publicJob(job),
