@@ -48,7 +48,7 @@ export function assertCustomerQuotaCapacity({ quotas, usage, resource = 'website
 }
 
 export function assertCustomerQuotaWithinResellerCapacity({ customerQuotas, resellerLimits } = {}) {
-  if (resellerLimits?.maxWebsites !== null && customerQuotas?.maxWebsites !== null && customerQuotas.maxWebsites > resellerLimits.maxWebsites) {
+  if (resellerLimits?.maxWebsites !== null && (customerQuotas?.maxWebsites === null || customerQuotas.maxWebsites > resellerLimits.maxWebsites)) {
     throw new AuthError('reseller_limit_reached', 'Customer website quota cannot exceed the reseller maximum websites limit.', 409);
   }
 }

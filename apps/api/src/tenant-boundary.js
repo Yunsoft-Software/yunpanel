@@ -316,8 +316,8 @@ export function createTenantBoundaryMiddleware(options = {}) {
         throw denied('tenant_boundary_forbidden', 'Global server settings are outside tenant boundary.');
       }
 
-      if (/^\/api\/(?:system\/packages|system\/upgrade)/.test(path)
-        || /^\/api\/servers\/[^/]+\/(?:system\/packages|system\/upgrade|services|node-runtimes)/.test(path)) {
+      if (/^\/api\/(?:system\/packages|system\/upgrade|system\/watchdog)/.test(path)
+        || /^\/api\/servers\/[^/]+\/(?:system\/packages|system\/upgrade|services|node-runtimes|watchdog)/.test(path)) {
         throw denied('tenant_boundary_forbidden', 'Server package and service management is outside tenant boundary.');
       }
 
