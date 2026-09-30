@@ -92,6 +92,8 @@ export function createHostingSiteCreateService({
     // Rechecks live Owner, account chain and capacity atomically AFTER all reads.
     const reserved = allocations.reserve(rawToken, policy, prepared.allocationInput);
     let created = false;
+    let siteAdmin = null;
+    let siteAdminError = null;
     if (reserved.state !== 'attached') {
       const result = await createSite({
         input: submitted.input,
@@ -103,6 +105,12 @@ export function createHostingSiteCreateService({
         throw fail('hosting_site_result_invalid', 'Site creation did not return the allocated Website.', 503);
       }
       created = result.created;
+      if (result.siteAdmin) {
+        siteAdmin = result.siteAdmin;
+      }
+      if (result.siteAdminError) {
+        siteAdminError = result.siteAdminError;
+      }
     }
     // Never accept createSite's response object as persistence evidence.
     const website = await websiteRegistry.getWebsite(reserved.websiteId);
@@ -137,6 +145,8 @@ export function createHostingSiteCreateService({
       provisioningReady,
       ...(provisioning ? { provisioning } : {}),
       ...(provisioningError ? { provisioningError } : {}),
+      ...(siteAdmin ? { siteAdmin } : {}),
+      ...(siteAdminError ? { siteAdminError } : {}),
     });
   }
 

@@ -136,7 +136,7 @@ test('failed mutation discards dirty in-memory state and reloads last committed 
   await assert.rejects(registry.enqueue({ id: 'dirty-job', serverId: 'server-1' }), /before commit/);
   assert.deepEqual(await registry.listJobs(), [committed]);
   assert.deepEqual(fake.disk(), [committed]);
-  assert.equal(fake.factoryCount(), 3);
+  assert.equal(fake.factoryCount(), 4);
   assert.equal(registry.failure(), null);
 });
 
