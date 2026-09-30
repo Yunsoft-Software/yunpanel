@@ -9,6 +9,10 @@ for (const tool of ['mail', 'databases']) test(`${tool} resolves the existing do
   assert.equal(entry({ tool }).target.href, `/websites/domain-a/${tool}`);
   assert.equal(entry({ tool, requestedSiteId: site.id }).state, 'ready');
 });
+test('statistics resolves the existing analytics domain-scoped route', () => {
+  assert.equal(entry({ tool: 'statistics' }).target.href, '/websites/domain-a/analytics');
+  assert.equal(entry({ tool: 'statistics', requestedSiteId: site.id }).state, 'ready');
+});
 test('Domain ID, unknown, blank and non-string explicit Website selection never falls back', () => {
   for (const requestedSiteId of [domain.id, 'wrong', '', 0, {}]) {
     assert.equal(entry({ requestedSiteId }).state, 'not_found');
