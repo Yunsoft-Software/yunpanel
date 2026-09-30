@@ -3,11 +3,15 @@ import test from 'node:test';
 import { AuthError } from '../src/auth-error.js';
 import {
   mountSiteCreateRoutes,
-  SiteCreateError,
   siteCreateHttpInternals,
 } from '../src/site-create-http.js';
+import { SiteCreateError } from '../src/site-create.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
-import { createHostingSiteAllocationStore, hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
+import {
+  createHostingSiteAllocationStore,
+  hostingWebsiteDigest,
+} from '../src/hosting-site-allocation-store.js';
+import { createHostingSiteCreateService } from '../src/hosting-site-create-service.js';
 import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
@@ -30,7 +34,7 @@ function fakeResponse() {
     payload: null,
     headers: {},
     setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
-    set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
+    set(name, value) { this.setHeader(name, value); return this; },
     status(value) { this.statusCode = value; return this; },
     json(value) { this.payload = value; return this; },
   };
@@ -78,6 +82,7 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     steps: { websiteReady: sites.has(plannedSite.id) },
     source: { kind: 'external_proxy' },
     plan: { website: plannedSite, application: null },
+    state: 'available',
     });
   };
 
@@ -95,17 +100,35 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     },
   };
 
+  const server = { id: serverId, name: 'primary', serverIp: '127.0.0.1' };
+  const registry = {
+    getServer: async (id) => (id === serverId ? server : null),
+  };
+  const dockerWorkloadRegistry = {
+    getWorkload: async () => null,
+    listWorkloads: async () => [],
+  };
   const websiteRegistry = {
     getWebsite: async (id) => sites.get(id) ?? null,
+    listWebsites: async () => [...sites.values()],
   };
   const applicationRegistry = {
     getApplication: async (id) => applications.get(id) ?? null,
+    listApplications: async () => [...applications.values()],
   };
   const domainRegistry = {
     getDomain: async (id) => domains.get(id) ?? null,
+    listDomains: async () => [...domains.values()],
   };
   const mailDomainRegistry = {
     getMailDomain: async (id) => mailDomains.get(id) ?? null,
+    listMailDomains: async () => [...mailDomains.values()],
+  };
+  const serverDnsIdentityRegistry = {
+    getForServer: async () => null,
+  };
+  const dnsZoneTemplateRegistry = {
+    getForServer: async () => null,
   };
   const websiteProvisioningRegistry = {
     get: async (id) => provisioningOperations.get(id) ?? null,
@@ -142,13 +165,31 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     hostingAccounts: f.store,
   };
 
-  const dependencies = {
-    localServerId: serverId,
-    siteMutationLock,
+  const hostingSiteCreateRuntime = createHostingSiteCreateService({
+    hostingAccounts: f.store,
     websiteRegistry,
     applicationRegistry,
     domainRegistry,
     mailDomainRegistry,
+    websiteProvisioningRegistry,
+    siteMutationLock,
+    localServerId: serverId,
+    previewSiteCreate: previewAdapter,
+    createSite: createAdapter,
+  });
+
+  const dependencies = {
+    localServerId: serverId,
+    hostingSiteCreateRuntime,
+    siteMutationLock,
+    registry,
+    dockerWorkloadRegistry,
+    websiteRegistry,
+    applicationRegistry,
+    domainRegistry,
+    mailDomainRegistry,
+    serverDnsIdentityRegistry,
+    dnsZoneTemplateRegistry,
     websiteProvisioningRegistry,
     userAdminStore,
     previewSiteCreate: previewAdapter,
@@ -165,6 +206,21 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     security: { managementAllowed: true },
   };
 
+  function siteInput(operationId = uuid(1001), overrides = {}) {
+    return {
+      operationId,
+      serverId,
+      name: 'Example',
+      primaryDomain: 'example.com',
+      parentDomainId: null,
+      wwwMode: 'none',
+      httpsMode: 'off',
+      dns: { mode: 'external' },
+      source: { kind: 'external_proxy', target: { host: '127.0.0.1', port: 8080, websocket: true } },
+      ...overrides,
+    };
+  }
+
   return {
     f,
     serverId,
@@ -177,6 +233,7 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     lockCalls,
     dependencies,
     ownerAuth,
+    siteInput,
   };
 }
 
@@ -198,7 +255,7 @@ test('hosted preview via /api/sites/create-preview and /api/sites/hosted/create-
 
   const previewBody = {
     customerId: 'customer-a',
-    input: { operationId: uuid(1001), serverId: env.serverId },
+    input: env.siteInput(uuid(1001)),
   };
 
   // Test 1: POST /api/sites/create-preview with customerId
@@ -239,7 +296,7 @@ test('hosted create via /api/sites and /api/sites/hosted creates site and attach
     rawToken: env.ownerAuth.rawToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: uuid(1001), serverId: env.serverId },
+      input: env.siteInput(uuid(1001)),
     },
   });
   const preview = previewRes.payload.data;
@@ -251,7 +308,7 @@ test('hosted create via /api/sites and /api/sites/hosted creates site and attach
     rawToken: env.ownerAuth.rawToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: uuid(1001), serverId: env.serverId },
+      input: env.siteInput(uuid(1001)),
       previewDigest: preview.previewDigest,
       confirmation: preview.confirmation,
     },
@@ -275,7 +332,7 @@ test('hosted create via /api/sites and /api/sites/hosted creates site and attach
     rawToken: env.ownerAuth.rawToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: uuid(1001), serverId: env.serverId },
+      input: env.siteInput(uuid(1001)),
       previewDigest: preview.previewDigest,
       confirmation: preview.confirmation,
     },
@@ -297,7 +354,7 @@ test('hosted reservation recovery via /api/sites/recover-reservation and /api/si
     rawToken: env.ownerAuth.rawToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: uuid(1002), serverId: env.serverId },
+      input: env.siteInput(uuid(1002)),
     },
   });
   const preview = previewRes.payload.data;
@@ -320,7 +377,7 @@ test('hosted reservation recovery via /api/sites/recover-reservation and /api/si
     rawToken: env.ownerAuth.rawToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: uuid(1002), serverId: env.serverId },
+      input: env.siteInput(uuid(1002)),
       previewDigest: preview.previewDigest,
       confirmation: preview.confirmation,
     },
@@ -397,7 +454,7 @@ test('inactive customer or suspended parent reseller cannot reserve site quota',
       rawToken: env.ownerAuth.rawToken,
       body: {
         customerId: 'customer-a',
-        input: { operationId: uuid(1003), serverId: env.serverId },
+        input: env.siteInput(uuid(1003)),
       },
     }),
     (error) => error.code === 'hosting_account_inactive' || error.status === 403,
@@ -429,7 +486,7 @@ test('invalid hosted site requests are rejected with appropriate error codes', a
       rawToken: env.ownerAuth.rawToken,
       body: {
         customerId: 'customer-a',
-        input: { operationId: uuid(1004), serverId: env.serverId },
+        input: env.siteInput(uuid(1004)),
         previewDigest: '0'.repeat(64),
         confirmation: 'invalid-confirmation',
       },
@@ -696,7 +753,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   const opId1 = uuid(1101);
   const previewBody1 = {
     customerId: 'customer-a',
-    input: { operationId: opId1, serverId: env.serverId },
+    input: env.siteInput(opId1),
   };
   const previewRes = await invoke(previewHandler, {
     auth: resellerAuth,
@@ -705,7 +762,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   });
   assert.equal(previewRes.statusCode, 200);
   assert.equal(previewRes.payload.data.customerId, 'customer-a');
-  assert.equal(previewRes.payload.data.state, 'available');
+  assert.equal(previewRes.payload.data.state ?? previewRes.payload.data.ownership?.state, 'available');
   const previewDigest = previewRes.payload.data.previewDigest;
   const confirmation = previewRes.payload.data.confirmation;
 
@@ -715,15 +772,16 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
     rawToken: resellerToken,
     body: {
       customerId: 'customer-a',
-      input: { operationId: opId1, serverId: env.serverId },
+      input: env.siteInput(opId1),
       previewDigest,
       confirmation,
     },
   });
   assert.equal(applyRes.statusCode, 201);
   assert.equal(applyRes.payload.data.created, true);
-  assert.equal(applyRes.payload.data.allocation.state, 'attached');
-  assert.equal(applyRes.payload.data.allocation.customerId, 'customer-a');
+  const alloc = applyRes.payload.data.allocation ?? applyRes.payload.data.ownership;
+  assert.equal(alloc.state, 'attached');
+  assert.equal(alloc.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
   // Invalidate and refresh reseller session after site completion
@@ -735,16 +793,23 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   };
 
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
+  // Re-issue session token as completion revokes live session on attached ownership
+  const activeResellerToken = env.f.session('reseller-a');
+  const activeResellerAuth = {
+    ...resellerAuth,
+    token: activeResellerToken,
+    rawToken: activeResellerToken,
+  };
   const opId2 = uuid(1102);
   const previewBody2 = {
     customerId: 'customer-b',
-    input: { operationId: opId2, serverId: env.serverId },
+    input: env.siteInput(opId2),
   };
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: freshResellerAuth,
-        rawToken: freshResellerToken,
+        auth: activeResellerAuth,
+        rawToken: activeResellerToken,
         body: previewBody2,
       });
     },
@@ -759,9 +824,9 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: freshResellerAuth,
-        rawToken: freshResellerToken,
-        body: { customerId: 'customer-c', input: { operationId: opIdForeign, serverId: env.serverId } },
+        auth: activeResellerAuth,
+        rawToken: activeResellerToken,
+        body: { customerId: 'customer-c', input: env.siteInput(opIdForeign) },
       });
     },
     (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
@@ -772,9 +837,9 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: freshResellerAuth,
-        rawToken: freshResellerToken,
-        body: { customerId: 'direct', input: { operationId: opIdDirect, serverId: env.serverId } },
+        auth: activeResellerAuth,
+        rawToken: activeResellerToken,
+        body: { customerId: 'direct', input: env.siteInput(opIdDirect) },
       });
     },
     (err) => err instanceof AuthError && err.code === 'reseller_scope_forbidden' && err.status === 403,
@@ -784,9 +849,9 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   await assert.rejects(
     async () => {
       await invoke(previewHandler, {
-        auth: freshResellerAuth,
-        rawToken: freshResellerToken,
-        body: { customerId: 'non-existent', input: { operationId: uuid(1105), serverId: env.serverId } },
+        auth: activeResellerAuth,
+        rawToken: activeResellerToken,
+        body: { customerId: 'non-existent', input: env.siteInput(uuid(1105)) },
       });
     },
     (err) => err instanceof AuthError && err.code === 'hosting_account_not_found',
@@ -912,23 +977,22 @@ test('hosting-site-allocation-store supports role: reseller actor and customer r
   assert.equal(ownPreview.state, 'available');
 
   // Verify hosting account store accepts users with role: 'customer'
-  env.f.db.exec(`
-    PRAGMA legacy_alter_table = ON;
-    PRAGMA foreign_keys = OFF;
-    DROP TRIGGER IF EXISTS auth_hosting_account_insert;
-    DROP TRIGGER IF EXISTS auth_hosting_lifecycle_intent_insert;
-    DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard;
-    CREATE TABLE users_temp (
-      id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
-      created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
-    );
-    INSERT INTO users_temp SELECT * FROM users;
-    DROP TABLE users;
-    ALTER TABLE users_temp RENAME TO users;
-    PRAGMA foreign_keys = ON;
-    PRAGMA legacy_alter_table = OFF;
-  `);
+  env.f.db.exec('PRAGMA legacy_alter_table = ON');
+  env.f.db.exec('PRAGMA foreign_keys = OFF');
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_account_insert');
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_lifecycle_intent_insert');
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard');
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_lifecycle_intent_consume');
+  env.f.db.exec(`CREATE TABLE users_temp (
+    id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
+    role TEXT NOT NULL, active INTEGER NOT NULL DEFAULT 1,
+    created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
+  )`);
+  env.f.db.exec('INSERT INTO users_temp SELECT * FROM users');
+  env.f.db.exec('DROP TABLE users');
+  env.f.db.exec('ALTER TABLE users_temp RENAME TO users');
+  env.f.db.exec('PRAGMA legacy_alter_table = OFF');
+  env.f.db.exec('PRAGMA foreign_keys = ON');
   env.f.db.prepare("UPDATE users SET role = 'customer' WHERE id = 'customer-a'").run();
   const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
   assert.equal(customerAccount.id, 'customer-a');
