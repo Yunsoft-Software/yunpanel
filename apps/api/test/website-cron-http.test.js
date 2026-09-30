@@ -65,20 +65,27 @@ function createApp({ serviceOverrides = {}, authOverride = null } = {}) {
 }
 
 async function request(app, method, path, body = undefined) {
-  return new Promise((resolve) => {
-    const server = app.listen(0, async () => {
+  return new Promise((resolve, reject) => {
+    const server = app.listen(0, '127.0.0.1');
+    server.once('error', reject);
+    server.once('listening', async () => {
       const port = server.address().port;
       const url = `http://127.0.0.1:${port}${path}`;
       try {
         const response = await fetch(url, {
           method,
-          headers: body ? { 'Content-Type': 'application/json' } : {},
+          headers: {
+            connection: 'close',
+            ...(body ? { 'Content-Type': 'application/json' } : {}),
+          },
           body: body ? JSON.stringify(body) : undefined,
         });
         const json = await response.json();
         server.close(() => resolve({ status: response.status, body: json }));
+        server.closeAllConnections?.();
       } catch (err) {
         server.close(() => resolve({ status: 500, error: err }));
+        server.closeAllConnections?.();
       }
     });
   });
