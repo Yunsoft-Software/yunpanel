@@ -17,6 +17,9 @@ export function hostingAccountMessage(error) {
     hosting_profile_requires_site_manager: 'Profil için site atanmamış bir Site Yöneticisi hesabı seçin.',
     reseller_limit_reached: 'Bayinin adet sınırı doldu. Yeni kayıt eklenmedi.',
     reseller_scope_forbidden: 'Seçilen bayinin etkin olduğunu kontrol edin; bu ilişki kurulamadı.',
+    customer_quota_exceeded: 'Müşteri web sitesi kotası doldu. Yeni site tahsis edilemez.',
+    hosting_account_inactive: 'Hesap askıya alınmış veya kilitli durumda. Kaynak işlemleri yapılamaz.',
+    invalid_customer_quotas: 'Geçerli kota değerleri girin veya Sınırsız seçin. Değerler negatif olamaz.',
     hosting_account_not_found: 'Profil artık bulunmuyor. Listeyi yenileyin.',
     username_taken: 'Bu kullanıcı adı zaten kullanımda. Başka bir kullanıcı adı seçin.',
     invalid_username: 'Kullanıcı adı 3–128 karakter olmalı; harf, rakam ve . _ @ + - kullanılabilir.',
@@ -55,6 +58,28 @@ export function readHostingAccount(value) {
     result.limits = { maxCustomers: value.limits.maxCustomers, maxWebsites: value.limits.maxWebsites };
     result.usage = { customers: value.usage.customers, websites: value.usage.websites };
     result.usageScope = value.usageScope;
+  }
+  if (kind === 'customer' && value.quotas !== undefined) {
+    if (!object(value.quotas) || !['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].every((key) => value.quotas[key] === null || integer(value.quotas[key]))) {
+      throw problem('hosting_result_invalid');
+    }
+    result.quotas = {
+      maxWebsites: value.quotas.maxWebsites,
+      maxDiskMb: value.quotas.maxDiskMb,
+      maxTrafficMb: value.quotas.maxTrafficMb,
+      maxDatabases: value.quotas.maxDatabases,
+    };
+  }
+  if (kind === 'customer' && value.usage !== undefined) {
+    if (!object(value.usage) || !['websites', 'diskMb', 'trafficMb', 'databases'].every((key) => integer(value.usage[key]))) {
+      throw problem('hosting_result_invalid');
+    }
+    result.usage = {
+      websites: value.usage.websites,
+      diskMb: value.usage.diskMb,
+      trafficMb: value.usage.trafficMb,
+      databases: value.usage.databases,
+    };
   }
   return result; // Only documented fields; no accidental credentials or server messages.
 }
@@ -110,6 +135,20 @@ export function hostingCustomerLoginInput(account, form) {
   if (form && typeof form.password === 'string' && form.password.length) body.password = customerPassword(form.password);
   if (Object.keys(body).length === 1) throw problem('empty_hosting_customer_update');
   return body;
+}
+
+export function hostingCustomerQuotasInput(form) {
+  const quotas = {};
+  for (const key of ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases']) {
+    const value = form?.[key];
+    if (value === null || value === '' || value === undefined) { quotas[key] = null; continue; }
+    if (typeof value === 'number' && integer(value)) { quotas[key] = value; continue; }
+    if (typeof value !== 'string' || !/^\d+$/.test(value.trim()) || !integer(Number(value.trim()))) {
+      throw problem('invalid_customer_quotas');
+    }
+    quotas[key] = Number(value.trim());
+  }
+  return quotas;
 }
 
 /** Instance belongs to one mounted Owner or persisted-reseller component.
@@ -191,6 +230,9 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
         if (action === 'limits' && account.kind === 'reseller') {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/limits`;
           body = { revision: account.revision, limits: hostingLimitsInput(form) };
+        } else if (action === 'quotas' && account.kind === 'customer') {
+          method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/quotas`;
+          body = { revision: account.revision, quotas: hostingCustomerQuotasInput(form) };
         } else if (action === 'status' && typeof form?.active === 'boolean' && form.active !== account.active) {
           method = 'PATCH'; path = `${ROOT}/${encodeURIComponent(target)}/status`;
           body = { revision: account.revision, active: form.active };
@@ -220,6 +262,8 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
           || (action === 'register' && next.userRevision <= user.revision)
           || (action === 'register' && expectedKind === 'reseller' && (next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
           || (action === 'limits' && (next.revision < account.revision || next.limits.maxCustomers !== body.limits.maxCustomers || next.limits.maxWebsites !== body.limits.maxWebsites))
+          || (action === 'quotas' && (next.revision <= account.revision
+            || ['maxWebsites', 'maxDiskMb', 'maxTrafficMb', 'maxDatabases'].some((key) => next.quotas?.[key] !== body.quotas[key])))
           || (action === 'status' && (next.active !== body.active || next.revision <= account.revision))
           || (action === 'login' && (next.revision <= account.revision || next.userRevision <= account.userRevision
             || (body.username !== undefined && next.username !== body.username)))) throw problem('hosting_result_invalid');

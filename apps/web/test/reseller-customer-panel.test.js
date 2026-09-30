@@ -3,6 +3,11 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { navigationGroups, commandEntries } from '../src/workspace/ui/ux-model.js';
 import { requireSession } from '../src/auth-protocol.js';
+import {
+  hostingCustomerQuotasInput,
+  readHostingAccount,
+  hostingAccountMessage,
+} from '../src/workspace/hosting-account-client.js';
 
 const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.meta.url), 'utf8');
 
@@ -136,4 +141,100 @@ test('source: ResellerCustomersPage contains website quota and site allocation f
   assert.match(resellerPage, /function AllocateSiteDialog/);
   assert.match(resellerPage, /\/api\/sites\/hosted\/create-preview/);
   assert.match(resellerPage, /\/api\/sites\/hosted/);
+});
+
+test('hostingCustomerQuotasInput: parses form inputs and handles nulls or invalid values', () => {
+  const parsed = hostingCustomerQuotasInput({
+    maxWebsites: '3',
+    maxDiskMb: 1024,
+    maxTrafficMb: '',
+    maxDatabases: null,
+  });
+  assert.deepEqual(parsed, {
+    maxWebsites: 3,
+    maxDiskMb: 1024,
+    maxTrafficMb: null,
+    maxDatabases: null,
+  });
+
+  assert.throws(
+    () => hostingCustomerQuotasInput({ maxWebsites: -1 }),
+    (err) => err.code === 'invalid_customer_quotas'
+  );
+  assert.throws(
+    () => hostingCustomerQuotasInput({ maxDiskMb: 'abc' }),
+    (err) => err.code === 'invalid_customer_quotas'
+  );
+});
+
+test('readHostingAccount: parses and validates customer quotas and usage', () => {
+  const account = {
+    id: 'c1',
+    username: 'cust1',
+    kind: 'customer',
+    resellerId: 'r1',
+    active: true,
+    revision: 1,
+    userRevision: 1,
+    createdAt: 1000,
+    updatedAt: 1000,
+    stage: 'profile_only',
+    quotas: {
+      maxWebsites: 2,
+      maxDiskMb: 1024,
+      maxTrafficMb: null,
+      maxDatabases: 1,
+    },
+    usage: {
+      websites: 1,
+      diskMb: 256,
+      trafficMb: 100,
+      databases: 1,
+    },
+  };
+  const parsed = readHostingAccount(account);
+  assert.deepEqual(parsed.quotas, account.quotas);
+  assert.deepEqual(parsed.usage, account.usage);
+
+  assert.throws(
+    () => readHostingAccount({ ...account, quotas: { maxWebsites: 'invalid' } }),
+    (err) => err.code === 'hosting_result_invalid'
+  );
+  assert.throws(
+    () => readHostingAccount({ ...account, usage: { websites: -1 } }),
+    (err) => err.code === 'hosting_result_invalid'
+  );
+});
+
+test('hostingAccountMessage: translates customer quota and account lock error codes', () => {
+  assert.equal(
+    hostingAccountMessage({ code: 'customer_quota_exceeded' }),
+    'Müşteri web sitesi kotası doldu. Yeni site tahsis edilemez.'
+  );
+  assert.equal(
+    hostingAccountMessage({ code: 'hosting_account_inactive' }),
+    'Hesap askıya alınmış veya kilitli durumda. Kaynak işlemleri yapılamaz.'
+  );
+  assert.equal(
+    hostingAccountMessage({ code: 'invalid_customer_quotas' }),
+    'Geçerli kota değerleri girin veya Sınırsız seçin. Değerler negatif olamaz.'
+  );
+});
+
+test('source: ResellerCustomersPage contains customer quota management dialog, status badges and warnings', async () => {
+  const resellerPage = await source('ResellerCustomersPage.jsx');
+  assert.match(resellerPage, /CustomerQuotaDialog/);
+  assert.match(resellerPage, /Kota tahsis et/);
+  assert.match(resellerPage, /Etkin \(Kota Doldu\)/);
+  assert.match(resellerPage, /Askıda \(Kilitli\)/);
+  assert.match(resellerPage, /Bu müşterinin web sitesi kotası dolmuştur/);
+  assert.match(resellerPage, /Askıya alınan müşterilere site tahsis edilemez/);
+});
+
+test('source: WebsitesPage contains customer quota section and resource locking warning', async () => {
+  const page = await source('WebsitesPage.jsx');
+  assert.match(page, /Barındırma Kaynakları ve Kotalar/);
+  assert.match(page, /Kaynaklar Kilitli/);
+  assert.match(page, /Kota Sınırı/);
+  assert.match(page, /hostingProfile\?\.quotas/);
 });

@@ -3,7 +3,7 @@ import { AuthError } from './auth-error.js';
 const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
 const SELF_CUSTOMERS = `${ROOT}/self/customers`;
-const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|profile|status|login))?$`);
+const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|quotas|profile|status|login))?$`);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
 const invalidQuery = () => new AuthError('invalid_hosting_account_query', 'Use documented, single-valued account filters.');
 
@@ -98,6 +98,14 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const body = await readJson(request);
     return json(response, 200, { data: { account: call('updateLimits', match[1], body), accessGranted: false } });
   }
+  if (match?.[2] === 'quotas' && request.method === 'PATCH') {
+    if (actor?.role !== 'owner' && actor?.role !== 'reseller') {
+      throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+    }
+    const body = await readJson(request);
+    const account = call('updateCustomerQuotas', match[1], body);
+    return json(response, 200, { data: { account, accessGranted: false } });
+  }
   if (match?.[2] === 'status' && request.method === 'PATCH') {
     const body = await readJson(request);
     const account = call('setActive', match[1], body);
@@ -125,6 +133,6 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const result = call('unregister', match[1], { revision: body.revision });
     return json(response, 200, { data: { ...result, loginDeleted: false, accessGranted: false } });
   }
-  response.setHeader('allow', collection || selfCustomers ? (collection ? 'GET, POST' : 'POST') : ['limits', 'status', 'login'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
+  response.setHeader('allow', collection || selfCustomers ? (collection ? 'GET, POST' : 'POST') : ['limits', 'quotas', 'status', 'login'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
   throw new AuthError('method_not_allowed', 'Unsupported hosting account operation.', 405);
 }

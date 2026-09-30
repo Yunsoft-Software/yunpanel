@@ -219,7 +219,25 @@ export function createAuthStore({
       || (row.resellerId !== null && (typeof row.resellerId !== 'string' || !row.resellerId))) {
       throw new AuthError('hosting_account_state_invalid', 'Hosting account state requires recovery.', 503);
     }
-    return { kind: row.kind, resellerId: row.resellerId };
+    const profile = { kind: row.kind, resellerId: row.resellerId };
+    if (row.kind === 'customer') {
+      const quotaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_customer_quotas'").get();
+      if (quotaTable) {
+        const quotaRow = db.prepare('SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?').get(userId);
+        profile.quotas = quotaRow ? {
+          maxWebsites: quotaRow.maxWebsites,
+          maxDiskMb: quotaRow.maxDiskMb,
+          maxTrafficMb: quotaRow.maxTrafficMb,
+          maxDatabases: quotaRow.maxDatabases,
+        } : {
+          maxWebsites: null,
+          maxDiskMb: null,
+          maxTrafficMb: null,
+          maxDatabases: null,
+        };
+      }
+    }
+    return profile;
   }
 
   function verifiedWebsiteIds(owned, attached) {
