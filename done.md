@@ -252,3 +252,8 @@
 ## 2026-09-30 — SSL-RENEW: Certificate-http test fixture jobRegistry createJob ve updateJobStatus uyarlaması
 - `apps/api/test/certificate-http.test.js` test düzeneğinde `jobRegistry.createJob is not a function` hatası giderildi; test fixture `jobRegistry` nesnesine `createJob`, `updateJobStatus`, dinamik `getJob` ve `listJobs` yetenekleri eklenerek kuru çalıştırma (`dryRun`) ve tanımsız hata nesnesine sahip başarısız iş senaryoları deterministik şekilde doğrulandı.
 - `apps/api/src/certificate-http.js` uç noktalarında (`verify-tls`, `renewal-outcome`, `reload-outcome`) tanımsız hata nesneleri ve `.code` erişimleri güvenli şekilde ele alınmış olup tüm test paketleri (`node --test apps/api/test/certificate-http.test.js`, `node --test apps/api/test/ssl-renewal.test.js`) orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
+
+## 2026-09-30 — apps/web/test/server.test.js sözdizimi ve createPanelServer parametre ayrıştırma onarımı
+- `apps/web/test/server.test.js` test paketindeki tüm test blokları (20 test senaryosu) ve içe aktarımlar sözdizimi, parantez dengesi ve uçtan uca bildirimler açısından incelendi; test dosyasının sonundaki fazladan boş satırlar giderildi.
+- `apps/web/server.js` dosyasında `createPanelServer` fonksiyonundaki `allowedClientIps` varsayılan değer mantığı nesne parçalama (destructuring) öncesinde yalın ve açık bir `defaultAllowedClientIps` ifadesine dönüştürülerek iç içe parantez ve gereksiz koşullu mantık temizlendi.
+- Test kapsamı ve iddiaları (assertions) eksiksiz muhafaza edildi; `node --test apps/web/test/server.test.js` çalıştırması ve bağımlı testler orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
