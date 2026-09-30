@@ -4,17 +4,25 @@ import { panelPermission } from './owner-access.js';
 const PanelSessionContext = createContext(null);
 
 export function PanelSessionProvider({ session, children }) {
-  const value = useMemo(() => ({
-    session,
-    can: (permission) => panelPermission(session, permission),
-    canManage: panelPermission(session, '*'),
-    isOwner: session?.user?.role === 'owner',
-    isSiteManager: session?.user?.role === 'site_manager',
-    isReseller: session?.user?.hosting?.kind === 'reseller',
-    isCustomer: session?.user?.hosting?.kind === 'customer',
-    hostingProfile: session?.user?.hosting ?? null,
-    readOnly: session?.access?.mode === 'read_only',
-  }), [session]);
+  const value = useMemo(() => {
+    const role = session?.user?.role;
+    const hosting = session?.user?.hosting;
+    const isOwner = role === 'owner';
+    const isReseller = hosting?.kind === 'reseller' || role === 'reseller';
+    const isCustomer = hosting?.kind === 'customer' || role === 'customer';
+    const isSiteManager = role === 'site_manager' && !isReseller && !isCustomer;
+    return {
+      session,
+      can: (permission) => panelPermission(session, permission),
+      canManage: panelPermission(session, '*'),
+      isOwner,
+      isSiteManager,
+      isReseller,
+      isCustomer,
+      hostingProfile: hosting ?? null,
+      readOnly: session?.access?.mode === 'read_only' || role === 'read_only',
+    };
+  }, [session]);
   return <PanelSessionContext.Provider value={value}>{children}</PanelSessionContext.Provider>;
 }
 

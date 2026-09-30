@@ -35,7 +35,11 @@ function ResellerRoute({ children }) {
 }
 function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
-  return canManage ? children : <Navigate to="/dashboard" replace />;
+  return canManage ? children : <Navigate to="/websites" replace />;
+}
+function CustomerRoute({ children }) {
+  const { isCustomer } = usePanelSession();
+  return isCustomer ? children : <Navigate to="/websites" replace />;
 }
 function ScopedRoute({ management, readOnly }) {
   const { canManage } = usePanelSession();
@@ -48,6 +52,7 @@ function GlobalSiteTool({ tool, ownerView }) {
 }
 const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
 const reseller = (element) => <ResellerRoute>{element}</ResellerRoute>;
+const customer = (element) => <CustomerRoute>{element}</CustomerRoute>;
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
 function createWorkspaceRouter() {
@@ -55,10 +60,10 @@ function createWorkspaceRouter() {
     element: <WorkspaceLayout />, errorElement: <RouteFailure />,
     children: [
       { index: true, element: <Navigate to="/websites" replace /> },
-      { path: 'dashboard', element: scoped(<DashboardPage />, <ReadOnlyDashboardPage />) },
+      { path: 'dashboard', element: owner(scoped(<DashboardPage />, <ReadOnlyDashboardPage />)) },
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'customers', element: reseller(<ResellerCustomersPage />) },
-      { path: 'websites/new', element: manage(<NewWebsitePage />) },
+      { path: 'websites/new', element: owner(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'files', element: manage(<FilesPage />) },
       { path: 'tools-settings', element: owner(<ToolsSettingsPage />) },
@@ -67,8 +72,8 @@ function createWorkspaceRouter() {
       { path: 'domains', element: owner(<AdvancedDomainsPage />) },
       { path: 'servers', element: owner(<ServersPage />) },
       { path: 'databases', element: manage(<GlobalSiteTool tool="databases" ownerView={<DatabasesPage />} />) },
-      { path: 'docker', element: manage(<DockerProjectsPage />) },
-      { path: 'docker/:dockerProjectId', element: manage(<DockerProjectsPage />) },
+      { path: 'docker', element: owner(<DockerProjectsPage />) },
+      { path: 'docker/:dockerProjectId', element: owner(<DockerProjectsPage />) },
       { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) },
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },

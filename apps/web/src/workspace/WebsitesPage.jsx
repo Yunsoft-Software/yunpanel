@@ -13,7 +13,7 @@ import './ui/console-lists.css';
 import './ui/website-task-cards.css';
 
 export default function WebsitesPage() {
-  const { domains, websites, applications, certificates, isOwner, canManage, refreshAll } = useWorkspace();
+  const { domains, websites, applications, certificates, isOwner, isReseller, isCustomer, canManage, refreshAll } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
@@ -33,7 +33,7 @@ export default function WebsitesPage() {
     setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
   return <>
-    <PageHeading title="Web Siteleri ve Alan Adları" description="Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın." actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}</>} />
+    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını ilgili sitenin kartından açın.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel />}
     <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu` : 'Site listesi hazırlanıyor.'}>
       <div className="ws-filters">
@@ -51,7 +51,7 @@ export default function WebsitesPage() {
       <CollectionNotice resource={websites} label="Site bağlantıları" />
       <CollectionNotice resource={applications} label="Uygulamalar" />
       <CollectionNotice resource={certificates} label="SSL bilgisi" />
-      {domains.status === 'ready' && !domains.items.length ? <EmptyState title="Henüz web sitesi yok" detail={isOwner ? 'İlk sitenizin alan adını, uygulama türünü ve HTTPS tercihini belirleyin.' : 'Hesabınıza bağlı siteler burada görünecek.'} icon="globe" action={isOwner && canManage ? <LinkButton to="/websites/new" variant="primary" icon="plus">İlk siteyi ekle</LinkButton> : null} /> : readable && <>
+      {domains.status === 'ready' && !domains.items.length ? <EmptyState title="Henüz web sitesi yok" detail={isOwner ? 'İlk sitenizin alan adını, uygulama türünü ve HTTPS tercihini belirleyin.' : isReseller ? 'Müşterilerinize henüz bir web sitesi tahsis edilmedi. Müşteriler sayfasından yeni site tahsis edebilirsiniz.' : 'Hesabınıza bağlı siteler burada görünecek.'} icon="globe" action={isOwner && canManage ? <LinkButton to="/websites/new" variant="primary" icon="plus">İlk siteyi ekle</LinkButton> : isReseller ? <LinkButton to="/customers" variant="primary" icon="user">Müşterilere git</LinkButton> : null} /> : readable && <>
         {result.rows.length > 0 && <ul className="ws-website-task-list" aria-label="Siteler ve alt alan adları">
           {result.rows.map((row) => <li key={row.domain.id}><WebsiteTaskCard row={row} tasks={resolveTasks(row.domain.id)} certificates={certificates} filtering={filtering} onToggle={toggle} /></li>)}
         </ul>}
