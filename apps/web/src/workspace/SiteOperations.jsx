@@ -61,16 +61,36 @@ export function DomainOperations({ domain }) {
   const { domains, jobs, runJob, resourceBusy } = useWorkspace(); const operation = useOperation();
   const children = domains.items.filter((item) => item.parentDomainId === domain.id);
   const locked = operation.busy || domains.status !== 'ready' || jobs.status !== 'ready' || resourceBusy('domain', domain.id);
+  const pendingPublication = domain.appliedRevision !== domain.desiredRevision || domain.state !== 'active';
+  async function applyPublication() {
+    return operation.perform(async () => {
+      if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) {
+        await runJob(`/domains/${encodeURIComponent(domain.id)}/stage`, {});
+      }
+      await runJob(`/domains/${encodeURIComponent(domain.id)}/activate`, {});
+    });
+  }
   return <Section title="Alan adı ve Nginx" description="Bu kayıt ve aliasları aynı hedefi kullanır." actions={<Link to={`/websites/new?parent=${encodeURIComponent(domain.id)}`}>Alt alan adı ekle</Link>}>
-    <div className="ws-section-body"><div className="ws-actions"><Badge state={domain.state} /><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div><ErrorNotice error={operation.error} /></div>
+    <div className="ws-section-body"><div className="ws-actions"><Badge state={pendingPublication ? 'staged' : domain.state}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında'}</Badge><Button variant="primary" disabled={locked || !pendingPublication} onClick={applyPublication}>Yayına uygula</Button></div><ErrorNotice error={operation.error} /></div>
     <KeyValues items={[
       ['Alan adı', domain.primaryDomain], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
       ['Hedef', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen sertifika' : 'Kapalı'],
-      ['İstenen / uygulanan revizyon', `${domain.desiredRevision ?? '—'} / ${domain.appliedRevision ?? '—'}`],
+      ['Yayın durumu', !pendingPublication ? 'Yayında (Güncel)' : 'Yapılandırma yayına uygulanmayı bekliyor'],
       ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
     ]} />
     <div className="ws-section-body"><h3>Alt alan adları</h3>{children.length ? <div className="ws-actions">{children.map((item) => <Link key={item.id} to={siteHref(item.id)}>{item.primaryDomain}</Link>)}</div> : <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>}<p className="ws-muted">Bu işlem DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.</p></div>
+    <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik ayrıntılar</summary><KeyValues items={[
+      ['Hedef revizyon (desired state)', domain.desiredRevision ?? '—'],
+      ['Uygulanan revizyon (applied revision)', domain.appliedRevision ?? '—'],
+      ['Hazırlanan revizyon (staged revision)', domain.stagedRevision ?? '—'],
+      ['Yapılandırma sağlama toplamı (checksum)', domain.stagedChecksum ?? '—'],
+    ]} />
+    <div className="ws-actions" style={{ marginTop: '0.5rem' }}>
+      <Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Ayrı hazırla (stage)</Button>
+      <Button disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Ayrı etkinleştir (activate)</Button>
+    </div>
+    </details>
   </Section>;
 }
 

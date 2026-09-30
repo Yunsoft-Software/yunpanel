@@ -34,14 +34,14 @@ function RemovalWorkspace({scope,generation}){
  const counts=preview?{domains:preview.plan.domains.length,databases:preview.plan.additional.databases.ids.length,sftp:preview.plan.additional.sftpKeys.ids.length,
   cron:preview.plan.additional.crons.ids.length,backups:preview.plan.additional.backups.ids.length}:null;
  async function start(){setConfirm(false);await ref.current?.start();}
- return <Section title="Siteyi sil" description="Website'i ve bağlı yönetilen kaynakları kalıcı olarak, journal adımlarıyla kaldırır."
+ return <Section title="Siteyi sil" description="Web sitesini ve bağlı yönetilen kaynakları kalıcı olarak, güvenli işlem adımlarıyla kaldırır."
   actions={<Button icon="refresh" disabled={state?.loading||state?.busy||state?.denied} onClick={()=>void (operation?ref.current?.refreshOperation(operation.id):ref.current?.load())}>Durumu yenile</Button>}>
   <div className="ws-section-body"><ErrorNotice error={state?.error}/>
    {state?.loading&&!preview&&<p role="status">Silme etkisi hesaplanıyor…</p>}
    {preview&&<><KeyValues items={[
     ['Bağlı alan adı',counts.domains],['Veritabanı bağlantısı',counts.databases],['SFTP anahtarı',counts.sftp],
     ['Zamanlanmış görev',counts.cron],['Korunacak yedek kaydı',counts.backups],
-    ['Silme durumu',preview.readyToStart?'Hazır':'Güvenlik blocker’ı var'],
+    ['Silme durumu',preview.readyToStart?'Hazır':'Güvenlik engeli var'],
    ]}/>
     {!preview.readyToStart&&<Blockers blockers={preview.hardBlockers}/>}
    </>}
@@ -49,11 +49,11 @@ function RemovalWorkspace({scope,generation}){
     <p>Bağlı web alan adları, zamanlanmış görevler, SFTP anahtarları, veritabanı bağları, runtime, site Unix kullanıcısı, canonical dosya kökleri, Website ve Application metadata kaldırılır. Retained backup/log kayıtları korunur.</p></div></div>
     <Button variant="danger" disabled={state?.busy} onClick={()=>setConfirm(true)}>Siteyi sil…</Button></>}
    {operation&&<Operation operation={operation} next={next} busy={state?.busy} onContinue={()=>void ref.current?.continueStep()} onDone={()=>navigate('/websites')}/>}
-   {state?.unknownMutation&&<p className="ws-muted">Belirsiz yazma sonucu nedeniyle aynı POST tekrar edilmedi; kalıcı removal journal sunucudan yeniden okundu.</p>}
-   <p className="ws-muted">Her çağrı yalnız journal'daki mevcut adımı ilerletir. Sonraki adım için yeniden açıkça devam etmeniz gerekir.</p>
+   {state?.unknownMutation&&<p className="ws-muted">Belirsiz işlem sonucu nedeniyle aynı istek tekrar edilmedi; güncel sunucu durumu güvenle yeniden okundu.</p>}
+   <p className="ws-muted">Her çağrı yalnız sıradaki adımı ilerletir. Güvenlik gereği sonraki adım için onayınız alınır.</p>
   </div>
   {confirm&&<ConfirmDialog title="Siteyi kalıcı olarak sil" confirmation={scope.label} busy={state?.busy} error={state?.error}
-   message={scope.label+' ve bu Website’e bağlı yönetilen web kaynakları kalıcı olarak kaldırılacak. Yedek kayıtları silinmeyecek. Bu işlem adım adım journal üzerinden yürütülür.'}
+   message={scope.label+' ve bu Website’e bağlı yönetilen web kaynakları kalıcı olarak kaldırılacak. Yedek kayıtları silinmeyecek. Bu işlem adım adım güvenli görev akışı üzerinden yürütülür.'}
    onCancel={()=>setConfirm(false)} onConfirm={()=>void start()} confirmLabel="Silme işlemini başlat"/>}
  </Section>;
 }
@@ -61,17 +61,20 @@ function Operation({operation,next,busy,onContinue,onDone}){
  const done=operation.status==='removed';
  const failed=['failed','blocked'].includes(operation.status);
  const completed=operation.steps.filter((step)=>step.status==='succeeded').length;
- return <div><h3>Silme journal’ı</h3><KeyValues items={[
-  ['Durum',operation.status],['Tamamlanan adım',completed+' / '+operation.steps.length],
+ return <div><h3>Silme adımları</h3><KeyValues items={[
+  ['Durum',done?'Silindi':failed?'Müdahale gerekli':'Devam ediyor'],['Tamamlanan adım',completed+' / '+operation.steps.length],
   ['Sıradaki adım',next?(STEP_LABELS[next.kind]??next.kind):done?'Tamamlandı':'Kontrol gerekli'],
  ]}/>
  <p><Badge state={done?'succeeded':failed?'warning':'running'}>{done?'Silindi':failed?'Müdahale gerekli':'Devam ediyor'}</Badge></p>
  {done?<Button variant="primary" onClick={onDone}>Web sitelerine dön</Button>
   :next?<Button variant={failed?'danger':'primary'} disabled={busy} onClick={onContinue}>{failed?'Bu adımı açıkça yeniden dene':'Sonraki silme adımını çalıştır'}</Button>
-  :<p className="ws-muted">Journal ilerletilebilir bir adım göstermiyor. Durumu yenileyin ve Silme kurtarma bölümünü kontrol edin.</p>}
+  :<p className="ws-muted">İlerletilebilir bir adım bulunmuyor. Durumu yenileyin ve tanılama ayrıntılarını kontrol edin.</p>}
+ <details className="ws-disclosure" style={{marginTop:'0.75rem'}}><summary>Tanılama ve teknik işlem ayrıntıları</summary><KeyValues items={[
+  ['İşlem kimliği (operationId)',operation.id],['Ham durum (raw status)',operation.status],
+ ]}/></details>
  </div>;
 }
 function Blockers({blockers}){
- if(!blockers.length)return <div className="ws-notice ws-notice-warn"><div><strong>Silme henüz hazır değil</strong><p>Backend güvenli tamamlama kanıtı üretmedi.</p></div></div>;
- return <div className="ws-notice ws-notice-warn"><div><strong>Silme kapalı</strong><ul>{blockers.map((code)=><li key={code}>{removalBlockerLabel(code)}</li>)}</ul></div></div>;
+ if(!blockers.length)return <div className="ws-notice ws-notice-warn"><div><strong>Silme henüz hazır değil</strong><p>Sunucu güvenlik ve tamamlama önkoşulları henüz karşılanmadı.</p></div></div>;
+ return <div className="ws-notice ws-notice-warn"><div><strong>Silme engelleri</strong><ul>{blockers.map((code)=><li key={code}>{removalBlockerLabel(code)}</li>)}</ul></div></div>;
 }
