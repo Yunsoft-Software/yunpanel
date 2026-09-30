@@ -84,7 +84,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
-  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && application?.type === 'php' ? 'PHP / WordPress' : label]);
+  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && application?.type === 'php' ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : label]);
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
@@ -92,10 +92,11 @@ function SiteWorkspace({ websiteId, tab }) {
   const scopedJobs = siteJobs(domain, application, jobs.items);
   const query = application && params.get('application') ? `?application=${encodeURIComponent(application.id)}` : '';
   const runtimeType = website?.runtimeType ?? application?.type;
-  const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python', static: 'Statik site', docker: 'Docker / proxy' }[runtimeType] ?? 'Yerel proxy');
+  const isCustomRuntime = ['python', 'docker'].includes(runtimeType);
+  const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python (Ürün uzantısı)', static: 'Statik site', docker: 'Docker / proxy (Ürün uzantısı)' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
-    ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : 'Uygulama', 'code'],
+    ['ssl', 'SSL/TLS Sertifikaları', 'shield'], ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
@@ -108,7 +109,7 @@ function SiteWorkspace({ websiteId, tab }) {
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to="/websites">{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
     <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button></>} />
-    <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span></div>
+    <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span>{isCustomRuntime && <Badge state="neutral">Ürün Uzantısı</Badge>}</div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />
     <CollectionNotice resource={domains} label="Alan adı verisi" />
     <CollectionNotice resource={websites} label="Site kaydı" />

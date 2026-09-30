@@ -36,12 +36,12 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
     ['/dashboard', 'Sunucu genel bakışı', 'dashboard'],
     ['/settings?section=dns', 'Sunucu DNS ve SSL ayarları', 'globe'],
     ['/settings?section=updates', 'YunPanel güncellemeleri', 'refresh'],
-    ['/docker', 'Docker projeleri', 'box'],
+    ['/docker', 'Docker projeleri (Ürün uzantısı)', 'box'],
   ] },
   { id: 'panel', label: 'Panel ve erişim', items: [
     ['/settings/users', 'Kullanıcılar, bayiler ve müşteriler', 'user'],
     ['/settings?section=account', 'Hesap ve erişim ayarları', 'shield'],
-    ['/settings?section=ai', 'AI sağlayıcıları', 'code'],
+    ['/settings?section=ai', 'AI sağlayıcıları (Ürün uzantısı)', 'code'],
   ] },
   { id: 'diagnostics', label: 'Tanılama ve kayıtlar', items: [
     ['/jobs', 'İşlem geçmişi', 'jobs'], ['/audit', 'Denetim kayıtları', 'shield'],
@@ -86,19 +86,24 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
   if (term) entries.push({ id: 'search-all', to: `/websites?q=${encodeURIComponent(term)}`, label: `“${term}” için tüm sonuçlar`, title: `“${term}” için tüm sonuçlar`, icon: 'search', detail: isReseller && !isOwner ? 'Sitelerim listesini aç' : 'Web siteleri listesini aç' });
   return entries;
 }
+export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
   { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics'] },
   { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
-export function groupSiteTabs(tabs) {
+export function groupSiteTabs(tabs = []) {
+  if (!Array.isArray(tabs)) return [];
   const known = new Set(siteGroups.flatMap((group) => group.keys));
   // Legacy resources remains addressable, but it is the existing database surface,
   // not a fourth user-facing workspace or a duplicate tool button.
   known.add('resources');
-  const groups = siteGroups.map((group) => ({ ...group, tabs: group.keys.map((key) => tabs.find(([tab]) => tab === key)).filter(Boolean) })).filter((group) => group.tabs.length);
-  const extra = tabs.filter(([key]) => !known.has(key));
-  if (extra.length) groups.push({ id: 'extensions', label: 'Ek site araçları', icon: 'box', keys: extra.map(([key]) => key), tabs: extra });
+  const groups = siteGroups.map((group) => ({
+    ...group,
+    tabs: group.keys.map((key) => tabs.find((tab) => tabKey(tab) === key)).filter(Boolean),
+  })).filter((group) => group.tabs.length);
+  const extra = tabs.filter((tab) => !known.has(tabKey(tab)));
+  if (extra.length) groups.push({ id: 'extensions', label: 'Ürün uzantıları', icon: 'box', keys: extra.map((tab) => tabKey(tab)), tabs: extra });
   return groups;
 }

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { navigationGroups, commandEntries } from '../src/workspace/ui/ux-model.js';
+import { navigationGroups, commandEntries, TOOLS_SETTINGS_GROUPS, groupSiteTabs } from '../src/workspace/ui/ux-model.js';
 import { requireSession } from '../src/auth-protocol.js';
 import {
   hostingCustomerQuotasInput,
@@ -268,4 +268,44 @@ test('navigationGroups: strict role isolation ensures non-overlapping permission
   assert.ok(resCmds.includes('/customers'));
   assert.ok(!resCmds.includes('/docker'));
   assert.ok(!resCmds.includes('/tools-settings'));
+});
+
+test('product extensions: AI and custom runtimes (Docker, Python) are explicitly marked as product extensions', async () => {
+  // Check TOOLS_SETTINGS_GROUPS
+  const serverGroup = TOOLS_SETTINGS_GROUPS.find((g) => g.id === 'server');
+  const dockerItem = serverGroup.items.find(([path]) => path === '/docker');
+  assert.ok(dockerItem[1].includes('(Ürün uzantısı)'));
+
+  const panelGroup = TOOLS_SETTINGS_GROUPS.find((g) => g.id === 'panel');
+  const aiItem = panelGroup.items.find(([path]) => path === '/settings?section=ai');
+  assert.ok(aiItem[1].includes('(Ürün uzantısı)'));
+
+  // Check groupSiteTabs label
+  const extraTabs = groupSiteTabs([
+    { id: 'logs', label: 'Günlükler' },
+    { id: 'custom-ext', label: 'Özel Eklenti' },
+  ]);
+  const extGroup = extraTabs.find((g) => g.label === 'Ürün uzantıları');
+  assert.ok(extGroup, 'Extra tabs should be grouped under Ürün uzantıları');
+
+  // Check WorkspaceLayout source
+  const layout = await source('WorkspaceLayout.jsx');
+  assert.match(layout, /AI asistanı · Ürün uzantısı/);
+  assert.match(layout, /<span className="ws-badge"[\s\S]*?>Uzantı<\/span>/);
+
+  // Check AiDrawer source
+  const aiDrawer = await source('AiDrawer.jsx');
+  assert.match(aiDrawer, /YunPanel AI Yönetim Asistanı \(Ürün Uzantısı\)/);
+  assert.match(aiDrawer, /Ürün uzantısı · /);
+
+  // Check DockerProjectsPage source
+  const dockerPage = await source('DockerProjectsPage.jsx');
+  assert.match(dockerPage, /Docker \(Ürün Uzantısı\)/);
+
+  // Check SiteDetailPage source
+  const siteDetailPage = await source('SiteDetailPage.jsx');
+  assert.match(siteDetailPage, /isCustomRuntime/);
+  assert.match(siteDetailPage, /Python \(Ürün uzantısı\)/);
+  assert.match(siteDetailPage, /Docker \/ proxy \(Ürün uzantısı\)/);
+  assert.match(siteDetailPage, /Ürün Uzantısı<\/Badge>/);
 });
