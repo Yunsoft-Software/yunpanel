@@ -1,9 +1,17 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createAiOrchestrator } from './ai-orchestrator.js';
 import { createProviderFromConfig } from './ai-provider-adapters.js';
-import { conversationScope, conversationVisible, conversationSummary, createConversationPager } from './ai-conversation-history.js';
+import {
+  conversationScope,
+  conversationVisible,
+  conversationSummary,
+  createConversationPager,
+  ACTOR,
+  UUID,
+} from './ai-conversation-history.js';
+import { createProcessStoreLock, ProcessStoreLockError } from './process-store-lock.js';
 
 const STORE_VERSION = 2;
 const MAX_TURNS = 5;
@@ -56,6 +64,9 @@ export function createAiConversationService({
   domainRegistry = null,
   applicationRegistry = null,
   now = () => new Date().toISOString(),
+  storeLockFactory = createProcessStoreLock,
+  signalProcess = process.kill.bind(process),
+  authorizeActor = null,
 } = {}) {
   const conversations = new Map();
   let initialization = null;
@@ -64,60 +75,122 @@ export function createAiConversationService({
   let legacySource = null;
   const page = createConversationPager();
 
-  async function init() {
-    if (!initialization) initialization = (async () => {
-      try {
-        const raw = await readFile(filePath, 'utf8');
-        const data = JSON.parse(raw);
-        if (!data || ![1, STORE_VERSION].includes(data.version) || !Array.isArray(data.conversations)) throw new Error('Invalid store');
-        const loaded = new Map();
-        for (const item of data.conversations) {
-          if (!item || typeof item.id !== 'string' || loaded.has(item.id)
-            || typeof item.title !== 'string' || !Array.isArray(item.messages)
-            || !Number.isFinite(Date.parse(item.createdAt)) || !Number.isFinite(Date.parse(item.updatedAt))
-            || (item.actorId != null && typeof item.actorId !== 'string')) throw new Error('Invalid record');
-          // Preserve legacy records and all their fields; never guess an owner.
-          loaded.set(item.id, { ...item, actorId: item.actorId ?? null, websiteId: item.websiteId ?? null });
-        }
-        for (const [id, item] of loaded) conversations.set(id, item);
-        if (data.version === 1) legacySource = raw;
-      } catch (error) {
-        if (error.code !== 'ENOENT') throw new AiConversationError('ai_history_store_unavailable', 'Conversation history could not be read safely.', 503);
+  const lockNow = () => {
+    try {
+      const parsed = Date.parse(now());
+      return Number.isFinite(parsed) ? parsed : Date.now();
+    } catch {
+      return Date.now();
+    }
+  };
+
+  const storeLock = storeLockFactory({
+    filePath: path.resolve(filePath),
+    now: lockNow,
+    signalProcess,
+  });
+
+  async function reloadFromDisk() {
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const data = JSON.parse(raw);
+      if (!data || ![1, STORE_VERSION].includes(data.version) || !Array.isArray(data.conversations)) {
+        throw new Error('Invalid store');
       }
-    })();
-    await initialization;
-    await writes;
-    if (storageFailed) throw new AiConversationError('ai_history_store_unavailable', 'Conversation storage needs recovery.', 503);
+      const loaded = new Map();
+      for (const item of data.conversations) {
+        if (!item || typeof item.id !== 'string' || loaded.has(item.id)
+          || typeof item.title !== 'string' || !Array.isArray(item.messages)
+          || !Number.isFinite(Date.parse(item.createdAt)) || !Number.isFinite(Date.parse(item.updatedAt))
+          || (item.actorId != null && typeof item.actorId !== 'string')) {
+          throw new Error('Invalid record');
+        }
+        loaded.set(item.id, {
+          ...item,
+          actorId: item.actorId ?? null,
+          websiteId: item.websiteId ?? null,
+          migratedAt: item.migratedAt ?? undefined,
+        });
+      }
+      conversations.clear();
+      for (const [id, item] of loaded) conversations.set(id, item);
+      if (data.version === 1) legacySource = raw;
+    } catch (error) {
+      if (error.code !== 'ENOENT') {
+        throw new AiConversationError('ai_history_store_unavailable', 'Conversation history could not be read safely.', 503);
+      }
+    }
   }
 
-  async function persist() {
-    const task = writes.then(async () => {
-      if (storageFailed) throw new Error('Storage unavailable');
-      const dir = path.dirname(filePath);
-      await mkdir(dir, { recursive: true, mode: 0o700 });
-      if (legacySource !== null) {
-        const backup = `${filePath}.v1-backup`;
-        try { await writeFile(backup, legacySource, { encoding: 'utf8', mode: 0o600, flag: 'wx' }); }
-        catch (error) {
-          if (error.code !== 'EEXIST' || await readFile(backup, 'utf8') !== legacySource) throw error;
-        }
-        await chmod(backup, 0o600);
-        legacySource = null;
+  async function init() {
+    if (!initialization) {
+      initialization = (async () => {
+        await reloadFromDisk();
+      })();
+    }
+    await initialization;
+    await writes;
+    if (storageFailed) {
+      throw new AiConversationError('ai_history_store_unavailable', 'Conversation storage needs recovery.', 503);
+    }
+  }
+
+  async function writeToDisk() {
+    if (storageFailed) throw new Error('Storage unavailable');
+    const dir = path.dirname(filePath);
+    await mkdir(dir, { recursive: true, mode: 0o700 });
+    if (legacySource !== null) {
+      const backup = `${filePath}.v1-backup`;
+      try {
+        await writeFile(backup, legacySource, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+      } catch (error) {
+        if (error.code !== 'EEXIST' || await readFile(backup, 'utf8') !== legacySource) throw error;
       }
-      const payload = JSON.stringify({ version: STORE_VERSION, conversations: Array.from(conversations.values()) }, null, 2);
-      const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
-      await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
-      await chmod(tempPath, 0o600);
-      await rename(tempPath, filePath);
+      await chmod(backup, 0o600);
+      legacySource = null;
+    }
+    const payload = JSON.stringify({
+      version: STORE_VERSION,
+      conversations: Array.from(conversations.values()),
+    }, null, 2);
+    const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
+    await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
+    await chmod(tempPath, 0o600);
+    await rename(tempPath, filePath);
+  }
+
+  async function mutate(action) {
+    const task = writes.then(async () => {
+      if (storageFailed) {
+        throw new AiConversationError('ai_history_store_unavailable', 'Conversation storage needs recovery.', 503);
+      }
+      return await storeLock.withLock(async () => {
+        await reloadFromDisk();
+        const result = await action();
+        await writeToDisk();
+        return result;
+      });
     });
-    writes = task.catch(() => { storageFailed = true; });
-    try { await task; }
-    catch { throw new AiConversationError('ai_history_store_unavailable', 'Conversation changes could not be stored.', 503); }
+    writes = task.catch((err) => {
+      if (!(err instanceof AiConversationError) || err.status >= 500) {
+        storageFailed = true;
+      }
+    });
+    try {
+      return await task;
+    } catch (error) {
+      if (error instanceof AiConversationError) throw error;
+      if (error instanceof ProcessStoreLockError) {
+        throw new AiConversationError('ai_history_store_unavailable', error.message, 503);
+      }
+      throw new AiConversationError('ai_history_store_unavailable', 'Conversation changes could not be stored.', 503);
+    }
   }
 
   async function listConversations({ websiteId = null, auth } = {}) {
     const scope = conversationScope(auth, websiteId);
     await init();
+    await reloadFromDisk();
     return Array.from(conversations.values()).filter((conv) => conversationVisible(conv, scope))
       .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt)).map(conversationSummary);
   }
@@ -125,6 +198,7 @@ export function createAiConversationService({
   async function listConversationPage({ websiteId = null, auth, limit = 20, cursor = null } = {}) {
     const scope = conversationScope(auth, websiteId);
     await init();
+    await reloadFromDisk();
     return page(Array.from(conversations.values()), scope, { limit, cursor });
   }
 
@@ -135,6 +209,7 @@ export function createAiConversationService({
   async function getConversation(id, { auth } = {}) {
     const scope = conversationScope(auth);
     await init();
+    await reloadFromDisk();
     const conv = conversations.get(id);
     return conversationVisible(conv, scope) ? publicConversation(conv) : null;
   }
@@ -148,25 +223,193 @@ export function createAiConversationService({
       throw new AiConversationError('conversation_not_found', 'Website not found.', 404);
     }
     conversationScope(auth, websiteId);
-    if (Array.from(conversations.values()).filter((conv) => conv.actorId === scope.actorId).length >= MAX_CONVERSATIONS) {
-      throw new AiConversationError('ai_conversation_limit', '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti açıkça silin.', 409);
-    }
-    const id = randomUUID();
-    const timestamp = new Date(now()).toISOString();
-    const record = { id, actorId: scope.actorId, title: (title || 'New Conversation').slice(0, 100),
-      websiteId, messages: [], createdAt: timestamp, updatedAt: timestamp };
-    conversations.set(id, record);
-    await persist();
-    return publicConversation(record);
+    const created = await mutate(async () => {
+      if (Array.from(conversations.values()).filter((conv) => conv.actorId === scope.actorId).length >= MAX_CONVERSATIONS) {
+        throw new AiConversationError('ai_conversation_limit', '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti açıkça silin.', 409);
+      }
+      const id = randomUUID();
+      const timestamp = new Date(now()).toISOString();
+      const record = {
+        id,
+        actorId: scope.actorId,
+        title: (title || 'New Conversation').slice(0, 100),
+        websiteId,
+        messages: [],
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+      conversations.set(id, record);
+      return record;
+    });
+    return publicConversation(created);
   }
 
   async function deleteConversation(id, { auth } = {}) {
     const scope = conversationScope(auth);
     await init();
-    if (!conversationVisible(conversations.get(id), scope)) return false;
-    conversations.delete(id);
-    await persist();
-    return true;
+    return await mutate(async () => {
+      const conv = conversations.get(id);
+      if (!conversationVisible(conv, scope)) return false;
+      conversations.delete(id);
+      return true;
+    });
+  }
+
+  async function listUnownedConversations({ auth } = {}) {
+    const scope = conversationScope(auth);
+    if (!scope.owner) {
+      throw new AiConversationError('forbidden', 'Owner access is required.', 403);
+    }
+    await init();
+    await reloadFromDisk();
+    return Array.from(conversations.values())
+      .filter((conv) => conv.actorId === null)
+      .sort((a, b) => Date.parse(b.updatedAt) - Date.parse(a.updatedAt))
+      .map(conversationSummary);
+  }
+
+  async function migrateUnownedConversations({ assignments, auth } = {}) {
+    const scope = conversationScope(auth);
+    if (!scope.owner) {
+      throw new AiConversationError('forbidden', 'Owner access is required.', 403);
+    }
+    if (!Array.isArray(assignments) || assignments.length === 0) {
+      throw new AiConversationError('invalid_migration_assignments', 'Assignments must be a non-empty array.', 400);
+    }
+    for (const item of assignments) {
+      if (!item || typeof item.conversationId !== 'string' || !UUID.test(item.conversationId)
+        || typeof item.targetActorId !== 'string' || !ACTOR.test(item.targetActorId)) {
+        throw new AiConversationError('invalid_migration_assignments', 'Invalid assignment format.', 400);
+      }
+    }
+    await init();
+    return await mutate(async () => {
+      const targetActors = new Map();
+      for (const conv of conversations.values()) {
+        if (conv.actorId) {
+          targetActors.set(conv.actorId, (targetActors.get(conv.actorId) || 0) + 1);
+        }
+      }
+
+      for (const item of assignments) {
+        const conv = conversations.get(item.conversationId);
+        if (!conv) {
+          throw new AiConversationError('conversation_not_found', `Conversation ${item.conversationId} not found.`, 404);
+        }
+        if (conv.actorId !== null) {
+          throw new AiConversationError('conversation_already_owned', `Conversation ${item.conversationId} is already owned.`, 409);
+        }
+        const currentCount = targetActors.get(item.targetActorId) || 0;
+        if (currentCount + 1 > MAX_CONVERSATIONS) {
+          throw new AiConversationError('ai_conversation_limit', `Actor ${item.targetActorId} has reached the 100 conversation limit.`, 409);
+        }
+        targetActors.set(item.targetActorId, currentCount + 1);
+      }
+
+      const timestamp = new Date(now()).toISOString();
+      const migrated = [];
+      for (const item of assignments) {
+        const conv = conversations.get(item.conversationId);
+        conv.actorId = item.targetActorId;
+        conv.migratedAt = timestamp;
+        conv.updatedAt = timestamp;
+        migrated.push(publicConversation(conv));
+      }
+      return Object.freeze({ count: migrated.length, migrated: Object.freeze(migrated) });
+    });
+  }
+
+  async function rollbackUnownedConversations({ conversationIds, auth } = {}) {
+    const scope = conversationScope(auth);
+    if (!scope.owner) {
+      throw new AiConversationError('forbidden', 'Owner access is required.', 403);
+    }
+    if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
+      throw new AiConversationError('invalid_rollback_request', 'conversationIds must be a non-empty array.', 400);
+    }
+    for (const id of conversationIds) {
+      if (typeof id !== 'string' || !UUID.test(id)) {
+        throw new AiConversationError('invalid_rollback_request', 'Invalid conversation ID in rollback request.', 400);
+      }
+    }
+    await init();
+    return await mutate(async () => {
+      const rolledBack = [];
+      const timestamp = new Date(now()).toISOString();
+      for (const id of conversationIds) {
+        const conv = conversations.get(id);
+        if (!conv) {
+          throw new AiConversationError('conversation_not_found', `Conversation ${id} not found.`, 404);
+        }
+        conv.actorId = null;
+        delete conv.migratedAt;
+        conv.updatedAt = timestamp;
+        rolledBack.push(conv.id);
+      }
+      return Object.freeze({ count: rolledBack.length, rolledBackIds: Object.freeze(rolledBack) });
+    });
+  }
+
+  async function rollbackToV1Backup({ auth } = {}) {
+    const scope = conversationScope(auth);
+    if (!scope.owner) {
+      throw new AiConversationError('forbidden', 'Owner access is required.', 403);
+    }
+    await init();
+    const backupPath = `${filePath}.v1-backup`;
+    let rawBackup;
+    try {
+      rawBackup = await readFile(backupPath, 'utf8');
+    } catch (err) {
+      if (err.code === 'ENOENT') {
+        throw new AiConversationError('v1_backup_not_found', 'No V1 backup file exists.', 404);
+      }
+      throw new AiConversationError('ai_history_store_unavailable', 'Cannot read V1 backup file.', 503);
+    }
+
+    try {
+      const fileStat = await stat(backupPath);
+      if ((fileStat.mode & 0o777) !== 0o600) {
+        await chmod(backupPath, 0o600);
+      }
+    } catch {}
+
+    let parsed;
+    try {
+      parsed = JSON.parse(rawBackup);
+      if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.conversations)) {
+        throw new Error('Invalid V1 backup format');
+      }
+    } catch {
+      throw new AiConversationError('invalid_v1_backup', 'V1 backup file is corrupted or invalid.', 500);
+    }
+
+    return await mutate(async () => {
+      const timestamp = new Date(now()).toISOString();
+      const backupIds = new Set();
+      for (const item of parsed.conversations) {
+        if (!item || typeof item.id !== 'string') continue;
+        backupIds.add(item.id);
+        const existing = conversations.get(item.id);
+        if (existing) {
+          existing.actorId = null;
+          delete existing.migratedAt;
+          existing.updatedAt = timestamp;
+        } else {
+          conversations.set(item.id, {
+            ...item,
+            actorId: null,
+            websiteId: item.websiteId ?? null,
+            createdAt: item.createdAt || timestamp,
+            updatedAt: timestamp,
+          });
+        }
+      }
+      return Object.freeze({
+        success: true,
+        restoredCount: backupIds.size,
+      });
+    });
   }
 
   async function resolveContext(websiteId) {
@@ -200,9 +443,11 @@ export function createAiConversationService({
     auth,
     onEvent = null,
     signal = null,
+    authorizeActor: callAuthorizeActor = null,
   }) {
     const scope = conversationScope(auth);
     await init();
+    await reloadFromDisk();
     const conv = conversations.get(conversationId);
     if (!conversationVisible(conv, scope)) {
       throw new AiConversationError('conversation_not_found', 'Conversation not found', 404);
@@ -211,139 +456,226 @@ export function createAiConversationService({
       throw new AiConversationError('invalid_message_text', 'Message text cannot be empty', 400);
     }
 
-    let adapter = providerAdapter;
-    let selectedModel = providerAdapter?.defaultModel || 'gpt-4o';
-
-    if (!adapter) {
-      const decryptedProvider = await providerRegistry?.getDecryptedActiveProvider();
-      if (!decryptedProvider) {
-        throw new AiConversationError('ai_provider_not_configured', 'No active AI provider is configured. Please configure an AI provider in Settings > AI Management.', 503);
+    const abortController = new AbortController();
+    if (signal) {
+      if (signal.aborted) {
+        abortController.abort(signal.reason);
+      } else {
+        signal.addEventListener('abort', () => abortController.abort(signal.reason), { once: true });
       }
-      adapter = createProviderFromConfig(decryptedProvider);
-      selectedModel = decryptedProvider.defaultModel;
     }
 
-    const overrides = await currentOverrides();
-    const orchestrator = createAiOrchestrator({
-      provider: adapter,
-      registry: toolRegistry,
-      policyOverrides: overrides,
-    });
+    const activeAuthChecker = callAuthorizeActor || authorizeActor;
+    async function verifyLiveAuth() {
+      if (auth?.user?.active === false || auth?.security?.managementAllowed === false) {
+        return false;
+      }
+      if (typeof activeAuthChecker === 'function') {
+        try {
+          const res = await activeAuthChecker({
+            sessionId: auth?.session?.id || auth?.sessionId,
+            userId: auth?.user?.id,
+            role: auth?.user?.role,
+            user: auth?.user,
+            auth,
+          }, conv.websiteId);
+          if (!res || res.revoked === true || res.active === false || (res.user && res.user.active === false)) {
+            return false;
+          }
+        } catch {
+          return false;
+        }
+      }
+      return true;
+    }
 
-    const context = await resolveContext(conv.websiteId);
-    const systemPrompt = buildSystemPrompt(context);
-
-    // Append user message
-    const userMsg = {
-      id: randomUUID(),
-      role: 'user',
-      text: text.trim(),
-      createdAt: now(),
+    let authRevoked = false;
+    const checkAuthOrAbort = async () => {
+      const allowed = await verifyLiveAuth();
+      if (!allowed) {
+        authRevoked = true;
+        abortController.abort(new AiConversationError('forbidden', 'Live authorization or session revoked.', 403));
+      }
     };
-    conv.messages.push(userMsg);
-    if (conv.title === 'New Conversation') {
-      conv.title = text.trim().slice(0, 40) + (text.trim().length > 40 ? '...' : '');
+
+    await checkAuthOrAbort();
+    if (authRevoked) {
+      throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
     }
 
-    // Build messages list for provider
-    const workingMessages = [
-      { role: 'system', text: systemPrompt },
-    ];
+    const authPollTimer = setInterval(() => {
+      checkAuthOrAbort().catch(() => {});
+    }, 20);
 
-    for (const msg of conv.messages.slice(-MAX_MESSAGES_PER_CONVERSATION)) {
-      if (msg.role === 'user' || msg.role === 'assistant') {
-        workingMessages.push({ role: msg.role, text: msg.text || '' });
+    try {
+      let adapter = providerAdapter;
+      let selectedModel = providerAdapter?.defaultModel || 'gpt-4o';
+
+      if (!adapter) {
+        const decryptedProvider = await providerRegistry?.getDecryptedActiveProvider();
+        if (!decryptedProvider) {
+          throw new AiConversationError('ai_provider_not_configured', 'No active AI provider is configured. Please configure an AI provider in Settings > AI Management.', 503);
+        }
+        adapter = createProviderFromConfig(decryptedProvider);
+        selectedModel = decryptedProvider.defaultModel;
       }
-    }
 
-    let turnCount = 0;
-    let finalAssistantText = '';
-    let finalProposals = [];
-    const toolExecutions = [];
+      if (adapter && typeof adapter.id !== 'string') {
+        adapter = { ...adapter, id: adapter.id || 'ai-provider' };
+      }
 
-    while (turnCount < MAX_TURNS) {
-      turnCount += 1;
-      if (onEvent) onEvent({ type: 'thinking', turn: turnCount });
+      const resolvedToolRegistry = toolRegistry && typeof toolRegistry.list === 'function' && typeof toolRegistry.prepare === 'function'
+        ? toolRegistry
+        : { list: () => [], prepare: () => null, execute: async () => { throw new Error('No tools'); } };
 
-      const turn = await orchestrator.proposeTurn({
-        model: selectedModel,
-        messages: workingMessages,
-        auth,
-        signal,
+      const overrides = await currentOverrides();
+      const orchestrator = createAiOrchestrator({
+        provider: adapter,
+        registry: resolvedToolRegistry,
+        policyOverrides: overrides,
       });
 
-      if (turn.type === 'message') {
-        finalAssistantText = turn.message.text;
-        if (onEvent) onEvent({ type: 'text', text: finalAssistantText });
-        break;
+      const context = await resolveContext(conv.websiteId);
+      const systemPrompt = buildSystemPrompt(context);
+
+      const userMsg = {
+        id: randomUUID(),
+        role: 'user',
+        text: text.trim(),
+        createdAt: now(),
+      };
+
+      const workingMessages = [
+        { role: 'system', text: systemPrompt },
+      ];
+
+      for (const msg of conv.messages.slice(-MAX_MESSAGES_PER_CONVERSATION)) {
+        if (msg.role === 'user' || msg.role === 'assistant') {
+          workingMessages.push({ role: msg.role, text: msg.text || '' });
+        }
       }
+      workingMessages.push({ role: 'user', text: userMsg.text });
 
-      if (turn.type === 'tool_proposals') {
-        const hasActionProposal = turn.proposals.some((p) => p.plan?.tool?.risk !== 'read' || !p.autoExecutable);
+      let turnCount = 0;
+      let finalAssistantText = '';
+      let finalProposals = [];
+      const toolExecutions = [];
 
-        if (hasActionProposal) {
-          // Write, mutation or non-auto-executable proposals require explicit human confirmation
-          finalProposals = turn.proposals.map((p) => ({
-            id: randomUUID(),
-            callId: p.callId,
-            toolName: p.name,
-            input: p.input,
-            plan: p.plan,
-            autoExecutable: p.autoExecutable,
-          }));
+      while (turnCount < MAX_TURNS) {
+        turnCount += 1;
+        if (onEvent) onEvent({ type: 'thinking', turn: turnCount });
 
-          finalAssistantText = finalAssistantText
-            || 'I have prepared the following action for your review and confirmation:';
+        await checkAuthOrAbort();
+        if (authRevoked) throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
 
-          if (onEvent) {
-            onEvent({ type: 'proposals', proposals: finalProposals, text: finalAssistantText });
-          }
+        const turn = await orchestrator.proposeTurn({
+          model: selectedModel,
+          messages: workingMessages,
+          auth,
+          signal: abortController.signal,
+        });
+
+        if (turn.type === 'message') {
+          finalAssistantText = turn.message.text;
+          if (onEvent) onEvent({ type: 'text', text: finalAssistantText });
           break;
         }
 
-        // All proposals are auto-executable (read tools)
-        for (const proposal of turn.proposals) {
-          if (onEvent) onEvent({ type: 'tool_call', name: proposal.name, input: proposal.input });
+        if (turn.type === 'tool_proposals') {
+          const hasActionProposal = turn.proposals.some((p) => p.plan?.tool?.risk !== 'read' || !p.autoExecutable);
 
-          let result;
-          try {
-            result = await toolRegistry.execute({
-              name: proposal.name,
-              input: proposal.input,
-              context: { actorId: auth.user.id, role: auth.user.role },
-            });
-          } catch (err) {
-            result = { error: err.message, code: err.code || 'tool_execution_failed' };
+          if (hasActionProposal) {
+            finalProposals = turn.proposals.map((p) => ({
+              id: randomUUID(),
+              callId: p.callId,
+              toolName: p.name,
+              input: p.input,
+              plan: p.plan,
+              autoExecutable: p.autoExecutable,
+            }));
+
+            finalAssistantText = finalAssistantText
+              || 'I have prepared the following action for your review and confirmation:';
+
+            if (onEvent) {
+              onEvent({ type: 'proposals', proposals: finalProposals, text: finalAssistantText });
+            }
+            break;
           }
 
-          toolExecutions.push({ name: proposal.name, input: proposal.input, result });
-          if (onEvent) onEvent({ type: 'tool_result', name: proposal.name, result });
+          for (const proposal of turn.proposals) {
+            await checkAuthOrAbort();
+            if (authRevoked) throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
 
-          workingMessages.push({
-            role: 'tool',
-            callId: proposal.callId,
-            name: proposal.name,
-            result,
-          });
+            if (onEvent) onEvent({ type: 'tool_call', name: proposal.name, input: proposal.input });
+
+            let result;
+            try {
+              result = await resolvedToolRegistry.execute({
+                name: proposal.name,
+                input: proposal.input,
+                context: { actorId: auth.user.id, role: auth.user.role },
+              });
+            } catch (err) {
+              result = { error: err.message, code: err.code || 'tool_execution_failed' };
+            }
+
+            toolExecutions.push({ name: proposal.name, input: proposal.input, result });
+            if (onEvent) onEvent({ type: 'tool_result', name: proposal.name, result });
+
+            workingMessages.push({
+              role: 'tool',
+              callId: proposal.callId,
+              name: proposal.name,
+              result,
+            });
+          }
         }
       }
+
+      await checkAuthOrAbort();
+      if (authRevoked) {
+        throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
+      }
+      if (abortController.signal.aborted) {
+        throw new AiConversationError('chat_aborted', 'AI conversation request was aborted.', 499);
+      }
+
+      const assistantMsg = {
+        id: randomUUID(),
+        role: 'assistant',
+        text: finalAssistantText,
+        proposals: finalProposals.length > 0 ? finalProposals : undefined,
+        toolExecutions: toolExecutions.length > 0 ? toolExecutions : undefined,
+        createdAt: now(),
+      };
+
+      await mutate(async () => {
+        const targetConv = conversations.get(conversationId);
+        if (!targetConv || !conversationVisible(targetConv, scope)) {
+          throw new AiConversationError('conversation_not_found', 'Conversation not found', 404);
+        }
+        targetConv.messages.push(userMsg);
+        if (targetConv.title === 'New Conversation') {
+          targetConv.title = text.trim().slice(0, 40) + (text.trim().length > 40 ? '...' : '');
+        }
+        targetConv.messages.push(assistantMsg);
+        targetConv.updatedAt = now();
+      });
+
+      if (onEvent) onEvent({ type: 'done', message: assistantMsg });
+      return Object.freeze(assistantMsg);
+    } catch (err) {
+      if (authRevoked) {
+        throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
+      }
+      if (abortController.signal.aborted) {
+        throw new AiConversationError('chat_aborted', 'AI conversation request was aborted.', 499);
+      }
+      throw err;
+    } finally {
+      clearInterval(authPollTimer);
     }
-
-    const assistantMsg = {
-      id: randomUUID(),
-      role: 'assistant',
-      text: finalAssistantText,
-      proposals: finalProposals.length > 0 ? finalProposals : undefined,
-      toolExecutions: toolExecutions.length > 0 ? toolExecutions : undefined,
-      createdAt: now(),
-    };
-
-    conv.messages.push(assistantMsg);
-    conv.updatedAt = now();
-    await persist();
-
-    if (onEvent) onEvent({ type: 'done', message: assistantMsg });
-    return Object.freeze(assistantMsg);
   }
 
   return Object.freeze({
@@ -355,5 +687,9 @@ export function createAiConversationService({
     deleteConversation,
     sendMessage,
     buildSystemPrompt,
+    listUnownedConversations,
+    migrateUnownedConversations,
+    rollbackUnownedConversations,
+    rollbackToV1Backup,
   });
 }
