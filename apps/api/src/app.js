@@ -181,6 +181,8 @@ import { createWebsiteBackupService, WebsiteBackupError } from './website-backup
 import { createResticRepositoryRegistry, ResticRepositoryRegistryError } from './restic-repository-registry.js';
 import { createRcloneRemoteRegistry, RcloneRemoteRegistryError } from './rclone-remote-registry.js';
 import { isBackupRepositoryHttpError, mountBackupRepositoryRoutes } from './backup-repository-http.js';
+import { createWebsiteBackupOperationRegistry, WebsiteBackupOperationRegistryError } from './website-backup-operation-registry.js';
+import { createWebsiteBackupOperationService, WebsiteBackupOperationServiceError } from './website-backup-operation-service.js';
 import { createWebsiteRestoreService, WebsiteRestoreError } from './website-restore-service.js';
 import { isWebsiteRestoreHttpError, mountWebsiteRestoreRoutes } from './website-restore-http.js';
 import { mountWebsiteAnalyticsRoutes, WebsiteAnalyticsHttpError } from './website-analytics-http.js';
@@ -930,12 +932,7 @@ export function createApp(allOptions = {}) {
         jobRegistry,
       }) : null
     );
-    mountWebsiteBackupRoutes(app, {
-      websiteBackupSetProvider,
-      websiteBackupService: resolvedWebsiteBackupService,
-      websiteBackupBrowser,
-      localServerId,
-    });
+    const resolvedWebsiteRestoreReceiptStore = options.websiteRestoreReceiptStore ?? createWebsiteRestoreReceiptStore();
     const resolvedWebsiteRestoreService = websiteRestoreService ?? (
       resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteRestoreService({
         websiteRegistry,
@@ -945,12 +942,35 @@ export function createApp(allOptions = {}) {
         healthInspector: createWebsiteHttpHealthInspector(),
         localServerId,
         jobRegistry,
-        receiptStore: createWebsiteRestoreReceiptStore(),
+        receiptStore: resolvedWebsiteRestoreReceiptStore,
       }) : null
     );
+    const resolvedWebsiteBackupOperationRegistry = options.websiteBackupOperationRegistry ?? createWebsiteBackupOperationRegistry({
+      filePath: options.websiteBackupOperationStorePath ?? null,
+    });
+    const resolvedWebsiteBackupOperationService = options.websiteBackupOperationService ?? (
+      (resolvedWebsiteBackupService || resolvedWebsiteRestoreService) ? createWebsiteBackupOperationService({
+        registry: resolvedWebsiteBackupOperationRegistry,
+        websiteBackupService: resolvedWebsiteBackupService,
+        websiteRestoreService: resolvedWebsiteRestoreService,
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        resticManager: resolvedResticManager,
+        receiptStore: resolvedWebsiteRestoreReceiptStore,
+      }) : null
+    );
+    mountWebsiteBackupRoutes(app, {
+      websiteBackupSetProvider,
+      websiteBackupService: resolvedWebsiteBackupService,
+      websiteBackupBrowser,
+      websiteBackupOperationService: resolvedWebsiteBackupOperationService,
+      websiteRestoreService: resolvedWebsiteRestoreService,
+      localServerId,
+    });
     if (resolvedWebsiteRestoreService) {
       mountWebsiteRestoreRoutes(app, {
         websiteRestoreService: resolvedWebsiteRestoreService,
+        websiteBackupOperationService: resolvedWebsiteBackupOperationService,
         localServerId,
       });
     }
@@ -1084,6 +1104,8 @@ export function createApp(allOptions = {}) {
       || error instanceof ResticRepositoryRegistryError
       || error instanceof RcloneRemoteRegistryError
       || error instanceof WebsiteBackupError
+      || error instanceof WebsiteBackupOperationRegistryError
+      || error instanceof WebsiteBackupOperationServiceError
       || error instanceof ApplicationRuntimeBindingRegistryError
       || error instanceof DatabaseBindingHttpError
       || error instanceof DatabaseBindingRegistryError

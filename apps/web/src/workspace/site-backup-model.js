@@ -98,6 +98,37 @@ export function resolveSiteBackupAccess({ domainId, domains, websites, canManage
   catch { return { state: 'inconsistent' }; }
 }
 
+export function siteBackupOperation(value) {
+  need(record(value) && UUID.test(value.id ?? '') && UUID.test(value.websiteId ?? '')
+    && ['backup', 'restore'].includes(value.kind)
+    && ['queued', 'running', 'succeeded', 'failed', 'rolled_back'].includes(value.status));
+  return Object.freeze({
+    id: value.id,
+    websiteId: value.websiteId,
+    serverId: value.serverId ?? null,
+    repositoryId: value.repositoryId,
+    kind: value.kind,
+    snapshotId: value.snapshotId ?? null,
+    preRestoreSnapshotId: value.preRestoreSnapshotId ?? null,
+    previewDigest: value.previewDigest,
+    status: value.status,
+    progress: record(value.progress) ? Object.freeze({ ...value.progress }) : null,
+    steps: Array.isArray(value.steps) ? Object.freeze(value.steps.map((s) => Object.freeze({ ...s }))) : Object.freeze([]),
+    result: record(value.result) ? Object.freeze({ ...value.result }) : null,
+    error: record(value.error) ? Object.freeze({ ...value.error }) : null,
+    restartEvidence: record(value.restartEvidence) ? Object.freeze({ ...value.restartEvidence }) : null,
+    createdAt: normalizedDate(value.createdAt),
+    startedAt: value.startedAt ? normalizedDate(value.startedAt) : null,
+    finishedAt: value.finishedAt ? normalizedDate(value.finishedAt) : null,
+    updatedAt: normalizedDate(value.updatedAt),
+  });
+}
+
+export function siteBackupPreview(value) {
+  need(record(value) && UUID.test(value.websiteId ?? '') && text(value.confirmation, 200));
+  return Object.freeze({ ...value });
+}
+
 export function siteBackupErrorMessage(error) {
   return ({
     site_backup_response_invalid: 'Yedekleme yanıtı bu siteyle eşleşmiyor. Sonuç kullanılmadı.',
@@ -105,5 +136,12 @@ export function siteBackupErrorMessage(error) {
     site_scope_unavailable: 'Site yetkileri doğrulanamadı.',
     restic_binary_missing: 'Yedekleme aracı sunucuda kullanılamıyor.',
     restic_repo_locked: 'Yedek deposu kilitli; Owner müdahalesi gerekiyor.',
+    backup_preview_stale: 'Site yapılandırması değişti; lütfen önizlemeyi yenileyin.',
+    backup_confirmation_invalid: 'Yedekleme onay metni eşleşmiyor.',
+    restore_preview_stale: 'Site veya snapshot durumu değişti; lütfen önizlemeyi yenileyin.',
+    restore_confirmation_invalid: 'Geri yükleme onay metni eşleşmiyor.',
+    website_backup_operation_conflict: 'Bu site için halihazırda çalışan veya kuyrukta olan bir işlem var.',
+    website_backup_operation_not_found: 'Yedekleme işlemi bulunamadı.',
+    interrupted_by_restart: 'İşlem sistem yeniden başlatması nedeniyle kesintiye uğradı.',
   })[error?.code] ?? 'Yedekleme bilgileri alınamadı. Yeniden kontrol edin.';
 }
