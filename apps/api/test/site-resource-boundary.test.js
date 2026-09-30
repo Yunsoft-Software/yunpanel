@@ -109,6 +109,9 @@ test('owner and read-only still use their existing authorization boundaries; own
 test('only small identity-bearing JSON bodies are parsed ahead of the inner app',()=>{
  assert.equal(needsSiteResourceJson({auth,method:'POST',url:'/api/mailboxes'}),true);
  assert.equal(needsSiteResourceJson({auth,method:'POST',url:'/api/servers/server/websites/site-a/phpmyadmin-handoffs'}),true);
+ assert.equal(needsSiteResourceJson({auth,method:'POST',url:'/api/websites'}),true);
+ assert.equal(needsSiteResourceJson({auth,method:'POST',url:'/api/websites/site-a'}),true);
+ assert.equal(needsSiteResourceJson({auth,method:'POST',url:'/api/sites'}),true);
  assert.equal(needsSiteResourceJson({auth,method:'PUT',url:'/api/websites/site-a/files/upload?path=index.php'}),false);
  assert.equal(needsSiteResourceJson({auth,method:'PUT',url:'/api/websites/site-a/files/text'}),false);
 });
@@ -277,4 +280,418 @@ test('customer actor site resource boundary manages own website DB credentials/p
   assert.equal(r.called, 0);
   assert.equal(r.res.statusCode, 403);
  }
+});
+
+test('comprehensive multi-tenant hierarchy matrix (Owner, 2 Reseller, 4 Customer, Direct Owner Customer) resource boundary isolation', async () => {
+  const topologyWebsites = [
+    { id: 'site-1a', serverId: 'server', applicationId: 'app-1a', customerId: 'customer-1a', resellerId: 'reseller-1' },
+    { id: 'site-1b', serverId: 'server', applicationId: 'app-1b', customerId: 'customer-1b', resellerId: 'reseller-1' },
+    { id: 'site-2a', serverId: 'server', applicationId: 'app-2a', customerId: 'customer-2a', resellerId: 'reseller-2' },
+    { id: 'site-2b', serverId: 'server', applicationId: 'app-2b', customerId: 'customer-2b', resellerId: 'reseller-2' },
+    { id: 'site-direct', serverId: 'server', applicationId: 'app-direct', customerId: 'customer-direct', resellerId: null },
+  ];
+  const topologyDomains = [
+    { id: 'domain-1a', websiteId: 'site-1a', serverId: 'server', certificateId: 'cert-1a' },
+    { id: 'domain-1b', websiteId: 'site-1b', serverId: 'server', certificateId: 'cert-1b' },
+    { id: 'domain-2a', websiteId: 'site-2a', serverId: 'server', certificateId: 'cert-2a' },
+    { id: 'domain-2b', websiteId: 'site-2b', serverId: 'server', certificateId: 'cert-2b' },
+    { id: 'domain-direct', websiteId: 'site-direct', serverId: 'server', certificateId: 'cert-direct' },
+  ];
+  const topologyBindings = [
+    { id: 'binding-1a', websiteId: 'site-1a', serverId: 'server', applicationId: 'app-1a', databaseName: 'db_1a' },
+    { id: 'binding-1b', websiteId: 'site-1b', serverId: 'server', applicationId: 'app-1b', databaseName: 'db_1b' },
+    { id: 'binding-2a', websiteId: 'site-2a', serverId: 'server', applicationId: 'app-2a', databaseName: 'db_2a' },
+    { id: 'binding-2b', websiteId: 'site-2b', serverId: 'server', applicationId: 'app-2b', databaseName: 'db_2b' },
+    { id: 'binding-direct', websiteId: 'site-direct', serverId: 'server', applicationId: 'app-direct', databaseName: 'db_direct' },
+  ];
+  const topologyCredentials = topologyBindings.map((b) => ({
+    ...b,
+    id: `credential-${b.id.replace('binding-', '')}`,
+    databaseBindingId: b.id,
+  }));
+  const topologyMails = [
+    { id: 'mail-1a', webDomainId: 'domain-1a', managementMode: 'local' },
+    { id: 'mail-1b', webDomainId: 'domain-1b', managementMode: 'local' },
+    { id: 'mail-2a', webDomainId: 'domain-2a', managementMode: 'local' },
+    { id: 'mail-2b', webDomainId: 'domain-2b', managementMode: 'local' },
+    { id: 'mail-direct', webDomainId: 'domain-direct', managementMode: 'local' },
+  ];
+  const topologyBoxes = [
+    { id: 'box-1a', mailDomainId: 'mail-1a' },
+    { id: 'box-1b', mailDomainId: 'mail-1b' },
+    { id: 'box-2a', mailDomainId: 'mail-2a' },
+    { id: 'box-2b', mailDomainId: 'mail-2b' },
+    { id: 'box-direct', mailDomainId: 'mail-direct' },
+  ];
+  const topologyAliases = [
+    { id: 'alias-1a', mailDomainId: 'mail-1a' },
+    { id: 'alias-1b', mailDomainId: 'mail-1b' },
+    { id: 'alias-2a', mailDomainId: 'mail-2a' },
+    { id: 'alias-2b', mailDomainId: 'mail-2b' },
+    { id: 'alias-direct', mailDomainId: 'mail-direct' },
+  ];
+  const topologyJobs = [
+    { id: 'job-1a', serverId: 'server', resourceType: 'website', resourceId: 'site-1a', payload: { websiteId: 'site-1a' } },
+    { id: 'job-1b', serverId: 'server', resourceType: 'website', resourceId: 'site-1b', payload: { websiteId: 'site-1b' } },
+    { id: 'job-2a', serverId: 'server', resourceType: 'website', resourceId: 'site-2a', payload: { websiteId: 'site-2a' } },
+    { id: 'job-2b', serverId: 'server', resourceType: 'website', resourceId: 'site-2b', payload: { websiteId: 'site-2b' } },
+    { id: 'job-direct', serverId: 'server', resourceType: 'website', resourceId: 'site-direct', payload: { websiteId: 'site-direct' } },
+  ];
+  const customerDb = {
+    'customer-1a': { id: 'customer-1a', kind: 'customer', resellerId: 'reseller-1', active: true },
+    'customer-1b': { id: 'customer-1b', kind: 'customer', resellerId: 'reseller-1', active: true },
+    'customer-2a': { id: 'customer-2a', kind: 'customer', resellerId: 'reseller-2', active: true },
+    'customer-2b': { id: 'customer-2b', kind: 'customer', resellerId: 'reseller-2', active: true },
+    'customer-direct': { id: 'customer-direct', kind: 'customer', resellerId: null, active: true },
+  };
+
+  const matrixDeps = {
+    localServerId: 'server',
+    websiteRegistry: {
+      getWebsite: lookup(topologyWebsites),
+      listWebsites: async () => topologyWebsites,
+    },
+    domainRegistry: {
+      getDomain: lookup(topologyDomains),
+      listDomains: async () => topologyDomains,
+    },
+    databaseBindingRegistry: {
+      getBinding: lookup(topologyBindings),
+      listBindings: async () => topologyBindings,
+    },
+    databaseCredentialRegistry: {
+      getCredential: lookup(topologyCredentials),
+    },
+    mailDomainRegistry: {
+      getMailDomain: lookup(topologyMails),
+    },
+    mailboxRegistry: {
+      getMailbox: lookup(topologyBoxes),
+    },
+    mailAliasRegistry: {
+      getAlias: lookup(topologyAliases),
+    },
+    jobRegistry: {
+      getJob: lookup(topologyJobs),
+      listJobs: async () => topologyJobs,
+    },
+    customerLookup: async (id) => customerDb[id] ?? null,
+  };
+
+  // Actors
+  const ownerSession = {
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management' },
+    security: { managementAllowed: true },
+  };
+  const reseller1Session = {
+    user: { id: 'reseller-1', role: 'reseller', websiteIds: ['site-1a', 'site-1b'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const reseller2Session = {
+    user: { id: 'reseller-2', role: 'reseller', websiteIds: ['site-2a', 'site-2b'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const customer1ASession = {
+    user: { id: 'customer-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, websiteIds: ['site-1a'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const customer1BSession = {
+    user: { id: 'customer-1b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, websiteIds: ['site-1b'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const customer2ASession = {
+    user: { id: 'customer-2a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, websiteIds: ['site-2a'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const customer2BSession = {
+    user: { id: 'customer-2b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, websiteIds: ['site-2b'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const customerDirectSession = {
+    user: { id: 'customer-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, websiteIds: ['site-direct'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+
+  const runMatrix = async (url, { method = 'GET', body, session = customer1ASession, output } = {}) => {
+    return run(url, { method, body, session, dependencies: matrixDeps, output });
+  };
+
+  const assertFailClosedNoLeak = (result, forbiddenTokens = []) => {
+    assert.equal(result.called, 0);
+    assert.ok(result.res.statusCode === 403 || result.res.statusCode === 404);
+    const bodyStr = JSON.stringify(result.res.body ?? {});
+    for (const token of forbiddenTokens) {
+      assert.equal(bodyStr.includes(token), false, `Response leaked sensitive metadata: ${token}`);
+    }
+  };
+
+  // 1. Customer scope visibility in collections
+  // Customer 1A sees only attached site-1a
+  const c1aSites = await runMatrix('/api/websites', { session: customer1ASession, output: { data: topologyWebsites } });
+  assert.deepEqual(c1aSites.res.body.data.map((w) => w.id), ['site-1a']);
+
+  const c1aDomains = await runMatrix('/api/domains', { session: customer1ASession, output: { data: topologyDomains } });
+  assert.deepEqual(c1aDomains.res.body.data.map((d) => d.id), ['domain-1a']);
+
+  const c1aJobs = await runMatrix('/api/jobs', { session: customer1ASession, output: { data: topologyJobs } });
+  assert.deepEqual(c1aJobs.res.body.data.map((j) => j.id), ['job-1a']);
+
+  // Customer 1B sees only attached site-1b
+  const c1bSites = await runMatrix('/api/websites', { session: customer1BSession, output: { data: topologyWebsites } });
+  assert.deepEqual(c1bSites.res.body.data.map((w) => w.id), ['site-1b']);
+
+  const c1bDomains = await runMatrix('/api/domains', { session: customer1BSession, output: { data: topologyDomains } });
+  assert.deepEqual(c1bDomains.res.body.data.map((d) => d.id), ['domain-1b']);
+
+  // Customer 2A sees only attached site-2a
+  const c2aSites = await runMatrix('/api/websites', { session: customer2ASession, output: { data: topologyWebsites } });
+  assert.deepEqual(c2aSites.res.body.data.map((w) => w.id), ['site-2a']);
+
+  const c2aDomains = await runMatrix('/api/domains', { session: customer2ASession, output: { data: topologyDomains } });
+  assert.deepEqual(c2aDomains.res.body.data.map((d) => d.id), ['domain-2a']);
+
+  // Customer 2B sees only attached site-2b
+  const c2bSites = await runMatrix('/api/websites', { session: customer2BSession, output: { data: topologyWebsites } });
+  assert.deepEqual(c2bSites.res.body.data.map((w) => w.id), ['site-2b']);
+
+  const c2bDomains = await runMatrix('/api/domains', { session: customer2BSession, output: { data: topologyDomains } });
+  assert.deepEqual(c2bDomains.res.body.data.map((d) => d.id), ['domain-2b']);
+
+  // Reseller 1 sees only direct child customer sites: site-1a and site-1b
+  const r1Sites = await runMatrix('/api/websites', { session: reseller1Session, output: { data: topologyWebsites } });
+  assert.deepEqual(r1Sites.res.body.data.map((w) => w.id).sort(), ['site-1a', 'site-1b']);
+
+  const r1Domains = await runMatrix('/api/domains', { session: reseller1Session, output: { data: topologyDomains } });
+  assert.deepEqual(r1Domains.res.body.data.map((d) => d.id).sort(), ['domain-1a', 'domain-1b']);
+
+  const r1Jobs = await runMatrix('/api/jobs', { session: reseller1Session, output: { data: topologyJobs } });
+  assert.deepEqual(r1Jobs.res.body.data.map((j) => j.id).sort(), ['job-1a', 'job-1b']);
+
+  // Reseller 2 sees only direct child customer sites: site-2a and site-2b
+  const r2Sites = await runMatrix('/api/websites', { session: reseller2Session, output: { data: topologyWebsites } });
+  assert.deepEqual(r2Sites.res.body.data.map((w) => w.id).sort(), ['site-2a', 'site-2b']);
+
+  const r2Domains = await runMatrix('/api/domains', { session: reseller2Session, output: { data: topologyDomains } });
+  assert.deepEqual(r2Domains.res.body.data.map((d) => d.id).sort(), ['domain-2a', 'domain-2b']);
+
+  // Direct Owner customer sees only site-direct
+  const directSites = await runMatrix('/api/websites', { session: customerDirectSession, output: { data: topologyWebsites } });
+  assert.deepEqual(directSites.res.body.data.map((w) => w.id), ['site-direct']);
+
+  // Owner sees all 5 sites
+  const oSites = await runMatrix('/api/websites', { session: ownerSession, output: { data: topologyWebsites } });
+  assert.equal(oSites.res.body.data.length, 5);
+
+  // 2. Customer 1A attempts to access foreign sites (site-1b, site-2a, site-2b, site-direct)
+  const foreignTokens = ['site-1b', 'site-2a', 'site-2b', 'site-direct', 'customer-1b', 'customer-2a', 'customer-direct', 'reseller-2'];
+  const foreignTargets = ['site-1b', 'site-2a', 'site-2b', 'site-direct'];
+
+  for (const targetId of foreignTargets) {
+    // 1. Website
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}`), foreignTokens);
+
+    // 2. Files
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files?path=`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/text?path=index.php`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/text`, { method: 'PUT', body: { content: 'test' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/download?path=.env`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/upload?path=test.txt`, { method: 'PUT' }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/file`, { method: 'POST', body: { path: 'a.txt' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/mkdir`, { method: 'POST', body: { path: 'dir' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/rename`, { method: 'POST', body: { path: 'a', destination: 'b' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files`, { method: 'DELETE', body: { path: 'a' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files/batch-delete`, { method: 'POST', body: { paths: ['a'] } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/files?path=`), foreignTokens);
+
+    // 3. DB
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/database-resources`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/database-bindings/binding-${targetId.replace('site-', '')}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/phpmyadmin-handoffs`, {
+      method: 'POST',
+      body: { credentialId: `credential-${targetId.replace('site-', '')}` },
+    }), foreignTokens);
+
+    // 4. Backup
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/backups`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/backups`), foreignTokens);
+
+    // 5. Analytics
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/analytics/status`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/analytics`), foreignTokens);
+
+    // 6. PHP
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/wp-cli/status`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/composer/status`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/actions/preview`, { method: 'POST', body: { actionId: 'test' } }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/wp-cli/status`), foreignTokens);
+
+    // 7. Cron
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/crons`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/crons/c-1`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/crons`), foreignTokens);
+
+    // 8. SFTP
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/sftp/keys`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/sftp/keys`), foreignTokens);
+
+    // 9. elFinder
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/elfinder-handoffs`, { method: 'POST' }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/elfinder-handoffs`, { method: 'POST' }), foreignTokens);
+
+    // 10. Terminal
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/terminal`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/terminal`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: targetId },
+    }), foreignTokens);
+
+    // 11. Log
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/logs`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/logs`), foreignTokens);
+  }
+
+  // 12. Mail foreign boundaries
+  for (const mId of ['mail-1b', 'mail-2a', 'mail-2b', 'mail-direct']) {
+    assertFailClosedNoLeak(await runMatrix(`/api/mail-domains/${mId}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mail-domains/${mId}/config-preview`, { method: 'POST' }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mailboxes?mailDomainId=${mId}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mailboxes/box-${mId.replace('mail-', '')}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mail-aliases?mailDomainId=${mId}`), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mail-aliases/alias-${mId.replace('mail-', '')}`), foreignTokens);
+  }
+
+  // 13. DNS foreign boundaries
+  for (const dId of ['domain-1b', 'domain-2a', 'domain-2b', 'domain-direct']) {
+    assertFailClosedNoLeak(await runMatrix(`/api/domains/${dId}`), foreignTokens);
+  }
+  for (const targetId of foreignTargets) {
+    assertFailClosedNoLeak(await runMatrix('/api/domains', {
+      method: 'POST',
+      body: { websiteId: targetId, primaryDomain: `new.${targetId}.com` },
+    }), foreignTokens);
+  }
+
+  // 14. Job foreign boundaries
+  for (const jId of ['job-1b', 'job-2a', 'job-2b', 'job-direct']) {
+    assertFailClosedNoLeak(await runMatrix(`/api/jobs/${jId}`), foreignTokens);
+  }
+
+  // Root terminal denied for non-owner
+  assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+    method: 'POST',
+    body: { scope: 'server', serverId: 'server' },
+    session: customer1ASession,
+  }));
+  assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+    method: 'POST',
+    body: { scope: 'server', serverId: 'server' },
+    session: reseller1Session,
+  }));
+
+  // 3. Reseller 1 boundary isolation:
+  // Reseller 1 can access site-1a and site-1b resources
+  assert.equal((await runMatrix('/api/websites/site-1a', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-1b', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-1a/files?path=', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-1b/files?path=', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/domains/domain-1a', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/domains/domain-1b', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/mail-domains/mail-1a', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/mail-domains/mail-1b', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/jobs/job-1a', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/jobs/job-1b', { session: reseller1Session })).called, 1);
+  assert.equal((await runMatrix('/api/terminal/capabilities', {
+    method: 'POST',
+    body: { scope: 'site', websiteId: 'site-1a' },
+    session: reseller1Session,
+  })).called, 1);
+  assert.equal((await runMatrix('/api/terminal/capabilities', {
+    method: 'POST',
+    body: { scope: 'site', websiteId: 'site-1b' },
+    session: reseller1Session,
+  })).called, 1);
+
+  // Reseller 1 CANNOT access Reseller 2 sites (site-2a, site-2b) or Direct Owner site (site-direct)
+  const resellerForeignTargets = ['site-2a', 'site-2b', 'site-direct'];
+  const resellerForbiddenTokens = ['site-2a', 'site-2b', 'site-direct', 'customer-2a', 'customer-2b', 'customer-direct', 'reseller-2'];
+  for (const targetId of resellerForeignTargets) {
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files?path=`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/files?path=`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/database-resources`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/backups`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/analytics/status`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/wp-cli/status`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/crons`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/sftp/keys`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/elfinder-handoffs`, { method: 'POST', session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: targetId },
+      session: reseller1Session,
+    }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/logs`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/domains/domain-${targetId.replace('site-', '')}`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/mail-domains/mail-${targetId.replace('site-', '')}`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/jobs/job-${targetId.replace('site-', '')}`, { session: reseller1Session }), resellerForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix('/api/domains', {
+      method: 'POST',
+      body: { websiteId: targetId, primaryDomain: `new.${targetId}.com` },
+      session: reseller1Session,
+    }), resellerForbiddenTokens);
+  }
+
+  // 4. Direct Owner Customer CANNOT access Reseller 1 or Reseller 2 sites
+  for (const targetId of ['site-1a', 'site-1b', 'site-2a', 'site-2b']) {
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}`, { session: customerDirectSession }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files?path=`, { session: customerDirectSession }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}/database-resources`, { session: customerDirectSession }), foreignTokens);
+    assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: targetId },
+      session: customerDirectSession,
+    }), foreignTokens);
+  }
+
+  // 5. Reseller 2 boundary isolation:
+  // Reseller 2 can access site-2a and site-2b resources
+  assert.equal((await runMatrix('/api/websites/site-2a', { session: reseller2Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-2b', { session: reseller2Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-2a/files?path=', { session: reseller2Session })).called, 1);
+  assert.equal((await runMatrix('/api/websites/site-2b/files?path=', { session: reseller2Session })).called, 1);
+  assert.equal((await runMatrix('/api/domains/domain-2a', { session: reseller2Session })).called, 1);
+  assert.equal((await runMatrix('/api/domains/domain-2b', { session: reseller2Session })).called, 1);
+
+  // Reseller 2 CANNOT access Reseller 1 sites (site-1a, site-1b) or Direct Owner site (site-direct)
+  const reseller2ForeignTargets = ['site-1a', 'site-1b', 'site-direct'];
+  const reseller2ForbiddenTokens = ['site-1a', 'site-1b', 'site-direct', 'customer-1a', 'customer-1b', 'customer-direct', 'reseller-1'];
+  for (const targetId of reseller2ForeignTargets) {
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}`, { session: reseller2Session }), reseller2ForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/servers/server/websites/${targetId}`, { session: reseller2Session }), reseller2ForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix(`/api/websites/${targetId}/files?path=`, { session: reseller2Session }), reseller2ForbiddenTokens);
+    assertFailClosedNoLeak(await runMatrix('/api/terminal/capabilities', {
+      method: 'POST',
+      body: { scope: 'site', websiteId: targetId },
+      session: reseller2Session,
+    }), reseller2ForbiddenTokens);
+  }
+
+  // 6. Cross-customer isolation (Customer 1B, 2A, 2B cannot access sibling or foreign sites)
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-1a', { session: customer1BSession }), ['site-1a']);
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-2a', { session: customer1BSession }), ['site-2a']);
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-2b', { session: customer2ASession }), ['site-2b']);
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-1a', { session: customer2ASession }), ['site-1a']);
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-2a', { session: customer2BSession }), ['site-2a']);
+  assertFailClosedNoLeak(await runMatrix('/api/websites/site-1b', { session: customer2BSession }), ['site-1b']);
 });

@@ -26,8 +26,10 @@ export function needsSiteResourceJson(request) {
     || (role && !['owner', 'read_only'].includes(role));
   if (!isSiteScoped) return false;
   const path = new URL(request.originalUrl ?? request.url, 'http://panel.internal').pathname.replace(/\/$/, '');
-  return /^\/api\/(?:mailboxes|mail-aliases|domains|sites(?:\/|$))/.test(path)
-    || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path);
+  if (/\/files(?:\/|$)/.test(path)) return false;
+  return /^\/api\/(?:mailboxes|mail-aliases|domains|websites(?:\/|$)|sites(?:\/|$)|terminal(?:\/|$))/.test(path)
+    || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path)
+    || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/elfinder-handoffs$/.test(path);
 }
 function replaceCollection(response, accept, project = (value) => value) {
   const original = response.json.bind(response);
@@ -54,40 +56,66 @@ export function createSiteResourceBoundary(options = {}) {
       response.setHeader?.('Cache-Control', 'no-store');
       return response.status(403).json({ error: { code: 'site_scope_forbidden', message: 'Inactive account cannot access site resources.' } });
     }
-    const url = routeUrl(request), path = url.pathname.replace(/\/$/, '');
-    if (path.startsWith('/api/sites')) return next();
     try {
+      const url = routeUrl(request);
+      const path = url.pathname.replace(/\/$/, '');
+      if (path.startsWith('/api/sites')) return next();
       const mode = auth.access?.mode ?? (actorTenant.isReseller || actorTenant.isCustomer || actorTenant.isLegacySiteManager ? 'site_management' : null);
       if (mode !== 'site_management' || auth.security?.managementAllowed === false) throw new ScopeError();
       const websiteIds = Array.isArray(auth.user.websiteIds) ? auth.user.websiteIds : (actorTenant.isReseller ? [] : null);
       if (websiteIds === null) throw new ScopeError();
       const allowed = new Set(websiteIds);
-      const url = routeUrl(request), path = url.pathname.replace(/\/$/, '');
       const method = request.method;
       const cachedSites = new Map();
 
       const isAllowedSiteId = async (id, siteObj = null) => {
-        if (allowed.has(id)) {
-          if (actorTenant.isReseller) {
-            const s = siteObj ?? cachedSites.get(id) ?? (await get(websiteRegistry, 'getWebsite', id).catch(() => null));
-            if (s && s.resellerId !== undefined && s.resellerId !== actorTenant.actorId) {
-              return false;
-            }
+        let s = siteObj ?? cachedSites.get(id);
+        if (!s && typeof websiteRegistry?.getWebsite === 'function') {
+          s = await get(websiteRegistry, 'getWebsite', id).catch(() => null);
+          if (s) cachedSites.set(id, s);
+        }
+
+        if (actorTenant.isCustomer) {
+          if (!allowed.has(id)) return false;
+          if (s && s.customerId && s.customerId !== actorTenant.actorId) {
+            return false;
           }
           return true;
         }
+
         if (actorTenant.isReseller) {
-          const s = siteObj ?? cachedSites.get(id) ?? (await get(websiteRegistry, 'getWebsite', id).catch(() => null));
           if (s) {
-            if (s.resellerId && s.resellerId === actorTenant.actorId) return true;
-            if (s.customerId && typeof customerLookup === 'function') {
-              try {
-                const cust = await Promise.resolve(customerLookup(s.customerId));
-                if (cust && cust.resellerId === actorTenant.actorId) return true;
-              } catch {}
+            if (s.resellerId !== undefined) {
+              if (s.resellerId === null || s.resellerId !== actorTenant.actorId) {
+                return false;
+              }
+              return true;
+            }
+            if (s.customerId) {
+              if (typeof customerLookup === 'function') {
+                try {
+                  const cust = await Promise.resolve(customerLookup(s.customerId));
+                  if (!cust || cust.resellerId === null || cust.resellerId !== actorTenant.actorId) {
+                    return false;
+                  }
+                  return true;
+                } catch {
+                  return false;
+                }
+              }
+              return false;
             }
           }
+          if (allowed.has(id)) {
+            return true;
+          }
+          return false;
         }
+
+        if (actorTenant.isLegacySiteManager) {
+          return allowed.has(id);
+        }
+
         return false;
       };
 
@@ -128,7 +156,7 @@ export function createSiteResourceBoundary(options = {}) {
       const sites = async () => {
         if (siteList) return siteList;
         siteList = [];
-        if (actorTenant.isReseller && allowed.size === 0 && typeof websiteRegistry?.listWebsites === 'function') {
+        if (actorTenant.isReseller && typeof websiteRegistry?.listWebsites === 'function') {
           try {
             const allSites = await websiteRegistry.listWebsites(localServerId ? { serverId: localServerId } : {});
             for (const s of allSites) {
@@ -279,6 +307,19 @@ export function createSiteResourceBoundary(options = {}) {
       if (/^\/api\/audit(?:\/|$)/.test(path)) {
         if (actorTenant.isLegacySiteManager) throw new ScopeError();
         return next();
+      }
+      if (path === '/api/terminal/capabilities' && method === 'POST') {
+        if (request.body?.scope === 'server') {
+          throw new ScopeError();
+        }
+        if (request.body?.scope === 'site') {
+          const websiteId = request.body.websiteId;
+          if (!websiteId) throw new ScopeError();
+          const ok = await isAllowedSiteId(websiteId);
+          if (!ok) throw new ScopeError();
+          return next();
+        }
+        throw new ScopeError();
       }
       if (/^\/api\/users(?:\/|$)/.test(path) && !path.startsWith('/api/users/hosting/accounts')) throw new ScopeError();
       if (/^\/api\/servers\//.test(path)) throw new ScopeError();
