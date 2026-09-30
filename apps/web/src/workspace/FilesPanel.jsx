@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { panelRequest, uploadSiteFile } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { useFileWorkspaceSession } from './FileWorkspaceSession.jsx';
 import { formatBytes, formatDate } from './site-model.js';
 import { Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, Modal, Section } from './PanelKit.jsx';
-import { fileChild, fileCrumbs, fileKind, fileListing, fileParent, toggleVisibleSelection, validFileName, visibleFiles } from './ui/file-workspace-model.js';
+import { fileChild, fileCrumbs, fileKind, fileListing, fileParent, toggleVisibleSelection, validFileName, validRelativePath, visibleFiles } from './ui/file-workspace-model.js';
 import './ui/file-workspace.css';
 
 // A changed Website must discard caches, selection, in-flight reads and editor state.
@@ -13,18 +14,24 @@ export default function FilesPanel({ websiteId, serverId, runtimeType }) {
 }
 function FileWorkspace({ websiteId, runtimeType }) {
   const { canManage } = useWorkspace();
+  const [searchParams, setSearchParams] = useSearchParams();
   const supported = ['static', 'node', 'php', 'python'].includes(runtimeType);
   const base = `/websites/${encodeURIComponent(websiteId)}/files`;
   const { initialPath, editor, setEditor, rememberPath } = useFileWorkspaceSession({ websiteId, runtimeType });
-  const [view, setView] = useState({ path: initialPath, entries: [], loading: true, loaded: false, error: null });
+  const urlPath = searchParams.get('path');
+  const validUrlPath = urlPath && validRelativePath(urlPath) ? urlPath : null;
+  const effectiveInitialPath = validUrlPath ?? initialPath;
+  const [view, setView] = useState({ path: effectiveInitialPath, entries: [], loading: true, loaded: false, error: null });
+  const lastLoadedPath = useRef(effectiveInitialPath);
+  const autoOpenedRef = useRef(false);
   const [folders, setFolders] = useState({});
   const [expanded, setExpanded] = useState(() => new Set(['']));
   const [treeLoading, setTreeLoading] = useState(() => new Set());
   const [treeError, setTreeError] = useState(null);
   const [treeOpen, setTreeOpen] = useState(false);
-  const [query, setQuery] = useState('');
-  const [hidden, setHidden] = useState(true);
-  const [sort, setSort] = useState('name');
+  const [query, setQuery] = useState(() => searchParams.get('q') ?? searchParams.get('search') ?? '');
+  const [hidden, setHidden] = useState(() => searchParams.get('hidden') !== 'false');
+  const [sort, setSort] = useState(() => ['name', 'size', 'modified'].includes(searchParams.get('sort')) ? searchParams.get('sort') : 'name');
   const [layout, setLayout] = useState('list');
   const [selected, setSelected] = useState([]);
   const [dialog, setDialog] = useState(null);
@@ -57,6 +64,7 @@ function FileWorkspace({ websiteId, runtimeType }) {
     ...current, [path]: items.filter((entry) => entry.type === 'directory'),
   })), []);
   const load = useCallback(async (nextPath = '') => {
+    lastLoadedPath.current = nextPath;
     const current = ++generation.current;
     read.current?.abort(); const controller = new AbortController(); read.current = controller;
     setView((value) => ({ ...value, loading: true, error: null }));
@@ -74,7 +82,14 @@ function FileWorkspace({ websiteId, runtimeType }) {
       }
     }
   }, [base, cacheFolders, rememberPath]);
-  useEffect(() => { if (supported && websiteId) void load(initialPath); }, [supported, websiteId, load, initialPath]);
+  useEffect(() => { if (supported && websiteId) void load(effectiveInitialPath); }, [supported, websiteId, load, effectiveInitialPath]);
+  const currentParamPath = searchParams.get('path') ?? '';
+  useEffect(() => {
+    const targetPath = validRelativePath(currentParamPath) ? currentParamPath : '';
+    if (targetPath !== lastLoadedPath.current) {
+      void load(targetPath);
+    }
+  }, [currentParamPath, load]);
   async function expand(path) {
     if (expanded.has(path)) { setExpanded((value) => { const next = new Set(value); next.delete(path); return next; }); return; }
     setTreeError(null);
@@ -87,7 +102,50 @@ function FileWorkspace({ websiteId, runtimeType }) {
     }
     if (alive.current) setExpanded((value) => new Set([...value, path]));
   }
-  function navigate(path) { if (locked) return; setQuery(''); setTreeOpen(false); void load(path); }
+  function navigate(path) {
+    if (locked) return;
+    lastLoadedPath.current = path;
+    setQuery('');
+    setTreeOpen(false);
+    autoOpenedRef.current = false;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (path) next.set('path', path);
+      else next.delete('path');
+      next.delete('file');
+      next.delete('q');
+      next.delete('search');
+      return next;
+    });
+    void load(path);
+  }
+  function handleQueryChange(value) {
+    setQuery(value);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value) next.set('q', value);
+      else { next.delete('q'); next.delete('search'); }
+      return next;
+    }, { replace: true });
+  }
+  function handleSortChange(value) {
+    setSort(value);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (value && value !== 'name') next.set('sort', value);
+      else next.delete('sort');
+      return next;
+    }, { replace: true });
+  }
+  function handleHiddenChange(checked) {
+    setHidden(checked);
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      if (!checked) next.set('hidden', 'false');
+      else next.delete('hidden');
+      return next;
+    }, { replace: true });
+  }
   function openDialog(value) { setError(null); setNotice(''); setDialog(value); }
   async function operate(action, success) {
     if (pending.current || !canManage) return;
@@ -116,6 +174,11 @@ function FileWorkspace({ websiteId, runtimeType }) {
   }
   async function openFile(entry) {
     if (locked || entry.type !== 'file' || !canManage) return;
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      next.set('file', entry.name);
+      return next;
+    }, { replace: true });
     setEditorLoading(true); setError(null); setNotice('');
     try {
       const result = await request(`${base}/text?path=${encodeURIComponent(entry.path)}`);
@@ -123,6 +186,15 @@ function FileWorkspace({ websiteId, runtimeType }) {
     } catch (failure) { if (alive.current && failure.name !== 'AbortError') setError(failure.message); }
     finally { if (alive.current) setEditorLoading(false); }
   }
+  useEffect(() => {
+    const fileParam = searchParams.get('file');
+    if (!fileParam || autoOpenedRef.current || !view.loaded || view.loading || !canManage) return;
+    const match = view.entries.find((e) => e.type === 'file' && (e.name === fileParam || e.path === fileParam));
+    if (match) {
+      autoOpenedRef.current = true;
+      void openFile(match);
+    }
+  }, [searchParams, view.loaded, view.loading, view.entries, canManage]);
   async function saveEditor(event) {
     event?.preventDefault(); if (!editor || pending.current || editor.content === editor.saved) return;
     const current = editor;
@@ -134,7 +206,15 @@ function FileWorkspace({ websiteId, runtimeType }) {
   function closeEditor() {
     if (busy) return;
     if (editor && editor.content !== editor.saved) setDiscard(true);
-    else { setEditor(null); setError(null); }
+    else {
+      setEditor(null);
+      setError(null);
+      setSearchParams((prev) => {
+        const next = new URLSearchParams(prev);
+        next.delete('file');
+        return next;
+      }, { replace: true });
+    }
   }
   function chooseUpload(files) {
     if (!mutable || !files.length || dialog || editor || upload) return;
@@ -185,8 +265,8 @@ function FileWorkspace({ websiteId, runtimeType }) {
       {!dialog && !upload && !editor && <ErrorNotice error={error} />}
       {notice && !editor && <div className="yf-feedback" role="status"><Icon name="check" size={16} />{notice}</div>}
       <div className="yf-body"><aside className="yf-folders">{tree}</aside><div className="yf-content">
-        <div className="yf-tools"><Button className="yf-mobile-folders" icon="folder" onClick={() => setTreeOpen(true)}>Klasörler</Button><label className="yf-search"><Icon name="search" size={17} /><span className="ws-sr-only">Bu klasörde ara</span><input type="search" placeholder="Bu klasörde ara…" value={query} onChange={(event) => setQuery(event.target.value)} /></label><label className="yf-sort"><span className="ws-sr-only">Dosya sıralaması</span><select value={sort} onChange={(event) => setSort(event.target.value)}><option value="name">Ada göre</option><option value="modified">Son değişen</option><option value="size">Boyuta göre</option></select></label><div className="yf-view" aria-label="Dosya görünümü"><Button icon="jobs" aria-label="Liste görünümü" aria-pressed={layout === 'list'} onClick={() => setLayout('list')} /><Button icon="dashboard" aria-label="Izgara görünümü" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} /></div></div>
-        <div className="yf-selection"><label><input ref={allBox} aria-label="Görünen öğeleri seç" type="checkbox" checked={allSelected} disabled={!entries.length || locked} onChange={() => setSelected((value) => toggleVisibleSelection(value, entries))} /><span>{selected.length ? `${selected.length} öğe seçili` : `${entries.length} öğe`}</span></label>{selected.length > 0 ? <><Button disabled={!mutable} icon="trash" onClick={() => openDialog({ kind: 'delete', paths: [...selected] })}>Seçilenleri Sil</Button><Button disabled={locked} onClick={() => setSelected([])}>Seçimi kaldır</Button></> : <label className="yf-hidden"><input type="checkbox" checked={hidden} onChange={(event) => setHidden(event.target.checked)} /><span>Gizli dosyalar</span></label>}</div>
+        <div className="yf-tools"><Button className="yf-mobile-folders" icon="folder" onClick={() => setTreeOpen(true)}>Klasörler</Button><label className="yf-search"><Icon name="search" size={17} /><span className="ws-sr-only">Bu klasörde ara</span><input type="search" placeholder="Bu klasörde ara…" value={query} onChange={(event) => handleQueryChange(event.target.value)} /></label><label className="yf-sort"><span className="ws-sr-only">Dosya sıralaması</span><select value={sort} onChange={(event) => handleSortChange(event.target.value)}><option value="name">Ada göre</option><option value="modified">Son değişen</option><option value="size">Boyuta göre</option></select></label><div className="yf-view" aria-label="Dosya görünümü"><Button icon="jobs" aria-label="Liste görünümü" aria-pressed={layout === 'list'} onClick={() => setLayout('list')} /><Button icon="dashboard" aria-label="Izgara görünümü" aria-pressed={layout === 'grid'} onClick={() => setLayout('grid')} /></div></div>
+        <div className="yf-selection"><label><input ref={allBox} aria-label="Görünen öğeleri seç" type="checkbox" checked={allSelected} disabled={!entries.length || locked} onChange={() => setSelected((value) => toggleVisibleSelection(value, entries))} /><span>{selected.length ? `${selected.length} öğe seçili` : `${entries.length} öğe`}</span></label>{selected.length > 0 ? <><Button disabled={!mutable} icon="trash" onClick={() => openDialog({ kind: 'delete', paths: [...selected] })}>Seçilenleri Sil</Button><Button disabled={locked} onClick={() => setSelected([])}>Seçimi kaldır</Button></> : <label className="yf-hidden"><input type="checkbox" checked={hidden} onChange={(event) => handleHiddenChange(event.target.checked)} /><span>Gizli dosyalar</span></label>}</div>
         {view.error && <div className="yf-list-error"><ErrorNotice error={view.error} /><Button onClick={() => load(view.path)} disabled={locked}>Yeniden dene</Button><p>Son liste korunuyor; güncel veri alınana kadar değişiklik yapılamaz.</p></div>}
         <div className="yf-results" aria-busy={view.loading || editorLoading}>
           {(view.loading || editorLoading) && <div className="yf-busy" role="status"><span className="ws-spinner" />{editorLoading ? 'Dosya açılıyor…' : 'Dosyalar yükleniyor…'}</div>}
@@ -201,6 +281,6 @@ function FileWorkspace({ websiteId, runtimeType }) {
     {dialog?.kind === 'delete' && <ConfirmDialog title={`${dialog.paths.length} öğe silinsin mi?`} message={`Kalıcı olarak silinecek: ${dialog.paths.join(', ')}. Klasörlerin içeriği de etkilenebilir. Bu işlem geri alınamaz.`} confirmation={dialog.paths.length === 1 ? dialog.paths[0] : 'SİL'} confirmLabel="Kalıcı olarak sil" busy={busy} error={error} onCancel={() => setDialog(null)} onConfirm={remove} />}
     {upload && <Modal title="Dosya yükle" busy={busy} onClose={() => setUpload(null)}><p className="ws-muted">Hedef: Site kökü / {upload.parent}. Aynı adlı dosyalar değiştirilebilir.</p><ul className="yf-upload-list">{upload.items.map((item, i) => <li key={i}><Icon name={item.state === 'uploaded' ? 'check' : 'file'} /><span>{item.file.name}<small>{formatBytes(item.file.size)}</small></span><strong>{item.state === 'uploaded' ? 'Yüklendi' : 'Bekliyor'}</strong></li>)}</ul><ErrorNotice error={error} /><p role="status" className="ws-muted">{upload.items.filter((item) => item.state === 'uploaded').length} / {upload.items.length} tamamlandı</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => { setUpload(null); void load(view.path); }}>Kapat</Button><Button variant="primary" disabled={busy} onClick={startUpload}>{busy ? 'Yükleniyor…' : 'Yüklemeyi başlat'}</Button></footer></Modal>}
     {editor && <Modal title={editor.name} wide busy={busy} onClose={closeEditor}><div className="yf-editor-meta"><code>/{editor.path}</code><span>{editor.content === editor.saved ? 'Kaydedildi' : 'Kaydedilmemiş değişiklikler'}</span></div><ErrorNotice error={error} /><form onSubmit={saveEditor} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveEditor(); } }}><div className="yf-editor"><pre ref={lineNumbers} aria-hidden="true">{editor.content.split('\n').map((_, i) => i + 1).join('\n')}</pre><textarea aria-label={`${editor.name} içeriği`} value={editor.content} readOnly={busy} spellCheck={false} autoCapitalize="none" wrap="off" onScroll={(event) => { if (lineNumbers.current) lineNumbers.current.scrollTop = event.target.scrollTop; }} onChange={(event) => setEditor({ ...editor, content: event.target.value })} /></div><footer className="ws-modal-footer"><span className="yf-editor-hint">Ctrl / ⌘ S · Sunucudaki sürüm değişirse üzerine yazılmaz.</span><Button disabled={busy} onClick={closeEditor}>Kapat</Button><Button variant="primary" type="submit" disabled={busy || editor.content === editor.saved}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</Button></footer></form></Modal>}
-    {discard && <ConfirmDialog title="Değişiklikler bırakılsın mı?" message="Dosyada kaydedilmemiş değişiklikler var." confirmLabel="Değişiklikleri bırak" onCancel={() => setDiscard(false)} onConfirm={() => { setDiscard(false); setEditor(null); setError(null); }} />}
+    {discard && <ConfirmDialog title="Değişiklikler bırakılsın mı?" message="Dosyada kaydedilmemiş değişiklikler var." confirmLabel="Değişiklikleri bırak" onCancel={() => setDiscard(false)} onConfirm={() => { setDiscard(false); setEditor(null); setError(null); setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('file'); return next; }, { replace: true }); }} />}
   </>;
 }
