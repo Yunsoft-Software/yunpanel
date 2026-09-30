@@ -1,8 +1,8 @@
-import { Fragment, useState } from 'react';
-import { Link, useParams, useSearchParams } from 'react-router';
+import { Fragment, useEffect, useState } from 'react';
+import { Link, useLocation, useParams, useSearchParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
-import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
+import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, safeReturnHref, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
 import { ApplicationOperations, SslOperations } from './SiteOperations.jsx';
 import DomainOperations from './DomainOperations.jsx';
 import DomainHostingPanel from './DomainHostingPanel.jsx';
@@ -68,7 +68,20 @@ export default function SiteDetailPage() {
 function SiteWorkspace({ websiteId, tab }) {
   const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isReseller } = useWorkspace();
   const [params, setParams] = useSearchParams();
-  const domain = domains.items.find((item) => item.id === websiteId);
+  const location = useLocation();
+  const domain = domains.items.find((item) => item.id === websiteId)
+    ?? domains.items.find((item) => item.websiteId === websiteId && !item.parentDomainId)
+    ?? domains.items.find((item) => item.websiteId === websiteId)
+    ?? domains.items.find((item) => item.primaryDomain?.toLowerCase() === websiteId?.toLowerCase());
+
+  useEffect(() => {
+    if (domain && domain.id !== websiteId && typeof window !== 'undefined' && window.history?.replaceState) {
+      const canonicalTab = tab === 'overview' ? '' : `/${tab}`;
+      const search = location.search || '';
+      window.history.replaceState(null, '', `/websites/${encodeURIComponent(domain.id)}${canonicalTab}${search}`);
+    }
+  }, [domain, websiteId, tab, location.search]);
+
   if (!domain) return <><PageHeading title="Web sitesi" /><CollectionNotice resource={domains} label="Alan adı" />{domains.status === 'ready' && <EmptyState title="Web sitesi bulunamadı" detail="Kayıt kaldırılmış olabilir veya bağlantı yanlış bir kimliğe işaret ediyor." icon="globe" action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} />}</>;
   const website = websites.items.find((item) => item.id === domain.websiteId);
   // Legacy proxy matching is never used to assign a different site's runtime to a site manager.
@@ -94,7 +107,11 @@ function SiteWorkspace({ websiteId, tab }) {
   const server = servers.items.find((item) => item.id === domain.serverId);
   const url = externalSiteUrl(domain);
   const scopedJobs = siteJobs(domain, application, jobs.items);
-  const query = application && params.get('application') ? `?application=${encodeURIComponent(application.id)}` : '';
+  const queryParts = [];
+  if (application && params.get('application')) queryParts.push(`application=${encodeURIComponent(application.id)}`);
+  if (params.get('returnTo')) queryParts.push(`returnTo=${encodeURIComponent(params.get('returnTo'))}`);
+  const query = queryParts.length ? `?${queryParts.join('&')}` : '';
+  const returnTo = safeReturnHref(params.get('returnTo') ?? params.get('from'), '/websites');
   const runtimeType = website?.runtimeType ?? application?.type;
   const isCustomRuntime = ['python', 'docker'].includes(runtimeType);
   const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python (Ürün uzantısı)', static: 'Statik site', docker: 'Docker / proxy (Ürün uzantısı)' }[runtimeType] ?? 'Yerel proxy');
@@ -115,7 +132,7 @@ function SiteWorkspace({ websiteId, tab }) {
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
-    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to="/websites">{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
+    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
     <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button></>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span>{isCustomRuntime && <Badge state="neutral">Ürün Uzantısı</Badge>}</div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />

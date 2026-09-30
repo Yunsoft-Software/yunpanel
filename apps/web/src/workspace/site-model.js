@@ -8,18 +8,43 @@ export const SITE_TABS = [
   ['php', 'PHP / WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Barındırma bilgileri'],
 ];
 export function normalizeSiteTab(tab) {
-  if (tab === 'statistics') return 'analytics';
-  if (tab === 'scheduled-tasks') return 'cron';
-  if (tab === 'backups') return 'backup';
-  if (tab === 'git') return 'deploy';
-  if (['sftp', 'ssh'].includes(tab)) return 'access';
-  if (['wp', 'wordpress'].includes(tab)) return 'php';
-  return tab;
+  if (!tab || typeof tab !== 'string') return 'overview';
+  const lower = tab.toLowerCase().trim();
+  if (['statistics', 'stats', 'analytics'].includes(lower)) return 'analytics';
+  if (['scheduled-tasks', 'tasks', 'crons', 'task', 'cron'].includes(lower)) return 'cron';
+  if (['backups', 'restore', 'restores', 'backup-restore', 'backup'].includes(lower)) return 'backup';
+  if (['git', 'deploy', 'deployment', 'deployments'].includes(lower)) return 'deploy';
+  if (['sftp', 'ssh', 'access-accounts', 'security', 'access'].includes(lower)) return 'access';
+  if (['wp', 'wordpress', 'php'].includes(lower)) return 'php';
+  if (['file-manager', 'file', 'files'].includes(lower)) return 'files';
+  if (['database', 'databases', 'db'].includes(lower)) return 'databases';
+  if (['mail', 'mailbox', 'mailboxes', 'email'].includes(lower)) return 'mail';
+  if (['ssl', 'certificate', 'certificates', 'ssl-tls', 'ssl-certificates'].includes(lower)) return 'ssl';
+  if (['log', 'logs', 'logging'].includes(lower)) return 'logs';
+  if (['node', 'application', 'app', 'environment'].includes(lower)) return 'node';
+  if (['settings', 'configuration', 'config', 'settings-hosting'].includes(lower)) return 'settings';
+  if (['dns', 'dns-records'].includes(lower)) return 'dns';
+  if (['domains', 'domain', 'alias', 'aliases'].includes(lower)) return 'domains';
+  if (['resources'].includes(lower)) return 'resources';
+  if (['hosting'].includes(lower)) return 'hosting';
+  if (['terminal'].includes(lower)) return 'terminal';
+  if (['overview', 'dashboard'].includes(lower)) return 'overview';
+  return 'overview';
 }
 export const siteHref = (id, tab = 'overview') => {
+  if (!id) return '/websites';
   const normalized = normalizeSiteTab(tab);
   return `/websites/${encodeURIComponent(id)}/${SITE_TABS.some(([key]) => key === normalized) ? normalized : 'overview'}`;
 };
+export function safeReturnHref(candidate, fallback = '/websites') {
+  if (typeof candidate !== 'string' || !candidate.startsWith('/') || candidate.startsWith('//') || candidate.includes('\\')) {
+    return fallback;
+  }
+  if (/^\/(websites|mail|files|databases|statistics|cron|backups|settings|users|customers|tools-settings|dashboard|applications|servers|docker|jobs|audit)(\?|\/|$)/.test(candidate)) {
+    return candidate;
+  }
+  return fallback;
+}
 export function certificateState(domain, certificates, now = Date.now()) {
   if (!Array.isArray(certificates)) return { state: 'unknown', label: 'SSL bilgisi alınamadı' };
   const certificate = certificates.find((item) => item.id === domain.certificateId);

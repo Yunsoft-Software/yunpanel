@@ -20,9 +20,10 @@ export default function WebsitesPage() {
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
 
-  const query = params.get('q') ?? '';
+  const query = params.get('q') ?? params.get('search') ?? params.get('query') ?? '';
   const type = ['proxy', 'static'].includes(params.get('type')) ? params.get('type') : 'all';
-  const status = ['active', 'draft', 'staged', 'error'].includes(params.get('status')) ? params.get('status') : 'all';
+  const statusParam = params.get('status') ?? params.get('state');
+  const status = ['active', 'draft', 'staged', 'error'].includes(statusParam) ? statusParam : 'all';
   const sort = params.get('sort') === 'desc' ? 'desc' : 'asc';
   const filtering = Boolean(query.trim()) || type !== 'all' || status !== 'all';
   const tree = useMemo(() => domainTreeRows(domains.items, { query, collapsed: filtering ? new Set() : collapsed }), [domains.items, query, filtering, collapsed]);
