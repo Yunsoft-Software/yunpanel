@@ -57,7 +57,11 @@ export function createProcessStoreLock({
     if (typeof action !== 'function') {
       throw new ProcessStoreLockError('process_store_lock_action_invalid', 'Process store lock action is invalid', 400);
     }
-    await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+    try {
+      await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
+    } catch {
+      throw new ProcessStoreLockError('process_store_lock_failed', 'Process store lock could not be acquired');
+    }
     const token = randomUUID();
     const record = Object.freeze({
       version: 1,
@@ -87,15 +91,23 @@ export function createProcessStoreLock({
           }
         }
       } catch (error) {
-        await handle?.close().catch(() => {});
+        if (handle) {
+          await handle.close().catch(() => {});
+          await rm(lockPath, { force: true }).catch(() => {});
+        }
         if (acquired) throw error;
         if (error instanceof ProcessStoreLockError) throw error;
         if (error?.code !== 'EEXIST') {
           throw new ProcessStoreLockError('process_store_lock_failed', 'Process store lock could not be acquired');
         }
         let existing;
-        try { existing = parseRecord(await readFile(lockPath, 'utf8')); }
-        catch {
+        try {
+          existing = parseRecord(await readFile(lockPath, 'utf8'));
+        } catch (readError) {
+          if (readError?.code === 'ENOENT') {
+            await new Promise((resolve) => setTimeout(resolve, retryMs));
+            continue;
+          }
           throw new ProcessStoreLockError('process_store_lock_unreadable', 'Existing process store lock requires inspection');
         }
         if (!existing) {
@@ -108,7 +120,11 @@ export function createProcessStoreLock({
           await new Promise((resolve) => setTimeout(resolve, retryMs));
           continue;
         }
-        await rm(lockPath, { force: true });
+        try {
+          await rm(lockPath, { force: true });
+        } catch {
+          throw new ProcessStoreLockError('process_store_lock_failed', 'Process store lock could not be acquired');
+        }
       }
     }
   }

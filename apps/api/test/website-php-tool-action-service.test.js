@@ -1,24 +1,16 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebsitePhpToolActionService } from '../src/website-php-tool-action-service.js';
+import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
 
-const preview = Object.freeze({
-  version: 1,
+const preview = websitePhpToolActionPreview({
   websiteId: '11111111-1111-4111-8111-111111111111',
   serverId: '33333333-3333-4333-8333-333333333333',
   applicationId: '22222222-2222-4222-8222-222222222222',
   unixUser: 'yunapp-123456789abc',
   websiteRevision: 4,
-  actionId: 'composer.dump-autoload',
-  tool: 'composer',
-  command: 'dump-autoload',
-  args: Object.freeze(['--optimize']),
-  timeout: 120000,
-  label: 'Composer autoload dosyalarını yeniden oluştur',
-  impact: 'vendor içindeki autoload metadata dosyaları yeniden oluşturulur; paket sürümleri değiştirilmez.',
-  previewDigest: 'b'.repeat(64),
-  confirmation: `php-tool:11111111-1111-4111-8111-111111111111:composer.dump-autoload:${'b'.repeat(64)}`,
-});
+}, 'composer.dump-autoload');
+
 const input = Object.freeze({
   actionId: preview.actionId,
   expectedWebsiteRevision: preview.websiteRevision,
@@ -66,4 +58,50 @@ test('action service blocks when another Application job is active', async () =>
     (error) => error.code === 'website_php_action_job_conflict',
   );
   assert.equal(enqueued, false);
+});
+
+test('action service rejects enqueue when actor session is revoked or unauthorized', async () => {
+  let enqueued = false;
+  const deps = dependencies();
+  deps.authorizeActor = async () => null; // Session revoked or invalid grant
+  deps.jobRegistry.enqueue = async () => { enqueued = true; };
+  const service = createWebsitePhpToolActionService(deps);
+  await assert.rejects(
+    () => service.queue(preview.websiteId, input, actor),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(enqueued, false);
+});
+
+test('action service rejects enqueue when session is revoked while acquiring application lock', async () => {
+  let enqueued = false;
+  let checks = 0;
+  const deps = dependencies();
+  deps.authorizeActor = async () => {
+    checks++;
+    return checks === 1 ? actor : null; // Session revoked concurrently
+  };
+  deps.jobRegistry.enqueue = async () => { enqueued = true; };
+  const service = createWebsitePhpToolActionService(deps);
+  await assert.rejects(
+    () => service.queue(preview.websiteId, input, actor),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(enqueued, false);
+});
+
+test('action service binds live actor role to durable job payload for all authorized roles', async () => {
+  for (const role of ['owner', 'site_manager', 'reseller', 'customer']) {
+    const roleActor = Object.freeze({ ...actor, role });
+    const enqueued = [];
+    const deps = dependencies();
+    deps.authorizeActor = async () => roleActor;
+    deps.jobRegistry.enqueue = async (value) => { enqueued.push(value); return { id: 'job-1', status: 'queued', ...value }; };
+    const service = createWebsitePhpToolActionService(deps);
+    const result = await service.queue(preview.websiteId, input, roleActor);
+    assert.equal(enqueued.length, 1);
+    assert.equal(enqueued[0].payload.actorRole, role);
+    assert.equal(enqueued[0].payload.actorSessionId, roleActor.sessionId);
+    assert.equal(result.job.status, 'queued');
+  }
 });

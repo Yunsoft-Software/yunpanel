@@ -56,3 +56,19 @@ test('recovery requires stopped consumers', async()=>{
   await assert.rejects(()=>recoverRunningPhpTool(h.args),(e)=>e.code==='job_php_tool_recovery_consumers_must_be_stopped');
   assert.equal(h.calls.length,0);
 });
+
+test('mismatched receipt evidence fails closed and prevents unverified re-execution', async () => {
+  const h = harness();
+  h.args.readOperationReceipt = async () => ({
+    version: 1,
+    serverId,
+    jobId,
+    payload: { ...payload, actionId: 'composer.dump-autoload' },
+    result: { ...result, actionId: 'composer.dump-autoload' },
+  });
+  await assert.rejects(
+    () => recoverRunningPhpTool(h.args),
+    (error) => error.code === 'job_php_tool_recovery_evidence_mismatch',
+  );
+  assert.equal(h.calls.length, 0);
+});
