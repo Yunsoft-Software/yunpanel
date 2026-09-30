@@ -225,3 +225,45 @@ test('busy is only actual local sequencing, not a blocked or ambiguous result', 
   for (const phase of ['idle', 'error', 'uncertain', 'attention', 'ready', 'recorded']) assert.equal(siteSubmissionBusy({ phase }), false);
   assert.equal(EMPTY_SITE_SUBMISSION.created, null);
 });
+
+test('post-account provisioning error in create result preserves created site and notifies user', async () => {
+  const customResult = {
+    ...result(),
+    siteAdmin: { status: 'created', websiteId, code: null },
+    provisioningError: { code: 'provisioning_registration_failed', message: 'Failed to register', status: 503 },
+  };
+  let advanced = 0;
+  const run = harness({
+    request: async (url) => url.endsWith('create-preview') ? preview() : customResult,
+    advance: async () => { advanced++; },
+  });
+  const state = await run.flow.submit(input());
+  assert.equal(state.phase, 'attention');
+  assert.equal(state.created.id, domainId);
+  assert.equal(state.siteAdmin.status, 'created');
+  assert.ok(state.error.includes('kurulum planı kaydedilemedi'));
+  assert.equal(advanced, 0);
+});
+
+test('post-account provisioning error rejection preserves created site from error data', async () => {
+  let advanced = 0;
+  const run = harness({
+    request: async (url) => {
+      if (url.endsWith('create-preview')) return preview();
+      const err = new Error('Provisioning failed');
+      err.data = {
+        ...result(),
+        siteAdmin: { status: 'created', websiteId, code: null },
+        provisioningError: { code: 'provisioning_registration_failed' },
+      };
+      throw err;
+    },
+    advance: async () => { advanced++; },
+  });
+  const state = await run.flow.submit(input());
+  assert.equal(state.phase, 'attention');
+  assert.equal(state.created.id, domainId);
+  assert.equal(state.siteAdmin.status, 'created');
+  assert.ok(state.error.includes('kurulum planı kaydedilemedi'));
+  assert.equal(advanced, 0);
+});

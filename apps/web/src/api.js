@@ -347,5 +347,21 @@ export async function uploadSiteFile(websiteId, targetPath, binaryData) {
   return payload.data;
 }
 
+export async function downloadSiteFile(websiteId, targetPath) {
+  const url = `${MANAGEMENT_ROOT}/websites/${encodeURIComponent(websiteId)}/files/download?path=${encodeURIComponent(targetPath)}`;
+  const response = await fetch(url, {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: sessionHeaders('GET'),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error?.message ?? 'Dosya indirme başarısız oldu');
+  }
+  const arrayBuffer = await response.arrayBuffer();
+  return new Uint8Array(arrayBuffer);
+}
+
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });
 export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath, databaseCredentialPath, websiteDatabaseBindingDataPath, positiveRevision });
