@@ -64,7 +64,7 @@ export default function SiteDetailPage() {
   return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={tab} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
-  const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner } = useWorkspace();
+  const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isReseller } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const domain = domains.items.find((item) => item.id === websiteId);
   if (!domain) return <><PageHeading title="Web sitesi" /><CollectionNotice resource={domains} label="Alan adı" />{domains.status === 'ready' && <EmptyState title="Web sitesi bulunamadı" detail="Kayıt kaldırılmış olabilir veya bağlantı yanlış bir kimliğe işaret ediyor." icon="globe" action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} />}</>;
@@ -106,7 +106,7 @@ function SiteWorkspace({ websiteId, tab }) {
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
-    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to="/websites">Web Siteleri ve Alan Adları</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
+    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to="/websites">{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
     <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button></>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span></div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />

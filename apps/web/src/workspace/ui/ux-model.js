@@ -17,7 +17,7 @@ export function writePreferences(storage, value) {
 export const resolveTheme = (theme, darkSystem = false) => themes.has(theme) && theme !== 'system' ? theme : darkSystem ? 'dark' : 'light';
 
 // Plesk task order; these links do not grant API permissions.
-export function navigationGroups(canManage, isOwner = true, isReseller = false) {
+export function navigationGroups(canManage, isOwner = true, isReseller = false, isCustomer = false) {
   const items = isReseller && !isOwner
     ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Sitelerim', 'globe']]
     : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
@@ -25,7 +25,8 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false) 
     items.push(['/mail', 'Posta', 'mail'], ['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database']);
     if (isOwner) items.push(['/tools-settings', 'Araçlar ve Ayarlar', 'settings'], ['/settings/users', 'Kullanıcılar', 'user']);
   } else if (isOwner) items.push(['/dashboard', 'Genel bakış', 'dashboard']);
-  return [{ id: 'panel', label: 'Panel', items }];
+  const label = isReseller && !isOwner ? 'Bayi Menüsü' : isCustomer && !isOwner ? 'Müşteri Menüsü' : 'Panel';
+  return [{ id: 'panel', label, title: label, items }];
 }
 
 // Only working surfaces belong in this directory. No placeholder backup/statistics catalog.
@@ -62,20 +63,27 @@ export function websiteCount(resource) {
   if (!['ready', 'stale'].includes(resource?.status) || !Array.isArray(resource.items)) return null;
   return new Set(resource.items.filter((item) => typeof item.id === 'string' && item.id).map((item) => item.id)).size;
 }
-export function commandEntries({ query = '', canManage = false, isOwner = false, isReseller = false, domains } = {}) {
+export function commandEntries({ query = '', canManage = false, isOwner = false, isReseller = false, isCustomer = false, domains } = {}) {
   const term = String(query).trim().slice(0, 253);
   const normalized = term.toLocaleLowerCase('tr-TR');
   const matches = (value) => String(value ?? '').toLocaleLowerCase('tr-TR').includes(normalized);
-  const sources = navigationGroups(canManage, isOwner, isReseller);
+  const sources = navigationGroups(canManage, isOwner, isReseller, isCustomer);
   if (canManage && isOwner) sources.push(...TOOLS_SETTINGS_GROUPS);
   const seen = new Set();
-  const entries = sources.flatMap((group) => group.items.map(([to, label, icon]) => ({ id: to, to, label, icon, detail: group.label })))
+  const entries = sources.flatMap((group) => group.items.map(([to, label, icon]) => ({
+    id: to,
+    to,
+    label,
+    title: label,
+    icon,
+    detail: (to === '/websites' && isReseller && !isOwner) ? 'Sitelerim listesini aç' : group.label,
+  })))
     .filter((entry) => { if (seen.has(entry.id) || !matches(entry.label)) return false; seen.add(entry.id); return true; });
   if (['ready', 'stale'].includes(domains?.status) && Array.isArray(domains.items)) {
     const sites = domains.items.filter((item) => typeof item.id === 'string' && typeof item.primaryDomain === 'string' && (matches(item.primaryDomain) || item.aliases?.some(matches))).slice(0, 8);
-    for (const domain of sites) entries.push({ id: `domain:${domain.id}`, to: `/websites/${encodeURIComponent(domain.id)}/overview`, label: domain.primaryDomain, icon: 'globe', detail: domains.status === 'stale' ? 'Alan adı · son alınan envanter' : 'Alan adı · site çalışma alanı' });
+    for (const domain of sites) entries.push({ id: `domain:${domain.id}`, to: `/websites/${encodeURIComponent(domain.id)}/overview`, label: domain.primaryDomain, title: domain.primaryDomain, icon: 'globe', detail: domains.status === 'stale' ? 'Alan adı · son alınan envanter' : 'Alan adı · site çalışma alanı' });
   }
-  if (term) entries.push({ id: 'search-all', to: `/websites?q=${encodeURIComponent(term)}`, label: `“${term}” için tüm sonuçlar`, icon: 'search', detail: 'Web siteleri listesini aç' });
+  if (term) entries.push({ id: 'search-all', to: `/websites?q=${encodeURIComponent(term)}`, label: `“${term}” için tüm sonuçlar`, title: `“${term}” için tüm sonuçlar`, icon: 'search', detail: isReseller && !isOwner ? 'Sitelerim listesini aç' : 'Web siteleri listesini aç' });
   return entries;
 }
 
