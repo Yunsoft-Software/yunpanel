@@ -97,6 +97,10 @@ export const LOCAL_CRON_OPERATIONS = Object.freeze([
   OPERATIONS.CRON_REMOVE,
 ]);
 
+export const LOCAL_WEBSITE_PHP_OPERATIONS = Object.freeze([
+  OPERATIONS.WEBSITE_PHP_ACTION,
+]);
+
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 
 function validEnvironmentBundle(value) {

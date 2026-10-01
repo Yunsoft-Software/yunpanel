@@ -312,7 +312,7 @@ test('persisted reseller creates a new direct customer login and profile atomica
   assert.equal(account.revision, 1);
   assert.equal(account.userRevision, 2);
   const user = f.db.prepare("SELECT username, password_hash, role, active FROM users WHERE id = ?").get(account.id);
-  assert.deepEqual(user, { username: 'new-customer', password_hash: 'fixture-customer-hash:customer-password', role: 'site_manager', active: 1 });
+  assert.deepEqual({ ...user }, { username: 'new-customer', password_hash: 'fixture-customer-hash:customer-password', role: 'site_manager', active: 1 });
   assert.equal(f.get().usage.customers, 1);
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM auth_user_websites WHERE user_id = ?').get(account.id).n, 0);
   assert.equal(f.revoked.length, 0);
@@ -419,7 +419,7 @@ test('persisted reseller may suspend and reactivate only its direct customer log
   assert.equal(f.getSession(childToken), null);
   assert.deepEqual(f.revoked, [{ id: 'customer-a', reason: 'hosting_account_suspended' }]);
   assert.deepEqual(
-    f.db.prepare("SELECT actor, action, resource FROM fixture_audit WHERE action = 'hosting.account_suspended' ORDER BY rowid DESC LIMIT 1").get(),
+    { ...f.db.prepare("SELECT actor, action, resource FROM fixture_audit WHERE action = 'hosting.account_suspended' ORDER BY rowid DESC LIMIT 1").get() },
     { actor: 'reseller-a', action: 'hosting.account_suspended', resource: 'customer-a' },
   );
 
@@ -435,8 +435,9 @@ test('persisted reseller may suspend and reactivate only its direct customer log
 test('non-reseller site sessions and missing sessions cannot use scoped account reads', (t) => {
   const f = setup(t); f.reseller(); f.customer();
   const viewer = f.session('viewer'); const customer = f.session('customer-a');
+  assert.throws(() => f.store.get(viewer, f.requireManagement, 'customer-a'), code('reseller_scope_forbidden'));
+  assert.throws(() => f.store.get(customer, f.requireManagement, 'reseller-a'), code('reseller_scope_forbidden'));
   for (const token of [viewer, customer]) {
-    assert.throws(() => f.store.get(token, f.requireManagement, 'customer-a'), code('reseller_scope_forbidden'));
     assert.throws(() => f.store.list(token, f.requireManagement, { kind: 'customer' }), code('reseller_scope_forbidden'));
   }
   assert.throws(() => f.store.get('unknown-token', f.requireManagement, 'customer-a'), code('unauthorized'));

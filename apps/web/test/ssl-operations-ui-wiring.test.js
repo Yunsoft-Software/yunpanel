@@ -5,12 +5,12 @@ import test from 'node:test';
 test('SiteOperations SSL issuance includes Plesk Obsidian multi-SAN checkboxes and ACME email pre-fill', async () => {
   const operations = await readFile(new URL('../src/workspace/SiteOperations.jsx', import.meta.url), 'utf8');
 
-  // Pre-fills ACME email from panel settings
-  assert.match(operations, /getPanelSettings/);
-  assert.match(operations, /settings\?\.dnsSsl\?\.acmeEmail/);
+  // Pre-fills ACME email from panel session
+  assert.match(operations, /usePanelSession/);
+  assert.match(operations, /sslContactEmail/);
 
-  // Plesk Obsidian SAN checkboxes
-  assert.match(operations, /Sertifika Kapsamı \(Plesk Obsidian standardı\)/);
+  // SAN checkboxes
+  assert.match(operations, /Korunacak alan adları:/);
   assert.match(operations, /www\.\$\{domain\.primaryDomain\}/);
   assert.match(operations, /webmail\.\$\{domain\.primaryDomain\}/);
   assert.match(operations, /mail\.\$\{domain\.primaryDomain\}/);

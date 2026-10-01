@@ -845,7 +845,7 @@ export async function reconcileCompletedJob({
       error: null,
     };
   }
-  return { reconciled: true, outcome: 'succeeded', status: 'succeeded', error: null };
+  return { reconciled: true, error: null };
 }
 
 export const jobReconciliationInternals = Object.freeze({

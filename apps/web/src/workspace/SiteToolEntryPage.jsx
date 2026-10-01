@@ -30,7 +30,7 @@ export default function SiteToolEntryPage({ tool }) {
   forwardParams.delete('site');
   const forwardQuery = forwardParams.toString() ? `?${forwardParams.toString()}` : '';
 
-  if (entry.state === 'ready') return <Navigate to={`${entry.target.href}${forwardQuery}`} replace />;
+  if (entry.state === 'ready') return forwardQuery ? <Navigate to={`${entry.target.href}${forwardQuery}`} replace /> : <Navigate to={entry.target.href} replace />;
   return <>
     <PageHeading title={title} description="Yönetmek istediğiniz web sitesini seçin." />
     {entry.state === 'unavailable' && <><CollectionNotice resource={websites} label="Web siteleri" /><CollectionNotice resource={domains} label="Alan adları" />{websites.status === 'ready' && domains.status === 'ready' && <EmptyState icon={icon} title="Site listesi doğrulanamadı" detail="Sunucu beklenen site envanterini döndürmedi. Sayfayı yenileyip tekrar deneyin." />}</>}

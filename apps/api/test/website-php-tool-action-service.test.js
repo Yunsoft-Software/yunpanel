@@ -11,6 +11,7 @@ const preview = websitePhpToolActionPreview({
   websiteRevision: 4,
 }, 'composer.dump-autoload');
 
+
 const input = Object.freeze({
   actionId: preview.actionId,
   expectedWebsiteRevision: preview.websiteRevision,

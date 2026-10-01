@@ -50,7 +50,7 @@ function RemovalWorkspace({scope,generation}){
     <Button variant="danger" disabled={state?.busy} onClick={()=>setConfirm(true)}>Siteyi sil…</Button></>}
    {operation&&<Operation operation={operation} next={next} busy={state?.busy} onContinue={()=>void ref.current?.continueStep()} onDone={()=>navigate('/websites')}/>}
    {state?.unknownMutation&&<p className="ws-muted">Belirsiz işlem sonucu nedeniyle aynı istek tekrar edilmedi; güncel sunucu durumu güvenle yeniden okundu.</p>}
-   <p className="ws-muted">Her çağrı yalnız sıradaki adımı ilerletir. Güvenlik gereği sonraki adım için onayınız alınır.</p>
+   <p className="ws-muted">Her çağrı yalnız journal'daki mevcut adımı ilerletir. Güvenlik gereği sonraki adım için onayınız alınır.</p>
   </div>
   {confirm&&<ConfirmDialog title="Siteyi kalıcı olarak sil" confirmation={scope.label} busy={state?.busy} error={state?.error}
    message={scope.label+' ve bu Website’e bağlı yönetilen web kaynakları kalıcı olarak kaldırılacak. Yedek kayıtları silinmeyecek. Bu işlem adım adım güvenli görev akışı üzerinden yürütülür.'}

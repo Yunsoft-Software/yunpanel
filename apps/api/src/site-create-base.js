@@ -1028,13 +1028,14 @@ export async function createSite({
   domainRegistry,
   mailDomainRegistry = null,
   serverDnsIdentityRegistry = null,
+  siteMutationLock = null,
 } = {}) {
   if (typeof previewDigest !== 'string' || !SHA256_PATTERN.test(previewDigest)) {
     throw new SiteCreateError('site_create_preview_digest_invalid', 'A current site-create preview digest is required');
   }
   const preview = await previewSiteCreate({
     input, registry, applicationRegistry, dockerWorkloadRegistry, dockerComposeProjectRegistry, websiteRegistry, domainRegistry,
-    mailDomainRegistry, serverDnsIdentityRegistry,
+    mailDomainRegistry, serverDnsIdentityRegistry, siteMutationLock,
   });
   if (preview.previewDigest !== previewDigest) {
     throw new SiteCreateError('site_create_preview_stale', 'Site-create state changed after preview; request a new preview', 409);

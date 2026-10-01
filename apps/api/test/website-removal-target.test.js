@@ -46,7 +46,10 @@ for (const changes of [{ websiteId: 'other' }, { stepId: 'old-step' }, { expecte
 test('finished operation continuation is a 409, not a null-step TypeError', async () => {
   const f = await removalFixture(); let op = await f.runtime.start(removalStart(f.preview));
   const stale = removalContinue(op);
-  op = await f.runtime.continueStep(stale); assert.equal(op.status, 'removed');
+  while (op.status === 'running') {
+    op = await f.runtime.continueStep(removalContinue(op));
+  }
+  assert.equal(op.status, 'removed');
   await assert.rejects(f.runtime.continueStep(stale), code('website_removal_step_continuation_stale'));
 });
 test('two runtime instances sharing a registry cannot start the same Website concurrently', async () => {
@@ -89,8 +92,10 @@ for (const [websiteId, exists, expected] of [['site-a', true, 200], ['site-b', t
     mountWebsiteRemovalRoutes({ get: (path, ...handlers) => routes.set(path, handlers.at(-1)), post() {} },
       { runtime: { ...f.runtime, get: async () => exists ? operation : null } });
     let status = 200, payload;
-    await routes.get(route)({ params: { websiteId, operationId: operation.id } }, { json: (data) => { payload = data; } },
-      (error) => { status = error.status; });
+    await routes.get(route)({
+      params: { websiteId, operationId: operation.id },
+      auth: { id: 'sess-1', user: { id: 'user-1', role: 'owner', active: true } },
+    }, { json: (data) => { payload = data; } }, (error) => { status = error.status; });
     assert.equal(status, expected);
     if (expected === 404) assert.equal(payload, undefined); else assert.equal(payload.operation.id, operation.id);
   });

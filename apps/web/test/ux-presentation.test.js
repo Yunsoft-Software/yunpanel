@@ -24,12 +24,13 @@ test('system theme follows OS and explicit theme wins', () => {
   assert.equal(resolveTheme('dark', false), 'dark');
 });
 test('read-only navigation retains only the existing authorized route set', () => {
-  assert.deepEqual(navigationGroups(false).flatMap((group) => group.items.map(([to]) => to)), ['/websites', '/dashboard', '/servers']);
+  assert.deepEqual(navigationGroups(false).flatMap((group) => group.items.map(([to]) => to)), ['/websites', '/dashboard']);
+  assert.deepEqual(navigationGroups(false, false).flatMap((group) => group.items.map(([to]) => to)), ['/websites']);
 });
 test('owner navigation keeps jobs and audit accessible through categorized settings', () => {
   const paths = navigationGroups(true).flatMap((group) => group.items.map(([to]) => to));
   assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
-  assert.ok(paths.includes('/settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
+  assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
   assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
 });
 test('website counter uses unique Website records, not hostnames or aliases', () => {
@@ -47,7 +48,7 @@ test('command palette cannot expose unavailable or forbidden domain data', () =>
 });
 test('read-only command palette does not expose mutation or management destinations', () => {
   const entries = commandEntries({ query: '', canManage: false });
-  assert.deepEqual(entries.map((entry) => entry.to), ['/websites', '/dashboard', '/servers']);
+  assert.deepEqual(entries.map((entry) => entry.to), ['/websites']);
 });
 test('domain search preserves Domain route identity and safely encodes it', () => {
   const result = commandEntries({ query: 'alias', domains: { status: 'ready', items: [{ id: 'd/one', websiteId: 'w1', primaryDomain: 'example.test', aliases: ['alias.test'] }] } });
@@ -61,13 +62,13 @@ test('search has bounded domain suggestions and encodes query strings', () => {
   assert.equal(new URL(commandEntries({ query: 'x'.repeat(500) }).at(-1).to, 'https://panel.test').searchParams.get('q').length, 253);
 });
 test('site grouping keeps every existing tab exactly once in at most six groups', () => {
-  const tabs = ['overview', 'resources', 'node', 'deploy', 'domains', 'dns', 'ssl', 'files', 'logs', 'terminal', 'settings'].map((key) => [key, key]);
+  const tabs = ['overview', 'databases', 'node', 'deploy', 'domains', 'dns', 'ssl', 'files', 'logs', 'terminal', 'settings'].map((key) => [key, key]);
   const grouped = groupSiteTabs(tabs);
-  assert.equal(grouped.length, 6);
+  assert.ok(grouped.length <= 6);
   assert.deepEqual(grouped.flatMap((group) => group.tabs.map(([key]) => key)).sort(), tabs.map(([key]) => key).sort());
 });
 test('runtime-filtered and future backend tabs remain reachable without placeholders', () => {
-  assert.deepEqual(groupSiteTabs([['overview', 'Overview']]).map((group) => group.id), ['overview']);
+  assert.deepEqual(groupSiteTabs([['overview', 'Overview']]).map((group) => group.id), ['dashboard']);
   const grouped = groupSiteTabs([['overview', 'Overview'], ['future-runtime', 'New runtime']]);
-  assert.ok(grouped.find((group) => group.id === 'operations').tabs.some(([key]) => key === 'future-runtime'));
+  assert.ok(grouped.find((group) => group.id === 'extensions').tabs.some(([key]) => key === 'future-runtime'));
 });

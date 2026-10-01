@@ -1132,8 +1132,15 @@ export function createApp({
         resourceId: certificate.id,
       });
       await certificateRegistry.setState(certificate.id, 'issuing');
+      const certRecord = await certificateRegistry.getCertificate(certificate.id);
       return response.status(202).json({
-        data: { certificate: certificatePublicView(await certificateRegistry.getCertificate(certificate.id)), job: jobPublicView(job) },
+        data: {
+          certificate: {
+            ...certificatePublicView(certRecord),
+            email: certRecord?.email ?? null,
+          },
+          job: jobPublicView(job),
+        },
       });
     } catch (error) {
       await certificateRegistry.markFailed(certificate.id, error.code ?? 'certificate_enqueue_failed');

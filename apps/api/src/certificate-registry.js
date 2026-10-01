@@ -5,7 +5,7 @@ import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { createProcessStoreLock } from './process-store-lock.js';
 
-const STORE_VERSION = 8;
+const STORE_VERSION = 7;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -210,7 +210,6 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     certificateNames: Object.freeze([...(certificate.certificateNames ?? certificate.domains ?? [])]),
     challenge,
     staging: certificate.staging === true,
-    email: certificate.email ?? null,
     subject: typeof certificate.subject === 'string' ? sanitizeLogMessage(certificate.subject).message.slice(0, 500) : null,
     issuer: typeof certificate.issuer === 'string' ? sanitizeLogMessage(certificate.issuer).message.slice(0, 500) : null,
     subjectAltName: typeof certificate.subjectAltName === 'string'

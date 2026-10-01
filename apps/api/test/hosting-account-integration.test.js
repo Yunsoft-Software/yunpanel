@@ -47,7 +47,7 @@ test('user admin composition supplies the existing password and username helpers
   assert.equal(account.username, 'composed-child');
   assert.equal(account.resellerId, 'reseller-a');
   assert.deepEqual(
-    f.db.prepare('SELECT password_hash, role, active FROM users WHERE id = ?').get(account.id),
+    { ...f.db.prepare('SELECT password_hash, role, active FROM users WHERE id = ?').get(account.id) },
     { password_hash: 'composed-hash:customer-password', role: 'site_manager', active: 1 },
   );
 });

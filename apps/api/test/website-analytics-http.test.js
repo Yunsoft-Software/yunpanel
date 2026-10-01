@@ -66,6 +66,13 @@ test('website analytics routes generate reports and manage daemons', async () =>
         pidPath: `/run/yunpanel/goaccess/${websiteId}.pid`,
       };
     },
+    inspectGoAccess: async () => {
+      goaccessCalls.push(['inspect-tool']);
+      return {
+        satisfied: true,
+        version: '1.9.3',
+      };
+    },
     startRealtimeDaemon: async (opts) => {
       goaccessCalls.push(['start', opts]);
       return {
@@ -125,8 +132,10 @@ test('website analytics routes generate reports and manage daemons', async () =>
     const statusRes = await fetch(`${baseUrl}/api/websites/site-1/analytics/status`);
     assert.equal(statusRes.status, 200);
     const statusJson = await statusRes.json();
+    assert.equal(statusJson.data.available, true);
     assert.equal(statusJson.data.running, true);
-    assert.equal(statusJson.data.pid, 12345);
+    assert.equal(statusJson.data.socketReady, true);
+    assert.equal(Object.hasOwn(statusJson.data, 'pid'), false);
     assert.equal(statusJson.data.wsUrl, '/tools/goaccess/site-1/ws');
 
     // 4. POST realtime start
@@ -145,8 +154,9 @@ test('website analytics routes generate reports and manage daemons', async () =>
     const restartRes = await fetch(`${baseUrl}/api/websites/site-1/analytics/realtime/restart`, { method: 'POST' });
     assert.equal(restartRes.status, 200);
     const restartJson = await restartRes.json();
+    assert.equal(restartJson.data.websiteId, 'site-1');
     assert.equal(restartJson.data.running, true);
-    assert.equal(restartJson.data.pid, 12346);
+    assert.equal(Object.hasOwn(restartJson.data, 'pid'), false);
 
     // 7. Unknown website returns 404
     const notFoundRes = await fetch(`${baseUrl}/api/websites/unknown/analytics/status`);

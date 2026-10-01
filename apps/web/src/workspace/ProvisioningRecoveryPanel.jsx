@@ -99,18 +99,19 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
       </div>
       {operation && <div className="ws-table-scroll"><table className="ws-table">
         <thead><tr><th>Görev adımı</th><th>Durum</th><th>Tanılama / çözüm</th><th>İşlem</th></tr></thead>
-        <tbody>{operation.steps.map((item) => {
-          const remediation = provisioningRemediation(item);
-          return <tr key={item.id}>
-            <td><strong>{provisioningStepLabel(item)}</strong><div className="ws-muted"><code>{item.id}</code></div></td>
-            <td><Badge state={provisioningBadgeState(item)}>{provisioningStepStateLabel(item)}</Badge></td>
-            <td>{item.error ? <code>{item.error}</code> : item.compensation.error ? <code>{item.compensation.error}</code> : <span className="ws-muted">—</span>}
+        <tbody>{operation.steps.map((step) => {
+          const item = step;
+          const remediation = provisioningRemediation(step); // provisioningRemediation(item)
+          return <tr key={step.id}>
+            <td><strong>{provisioningStepLabel(step)}</strong><div className="ws-muted"><code>{step.id}</code></div></td>
+            <td><Badge state={provisioningBadgeState(step)}>{provisioningStepStateLabel(step)}</Badge></td>
+            <td>{step.error ? <code>{step.error}</code> : step.compensation.error ? <code>{step.compensation.error}</code> : <span className="ws-muted">—</span>}
               {remediation && <div className="ws-muted ws-provisioning-remediation">{remediation}</div>}
             </td>
             <td><div className="ws-actions">
-              {canManage && item.canRetry && <Button disabled={!available} onClick={() => client.current?.prepare('retry', item.id)}>Tekrar dene</Button>}
-              {canManage && item.canCompensate && <Button variant="danger" disabled={!available} onClick={() => client.current?.prepare('compensate', item.id)}>Geri al</Button>}
-              {(!canManage || (!item.canRetry && !item.canCompensate)) && <span className="ws-muted">—</span>}
+              {canManage && step.canRetry === true && <Button disabled={!available} onClick={() => client.current?.prepare('retry', step.id)}>Tekrar dene</Button>}
+              {canManage && step.canCompensate === true && <Button variant="danger" disabled={!available} onClick={() => client.current?.prepare('compensate', step.id)}>Geri al</Button>}
+              {(!canManage || (step.canRetry !== true && step.canCompensate !== true)) && <span className="ws-muted">—</span>}
             </div></td>
           </tr>;
         })}</tbody>

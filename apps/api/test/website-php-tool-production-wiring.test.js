@@ -6,7 +6,7 @@ test('production PHP action wiring uses live session lookup both at queue and wo
  const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
  assert.match(source,/authStore\.getSessionById\(actor\.sessionId\)/);
  assert.match(source,/authorizeActor: authorizeWebsitePhpActor/);
- assert.match(source,/withApplicationLock: websitePhpActionLock\.withApplicationLock/);
+ assert.match(source,/withApplicationLock: siteMutationLock\.withApplicationLock/);
  assert.match(source,/websitePhpToolActionService,/);
 });
 test('queue response uses public job view so actor/session payload is not exposed',async()=>{

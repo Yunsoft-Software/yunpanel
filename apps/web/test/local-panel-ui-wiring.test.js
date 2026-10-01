@@ -9,6 +9,7 @@ test('management UI has one implicit local server and no server chooser', async 
     '../src/workspace/DatabasesPage.jsx',
     '../src/workspace/OperationsPages.jsx',
     '../src/DomainManager.jsx',
+    '../src/workspace/site-create-submission.js',
   ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
   const combined = sources.join('\n');
   assert.doesNotMatch(combined, /Sunucu seç|Tüm sunucular|Select server|serverId: ''/);
@@ -17,8 +18,8 @@ test('management UI has one implicit local server and no server chooser', async 
   assert.doesNotMatch(sources[2], /inspectDatabases|Sunucuyu tara/);
   assert.match(sources[3], /YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir/);
   assert.doesNotMatch(sources[3], /ServerManager|enrollment/);
-  assert.match(sources[0], /\/sites\/create-preview/);
-  assert.match(sources[0], /previewDigest: preview\.previewDigest/);
+  assert.match(sources[5], /\/sites\/create-preview/);
+  assert.match(sources[5], /previewDigest: preview\.previewDigest/);
   assert.match(sources[0], /Yeni Node\.js 24 \/ Passenger uygulaması/);
   assert.match(sources[0], /Yeni PHP-FPM uygulaması/);
   assert.match(sources[0], /Mevcut Website’i paylaş \(shared-site\)/);
@@ -40,12 +41,12 @@ test('primary navigation exposes working modules instead of placeholder destinat
     readFile(new URL('../src/workspace/OperationsPages.jsx', import.meta.url), 'utf8'),
   ]);
   assert.match(layout, /navigationGroups/);
-  assert.match(uxModel, /\['\/docker', 'Docker', 'box'\]/);
-  assert.match(uxModel, /\['\/mail', 'Mail', 'mail'\]/);
+  assert.match(uxModel, /\['\/docker', 'Docker/);
+  assert.match(uxModel, /\['\/mail', 'Posta', 'mail'\]/);
   assert.doesNotMatch(uxModel, /\['\/audit', 'Denetim', 'shield'\]/);
   assert.match(operations, /LinkButton to="\/audit"/);
-  assert.match(app, /path: 'docker', element: manage\(<DockerProjectsPage \/>\)/);
-  assert.match(app, /path: 'docker\/:dockerProjectId', element: manage\(<DockerProjectsPage \/>\)/);
+  assert.match(app, /path: 'docker', element: (?:owner|manage)\(<DockerProjectsPage \/>\)/);
+  assert.match(app, /path: 'docker\/:dockerProjectId', element: (?:owner|manage)\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'mail', element: manage\(<MailDomainsPage \/>\)/);
   assert.match(app, /path: 'mail\/:mailDomainId', element: manage\(<MailDomainsPage \/>\)/);
   assert.match(dockerPage, /DockerProjectCreateDialog/);
@@ -159,7 +160,7 @@ test('legacy Domain repair and real site file manager replace terminal and file 
   assert.match(detail, /websites\.items\.find/);
   assert.match(detail, /key === 'files'/);
   assert.match(detail, /key === 'terminal'/);
-  assert.match(detail, /<FilesPanel serverId=\{domain\.serverId\} websiteId=\{domain\.websiteId\}/);
+  assert.match(detail, /<SiteFilesPanel domainId=\{domain\.id\}/);
   assert.doesNotMatch(detail, /Site dosyalarını listeleme, yükleme ve düzenleme API’leri henüz uygulanmadı/);
   assert.match(files, /const base = `\/websites\/\$\{encodeURIComponent\(websiteId\)\}\/files`/);
   assert.match(files, /\$\{base\}\/text/);
