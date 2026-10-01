@@ -8,19 +8,20 @@ import {
   jobLifecycle,
   jobResourceTarget,
   jobSupportsDeployLogs,
+  jobSupportsManualRetry,
   safeJobResultMetadata,
 } from './job-presentation.js';
 import { formatDate, jobActive, jobFinishedAt } from './site-model.js';
 import { observeJob } from './observe-job.js';
 
-export default function JobDrawer() {
+export default function JobDrawer({ onRetry } = {}) {
   const { observedJob: job, jobOpen, closeJob, updateJob, refreshAll } = useWorkspace();
   if (!jobOpen || !job) return null;
   // Close/reopen and switching jobs create a fresh observer with no trusted data.
-  return <JobObservation key={job.id} id={job.id} close={closeJob} update={updateJob} refresh={refreshAll} />;
+  return <JobObservation key={job.id} id={job.id} close={closeJob} update={updateJob} refresh={refreshAll} onRetry={onRetry} />;
 }
 
-function JobObservation({ id, close, update, refresh }) {
+function JobObservation({ id, close, update, refresh, onRetry }) {
   const { domains, websites } = useWorkspace();
   const [state, setState] = useState({ job: null, error: null });
   const [logs, setLogs] = useState({ status: 'idle', data: null, error: null });
@@ -81,6 +82,11 @@ function JobObservation({ id, close, update, refresh }) {
       ]} /></details>
       {supportsLogs && <div className="ws-section-body"><div className="ws-actions"><strong>Deploy logu</strong><Button icon="refresh" disabled={logs.status === 'loading' || logs.status === 'refreshing'} onClick={loadLogs}>Yenile</Button></div><ErrorNotice error={logs.error} />{logs.status === 'loading' && !logs.data && <div className="ws-loading" role="status"><span className="ws-spinner" />Deploy logu yükleniyor…</div>}{logs.data?.entries?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Zaman</th><th>Seviye</th><th>Aşama</th><th>Mesaj</th></tr></thead><tbody>{logs.data.entries.map((entry, index) => <tr key={entry.cursor ?? `${entry.timestamp}:${index}`}><td>{formatDate(entry.timestamp)}</td><td>{entry.level}</td><td>{entry.stage ?? '—'}</td><td><code>{entry.message}</code></td></tr>)}</tbody></table></div> : logs.data && <EmptyState icon="file" title="Deploy logu yok" detail="Bu iş için saklanan bounded deploy log kaydı bulunamadı." />}</div>}
     </>}
-    <footer className="ws-modal-footer"><Button onClick={close}>Kapat</Button></footer>
+    <footer className="ws-modal-footer">
+      {typeof onRetry === 'function' && jobSupportsManualRetry(job, { canManage: true }) && (
+        <Button variant="primary" onClick={() => onRetry(job)}>Yeniden dene</Button>
+      )}
+      <Button onClick={close}>Kapat</Button>
+    </footer>
   </Modal>;
 }
