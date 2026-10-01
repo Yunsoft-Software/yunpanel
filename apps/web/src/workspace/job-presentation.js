@@ -93,6 +93,67 @@ export function jobAttemptCount(job) {
   return Number.isSafeInteger(job?.attempts) && job.attempts >= 0 ? job.attempts : null;
 }
 
+// Health checks must be cleanly separated from execution attempt counters.
+// For example, a 0/3 health check pass ratio must never be displayed as "0/3 attempts".
+export function jobHealthIndicator(job) {
+  const health = job?.healthCheck ?? job?.result?.healthCheck ?? job?.health ?? null;
+  if (!health || typeof health !== 'object') return null;
+  if (typeof health.satisfied === 'boolean') {
+    return Object.freeze({
+      satisfied: health.satisfied,
+      status: health.satisfied ? 'healthy' : 'unhealthy',
+      label: health.satisfied ? 'Sağlıklı' : 'Sağlıksız',
+      statusCode: typeof health.statusCode === 'number' ? health.statusCode : null,
+      passed: Number.isInteger(health.passed) ? health.passed : (health.satisfied ? 1 : 0),
+      total: Number.isInteger(health.total) ? health.total : 1,
+    });
+  }
+  if (typeof health.healthy === 'boolean') {
+    return Object.freeze({
+      satisfied: health.healthy,
+      status: health.healthy ? 'healthy' : 'unhealthy',
+      label: health.healthy ? 'Sağlıklı' : 'Sağlıksız',
+      statusCode: null,
+      passed: health.healthy ? 1 : 0,
+      total: 1,
+    });
+  }
+  return null;
+}
+
+// Fixed stage progressions (1/3, 2/3, 3/3) must never be treated as true completion percentages,
+// nor should failed/cancelled states be disguised as completed/successful.
+export function jobStageProgress(job) {
+  const stages = job?.stages ?? job?.progress?.stages ?? null;
+  if (stages && typeof stages === 'object' && Number.isInteger(stages.total) && Number.isInteger(stages.current)) {
+    const isTerminalFailed = ['failed', 'cancelled'].includes(job?.status);
+    return Object.freeze({
+      current: stages.current,
+      total: stages.total,
+      label: `${stages.current}/${stages.total} aşama`,
+      completed: !isTerminalFailed && stages.current === stages.total,
+      isPercentage: false,
+    });
+  }
+  return null;
+}
+
+// Manual retry via 'Yeniden dene' can be triggered by authorized users even after
+// automatic retry budget is exhausted, provided the system maximum retry limit is not reached.
+export function jobSupportsManualRetry(job, { canManage = false } = {}) {
+  if (!canManage || !job || typeof job !== 'object') return false;
+  if (job.status !== 'failed' && job.canRetry !== true) return false;
+  const attempts = Number.isSafeInteger(job.attempts) ? job.attempts : 0;
+  const maxAttempts = Number.isSafeInteger(job.maxAttempts) ? job.maxAttempts : 10;
+  if (attempts >= maxAttempts) return false;
+  if (job.permanentError === true && job.manualRetryAllowed !== true) return false;
+  if (job.canRetry === true) return true;
+  if (job.status === 'failed') return true;
+  return false;
+}
+
+export const canTriggerManualRetry = jobSupportsManualRetry;
+
 export function safeJobResultMetadata(job) {
   const result = job?.result;
   if (!result || typeof result !== 'object' || Array.isArray(result)) return Object.freeze([]);
@@ -113,4 +174,8 @@ export const jobPresentationInternals = Object.freeze({
   safeResultFields: SAFE_RESULT_FIELDS,
   boundedScalar,
   deployLogOperations: DEPLOY_LOG_OPERATIONS,
+  jobHealthIndicator,
+  jobStageProgress,
+  jobSupportsManualRetry,
+  canTriggerManualRetry,
 });
