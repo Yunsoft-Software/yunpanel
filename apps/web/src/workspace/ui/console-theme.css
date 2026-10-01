@@ -162,6 +162,13 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-keyvalues dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
 .ws-form { display: grid; gap: 18px; padding: var(--ws-section-pad); }
 .ws-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
+.ws-site-admin-fields { align-items: start; }
+.ws-site-admin-fields label { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; padding: 0; font-size: 12px; font-weight: 550; line-height: 1.4; align-self: start; }
+.ws-site-admin-fields label > input { box-sizing: border-box; width: 100%; height: var(--ws-control-height); min-height: var(--ws-control-height); padding: 10px 12px; font-size: 14px; line-height: 1.4; margin: 0; }
+.ws-site-admin-fields label > input:invalid { box-shadow: none; }
+.ws-site-admin-fields input[type="password"]::-ms-reveal, .ws-site-admin-fields input[type="password"]::-ms-clear { display: none; width: 0; height: 0; }
+.ws-site-admin-fields input::-webkit-credentials-auto-fill-button { margin: 0; }
+.ws-site-admin-fields .ws-field-hint { font-size: 12px; line-height: 1.5; color: var(--ws-muted); margin: 0; }
 .ws-form h3 { margin: 0; font-size: 14px; }
 .ws-form-divider { margin-top: 0; padding-top: 20px; border-top: 1px solid var(--ws-border); }
 .ws-form-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding-top: 18px; border-top: 1px solid var(--ws-border); }
