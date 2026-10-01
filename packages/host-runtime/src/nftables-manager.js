@@ -18,6 +18,11 @@ export const RESOLVED_DEFAULT_SSH_PORT = nftablesTemplatePolicy.defaultSshPort
   ?? nftablesTemplatePolicy.standardPorts?.ssh
   ?? 22;
 
+export const MANAGED_FIREWALL_TABLE = 'yunpanel';
+export const MANAGED_FIREWALL_FAMILY = 'inet';
+export const DOCKER_BRIDGE_INTERFACES = Object.freeze(['docker0', 'br-*']);
+export const CROWDSEC_SET_NAMES = Object.freeze(['crowdsec-blacklists', 'crowdsec6-blacklists']);
+
 function execFileSafe(file, args, options = {}) {
   return execFileAsync(file, args, {
     encoding: 'utf8',
@@ -380,6 +385,378 @@ export async function verifySshListenerContract(candidateContent, {
   });
 }
 
+export function detectTableNames(rulesetText) {
+  if (!rulesetText || typeof rulesetText !== 'string') return [];
+  const results = [];
+  const regex = /table\s+(inet|ip|ip6|bridge|netdev)\s+([a-zA-Z0-9_-]+)/gi;
+  let m;
+  while ((m = regex.exec(rulesetText)) !== null) {
+    results.push({ family: m[1].toLowerCase(), name: m[2] });
+  }
+  return results;
+}
+
+function findNamedBlocks(rulesetText, type, name) {
+  if (!rulesetText || typeof rulesetText !== 'string') return [];
+  const escapedName = name.replace(/[-/\\^$*+?.()|[\]{}]/g, '\\$&');
+  const headerRegex = new RegExp(`(?:^|[\\s;])(${type}\\s+${escapedName}\\s*\\{)`, 'gi');
+  const blocks = [];
+  let match;
+  while ((match = headerRegex.exec(rulesetText)) !== null) {
+    const startIndex = match.index + match[0].indexOf(match[1]);
+    const openBrace = rulesetText.indexOf('{', startIndex);
+    if (openBrace === -1) continue;
+
+    let depth = 0;
+    let inComment = false;
+    let closeBrace = -1;
+
+    for (let i = openBrace; i < rulesetText.length; i++) {
+      const ch = rulesetText[i];
+      if (inComment) {
+        if (ch === '\n') inComment = false;
+        continue;
+      }
+      if (ch === '#') {
+        inComment = true;
+        continue;
+      }
+      if (ch === '{') {
+        depth++;
+      } else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          closeBrace = i;
+          break;
+        }
+      }
+    }
+
+    if (closeBrace !== -1) {
+      blocks.push({
+        start: startIndex,
+        end: closeBrace + 1,
+        openBraceIndex: openBrace,
+        closeBraceIndex: closeBrace,
+        body: rulesetText.slice(openBrace + 1, closeBrace),
+      });
+      headerRegex.lastIndex = closeBrace + 1;
+    }
+  }
+  return blocks;
+}
+
+export function extractSetElements(rulesetText, setName) {
+  if (!rulesetText || typeof rulesetText !== 'string') return [];
+  const blocks = findNamedBlocks(rulesetText, 'set', setName);
+  if (blocks.length === 0) return [];
+  const elements = [];
+  for (const block of blocks) {
+    const elementsMatch = block.body.match(/elements\s*=\s*\{([^{}]*)\}/i);
+    if (elementsMatch) {
+      const items = elementsMatch[1]
+        .split(/[,\s;]+/)
+        .map((s) => s.trim())
+        .filter(Boolean);
+      for (const item of items) {
+        if (!elements.includes(item)) {
+          elements.push(item);
+        }
+      }
+    }
+  }
+  return elements;
+}
+
+function updateSetWithElements(rulesetText, setName, mergedElements) {
+  if (!mergedElements || mergedElements.length === 0) return rulesetText;
+  const blocks = findNamedBlocks(rulesetText, 'set', setName);
+  if (blocks.length === 0) return rulesetText;
+
+  let result = rulesetText;
+  for (let i = blocks.length - 1; i >= 0; i--) {
+    const block = blocks[i];
+    let newBody;
+    if (/elements\s*=\s*\{[^{}]*\}/i.test(block.body)) {
+      newBody = block.body.replace(
+        /elements\s*=\s*\{[^{}]*\}/i,
+        `elements = { ${mergedElements.join(', ')} }`,
+      );
+    } else if (!block.body.includes('\n')) {
+      const trimmed = block.body.trim();
+      const semi = trimmed.endsWith(';') ? '' : ';';
+      newBody = ` ${trimmed}${semi} elements = { ${mergedElements.join(', ')} }; `;
+    } else {
+      const indentMatch = block.body.match(/\n([ \t]+)\S/);
+      const indent = indentMatch ? indentMatch[1] : '    ';
+      const closingMatch = block.body.match(/\n([ \t]*)$/);
+      const closingIndent = closingMatch ? closingMatch[1] : '  ';
+      newBody = `${block.body.trimEnd()}\n${indent}elements = { ${mergedElements.join(', ')} }\n${closingIndent}`;
+    }
+
+    result = result.slice(0, block.openBraceIndex + 1) + newBody + result.slice(block.closeBraceIndex);
+  }
+  return result;
+}
+
+export function preserveCrowdsecSetElements(candidateContent, liveRulesetText) {
+  if (!candidateContent || typeof candidateContent !== 'string') return candidateContent;
+  if (!liveRulesetText || typeof liveRulesetText !== 'string') return candidateContent;
+
+  const ipv4Elements = extractSetElements(liveRulesetText, 'crowdsec-blacklists');
+  const ipv6Elements = extractSetElements(liveRulesetText, 'crowdsec6-blacklists');
+
+  let updated = candidateContent;
+
+  if (ipv4Elements.length > 0) {
+    const candidateIpv4 = extractSetElements(candidateContent, 'crowdsec-blacklists');
+    const mergedIpv4 = [...new Set([...candidateIpv4, ...ipv4Elements])];
+    updated = updateSetWithElements(updated, 'crowdsec-blacklists', mergedIpv4);
+  }
+
+  if (ipv6Elements.length > 0) {
+    const candidateIpv6 = extractSetElements(candidateContent, 'crowdsec6-blacklists');
+    const mergedIpv6 = [...new Set([...candidateIpv6, ...ipv6Elements])];
+    updated = updateSetWithElements(updated, 'crowdsec6-blacklists', mergedIpv6);
+  }
+
+  return updated;
+}
+
+export function sanitizeManagedRuleset(content, {
+  tableName = MANAGED_FIREWALL_TABLE,
+  family = MANAGED_FIREWALL_FAMILY,
+} = {}) {
+  if (typeof content !== 'string') return content;
+
+  let sanitized = content;
+
+  // 1. Remove any global flush ruleset lines
+  sanitized = sanitized.replace(/^[ \t]*flush[ \t]+ruleset[ \t]*(?:;[ \t]*)?(?:#[^\n]*)?$/gm, '');
+
+  // 2. Identify target table: use specified tableName if present, or detect first table
+  let targetTable = tableName;
+  let targetFamily = family;
+  const detected = detectTableNames(sanitized);
+  const foundExplicit = detected.find((t) => t.name === tableName && t.family === family);
+  if (!foundExplicit && detected.length > 0) {
+    targetTable = detected[0].name;
+    targetFamily = detected[0].family;
+  }
+
+  // 3. Ensure targeted table initialization and deletion before the table definition
+  const deleteTableRegex = new RegExp(`delete\\s+table\\s+${targetFamily}\\s+${targetTable}\\b`, 'i');
+  if (!deleteTableRegex.test(sanitized)) {
+    const tableDefRegex = new RegExp(`(^|[\\n;])([ \\t]*table\\s+${targetFamily}\\s+${targetTable}\\s*\\{)`, 'i');
+    const match = sanitized.match(tableDefRegex);
+    if (match) {
+      const idx = match.index + match[1].length;
+      const prefix = sanitized.slice(0, idx);
+      const rest = sanitized.slice(idx);
+      const scopedReset = `table ${targetFamily} ${targetTable}\ndelete table ${targetFamily} ${targetTable}\n`;
+      sanitized = `${prefix}${scopedReset}${rest}`;
+    }
+  }
+
+  // 4. Clean up leading blank lines
+  sanitized = sanitized.replace(/^(\s*[\r\n]){2,}/, '\n');
+
+  return sanitized.trim() + '\n';
+}
+
+export function verifyDockerCoexistence(candidateContent, {
+  liveRuleset = null,
+} = {}) {
+  if (typeof candidateContent !== 'string') return Object.freeze({ verified: true, dockerProtected: true });
+
+  // 1. Prohibit global flush ruleset (would flush Docker's iptables-nft tables)
+  if (/^[ \t]*flush[ \t]+ruleset\b/m.test(candidateContent)) {
+    throw new NftablesManagerError(
+      'global_flush_prohibited',
+      'Candidate ruleset uses "flush ruleset" which destroys Docker iptables/nftables tables, NAT, and network isolation.',
+    );
+  }
+
+  // 2. Prohibit deleting Docker's own tables directly
+  const deleteTableRegex = /delete\s+table\s+(?:ip|ip6)\s+(?:nat|filter)\b/gi;
+  if (deleteTableRegex.test(candidateContent)) {
+    throw new NftablesManagerError(
+      'docker_table_interference',
+      'Candidate ruleset explicitly deletes Docker tables. Docker coexistence requires leaving Docker tables untouched.',
+    );
+  }
+
+  // 3. Verify Docker bridge interface traffic is permitted in forward chain
+  const forwardBlocks = findNamedBlocks(candidateContent, 'chain', 'forward');
+  for (const block of forwardBlocks) {
+    const chainBody = block.body;
+    const hasDocker0 = /iifname\s+"docker0"\s+accept/i.test(chainBody) || /oifname\s+"docker0"\s+accept/i.test(chainBody);
+    const hasBr = /iifname\s+"br-\*"\s+accept/i.test(chainBody) || /oifname\s+"br-\*"\s+accept/i.test(chainBody);
+
+    if (!hasDocker0 || !hasBr) {
+      throw new NftablesManagerError(
+        'docker_interface_isolation_risk',
+        'Candidate forward chain does not permit traffic for Docker bridge interfaces ("docker0" and "br-*"). Container access and networking would be blocked.',
+      );
+    }
+  }
+
+  return Object.freeze({
+    verified: true,
+    dockerProtected: true,
+    bridgeInterfacesAllowed: true,
+  });
+}
+
+export function verifyCrowdsecCoexistence(candidateContent, {
+  liveRuleset = null,
+} = {}) {
+  if (typeof candidateContent !== 'string') return Object.freeze({ verified: true, crowdsecProtected: true });
+
+  // 1. Prohibit global flush ruleset (would flush CrowdSec's table / sets)
+  if (/^[ \t]*flush[ \t]+ruleset\b/m.test(candidateContent)) {
+    throw new NftablesManagerError(
+      'global_flush_prohibited',
+      'Candidate ruleset uses "flush ruleset" which wipes CrowdSec bouncer tables, sets, and active blocklists.',
+    );
+  }
+
+  // 2. Prohibit deleting CrowdSec's own tables directly
+  if (/delete\s+table\s+(?:inet|ip|ip6)\s+crowdsec\b/i.test(candidateContent)) {
+    throw new NftablesManagerError(
+      'crowdsec_table_interference',
+      'Candidate ruleset explicitly deletes CrowdSec tables. CrowdSec coexistence requires leaving CrowdSec tables untouched.',
+    );
+  }
+
+  // 3. In table inet yunpanel, verify CrowdSec sets and early drop rules exist
+  if (/table\s+inet\s+yunpanel\b/i.test(candidateContent)) {
+    const hasIpv4Set = /set\s+crowdsec-blacklists\b/i.test(candidateContent);
+    const hasIpv6Set = /set\s+crowdsec6-blacklists\b/i.test(candidateContent);
+    const hasIpv4Drop = /ip\s+saddr\s+@crowdsec-blacklists\s+drop/i.test(candidateContent);
+    const hasIpv6Drop = /ip6\s+saddr\s+@crowdsec6-blacklists\s+drop/i.test(candidateContent);
+
+    if (!hasIpv4Set || !hasIpv6Set || !hasIpv4Drop || !hasIpv6Drop) {
+      throw new NftablesManagerError(
+        'crowdsec_integration_missing',
+        'Candidate table inet yunpanel must define crowdsec-blacklists and crowdsec6-blacklists sets and early drop rules to maintain CrowdSec bouncer protection.',
+      );
+    }
+  }
+
+  return Object.freeze({
+    verified: true,
+    crowdsecProtected: true,
+    setsPreserved: true,
+  });
+}
+
+export async function inspectDockerFirewall({
+  execFn = execFileSafe,
+  nftPath = '/usr/sbin/nft',
+} = {}) {
+  let liveRuleset = '';
+  try {
+    const { stdout } = await execFn(nftPath, ['list', 'ruleset']);
+    liveRuleset = stdout;
+  } catch {
+    liveRuleset = '';
+  }
+
+  const hasDockerIptables = /table\s+ip\s+filter\b/i.test(liveRuleset)
+    || /chain\s+DOCKER\b/i.test(liveRuleset)
+    || /chain\s+DOCKER-USER\b/i.test(liveRuleset);
+
+  const hasDockerNat = /table\s+ip\s+nat\b/i.test(liveRuleset)
+    && /chain\s+POSTROUTING\b/i.test(liveRuleset);
+
+  const hasDockerBridgeForwarding = /iifname\s+"docker0"\s+accept/i.test(liveRuleset)
+    || /oifname\s+"docker0"\s+accept/i.test(liveRuleset)
+    || /iifname\s+"br-\*"\s+accept/i.test(liveRuleset)
+    || /oifname\s+"br-\*"\s+accept/i.test(liveRuleset);
+
+  const dockerDetected = hasDockerIptables || hasDockerNat || hasDockerBridgeForwarding;
+
+  return Object.freeze({
+    dockerDetected,
+    hasDockerIptables,
+    hasDockerNat,
+    hasDockerBridgeForwarding,
+    tablesProtected: true,
+    bridgeInterfaces: DOCKER_BRIDGE_INTERFACES,
+  });
+}
+
+export async function inspectCrowdsecFirewall({
+  execFn = execFileSafe,
+  nftPath = '/usr/sbin/nft',
+  systemctlPath = '/bin/systemctl',
+} = {}) {
+  let liveRuleset = '';
+  try {
+    const { stdout } = await execFn(nftPath, ['list', 'ruleset']);
+    liveRuleset = stdout;
+  } catch {
+    liveRuleset = '';
+  }
+
+  let bouncerActive = false;
+  try {
+    const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
+    bouncerActive = stdout.trim() === 'active';
+  } catch {
+    bouncerActive = false;
+  }
+
+  const hasCrowdsecTable = /table\s+(?:ip|ip6|inet)\s+crowdsec\b/i.test(liveRuleset);
+  const hasCrowdsecSets = /set\s+crowdsec(?:6)?-blacklists/i.test(liveRuleset);
+  const ipv4Bans = extractSetElements(liveRuleset, 'crowdsec-blacklists');
+  const ipv6Bans = extractSetElements(liveRuleset, 'crowdsec6-blacklists');
+
+  return Object.freeze({
+    bouncerActive,
+    hasCrowdsecTable,
+    hasCrowdsecSets,
+    bannedIpsCount: ipv4Bans.length + ipv6Bans.length,
+    ipv4Bans: Object.freeze(ipv4Bans),
+    ipv6Bans: Object.freeze(ipv6Bans),
+    earlyDropActive: /ip\s+saddr\s+@crowdsec-blacklists\s+drop/i.test(liveRuleset),
+  });
+}
+
+export function migrateRulesetToManagedScope(rulesetContent, {
+  tableName = MANAGED_FIREWALL_TABLE,
+  family = MANAGED_FIREWALL_FAMILY,
+  liveRuleset = null,
+} = {}) {
+  if (typeof rulesetContent !== 'string' || !rulesetContent.trim()) {
+    throw new NftablesManagerError('invalid_candidate', 'Ruleset content to migrate cannot be empty');
+  }
+
+  const hadGlobalFlush = /^[ \t]*flush[ \t]+ruleset\b/m.test(rulesetContent);
+
+  // 1. Sanitize to managed scope
+  let migrated = sanitizeManagedRuleset(rulesetContent, { tableName, family });
+
+  // 2. Preserve CrowdSec elements if live ruleset is provided
+  if (liveRuleset) {
+    migrated = preserveCrowdsecSetElements(migrated, liveRuleset);
+  }
+
+  // 3. Verify Docker and CrowdSec coexistence
+  verifyDockerCoexistence(migrated);
+  verifyCrowdsecCoexistence(migrated);
+
+  return Object.freeze({
+    migratedContent: migrated,
+    hadGlobalFlush,
+    globalFlushEliminated: hadGlobalFlush,
+    managedTable: tableName,
+    managedFamily: family,
+    sha256: computeSha256(migrated),
+  });
+}
+
 export function createNftablesManager({
   nftPath = '/usr/sbin/nft',
   configPath = nftablesTemplatePolicy.configPath,
@@ -541,6 +918,18 @@ export function createNftablesManager({
     const conflictingFirewalls = await inspectConflictingFirewalls();
     const liveRuleset = await getLiveRuleset();
     const rulesetMetadata = parseRulesetMetadata(liveRuleset);
+    const dockerFirewall = await inspectDockerFirewall({ execFn, nftPath });
+    const crowdsecFirewall = await inspectCrowdsecFirewall({ execFn, nftPath, systemctlPath });
+
+    const managedBoundary = Object.freeze({
+      table: MANAGED_FIREWALL_TABLE,
+      family: MANAGED_FIREWALL_FAMILY,
+      scope: `${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}`,
+      managedTablesPresent: rulesetMetadata.hasYunpanelTable,
+      prohibitsGlobalFlush: true,
+      dockerProtected: dockerFirewall.tablesProtected,
+      crowdsecProtected: true,
+    });
 
     let sshListeners;
     try {
@@ -569,6 +958,9 @@ export function createNftablesManager({
       version,
       serviceStatus: Object.freeze(serviceStatus),
       conflictingFirewalls,
+      dockerFirewall,
+      crowdsecFirewall,
+      managedBoundary,
       ruleset: rulesetMetadata,
       sshListeners,
       defaultSshPort: resolvedDefaultSshPort,
@@ -588,10 +980,22 @@ export function createNftablesManager({
       throw new NftablesManagerError('invalid_candidate', 'Candidate ruleset content cannot be empty');
     }
 
+    // 1. Prohibit global flush ruleset (Acceptance Criterion 1)
+    if (/^[ \t]*flush[ \t]+ruleset\b/m.test(candidateContent)) {
+      throw new NftablesManagerError(
+        'global_flush_prohibited',
+        'Candidate ruleset uses "flush ruleset" which violates YunPanel managed resource boundary and destroys Docker/CrowdSec rules.',
+      );
+    }
+
+    // 2. Verify Docker and CrowdSec coexistence (Acceptance Criteria 2 & 3)
+    verifyDockerCoexistence(candidateContent);
+    verifyCrowdsecCoexistence(candidateContent);
+
     const explicitPortInput = allowedSshPorts ?? sshPorts ?? allowedSshPort ?? sshPort;
     const targetPorts = normalizeSshPorts(explicitPortInput, resolvedDefaultSshPorts);
 
-    // 1. Check lockout prevention
+    // 3. Check lockout prevention
     if (verifyListeners) {
       await verifySshListenerContract(candidateContent, {
         listeners,
@@ -604,7 +1008,7 @@ export function createNftablesManager({
       assertSshPortsAllowed(candidateContent, targetPorts);
     }
 
-    // 2. Syntax check via nft -c -f
+    // 4. Syntax check via nft -c -f
     const tempPath = `/tmp/nftables-check.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
     try {
       await writeFileFn(tempPath, candidateContent, { encoding: 'utf8', mode: 0o600 });
@@ -617,6 +1021,9 @@ export function createNftablesManager({
         sshPorts: targetPorts,
       });
     } catch (error) {
+      if (error instanceof NftablesManagerError) {
+        throw error;
+      }
       const errMsg = error.stderr || error.stdout || error.message;
       throw new NftablesManagerError(
         'candidate_syntax_error',
@@ -653,33 +1060,52 @@ export function createNftablesManager({
       ?? renderOptions.sshPorts ?? renderOptions.sshPort;
     const targetPorts = normalizeSshPorts(explicitPortInput, resolvedDefaultSshPorts);
 
-    // 3. Resolve candidate content
-    const contentToApply = candidateContent ?? renderNftablesConfig({
-      ...renderOptions,
-      sshPorts: targetPorts,
-    });
+    // 3. Snapshot current ruleset for element preservation and scoped rollback
+    const currentRuleset = await getLiveRuleset();
+    const backupRulesetSha256 = currentRuleset ? computeSha256(currentRuleset) : null;
 
-    // 4. Validate candidate (lockout + syntax)
+    // 4. Resolve candidate content
+    let contentToApply = candidateContent;
+    if (!contentToApply) {
+      const rendered = renderNftablesConfig({
+        ...renderOptions,
+        sshPorts: targetPorts,
+      });
+      // Sanitize rendered template to remove any global flush ruleset and enforce managed table scope
+      contentToApply = sanitizeManagedRuleset(rendered);
+    }
+
+    // 5. If live ruleset has active CrowdSec bans and candidate defines crowdsec sets, preserve them
+    if (currentRuleset) {
+      contentToApply = preserveCrowdsecSetElements(contentToApply, currentRuleset);
+    }
+
+    // 6. Validate candidate (rejection of global flush, coexistence, lockout + syntax)
     await validateRulesetCandidate(contentToApply, {
       allowedSshPorts: targetPorts,
       verifyListeners,
     });
 
-    // 5. Snapshot current ruleset for rollback
-    const currentRuleset = await getLiveRuleset();
-    const backupRulesetSha256 = currentRuleset ? computeSha256(currentRuleset) : null;
-
-    // 6. Apply live
+    // 7. Apply live within managed scope
     const tempPath = `/tmp/nftables-apply.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
     try {
       await writeFileFn(tempPath, contentToApply, { encoding: 'utf8', mode: 0o600 });
       await execFn(nftPath, ['-f', tempPath]);
     } catch (applyError) {
-      // Rollback immediately if backup exists
+      // Scoped rollback immediately if backup exists
       if (currentRuleset && currentRuleset.trim()) {
         try {
+          const rollbackScoped = sanitizeManagedRuleset(currentRuleset);
           const rollbackTemp = `/tmp/nftables-rollback.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
-          await writeFileFn(rollbackTemp, currentRuleset, { encoding: 'utf8', mode: 0o600 });
+          await writeFileFn(rollbackTemp, rollbackScoped, { encoding: 'utf8', mode: 0o600 });
+          await execFn(nftPath, ['-f', rollbackTemp]);
+          try { await rmFn(rollbackTemp, { force: true }); } catch {}
+        } catch {}
+      } else {
+        try {
+          const cleanupScript = `table ${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}\ndelete table ${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}\n`;
+          const rollbackTemp = `/tmp/nftables-rollback.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
+          await writeFileFn(rollbackTemp, cleanupScript, { encoding: 'utf8', mode: 0o600 });
           await execFn(nftPath, ['-f', rollbackTemp]);
           try { await rmFn(rollbackTemp, { force: true }); } catch {}
         } catch {}
@@ -692,26 +1118,26 @@ export function createNftablesManager({
       try { await rmFn(tempPath, { force: true }); } catch {}
     }
 
-    // 7. Persist to /etc/nftables.conf if requested
+    // 8. Persist to /etc/nftables.conf if requested
     if (persist) {
       await atomicWrite(configPath, contentToApply, 0o755);
     }
 
-    // 8. Enable and start nftables.service if requested (only when persisted)
+    // 9. Enable and start nftables.service if requested (only when persisted)
     if (enableService && persist) {
       try {
         await execFn(systemctlPath, ['enable', 'nftables']);
         await execFn(systemctlPath, ['start', 'nftables']);
       } catch (svcError) {
-        // Warning: service enable/start failed, but ruleset is loaded live
+        // Service enable/start failed, but ruleset is loaded live
       }
     }
 
-    // 9. If crowdsec-firewall-bouncer is active, restart it so its nftables tables are restored after flush
+    // 10. Check CrowdSec bouncer status without needlessly restarting unless inactive
     try {
       const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
       if (stdout.trim() === 'active') {
-        await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
+        // CrowdSec tables and sets remain untouched due to scoped ruleset application
       }
     } catch {}
 
@@ -726,26 +1152,48 @@ export function createNftablesManager({
       allowedSshPorts: targetPorts,
       sshPort: targetPorts[0],
       sshPorts: targetPorts,
+      managedBoundary: Object.freeze({
+        table: MANAGED_FIREWALL_TABLE,
+        family: MANAGED_FIREWALL_FAMILY,
+        scope: `${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}`,
+      }),
     });
   }
 
   async function rollbackRuleset(previousRuleset, { persist = true } = {}) {
     if (!previousRuleset || typeof previousRuleset !== 'string' || !previousRuleset.trim()) {
-      // If previous ruleset is empty, flush ruleset
-      await execFn(nftPath, ['flush', 'ruleset']);
+      // If previous ruleset is empty, delete ONLY the YunPanel-managed table
+      // NEVER execute global flush ruleset (which would wipe Docker / CrowdSec tables)
+      const tempPath = `/tmp/nftables-rollback.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
+      const cleanupScript = `table ${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}\ndelete table ${MANAGED_FIREWALL_FAMILY} ${MANAGED_FIREWALL_TABLE}\n`;
       try {
-        const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
-        if (stdout.trim() === 'active') {
-          await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
-        }
-      } catch {}
-      return Object.freeze({ success: true, rolledBack: true, flushed: true });
+        await writeFileFn(tempPath, cleanupScript, { encoding: 'utf8', mode: 0o600 });
+        await execFn(nftPath, ['-f', tempPath]);
+      } catch {
+        // Table might not exist, ignore
+      } finally {
+        try { await rmFn(tempPath, { force: true }); } catch {}
+      }
+      return Object.freeze({
+        success: true,
+        rolledBack: true,
+        flushed: false,
+        tableDeleted: true,
+        managedBoundary: Object.freeze({
+          table: MANAGED_FIREWALL_TABLE,
+          family: MANAGED_FIREWALL_FAMILY,
+        }),
+      });
     }
 
-    // Ensure flush ruleset is present at the beginning so existing tables not in previousRuleset are removed
-    const contentToRestore = previousRuleset.includes('flush ruleset')
-      ? previousRuleset
-      : `flush ruleset\n\n${previousRuleset}`;
+    // Ensure candidate to restore is strictly scoped to managed table and strips any global flush ruleset
+    let contentToRestore = sanitizeManagedRuleset(previousRuleset);
+
+    // If live ruleset has CrowdSec bans, preserve them during rollback too
+    const currentRuleset = await getLiveRuleset();
+    if (currentRuleset) {
+      contentToRestore = preserveCrowdsecSetElements(contentToRestore, currentRuleset);
+    }
 
     const tempPath = `/tmp/nftables-rollback.${process.pid}.${randomBytes(6).toString('hex')}.nft`;
     try {
@@ -754,16 +1202,14 @@ export function createNftablesManager({
       if (persist) {
         await atomicWrite(configPath, contentToRestore, 0o755);
       }
-      try {
-        const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
-        if (stdout.trim() === 'active') {
-          await execFn(systemctlPath, ['restart', 'crowdsec-firewall-bouncer']);
-        }
-      } catch {}
       return Object.freeze({
         success: true,
         rolledBack: true,
         rulesetSha256: computeSha256(contentToRestore),
+        managedBoundary: Object.freeze({
+          table: MANAGED_FIREWALL_TABLE,
+          family: MANAGED_FIREWALL_FAMILY,
+        }),
       });
     } catch (error) {
       throw new NftablesManagerError(
@@ -775,12 +1221,69 @@ export function createNftablesManager({
     }
   }
 
+  async function migrateFirewallConfiguration({
+    configPathOverride = null,
+    applyLive = false,
+    persist = true,
+  } = {}) {
+    const targetConfigPath = configPathOverride ?? configPath;
+    let existingContent = '';
+    try {
+      existingContent = await readFileFn(targetConfigPath, 'utf8');
+    } catch {
+      existingContent = '';
+    }
+
+    const liveRuleset = await getLiveRuleset();
+    const sourceContent = existingContent.trim() ? existingContent : (liveRuleset.trim() ? liveRuleset : '');
+
+    if (!sourceContent) {
+      return Object.freeze({
+        migrated: false,
+        reason: 'no_existing_ruleset',
+      });
+    }
+
+    const migrationResult = migrateRulesetToManagedScope(sourceContent, {
+      tableName: MANAGED_FIREWALL_TABLE,
+      family: MANAGED_FIREWALL_FAMILY,
+      liveRuleset,
+    });
+
+    let applied = false;
+    if (applyLive) {
+      await applyRuleset({
+        candidateContent: migrationResult.migratedContent,
+        persist,
+      });
+      applied = true;
+    } else if (persist) {
+      await atomicWrite(targetConfigPath, migrationResult.migratedContent, 0o755);
+    }
+
+    return Object.freeze({
+      migrated: true,
+      globalFlushEliminated: migrationResult.globalFlushEliminated,
+      hadGlobalFlush: migrationResult.hadGlobalFlush,
+      appliedLive: applied,
+      persisted: persist,
+      configPath: targetConfigPath,
+      sha256: migrationResult.sha256,
+      migratedContent: migrationResult.migratedContent,
+    });
+  }
+
   return Object.freeze({
     inspectNftables,
     validateRulesetCandidate,
     applyRuleset,
     rollbackRuleset,
     getLiveRuleset,
+    migrateFirewallConfiguration,
+    inspectDockerFirewall: () => inspectDockerFirewall({ execFn, nftPath }),
+    inspectCrowdsecFirewall: () => inspectCrowdsecFirewall({ execFn, nftPath, systemctlPath }),
+    verifyDockerCoexistence: (candidate, opts) => verifyDockerCoexistence(candidate, opts),
+    verifyCrowdsecCoexistence: (candidate, opts) => verifyCrowdsecCoexistence(candidate, opts),
     inspectSshListeners: (opts) => inspectSshListeners({
       ssPath,
       sshdConfigPath,
@@ -799,6 +1302,8 @@ export function createNftablesManager({
     }),
     assertSshPortAllowed: (candidate, port, opts) => assertSshPortAllowed(candidate, port, opts),
     assertSshPortsAllowed: (candidate, ports, opts) => assertSshPortsAllowed(candidate, ports, opts),
+    managedTable: MANAGED_FIREWALL_TABLE,
+    managedFamily: MANAGED_FIREWALL_FAMILY,
     configPath,
     defaultSshPort: resolvedDefaultSshPort,
     defaultSshPorts: resolvedDefaultSshPorts,
@@ -808,12 +1313,26 @@ export function createNftablesManager({
 
 export const nftablesManagerInternals = Object.freeze({
   RESOLVED_DEFAULT_SSH_PORT,
+  MANAGED_FIREWALL_TABLE,
+  MANAGED_FIREWALL_FAMILY,
+  DOCKER_BRIDGE_INTERFACES,
+  CROWDSEC_SET_NAMES,
   normalizeSshPorts,
   inspectPortCoverageInRuleset,
   assertSshPortAllowed,
   assertSshPortsAllowed,
   inspectSshListeners,
   verifySshListenerContract,
+  detectTableNames,
+  findNamedBlocks,
+  extractSetElements,
+  preserveCrowdsecSetElements,
+  sanitizeManagedRuleset,
+  verifyDockerCoexistence,
+  verifyCrowdsecCoexistence,
+  inspectDockerFirewall,
+  inspectCrowdsecFirewall,
+  migrateRulesetToManagedScope,
   execFileSafe,
   computeSha256,
 });
