@@ -192,12 +192,16 @@ import { createSiteHealthService, SiteHealthError } from './site-health-service.
 import { mountSiteHealthRoutes, SiteHealthHttpError } from './site-health-http.js';
 import { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
 import { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
+import { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
+import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
 export { API_VERSION } from './core-app.js';
 export { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
 export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
+export { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
+export { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -343,6 +347,7 @@ export function createApp(allOptions = {}) {
   websiteBackupService = null,
   websiteRestoreService = null,
   pleskImporter = null,
+  operationalNotificationService = null,
   ...options
 } = allOptions;
   const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
@@ -1090,6 +1095,20 @@ export function createApp(allOptions = {}) {
       ttydSessionManager,
     });
   }
+  const resolvedOperationalNotificationService = operationalNotificationService ?? createOperationalNotificationService({
+    authMailer: options.authMailer ?? null,
+    certificateRegistry,
+    domainRegistry,
+    websiteRegistry,
+    jobRegistry,
+    userAdminStore: options.userAdminStore ?? null,
+    hostingAccountStore: hostingAccounts,
+    customerLookup,
+    localServerId,
+  });
+  mountOperationalNotificationRoutes(app, {
+    notificationService: resolvedOperationalNotificationService,
+  });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -1206,6 +1225,8 @@ export function createApp(allOptions = {}) {
       || error instanceof SiteHealthHttpError
       || error instanceof SystemWatchdogError
       || error instanceof SystemWatchdogHttpError
+      || error instanceof OperationalNotificationError
+      || error instanceof OperationalNotificationHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

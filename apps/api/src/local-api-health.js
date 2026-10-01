@@ -156,3 +156,25 @@ export {
   SystemWatchdogHttpError,
   systemWatchdogHttpInternals,
 } from './system-watchdog-http.js';
+export {
+  createOperationalNotificationService,
+  OperationalNotificationError,
+  operationalNotificationInternals,
+} from './operational-notification-service.js';
+export {
+  mountOperationalNotificationRoutes,
+  OperationalNotificationHttpError,
+  operationalNotificationHttpInternals,
+} from './operational-notification-http.js';
+export {
+  NOTIFICATION_EVENT_TYPES,
+  NOTIFICATION_SEVERITY,
+  NOTIFICATION_CATEGORIES,
+  NOTIFICATION_CHANNELS,
+  DELIVERY_STATUS,
+  DEFAULT_NOTIFICATION_PREFERENCES,
+} from './operational-notification-types.js';
+export {
+  maskSecrets,
+  isSensitiveKey,
+} from './secret-masker.js';
