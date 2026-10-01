@@ -128,14 +128,15 @@ function record({ key, owner, type, ttl: recordTtl, values, source, templateVers
 }
 
 function placeholderValues({ zoneName, identity, mail }) {
+  const mailActive = mail?.enabled === true && (mail.requireApplied !== true || mail.applied === true);
   return Object.freeze({
     '<domain>': zoneName,
     '<server-ipv4>': identity.settings.publicIpv4,
     '<server-ipv6>': identity.settings.publicIpv6,
     '<ns1>': identity.settings.ns1.hostname,
     '<ns2>': identity.settings.ns2.hostname,
-    '<mail-host>': mail?.enabled === true ? mail.host : null,
-    '<webmail-host>': mail?.webmailEnabled === true ? mail.webmailHost : null,
+    '<mail-host>': mailActive ? mail.host : null,
+    '<webmail-host>': (mailActive && mail?.webmailEnabled === true) ? mail.webmailHost : null,
   });
 }
 
@@ -252,7 +253,7 @@ function mailDiscoveryRecords(zoneName, identity, discovery) {
 }
 
 function mailRecords(zoneName, identity, mail) {
-  if (!mail?.enabled) return [];
+  if (!mail?.enabled || (mail.requireApplied === true && mail.applied !== true)) return [];
   const host = fqdn(mail.host, 'mail host');
   const result = [
     record({ key: 'mail-mx', owner: zoneName, type: 'MX', ttl: null, values: [`10 ${host}`], source: 'mail' }, identity.settings.soa.ttl),
