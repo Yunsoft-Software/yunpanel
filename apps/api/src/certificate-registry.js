@@ -3,8 +3,9 @@ import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
+import { createProcessStoreLock } from './process-store-lock.js';
 
-const STORE_VERSION = 7;
+const STORE_VERSION = 8;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -29,18 +30,93 @@ function emptyState() {
   return { version: STORE_VERSION, certificates: [] };
 }
 
-function publicCertificate(certificate) {
+function publicCertificate(certificate, { now = Date.now } = {}) {
+  if (!certificate || typeof certificate !== 'object') return null;
   return {
     ...certificate,
     domains: [...certificate.domains],
     certificateNames: [...certificate.certificateNames],
     challenge: certificate.challenge ? { ...certificate.challenge } : null,
+    lastReloadOutcome: certificate.lastReloadOutcome ? { ...certificate.lastReloadOutcome } : null,
+    diagnosis: certificateDiagnosis(certificate, { now }),
   };
+}
+
+export function compareTlsPresentation(certificate, liveTls) {
+  if (!certificate || typeof certificate !== 'object') {
+    return Object.freeze({ matches: false, reason: 'certificate_record_required' });
+  }
+  if (!liveTls || typeof liveTls !== 'object') {
+    return Object.freeze({ matches: false, reason: 'live_tls_presentation_required' });
+  }
+
+  const certFingerprint = typeof certificate.fingerprint256 === 'string'
+    ? certificate.fingerprint256.toUpperCase()
+    : null;
+  const liveFingerprint = typeof liveTls.fingerprint256 === 'string'
+    ? liveTls.fingerprint256.toUpperCase()
+    : null;
+
+  if (!certFingerprint || !SHA256_FINGERPRINT.test(certFingerprint)) {
+    return Object.freeze({ matches: false, reason: 'stored_fingerprint_invalid' });
+  }
+  if (!liveFingerprint || !SHA256_FINGERPRINT.test(liveFingerprint)) {
+    return Object.freeze({ matches: false, reason: 'live_fingerprint_invalid' });
+  }
+
+  if (certFingerprint !== liveFingerprint) {
+    return Object.freeze({
+      matches: false,
+      reason: 'fingerprint_mismatch',
+      expected: certFingerprint,
+      actual: liveFingerprint,
+    });
+  }
+
+  const certValidFrom = Date.parse(certificate.validFrom);
+  const liveValidFrom = Date.parse(liveTls.validFrom);
+  if (!Number.isFinite(certValidFrom) || !Number.isFinite(liveValidFrom) || certValidFrom !== liveValidFrom) {
+    return Object.freeze({
+      matches: false,
+      reason: 'valid_from_mismatch',
+      expected: certificate.validFrom ?? null,
+      actual: liveTls.validFrom ?? null,
+    });
+  }
+
+  const certValidTo = Date.parse(certificate.validTo);
+  const liveValidTo = Date.parse(liveTls.validTo);
+  if (!Number.isFinite(certValidTo) || !Number.isFinite(liveValidTo) || certValidTo !== liveValidTo) {
+    return Object.freeze({
+      matches: false,
+      reason: 'valid_to_mismatch',
+      expected: certificate.validTo ?? null,
+      actual: liveTls.validTo ?? null,
+    });
+  }
+
+  return Object.freeze({
+    matches: true,
+    fingerprint256: certFingerprint,
+    validFrom: new Date(certValidFrom).toISOString(),
+    validTo: new Date(certValidTo).toISOString(),
+  });
 }
 
 export function certificateDiagnosis(certificate, { now = Date.now() } = {}) {
   if (!certificate || typeof certificate !== 'object') return null;
   if (certificate.state === 'error') return operationErrorDiagnosis('certificate', certificate.lastError);
+  if (certificate.lastReloadOutcome && certificate.lastReloadOutcome.status !== 'succeeded') {
+    const isPartial = certificate.lastReloadOutcome.status === 'partial';
+    return Object.freeze({
+      severity: 'warning',
+      code: isPartial ? 'certificate_reload_partial' : 'certificate_reload_failed',
+      message: isPartial
+        ? `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload completed partially.`
+        : `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload failed.`,
+      action: 'Inspect service configuration logs and retry reload without regenerating certificate.',
+    });
+  }
   if (certificate.state === 'pending') {
     return Object.freeze({
       severity: 'action_required', code: 'certificate_queue_required',
@@ -140,6 +216,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     lastImportedAt: certificate.lastImportedAt,
     retiredAt: certificate.retiredAt,
     materialPurgedAt: certificate.materialPurgedAt ?? null,
+    lastReloadOutcome: certificate.lastReloadOutcome ? Object.freeze({ ...certificate.lastReloadOutcome }) : null,
     provisioningOperationId: certificate.provisioningOperationId ?? null,
     createdAt: certificate.createdAt,
     updatedAt: certificate.updatedAt,
@@ -290,6 +367,23 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   if (sourceVersion < 7) {
     certificate.materialPurgedAt = null;
   }
+  if (sourceVersion < 8) {
+    certificate.lastReloadOutcome = null;
+  }
+  if (certificate.lastReloadOutcome !== null && certificate.lastReloadOutcome !== undefined && (
+    typeof certificate.lastReloadOutcome !== 'object'
+    || Array.isArray(certificate.lastReloadOutcome)
+    || typeof certificate.lastReloadOutcome.service !== 'string'
+    || !['succeeded', 'partial', 'failed'].includes(certificate.lastReloadOutcome.status)
+    || typeof certificate.lastReloadOutcome.recordedAt !== 'string'
+    || !Number.isFinite(Date.parse(certificate.lastReloadOutcome.recordedAt))
+  )) {
+    throw new CertificateRegistryError(
+      'invalid_certificate_state',
+      'Persisted certificate reload outcome evidence is invalid',
+      409,
+    );
+  }
   if (certificate.materialPurgedAt !== null && (
     typeof certificate.materialPurgedAt !== 'string'
     || !Number.isFinite(Date.parse(certificate.materialPurgedAt))
@@ -361,6 +455,7 @@ export function createCertificateRegistry({
   now = () => Date.now(),
   acmeLiveRoot = '/etc/letsencrypt/live',
   customRoot = filePath ? path.join(path.dirname(filePath), 'custom-certificates') : '/var/lib/yunpanel/control-plane/custom-certificates',
+  storeLockFactory = createProcessStoreLock,
 } = {}) {
   const roots = Object.freeze({
     acmeLiveRoot: safeAbsoluteRoot(acmeLiveRoot, '/etc/letsencrypt/live'),
@@ -368,36 +463,58 @@ export function createCertificateRegistry({
   });
   let state = emptyState();
   let initialized = false;
-  let writeChain = Promise.resolve();
+  let mutationTail = Promise.resolve();
+  const toPublic = (certificate) => publicCertificate(certificate, { now });
+  const storeLock = filePath ? storeLockFactory({
+    filePath: path.resolve(filePath),
+    now: typeof now === 'function' ? now : () => Date.now(),
+  }) : null;
 
-  async function persist() {
+  async function persistDirect() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
+    await mkdir(directory, { recursive: true });
+    await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
+    await rename(temporaryPath, filePath);
+  }
 
-    writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
-      await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
-    return writeChain;
+  async function reloadFromDisk() {
+    if (!filePath) return;
+    try {
+      const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+      if (![1, 2, 3, 4, 5, 6, 7, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
+        throw new Error('unsupported or invalid certificate registry state');
+      }
+      parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
+      state = parsed;
+      state.version = STORE_VERSION;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+    }
+  }
+
+  async function withStoreLock(action) {
+    if (!storeLock) {
+      const result = await action();
+      if (filePath) await persistDirect();
+      return result;
+    }
+    const operation = mutationTail.then(() => storeLock.withLock(async () => {
+      await reloadFromDisk();
+      const result = await action();
+      await persistDirect();
+      return result;
+    }));
+    mutationTail = operation.catch(() => {});
+    return operation;
   }
 
   async function init() {
     if (initialized) return;
     if (filePath) {
-      try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, 3, 4, 5, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.certificates)) {
-          throw new Error('unsupported or invalid certificate registry state');
-        }
-        parsed.certificates.forEach((certificate) => hydrateCertificate(certificate, parsed.version, roots));
-        state = parsed;
-        state.version = STORE_VERSION;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-      }
+      await reloadFromDisk();
     }
     initialized = true;
   }
@@ -406,7 +523,7 @@ export function createCertificateRegistry({
     if (!initialized) await init();
   }
 
-  async function createForDomain({
+  function _createForDomain({
     domainId,
     serverId,
     domains,
@@ -418,7 +535,6 @@ export function createCertificateRegistry({
     provisioningOperationId = null,
     purpose = 'web',
   }) {
-    await ensureInitialized();
     if (typeof domainId !== 'string' || !domainId) throw new CertificateRegistryError('invalid_domain', 'domainId is required');
     if (typeof serverId !== 'string' || !serverId) throw new CertificateRegistryError('invalid_server', 'serverId is required');
 
@@ -493,18 +609,17 @@ export function createCertificateRegistry({
       retiredFromUpdatedAt: null,
       materialPurgedAt: null,
       materialDigest: null,
+      lastReloadOutcome: null,
       lastError: null,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
 
     state.certificates.push(certificate);
-    await persist();
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function setState(certificateId, nextState) {
-    await ensureInitialized();
+  function _setState(certificateId, nextState) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.state === 'retired') {
       throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
@@ -515,12 +630,10 @@ export function createCertificateRegistry({
     }
     certificate.state = normalizedState;
     certificate.updatedAt = new Date(now()).toISOString();
-    await persist();
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function markValidated(certificateId, result) {
-    await ensureInitialized();
+  function _markValidated(certificateId, result) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.state === 'retired') {
       throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
@@ -538,18 +651,16 @@ export function createCertificateRegistry({
     certificate.lastValidatedAt = timestamp;
     certificate.lastError = null;
     certificate.updatedAt = timestamp;
-    await persist();
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function markActive(certificateId, result, { renewal = false } = {}) {
-    await ensureInitialized();
+  function _markActive(certificateId, result, { renewal = false } = {}) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.state === 'retired') {
       throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
     }
     if (certificate.staging) {
-      return markValidated(certificateId, result);
+      return _markValidated(certificateId, result);
     }
     if (certificate.source !== 'acme') {
       throw new CertificateRegistryError('managed_certificate_required', 'Only managed ACME certificates can reconcile issue or renewal results', 409);
@@ -583,11 +694,10 @@ export function createCertificateRegistry({
     certificate.updatedAt = timestamp;
     if (renewal) certificate.lastRenewedAt = timestamp;
     else certificate.lastIssuedAt = timestamp;
-    await persist();
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function registerCustom({
+  function _registerCustom({
     certificateId,
     domainId,
     serverId,
@@ -604,7 +714,6 @@ export function createCertificateRegistry({
     materialDigest,
     purpose = 'web',
   } = {}) {
-    await ensureInitialized();
     if (typeof certificateId !== 'string' || !UUID_PATTERN.test(certificateId)) {
       throw new CertificateRegistryError('invalid_certificate_id', 'Custom certificate ID is invalid');
     }
@@ -655,6 +764,7 @@ export function createCertificateRegistry({
       retiredFromUpdatedAt: null,
       materialPurgedAt: null,
       materialDigest: typeof materialDigest === 'string' && /^[a-f0-9]{64}$/.test(materialDigest) ? materialDigest : null,
+      lastReloadOutcome: null,
       lastError: null,
       createdAt: timestamp,
       updatedAt: timestamp,
@@ -667,17 +777,10 @@ export function createCertificateRegistry({
     certificate.fullchainPath = validateCertificatePath(certificate, fullchainPath, 'fullchain.pem', roots);
     certificate.privateKeyPath = validateCertificatePath(certificate, privateKeyPath, 'privkey.pem', roots);
     state.certificates.push(certificate);
-    try {
-      await persist();
-    } catch (error) {
-      state.certificates = state.certificates.filter((candidate) => candidate.id !== certificate.id);
-      throw error;
-    }
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function prepareSelection(certificateId) {
-    await ensureInitialized();
+  function _prepareSelection(certificateId) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.purpose !== 'web' || certificate.staging || !['active', 'superseded'].includes(certificate.state)
       || !certificate.validTo || Date.parse(certificate.validTo) <= now()) {
@@ -690,32 +793,26 @@ export function createCertificateRegistry({
       certificate.state = 'active';
       certificate.lastError = null;
       certificate.updatedAt = new Date(now()).toISOString();
-      await persist();
     }
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function commitSelection(certificateId) {
-    await ensureInitialized();
+  function _commitSelection(certificateId) {
     const selected = requireCertificate(state, certificateId);
     if (selected.purpose !== 'web' || selected.staging || selected.state !== 'active') {
       throw new CertificateRegistryError('certificate_not_selectable', 'Certificate is not selectable', 409);
     }
     const timestamp = new Date(now()).toISOString();
-    let changed = false;
     for (const certificate of state.certificates) {
       if (certificate.id === selected.id || certificate.domainId !== selected.domainId
         || certificate.purpose !== 'web' || certificate.staging || certificate.state !== 'active') continue;
       certificate.state = 'superseded';
       certificate.updatedAt = timestamp;
-      changed = true;
     }
-    if (changed) await persist();
-    return publicCertificate(selected);
+    return toPublic(selected);
   }
 
-  async function markFailed(certificateId, errorCode) {
-    await ensureInitialized();
+  function _markFailed(certificateId, errorCode) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.state === 'retired') {
       throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
@@ -723,11 +820,10 @@ export function createCertificateRegistry({
     certificate.state = 'error';
     certificate.lastError = typeof errorCode === 'string' ? errorCode.slice(0, 120) : 'certificate_operation_failed';
     certificate.updatedAt = new Date(now()).toISOString();
-    await persist();
-    return publicCertificate(certificate);
+    return toPublic(certificate);
   }
 
-  async function retireForDomainRemoval(certificateId, {
+  function _retireForDomainRemoval(certificateId, {
     expectedDomainId,
     expectedServerId,
     expectedState,
@@ -738,7 +834,6 @@ export function createCertificateRegistry({
     expectedUpdatedAt,
     operationId,
   } = {}) {
-    await ensureInitialized();
     const certificate = requireCertificate(state, certificateId);
     if (typeof operationId !== 'string' || !SAFE_OPERATION_ID.test(operationId)) {
       throw new CertificateRegistryError(
@@ -762,7 +857,7 @@ export function createCertificateRegistry({
           409,
         );
       }
-      return Object.freeze({ changed: false, certificate: publicCertificate(certificate) });
+      return Object.freeze({ changed: false, certificate: toPublic(certificate) });
     }
     if (certificate.domainId !== expectedDomainId
       || certificate.serverId !== expectedServerId
@@ -786,12 +881,10 @@ export function createCertificateRegistry({
     certificate.retiredAt = retiredAt;
     certificate.lastError = null;
     certificate.updatedAt = retiredAt;
-    await persist();
-    return Object.freeze({ changed: true, certificate: publicCertificate(certificate) });
+    return Object.freeze({ changed: true, certificate: toPublic(certificate) });
   }
 
-  async function markMaterialPurged(certificateId, { purgedAt = new Date(now()).toISOString() } = {}) {
-    await ensureInitialized();
+  function _markMaterialPurged(certificateId, { purgedAt = new Date(now()).toISOString() } = {}) {
     const certificate = requireCertificate(state, certificateId);
     if (certificate.state !== 'retired') {
       throw new CertificateRegistryError(
@@ -802,31 +895,125 @@ export function createCertificateRegistry({
     }
     const normalizedPurgedAt = validateDate(purgedAt, 'purgedAt');
     if (certificate.materialPurgedAt !== null) {
-      return Object.freeze({ changed: false, certificate: publicCertificate(certificate) });
+      return Object.freeze({ changed: false, certificate: toPublic(certificate) });
     }
     certificate.materialPurgedAt = normalizedPurgedAt;
     certificate.updatedAt = normalizedPurgedAt;
-    await persist();
-    return Object.freeze({ changed: true, certificate: publicCertificate(certificate) });
+    return Object.freeze({ changed: true, certificate: toPublic(certificate) });
+  }
+
+  function _recordReloadOutcome(certificateId, outcome = {}) {
+    const certificate = requireCertificate(state, certificateId);
+    if (certificate.state === 'retired') {
+      throw new CertificateRegistryError('certificate_retired', 'Retired certificate state is immutable', 409);
+    }
+    if (!outcome || typeof outcome !== 'object') {
+      throw new CertificateRegistryError('invalid_reload_outcome', 'Reload outcome payload is invalid');
+    }
+    const { service, status, error = null, stage = 'reload' } = outcome;
+    if (typeof service !== 'string' || !/^[a-z0-9_-]{1,64}$/i.test(service)) {
+      throw new CertificateRegistryError('invalid_reload_outcome_service', 'Reload outcome service is invalid');
+    }
+    if (!['succeeded', 'partial', 'failed'].includes(status)) {
+      throw new CertificateRegistryError('invalid_reload_outcome_status', 'Reload outcome status must be succeeded, partial, or failed');
+    }
+    if (typeof stage !== 'string' || !/^[a-z0-9_-]{1,32}$/i.test(stage)) {
+      throw new CertificateRegistryError('invalid_reload_outcome_stage', 'Reload outcome stage is invalid');
+    }
+    const recordedAt = new Date(now()).toISOString();
+    certificate.lastReloadOutcome = Object.freeze({
+      service: service.toLowerCase(),
+      status,
+      stage: stage.toLowerCase(),
+      error: typeof error === 'string' ? sanitizeLogMessage(error).message.slice(0, 200) : null,
+      recordedAt,
+    });
+    certificate.updatedAt = recordedAt;
+    return toPublic(certificate);
+  }
+
+  async function createForDomain(params) {
+    await ensureInitialized();
+    return withStoreLock(async () => _createForDomain(params));
+  }
+
+  async function setState(certificateId, nextState) {
+    await ensureInitialized();
+    return withStoreLock(async () => _setState(certificateId, nextState));
+  }
+
+  async function markValidated(certificateId, result) {
+    await ensureInitialized();
+    return withStoreLock(async () => _markValidated(certificateId, result));
+  }
+
+  async function markActive(certificateId, result, options) {
+    await ensureInitialized();
+    return withStoreLock(async () => _markActive(certificateId, result, options));
+  }
+
+  async function registerCustom(params) {
+    await ensureInitialized();
+    return withStoreLock(async () => _registerCustom(params));
+  }
+
+  async function prepareSelection(certificateId) {
+    await ensureInitialized();
+    return withStoreLock(async () => _prepareSelection(certificateId));
+  }
+
+  async function commitSelection(certificateId) {
+    await ensureInitialized();
+    return withStoreLock(async () => _commitSelection(certificateId));
+  }
+
+  async function markFailed(certificateId, errorCode) {
+    await ensureInitialized();
+    return withStoreLock(async () => _markFailed(certificateId, errorCode));
+  }
+
+  async function retireForDomainRemoval(certificateId, options) {
+    await ensureInitialized();
+    return withStoreLock(async () => _retireForDomainRemoval(certificateId, options));
+  }
+
+  async function markMaterialPurged(certificateId, options) {
+    await ensureInitialized();
+    return withStoreLock(async () => _markMaterialPurged(certificateId, options));
+  }
+
+  async function recordReloadOutcome(certificateId, outcome) {
+    await ensureInitialized();
+    return withStoreLock(async () => _recordReloadOutcome(certificateId, outcome));
+  }
+
+  async function verifyLiveTls(certificateId, liveTls) {
+    await ensureInitialized();
+    if (filePath) await reloadFromDisk();
+    const certificate = requireCertificate(state, certificateId);
+    return compareTlsPresentation(certificate, liveTls);
   }
 
   async function getCertificate(certificateId) {
     await ensureInitialized();
+    if (filePath) await reloadFromDisk();
     const certificate = state.certificates.find((candidate) => candidate.id === certificateId);
-    return certificate ? publicCertificate(certificate) : null;
+    return certificate ? toPublic(certificate) : null;
   }
 
   async function getForDomain(domainId) {
     await ensureInitialized();
+    if (filePath) await reloadFromDisk();
     const certificate = [...state.certificates].reverse().find((candidate) => (
       candidate.domainId === domainId && candidate.purpose === 'web'
     ));
-    return certificate ? publicCertificate(certificate) : null;
+    return certificate ? toPublic(certificate) : null;
   }
 
   async function listCertificates() {
     await ensureInitialized();
-    return state.certificates.map(publicCertificate);
+    if (filePath) await reloadFromDisk();
+    return state.certificates.map(toPublic);
   }
 
   return {
@@ -841,6 +1028,8 @@ export function createCertificateRegistry({
     markFailed,
     retireForDomainRemoval,
     markMaterialPurged,
+    recordReloadOutcome,
+    verifyLiveTls,
     getCertificate,
     getForDomain,
     listCertificates,
@@ -851,4 +1040,5 @@ export const certificateRegistryInternals = Object.freeze({
   storeVersion: STORE_VERSION,
   certificatePurposes: Object.freeze([...CERTIFICATE_PURPOSES]),
   hydrateCertificate,
+  compareTlsPresentation,
 });
