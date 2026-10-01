@@ -1,3 +1,4 @@
+import { OPERATIONS } from '@yunpanel/protocol';
 import { inspectDurableJobRecovery } from './job-recovery-inspection.js';
 
 const JOB = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -36,7 +37,7 @@ export async function recoverRunningPhpTool({
   await stopped(serviceStatus);
   const snapshot = await inspect({ registry: jobRegistry });
   const candidate = snapshot?.jobs?.find((entry) => entry.jobId === jobId && entry.serverId === serverId) ?? null;
-  if (!candidate || candidate.status !== 'running' || candidate.operation !== 'website.php.action'
+  if (!candidate || candidate.status !== 'running' || candidate.operation !== OPERATIONS.WEBSITE_PHP_ACTION
     || candidate.resourceType !== 'application') {
     throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_job_mismatch', 'Running PHP tool recovery metadata is inconsistent');
   }
@@ -44,7 +45,7 @@ export async function recoverRunningPhpTool({
     jobRegistry.getJob(jobId), loadJobContext(jobId), readOperationReceipt(serverId, jobId),
   ]);
   if (!job || job.id !== jobId || job.serverId !== serverId || job.status !== 'running'
-    || job.operation !== 'website.php.action' || job.resourceType !== 'application'
+    || job.operation !== OPERATIONS.WEBSITE_PHP_ACTION || job.resourceType !== 'application'
     || !context || context.id !== jobId || context.serverId !== serverId || context.status !== 'running'
     || context.operation !== job.operation || context.resourceType !== job.resourceType || context.resourceId !== job.resourceId
     || !receipt || receipt.serverId !== serverId || receipt.jobId !== jobId
@@ -77,7 +78,7 @@ export async function recoverRunningPhpTool({
     throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_acknowledgement_invalid', 'PHP tool recovery acknowledgement is inconsistent');
   }
   return Object.freeze({
-    serverId, jobId, operation: 'website.php.action', status: 'succeeded',
+    serverId, jobId, operation: OPERATIONS.WEBSITE_PHP_ACTION, status: 'succeeded',
     recoveryMethod: 'verified_php_tool_receipt', reconciled: true,
   });
 }

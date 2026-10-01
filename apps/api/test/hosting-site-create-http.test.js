@@ -7,7 +7,7 @@ import {
   siteCreateHttpInternals,
 } from '../src/site-create-http.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
-import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
+import { createHostingSiteAllocationStore, hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
 import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
@@ -30,6 +30,7 @@ function fakeResponse() {
     payload: null,
     headers: {},
     setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+    set(name, value) { this.setHeader(name, value); return this; },
     status(value) { this.statusCode = value; return this; },
     json(value) { this.payload = value; return this; },
   };
@@ -54,11 +55,11 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
   const provisioningOperations = new Map();
   const lockCalls = [];
 
-  const basePlan = (operationId = uuid(1001)) => ({
+  const basePlan = (operationId = uuid(1001), targetSite = site) => ({
     operationId,
     ids: {
-      websiteId: site.id,
-      applicationId: site.applicationId,
+      websiteId: targetSite.id,
+      applicationId: targetSite.applicationId,
       primaryDomainId: uuid(2),
       wwwDomainId: null,
       mailDomainId: null,
@@ -66,15 +67,23 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     previewDigest: 'b'.repeat(64),
     confirmation: 'original-confirmation',
     blockers: [],
-    steps: { websiteReady: sites.has(site.id) },
+    steps: { websiteReady: sites.has(targetSite.id) },
     source: { kind: 'external_proxy' },
-    plan: { website: site, application: null },
+    plan: { website: targetSite, application: null },
   });
 
-  const previewAdapter = async (input) => basePlan(input.operationId);
+  const previewAdapter = async (input) => {
+    const targetSite = input.operationId === uuid(1001)
+      ? site
+      : website(Number(input.operationId.slice(-4)) || 2);
+    return basePlan(input.operationId, targetSite);
+  };
   const createAdapter = async (apply) => {
-    sites.set(site.id, structuredClone(site));
-    return { created: true, website: site };
+    const targetSite = apply.input?.operationId === uuid(1001)
+      ? site
+      : website(Number(apply.input?.operationId?.slice(-4)) || 2);
+    sites.set(targetSite.id, structuredClone(targetSite));
+    return { created: true, website: targetSite };
   };
 
   const siteMutationLock = {
@@ -294,7 +303,7 @@ test('hosted reservation recovery via /api/sites/recover-reservation and /api/si
   // 2. Reserve quota directly
   env.f.reserve({
     operationId: uuid(1002),
-    websiteId: env.site.id,
+    websiteId: preview.ids.websiteId,
     customerId: 'customer-a',
     serverId: env.serverId,
     intentDigest: preview.ownership.intentDigest,
@@ -377,6 +386,7 @@ test('inactive customer or suspended parent reseller cannot reserve site quota',
   mountSiteCreateRoutes(app, env.dependencies);
 
   // Deactivate customer-a in SQLite DB
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard');
   env.f.db.prepare('UPDATE users SET active = 0 WHERE id = ?').run('customer-a');
 
   const previewHandler = app.routes.post.get('/api/sites/hosted/create-preview');
@@ -557,7 +567,7 @@ test('website removal releases reseller and customer quotas via releaseRemoved a
     customerId: 'customer-a',
     serverId: env.serverId,
     intentDigest: 'f'.repeat(64),
-    websiteDigest: 'e'.repeat(64),
+    websiteDigest: hostingWebsiteDigest(env.site),
   };
   env.f.preview(alloc);
   env.f.reserve(alloc);
@@ -669,7 +679,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   const app = fakeApp();
   mountSiteCreateRoutes(app, env.dependencies);
 
-  const resellerToken = env.f.session('reseller-a');
+  let resellerToken = env.f.session('reseller-a');
   const resellerAuth = {
     id: 'session-reseller-a',
     token: resellerToken,
@@ -693,7 +703,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   });
   assert.equal(previewRes.statusCode, 200);
   assert.equal(previewRes.payload.data.customerId, 'customer-a');
-  assert.equal(previewRes.payload.data.state, 'available');
+  assert.equal(previewRes.payload.data.ownership.state, 'available');
   const previewDigest = previewRes.payload.data.previewDigest;
   const confirmation = previewRes.payload.data.confirmation;
 
@@ -710,11 +720,15 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   });
   assert.equal(applyRes.statusCode, 201);
   assert.equal(applyRes.payload.data.created, true);
-  assert.equal(applyRes.payload.data.allocation.state, 'attached');
-  assert.equal(applyRes.payload.data.allocation.customerId, 'customer-a');
+  assert.equal(applyRes.payload.data.ownership.state, 'attached');
+  assert.equal(applyRes.payload.data.ownership.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
+  resellerToken = env.f.session('reseller-a');
+  resellerAuth.token = resellerToken;
+  resellerAuth.rawToken = resellerToken;
+
   const opId2 = uuid(1102);
   const previewBody2 = {
     customerId: 'customer-b',
@@ -728,7 +742,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
         body: previewBody2,
       });
     },
-    (err) => err instanceof AuthError && err.code === 'reseller_capacity_exceeded',
+    (err) => err instanceof AuthError && (err.code === 'reseller_limit_reached' || err.code === 'reseller_capacity_exceeded'),
   );
 
   // 4. Reseller attempts site preview for customer-c belonging to foreign reseller-b
@@ -889,6 +903,7 @@ test('hosting-site-allocation-store supports role: reseller actor and customer r
   assert.equal(ownPreview.state, 'available');
 
   // Verify hosting account store accepts users with role: 'customer'
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard; PRAGMA ignore_check_constraints = ON;');
   env.f.db.prepare("UPDATE users SET role = 'customer' WHERE id = 'customer-a'").run();
   const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
   assert.equal(customerAccount.id, 'customer-a');

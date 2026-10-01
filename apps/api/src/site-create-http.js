@@ -1,6 +1,7 @@
 import { AuthError } from './auth-error.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createSite, previewSiteCreate, SiteCreateError } from './site-create-isolation-guard.js';
+export { SiteCreateError };
 import { siteCreateProvisioningPlan as dnsAwareSiteCreateProvisioningPlan } from './site-create-dns-provisioning.js';
 import { siteCreateProvisioningPlan as mailAwareSiteCreateProvisioningPlan } from './site-create-mail-provisioning.js';
 import { provisionSiteAdmin } from './site-admin-provisioning.js';
@@ -146,7 +147,9 @@ function provisioningPlanner(dependencies) {
 }
 
 async function previewWithProvisioning({ input, dependencies }) {
-  const preview = await previewSiteCreate({ input, ...dependencies });
+  const preview = dependencies.previewSiteCreate
+    ? await dependencies.previewSiteCreate(input)
+    : await previewSiteCreate({ input, ...dependencies });
   const planner = provisioningPlanner(dependencies);
   return Object.freeze({
     ...preview,
@@ -230,7 +233,8 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
     const input = localInput(body.input, dependencies.localServerId);
-    const result = await createSite({
+    const createFn = dependencies.createSite ?? createSite;
+    const result = await createFn({
       input,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,

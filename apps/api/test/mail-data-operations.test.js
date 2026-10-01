@@ -16,6 +16,7 @@ const digest = 'a'.repeat(64);
 function fixture({
   domainStatus = 'disabled',
   mailboxRevision = 3,
+  mailboxEnabled = false,
   activeJobs = [],
   selectedBackup = null,
   deleteBlockers = [{ code: 'mail_data_backup_required', count: 1 }],
@@ -33,7 +34,7 @@ function fixture({
     id: mailboxId,
     mailDomainId,
     address: 'owner@example.com',
-    enabled: false,
+    enabled: mailboxEnabled,
     revision: mailboxRevision,
   };
   const service = createMailDataOperationsService({
@@ -211,10 +212,10 @@ test('restore queues selected backup against the same mail-domain resource lock'
 });
 
 test('delete preview requires disabled domain verified current backup and no non-data blockers', async () => {
-  const enabled = fixture({ domainStatus: 'enabled' });
+  const enabled = fixture({ mailboxEnabled: true });
   await assert.rejects(
     enabled.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
-    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_domain_disable_required',
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_mailbox_disable_required',
   );
 
   const blocked = fixture({ deleteBlockers: [

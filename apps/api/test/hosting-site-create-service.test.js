@@ -177,7 +177,8 @@ test('known blockers never reserve a quota slot', async (t) => {
 });
 test('input is snapshotted before asynchronous preview', async (t) => {
   const f = setup(t); const submitted = await f.submit(); let proceed;
-  f.previewAdapter = () => new Promise((resolve) => { proceed = () => resolve(f.base()); });
+  let resolveNow = false;
+  f.previewAdapter = () => (resolveNow ? Promise.resolve(f.base()) : new Promise((resolve) => { proceed = () => { resolveNow = true; resolve(f.base()); }; }));
   const result = f.createHosted(submitted); submitted.input.serverId = uuid(200); submitted.customerId = 'customer-b';
   // Creation is queued to serialize duplicate operations. Wait for preview to start.
   await new Promise((resolve) => setImmediate(resolve));

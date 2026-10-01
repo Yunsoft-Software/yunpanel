@@ -62,6 +62,10 @@ function continueStepBody(body) {
   return value;
 }
 
+function requireRemovalOwner(request, response, next) {
+  return requirePanelRouteAccess(request, response, next);
+}
+
 function removalActor(request) {
   const sessionId = request.auth?.id;
   const userId = request.auth?.user?.id;
@@ -170,7 +174,7 @@ export function mountWebsiteRemovalRoutes(app, {
     return siteMutationLock.withSiteLock({ websiteId }, action);
   }
 
-  app.get('/api/website-removal-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/website-removal-operations', requireRemovalOwner, asyncRoute(async (request, response) => {
     const actor = removalActor(request);
     const actorTenant = extractActorTenant(request.auth);
     if (!actorTenant.active) {
@@ -184,7 +188,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ data: filtered });
   }));
 
-  app.get('/api/website-removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/website-removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
     const operation = await runtime.get(request.params.operationId);
     if (!operation) {
       throw removalNotFound();
@@ -194,7 +198,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ data: operation });
   }));
 
-  app.post('/api/website-removal-operations/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/website-removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
     const operation = await runtime.get(request.params.operationId);
     if (!operation) {
       throw removalNotFound();
@@ -213,7 +217,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ data: updated });
   }));
 
-  app.get('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const [preview, operations] = await Promise.all([
@@ -225,7 +229,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ preview, operations, data });
   }));
 
-  app.post('/api/websites/:websiteId/removal-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-preview', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const preview = await runtime.preview({ websiteId });
@@ -233,7 +237,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ preview, data: preview });
   }));
 
-  app.post('/api/websites/:websiteId/removal', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     const actor = await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId });
     const body = startBody(request.body);
@@ -246,7 +250,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.status(201).json({ operation, data: operation });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId } = request.params;
     await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const operations = await runtime.listForWebsite(websiteId);
@@ -254,7 +258,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ operations, data: operations });
   }));
 
-  app.get('/api/websites/:websiteId/removal-operations/:operationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/websites/:websiteId/removal-operations/:operationId', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
     await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const operation = await runtime.get(operationId);
@@ -264,7 +268,7 @@ export function mountWebsiteRemovalRoutes(app, {
     response.json({ operation, data: operation });
   }));
 
-  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/websites/:websiteId/removal-operations/:operationId/continue', requireRemovalOwner, asyncRoute(async (request, response) => {
     const { websiteId, operationId } = request.params;
     const actor = await requireWebsiteAccess(request, websiteId, { websiteRegistry, localServerId, allowDeleted: true });
     const body = continueStepBody(request.body);

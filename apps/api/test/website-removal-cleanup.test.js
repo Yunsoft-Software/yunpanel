@@ -55,7 +55,7 @@ for (const receipt of [undefined, null, true, {}, { filesCleaned: 'true' }, { fi
 test('cleanup result whitelists safe fields; arbitrary adapter secrets are not published', async () => {
   const f = await removalFixture({ fileCleanupHandler: async (input) => ({ ...input, filesCleaned: true, cleanedFilesCount: 3, secret: 'do-not-publish' }) });
   const op = await f.runtime.start(removalStart(f.preview));
-  assert.deepEqual(op.steps[0].result, { filesCleaned: true, retainedBackups: [], cleanedFilesCount: 3 });
+  assert.deepEqual(op.steps[0].result, { filesCleaned: true, retainedBackups: [], retainedLogScopes: [], cleanedFilesCount: 3 });
   assert.doesNotMatch(JSON.stringify(op), /do-not-publish/);
 });
 test('retained backups cannot be changed through either input mutation or a false receipt', async () => {
@@ -107,7 +107,8 @@ test('only an independent null read after deletion completes metadata', async ()
   const f = await removalFixture({ websiteRegistry: { getWebsite: async () => current,
     deleteMigrationWebsite: async (input) => { assert.deepEqual(input, { websiteId: 'site-a', serverId: 'server-a', applicationId: 'app-a' }); deletes++; current = null; },
   } });
-  let op = await f.runtime.start(removalStart(f.preview)); op = await f.runtime.continueStep(removalContinue(op));
+  let op = await f.runtime.start(removalStart(f.preview));
+  while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
   assert.equal(op.status, 'removed'); assert.equal(deletes, 1);
 });
 for (const stage of ['read-before', 'read-after']) {

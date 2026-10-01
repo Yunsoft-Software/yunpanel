@@ -74,7 +74,7 @@ function createWorkspaceRouter() {
       { path: 'databases', element: manage(<GlobalSiteTool tool="databases" ownerView={<DatabasesPage />} />) },
       { path: 'docker', element: owner(<DockerProjectsPage />) },
       { path: 'docker/:dockerProjectId', element: owner(<DockerProjectsPage />) },
-      { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) },
+      { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) }, /* path: 'mail', element: manage(<MailDomainsPage />) */
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },

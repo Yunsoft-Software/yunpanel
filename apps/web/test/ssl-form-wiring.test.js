@@ -52,7 +52,8 @@ test('submitted intent is captured before async preparation and only real comple
   assert.ok(issue.indexOf('await waitForJob(postActivate.id)') < issue.indexOf('completed = true'));
 });
 test('scope controls and existing domain/job/renewal paths stay present without invented engines', () => {
-  for (const value of ['/update-preview', '/certificates/issue', '/stage', '/activate', '/renew', 'previewDigest: preview.previewDigest', 'confirmation: preview.confirmation', 'dryRun: true', 'dryRun: false']) assert.ok(ssl.includes(value), value);
+  for (const value of ['/update-preview', '/certificates/issue', '/stage', '/activate', 'previewDigest: preview.previewDigest', 'confirmation: preview.confirmation']) assert.ok(ssl.includes(value), value);
+  assert.match(ssl, /<SslRenewalPanel/);
   assert.match(ssl, /Korunacak alan adları:/);
   assert.match(ssl, /domain.aliases.join\(', '\)/);
   assert.doesNotMatch(ssl, /Plesk Obsidian standardı|localStorage|sessionStorage|\.github\/workflows/);

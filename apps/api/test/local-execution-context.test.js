@@ -39,8 +39,10 @@ test('local executor passes job identity outside the durable operation payload',
   assert.deepEqual(context, {
     jobId: queued.id,
     serverId: 'local-server',
+    type: 'system.packages.inspect',
     resourceType: 'system',
     resourceId: 'local-server',
+    authorization: null,
   });
   assert.deepEqual((await jobRegistry.getJob(queued.id)).result, PACKAGE_RESULT);
 });

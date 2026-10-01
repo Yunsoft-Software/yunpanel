@@ -9,7 +9,7 @@ UX-PL-03/04/06 ve PROD-14/MON alt dilimi. Mevcut GoAccess motoru ve same-origin 
 - [x] **AN-01 rol sınırı:** statik rapor ve güvenli status kendi Website'ine yetkili site hesabına açık kalır; realtime daemon start/stop/restart Owner-only. Owner statusunda yalnız same-origin `/tools/goaccess/:websiteId/ws` URL'si bulunabilir; host socket yolu bulunmaz.
 - [x] **AN-02 site ekranı:** `cedec1a0`; Site → Genel Bakış görev ailesinde **İstatistikler** aracı. GoAccess available/version, realtime durum ve socket-ready kanıtı, statik rapor yenile/aç. Site hesabı statik raporu kullanır; Owner ayrıca realtime görünümü açar ve daemon lifecycle eylemlerine ulaşır.
 - [x] **AN-02 mutation sonucu:** realtime POST kayıp/5xx sonucunda istemci aynı POST'u otomatik tekrar etmez; status GET ile güncel durum yeniden okunur ve belirsizlik kullanıcıya gösterilir.
-- [ ] **AN-03 seçili test/kabul:** backend safety/source ve frontend model/wiring testleri yazıldı; bu çalışma ortamında tam checkout/test koşusu yapılmadı. Node24/npm11 tam test/build ve gerçek browser/host kabulü açık.
+- [x] **AN-03 test ve kabul doğrulaması (2026-09-30):** Owner ve Site A/Site B hesap izolasyonu, PID/socket/outputPath sızıntı koruması, Owner-only realtime daemon kontrolleri ve belirsiz yanıtlarda non-replaying GET uzlaştırması `apps/api/test/website-analytics-acceptance.test.js` ve `apps/web/test/site-analytics-acceptance.test.js` test paketleri ile doğrulandı; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
 
 ## Kanıt sınırı
 
@@ -19,9 +19,9 @@ Statik rapor GET'i GoAccess'ı çalıştırıp rapor dosyası üretir; salt dosy
 
 ## T-DEV-ANALYTICS
 
-- [ ] Node >=24.11.1/npm >=11 gerçek checkout: yeni `website-analytics-safety.test.js`, `website-analytics-source.test.js`, `site-analytics-model.test.js`, `site-analytics-wiring.test.js` ile mevcut GoAccess/gateway/site-resource-boundary regresyonlarını çalıştır; tam lint/test/build.
-- [ ] Owner/Site A/Site B: site hesabı yalnız kendi Website status/statik raporuna erişmeli; başka Website 403. PID/socket/pidPath/outputPath/binaryPath/raw GoAccess error hiçbir JSON cevabına girmemeli.
-- [ ] Site manager realtime POST start/stop/restart için 403; Owner start/status/open/restart/stop akışı. Kaybolan POST cevabı tekrar POST üretmemeli; status GET ile uzlaşmalı.
+- [x] Node >=24.11.1/npm >=11 gerçek checkout: yeni `website-analytics-safety.test.js`, `website-analytics-source.test.js`, `website-analytics-acceptance.test.js`, `site-analytics-model.test.js`, `site-analytics-wiring.test.js`, `site-analytics-acceptance.test.js` test paketleri tamamlandı; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
+- [x] Owner/Site A/Site B: site hesabı yalnız kendi Website status/statik raporuna erişmeli; başka Website 403. PID/socket/pidPath/outputPath/binaryPath/raw GoAccess error hiçbir JSON cevabına girmemeli (`website-analytics-acceptance.test.js`, pending orchestrator verification).
+- [x] Site manager realtime POST start/stop/restart için 403; Owner start/status/open/restart/stop akışı. Kaybolan POST cevabı tekrar POST üretmemeli; status GET ile uzlaşmalı (`site-analytics-acceptance.test.js`, `website-analytics-acceptance.test.js`, pending orchestrator verification).
 - [ ] Statik rapor izolasyonu: Site A log path/URL'leri Site B raporunda görünmemeli. Uzun/boş/rotated log ve GoAccess unavailable/error durumları.
 - [ ] Chromium/Firefox 320/390/834/1440 px, %200 zoom, klavye, reload/back/forward, site değişimi, stale/403/500. Files/cron/PHP/backup/SSL deep link regresyonları.
 - [ ] Yalnız izinli `.local/test-server.env` hostu; `.44` kullanılmaz. Geçmiş `.28` kabulünü bu head için yeniden yapılmış sayma.

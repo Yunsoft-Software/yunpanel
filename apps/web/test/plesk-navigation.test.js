@@ -66,8 +66,8 @@ test('domain navigation uses encoded Domain ID and preserves bounded search', ()
 test('site tools follow three task families and expose DNS, Git and logs', () => {
   const groups = groupSiteTabs(SITE_TABS);
   assert.deepEqual(groups.map((group) => group.id), ['dashboard', 'hosting', 'mail']);
-  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs']);
-  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'terminal']);
+  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics']);
+  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup']);
   assert.deepEqual(groups[2].tabs.map(([key]) => key), ['mail']);
 });
 test('unsupported runtime tools are not invented; unknown implemented tabs remain reachable', () => {
@@ -119,7 +119,7 @@ test('source: command palette uses actual Owner context and preferences are not 
   assert.match(layout, /<Preferences \/>/);
   assert.match(layout, /inert=\{narrow && !menuOpen\}/);
   const palette = await source('ui/CommandPalette.jsx');
-  assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, isReseller, domains \}\)/);
+  assert.match(palette, /commandEntries\(\{ query, canManage, isOwner, isReseller(?:, isCustomer)?, domains \}\)/);
 });
 test('source: no More-only site navigation and tools wrap on narrow screens', async () => {
   const nav = await source('ui/SiteNavigation.jsx');

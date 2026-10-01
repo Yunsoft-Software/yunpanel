@@ -14,13 +14,16 @@ test('process store lock waits for a live writer and then runs the next transact
 
   let release;
   const pending = new Promise((resolve) => { release = resolve; });
+  let startedA;
+  const aStarted = new Promise((resolve) => { startedA = resolve; });
   const order = [];
   const first = lockA.withLock(async () => {
     order.push('a-start');
+    startedA();
     await pending;
     order.push('a-end');
   });
-  await new Promise((resolve) => setTimeout(resolve, 20));
+  await aStarted;
   const second = lockB.withLock(async () => {
     order.push('b');
   });

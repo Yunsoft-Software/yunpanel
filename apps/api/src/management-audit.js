@@ -18,8 +18,9 @@ export function classifyManagementMutation(method, pathname) {
   if (!MUTATION_METHODS.has(method) || typeof pathname !== 'string') return null;
   let parts;
 
-  if (method === 'POST' && pathname === '/api/sites/create-preview') return { action: 'site.create.preview', resourceType: 'site', resourceId: 'new' };
-  if (method === 'POST' && pathname === '/api/sites') return { action: 'site.create', resourceType: 'site', resourceId: 'new' };
+  if (method === 'POST' && (pathname === '/api/sites/create-preview' || pathname === '/api/sites/hosted/create-preview')) return { action: 'site.create.preview', resourceType: 'site', resourceId: 'new' };
+  if (method === 'POST' && (pathname === '/api/sites' || pathname === '/api/sites/hosted')) return { action: 'site.create', resourceType: 'site', resourceId: 'new' };
+  if (method === 'POST' && (pathname === '/api/sites/recover-reservation' || pathname === '/api/sites/hosted/recover-reservation')) return { action: 'site.reservation.recover', resourceType: 'site', resourceId: 'reservation' };
   if (method === 'POST' && pathname === '/api/dns-zones') return { action: 'dns_zone.external.track', resourceType: 'dns_zone', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/mail-domains') return { action: 'mail_domain.track', resourceType: 'mail_domain', resourceId: 'new' };
   if (method === 'POST' && pathname === '/api/mailboxes') return { action: 'mailbox.create', resourceType: 'mailbox', resourceId: 'new' };
@@ -41,9 +42,12 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/update-preview$/)) && method === 'POST') return { action: 'website.update.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/impact-preview$/)) && method === 'POST') return { action: 'website.impact.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup\/preview$/)) && method === 'POST') return { action: 'website.backup.preview', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup\/queue$/)) && method === 'POST') return { action: 'website.backup.queue', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup$/)) && method === 'POST') return { action: 'website.backup', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore\/preview$/)) && method === 'POST') return { action: 'website.restore.preview', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore\/queue$/)) && method === 'POST') return { action: 'website.restore.queue', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore$/)) && method === 'POST') return { action: 'website.restore', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup-operations$/)) && method === 'POST') return { action: 'website.backup_operation.create', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys$/)) && method === 'POST') return { action: 'website.sftp_key.add', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/revoke$/)) && method === 'POST') return { action: 'website.sftp_key.revoke', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/rotate$/)) && method === 'POST') return { action: 'website.sftp_key.rotate', resourceType: 'website', resourceId: parts[0] };

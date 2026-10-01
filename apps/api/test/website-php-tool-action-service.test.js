@@ -1,24 +1,15 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebsitePhpToolActionService } from '../src/website-php-tool-action-service.js';
+import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
 
-const preview = Object.freeze({
-  version: 1,
+const preview = websitePhpToolActionPreview({
   websiteId: '11111111-1111-4111-8111-111111111111',
   serverId: '33333333-3333-4333-8333-333333333333',
   applicationId: '22222222-2222-4222-8222-222222222222',
   unixUser: 'yunapp-123456789abc',
   websiteRevision: 4,
-  actionId: 'composer.dump-autoload',
-  tool: 'composer',
-  command: 'dump-autoload',
-  args: Object.freeze(['--optimize']),
-  timeout: 120000,
-  label: 'Composer autoload dosyalarını yeniden oluştur',
-  impact: 'vendor içindeki autoload metadata dosyaları yeniden oluşturulur; paket sürümleri değiştirilmez.',
-  previewDigest: 'b'.repeat(64),
-  confirmation: `php-tool:11111111-1111-4111-8111-111111111111:composer.dump-autoload:${'b'.repeat(64)}`,
-});
+}, 'composer.dump-autoload');
 const input = Object.freeze({
   actionId: preview.actionId,
   expectedWebsiteRevision: preview.websiteRevision,
