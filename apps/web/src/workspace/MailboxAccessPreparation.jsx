@@ -34,7 +34,10 @@ export default function MailboxAccessPreparation({ mailbox, domain, canManage, b
   const view = state.snapshot;
   const available = canManage && !blocked && !occupied && state.status === 'ready';
   const approval = state.approval;
-  const href = `/mail/${encodeURIComponent(domain.id)}?section=configuration`;
+  const domainId = domain.webDomainId || domain.id;
+  const href = (typeof window !== 'undefined' && window.location.pathname.startsWith('/websites/'))
+    ? `/websites/${encodeURIComponent(domainId)}/mail?mailTab=configuration`
+    : `/mail/${encodeURIComponent(domain.id)}?section=configuration`;
   return <div className="ws-section-body" aria-label="Tek posta hesabı erişim hazırlığı">
     <h3>Yalnız bu hesabın erişimini kapat</h3>
     <p>{mailbox.address} kapatılır; alan adının ve diğer hesapların açık/kapalı tercihleri değiştirilmez.</p>

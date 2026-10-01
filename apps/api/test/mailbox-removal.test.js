@@ -31,6 +31,13 @@ import {
 import {
   MailboxRegistryError,
 } from '../src/mailbox-registry.js';
+import {
+  createSiteResourceBoundary,
+  needsSiteResourceJson,
+} from '../src/site-resource-boundary.js';
+import {
+  createTenantBoundaryMiddleware,
+} from '../src/tenant-boundary.js';
 
 function sha256(content) {
   return createHash('sha256').update(typeof content === 'string' ? content : JSON.stringify(content)).digest('hex');
@@ -55,6 +62,23 @@ function createMailboxRemovalFixture({
   const mailboxId = randomUUID();
   const siblingMailboxId = randomUUID();
   const backupId = 'mail-backup-' + randomUUID().slice(0, 8);
+  const websiteId = randomUUID();
+  const otherWebsiteId = randomUUID();
+  const otherWebDomainId = randomUUID();
+  const otherMailDomainId = randomUUID();
+  const otherMailboxId = randomUUID();
+
+  const website = {
+    id: websiteId,
+    serverId: localServerId,
+    customerId: 'cust-1',
+  };
+
+  const otherWebsite = {
+    id: otherWebsiteId,
+    serverId: localServerId,
+    customerId: 'cust-2',
+  };
 
   const mailDomain = {
     id: mailDomainId,
@@ -65,10 +89,27 @@ function createMailboxRemovalFixture({
     revision: 1,
   };
 
+  const otherMailDomain = {
+    id: otherMailDomainId,
+    webDomainId: otherWebDomainId,
+    domainName: 'other.com',
+    managementMode: 'local',
+    status: 'enabled',
+    revision: 1,
+  };
+
   const domain = {
     id: webDomainId,
+    websiteId,
     serverId: localServerId,
     primaryDomain: 'example.com',
+  };
+
+  const otherDomain = {
+    id: otherWebDomainId,
+    websiteId: otherWebsiteId,
+    serverId: localServerId,
+    primaryDomain: 'other.com',
   };
 
   const mailbox = {
@@ -87,9 +128,18 @@ function createMailboxRemovalFixture({
     revision: 1,
   };
 
+  const otherMailbox = {
+    id: otherMailboxId,
+    mailDomainId: otherMailDomainId,
+    address: 'user@other.com',
+    enabled: false,
+    revision: 1,
+  };
+
   const mailboxesMap = new Map([
     [mailbox.id, { ...mailbox }],
     [siblingMailbox.id, { ...siblingMailbox }],
+    [otherMailbox.id, { ...otherMailbox }],
   ]);
 
   // Model active sessions across protocols and clients for both mailboxes
@@ -174,16 +224,38 @@ function createMailboxRemovalFixture({
 
   const mailDomainRegistry = {
     async getMailDomain(id) {
-      return id === mailDomainId ? { ...mailDomain } : null;
+      if (id === mailDomainId) return { ...mailDomain };
+      if (id === otherMailDomainId) return { ...otherMailDomain };
+      return null;
     },
     async deleteMailDomain(id) {
       if (id === mailDomainId) mailDomain.status = 'deleted';
+      if (id === otherMailDomainId) otherMailDomain.status = 'deleted';
+    },
+    async listMailDomains() {
+      return [{ ...mailDomain }, { ...otherMailDomain }];
     },
   };
 
   const domainRegistry = {
     async getDomain(id) {
-      return id === webDomainId ? { ...domain } : null;
+      if (id === webDomainId) return { ...domain };
+      if (id === otherWebDomainId) return { ...otherDomain };
+      return null;
+    },
+    async listDomains() {
+      return [{ ...domain }, { ...otherDomain }];
+    },
+  };
+
+  const websiteRegistry = {
+    async getWebsite(id) {
+      if (id === websiteId) return { ...website };
+      if (id === otherWebsiteId) return { ...otherWebsite };
+      return null;
+    },
+    async listWebsites() {
+      return [{ ...website }, { ...otherWebsite }];
     },
   };
 
@@ -504,6 +576,17 @@ function createMailboxRemovalFixture({
     mailDomainId,
     mailboxId,
     siblingMailboxId,
+    websiteId,
+    otherWebsiteId,
+    otherWebDomainId,
+    otherMailDomainId,
+    otherMailboxId,
+    website,
+    otherWebsite,
+    otherDomain,
+    otherMailDomain,
+    otherMailbox,
+    websiteRegistry,
     backupId,
     snapshotDigest,
     backupContentDigest,
@@ -1031,7 +1114,12 @@ test('Criterion 3: Atomic backend race and permission boundaries are enforced so
     });
 
     const app = express();
-    app.use(express.json());
+    app.disable('x-powered-by');
+    const smallJson = express.json({ limit: '64kb' });
+    app.use((request, response, next) => {
+      if (needsSiteResourceJson(request)) return smallJson(request, response, next);
+      return express.json()(request, response, next);
+    });
 
     let currentAuth = {
       user: { role: 'read_only' },
@@ -1043,6 +1131,19 @@ test('Criterion 3: Atomic backend race and permission boundaries are enforced so
       req.auth = currentAuth;
       next();
     });
+
+    app.use(createTenantBoundaryMiddleware({
+      websiteRegistry: fxHttp.websiteRegistry,
+      websiteLookup: async (id) => fxHttp.websiteRegistry.getWebsite(id),
+    }));
+
+    app.use(createSiteResourceBoundary({
+      websiteRegistry: fxHttp.websiteRegistry,
+      domainRegistry: fxHttp.domainRegistry,
+      mailDomainRegistry: fxHttp.mailDomainRegistry,
+      mailboxRegistry: fxHttp.mailboxRegistry,
+      localServerId: fxHttp.localServerId,
+    }));
 
     mountMailboxRoutes(app, {
       mailboxRegistry: fxHttp.mailboxRegistry,
@@ -1109,6 +1210,180 @@ test('Criterion 3: Atomic backend race and permission boundaries are enforced so
         method: 'GET',
       });
       assert.equal(otherServerRes.status, 404);
+
+      // 5f. Unauthenticated request rejected fail-closed (401 Unauthorized)
+      currentAuth = null;
+      const unauthRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          deleteJobId: randomUUID(),
+          confirmation: `delete-mailbox:${fxHttp.mailbox.address}`,
+        }),
+      });
+      assert.equal(unauthRes.status, 401);
+
+      // 5g. Inactive site_manager account rejected fail-closed (403 Forbidden)
+      currentAuth = {
+        user: {
+          id: 'sm-inactive',
+          role: 'site_manager',
+          active: false,
+          websiteIds: [fxHttp.websiteId],
+        },
+        access: { mode: 'site_management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      const inactiveRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          deleteJobId: randomUUID(),
+          confirmation: `delete-mailbox:${fxHttp.mailbox.address}`,
+        }),
+      });
+      assert.equal(inactiveRes.status, 403);
+
+      // 5h. Site_manager attempting cross-site deletion of mailbox on foreign website rejected with 403
+      currentAuth = {
+        user: {
+          id: 'sm-active',
+          role: 'site_manager',
+          active: true,
+          websiteIds: [fxHttp.websiteId],
+        },
+        access: { mode: 'site_management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      const crossSiteRes = await fetch(`${base}/api/mailboxes/${fxHttp.otherMailboxId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          deleteJobId: randomUUID(),
+          confirmation: `delete-mailbox:${fxHttp.otherMailbox.address}`,
+        }),
+      });
+      assert.equal(crossSiteRes.status, 403);
+      const crossSiteBody = await crossSiteRes.json();
+      assert.equal(crossSiteBody?.error?.code, 'site_scope_forbidden');
+
+      // 5i. Customer account attempting cross-site deletion rejected with 403
+      currentAuth = {
+        user: {
+          id: 'cust-1',
+          role: 'customer',
+          hosting: { kind: 'customer', resellerId: null },
+          active: true,
+          websiteIds: [fxHttp.websiteId],
+        },
+        access: { mode: 'site_management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      const custCrossRes = await fetch(`${base}/api/mailboxes/${fxHttp.otherMailboxId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 1,
+          deleteJobId: randomUUID(),
+          confirmation: `delete-mailbox:${fxHttp.otherMailbox.address}`,
+        }),
+      });
+      assert.equal(custCrossRes.status, 403);
+      const custCrossBody = await custCrossRes.json();
+      assert.equal(custCrossBody?.error?.code, 'site_scope_forbidden');
+
+      // 5j. Authorized site account successfully disables and finalizes mailbox removal
+      // 5j.1 Disable mailbox via PATCH as authorized customer
+      const disableRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ expectedRevision: 1, enabled: false }),
+      });
+      assert.equal(disableRes.status, 200);
+      const disabledData = await disableRes.json();
+      assert.equal(disabledData?.data?.enabled, false);
+      assert.equal(disabledData?.data?.revision, 2);
+
+      // Prepare simulated completed delete job for revision 2
+      const deleteJobId = randomUUID();
+      const jobResult = {
+        version: 1,
+        transactionId: deleteJobId,
+        backupId: fxHttp.backupId,
+        scope: 'mailbox',
+        identity: fxHttp.mailbox.address,
+        mailDomainId: fxHttp.mailDomainId,
+        resourceId: fxHttp.mailboxId,
+        expectedResourceRevision: 2,
+        sourcePresent: true,
+        contentSha256: fxHttp.backupContentDigest,
+        bytes: 0,
+        files: 0,
+        directories: 0,
+        deleted: true,
+        sideEffects: true,
+      };
+      fxHttp.storedJobs.set(deleteJobId, {
+        id: deleteJobId,
+        serverId: fxHttp.localServerId,
+        type: 'mail_data_delete',
+        resourceType: 'mail_domain',
+        resourceId: fxHttp.mailDomainId,
+        operation: OPERATIONS.MAIL_DATA_DELETE,
+        status: 'succeeded',
+        payload: {
+          transactionId: deleteJobId,
+          backupId: fxHttp.backupId,
+          scope: 'mailbox',
+          identity: fxHttp.mailbox.address,
+        },
+        result: jobResult,
+      });
+      fxHttp.liveData.present = false;
+      fxHttp.liveData.bytes = 0;
+
+      // 5j.2 Finalize deletion via DELETE as authorized customer
+      const validConfirmation = `delete-mailbox:${fxHttp.mailbox.address}`;
+      const deleteSuccessRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'DELETE',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          expectedRevision: 2,
+          deleteJobId,
+          confirmation: validConfirmation,
+        }),
+      });
+      assert.equal(deleteSuccessRes.status, 200);
+      const deleteSuccessBody = await deleteSuccessRes.json();
+      assert.equal(deleteSuccessBody?.data?.deleted, true);
+      assert.equal(deleteSuccessBody?.data?.id, fxHttp.mailboxId);
+
+      // Verify mailbox removed from registry
+      assert.equal(await fxHttp.mailboxRegistry.getMailbox(fxHttp.mailboxId), null);
+
+      // Subsequent GET as customer fails closed with 403 site_scope_forbidden
+      const getDeletedCustomerRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'GET',
+      });
+      assert.equal(getDeletedCustomerRes.status, 403);
+      const getDeletedCustomerBody = await getDeletedCustomerRes.json();
+      assert.equal(getDeletedCustomerBody?.error?.code, 'site_scope_forbidden');
+
+      // Subsequent GET as owner returns 404 mailbox_not_found from route handler
+      currentAuth = {
+        user: { role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      const getDeletedOwnerRes = await fetch(`${base}/api/mailboxes/${fxHttp.mailboxId}`, {
+        method: 'GET',
+      });
+      assert.equal(getDeletedOwnerRes.status, 404);
+      const getDeletedOwnerBody = await getDeletedOwnerRes.json();
+      assert.equal(getDeletedOwnerBody?.error?.code, 'mailbox_not_found');
     } finally {
       await new Promise((resolve) => server.close(resolve));
     }

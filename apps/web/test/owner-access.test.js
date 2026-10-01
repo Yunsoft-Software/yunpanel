@@ -27,6 +27,15 @@ test('site manager, reseller, and customer sessions use site-management access o
     assert.equal(panelPermission(tenant, '*'), true);
     assert.equal(ownerAccess({ ...tenant, access: { mode: 'management', permissions: ['*'] } }), 'denied');
   }
+  for (const kind of ['reseller', 'customer']) {
+    const tenant = {
+      user: { role: 'user', hosting: { kind } },
+      security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+    };
+    assert.equal(ownerAccess(tenant), 'site_management');
+    assert.equal(panelPermission(tenant, '*'), true);
+  }
 });
 
 test('non-Owners cannot inherit management wildcard or inconsistent metadata', () => {
