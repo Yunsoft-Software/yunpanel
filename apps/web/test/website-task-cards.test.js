@@ -68,10 +68,12 @@ test('source: refresh updates all binding and certificate resources, not only do
 test('source: create entry is Owner-only in heading and empty state; no mutation is introduced', async () => {
   const page = await source('WebsitesPage.jsx');
   assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new"/);
+  assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new\?mode=subdomain"/);
   assert.match(page, /action=\{isOwner && canManage \? <LinkButton to="\/websites\/new"/);
   assert.doesNotMatch(page, /panelRequest|fetch\(|localStorage|sessionStorage/);
   const card = await source('WebsiteTaskCard.jsx');
   assert.match(card, /tasks.createSubdomainHref && <LinkButton to=\{tasks.createSubdomainHref\}/);
+  assert.match(card, /tasks.manageAliasesHref && <LinkButton to=\{tasks.manageAliasesHref\}/);
   assert.doesNotMatch(card, /panelRequest|fetch\(|localStorage|sessionStorage/);
 });
 test('source: every daily tool is outside disclosures and has an accessible destination', async () => {
