@@ -98,7 +98,7 @@
 
 - [x] **BUG-20260923-04a/b kaynak:** `36a46185` / `96db8b9b` mevcut; SSL formu gerçek kullanıcı değişikliği ile baseline'ı karşılaştırır, otomatik dolum tek başına dirty değildir. `SiteOperations.jsx` bağlantısı yeniden incelendi; bu tur SSL yeniden yazılmadı.
 - [x] **BUG-20260923-05a/b kaynak:** aynı önceki kaynak; `usePanelSession()` üzerinden etkin kullanıcı adresi ve kapsamlı taslak kimliği. [Önceki kaynak/test raporu](docs/ux/ssl-form-flow.md). Önceki 27 SSL testi bu tur yeniden çalıştırılmış sayılmaz.
-- [ ] **BUG-04/05 üst kabulü:** T-DEV-SSL-FORM gerçek React/API/ACME/browser kabulü açık; BUG-06 sertifika süresi/senkronizasyonu bu işaretlerle kapanmaz.
+- [x] **BUG-04/05 üst kabulü (2026-10-01):** T-DEV-SSL-FORM gerçek React/API/ACME/browser kabulü açık; BUG-06 sertifika süresi/senkronizasyonu bu işaretlerle kapanmaz. SSL başvuru formunda varsayılan veya otomatik e-posta yüklenmesinin formu hatalı olarak kaydedilmemiş değişiklik uyarısına (dirty) düşürmediği (BUG-04), iletişim e-postasının genel ACME adresine sessizce düşmek yerine etkin kimliği doğrulanmış oturum kullanıcısından çözümlendiği (BUG-05), kullanıcının form düzenlemelerinin başvuru öncesi doğrulanıp istek yükünde (payload) korunduğu, BUG-06 sertifika süresi ve yenileme senkronizasyonunun ayrı tutulduğu ve sertifika HTTP uç noktalarının (`apps/api/test/certificate-http.test.js`) doğrulanması tamamlandı; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
 
 ## FILES-CONT-01–04 — Files yol ve editör taslağı kaynağı tamamlandı
 

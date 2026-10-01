@@ -203,6 +203,7 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     certificateNames: Object.freeze([...(certificate.certificateNames ?? certificate.domains ?? [])]),
     challenge,
     staging: certificate.staging === true,
+    email: certificate.email ?? null,
     subject: typeof certificate.subject === 'string' ? sanitizeLogMessage(certificate.subject).message.slice(0, 500) : null,
     issuer: typeof certificate.issuer === 'string' ? sanitizeLogMessage(certificate.issuer).message.slice(0, 500) : null,
     subjectAltName: typeof certificate.subjectAltName === 'string'
@@ -369,6 +370,9 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   }
   if (sourceVersion < 8) {
     certificate.lastReloadOutcome = null;
+  }
+  if (certificate.email === undefined) {
+    certificate.email = null;
   }
   if (certificate.lastReloadOutcome !== null && certificate.lastReloadOutcome !== undefined && (
     typeof certificate.lastReloadOutcome !== 'object'

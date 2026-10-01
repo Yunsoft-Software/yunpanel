@@ -653,3 +653,106 @@ test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentat
     assert.equal(failedArrayMail.error.code, 'postfix_reload_failed');
   });
 });
+
+test('SSL certificate issuance endpoint validates contact email, preserves user payload, and avoids silent global ACME fallback (BUG-04/05)', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-cert-issue-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const customRoot = path.join(directory, 'custom-certificates');
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'issue-host' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'issue-host' });
+
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const domain = await domainRegistry.createDomain({
+    serverId: enrolled.server.id,
+    primaryDomain: 'issue.example.com',
+    aliases: ['www.issue.example.com'],
+    targetType: 'proxy',
+    target: { upstreamPort: 8080 },
+    httpsMode: 'managed',
+  });
+
+  const checksum = 'c'.repeat(64);
+  await domainRegistry.markStaged(domain.id, {
+    checksum,
+    configName: 'yunpanel-issue.example.com.conf',
+  });
+  await domainRegistry.markApplied(domain.id, { checksum });
+
+  const certificateRegistry = createCertificateRegistry({ customRoot });
+  const certificateMaterialManager = createCertificateMaterialManager({ customRoot, getUid: () => 0 });
+  const jobRegistry = createJobRegistry();
+
+  const app = withPanelContext(createApp({
+    environment: 'production',
+    registry: serverRegistry,
+    domainRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    jobRegistry,
+    localServerId: enrolled.server.id,
+  }));
+
+  await withServer(app, async (baseUrl) => {
+    // 1. Missing contact email is rejected with invalid_acme_email (no silent global fallback - BUG-05)
+    const missingEmail = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
+      method: 'POST',
+      body: { staging: true },
+    });
+    assert.equal(missingEmail.response.status, 400);
+    assert.equal(missingEmail.payload.error.code, 'invalid_acme_email');
+
+    // 2. Malformed contact email is rejected without throwing unhandled errors
+    const invalidEmail = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
+      method: 'POST',
+      body: { email: 'not-an-email', staging: true },
+    });
+    assert.equal(invalidEmail.response.status, 400);
+    assert.equal(invalidEmail.payload.error.code, 'invalid_acme_email');
+
+    // 3. Valid user-provided contact email and explicit domain list are accepted and preserved (BUG-04/05 payload preservation)
+    const validIssue = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
+      method: 'POST',
+      body: {
+        email: 'user.contact@example.test',
+        staging: true,
+        domains: ['issue.example.com', 'www.issue.example.com'],
+      },
+    });
+    assert.equal(validIssue.response.status, 202);
+    assert.equal(validIssue.payload.data.certificate.email, 'user.contact@example.test');
+    assert.deepEqual(validIssue.payload.data.certificate.certificateNames, ['issue.example.com', 'www.issue.example.com']);
+    assert.ok(validIssue.payload.data.job);
+
+    const queuedJob = await jobRegistry.getJob(validIssue.payload.data.job.id);
+    assert.equal(queuedJob.operation, 'ssl.issue');
+    assert.equal(queuedJob.payload.email, 'user.contact@example.test');
+    assert.deepEqual(queuedJob.payload.domains, ['issue.example.com', 'www.issue.example.com']);
+    assert.equal(queuedJob.payload.staging, true);
+
+    // 4. Verify BUG-06 boundary: certificate issuance is distinct from renewal synchronization
+    const certRecord = await certificateRegistry.getCertificate(validIssue.payload.data.certificate.id);
+    assert.equal(certRecord.state, 'validating');
+    assert.equal(validIssue.payload.data.certificate.state, 'validating');
+    const outcomeRes = await requestJson(`${baseUrl}/api/certificates/${certRecord.id}/renewal-outcome?jobId=${queuedJob.id}`);
+    assert.equal(outcomeRes.response.status, 200);
+    assert.notEqual(outcomeRes.payload.data.outcome, 'renewed');
+
+    // 5. Verify production issuance (staging: false) moves certificate to 'issuing' state
+    const prodIssue = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/issue`, {
+      method: 'POST',
+      body: {
+        email: 'user.contact@example.test',
+        staging: false,
+        domains: ['issue.example.com', 'www.issue.example.com'],
+      },
+    });
+    assert.equal(prodIssue.response.status, 202);
+    assert.equal(prodIssue.payload.data.certificate.email, 'user.contact@example.test');
+    assert.equal(prodIssue.payload.data.certificate.state, 'issuing');
+    const prodRecord = await certificateRegistry.getCertificate(prodIssue.payload.data.certificate.id);
+    assert.equal(prodRecord.state, 'issuing');
+  });
+});
