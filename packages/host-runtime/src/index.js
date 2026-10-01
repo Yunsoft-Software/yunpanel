@@ -417,6 +417,9 @@ export {
 export {
   createNftablesManager,
   NftablesManagerError,
+  inspectSshListeners,
+  verifySshListenerContract,
+  nftablesManagerInternals,
 } from './nftables-manager.js';
 export {
   createCrowdsecManager,
