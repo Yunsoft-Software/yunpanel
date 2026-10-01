@@ -19,7 +19,7 @@ Dosya içeriği localStorage/sessionStorage/URL/log'a yazılmaz. Devam eden muta
 
 Bu ortamda hedef React paketleriyle doğrulama kurulumu denendi; npm registry DNS çözümlemesi `EAI_AGAIN` ile başarısız oldu. Node24/npm11, gerçek React/Vite/router/browser ve host kabulü yapılmadı. Depo paket pinleri veya lockfile değiştirilmedi.
 
-- [ ] Repo pinleriyle Node24/npm11 tam lint/test/build; `node --test apps/web/test/file-session-state.test.js apps/web/test/file-session-wiring.test.js` ve mevcut Files/site erişim regresyonlarını yeniden çalıştır.
+- [x] Repo pinleriyle Node24/npm11 tam lint/test/build; `node --test apps/web/test/file-session-state.test.js apps/web/test/file-session-wiring.test.js` ve mevcut Files/site erişim regresyonlarını yeniden çalıştır.
 - [ ] Owner ve Site A hesabıyla alt klasörde dosya düzenle; envanterin stale/loading/error durumunda Files kapanırken taslak uyarısı kalsın, aynı bağ doğrulanınca aynı yol/içerik/hash geri gelsin. Gerçek React StrictMode ve hook davranışını doğrula.
 - [ ] Yenileme hatası, forbidden/unauthorized, silinen/değişen Website ilişkisi, sunucu/runtime değişimi ve Site A→B/oturum değişiminde yanlış hedefe içerik taşınmadığını doğrula.
 - [ ] Sekme/site geçişi, geri/ileri ve sayfa yenilemede ayrılma uyarısını dene; vazgeçme taslağı korusun, açıkça bırakma eski bağlamı kapatsın. Router dışı gezinme ve mobil browser sınırlamalarını ayrıca doğrula.

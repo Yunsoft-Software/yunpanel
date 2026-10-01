@@ -121,3 +121,19 @@ test('malformed editors and arbitrary cache fields are rejected', () => {
   }
   assert.equal(updateFileSession(state, key, 'entries', ['not cached']), state);
 });
+test('navigating folders within the same binding preserves editor draft without modification', () => {
+  const state = draft();
+  const key = fileSessionKey(state.binding);
+  const moved = updateFileSession(state, key, 'path', 'src');
+  assert.equal(moved.path, 'src');
+  assert.equal(moved.editor, state.editor);
+  assert.equal(fileEditorDirty(moved.editor), true);
+});
+test('explicitly confirming discard sets editor to null without unhandled exceptions', () => {
+  const state = draft();
+  const key = fileSessionKey(state.binding);
+  const discarded = updateFileSession(state, key, 'editor', null);
+  assert.equal(discarded.editor, null);
+  assert.equal(fileEditorDirty(discarded.editor), false);
+  assert.equal(discarded.path, state.path);
+});
