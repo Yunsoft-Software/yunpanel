@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import { Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
+import { Badge, Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { getPanelSettings, updatePanelSettings } from './system-settings-client.js';
+import { FRONTEND_BUILD_ID, FRONTEND_ASSET_ID } from './deployment-diagnostics-client.js';
 
 function formatUptime(seconds) {
   if (!seconds || seconds < 0) return '—';
@@ -86,6 +87,36 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
           ['Sunucu görünen adı', panel.displayName ?? '—'],
           ['Yerel sunucu kimliği', panel.localServerId ?? '—'],
           ['Çalışma süresi', formatUptime(panel.uptimeSeconds)],
+        ]} />
+      </Section>}
+
+      {diagnostics && data.deployment && <Section
+        title="Dağıtılan sürüm ve veri tazeliği"
+        description="Backend ve frontend derleme kimlikleri, şema sürümü ve önbellek tazelik doğrulaması."
+      >
+        {data.deployment.sourceInfo?.warning && (
+          <div className="ws-notice ws-notice-warning" style={{ marginBottom: '1rem' }}>
+            <strong>Uyarı:</strong> {data.deployment.sourceInfo.warning}
+          </div>
+        )}
+        <KeyValues items={[
+          ['Backend API sürümü', `v${data.deployment.version}`],
+          ['Backend derleme kimliği', data.deployment.buildId],
+          ['Backend commit', data.deployment.commit],
+          ['Veri şema sürümü', `Şema v${data.deployment.schemaVersion}`],
+          ['Frontend derleme kimliği', FRONTEND_BUILD_ID],
+          ['Frontend varlık kimliği', FRONTEND_ASSET_ID],
+          ['Çalışma zamanı senkronizasyonu', (
+            <Badge state={data.deployment.sourceInfo?.sourceMatchesDeployed ? 'synchronized' : 'diverged'}>
+              {data.deployment.sourceInfo?.sourceMatchesDeployed ? 'Senkronize' : 'Farklılaşmış'}
+            </Badge>
+          )],
+          ['Son tanılama kontrolü', data.deployment.lastCheckedAt ? new Date(data.deployment.lastCheckedAt).toLocaleString() : 'Bilinmiyor'],
+          ['Tazelik durumu', (
+            <Badge state={data.deployment.lastCheckedAt ? 'healthy' : 'unknown'}>
+              {data.deployment.lastCheckedAt ? 'Güncel ve Sağlıklı' : 'Bilinmiyor'}
+            </Badge>
+          )],
         ]} />
       </Section>}
 

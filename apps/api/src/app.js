@@ -30,7 +30,7 @@ import { createBackupResourceProvider } from './backup-resource-provider.js';
 import { CertificateRegistryError, createCertificateRegistry } from './certificate-registry.js';
 import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
 import { mountCertificateRoutes } from './certificate-http.js';
-import { createApp as createCoreApp } from './core-app.js';
+import { createApp as createCoreApp, resolveDeploymentDiagnostics } from './core-app.js';
 import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from './database-binding-http.js';
 import { DatabaseBindingRegistryError } from './database-binding-registry.js';
 import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } from './database-credential-apply-service.js';
@@ -197,7 +197,19 @@ import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } 
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
-export { API_VERSION } from './core-app.js';
+export {
+  API_VERSION,
+  SCHEMA_VERSION,
+  DEFAULT_STALE_THRESHOLD_MS,
+  FRESHNESS_STATUSES,
+  DEPLOYMENT_COMPARISON_STATUSES,
+  sanitizeDiagnosticInfo,
+  resolveDeploymentDiagnostics,
+  compareDeploymentVersions,
+  evaluateFreshnessState,
+  evaluateDeploymentEvidence,
+  requireDeploymentDiagnosticsAccess,
+} from './core-app.js';
 export { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
 export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
 export { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
@@ -1006,8 +1018,19 @@ export function createApp(allOptions = {}) {
     });
   }
   if (panelSettingsService) {
+    const wrappedPanelSettingsService = {
+      ...panelSettingsService,
+      getSystemSettings: async (...args) => {
+        const data = await panelSettingsService.getSystemSettings(...args);
+        return {
+          ...data,
+          deployment: resolveDeploymentDiagnostics(),
+        };
+      },
+      updateSystemSettings: (...args) => panelSettingsService.updateSystemSettings(...args),
+    };
     mountPanelSettingsRoutes(app, {
-      panelSettingsService,
+      panelSettingsService: wrappedPanelSettingsService,
     });
   }
   if (pleskImporter) {
