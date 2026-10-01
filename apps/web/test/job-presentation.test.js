@@ -32,8 +32,9 @@ test('job resource links prefer exact linked site routes when available', () => 
 });
 
 for (const [status, stage] of [
-  ['queued', 'Kuyrukta'], ['running', 'Sunucuda çalışıyor'], ['succeeded', 'Tamamlandı'],
-  ['failed', 'Başarısız'], ['cancelled', 'İptal edildi'], ['unexpected', 'Bilinmiyor'],
+  ['saving', 'Kaydediliyor'], ['queued', 'Kuyrukta'], ['running', 'Sunucuda çalışıyor'],
+  ['applying', 'Uygulanıyor'], ['verifying', 'Doğrulanıyor'], ['partial', 'Kısmi başarılı'],
+  ['succeeded', 'Tamamlandı'], ['failed', 'Başarısız'], ['cancelled', 'İptal edildi'], ['unexpected', 'Bilinmiyor'],
 ]) {
   test(`${status} reports its actual state, never a fabricated fraction or attempt budget`, () => {
     const job = Object.freeze({ status, attempts: 3, progress: 100 });

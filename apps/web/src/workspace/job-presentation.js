@@ -25,9 +25,9 @@ const SAFE_RESULT_FIELDS = Object.freeze([
   ['commitSha', 'Commit'],
   ['releaseId', 'Release'],
   ['previousReleaseId', 'Önceki release'],
-  ['environmentRevision', 'Env revizyonu'],
+  ['environmentRevision', 'Ortam sürümü'],
   ['artifactFiles', 'Dosya sayısı'],
-  ['artifactBytes', 'Artifact boyutu'],
+  ['artifactBytes', 'Dosya boyutu'],
   ['port', 'Port'],
   ['healthy', 'Sağlık'],
   ['selector', 'DKIM selector'],
@@ -77,8 +77,12 @@ export function jobResourceTarget(job, resources = {}) {
 // until the API exposes an explicit, validated measurement contract.
 export function jobLifecycle(job) {
   const status = job?.status;
+  if (status === 'saving') return Object.freeze({ stage: 'Kaydediliyor', progress: '—', detail: 'Değişiklikler sunucuya kaydediliyor.' });
   if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '—', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.' });
   if (status === 'running') return Object.freeze({ stage: 'Sunucuda çalışıyor', progress: '—', detail: 'İş sunucuda çalışıyor; sonucu henüz belli değil.' });
+  if (status === 'applying') return Object.freeze({ stage: 'Uygulanıyor', progress: '—', detail: 'Yapılandırma sunucuda uygulanıyor.' });
+  if (status === 'verifying') return Object.freeze({ stage: 'Doğrulanıyor', progress: '—', detail: 'Sunucu işlem sonucu ve durum güncelliği doğrulanıyor.' });
+  if (status === 'partial' || status === 'partial_success') return Object.freeze({ stage: 'Kısmi başarılı', progress: '—', detail: 'İşlem kısmen tamamlandı; bazı adımlar müdahale veya doğrulama gerektiriyor.' });
   if (status === 'succeeded') return Object.freeze({ stage: 'Tamamlandı', progress: '—', detail: 'Sunucu doğrulanmış başarılı sonuç kaydetti.' });
   if (status === 'failed') return Object.freeze({ stage: 'Başarısız', progress: '—', detail: 'İşlem başarısız oldu. Hata ayrıntısını ve ilgili kaynak durumunu kontrol edin.' });
   if (status === 'cancelled') return Object.freeze({ stage: 'İptal edildi', progress: '—', detail: 'İş çalışmadan önce veya desteklenen iptal noktasında kapatıldı.' });

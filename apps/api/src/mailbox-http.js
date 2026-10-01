@@ -2,6 +2,8 @@ import { normalizeMailboxAddress } from '@yunpanel/config-templates';
 import { MailboxRegistryError } from './mailbox-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
+export { MailboxRegistryError };
+
 const CREATE_FIELDS = new Set(['mailDomainId', 'address', 'password']);
 const ROTATE_FIELDS = new Set(['expectedRevision', 'password']);
 const UPDATE_FIELDS = new Set(['expectedRevision', 'enabled']);

@@ -62,6 +62,17 @@ function createFakeFactory({ initialJobs = [], failRecovery = false, failRecover
         await persist('cancel');
         return structuredClone(job);
       },
+      async retryJob(jobId, options) {
+        const job = jobs.find((entry) => entry.id === jobId);
+        if (!job || job.status !== 'failed') throw new Error('job is not failed');
+        job.status = 'queued';
+        job.manualRetry = true;
+        await persist('retryJob');
+        return structuredClone(job);
+      },
+      async manualRetry(jobId, options) {
+        return this.retryJob(jobId, options);
+      },
       async getJob(id) { return structuredClone(jobs.find((job) => job.id === id) ?? null); },
       async listJobs({ status = null } = {}) { return structuredClone(jobs.filter((job) => !status || job.status === status)); },
     };
@@ -136,7 +147,7 @@ test('failed mutation discards dirty in-memory state and reloads last committed 
   await assert.rejects(registry.enqueue({ id: 'dirty-job', serverId: 'server-1' }), /before commit/);
   assert.deepEqual(await registry.listJobs(), [committed]);
   assert.deepEqual(fake.disk(), [committed]);
-  assert.equal(fake.factoryCount(), 3);
+  assert.equal(fake.factoryCount(), 4);
   assert.equal(registry.failure(), null);
 });
 
@@ -246,4 +257,61 @@ test('constructor rejects non-durable usage and invalid factories', () => {
   assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json' }), { code: 'durable_job_factory_required' });
   assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json', registryFactory: () => ({}), recoveryStoreFactory: null }), { code: 'durable_job_recovery_factory_required' });
   assert.throws(() => createDurableJobRegistry({ filePath: '/virtual/jobs.json', registryFactory: () => ({}), recoveryStoreFactory: () => ({}), storeLockFactory: null }), { code: 'durable_job_store_lock_invalid' });
+});
+
+test('retryJob and manualRetry are blocked when reconciliation is required', async () => {
+  const fake = createFakeFactory({ initialJobs: [runningJob] });
+  const registry = durable(fake);
+  await registry.init();
+
+  await assert.rejects(
+    registry.retryJob(runningJob.id),
+    (error) => error instanceof DurableJobRegistryError && error.code === 'durable_job_reconciliation_required',
+  );
+  await assert.rejects(
+    registry.manualRetry(runningJob.id),
+    (error) => error instanceof DurableJobRegistryError && error.code === 'durable_job_reconciliation_required',
+  );
+});
+
+test('retryJob executes under store lock and commits durable state', async () => {
+  const failedJob = {
+    id: '12345678-1234-4234-8234-123456789012',
+    serverId: 'server-1',
+    operation: 'system.packages.inspect',
+    status: 'failed',
+    error: { code: 'dns_provider_rate_limited' },
+  };
+  const fake = createFakeFactory({ initialJobs: [failedJob] });
+  const registry = durable(fake);
+  await registry.init();
+
+  const retried = await registry.retryJob(failedJob.id);
+  assert.equal(retried.status, 'queued');
+  assert.equal(retried.manualRetry, true);
+  assert.deepEqual(fake.disk(), [{ ...failedJob, status: 'queued', manualRetry: true }]);
+});
+
+test('durable job registry exposes withLock and storeLock for shared resource synchronization', async () => {
+  let lockCalls = 0;
+  const fake = createFakeFactory({ initialJobs: [] });
+  const registry = createDurableJobRegistry({
+    filePath: '/virtual/jobs.json',
+    registryFactory: fake.factory,
+    recoveryStoreFactory: fake.recoveryStoreFactory,
+    storeLockFactory: () => ({
+      withLock: async (action) => {
+        lockCalls += 1;
+        return action();
+      },
+    }),
+  });
+  await registry.init();
+
+  const res = await registry.withLock(async () => {
+    return 'locked-result';
+  });
+  assert.equal(res, 'locked-result');
+  assert.equal(lockCalls, 1);
+  assert.ok(registry.storeLock);
 });

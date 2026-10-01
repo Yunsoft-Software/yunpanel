@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -262,7 +263,7 @@ test('Certificate GC preview and sweep routes expose retention candidates and sw
   });
 });
 
-test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation checks and handle partial reloads gracefully', async () => {
+test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation checks and handle partial reloads gracefully (live TLS and registry state)', async () => {
   const certificateRegistry = createCertificateRegistry();
   const domainRegistry = createDomainRegistry();
   const jobRegistry = createJobRegistry();
@@ -418,5 +419,237 @@ test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentat
     const clearedCert = await certificateRegistry.getCertificate(certificate.id);
     assert.equal(clearedCert.state, 'active');
     assert.equal(clearedCert.diagnosis, null);
+  });
+});
+
+test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation checks and handle partial reloads gracefully (presentation checks and service matrix)', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-cert-presentation-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const customRoot = path.join(directory, 'custom-certificates');
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'presentation-host' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'presentation-host' });
+
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const domain = await domainRegistry.createDomain({
+    serverId: enrolled.server.id,
+    primaryDomain: 'secure.example.com',
+    aliases: ['www.secure.example.com'],
+    targetType: 'proxy',
+    target: { upstreamPort: 4301 },
+    httpsMode: 'managed',
+  });
+
+  const certificateRegistry = createCertificateRegistry({ customRoot });
+  const certificateMaterialManager = createCertificateMaterialManager({ customRoot, getUid: () => 0 });
+  const jobRegistry = createJobRegistry();
+  const testJobs = new Map();
+  const baseGetJob = jobRegistry.getJob.bind(jobRegistry);
+  const baseListJobs = jobRegistry.listJobs.bind(jobRegistry);
+
+  jobRegistry.createJob = async ({ serverId, operation, resourceType, resourceId }) => {
+    const id = randomUUID();
+    const job = {
+      id,
+      serverId,
+      operation,
+      resourceType,
+      resourceId,
+      status: 'queued',
+      result: null,
+      error: null,
+      createdAt: new Date().toISOString(),
+    };
+    testJobs.set(id, job);
+    return job;
+  };
+
+  jobRegistry.updateJobStatus = async (id, status, { result = null, error = null } = {}) => {
+    const job = testJobs.get(id);
+    if (job) {
+      job.status = status;
+      job.result = result;
+      job.error = error;
+      job.finishedAt = new Date().toISOString();
+    }
+    return job;
+  };
+
+  jobRegistry.getJob = async (id) => {
+    if (testJobs.has(id)) {
+      return testJobs.get(id);
+    }
+    return baseGetJob(id);
+  };
+
+  jobRegistry.listJobs = async (filter) => {
+    const fromBase = await baseListJobs(filter);
+    const fromCustom = Array.from(testJobs.values()).filter((j) => {
+      if (filter?.serverId && j.serverId !== filter.serverId) return false;
+      if (filter?.resourceType && j.resourceType !== filter.resourceType) return false;
+      if (filter?.resourceId && j.resourceId !== filter.resourceId) return false;
+      if (filter?.status && j.status !== filter.status) return false;
+      return true;
+    });
+    return [...fromBase, ...fromCustom];
+  };
+
+  const app = withPanelContext(createApp({
+    environment: 'production',
+    registry: serverRegistry,
+    domainRegistry,
+    certificateRegistry,
+    certificateMaterialManager,
+    jobRegistry,
+    localServerId: enrolled.server.id,
+  }));
+
+  const material = await generateCertificate(directory, 'presentation');
+
+  await withServer(app, async (baseUrl) => {
+    // 1. Import a custom certificate to test against
+    const preview = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/custom-preview`, {
+      method: 'POST',
+      body: material,
+    });
+    assert.equal(preview.response.status, 200);
+
+    const apply = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/custom`, {
+      method: 'POST',
+      body: {
+        ...material,
+        previewDigest: preview.payload.data.previewDigest,
+        confirmation: preview.payload.data.confirmation,
+      },
+    });
+    assert.equal(apply.response.status, 201);
+    const cert = apply.payload.data.certificate;
+
+    // 2. Test Verify-TLS endpoint exposes presentation checks
+    const verifyTls = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/verify-tls`);
+    assert.equal(verifyTls.response.status, 200);
+    assert.equal(verifyTls.payload.data.verified, true);
+    assert.equal(verifyTls.payload.data.status, 'valid');
+    assert.equal(verifyTls.payload.data.code, 'tls_verified');
+    assert.ok(verifyTls.payload.data.presentationChecks);
+    assert.equal(verifyTls.payload.data.presentationChecks.domainsMatch, true);
+    assert.equal(verifyTls.payload.data.presentationChecks.notExpired, true);
+    assert.equal(verifyTls.payload.data.presentationChecks.fingerprintValid, true);
+    assert.equal(verifyTls.payload.data.presentationChecks.materialVerified, true);
+    assert.equal(verifyTls.payload.data.presentationChecks.isExpiringSoon, true);
+
+    // Also test verify-tls directly via domain route
+    const domainVerifyTls = await requestJson(`${baseUrl}/api/domains/${domain.id}/verify-tls`);
+    assert.equal(domainVerifyTls.response.status, 200);
+    assert.equal(domainVerifyTls.payload.data.verified, true);
+
+    // 3. Test Renewal-outcome endpoint with various job states and safe undefined handling
+    // 3a. Initial state (no jobs yet)
+    const initialRenewal = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/renewal-outcome`);
+    assert.equal(initialRenewal.response.status, 200);
+    assert.equal(initialRenewal.payload.data.outcome, 'idle');
+    assert.equal(initialRenewal.payload.data.presentationChecks.waiting, false);
+    assert.equal(initialRenewal.payload.data.presentationChecks.failed, false);
+
+    // 3b. Succeeded dryRun job -> outcome 'tested'
+    const dryRunJob = await jobRegistry.createJob({
+      serverId: enrolled.server.id,
+      operation: 'ssl.renew',
+      resourceType: 'certificate',
+      resourceId: cert.id,
+    });
+    await jobRegistry.updateJobStatus(dryRunJob.id, 'succeeded', {
+      result: { dryRun: true, status: 'validated', certName: 'secure.example.com' },
+    });
+
+    const dryRunRenewal = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/renewal-outcome?jobId=${dryRunJob.id}`);
+    assert.equal(dryRunRenewal.response.status, 200);
+    assert.equal(dryRunRenewal.payload.data.outcome, 'tested');
+    assert.equal(dryRunRenewal.payload.data.code, 'tested');
+    assert.equal(dryRunRenewal.payload.data.presentationChecks.tested, true);
+
+    // 3c. Failed job with undefined error object (verifying code property does not throw TypeError)
+    const failedJob = await jobRegistry.createJob({
+      serverId: enrolled.server.id,
+      operation: 'ssl.renew',
+      resourceType: 'certificate',
+      resourceId: cert.id,
+    });
+    // Deliberately set status failed without an error.code property
+    await jobRegistry.updateJobStatus(failedJob.id, 'failed');
+
+    const failedRenewal = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/renewal-outcome?jobId=${failedJob.id}`);
+    assert.equal(failedRenewal.response.status, 200);
+    assert.equal(failedRenewal.payload.data.outcome, 'failed');
+    assert.equal(failedRenewal.payload.data.code, 'renewal_job_failed');
+    assert.equal(failedRenewal.payload.data.presentationChecks.failed, true);
+    assert.ok(failedRenewal.payload.data.error);
+    assert.equal(failedRenewal.payload.data.error.code, 'renewal_job_failed');
+
+    // 4. Test Reload-outcome endpoint handling partial reloads gracefully
+    // 4a. Complete reload (all services ok)
+    const completeReload = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/reload-outcome`, {
+      method: 'POST',
+      body: {
+        services: {
+          nginx: { ok: true },
+        },
+      },
+    });
+    assert.equal(completeReload.response.status, 200);
+    assert.equal(completeReload.payload.data.status, 'reloaded');
+    assert.equal(completeReload.payload.data.partial, false);
+    assert.equal(completeReload.payload.data.outcome, 'complete_reload');
+    assert.equal(completeReload.payload.data.code, 'reload_succeeded');
+    assert.equal(completeReload.payload.data.presentationChecks.allServicesReloaded, true);
+    assert.equal(completeReload.payload.data.presentationChecks.partialReload, false);
+
+    // 4b. Partial reload where mail service fails and its error object or error.code is undefined
+    const partialReload = await requestJson(`${baseUrl}/api/domains/${domain.id}/certificates/${cert.id}/reload-outcome`, {
+      method: 'POST',
+      body: {
+        services: {
+          nginx: { ok: true },
+          mail: { ok: false }, // Note: error object is omitted/undefined!
+        },
+      },
+    });
+    assert.equal(partialReload.response.status, 200);
+    assert.equal(partialReload.payload.data.status, 'partial');
+    assert.equal(partialReload.payload.data.partial, true);
+    assert.equal(partialReload.payload.data.outcome, 'partial_reload');
+    assert.equal(partialReload.payload.data.code, 'partial_reload');
+    assert.equal(partialReload.payload.data.presentationChecks.partialReload, true);
+    assert.equal(partialReload.payload.data.presentationChecks.hasFailures, true);
+
+    const nginxService = partialReload.payload.data.services.find((s) => s.service === 'nginx');
+    const mailService = partialReload.payload.data.services.find((s) => s.service === 'mail');
+    assert.ok(nginxService);
+    assert.equal(nginxService.ok, true);
+    assert.equal(nginxService.code, 'ok');
+    assert.equal(nginxService.error, null);
+
+    assert.ok(mailService);
+    assert.equal(mailService.ok, false);
+    assert.equal(mailService.code, 'service_reload_failed');
+    assert.ok(mailService.error);
+    assert.equal(mailService.error.code, 'service_reload_failed');
+
+    // 4c. Partial reload with array representation and explicit error code
+    const arrayReload = await requestJson(`${baseUrl}/api/domains/${domain.id}/reload-outcome`, {
+      method: 'POST',
+      body: {
+        services: [
+          { service: 'nginx', ok: true },
+          { service: 'mail', ok: false, error: { code: 'postfix_reload_failed', message: 'Postfix reload failed' } },
+        ],
+      },
+    });
+    assert.equal(arrayReload.response.status, 200);
+    assert.equal(arrayReload.payload.data.partial, true);
+    const failedArrayMail = arrayReload.payload.data.services.find((s) => s.service === 'mail');
+    assert.equal(failedArrayMail.error.code, 'postfix_reload_failed');
   });
 });

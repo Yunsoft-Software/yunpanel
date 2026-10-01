@@ -11,7 +11,7 @@ import {resolveWebsiteSuspensionAccess,suspensionAction} from './website-suspens
 const ACCESS={forbidden:'Bu siteyi yönetme izniniz yok.',unavailable:'Güncel site bilgileri bekleniyor.',
  not_found:'Bu alan adına bağlı tek bir Website kaydı bulunamadı.',unbound:'Alan adı henüz bir Website kaydına bağlı değil.',
  inconsistent:'Site ve sunucu bağlantısı doğrulanamadı.'};
-const labels={pending:'Hazırlanıyor',suspending:'Askıya alınıyor',suspended:'Askıda',partial:'Kısmi',failed:'Başarısız',
+const labels={pending:'Hazırlanıyor',suspending:'Askıya alınıyor',suspended:'Askıda',partial:'Kısmi başarılı',failed:'Başarısız',
  resuming:'Yeniden açılıyor',resumed:'Aktif',resume_partial:'Kısmi açıldı',resume_failed:'Yeniden açma başarısız'};
 const actionLabels={'start':'Siteyi askıya al','retry-suspend':'Askıya almayı yeniden dene','resume':'Siteyi yeniden aç','retry-resume':'Yeniden açmayı tekrar dene'};
 
@@ -45,7 +45,7 @@ function SuspensionWorkspace({scope,generation,onChanged}){
      ['Son güncelleme',latest?formatDate(latest.updatedAt):'—'],
      ['Sorunlu alan adı',failedDomains||'Yok'],
     ]}/>}
-    <p className="ws-muted">Askıya alma bağlı alan adlarının web yayınını durdurur; posta kutularını, veritabanlarını veya site dosyalarını silmez. Her değişiklik mevcut kalıcı suspension journal üzerinden izlenir.</p>
+    <p className="ws-muted">Askıya alma bağlı alan adlarının web yayınını durdurur; posta kutularını, veritabanlarını veya site dosyalarını silmez. Her işlem sunucu görev adımları üzerinden güvenle yürütülür ve izlenir.</p>
     {data&&!data.preview.readyToSuspend&&!data.preview.readyToResume&&!action&&<Blockers domains={data.preview.domains}/>}
     {action&&<Button variant={action.kind==='resume'||action.kind==='retry-resume'?'primary':'danger'} disabled={state?.busy} onClick={()=>setConfirm(action.kind)}>{actionLabels[action.kind]}…</Button>}
     {state?.unknownMutation&&<p className="ws-muted">Önceki isteğin sonucu bilinmediği için işlem tekrar gönderilmedi; yukarıdaki durum sunucudan yeniden okundu.</p>}
@@ -53,7 +53,12 @@ function SuspensionWorkspace({scope,generation,onChanged}){
   </Section>
   {latest&&<Section title="Son site erişim işlemi"><div className="ws-section-body">
    <p><Badge state={['suspended','resumed'].includes(latest.status)?'active':['partial','failed','resume_partial','resume_failed'].includes(latest.status)?'warning':'pending'}>{labels[latest.status]??latest.status}</Badge></p>
-   <p className="ws-muted">{latest.domainOperations.length} alan adı bu işlem kapsamına bağlıdır. Teknik çocuk operation kimlikleri normal kullanımda gösterilmez.</p>
+   <p className="ws-muted">{latest.domainOperations.length} alan adı bu işlem kapsamına bağlıdır. Teknik alt işlem ayrıntıları tanılama detaylarında saklanır.</p>
+   <details className="ws-disclosure" style={{marginTop:'0.75rem'}}><summary>Tanılama ve teknik işlem ayrıntıları</summary><KeyValues items={[
+    ['İşlem kimliği', latest.id],
+    ['Ham durum (raw status)', latest.status],
+    ['Bağlı domain işlem sayısı', latest.domainOperations?.length ?? 0],
+   ]} /></details>
   </div></Section>}
   {confirm&&<ConfirmDialog title={actionLabels[confirm]} confirmation={scope.label} busy={state?.busy} error={state?.error}
    message={confirm==='start'||confirm==='retry-suspend'

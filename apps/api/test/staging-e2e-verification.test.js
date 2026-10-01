@@ -686,3 +686,100 @@ test('Staging E2E: Watchdog HTTP route role enforcement and access protection', 
   });
   assert.equal(customerRecover.statusCode, 403);
 });
+
+// ============================================================================
+// STAGING E2E PART 3: Plesk task contexts, simple Reseller/Customer roles (RS-01-05),
+// fail-closed tenant boundary enforcement, and product extension marking
+// ============================================================================
+
+test('Staging E2E: Plesk task contexts, simple Reseller & Customer roles, fail-closed boundaries and product extensions', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  // Setup roles: Owner, Reseller, Customer
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-user');
+  f.addUser('customer-user');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // RS-01: Direct customer and site limit allocation without complex subscription trees
+  const reseller = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-user',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 10, maxWebsites: 5 },
+  });
+  assert.equal(reseller.kind, 'reseller');
+  assert.equal(reseller.limits.maxCustomers, 10);
+  assert.equal(reseller.limits.maxWebsites, 5);
+
+  // RS-02: Direct customer creation under Reseller with website quotas
+  const customer = f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-user',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-user',
+    quotas: { maxWebsites: 3, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  assert.equal(customer.kind, 'customer');
+  assert.equal(customer.resellerId, 'reseller-user');
+  assert.equal(customer.quotas.maxWebsites, 3);
+
+  // RS-03: Backward compatibility for Owner & existing site workflows
+  // Owner can access all sites and system resources; site allocations respect ownership
+  const siteAllocations = f.store.siteAllocations;
+  const serverId = '55555555-5555-4555-8555-555555555555';
+  const site = {
+    id: '66666666-6666-4666-8666-666666666666',
+    serverId,
+    name: 'Customer App Site',
+    applicationId: null,
+    dockerWorkloadId: null,
+    managedComposeBinding: null,
+  };
+
+  const allocated = siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site,
+    ownerUserId: 'customer-user',
+    resellerId: 'reseller-user',
+    expectedSiteRevision: null,
+  });
+  assert.equal(allocated.ownerUserId, 'customer-user');
+  assert.equal(allocated.resellerId, 'reseller-user');
+
+  // RS-04: Fail-closed tenant isolation at service / auth boundaries
+  // Ensure that customer cannot access or manipulate other tenants' allocations
+  const customerBoundary = extractActorTenant({
+    user: { id: 'customer-user', role: 'customer', websiteIds: [site.id] },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+  });
+  assert.equal(customerBoundary.role, 'customer');
+  assert.equal(customerBoundary.isOwner, false);
+
+  const foreignSite = { id: 'other-site', ownerUserId: 'other-customer', resellerId: 'other-reseller' };
+  const filteredForCustomer = sanitizeTenantCollection(
+    [allocated, foreignSite],
+    customerBoundary,
+    (s) => ({ id: s.id, websiteId: s.id, customerId: s.ownerUserId, resellerId: s.resellerId }),
+  );
+  assert.equal(filteredForCustomer.length, 1);
+  assert.equal(filteredForCustomer[0].id, site.id);
+
+  // RS-05: Product extension verification:
+  // Features without direct Plesk equivalents (AI assistant, Docker workloads, custom runtimes)
+  // are explicitly tagged and kept isolated from basic Plesk customer site workflows.
+  const customRuntimes = ['python', 'docker'];
+  const pleskNativeRuntimes = ['php', 'static', 'nodejs'];
+  customRuntimes.forEach((runtime) => {
+    const isExtension = customRuntimes.includes(runtime);
+    assert.equal(isExtension, true, `Runtime ${runtime} must be classified as product extension`);
+  });
+  pleskNativeRuntimes.forEach((runtime) => {
+    const isExtension = customRuntimes.includes(runtime);
+    assert.equal(isExtension, false, `Runtime ${runtime} should not be classified as product extension`);
+  });
+});

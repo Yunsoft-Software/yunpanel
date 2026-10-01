@@ -136,6 +136,16 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
     return response.json({ data });
   }));
 
+  const permissionsRoute = asyncRoute(async (request, response) => {
+    if (!exactObject(request.body, ['path', 'mode'])) throw new SiteFileHttpError('site_file_request_invalid', 'Permission request fields are invalid');
+    const itemPath = siteFileWorkerInternals.relativePath(request.body.path);
+    const mode = siteFileWorkerInternals.permissionMode(request.body.mode).toString(8).padStart(4, '0');
+    const data = await siteFileManager.execute(request.params.websiteId, { operation: 'permissions', path: itemPath, mode });
+    return response.json({ data });
+  });
+  app.post('/api/websites/:websiteId/files/permissions', requirePanelRouteAccess, SMALL_JSON, permissionsRoute);
+  app.put('/api/websites/:websiteId/files/permissions', requirePanelRouteAccess, SMALL_JSON, permissionsRoute);
+
   app.post('/api/websites/:websiteId/files/file', requirePanelRouteAccess, SMALL_JSON, asyncRoute(async (request, response) => {
     if (!exactObject(request.body, ['path']) || typeof request.body.path !== 'string') {
       throw new SiteFileHttpError('site_file_request_invalid', 'File creation request fields are invalid');

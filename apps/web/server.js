@@ -1293,12 +1293,11 @@ async function serveStatic(request, response, webRoot, pathname) {
 }
 
 export function createPanelServer(options = {}) {
+  const defaultAllowedClientIps = process.env.YUNPANEL_ENFORCE_CLIENT_IPS === 'true'
+    ? (process.env.YUNPANEL_ALLOWED_CLIENT_IPS || '*')
+    : '*';
   const {
-    allowedClientIps = options.allowedClientIps !== undefined
-      ? options.allowedClientIps
-      : (process.env.YUNPANEL_ENFORCE_CLIENT_IPS === 'true'
-          ? (process.env.YUNPANEL_ALLOWED_CLIENT_IPS || '*')
-          : '*'),
+    allowedClientIps = defaultAllowedClientIps,
     apiHost = process.env.YUNPANEL_API_HOST ?? '127.0.0.1',
     apiPort = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10),
     publicOrigin = process.env.YUNPANEL_PUBLIC_ORIGIN,
