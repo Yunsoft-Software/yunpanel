@@ -500,3 +500,11 @@
 - Tarayıcıların native parola göster/gizle butonlarının (Edge `::-ms-reveal`, `::-ms-clear`) ve validation efektlerinin parola ve e-posta alanları arasında asimetri ve dikey kaymaya yol açması engellendi.
 - Parola notu ve e-posta bilgilendirme metinlerinin (`.ws-field-hint`) bağımsız alt akışı korunarak komşu alanları dikey esnetmesi önlendi, `aria-describedby` ve form doğrulama kısıtları muhafaza edildi.
 - `apps/web/test/new-website-admin-layout.test.js` test paketi temalar, kontrol yükseklikleri, baseline hizalaması, reveal asimetri engellemesi ve responsive kuralları doğrulayacak şekilde genişletildi; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
+
+## 2026-10-01 — PROD-01: Firewall SSH parametre sözleşmesi düzeltmesi ve dinleyici doğrulaması
+- `packages/host-runtime/src/nftables-manager.js` içinde `nftablesTemplatePolicy.defaultSshPort` / `standardPorts.ssh` ve `sshPort` / `sshPorts` parametre sözleşmesi uyumsuzlukları giderildi.
+- Varsayılan SSH portu `nftablesTemplatePolicy.defaultSshPort ?? nftablesTemplatePolicy.standardPorts?.ssh ?? 22` mantığıyla çözümlendi; `createNftablesManager`, `applyRuleset` ve `validateRulesetCandidate` fonksiyonlarında `defaultSshPort`, `defaultSshPorts`, `sshPort`, `sshPorts` ve `standardPorts` takma adları desteklendi.
+- `renderNftablesConfig` çağrısına çoğul dizi (`sshPorts`) aktarılarak özel ve birden fazla port tanımlarının kurallara işlenmesi sağlandı, özel portların göz ardı edilmesi ve yönetim erişiminin kilitlenmesi önlendi.
+- Boş, null veya geçersiz port girişlerinde fail-closed mantığı (`invalid_ssh_port`), tanımsız girişlerde ise güvenli varsayılan değer (22) uygulandı; kurallarda SSH portunun bulunmaması durumu `ssh_lockout_risk` ile engellendi.
+- Dual-stack (`table inet`), IPv4 (`ip protocol tcp`) ve IPv6 (`ip6 nexthdr tcp`) kural kapsamları ile port aralıkları tanındı; gerçek SSH dinleyicilerini (`ss -H -ltn`, `/etc/ssh/sshd_config`) denetleyen `inspectSshListeners` ve `verifySshListenerContract` sözleşmesi eklendi.
+- Odaklı birim ve entegrasyon testleri `packages/host-runtime/test/firewall-ssh-contract.test.js` test paketiyle tamamlandı ve mevcut `nftables-manager.test.js` regresyonlarıyla birlikte orkestratör doğrulaması için hazırlandı (pending orchestrator verification).
