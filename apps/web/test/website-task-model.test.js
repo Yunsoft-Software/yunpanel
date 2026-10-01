@@ -15,6 +15,8 @@ test('six daily tools are visible and use Domain IDs, not Website or hostnames',
     assert.equal(tool.href, `/websites/domain-a/${tool.key}`); assert.equal(tool.reason, null);
   }
   assert.equal(result.createSubdomainHref, '/websites/new?parent=domain-a');
+  assert.equal(result.manageAliasesHref, '/websites/domain-a/domains');
+  assert.equal(result.addAliasHref, '/websites/domain-a/domains');
   assert.equal(result.runtimeLabel, 'Node.js');
 });
 test('unknown and Website IDs cannot redirect to a guessed domain', () => {
@@ -23,12 +25,14 @@ test('unknown and Website IDs cannot redirect to a guessed domain', () => {
     assert.equal(result.domainReady, false);
     assert.ok(result.tools.every((tool) => tool.href === null && tool.reason));
     assert.equal(result.createSubdomainHref, null);
+    assert.equal(result.manageAliasesHref, null);
   }
 });
 test('read-only and missing access do not gain navigation or create privileges', () => {
   const result = resolve({ canManage: false });
   assert.ok([...result.tools, ...result.secondaryTools].every((tool) => tool.href === null));
   assert.equal(result.createSubdomainHref, null);
+  assert.equal(result.manageAliasesHref, null);
   assert.equal(result.applicationName, null);
   assert.equal(createWebsiteTaskResolver()('one').domainReady, false);
 });
@@ -36,12 +40,14 @@ test('site-manager keeps scoped tasks but does not gain new-site permissions', (
   const result = resolve({ isOwner: false });
   assert.equal(href(result, 'mail'), '/websites/domain-a/mail');
   assert.equal(result.createSubdomainHref, null);
+  assert.equal(result.manageAliasesHref, '/websites/domain-a/domains');
 });
 for (const status of ['idle', 'loading', 'stale', 'error', 'forbidden', 'unauthorized']) {
   test(`${status} domain data cannot provide active task targets`, () => {
     const result = resolve({ domains: { status, items: [domain] } });
     assert.ok(result.tools.every((tool) => tool.href === null));
     assert.equal(result.createSubdomainHref, null);
+    assert.equal(result.manageAliasesHref, null);
   });
   test(`${status} Website data keeps Files visible without guessing DB/mail/runtime`, () => {
     const result = resolve({ websites: { status, items: [website] } });
@@ -135,4 +141,18 @@ test('clear and all filters preserve other parameters without accepting unknown 
   assert.equal(clearSiteListFilters(params).toString(), 'keep=one&keep=two');
   assert.equal(siteListFilterParams(params, 'type', 'all').has('type'), false);
   assert.equal(siteListFilterParams(params, 'keep', 'overwrite').toString(), params.toString());
+});
+test('php runtime assigns PHP tool label and python assigns Python', () => {
+  const phpResult = resolve({
+    websites: ready([{ ...website, runtimeType: 'php' }]),
+    applications: ready([{ ...application, type: 'php' }]),
+  });
+  assert.equal(phpResult.secondaryTools.find((t) => t.key === 'node')?.label, 'PHP');
+  assert.equal(phpResult.secondaryTools.find((t) => t.key === 'settings')?.label, 'Barındırma ayarları');
+
+  const pythonResult = resolve({
+    websites: ready([{ ...website, runtimeType: 'python' }]),
+    applications: ready([{ ...application, type: 'python' }]),
+  });
+  assert.equal(pythonResult.secondaryTools.find((t) => t.key === 'node')?.label, 'Python');
 });

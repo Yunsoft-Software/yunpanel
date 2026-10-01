@@ -91,6 +91,7 @@
 .workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary) { background: transparent; }
 .workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary):hover { background: var(--ws-surface); }
 .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border-radius: var(--ws-radius-control); border-color: var(--ws-control-border); background: var(--ws-surface-subtle); }
+.workspace-shell .ws-site-admin-fields label > input { height: var(--ws-control-height); min-height: var(--ws-control-height); border-radius: var(--ws-radius-control); }
 .workspace-shell :is(input,textarea)::placeholder, .ws-modal :is(input,textarea)::placeholder { opacity: 1; }
 .workspace-shell input:is([type='checkbox'],[type='radio']), .ws-modal input:is([type='checkbox'],[type='radio']) { accent-color: var(--ws-brand); }
 .workspace-shell :is(button,a,input,select,textarea,summary):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary):focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }

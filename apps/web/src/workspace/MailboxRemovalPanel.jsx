@@ -51,7 +51,11 @@ function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClo
   const prepared = usable && mailboxRemovalEligible(snapshot);
   const approval = state.approval;
   const copy = approval ? ACTIONS[approval.action] : null;
-  const href = (section) => `/mail/${encodeURIComponent(domain.id)}?section=${section}`;
+  const domainId = domain.webDomainId || domain.id;
+  const mailboxesHref = `/websites/${encodeURIComponent(domainId)}/mail?mailTab=mailboxes`;
+  const href = (section) => (typeof window !== 'undefined' && window.location.pathname.startsWith('/websites/'))
+    ? (section === 'mailboxes' ? mailboxesHref : `/websites/${encodeURIComponent(domainId)}/mail?mailTab=${section}`)
+    : `/mail/${encodeURIComponent(domain.id)}?section=${section}`;
   return <Section title={`Posta hesabını sil: ${mailbox.address}`} description="Önkoşullar → yedek → veri silme → kayıt kaldırma. Her yazma ayrı onay ister."
     actions={<div className="ws-actions"><Button icon="refresh" disabled={busy || state.status === 'deleted'} onClick={() => client.current?.refresh()}>Durumu yenile</Button><Button disabled={busy} onClick={onClose}>Kapat</Button></div>}>
     <div className="ws-section-body">
@@ -61,7 +65,10 @@ function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClo
       {state.status === 'deleted' ? <>
         <p role="status">Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı. Yedek korundu.</p>
         <p>Bu silme akışı diğer posta hesaplarını veya alan adını kapatmaz. Önceden kapalı olan alan adı da kendiliğinden açılmaz.</p>
-        <LinkButton to={href('configuration')}>Posta yapılandırmasını aç</LinkButton>
+        <div className="ws-actions">
+          <Button variant="primary" onClick={onClose}>Posta kutularına dön</Button>
+          <LinkButton to={href('configuration')}>Posta yapılandırmasını aç</LinkButton>
+        </div>
       </> : <>
         {!state.receipt && state.status !== 'absent' && <MailboxAccessPreparation mailbox={mailbox} domain={domain} canManage={canManage}
           blocked={removalBusy || state.status === 'waiting' || Boolean(state.approval) || state.uncertain}

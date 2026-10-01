@@ -226,6 +226,13 @@ test('delete preview requires disabling its target, verified current backup and 
   const independentPreview = await independent.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' });
   assert.equal(independentPreview.operation, 'mail_data_delete');
 
+  const enabledMailbox = fixture({ domainStatus: 'enabled' });
+  enabledMailbox.mailbox.enabled = true;
+  await assert.rejects(
+    enabledMailbox.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_mailbox_disable_required',
+  );
+
   const blocked = fixture({ deleteBlockers: [
     { code: 'mailbox_alias_reference_configured', count: 1 },
     { code: 'mail_data_backup_required', count: 1 },

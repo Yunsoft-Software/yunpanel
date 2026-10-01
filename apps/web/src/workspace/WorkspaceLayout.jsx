@@ -80,7 +80,7 @@ function Shell() {
         <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         {canManage && <div className="ws-toolbar-actions">
-          {isOwner && <Button icon="terminal" aria-label="AI asistanı aç" title="AI asistanı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span></Button>}
+          {isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
           <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>
           {isOwner && <LinkButton to="/websites/new" variant="primary" icon="plus" aria-label="Web sitesi ekle" title="Web sitesi ekle"><span className="ws-toolbar-label">Site ekle</span></LinkButton>}
         </div>}

@@ -147,7 +147,10 @@ function provisioningPlanner(dependencies) {
 
 async function previewWithProvisioning({ input, dependencies }) {
   const previewFn = dependencies?.previewSiteCreate ?? previewSiteCreate;
-  const preview = await previewFn({ input, ...dependencies });
+  const arg = input && typeof input === 'object'
+    ? Object.assign(Object.create(input), { input, ...dependencies })
+    : { input, ...dependencies };
+  const preview = await previewFn(arg);
   const planner = provisioningPlanner(dependencies);
   return Object.freeze({
     ...preview,
@@ -217,12 +220,25 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       const input = localInput(body.input, dependencies.localServerId);
       const value = { ...body, input };
       const result = await hostingRuntime.create(rawToken, policy, value);
-      const current = await previewWithProvisioning({ input, dependencies });
-      const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+      let provisioning = result.provisioning ?? null;
+      let provisioningError = result.provisioningError ?? null;
+      if (!provisioning && !provisioningError) {
+        try {
+          const current = await previewWithProvisioning({ input, dependencies });
+          provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+        } catch (err) {
+          provisioningError = Object.freeze({
+            code: err?.code ?? 'provisioning_registration_failed',
+            message: err?.message ?? 'Website provisioning registration failed.',
+            status: err?.status ?? 503,
+          });
+        }
+      }
       return response.status(result.created ? 201 : 200).json({
         data: Object.freeze({
           ...result,
-          provisioning,
+          ...(provisioning ? { provisioning } : {}),
+          ...(provisioningError ? { provisioningError } : {}),
         }),
       });
     }
@@ -231,22 +247,57 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
     const input = localInput(body.input, dependencies.localServerId);
-    const result = await createSite({
+    const createFn = dependencies.createSite ?? createSite;
+    const result = await createFn({
       input,
       previewDigest: body.previewDigest,
       confirmation: body.confirmation,
       ...dependencies,
     });
-    const siteAdmin = await provisionSiteAdmin({
-      input, result, userAdminStore: dependencies.userAdminStore, actorId: request.auth?.user?.id,
-    });
-    const current = await previewWithProvisioning({ input, dependencies });
-    const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+    let siteAdmin = null;
+    let siteAdminError = null;
+    try {
+      siteAdmin = await provisionSiteAdmin({
+        input, result, userAdminStore: dependencies.userAdminStore, actorId: request.auth?.user?.id,
+      });
+      if (siteAdmin?.status === 'attention') {
+        siteAdminError = Object.freeze({
+          code: siteAdmin.code ?? 'site_admin_result_unverified',
+          message: 'Site administrator account creation requires attention.',
+          status: siteAdmin.code === 'site_admin_conflict' ? 409 : 400,
+        });
+      }
+    } catch (err) {
+      siteAdmin = Object.freeze({
+        status: 'attention',
+        websiteId: result?.website?.id ?? null,
+        code: err?.code ?? 'site_admin_result_unverified',
+      });
+      siteAdminError = Object.freeze({
+        code: err?.code ?? 'site_admin_result_unverified',
+        message: err?.message ?? 'Site administrator account creation failed.',
+        status: err?.status ?? 500,
+      });
+    }
+    let provisioning = null;
+    let provisioningError = null;
+    try {
+      const current = await previewWithProvisioning({ input, dependencies });
+      provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+    } catch (err) {
+      provisioningError = Object.freeze({
+        code: err?.code ?? 'provisioning_registration_failed',
+        message: err?.message ?? 'Website provisioning registration failed.',
+        status: err?.status ?? 503,
+      });
+    }
     return response.status(result.created ? 201 : 200).json({
       data: Object.freeze({
         ...result,
         siteAdmin,
-        provisioning,
+        ...(siteAdminError ? { siteAdminError } : {}),
+        ...(provisioning ? { provisioning } : {}),
+        ...(provisioningError ? { provisioningError } : {}),
       }),
     });
   }));
@@ -284,12 +335,25 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
     const input = localInput(body.input, dependencies.localServerId);
     const value = { ...body, input };
     const result = await hostingRuntime.create(rawToken, policy, value);
-    const current = await previewWithProvisioning({ input, dependencies });
-    const provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+    let provisioning = result.provisioning ?? null;
+    let provisioningError = result.provisioningError ?? null;
+    if (!provisioning && !provisioningError) {
+      try {
+        const current = await previewWithProvisioning({ input, dependencies });
+        provisioning = await persistProvisioning(current.provisioning, dependencies.websiteProvisioningRegistry);
+      } catch (err) {
+        provisioningError = Object.freeze({
+          code: err?.code ?? 'provisioning_registration_failed',
+          message: err?.message ?? 'Website provisioning registration failed.',
+          status: err?.status ?? 503,
+        });
+      }
+    }
     return response.status(result.created ? 201 : 200).json({
       data: Object.freeze({
         ...result,
-        provisioning,
+        ...(provisioning ? { provisioning } : {}),
+        ...(provisioningError ? { provisioningError } : {}),
       }),
     });
   }));
@@ -315,6 +379,8 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
   app.post('/api/sites/recover-reservation', requirePanelRouteAccess, handleRecoverReservation);
 }
 
+export { SiteCreateError };
+
 export const siteCreateHttpInternals = Object.freeze({
   previewBody,
   applyBody,
@@ -330,4 +396,5 @@ export const siteCreateHttpInternals = Object.freeze({
   previewWithProvisioning,
   previewHostedWithProvisioning,
   persistProvisioning,
+  SiteCreateError,
 });

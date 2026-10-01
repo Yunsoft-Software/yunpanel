@@ -173,5 +173,109 @@ test('website-suspension-runtime manages website suspension preview, start and r
     assert.equal(opFail.domainOperations.find((d) => d.domainId === 'dom-1').status, 'suspended');
     assert.equal(opFail.domainOperations.find((d) => d.domainId === 'dom-2').status, 'failed');
     assert.ok(opFail.actions.suspendRetryConfirmation);
+
+    // 5. Retry partial suspend after dom-2 is fixed
+    const recoveredDomainSuspensionRuntime = {
+      ...domainSuspensionRuntime,
+      preview: async ({ domainId }) => {
+        const isSusp = domainSuspendedState.get(domainId) === 'suspended';
+        return {
+          readyToSuspend: !isSusp,
+          previewDigest: 'd'.repeat(64),
+          confirmation: `start-domain-suspend:${domainId}:1:${'d'.repeat(64)}`,
+        };
+      },
+      start: async ({ domainId }) => {
+        domainSuspendedState.set(domainId, 'suspended');
+        return {
+          id: `op-${domainId}`,
+          domainId,
+          status: 'suspended',
+          checksum: 'c'.repeat(64),
+          updatedAt: '2026-09-19T20:00:00.000Z',
+        };
+      },
+    };
+    const recoveredRuntime = createWebsiteSuspensionRuntime({
+      registry,
+      websiteRegistry,
+      domainRegistry,
+      domainSuspensionRuntime: recoveredDomainSuspensionRuntime,
+      localServerId,
+    });
+    const opRetried = await recoveredRuntime.retrySuspend({
+      websiteId: 'ws-1',
+      operationId: opFail.id,
+      expectedUpdatedAt: opFail.updatedAt,
+      confirmation: opFail.actions.suspendRetryConfirmation,
+    });
+    assert.equal(opRetried.status, 'suspended');
+    assert.ok(opRetried.domainOperations.every((d) => d.status === 'suspended'));
+    assert.ok(opRetried.actions.resumeConfirmation);
+
+    // 6. Resume with partial failure (dom-2 restore fails)
+    const failingResumeDomainRuntime = {
+      ...recoveredDomainSuspensionRuntime,
+      resume: async ({ domainId }) => {
+        if (domainId === 'dom-2') {
+          throw new Error('Nginx restore failed for dom-2');
+        }
+        domainSuspendedState.set(domainId, 'active');
+        return {
+          id: `op-${domainId}`,
+          domainId,
+          status: 'resumed',
+          checksum: 'c'.repeat(64),
+          updatedAt: '2026-09-19T20:01:00.000Z',
+        };
+      },
+    };
+    const resumeFailingRuntime = createWebsiteSuspensionRuntime({
+      registry,
+      websiteRegistry,
+      domainRegistry,
+      domainSuspensionRuntime: failingResumeDomainRuntime,
+      localServerId,
+    });
+    const resumeFailOp = await resumeFailingRuntime.resume({
+      websiteId: 'ws-1',
+      operationId: opRetried.id,
+      expectedUpdatedAt: opRetried.updatedAt,
+      confirmation: opRetried.actions.resumeConfirmation,
+    });
+    assert.equal(resumeFailOp.status, 'resume_partial');
+    assert.equal(resumeFailOp.domainOperations.find((d) => d.domainId === 'dom-1').status, 'resumed');
+    assert.equal(resumeFailOp.domainOperations.find((d) => d.domainId === 'dom-2').status, 'resume_failed');
+    assert.ok(resumeFailOp.actions.resumeRetryConfirmation);
+
+    // 7. Retry resume once dom-2 restore issue is resolved
+    const fixedResumeDomainRuntime = {
+      ...recoveredDomainSuspensionRuntime,
+      resume: async ({ domainId }) => {
+        domainSuspendedState.set(domainId, 'active');
+        return {
+          id: `op-${domainId}`,
+          domainId,
+          status: 'resumed',
+          checksum: 'c'.repeat(64),
+          updatedAt: '2026-09-19T20:02:00.000Z',
+        };
+      },
+    };
+    const fixedResumeRuntime = createWebsiteSuspensionRuntime({
+      registry,
+      websiteRegistry,
+      domainRegistry,
+      domainSuspensionRuntime: fixedResumeDomainRuntime,
+      localServerId,
+    });
+    const resumeFixedOp = await fixedResumeRuntime.retryResume({
+      websiteId: 'ws-1',
+      operationId: resumeFailOp.id,
+      expectedUpdatedAt: resumeFailOp.updatedAt,
+      confirmation: resumeFailOp.actions.resumeRetryConfirmation,
+    });
+    assert.equal(resumeFixedOp.status, 'resumed');
+    assert.ok(resumeFixedOp.domainOperations.every((d) => d.status === 'resumed'));
   });
 });

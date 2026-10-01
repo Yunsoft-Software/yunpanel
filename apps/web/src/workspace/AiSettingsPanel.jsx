@@ -124,7 +124,7 @@ export default function AiSettingsPanel() {
   };
 
   return (
-    <Section title="AI Asistanı ve Model Sağlayıcıları" description="Sunucu ve site işlemlerini yönetmek için Anthropic Claude, OpenAI, Google Gemini veya yerel Ollama modellerini bağlayın.">
+    <Section title="AI Asistanı ve Model Sağlayıcıları (Ürün Uzantısı)" description="Sunucu ve site işlemlerini yönetmek için Anthropic Claude, OpenAI, Google Gemini veya yerel Ollama modellerini bağlayın. (Plesk standart eşdeğeri olmayan ürün uzantısı)">
       <div className="ws-section-body" style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {error && <ErrorNotice error={error} />}
         {success && (

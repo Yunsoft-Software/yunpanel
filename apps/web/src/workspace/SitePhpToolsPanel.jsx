@@ -54,7 +54,7 @@ function PhpToolsWorkspace({ domainId, scope, generation }) {
   return <>
     <Section title="PHP araçları" description="WordPress ve Composer durumunu bu site kapsamında kontrol edin.">
       <div className="ws-section-body"><div className="ws-actions"><LinkButton to={siteHref(domainId, 'files')} icon="folder">Dosya Yöneticisi</LinkButton><LinkButton to={siteHref(domainId, 'terminal')} icon="terminal">Site terminali</LinkButton></div>
-        <p className="ws-muted">Durum kontrolleri mevcut PHP araçlarını site kullanıcısıyla çağırır. Yazma etkili eylemler sabit katalogdan seçilir, açık onaydan sonra durable işlem kuyruğuna alınır; paket/eklenti güncellemesi veya serbest komut çalıştırma sunulmaz.</p></div>
+        <p className="ws-muted">Durum kontrolleri mevcut PHP araçlarını site kullanıcısıyla çağırır. Yazma etkili eylemler sabit katalogdan seçilir, açık onaydan sonra güvenli sunucu işlem kuyruğuna alınır; paket/eklenti güncellemesi veya serbest komut çalıştırma sunulmaz.</p></div>
     </Section>
     <ToolSection title="WordPress" tool="wordpress" status={state?.wordpress} denied={state?.denied} client={ref}
       actions={actionsFor('wordpress')} actionBusy={actionBusy} onAction={(id) => void ref.current?.prepareAction(id)}>

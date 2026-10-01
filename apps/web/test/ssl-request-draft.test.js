@@ -133,3 +133,39 @@ test('form identity isolates domain, server, actor, role and session generation 
   assert.equal(sslDraftKey(domain, { ...session, user: { ...session.user, email: 'b@example.test' } }, 1), key);
   assert.equal(key.includes('not-in-key'), false); assert.equal(key.includes('@'), false);
 });
+
+test('BUG-04/05 acceptance: default/auto email does not flag dirty, session email resolves without global fallback, and user edits are preserved', () => {
+  const sessionWithEmail = { user: { id: 'u1', role: 'owner', email: 'owner@example.test' } };
+  const sessionWithUsername = { user: { id: 'u2', role: 'site_manager', username: 'manager@example.test' } };
+  const sessionWithoutEmail = { user: { id: 'u3', role: 'owner', username: 'admin' }, dnsSsl: { acmeEmail: 'global@example.test' } };
+
+  assert.equal(sslContactEmail(sessionWithEmail), 'owner@example.test');
+  assert.equal(sslContactEmail(sessionWithUsername), 'manager@example.test');
+  assert.equal(sslContactEmail(sessionWithoutEmail), '');
+
+  const initialPopulated = createSslRequestDraft(sslContactEmail(sessionWithEmail));
+  assert.equal(sslDraftDirty(initialPopulated), false);
+
+  const initialEmpty = createSslRequestDraft(sslContactEmail(sessionWithoutEmail));
+  assert.equal(sslDraftDirty(initialEmpty), false);
+
+  const lateResolved = reduce(initialEmpty, { type: 'email-default', email: 'late-session@example.test' });
+  assert.equal(lateResolved.values.email, 'late-session@example.test');
+  assert.equal(sslDraftDirty(lateResolved), false);
+
+  const userEdited = edit(initialPopulated, 'email', 'custom-ssl@example.test');
+  assert.equal(sslDraftDirty(userEdited), true);
+  assert.equal(userEdited.values.email, 'custom-ssl@example.test');
+
+  const lateAttempt = reduce(userEdited, { type: 'email-default', email: 'ignored@example.test' });
+  assert.equal(lateAttempt.values.email, 'custom-ssl@example.test');
+  assert.equal(sslDraftDirty(lateAttempt), true);
+
+  const snapshot = sslDraftSnapshot(userEdited);
+  assert.equal(snapshot.email, 'custom-ssl@example.test');
+  assert.equal(validSslContactEmail(snapshot.email), true);
+
+  const submitted = reduce(userEdited, { type: 'submitted', values: snapshot });
+  assert.equal(sslDraftDirty(submitted), false);
+  assert.equal(submitted.baseline.email, 'custom-ssl@example.test');
+});

@@ -119,3 +119,84 @@ test('unmount aborts both requests and never publishes late results', async () =
 test('unsupported tool cannot be turned into an arbitrary API path', async () => {
   const h = harness(); await assert.rejects(h.client.load('../run')); assert.equal(h.calls.length, 0);
 });
+
+const actionId = 'wp.cache.flush';
+const previewDigest = 'a'.repeat(64);
+const previewData = () => ({
+  version: 1, ...scope, websiteRevision: 4, actionId, tool: 'wp-cli',
+  label: 'Önbelleği temizle', impact: 'WordPress nesne önbelleği temizlenir.',
+  previewDigest, confirmation: `php-tool:${scope.websiteId}:${actionId}:${previewDigest}`,
+});
+const queuedData = (status = 'queued', completed = false) => ({
+  action: { actionId, websiteId: scope.websiteId, applicationId: scope.applicationId, websiteRevision: 4, tool: 'wp-cli' },
+  job: {
+    id: 'php-action-job-01', serverId: scope.serverId, operation: 'website.php.action',
+    resourceType: 'application', resourceId: scope.applicationId, status,
+    ...(completed ? { result: { version: 1, websiteId: scope.websiteId, applicationId: scope.applicationId, actionId, completed: true, sideEffects: true } } : {}),
+  },
+});
+
+test('prepareAction fetches reviewed preview and updates state', async () => {
+  const h = harness();
+  h.handle(async (path) => path.includes('/actions/preview') ? previewData() : wp());
+  const preview = await h.client.prepareAction(actionId);
+  assert.equal(preview.actionId, actionId);
+  assert.equal(preview.previewDigest, previewDigest);
+  assert.deepEqual(h.client.getSnapshot().action.preview, preview);
+  assert.equal(h.calls[0].path, `/websites/${scope.websiteId}/actions/preview`);
+  assert.deepEqual(h.calls[0].body, { actionId });
+});
+
+test('dismissPreview clears pending preview', async () => {
+  const h = harness();
+  h.handle(async (path) => path.includes('/actions/preview') ? previewData() : wp());
+  await h.client.prepareAction(actionId);
+  assert.ok(h.client.getSnapshot().action.preview);
+  h.client.dismissPreview();
+  assert.equal(h.client.getSnapshot().action.preview, null);
+});
+
+test('queueAction submits confirmed action and updates job state', async () => {
+  let observedJob = null;
+  const h = harness({ onJob: (job) => { observedJob = job; } });
+  h.handle(async (path) => path.includes('/actions/preview') ? previewData() : queuedData());
+  await h.client.prepareAction(actionId);
+  const job = await h.client.queueAction();
+  assert.equal(job.id, 'php-action-job-01');
+  assert.equal(job.status, 'queued');
+  assert.equal(h.client.getSnapshot().action.preview, null);
+  assert.equal(h.client.getSnapshot().action.job.id, 'php-action-job-01');
+  assert.equal(observedJob.id, 'php-action-job-01');
+  assert.equal(h.calls[1].path, `/websites/${scope.websiteId}/actions/queue`);
+  assert.equal(h.calls[1].body.confirmation, `php-tool:${scope.websiteId}:${actionId}:${previewDigest}`);
+});
+
+test('queueAction on network failure does not retry automatically and records warning', async () => {
+  const h = harness();
+  h.handle(async (path) => {
+    if (path.includes('/actions/preview')) return previewData();
+    throw new Error('network down');
+  });
+  await h.client.prepareAction(actionId);
+  const result = await h.client.queueAction();
+  assert.equal(result, null);
+  assert.match(h.client.getSnapshot().action.error, /İsteğin sonucu bilinmiyor/);
+});
+
+test('refreshAction polls job and reloads tool status when succeeded', async () => {
+  let refreshedWp = false;
+  const h = harness();
+  h.handle(async (path) => {
+    if (path.includes('/actions/preview')) return previewData();
+    if (path.includes('/actions/queue')) return queuedData('running');
+    if (path.includes('/jobs/')) return queuedData('succeeded', true).job;
+    if (path.includes('/wp-cli/status')) { refreshedWp = true; return wp(); }
+    return composer();
+  });
+  await h.client.prepareAction(actionId);
+  await h.client.queueAction();
+  const job = await h.client.refreshAction();
+  assert.equal(job.status, 'succeeded');
+  assert.equal(refreshedWp, true);
+  assert.equal(h.client.getSnapshot().action.job.status, 'succeeded');
+});

@@ -6,6 +6,10 @@ const MESSAGES = Object.freeze({
   site_admin_actor_unavailable: 'Hesap işlemini yapan kullanıcı doğrulanamadı. Site ve kullanıcı kayıtlarını güncel oturumla kontrol edin.',
   site_admin_replay_requires_review: 'Mevcut site kaydı kullanıldı. Yönetici hesabı yeniden oluşturulmadı veya parolası değiştirilmedi; hesabın durumunu kontrol edin.',
   site_admin_result_unverified: 'Yönetici hesabının sonucu doğrulanamadı. Siteyi yeniden oluşturmayın; mevcut kullanıcıları ve site yetkilerini kontrol edin.',
+  site_admin_website_deleted: 'Hedef web sitesi kaldırıldığı için yönetici hesabı oluşturulamadı. Web Siteleri listesini kontrol edin.',
+  site_admin_actor_forbidden: 'İşlem sırasında oturum yetkisi geçersiz kılındı. Yönetici hesabı güvenlik nedeniyle oluşturulmadı.',
+  site_admin_locked: 'Hesap deposu şu anda başka bir işlem tarafından kilitli. Lütfen biraz sonra tekrar deneyin.',
+  site_admin_provisioning_failed: 'Yönetici hesabı oluşturuldu ancak sağlama kaydı tamamlanamadı. Kullanıcı yönetiminden kontrol edin.',
 });
 
 export function siteAdminResult(value, { requested, websiteId }) {

@@ -360,3 +360,52 @@ test('reservation recovery keeps quota when provisioning journal still requires 
   assert.equal(f.count('auth_hosting_site_allocations'), 1);
   assert.equal(f.get().usage.websites, 1);
 });
+
+test('hosted site create propagates siteAdmin and siteAdminError from creation result', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  const siteAdminOutcome = { status: 'attention', code: 'site_admin_result_unverified' };
+  f.createAdapter = async (args) => {
+    f.calls.push(args);
+    f.sites.set(f.site.id, structuredClone(f.site));
+    return { created: true, website: f.site, siteAdmin: siteAdminOutcome };
+  };
+
+  const result = await f.createHosted(submitted);
+  assert.equal(result.created, true);
+  assert.deepEqual(result.siteAdmin, siteAdminOutcome);
+  assert.equal(result.siteAdminError.code, 'site_admin_result_unverified');
+});
+
+test('hosted site create rejects explicit siteAdmin input to avoid conflicting logins', async (t) => {
+  const f = setup(t);
+  const preview = await f.previewHosted();
+  const conflicting = {
+    ...f.value,
+    input: { ...f.value.input, siteAdmin: { email: 'admin@example.com', password: 'password123' } },
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  };
+
+  await assert.rejects(
+    f.createHosted(conflicting),
+    code('hosting_site_admin_conflict'),
+  );
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+});
+
+test('client confirmation token does not bypass backend tenant authorization check', async (t) => {
+  const f = setup(t);
+  const submitted = await f.submit();
+  await assert.rejects(
+    f.service.create('invalid-token', f.requireManagement, submitted),
+    (error) => error?.code === 'unauthorized' || error?.code === 'forbidden',
+  );
+  await assert.rejects(
+    f.service.create(f.session('reseller-b'), f.requireManagement, submitted),
+    (error) => error?.code === 'reseller_scope_forbidden' || error?.code === 'forbidden',
+  );
+  assert.equal(f.calls.length, 0);
+  assert.equal(f.count('auth_hosting_site_allocations'), 0);
+});
