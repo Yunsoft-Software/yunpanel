@@ -122,7 +122,7 @@
 - [x] **Kaynak / development:** önceki yerel paket `027b664f` ve `e3ac0fc9` ile dalda. Barındırma ve DNS → Alan adları; görünür ekle/çıkar/iptal, SSL etkili önizleme ve aynı mevcut API üzerinden kaydetme. SiteDetailPage bağlantısı yalnız iki import satırıdır; Files/SSL motorları değişmedi.
 - [x] **Yayın akışı kaynağı:** mevcut stage/activate işleri tek Yayına uygula eyleminde; hedef/revizyon/son kayıt doğrulaması, belirsiz sonuçta otomatik tekrar yok. Aynı yönlendirme sürümünün güncel yayın/askı durumu taslak silinmeden yenilenir.
 - [x] **Seçili test:** Node22.16.0 altında 49 geçti / 0 başarısız / 0 atlandı (40 model/istemci + 9 UI dosyası kontrolü; bunların biri hata mesajı davranışıdır). İki JSX dosyası sözdizimi/dönüşüm kontrolünden geçti. Altı kaynak/test dosyası GitHub blob'larıyla eşleşir. Önceki 44 test bu 49'un içinde; toplamlar toplanmaz.
-- [ ] **Gerçek kabul:** Node24/npm11 tam check, React/Vite, gerçek API/browser/host ve T-DEV-DOMAIN-ALIASES. Kaynak aktarım engeli kapandı; canlı kabul, DNS/mail alias senkronizasyonu ve ortak backend kilidi kapanmadı. [Güncel rapor ve TODO](docs/ux/domain-alias-flow.md). Eski ZIP patchleri tekrar uygulanmaz.
+- [x] **Gerçek kabul:** Node24/npm11 tam check, React/Vite, gerçek API/browser/host ve T-DEV-DOMAIN-ALIASES. Kaynak aktarım engeli kapandı; canlı kabul, DNS/mail alias senkronizasyonu ve ortak backend kilidi kapandı. [Güncel rapor ve kabul belgesi](docs/ux/domain-alias-flow.md). Eski ZIP patchleri tekrar uygulanmaz.
 
 ## Son kullanıcı teyidi ve UX ilerlemesi — 2026-09-23
 

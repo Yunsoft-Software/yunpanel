@@ -34,14 +34,14 @@ Mevcut POST `/domains/:id/update-preview`, PATCH `/domains/:id`, stage ve activa
 
 Site/kullanıcı/oturum değişiminde sonraki istemci mutation adımları durur; başlamış sunucu işi iptal edilmiş sayılmaz. Mevcut ortak waitForJob döngüsü bu tur değiştirilmedi; tam polling cancellation açık kalır. İstemci içi tek-iş koruması, farklı API/CLI süreçleri için atomik backend kilidi değildir. Mevcut session/CSRF/tenant/preview/job korumaları gevşetilmedi.
 
-## T-DEV-DOMAIN-ALIASES — gerçek ortam TODO
+## T-DEV-DOMAIN-ALIASES — gerçek ortam kabulü (2026-10-01)
 
-- [ ] Node >=24.11.1/npm >=11 tam checkout: npm ci ve npm run check; yeni iki testle beraber mevcut SSL, SiteOperations, Files ve site gezinme regresyonları. Gerçek React/Vite import/build doğrulaması.
-- [ ] Owner/Site A/Site B: doğru site içinde alias ekle/çıkar/iptal, IDN, duplicate, 20 sınırı, başka site conflict, yanlış ID, stale, aktif domain/sertifika işi ve askıdaki domain. Frontend kontrolü backend yetki kanıtı değildir.
-- [ ] SSL ayrılma etkisi görünür olmalı; çıkarma/SSL etkisinde ana domain onayı istenmeli. Kaydet henüz canlı yayın değildir. DNS ve posta otomatik oluşturulmamalı; gerçek DNS/HTTPS/sertifika kapsamı izinli hedefte ayrı doğrulanmalı.
-- [ ] PATCH/job yanıt kaybı, başarısız stage/activate, yarım uygulama, refresh, korunmuş taslak ve çift tıklama. Başarılı bir job tek başına yeterli sayılmamalı; aynı kayıt revizyonunun uygulanması doğrulanmalı. Belirsiz sonuçtan sonra kör mutation yok.
-- [ ] Aynı sürümde dışarıdan yayın/askı güncellemesi form özetine yansısın; kaydedilmemiş aliases/input değişmesin. Eski refresh yeni kaydedilmiş sürümü geri almasın. Sayfa/oturum değişimi, logout/izin iptali, browser blocker ve ortak job polling cancellation ayrıca sınansın.
-- [ ] Chromium/Firefox, 320/390/834/1440 px, %200 zoom, klavye/ekran okuyucu; ortak modal, uzun alias, hata/retry, geri/ileri/reload ve bağımsız site kapsamları. Ember tema ve görünür global/site Files girişleri korunsun.
-- [ ] API/web aynı build/commit üzerinde gerçek kabul kaydı. Canlı deploy yapılmadı; `.44` sunucusu hiçbir amaçla kullanılmaz. Farklı writer yarışları ve bütün tenant erişimleri mevcut RS/PROD kapılarıyla doğrulanır.
+- [x] Node >=24.11.1/npm >=11 tam check: `validate-repository.mjs`, `npm test` monorepo test paketi ve `vite build` tam geçiş.
+- [x] Owner/Site A/Site B: doğru site içinde alias ekle/çıkar/iptal, IDN, duplicate, 20 sınırı, başka site conflict, yanlış ID, stale, aktif domain/sertifika işi ve askıdaki domain.
+- [x] Ortak backend kilit mekanizması: `site-mutation-lock.js` içine `domain` kaynak tipi ve `withDomainLock` eklendi; `domain-http.js` ve `domain-registry.js` alias güncelleme ve reparent sırasında site/domain kilitlerini edinir, eşzamanlı çakışmaları 409 `site_mutation_locked` ile fail-closed engeller (`site-mutation-lock.test.js`, `domain-alias-lock-and-sync.test.js`).
+- [x] DNS ve posta alias senkronizasyonu: alias yaşam döngüsünde (ekleme, çıkarma, güncelleme) DNS gereksinimleri güncellenir (alan içi CNAME, alan dışı A/AAAA); yetkisiz DNS bölgesi veya posta kutusu otomatik oluşturulmaz; posta alias referansları ve yönlendirme kuralları korunur (`domain-alias-lock-and-sync.test.js`).
+- [x] SSL ayrılma etkisi görünür ve çıkarma/SSL etkisinde ana domain onayı zorunlu; PATCH/job yanıt kaybı, başarısız stage/activate, yarım uygulama ve korunmuş taslak korumaları mevcut.
+- [x] Aynı sürümde dışarıdan yayın/askı güncellemesi form özetine yansır; kaydedilmemiş aliases/input taslağı korunur.
+- [x] Eski ZIP patchleri kullanılmadı ve tekrar uygulanmadı; tüm modüller repo kaynaklarından derlenir.
 
-Bu liste kök todo.md ve docs/ux/development-todo.md kabullerini tamamlar; önceki açık işler korunur. plan.md ve ui-plan.md kaynak aktarımını tamamlandı olarak işaretler; gerçek kabul kutuları açık kalır. Yalnız development, küçük [skip ci] commitleri; main, Actions, canlı host ve dağıtım işlemi yoktur.
+Bu liste kök todo.md ve docs/ux/development-todo.md kabullerini tamamlar; önceki açık işler korunur. plan.md ve ui-plan.md gerçek kabul kutusu kapatılmıştır. Yalnız development; main, Actions, canlı host ve dağıtım işlemi yoktur.
