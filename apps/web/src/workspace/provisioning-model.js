@@ -28,7 +28,7 @@ const REMEDIATION_GUIDANCE = Object.freeze({
 });
 
 export function provisioningStepLabel(step) {
-  return STEP_LABELS[step?.id] ?? STEP_LABELS[step?.kind] ?? step?.id ?? step?.kind ?? 'Provisioning adımı';
+  return STEP_LABELS[step?.id] ?? STEP_LABELS[step?.kind] ?? step?.id ?? step?.kind ?? 'Kurulum adımı';
 }
 
 export function provisioningStepStateLabel(step) {
@@ -61,11 +61,11 @@ export function canContinueProvisioning(operation) {
 }
 
 export function provisioningOperationLabel(operation) {
-  if (!operation) return 'Provisioning kaydı yok';
+  if (!operation) return 'Kurulum kaydı yok';
   if (operation.ready) return 'Hazır';
-  if ((operation.steps ?? []).some((step) => step.state === 'failed')) return 'Müdahale gerekli';
+  if ((operation.steps ?? []).some((step) => step.state === 'failed')) return 'Başarısız';
   if ((operation.steps ?? []).some((step) => step.state === 'blocked')) return 'Bloke';
-  if ((operation.steps ?? []).some((step) => ['applying', 'compensating'].includes(step.state))) return 'Devam eden işlem';
-  if ((operation.steps ?? []).some((step) => step.state === 'compensated')) return 'Geri alma sonrası müdahale gerekli';
+  if ((operation.steps ?? []).some((step) => ['applying', 'compensating'].includes(step.state))) return 'İşleniyor';
+  if ((operation.steps ?? []).some((step) => step.state === 'compensated')) return 'Geri alındı';
   return 'Hazırlanıyor';
 }

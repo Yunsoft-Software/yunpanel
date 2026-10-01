@@ -1,4 +1,4 @@
-import { createBrowserRouter, Navigate } from 'react-router';
+import { createBrowserRouter, Navigate, useLocation, useSearchParams } from 'react-router';
 import { RouterProvider } from 'react-router/dom';
 import { usePanelSession } from '../panel-session.jsx';
 import WorkspaceLayout from './WorkspaceLayout.jsx';
@@ -25,6 +25,10 @@ import ResellerCustomersPage from './ResellerCustomersPage.jsx';
 function RouteFailure() {
   return <main className="ws-content"><h1>Sayfa yüklenemedi</h1><p>Beklenmeyen bir arayüz veya veri hatası oluştu. Sayfayı yeniden yükleyin; sorun sürerse API ve web sürümlerini birlikte kontrol edin.</p><button type="button" className="ws-button" onClick={() => window.location.reload()}>Yeniden yükle</button></main>;
 }
+function RedirectWithSearch({ to }) {
+  const location = useLocation();
+  return <Navigate to={`${to}${location.search}`} replace />;
+}
 function OwnerRoute({ children }) {
   const { isOwner } = usePanelSession();
   return isOwner ? children : <Navigate to="/websites" replace />;
@@ -47,8 +51,9 @@ function ScopedRoute({ management, readOnly }) {
 }
 function GlobalSiteTool({ tool, ownerView }) {
   const { isOwner } = usePanelSession();
-  // The site account enters its existing scoped tool, not the host-wide console.
-  return isOwner ? ownerView : <SiteToolEntryPage tool={tool} />;
+  const [params] = useSearchParams();
+  // return isOwner ? ownerView : <SiteToolEntryPage tool={tool} />;
+  return isOwner && !params.has('site') ? ownerView : <SiteToolEntryPage tool={tool} />;
 }
 const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
 const reseller = (element) => <ResellerRoute>{element}</ResellerRoute>;
@@ -66,20 +71,41 @@ function createWorkspaceRouter() {
       { path: 'websites/new', element: owner(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'files', element: manage(<FilesPage />) },
+      { path: 'file-manager', element: <RedirectWithSearch to="/files" /> },
+      { path: 'file', element: <RedirectWithSearch to="/files" /> },
       { path: 'tools-settings', element: owner(<ToolsSettingsPage />) },
       { path: 'applications', element: owner(<ApplicationsPage />) },
       { path: 'applications/new', element: owner(<ApplicationsPage create />) },
       { path: 'domains', element: owner(<AdvancedDomainsPage />) },
       { path: 'servers', element: owner(<ServersPage />) },
       { path: 'databases', element: manage(<GlobalSiteTool tool="databases" ownerView={<DatabasesPage />} />) },
+      { path: 'database', element: <RedirectWithSearch to="/databases" /> },
+      { path: 'db', element: <RedirectWithSearch to="/databases" /> },
+      { path: 'statistics', element: manage(<GlobalSiteTool tool="statistics" ownerView={<SiteToolEntryPage tool="statistics" />} />) },
+      { path: 'stats', element: <RedirectWithSearch to="/statistics" /> },
+      { path: 'analytics', element: <RedirectWithSearch to="/statistics" /> },
       { path: 'docker', element: owner(<DockerProjectsPage />) },
       { path: 'docker/:dockerProjectId', element: owner(<DockerProjectsPage />) },
       { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) }, /* path: 'mail', element: manage(<MailDomainsPage />) */
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
+      { path: 'email', element: <RedirectWithSearch to="/mail" /> },
+      { path: 'mailboxes', element: <RedirectWithSearch to="/mail" /> },
+      { path: 'mailbox', element: <RedirectWithSearch to="/mail" /> },
+      { path: 'cron', element: manage(<SiteToolEntryPage tool="cron" />) },
+      { path: 'scheduled-tasks', element: <RedirectWithSearch to="/cron" /> },
+      { path: 'tasks', element: <RedirectWithSearch to="/cron" /> },
+      { path: 'backup', element: manage(<SiteToolEntryPage tool="backup" />) },
+      { path: 'ssl', element: manage(<SiteToolEntryPage tool="ssl" />) },
+      { path: 'certificates', element: <RedirectWithSearch to="/ssl" /> },
+      { path: 'certificate', element: <RedirectWithSearch to="/ssl" /> },
+      { path: 'logs', element: manage(<SiteToolEntryPage tool="logs" />) },
+      { path: 'php', element: manage(<SiteToolEntryPage tool="php" />) },
+      { path: 'access', element: manage(<SiteToolEntryPage tool="access" />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },
       { path: 'settings', element: owner(<SettingsPage />) },
       { path: 'settings/users', element: owner(<UsersPage />) },
+      { path: 'users', element: owner(<UsersPage />) },
       { path: 'backups', element: owner(<CapabilityPage name="backups" />) },
       { path: '*', element: <NotFoundPage /> },
     ],

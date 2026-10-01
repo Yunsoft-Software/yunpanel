@@ -92,6 +92,8 @@ export function createHostingSiteCreateService({
     // Rechecks live Owner, account chain and capacity atomically AFTER all reads.
     const reserved = allocations.reserve(rawToken, policy, prepared.allocationInput);
     let created = false;
+    let siteAdmin = null;
+    let siteAdminError = null;
     if (reserved.state !== 'attached') {
       const result = await createSite({
         input: submitted.input,
@@ -103,6 +105,19 @@ export function createHostingSiteCreateService({
         throw fail('hosting_site_result_invalid', 'Site creation did not return the allocated Website.', 503);
       }
       created = result.created;
+      if (result.siteAdmin) {
+        siteAdmin = result.siteAdmin;
+        if (!siteAdminError && siteAdmin.status === 'attention') {
+          siteAdminError = Object.freeze({
+            code: siteAdmin.code ?? 'site_admin_result_unverified',
+            message: 'Site administrator account creation requires attention.',
+            status: siteAdmin.code === 'site_admin_conflict' ? 409 : 400,
+          });
+        }
+      }
+      if (result.siteAdminError) {
+        siteAdminError = result.siteAdminError;
+      }
     }
     // Never accept createSite's response object as persistence evidence.
     const website = await websiteRegistry.getWebsite(reserved.websiteId);
@@ -110,13 +125,36 @@ export function createHostingSiteCreateService({
       throw fail('hosting_site_persistence_unverified', 'The allocated Website could not be verified in persistent state.', 503);
     }
     const allocation = allocations.complete(rawToken, policy, prepared.allocationInput, website);
+    let provisioning = null;
+    let provisioningError = null;
+    let stage = 'ownership_recorded';
+    let provisioningReady = false;
+    if (typeof websiteProvisioningRegistry?.create === 'function' && prepared.base?.provisioning) {
+      try {
+        provisioning = await websiteProvisioningRegistry.create(prepared.base.provisioning);
+        stage = 'provisioning_registered';
+        provisioningReady = Boolean(provisioning?.ready);
+      } catch (err) {
+        provisioningError = Object.freeze({
+          code: err?.code ?? 'provisioning_registration_failed',
+          message: err?.message ?? 'Website provisioning registration failed.',
+          status: err?.status ?? 503,
+        });
+        stage = 'provisioning_registration_failed';
+      }
+    }
     return Object.freeze({
       website,
       ownership: allocation,
+      allocation,
       created,
       accessGranted: allocation.accessGranted === true,
-      stage: 'ownership_recorded',
-      provisioningReady: false,
+      stage,
+      provisioningReady,
+      ...(provisioning ? { provisioning } : {}),
+      ...(provisioningError ? { provisioningError } : {}),
+      ...(siteAdmin ? { siteAdmin } : {}),
+      ...(siteAdminError ? { siteAdminError } : {}),
     });
   }
 
@@ -298,7 +336,7 @@ export function createHostingSiteCreateService({
       const prepared = await prepare(rawToken, policy, request(value));
       return Object.freeze({ ...prepared.base, customerId: prepared.allocationInput.customerId,
         previewDigest: prepared.previewDigest, confirmation: prepared.confirmation,
-        ownership: prepared.allocation, accessGranted: false });
+        ownership: prepared.allocation, state: prepared.allocation.state, accessGranted: false });
     },
     async create(rawToken, policy, value) {
       const submitted = request(value, true);

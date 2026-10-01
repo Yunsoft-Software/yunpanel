@@ -158,6 +158,7 @@ function HostingForm({ domain, generation }) {
         </div>
       </form>}
       {busy && <p role="status">İşlem sürüyor…</p>}
+      <div className="ws-actions"><Badge state={pendingPublication ? 'staged' : 'active'}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında (Güncel)'}</Badge></div>
       <p className="ws-muted">{!form ? 'Yayın durumu doğrulanamadı.' : pendingPublication
         ? 'Kaydedilmiş yapılandırmanın yayına uygulanması gerekiyor.' : 'Kayıt, son uygulanan yapılandırmayla eşleşiyor.'} Kaydetmek tek başına yayın, DNS, posta veya sertifika işi başlatmaz.</p>
       <div className="ws-actions">
@@ -165,6 +166,11 @@ function HostingForm({ domain, generation }) {
         <LinkButton to={siteHref(domain.id, 'ssl')}>SSL/TLS Sertifikaları</LinkButton>
       </div>
       {dirty && <p className="ws-muted">Sayfadan ayrılmadan önce taslağı kaydedin veya değişiklikleri iptal edin.</p>}
+      <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik yayın bilgileri</summary><KeyValues items={[
+        ['Alan adı kimliği', domain.id],
+        ['Hedef revizyon (desired revision)', form?.base?.desiredRevision ?? '—'],
+        ['Uygulanan revizyon (applied revision)', form?.base?.appliedRevision ?? '—'],
+      ]}/></details>
     </div>
     {plan && <HostingReview plan={plan} busy={busy} blocked={blocked} onCancel={() => setPlan(null)} onSave={save} />}
   </Section>;

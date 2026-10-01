@@ -41,10 +41,11 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
       <div className="ws-actions">
         <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Site genel bakışı</LinkButton>
         {tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`}>Alt alan adı ekle</LinkButton>}
+        {tasks.manageAliasesHref && <LinkButton to={tasks.manageAliasesHref} icon="plus" aria-label={`${domain.primaryDomain} için alias ekle veya yönet`}>Alias ekle</LinkButton>}
         {childCount > 0 && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} aria-label={`${domain.primaryDomain} alt alan adlarını ${expanded ? 'daralt' : 'genişlet'}`} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
       </div>
       <details className="ws-website-task-details"><summary>Alan adı bilgileri</summary>
-        <dl><div><dt>Aliaslar</dt><dd>{domain.aliases?.length ? domain.aliases.join(', ') : 'Yok'}</dd></div>
+        <dl><div><dt>Aliaslar</dt><dd>{domain.aliases?.length ? domain.aliases.join(', ') : 'Yok'}{tasks.manageAliasesHref && <> · <Link to={tasks.manageAliasesHref}>Alias yönetimi</Link></>}</dd></div>
           {tasks.applicationName && <div><dt>Bağlı uygulama</dt><dd>{tasks.applicationName}</dd></div>}
         </dl>
       </details>

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { CertificateMaterialError } from './certificate-material-manager.js';
-import { certificatePublicView, CertificateRegistryError } from './certificate-registry.js';
+import { certificatePublicView, CertificateRegistryError, compareTlsPresentation } from './certificate-registry.js';
+import { verifyCertificateRenewalOutcome, verifyRenewalOutcome } from './certificate-renewal-scheduler.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -179,6 +180,261 @@ async function buildSelectionPreview({ request, dependencies, requireIdle = fals
   return { domain, certificate, inspected, preview: selectionPreview({ domain, certificate, inspected }) };
 }
 
+const FINGERPRINT_PATTERN = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
+
+function renewalMetadata(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw Object.assign(new Error('SSL renewal metadata requires an object'), { code: 'ssl_renewal_unverified' });
+  }
+  if (typeof value.fingerprint256 !== 'string' || !FINGERPRINT_PATTERN.test(value.fingerprint256)) {
+    throw Object.assign(new Error('Invalid certificate fingerprint'), { code: 'ssl_renewal_unverified' });
+  }
+  const validFrom = typeof value.validFrom === 'string' && Number.isFinite(Date.parse(value.validFrom))
+    ? new Date(value.validFrom).toISOString()
+    : null;
+  const validTo = typeof value.validTo === 'string' && Number.isFinite(Date.parse(value.validTo))
+    ? new Date(value.validTo).toISOString()
+    : null;
+  if (!validFrom || !validTo || Date.parse(validTo) <= Date.parse(validFrom)) {
+    throw Object.assign(new Error('Invalid certificate validity dates'), { code: 'ssl_renewal_unverified' });
+  }
+  return Object.freeze({
+    validFrom,
+    validTo,
+    fingerprint256: value.fingerprint256.toUpperCase(),
+  });
+}
+
+function renewalOutcome(job, before, certificate, dryRun = false) {
+  if (!job) {
+    return 'idle';
+  }
+  const jobStatus = job?.status;
+  if (jobStatus === 'queued' || jobStatus === 'running') {
+    return 'waiting';
+  }
+  if (jobStatus === 'cancelled') {
+    return 'cancelled';
+  }
+  if (jobStatus === 'failed') {
+    return 'failed';
+  }
+  if (jobStatus !== 'succeeded') {
+    return 'unverified';
+  }
+  const isDryRun = Boolean(dryRun || job?.result?.dryRun);
+  if (isDryRun) {
+    return certificate?.state === 'active' ? 'tested' : 'syncing';
+  }
+  if (!certificate || !certificate.fingerprint256) {
+    return 'syncing';
+  }
+  if (job?.result?.fingerprint256) {
+    const jobFp = String(job.result.fingerprint256).toUpperCase();
+    const certFp = String(certificate.fingerprint256).toUpperCase();
+    if (certificate.state !== 'active' || jobFp !== certFp) {
+      return 'syncing';
+    }
+    if (before?.fingerprint256) {
+      const beforeFp = String(before.fingerprint256).toUpperCase();
+      if (beforeFp === jobFp) {
+        return 'unchanged';
+      }
+    }
+    return 'renewed';
+  }
+  return certificate?.state === 'active' ? 'renewed' : 'syncing';
+}
+
+function verifyTlsPresentation({ domain, certificate, inspected = null }) {
+  const hostnames = domain
+    ? [domain.primaryDomain, ...(domain.aliases ?? [])].filter(Boolean)
+    : (Array.isArray(certificate?.domains) ? certificate.domains : []);
+
+  const certDomains = new Set([
+    ...(Array.isArray(certificate?.domains) ? certificate.domains : certificate?.domains ? [certificate.domains] : []),
+    ...(certificate?.certName ? [certificate.certName] : []),
+    ...(certificate?.subjectAltName ? certificate.subjectAltName.split(',').map((s) => s.trim().replace(/^DNS:/i, '')) : []),
+  ].filter(Boolean).map((d) => d.toLowerCase()));
+
+  const domainsMatch = hostnames.length > 0
+    ? hostnames.every((h) => {
+        const lower = h.toLowerCase();
+        if (certDomains.has(lower)) return true;
+        const wildcard = `*.${lower.replace(/^[^.]+\./, '')}`;
+        return certDomains.has(wildcard);
+      })
+    : true;
+
+  const validFrom = certificate?.validFrom ? Date.parse(certificate.validFrom) : null;
+  const validTo = certificate?.validTo ? Date.parse(certificate.validTo) : null;
+  const now = Date.now();
+  const isExpired = validTo !== null ? now > validTo : false;
+  const isExpiringSoon = validTo !== null ? (validTo - now) <= (30 * 24 * 60 * 60 * 1000) : false;
+  const notExpired = validTo !== null && !isExpired;
+
+  const fingerprintValid = Boolean(
+    certificate?.fingerprint256
+    && typeof certificate.fingerprint256 === 'string'
+    && certificate.fingerprint256.length > 0
+  );
+
+  let materialVerified = fingerprintValid;
+  if (inspected?.fingerprint256 && certificate?.fingerprint256) {
+    materialVerified = inspected.fingerprint256.toUpperCase() === certificate.fingerprint256.toUpperCase();
+  }
+
+  const allValid = domainsMatch && notExpired && fingerprintValid && materialVerified && certificate?.state !== 'error';
+
+  let status = 'valid';
+  let code = 'tls_verified';
+  if (!notExpired) {
+    status = 'expired';
+    code = 'certificate_expired';
+  } else if (!domainsMatch) {
+    status = 'domain_mismatch';
+    code = 'domain_mismatch';
+  } else if (!materialVerified || !fingerprintValid) {
+    status = 'material_invalid';
+    code = 'certificate_material_mismatch';
+  } else if (certificate?.state === 'error') {
+    status = 'error';
+    code = 'certificate_error';
+  }
+
+  return Object.freeze({
+    verified: allValid,
+    status,
+    code,
+    presentationChecks: Object.freeze({
+      domainsMatch,
+      notExpired,
+      fingerprintValid,
+      materialVerified,
+      isExpiringSoon,
+      healthy: allValid,
+    }),
+  });
+}
+
+function normalizeReloadService(name, input) {
+  if (input === true || input === 'ok' || input === 'reloaded' || input === 'success') {
+    return Object.freeze({
+      service: name,
+      ok: true,
+      status: 'reloaded',
+      code: 'ok',
+      error: null,
+    });
+  }
+  if (input === false || input === 'failed' || input === 'error') {
+    return Object.freeze({
+      service: name,
+      ok: false,
+      status: 'failed',
+      code: 'service_reload_failed',
+      error: Object.freeze({
+        code: 'service_reload_failed',
+        message: `Service ${name} reload failed`,
+      }),
+    });
+  }
+  if (input && typeof input === 'object') {
+    const isOk = input.ok === true
+      || input.success === true
+      || input.status === 'reloaded'
+      || input.status === 'success'
+      || input.status === 'active'
+      || (input.ok !== false && input.status !== 'failed' && !input.error);
+
+    const errObj = input.error && typeof input.error === 'object' ? input.error : null;
+    const errCode = errObj?.code ?? input.code ?? (isOk ? null : 'service_reload_failed');
+    const errMsg = errObj?.message ?? input.message ?? (isOk ? null : `Service ${name} reload failed`);
+
+    return Object.freeze({
+      service: name,
+      ok: Boolean(isOk),
+      status: isOk ? 'reloaded' : (input.status ?? 'failed'),
+      code: errCode ?? (isOk ? 'ok' : 'service_reload_failed'),
+      error: isOk ? null : Object.freeze({
+        code: errCode ?? 'service_reload_failed',
+        message: errMsg ?? `Service ${name} reload failed`,
+      }),
+    });
+  }
+  return Object.freeze({
+    service: name,
+    ok: false,
+    status: 'failed',
+    code: 'service_reload_unspecified',
+    error: Object.freeze({
+      code: 'service_reload_unspecified',
+      message: `Service ${name} reload status unspecified`,
+    }),
+  });
+}
+
+function checkReloadOutcome(input = {}) {
+  let rawServices = input?.services ?? input?.results ?? input?.reloadResults ?? input;
+  let serviceList = [];
+
+  if (Array.isArray(rawServices)) {
+    serviceList = rawServices.map((item, idx) => {
+      const name = item?.service ?? item?.name ?? `service-${idx}`;
+      return normalizeReloadService(name, item);
+    });
+  } else if (rawServices && typeof rawServices === 'object') {
+    const keys = Object.keys(rawServices).filter((k) => !['status', 'outcome', 'partial', 'code', 'presentationChecks'].includes(k));
+    if (keys.length > 0) {
+      serviceList = keys.map((key) => normalizeReloadService(key, rawServices[key]));
+    } else {
+      serviceList = [normalizeReloadService('nginx', { ok: true })];
+    }
+  } else {
+    serviceList = [normalizeReloadService('nginx', { ok: true })];
+  }
+
+  const allOk = serviceList.every((s) => s.ok);
+  const anyOk = serviceList.some((s) => s.ok);
+  const hasFailures = serviceList.some((s) => !s.ok);
+  const partial = anyOk && hasFailures;
+
+  let status = 'reloaded';
+  let outcome = 'complete_reload';
+  let code = 'reload_succeeded';
+
+  if (partial) {
+    status = 'partial';
+    outcome = 'partial_reload';
+    code = 'partial_reload';
+  } else if (!allOk) {
+    status = 'failed';
+    outcome = 'reload_failed';
+    code = serviceList.find((s) => !s.ok)?.code ?? 'reload_failed';
+  }
+
+  const presentationChecks = Object.freeze({
+    allServicesReloaded: !partial && allOk,
+    partialReload: partial,
+    hasFailures,
+    services: serviceList.map((s) => ({
+      service: s.service,
+      ok: s.ok,
+      code: s.code,
+      status: s.status,
+    })),
+  });
+
+  return Object.freeze({
+    status,
+    outcome,
+    partial,
+    code,
+    services: serviceList,
+    presentationChecks,
+  });
+}
+
 export function mountCertificateRoutes(app, dependencies = {}) {
   const required = ['domainRegistry', 'certificateRegistry', 'certificateMaterialManager', 'jobRegistry'];
   if (!app || typeof app.post !== 'function' || required.some((key) => !dependencies[key])) {
@@ -296,6 +552,83 @@ export function mountCertificateRoutes(app, dependencies = {}) {
     } catch (error) { return next(error); }
   });
 
+  app.post('/api/certificates/:certificateId/verify-tls', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      const liveTls = request.body?.liveTls ?? request.body;
+      const result = await dependencies.certificateRegistry.verifyLiveTls(certificate.id, liveTls);
+      return response.json({
+        data: {
+          certificateId: certificate.id,
+          ...result,
+        },
+      });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/domains/:domainId/certificates/:certificateId/verify-tls', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const domain = await dependencies.domainRegistry.getDomain(request.params.domainId);
+      if (!domain) {
+        throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+      }
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate || certificate.domainId !== domain.id) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found for this Domain', 404);
+      }
+      const liveTls = request.body?.liveTls ?? request.body;
+      const result = await dependencies.certificateRegistry.verifyLiveTls(certificate.id, liveTls);
+      return response.json({
+        data: {
+          domainId: domain.id,
+          certificateId: certificate.id,
+          ...result,
+        },
+      });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/certificates/:certificateId/renewal-outcome', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const { jobId, before = null, liveTls = null, dryRun = false } = request.body ?? {};
+      if (typeof jobId !== 'string' || !jobId) {
+        throw new CertificateRegistryError('job_id_required', 'Renewal job ID is required');
+      }
+      const result = await verifyCertificateRenewalOutcome({
+        certificateId: request.params.certificateId,
+        certificateRegistry: dependencies.certificateRegistry,
+        jobRegistry: dependencies.jobRegistry,
+        jobId,
+        before,
+        liveTls,
+        dryRun: Boolean(dryRun),
+      });
+      return response.json({ data: result });
+    } catch (error) { return next(error); }
+  });
+
+  app.post('/api/certificates/:certificateId/reload-outcome', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      const { service, status, error = null, stage = 'reload' } = request.body ?? {};
+      if (typeof service !== 'string' || !service) {
+        throw new CertificateRegistryError('invalid_reload_outcome_service', 'Reload outcome service is required');
+      }
+      if (!['succeeded', 'partial', 'failed'].includes(status)) {
+        throw new CertificateRegistryError('invalid_reload_outcome_status', 'Reload outcome status must be succeeded, partial, or failed');
+      }
+      const updated = await dependencies.certificateRegistry.recordReloadOutcome(request.params.certificateId, {
+        service,
+        status,
+        error,
+        stage,
+      });
+      return response.json({ data: { certificate: publicCertificate(updated) } });
+    } catch (error) { return next(error); }
+  });
+
   if (dependencies.certificateMaterialGc) {
     app.get('/api/certificates/gc/preview', requirePanelRouteAccess, async (request, response, next) => {
       try {
@@ -317,10 +650,176 @@ export function mountCertificateRoutes(app, dependencies = {}) {
       } catch (error) { return next(error); }
     });
   }
+
+  async function handleVerifyTls(request, response, next) {
+    try {
+      const { domainRegistry, certificateRegistry, certificateMaterialManager } = dependencies;
+      const domainId = request.params.domainId;
+      let certificateId = request.params.certificateId;
+      let domain = null;
+      if (domainId) {
+        domain = await domainRegistry.getDomain(domainId).catch(() => null);
+        if (!domain && !certificateId) {
+          throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+        }
+      }
+      if (!certificateId && domain?.certificateId) {
+        certificateId = domain.certificateId;
+      }
+      if (!certificateId) {
+        return response.status(404).json({
+          error: { code: 'certificate_not_found', message: 'No certificate specified or associated with domain' },
+        });
+      }
+      const certificate = await certificateRegistry.getCertificate(certificateId).catch(() => null);
+      if (!certificate) {
+        return response.status(404).json({
+          error: { code: 'certificate_not_found', message: 'Certificate not found' },
+        });
+      }
+      if (!domain && certificate.domainId) {
+        domain = await domainRegistry.getDomain(certificate.domainId).catch(() => null);
+      }
+
+      let inspected = null;
+      if (certificateMaterialManager && typeof certificateMaterialManager.inspectStored === 'function' && certificate.certificatePath) {
+        try {
+          inspected = await certificateMaterialManager.inspectStored({
+            certificate,
+            domains: domain ? [domain.primaryDomain, ...(domain.aliases ?? [])] : certificate.domains ?? [],
+          });
+        } catch {
+          inspected = null;
+        }
+      }
+
+      const presentation = verifyTlsPresentation({ domain, certificate, inspected });
+      return response.json({
+        data: {
+          certificateId: certificate.id,
+          domainId: domain?.id ?? certificate.domainId ?? null,
+          status: presentation.status,
+          code: presentation.code,
+          verified: presentation.verified,
+          presentationChecks: presentation.presentationChecks,
+          certificate: publicCertificate(certificate),
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async function handleRenewalOutcome(request, response, next) {
+    try {
+      const { domainRegistry, certificateRegistry, jobRegistry } = dependencies;
+      const domainId = request.params.domainId;
+      const certificateId = request.params.certificateId;
+      let domain = null;
+      if (domainId) {
+        domain = await domainRegistry.getDomain(domainId).catch(() => null);
+      }
+      let certId = certificateId ?? domain?.certificateId;
+      let certificate = certId ? await certificateRegistry.getCertificate(certId).catch(() => null) : null;
+      if (!domain && certificate?.domainId) {
+        domain = await domainRegistry.getDomain(certificate.domainId).catch(() => null);
+      }
+
+      const queryJobId = request.query?.jobId ?? request.body?.jobId;
+      let job = null;
+      if (queryJobId) {
+        job = await jobRegistry.getJob(queryJobId).catch(() => null);
+      } else if (certId) {
+        const jobs = await jobRegistry.listJobs({ resourceType: 'certificate', resourceId: certId }).catch(() => []);
+        job = jobs.filter((j) => j.operation === 'ssl.renew').pop() ?? jobs.pop() ?? null;
+      }
+
+      const dryRun = Boolean(request.body?.dryRun ?? request.query?.dryRun ?? job?.result?.dryRun);
+      const before = request.body?.before ?? null;
+      const outcome = renewalOutcome(job, before, certificate, dryRun);
+
+      const jobErrorCode = job?.error?.code ?? (job?.status === 'failed' ? 'renewal_job_failed' : null);
+      const jobErrorMessage = job?.error?.message ?? (job?.status === 'failed' ? 'Renewal job failed' : null);
+
+      const presentationChecks = Object.freeze({
+        terminal: ['succeeded', 'failed', 'cancelled'].includes(job?.status),
+        synced: outcome !== 'syncing',
+        renewed: outcome === 'renewed',
+        unchanged: outcome === 'unchanged',
+        tested: outcome === 'tested',
+        waiting: outcome === 'waiting',
+        failed: outcome === 'failed',
+        outcome,
+      });
+
+      return response.json({
+        data: {
+          outcome,
+          status: job?.status ?? 'idle',
+          code: jobErrorCode ?? (outcome === 'failed' ? 'renewal_failed' : outcome),
+          error: jobErrorCode ? { code: jobErrorCode, message: jobErrorMessage } : null,
+          presentationChecks,
+          job: job ? { id: job.id, status: job.status, operation: job.operation } : null,
+          certificate: certificate ? publicCertificate(certificate) : null,
+        },
+      });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  async function handleReloadOutcome(request, response, next) {
+    try {
+      const body = request.body ?? {};
+      const result = checkReloadOutcome(body);
+      return response.status(200).json({ data: result });
+    } catch (error) {
+      return next(error);
+    }
+  }
+
+  const verifyTlsRoutes = [
+    '/api/domains/:domainId/certificates/:certificateId/verify-tls',
+    '/api/certificates/:certificateId/verify-tls',
+    '/api/domains/:domainId/verify-tls',
+  ];
+  for (const route of verifyTlsRoutes) {
+    app.get(route, requirePanelRouteAccess, handleVerifyTls);
+    app.post(route, requirePanelRouteAccess, handleVerifyTls);
+  }
+
+  const renewalOutcomeRoutes = [
+    '/api/domains/:domainId/certificates/:certificateId/renewal-outcome',
+    '/api/certificates/:certificateId/renewal-outcome',
+    '/api/domains/:domainId/certificates/renewal-outcome',
+    '/api/domains/:domainId/renewal-outcome',
+  ];
+  for (const route of renewalOutcomeRoutes) {
+    app.get(route, requirePanelRouteAccess, handleRenewalOutcome);
+    app.post(route, requirePanelRouteAccess, handleRenewalOutcome);
+  }
+
+  const reloadOutcomeRoutes = [
+    '/api/domains/:domainId/certificates/:certificateId/reload-outcome',
+    '/api/certificates/:certificateId/reload-outcome',
+    '/api/domains/:domainId/certificates/reload-outcome',
+    '/api/domains/:domainId/reload-outcome',
+  ];
+  for (const route of reloadOutcomeRoutes) {
+    app.get(route, requirePanelRouteAccess, handleReloadOutcome);
+    app.post(route, requirePanelRouteAccess, handleReloadOutcome);
+  }
 }
 
 export const certificateHttpInternals = Object.freeze({
   customPreview,
   selectionPreview,
   publicCertificate,
+  compareTlsPresentation,
+  verifyRenewalOutcome,
+  renewalOutcome,
+  renewalMetadata,
+  verifyTlsPresentation,
+  checkReloadOutcome,
+  normalizeReloadService,
 });

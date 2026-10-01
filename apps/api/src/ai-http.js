@@ -257,6 +257,40 @@ export function mountAiRoutes(app, {
   }
 
   if (conversationService) {
+    app.get('/api/ai/conversations/unowned', requireAiOwner, asyncRoute(async (request, response) => {
+      const list = await conversationService.listUnownedConversations({ auth: request.auth });
+      return response.json({ data: list });
+    }));
+
+    app.post('/api/ai/conversations/unowned/migrate', requireAiOwner, asyncRoute(async (request, response) => {
+      const body = normalizeBody(request.body, new Set(['assignments']));
+      if (!Array.isArray(body.assignments)) {
+        throw new AiHttpError('invalid_ai_request', 'assignments must be an array');
+      }
+      const result = await conversationService.migrateUnownedConversations({
+        assignments: body.assignments,
+        auth: request.auth,
+      });
+      return response.json({ data: result });
+    }));
+
+    app.post('/api/ai/conversations/unowned/rollback', requireAiOwner, asyncRoute(async (request, response) => {
+      const body = normalizeBody(request.body, new Set(['conversationIds', 'restoreV1Backup']));
+      let result;
+      if (body.restoreV1Backup) {
+        result = await conversationService.rollbackToV1Backup({ auth: request.auth });
+      } else {
+        if (!Array.isArray(body.conversationIds)) {
+          throw new AiHttpError('invalid_ai_request', 'conversationIds must be an array');
+        }
+        result = await conversationService.rollbackUnownedConversations({
+          conversationIds: body.conversationIds,
+          auth: request.auth,
+        });
+      }
+      return response.json({ data: result });
+    }));
+
     app.get('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
       const query = normalizeBody(request.query, new Set(['websiteId', 'limit', 'cursor']));
       const websiteId = query.websiteId ?? null;
@@ -291,11 +325,16 @@ export function mountAiRoutes(app, {
     }));
 
     app.post('/api/ai/conversations/:conversationId/messages', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const abortController = new AbortController();
+      request.on?.('close', () => {
+        if (!response.writableEnded) abortController.abort();
+      });
       const text = request.body?.text;
       const message = await conversationService.sendMessage({
         conversationId: request.params.conversationId,
         text,
         auth: request.auth,
+        signal: abortController.signal,
       });
       return response.json({ data: message });
     }));
@@ -307,6 +346,11 @@ export function mountAiRoutes(app, {
       response.setHeader('x-accel-buffering', 'no');
       response.flushHeaders?.();
 
+      const abortController = new AbortController();
+      request.on?.('close', () => {
+        if (!response.writableEnded) abortController.abort();
+      });
+
       const sendEvent = (event) => {
         response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       };
@@ -317,6 +361,7 @@ export function mountAiRoutes(app, {
           text: request.body?.text,
           auth: request.auth,
           onEvent: sendEvent,
+          signal: abortController.signal,
         });
         response.end();
       } catch (err) {

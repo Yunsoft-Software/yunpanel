@@ -7,9 +7,11 @@ import { createAuditStore } from './audit-store.js';
 import { AuthError, safeEqual } from './auth-error.js';
 import { createAuthMailer, validateEmail } from './auth-mailer.js';
 import { createMfaStore } from './mfa-store.js';
+import { createProcessStoreLock, ProcessStoreLockError } from './process-store-lock.js';
 import { createUserAdminStore } from './user-admin-store.js';
 export { AuthError, safeEqual } from './auth-error.js';
 export { validateEmail } from './auth-mailer.js';
+export { ProcessStoreLockError } from './process-store-lock.js';
 
 const derive = promisify(argon2);
 const PASSWORD_PREFIX = '$argon2id$v=19$m=65536,t=3,p=1$';
@@ -80,6 +82,8 @@ export function createAuthStore({
   liveSessions = null,
   revokeLiveUser: customRevokeLiveUser = null,
   mailer: customMailer = null,
+  storeLockFactory = null,
+  websiteLookup = null,
 } = {}) {
   const mailer = customMailer ?? createAuthMailer();
   if (![idleMs, absoluteMs].every((value) => Number.isSafeInteger(value) && value > 0) || idleMs > absoluteMs) {
@@ -114,6 +118,20 @@ export function createAuthStore({
     if (!metadata.isFile() || (metadata.mode & 0o077) !== 0 || metadata.uid !== process.getuid?.()) {
       throw new Error('Auth database requires a service-owned regular file with mode 0600');
     }
+  }
+  const resolvedLockFactory = storeLockFactory ?? createProcessStoreLock;
+  let storeLock;
+  if (filePath !== ':memory:') {
+    try {
+      storeLock = resolvedLockFactory({ filePath: path.resolve(filePath), now });
+    } catch (err) {
+      if (err instanceof ProcessStoreLockError) throw err;
+      throw new Error(`Process store lock initialization failed: ${err.message}`);
+    }
+  } else {
+    storeLock = storeLockFactory && storeLockFactory !== createProcessStoreLock
+      ? storeLockFactory({ filePath: ':memory:', now })
+      : { withLock: async (action) => action() };
   }
   const db = new DatabaseSync(filePath);
   db.exec('PRAGMA busy_timeout = 5000; PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;');
@@ -154,6 +172,14 @@ export function createAuthStore({
       PRIMARY KEY (user_id, website_id)
     );
     CREATE INDEX IF NOT EXISTS idx_auth_user_websites_user ON auth_user_websites(user_id);
+    CREATE TABLE IF NOT EXISTS auth_operation_users (
+      operation_id TEXT PRIMARY KEY NOT NULL,
+      user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+      website_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_auth_operation_users_website ON auth_operation_users(website_id);
+    CREATE INDEX IF NOT EXISTS idx_auth_operation_users_user ON auth_operation_users(user_id);
     CREATE TABLE IF NOT EXISTS auth_recovery_emails (
       user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
       email TEXT NOT NULL,
@@ -344,11 +370,192 @@ export function createAuthStore({
     });
   } catch (error) { db.close(); throw error; }
 
+  const adminUserSelect = `SELECT u.id, u.username, u.role, u.active, u.created_at,
+    COALESCE(r.revision, 1) AS revision, COALESCE(r.updated_at, u.created_at) AS updated_at,
+    EXISTS(SELECT 1 FROM auth_mfa m WHERE m.user_id = u.id) AS mfa_enabled
+    FROM users u LEFT JOIN auth_user_revisions r ON r.user_id = u.id`;
+  const readAdminUser = (userId) => db.prepare(`${adminUserSelect} WHERE u.id = ?`).get(userId);
+  const formatAdminUser = (row) => {
+    if (!row) return null;
+    const websiteIds = row.role === 'site_manager'
+      ? db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ? ORDER BY website_id').all(row.id).map((r) => r.website_id)
+      : undefined;
+    return {
+      id: row.id,
+      username: row.username,
+      role: row.role,
+      active: Boolean(row.active),
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      revision: row.revision,
+      mfaEnabled: Boolean(row.mfa_enabled),
+      ...(websiteIds !== undefined ? { websiteIds } : {}),
+    };
+  };
+
+  function getOperationUser(operationId) {
+    if (typeof operationId !== 'string' || !operationId) {
+      throw new AuthError('invalid_operation_id', 'operationId must be a non-empty string.');
+    }
+    const row = db.prepare('SELECT operation_id, user_id, website_id, created_at FROM auth_operation_users WHERE operation_id = ?').get(operationId);
+    if (!row) return null;
+    const user = formatAdminUser(readAdminUser(row.user_id));
+    return {
+      operationId: row.operation_id,
+      userId: row.user_id,
+      websiteId: row.website_id,
+      createdAt: row.created_at,
+      user,
+    };
+  }
+
+  function reconcileOperationUser(operationId, websiteId) {
+    if (typeof operationId !== 'string' || !operationId) {
+      throw new AuthError('invalid_operation_id', 'operationId must be a non-empty string.');
+    }
+    if (typeof websiteId !== 'string' || !websiteId) {
+      throw new AuthError('invalid_website_ids', 'websiteId must be a non-empty string.');
+    }
+    const row = db.prepare('SELECT operation_id, user_id, website_id, created_at FROM auth_operation_users WHERE operation_id = ?').get(operationId);
+    if (!row) return null;
+    if (row.website_id !== websiteId) {
+      throw new AuthError('operation_user_conflict', 'Operation is already associated with a different website.', 409);
+    }
+    const user = formatAdminUser(readAdminUser(row.user_id));
+    if (!user || user.role !== 'site_manager' || !user.active) {
+      throw new AuthError('operation_user_invalid', 'Reconciled user is inactive or not a site manager.', 409);
+    }
+    if (!Array.isArray(user.websiteIds) || !user.websiteIds.includes(websiteId)) {
+      throw new AuthError('operation_user_invalid', 'Reconciled user is not attached to the target website.', 409);
+    }
+    return user;
+  }
+
+  async function createSiteManager({
+    username: inputUsername,
+    password: inputPassword,
+    websiteId,
+    actorId = 'system',
+    operationId = null,
+    rawToken = null,
+    requireManagement = null,
+    websiteLookup: customWebsiteLookup = null,
+  } = {}) {
+    const activeWebsiteLookup = customWebsiteLookup ?? websiteLookup;
+    return storeLock.withLock(async () => {
+      const name = username(inputUsername);
+      if (typeof websiteId !== 'string' || !websiteId) {
+        throw new AuthError('invalid_website_ids', 'websiteId is required.');
+      }
+      if (operationId !== null && (typeof operationId !== 'string' || !operationId)) {
+        throw new AuthError('invalid_operation_id', 'operationId must be a non-empty string.');
+      }
+
+      if (operationId) {
+        const reconciled = reconcileOperationUser(operationId, websiteId);
+        if (reconciled) {
+          if (reconciled.username !== name) {
+            throw new AuthError('operation_user_conflict', 'Operation is already associated with a different username.', 409);
+          }
+          return reconciled;
+        }
+      }
+
+      // Pre-hash live actor check
+      if (rawToken) {
+        const session = getSession(rawToken);
+        if (!session) throw invalid();
+        if (typeof requireManagement === 'function') requireManagement(session);
+      } else if (actorId && actorId !== 'system') {
+        const actor = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actorId);
+        if (!actor || actor.active !== 1) {
+          throw new AuthError('forbidden', 'Actor is inactive or not found.', 403);
+        }
+      }
+
+      // Pre-hash live website check
+      if (typeof activeWebsiteLookup === 'function') {
+        const exists = await activeWebsiteLookup(websiteId);
+        if (!exists) {
+          throw new AuthError('website_not_found', 'Target website does not exist.', 404);
+        }
+      }
+
+      if (db.prepare('SELECT id FROM users WHERE username = ?').get(name)) {
+        throw new AuthError('username_taken', 'This username is already taken.', 409);
+      }
+
+      const passwordHash = await hashPassword(inputPassword);
+
+      // Post-hash live actor check (fail-closed)
+      if (rawToken) {
+        const session = getSession(rawToken);
+        if (!session) {
+          throw new AuthError('forbidden', 'Actor authorization was revoked during password hashing.', 403);
+        }
+        if (typeof requireManagement === 'function') requireManagement(session);
+      } else if (actorId && actorId !== 'system') {
+        const actor = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actorId);
+        if (!actor || actor.active !== 1) {
+          throw new AuthError('forbidden', 'Actor authorization was revoked during password hashing.', 403);
+        }
+      }
+
+      // Post-hash live website check (fail-closed)
+      if (typeof activeWebsiteLookup === 'function') {
+        const stillExists = await activeWebsiteLookup(websiteId);
+        if (!stillExists) {
+          throw new AuthError('website_not_found', 'Target website was removed during password hashing.', 404);
+        }
+      }
+
+      return transaction(() => {
+        if (db.prepare('SELECT id FROM users WHERE username = ?').get(name)) {
+          throw new AuthError('username_taken', 'This username is already taken.', 409);
+        }
+        if (operationId) {
+          const opRow = db.prepare('SELECT operation_id, user_id, website_id FROM auth_operation_users WHERE operation_id = ?').get(operationId);
+          if (opRow) {
+            if (opRow.website_id !== websiteId) {
+              throw new AuthError('operation_user_conflict', 'Operation is already associated with a different website.', 409);
+            }
+            return formatAdminUser(readAdminUser(opRow.user_id));
+          }
+        }
+
+        const id = randomUUID();
+        db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, ?, ?, ?)')
+          .run(id, name, passwordHash, 'site_manager', 1, now(), now());
+        db.prepare('INSERT OR IGNORE INTO auth_user_websites(user_id, website_id) VALUES (?, ?)').run(id, websiteId);
+        if (operationId) {
+          db.prepare('INSERT INTO auth_operation_users(operation_id, user_id, website_id, created_at) VALUES (?, ?, ?, ?)')
+            .run(operationId, id, websiteId, now());
+        }
+        try {
+          db.prepare('DELETE FROM auth_user_admin_events WHERE created_at < ?').run(now() - 90 * 24 * 60 * 60_000);
+          db.prepare('INSERT INTO auth_user_admin_events(actor_id, target_id, action, created_at) VALUES (?, ?, ?, ?)').run(actorId, id, 'user.created', now());
+        } catch {}
+        event(actorId, 'user.created', { type: 'user', id });
+        return formatAdminUser(readAdminUser(id));
+      });
+    });
+  }
+
+  users.createSiteManager = createSiteManager;
+  users.getOperationUser = getOperationUser;
+  users.reconcileOperationUser = reconcileOperationUser;
+  users.storeLock = storeLock;
+  users.withLock = (fn) => storeLock.withLock(fn);
+
   return {
     mfa,
     users,
     hostingAccounts: users.hostingAccounts,
     audit,
+    getOperationUser,
+    reconcileOperationUser,
+    storeLock,
+    withLock: (fn) => storeLock.withLock(fn),
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),
     issueSetupToken() {

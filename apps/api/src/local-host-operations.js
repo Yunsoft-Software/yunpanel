@@ -269,9 +269,18 @@ export function createLocalHostOperations({
   const resolvedMailDataRestoreManager = mailDataRestoreManager ?? createMailDataRestoreManager({
     backupManager: resolvedMailDataBackupManager,
   });
-  const resolvedMailDataDeleteManager = mailDataDeleteManager ?? createMailDataDeleteManager({
+  const rawMailDataDeleteManager = mailDataDeleteManager ?? createMailDataDeleteManager({
     backupManager: resolvedMailDataBackupManager,
   });
+  const resolvedMailDataDeleteManager = rawMailDataDeleteManager ? {
+    ...rawMailDataDeleteManager,
+    deleteData: typeof rawMailDataDeleteManager.deleteData === 'function'
+      ? rawMailDataDeleteManager.deleteData.bind(rawMailDataDeleteManager)
+      : (input) => rawMailDataDeleteManager.deleteNow(input),
+    deleteNow: typeof rawMailDataDeleteManager.deleteNow === 'function'
+      ? rawMailDataDeleteManager.deleteNow.bind(rawMailDataDeleteManager)
+      : (input) => rawMailDataDeleteManager.deleteData(input),
+  } : null;
   const resolvedRoundcubeConfigOperation = roundcubeConfigOperation ?? (loadRoundcubeConfiguration
     ? createLocalRoundcubeConfigOperation({ loadConfiguration: loadRoundcubeConfiguration })
     : null);
@@ -309,8 +318,10 @@ export function createLocalHostOperations({
   if (!resolvedMailDataRestoreManager || typeof resolvedMailDataRestoreManager.restore !== 'function') {
     throw new Error('mailDataRestoreManager must provide restore()');
   }
-  if (!resolvedMailDataDeleteManager || typeof resolvedMailDataDeleteManager.deleteData !== 'function') {
-    throw new Error('mailDataDeleteManager must provide deleteData()');
+  if (!resolvedMailDataDeleteManager
+    || (typeof resolvedMailDataDeleteManager.deleteData !== 'function'
+      && typeof resolvedMailDataDeleteManager.deleteNow !== 'function')) {
+    throw new Error('mailDataDeleteManager must provide deleteData() or deleteNow()');
   }
 
   async function withApplicationEnvironment(payload, execute) {
@@ -677,7 +688,10 @@ export function createLocalHostOperations({
 
   async function executeMailDataDelete(payload, execution) {
     assertMailExecutionContext(payload, execution);
-    const deletion = await resolvedMailDataDeleteManager.deleteData({
+    const deleteFn = typeof resolvedMailDataDeleteManager.deleteData === 'function'
+      ? resolvedMailDataDeleteManager.deleteData.bind(resolvedMailDataDeleteManager)
+      : resolvedMailDataDeleteManager.deleteNow.bind(resolvedMailDataDeleteManager);
+    const deletion = await deleteFn({
       transactionId: execution.jobId,
       backupId: payload.backupId,
       scope: payload.scope,

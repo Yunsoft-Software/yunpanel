@@ -197,6 +197,9 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         return { id: actor.id, role: actor.role, active: actor.active };
       });
     },
+    allocateCustomerSite(rawToken, requireManagement, input) {
+      return siteAllocations.allocateCustomerSite(rawToken, requireManagement, input);
+    },
     registerReseller(rawToken, requireManagement, input) {
       const result = transaction(() => {
         const actor = owner(rawToken, requireManagement);

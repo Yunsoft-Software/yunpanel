@@ -175,6 +175,60 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
       for (const id of result.revoke) revokeLiveUser(id, 'hosting_website_attached');
       return result.allocation;
     },
+    allocateCustomerSite(rawToken, policy, input) {
+      const result = transaction(() => {
+        const resolveActor = typeof managementActor === 'function' ? managementActor : owner;
+        const actor = resolveActor(rawToken, policy);
+        const site = input.site ?? input;
+        const ownerUserId = input.ownerUserId ?? input.customerId;
+        const chain = customer(ownerUserId);
+        const isReseller = actor.role === 'reseller' || actor.kind === 'reseller' || actor.hosting?.kind === 'reseller';
+        if (isReseller) {
+          if (chain.current.resellerId !== actor.id) {
+            throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+          }
+        } else if (actor.role !== 'owner') {
+          throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
+        }
+        if (chain.parent) {
+          assertResellerCapacity({ limits: limits(chain.parent.user_id), usage: usage(chain.parent), resource: 'websites' });
+        }
+        const hasQuotaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_customer_quotas'").get();
+        if (hasQuotaTable) {
+          const customerQuotaRow = db.prepare('SELECT max_websites FROM auth_customer_quotas WHERE customer_id = ?').get(ownerUserId);
+          if (customerQuotaRow && customerQuotaRow.max_websites !== null) {
+            const currentWebsites = db.prepare(`SELECT count(DISTINCT website_id) AS total FROM (
+              SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
+              UNION
+              SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'reserved'
+            )`).get(ownerUserId, ownerUserId)?.total ?? 0;
+            if (currentWebsites >= customerQuotaRow.max_websites) {
+              throw new AuthError('customer_quota_exceeded', 'The customer website quota has been reached.', 409);
+            }
+          }
+        }
+        db.prepare('INSERT OR IGNORE INTO auth_customer_websites (website_id, customer_id, created_at) VALUES (?, ?, ?)')
+          .run(site.id, ownerUserId, now());
+        const effectiveResellerId = input.resellerId ?? chain.current.resellerId ?? null;
+        const revoke = [chain.current.id, ...(chain.parent ? [chain.parent.user_id] : [])];
+        for (const id of revoke) invalidate(id);
+        audit(actor.id, 'hosting.customer_site_allocated', { type: 'website', id: site.id, customerId: ownerUserId });
+        const allocation = Object.freeze({
+          id: site.id,
+          websiteId: site.id,
+          serverId: site.serverId,
+          name: site.name,
+          site,
+          ownerUserId,
+          customerId: ownerUserId,
+          resellerId: effectiveResellerId,
+          attachedAt: now(),
+        });
+        return { allocation, revoke };
+      });
+      for (const id of result.revoke) revokeLiveUser(id, 'hosting_website_attached');
+      return result.allocation;
+    },
     /** Explicit recovery hook for a quota hold whose site metadata never became
      * durable. This is never called from a catch/timer. The caller must inspect
      * the canonical registries under the shared site mutation lock first.

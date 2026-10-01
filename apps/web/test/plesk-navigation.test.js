@@ -7,14 +7,14 @@ const menu = (manage, owner, reseller = false) => navigationGroups(manage, owner
 const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.meta.url), 'utf8');
 
 test('Owner menu puts site tasks first in Plesk order, not runtime inventory', () => {
-  assert.deepEqual(menu(true, true), ['/websites', '/mail', '/files', '/databases', '/tools-settings', '/settings/users']);
+  assert.deepEqual(menu(true, true), ['/websites', '/mail', '/files', '/databases', '/statistics', '/tools-settings', '/settings/users']);
   assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri ve Alan Adları');
 });
 test('site manager gets the four scoped task entries without Owner tools', () => {
-  assert.deepEqual(menu(true, false), ['/websites', '/mail', '/files', '/databases']);
+  assert.deepEqual(menu(true, false), ['/websites', '/mail', '/files', '/databases', '/statistics']);
 });
 test('reseller gets Müşterilerim and Sitelerim without changing the ordinary site-manager menu', () => {
-  assert.deepEqual(menu(true, false, true), ['/customers', '/websites', '/mail', '/files', '/databases']);
+  assert.deepEqual(menu(true, false, true), ['/customers', '/websites', '/mail', '/files', '/databases', '/statistics']);
   assert.equal(navigationGroups(true, false, true)[0].items[0][1], 'Müşterilerim');
   assert.equal(navigationGroups(true, false, true)[0].items[1][1], 'Sitelerim');
 });
@@ -66,8 +66,8 @@ test('domain navigation uses encoded Domain ID and preserves bounded search', ()
 test('site tools follow three task families and expose DNS, Git and logs', () => {
   const groups = groupSiteTabs(SITE_TABS);
   assert.deepEqual(groups.map((group) => group.id), ['dashboard', 'hosting', 'mail']);
-  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics']);
-  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup']);
+  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics']);
+  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup']);
   assert.deepEqual(groups[2].tabs.map(([key]) => key), ['mail']);
 });
 test('unsupported runtime tools are not invented; unknown implemented tabs remain reachable', () => {

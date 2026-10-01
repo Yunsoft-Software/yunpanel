@@ -39,8 +39,11 @@ for (const patch of [{ created: false }, { resumed: true }, { created: undefined
 }
 
 for (const [errorCode, code] of [
-  ['username_taken', 'site_admin_conflict'], ['invalid_password', 'site_admin_input_invalid'],
-  ['auth_busy', 'site_admin_busy'], ['SQLITE_IOERR', 'site_admin_result_unverified'], ['__proto__', 'site_admin_result_unverified'],
+  ['username_taken', 'site_admin_conflict'], ['operation_user_conflict', 'site_admin_conflict'],
+  ['invalid_password', 'site_admin_input_invalid'], ['auth_busy', 'site_admin_busy'],
+  ['website_not_found', 'site_admin_website_deleted'], ['forbidden', 'site_admin_actor_forbidden'],
+  ['auth_store_locked', 'site_admin_locked'], ['store_locked', 'site_admin_locked'],
+  ['SQLITE_IOERR', 'site_admin_result_unverified'], ['__proto__', 'site_admin_result_unverified'],
 ]) {
   test(`async rejection ${errorCode} is awaited and projected without raw error or credentials`, async () => {
     const value = await provisionSiteAdmin(options({ userAdminStore: { createSiteManager: async () => {

@@ -509,9 +509,11 @@ test('website restore durable queue route supports health check rollback', async
   assert.equal(op.snapshotId, fixture.targetSnapshotId);
 
   // Wait for background execution
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const completed = await fixture.operationService.getOperation(op.id);
+  let completed = await fixture.operationService.getOperation(op.id);
+  for (let i = 0; i < 20 && (completed.status === 'queued' || completed.status === 'running'); i++) {
+    await new Promise((resolve) => setTimeout(resolve, 25));
+    completed = await fixture.operationService.getOperation(op.id);
+  }
   assert.equal(completed.status, 'rolled_back');
   assert.equal(completed.result.status, 'rolled_back');
   assert.equal(completed.result.rollbackReason, 'health_check_failed');

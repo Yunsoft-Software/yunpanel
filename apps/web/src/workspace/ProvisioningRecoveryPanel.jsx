@@ -98,7 +98,7 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
         </p>}
       </div>
       {operation && <div className="ws-table-scroll"><table className="ws-table">
-        <thead><tr><th>Adım</th><th>Durum</th><th>Hata / çözüm</th><th>İşlem</th></tr></thead>
+        <thead><tr><th>Görev adımı</th><th>Durum</th><th>Tanılama / çözüm</th><th>İşlem</th></tr></thead>
         <tbody>{operation.steps.map((step) => {
           const item = step;
           const remediation = provisioningRemediation(step); // provisioningRemediation(item)
@@ -118,7 +118,7 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
       </table></div>}
       <div className="ws-section-body">
         <p className="ws-muted">Durumu yenile yalnızca kayıt okur; işlemi tekrar başlatmaz. Sayfadan ayrılmak sunucuda başlamış bir işi geri almaz.</p>
-        {operation && <details><summary>Teknik bilgiler</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Tekrar deneme ve geri alma onayı bu işlem ve seçilen adımla sınırlıdır.</p></details>}
+        {operation && <details><summary>Teknik bilgiler ve tanılama</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Web sitesi kimliği: <code>{operation.websiteId}</code></p><p>Hazır olma durumu (ready): <code>{operation.ready ? 'true' : 'false'}</code></p><p>Tekrar deneme ve geri alma onayı bu işlem ve seçilen adımla sınırlıdır.</p></details>}
       </div>
     </Section>
     {approval && copy && <ConfirmDialog key={`${approval.confirmation}:${approval.snapshot}`}

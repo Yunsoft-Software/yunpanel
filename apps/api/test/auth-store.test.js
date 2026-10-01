@@ -386,3 +386,179 @@ test('unsafe auth database directory is rejected without changing its permission
   assert.throws(() => createAuthStore({ filePath: path.join(directory, 'auth.sqlite') }), /private directory/);
   assert.equal(statSync(directory).mode & 0o777, 0o755);
 });
+
+test('persistent operation->user reconciliation returns existing user and prevents duplicate creation', async (t) => {
+  const { store } = fixture(t);
+  await owner(store);
+  const operationId = '11111111-2222-4333-8444-555555555555';
+  const websiteId = '66666666-7777-4888-8999-000000000000';
+
+  const user = await store.users.createSiteManager({
+    username: 'manager-test',
+    password,
+    websiteId,
+    actorId: 'system',
+    operationId,
+  });
+
+  assert.equal(user.username, 'manager-test');
+  assert.equal(user.role, 'site_manager');
+  assert.equal(user.active, true);
+  assert.deepEqual(user.websiteIds, [websiteId]);
+
+  // Check getOperationUser
+  const opRecord = store.getOperationUser(operationId);
+  assert.ok(opRecord);
+  assert.equal(opRecord.operationId, operationId);
+  assert.equal(opRecord.userId, user.id);
+  assert.equal(opRecord.websiteId, websiteId);
+  assert.equal(opRecord.user.username, 'manager-test');
+
+  // Check reconcileOperationUser
+  const reconciled = store.reconcileOperationUser(operationId, websiteId);
+  assert.equal(reconciled.id, user.id);
+  assert.equal(reconciled.username, 'manager-test');
+
+  // Replay createSiteManager with same operationId, websiteId, username returns existing user
+  const replayed = await store.users.createSiteManager({
+    username: 'manager-test',
+    password: secondPassword,
+    websiteId,
+    actorId: 'system',
+    operationId,
+  });
+  assert.equal(replayed.id, user.id);
+  assert.equal(replayed.username, 'manager-test');
+
+  // Conflicting websiteId for same operationId throws 409
+  await assert.rejects(
+    store.users.createSiteManager({
+      username: 'manager-test',
+      password,
+      websiteId: 'different-site-id',
+      operationId,
+    }),
+    { code: 'operation_user_conflict', status: 409 },
+  );
+
+  // Conflicting username for same operationId throws 409
+  await assert.rejects(
+    store.users.createSiteManager({
+      username: 'other-user',
+      password,
+      websiteId,
+      operationId,
+    }),
+    { code: 'operation_user_conflict', status: 409 },
+  );
+
+  // Reconcile with wrong websiteId throws 409
+  assert.throws(
+    () => store.reconcileOperationUser(operationId, 'wrong-website'),
+    { code: 'operation_user_conflict', status: 409 },
+  );
+});
+
+test('live actor deactivation during Argon2id hash fails-closed before creating account', async (t) => {
+  const { store: liveStore, filePath } = fixture(t);
+  const liveOwner = await owner(liveStore);
+  const websiteId = '77777777-8888-4999-8000-111111111111';
+
+  // Simulate deactivating actor in database right before hash finishes
+  const websiteLookup = async () => {
+    const dbAdmin = new DatabaseSync(filePath);
+    dbAdmin.prepare('UPDATE users SET active = 0 WHERE id = ?').run(liveOwner.id);
+    dbAdmin.close();
+    return true;
+  };
+
+  await assert.rejects(
+    liveStore.users.createSiteManager({
+      username: 'site-admin-live-actor',
+      password,
+      websiteId,
+      actorId: liveOwner.id,
+      websiteLookup,
+    }),
+    { code: 'forbidden', status: 403 },
+  );
+});
+
+test('live website deletion during Argon2id hash fails-closed before creating account', async (t) => {
+  const { store } = fixture(t);
+  const ownerUser = await owner(store);
+  const websiteId = '88888888-9999-4000-8111-222222222222';
+
+  let websiteExists = true;
+  const websiteLookup = async () => {
+    if (!websiteExists) return false;
+    websiteExists = false;
+    return true; // pre-hash check sees true, post-hash check will see false!
+  };
+
+  await assert.rejects(
+    store.users.createSiteManager({
+      username: 'site-admin-live-site',
+      password,
+      websiteId,
+      actorId: ownerUser.id,
+      websiteLookup,
+    }),
+    { code: 'website_not_found', status: 404 },
+  );
+
+  assert.equal(store.reconcileOperationUser('non-existent-op', websiteId), null);
+});
+
+test('process store lock protects concurrent site manager creation across operations', async (t) => {
+  const { store } = fixture(t);
+  await owner(store);
+
+  assert.ok(store.storeLock);
+  assert.equal(typeof store.withLock, 'function');
+  assert.equal(typeof store.users.withLock, 'function');
+
+  const op1 = 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa';
+  const op2 = 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb';
+  const site1 = 'cccccccc-3333-4333-8333-cccccccccccc';
+  const site2 = 'dddddddd-4444-4444-8444-dddddddddddd';
+
+  const [u1, u2] = await Promise.all([
+    store.users.createSiteManager({ username: 'manager-concurrent-1', password, websiteId: site1, operationId: op1 }),
+    store.users.createSiteManager({ username: 'manager-concurrent-2', password, websiteId: site2, operationId: op2 }),
+  ]);
+
+  assert.equal(u1.username, 'manager-concurrent-1');
+  assert.equal(u2.username, 'manager-concurrent-2');
+  assert.deepEqual(u1.websiteIds, [site1]);
+  assert.deepEqual(u2.websiteIds, [site2]);
+});
+
+test('hosting customer session profile includes quotas when defined in customer quotas table', async (t) => {
+  const { store, filePath } = fixture(t);
+  await owner(store);
+  const encoded = await hashPassword(password);
+  const db = new DatabaseSync(filePath);
+  db.exec('PRAGMA foreign_keys = ON');
+  try {
+    db.prepare("INSERT INTO users VALUES (?, ?, ?, 'site_manager', 1, 1000, 1000)")
+      .run('customer-with-quotas', 'customer-with-quotas', encoded);
+    db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, 1000, 1000)')
+      .run('customer-with-quotas', 'customer', null);
+    db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, 1000, 1000)')
+      .run('customer-with-quotas', 5, 2048, 10240, 3);
+  } finally { db.close(); }
+
+  const result = await store.login({ username: 'customer-with-quotas', password });
+  assert.equal(result.session.user.username, 'customer-with-quotas');
+  assert.deepEqual(result.session.user.hosting, {
+    kind: 'customer',
+    resellerId: null,
+    quotas: {
+      maxWebsites: 5,
+      maxDiskMb: 2048,
+      maxTrafficMb: 10240,
+      maxDatabases: 3,
+    },
+  });
+});

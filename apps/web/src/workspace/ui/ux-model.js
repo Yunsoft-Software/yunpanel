@@ -22,7 +22,12 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false, 
     ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Sitelerim', 'globe']]
     : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
   if (canManage) {
-    items.push(['/mail', 'Posta', 'mail'], ['/files', 'Dosyalar', 'folder'], ['/databases', 'Veritabanları', 'database']);
+    items.push(
+      ['/mail', 'Posta', 'mail'],
+      ['/files', 'Dosyalar', 'folder'],
+      ['/databases', 'Veritabanları', 'database'],
+      ['/statistics', 'İstatistikler', 'dashboard'],
+    );
     if (isOwner) items.push(['/tools-settings', 'Araçlar ve Ayarlar', 'settings'], ['/settings/users', 'Kullanıcılar', 'user']);
   } else if (isOwner) items.push(['/dashboard', 'Genel bakış', 'dashboard']);
   const label = isReseller && !isOwner ? 'Bayi Menüsü' : isCustomer && !isOwner ? 'Müşteri Menüsü' : 'Panel';
@@ -36,12 +41,12 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
     ['/dashboard', 'Sunucu genel bakışı', 'dashboard'],
     ['/settings?section=dns', 'Sunucu DNS ve SSL ayarları', 'globe'],
     ['/settings?section=updates', 'YunPanel güncellemeleri', 'refresh'],
-    ['/docker', 'Docker projeleri', 'box'],
+    ['/docker', 'Docker projeleri (Ürün uzantısı)', 'box'],
   ] },
   { id: 'panel', label: 'Panel ve erişim', items: [
     ['/settings/users', 'Kullanıcılar, bayiler ve müşteriler', 'user'],
     ['/settings?section=account', 'Hesap ve erişim ayarları', 'shield'],
-    ['/settings?section=ai', 'AI sağlayıcıları', 'code'],
+    ['/settings?section=ai', 'AI sağlayıcıları (Ürün uzantısı)', 'code'],
   ] },
   { id: 'diagnostics', label: 'Tanılama ve kayıtlar', items: [
     ['/jobs', 'İşlem geçmişi', 'jobs'], ['/audit', 'Denetim kayıtları', 'shield'],
@@ -51,12 +56,43 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
 ].map((group) => Object.freeze({ ...group, items: Object.freeze(group.items.map((item) => Object.freeze(item))) })));
 
 export function navigationItemActive(to, pathname) {
-  if (typeof pathname !== 'string') return false;
-  if (to === '/tools-settings') {
-    return ['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => pathname === path || pathname.startsWith(`${path}/`))
-      || (pathname === '/settings' || (pathname.startsWith('/settings/') && pathname !== '/settings/users' && !pathname.startsWith('/settings/users/')));
+  if (typeof pathname !== 'string' || typeof to !== 'string') return false;
+  if (pathname === to) return true;
+  const currentPath = pathname.split('?')[0].split('#')[0];
+  if (to === '/settings/users' || to === '/users') {
+    return currentPath === '/users' || currentPath.startsWith('/users/')
+      || currentPath === '/settings/users' || currentPath.startsWith('/settings/users/');
   }
-  return pathname === to || pathname.startsWith(`${to}/`);
+  if (to === '/statistics') {
+    return currentPath === '/statistics' || currentPath.startsWith('/statistics/')
+      || currentPath === '/stats' || currentPath.startsWith('/stats/')
+      || currentPath === '/analytics' || currentPath.startsWith('/analytics/');
+  }
+  if (to === '/files') {
+    return currentPath === '/files' || currentPath.startsWith('/files/')
+      || currentPath === '/file-manager' || currentPath.startsWith('/file-manager/')
+      || currentPath === '/file' || currentPath.startsWith('/file/');
+  }
+  if (to === '/mail') {
+    return currentPath === '/mail' || currentPath.startsWith('/mail/')
+      || currentPath === '/email' || currentPath.startsWith('/email/')
+      || currentPath === '/mailboxes' || currentPath.startsWith('/mailboxes/')
+      || currentPath === '/mailbox' || currentPath.startsWith('/mailbox/');
+  }
+  if (to === '/databases') {
+    return currentPath === '/databases' || currentPath.startsWith('/databases/')
+      || currentPath === '/database' || currentPath.startsWith('/database/')
+      || currentPath === '/db' || currentPath.startsWith('/db/');
+  }
+  if (to === '/tools-settings') {
+    return (['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
+      || (currentPath === '/settings' || (currentPath.startsWith('/settings/') && currentPath !== '/settings/users' && !currentPath.startsWith('/settings/users/'))))
+      && currentPath !== '/users' && !currentPath.startsWith('/users/');
+  }
+  if (to.includes('?') || to.includes('#')) {
+    return pathname === to || pathname.startsWith(`${to}&`) || pathname.startsWith(`${to}#`);
+  }
+  return currentPath === to || currentPath.startsWith(`${to}/`);
 }
 
 export function websiteCount(resource) {
@@ -86,19 +122,24 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
   if (term) entries.push({ id: 'search-all', to: `/websites?q=${encodeURIComponent(term)}`, label: `“${term}” için tüm sonuçlar`, title: `“${term}” için tüm sonuçlar`, icon: 'search', detail: isReseller && !isOwner ? 'Sitelerim listesini aç' : 'Web siteleri listesini aç' });
   return entries;
 }
+export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
-  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'deploy', 'logs', 'analytics'] },
-  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'terminal', 'cron', 'backup'] },
+  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics'] },
+  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
-export function groupSiteTabs(tabs) {
+export function groupSiteTabs(tabs = []) {
+  if (!Array.isArray(tabs)) return [];
   const known = new Set(siteGroups.flatMap((group) => group.keys));
   // Legacy resources remains addressable, but it is the existing database surface,
   // not a fourth user-facing workspace or a duplicate tool button.
   known.add('resources');
-  const groups = siteGroups.map((group) => ({ ...group, tabs: group.keys.map((key) => tabs.find(([tab]) => tab === key)).filter(Boolean) })).filter((group) => group.tabs.length);
-  const extra = tabs.filter(([key]) => !known.has(key));
-  if (extra.length) groups.push({ id: 'extensions', label: 'Ek site araçları', icon: 'box', keys: extra.map(([key]) => key), tabs: extra });
+  const groups = siteGroups.map((group) => ({
+    ...group,
+    tabs: group.keys.map((key) => tabs.find((tab) => tabKey(tab) === key)).filter(Boolean),
+  })).filter((group) => group.tabs.length);
+  const extra = tabs.filter((tab) => !known.has(tabKey(tab)));
+  if (extra.length) groups.push({ id: 'extensions', label: 'Ürün uzantıları', icon: 'box', keys: extra.map((tab) => tabKey(tab)), tabs: extra });
   return groups;
 }

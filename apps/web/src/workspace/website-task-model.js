@@ -49,9 +49,19 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
     const tools = primaryTools.map((entry) => tool(entry, ['databases', 'mail'].includes(entry[0]) ? bindingProblem : domainProblem));
     // Files stays visible even for an unbound/unsupported Website. The existing
     // SiteFilesPanel provides its verified setup/unsupported/error explanation.
-    const secondaryTools = [tool(['hosting', 'Barındırma ve DNS', 'settings'])];
+    const secondaryTools = [
+      tool(['hosting', 'Barındırma ve DNS', 'settings']),
+      tool(['settings', 'Barındırma ayarları', 'settings']),
+    ];
     if (application || !website || hasId(website.applicationId)) {
-      secondaryTools.push(tool(['node', application?.type === 'node' ? 'Node.js' : 'Uygulama', 'code'], applicationProblem));
+      const runtimeName = application?.type === 'node'
+        ? 'Node.js'
+        : (application?.type === 'php' || website?.runtimeType === 'php')
+          ? 'PHP'
+          : (application?.type === 'python' || website?.runtimeType === 'python')
+            ? 'Python'
+            : 'Uygulama';
+      secondaryTools.push(tool(['node', runtimeName, 'code'], applicationProblem));
       secondaryTools.push(tool(['deploy', 'Git / Yayınlama', 'git'], applicationProblem));
     }
     return {
@@ -62,6 +72,8 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
       tools,
       secondaryTools,
       createSubdomainHref: isOwner && !domainProblem ? `/websites/new?parent=${encodeURIComponent(domain.id)}` : null,
+      manageAliasesHref: canManage && !domainProblem ? siteHref(domain.id, 'domains') : null,
+      addAliasHref: canManage && !domainProblem ? siteHref(domain.id, 'domains') : null,
     };
   };
 }
@@ -71,11 +83,13 @@ export function siteListFilterParams(current, name, value) {
   const next = new URLSearchParams(current);
   if (!['q', 'type', 'status', 'sort', 'page'].includes(name)) return next;
   if (value && value !== 'all') next.set(name, value); else next.delete(name);
+  if (name === 'q') { next.delete('search'); next.delete('query'); }
+  if (name === 'status') { next.delete('state'); }
   if (name !== 'page') next.delete('page');
   return next;
 }
 export function clearSiteListFilters(current) {
   const next = new URLSearchParams(current);
-  for (const name of ['q', 'type', 'status', 'sort', 'page']) next.delete(name);
+  for (const name of ['q', 'search', 'query', 'type', 'status', 'state', 'sort', 'page']) next.delete(name);
   return next;
 }

@@ -33,7 +33,13 @@ async function createFixture(t) {
     open: (p, flags, mode) => fs.open(toReal(p), flags, mode),
     readdir: (p, options) => fs.readdir(toReal(p), options),
     readFile: (p) => fs.readFile(toReal(p)),
-    realpath: async (p) => (toReal(p) === tempDir ? FAKE_ROOT : p),
+    realpath: async (p) => {
+      if (p.startsWith('/proc/self/fd/')) {
+        const resolved = await fs.realpath(p);
+        return resolved === tempDir ? FAKE_ROOT : resolved.startsWith(`${tempDir}/`) ? `${FAKE_ROOT}/${resolved.slice(tempDir.length + 1)}` : resolved;
+      }
+      return toReal(p) === tempDir ? FAKE_ROOT : p;
+    },
     rename: (oldP, newP) => fs.rename(toReal(oldP), toReal(newP)),
     rm: (p, options) => fs.rm(toReal(p), options),
     stat: (p) => fs.stat(toReal(p)),
@@ -211,3 +217,53 @@ test('site-file-worker: handles root slash and leading slashes safely', async (t
 });
 
 
+
+
+test('permissions change the actual file and directory modes through opened descriptors', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  await fs.writeFile(path.join(tempDir, 'index.html'), 'actual content');
+  await fs.mkdir(path.join(tempDir, 'assets'));
+  assert.deepEqual(await executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'index.html', mode: '640' }, deps),
+    { path: 'index.html', mode: '0640', updated: true });
+  assert.equal((await fs.stat(path.join(tempDir, 'index.html'))).mode & 0o7777, 0o640);
+  await executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'assets', mode: '0750' }, deps);
+  assert.equal((await fs.stat(path.join(tempDir, 'assets'))).mode & 0o7777, 0o750);
+});
+
+test('permissions reject traversal, symlinks, hardlinks and unsafe modes without changing the target', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const target = path.join(tempDir, 'target');
+  await fs.writeFile(target, 'preserve'); await fs.chmod(target, 0o640);
+  await fs.symlink(target, path.join(tempDir, 'symlink'));
+  await fs.link(target, path.join(tempDir, 'hardlink'));
+  for (const [file, code] of [['../target', 'site_file_path_invalid'], ['symlink', 'site_file_symlink_rejected'], ['hardlink', 'site_file_hardlink_rejected']]) {
+    await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: file, mode: '0755' }, deps), error => error.code === code);
+  }
+  await fs.unlink(path.join(tempDir, 'hardlink'));
+  for (const mode of ['0777', '0646', '0000', '4640', 'abc', '0640x']) {
+    await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'target', mode }, deps), error => ['site_file_mode_invalid', 'site_file_mode_unsafe'].includes(error.code));
+  }
+  await fs.mkdir(path.join(tempDir, 'dir'));
+  await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'dir', mode: '0640' }, deps), error => error.code === 'site_file_mode_unsafe');
+  assert.equal((await fs.stat(target)).mode & 0o7777, 0o640);
+});
+
+test('permissions expose filesystem failures and close descriptors without false success', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  await fs.writeFile(path.join(tempDir, 'target'), 'preserve'); await fs.chmod(path.join(tempDir, 'target'), 0o640);
+  let closed = 0;
+  const failing = { ...deps, open: async (...args) => {
+    const handle = await deps.open(...args);
+    return { fd: handle.fd, stat: () => handle.stat(), chmod: async () => { throw Object.assign(new Error('denied'), { code: 'EPERM' }); }, close: async () => { closed++; await handle.close(); } };
+  } };
+  await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'target', mode: '0755' }, failing), error => error.code === 'site_file_permission_denied' && error.status === 403);
+  assert.equal(closed, 1); assert.equal((await fs.stat(path.join(tempDir, 'target'))).mode & 0o7777, 0o640);
+});
+
+test('permissions reject a descriptor redirected outside the Website before mutation', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  await fs.writeFile(path.join(tempDir, 'target'), 'preserve'); await fs.chmod(path.join(tempDir, 'target'), 0o640);
+  const redirected = { ...deps, realpath: p => p.startsWith('/proc/self/fd/') ? '/another-website/target' : deps.realpath(p) };
+  await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'target', mode: '0755' }, redirected), error => error.code === 'site_file_changed');
+  assert.equal((await fs.stat(path.join(tempDir, 'target'))).mode & 0o7777, 0o640);
+});

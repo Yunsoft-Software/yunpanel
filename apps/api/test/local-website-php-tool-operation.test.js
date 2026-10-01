@@ -3,17 +3,10 @@ import test from 'node:test';
 import { createLocalWebsitePhpToolOperation } from '../src/local-website-php-tool-operation.js';
 import { websitePhpToolActionPreview } from '../src/website-php-tool-action.js';
 
-const execution = Object.freeze({
-  jobId: 'php-action-job-01',
-  serverId: '33333333-3333-4333-8333-333333333333',
-  resourceType: 'application',
-  resourceId: '22222222-2222-4222-8222-222222222222',
-});
-
 const preview = websitePhpToolActionPreview({
   websiteId: '11111111-1111-4111-8111-111111111111',
-  serverId: execution.serverId,
-  applicationId: execution.resourceId,
+  serverId: '33333333-3333-4333-8333-333333333333',
+  applicationId: '22222222-2222-4222-8222-222222222222',
   unixUser: 'yunapp-123456789abc',
   websiteRevision: 4,
 }, 'wp.cache.flush');
@@ -29,6 +22,12 @@ const payload = Object.freeze({
   actionId: preview.actionId,
   previewDigest: preview.previewDigest,
   confirmation: preview.confirmation,
+});
+const execution = Object.freeze({
+  jobId: 'php-action-job-01',
+  serverId: preview.serverId,
+  resourceType: 'application',
+  resourceId: '22222222-2222-4222-8222-222222222222',
 });
 
 test('local PHP action runs only the reviewed fixed action and returns no stdout', async () => {
@@ -119,4 +118,36 @@ test('local PHP action holds the shared site lock during command execution', asy
     applicationId: payload.applicationId,
     websiteId: payload.websiteId,
   }]);
+});
+
+test('local PHP action rejects revoked sessions or altered actor roles before execution', async () => {
+  let ran = false;
+  const operation = createLocalWebsitePhpToolOperation({
+    websitePhpToolsService: {
+      getActionPreview: async () => preview,
+      runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
+      runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
+    },
+    authorizeActor: async () => null, // Revoked session or deactivated account
+  });
+  await assert.rejects(
+    () => operation.execute(payload, execution),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(ran, false);
+
+  // Mismatched role at execution time fails closed
+  const mismatchedOp = createLocalWebsitePhpToolOperation({
+    websitePhpToolsService: {
+      getActionPreview: async () => preview,
+      runWpCli: async () => { ran = true; return { success: true, exitCode: 0 }; },
+      runComposer: async () => { ran = true; return { success: true, exitCode: 0 }; },
+    },
+    authorizeActor: async () => ({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: 'customer' }),
+  });
+  await assert.rejects(
+    () => mismatchedOp.execute(payload, execution),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(ran, false);
 });

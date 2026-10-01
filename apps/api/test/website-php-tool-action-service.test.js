@@ -10,6 +10,8 @@ const preview = websitePhpToolActionPreview({
   unixUser: 'yunapp-123456789abc',
   websiteRevision: 4,
 }, 'composer.dump-autoload');
+
+
 const input = Object.freeze({
   actionId: preview.actionId,
   expectedWebsiteRevision: preview.websiteRevision,
@@ -57,4 +59,50 @@ test('action service blocks when another Application job is active', async () =>
     (error) => error.code === 'website_php_action_job_conflict',
   );
   assert.equal(enqueued, false);
+});
+
+test('action service rejects enqueue when actor session is revoked or unauthorized', async () => {
+  let enqueued = false;
+  const deps = dependencies();
+  deps.authorizeActor = async () => null; // Session revoked or invalid grant
+  deps.jobRegistry.enqueue = async () => { enqueued = true; };
+  const service = createWebsitePhpToolActionService(deps);
+  await assert.rejects(
+    () => service.queue(preview.websiteId, input, actor),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(enqueued, false);
+});
+
+test('action service rejects enqueue when session is revoked while acquiring application lock', async () => {
+  let enqueued = false;
+  let checks = 0;
+  const deps = dependencies();
+  deps.authorizeActor = async () => {
+    checks++;
+    return checks === 1 ? actor : null; // Session revoked concurrently
+  };
+  deps.jobRegistry.enqueue = async () => { enqueued = true; };
+  const service = createWebsitePhpToolActionService(deps);
+  await assert.rejects(
+    () => service.queue(preview.websiteId, input, actor),
+    (error) => error.code === 'website_php_action_actor_forbidden' && error.status === 403,
+  );
+  assert.equal(enqueued, false);
+});
+
+test('action service binds live actor role to durable job payload for all authorized roles', async () => {
+  for (const role of ['owner', 'site_manager', 'reseller', 'customer']) {
+    const roleActor = Object.freeze({ ...actor, role });
+    const enqueued = [];
+    const deps = dependencies();
+    deps.authorizeActor = async () => roleActor;
+    deps.jobRegistry.enqueue = async (value) => { enqueued.push(value); return { id: 'job-1', status: 'queued', ...value }; };
+    const service = createWebsitePhpToolActionService(deps);
+    const result = await service.queue(preview.websiteId, input, roleActor);
+    assert.equal(enqueued.length, 1);
+    assert.equal(enqueued[0].payload.actorRole, role);
+    assert.equal(enqueued[0].payload.actorSessionId, roleActor.sessionId);
+    assert.equal(result.job.status, 'queued');
+  }
 });

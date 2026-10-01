@@ -212,9 +212,16 @@ test('restore queues selected backup against the same mail-domain resource lock'
 });
 
 test('delete preview requires disabled domain verified current backup and no non-data blockers', async () => {
-  const enabled = fixture({ mailboxEnabled: true });
+  const enabledDomain = fixture({ domainStatus: 'enabled' });
   await assert.rejects(
-    enabled.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    enabledDomain.service.previewDelete({ scope: 'domain', resourceId: mailDomainId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_domain_disable_required',
+  );
+
+  const enabledMailbox = fixture({ domainStatus: 'enabled' });
+  enabledMailbox.mailbox.enabled = true;
+  await assert.rejects(
+    enabledMailbox.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
     (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_mailbox_disable_required',
   );
 

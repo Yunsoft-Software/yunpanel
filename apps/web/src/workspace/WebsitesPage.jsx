@@ -20,9 +20,10 @@ export default function WebsitesPage() {
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
 
-  const query = params.get('q') ?? '';
+  const query = params.get('q') ?? params.get('search') ?? params.get('query') ?? '';
   const type = ['proxy', 'static'].includes(params.get('type')) ? params.get('type') : 'all';
-  const status = ['active', 'draft', 'staged', 'error'].includes(params.get('status')) ? params.get('status') : 'all';
+  const statusParam = params.get('status') ?? params.get('state');
+  const status = ['active', 'draft', 'staged', 'error'].includes(statusParam) ? statusParam : 'all';
   const sort = params.get('sort') === 'desc' ? 'desc' : 'asc';
   const filtering = Boolean(query.trim()) || type !== 'all' || status !== 'all';
   const tree = useMemo(() => domainTreeRows(domains.items, { query, collapsed: filtering ? new Set() : collapsed }), [domains.items, query, filtering, collapsed]);
@@ -40,7 +41,7 @@ export default function WebsitesPage() {
   const isQuotaReached = hostingProfile?.quotas?.maxWebsites !== null && hostingProfile?.quotas?.maxWebsites !== undefined && websiteCount >= hostingProfile.quotas.maxWebsites;
 
   return <>
-    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını ilgili sitenin kartından açın.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
+    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını ilgili sitenin kartından açın.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel />}
     {isCustomer && (
       <Section title="Barındırma Kaynakları ve Kotalar" description="Hesabınıza tahsis edilen kaynak kullanım durumu">

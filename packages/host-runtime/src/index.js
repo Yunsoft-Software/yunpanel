@@ -417,6 +417,22 @@ export {
 export {
   createNftablesManager,
   NftablesManagerError,
+  inspectSshListeners,
+  verifySshListenerContract,
+  nftablesManagerInternals,
+  MANAGED_FIREWALL_TABLE,
+  MANAGED_FIREWALL_FAMILY,
+  DOCKER_BRIDGE_INTERFACES,
+  CROWDSEC_SET_NAMES,
+  detectTableNames,
+  extractSetElements,
+  preserveCrowdsecSetElements,
+  sanitizeManagedRuleset,
+  verifyDockerCoexistence,
+  verifyCrowdsecCoexistence,
+  inspectDockerFirewall,
+  inspectCrowdsecFirewall,
+  migrateRulesetToManagedScope,
 } from './nftables-manager.js';
 export {
   createCrowdsecManager,
