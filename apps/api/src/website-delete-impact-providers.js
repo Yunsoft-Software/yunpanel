@@ -49,11 +49,11 @@ export function createRuntimeBindingImpactProvider({ runtimeBindingRegistry }) {
     if (!applicationId) return [];
     const binding = await runtimeBindingRegistry.getBinding(applicationId);
     if (!binding) return [];
-    if (typeof binding.applicationId !== 'string' || binding.applicationId !== applicationId) {
+    if (binding.applicationId && binding.applicationId !== applicationId) {
       throw new Error('runtime binding identity does not match the requested application');
     }
     return [{
-      id: binding.applicationId,
+      id: binding.id ?? binding.applicationId,
       state: binding.state,
     }];
   };

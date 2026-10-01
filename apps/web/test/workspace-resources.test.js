@@ -27,11 +27,11 @@ test('website list and creation request their dependencies without a job invento
   assert.deepEqual(selected('/websites/new'), ['applications', 'domains', 'servers', 'websites']);
 });
 test('site operation tabs retain required locks and job history', () => {
-  for (const tab of ['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources']) assert.equal(workspaceResources(`/websites/example/${tab}`).jobs, true);
+  for (const tab of ['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources', 'settings', 'cron', 'backup']) assert.equal(workspaceResources(`/websites/example/${tab}`).jobs, true);
   assert.equal(workspaceResources('/websites/example').websites, true);
   assert.equal(workspaceResources('/websites/example').jobs, true);
   assert.equal(workspaceResources('/websites/example/mail').jobs, true);
-  assert.equal(workspaceResources('/websites/example/settings').jobs, false);
+  assert.equal(workspaceResources('/websites/example/settings').jobs, true);
 });
 test('application forms and advanced tools retain actual resource dependencies', () => {
   assert.deepEqual(selected('/applications'), ['applications', 'jobs', 'servers']);

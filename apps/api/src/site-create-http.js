@@ -146,7 +146,8 @@ function provisioningPlanner(dependencies) {
 }
 
 async function previewWithProvisioning({ input, dependencies }) {
-  const preview = await previewSiteCreate({ input, ...dependencies });
+  const previewFn = dependencies?.previewSiteCreate ?? previewSiteCreate;
+  const preview = await previewFn({ input, ...dependencies });
   const planner = provisioningPlanner(dependencies);
   return Object.freeze({
     ...preview,

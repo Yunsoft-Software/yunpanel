@@ -15,6 +15,7 @@ const digest = 'a'.repeat(64);
 
 function fixture({
   domainStatus = 'disabled',
+  mailboxEnabled = false,
   mailboxRevision = 3,
   activeJobs = [],
   selectedBackup = null,
@@ -33,7 +34,7 @@ function fixture({
     id: mailboxId,
     mailDomainId,
     address: 'owner@example.com',
-    enabled: false,
+    enabled: mailboxEnabled,
     revision: mailboxRevision,
   };
   const service = createMailDataOperationsService({
@@ -210,12 +211,20 @@ test('restore queues selected backup against the same mail-domain resource lock'
   assert.equal(state.enqueued[0].operation, OPERATIONS.MAIL_DATA_RESTORE);
 });
 
-test('delete preview requires disabled domain verified current backup and no non-data blockers', async () => {
-  const enabled = fixture({ domainStatus: 'enabled' });
+test('delete preview requires disabling its target, verified current backup and no non-data blockers', async () => {
+  const enabled = fixture({ domainStatus: 'enabled', mailboxEnabled: true });
   await assert.rejects(
     enabled.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' }),
+    (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_mailbox_disable_required',
+  );
+
+  await assert.rejects(
+    enabled.service.previewDelete({ scope: 'domain', resourceId: mailDomainId, backupId: 'mail-backup-0001' }),
     (error) => error instanceof MailDataOperationsError && error.code === 'mail_data_delete_domain_disable_required',
   );
+  const independent = fixture({ domainStatus: 'enabled', mailboxEnabled: false });
+  const independentPreview = await independent.service.previewDelete({ scope: 'mailbox', resourceId: mailboxId, backupId: 'mail-backup-0001' });
+  assert.equal(independentPreview.operation, 'mail_data_delete');
 
   const blocked = fixture({ deleteBlockers: [
     { code: 'mailbox_alias_reference_configured', count: 1 },

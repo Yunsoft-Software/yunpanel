@@ -175,13 +175,17 @@ test('known blockers never reserve a quota slot', async (t) => {
   await assert.rejects(f.createHosted(), code('hosting_site_blocked'));
   assert.equal(f.count('auth_hosting_site_allocations'), 0);
 });
-test('input is snapshotted before asynchronous preview', async (t) => {
+test('input is snapshotted before asynchronous preview', { timeout: 5000 }, async (t) => {
   const f = setup(t); const submitted = await f.submit(); let proceed;
-  f.previewAdapter = () => new Promise((resolve) => { proceed = () => resolve(f.base()); });
+  let previews = 0;
+  f.previewAdapter = () => ++previews === 1
+    ? new Promise((resolve) => { proceed = () => resolve(f.base()); })
+    : Promise.resolve(f.base());
   const result = f.createHosted(submitted); submitted.input.serverId = uuid(200); submitted.customerId = 'customer-b';
   // Creation is queued to serialize duplicate operations. Wait for preview to start.
   await new Promise((resolve) => setImmediate(resolve));
   proceed(); await result;
+  assert.equal(previews, 2, 'The lock must revalidate the snapshot without waiting on a second unresolved fixture');
   assert.equal(f.calls[0].input.serverId, uuid(100));
   assert.equal(f.db.prepare('SELECT customer_id FROM auth_customer_websites').get().customer_id, 'customer-a');
 });

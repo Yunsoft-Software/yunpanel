@@ -33,7 +33,14 @@ test('mounted site create route awaits users, preserves partial results and exis
     const routes = new Map(); let resolveUser;
     const store = { createSiteManager: (args) => { calls++; assert.equal(args.username, 'admin@example.test'); assert.equal(args.actorId, 'owner-id'); return new Promise((resolve) => { resolveUser = resolve; }); } };
     mountSiteCreateRoutes({ post: (path, ...handlers) => routes.set(path, handlers) }, { localServerId: input.serverId, userAdminStore: store, websiteProvisioningRegistry: { create: async (plan) => ({ ...plan, persisted: true }) } });
-    assert.deepEqual([...routes.keys()], ['/api/sites/create-preview', '/api/sites']);
+    assert.deepEqual([...routes.keys()], [
+      '/api/sites/create-preview',
+      '/api/sites',
+      '/api/sites/hosted/create-preview',
+      '/api/sites/hosted',
+      '/api/sites/hosted/recover-reservation',
+      '/api/sites/recover-reservation',
+    ]);
     for (const handlers of routes.values()) assert.equal(handlers[0], guard);
     const invoke = async (body, path = '/api/sites') => {
       const res = { statusCode: 200, status(n) { this.statusCode = n; return this; }, json(value) { this.body = value; return this; } };

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createWebsiteProvisioningOrchestrator } from '../src/website-provisioning-orchestrator.js';
+import {
+  createWebsiteProvisioningOrchestrator,
+  WebsiteProvisioningOrchestratorError,
+} from '../src/website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';

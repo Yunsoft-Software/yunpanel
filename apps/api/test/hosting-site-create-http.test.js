@@ -3,11 +3,10 @@ import test from 'node:test';
 import { AuthError } from '../src/auth-error.js';
 import {
   mountSiteCreateRoutes,
-  SiteCreateError,
   siteCreateHttpInternals,
 } from '../src/site-create-http.js';
 import { siteFixture, website, allocation, uuid } from '../test-support/hosting-site-fixture.js';
-import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
+import { createHostingSiteAllocationStore, hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
 import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 import {
   mountWebsiteRemovalRoutes,
@@ -30,6 +29,7 @@ function fakeResponse() {
     payload: null,
     headers: {},
     setHeader(name, value) { this.headers[name.toLowerCase()] = value; },
+    set(name, value) { this.headers[name.toLowerCase()] = value; return this; },
     status(value) { this.statusCode = value; return this; },
     json(value) { this.payload = value; return this; },
   };
@@ -377,6 +377,7 @@ test('inactive customer or suspended parent reseller cannot reserve site quota',
   mountSiteCreateRoutes(app, env.dependencies);
 
   // Deactivate customer-a in SQLite DB
+  env.f.db.prepare('INSERT INTO auth_hosting_lifecycle_intents VALUES (?, ?, ?, ?)').run('customer-a', 0, 'owner', 1000);
   env.f.db.prepare('UPDATE users SET active = 0 WHERE id = ?').run('customer-a');
 
   const previewHandler = app.routes.post.get('/api/sites/hosted/create-preview');
@@ -557,7 +558,7 @@ test('website removal releases reseller and customer quotas via releaseRemoved a
     customerId: 'customer-a',
     serverId: env.serverId,
     intentDigest: 'f'.repeat(64),
-    websiteDigest: 'e'.repeat(64),
+    websiteDigest: hostingWebsiteDigest(env.site),
   };
   env.f.preview(alloc);
   env.f.reserve(alloc);
@@ -666,10 +667,20 @@ test('authorizeWebsiteRemovalActor validates active tenant context, MFA, and ass
 
 test('reseller self-service hosted site allocation enforces tenant boundary, customer scope, and quotas', async (t) => {
   const env = setupTestEnvironment(t, { maxWebsites: 1, maxCustomers: 5 });
+  // Separate operation IDs must preview distinct Websites; otherwise this
+  // fixture exercises allocation identity conflicts instead of capacity.
+  const originalPreview = env.dependencies.previewSiteCreate;
+  env.dependencies.previewSiteCreate = async (input) => {
+    const value = await originalPreview(input);
+    if (!input.operationId || input.operationId === uuid(1101)) return value;
+    const nextWebsite = { ...value.plan.website, id: uuid(2100 + Number.parseInt(input.operationId.slice(-4), 16)) };
+    return { ...value, ids: { ...value.ids, websiteId: nextWebsite.id },
+      plan: { ...value.plan, website: nextWebsite }, steps: { ...value.steps, websiteReady: false } };
+  };
   const app = fakeApp();
   mountSiteCreateRoutes(app, env.dependencies);
 
-  const resellerToken = env.f.session('reseller-a');
+  let resellerToken = env.f.session('reseller-a');
   const resellerAuth = {
     id: 'session-reseller-a',
     token: resellerToken,
@@ -714,6 +725,12 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   assert.equal(applyRes.payload.data.allocation.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
+  // Ownership changes revoke the old session; the next request must sign in again.
+  assert.equal(env.f.getSession(resellerToken), null);
+  resellerToken = env.f.session('reseller-a');
+  resellerAuth.token = resellerToken;
+  resellerAuth.rawToken = resellerToken;
+
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
   const opId2 = uuid(1102);
   const previewBody2 = {
@@ -728,7 +745,7 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
         body: previewBody2,
       });
     },
-    (err) => err instanceof AuthError && err.code === 'reseller_capacity_exceeded',
+    (err) => err instanceof AuthError && err.code === 'reseller_limit_reached' && err.status === 409,
   );
 
   // 4. Reseller attempts site preview for customer-c belonging to foreign reseller-b
@@ -889,6 +906,7 @@ test('hosting-site-allocation-store supports role: reseller actor and customer r
   assert.equal(ownPreview.state, 'available');
 
   // Verify hosting account store accepts users with role: 'customer'
+  env.f.db.exec('DROP TRIGGER IF EXISTS auth_hosting_legacy_user_guard');
   env.f.db.prepare("UPDATE users SET role = 'customer' WHERE id = 'customer-a'").run();
   const customerAccount = env.f.store.get(env.f.token, env.f.requireManagement, 'customer-a');
   assert.equal(customerAccount.id, 'customer-a');

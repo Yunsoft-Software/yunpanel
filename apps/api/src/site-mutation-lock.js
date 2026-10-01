@@ -139,7 +139,9 @@ export function createSiteMutationLock({
     return withLock({ resourceType: 'website', resourceId: websiteId }, action);
   }
 
-  function withSiteLock({ applicationId = null, websiteId = null } = {}, action) {
+  async function withSiteLock(identity = {}, action) {
+    const applicationId = typeof identity?.applicationId === 'string' && identity.applicationId.trim() ? identity.applicationId.trim() : null;
+    const websiteId = typeof identity?.websiteId === 'string' && identity.websiteId.trim() ? identity.websiteId.trim() : null;
     if (applicationId !== null) return withApplicationLock(applicationId, action);
     if (websiteId !== null) return withWebsiteLock(websiteId, action);
     throw new SiteMutationLockError('site_mutation_lock_identity_invalid', 'Application or Website identity is required', 400);

@@ -7,7 +7,7 @@ export function hostingAuthFixture(filePath = ':memory:') {
   db.exec(`PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000; PRAGMA journal_mode = WAL;
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager', 'reseller', 'customer')), active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (

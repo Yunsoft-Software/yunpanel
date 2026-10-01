@@ -69,12 +69,12 @@ for (const patch of [{ operationId: 'bad' }, { serverId: '' }, { websiteId: 'dom
 for (const role of ['site_manager', 'read_only']) {
   test(`${role} cannot preview/reserve/complete even through internal store`, (t) => {
     const f = siteFixture(t); f.addUser('other', { role }); const token = f.session('other');
-    for (const method of ['preview', 'reserve', 'complete']) assert.throws(() => f.store.siteAllocations[method](token, f.requireManagement, allocation(), website()), code('forbidden'));
+    for (const method of ['preview', 'reserve', 'complete']) assert.throws(() => f.store.siteAllocations[method](token, f.requireManagement, allocation(), website()), (err) => err.code === 'reseller_scope_forbidden' && err.status === 403);
   });
 }
 test('logout and forged policy cannot authorize writes', (t) => {
   const f = siteFixture(t);
-  assert.throws(() => f.store.siteAllocations.reserve('bad', () => ({ id: 'fake', user: { id: 'owner', role: 'owner' } }), allocation()), code('forbidden'));
+  assert.throws(() => f.store.siteAllocations.reserve('bad', () => ({ id: 'fake', user: { id: 'owner', role: 'owner' } }), allocation()), (err) => err.code === 'unauthorized' && err.status === 401);
   f.db.exec("DELETE FROM sessions WHERE user_id = 'owner'");
   assert.throws(() => f.reserve(), code('unauthorized'));
 });
@@ -151,7 +151,7 @@ test('schema upgrade is additive, repeatable and empty rollback removes both sid
   const f = hostingAuthFixture(); t.after(() => f.db.close()); f.addUser('owner', { role: 'owner' });
   const before = f.db.prepare('SELECT * FROM users').all();
   initializeHostingAccountSchema(f);
-  assert.deepEqual(initializeHostingAccountSchema(f), { version: 1, created: false });
+  assert.deepEqual(initializeHostingAccountSchema(f), { version: 3, created: false });
   assert.deepEqual(f.db.prepare('SELECT * FROM users').all(), before);
   assert.equal(rollbackEmptyHostingAccountSchema(f).removed, true);
   assert.equal(f.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'auth_hosting_site_schema'").get(), undefined);

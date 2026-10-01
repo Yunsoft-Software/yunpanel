@@ -6,6 +6,12 @@ import { createHostingSiteCreateService } from './hosting-site-create-service.js
  * HTTP/job integration must use its own fresh Owner/MFA token/policy, never body roles.
  */
 export function createHostingSiteCreateRuntime(dependencies = {}) {
+  const previewSite = typeof dependencies.previewSiteCreate === 'function'
+    ? dependencies.previewSiteCreate
+    : (input) => previewSiteCreate({ ...dependencies, input });
+  const makeSite = typeof dependencies.createSite === 'function'
+    ? dependencies.createSite
+    : (apply) => createSite({ ...dependencies, ...apply });
   return createHostingSiteCreateService({
     hostingAccounts: dependencies.userAdminStore?.hostingAccounts,
     websiteRegistry: dependencies.websiteRegistry,
@@ -16,7 +22,7 @@ export function createHostingSiteCreateRuntime(dependencies = {}) {
       ?? dependencies.websiteProvisioningRegistry,
     siteMutationLock: dependencies.siteMutationLock,
     localServerId: dependencies.localServerId,
-    previewSiteCreate: (input) => previewSiteCreate({ ...dependencies, input }),
-    createSite: (apply) => createSite({ ...dependencies, ...apply }),
+    previewSiteCreate: previewSite,
+    createSite: makeSite,
   });
 }

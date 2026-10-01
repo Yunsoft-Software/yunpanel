@@ -841,4 +841,42 @@ test('watchdog HTTP routes: role authorization restricts check and recover', asy
   } finally {
     server.close();
   }
+
+  // App with reseller role
+  const resellerApp = createWatchdogTestApp({ watchdogService, role: 'reseller' });
+  const resellerServer = resellerApp.listen(0);
+  const resellerUrl = `http://127.0.0.1:${resellerServer.address().port}`;
+
+  try {
+    const resCheck = await fetch(`${resellerUrl}/api/system/watchdog/check`, { method: 'POST' });
+    assert.equal(resCheck.status, 403);
+
+    const resRecover = await fetch(`${resellerUrl}/api/system/watchdog/recover`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetType: 'service', targetId: 'nginx', confirmation: 'recover:service:nginx' }),
+    });
+    assert.equal(resRecover.status, 403);
+  } finally {
+    resellerServer.close();
+  }
+
+  // App with customer role
+  const customerApp = createWatchdogTestApp({ watchdogService, role: 'customer' });
+  const customerServer = customerApp.listen(0);
+  const customerUrl = `http://127.0.0.1:${customerServer.address().port}`;
+
+  try {
+    const custCheck = await fetch(`${customerUrl}/api/system/watchdog/check`, { method: 'POST' });
+    assert.equal(custCheck.status, 403);
+
+    const custRecover = await fetch(`${customerUrl}/api/system/watchdog/recover`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ targetType: 'service', targetId: 'nginx', confirmation: 'recover:service:nginx' }),
+    });
+    assert.equal(custRecover.status, 403);
+  } finally {
+    customerServer.close();
+  }
 });

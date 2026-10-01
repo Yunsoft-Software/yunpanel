@@ -36,6 +36,7 @@ test('website analytics routes generate reports and manage daemons', async () =>
 
   const goaccessCalls = [];
   const mockGoAccessManager = {
+    inspectGoAccess: async () => ({ satisfied: true, version: '1.8.1' }),
     generateStaticReport: async (opts) => {
       goaccessCalls.push(['generate', opts]);
       return {
@@ -126,7 +127,7 @@ test('website analytics routes generate reports and manage daemons', async () =>
     assert.equal(statusRes.status, 200);
     const statusJson = await statusRes.json();
     assert.equal(statusJson.data.running, true);
-    assert.equal(statusJson.data.pid, 12345);
+    assert.equal(Object.hasOwn(statusJson.data, 'pid'), false);
     assert.equal(statusJson.data.wsUrl, '/tools/goaccess/site-1/ws');
 
     // 4. POST realtime start
@@ -146,7 +147,7 @@ test('website analytics routes generate reports and manage daemons', async () =>
     assert.equal(restartRes.status, 200);
     const restartJson = await restartRes.json();
     assert.equal(restartJson.data.running, true);
-    assert.equal(restartJson.data.pid, 12346);
+    assert.equal(Object.hasOwn(restartJson.data, 'pid'), false);
 
     // 7. Unknown website returns 404
     const notFoundRes = await fetch(`${baseUrl}/api/websites/unknown/analytics/status`);

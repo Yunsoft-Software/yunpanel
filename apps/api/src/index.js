@@ -705,11 +705,12 @@ localWebsiteCronOperation = createLocalWebsiteCronOperation({
   authorizeActor: authorizeWebsitePhpActor,
   authorizeSystemRemoval: authorizeWebsiteRemovalSystemCron,
 });
+const websitePhpActionLock = siteMutationLock;
 websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
   jobRegistry,
   authorizeActor: authorizeWebsitePhpActor,
-  withApplicationLock: siteMutationLock.withApplicationLock,
+  withApplicationLock: websitePhpActionLock.withApplicationLock,
 });
 localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
@@ -1105,7 +1106,7 @@ const systemWatchdogService = createSystemWatchdogService({
   serverRegistry: registry,
   jobRegistry,
   localRuntime: () => localRuntimeInstance,
-  inspectServices: inspectAllowlistedServices,
+  inspectServices: (serviceIds) => inspectAllowlistedServices(serviceIds),
   daemons: () => ({
     renewalScheduler: {
       name: 'renewalScheduler',

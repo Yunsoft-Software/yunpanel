@@ -46,7 +46,9 @@ for (const changes of [{ websiteId: 'other' }, { stepId: 'old-step' }, { expecte
 test('finished operation continuation is a 409, not a null-step TypeError', async () => {
   const f = await removalFixture(); let op = await f.runtime.start(removalStart(f.preview));
   const stale = removalContinue(op);
-  op = await f.runtime.continueStep(stale); assert.equal(op.status, 'removed');
+  op = await f.runtime.continueStep(stale);
+  while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
+  assert.equal(op.status, 'removed');
   await assert.rejects(f.runtime.continueStep(stale), code('website_removal_step_continuation_stale'));
 });
 test('two runtime instances sharing a registry cannot start the same Website concurrently', async () => {
@@ -86,10 +88,12 @@ for (const [websiteId, exists, expected] of [['site-a', true, 200], ['site-b', t
   test(`operation detail is bound to URL Website: ${websiteId}, exists=${exists}`, async () => {
     const routes = new Map(); const route = '/api/websites/:websiteId/removal-operations/:operationId';
     const f = await removalFixture(); const operation = await f.runtime.start(removalStart(f.preview));
+    const websiteRegistry = { getWebsite: async (id) => (id === 'site-a' ? { id: 'site-a', serverId: 'server-a' } : null) };
     mountWebsiteRemovalRoutes({ get: (path, ...handlers) => routes.set(path, handlers.at(-1)), post() {} },
-      { runtime: { ...f.runtime, get: async () => exists ? operation : null } });
+      { runtime: { ...f.runtime, get: async () => exists ? operation : null }, websiteRegistry });
     let status = 200, payload;
-    await routes.get(route)({ params: { websiteId, operationId: operation.id } }, { json: (data) => { payload = data; } },
+    const auth = { id: 'sess-1', user: { id: 'user-1', role: 'owner' } };
+    await routes.get(route)({ params: { websiteId, operationId: operation.id }, auth }, { json: (data) => { payload = data; } },
       (error) => { status = error.status; });
     assert.equal(status, expected);
     if (expected === 404) assert.equal(payload, undefined); else assert.equal(payload.operation.id, operation.id);

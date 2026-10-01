@@ -21,7 +21,8 @@ const TERMINAL_STATUSES = new Set(['succeeded', 'failed']);
 const JOB_STORE_VERSION = 1;
 
 function safeRecoveryJob(job) {
-  const jobId = typeof job?.id === 'string' && job.id.length >= 8 && job.id.length <= 128 ? job.id : null;
+  const rawId = job?.id ?? job?.jobId;
+  const jobId = typeof rawId === 'string' && rawId.length >= 8 && rawId.length <= 128 ? rawId : null;
   const serverId = typeof job?.serverId === 'string' && job.serverId.length >= 1 && job.serverId.length <= 128 ? job.serverId : null;
   return jobId && serverId ? Object.freeze({ jobId, serverId }) : null;
 }
@@ -187,7 +188,11 @@ export function createDurableJobRegistry({
     const storedJobs = recoverySnapshotJobs();
     const jobs = uniqueRecoveryJobs([...storedJobs, ...runningJobs]);
     reconciliationPending.clear();
-    explicitlyBegunReconciliation.clear();
+    for (const key of explicitlyBegunReconciliation) {
+      if (!jobs.some((job) => recoveryKey(job) === key)) {
+        explicitlyBegunReconciliation.delete(key);
+      }
+    }
 
     for (const identity of storedJobs) {
       let job;
@@ -199,7 +204,11 @@ export function createDurableJobRegistry({
       if (!job || job.serverId !== identity.serverId || !RECOVERABLE_STATUSES.has(job.status)) {
         latch('durable_job_recovery_state_invalid', 'Durable job recovery record does not match persisted job state');
       }
-      if (TERMINAL_STATUSES.has(job.status)) reconciliationPending.add(recoveryKey(identity));
+      // Reloads under the cross-process lock must preserve an explicit running
+      // reconciliation until its terminal evidence is acknowledged.
+      if (TERMINAL_STATUSES.has(job.status) || explicitlyBegunReconciliation.has(recoveryKey(identity))) {
+        reconciliationPending.add(recoveryKey(identity));
+      }
     }
 
     setRecovery(jobs);

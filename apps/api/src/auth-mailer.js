@@ -208,16 +208,16 @@ export function createAuthMailer({
       const body = `${headers}\r\n\r\n${text}\r\n.`;
       await session.sendCommand(body, 250);
       session.close();
-      return { sent: true, messageId };
+      return { sent: true, messageId, accepted: [validatedTo] };
     } catch (error) {
       session.destroy();
       throw error;
     }
   }
 
-  async function sendPasswordResetEmail({ to, username, token, expiresAt, origin = 'http://localhost:5173' }) {
-    const resetUrl = `${origin}/#reset-token=${encodeURIComponent(token)}`;
-    const minutes = Math.max(1, Math.round((expiresAt - Date.now()) / 60_000));
+  async function sendPasswordResetEmail({ to, username, token, expiresAt, origin = 'http://localhost:5173', resetUrl: customResetUrl }) {
+    const resetUrl = customResetUrl || (token ? `${origin}/#reset-token=${encodeURIComponent(token)}` : `${origin}/#reset-password`);
+    const minutes = expiresAt ? Math.max(1, Math.round((expiresAt - Date.now()) / 60_000)) : 15;
     const subject = 'YunPanel — Parola Sıfırlama Bağlantısı';
     const text = [
       `Merhaba ${username},`,

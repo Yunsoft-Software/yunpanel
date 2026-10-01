@@ -78,6 +78,7 @@ export function createAuthStore({
   absoluteMs = 12 * 60 * 60_000,
   masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
   liveSessions = null,
+  revokeLiveUser: customRevokeLiveUser = null,
   mailer: customMailer = null,
 } = {}) {
   const mailer = customMailer ?? createAuthMailer();
@@ -93,6 +94,9 @@ export function createAuthStore({
     try { liveSessions.revokeSession(sessionId, reason); } catch {}
   };
   const revokeLiveUser = (userId, reason) => {
+    if (typeof customRevokeLiveUser === 'function') {
+      try { customRevokeLiveUser(userId, reason); } catch {}
+    }
     if (!userId || !liveSessions) return;
     try { liveSessions.revokeUser(userId, reason); } catch {}
   };
@@ -121,7 +125,7 @@ export function createAuthStore({
       PRAGMA foreign_keys = OFF;
       CREATE TABLE users_new (
         id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+        role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager', 'reseller', 'customer')), active INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
       );
       INSERT INTO users_new SELECT id, username, password_hash, role, active, created_at, password_changed_at FROM users;
@@ -133,7 +137,7 @@ export function createAuthStore({
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager', 'reseller', 'customer')), active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -224,17 +228,14 @@ export function createAuthStore({
       const quotaTable = db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_customer_quotas'").get();
       if (quotaTable) {
         const quotaRow = db.prepare('SELECT max_websites AS maxWebsites, max_disk_mb AS maxDiskMb, max_traffic_mb AS maxTrafficMb, max_databases AS maxDatabases FROM auth_customer_quotas WHERE customer_id = ?').get(userId);
-        profile.quotas = quotaRow ? {
-          maxWebsites: quotaRow.maxWebsites,
-          maxDiskMb: quotaRow.maxDiskMb,
-          maxTrafficMb: quotaRow.maxTrafficMb,
-          maxDatabases: quotaRow.maxDatabases,
-        } : {
-          maxWebsites: null,
-          maxDiskMb: null,
-          maxTrafficMb: null,
-          maxDatabases: null,
-        };
+        if (quotaRow) {
+          profile.quotas = {
+            maxWebsites: quotaRow.maxWebsites,
+            maxDiskMb: quotaRow.maxDiskMb,
+            maxTrafficMb: quotaRow.maxTrafficMb,
+            maxDatabases: quotaRow.maxDatabases,
+          };
+        }
       }
     }
     return profile;
@@ -585,13 +586,16 @@ export function createAuthStore({
           event(candidate.id, 'password_reset.requested');
         });
 
+        const effectiveOrigin = origin || 'http://localhost:5173';
+        const resetUrl = `${effectiveOrigin}/#reset-token=${encodeURIComponent(rawToken)}`;
         try {
           await mailer.sendPasswordResetEmail({
             to: candidate.recovery_email,
             username: candidate.username,
             token: rawToken,
             expiresAt,
-            origin,
+            origin: effectiveOrigin,
+            resetUrl,
           });
         } catch (error) {
           db.prepare('DELETE FROM auth_password_resets WHERE token_hash = ?').run(tokenHash);

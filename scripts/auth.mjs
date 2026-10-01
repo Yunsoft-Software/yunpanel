@@ -35,6 +35,9 @@ try {
     || (command === 'set-recovery-email' && username && extra.length === 1)
     || (command === 'get-recovery-email' && username && extra.length === 0);
   if (!valid) {
+    if (command === 'reset-password' && extra.length > 0) {
+      throw new Error('Passwords must never argv: passwords must never be passed via argv. Usage: node scripts/auth.mjs reset-password <username>');
+    }
     throw new Error('Usage: node scripts/auth.mjs setup-token | reset-password <username> | reset-mfa <username> --confirm | set-recovery-email <username> <email> | get-recovery-email <username>');
   }
   const serverStore = process.env.YUNPANEL_SERVER_STORE ?? path.resolve('.data/server-registry.json');

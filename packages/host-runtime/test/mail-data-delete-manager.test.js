@@ -17,6 +17,7 @@ import {
   createMailDataDeleteManager,
   MailDataDeleteError,
 } from '../src/index.js';
+import { mailboxAccessInternals } from '../src/mailbox-access-guard.js';
 
 const CANONICAL_SOURCE = '/var/lib/yunpanel/mail/example.com/owner';
 const SNAPSHOT = 'a'.repeat(64);
@@ -91,8 +92,38 @@ function inspector() {
   };
 }
 
-function vmailRun() {
-  return async () => ({ stdout: `vmail:x:${UID}:${GID}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n` });
+function vmailRun(identity = 'owner@example.com') {
+  const missing = (code, stderr = '') => Object.assign(new Error('private command failure'), { code, stdout: '', stderr });
+  return async (file, args = []) => {
+    if (file === '/usr/bin/getent' || file.endsWith('/getent')) {
+      return { stdout: `vmail:x:${UID}:${GID}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n`, stderr: '' };
+    }
+    if (file.endsWith('/postconf')) {
+      const lookup = mailboxAccessInternals.lookups.find(([key]) => key === args[1]);
+      return { stdout: lookup ? lookup[1] : '', stderr: '' };
+    }
+    if (file.endsWith('/postmap')) {
+      throw missing(1);
+    }
+    if (file.endsWith('/doveadm')) {
+      if (args[0] === 'auth' && args[1] === 'lookup') {
+        throw missing(67, `passdb lookup: user ${identity} doesn't exist`);
+      }
+      if (args[0] === 'user') {
+        throw missing(67, `userdb lookup: user ${identity} doesn't exist`);
+      }
+      if (args[0] === 'auth' && args[1] === 'cache') {
+        return { stdout: '0 cache entries flushed\n', stderr: '' };
+      }
+      if (args.includes('who')) {
+        return { stdout: 'username\tproto\tpid\tip\n', stderr: '' };
+      }
+      if (args[0] === 'kick') {
+        return { stdout: identity, stderr: '' };
+      }
+    }
+    return { stdout: `vmail:x:${UID}:${GID}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n`, stderr: '' };
+  };
 }
 
 async function createVerifiedBackup(root, sourceRoot, mapped) {

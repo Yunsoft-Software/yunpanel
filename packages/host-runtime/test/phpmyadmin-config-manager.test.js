@@ -109,6 +109,14 @@ test('staging rejects content and preview metadata outside the approved template
       (error) => error instanceof PhpMyAdminConfigManagerError
         && error.code === 'phpmyadmin_signon_bridge_preview_invalid',
     );
+    await assert.rejects(
+      manager.stageSignonBridge(
+        { ...signonBridgePreview, gatewaySessionCookie: 'invalid-cookie' },
+        renderPhpMyAdminSignonBridge(),
+      ),
+      (error) => error instanceof PhpMyAdminConfigManagerError
+        && error.code === 'phpmyadmin_signon_bridge_preview_invalid',
+    );
   });
 });
 

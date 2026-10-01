@@ -51,8 +51,15 @@ test('submitted intent is captured before async preparation and only real comple
   assert.ok(issue.indexOf("finished?.status === 'succeeded'") < issue.indexOf('completed = true'));
   assert.ok(issue.indexOf('await waitForJob(postActivate.id)') < issue.indexOf('completed = true'));
 });
-test('scope controls and existing domain/job/renewal paths stay present without invented engines', () => {
-  for (const value of ['/update-preview', '/certificates/issue', '/stage', '/activate', '/renew', 'previewDigest: preview.previewDigest', 'confirmation: preview.confirmation', 'dryRun: true', 'dryRun: false']) assert.ok(ssl.includes(value), value);
+test('scope controls and existing domain/job/renewal paths stay present without invented engines', async () => {
+  for (const value of ['/update-preview', '/certificates/issue', '/stage', '/activate', 'previewDigest: preview.previewDigest', 'confirmation: preview.confirmation']) assert.ok(ssl.includes(value), value);
+  const renewal = await readFile(new URL('../src/workspace/ssl-renewal.js', import.meta.url), 'utf8');
+  assert.match(ssl, /<SslRenewalPanel/);
+  assert.match(renewal, /\/renew/);
+  assert.match(renewal, /dryRun: approval\.dryRun/);
+  const renewalPanel = await readFile(new URL('../src/workspace/SslRenewalPanel.jsx', import.meta.url), 'utf8');
+  assert.match(renewalPanel, /prepare\(true\)/);
+  assert.match(renewalPanel, /prepare\(false\)/);
   assert.match(ssl, /Korunacak alan adları:/);
   assert.match(ssl, /domain.aliases.join\(', '\)/);
   assert.doesNotMatch(ssl, /Plesk Obsidian standardı|localStorage|sessionStorage|\.github\/workflows/);

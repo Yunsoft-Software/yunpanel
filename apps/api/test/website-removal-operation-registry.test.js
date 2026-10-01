@@ -33,6 +33,7 @@ function mockPreview() {
     version: 1,
     resourceType: 'website',
     resource: { id: 'ws-1', serverId: 'srv-local' },
+    application: { id: 'app-1', serverId: 'srv-local', desiredRevision: 1 },
     operation: 'delete',
     targetServerId: null,
     dependencies: {

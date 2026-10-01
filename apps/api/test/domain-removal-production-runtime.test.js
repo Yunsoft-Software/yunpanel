@@ -243,7 +243,7 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
       listKeys: async (wsId) => (wsId === 'ws-1' ? [{ id: 'key-1', status: 'authorized' }] : []),
     };
     const runtimeBindingRegistry = {
-      getBinding: async (appId) => (appId === 'app-1' ? { id: 'rb-1', state: 'active' } : null),
+      getBinding: async (appId) => (appId === 'app-1' ? { id: 'rb-1', applicationId: 'app-1', state: 'active' } : null),
     };
     const databaseBindingRegistryWithData = {
       listBindings: async ({ websiteId }) => (websiteId === 'ws-1' ? [{ id: 'db-1', databaseName: 'mydb' }] : []),

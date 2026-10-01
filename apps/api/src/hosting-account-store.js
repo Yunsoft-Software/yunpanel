@@ -83,10 +83,10 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     if (!row) throw scopeDenied();
     const profile = projection(row);
     if (profile.kind === 'reseller' && profile.resellerId === null && profile.active) {
-      return { id: user.id, role: 'reseller', kind: 'reseller', active: true };
+      return { id: user.id, role: 'reseller', active: true };
     }
     if (profile.kind === 'customer' && profile.active) {
-      return { id: user.id, role: 'customer', kind: 'customer', active: true };
+      return { id: user.id, role: 'customer', active: true };
     }
     throw scopeDenied();
   }

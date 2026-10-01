@@ -86,7 +86,7 @@ const blockerLabels=Object.freeze({
  runtime_cleanup_unavailable:'Runtime bağlantısı güvenli biçimde temizlenemiyor.',
  cron_cleanup_unavailable:'Zamanlanmış görevler güvenli biçimde temizlenemiyor.',
  metadata_cleanup_unavailable:'Website metadata lifecycle’ı kullanılamıyor.',
- application_cleanup_unavailable:'Application metadata/env cleanup lifecycle’ı kullanılamıyor.',
+ application_cleanup_unavailable:'Uygulama kaydı ve ortam dosyaları için temizleme işlemi kullanılamıyor.',
  file_cleanup_preflight_failed:'Canonical site dosya kökleri güvenli olarak doğrulanamadı.',
  unix_cleanup_evidence_unavailable:'Site Unix kullanıcısının ownership receipt’i bulunamadı; legacy kullanıcı otomatik silinmez.',
  runtime_cleanup_adapter_unsupported:'Bu runtime adapterı için doğrulanmış kaldırma yolu henüz yok.',
