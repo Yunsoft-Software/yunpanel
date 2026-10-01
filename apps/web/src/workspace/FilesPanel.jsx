@@ -115,6 +115,14 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
   }
   function navigate(path) {
     if (locked) return;
+    if (editor && editor.content !== editor.saved) {
+      setDiscard(true);
+      return;
+    }
+    if (editor && editor.content === editor.saved) {
+      setEditor(null);
+      setError(null);
+    }
     lastLoadedPath.current = path;
     setQuery('');
     setTreeOpen(false);
@@ -350,13 +358,24 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
   }
   useEffect(() => {
     const fileParam = searchParams.get('file');
-    if (!fileParam || autoOpenedRef.current || !view.loaded || view.loading || !canManage) return;
+    if (!fileParam) {
+      if (editor && !discard) {
+        setEditor(null);
+        setError(null);
+        autoOpenedRef.current = false;
+      }
+      return;
+    }
+    if (autoOpenedRef.current || !view.loaded || view.loading || !canManage) return;
     const match = view.entries.find((e) => e.type === 'file' && (e.name === fileParam || e.path === fileParam));
     if (match) {
       autoOpenedRef.current = true;
+      if (editor && (editor.name === match.name || editor.path === match.path)) {
+        return;
+      }
       void openFile(match);
     }
-  }, [searchParams, view.loaded, view.loading, view.entries, canManage]);
+  }, [searchParams, view.loaded, view.loading, view.entries, canManage, editor, discard]);
   async function saveEditor(event) {
     event?.preventDefault(); if (!editor || pending.current || editor.content === editor.saved) return;
     const current = editor;
@@ -369,6 +388,7 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
     if (busy) return;
     if (editor && editor.content !== editor.saved) setDiscard(true);
     else {
+      autoOpenedRef.current = false;
       setEditor(null);
       setError(null);
       setSearchParams((prev) => {
@@ -467,6 +487,6 @@ function FileWorkspace({ websiteId, serverId, runtimeType }) {
     {dialog?.kind === 'delete' && <ConfirmDialog title={`${dialog.paths.length} öğe silinsin mi?`} message={`Kalıcı olarak silinecek: ${dialog.paths.join(', ')}. Klasörlerin içeriği de etkilenebilir. Bu işlem geri alınamaz.`} confirmation={dialog.paths.length === 1 ? dialog.paths[0] : 'SİL'} confirmLabel="Kalıcı olarak sil" busy={busy} error={error} onCancel={() => setDialog(null)} onConfirm={remove} />}
     {upload && <Modal title="Dosya yükle" busy={busy} onClose={() => setUpload(null)}><p className="ws-muted">Hedef: Site kökü / {upload.parent}. Aynı adlı dosyalar değiştirilebilir.</p><ul className="yf-upload-list">{upload.items.map((item, i) => <li key={i}><Icon name={item.state === 'uploaded' ? 'check' : 'file'} /><span>{item.file.name}<small>{formatBytes(item.file.size)}</small></span><strong>{item.state === 'uploaded' ? 'Yüklendi' : 'Bekliyor'}</strong></li>)}</ul><ErrorNotice error={error} /><p role="status" className="ws-muted">{upload.items.filter((item) => item.state === 'uploaded').length} / {upload.items.length} tamamlandı</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => { setUpload(null); void load(view.path); }}>Kapat</Button><Button variant="primary" disabled={busy} onClick={startUpload}>{busy ? 'Yükleniyor…' : 'Yüklemeyi başlat'}</Button></footer></Modal>}
     {editor && <Modal title={editor.name} wide busy={busy} onClose={closeEditor}><div className="yf-editor-meta"><code>/{editor.path}</code><span>{editor.content === editor.saved ? 'Kaydedildi' : 'Kaydedilmemiş değişiklikler'}</span></div><ErrorNotice error={error} /><form onSubmit={saveEditor} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); void saveEditor(); } }}><div className="yf-editor"><pre ref={lineNumbers} aria-hidden="true">{editor.content.split('\n').map((_, i) => i + 1).join('\n')}</pre><textarea aria-label={`${editor.name} içeriği`} value={editor.content} readOnly={busy} spellCheck={false} autoCapitalize="none" wrap="off" onScroll={(event) => { if (lineNumbers.current) lineNumbers.current.scrollTop = event.target.scrollTop; }} onChange={(event) => setEditor({ ...editor, content: event.target.value })} /></div><footer className="ws-modal-footer"><span className="yf-editor-hint">Ctrl / ⌘ S · Sunucudaki sürüm değişirse üzerine yazılmaz.</span><Button disabled={busy} onClick={closeEditor}>Kapat</Button><Button variant="primary" type="submit" disabled={busy || editor.content === editor.saved}>{busy ? 'Kaydediliyor…' : 'Kaydet'}</Button></footer></form></Modal>}
-    {discard && <ConfirmDialog title="Değişiklikler bırakılsın mı?" message="Dosyada kaydedilmemiş değişiklikler var." confirmLabel="Değişiklikleri bırak" onCancel={() => setDiscard(false)} onConfirm={() => { setDiscard(false); setEditor(null); setError(null); setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('file'); return next; }, { replace: true }); }} />}
+    {discard && <ConfirmDialog title="Değişiklikler bırakılsın mı?" message="Dosyada kaydedilmemiş değişiklikler var." confirmLabel="Değişiklikleri bırak" onCancel={() => setDiscard(false)} onConfirm={() => { setDiscard(false); setEditor(null); setError(null); autoOpenedRef.current = false; setSearchParams((prev) => { const next = new URLSearchParams(prev); next.delete('file'); return next; }, { replace: true }); }} />}
   </>;
 }
