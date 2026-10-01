@@ -4,6 +4,233 @@ import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js
 
 const SAFE_ERROR_CODE = /^[a-z0-9_.-]{1,80}$/;
 
+export const LIFECYCLE_STAGES = Object.freeze({
+  SAVED: 'saved',
+  APPLYING: 'applying',
+  VERIFYING: 'verifying',
+  OUTCOME: 'outcome',
+});
+
+export const LIFECYCLE_OUTCOMES = Object.freeze({
+  SUCCEEDED: 'succeeded',
+  PARTIAL: 'partial',
+  FAILED: 'failed',
+});
+
+/**
+ * Unified lifecycle state evaluator across components (mailbox, DNS, SSL, runtime, services).
+ * A desired record alone must not generate active or healthy status until execution, application,
+ * and live verification succeed. Unifies the save -> apply -> live verification -> outcome model.
+ */
+export function evaluateLifecycleState({
+  resourceType,
+  desired,
+  applied = null,
+  verified = null,
+  sideEffects = null,
+  error = null,
+} = {}) {
+  if (!desired) {
+    throw new Error('desired state is required');
+  }
+
+  // 1. Error / Failure check
+  if (error) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.OUTCOME,
+      status: LIFECYCLE_OUTCOMES.FAILED,
+      outcome: LIFECYCLE_OUTCOMES.FAILED,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      error: typeof error === 'object' ? error.message ?? String(error) : String(error),
+      sideEffects: sideEffects ?? null,
+    });
+  }
+
+  // 2. Saved (Pending Apply) check
+  const isApplied = applied !== null && applied !== false && applied?.status !== 'pending' && applied?.status !== 'applying';
+  const isApplying = applied?.status === 'applying';
+
+  if (isApplying) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.APPLYING,
+      status: 'applying',
+      outcome: null,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      sideEffects: null,
+    });
+  }
+
+  if (!isApplied) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.SAVED,
+      status: 'pending_apply',
+      outcome: null,
+      pendingApply: true,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      sideEffects: null,
+    });
+  }
+
+  // Check version/revision match if applicable
+  if (desired.revision !== undefined && applied.revision !== undefined && applied.revision < desired.revision) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.SAVED,
+      status: 'pending_apply',
+      outcome: null,
+      pendingApply: true,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      sideEffects: null,
+    });
+  }
+
+  // Check DNS serial if applicable
+  if (desired.serial !== undefined && applied.serial !== undefined && applied.serial < desired.serial) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.SAVED,
+      status: 'pending_apply',
+      outcome: null,
+      pendingApply: true,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      sideEffects: null,
+    });
+  }
+
+  // Check applied failure or unhealthy state
+  if (applied?.status === 'failed' || applied?.failed === true) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.OUTCOME,
+      status: LIFECYCLE_OUTCOMES.FAILED,
+      outcome: LIFECYCLE_OUTCOMES.FAILED,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      error: applied.error ?? `${resourceType ?? 'Resource'} operation failed`,
+      sideEffects: sideEffects ?? null,
+    });
+  }
+
+  if (applied?.healthy === false) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.OUTCOME,
+      status: LIFECYCLE_OUTCOMES.FAILED,
+      outcome: LIFECYCLE_OUTCOMES.FAILED,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      error: resourceType === 'application'
+        ? 'Application health check failed'
+        : (resourceType === 'service' ? 'Service health check failed' : `${resourceType ?? 'Resource'} health check failed`),
+      sideEffects: sideEffects ?? null,
+    });
+  }
+
+  if (typeof verified === 'object' && verified !== null && verified.satisfied === false) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.OUTCOME,
+      status: LIFECYCLE_OUTCOMES.FAILED,
+      outcome: LIFECYCLE_OUTCOMES.FAILED,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: false,
+      error: verified.reason ?? 'Live verification failed',
+      sideEffects: sideEffects ?? null,
+    });
+  }
+
+  // 3. Verifying check
+  const isVerified = verified === true || (typeof verified === 'object' && verified !== null && verified.satisfied === true && verified.verified !== false);
+  const isVerifying = verified === 'verifying' || (typeof verified === 'object' && verified?.status === 'verifying');
+
+  if (isVerifying || verified === null || verified === false || (typeof verified === 'object' && verified !== null && verified.verified === false && !verified.partial)) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.VERIFYING,
+      status: 'pending_verification',
+      outcome: null,
+      pendingApply: false,
+      pendingVerification: true,
+      active: false,
+      healthy: false,
+      partial: false,
+      sideEffects: null,
+    });
+  }
+
+  // 4. Outcome check
+  const hasSideEffectFailure = Boolean(
+    sideEffects && (
+      sideEffects.status === 'partial' ||
+      sideEffects.status === 'failed' ||
+      sideEffects.mailIdentity?.status === 'partial' ||
+      sideEffects.mailIdentity?.status === 'failed' ||
+      sideEffects.reload?.status === 'partial' ||
+      sideEffects.reload?.status === 'failed' ||
+      sideEffects.failed === true
+    )
+  ) || (typeof verified === 'object' && verified !== null && verified.partial === true);
+
+  if (hasSideEffectFailure) {
+    return Object.freeze({
+      resourceType: resourceType ?? 'unknown',
+      stage: LIFECYCLE_STAGES.OUTCOME,
+      status: LIFECYCLE_OUTCOMES.PARTIAL,
+      outcome: LIFECYCLE_OUTCOMES.PARTIAL,
+      pendingApply: false,
+      pendingVerification: false,
+      active: false,
+      healthy: false,
+      partial: true,
+      sideEffects: sideEffects ?? (typeof verified === 'object' ? verified : null),
+      error: sideEffects?.mailIdentity?.error ?? sideEffects?.reload?.error ?? sideEffects?.error ?? (typeof verified === 'object' ? verified.error : null),
+    });
+  }
+
+  const active = resourceType === 'mailbox' ? desired.enabled === true : true;
+  return Object.freeze({
+    resourceType: resourceType ?? 'unknown',
+    stage: LIFECYCLE_STAGES.OUTCOME,
+    status: LIFECYCLE_OUTCOMES.SUCCEEDED,
+    outcome: LIFECYCLE_OUTCOMES.SUCCEEDED,
+    pendingApply: false,
+    pendingVerification: false,
+    active,
+    healthy: true,
+    partial: false,
+    sideEffects: sideEffects ?? null,
+  });
+}
+
 export class JobReconciliationError extends Error {
   constructor(code) {
     super('Completed job reconciliation failed');
@@ -417,6 +644,7 @@ async function applyReconciliation({
   websiteRegistry,
   runtimeBindingRegistry,
   mailDomainRegistry,
+  mailServiceIdentityRegistry = null,
   job,
 }) {
   if (job.resourceType === 'application') {
@@ -431,21 +659,21 @@ async function applyReconciliation({
           runtimeBindingRegistry,
         });
       }
-      return;
+      return { reconciled: true, outcome: 'succeeded' };
     }
     await reconcileApplicationJob(applicationRegistry, applicationEnvironmentRegistry, job, runtimeBindingRegistry);
-    return;
+    return { reconciled: true, outcome: 'succeeded' };
   }
 
   if (job.resourceType === 'mail_domain') {
     await reconcileMailDomainJob(mailDomainRegistry, job);
-    return;
+    return { reconciled: true, outcome: 'succeeded' };
   }
 
   if (job.resourceType === 'domain') {
     if (job.status === 'failed') {
       await domainRegistry.markFailed(job.resourceId, job.error?.code ?? 'agent_job_failed');
-      return;
+      return { reconciled: true, outcome: 'failed' };
     }
     if (job.operation === OPERATIONS.DOMAIN_STAGE) {
       const domain = await domainRegistry.markStaged(job.resourceId, {
@@ -466,37 +694,91 @@ async function applyReconciliation({
         websiteRegistry,
         runtimeBindingRegistry,
       });
-      return;
+      return { reconciled: true, outcome: 'succeeded' };
     }
-    if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
-    return;
+    if (job.operation === OPERATIONS.DOMAIN_ACTIVATE) {
+      await domainRegistry.markApplied(job.resourceId, { checksum: job.result.checksum });
+    }
+    return { reconciled: true, outcome: 'succeeded' };
   }
 
   if (job.resourceType === 'certificate') {
     if (job.status === 'failed') {
       if (job.payload?.dryRun === true) {
         await certificateRegistry.setState(job.resourceId, 'active');
-        return;
+        return { reconciled: true, outcome: 'succeeded' };
       }
       await certificateRegistry.markFailed(job.resourceId, job.error?.code ?? 'certificate_operation_failed');
-      return;
+      return { reconciled: true, outcome: 'failed' };
     }
-    if (job.operation === OPERATIONS.SSL_ISSUE) {
-      const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: false });
-      if (!certificate.staging && (certificate.purpose ?? 'web') === 'web') {
+    if (job.operation === OPERATIONS.SSL_ISSUE || job.operation === OPERATIONS.SSL_RENEW) {
+      const isRenewal = job.operation === OPERATIONS.SSL_RENEW;
+      if (isRenewal && job.result?.dryRun === true) {
+        await certificateRegistry.setState(job.resourceId, 'active');
+        return { reconciled: true, outcome: 'succeeded', dryRun: true };
+      }
+      const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: isRenewal });
+      if (!isRenewal && !certificate.staging && (certificate.purpose ?? 'web') === 'web') {
         await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
         await certificateRegistry.commitSelection(certificate.id);
       }
-      return;
-    }
-    if (job.operation === OPERATIONS.SSL_RENEW) {
-      if (job.result.dryRun === true) {
-        await certificateRegistry.setState(job.resourceId, 'active');
-        return;
+
+      let reloadOutcome = null;
+      if (job.result?.reloadOutcome && typeof certificateRegistry.recordReloadOutcome === 'function') {
+        await certificateRegistry.recordReloadOutcome(certificate.id, job.result.reloadOutcome);
+        reloadOutcome = job.result.reloadOutcome;
       }
-      await certificateRegistry.markActive(job.resourceId, job.result, { renewal: true });
+
+      // Handle post-SSL mail identity assignment side-effects without swallowing errors
+      let mailIdentityOutcome = null;
+      if (mailServiceIdentityRegistry) {
+        try {
+          if (typeof mailServiceIdentityRegistry.getForServer === 'function') {
+            const binding = await mailServiceIdentityRegistry.getForServer(certificate.serverId);
+            const coversHostname = binding && (
+              binding.webDomainId === certificate.domainId
+              || binding.hostname === certificate.certName
+              || certificate.domains?.includes(binding.hostname)
+            );
+            if (binding && coversHostname && typeof mailServiceIdentityRegistry.bind === 'function') {
+              await mailServiceIdentityRegistry.bind({
+                serverId: binding.serverId,
+                webDomainId: binding.webDomainId,
+                expectedRevision: binding.revision,
+              });
+            }
+          }
+        } catch (mailIdentityError) {
+          mailIdentityOutcome = {
+            service: 'mail_identity',
+            status: 'partial',
+            stage: 'identity_assignment',
+            error: mailIdentityError.message ?? 'Mail service identity assignment failed',
+          };
+          if (certificateRegistry && typeof certificateRegistry.recordReloadOutcome === 'function') {
+            await certificateRegistry.recordReloadOutcome(certificate.id, mailIdentityOutcome);
+          }
+        }
+      }
+
+      if (mailIdentityOutcome || (reloadOutcome && reloadOutcome.status !== 'succeeded')) {
+        return {
+          reconciled: true,
+          outcome: 'partial',
+          status: 'partial',
+          partial: true,
+          sideEffects: {
+            mailIdentity: mailIdentityOutcome,
+            reload: reloadOutcome,
+          },
+        };
+      }
+
+      return { reconciled: true, outcome: 'succeeded', status: 'succeeded' };
     }
   }
+
+  return { reconciled: true, outcome: 'succeeded' };
 }
 
 /**
@@ -506,6 +788,9 @@ async function applyReconciliation({
  * control-plane failure so HTTP/local callers cannot report false success.
  * Automatic durable reconciliation is acknowledged only after this transition
  * succeeds; failed reconciliation therefore remains visible in recovery state.
+ * Swallowed side effects such as post-SSL mail identity assignment failures are
+ * surfaced as visible partial results rather than treating the operation as
+ * completely successful.
  */
 export async function reconcileCompletedJob({
   domainRegistry,
@@ -515,10 +800,12 @@ export async function reconcileCompletedJob({
   websiteRegistry = null,
   runtimeBindingRegistry = null,
   mailDomainRegistry = null,
+  mailServiceIdentityRegistry = null,
   job,
 }) {
+  let reconciliationResult = null;
   try {
-    await applyReconciliation({
+    reconciliationResult = await applyReconciliation({
       domainRegistry,
       certificateRegistry,
       applicationRegistry,
@@ -526,6 +813,7 @@ export async function reconcileCompletedJob({
       websiteRegistry,
       runtimeBindingRegistry,
       mailDomainRegistry,
+      mailServiceIdentityRegistry,
       job,
     });
   } catch (error) {
@@ -547,7 +835,17 @@ export async function reconcileCompletedJob({
   }
 
   await acknowledgeAutomaticJobReconciliation(job);
-  return { reconciled: true, error: null };
+  if (reconciliationResult?.outcome === 'partial') {
+    return {
+      reconciled: true,
+      outcome: 'partial',
+      status: 'partial',
+      partial: true,
+      sideEffects: reconciliationResult.sideEffects ?? null,
+      error: null,
+    };
+  }
+  return { reconciled: true, outcome: 'succeeded', status: 'succeeded', error: null };
 }
 
 export const jobReconciliationInternals = Object.freeze({
@@ -555,4 +853,8 @@ export const jobReconciliationInternals = Object.freeze({
   reconcileMailDomainJob,
   reconcilePassengerDomainStageBinding,
   reconcileStaticDomainStageBinding,
+  applyReconciliation,
+  evaluateLifecycleState,
+  LIFECYCLE_STAGES,
+  LIFECYCLE_OUTCOMES,
 });

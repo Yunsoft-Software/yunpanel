@@ -108,13 +108,20 @@ export function certificateDiagnosis(certificate, { now = Date.now() } = {}) {
   if (certificate.state === 'error') return operationErrorDiagnosis('certificate', certificate.lastError);
   if (certificate.lastReloadOutcome && certificate.lastReloadOutcome.status !== 'succeeded') {
     const isPartial = certificate.lastReloadOutcome.status === 'partial';
+    const isMailIdentity = certificate.lastReloadOutcome.service === 'mail_identity';
     return Object.freeze({
       severity: 'warning',
       code: isPartial ? 'certificate_reload_partial' : 'certificate_reload_failed',
-      message: isPartial
-        ? `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload completed partially.`
-        : `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload failed.`,
-      action: 'Inspect service configuration logs and retry reload without regenerating certificate.',
+      message: isMailIdentity
+        ? (isPartial
+          ? 'Certificate is valid, but mail service identity assignment completed partially.'
+          : 'Certificate is valid, but mail service identity assignment failed.')
+        : (isPartial
+          ? `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload completed partially.`
+          : `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload failed.`),
+      action: isMailIdentity
+        ? 'Inspect mail service identity bindings and retry mail identity assignment.'
+        : 'Inspect service configuration logs and retry reload without regenerating certificate.',
     });
   }
   if (certificate.state === 'pending') {
