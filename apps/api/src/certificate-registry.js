@@ -373,8 +373,9 @@ function hydrateCertificate(certificate, sourceVersion, roots) {
   }
   if (sourceVersion < 7) {
     certificate.materialPurgedAt = null;
+    certificate.lastReloadOutcome = null;
   }
-  if (sourceVersion < 8) {
+  if (certificate.lastReloadOutcome === undefined) {
     certificate.lastReloadOutcome = null;
   }
   if (certificate.email === undefined) {
