@@ -1,6 +1,183 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import express from 'express';
+import http from 'node:http';
+
+function createExpressMockApp() {
+  const globalMiddlewares = [];
+  const errorHandlers = [];
+  const routes = [];
+
+  const app = {
+    use(fn) {
+      if (typeof fn === 'function') {
+        if (fn.length === 4) {
+          errorHandlers.push(fn);
+        } else {
+          globalMiddlewares.push(fn);
+        }
+      }
+      return app;
+    },
+    get(pathPattern, ...handlers) {
+      const paramNames = [];
+      const regexStr = '^' + pathPattern.replace(/:([a-zA-Z0-9_]+)/g, (_, name) => {
+        paramNames.push(name);
+        return '([^/]+)';
+      }) + '$';
+      routes.push({
+        method: 'GET',
+        pathPattern,
+        regex: new RegExp(regexStr),
+        paramNames,
+        handlers,
+      });
+      return app;
+    },
+    post(pathPattern, ...handlers) {
+      const paramNames = [];
+      const regexStr = '^' + pathPattern.replace(/:([a-zA-Z0-9_]+)/g, (_, name) => {
+        paramNames.push(name);
+        return '([^/]+)';
+      }) + '$';
+      routes.push({
+        method: 'POST',
+        pathPattern,
+        regex: new RegExp(regexStr),
+        paramNames,
+        handlers,
+      });
+      return app;
+    },
+    listen(port, callback) {
+      const server = http.createServer(async (req, res) => {
+        res.status = function (statusCode) {
+          res.statusCode = statusCode;
+          return res;
+        };
+        res.set = function (headerName, headerValue) {
+          if (!res.headersSent) {
+            if (typeof headerName === 'object' && headerName !== null) {
+              for (const [k, v] of Object.entries(headerName)) {
+                res.setHeader(k, v);
+              }
+            } else if (typeof headerName === 'string') {
+              res.setHeader(headerName, headerValue);
+            }
+          }
+          return res;
+        };
+        res.json = function (data) {
+          if (!res.headersSent) {
+            res.setHeader('content-type', 'application/json');
+            res.end(JSON.stringify(data));
+          }
+          return res;
+        };
+        res.send = function (data) {
+          if (!res.headersSent) {
+            if (typeof data === 'object' && data !== null) {
+              return res.json(data);
+            }
+            res.end(data);
+          }
+          return res;
+        };
+
+        req.originalUrl = req.url;
+
+        if (['POST', 'PUT', 'PATCH'].includes(req.method)) {
+          try {
+            const chunks = [];
+            for await (const chunk of req) {
+              chunks.push(chunk);
+            }
+            const raw = Buffer.concat(chunks).toString('utf8');
+            req.body = raw.trim() ? JSON.parse(raw) : {};
+          } catch {
+            req.body = {};
+          }
+        } else {
+          req.body = {};
+        }
+
+        const urlObj = new URL(req.url, 'http://127.0.0.1');
+        const pathname = urlObj.pathname;
+        req.query = Object.fromEntries(urlObj.searchParams.entries());
+
+        let matchedRoute = null;
+        const routeParams = {};
+
+        for (const r of routes) {
+          if (r.method !== req.method) continue;
+          const match = pathname.match(r.regex);
+          if (match) {
+            matchedRoute = r;
+            r.paramNames.forEach((name, idx) => {
+              routeParams[name] = match[idx + 1];
+            });
+            break;
+          }
+        }
+
+        req.params = routeParams;
+
+        if (!matchedRoute) {
+          res.status(404).json({ error: { code: 'not_found', message: 'Not Found' } });
+          return;
+        }
+
+        const chain = [...globalMiddlewares, ...matchedRoute.handlers];
+        let idx = 0;
+
+        const handleError = async (err) => {
+          if (res.headersSent) return;
+          let errIdx = 0;
+          const runErrHandler = async (e) => {
+            if (res.headersSent) return;
+            if (errIdx < errorHandlers.length) {
+              const h = errorHandlers[errIdx++];
+              try {
+                await h(e, req, res, runErrHandler);
+              } catch (handlerError) {
+                await runErrHandler(handlerError);
+              }
+            } else {
+              const status = e.status ?? 500;
+              const code = e.code ?? 'internal_error';
+              res.status(status).json({ error: { code, message: e.message } });
+            }
+          };
+          await runErrHandler(err);
+        };
+
+        const next = async (err) => {
+          if (res.headersSent) return;
+          if (err) {
+            return handleError(err);
+          }
+          if (idx < chain.length) {
+            const handler = chain[idx++];
+            try {
+              await handler(req, res, next);
+            } catch (handlerErr) {
+              await handleError(handlerErr);
+            }
+          }
+        };
+
+        await next();
+      });
+
+      return server.listen(port, callback);
+    },
+  };
+
+  return app;
+}
+
+const express = () => createExpressMockApp();
+express.json = () => (req, res, next) => next();
+
 import {
   mountDomainRemovalRoutes,
 } from '../src/domain-removal-http.js';

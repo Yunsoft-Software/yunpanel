@@ -9,7 +9,7 @@ test('production Website removal wires receipt-owned cleanup adapters',async()=>
  assert.match(block,/fileCleanupHandler: websiteRemovalCleanupAdapters/);
  assert.match(block,/unixIdentityCleanupHandler: websiteRemovalCleanupAdapters/);
 });
-test('removal journals Unix identity before recursive file cleanup',async()=>{
+test('removal journals file cleanup before Unix identity cleanup',async()=>{
  const source=await readFile(new URL('../src/website-removal-operation-registry.js',import.meta.url),'utf8');
- assert.ok(source.indexOf("add('unix_identity_cleanup'") < source.indexOf("add('file_cleanup'"));
+ assert.ok(source.indexOf("add('file_cleanup'") < source.indexOf("add('unix_identity_cleanup'"));
 });

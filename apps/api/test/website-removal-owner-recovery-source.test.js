@@ -2,10 +2,12 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('all Website removal endpoints use Owner-only guard', async () => {
+test('all Website removal endpoints use the route and Website tenant guards', async () => {
   const source=await readFile(new URL('../src/website-removal-http.js',import.meta.url),'utf8');
-  assert.doesNotMatch(source,/removal[^\n]*requirePanelRouteAccess/);
-  assert.ok((source.match(/requireRemovalOwner/g) ?? []).length >= 8);
+  assert.match(source,/requirePanelRouteAccess/);
+  assert.ok((source.match(/requireWebsiteAccess/g) ?? []).length >= 8);
+  assert.match(source,/actorTenant\.websiteIds\.includes\(targetWebsiteId\)/);
+  assert.match(source,/auth\?\.security\?\.managementAllowed !== true/);
 });
 
 test('global removal recovery endpoints survive Website metadata deletion', async () => {

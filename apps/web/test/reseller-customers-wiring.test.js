@@ -10,8 +10,8 @@ test('session exposes only bounded hosting profile context for reseller routing'
   assert.match(auth, /validHostingProfile/);
   assert.match(auth, /\['reseller', 'customer'\]/);
   assert.match(auth, /hosting\.kind === 'reseller'/);
-  assert.match(session, /isReseller: session\?\.user\?\.hosting\?\.kind === 'reseller'/);
-  assert.match(session, /isCustomer: session\?\.user\?\.hosting\?\.kind === 'customer'/);
+  assert.match(session, /const isReseller = hosting\?\.kind === 'reseller' \|\| role === 'reseller'/);
+  assert.match(session, /const isCustomer = hosting\?\.kind === 'customer' \|\| role === 'customer'/);
 });
 
 test('reseller customers page uses scoped account API and never exposes owner-only profile mutations', async () => {

@@ -143,7 +143,7 @@ export function createAuthStore({
       PRAGMA foreign_keys = OFF;
       CREATE TABLE users_new (
         id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-        role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+        role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager', 'reseller', 'customer')), active INTEGER NOT NULL DEFAULT 1,
         created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
       );
       INSERT INTO users_new SELECT id, username, password_hash, role, active, created_at, password_changed_at FROM users;
@@ -155,7 +155,7 @@ export function createAuthStore({
   db.exec(`
     CREATE TABLE IF NOT EXISTS users (
       id TEXT PRIMARY KEY, username TEXT UNIQUE NOT NULL, password_hash TEXT NOT NULL,
-      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager')), active INTEGER NOT NULL DEFAULT 1,
+      role TEXT NOT NULL CHECK(role IN ('owner', 'read_only', 'site_manager', 'reseller', 'customer')), active INTEGER NOT NULL DEFAULT 1,
       created_at INTEGER NOT NULL, password_changed_at INTEGER NOT NULL
     );
     CREATE TABLE IF NOT EXISTS sessions (
@@ -793,16 +793,16 @@ export function createAuthStore({
           event(candidate.id, 'password_reset.requested');
         });
 
+        const effectiveOrigin = origin || 'http://localhost:5173';
+        const resetUrl = `${effectiveOrigin}/#reset-token=${encodeURIComponent(rawToken)}`;
         try {
-          const resetOrigin = origin || 'http://localhost:5173';
-          const resetUrl = `${resetOrigin}/#reset-token=${encodeURIComponent(rawToken)}`;
           await mailer.sendPasswordResetEmail({
             to: candidate.recovery_email,
             username: candidate.username,
             token: rawToken,
             resetUrl,
             expiresAt,
-            origin: resetOrigin,
+            origin: effectiveOrigin,
           });
         } catch (error) {
           db.prepare('DELETE FROM auth_password_resets WHERE token_hash = ?').run(tokenHash);
@@ -840,7 +840,7 @@ export function createAuthStore({
       }
       if (row.expires_at <= now()) {
         db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);
-        throw new AuthError('invalid_reset_token', 'Parola sıfırlama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı talep edin.', 400);
+        throw new AuthError('reset_token_expired', 'Parola sıfırlama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı talep edin.', 400);
       }
       if (!row.active || row.role !== 'owner') {
         db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);

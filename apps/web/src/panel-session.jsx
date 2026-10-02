@@ -8,8 +8,8 @@ export function PanelSessionProvider({ session, children }) {
     const role = session?.user?.role;
     const hosting = session?.user?.hosting;
     const isOwner = role === 'owner';
-    const isReseller = hosting?.kind === 'reseller';
-    const isCustomer = hosting?.kind === 'customer';
+    const isReseller = hosting?.kind === 'reseller' || role === 'reseller';
+    const isCustomer = hosting?.kind === 'customer' || role === 'customer';
     const isSiteManager = role === 'site_manager' && !isReseller && !isCustomer;
     return {
       session,
@@ -17,8 +17,8 @@ export function PanelSessionProvider({ session, children }) {
       canManage: panelPermission(session, '*'),
       isOwner,
       isSiteManager,
-      isReseller: session?.user?.hosting?.kind === 'reseller',
-      isCustomer: session?.user?.hosting?.kind === 'customer',
+      isReseller,
+      isCustomer,
       hostingProfile: hosting ?? null,
       readOnly: session?.access?.mode === 'read_only' || role === 'read_only',
     };

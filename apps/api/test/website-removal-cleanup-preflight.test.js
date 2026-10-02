@@ -4,7 +4,7 @@ import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
 import { removalFixture, removalPreview } from '../test-support/website-removal-fixture.js';
 
 test('preview blocks before destructive work when Unix ownership evidence is unavailable',async()=>{
- const preview=removalPreview('site-a', {}, { systemUser: 'yunapp-site1' });
+ const preview=removalPreview('site-a', {}, { systemUser: 'yunapp-site-a' });
  const f=await removalFixture({
    fileCleanupInspector:async()=>({ready:true}),
    unixIdentityCleanupInspector:async()=>{throw new Error('no receipt');},

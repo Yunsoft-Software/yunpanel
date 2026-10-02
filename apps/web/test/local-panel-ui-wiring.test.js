@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { SITE_TABS } from '../src/workspace/site-model.js';
 
 test('management UI has one implicit local server and no server chooser', async () => {
   const sources = await Promise.all([
@@ -18,6 +19,7 @@ test('management UI has one implicit local server and no server chooser', async 
   assert.doesNotMatch(sources[2], /inspectDatabases|Sunucuyu tara/);
   assert.match(sources[3], /YunPanel yalnızca kurulu olduğu yerel sunucuyu yönetir/);
   assert.doesNotMatch(sources[3], /ServerManager|enrollment/);
+  assert.match(sources[0], /createSiteSubmission/);
   assert.match(sources[5], /\/sites\/create-preview/);
   assert.match(sources[5], /previewDigest: preview\.previewDigest/);
   assert.match(sources[0], /Yeni Node\.js 24 \/ Passenger uygulaması/);
@@ -47,7 +49,7 @@ test('primary navigation exposes working modules instead of placeholder destinat
   assert.match(operations, /LinkButton to="\/audit"/);
   assert.match(app, /path: 'docker', element: (?:owner|manage)\(<DockerProjectsPage \/>\)/);
   assert.match(app, /path: 'docker\/:dockerProjectId', element: (?:owner|manage)\(<DockerProjectsPage \/>\)/);
-  assert.match(app, /path: 'mail', element: manage\(<MailDomainsPage \/>\)/);
+  assert.match(app, /path: 'mail', element: manage\((?:<GlobalSiteTool tool="mail" ownerView=\{<MailDomainsPage \/>\} \/>|<MailDomainsPage \/>)\)/);
   assert.match(app, /path: 'mail\/:mailDomainId', element: manage\(<MailDomainsPage \/>\)/);
   assert.match(dockerPage, /DockerProjectCreateDialog/);
   assert.match(dockerPage, /DockerConfigPanel/);
@@ -64,12 +66,14 @@ test('primary navigation exposes working modules instead of placeholder destinat
   assert.match(dockerConfig, /validateSavedDockerProject/);
   assert.doesNotMatch(operations, /docker: \['Docker'/);
   assert.doesNotMatch(operations, /mail: \['Mail'/);
-  // Mail and databases now have real site-contained surfaces. Keep only
-  // unsupported placeholder tabs forbidden; never revert the working UI here.
-  assert.doesNotMatch(model, /\['(?:cron|backups)'/);
-  assert.match(model, /\['databases', 'Veritabanları'\]/);
-  assert.match(model, /\['mail', 'E-posta'\]/);
-  assert.match(model, /\['files', 'Dosyalar'\]/);
+  // Site tools are bound to implemented surfaces; unsupported placeholders stay absent.
+  // Assert the operator's actual navigation data, regardless of constants/literal formatting.
+  assert.equal(SITE_TABS.some(([key]) => key === 'backups'), false);
+  assert.equal(new Set(SITE_TABS.map(([key]) => key)).size, SITE_TABS.length);
+  const tabs = new Map(SITE_TABS);
+  for (const [key, label] of [['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'],
+    ['databases', 'Veritabanları'], ['files', 'Dosyalar']]) assert.equal(tabs.get(key), label);
+  assert.match(tabs.get('mail'), /^(?:Posta|E-posta)$/);
 });
 
 test('mail route exposes domain, mailbox, alias, configuration, DKIM, queue, logs and Roundcube controls', async () => {
@@ -161,6 +165,8 @@ test('legacy Domain repair and real site file manager replace terminal and file 
   assert.match(detail, /key === 'files'/);
   assert.match(detail, /key === 'terminal'/);
   assert.match(detail, /<SiteFilesPanel domainId=\{domain\.id\}/);
+  const binding = await readFile(new URL('../src/workspace/SiteFilesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(binding, /serverId=\{access\.website\.serverId\} websiteId=\{access\.website\.id\}/);
   assert.doesNotMatch(detail, /Site dosyalarını listeleme, yükleme ve düzenleme API’leri henüz uygulanmadı/);
   assert.match(files, /const base = `\/websites\/\$\{encodeURIComponent\(websiteId\)\}\/files`/);
   assert.match(files, /\$\{base\}\/text/);

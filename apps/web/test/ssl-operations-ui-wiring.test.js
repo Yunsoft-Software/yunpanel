@@ -2,14 +2,14 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('SiteOperations SSL issuance includes Plesk Obsidian multi-SAN checkboxes and ACME email pre-fill', async () => {
+test('SiteOperations SSL issuance preserves account-bound contact defaults and the multi-SAN request', async () => {
   const operations = await readFile(new URL('../src/workspace/SiteOperations.jsx', import.meta.url), 'utf8');
 
-  // Pre-fills ACME email from panel session
-  assert.match(operations, /usePanelSession/);
-  assert.match(operations, /sslContactEmail/);
+  assert.match(operations, /sslContactEmail\(session\)/);
+  assert.match(operations, /usePanelSession\(\)/);
+  assert.doesNotMatch(operations, /getPanelSettings|dnsSsl\.acmeEmail/);
 
-  // SAN checkboxes
+  // Plesk Obsidian SAN checkboxes
   assert.match(operations, /Korunacak alan adları:/);
   assert.match(operations, /www\.\$\{domain\.primaryDomain\}/);
   assert.match(operations, /webmail\.\$\{domain\.primaryDomain\}/);

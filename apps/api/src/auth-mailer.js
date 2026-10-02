@@ -215,8 +215,8 @@ export function createAuthMailer({
     }
   }
 
-  async function sendPasswordResetEmail({ to, username, token, resetUrl: inputResetUrl, expiresAt, origin = 'http://localhost:5173' }) {
-    const resetUrl = inputResetUrl || (token ? `${origin}/#reset-token=${encodeURIComponent(token)}` : '');
+  async function sendPasswordResetEmail({ to, username, token, resetUrl: customResetUrl, expiresAt, origin = 'http://localhost:5173' }) {
+    const resetUrl = customResetUrl || (token ? `${origin}/#reset-token=${encodeURIComponent(token)}` : `${origin}/#reset-password`);
     const minutes = expiresAt ? Math.max(1, Math.round((expiresAt - Date.now()) / 60_000)) : 15;
     const subject = 'YunPanel — Parola Sıfırlama Bağlantısı';
     const text = [

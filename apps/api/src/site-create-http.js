@@ -146,7 +146,7 @@ function provisioningPlanner(dependencies) {
 }
 
 async function previewWithProvisioning({ input, dependencies }) {
-  const previewFn = dependencies.previewSiteCreate ?? previewSiteCreate;
+  const previewFn = dependencies?.previewSiteCreate ?? previewSiteCreate;
   const arg = input && typeof input === 'object'
     ? Object.assign(Object.create(input), { input, ...dependencies })
     : { input, ...dependencies };

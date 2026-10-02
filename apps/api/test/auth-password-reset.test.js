@@ -7,10 +7,10 @@ import http from 'node:http';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
+import { TOTP } from 'otpauth';
 import { createAuthStore, hashPassword, verifyPassword } from '../src/auth-store.js';
 import { createAuthMailer, validateEmail } from '../src/auth-mailer.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
-import { TOTP } from 'otpauth';
 
 function createMockMailer({ available = true, shouldFailSend = false } = {}) {
   const sent = [];
@@ -45,7 +45,7 @@ function fixture(t, { mailer = createMockMailer(), now = Date.now, masterKey = '
     filePath,
     mailer,
     now,
-    masterKey,
+    masterKey: storeOptions.masterKey ?? masterKey,
     revokeLiveUser: (userId, reason) => {
       revokedLiveUser = { userId, reason };
     },
@@ -240,7 +240,7 @@ test('expired reset token is rejected', async (t) => {
 
   await assert.rejects(
     store.resetPasswordWithToken({ token: rawToken, newPassword: 'brand-new-secure-password-123' }),
-    { code: 'invalid_reset_token' },
+    { code: 'reset_token_expired' },
   );
 });
 
@@ -252,7 +252,8 @@ test('successful password reset revokes all sessions, clears challenges, invalid
   // Enroll MFA for owner
   const loginBeforeMfa = await store.login({ username: 'admin', password: 'initial-password-1234' });
   const enrollment = await store.mfa.beginEnrollment(loginBeforeMfa.token, 'initial-password-1234');
-  const confirmResult = store.mfa.confirmEnrollment(loginBeforeMfa.token, new TOTP({ secret: enrollment.secret }).generate());
+  const totpCode = new TOTP({ secret: enrollment.secret }).generate();
+  const confirmResult = store.mfa.confirmEnrollment(loginBeforeMfa.token, totpCode);
   assert.equal(store.mfa.enabled(ownerUser.id), true);
 
   // Create an active session and a pending login challenge

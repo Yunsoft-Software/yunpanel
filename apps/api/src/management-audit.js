@@ -44,10 +44,11 @@ export function classifyManagementMutation(method, pathname) {
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup\/preview$/)) && method === 'POST') return { action: 'website.backup.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup\/queue$/)) && method === 'POST') return { action: 'website.backup.queue', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup$/)) && method === 'POST') return { action: 'website.backup', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup\/queue$/)) && method === 'POST') return { action: 'website.backup.queue', resourceType: 'website', resourceId: parts[0] };
+  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup-operations$/)) && method === 'POST') return { action: 'website.backup_operation.queue', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore\/preview$/)) && method === 'POST') return { action: 'website.restore.preview', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore\/queue$/)) && method === 'POST') return { action: 'website.restore.queue', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/restore$/)) && method === 'POST') return { action: 'website.restore', resourceType: 'website', resourceId: parts[0] };
-  if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/backup-operations$/)) && method === 'POST') return { action: 'website.backup_operation.create', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys$/)) && method === 'POST') return { action: 'website.sftp_key.add', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/revoke$/)) && method === 'POST') return { action: 'website.sftp_key.revoke', resourceType: 'website', resourceId: parts[0] };
   if ((parts = match(pathname, /^\/api\/websites\/([^/]+)\/sftp\/keys\/[^/]+\/rotate$/)) && method === 'POST') return { action: 'website.sftp_key.rotate', resourceType: 'website', resourceId: parts[0] };

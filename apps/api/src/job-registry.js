@@ -88,8 +88,8 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.CRON_APPLY,
   OPERATIONS.CRON_REMOVE,
   OPERATIONS.WEBSITE_PHP_ACTION,
-  ...DOCKER_COMPOSE_OPERATIONS,
 ]);
+for (const op of DOCKER_COMPOSE_OPERATIONS) ASYNC_OPERATIONS.add(op);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const COMMIT_PATTERN = /^[a-f0-9]{40}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;

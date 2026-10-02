@@ -36,6 +36,7 @@ test('website analytics routes generate reports and manage daemons', async () =>
 
   const goaccessCalls = [];
   const mockGoAccessManager = {
+    inspectGoAccess: async () => ({ satisfied: true, version: '1.8.1' }),
     generateStaticReport: async (opts) => {
       goaccessCalls.push(['generate', opts]);
       return {

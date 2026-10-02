@@ -432,12 +432,17 @@ test('persisted reseller may suspend and reactivate only its direct customer log
   }
 });
 
-test('non-reseller site sessions and missing sessions cannot use scoped account reads', (t) => {
-  const f = setup(t); f.reseller(); f.customer();
-  const viewer = f.session('viewer'); const customer = f.session('customer-a');
-  assert.throws(() => f.store.get(viewer, f.requireManagement, 'customer-a'), code('reseller_scope_forbidden'));
-  assert.throws(() => f.store.get(customer, f.requireManagement, 'reseller-a'), code('reseller_scope_forbidden'));
-  for (const token of [viewer, customer]) {
+test('customers read only their own account; ordinary site sessions and missing sessions cannot read hosting accounts', (t) => {
+  const f = setup(t); f.reseller(); f.customer(); f.customer('customer-b'); f.customer('direct', null);
+  const viewer = f.session('viewer'); const customer = f.session('customer-a'); const legacy = f.session('legacy');
+  assert.equal(f.store.get(customer, f.requireManagement, 'customer-a').id, 'customer-a');
+  for (const id of ['customer-b', 'direct', 'reseller-a']) {
+    assert.throws(() => f.store.get(customer, f.requireManagement, id), code('reseller_scope_forbidden'));
+  }
+  for (const token of [viewer, legacy]) {
+    assert.throws(() => f.store.get(token, f.requireManagement, 'customer-a'), code('reseller_scope_forbidden'));
+  }
+  for (const token of [viewer, legacy, customer]) {
     assert.throws(() => f.store.list(token, f.requireManagement, { kind: 'customer' }), code('reseller_scope_forbidden'));
   }
   assert.throws(() => f.store.get('unknown-token', f.requireManagement, 'customer-a'), code('unauthorized'));

@@ -89,8 +89,9 @@ for (const [websiteId, exists, expected] of [['site-a', true, 200], ['site-b', t
   test(`operation detail is bound to URL Website: ${websiteId}, exists=${exists}`, async () => {
     const routes = new Map(); const route = '/api/websites/:websiteId/removal-operations/:operationId';
     const f = await removalFixture(); const operation = await f.runtime.start(removalStart(f.preview));
+    const websiteRegistry = { getWebsite: async (id) => (id === 'site-a' ? { id: 'site-a', serverId: 'server-a' } : null) };
     mountWebsiteRemovalRoutes({ get: (path, ...handlers) => routes.set(path, handlers.at(-1)), post() {} },
-      { runtime: { ...f.runtime, get: async () => exists ? operation : null } });
+      { runtime: { ...f.runtime, get: async () => exists ? operation : null }, websiteRegistry });
     let status = 200, payload;
     await routes.get(route)({
       params: { websiteId, operationId: operation.id },

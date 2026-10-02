@@ -156,7 +156,7 @@ export function mountWebsiteRemovalRoutes(app, {
   }
   if (!runtime || typeof runtime.preview !== 'function' || typeof runtime.start !== 'function'
     || typeof runtime.continueStep !== 'function' || typeof runtime.get !== 'function'
-    || typeof runtime.list !== 'function' || typeof runtime.listForWebsite !== 'function') {
+    || typeof runtime.listForWebsite !== 'function') {
     throw new Error('Website removal runtime is required');
   }
 
@@ -180,7 +180,7 @@ export function mountWebsiteRemovalRoutes(app, {
     if (!actorTenant.active) {
       throw new WebsiteRemovalHttpError('tenant_actor_inactive', 'Inactive account cannot access tenant resources.', 403);
     }
-    const operations = await runtime.list();
+    const operations = typeof runtime.list === 'function' ? await runtime.list() : [];
     const filtered = actor.role === 'owner'
       ? operations
       : operations.filter((op) => actorTenant.websiteIds.includes(op.websiteId));

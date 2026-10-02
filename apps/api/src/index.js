@@ -1105,7 +1105,7 @@ const systemWatchdogService = createSystemWatchdogService({
   serverRegistry: registry,
   jobRegistry,
   localRuntime: () => localRuntimeInstance,
-  inspectServices: inspectAllowlistedServices,
+  inspectServices: (serviceIds) => inspectAllowlistedServices(serviceIds),
   daemons: () => ({
     renewalScheduler: {
       name: 'renewalScheduler',

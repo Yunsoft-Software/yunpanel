@@ -50,7 +50,7 @@ export function siteBackupBrowser(value, scope) {
     && (set.digest === null || /^[a-f0-9]{64}$/.test(set.digest))
     && (set.runtimeType === null || text(set.runtimeType, 40)));
   const repositories = value.repositories.map((repo) => {
-    need(record(repo) && UUID.test(repo.id ?? '') && REPO_NAME.test(repo.name ?? '')
+    need(record(repo) && UUID.test(repo.id ?? '') && text(repo.name, 80) && !/[\\/]/u.test(repo.name)
       && ['local', 'rclone'].includes(repo.backend)
       && ['uninitialized', 'ready', 'error'].includes(repo.status)
       && ['ready', 'unavailable', 'error', 'partial'].includes(repo.snapshotStatus)

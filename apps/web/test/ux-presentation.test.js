@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { DEFAULT_PREFERENCES, PREFERENCE_KEY, normalizePreferences, readPreferences, writePreferences, resolveTheme, navigationGroups, websiteCount, commandEntries, groupSiteTabs } from '../src/workspace/ui/ux-model.js';
+import { DEFAULT_PREFERENCES, PREFERENCE_KEY, normalizePreferences, readPreferences, writePreferences, resolveTheme, navigationGroups, websiteCount, commandEntries, groupSiteTabs, TOOLS_SETTINGS_GROUPS } from '../src/workspace/ui/ux-model.js';
 import {
   jobAttemptCount,
   jobLifecycle,
@@ -48,6 +48,8 @@ test('owner navigation keeps jobs and audit accessible through categorized setti
   assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
   assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
   assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
+  const tools = TOOLS_SETTINGS_GROUPS.flatMap(group => group.items.map(([to]) => to));
+  for (const to of ['/jobs', '/audit']) assert.ok(tools.includes(to));
 });
 test('website counter uses unique Website records, not hostnames or aliases', () => {
   assert.equal(websiteCount({ status: 'ready', items: [{ id: 'w1', aliases: ['a', 'b'] }, { id: 'w1' }, { id: 'w2' }] }), 2);
@@ -77,11 +79,11 @@ test('search has bounded domain suggestions and encodes query strings', () => {
   assert.equal(commandEntries({ query: 'a&b?#' }).at(-1).to, '/websites?q=a%26b%3F%23');
   assert.equal(new URL(commandEntries({ query: 'x'.repeat(500) }).at(-1).to, 'https://panel.test').searchParams.get('q').length, 253);
 });
-test('site grouping keeps every existing tab exactly once in at most six groups', () => {
-  const tabs = ['overview', 'databases', 'node', 'deploy', 'domains', 'dns', 'ssl', 'files', 'logs', 'terminal', 'settings'].map((key) => [key, key]);
+test('site grouping keeps every visible tab exactly once without duplicating the legacy resources alias', () => {
+  const tabs = ['overview', 'resources', 'databases', 'node', 'deploy', 'domains', 'dns', 'ssl', 'files', 'logs', 'terminal', 'settings'].map((key) => [key, key]);
   const grouped = groupSiteTabs(tabs);
-  assert.ok(grouped.length <= 6);
-  assert.deepEqual(grouped.flatMap((group) => group.tabs.map(([key]) => key)).sort(), tabs.map(([key]) => key).sort());
+  assert.ok(grouped.length <= 3);
+  assert.deepEqual(grouped.flatMap((group) => group.tabs.map(([key]) => key)).sort(), tabs.filter(([key]) => key !== 'resources').map(([key]) => key).sort());
 });
 test('runtime-filtered and future backend tabs remain reachable without placeholders', () => {
   assert.deepEqual(groupSiteTabs([['overview', 'Overview']]).map((group) => group.id), ['dashboard']);

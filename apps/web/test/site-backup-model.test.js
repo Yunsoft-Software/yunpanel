@@ -24,6 +24,9 @@ test('access resolves Domain to explicit Website without fallback', () => {
   assert.deepEqual(resolveSiteBackupAccess(input), { state: 'ready', scope });
 });
 test('unsafe repository/snapshot metadata is rejected by model', () => {
-  assert.throws(() => siteBackupBrowser({ ...value, repositories: [{ ...value.repositories[0], name: '../secret' }] }, scope));
+  for (const name of ['../secret', 'secret/file', 'secret\\file']) {
+    assert.throws(() => siteBackupBrowser({ ...value, repositories: [{ ...value.repositories[0], name }] }, scope));
+  }
+  assert.equal(siteBackupBrowser({ ...value, repositories: [{ ...value.repositories[0], name: 'Primary backup' }] }, scope).repositories[0].name, 'Primary backup');
   assert.throws(() => siteBackupBrowser({ ...value, repositories: [{ ...value.repositories[0], snapshots: [{ ...value.repositories[0].snapshots[0], time: 'bad' }] }] }, scope));
 });

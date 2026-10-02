@@ -740,6 +740,16 @@ test('authorizeWebsiteRemovalActor validates active tenant context, MFA, and ass
 
 test('reseller self-service hosted site allocation enforces tenant boundary, customer scope, and quotas', async (t) => {
   const env = setupTestEnvironment(t, { maxWebsites: 1, maxCustomers: 5 });
+  // Separate operation IDs must preview distinct Websites; otherwise this
+  // fixture exercises allocation identity conflicts instead of capacity.
+  const originalPreview = env.dependencies.previewSiteCreate;
+  env.dependencies.previewSiteCreate = async (input) => {
+    const value = await originalPreview(input);
+    if (!input.operationId || input.operationId === uuid(1101)) return value;
+    const nextWebsite = { ...value.plan.website, id: uuid(2100 + Number.parseInt(input.operationId.slice(-4), 16)) };
+    return { ...value, ids: { ...value.ids, websiteId: nextWebsite.id },
+      plan: { ...value.plan, website: nextWebsite }, steps: { ...value.steps, websiteReady: false } };
+  };
   const app = fakeApp();
   mountSiteCreateRoutes(app, env.dependencies);
 
@@ -789,13 +799,11 @@ test('reseller self-service hosted site allocation enforces tenant boundary, cus
   assert.equal(alloc.customerId, 'customer-a');
   assert.equal(env.f.get('reseller-a').usage.websites, 1);
 
-  // Invalidate and refresh reseller session after site completion
-  const freshResellerToken = env.f.session('reseller-a');
-  const freshResellerAuth = {
-    ...resellerAuth,
-    token: freshResellerToken,
-    rawToken: freshResellerToken,
-  };
+  // Ownership changes revoke the old session; the next request must sign in again.
+  assert.equal(env.f.getSession(resellerToken), null);
+  resellerToken = env.f.session('reseller-a');
+  resellerAuth.token = resellerToken;
+  resellerAuth.rawToken = resellerToken;
 
   // 3. Reseller attempts second site creation for customer-b exceeding maxWebsites limit (1)
   // Re-issue session token as completion revokes live session on attached ownership

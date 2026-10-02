@@ -143,7 +143,10 @@ export function createSiteMutationLock({
     return withLock({ resourceType: 'domain', resourceId: domainId }, action);
   }
 
-  async function withSiteLock({ applicationId = null, websiteId = null, domainId = null } = {}, action) {
+  async function withSiteLock(identity = {}, action) {
+    const applicationId = typeof identity?.applicationId === 'string' && identity.applicationId.trim() ? identity.applicationId.trim() : null;
+    const websiteId = typeof identity?.websiteId === 'string' && identity.websiteId.trim() ? identity.websiteId.trim() : null;
+    const domainId = typeof identity?.domainId === 'string' && identity.domainId.trim() ? identity.domainId.trim() : null;
     if (applicationId !== null) return withApplicationLock(applicationId, action);
     if (websiteId !== null) return withWebsiteLock(websiteId, action);
     if (domainId !== null) return withDomainLock(domainId, action);

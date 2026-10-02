@@ -334,9 +334,16 @@ export function createHostingSiteCreateService({
   return Object.freeze({
     async preview(rawToken, policy, value) {
       const prepared = await prepare(rawToken, policy, request(value));
-      return Object.freeze({ ...prepared.base, customerId: prepared.allocationInput.customerId,
-        previewDigest: prepared.previewDigest, confirmation: prepared.confirmation,
-        ownership: prepared.allocation, state: prepared.allocation.state, accessGranted: false });
+      return Object.freeze({
+        ...prepared.base,
+        customerId: prepared.allocationInput.customerId,
+        previewDigest: prepared.previewDigest,
+        confirmation: prepared.confirmation,
+        ownership: prepared.allocation,
+        allocation: prepared.allocation,
+        state: prepared.allocation.state,
+        accessGranted: false,
+      });
     },
     async create(rawToken, policy, value) {
       const submitted = request(value, true);
