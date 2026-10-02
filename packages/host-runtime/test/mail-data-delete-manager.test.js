@@ -95,6 +95,17 @@ function vmailRun() {
   return async () => ({ stdout: `vmail:x:${UID}:${GID}:vmail:/var/lib/yunpanel/mail:/usr/sbin/nologin\n` });
 }
 
+function mockAccessGuard() {
+  return {
+    async quiesce(identity) {
+      return Object.freeze({ identity, accessDisabled: true, sessionsCleared: true });
+    },
+    async verify(identity) {
+      return Object.freeze({ identity, accessDisabled: true, sessionsCleared: true });
+    },
+  };
+}
+
 async function createVerifiedBackup(root, sourceRoot, mapped) {
   const manager = createMailDataBackupManager({
     backupRoot: path.join(root, 'backups'),
@@ -119,6 +130,7 @@ test('delete verifies backup content, removes live Maildir and exposes replay-fr
   const deletion = createMailDataDeleteManager({
     backupManager: manager,
     mailDataInspector: inspector(),
+    mailboxAccessGuard: mockAccessGuard(),
     run: vmailRun(),
     lstatFn: mapped.lstatFn,
     openFn: mapped.openFn,
@@ -155,6 +167,7 @@ test('purge failure restores the original live path when tombstone content is st
   const deletion = createMailDataDeleteManager({
     backupManager: manager,
     mailDataInspector: inspector(),
+    mailboxAccessGuard: mockAccessGuard(),
     run: vmailRun(),
     lstatFn: mapped.lstatFn,
     openFn: mapped.openFn,

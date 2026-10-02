@@ -5,7 +5,7 @@ import { normalizeDomainSet, sanitizeLogMessage } from '@yunpanel/shared';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { createProcessStoreLock } from './process-store-lock.js';
 
-const STORE_VERSION = 8;
+const STORE_VERSION = 7;
 const SHA256_FINGERPRINT = /^(?:[A-F0-9]{2}:){31}[A-F0-9]{2}$/i;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const CERT_STATES = new Set([
@@ -108,13 +108,20 @@ export function certificateDiagnosis(certificate, { now = Date.now() } = {}) {
   if (certificate.state === 'error') return operationErrorDiagnosis('certificate', certificate.lastError);
   if (certificate.lastReloadOutcome && certificate.lastReloadOutcome.status !== 'succeeded') {
     const isPartial = certificate.lastReloadOutcome.status === 'partial';
+    const isMailIdentity = certificate.lastReloadOutcome.service === 'mail_identity';
     return Object.freeze({
       severity: 'warning',
       code: isPartial ? 'certificate_reload_partial' : 'certificate_reload_failed',
-      message: isPartial
-        ? `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload completed partially.`
-        : `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload failed.`,
-      action: 'Inspect service configuration logs and retry reload without regenerating certificate.',
+      message: isMailIdentity
+        ? (isPartial
+          ? 'Certificate is valid, but mail service identity assignment completed partially.'
+          : 'Certificate is valid, but mail service identity assignment failed.')
+        : (isPartial
+          ? `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload completed partially.`
+          : `Certificate is valid, but ${certificate.lastReloadOutcome.service} reload failed.`),
+      action: isMailIdentity
+        ? 'Inspect mail service identity bindings and retry mail identity assignment.'
+        : 'Inspect service configuration logs and retry reload without regenerating certificate.',
     });
   }
   if (certificate.state === 'pending') {
@@ -203,7 +210,6 @@ export function certificatePublicView(certificate, { now = Date.now } = {}) {
     certificateNames: Object.freeze([...(certificate.certificateNames ?? certificate.domains ?? [])]),
     challenge,
     staging: certificate.staging === true,
-    email: certificate.email ?? null,
     subject: typeof certificate.subject === 'string' ? sanitizeLogMessage(certificate.subject).message.slice(0, 500) : null,
     issuer: typeof certificate.issuer === 'string' ? sanitizeLogMessage(certificate.issuer).message.slice(0, 500) : null,
     subjectAltName: typeof certificate.subjectAltName === 'string'

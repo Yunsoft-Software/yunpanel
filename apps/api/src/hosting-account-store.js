@@ -192,7 +192,10 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
   return {
     siteAllocations,
     authorizeActor(rawToken, requireManagement) {
-      return transaction(() => managementActor(rawToken, requireManagement));
+      return transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        return { id: actor.id, role: actor.role, active: actor.active };
+      });
     },
     allocateCustomerSite(rawToken, requireManagement, input) {
       return siteAllocations.allocateCustomerSite(rawToken, requireManagement, input);

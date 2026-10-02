@@ -32,7 +32,7 @@ export function createSiteAnalyticsClient({scope:input,request,isOwner=false,isC
    if(!current())return null;const result=analyticsRealtime(value,scope,action);await load();return result;
   }catch(error){
    if(!current())return null;
-   if(sent&&!([400,401,403,409].includes(error?.status))){publish({unknownMutation:true,error:'İsteğin sonucu bilinmiyor. İşlem tekrar gönderilmedi; servis durumu yeniden okunuyor.'});await load();}
+   if(sent&&!([400,401,403,409].includes(error?.status))){await load();publish({unknownMutation:true,error:'İsteğin sonucu bilinmiyor. İşlem tekrar gönderilmedi; servis durumu yeniden okunuyor.'});}
    else publish({error:siteAnalyticsErrorMessage(error)});
    return null;
   }finally{if(current())publish({busy:false});}

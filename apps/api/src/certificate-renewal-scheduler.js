@@ -78,6 +78,24 @@ export function verifyRenewalOutcome({ certificate, before = null, job, liveTls 
   if (before && typeof before === 'object' && before.fingerprint256) {
     const beforeFingerprint = before.fingerprint256.toUpperCase();
     if (beforeFingerprint === certFingerprint) {
+      if (certificate.lastReloadOutcome && certificate.lastReloadOutcome.status !== 'succeeded') {
+        const isPartial = certificate.lastReloadOutcome.status === 'partial';
+        return Object.freeze({
+          outcome: isPartial ? 'partial' : 'partial_service_reload',
+          status: certificate.lastReloadOutcome.status,
+          reason: certificate.lastReloadOutcome.service === 'mail_identity'
+            ? 'post_ssl_mail_identity_assignment_failed'
+            : `${certificate.lastReloadOutcome.service}_reload_${certificate.lastReloadOutcome.status}`,
+          verified: false,
+          partial: true,
+          fingerprint256: certFingerprint,
+          validFrom: certificate.validFrom,
+          validTo: certificate.validTo,
+          service: certificate.lastReloadOutcome.service,
+          stage: certificate.lastReloadOutcome.stage,
+          error: certificate.lastReloadOutcome.error,
+        });
+      }
       if (liveTls) {
         const liveMatch = compareTlsPresentation(certificate, liveTls);
         return Object.freeze({
@@ -111,6 +129,25 @@ export function verifyRenewalOutcome({ certificate, before = null, job, liveTls 
 
   const livePresentationMatch = compareTlsPresentation(certificate, liveTls);
   if (livePresentationMatch.matches) {
+    if (certificate.lastReloadOutcome && certificate.lastReloadOutcome.status !== 'succeeded') {
+      const isPartial = certificate.lastReloadOutcome.status === 'partial';
+      return Object.freeze({
+        outcome: isPartial ? 'partial' : 'partial_service_reload',
+        status: certificate.lastReloadOutcome.status,
+        reason: certificate.lastReloadOutcome.service === 'mail_identity'
+          ? 'post_ssl_mail_identity_assignment_failed'
+          : `${certificate.lastReloadOutcome.service}_reload_${certificate.lastReloadOutcome.status}`,
+        verified: false,
+        partial: true,
+        fingerprint256: certFingerprint,
+        validFrom: certificate.validFrom,
+        validTo: certificate.validTo,
+        service: certificate.lastReloadOutcome.service,
+        stage: certificate.lastReloadOutcome.stage,
+        error: certificate.lastReloadOutcome.error,
+      });
+    }
+
     return Object.freeze({
       outcome: 'renewed_and_live_verified',
       verified: true,

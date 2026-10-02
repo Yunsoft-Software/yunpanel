@@ -16,6 +16,7 @@ const digest = 'a'.repeat(64);
 function fixture({
   domainStatus = 'disabled',
   mailboxRevision = 3,
+  mailboxEnabled = false,
   activeJobs = [],
   selectedBackup = null,
   deleteBlockers = [{ code: 'mail_data_backup_required', count: 1 }],
@@ -33,7 +34,7 @@ function fixture({
     id: mailboxId,
     mailDomainId,
     address: 'owner@example.com',
-    enabled: false,
+    enabled: mailboxEnabled,
     revision: mailboxRevision,
   };
   const service = createMailDataOperationsService({

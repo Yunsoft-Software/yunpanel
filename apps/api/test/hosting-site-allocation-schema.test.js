@@ -14,8 +14,8 @@ test('allocation schema is additive and repeatable without changing legacy recor
   const f = fixture(t);
   const users = f.db.prepare('SELECT * FROM users').all();
   const sessions = f.db.prepare('SELECT * FROM sessions').all();
-  assert.deepEqual(initializeHostingAccountSchema(f), { version: 1, created: true });
-  assert.deepEqual(initializeHostingAccountSchema(f), { version: 1, created: false });
+  assert.deepEqual(initializeHostingAccountSchema(f), { version: 3, created: true });
+  assert.deepEqual(initializeHostingAccountSchema(f), { version: 3, created: false });
   assert.deepEqual(f.db.prepare('SELECT * FROM users').all(), users);
   assert.deepEqual(f.db.prepare('SELECT * FROM sessions').all(), sessions);
   assert.equal(f.db.prepare('PRAGMA user_version').get().user_version, 0);

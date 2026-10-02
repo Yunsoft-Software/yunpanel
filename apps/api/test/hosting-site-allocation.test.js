@@ -151,7 +151,7 @@ test('schema upgrade is additive, repeatable and empty rollback removes both sid
   const f = hostingAuthFixture(); t.after(() => f.db.close()); f.addUser('owner', { role: 'owner' });
   const before = f.db.prepare('SELECT * FROM users').all();
   initializeHostingAccountSchema(f);
-  assert.deepEqual(initializeHostingAccountSchema(f), { version: 1, created: false });
+  assert.deepEqual(initializeHostingAccountSchema(f), { version: 3, created: false });
   assert.deepEqual(f.db.prepare('SELECT * FROM users').all(), before);
   assert.equal(rollbackEmptyHostingAccountSchema(f).removed, true);
   assert.equal(f.db.prepare("SELECT 1 FROM sqlite_master WHERE name = 'auth_hosting_site_schema'").get(), undefined);

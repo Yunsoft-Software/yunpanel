@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { createAuthStore, hashPassword, verifyPassword } from '../src/auth-store.js';
 import { createAuthMailer, validateEmail } from '../src/auth-mailer.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
+import { TOTP } from 'otpauth';
 
 function createMockMailer({ available = true, shouldFailSend = false } = {}) {
   const sent = [];
@@ -36,7 +37,7 @@ function createMockMailer({ available = true, shouldFailSend = false } = {}) {
   };
 }
 
-function fixture(t, { mailer = createMockMailer(), now = Date.now, ...storeOptions } = {}) {
+function fixture(t, { mailer = createMockMailer(), now = Date.now, masterKey = 'a'.repeat(64), ...storeOptions } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-pwd-reset-'));
   const filePath = path.join(root, 'auth.sqlite');
   let revokedLiveUser = null;
@@ -44,6 +45,7 @@ function fixture(t, { mailer = createMockMailer(), now = Date.now, ...storeOptio
     filePath,
     mailer,
     now,
+    masterKey,
     revokeLiveUser: (userId, reason) => {
       revokedLiveUser = { userId, reason };
     },
@@ -250,7 +252,7 @@ test('successful password reset revokes all sessions, clears challenges, invalid
   // Enroll MFA for owner
   const loginBeforeMfa = await store.login({ username: 'admin', password: 'initial-password-1234' });
   const enrollment = await store.mfa.beginEnrollment(loginBeforeMfa.token, 'initial-password-1234');
-  const confirmResult = store.mfa.confirmEnrollment(loginBeforeMfa.token, enrollment.secret);
+  const confirmResult = store.mfa.confirmEnrollment(loginBeforeMfa.token, new TOTP({ secret: enrollment.secret }).generate());
   assert.equal(store.mfa.enabled(ownerUser.id), true);
 
   // Create an active session and a pending login challenge

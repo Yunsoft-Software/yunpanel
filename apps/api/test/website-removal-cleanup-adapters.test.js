@@ -62,7 +62,7 @@ test('file cleanup is idempotent when canonical roots are already absent',async(
 test('file cleanup preflight returns canonical direct-child roots without recursion', async()=>{
  const f=fixture();
  const value=await f.adapters.inspectFileCleanup({websiteId,applicationId});
- assert.deepEqual(value.targets.sort(),[
+ assert.deepEqual([...value.targets].sort(),[
   '/var/lib/yunpanel/apps/'+applicationId,
   '/var/lib/yunpanel/build/'+applicationId,
   '/var/lib/yunpanel/data/'+applicationId,

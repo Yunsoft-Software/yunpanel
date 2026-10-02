@@ -1,10 +1,12 @@
 const DAY = 86400000;
 const ACTIVE_JOBS = new Set(['queued', 'running']);
+const CRON = 'cron';
+const BACKUP = 'backup';
 export const SITE_TABS = [
   ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
   ['hosting', 'Barındırma ve DNS'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
-  ['databases', 'Veritabanları'], ['mail', 'Posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
-  ['cron', 'Zamanlanmış Görevler'], ['backup', 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],
+  ['databases', 'Veritabanları'], ['mail', 'E-posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
+  [CRON, 'Zamanlanmış Görevler'], [BACKUP, 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],
   ['php', 'PHP / WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Barındırma bilgileri'],
 ];
 export function normalizeSiteTab(tab) {
@@ -12,7 +14,7 @@ export function normalizeSiteTab(tab) {
   const lower = tab.toLowerCase().trim();
   if (['statistics', 'stats', 'analytics'].includes(lower)) return 'analytics';
   if (['scheduled-tasks', 'tasks', 'crons', 'task', 'cron'].includes(lower)) return 'cron';
-  if (['backups', 'restore', 'restores', 'backup-restore', 'backup'].includes(lower)) return 'backup';
+  if (['backup', 'backups', 'restore', 'restores', 'backup-restore'].includes(lower)) return 'backup';
   if (['git', 'deploy', 'deployment', 'deployments'].includes(lower)) return 'deploy';
   if (['sftp', 'ssh', 'access-accounts', 'security', 'access'].includes(lower)) return 'access';
   if (['wp', 'wordpress', 'php'].includes(lower)) return 'php';

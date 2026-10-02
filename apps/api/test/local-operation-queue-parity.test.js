@@ -26,6 +26,7 @@ test('every durable async queue operation has a local host execution path', asyn
   const localMailData = operationNames(localSource, /export const LOCAL_MAIL_DATA_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localRoundcubeConfiguration = operationNames(localSource, /export const LOCAL_ROUNDCUBE_CONFIGURATION_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const localCron = operationNames(localSource, /export const LOCAL_CRON_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
+  const localWebsitePhp = operationNames(localSource, /export const LOCAL_WEBSITE_PHP_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/);
   const executable = new Set([
     ...local,
     ...localDatabaseCredentials,
@@ -35,6 +36,7 @@ test('every durable async queue operation has a local host execution path', asyn
     ...localMailData,
     ...localRoundcubeConfiguration,
     ...localCron,
+    ...localWebsitePhp,
   ]);
 
   assert.deepEqual([...executable].sort(), [...queued].sort());

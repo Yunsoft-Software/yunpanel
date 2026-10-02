@@ -3,7 +3,7 @@ import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const TYPES = new Set(['application', 'website']);
+const TYPES = new Set(['application', 'website', 'domain']);
 
 export class SiteMutationLockError extends Error {
   constructor(code, message, status = 409) {
@@ -139,13 +139,18 @@ export function createSiteMutationLock({
     return withLock({ resourceType: 'website', resourceId: websiteId }, action);
   }
 
-  function withSiteLock({ applicationId = null, websiteId = null } = {}, action) {
-    if (applicationId !== null) return withApplicationLock(applicationId, action);
-    if (websiteId !== null) return withWebsiteLock(websiteId, action);
-    throw new SiteMutationLockError('site_mutation_lock_identity_invalid', 'Application or Website identity is required', 400);
+  function withDomainLock(domainId, action) {
+    return withLock({ resourceType: 'domain', resourceId: domainId }, action);
   }
 
-  return Object.freeze({ withLock, withApplicationLock, withWebsiteLock, withSiteLock });
+  async function withSiteLock({ applicationId = null, websiteId = null, domainId = null } = {}, action) {
+    if (applicationId !== null) return withApplicationLock(applicationId, action);
+    if (websiteId !== null) return withWebsiteLock(websiteId, action);
+    if (domainId !== null) return withDomainLock(domainId, action);
+    throw new SiteMutationLockError('site_mutation_lock_identity_invalid', 'Application, Website, or Domain identity is required', 400);
+  }
+
+  return Object.freeze({ withLock, withApplicationLock, withWebsiteLock, withDomainLock, withSiteLock });
 }
 
 export const siteMutationLockInternals = Object.freeze({

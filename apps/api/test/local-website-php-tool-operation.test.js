@@ -27,7 +27,7 @@ const execution = Object.freeze({
   jobId: 'php-action-job-01',
   serverId: preview.serverId,
   resourceType: 'application',
-  resourceId: payload.applicationId,
+  resourceId: '22222222-2222-4222-8222-222222222222',
 });
 
 test('local PHP action runs only the reviewed fixed action and returns no stdout', async () => {

@@ -80,6 +80,7 @@ export function createAuthStore({
   absoluteMs = 12 * 60 * 60_000,
   masterKey = process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
   liveSessions = null,
+  revokeLiveUser: customRevokeLiveUser = null,
   mailer: customMailer = null,
   storeLockFactory = null,
   websiteLookup = null,
@@ -97,6 +98,9 @@ export function createAuthStore({
     try { liveSessions.revokeSession(sessionId, reason); } catch {}
   };
   const revokeLiveUser = (userId, reason) => {
+    if (typeof customRevokeLiveUser === 'function') {
+      try { customRevokeLiveUser(userId, reason); } catch {}
+    }
     if (!userId || !liveSessions) return;
     try { liveSessions.revokeUser(userId, reason); } catch {}
   };
@@ -790,12 +794,15 @@ export function createAuthStore({
         });
 
         try {
+          const resetOrigin = origin || 'http://localhost:5173';
+          const resetUrl = `${resetOrigin}/#reset-token=${encodeURIComponent(rawToken)}`;
           await mailer.sendPasswordResetEmail({
             to: candidate.recovery_email,
             username: candidate.username,
             token: rawToken,
+            resetUrl,
             expiresAt,
-            origin,
+            origin: resetOrigin,
           });
         } catch (error) {
           db.prepare('DELETE FROM auth_password_resets WHERE token_hash = ?').run(tokenHash);
@@ -833,7 +840,7 @@ export function createAuthStore({
       }
       if (row.expires_at <= now()) {
         db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);
-        throw new AuthError('reset_token_expired', 'Parola sıfırlama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı talep edin.', 400);
+        throw new AuthError('invalid_reset_token', 'Parola sıfırlama bağlantısının süresi dolmuş. Lütfen yeni bir bağlantı talep edin.', 400);
       }
       if (!row.active || row.role !== 'owner') {
         db.prepare('DELETE FROM auth_password_resets WHERE id = ?').run(row.reset_id);

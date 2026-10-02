@@ -84,8 +84,19 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
     return { current, parent };
   }
   function check(rawToken, policy, value, requireExisting = false) {
-    const resolveActor = typeof managementActor === 'function' ? managementActor : owner;
-    const actor = resolveActor(rawToken, policy);
+    let actor;
+    if (typeof managementActor === 'function') {
+      try {
+        const candidate = managementActor(rawToken, policy);
+        const isReseller = candidate?.role === 'reseller' || candidate?.kind === 'reseller' || candidate?.hosting?.kind === 'reseller';
+        if (isReseller) {
+          actor = candidate;
+        }
+      } catch {}
+    }
+    if (!actor) {
+      actor = owner(rawToken, policy);
+    }
     const plan = input(value);
     const chain = customer(plan.customerId);
     const isReseller = actor.role === 'reseller' || actor.kind === 'reseller' || actor.hosting?.kind === 'reseller';

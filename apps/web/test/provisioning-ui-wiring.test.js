@@ -3,9 +3,10 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 test('site overview binds provisioning recovery to the persistent Website identity', async () => {
-  const [site, panel] = await Promise.all([
+  const [site, panel, client] = await Promise.all([
     readFile(new URL('../src/workspace/SiteDetailPage.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/provisioning-client.js', import.meta.url), 'utf8'),
   ]);
 
   assert.match(site, /ProvisioningRecoveryPanel/);
@@ -13,7 +14,7 @@ test('site overview binds provisioning recovery to the persistent Website identi
   assert.doesNotMatch(site, /ProvisioningRecoveryPanel websiteId=\{domain\.id\}/);
 
   assert.match(panel, /ConfirmDialog/);
-  assert.match(panel, /provisioningConfirmation\(confirm\.action, operation\.operationId/);
+  assert.match(client, /export function provisioningConfirmation\(action, operationId/);
   assert.match(panel, /provisioningRemediation\(step\)/);
   assert.match(panel, /step\.canRetry === true/);
   assert.match(panel, /step\.canCompensate === true/);

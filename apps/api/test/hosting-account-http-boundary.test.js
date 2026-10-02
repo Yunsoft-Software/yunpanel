@@ -159,7 +159,7 @@ test('persisted reseller creates and edits only its own customer login through f
   assert.equal(created.body.data.siteAccessGranted, false);
   const childId = created.body.data.account.id;
   assert.deepEqual(
-    f.db.prepare('SELECT username, password_hash, role, active FROM users WHERE id = ?').get(childId),
+    { ...f.db.prepare('SELECT username, password_hash, role, active FROM users WHERE id = ?').get(childId) },
     { username: 'reseller-child', password_hash: 'fixture-http-hash:customer-password', role: 'site_manager', active: 1 },
   );
 

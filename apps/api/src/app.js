@@ -30,7 +30,7 @@ import { createBackupResourceProvider } from './backup-resource-provider.js';
 import { CertificateRegistryError, createCertificateRegistry } from './certificate-registry.js';
 import { CertificateMaterialError, createCertificateMaterialManager } from './certificate-material-manager.js';
 import { mountCertificateRoutes } from './certificate-http.js';
-import { createApp as createCoreApp } from './core-app.js';
+import { createApp as createCoreApp, resolveDeploymentDiagnostics } from './core-app.js';
 import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from './database-binding-http.js';
 import { DatabaseBindingRegistryError } from './database-binding-registry.js';
 import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } from './database-credential-apply-service.js';
@@ -192,12 +192,28 @@ import { createSiteHealthService, SiteHealthError } from './site-health-service.
 import { mountSiteHealthRoutes, SiteHealthHttpError } from './site-health-http.js';
 import { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
 import { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
+import { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
+import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
-export { API_VERSION } from './core-app.js';
+export {
+  API_VERSION,
+  SCHEMA_VERSION,
+  DEFAULT_STALE_THRESHOLD_MS,
+  FRESHNESS_STATUSES,
+  DEPLOYMENT_COMPARISON_STATUSES,
+  sanitizeDiagnosticInfo,
+  resolveDeploymentDiagnostics,
+  compareDeploymentVersions,
+  evaluateFreshnessState,
+  evaluateDeploymentEvidence,
+  requireDeploymentDiagnosticsAccess,
+} from './core-app.js';
 export { createSystemWatchdogService, SystemWatchdogError } from './system-watchdog-service.js';
 export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
+export { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
+export { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -343,6 +359,7 @@ export function createApp(allOptions = {}) {
   websiteBackupService = null,
   websiteRestoreService = null,
   pleskImporter = null,
+  operationalNotificationService = null,
   ...options
 } = allOptions;
   const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
@@ -873,7 +890,12 @@ export function createApp(allOptions = {}) {
     });
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId, customerLookup });
-  mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  mountWebsiteAnalyticsRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    goaccessManager: options.goaccessManager,
+  });
   const siteHealthService = options.siteHealthService ?? createSiteHealthService({
     websiteRegistry,
     domainRegistry,
@@ -1001,8 +1023,19 @@ export function createApp(allOptions = {}) {
     });
   }
   if (panelSettingsService) {
+    const wrappedPanelSettingsService = {
+      ...panelSettingsService,
+      getSystemSettings: async (...args) => {
+        const data = await panelSettingsService.getSystemSettings(...args);
+        return {
+          ...data,
+          deployment: resolveDeploymentDiagnostics(),
+        };
+      },
+      updateSystemSettings: (...args) => panelSettingsService.updateSystemSettings(...args),
+    };
     mountPanelSettingsRoutes(app, {
-      panelSettingsService,
+      panelSettingsService: wrappedPanelSettingsService,
     });
   }
   if (pleskImporter) {
@@ -1090,6 +1123,20 @@ export function createApp(allOptions = {}) {
       ttydSessionManager,
     });
   }
+  const resolvedOperationalNotificationService = operationalNotificationService ?? createOperationalNotificationService({
+    authMailer: options.authMailer ?? null,
+    certificateRegistry,
+    domainRegistry,
+    websiteRegistry,
+    jobRegistry,
+    userAdminStore: options.userAdminStore ?? null,
+    hostingAccountStore: hostingAccounts,
+    customerLookup,
+    localServerId,
+  });
+  mountOperationalNotificationRoutes(app, {
+    notificationService: resolvedOperationalNotificationService,
+  });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -1206,6 +1253,8 @@ export function createApp(allOptions = {}) {
       || error instanceof SiteHealthHttpError
       || error instanceof SystemWatchdogError
       || error instanceof SystemWatchdogHttpError
+      || error instanceof OperationalNotificationError
+      || error instanceof OperationalNotificationHttpError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

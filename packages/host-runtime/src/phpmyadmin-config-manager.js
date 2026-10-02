@@ -24,7 +24,7 @@ const SIGNON_CONFIG_PREVIEW_KEYS = new Set([
 ]);
 const SIGNON_BRIDGE_PREVIEW_KEYS = new Set([
   'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
-  'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
+  'gatewaySessionCookie', 'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -123,6 +123,7 @@ function validateSignonBridgePreview(preview) {
   }, 'phpmyadmin_signon_bridge_preview_invalid');
   if (value.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
     || value.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || value.gatewaySessionCookie !== phpMyAdminSignonTemplatePolicy.gatewaySessionCookie
     || value.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
     || value.internalLogoutPath !== phpMyAdminSignonTemplatePolicy.internalLogoutPath
     || value.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {

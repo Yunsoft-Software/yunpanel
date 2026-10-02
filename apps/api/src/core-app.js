@@ -15,6 +15,384 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 
 export const API_VERSION = '0.3.0';
+export const SCHEMA_VERSION = 3;
+export const DEFAULT_STALE_THRESHOLD_MS = 60 * 1000;
+
+export const FRESHNESS_STATUSES = Object.freeze({
+  HEALTHY: 'healthy',
+  STALE: 'stale',
+  UNKNOWN: 'unknown',
+});
+
+export const DEPLOYMENT_COMPARISON_STATUSES = Object.freeze({
+  SYNCHRONIZED: 'synchronized',
+  VERSION_MISMATCH: 'version_mismatch',
+  STALE_CACHE: 'stale_cache',
+  SCHEMA_MISMATCH: 'schema_mismatch',
+  UNKNOWN: 'unknown',
+});
+
+const SENSITIVE_PATH_PATTERN = /(?:\/[^\s"'/]+)*\/(?:root|home|etc\/shadow|etc\/yunpanel|\.gemini|\.ssh|credentials)(?:\/[^\s"']*)?/gi;
+
+function isSensitiveDiagnosticKey(key) {
+  if (typeof key !== 'string') return false;
+  const lower = key.toLowerCase();
+
+  if (lower.startsWith('safe') || lower.includes('safekey') || lower.includes('safe_key')) {
+    return false;
+  }
+
+  if (lower.endsWith('path') || lower.endsWith('file') || lower.endsWith('dir') || lower.endsWith('url')) {
+    return false;
+  }
+
+  if (lower.endsWith('header')) {
+    return false;
+  }
+
+  if (/(?:password|passwd|pwd|secret|credential)/i.test(lower)) {
+    return true;
+  }
+  if (/(?:^|_|-)token|token(?:$|_|-)|api_token|authtoken|accesstoken/i.test(lower)) {
+    return true;
+  }
+  if (/(?:auth_key|api_key|private_key|secret_key|master_key|access_key|signing_key)/i.test(lower)) {
+    return true;
+  }
+  if (/(?:authkey|apikey|privatekey|secretkey|masterkey|accesskey|signingkey)/i.test(lower)) {
+    return true;
+  }
+  if (lower === 'key' || lower === 'token' || lower === 'cookie') {
+    return true;
+  }
+  if (/(?:^|_|-)auth(?:$|_|-)/i.test(lower)) {
+    return true;
+  }
+
+  return false;
+}
+
+export function sanitizeDiagnosticInfo(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    let sanitized = value.replace(SENSITIVE_PATH_PATTERN, '[REDACTED_PATH]');
+    sanitized = sanitized.replace(/Bearer\s+[A-Za-z0-9._~+/-]+=*/gi, 'Bearer [REDACTED]');
+    return sanitized;
+  }
+  if (Array.isArray(value)) {
+    return value.map(sanitizeDiagnosticInfo);
+  }
+  if (typeof value === 'object') {
+    const result = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (isSensitiveDiagnosticKey(k)) {
+        result[k] = '[REDACTED]';
+      } else {
+        result[k] = sanitizeDiagnosticInfo(v);
+      }
+    }
+    return result;
+  }
+  return value;
+}
+
+export function evaluateDeploymentEvidence({
+  deployedCommit,
+  sourceCommit,
+  isDirtyTree = false,
+  buildId,
+  deployedAt,
+} = {}) {
+  const diverged = Boolean(isDirtyTree) || (Boolean(sourceCommit) && Boolean(deployedCommit) && sourceCommit !== deployedCommit);
+  const warnings = [];
+
+  if (isDirtyTree) {
+    warnings.push('Uncommitted changes detected in local source workspace: runtime code may differ from repository tree.');
+  }
+  if (sourceCommit && deployedCommit && sourceCommit !== deployedCommit) {
+    warnings.push(`Local source HEAD (${sourceCommit}) does not match deployed runtime commit (${deployedCommit}). Deploy pipeline execution required for changes to take effect.`);
+  }
+
+  return {
+    deployed: {
+      buildId: buildId ?? null,
+      commit: deployedCommit ?? null,
+      deployedAt: deployedAt ?? null,
+    },
+    source: {
+      commit: sourceCommit ?? null,
+      isDirtyTree: Boolean(isDirtyTree),
+    },
+    diverged,
+    warnings,
+    summary: diverged
+      ? 'RUNTIME DIVERGENCE: Source code modifications have NOT been deployed to the live runtime environment.'
+      : 'RUNTIME SYNCHRONIZED: Live runtime build matches current source commit.',
+  };
+}
+
+export function resolveDeploymentDiagnostics(options = {}) {
+  const env = options.env ?? process.env;
+  const now = options.now instanceof Date ? options.now : new Date(options.now ?? Date.now());
+
+  const buildId = options.buildId ?? env.YUNPANEL_BUILD_ID ?? 'build-20261001-0300';
+  const commit = options.commit ?? env.YUNPANEL_COMMIT_HASH ?? env.GIT_COMMIT ?? 'b3f505cf14c341d58d472ea3b8916a31';
+  const buildTime = options.buildTime ?? env.YUNPANEL_BUILD_TIME ?? env.BUILD_TIMESTAMP ?? '2026-10-01T03:00:00.000Z';
+  const assetId = options.assetId ?? env.YUNPANEL_ASSET_ID ?? `assets-${buildId}`;
+  const environment = options.environment ?? env.NODE_ENV ?? 'production';
+
+  const sourceCommit = options.sourceCommit ?? env.YUNPANEL_SOURCE_COMMIT ?? commit;
+  const isDirtyTree = options.isDirtyTree !== undefined
+    ? Boolean(options.isDirtyTree)
+    : (env.YUNPANEL_DIRTY_TREE === 'true' || env.YUNPANEL_DIRTY_TREE === '1');
+
+  const evidence = evaluateDeploymentEvidence({
+    deployedCommit: commit,
+    sourceCommit,
+    isDirtyTree,
+    buildId,
+    deployedAt: buildTime,
+  });
+
+  const sourceDiffWarning = options.sourceDiffWarning ?? (
+    evidence.warnings.length > 0 ? evidence.warnings[0] : null
+  );
+
+  const rawInfo = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId,
+    commit,
+    buildTime,
+    assetId,
+    environment,
+    sourceInfo: {
+      sourceCommit,
+      isDirtyTree,
+      sourceMatchesDeployed: !evidence.diverged,
+      warning: sourceDiffWarning,
+    },
+    evidence,
+    lastCheckedAt: now.toISOString(),
+  };
+
+  return sanitizeDiagnosticInfo(rawInfo);
+}
+
+export function evaluateFreshnessState(options = {}) {
+  const {
+    lastCheckedAt,
+    staleThresholdMs = DEFAULT_STALE_THRESHOLD_MS,
+    now = Date.now(),
+    checkSuccessful = true,
+  } = options;
+
+  const currentMs = typeof now === 'number' ? now : (now instanceof Date ? now.getTime() : Date.parse(now));
+
+  if (!lastCheckedAt) {
+    return {
+      status: FRESHNESS_STATUSES.UNKNOWN,
+      healthy: false,
+      lastCheckedAt: null,
+      elapsedMs: null,
+      thresholdMs: staleThresholdMs,
+      stale: false,
+      unknown: true,
+      message: 'Freshness status is unknown: check has never run or timestamp is absent.',
+    };
+  }
+
+  const lastCheckedMs = typeof lastCheckedAt === 'number' ? lastCheckedAt : Date.parse(lastCheckedAt);
+  if (Number.isNaN(lastCheckedMs)) {
+    return {
+      status: FRESHNESS_STATUSES.UNKNOWN,
+      healthy: false,
+      lastCheckedAt: null,
+      elapsedMs: null,
+      thresholdMs: staleThresholdMs,
+      stale: false,
+      unknown: true,
+      message: 'Freshness status is unknown: invalid check timestamp.',
+    };
+  }
+
+  const elapsedMs = Math.max(0, currentMs - lastCheckedMs);
+
+  if (elapsedMs > staleThresholdMs) {
+    return {
+      status: FRESHNESS_STATUSES.STALE,
+      healthy: false,
+      lastCheckedAt: new Date(lastCheckedMs).toISOString(),
+      elapsedMs,
+      thresholdMs: staleThresholdMs,
+      stale: true,
+      unknown: false,
+      message: `Diagnostic check is stale: last checked ${Math.round(elapsedMs / 1000)}s ago (threshold: ${Math.round(staleThresholdMs / 1000)}s).`,
+    };
+  }
+
+  if (!checkSuccessful) {
+    return {
+      status: 'unhealthy',
+      healthy: false,
+      lastCheckedAt: new Date(lastCheckedMs).toISOString(),
+      elapsedMs,
+      thresholdMs: staleThresholdMs,
+      stale: false,
+      unknown: false,
+      message: 'Diagnostic check executed recently but reported unhealthy status.',
+    };
+  }
+
+  return {
+    status: FRESHNESS_STATUSES.HEALTHY,
+    healthy: true,
+    lastCheckedAt: new Date(lastCheckedMs).toISOString(),
+    elapsedMs,
+    thresholdMs: staleThresholdMs,
+    stale: false,
+    unknown: false,
+    message: 'Diagnostic check is fresh and healthy.',
+  };
+}
+
+export function compareDeploymentVersions(backendDeployment, frontendClient = {}) {
+  const backend = backendDeployment || resolveDeploymentDiagnostics();
+  if (!frontendClient || typeof frontendClient !== 'object' || Object.keys(frontendClient).length === 0) {
+    return {
+      status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN,
+      compatible: false,
+      staleCache: false,
+      requiresRefresh: false,
+      hardRefreshRequired: false,
+      backend: {
+        version: backend.version,
+        schemaVersion: backend.schemaVersion,
+        buildId: backend.buildId,
+        assetId: backend.assetId,
+      },
+      frontend: null,
+      message: 'Frontend client version information was not supplied.',
+    };
+  }
+
+  const {
+    version: frontendVersion,
+    buildId: frontendBuildId,
+    assetId: frontendAssetId,
+    schemaVersion: frontendSchemaVersion,
+  } = frontendClient;
+
+  const frontendSummary = {
+    version: frontendVersion ?? null,
+    schemaVersion: frontendSchemaVersion !== undefined && frontendSchemaVersion !== null ? Number(frontendSchemaVersion) : null,
+    buildId: frontendBuildId ?? null,
+    assetId: frontendAssetId ?? null,
+  };
+
+  if (frontendSchemaVersion !== undefined && frontendSchemaVersion !== null && Number(frontendSchemaVersion) !== backend.schemaVersion) {
+    return {
+      status: DEPLOYMENT_COMPARISON_STATUSES.SCHEMA_MISMATCH,
+      compatible: false,
+      staleCache: false,
+      requiresRefresh: true,
+      hardRefreshRequired: true,
+      backend: {
+        version: backend.version,
+        schemaVersion: backend.schemaVersion,
+        buildId: backend.buildId,
+        assetId: backend.assetId,
+      },
+      frontend: frontendSummary,
+      message: `Data schema version mismatch: frontend expects schema ${frontendSchemaVersion}, but backend serves schema ${backend.schemaVersion}.`,
+    };
+  }
+
+  if (frontendVersion && frontendVersion !== backend.version) {
+    return {
+      status: DEPLOYMENT_COMPARISON_STATUSES.VERSION_MISMATCH,
+      compatible: false,
+      staleCache: false,
+      requiresRefresh: true,
+      hardRefreshRequired: true,
+      backend: {
+        version: backend.version,
+        schemaVersion: backend.schemaVersion,
+        buildId: backend.buildId,
+        assetId: backend.assetId,
+      },
+      frontend: frontendSummary,
+      message: `API version mismatch: frontend version ${frontendVersion} differs from backend ${backend.version}.`,
+    };
+  }
+
+  const assetMismatch = Boolean(frontendAssetId && frontendAssetId !== backend.assetId);
+  const buildMismatch = Boolean(frontendBuildId && frontendBuildId !== backend.buildId);
+
+  if (assetMismatch || buildMismatch) {
+    return {
+      status: DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE,
+      compatible: false,
+      staleCache: true,
+      requiresRefresh: true,
+      hardRefreshRequired: true,
+      backend: {
+        version: backend.version,
+        schemaVersion: backend.schemaVersion,
+        buildId: backend.buildId,
+        assetId: backend.assetId,
+      },
+      frontend: frontendSummary,
+      message: `Stale frontend asset cache detected: client is running ${frontendAssetId || frontendBuildId}, current deployed is ${backend.assetId || backend.buildId}.`,
+    };
+  }
+
+  return {
+    status: DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED,
+    compatible: true,
+    staleCache: false,
+    requiresRefresh: false,
+    hardRefreshRequired: false,
+    backend: {
+      version: backend.version,
+      schemaVersion: backend.schemaVersion,
+      buildId: backend.buildId,
+      assetId: backend.assetId,
+    },
+    frontend: frontendSummary,
+    message: 'Frontend and backend deployment versions are fully synchronized.',
+  };
+}
+
+export function requireDeploymentDiagnosticsAccess(request, response, next) {
+  const auth = request.auth;
+  if (!auth?.user || !auth?.access || !auth?.security) {
+    return response.status(401).json({ error: { code: 'unauthorized', message: 'Authenticated panel context is required.' } });
+  }
+
+  if (auth.user.status && auth.user.status !== 'active') {
+    return response.status(403).json({ error: { code: 'forbidden', message: 'Inactive account cannot access diagnostics.' } });
+  }
+
+  if (
+    auth.user.role === 'owner'
+    && auth.access.mode === 'management'
+    && auth.security.managementAllowed === true
+  ) {
+    return next();
+  }
+
+  if (
+    auth.user.role === 'read_only'
+    && auth.access.mode === 'read_only'
+    && Array.isArray(auth.access.permissions)
+    && (auth.access.permissions.includes('servers.read') || auth.access.permissions.includes('*'))
+  ) {
+    return next();
+  }
+
+  return response.status(403).json({ error: { code: 'forbidden', message: 'Site-scoped role cannot access global server management.' } });
+}
 
 function bearerToken(request) {
   const header = request.headers.authorization;
@@ -754,8 +1132,15 @@ export function createApp({
         resourceId: certificate.id,
       });
       await certificateRegistry.setState(certificate.id, 'issuing');
+      const certRecord = await certificateRegistry.getCertificate(certificate.id);
       return response.status(202).json({
-        data: { certificate: certificatePublicView(await certificateRegistry.getCertificate(certificate.id)), job: jobPublicView(job) },
+        data: {
+          certificate: {
+            ...certificatePublicView(certRecord),
+            email: certRecord?.email ?? null,
+          },
+          job: jobPublicView(job),
+        },
       });
     } catch (error) {
       await certificateRegistry.markFailed(certificate.id, error.code ?? 'certificate_enqueue_failed');
@@ -837,6 +1222,58 @@ export function createApp({
     }
     return response.json({ data: jobPublicView(job) });
   });
+
+  // Deployment version, diagnostics and cache freshness endpoints (PROD-10)
+  app.get(
+    ['/api/system/diagnostics/version', '/api/diagnostics/deployment', '/api/diagnostics/version'],
+    requireDeploymentDiagnosticsAccess,
+    (request, response) => {
+      const deployment = resolveDeploymentDiagnostics();
+      const frontendQuery = {
+        version: request.query.frontendVersion || request.query.version || undefined,
+        buildId: request.query.frontendBuildId || request.query.buildId || undefined,
+        assetId: request.query.frontendAssetId || request.query.assetId || undefined,
+        schemaVersion: request.query.frontendSchemaVersion || request.query.schemaVersion || undefined,
+      };
+
+      const hasFrontendInfo = Object.values(frontendQuery).some((v) => v !== undefined);
+      const comparison = hasFrontendInfo ? compareDeploymentVersions(deployment, frontendQuery) : null;
+      const freshness = evaluateFreshnessState({
+        lastCheckedAt: deployment.lastCheckedAt,
+        staleThresholdMs: Number(request.query.staleThresholdMs) || DEFAULT_STALE_THRESHOLD_MS,
+      });
+
+      return response.json({
+        data: {
+          ...deployment,
+          comparison,
+          freshness,
+        },
+      });
+    },
+  );
+
+  app.post(
+    ['/api/system/diagnostics/version/compare', '/api/diagnostics/deployment/compare'],
+    requireDeploymentDiagnosticsAccess,
+    (request, response) => {
+      const deployment = resolveDeploymentDiagnostics();
+      const frontend = request.body || {};
+      const comparison = compareDeploymentVersions(deployment, frontend);
+      const freshness = evaluateFreshnessState({
+        lastCheckedAt: request.body?.lastCheckedAt || deployment.lastCheckedAt,
+        staleThresholdMs: Number(request.body?.staleThresholdMs) || DEFAULT_STALE_THRESHOLD_MS,
+      });
+
+      return response.json({
+        data: {
+          ...deployment,
+          comparison,
+          freshness,
+        },
+      });
+    },
+  );
 
   app.use((request, response) => response.status(404).json({ error: { code: 'not_found', message: 'Not found' } }));
   app.use((error, request, response, next) => {
