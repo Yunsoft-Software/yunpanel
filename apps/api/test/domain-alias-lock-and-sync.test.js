@@ -396,3 +396,137 @@ test('mail aliases and mailbox references synchronize correctly without auto-cre
     await rm(root, { recursive: true, force: true });
   }
 });
+
+test('hosting redirect settings update acquires backend resource lock and enforces fail-closed and auth boundaries', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-hosting-redirect-lock-test-'));
+  try {
+    const lockA = createSiteMutationLock({ root, pid: 2001, signalProcess: () => true });
+    const lockB = createSiteMutationLock({ root, pid: 2002, signalProcess: () => true });
+
+    const serverId = randomUUID();
+    const websiteId = randomUUID();
+
+    const domainRegistry = createDomainRegistry({
+      getWebsite: async (id) => (id === websiteId ? { id: websiteId, serverId, runtimeType: 'proxy' } : null),
+      serverExists: async (id) => id === serverId,
+      siteMutationLock: lockA,
+    });
+
+    const domain = await domainRegistry.createDomain({
+      serverId,
+      websiteId,
+      primaryDomain: 'redirect.example.com',
+      aliases: ['www.redirect.example.com'],
+      targetType: 'proxy',
+      target: { upstreamPort: 8080 },
+      httpsMode: 'managed',
+      httpsRedirect: false,
+      canonicalRedirect: false,
+    });
+
+    // 1. Holding website lock blocks hosting redirect update with 409 site_mutation_locked
+    let releaseHold;
+    const holdPromise = new Promise((resolve) => { releaseHold = resolve; });
+    const holdTask = lockB.withWebsiteLock(websiteId, async () => {
+      await holdPromise;
+      return 'held';
+    });
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    const changes = { httpsRedirect: true, canonicalRedirect: true };
+    const preview = await domainRegistry.previewDomainUpdate({
+      domainId: domain.id,
+      changes,
+    });
+    assert.equal(preview.next.httpsRedirect, true);
+    assert.equal(preview.next.canonicalRedirect, true);
+
+    const updateHandler = createDomainUpdateHandler(domainRegistry, {
+      siteMutationLock: lockA,
+      localServerId: serverId,
+    });
+
+    const response = responseRecorder();
+    let handledError = null;
+    await updateHandler(
+      {
+        params: { domainId: domain.id },
+        body: {
+          changes,
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        },
+      },
+      response,
+      (err) => { handledError = err; },
+    );
+
+    assert.ok(handledError, 'Expected error when website lock is held');
+    assert.equal(handledError.code, 'site_mutation_locked');
+    assert.equal(handledError.status, 409);
+
+    releaseHold();
+    await holdTask;
+
+    // 2. Reject mismatched confirmation fail-closed
+    let confirmError = null;
+    await updateHandler(
+      {
+        params: { domainId: domain.id },
+        body: {
+          changes,
+          previewDigest: preview.previewDigest,
+          confirmation: 'wrong-confirmation',
+        },
+      },
+      responseRecorder(),
+      (err) => { confirmError = err; },
+    );
+    assert.equal(confirmError?.code, 'domain_update_confirmation_required');
+
+    // 3. Reject stale preview digest fail-closed
+    let staleError = null;
+    await updateHandler(
+      {
+        params: { domainId: domain.id },
+        body: {
+          changes,
+          previewDigest: '0'.repeat(64),
+          confirmation: preview.confirmation,
+        },
+      },
+      responseRecorder(),
+      (err) => { staleError = err; },
+    );
+    assert.equal(staleError?.code, 'domain_update_preview_stale');
+
+    // 4. Successful update under lock updates only redirect settings
+    const successResponse = responseRecorder();
+    let successError = null;
+    await updateHandler(
+      {
+        params: { domainId: domain.id },
+        body: {
+          changes,
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        },
+      },
+      successResponse,
+      (err) => { successError = err; },
+    );
+
+    assert.equal(successError, null);
+    assert.equal(successResponse.payload.data.domain.httpsRedirect, true);
+    assert.equal(successResponse.payload.data.domain.canonicalRedirect, true);
+
+    // Verify persisted state in registry
+    const updatedDomain = await domainRegistry.getDomain(domain.id);
+    assert.equal(updatedDomain.httpsRedirect, true);
+    assert.equal(updatedDomain.canonicalRedirect, true);
+    assert.equal(updatedDomain.primaryDomain, 'redirect.example.com');
+    assert.deepEqual(updatedDomain.aliases, ['www.redirect.example.com']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});

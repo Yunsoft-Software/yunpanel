@@ -3,7 +3,7 @@ import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionTransitionPending, sessionVersion } from '../session-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Button, CollectionNotice, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, CollectionNotice, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
 import { siteHref } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { DomainAliasError, aliasErrorMessage } from './domain-alias-model.js';

@@ -146,6 +146,7 @@ test('one stable client rechecks live mutation state; duplicate submissions and 
 test('dirty draft warning, review modal, explicit save and refresh are wired', () => {
   for (const expected of ['useUnsavedChanges(dirty)', 'reloadHostingForm(formRef.current, value, live.current.domain)', 'createHostingForm(result.domain)', 'client.save(approved)', 'refreshAll()', '<HostingReview', '<Modal', 'onSave={save}']) assert.ok(source.includes(expected), expected);
   assert.match(source, /setPlan\(null\); setError\(null\); setNotice\(null\)/);
+  assert.match(source, /import \{[^}]*\bBadge\b[^}]*\} from '\.\/PanelKit\.jsx'/);
 });
 test('form links to existing publishing and never creates a second publishing workflow', () => {
   assert.match(source, /siteHref\(domain.id, 'domains'\)/);
