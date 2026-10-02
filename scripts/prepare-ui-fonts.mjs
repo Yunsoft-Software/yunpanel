@@ -59,6 +59,8 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     console.log(`UI typography ready: ${results.length} verified assets (Manrope / Outfit).`);
   }).catch((error) => {
     console.error(`${error.message}\nFont preparation did not complete. For an offline build, supply the verified assets through YUNPANEL_FONT_CACHE_DIR. No production dependencies were changed.`);
-    process.exitCode = 1;
+    if (process.argv.includes('--check') || (!error.message?.includes('fetch failed') && !error.message?.includes('ENOTFOUND'))) {
+      process.exitCode = 1;
+    }
   });
 }

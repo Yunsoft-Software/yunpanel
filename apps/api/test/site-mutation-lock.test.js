@@ -19,12 +19,15 @@ test('site mutation lock serializes the same Application across lock instances',
     const firstLock = createSiteMutationLock({ root, pid: 1111, signalProcess: alive });
     const secondLock = createSiteMutationLock({ root, pid: 2222, signalProcess: alive });
     let release;
+    let lockAcquired;
+    const lockAcquiredPromise = new Promise((resolve) => { lockAcquired = resolve; });
     const pending = new Promise((resolve) => { release = resolve; });
     const first = firstLock.withApplicationLock(applicationId, async () => {
+      lockAcquired();
       await pending;
       return 'first';
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await lockAcquiredPromise;
     await assert.rejects(
       () => secondLock.withApplicationLock(applicationId, async () => 'second'),
       (error) => error.code === 'site_mutation_locked' && error.status === 409,
@@ -42,12 +45,15 @@ test('different Application and Website identities do not share a lock file', as
   try {
     const lock = createSiteMutationLock({ root, pid: 1234, signalProcess: () => true });
     let release;
+    let lockAcquired;
+    const lockAcquiredPromise = new Promise((resolve) => { lockAcquired = resolve; });
     const pending = new Promise((resolve) => { release = resolve; });
     const first = lock.withApplicationLock(applicationId, async () => {
+      lockAcquired();
       await pending;
       return 'application';
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await lockAcquiredPromise;
     assert.equal(await lock.withWebsiteLock(websiteId, async () => 'website'), 'website');
     release();
     assert.equal(await first, 'application');
@@ -124,12 +130,15 @@ test('site mutation lock serializes the same Domain across lock instances', asyn
     const firstLock = createSiteMutationLock({ root, pid: 1111, signalProcess: alive });
     const secondLock = createSiteMutationLock({ root, pid: 2222, signalProcess: alive });
     let release;
+    let lockAcquired;
+    const lockAcquiredPromise = new Promise((resolve) => { lockAcquired = resolve; });
     const pending = new Promise((resolve) => { release = resolve; });
     const first = firstLock.withDomainLock(domainId, async () => {
+      lockAcquired();
       await pending;
       return 'first';
     });
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await lockAcquiredPromise;
     await assert.rejects(
       () => secondLock.withDomainLock(domainId, async () => 'second'),
       (error) => error.code === 'site_mutation_locked' && error.status === 409,
