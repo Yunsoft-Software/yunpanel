@@ -3,6 +3,11 @@ import { chmod, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { randomBytes, createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import { renderNftablesConfig, nftablesTemplatePolicy } from '@yunpanel/config-templates';
+import {
+  createFirewallStatusInspector,
+  inspectFirewallStatus,
+  FirewallStatusInspectorError,
+} from './firewall-status-inspector.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -757,6 +762,276 @@ export function migrateRulesetToManagedScope(rulesetContent, {
   });
 }
 
+export async function checkSystemdService(serviceName, {
+  systemctlPath = '/bin/systemctl',
+  execFn = execFileSafe,
+} = {}) {
+  let active = false;
+  let enabled = false;
+  let activeState = 'unknown';
+  let unitFileState = 'unknown';
+  let verified = false;
+  let error = null;
+
+  try {
+    const { stdout } = await execFn(systemctlPath, ['is-active', serviceName]);
+    const trimmed = (stdout || '').trim();
+    activeState = trimmed || 'unknown';
+    if (trimmed === 'active') {
+      active = true;
+      verified = true;
+    } else if (['inactive', 'failed', 'activating', 'deactivating'].includes(trimmed)) {
+      active = false;
+      verified = true;
+    } else if (trimmed === '') {
+      active = false;
+      activeState = 'inactive';
+      verified = true;
+    } else {
+      verified = false;
+      error = `Unrecognized is-active state: ${trimmed}`;
+    }
+  } catch (err) {
+    const stdoutTrimmed = (err.stdout || err.message || '').trim();
+    if (stdoutTrimmed === 'active') {
+      active = true;
+      activeState = 'active';
+      verified = true;
+    } else if (['inactive', 'failed'].includes(stdoutTrimmed) || /inactive|disabled|failed/i.test(stdoutTrimmed)) {
+      active = false;
+      activeState = stdoutTrimmed;
+      verified = true;
+    } else {
+      active = false;
+      activeState = 'unknown';
+      verified = false;
+      error = err.message;
+    }
+  }
+
+  try {
+    const { stdout } = await execFn(systemctlPath, ['is-enabled', serviceName]);
+    const trimmed = (stdout || '').trim();
+    unitFileState = trimmed || 'unknown';
+    if (trimmed === 'enabled') {
+      enabled = true;
+      verified = true;
+    } else if (['disabled', 'masked', 'static', 'indirect', 'generated', 'transient'].includes(trimmed)) {
+      enabled = false;
+      verified = true;
+    } else if (trimmed === '' || trimmed === 'inactive') {
+      enabled = false;
+      unitFileState = 'disabled';
+      verified = true;
+    } else {
+      if (!error) error = `Unrecognized is-enabled state: ${trimmed}`;
+    }
+  } catch (err) {
+    const stdoutTrimmed = (err.stdout || err.message || '').trim();
+    if (stdoutTrimmed === 'enabled') {
+      enabled = true;
+      unitFileState = 'enabled';
+      verified = true;
+    } else if (['disabled', 'masked', 'static'].includes(stdoutTrimmed) || /disabled|inactive|failed/i.test(stdoutTrimmed)) {
+      enabled = false;
+      unitFileState = stdoutTrimmed;
+      verified = true;
+    } else {
+      enabled = false;
+      unitFileState = 'unknown';
+      if (!error) error = err.message;
+    }
+  }
+
+  const status = error ? 'error' : (active && enabled ? 'active' : (active ? 'running_not_enabled' : (enabled ? 'enabled_not_running' : 'inactive')));
+
+  return Object.freeze({
+    serviceName,
+    active,
+    enabled,
+    activeState,
+    unitFileState,
+    verified,
+    status,
+    error,
+  });
+}
+
+export async function inspectConflictingFirewalls({
+  ufwPath = '/usr/sbin/ufw',
+  systemctlPath = '/bin/systemctl',
+  statFn = stat,
+  execFn = execFileSafe,
+} = {}) {
+  let ufwInstalled = false;
+  let ufwServiceActive = false;
+  let ufwStatusActive = false;
+  let ufwStatus = 'inactive';
+  let ufwError = null;
+
+  let firewalldInstalled = false;
+  let firewalldActive = false;
+  let firewalldStatus = 'inactive';
+  let firewalldError = null;
+
+  // Check UFW binary presence
+  try {
+    await statFn(ufwPath);
+    ufwInstalled = true;
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      ufwInstalled = false;
+    } else {
+      ufwInstalled = 'unknown';
+      ufwError = `Failed to stat UFW binary: ${err.message}`;
+    }
+  }
+
+  if (ufwInstalled === true) {
+    const ufwService = await checkSystemdService('ufw', { systemctlPath, execFn });
+    ufwServiceActive = ufwService.active;
+    try {
+      const { stdout } = await execFn(ufwPath, ['status']);
+      if (typeof stdout === 'string') {
+        if (/status:\s*active/i.test(stdout)) {
+          ufwStatusActive = true;
+          ufwStatus = 'active';
+        } else if (/status:\s*inactive/i.test(stdout)) {
+          ufwStatusActive = false;
+          ufwStatus = 'inactive';
+        } else {
+          ufwStatusActive = 'unknown';
+          ufwStatus = 'unknown';
+          ufwError = `Unrecognized ufw status output: ${stdout.trim()}`;
+        }
+      } else {
+        ufwStatusActive = 'unknown';
+        ufwStatus = 'unknown';
+        ufwError = 'Empty or non-string ufw status output';
+      }
+    } catch (err) {
+      ufwStatusActive = 'unknown';
+      ufwStatus = 'error';
+      ufwError = `Failed to execute ufw status: ${err.message}`;
+    }
+  } else if (ufwInstalled === 'unknown') {
+    ufwStatusActive = 'unknown';
+    ufwStatus = 'error';
+  }
+
+  // Check firewalld service
+  try {
+    const firewalldService = await checkSystemdService('firewalld', { systemctlPath, execFn });
+    if (firewalldService.error && !firewalldService.verified) {
+      firewalldInstalled = 'unknown';
+      firewalldActive = 'unknown';
+      firewalldStatus = 'error';
+      firewalldError = firewalldService.error;
+    } else {
+      firewalldInstalled = firewalldService.active || firewalldService.enabled;
+      firewalldActive = firewalldService.active;
+      firewalldStatus = firewalldService.active ? 'active' : 'inactive';
+    }
+  } catch (err) {
+    firewalldInstalled = 'unknown';
+    firewalldActive = 'unknown';
+    firewalldStatus = 'error';
+    firewalldError = err.message;
+  }
+
+  const conflictDetected = ufwStatusActive === true || firewalldActive === true;
+  let conflictStatus = 'none';
+  if (conflictDetected) {
+    conflictStatus = 'conflict';
+  } else if (ufwStatus === 'error' || firewalldStatus === 'error' || ufwStatusActive === 'unknown' || firewalldActive === 'unknown') {
+    conflictStatus = 'unknown';
+  }
+
+  const errors = [ufwError, firewalldError].filter(Boolean);
+  const error = errors.length > 0 ? errors.join('; ') : null;
+
+  return Object.freeze({
+    ufw: Object.freeze({
+      installed: ufwInstalled,
+      serviceActive: ufwServiceActive,
+      statusActive: ufwStatusActive,
+      status: ufwStatus,
+      error: ufwError,
+    }),
+    firewalld: Object.freeze({
+      installed: firewalldInstalled,
+      active: firewalldActive,
+      status: firewalldStatus,
+      error: firewalldError,
+    }),
+    conflictDetected,
+    conflictStatus,
+    error,
+  });
+}
+
+export async function getLiveRuleset({
+  nftPath = '/usr/sbin/nft',
+  execFn = execFileSafe,
+  requireSnapshot = false,
+} = {}) {
+  try {
+    const { stdout } = await execFn(nftPath, ['list', 'ruleset']);
+    return stdout;
+  } catch (error) {
+    if (requireSnapshot) {
+      throw new NftablesManagerError(
+        'ruleset_snapshot_failed',
+        `Failed to snapshot live nftables ruleset: ${error.stderr || error.stdout || error.message}`,
+      );
+    }
+    return null;
+  }
+}
+
+export function parseRulesetMetadata(rulesetText, readError = null) {
+  if (readError !== null || rulesetText === null) {
+    return Object.freeze({
+      loaded: 'unknown',
+      tableNames: [],
+      hasYunpanelTable: false,
+      hasCrowdsecSets: false,
+      status: 'error',
+      error: readError || 'Ruleset read failed or ruleset is unavailable',
+    });
+  }
+
+  if (typeof rulesetText !== 'string' || rulesetText.trim() === '') {
+    return Object.freeze({
+      loaded: false,
+      tableNames: [],
+      hasYunpanelTable: false,
+      hasCrowdsecSets: false,
+      status: 'empty',
+      error: null,
+    });
+  }
+
+  const tableNames = [];
+  const tableRegex = /table\s+(?:inet|ip|ip6|bridge|netdev)\s+([a-zA-Z0-9_-]+)/g;
+  let match;
+  while ((match = tableRegex.exec(rulesetText)) !== null) {
+    tableNames.push(match[1]);
+  }
+
+  const hasYunpanelTable = tableNames.includes('yunpanel');
+  const hasCrowdsecSets = /set\s+crowdsec(?:6)?-blacklists/i.test(rulesetText);
+
+  return Object.freeze({
+    loaded: tableNames.length > 0,
+    tableNames,
+    hasYunpanelTable,
+    hasCrowdsecSets,
+    status: tableNames.length > 0 ? 'loaded' : 'empty',
+    error: null,
+  });
+}
+
 export function createNftablesManager({
   nftPath = '/usr/sbin/nft',
   configPath = nftablesTemplatePolicy.configPath,
@@ -783,6 +1058,13 @@ export function createNftablesManager({
   const resolvedDefaultSshPorts = normalizeSshPorts(initialPortInput, [RESOLVED_DEFAULT_SSH_PORT]);
   const resolvedDefaultSshPort = resolvedDefaultSshPorts[0];
 
+  const checkService = (serviceName, opts = {}) => checkSystemdService(serviceName, { systemctlPath, execFn, ...opts });
+  const inspectConflicts = (opts = {}) => inspectConflictingFirewalls({ ufwPath, systemctlPath, statFn, execFn, ...opts });
+  const getRuleset = (options = {}) => {
+    const { requireSnapshot = false } = (typeof options === 'boolean' ? { requireSnapshot: options } : options);
+    return getLiveRuleset({ nftPath, execFn, requireSnapshot });
+  };
+
   async function atomicWrite(targetPath, content, mode = 0o755) {
     const tempPath = `${targetPath}.${process.pid}.${randomBytes(6).toString('hex')}.tmp`;
     try {
@@ -793,112 +1075,6 @@ export function createNftablesManager({
       try { await rmFn(tempPath, { force: true }); } catch {}
       throw error;
     }
-  }
-
-  async function checkSystemdService(serviceName) {
-    let active = false;
-    let enabled = false;
-    try {
-      const { stdout } = await execFn(systemctlPath, ['is-active', serviceName]);
-      active = stdout.trim() === 'active';
-    } catch (err) {
-      active = err.stdout?.trim() === 'active';
-    }
-    try {
-      const { stdout } = await execFn(systemctlPath, ['is-enabled', serviceName]);
-      enabled = stdout.trim() === 'enabled';
-    } catch (err) {
-      enabled = err.stdout?.trim() === 'enabled';
-    }
-    return { active, enabled };
-  }
-
-  async function inspectConflictingFirewalls() {
-    let ufwInstalled = false;
-    let ufwServiceActive = false;
-    let ufwStatusActive = false;
-    let firewalldInstalled = false;
-    let firewalldActive = false;
-
-    // Check UFW
-    try {
-      await statFn(ufwPath);
-      ufwInstalled = true;
-    } catch {
-      ufwInstalled = false;
-    }
-
-    if (ufwInstalled) {
-      const ufwService = await checkSystemdService('ufw');
-      ufwServiceActive = ufwService.active;
-      try {
-        const { stdout } = await execFn(ufwPath, ['status']);
-        ufwStatusActive = /status:\s*active/i.test(stdout);
-      } catch {
-        ufwStatusActive = false;
-      }
-    }
-
-    // Check firewalld
-    try {
-      const firewalldService = await checkSystemdService('firewalld');
-      firewalldInstalled = firewalldService.active || firewalldService.enabled;
-      firewalldActive = firewalldService.active;
-    } catch {
-      firewalldActive = false;
-    }
-
-    const conflictDetected = ufwStatusActive || firewalldActive;
-
-    return Object.freeze({
-      ufw: Object.freeze({
-        installed: ufwInstalled,
-        serviceActive: ufwServiceActive,
-        statusActive: ufwStatusActive,
-      }),
-      firewalld: Object.freeze({
-        installed: firewalldInstalled,
-        active: firewalldActive,
-      }),
-      conflictDetected,
-    });
-  }
-
-  async function getLiveRuleset() {
-    try {
-      const { stdout } = await execFn(nftPath, ['list', 'ruleset']);
-      return stdout;
-    } catch (error) {
-      return '';
-    }
-  }
-
-  function parseRulesetMetadata(rulesetText) {
-    if (!rulesetText || typeof rulesetText !== 'string') {
-      return Object.freeze({
-        loaded: false,
-        tableNames: [],
-        hasYunpanelTable: false,
-        hasCrowdsecSets: false,
-      });
-    }
-
-    const tableNames = [];
-    const tableRegex = /table\s+(?:inet|ip|ip6|bridge|netdev)\s+([a-zA-Z0-9_-]+)/g;
-    let match;
-    while ((match = tableRegex.exec(rulesetText)) !== null) {
-      tableNames.push(match[1]);
-    }
-
-    const hasYunpanelTable = tableNames.includes('yunpanel');
-    const hasCrowdsecSets = /set\s+crowdsec(?:6)?-blacklists/i.test(rulesetText);
-
-    return Object.freeze({
-      loaded: tableNames.length > 0,
-      tableNames,
-      hasYunpanelTable,
-      hasCrowdsecSets,
-    });
   }
 
   async function inspectNftables() {
@@ -914,10 +1090,17 @@ export function createNftablesManager({
       satisfied = false;
     }
 
-    const serviceStatus = await checkSystemdService('nftables');
-    const conflictingFirewalls = await inspectConflictingFirewalls();
-    const liveRuleset = await getLiveRuleset();
-    const rulesetMetadata = parseRulesetMetadata(liveRuleset);
+    const serviceStatus = await checkService('nftables');
+    const conflictingFirewalls = await inspectConflicts();
+    let liveRuleset = null;
+    let rulesetReadError = null;
+    try {
+      const { stdout } = await execFn(nftPath, ['list', 'ruleset']);
+      liveRuleset = stdout;
+    } catch (err) {
+      rulesetReadError = err.message;
+    }
+    const rulesetMetadata = parseRulesetMetadata(liveRuleset, rulesetReadError);
     const dockerFirewall = await inspectDockerFirewall({ execFn, nftPath });
     const crowdsecFirewall = await inspectCrowdsecFirewall({ execFn, nftPath, systemctlPath });
 
@@ -952,6 +1135,22 @@ export function createNftablesManager({
       });
     }
 
+    const statusInspector = createFirewallStatusInspector({
+      nftPath,
+      configPath,
+      systemctlPath,
+      ufwPath,
+      execFn,
+      statFn,
+      readFileFn,
+    });
+    let firewallStatus = null;
+    try {
+      firewallStatus = await statusInspector.inspectStatus();
+    } catch {
+      firewallStatus = null;
+    }
+
     return Object.freeze({
       satisfied,
       binaryPath: nftPath,
@@ -963,6 +1162,7 @@ export function createNftablesManager({
       managedBoundary,
       ruleset: rulesetMetadata,
       sshListeners,
+      firewallStatus,
       defaultSshPort: resolvedDefaultSshPort,
       defaultSshPorts: resolvedDefaultSshPorts,
     });
@@ -1045,13 +1245,21 @@ export function createNftablesManager({
     persist = true,
     enableService = true,
     verifyListeners = false,
+    requireSnapshot = true,
+    requireServiceVerification = false,
   } = {}) {
     // 1. Check conflicting firewalls
-    const conflicts = await inspectConflictingFirewalls();
+    const conflicts = await inspectConflicts();
     if (conflicts.conflictDetected && !forceConflictOverride) {
       throw new NftablesManagerError(
         'conflicting_firewall_detected',
         'Conflicting firewall (UFW or firewalld) is currently active. UFW must be disabled to ensure nftables remains the single firewall authority.',
+      );
+    }
+    if (conflicts.conflictStatus === 'unknown' && !forceConflictOverride) {
+      throw new NftablesManagerError(
+        'conflicting_firewall_unknown',
+        `Cannot reliably verify conflicting firewalls (UFW/firewalld read error: ${conflicts.error || 'unknown error'}). Aborting to fail-closed.`,
       );
     }
 
@@ -1060,8 +1268,18 @@ export function createNftablesManager({
       ?? renderOptions.sshPorts ?? renderOptions.sshPort;
     const targetPorts = normalizeSshPorts(explicitPortInput, resolvedDefaultSshPorts);
 
-    // 3. Snapshot current ruleset for element preservation and scoped rollback
-    const currentRuleset = await getLiveRuleset();
+    // 3. Snapshot current ruleset for element preservation and scoped rollback (AC-4 fail-closed)
+    let currentRuleset = null;
+    try {
+      currentRuleset = await getRuleset({ requireSnapshot: true });
+    } catch (snapshotError) {
+      if (requireSnapshot !== false) {
+        throw new NftablesManagerError(
+          'ruleset_snapshot_failed',
+          `Failed to snapshot current ruleset before applying changes: ${snapshotError.message}`,
+        );
+      }
+    }
     const backupRulesetSha256 = currentRuleset ? computeSha256(currentRuleset) : null;
 
     // 4. Resolve candidate content
@@ -1124,22 +1342,59 @@ export function createNftablesManager({
     }
 
     // 9. Enable and start nftables.service if requested (only when persisted)
+    // AC-4: Failed service operations must NOT be swallowed!
     if (enableService && persist) {
       try {
         await execFn(systemctlPath, ['enable', 'nftables']);
+      } catch (svcError) {
+        throw new NftablesManagerError(
+          'service_operation_failed',
+          `Failed to enable nftables service: ${svcError.stderr || svcError.stdout || svcError.message}`,
+        );
+      }
+      try {
         await execFn(systemctlPath, ['start', 'nftables']);
       } catch (svcError) {
-        // Service enable/start failed, but ruleset is loaded live
+        throw new NftablesManagerError(
+          'service_operation_failed',
+          `Failed to start nftables service: ${svcError.stderr || svcError.stdout || svcError.message}`,
+        );
       }
     }
 
-    // 10. Check CrowdSec bouncer status without needlessly restarting unless inactive
+    // 10. AC-1: Obtain verified systemd service evidence
+    const verifiedService = await checkService('nftables');
+    if (requireServiceVerification && (!verifiedService.verified || !verifiedService.enabled)) {
+      throw new NftablesManagerError(
+        'service_verification_failed',
+        `Systemd service verification failed after enable/start: ${verifiedService.error || `unit is not enabled (state: ${verifiedService.unitFileState})`}`,
+      );
+    }
+
+    // 11. AC-3: Independent reports for live apply, persistent file, boot loading, and CrowdSec bouncer
+    const statusInspector = createFirewallStatusInspector({
+      nftPath,
+      configPath,
+      systemctlPath,
+      ufwPath,
+      execFn,
+      statFn,
+      readFileFn,
+    });
+    let liveApplyReport = null;
+    let persistentFileReport = null;
+    let bootLoadingReport = null;
+    let crowdsecBouncerReport = null;
+    let firewallStatus = null;
     try {
-      const { stdout } = await execFn(systemctlPath, ['is-active', 'crowdsec-firewall-bouncer']);
-      if (stdout.trim() === 'active') {
-        // CrowdSec tables and sets remain untouched due to scoped ruleset application
-      }
-    } catch {}
+      firewallStatus = await statusInspector.inspectStatus({ expectedContent: contentToApply });
+      liveApplyReport = firewallStatus.liveApply;
+      persistentFileReport = firewallStatus.persistentFile;
+      bootLoadingReport = firewallStatus.bootLoading;
+      crowdsecBouncerReport = firewallStatus.crowdsecBouncer;
+    } catch {
+      bootLoadingReport = verifiedService;
+    }
 
     return Object.freeze({
       success: true,
@@ -1147,7 +1402,16 @@ export function createNftablesManager({
       appliedRulesetSha256: computeSha256(contentToApply),
       backupRulesetSha256,
       persisted: persist,
-      serviceEnabled: enableService && persist,
+      // AC-1: serviceEnabled is derived STRICTLY from verified systemd evidence, never request option
+      serviceEnabled: verifiedService.enabled,
+      serviceActive: verifiedService.active,
+      systemdEvidence: verifiedService,
+      // AC-3: Independent reports
+      liveApply: liveApplyReport,
+      persistentFile: persistentFileReport,
+      bootLoading: bootLoadingReport,
+      crowdsecBouncer: crowdsecBouncerReport,
+      firewallStatus,
       allowedSshPort: targetPorts[0],
       allowedSshPorts: targetPorts,
       sshPort: targetPorts[0],
@@ -1190,7 +1454,7 @@ export function createNftablesManager({
     let contentToRestore = sanitizeManagedRuleset(previousRuleset);
 
     // If live ruleset has CrowdSec bans, preserve them during rollback too
-    const currentRuleset = await getLiveRuleset();
+    const currentRuleset = await getRuleset();
     if (currentRuleset) {
       contentToRestore = preserveCrowdsecSetElements(contentToRestore, currentRuleset);
     }
@@ -1234,8 +1498,8 @@ export function createNftablesManager({
       existingContent = '';
     }
 
-    const liveRuleset = await getLiveRuleset();
-    const sourceContent = existingContent.trim() ? existingContent : (liveRuleset.trim() ? liveRuleset : '');
+    const liveRuleset = await getRuleset();
+    const sourceContent = existingContent.trim() ? existingContent : (liveRuleset?.trim() ? liveRuleset : '');
 
     if (!sourceContent) {
       return Object.freeze({
@@ -1275,11 +1539,34 @@ export function createNftablesManager({
 
   return Object.freeze({
     inspectNftables,
+    inspectFirewallStatus: (opts) => inspectFirewallStatus({
+      nftPath,
+      configPath,
+      systemctlPath,
+      ufwPath,
+      execFn,
+      statFn,
+      readFileFn,
+      ...opts,
+    }),
+    inspectStatus: (opts) => inspectFirewallStatus({
+      nftPath,
+      configPath,
+      systemctlPath,
+      ufwPath,
+      execFn,
+      statFn,
+      readFileFn,
+      ...opts,
+    }),
     validateRulesetCandidate,
     applyRuleset,
     rollbackRuleset,
-    getLiveRuleset,
+    getLiveRuleset: getRuleset,
     migrateFirewallConfiguration,
+    inspectConflictingFirewalls: inspectConflicts,
+    checkSystemdService: checkService,
+    parseRulesetMetadata,
     inspectDockerFirewall: () => inspectDockerFirewall({ execFn, nftPath }),
     inspectCrowdsecFirewall: () => inspectCrowdsecFirewall({ execFn, nftPath, systemctlPath }),
     verifyDockerCoexistence: (candidate, opts) => verifyDockerCoexistence(candidate, opts),
@@ -1333,6 +1620,10 @@ export const nftablesManagerInternals = Object.freeze({
   inspectDockerFirewall,
   inspectCrowdsecFirewall,
   migrateRulesetToManagedScope,
+  checkSystemdService,
+  inspectConflictingFirewalls,
+  getLiveRuleset,
+  parseRulesetMetadata,
   execFileSafe,
   computeSha256,
 });

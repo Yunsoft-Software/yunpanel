@@ -433,9 +433,18 @@ export {
   inspectDockerFirewall,
   inspectCrowdsecFirewall,
   migrateRulesetToManagedScope,
+  checkSystemdService,
+  inspectConflictingFirewalls,
+  getLiveRuleset,
+  parseRulesetMetadata,
 } from './nftables-manager.js';
 export {
   createCrowdsecManager,
   CrowdsecManagerError,
 } from './crowdsec-manager.js';
-
+export {
+  createFirewallStatusInspector,
+  inspectFirewallStatus,
+  FirewallStatusInspectorError,
+  firewallStatusInspectorInternals,
+} from './firewall-status-inspector.js';
