@@ -115,11 +115,24 @@ export function createSiteMutationLock({
         let existing;
         try {
           existing = parseRecord(await readFile(target, 'utf8'), type, id);
-        } catch {
+        } catch (readError) {
+          if (readError?.code === 'ENOENT') {
+            continue;
+          }
           throw new SiteMutationLockError('site_mutation_lock_unreadable', 'Existing site mutation lock requires inspection', 503);
         }
         if (!existing) {
-          throw new SiteMutationLockError('site_mutation_lock_unreadable', 'Existing site mutation lock is invalid', 503);
+          await new Promise((r) => setTimeout(r, 25));
+          try {
+            existing = parseRecord(await readFile(target, 'utf8'), type, id);
+          } catch (retryError) {
+            if (retryError?.code === 'ENOENT') {
+              continue;
+            }
+          }
+          if (!existing) {
+            throw new SiteMutationLockError('site_mutation_lock_unreadable', 'Existing site mutation lock is invalid', 503);
+          }
         }
         if (processAlive(existing.pid, signalProcess)) {
           throw new SiteMutationLockError('site_mutation_locked', 'Another process is changing this site resource', 409);
