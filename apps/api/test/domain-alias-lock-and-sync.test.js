@@ -12,8 +12,11 @@ import { createDomainRegistry, DomainRegistryError } from '../src/domain-registr
 import { createJobRegistry } from '../src/job-registry.js';
 import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
 import { mailboxAliasReferences } from '../src/mailbox-alias-references.js';
+import { createMailDiscoveryEndpointResolver } from '../src/mail-discovery-endpoint-resolver.js';
+import { createMailDiscoveryService } from '../src/mail-discovery-service.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
 
 function responseRecorder() {
   return {
@@ -526,6 +529,392 @@ test('hosting redirect settings update acquires backend resource lock and enforc
     assert.equal(updatedDomain.canonicalRedirect, true);
     assert.equal(updatedDomain.primaryDomain, 'redirect.example.com');
     assert.deepEqual(updatedDomain.aliases, ['www.redirect.example.com']);
+  } finally {
+    await rm(root, { recursive: true, force: true });
+  }
+});
+
+test('mail discovery and endpoint resolver integrate with domain alias lifecycle and enforce fail-closed routing', async () => {
+  const serverId = randomUUID();
+  const websiteId = randomUUID();
+  const webDomainId = randomUUID();
+  const mailDomainId = randomUUID();
+  const certificateId = randomUUID();
+  const operationId = randomUUID();
+  const checksum = 'a'.repeat(64);
+
+  const mailDomain = {
+    id: mailDomainId,
+    webDomainId,
+    domainName: 'example.com',
+    managementMode: 'local',
+    status: 'enabled',
+    revision: 1,
+  };
+
+  const domain = {
+    id: webDomainId,
+    serverId,
+    websiteId,
+    primaryDomain: 'example.com',
+    aliases: ['alias.example.com'],
+    state: 'active',
+    httpsMode: 'managed',
+    httpsRedirect: true,
+    canonicalRedirect: false,
+    certificateId,
+    desiredRevision: 2,
+    stagedChecksum: checksum,
+  };
+
+  const mailDomainRegistry = {
+    listMailDomains: async () => [mailDomain],
+  };
+
+  const domainRegistry = {
+    getDomain: async (id) => (id === webDomainId ? domain : null),
+  };
+
+  const mailServiceIdentityRegistry = {
+    getForServer: async (id) => (id === serverId ? {
+      serverId,
+      hostname: 'mail.example.com',
+      ready: true,
+      revision: 1,
+    } : null),
+  };
+
+  const mailDiscoveryService = createMailDiscoveryService({
+    mailDomainRegistry,
+    domainRegistry,
+    mailServiceIdentityRegistry,
+  });
+
+  // 1. Mail discovery service resolves state for canonical primary domain
+  const state = await mailDiscoveryService.resolveState('example.com');
+  assert.equal(state.domainName, 'example.com');
+  assert.equal(state.serviceHostname, 'mail.example.com');
+
+  // 2. Autoconfig and autodiscover return XML protocols with STARTTLS ports
+  const autoconfig = await mailDiscoveryService.autoconfig({
+    domainName: 'example.com',
+    emailAddress: 'user@example.com',
+  });
+  assert.ok(autoconfig.body.includes('<hostname>mail.example.com</hostname>'));
+  assert.ok(autoconfig.body.includes('<port>143</port>'));
+  assert.ok(autoconfig.body.includes('<port>587</port>'));
+
+  const autodiscover = await mailDiscoveryService.autodiscover({
+    domainName: 'example.com',
+    emailAddress: 'user@example.com',
+  });
+  assert.ok(autodiscover.body.includes('<Server>mail.example.com</Server>'));
+
+  // 3. Address belonging to alias is rejected by discovery service fail-closed
+  await assert.rejects(
+    () => mailDiscoveryService.autoconfig({
+      domainName: 'example.com',
+      emailAddress: 'user@alias.example.com',
+    }),
+    (err) => err.code === 'mail_discovery_address_domain_mismatch' && err.status === 404,
+  );
+
+  // 4. Mail discovery endpoint resolver verifies runtime and matching Website provisioning operation
+  let runtimeSocketReady = true;
+  const mailDiscoveryRuntime = {
+    inspect: async () => ({
+      version: 1,
+      ready: runtimeSocketReady,
+      socketPath: '/run/yunpanel-mail-discovery/discovery.sock',
+      sideEffects: false,
+    }),
+  };
+
+  let provisioningRevision = 2;
+  const websiteProvisioningRegistry = {
+    listForWebsite: async (wsId) => (wsId === websiteId ? [
+      {
+        operationId,
+        websiteId,
+        steps: [
+          {
+            id: 'nginx',
+            kind: 'nginx',
+            state: 'succeeded',
+            intent: {
+              websiteId,
+              primaryDomain: 'example.com',
+              aliases: ['alias.example.com'],
+              mailDiscoverySocketPath: '/run/yunpanel-mail-discovery/discovery.sock',
+              targetType: 'static',
+              target: { root: '/var/www/site' },
+            },
+          },
+          {
+            id: 'tls_activation',
+            kind: 'tls_activation',
+            state: 'succeeded',
+            evidence: {
+              satisfied: true,
+              adapter: 'managed-certificate-nginx',
+              domainId: webDomainId,
+              certificateId,
+              domainRevision: provisioningRevision,
+              nginxChecksum: checksum,
+              nginxConfigName: 'yunpanel-example.com.conf',
+              httpsRedirect: true,
+              canonicalRedirect: false,
+            },
+          },
+        ],
+      },
+    ] : []),
+  };
+
+  const resolver = createMailDiscoveryEndpointResolver({
+    mailDiscoveryService,
+    mailDiscoveryRuntime,
+    websiteProvisioningRegistry,
+  });
+
+  // Succeeded provisioning matches current domain desiredRevision (2)
+  const resolved = await resolver.resolve({ mailDomain, domain });
+  assert.ok(resolved);
+  assert.equal(resolved.autodiscover.hostname, 'example.com');
+  assert.equal(resolved.autoconfig.hostname, 'example.com');
+
+  // 5. When domain alias configuration updates, desiredRevision increments (e.g. to 3)
+  domain.desiredRevision = 3;
+  // Resolver immediately fails closed (returns null) because TLS route has not been staged/activated for revision 3
+  const staleResolved = await resolver.resolve({ mailDomain, domain });
+  assert.equal(staleResolved, null, 'Stale TLS route must not advertise discovery endpoints');
+
+  // 6. When socket runtime is unavailable, resolver returns null
+  provisioningRevision = 3;
+  runtimeSocketReady = false;
+  const runtimeDownResolved = await resolver.resolve({ mailDomain, domain });
+  assert.equal(runtimeDownResolved, null, 'Unavailable runtime socket must fail closed');
+});
+
+test('hosting settings beyond basic redirects and T-DEV-HOSTING enforce tenant boundaries, locks and validation', async () => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-hosting-ext-test-'));
+  try {
+    const lock = createSiteMutationLock({ root, pid: 3001, signalProcess: () => true });
+    const serverId = randomUUID();
+    const websiteA = randomUUID();
+    const websiteB = randomUUID();
+
+    const websiteStore = new Map([
+      [websiteA, { id: websiteA, serverId, runtimeType: 'static', documentRoot: '/var/www/siteA', customerId: 'cust-1' }],
+      [websiteB, { id: websiteB, serverId, runtimeType: 'php', applicationId: randomUUID(), customerId: 'cust-2' }],
+    ]);
+
+    const domainRegistry = createDomainRegistry({
+      getWebsite: async (id) => websiteStore.get(id) ?? null,
+      serverExists: async (id) => id === serverId,
+      siteMutationLock: lock,
+    });
+
+    // 1. Create domain bound to static websiteA
+    const domainA = await domainRegistry.createDomain({
+      serverId,
+      websiteId: websiteA,
+      primaryDomain: 'site-a.example.com',
+      aliases: ['www.site-a.example.com'],
+      targetType: 'static',
+      target: { root: '/var/www/siteA' },
+      httpsMode: 'managed',
+      httpsRedirect: false,
+      canonicalRedirect: false,
+      nginxSettings: { spaFallback: true, headers: [] },
+    });
+
+    // 2. Validate websiteTargetMatches prevents targetType / runtime mismatch
+    await assert.rejects(
+      () => domainRegistry.createDomain({
+        serverId,
+        websiteId: websiteA,
+        primaryDomain: 'mismatch.example.com',
+        targetType: 'php',
+        target: { applicationId: randomUUID() },
+      }),
+      (err) => err instanceof DomainRegistryError && err.code === 'domain_website_target_mismatch',
+    );
+
+    // 3. Setting httpsRedirect: true when httpsMode is 'off' fails closed
+    await assert.rejects(
+      () => domainRegistry.createDomain({
+        serverId,
+        websiteId: websiteA,
+        primaryDomain: 'no-ssl.example.com',
+        targetType: 'static',
+        target: { root: '/var/www/siteA' },
+        httpsMode: 'off',
+        httpsRedirect: true,
+      }),
+      (err) => err instanceof DomainRegistryError && err.code === 'invalid_redirect_policy',
+    );
+
+    // 4. Updating nginxSettings beyond basic redirects (custom headers and spaFallback)
+    const nginxPreview = await domainRegistry.previewDomainUpdate({
+      domainId: domainA.id,
+      changes: {
+        nginxSettings: {
+          spaFallback: true,
+          headers: [{ name: 'X-Content-Type-Options', value: 'nosniff', always: false }],
+        },
+      },
+    });
+    assert.equal(nginxPreview.next.nginxSettings.headers.length, 1);
+    assert.equal(nginxPreview.next.nginxSettings.headers[0].name, 'X-Content-Type-Options');
+
+    const updateHandler = createDomainUpdateHandler(domainRegistry, {
+      siteMutationLock: lock,
+      localServerId: serverId,
+    });
+
+    const updateResp = responseRecorder();
+    await updateHandler(
+      {
+        params: { domainId: domainA.id },
+        body: {
+          changes: {
+            nginxSettings: {
+              spaFallback: true,
+              headers: [{ name: 'X-Content-Type-Options', value: 'nosniff', always: false }],
+            },
+          },
+          previewDigest: nginxPreview.previewDigest,
+          confirmation: nginxPreview.confirmation,
+        },
+      },
+      updateResp,
+      (err) => { throw err; },
+    );
+    assert.equal(updateResp.payload.data.domain.nginxSettings.headers[0].name, 'X-Content-Type-Options');
+
+    // 5. Active jobs in jobRegistry block domain update with 409 domain_update_operation_conflict
+    const jobRegistry = {
+      listJobs: async (filter) => {
+        if (!filter || (filter.resourceType === 'domain' && filter.resourceId === domainA.id)) {
+          return [{ id: 'job-1', status: 'queued', resourceType: 'domain', resourceId: domainA.id }];
+        }
+        return [];
+      },
+    };
+
+    const blockedHandler = createDomainUpdateHandler(domainRegistry, {
+      siteMutationLock: lock,
+      localServerId: serverId,
+      jobRegistry,
+    });
+
+    let conflictError = null;
+    await blockedHandler(
+      {
+        params: { domainId: domainA.id },
+        body: {
+          changes: { httpsRedirect: true },
+          previewDigest: '0'.repeat(64),
+          confirmation: 'dummy',
+        },
+      },
+      responseRecorder(),
+      (err) => { conflictError = err; },
+    );
+    assert.equal(conflictError?.code, 'domain_update_operation_conflict');
+    assert.equal(conflictError?.status, 409);
+
+    // 6. Tenant boundary isolation (createSiteResourceBoundary):
+    const siteResourceBoundary = createSiteResourceBoundary({
+      websiteRegistry: {
+        getWebsite: async (id) => websiteStore.get(id) ?? null,
+        listWebsites: async () => Array.from(websiteStore.values()),
+      },
+      domainRegistry,
+      localServerId: serverId,
+    });
+
+    async function checkBoundary(req) {
+      let statusCode = 200;
+      let responseBody = null;
+      let nextCalled = false;
+      const res = {
+        status(s) { statusCode = s; return this; },
+        json(b) { responseBody = b; return this; },
+        setHeader() {},
+      };
+      await siteResourceBoundary(req, res, () => { nextCalled = true; });
+      return { statusCode, responseBody, nextCalled };
+    }
+
+    // Customer 1 accessing own domain A -> allowed
+    const customerAllowed = await checkBoundary({
+      method: 'GET',
+      url: `/api/domains/${domainA.id}`,
+      auth: {
+        user: { role: 'customer', id: 'cust-1', active: true, websiteIds: [websiteA] },
+        access: { mode: 'site_management' },
+        security: { managementAllowed: true },
+      },
+    });
+    assert.equal(customerAllowed.nextCalled, true);
+
+    // Customer 1 attempting to access/update domain B of Customer 2 -> 403 site_scope_forbidden
+    const domainB = await domainRegistry.createDomain({
+      serverId,
+      websiteId: websiteB,
+      primaryDomain: 'site-b.example.com',
+      aliases: [],
+      targetType: 'php',
+      target: { applicationId: websiteStore.get(websiteB).applicationId },
+      httpsMode: 'managed',
+    });
+
+    const crossCustomerDenied = await checkBoundary({
+      method: 'PATCH',
+      url: `/api/domains/${domainB.id}`,
+      auth: {
+        user: { role: 'customer', id: 'cust-1', active: true, websiteIds: [websiteA] },
+        access: { mode: 'site_management' },
+        security: { managementAllowed: true },
+      },
+    });
+    assert.equal(crossCustomerDenied.statusCode, 403);
+    assert.equal(crossCustomerDenied.responseBody?.error?.code, 'site_scope_forbidden');
+    assert.equal(crossCustomerDenied.nextCalled, false);
+
+    // Inactive customer account -> 403 site_scope_forbidden
+    const inactiveDenied = await checkBoundary({
+      method: 'GET',
+      url: `/api/domains/${domainA.id}`,
+      auth: {
+        user: { role: 'customer', id: 'cust-1', active: false, websiteIds: [websiteA] },
+        access: { mode: 'site_management' },
+        security: { managementAllowed: true },
+      },
+    });
+    assert.equal(inactiveDenied.statusCode, 403);
+    assert.equal(inactiveDenied.responseBody?.error?.code, 'site_scope_forbidden');
+
+    // Unattached domain (no websiteId) -> 403 site_scope_forbidden for site-scoped accounts
+    const unattachedDomain = await domainRegistry.createDomain({
+      serverId,
+      primaryDomain: 'unattached.example.com',
+      targetType: 'static',
+      target: { root: '/var/www/unattached' },
+    });
+    const unattachedDenied = await checkBoundary({
+      method: 'GET',
+      url: `/api/domains/${unattachedDomain.id}`,
+      auth: {
+        user: { role: 'customer', id: 'cust-1', active: true, websiteIds: [websiteA] },
+        access: { mode: 'site_management' },
+        security: { managementAllowed: true },
+      },
+    });
+    assert.equal(unattachedDenied.statusCode, 403);
+    assert.equal(unattachedDenied.responseBody?.error?.code, 'site_scope_forbidden');
   } finally {
     await rm(root, { recursive: true, force: true });
   }
