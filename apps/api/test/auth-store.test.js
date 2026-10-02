@@ -22,20 +22,7 @@ async function owner(store) {
 }
 const login = (store, extra = {}) => store.login({ username: 'admin', password, ...extra });
 
-test('__find_failures__', async () => {
-  const cp = await import('node:child_process');
-  const cleanEnv = { ...process.env };
-  delete cleanEnv.NODE_TEST_CONTEXT;
-  for (const f of ['test/auth-password-reset.test.js', 'test/website-production-wiring.test.js']) {
-    try {
-      const out = cp.execSync(`node --test ${f}`, { encoding: 'utf8', env: cleanEnv });
-      console.log('CHECK_PASS:', f, '\n' + out);
-    } catch (err) {
-      console.log('CHECK_FAIL:', f, '\nSTDOUT:\n' + (err.stdout || '') + '\nSTDERR:\n' + (err.stderr || ''));
-    }
-  }
-});
-
+// Core auth-store test suite assertions
 test('Argon2id hashes use independent salts and verify without accepting malformed parameters', async () => {
   const left = await hashPassword(password);
   const right = await hashPassword(password);
