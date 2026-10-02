@@ -8,6 +8,7 @@ import {
   createCertificateRegistry,
   compareTlsPresentation,
   certificateDiagnosis,
+  CertificateRegistryError,
 } from '../src/certificate-registry.js';
 import {
   verifyRenewalOutcome,
@@ -699,4 +700,327 @@ test('normalizeReloadService and checkReloadOutcome handle partial reloads and u
   assert.equal(failedAll.presentationChecks.allServicesReloaded, false);
   assert.equal(failedAll.presentationChecks.partialReload, false);
   assert.equal(failedAll.presentationChecks.hasFailures, true);
+});
+
+test('Restart scenario and post-restart status consistency: reload outcomes, diagnosis, and fail-closed corrupt store handling', async (t) => {
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-cert-restart-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+
+  const filePath = path.join(dir, 'certificates.json');
+
+  // Phase 1: Initial process creates cert and records partial reload outcome
+  const registry1 = createCertificateRegistry({ filePath });
+  await registry1.init();
+
+  const cert = await registry1.createForDomain({
+    domainId: 'domain-restart',
+    serverId: 'server-restart',
+    domains: ['restart.example.com'],
+    email: 'admin@restart.example.com',
+  });
+
+  const validFrom = '2026-09-01T00:00:00.000Z';
+  const validTo = '2026-12-01T00:00:00.000Z';
+  const fingerprint256 = '77:'.repeat(31) + '77';
+
+  await registry1.markActive(cert.id, {
+    certName: 'restart.example.com',
+    certificatePath: '/etc/letsencrypt/live/restart.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/restart.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/restart.example.com/privkey.pem',
+    validFrom,
+    validTo,
+    fingerprint256,
+  });
+
+  // Record a partial Nginx reload outcome
+  await registry1.recordReloadOutcome(cert.id, {
+    service: 'nginx',
+    status: 'partial',
+    stage: 'stage',
+    error: 'Secondary listener configuration warning',
+  });
+
+  const certBeforeRestart = await registry1.getCertificate(cert.id);
+  assert.equal(certBeforeRestart.state, 'active');
+  assert.equal(certBeforeRestart.lastReloadOutcome.service, 'nginx');
+  assert.equal(certBeforeRestart.lastReloadOutcome.status, 'partial');
+  assert.equal(certBeforeRestart.diagnosis.code, 'certificate_reload_partial');
+  assert.equal(certBeforeRestart.diagnosis.severity, 'warning');
+
+  // Phase 2: Process restart (new instance loading from disk)
+  const registryRestarted = createCertificateRegistry({ filePath });
+  await registryRestarted.init();
+
+  const certAfterRestart = await registryRestarted.getCertificate(cert.id);
+  assert.ok(certAfterRestart);
+  assert.equal(certAfterRestart.id, cert.id);
+  assert.equal(certAfterRestart.state, 'active');
+  assert.equal(certAfterRestart.validFrom, validFrom);
+  assert.equal(certAfterRestart.validTo, validTo);
+  assert.equal(certAfterRestart.fingerprint256, fingerprint256);
+  assert.equal(certAfterRestart.lastReloadOutcome.service, 'nginx');
+  assert.equal(certAfterRestart.lastReloadOutcome.status, 'partial');
+  assert.equal(certAfterRestart.lastReloadOutcome.stage, 'stage');
+  assert.equal(certAfterRestart.diagnosis.code, 'certificate_reload_partial');
+  assert.equal(certAfterRestart.diagnosis.severity, 'warning');
+  assert.match(certAfterRestart.diagnosis.message, /nginx reload completed partially/i);
+
+  // Phase 3: Fail-closed validation on corrupted persisted store state
+  const rawContent = JSON.parse(await readFile(filePath, 'utf8'));
+  rawContent.certificates[0].lastReloadOutcome.status = 'corrupted_status';
+  const corruptFile = path.join(dir, 'certificates_corrupt.json');
+  await writeFile(corruptFile, JSON.stringify(rawContent, null, 2), 'utf8');
+
+  const corruptRegistry = createCertificateRegistry({ filePath: corruptFile });
+  await assert.rejects(
+    async () => corruptRegistry.init(),
+    (err) => err instanceof CertificateRegistryError && err.code === 'invalid_certificate_state',
+  );
+});
+
+test('Mail identity post-issuance/renewal partial and failure outcomes (PROD-06 boundary)', async () => {
+  const registry = createCertificateRegistry();
+  const cert = await registry.createForDomain({
+    domainId: 'domain-mail-id',
+    serverId: 'server-mail-id',
+    domains: ['mail.example.com'],
+    email: 'admin@mail.example.com',
+  });
+
+  const validFrom = '2026-09-01T00:00:00.000Z';
+  const validTo = '2026-12-01T00:00:00.000Z';
+  const fingerprint256 = '88:'.repeat(31) + '88';
+
+  await registry.markActive(cert.id, {
+    certName: 'mail.example.com',
+    certificatePath: '/etc/letsencrypt/live/mail.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/mail.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/mail.example.com/privkey.pem',
+    validFrom,
+    validTo,
+    fingerprint256,
+  });
+
+  const before = {
+    certName: 'mail.example.com',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: '99:'.repeat(31) + '99',
+  };
+
+  const job = {
+    status: 'succeeded',
+    result: {
+      certName: 'mail.example.com',
+      status: 'renewed',
+      validFrom,
+      validTo,
+      fingerprint256,
+      dryRun: false,
+    },
+  };
+
+  const liveTls = { validFrom, validTo, fingerprint256 };
+
+  // 1. Mail identity assignment completed partially
+  const partialRecord = await registry.recordReloadOutcome(cert.id, {
+    service: 'mail_identity',
+    status: 'partial',
+    stage: 'identity',
+    error: 'Dovecot SNI updated, Postfix cert map pending',
+  });
+
+  assert.equal(partialRecord.state, 'active');
+  assert.equal(partialRecord.lastReloadOutcome.service, 'mail_identity');
+  assert.equal(partialRecord.lastReloadOutcome.status, 'partial');
+
+  const partialDiag = certificateDiagnosis(partialRecord);
+  assert.equal(partialDiag.severity, 'warning');
+  assert.equal(partialDiag.code, 'certificate_reload_partial');
+  assert.equal(partialDiag.message, 'Certificate is valid, but mail service identity assignment completed partially.');
+  assert.equal(partialDiag.action, 'Inspect mail service identity bindings and retry mail identity assignment.');
+
+  // verifyRenewalOutcome with matching live TLS returns partial and verified: false
+  const partialRenewalOutcome = verifyRenewalOutcome({
+    certificate: partialRecord,
+    before,
+    job,
+    liveTls,
+  });
+  assert.equal(partialRenewalOutcome.outcome, 'partial');
+  assert.equal(partialRenewalOutcome.verified, false);
+  assert.equal(partialRenewalOutcome.partial, true);
+  assert.equal(partialRenewalOutcome.reason, 'post_ssl_mail_identity_assignment_failed');
+
+  // 2. Mail identity assignment failed completely
+  const failedRecord = await registry.recordReloadOutcome(cert.id, {
+    service: 'mail_identity',
+    status: 'failed',
+    stage: 'identity',
+    error: 'Mail identity daemon socket unreachable',
+  });
+
+  assert.equal(failedRecord.state, 'active');
+  assert.equal(failedRecord.lastReloadOutcome.service, 'mail_identity');
+  assert.equal(failedRecord.lastReloadOutcome.status, 'failed');
+
+  const failedDiag = certificateDiagnosis(failedRecord);
+  assert.equal(failedDiag.severity, 'warning');
+  assert.equal(failedDiag.code, 'certificate_reload_failed');
+  assert.equal(failedDiag.message, 'Certificate is valid, but mail service identity assignment failed.');
+  assert.equal(failedDiag.action, 'Inspect mail service identity bindings and retry mail identity assignment.');
+
+  // verifyRenewalOutcome with matching live TLS returns partial_service_reload and verified: false
+  const failedRenewalOutcome = verifyRenewalOutcome({
+    certificate: failedRecord,
+    before,
+    job,
+    liveTls,
+  });
+  assert.equal(failedRenewalOutcome.outcome, 'partial_service_reload');
+  assert.equal(failedRenewalOutcome.verified, false);
+  assert.equal(failedRenewalOutcome.partial, true);
+  assert.equal(failedRenewalOutcome.reason, 'post_ssl_mail_identity_assignment_failed');
+
+  // 3. Succeeded mail identity assignment clears warning and verifies renewal
+  const succeededRecord = await registry.recordReloadOutcome(cert.id, {
+    service: 'mail_identity',
+    status: 'succeeded',
+  });
+  assert.equal(succeededRecord.lastReloadOutcome.status, 'succeeded');
+  assert.equal(certificateDiagnosis(succeededRecord, { now: Date.parse('2026-09-15T00:00:00.000Z') }), null);
+
+  const cleanRenewalOutcome = verifyRenewalOutcome({
+    certificate: succeededRecord,
+    before,
+    job,
+    liveTls,
+  });
+  assert.equal(cleanRenewalOutcome.outcome, 'renewed_and_live_verified');
+  assert.equal(cleanRenewalOutcome.verified, true);
+});
+
+test('recordReloadOutcome validates inputs fail-closed and protects retired certificates', async () => {
+  const registry = createCertificateRegistry();
+  const cert = await registry.createForDomain({
+    domainId: 'domain-fc',
+    serverId: 'server-fc',
+    domains: ['fc.example.com'],
+    email: 'admin@fc.example.com',
+  });
+
+  // Invalid service
+  await assert.rejects(
+    () => registry.recordReloadOutcome(cert.id, { service: '', status: 'succeeded' }),
+    (err) => err instanceof CertificateRegistryError && err.code === 'invalid_reload_outcome_service',
+  );
+  await assert.rejects(
+    () => registry.recordReloadOutcome(cert.id, { service: 'invalid service with spaces!', status: 'succeeded' }),
+    (err) => err instanceof CertificateRegistryError && err.code === 'invalid_reload_outcome_service',
+  );
+
+  // Invalid status
+  await assert.rejects(
+    () => registry.recordReloadOutcome(cert.id, { service: 'nginx', status: 'unknown' }),
+    (err) => err instanceof CertificateRegistryError && err.code === 'invalid_reload_outcome_status',
+  );
+
+  // Invalid stage
+  await assert.rejects(
+    () => registry.recordReloadOutcome(cert.id, { service: 'nginx', status: 'succeeded', stage: 'bad stage!' }),
+    (err) => err instanceof CertificateRegistryError && err.code === 'invalid_reload_outcome_stage',
+  );
+
+  // Certificate not found
+  await assert.rejects(
+    () => registry.recordReloadOutcome('00000000-0000-0000-0000-000000000000', { service: 'nginx', status: 'succeeded' }),
+    (err) => err instanceof CertificateRegistryError && err.code === 'certificate_not_found',
+  );
+});
+
+test('Live TLS presentation vs persistent metadata equality: metadata equality is not live TLS proof', () => {
+  const before = {
+    certName: 'probe.example.com',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'AA:'.repeat(31) + 'AA',
+  };
+
+  const renewedCert = {
+    certName: 'probe.example.com',
+    state: 'active',
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+    fingerprint256: 'BB:'.repeat(31) + 'BB',
+  };
+
+  const job = {
+    status: 'succeeded',
+    result: {
+      certName: 'probe.example.com',
+      status: 'renewed',
+      validFrom: renewedCert.validFrom,
+      validTo: renewedCert.validTo,
+      fingerprint256: renewedCert.fingerprint256,
+      dryRun: false,
+    },
+  };
+
+  // Case A: Registry matches Job exactly (metadata equality), but live TLS is not provided
+  // Metadata equality must NOT be considered live proof!
+  const noLiveTls = verifyRenewalOutcome({
+    certificate: renewedCert,
+    before,
+    job,
+    liveTls: null,
+  });
+  assert.equal(noLiveTls.verified, false);
+  assert.equal(noLiveTls.outcome, 'pending_live_tls_verification');
+  assert.equal(noLiveTls.reason, 'live_tls_presentation_missing');
+  assert.equal(noLiveTls.storedFingerprint, renewedCert.fingerprint256);
+
+  // Case B: Live TLS probe returns old certificate before server reload
+  const oldTls = verifyRenewalOutcome({
+    certificate: renewedCert,
+    before,
+    job,
+    liveTls: {
+      validFrom: before.validFrom,
+      validTo: before.validTo,
+      fingerprint256: before.fingerprint256,
+    },
+  });
+  assert.equal(oldTls.verified, false);
+  assert.equal(oldTls.outcome, 'pending_service_reload');
+  assert.equal(oldTls.reason, 'live_tls_presents_previous_certificate');
+
+  // Case C: Live TLS probe returns completely different certificate
+  const mismatchedTls = verifyRenewalOutcome({
+    certificate: renewedCert,
+    before,
+    job,
+    liveTls: {
+      validFrom: '2026-01-01T00:00:00.000Z',
+      validTo: '2026-04-01T00:00:00.000Z',
+      fingerprint256: 'CC:'.repeat(31) + 'CC',
+    },
+  });
+  assert.equal(mismatchedTls.verified, false);
+  assert.equal(mismatchedTls.outcome, 'live_tls_mismatch');
+  assert.equal(mismatchedTls.reason, 'fingerprint_mismatch');
+
+  // Case D: Live TLS matches new certificate -> verified: true
+  const verifiedTls = verifyRenewalOutcome({
+    certificate: renewedCert,
+    before,
+    job,
+    liveTls: {
+      validFrom: renewedCert.validFrom,
+      validTo: renewedCert.validTo,
+      fingerprint256: renewedCert.fingerprint256,
+    },
+  });
+  assert.equal(verifiedTls.verified, true);
+  assert.equal(verifiedTls.outcome, 'renewed_and_live_verified');
 });
