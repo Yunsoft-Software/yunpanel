@@ -172,8 +172,11 @@ test('applyRuleset successfully applies ruleset, snapshots backup, and persists 
       if (args[0] === 'list' && args[1] === 'ruleset') {
         return { stdout: 'table inet old { chain input { type filter hook input priority 0; } }\n' };
       }
-      if (args[0] === 'is-active' || args[0] === 'is-enabled') {
-        return { stdout: 'inactive\n' };
+      if (args[0] === 'is-active') {
+        return { stdout: args[1] === 'nftables' ? 'active\n' : 'inactive\n' };
+      }
+      if (args[0] === 'is-enabled') {
+        return { stdout: args[1] === 'nftables' ? 'enabled\n' : 'disabled\n' };
       }
       return { stdout: '' };
     },

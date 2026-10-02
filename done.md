@@ -612,3 +612,25 @@
 - `apps/api/src/domain-http.js` ve `apps/api/src/domain-registry.js` kilit mekanizmasına bağlandı; alias güncelleme (`updateDomain`) ve reparent (`reparentDomain`) işlemlerinde domain ve bağlı website kilitleri edinilerek eşzamanlı çakışmalar 409 `site_mutation_locked` ile fail-closed engellendi; çift kilitlenmeyi önlemek amacıyla iç çağrılara `skipLock: true` aktarıldı.
 - DNS gereksinimleri (`dns-requirements-service.js`) ve posta alias referansları (`mailbox-alias-references.js`, `mail-alias-registry.js`) alias yaşam döngüsüyle (ekleme, çıkarma, güncelleme) tam senkronize edildi; yetkisiz DNS bölgesi veya posta kutusunun otomatik oluşturulmadığı, posta kutusu silme işlemlerinde alias referanslarının korunduğu ve yabancı alias kimliklerinin gizlendiği doğrulandı.
 - Eski ZIP patchleri kullanılmadı veya yeniden uygulanmadı; `site-mutation-lock.test.js`, `domain-http.test.js`, `domain-update-registry.test.js` ve yeni `domain-alias-lock-and-sync.test.js` test paketleri (tüm domain testleri ve `npm test` monorepo paketi) ile repository doğrulaması (`validate-repository.mjs`) ve Vite derlemesi (`apps/web`) Node 24 ve npm 11 hedefinde eksiksiz geçti.
+
+
+## 2026-10-01 — PROD-03: Firewall durumunun doğrulanmış systemd kanıtından üretilmesi ve bağımsız durum denetimi
+- Firewall durumunu belirlerken istek seçeneğindeki `serviceEnabled` yerine doğrulanmış gerçek systemd servis durumu (`checkSystemdUnit`, `checkSystemdService`) esas alındı; `applyRuleset` dönüşünde `serviceEnabled` ve `serviceActive` doğrudan systemd kanıtından üretildi.
+- UFW (`/usr/sbin/ufw status`), firewalld veya nftables kuralları (`nft list ruleset`) okuma ve ayrıştırma hatalarında durum pasif veya boş (`inactive`/`empty`) olarak varsayılmayıp açıkça `unknown` veya `error` olarak raporlandı (`inspectConflictingFirewallsSafe`, `parseRulesetMetadata`).
+- Canlı kural uygulaması (`liveApply`), kalıcı kural dosyası (`persistentFile`), önyükleme yüklemesi (`bootLoading`) ve CrowdSec bouncer sağlık durumu (`crowdsecBouncer`) bağımsız olarak raporlanacak şekilde `createFirewallStatusInspector` ve `inspectFirewallStatus` modülü geliştirildi; konfigürasyon ve canlı kurallar arası ayrışma (drift) denetimi sağlandı.
+- Kural snapshot'ı alınamadığında (`ruleset_snapshot_failed`), servis işlemleri başarısız olduğunda (`service_operation_failed`, yutulmadan) veya çakışan firewall durumu doğrulanamadığında (`conflicting_firewall_unknown`) işlem güvenli biçimde fail-closed durduruldu.
+- Birim ve entegrasyon testleri `packages/host-runtime/test/firewall-status.test.js` paketiyle tamamlandı; mevcut `nftables-manager.test.js` regresyonu güncellendi; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
+
+## 2026-10-01 — PROD-03: Doğrulama testleri ve sistemd/mock arayüz düzeltmeleri
+- `packages/host-runtime/src/nftables-manager.js` içinde `checkSystemdService`, `inspectConflictingFirewalls`, `getLiveRuleset` ve `parseRulesetMetadata` fonksiyonları modül düzeyinde dışa aktarılarak `ReferenceError` giderildi; `packages/host-runtime/src/index.js` üzerinden genel erişime açıldı.
+- `firewall-status-inspector.js` ve `nftables-manager.js` içindeki `checkSystemdUnit` ve `checkSystemdService` hata bloklarında beklenmeyen systemd ve D-Bus hatalarının sahte inactive olarak algılanması önlendi; `firewalld` sorgu hatasında `status: 'error'`, `active: 'unknown'` ve `conflictStatus: 'unknown'` doğru şekilde üretildi.
+- `inspectPersistentFile` içinde dosya mevcut ve sözdizimi geçerli olduğunda `status: 'persisted'` korunurken drift durumu `matchesLive: false` ile ayrıştırıldı ve genel durum `degraded` olarak raporlandı.
+- `packages/host-runtime/test/firewall-status.test.js` test mocklarına `chmodFn` ve `renameFn` sahteleri eklenerek `atomicWrite` kaynaklı ENOENT hataları giderildi; servis operasyon hatası ve doğrulama hatası fail-closed `assert.rejects` denetimleri doğrulandı.
+- `workspace_check` (`task-verify-1`) ve `nftables-manager.test.js` (Node 24) tam başarıyla çalıştırıldı (11/11 ve 7/7 geçti).
+
+## 2026-10-01 — PROD-03: Kapsam düzeltmesi (TASK_SCOPE_VIOLATION çözümü)
+- İzin verilen kapsam (`allowed_scope`) dışındaki `packages/host-runtime/package.json` üzerindeki değişiklikler geri alındı; modül dışa aktarımları izinli kapsamdaki `packages/host-runtime/src/index.js` üzerinden korunarak görev kapsam sınırlarına tam uyum sağlandı.
+- `workspace_check` (`task-verify-1`), `packages/host-runtime/test/firewall-status.test.js` ve `nftables-manager.test.js` başarıyla doğrulandı.
+
+## 2026-10-02 — PROD-03: Korunan kaynak için entegrasyon doğrulaması bekleniyor
+- Firewall kaynak değişikliği önceki özgün testleri ve bağımsız incelemeyi geçti. Yeni development hedefiyle belge çakışması giderilen bu aday, özgün tam doğrulama ve yeni bağımsız incelemeden yeniden geçmelidir; Git entegrasyonu ve görev tamamlanması henüz doğrulanmadı.
