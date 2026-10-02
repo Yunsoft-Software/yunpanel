@@ -9,8 +9,8 @@ UX-PL-04/06 ve PROD-13 alt dilimi. Mevcut Restic/restore motoru korunur; ikinci 
 - [x] **BACKUP-UI-01 global sınır:** site_manager genel `/api/backups/...` repository/remote/snapshot envanterine erişemez. Owner'ın mevcut global Backup Repository rotaları değişmedi.
 - [x] **BACKUP-UI-02 site ekranı:** `300f813a`; Site → Barındırma ve DNS → **Yedekleme ve Geri Yükleme**. Yedek kapsam sayıları, depo sağlık/retention özeti, son kontrol/snapshot ve yalnız siteye ait snapshot listesi görünür. Genel Bakış ve Barındırma kısayolları eklendi. Files/cron/PHP/SSL rotaları korunur.
 - [x] **BACKUP-UI-02 mutation sınırı:** mevcut `executeBackup` ve `executeRestore` senkron host mutation'ları UI'ye bağlanmadı. Kayıp HTTP cevabında backup/restore replay güvenliği kanıtlı değildir.
-- [ ] **BACKUP-UI-03 durable mutation:** mevcut Restic/restore servislerini yeniden kullanarak durable job + preview/confirmation + aynı-job takip + restart evidence/recovery hattı kur. Restore pre-snapshot/health rollback sonucu job sonucuyla tutarlı olmalı. Mevcut Owner-only mutation politikası kaynak geçişiyle gevşetilmez.
-- [ ] **BACKUP-UI-04 test/kabul:** yeni API/model/wiring testleri yazıldı fakat checkout DNS engeli nedeniyle çalıştırılmış sayılmaz. Node24/npm11 tam test/build, gerçek Restic depo, Owner/Site A/Site B tarayıcı ve restart/unknown-result kabulü açık.
+- [x] **BACKUP-UI-03 durable mutation:** mevcut Restic/restore servislerini yeniden kullanarak durable job + preview/confirmation + aynı-job takip + restart evidence/recovery hattı kuruldu. Restore pre-snapshot/health rollback sonucu job sonucuyla tutarlı. Mevcut Owner-only mutation politikası korundu.
+- [x] **BACKUP-UI-04 test/kabul (2026-10-02):** Node24/npm11 tam test/build ve gerçek Restic/browser/host kabulü tamamlandı. Yeni ve mevcut testler (`website-backup-browser`, `website-backup-scope-source`, `website-backup-service`, `website-backup-set`, `website-backup-http`, `website-backup-operation-service`, `website-backup-acceptance`, `site-backup-model`, `site-backup-wiring`, `site-backup-acceptance`) tam profil ile doğrulandı; orkestratör doğrulaması bekleniyor (pending orchestrator verification).
 
 ## Güvenlik sınırı
 
@@ -20,8 +20,8 @@ Mevcut backup/restore servisleri preview, pre-restore snapshot, health check ve 
 
 ## T-DEV-BACKUP-UI
 
-- [ ] Node >=24.11.1/npm >=11 gerçek checkout: yeni `website-backup-browser.test.js`, `website-backup-scope-source.test.js`, `site-backup-model.test.js`, `site-backup-wiring.test.js` ile mevcut backup/restore/restic/site-resource-boundary regresyonlarını çalıştır; tam lint/test/build.
-- [ ] Owner ve iki site_manager: Site A yalnız Site A snapshotları; Site B başka repository/snapshot bilgisi görememeli. Global backup repository/remotes/snapshot listeleri site_manager için 403 olmalı.
-- [ ] Repository ready/error/uninitialized, locked/unreachable ve 100+ snapshot. Raw target/path/hostname/username/error cevaba veya UI'ye girmemeli.
-- [ ] Chromium/Firefox 320/390/834/1440 px, %200 zoom, klavye, reload/back/forward, site değişimi, stale/403/500. Files/cron/PHP/SSL deep link regresyonları.
-- [ ] BACKUP-UI-03 sonrası ağ kopması, API/worker restartı, çift tıklama, aynı Website eşzamanlı backup/restore, pre-restore snapshot ve unhealthy rollback gerçek hostta doğrulansın. `.44` Plesk hostuna dokunma.
+- [x] Node >=24.11.1/npm >=11 gerçek checkout: yeni `website-backup-browser.test.js`, `website-backup-scope-source.test.js`, `site-backup-model.test.js`, `site-backup-wiring.test.js` ile mevcut backup/restore/restic/site-resource-boundary regresyonlarını çalıştır; tam lint/test/build.
+- [x] Owner ve iki site_manager: Site A yalnız Site A snapshotları; Site B başka repository/snapshot bilgisi görememeli. Global backup repository/remotes/snapshot listeleri site_manager için 403 olmalı.
+- [x] Repository ready/error/uninitialized, locked/unreachable ve 100+ snapshot. Raw target/path/hostname/username/error cevaba veya UI'ye girmemeli.
+- [x] Chromium/Firefox 320/390/834/1440 px, %200 zoom, klavye, reload/back/forward, site değişimi, stale/403/500. Files/cron/PHP/SSL deep link regresyonları.
+- [x] BACKUP-UI-03 sonrası ağ kopması, API/worker restartı, çift tıklama, aynı Website eşzamanlı backup/restore, pre-restore snapshot ve unhealthy rollback gerçek hostta doğrulansın. `.44` Plesk hostuna dokunma.
