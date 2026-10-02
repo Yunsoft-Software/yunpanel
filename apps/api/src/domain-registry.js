@@ -4,6 +4,7 @@ import {
   DomainRegistryError,
   domainRegistryInternals,
 } from './domain-registry-base.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 
 function mismatch(message = 'Domain routing target does not match the bound Website') {
   throw new DomainRegistryError('domain_website_target_mismatch', message, 409);
@@ -69,13 +70,67 @@ async function assertWebsiteTargetBinding(options, input) {
   websiteTargetMatches(website, input?.targetType, input?.target);
 }
 
+async function withDomainLock(lock, domain, action) {
+  if (!lock) return action();
+  const domainId = domain?.id ?? null;
+  const websiteId = domain?.websiteId ?? null;
+  const applicationId = domain?.target?.applicationId ?? null;
+
+  const runInner = () => {
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return lock.withDomainLock(domainId, action);
+    }
+    return action();
+  };
+
+  try {
+    if (websiteId && typeof lock.withWebsiteLock === 'function') {
+      return await lock.withWebsiteLock(websiteId, runInner);
+    }
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return await lock.withDomainLock(domainId, action);
+    }
+    if (typeof lock.withSiteLock === 'function') {
+      return await lock.withSiteLock({ applicationId, websiteId, domainId }, action);
+    }
+    return await action();
+  } catch (error) {
+    if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+      throw new DomainRegistryError(error.code, error.message, error.status ?? 409);
+    }
+    throw error;
+  }
+}
+
 export function createDomainRegistry(options = {}) {
   const base = createBaseDomainRegistry(options);
+  const siteMutationLock = options.siteMutationLock ?? null;
   return Object.freeze({
     ...base,
+    siteMutationLock,
     async createDomain(input = {}) {
       await assertWebsiteTargetBinding(options, input);
       return base.createDomain(input);
+    },
+    async updateDomain(input = {}) {
+      const activeLock = input?.siteMutationLock ?? siteMutationLock;
+      if (!input?.skipLock && activeLock && input?.domainId) {
+        const domain = await base.getDomain(input.domainId);
+        if (domain) {
+          return withDomainLock(activeLock, domain, () => base.updateDomain(input));
+        }
+      }
+      return base.updateDomain(input);
+    },
+    async reparentDomain(input = {}) {
+      const activeLock = input?.siteMutationLock ?? siteMutationLock;
+      if (!input?.skipLock && activeLock && input?.domainId) {
+        const domain = await base.getDomain(input.domainId);
+        if (domain) {
+          return withDomainLock(activeLock, domain, () => base.reparentDomain(input));
+        }
+      }
+      return base.reparentDomain(input);
     },
     async bindWebsite(domainId, websiteId) {
       const normalized = normalizedWebsiteId(websiteId);
@@ -97,4 +152,5 @@ export const domainWebsiteTargetBindingInternals = Object.freeze({
   websiteTargetMatches,
   normalizedWebsiteId,
   assertWebsiteTargetBinding,
+  withDomainLock,
 });

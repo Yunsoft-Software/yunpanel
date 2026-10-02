@@ -58,3 +58,8 @@ test('memory plumbing adds no storage, network mutations or automatic operation 
   assert.match(files, /batch-delete/);
   assert.match(files, /uploadSiteFile\(websiteId/);
 });
+test('in-memory editor draft continuity is preserved across view switches and discarded on confirmed leave', () => {
+  assert.match(files, /if \(editor && \(editor\.name === match\.name \|\| editor\.path === match\.path\)\) \{\s*return;\s*\}/);
+  assert.match(files, /if \(editor && editor\.content !== editor\.saved\) \{\s*setDiscard\(true\);\s*return;\s*\}/);
+  assert.match(files, /if \(!fileParam\) \{\s*if \(editor && !discard\) \{\s*setEditor\(null\);/);
+});

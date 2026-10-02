@@ -22,9 +22,9 @@ function operationBadgeState(operation) {
 function actionCopy(action, step) {
   const label = provisioningStepLabel(step);
   if (action === 'retry') return {
-    title: `${label} adımını tekrar dene`,
+    title: `${label} adımını yeniden dene`,
     message: 'Başarısız adım yeniden değerlendirilecek. Sunucu önce mevcut durumu kontrol eder; tamamlanmış kaynaklar körlemesine yeniden oluşturulmaz.',
-    confirmLabel: 'Adımı tekrar dene',
+    confirmLabel: 'Adımı yeniden dene',
   };
   if (action === 'compensate') return {
     title: `${label} adımını geri al`,
@@ -109,7 +109,7 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
               {remediation && <div className="ws-muted ws-provisioning-remediation">{remediation}</div>}
             </td>
             <td><div className="ws-actions">
-              {canManage && step.canRetry === true && <Button disabled={!available} onClick={() => client.current?.prepare('retry', step.id)}>Tekrar dene</Button>}
+              {canManage && step.canRetry === true && <Button disabled={!available} onClick={() => client.current?.prepare('retry', step.id)}>Yeniden dene</Button>}
               {canManage && step.canCompensate === true && <Button variant="danger" disabled={!available} onClick={() => client.current?.prepare('compensate', step.id)}>Geri al</Button>}
               {(!canManage || (step.canRetry !== true && step.canCompensate !== true)) && <span className="ws-muted">—</span>}
             </div></td>

@@ -1,5 +1,6 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { DomainRegistryError } from './domain-registry.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 
 const REPARENT_PREVIEW_FIELDS = new Set(['parentDomainId']);
 const REPARENT_APPLY_FIELDS = new Set(['parentDomainId', 'previewDigest', 'confirmation']);
@@ -157,7 +158,40 @@ export function createDomainUpdatePreviewHandler(domainRegistry, { localServerId
   };
 }
 
+async function withDomainLock(lock, domain, action) {
+  if (!lock) return action();
+  const domainId = domain?.id ?? null;
+  const websiteId = domain?.websiteId ?? null;
+  const applicationId = domain?.target?.applicationId ?? null;
+
+  const runInner = () => {
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return lock.withDomainLock(domainId, action);
+    }
+    return action();
+  };
+
+  try {
+    if (websiteId && typeof lock.withWebsiteLock === 'function') {
+      return await lock.withWebsiteLock(websiteId, runInner);
+    }
+    if (domainId && typeof lock.withDomainLock === 'function') {
+      return await lock.withDomainLock(domainId, action);
+    }
+    if (typeof lock.withSiteLock === 'function') {
+      return await lock.withSiteLock({ applicationId, websiteId, domainId }, action);
+    }
+    return await action();
+  } catch (error) {
+    if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+      throw new DomainRegistryError(error.code, error.message, error.status ?? 409);
+    }
+    throw error;
+  }
+}
+
 export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
+  const siteMutationLock = dependencies?.siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainUpdate !== 'function' || typeof domainRegistry.updateDomain !== 'function') {
@@ -166,18 +200,27 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
       const domain = await requireLocalDomain(domainRegistry, request.params.domainId, dependencies.localServerId ?? null);
       const input = assertUpdateApplyBody(request.body);
       await assertDomainUpdateIdle(domain, dependencies);
-      const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
-      if (input.previewDigest !== preview.previewDigest) {
-        throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
-      }
-      if (input.confirmation !== preview.confirmation) {
-        throw new DomainRegistryError('domain_update_confirmation_required', `Confirm Domain update with ${preview.confirmation}`);
-      }
-      const result = await domainRegistry.updateDomain({
-        domainId: request.params.domainId,
-        changes: input.changes,
-        previewDigest: input.previewDigest,
-      });
+
+      const performUpdate = async () => {
+        const preview = await domainRegistry.previewDomainUpdate({ domainId: request.params.domainId, changes: input.changes });
+        if (input.previewDigest !== preview.previewDigest) {
+          throw new DomainRegistryError('domain_update_preview_stale', 'Domain routing state changed after preview; request a new preview', 409);
+        }
+        if (input.confirmation !== preview.confirmation) {
+          throw new DomainRegistryError('domain_update_confirmation_required', `Confirm Domain update with ${preview.confirmation}`);
+        }
+        return domainRegistry.updateDomain({
+          domainId: request.params.domainId,
+          changes: input.changes,
+          previewDigest: input.previewDigest,
+          skipLock: true,
+        });
+      };
+
+      const result = siteMutationLock
+        ? await withDomainLock(siteMutationLock, domain, performUpdate)
+        : await performUpdate();
+
       return response.json({ data: result });
     } catch (error) {
       return next(error);
@@ -185,29 +228,40 @@ export function createDomainUpdateHandler(domainRegistry, dependencies = {}) {
   };
 }
 
-export function createDomainReparentHandler(domainRegistry, { localServerId = null } = {}) {
+export function createDomainReparentHandler(domainRegistry, dependencies = {}) {
+  const localServerId = typeof dependencies === 'string' ? dependencies : (dependencies?.localServerId ?? null);
+  const siteMutationLock = dependencies?.siteMutationLock ?? domainRegistry?.siteMutationLock ?? null;
   return async (request, response, next) => {
     try {
       if (!domainRegistry || typeof domainRegistry.previewDomainReparent !== 'function' || typeof domainRegistry.reparentDomain !== 'function') {
         throw new DomainRegistryError('domain_reparent_unavailable', 'Domain reparent is unavailable', 503);
       }
-      await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+      const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
       const input = assertReparentApplyBody(request.body);
-      const preview = await domainRegistry.previewDomainReparent({
-        domainId: request.params.domainId,
-        parentDomainId: input.parentDomainId,
-      });
-      if (input.previewDigest !== preview.previewDigest) {
-        throw new DomainRegistryError('domain_reparent_preview_stale', 'Domain hierarchy changed after preview; request a new preview', 409);
-      }
-      if (input.confirmation !== preview.confirmation) {
-        throw new DomainRegistryError('domain_reparent_confirmation_required', `Confirm Domain reparent with ${preview.confirmation}`);
-      }
-      const result = await domainRegistry.reparentDomain({
-        domainId: request.params.domainId,
-        parentDomainId: input.parentDomainId,
-        previewDigest: input.previewDigest,
-      });
+
+      const performReparent = async () => {
+        const preview = await domainRegistry.previewDomainReparent({
+          domainId: request.params.domainId,
+          parentDomainId: input.parentDomainId,
+        });
+        if (input.previewDigest !== preview.previewDigest) {
+          throw new DomainRegistryError('domain_reparent_preview_stale', 'Domain hierarchy changed after preview; request a new preview', 409);
+        }
+        if (input.confirmation !== preview.confirmation) {
+          throw new DomainRegistryError('domain_reparent_confirmation_required', `Confirm Domain reparent with ${preview.confirmation}`);
+        }
+        return domainRegistry.reparentDomain({
+          domainId: request.params.domainId,
+          parentDomainId: input.parentDomainId,
+          previewDigest: input.previewDigest,
+          skipLock: true,
+        });
+      };
+
+      const result = siteMutationLock
+        ? await withDomainLock(siteMutationLock, domain, performReparent)
+        : await performReparent();
+
       return response.json({ data: result });
     } catch (error) {
       return next(error);
@@ -221,4 +275,5 @@ export const domainHttpInternals = Object.freeze({
   assertUpdatePreviewBody,
   assertUpdateApplyBody,
   assertDomainUpdateIdle,
+  withDomainLock,
 });
