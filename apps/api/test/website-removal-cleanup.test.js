@@ -107,7 +107,8 @@ test('only an independent null read after deletion completes metadata', async ()
   const f = await removalFixture({ websiteRegistry: { getWebsite: async () => current,
     deleteMigrationWebsite: async (input) => { assert.deepEqual(input, { websiteId: 'site-a', serverId: 'server-a', applicationId: 'app-a' }); deletes++; current = null; },
   } });
-  let op = await f.runtime.start(removalStart(f.preview)); while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
+  let op = await f.runtime.start(removalStart(f.preview));
+  while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
   assert.equal(op.status, 'removed'); assert.equal(deletes, 1);
 });
 for (const stage of ['read-before', 'read-after']) {

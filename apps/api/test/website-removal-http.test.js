@@ -218,6 +218,7 @@ function createMockRuntime() {
     start: async (input) => { calls.push({ type: 'start', input }); return op; },
     continueStep: async (input) => { calls.push({ type: 'continue', input }); return { ...op, status: 'removed' }; },
     get: async (id) => (id === 'ws-rem-1' ? op : null),
+    list: async () => [op],
     listForWebsite: async (wsId) => (wsId === 'ws-1' ? [op] : []),
     list: async () => [op],
     calls,

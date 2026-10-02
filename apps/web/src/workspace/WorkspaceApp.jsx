@@ -31,23 +31,19 @@ function RedirectWithSearch({ to }) {
 }
 function OwnerRoute({ children }) {
   const { isOwner } = usePanelSession();
-  const location = useLocation();
-  return isOwner ? children : <Navigate to={`/websites${location.search}`} replace />;
+  return isOwner ? children : <Navigate to="/websites" replace />;
 }
 function ResellerRoute({ children }) {
   const { isReseller } = usePanelSession();
-  const location = useLocation();
-  return isReseller ? children : <Navigate to={`/websites${location.search}`} replace />;
+  return isReseller ? children : <Navigate to="/websites" replace />;
 }
 function ManagementRoute({ children }) {
   const { canManage } = usePanelSession();
-  const location = useLocation();
-  return canManage ? children : <Navigate to={`/websites${location.search}`} replace />;
+  return canManage ? children : <Navigate to="/websites" replace />;
 }
 function CustomerRoute({ children }) {
   const { isCustomer } = usePanelSession();
-  const location = useLocation();
-  return isCustomer ? children : <Navigate to={`/websites${location.search}`} replace />;
+  return isCustomer ? children : <Navigate to="/websites" replace />;
 }
 function ScopedRoute({ management, readOnly }) {
   const { canManage } = usePanelSession();
@@ -56,7 +52,7 @@ function ScopedRoute({ management, readOnly }) {
 function GlobalSiteTool({ tool, ownerView }) {
   const { isOwner } = usePanelSession();
   const [params] = useSearchParams();
-  // The site account enters its existing scoped tool, not the host-wide console.
+  // return isOwner ? ownerView : <SiteToolEntryPage tool={tool} />;
   return isOwner && !params.has('site') ? ownerView : <SiteToolEntryPage tool={tool} />;
 }
 const owner = (element) => <OwnerRoute>{element}</OwnerRoute>;
@@ -90,7 +86,7 @@ function createWorkspaceRouter() {
       { path: 'analytics', element: <RedirectWithSearch to="/statistics" /> },
       { path: 'docker', element: owner(<DockerProjectsPage />) },
       { path: 'docker/:dockerProjectId', element: owner(<DockerProjectsPage />) },
-      { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) },
+      { path: 'mail', element: manage(<GlobalSiteTool tool="mail" ownerView={<MailDomainsPage />} />) }, /* path: 'mail', element: manage(<MailDomainsPage />) */
       { path: 'mail/:mailDomainId', element: manage(<MailDomainsPage />) },
       { path: 'email', element: <RedirectWithSearch to="/mail" /> },
       { path: 'mailboxes', element: <RedirectWithSearch to="/mail" /> },

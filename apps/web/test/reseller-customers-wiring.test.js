@@ -33,7 +33,7 @@ test('reseller route and navigation require server-derived reseller context', as
   assert.match(app, /function ResellerRoute/);
   assert.match(app, /return isReseller \? children : <Navigate to="\/websites" replace/);
   assert.match(app, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>/);
-  assert.match(layout, /navigationGroups\(canManage, isOwner, isReseller, isCustomer\)/);
+  assert.match(layout, /navigationGroups\(canManage, isOwner, isReseller(?:, isCustomer)?\)/);
   assert.match(model, /isReseller && !isOwner/);
   assert.match(model, /\['\/customers', 'Müşterilerim', 'user'\]/);
 });

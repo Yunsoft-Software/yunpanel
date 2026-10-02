@@ -86,7 +86,12 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
     });
   };
 
-  const previewAdapter = async (input) => basePlan(input.operationId);
+  const previewAdapter = async (input) => {
+    const targetSite = input.operationId === uuid(1001)
+      ? site
+      : website(Number(input.operationId.slice(-4)) || 2);
+    return basePlan(input.operationId, targetSite);
+  };
   const createAdapter = async (apply) => {
     const plannedSite = siteForOperation(apply.input.operationId);
     sites.set(plannedSite.id, structuredClone(plannedSite));
@@ -362,7 +367,7 @@ test('hosted reservation recovery via /api/sites/recover-reservation and /api/si
   // 2. Reserve quota directly
   env.f.reserve({
     operationId: uuid(1002),
-    websiteId: env.site.id,
+    websiteId: preview.ids.websiteId,
     customerId: 'customer-a',
     serverId: env.serverId,
     intentDigest: preview.ownership.intentDigest,

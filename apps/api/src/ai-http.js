@@ -326,7 +326,7 @@ export function mountAiRoutes(app, {
 
     app.post('/api/ai/conversations/:conversationId/messages', requirePanelRouteAccess, asyncRoute(async (request, response) => {
       const abortController = new AbortController();
-      request.on('close', () => {
+      request.on?.('close', () => {
         if (!response.writableEnded) abortController.abort();
       });
       const text = request.body?.text;
@@ -347,7 +347,7 @@ export function mountAiRoutes(app, {
       response.flushHeaders?.();
 
       const abortController = new AbortController();
-      request.on('close', () => {
+      request.on?.('close', () => {
         if (!response.writableEnded) abortController.abort();
       });
 

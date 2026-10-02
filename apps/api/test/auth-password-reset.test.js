@@ -37,7 +37,7 @@ function createMockMailer({ available = true, shouldFailSend = false } = {}) {
   };
 }
 
-function fixture(t, { mailer = createMockMailer(), now = Date.now, ...storeOptions } = {}) {
+function fixture(t, { mailer = createMockMailer(), now = Date.now, masterKey = 'a'.repeat(64), ...storeOptions } = {}) {
   const root = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-pwd-reset-'));
   const filePath = path.join(root, 'auth.sqlite');
   let revokedLiveUser = null;
@@ -45,7 +45,7 @@ function fixture(t, { mailer = createMockMailer(), now = Date.now, ...storeOptio
     filePath,
     mailer,
     now,
-    masterKey: storeOptions.masterKey ?? 'a'.repeat(64),
+    masterKey: storeOptions.masterKey ?? masterKey,
     revokeLiveUser: (userId, reason) => {
       revokedLiveUser = { userId, reason };
     },

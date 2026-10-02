@@ -187,6 +187,8 @@ export function createDurableJobRegistry({
     if (runningJobs.some((job) => job === null)) latch('durable_job_recovery_state_invalid', 'Durable job registry contains invalid running-job identity');
     const storedJobs = recoverySnapshotJobs();
     const jobs = uniqueRecoveryJobs([...storedJobs, ...runningJobs]);
+    const previousExplicit = new Set(explicitlyBegunReconciliation);
+    const previousPending = new Set(reconciliationPending);
     reconciliationPending.clear();
     for (const key of explicitlyBegunReconciliation) {
       if (!jobs.some((job) => recoveryKey(job) === key)) {
@@ -204,10 +206,14 @@ export function createDurableJobRegistry({
       if (!job || job.serverId !== identity.serverId || !RECOVERABLE_STATUSES.has(job.status)) {
         latch('durable_job_recovery_state_invalid', 'Durable job recovery record does not match persisted job state');
       }
+      const key = recoveryKey(identity);
       // Reloads under the cross-process lock must preserve an explicit running
       // reconciliation until its terminal evidence is acknowledged.
-      if (TERMINAL_STATUSES.has(job.status) || explicitlyBegunReconciliation.has(recoveryKey(identity))) {
-        reconciliationPending.add(recoveryKey(identity));
+      if (TERMINAL_STATUSES.has(job.status) || previousPending.has(key) || explicitlyBegunReconciliation.has(key)) {
+        reconciliationPending.add(key);
+      }
+      if (previousExplicit.has(key)) {
+        explicitlyBegunReconciliation.add(key);
       }
     }
 

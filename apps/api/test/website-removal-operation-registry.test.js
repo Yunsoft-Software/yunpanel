@@ -33,7 +33,16 @@ function mockPreview() {
     version: 1,
     resourceType: 'website',
     resource: { id: 'ws-1', serverId: 'srv-local' },
-    application: { id: 'app-1', serverId: 'srv-local', desiredRevision: 1 },
+    application: {
+      id: 'app-1',
+      serverId: 'srv-local',
+      name: 'test-app',
+      type: 'node',
+      state: 'active',
+      desiredRevision: 1,
+      currentReleaseId: 'ff830043-9752-4640-83b4-3a1998de78a0',
+      activeDeploymentId: null,
+    },
     operation: 'delete',
     targetServerId: null,
     dependencies: {
@@ -89,6 +98,7 @@ test('creates durable website removal operation with ordered reverse-order steps
     assert.equal(op.steps[0].resourceId, 'dom-sub');
     assert.equal(op.steps[1].resourceId, 'dom-root');
     assert.equal(op.steps[2].resourceId, 'ws-1');
+    assert.equal(op.steps[6].resourceId, 'app-1');
     assert.equal(op.steps[7].resourceId, 'yunapp-site1');
     assert.equal(op.steps[8].resourceId, 'ws-1');
     assert.equal(op.steps[9].resourceId, 'app-1');

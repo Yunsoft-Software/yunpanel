@@ -800,9 +800,9 @@ export function createAuthStore({
             to: candidate.recovery_email,
             username: candidate.username,
             token: rawToken,
+            resetUrl,
             expiresAt,
             origin: effectiveOrigin,
-            resetUrl,
           });
         } catch (error) {
           db.prepare('DELETE FROM auth_password_resets WHERE token_hash = ?').run(tokenHash);

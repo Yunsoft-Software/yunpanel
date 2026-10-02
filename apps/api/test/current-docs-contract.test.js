@@ -8,6 +8,7 @@ const currentDocs = [
   'plan.md',
   'todo.md',
   'agents.md',
+  'docs/policies/agents-inherited-1a45ded8.md',
   'docs/development.md',
   'docs/architecture.md',
   'docs/domain-hierarchy.md',

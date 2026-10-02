@@ -243,7 +243,7 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
       listKeys: async (wsId) => (wsId === 'ws-1' ? [{ id: 'key-1', status: 'authorized' }] : []),
     };
     const runtimeBindingRegistry = {
-      getBinding: async (appId) => (appId === 'app-1' ? { id: 'rb-1', applicationId: 'app-1', state: 'active' } : null),
+      getBinding: async (appId) => (appId === 'app-1' ? { applicationId: 'app-1', state: 'active' } : null),
     };
     const databaseBindingRegistryWithData = {
       listBindings: async ({ websiteId }) => (websiteId === 'ws-1' ? [{ id: 'db-1', databaseName: 'mydb' }] : []),
@@ -282,7 +282,7 @@ test('domain-removal-production-runtime includes crons in preview impact and fai
     assert.equal(previewWithAll.plan.additional.sftpKeys.status, 'available');
     assert.deepEqual(previewWithAll.plan.additional.sftpKeys.ids, ['key-1']);
     assert.equal(previewWithAll.plan.additional.runtimeBindings.status, 'available');
-    assert.deepEqual(previewWithAll.plan.additional.runtimeBindings.ids, ['rb-1']);
+    assert.deepEqual(previewWithAll.plan.additional.runtimeBindings.ids, ['app-1']);
     assert.equal(previewWithAll.plan.additional.unixIdentities.status, 'available');
     assert.deepEqual(previewWithAll.plan.additional.unixIdentities.ids, ['siteuser1']);
     assert.equal(previewWithAll.plan.additional.logScopes.status, 'available');

@@ -32,6 +32,7 @@ test('site operation tabs retain required locks and job history', () => {
   assert.equal(workspaceResources('/websites/example').jobs, true);
   assert.equal(workspaceResources('/websites/example/mail').jobs, true);
   assert.equal(workspaceResources('/websites/example/settings').jobs, true);
+  assert.equal(workspaceResources('/websites/example/files').jobs, false);
 });
 test('application forms and advanced tools retain actual resource dependencies', () => {
   assert.deepEqual(selected('/applications'), ['applications', 'jobs', 'servers']);

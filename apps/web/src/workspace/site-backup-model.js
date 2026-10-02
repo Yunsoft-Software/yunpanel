@@ -1,5 +1,6 @@
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SNAP = /^[a-f0-9]{8,64}$/i;
+const REPO_NAME = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,79}$/;
 const record = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const normalizedDate = (value) => typeof value === 'string' && Number.isFinite(Date.parse(value)) ? new Date(value).toISOString() : null;
 const text = (value, max = 120) => typeof value === 'string' && value.length > 0 && value.length <= max && !/[\u0000-\u001f\u007f]/u.test(value);

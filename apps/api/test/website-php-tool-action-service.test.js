@@ -10,6 +10,7 @@ const preview = websitePhpToolActionPreview({
   unixUser: 'yunapp-123456789abc',
   websiteRevision: 4,
 }, 'composer.dump-autoload');
+
 const input = Object.freeze({
   actionId: preview.actionId,
   expectedWebsiteRevision: preview.websiteRevision,

@@ -24,11 +24,12 @@ test('system theme follows OS and explicit theme wins', () => {
   assert.equal(resolveTheme('dark', false), 'dark');
 });
 test('read-only navigation retains only the existing authorized route set', () => {
-  assert.deepEqual(navigationGroups(false, true).flatMap((group) => group.items.map(([to]) => to)), ['/websites', '/dashboard']);
+  assert.deepEqual(navigationGroups(false).flatMap((group) => group.items.map(([to]) => to)), ['/websites', '/dashboard']);
+  assert.deepEqual(navigationGroups(false, false).flatMap((group) => group.items.map(([to]) => to)), ['/websites']);
 });
 test('owner navigation keeps jobs and audit accessible through categorized settings', () => {
-  const paths = navigationGroups(true, true).flatMap((group) => group.items.map(([to]) => to));
-  assert.equal(paths.length, 6); assert.equal(new Set(paths).size, 6);
+  const paths = navigationGroups(true).flatMap((group) => group.items.map(([to]) => to));
+  assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
   assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
   assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
   const tools = TOOLS_SETTINGS_GROUPS.flatMap(group => group.items.map(([to]) => to));

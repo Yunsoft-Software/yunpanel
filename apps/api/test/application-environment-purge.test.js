@@ -7,7 +7,7 @@ test('Application environment purge removes variables, credentials and metadata 
   const registry=createApplicationEnvironmentRegistry({masterKey:'a'.repeat(64),applicationExists:async()=>true});
   await registry.init();
   await registry.setVariable({applicationId,key:'FOO',value:'bar',secret:false});
-  await registry.setWebhookSecret({applicationId,secret:'secret-12345678901234567890123456'});
+  await registry.setWebhookSecret({applicationId,secret:'secret-123456789012345678901234567890'});
   const before=await registry.inspectApplicationState(applicationId); assert.ok(before.variableCount>=2); assert.equal(before.environmentPresent,true);
   const receipt=await registry.purgeApplication(applicationId); assert.equal(receipt.purged,true);
   assert.deepEqual(await registry.inspectApplicationState(applicationId),{applicationId,variableCount:0,environmentPresent:false});

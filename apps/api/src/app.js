@@ -890,7 +890,12 @@ export function createApp(allOptions = {}) {
     });
   }
   mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId, customerLookup });
-  mountWebsiteAnalyticsRoutes(app, { websiteRegistry, domainRegistry, localServerId });
+  mountWebsiteAnalyticsRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    localServerId,
+    goaccessManager: options.goaccessManager,
+  });
   const siteHealthService = options.siteHealthService ?? createSiteHealthService({
     websiteRegistry,
     domainRegistry,

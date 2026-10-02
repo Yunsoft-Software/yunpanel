@@ -21,10 +21,10 @@ const STEP_STATE_LABELS = Object.freeze({
 });
 
 const REMEDIATION_GUIDANCE = Object.freeze({
-  unix_identity: 'Site kullanıcısı, grup ve ana dizin durumunu kontrol edin. Eksik veya uyuşmayan dosya yolu varsa düzeltin; doğrulanmadan kullanıcı veya dizin silmeyin.',
-  runtime: 'Web sunucusu ve uygulama çalışma ortamı paket durumunu, başlangıç dosyasını ve kullanıcı izinlerini kontrol edin. Sorun giderildikten sonra kuruluma devam edin.',
-  nginx: 'Web sunucusu yapılandırma testini ve alan adı yönlendirme durumunu doğrulayın. Uyuşmazlığı giderdikten sonra tekrar deneyin, devam edin veya güvenli geri alma kullanın.',
-  certificate: 'Sertifika ve DNS doğrulama önkoşullarını tamamlayın. Sertifika doğrulaması tamamlanmadan site hazır sayılmaz; önkoşul düzeldikten sonra kuruluma devam edin.',
+  unix_identity: 'Site kullanıcısı, grup ve home dizinini durable UID/GID ownership kaydıyla karşılaştırın. Eksik receipt veya UID/GID/path drift varsa elle düzeltin; ownership doğrulanmadan kullanıcı, grup ya da dizin silmeyin.',
+  runtime: 'Passenger/Nginx paket durumunu, yönetilen Node binary yolunu, app root/startup file ve site UID/GID eşleşmesini doğrulayın. Bağımlılık veya config sorununu giderdikten sonra provisioning’e devam edin; shared Passenger site rollback’iyle kaldırılmaz.',
+  nginx: 'Operation-owned vhost/checksum durumunu ve Nginx config testini doğrulayın. Sahipliği doğrulanmayan veya drift etmiş vhost’u körlemesine ezmeyin/silmeyin; drift’i giderdikten sonra retry, continue veya güvenli geri alma kullanın.',
+  certificate: 'Sertifika ve DNS doğrulama önkoşullarını tamamlayın. Durable certificate evidence oluşmadan siteyi hazır kabul etmeyin; önkoşul düzeldikten sonra provisioning’e devam edin.',
 });
 
 export function provisioningStepLabel(step) {
@@ -47,10 +47,10 @@ export function provisioningBadgeState(step) {
 export function provisioningRemediation(step) {
   if (!step || ['pending', 'succeeded'].includes(step.state)) return null;
   if (step.kind === 'runtime' && step.error === 'static_runtime_provisioning_pending') {
-    return 'Statik site çalışma ortamı kurulumu henüz tamamlanmamış. Web sitesi dizini doğrulanıp kurulum kanıtı oluşmadan bu adımı tamamlandı saymayın.';
+    return 'Static runtime provisioning henüz tamamlanmamış. Static adapter gerçek Website identity/directory contract’ına bağlanıp inspect kanıtı üretmeden bu adımı başarılı saymayın.';
   }
   return REMEDIATION_GUIDANCE[step.kind]
-    ?? 'Sunucu durumunu ve kaynak kayıtlarını kontrol edin. Uyuşmazlıkları giderdikten sonra adımı tekrar deneyin; doğrulanmayan kaynakları silmeyin.';
+    ?? 'Host durumunu durable ownership/evidence kaydıyla karşılaştırın. Drift veya belirsiz sahipliği elle giderin; aynı mutation’ı körlemesine tekrar etmeyin ve sahipliği doğrulanmayan kaynağı silmeyin.';
 }
 
 export function canContinueProvisioning(operation) {
@@ -63,8 +63,8 @@ export function canContinueProvisioning(operation) {
 export function provisioningOperationLabel(operation) {
   if (!operation) return 'Kurulum kaydı yok';
   if (operation.ready) return 'Hazır';
-  if ((operation.steps ?? []).some((step) => step.state === 'failed')) return 'Müdahale gerekli';
-  if ((operation.steps ?? []).some((step) => step.state === 'blocked')) return 'Engel var';
+  if ((operation.steps ?? []).some((step) => step.state === 'failed')) return 'Başarısız';
+  if ((operation.steps ?? []).some((step) => step.state === 'blocked')) return 'Bloke';
   if ((operation.steps ?? []).some((step) => ['applying', 'compensating'].includes(step.state))) return 'İşleniyor';
   if ((operation.steps ?? []).some((step) => step.state === 'compensated')) return 'Geri alındı';
   return 'Hazırlanıyor';

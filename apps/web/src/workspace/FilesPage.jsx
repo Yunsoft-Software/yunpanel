@@ -15,7 +15,7 @@ export default function FilesPage() {
   const forwardQuery = forwardParams.toString() ? `?${forwardParams.toString()}` : '';
 
   // Keep the existing site route, FilesPanel, API and Website-user isolation.
-  if (entry.state === 'ready') return <Navigate to={`${entry.target.href}${forwardQuery}`} replace />;
+  if (entry.state === 'ready') return forwardQuery ? <Navigate to={`${entry.target.href}${forwardQuery}`} replace /> : <Navigate to={entry.target.href} replace />;
   return <>
     <PageHeading title="Dosyalar" description="Dosya yöneticisini açmak için web sitesini seçin." />
     {entry.state === 'unavailable' && <>

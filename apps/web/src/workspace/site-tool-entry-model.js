@@ -28,24 +28,34 @@ export function resolveSiteToolEntry({ tool, websites, domains, canManage = fals
   const sites = uniqueIds(websites.items);
   const domainItems = uniqueIds(domains.items);
   let selected = sites;
+  let targetDomain = null;
   if (requestedSiteId !== null) {
-    const siteMatches = sites.filter((site) => site.id === requestedSiteId);
-    if (siteMatches.length > 0) {
-      selected = siteMatches;
-    } else {
-      const domainMatch = domainItems.find((d) => d.id === requestedSiteId || d.primaryDomain?.toLowerCase() === requestedSiteId.toLowerCase());
-      if (domainMatch && hasId(domainMatch.websiteId)) {
-        selected = sites.filter((site) => site.id === domainMatch.websiteId);
+    if (typeof requestedSiteId !== 'string' || requestedSiteId.length === 0) return result('not_found');
+    const directSite = sites.find((site) => site.id === requestedSiteId);
+    if (directSite) {
+      selected = [directSite];
+    } else if (tool !== 'mail') {
+      const matchDomain = domainItems.find((d) => d.id === requestedSiteId || d.primaryDomain?.toLowerCase() === requestedSiteId.toLowerCase());
+      if (matchDomain) {
+        const parentSite = sites.find((s) => s.id === matchDomain.websiteId && s.serverId === matchDomain.serverId);
+        if (parentSite) {
+          selected = [parentSite];
+          targetDomain = matchDomain;
+        } else {
+          return result('not_found');
+        }
       } else {
         return result('not_found');
       }
+    } else {
+      return result('not_found');
     }
   }
   const destTab = toolDestinationTab(tool);
   // Mail is domain-scoped: do not silently select a parent when a Website has
   // multiple domains. Each verified domain has an explicit destination.
   const targets = selected.flatMap((site) => {
-    const bound = domainItems.filter((domain) => hasId(site.serverId) && domain.websiteId === site.id && domain.serverId === site.serverId);
+    const bound = domainItems.filter((domain) => hasId(site.serverId) && domain.websiteId === site.id && domain.serverId === site.serverId && (!targetDomain || domain.id === targetDomain.id));
     if (!bound.length) return [{ id: `site:${site.id}`, websiteId: site.id, domainId: null, label: hasId(site.name) ? site.name : site.id, href: null }];
     return bound.map((domain) => ({ id: `domain:${domain.id}`, websiteId: site.id, domainId: domain.id,
       label: hasId(domain.primaryDomain) ? domain.primaryDomain : hasId(site.name) ? site.name : site.id,

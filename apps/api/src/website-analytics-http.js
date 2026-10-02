@@ -95,9 +95,12 @@ function asyncRoute(handler) {
         return next(new WebsiteAnalyticsHttpError(error.code, message, 500));
       }
       const status = Number.isInteger(error?.status) && error.status >= 400 && error.status <= 599 ? error.status : 500;
+      const safeMessage = (status < 500 && typeof error?.message === 'string' && !/[/\\]/.test(error.message))
+        ? error.message
+        : 'Website analytics operation failed';
       return next(new WebsiteAnalyticsHttpError(
         typeof error?.code === 'string' ? error.code : 'website_analytics_failed',
-        error?.message ?? 'Website analytics operation failed',
+        safeMessage,
         status,
       ));
     }
@@ -187,4 +190,8 @@ export function mountWebsiteAnalyticsRoutes(app, {
 export const websiteAnalyticsHttpInternals = Object.freeze({
   analyticsStatusView,
   realtimeView,
+  resolvePrimaryDomain,
+  requireLocalWebsite,
+  requireAnalyticsOwner,
+  asyncRoute,
 });

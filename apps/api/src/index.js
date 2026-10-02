@@ -705,12 +705,11 @@ localWebsiteCronOperation = createLocalWebsiteCronOperation({
   authorizeActor: authorizeWebsitePhpActor,
   authorizeSystemRemoval: authorizeWebsiteRemovalSystemCron,
 });
-const websitePhpActionLock = siteMutationLock;
 websitePhpToolActionService = createWebsitePhpToolActionService({
   websitePhpToolsService,
   jobRegistry,
   authorizeActor: authorizeWebsitePhpActor,
-  withApplicationLock: websitePhpActionLock.withApplicationLock,
+  withApplicationLock: siteMutationLock.withApplicationLock,
 });
 localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
