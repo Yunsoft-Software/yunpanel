@@ -15,6 +15,8 @@ import {
 } from '../src/customer-quotas.js';
 import { createHostingAccountStore } from '../src/hosting-account-store.js';
 import { hostingWebsiteDigest } from '../src/hosting-site-allocation-store.js';
+import { hostingWebsitesForCapacity } from '../src/hosting-site-allocation-schema.js';
+import { rollbackEmptyHostingAccountSchema, initializeHostingAccountSchema } from '../src/hosting-account-schema.js';
 import { hostingAuthFixture } from '../test-support/hosting-auth-fixture.js';
 import {
   checkLocalApiHealth,
@@ -782,4 +784,589 @@ test('Staging E2E: Plesk task contexts, simple Reseller & Customer roles, fail-c
     const isExtension = customRuntimes.includes(runtime);
     assert.equal(isExtension, false, `Runtime ${runtime} should not be classified as product extension`);
   });
+});
+
+// ============================================================================
+// STAGING E2E PART 4: Customer to Website Live Relationship Matrix
+// ============================================================================
+
+test('Staging E2E: Customer to Website live relationship matrix verifies tenant isolation across all tenant tiers (Owner -> Reseller -> Customer -> Website)', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('cust-2a');
+  f.addUser('cust-2b');
+  f.addUser('cust-direct');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // 1. Owner registers Reseller 1 and Reseller 2
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+
+  // 2. Register Customers
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 3, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 3 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  // 3. Allocate Sites
+  const siteAllocations = f.store.siteAllocations;
+  const stagingServerId = '44444444-4444-4444-8444-444444444444';
+
+  const sites = [
+    { id: 'site-1a1', name: 'Site 1A1', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: 'site-1a2', name: 'Site 1A2', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: 'site-1b1', name: 'Site 1B1', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: 'site-2a1', name: 'Site 2A1', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: 'site-2b1', name: 'Site 2B1', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: 'site-direct', name: 'Site Direct', customerId: 'cust-direct', resellerId: null },
+  ];
+
+  for (const s of sites) {
+    siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+      site: { id: s.id, serverId: stagingServerId, name: s.name, applicationId: null, dockerWorkloadId: null, managedComposeBinding: null },
+      ownerUserId: s.customerId,
+      resellerId: s.resellerId,
+    });
+  }
+
+  // 4. Verify Customer & Reseller website usage
+  const c1aUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  assert.equal(c1aUsage.usage.websites, 2);
+  const c1bUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
+  assert.equal(c1bUsage.usage.websites, 1);
+  const r1Usage = f.store.get(ownerToken, f.requireManagement, 'reseller-1');
+  assert.equal(r1Usage.usage.websites, 3);
+  assert.equal(r1Usage.usage.customers, 2);
+
+  // 5. Tenant boundary middleware matrix verification
+  const customerLookup = (id) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id, revision FROM auth_hosting_accounts WHERE user_id = ?').get(id);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(id);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+
+  const websiteLookup = (id) => {
+    const row = f.db.prepare(`SELECT w.website_id, w.customer_id, h.reseller_id
+      FROM auth_customer_websites w
+      JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+      WHERE w.website_id = ?`).get(id);
+    if (!row) return null;
+    return { id: row.website_id, customerId: row.customer_id, resellerId: row.reseller_id };
+  };
+
+  const middleware = createTenantBoundaryMiddleware({ customerLookup, websiteLookup });
+
+  const executeRequest = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  const ownerActor = { id: 'owner-user', role: 'owner', active: true };
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-1a1', 'site-1a2', 'site-1b1'] };
+  const r2Actor = { id: 'reseller-2', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-2a1', 'site-2b1'] };
+  const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1a1', 'site-1a2'] };
+  const c1bActor = { id: 'cust-1b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1b1'] };
+  const c2aActor = { id: 'cust-2a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2a1'] };
+  const c2bActor = { id: 'cust-2b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2b1'] };
+  const cDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: ['site-direct'] };
+
+  const toolSubpaths = [
+    '',
+    '/files',
+    '/databases',
+    '/mail',
+    '/dns',
+    '/backups',
+    '/analytics',
+    '/php-tools',
+    '/cron',
+    '/sftp',
+    '/elfinder',
+    '/terminal',
+  ];
+
+  const actors = [
+    { actor: ownerActor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1', 'site-2a1', 'site-2b1', 'site-direct'] },
+    { actor: r1Actor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1'] },
+    { actor: r2Actor, allowedSites: ['site-2a1', 'site-2b1'] },
+    { actor: c1aActor, allowedSites: ['site-1a1', 'site-1a2'] },
+    { actor: c1bActor, allowedSites: ['site-1b1'] },
+    { actor: c2aActor, allowedSites: ['site-2a1'] },
+    { actor: c2bActor, allowedSites: ['site-2b1'] },
+    { actor: cDirectActor, allowedSites: ['site-direct'] },
+  ];
+
+  for (const { actor, allowedSites } of actors) {
+    for (const site of sites) {
+      const isAllowed = allowedSites.includes(site.id);
+      for (const sub of toolSubpaths) {
+        const path = `/api/websites/${site.id}${sub}`;
+        const res = await executeRequest(actor, path);
+        if (isAllowed) {
+          assert.equal(res.called, true, `Expected actor ${actor.id} to be ALLOWED on ${path}`);
+          assert.equal(res.statusCode, 200);
+        } else {
+          assert.equal(res.called, false, `Expected actor ${actor.id} to be BLOCKED (403) on ${path}`);
+          assert.equal(res.statusCode, 403);
+          assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+          assert.equal(res.responseBody.error.site, undefined);
+          assert.equal(res.responseBody.error.customer, undefined);
+        }
+      }
+    }
+  }
+
+  // 6. Negative authorization checks: Unassigned admin endpoints fail closed with HTTP 403
+  const adminRoutes = [
+    '/api/system/watchdog/status',
+    '/api/system/watchdog/check',
+    '/api/system/watchdog/recover',
+    '/api/system/packages',
+    '/api/backups',
+    '/api/servers/srv-staging-1/services',
+  ];
+
+  const nonOwnerActors = [r1Actor, r2Actor, c1aActor, c1bActor, c2aActor, c2bActor, cDirectActor];
+  for (const actor of nonOwnerActors) {
+    for (const path of adminRoutes) {
+      const res = await executeRequest(actor, path);
+      assert.equal(res.called, false, `Expected ${path} to fail closed for ${actor.id}`);
+      assert.equal(res.statusCode, 403);
+      assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+    }
+  }
+
+  // Customers cannot call customer list
+  for (const custActor of [c1aActor, c1bActor, c2aActor, c2bActor, cDirectActor]) {
+    const res = await executeRequest(custActor, '/api/customers');
+    assert.equal(res.called, false);
+    assert.equal(res.statusCode, 403);
+  }
+
+  // Reseller cannot access foreign or direct customers
+  const r1ForeignCust = await executeRequest(r1Actor, '/api/customers/cust-2a');
+  assert.equal(r1ForeignCust.called, false);
+  assert.equal(r1ForeignCust.statusCode, 403);
+
+  const r1DirectCust = await executeRequest(r1Actor, '/api/customers/cust-direct');
+  assert.equal(r1DirectCust.called, false);
+  assert.equal(r1DirectCust.statusCode, 403);
+
+  // 7. Data isolation in sanitized collections
+  const rawCollection = sites.map((s) => ({ id: s.id, websiteId: s.id, customerId: s.customerId, resellerId: s.resellerId }));
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, c1aActor).map((s) => s.id), ['site-1a1', 'site-1a2']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, c1bActor).map((s) => s.id), ['site-1b1']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, r1Actor).map((s) => s.id), ['site-1a1', 'site-1a2', 'site-1b1']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, r2Actor).map((s) => s.id), ['site-2a1', 'site-2b1']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, cDirectActor).map((s) => s.id), ['site-direct']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, ownerActor).map((s) => s.id), sites.map((s) => s.id));
+});
+
+// ============================================================================
+// STAGING E2E PART 5: Data Migration and Rollback Procedures
+// ============================================================================
+
+test('Staging E2E: Data migration and rollback procedures for customer and website entities ensure consistent state without orphan records', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('customer-target');
+  f.addUser('legacy-sm-1');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // Setup reseller and target customer
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-target',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 5, maxDiskMb: 8192, maxTrafficMb: 40960, maxDatabases: 4 },
+  });
+
+  // 1. Setup legacy user with pre-existing grants in auth_user_websites
+  const legSite1 = '11111111-2222-4333-8444-555555555551';
+  const legSite2 = '11111111-2222-4333-8444-555555555552';
+  f.db.prepare('INSERT INTO auth_user_websites (user_id, website_id) VALUES (?, ?)').run('legacy-sm-1', legSite1);
+  f.db.prepare('INSERT INTO auth_user_websites (user_id, website_id) VALUES (?, ?)').run('legacy-sm-1', legSite2);
+
+  // Attempting direct customer registration without migration fails 409
+  assert.throws(
+    () => f.store.registerCustomer(ownerToken, f.requireManagement, {
+      userId: 'legacy-sm-1',
+      expectedUserRevision: 1,
+      resellerId: 'reseller-1',
+    }),
+    (err) => err.code === 'hosting_site_migration_required' && err.status === 409,
+  );
+
+  // Attempting site allocation on a legacy grant site fails 409
+  const stagingServerId = '44444444-4444-4444-8444-444444444444';
+  assert.throws(
+    () => f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+      site: { id: legSite1, serverId: stagingServerId, name: 'Conflict Site' },
+      ownerUserId: 'customer-target',
+      resellerId: 'reseller-1',
+    }),
+    (err) => err.code === 'hosting_site_migration_required' && err.status === 409,
+  );
+
+  // 2. Perform Migration of Legacy User to Customer Entity with Attached Websites
+  const migrationReceipt = f.store.migrateLegacyUserToCustomer(ownerToken, f.requireManagement, {
+    userId: 'legacy-sm-1',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 4, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+    serverId: stagingServerId,
+  });
+
+  assert.equal(migrationReceipt.customerId, 'legacy-sm-1');
+  assert.equal(migrationReceipt.resellerId, 'reseller-1');
+  assert.deepEqual(migrationReceipt.migratedWebsites, [legSite1, legSite2]);
+  assert.deepEqual(migrationReceipt.previousGrants, [legSite1, legSite2]);
+  assert.equal(migrationReceipt.allocations.length, 2);
+
+  // Verify post-migration state:
+  const remainingGrants = f.db.prepare('SELECT count(*) AS total FROM auth_user_websites WHERE user_id = ?').get('legacy-sm-1').total;
+  assert.equal(remainingGrants, 0);
+
+  const migratedCust = f.store.get(ownerToken, f.requireManagement, 'legacy-sm-1');
+  assert.equal(migratedCust.kind, 'customer');
+  assert.equal(migratedCust.resellerId, 'reseller-1');
+  assert.equal(migratedCust.usage.websites, 2);
+
+  const capacityWebsites = hostingWebsitesForCapacity(f.db);
+  assert.equal(capacityWebsites.filter((w) => w.customerId === 'legacy-sm-1').length, 2);
+
+  // 3. Rollback of Legacy User Migration
+  const rollbackResult = f.store.rollbackLegacyUserMigration(ownerToken, f.requireManagement, migrationReceipt);
+  assert.equal(rollbackResult.rolledBack, true);
+  assert.equal(rollbackResult.customerId, 'legacy-sm-1');
+  assert.deepEqual(rollbackResult.restoredWebsites, [legSite1, legSite2]);
+
+  // Verify post-rollback state:
+  assert.throws(
+    () => f.store.get(ownerToken, f.requireManagement, 'legacy-sm-1'),
+    (err) => err.code === 'hosting_account_not_found' && err.status === 404,
+  );
+
+  // No orphan records remain
+  const orphanAllocs = f.db.prepare('SELECT count(*) AS total FROM auth_hosting_site_allocations WHERE customer_id = ?').get('legacy-sm-1').total;
+  assert.equal(orphanAllocs, 0);
+  const orphanWebsites = f.db.prepare('SELECT count(*) AS total FROM auth_customer_websites WHERE customer_id = ?').get('legacy-sm-1').total;
+  assert.equal(orphanWebsites, 0);
+  const orphanQuotas = f.db.prepare('SELECT count(*) AS total FROM auth_customer_quotas WHERE customer_id = ?').get('legacy-sm-1').total;
+  assert.equal(orphanQuotas, 0);
+
+  // Legacy grants cleanly restored
+  const restoredGrants = f.db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ? ORDER BY website_id').all('legacy-sm-1').map((r) => r.website_id);
+  assert.deepEqual(restoredGrants, [legSite1, legSite2]);
+  assert.doesNotThrow(() => hostingWebsitesForCapacity(f.db));
+
+  // 4. Website Ownership Migration between Customers
+  const currentLegacyRev = f.db.prepare('SELECT revision FROM auth_user_revisions WHERE user_id = ?').get('legacy-sm-1')?.revision ?? 1;
+  const mReceipt2 = f.store.migrateLegacyUserToCustomer(ownerToken, f.requireManagement, {
+    userId: 'legacy-sm-1',
+    expectedUserRevision: currentLegacyRev,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 4, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+    serverId: stagingServerId,
+  });
+
+  const xferReceipt = f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+    websiteId: legSite1,
+    targetCustomerId: 'customer-target',
+    expectedSourceCustomerId: 'legacy-sm-1',
+  });
+
+  assert.equal(xferReceipt.websiteId, legSite1);
+  assert.equal(xferReceipt.previousCustomerId, 'legacy-sm-1');
+  assert.equal(xferReceipt.targetCustomerId, 'customer-target');
+
+  const legAfterXfer = f.store.get(ownerToken, f.requireManagement, 'legacy-sm-1');
+  assert.equal(legAfterXfer.usage.websites, 1);
+  const targetAfterXfer = f.store.get(ownerToken, f.requireManagement, 'customer-target');
+  assert.equal(targetAfterXfer.usage.websites, 1);
+  assert.doesNotThrow(() => hostingWebsitesForCapacity(f.db));
+
+  // Rollback website ownership transfer
+  const xferRollback = f.store.rollbackWebsiteOwnershipMigration(ownerToken, f.requireManagement, xferReceipt);
+  assert.equal(xferRollback.rolledBack, true);
+  assert.equal(xferRollback.restoredCustomerId, 'legacy-sm-1');
+
+  const legAfterRestore = f.store.get(ownerToken, f.requireManagement, 'legacy-sm-1');
+  assert.equal(legAfterRestore.usage.websites, 2);
+  const targetAfterRestore = f.store.get(ownerToken, f.requireManagement, 'customer-target');
+  assert.equal(targetAfterRestore.usage.websites, 0);
+  assert.doesNotThrow(() => hostingWebsitesForCapacity(f.db));
+
+  // 5. Schema Rollback with Data Guard
+  assert.throws(
+    () => rollbackEmptyHostingAccountSchema({ db: f.db, transaction: f.transaction }),
+    (err) => err.code === 'hosting_schema_in_use' && err.status === 409,
+  );
+
+  // Clean data properly before schema rollback
+  f.store.rollbackLegacyUserMigration(ownerToken, f.requireManagement, mReceipt2);
+  f.store.unregister(ownerToken, f.requireManagement, 'customer-target', { revision: 1 });
+  f.store.unregister(ownerToken, f.requireManagement, 'reseller-1', { revision: 1 });
+
+  const schemaRollback = rollbackEmptyHostingAccountSchema({ db: f.db, transaction: f.transaction });
+  assert.equal(schemaRollback.removed, true);
+
+  const hostingTableCount = f.db.prepare("SELECT count(*) AS total FROM sqlite_master WHERE type = 'table' AND name LIKE 'auth_hosting%'").get().total;
+  assert.equal(hostingTableCount, 0);
+
+  const schemaInit = initializeHostingAccountSchema({ db: f.db, transaction: f.transaction });
+  assert.equal(schemaInit.created, true);
+  assert.equal(schemaInit.version, 3);
+});
+
+// ============================================================================
+// STAGING E2E PART 6: Session Revocation, Logout & Account Suspension
+// ============================================================================
+
+test('Staging E2E: Revocation of grants, logout, or account suspension terminates active sessions and blocks ongoing tool operations', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('customer-1a');
+  f.addUser('customer-1b');
+  f.addUser('customer-direct');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 5 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  const stagingServerId = '44444444-4444-4444-8444-444444444444';
+  const site1 = {
+    id: 'aaaaaaaa-1111-4111-8111-111111111111',
+    serverId: stagingServerId,
+    name: 'Customer 1A Active Site',
+    applicationId: null,
+    dockerWorkloadId: null,
+    managedComposeBinding: null,
+  };
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1,
+    ownerUserId: 'customer-1a',
+    resellerId: 'reseller-1',
+  });
+
+  // Create active session tokens
+  const c1aToken = f.session('customer-1a');
+  const r1Token = f.session('reseller-1');
+  const directToken = f.session('customer-direct');
+
+  assert.equal(f.getSession(c1aToken)?.user.id, 'customer-1a');
+  assert.equal(f.getSession(r1Token)?.user.id, 'reseller-1');
+  assert.equal(f.getSession(directToken)?.user.id, 'customer-direct');
+
+  const customerLookup = (id) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id FROM auth_hosting_accounts WHERE user_id = ?').get(id);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(id);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+
+  const websiteLookup = (id) => {
+    const row = f.db.prepare(`SELECT w.website_id, w.customer_id, h.reseller_id
+      FROM auth_customer_websites w
+      JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+      WHERE w.website_id = ?`).get(id);
+    if (!row) return null;
+    return { id: row.website_id, customerId: row.customer_id, resellerId: row.reseller_id };
+  };
+
+  const middleware = createTenantBoundaryMiddleware({ customerLookup, websiteLookup });
+
+  const executeRequest = async (actor, url, method = 'GET') => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, auth: { user: actor } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  // 1. Account Suspension: Customer suspension terminates active session and blocks tool operations
+  const c1aActor = { id: 'customer-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: [site1.id] };
+
+  const preSuspReq = await executeRequest(c1aActor, `/api/websites/${site1.id}/files`);
+  assert.equal(preSuspReq.called, true);
+
+  // Suspend Customer 1A
+  f.store.setActive(ownerToken, f.requireManagement, 'customer-1a', { revision: 1, active: false });
+
+  // Verify session invalidated
+  assert.equal(f.getSession(c1aToken), null);
+  assert.equal(f.revoked.some((r) => r.id === 'customer-1a' && r.reason === 'hosting_account_suspended'), true);
+
+  // Post-suspension request fails closed 403 tenant_actor_inactive
+  const suspendedActor = { ...c1aActor, active: false };
+  const postSuspReq = await executeRequest(suspendedActor, `/api/websites/${site1.id}/files`);
+  assert.equal(postSuspReq.called, false);
+  assert.equal(postSuspReq.statusCode, 403);
+  assert.equal(postSuspReq.responseBody.error.code, 'tenant_actor_inactive');
+
+  // Ongoing tool operations fail closed
+  const ongoingTerminalReq = await executeRequest(suspendedActor, `/api/websites/${site1.id}/terminal`);
+  assert.equal(ongoingTerminalReq.called, false);
+  assert.equal(ongoingTerminalReq.statusCode, 403);
+  assert.equal(ongoingTerminalReq.responseBody.error.code, 'tenant_actor_inactive');
+
+  // 2. Reseller Suspension: Cascades to terminate child customer sessions and operations
+  const c1bToken = f.session('customer-1b');
+  assert.notEqual(f.getSession(c1bToken), null);
+
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', { revision: 1, active: false });
+
+  // Reseller 1 session invalidated
+  assert.equal(f.getSession(r1Token), null);
+  // Child customer 1B session invalidated due to parent suspension
+  assert.equal(f.getSession(c1bToken), null);
+  assert.equal(f.revoked.some((r) => r.id === 'customer-1b' && r.reason === 'hosting_parent_suspended'), true);
+
+  const suspendedR1Actor = { id: 'reseller-1', role: 'reseller', active: false, websiteIds: [] };
+  const r1Req = await executeRequest(suspendedR1Actor, `/api/websites/${site1.id}`);
+  assert.equal(r1Req.called, false);
+  assert.equal(r1Req.statusCode, 403);
+  assert.equal(r1Req.responseBody.error.code, 'tenant_actor_inactive');
+
+  // 3. Grant / Website Ownership Revocation
+  f.store.setActive(ownerToken, f.requireManagement, 'customer-1a', { revision: 2, active: true });
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', { revision: 2, active: true });
+
+  const activeC1aToken = f.session('customer-1a');
+  assert.notEqual(f.getSession(activeC1aToken), null);
+
+  const removalReceipt = f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-rem-site1',
+    websiteId: site1.id,
+    serverId: site1.serverId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(removalReceipt.released, true);
+  assert.equal(removalReceipt.quotaReleased, true);
+
+  // Customer session invalidated upon site removal
+  assert.equal(f.getSession(activeC1aToken), null);
+  assert.equal(f.revoked.some((r) => r.id === 'customer-1a' && r.reason === 'hosting_website_released'), true);
+
+  const c1aActorNoSites = { id: 'customer-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: [] };
+  const revokedSiteReq = await executeRequest(c1aActorNoSites, `/api/websites/${site1.id}/files`);
+  assert.equal(revokedSiteReq.called, false);
+  assert.equal(revokedSiteReq.statusCode, 403);
+
+  // 4. Logout: Session termination terminates ongoing access
+  assert.notEqual(f.getSession(directToken), null);
+  f.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(directToken);
+  assert.equal(f.getSession(directToken), null);
 });
