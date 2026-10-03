@@ -82,6 +82,18 @@ function createFixture({
   return { registry, service, calls, restoreConfirmation };
 }
 
+async function waitForOperationTerminal(registry, id, timeoutMs = 3000) {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    const op = await registry.getOperation(id);
+    if (op && (op.status === 'succeeded' || op.status === 'failed' || op.status === 'rolled_back')) {
+      return op;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  return registry.getOperation(id);
+}
+
 test('createWebsiteBackupOperationRegistry validates inputs and serializes operations per website', async () => {
   const registry = createWebsiteBackupOperationRegistry();
 
@@ -136,10 +148,8 @@ test('queueBackup validates digest and confirmation, enqueues operation and adva
   assert.equal(op.kind, 'backup');
   assert.equal(op.status, 'queued');
 
-  // Wait for setImmediate background execution
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const completed = await registry.getOperation(op.id);
+  // Wait for background execution to complete
+  const completed = await waitForOperationTerminal(registry, op.id);
   assert.equal(completed.status, 'succeeded');
   assert.equal(completed.snapshotId, 'snap-backup-123');
   assert.equal(completed.result?.status, 'succeeded');
@@ -151,9 +161,7 @@ test('queueBackup records failure in operation when executeBackup throws', async
   const { service, registry } = createFixture({ backupSucceeds: false });
 
   const op = await service.queueBackup({ websiteId, repositoryId, expectedPreviewDigest: previewDigest, confirmation });
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const failed = await registry.getOperation(op.id);
+  const failed = await waitForOperationTerminal(registry, op.id);
   assert.equal(failed.status, 'failed');
   assert.ok(failed.error?.message.includes('Restic backup execution failed'));
   assert.ok(failed.finishedAt);
@@ -172,9 +180,7 @@ test('queueRestore executes pre-restore snapshot, health check and records succe
   assert.equal(op.kind, 'restore');
   assert.equal(op.status, 'queued');
 
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const completed = await registry.getOperation(op.id);
+  const completed = await waitForOperationTerminal(registry, op.id);
   assert.equal(completed.status, 'succeeded');
   assert.equal(completed.preRestoreSnapshotId, 'pre-snap-1');
   assert.equal(completed.result?.healthCheck?.satisfied, true);
@@ -200,9 +206,7 @@ test('queueRestore handles automatic health rollback when health check fails', a
     confirmation: restoreConfirmation,
   });
 
-  await new Promise((resolve) => setTimeout(resolve, 50));
-
-  const rolledBack = await registry.getOperation(op.id);
+  const rolledBack = await waitForOperationTerminal(registry, op.id);
   assert.equal(rolledBack.status, 'rolled_back');
   assert.equal(rolledBack.result?.rollbackReason, 'health_check_failed');
   assert.equal(rolledBack.result?.preRestoreSnapshotId, 'pre-snap-1');

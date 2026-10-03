@@ -12,6 +12,7 @@ import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
 import { withPanelContext } from './helpers/panel-auth-fixture.js';
 
 const execFileAsync = promisify(execFile);
@@ -755,4 +756,292 @@ test('SSL certificate issuance endpoint validates contact email, preserves user 
     const prodRecord = await certificateRegistry.getCertificate(prodIssue.payload.data.certificate.id);
     assert.equal(prodRecord.state, 'issuing');
   });
+});
+
+test('SSL certificate issuance validates Owner and authorized site account roles, user switching, email payload verification, cross-tenant isolation, and error responses (BUG-20260923-05)', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'cert-http-role-test-'));
+  try {
+    const customRoot = path.join(directory, 'custom-certificates');
+    const serverRegistry = createServerRegistry();
+    const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'issue-role-host' });
+    const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'issue-role-host' });
+
+    const websiteRegistry = createWebsiteRegistry({
+      serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+    });
+    const websiteA = await websiteRegistry.createWebsite({
+      serverId: enrolled.server.id,
+      name: 'SiteA',
+      runtimeType: 'proxy',
+    });
+    const websiteB = await websiteRegistry.createWebsite({
+      serverId: enrolled.server.id,
+      name: 'SiteB',
+      runtimeType: 'proxy',
+    });
+    const websiteAId = websiteA.id;
+    const websiteBId = websiteB.id;
+
+    const domainRegistry = createDomainRegistry({
+      getWebsite: async (id) => websiteRegistry.getWebsite(id),
+      serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+    });
+
+    // Domain A attached to Website A
+    const domainA = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteAId,
+      primaryDomain: 'site-a.example.com',
+      aliases: ['www.site-a.example.com'],
+      targetType: 'proxy',
+      target: { upstreamPort: 8081 },
+      httpsMode: 'managed',
+    });
+    const checksumA = 'a'.repeat(64);
+    await domainRegistry.markStaged(domainA.id, {
+      checksum: checksumA,
+      configName: 'yunpanel-site-a.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainA.id, { checksum: checksumA });
+
+    // Additional domains on Website A for testing role switches and submissions
+    const domainA2 = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteAId,
+      primaryDomain: 'mgr-site-a.example.com',
+      aliases: [],
+      targetType: 'proxy',
+      target: { upstreamPort: 8082 },
+      httpsMode: 'managed',
+    });
+    await domainRegistry.markStaged(domainA2.id, {
+      checksum: checksumA,
+      configName: 'yunpanel-mgr-site-a.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainA2.id, { checksum: checksumA });
+
+    const domainA3 = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteAId,
+      primaryDomain: 'cust-site-a.example.com',
+      aliases: [],
+      targetType: 'proxy',
+      target: { upstreamPort: 8083 },
+      httpsMode: 'managed',
+    });
+    await domainRegistry.markStaged(domainA3.id, {
+      checksum: checksumA,
+      configName: 'yunpanel-cust-site-a.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainA3.id, { checksum: checksumA });
+
+    const domainA4 = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteAId,
+      primaryDomain: 'res-site-a.example.com',
+      aliases: [],
+      targetType: 'proxy',
+      target: { upstreamPort: 8084 },
+      httpsMode: 'managed',
+    });
+    await domainRegistry.markStaged(domainA4.id, {
+      checksum: checksumA,
+      configName: 'yunpanel-res-site-a.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainA4.id, { checksum: checksumA });
+
+    const domainA5 = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteAId,
+      primaryDomain: 'edit-site-a.example.com',
+      aliases: [],
+      targetType: 'proxy',
+      target: { upstreamPort: 8085 },
+      httpsMode: 'managed',
+    });
+    await domainRegistry.markStaged(domainA5.id, {
+      checksum: checksumA,
+      configName: 'yunpanel-edit-site-a.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainA5.id, { checksum: checksumA });
+
+    // Domain B attached to Website B
+    const domainB = await domainRegistry.createDomain({
+      serverId: enrolled.server.id,
+      websiteId: websiteBId,
+      primaryDomain: 'site-b.example.com',
+      aliases: [],
+      targetType: 'proxy',
+      target: { upstreamPort: 8086 },
+      httpsMode: 'managed',
+    });
+    const checksumB = 'b'.repeat(64);
+    await domainRegistry.markStaged(domainB.id, {
+      checksum: checksumB,
+      configName: 'yunpanel-site-b.example.com.conf',
+    });
+    await domainRegistry.markApplied(domainB.id, { checksum: checksumB });
+
+    const certificateRegistry = createCertificateRegistry({ customRoot });
+    const certificateMaterialManager = createCertificateMaterialManager({ customRoot, getUid: () => 0 });
+    const jobRegistry = createJobRegistry();
+
+    let currentAuthContext = null;
+    const app = withPanelContext(createApp({
+      environment: 'production',
+      registry: serverRegistry,
+      domainRegistry,
+      websiteRegistry,
+      certificateRegistry,
+      certificateMaterialManager,
+      jobRegistry,
+      localServerId: enrolled.server.id,
+    }), () => currentAuthContext);
+
+    const ownerAuth = {
+      user: { id: 'owner-user', username: 'owner-user', role: 'owner', email: 'owner@example.test' },
+      security: { ownerMfaRequired: true, enrollmentRequired: false, managementAllowed: true },
+      access: { mode: 'management', permissions: ['*'] },
+    };
+
+    const siteManagerAAuth = {
+      user: { id: 'mgr-a', username: 'mgr-a', role: 'site_manager', websiteIds: [websiteAId], email: 'manager-a@site-a.test' },
+      security: { managementAllowed: true },
+      access: { mode: 'site_management' },
+    };
+
+    const customerAAuth = {
+      user: { id: 'cust-a', username: 'cust-a', role: 'customer', websiteIds: [websiteAId], email: 'customer-a@site-a.test' },
+      security: { managementAllowed: true },
+      access: { mode: 'site_management' },
+    };
+
+    const resellerAAuth = {
+      user: { id: 'res-a', username: 'res-a', role: 'reseller', websiteIds: [websiteAId], email: 'reseller-a@site-a.test' },
+      security: { managementAllowed: true },
+      access: { mode: 'site_management' },
+    };
+
+    const customerBAuth = {
+      user: { id: 'cust-b', username: 'cust-b', role: 'customer', websiteIds: [websiteBId], email: 'customer-b@site-b.test' },
+      security: { managementAllowed: true },
+      access: { mode: 'site_management' },
+    };
+
+    const readOnlyAuth = {
+      user: { id: 'reader', username: 'reader', role: 'read_only' },
+      security: { managementAllowed: false },
+      access: { mode: 'read_only', permissions: ['domains.read'] },
+    };
+
+    await withServer(app, async (baseUrl) => {
+      // 1. Owner session issuing SSL certificate with user contact email in payload
+      currentAuthContext = ownerAuth;
+      const ownerIssue = await requestJson(`${baseUrl}/api/domains/${domainA.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'owner@example.test', staging: true },
+      });
+      assert.equal(ownerIssue.response.status, 202);
+      assert.equal(ownerIssue.payload.data.certificate.email, 'owner@example.test');
+      assert.ok(ownerIssue.payload.data.job);
+      const ownerJob = await jobRegistry.getJob(ownerIssue.payload.data.job.id);
+      assert.equal(ownerJob.operation, 'ssl.issue');
+      assert.equal(ownerJob.payload.email, 'owner@example.test');
+
+      // 2. Switching user session to authorized site manager (mgr-a) -> correct manager email in payload
+      currentAuthContext = siteManagerAAuth;
+      const mgrIssue = await requestJson(`${baseUrl}/api/domains/${domainA2.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'manager-a@site-a.test', staging: true },
+      });
+      assert.equal(mgrIssue.response.status, 202);
+      assert.equal(mgrIssue.payload.data.certificate.email, 'manager-a@site-a.test');
+      assert.ok(mgrIssue.payload.data.job);
+      const mgrJob = await jobRegistry.getJob(mgrIssue.payload.data.job.id);
+      assert.equal(mgrJob.operation, 'ssl.issue');
+      assert.equal(mgrJob.payload.email, 'manager-a@site-a.test');
+
+      // 3. Switching user session to authorized customer (cust-a) -> correct customer email in payload
+      currentAuthContext = customerAAuth;
+      const custIssue = await requestJson(`${baseUrl}/api/domains/${domainA3.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'customer-a@site-a.test', staging: true },
+      });
+      assert.equal(custIssue.response.status, 202);
+      assert.equal(custIssue.payload.data.certificate.email, 'customer-a@site-a.test');
+      assert.ok(custIssue.payload.data.job);
+      const custJob = await jobRegistry.getJob(custIssue.payload.data.job.id);
+      assert.equal(custJob.operation, 'ssl.issue');
+      assert.equal(custJob.payload.email, 'customer-a@site-a.test');
+
+      // 4. Switching user session to authorized reseller (res-a) -> correct reseller email in payload
+      currentAuthContext = resellerAAuth;
+      const resIssue = await requestJson(`${baseUrl}/api/domains/${domainA4.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'reseller-a@site-a.test', staging: true },
+      });
+      assert.equal(resIssue.response.status, 202);
+      assert.equal(resIssue.payload.data.certificate.email, 'reseller-a@site-a.test');
+      assert.ok(resIssue.payload.data.job);
+      const resJob = await jobRegistry.getJob(resIssue.payload.data.job.id);
+      assert.equal(resJob.operation, 'ssl.issue');
+      assert.equal(resJob.payload.email, 'reseller-a@site-a.test');
+
+      // 5. Cross-tenant isolation: Customer B attempting to issue certificate on Website A's domain -> 403 Forbidden
+      currentAuthContext = customerBAuth;
+      const crossDenied = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'customer-b@site-b.test', staging: true },
+      });
+      assert.equal(crossDenied.response.status, 403);
+      assert.equal(crossDenied.payload.error.code, 'site_scope_forbidden');
+
+      // 6. Read-only user attempt -> 403 Forbidden
+      currentAuthContext = readOnlyAuth;
+      const readOnlyDenied = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'reader@example.test', staging: true },
+      });
+      assert.equal(readOnlyDenied.response.status, 403);
+      assert.equal(readOnlyDenied.payload.error.code, 'forbidden');
+
+      // 7. Unauthenticated request -> 401 Unauthorized
+      currentAuthContext = null;
+      const unauthDenied = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'anon@example.test', staging: true },
+      });
+      assert.equal(unauthDenied.response.status, 401);
+      assert.equal(unauthDenied.payload.error.code, 'unauthorized');
+
+      // 8. Missing email in payload -> 400 invalid_acme_email (no silent global fallback)
+      currentAuthContext = ownerAuth;
+      const missingEmail = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { staging: true },
+      });
+      assert.equal(missingEmail.response.status, 400);
+      assert.equal(missingEmail.payload.error.code, 'invalid_acme_email');
+
+      // 9. Malformed email in payload -> 400 invalid_acme_email
+      const malformedEmail = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'invalid-address@', staging: true },
+      });
+      assert.equal(malformedEmail.response.status, 400);
+      assert.equal(malformedEmail.payload.error.code, 'invalid_acme_email');
+
+      // 10. User-edited valid email is preserved in payload and job
+      const customEmailIssue = await requestJson(`${baseUrl}/api/domains/${domainA5.id}/certificates/issue`, {
+        method: 'POST',
+        body: { email: 'custom.ssl@company.org', staging: true },
+      });
+      assert.equal(customEmailIssue.response.status, 202);
+      assert.equal(customEmailIssue.payload.data.certificate.email, 'custom.ssl@company.org');
+      const customJob = await jobRegistry.getJob(customEmailIssue.payload.data.job.id);
+      assert.equal(customJob.payload.email, 'custom.ssl@company.org');
+    });
+  } finally {
+    await rm(directory, { recursive: true, force: true }).catch(() => {});
+  }
 });

@@ -8,7 +8,13 @@ const FIELDS = Object.freeze(['email', ...Object.keys(SSL_SCOPE_DEFAULTS)]);
 // Only this authenticated user's data can provide a default. An email-shaped
 // login name is an account address, not a generated admin@domain fallback.
 export function sslContactEmail(session) {
-  for (const value of [session?.user?.email, session?.user?.username]) {
+  for (const value of [
+    session?.user?.email,
+    session?.user?.contactEmail,
+    session?.user?.recoveryEmail,
+    session?.user?.hosting?.contactEmail,
+    session?.user?.username,
+  ]) {
     if (typeof value === 'string' && validSslContactEmail(value)) return value.trim();
   }
   return '';
