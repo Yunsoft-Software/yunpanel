@@ -7,41 +7,73 @@ import { websiteCount } from './ui/ux-model.js';
 import { readableItems, usagePercent } from './ui/console-model.js';
 import UsageHistory from './ui/UsageHistory.jsx';
 
-function UsageRing({ label, value, detail }) {
+export function UsageRing({ label, value, detail }) {
   const valid = Number.isFinite(value) && value >= 0 && value <= 100;
   const rounded = valid ? Math.round(value) : null;
-  return <div className="ws-usage-metric"><div className={`ws-usage-ring ${valid && value >= 85 ? 'is-high' : ''} ${!valid ? 'is-unknown' : ''}`}
-    style={{ '--usage': valid ? `${value}%` : '0%' }} role="progressbar" aria-label={label}
-    aria-valuemin={0} aria-valuemax={100} aria-valuenow={rounded ?? undefined}
-    aria-valuetext={valid ? `%${rounded}` : 'Bilinmiyor'}><strong>{valid ? `%${rounded}` : '—'}</strong></div>
-    <span>{label}</span><small>{detail}</small></div>;
+  const isCritical = valid && value >= 90;
+  const isHigh = valid && value >= 85;
+  const ringState = !valid ? 'is-unknown' : isCritical ? 'is-critical is-high' : isHigh ? 'is-high' : '';
+  const ariaState = !valid
+    ? `${label} kullanım verisi bilinmiyor`
+    : `%${rounded}${isCritical ? ' (Kritik doluluk)' : isHigh ? ' (Yüksek doluluk)' : ''}`;
+
+  return <div className="ws-usage-metric">
+    <div
+      className={`ws-usage-ring ${ringState}`}
+      style={{ '--usage': valid ? `${value}%` : '0%' }}
+      role="progressbar"
+      tabIndex={0}
+      aria-label={`${label} kullanımı`}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      aria-valuenow={rounded ?? undefined}
+      aria-valuetext={ariaState}
+    >
+      <strong>{valid ? `%${rounded}` : '—'}</strong>
+    </div>
+    <span>{label}</span>
+    <small>{detail}</small>
+  </div>;
 }
 export function ServerSummary({ server }) {
-  const inventory = server.inventory ?? {};
+  const inventory = server?.inventory ?? {};
   const memory = inventory.memory ?? {};
   const disk = inventory.filesystem ?? {};
-  return <article className="ws-mini-server"><header><div><h3>{server.displayName ?? server.name ?? server.hostname}</h3><small className="ws-muted">{inventory.operatingSystem?.prettyName ?? 'Sistem bilgisi bekleniyor'}</small></div><Badge state={server.connectivity} /></header>
+  const cpuCount = inventory.cpu?.count;
+  const cpuDetail = cpuCount != null ? `${cpuCount} çekirdek` : '—';
+  const memoryUsage = usagePercent(memory.usedBytes, memory.totalBytes);
+  const memoryDetail = Number.isFinite(memory.usedBytes) && Number.isFinite(memory.totalBytes)
+    ? `${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)}`
+    : '—';
+  const diskUsage = usagePercent(disk.usedBytes, disk.totalBytes);
+  const diskDetail = Number.isFinite(disk.usedBytes) && Number.isFinite(disk.totalBytes)
+    ? `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`
+    : '—';
+
+  return <article className="ws-mini-server"><header><div><h3>{server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu'}</h3><small className="ws-muted">{inventory.operatingSystem?.prettyName ?? 'Sistem bilgisi bekleniyor'}</small></div><Badge state={server?.connectivity ?? 'unknown'} /></header>
     <div className="ws-server-metrics">
-      <UsageRing label="CPU" value={inventory.cpu?.usagePercent} detail={`${inventory.cpu?.count ?? '—'} çekirdek`} />
-      <UsageRing label="Bellek" value={usagePercent(memory.usedBytes, memory.totalBytes)} detail={`${formatBytes(memory.usedBytes)} / ${formatBytes(memory.totalBytes)}`} />
-      <UsageRing label="Disk" value={usagePercent(disk.usedBytes, disk.totalBytes)} detail={`${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`} />
-    </div><p className="ws-muted ws-server-timestamp">Son ölçüm · {formatDate(server.lastSeenAt)}</p>
+      <UsageRing label="CPU" value={inventory.cpu?.usagePercent} detail={cpuDetail} />
+      <UsageRing label="Bellek" value={memoryUsage} detail={memoryDetail} />
+      <UsageRing label="Disk" value={diskUsage} detail={diskDetail} />
+    </div><p className="ws-muted ws-server-timestamp">Son ölçüm · {formatDate(server?.lastSeenAt)}</p>
   </article>;
 }
 export default function DashboardPage() {
   const { domains, websites, applications, servers, certificates, jobs, refreshAll, isOwner } = useWorkspace();
-  const hasCerts = certificates.status === 'ready' && domains.status === 'ready';
-  const warnings = hasCerts ? domains.items.map((domain) => ({ domain, ssl: certificateState(domain, certificates.items) })).filter(({ ssl }) => ['warning', 'expired', 'error'].includes(ssl.state)) : [];
+  const certsReadable = ['ready', 'stale'].includes(certificates.status) && ['ready', 'stale'].includes(domains.status);
+  const certItems = readableItems(certificates);
+  const domainItems = readableItems(domains);
+  const warnings = certsReadable ? domainItems.map((domain) => ({ domain, ssl: certificateState(domain, certItems) })).filter(({ ssl }) => ['warning', 'expired', 'error'].includes(ssl.state)) : [];
   const activeJobs = knownCount(jobs, (job) => ['queued', 'running'].includes(job.status));
   const failedJobs = knownCount(jobs, (job) => job.status === 'failed');
   const server = readableItems(servers)[0];
   const disk = server?.inventory?.filesystem;
   const diskUsage = usagePercent(disk?.usedBytes, disk?.totalBytes);
   const metrics = [
-    ['Web siteleri', websiteCount(websites), 'Bağımsız çalışma alanı', 'globe', '/websites', 'Siteleri aç'],
+    ['Web siteleri', websiteCount(websites) ?? knownCount(domains), 'Bağımsız çalışma alanı', 'globe', '/websites', 'Siteleri aç'],
     ['Uygulamalar', knownCount(applications), 'Kayıtlı yayın uygulaması', 'code', '/websites', 'Site yönetimi'],
     ['Aktif işlemler', activeJobs, 'Sıradaki ve çalışan işler', 'jobs', '/jobs', 'İşlemleri aç'],
-    ['SSL uyarıları', hasCerts ? warnings.length : null, 'Süre veya sertifika hatası', 'shield', '/websites', 'Siteleri incele'],
+    ['SSL uyarıları', certsReadable ? warnings.length : null, 'Süre veya sertifika hatası', 'shield', '/websites', 'Siteleri incele'],
   ];
   const quicklinks = [
     ['/websites/new', 'Site ekle', 'Yeni çalışma alanı', 'plus'],
@@ -56,11 +88,15 @@ export default function DashboardPage() {
     <section className="ws-metrics ws-console-metrics" aria-label="Yönetim özeti">{metrics.map(([label, value, detail, icon, to, linkLabel]) => <article className="ws-metric" key={label}>
       <div className="ws-metric-label"><span>{label}</span><Icon name={icon} /></div><strong>{value ?? '—'}</strong><small>{detail}</small><br /><Link to={to}>{linkLabel}<Icon name="arrow" size={14} /></Link>
     </article>)}</section>
-    {diskUsage !== null && diskUsage >= 85 && <div className="ws-notice ws-notice-warn" role="alert"><Icon name="alert" /><div><strong>Disk alanı azalıyor · %{Math.round(diskUsage)}</strong><p>Yeni dağıtımlar ve yedekler için kullanılabilir alanı kontrol edin.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>}
+    {diskUsage !== null && diskUsage >= 90 ? (
+      <div className="ws-notice ws-notice-error" role="alert" aria-live="assertive"><Icon name="alert" /><div><strong>Kritik disk doluluğu · %{Math.round(diskUsage)}</strong><p>Disk alanı kritik seviyede (%90 üzeri). Yeni dağıtımlar ve servisler etkilenebilir.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
+    ) : diskUsage !== null && diskUsage >= 85 ? (
+      <div className="ws-notice ws-notice-warn" role="alert" aria-live="polite"><Icon name="alert" /><div><strong>Disk alanı azalıyor · %{Math.round(diskUsage)}</strong><p>Yeni dağıtımlar ve yedekler için kullanılabilir alanı kontrol edin.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
+    ) : null}
     <div className="ws-console-grid">
       <Section title="Performans" description="Sunucudan alınan ölçümler; yalnız bu açık oturumun geçmişi.">
         <CollectionNotice resource={servers} label="Sunucu" />
-        <UsageHistory key={server?.id ?? 'unavailable'} server={servers.status === 'ready' ? server : null} />
+        <UsageHistory key={server?.id ?? 'unavailable'} server={['ready', 'stale'].includes(servers.status) ? server : null} />
       </Section>
       <Section title="Sunucu kaynakları" actions={isOwner && <Link to="/servers">Ayrıntılar</Link>}>
         {server ? <ServerSummary server={server} /> : <EmptyState title="Sunucu bilgisi yok" detail="Yerel envanter doğrulandığında kaynak kullanımı burada görünür." icon="server" />}
@@ -77,7 +113,7 @@ export default function DashboardPage() {
     </div>
     <Section title="Sertifika kontrolleri" actions={<Link to="/websites">Web siteleri</Link>}>
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={certificates} label="Sertifikalar" />
-      {warnings.length ? <div className="ws-alert-list">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts && <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span><small>Bu, dış erişim testi değildir.</small></div>}
+      {warnings.length ? <div className="ws-alert-list" aria-label="SSL sertifika uyarıları">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts && <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span><small>Bu, dış erişim testi değildir.</small></div>}
     </Section>
   </>;
 }

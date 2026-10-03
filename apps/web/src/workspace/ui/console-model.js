@@ -3,6 +3,12 @@ export function usagePercent(used, total) {
   return Number.isFinite(used) && used >= 0 && Number.isFinite(total) && total > 0 && used <= total
     ? used / total * 100 : null;
 }
+export function usageThreshold(value) {
+  if (!Number.isFinite(value) || value < 0 || value > 100) return 'unknown';
+  if (value >= 90) return 'critical';
+  if (value >= 85) return 'high';
+  return 'normal';
+}
 export function readableItems(resource) {
   return ['ready', 'stale'].includes(resource?.status) && Array.isArray(resource.items) ? resource.items : [];
 }

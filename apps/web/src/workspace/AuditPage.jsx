@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router';
 import { panelRequest } from '../api.js';
 import { sessionGeneration, setSession } from '../session-client.js';
 import { Badge, Button, EmptyState, ErrorNotice, PageHeading, Section } from './PanelKit.jsx';
@@ -27,10 +28,26 @@ function normalizedDraft(draft) {
 }
 
 export default function AuditPage() {
+  const [params] = useSearchParams();
+  const initialDraft = () => ({
+    actorId: params.get('actorId') ?? '',
+    action: params.get('action') ?? '',
+    outcome: ['accepted', 'succeeded', 'failed', 'denied', 'cancelled'].includes(params.get('outcome')) ? params.get('outcome') : 'all',
+    resourceType: params.get('resourceType') ?? '',
+    resourceId: params.get('resourceId') ?? '',
+    from: params.get('from') ?? '',
+    to: params.get('to') ?? '',
+  });
   const [page, setPage] = useState(emptyAuditPage);
   const [number, setNumber] = useState(1);
-  const [draft, setDraft] = useState(blankFilters);
-  const [filters, setFilters] = useState(() => auditFilterInput());
+  const [draft, setDraft] = useState(initialDraft);
+  const [filters, setFilters] = useState(() => {
+    try {
+      return normalizedDraft(initialDraft());
+    } catch {
+      return auditFilterInput();
+    }
+  });
   const [filterError, setFilterError] = useState(null);
   const client = useRef(null);
   useEffect(() => {

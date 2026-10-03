@@ -30,11 +30,11 @@ function fixture(options = {}) {
       throw new AuthError('reseller_scope_forbidden', 'Scoped reseller access denied.', 403);
     },
   };
-  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'createCustomerLogin', 'updateCustomerLogin', 'updateLimits', 'setActive', 'unregister']) {
+  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'createCustomerLogin', 'updateCustomerLogin', 'updateLimits', 'setActive', 'unregister', 'deleteCustomerLogin']) {
     accounts[name] = (token, policy, ...args) => {
       accounts.authorizeActor(token, policy);
       calls.push({ name, args });
-      return name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateCustomerLogin', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
+      return name === 'deleteCustomerLogin' ? { id: args[0], deleted: true } : name === 'unregister' ? { id: args[0], unregistered: true } : { id: ['get', 'updateCustomerLogin', 'updateLimits', 'setActive'].includes(name) ? args[0] : 'customer-a', kind: 'customer', active: name === 'setActive' ? args[1]?.active : true, stage: 'profile_only' };
     };
   }
   const headers = {};
@@ -126,6 +126,13 @@ test('Owner cannot use reseller self-customer creation route while generic Owner
     code('reseller_scope_forbidden'),
   );
   assert.equal(f.calls.length, 0);
+});
+
+test('DELETE customer login calls deleteCustomerLogin', async () => {
+  const f = fixture();
+  const result = await f.run('DELETE', '/api/users/hosting/accounts/customer-a/login');
+  assert.deepEqual(result, { status: 200, data: { id: 'customer-a', deleted: true, accessGranted: false } });
+  assert.deepEqual(f.calls[0], { name: 'deleteCustomerLogin', args: ['customer-a', {}] });
 });
 
 test('profile removal requires bound confirmation and does not claim login deletion', async () => {

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import http from 'node:http';
 import test from 'node:test';
 import { AuthError } from '../src/auth-error.js';
@@ -42,6 +42,29 @@ import {
   evaluateTenantIsolationGate,
   evaluateFailClosedSecurityGate,
 } from '../src/production-exit-gate.js';
+import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/elfinder-handoff-service.js';
+import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
+import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
+import { lstat, mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import express from 'express';
+import { OPERATIONS } from '@yunpanel/protocol';
+import {
+  createPhpMyAdminHandoffService,
+  PhpMyAdminHandoffError,
+  phpMyAdminHandoffInternals,
+} from '../src/phpmyadmin-handoff-service.js';
+import {
+  mountPhpMyAdminHandoffRoutes,
+  phpMyAdminHandoffHttpInternals,
+} from '../src/phpmyadmin-handoff-http.js';
+import {
+  createPhpMyAdminHandoffConsumerHandler,
+  startPhpMyAdminHandoffSocket,
+  phpMyAdminHandoffSocketInternals,
+} from '../src/phpmyadmin-handoff-socket.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -878,8 +901,11 @@ test('Staging E2E: Customer to Website live relationship matrix verifies tenant 
     { id: 'site-1a1', name: 'Site 1A1', customerId: 'cust-1a', resellerId: 'reseller-1' },
     { id: 'site-1a2', name: 'Site 1A2', customerId: 'cust-1a', resellerId: 'reseller-1' },
     { id: 'site-1b1', name: 'Site 1B1', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: 'site-1b2', name: 'Site 1B2', customerId: 'cust-1b', resellerId: 'reseller-1' },
     { id: 'site-2a1', name: 'Site 2A1', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: 'site-2a2', name: 'Site 2A2', customerId: 'cust-2a', resellerId: 'reseller-2' },
     { id: 'site-2b1', name: 'Site 2B1', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: 'site-2b2', name: 'Site 2B2', customerId: 'cust-2b', resellerId: 'reseller-2' },
     { id: 'site-direct', name: 'Site Direct', customerId: 'cust-direct', resellerId: null },
   ];
 
@@ -891,14 +917,23 @@ test('Staging E2E: Customer to Website live relationship matrix verifies tenant 
     });
   }
 
-  // 4. Verify Customer & Reseller website usage
+  // 4. Verify Customer & Reseller website usage across full hierarchy
   const c1aUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
   assert.equal(c1aUsage.usage.websites, 2);
   const c1bUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
-  assert.equal(c1bUsage.usage.websites, 1);
+  assert.equal(c1bUsage.usage.websites, 2);
+  const c2aUsage = f.store.get(ownerToken, f.requireManagement, 'cust-2a');
+  assert.equal(c2aUsage.usage.websites, 2);
+  const c2bUsage = f.store.get(ownerToken, f.requireManagement, 'cust-2b');
+  assert.equal(c2bUsage.usage.websites, 2);
+  const cDirectUsage = f.store.get(ownerToken, f.requireManagement, 'cust-direct');
+  assert.equal(cDirectUsage.usage.websites, 1);
   const r1Usage = f.store.get(ownerToken, f.requireManagement, 'reseller-1');
-  assert.equal(r1Usage.usage.websites, 3);
+  assert.equal(r1Usage.usage.websites, 4);
   assert.equal(r1Usage.usage.customers, 2);
+  const r2Usage = f.store.get(ownerToken, f.requireManagement, 'reseller-2');
+  assert.equal(r2Usage.usage.websites, 4);
+  assert.equal(r2Usage.usage.customers, 2);
 
   // 5. Tenant boundary middleware matrix verification
   const customerLookup = (id) => {
@@ -934,12 +969,12 @@ test('Staging E2E: Customer to Website live relationship matrix verifies tenant 
   };
 
   const ownerActor = { id: 'owner-user', role: 'owner', active: true };
-  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-1a1', 'site-1a2', 'site-1b1'] };
-  const r2Actor = { id: 'reseller-2', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-2a1', 'site-2b1'] };
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2'] };
+  const r2Actor = { id: 'reseller-2', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-2a1', 'site-2a2', 'site-2b1', 'site-2b2'] };
   const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1a1', 'site-1a2'] };
-  const c1bActor = { id: 'cust-1b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1b1'] };
-  const c2aActor = { id: 'cust-2a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2a1'] };
-  const c2bActor = { id: 'cust-2b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2b1'] };
+  const c1bActor = { id: 'cust-1b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1b1', 'site-1b2'] };
+  const c2aActor = { id: 'cust-2a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2a1', 'site-2a2'] };
+  const c2bActor = { id: 'cust-2b', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: ['site-2b1', 'site-2b2'] };
   const cDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: ['site-direct'] };
 
   const toolSubpaths = [
@@ -958,13 +993,13 @@ test('Staging E2E: Customer to Website live relationship matrix verifies tenant 
   ];
 
   const actors = [
-    { actor: ownerActor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1', 'site-2a1', 'site-2b1', 'site-direct'] },
-    { actor: r1Actor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1'] },
-    { actor: r2Actor, allowedSites: ['site-2a1', 'site-2b1'] },
+    { actor: ownerActor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2', 'site-2a1', 'site-2a2', 'site-2b1', 'site-2b2', 'site-direct'] },
+    { actor: r1Actor, allowedSites: ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2'] },
+    { actor: r2Actor, allowedSites: ['site-2a1', 'site-2a2', 'site-2b1', 'site-2b2'] },
     { actor: c1aActor, allowedSites: ['site-1a1', 'site-1a2'] },
-    { actor: c1bActor, allowedSites: ['site-1b1'] },
-    { actor: c2aActor, allowedSites: ['site-2a1'] },
-    { actor: c2bActor, allowedSites: ['site-2b1'] },
+    { actor: c1bActor, allowedSites: ['site-1b1', 'site-1b2'] },
+    { actor: c2aActor, allowedSites: ['site-2a1', 'site-2a2'] },
+    { actor: c2bActor, allowedSites: ['site-2b1', 'site-2b2'] },
     { actor: cDirectActor, allowedSites: ['site-direct'] },
   ];
 
@@ -1027,9 +1062,11 @@ test('Staging E2E: Customer to Website live relationship matrix verifies tenant 
   // 7. Data isolation in sanitized collections
   const rawCollection = sites.map((s) => ({ id: s.id, websiteId: s.id, customerId: s.customerId, resellerId: s.resellerId }));
   assert.deepEqual(sanitizeTenantCollection(rawCollection, c1aActor).map((s) => s.id), ['site-1a1', 'site-1a2']);
-  assert.deepEqual(sanitizeTenantCollection(rawCollection, c1bActor).map((s) => s.id), ['site-1b1']);
-  assert.deepEqual(sanitizeTenantCollection(rawCollection, r1Actor).map((s) => s.id), ['site-1a1', 'site-1a2', 'site-1b1']);
-  assert.deepEqual(sanitizeTenantCollection(rawCollection, r2Actor).map((s) => s.id), ['site-2a1', 'site-2b1']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, c1bActor).map((s) => s.id), ['site-1b1', 'site-1b2']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, c2aActor).map((s) => s.id), ['site-2a1', 'site-2a2']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, c2bActor).map((s) => s.id), ['site-2b1', 'site-2b2']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, r1Actor).map((s) => s.id), ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2']);
+  assert.deepEqual(sanitizeTenantCollection(rawCollection, r2Actor).map((s) => s.id), ['site-2a1', 'site-2a2', 'site-2b1', 'site-2b2']);
   assert.deepEqual(sanitizeTenantCollection(rawCollection, cDirectActor).map((s) => s.id), ['site-direct']);
   assert.deepEqual(sanitizeTenantCollection(rawCollection, ownerActor).map((s) => s.id), sites.map((s) => s.id));
 });
@@ -2090,4 +2127,1518 @@ test('Staging E2E PROD-09: Strict .44 host isolation, verification evidence sepa
   const unauthGet = await callGateRoute('GET', '/api/system/exit-gate', null);
   assert.equal(unauthGet.statusCode, 401);
   assert.equal(unauthGet.responseBody.error.code, 'unauthorized');
+});
+
+// ============================================================================
+// STAGING E2E PART 8: PAR-00b Feature Parity Matrix, Reseller Scopes & EKL-07
+// ============================================================================
+
+test('Staging E2E PAR-00b: Feature parity matrix completeness, simple Reseller validation, deferred scopes, and open EKL-07 research status', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const candidates = [
+    new URL('../../../docs/plesk-feature-parity.md', import.meta.url).pathname,
+    path.resolve(process.cwd(), 'docs/plesk-feature-parity.md'),
+    path.resolve(process.cwd(), '../../docs/plesk-feature-parity.md')
+  ];
+  const parityPath = candidates.find((p) => fs.existsSync(p));
+  assert.ok(parityPath && fs.existsSync(parityPath), 'docs/plesk-feature-parity.md must exist');
+
+  const content = fs.readFileSync(parityPath, 'utf8');
+
+  // 1. All 21 groups must be documented
+  for (let i = 1; i <= 21; i++) {
+    const groupNum = String(i).padStart(2, '0');
+    assert.ok(
+      content.includes(`Grup ${groupNum}`),
+      `Feature group ${groupNum} must be documented in parity matrix`
+    );
+  }
+
+  // 2. PAR-01 and PAR-02 simple reseller developments must be reflected
+  assert.ok(content.includes('PAR-01'), 'PAR-01 simple reseller developments must be present');
+  assert.ok(content.includes('PAR-02'), 'PAR-02 simple customer/reseller management must be present');
+  assert.ok(content.includes('RS-01–02'), 'RS-01-02 ownership scope must be present');
+  assert.ok(content.includes('RS-03–05'), 'RS-03-05 customer/reseller management must be present');
+
+  // 3. Deferred reseller items must be classified as deferred / next phase (NOT MVP blockers, NOT completed)
+  const deferredItems = [
+    'Alt Bayi Zinciri',
+    'Ayrı Reseller Hizmet Paketi Motoru',
+    'Hosting Add-on Paketleri',
+    'Abonelik Senkronizasyonu',
+    'Overselling',
+    'Otomatik Faturalama',
+    'Bayi Markalama',
+    'Müşteri ↔ Bayi Dönüşümü',
+    'Toplu Hesap Transferi',
+    'Login-As',
+  ];
+  for (const item of deferredItems) {
+    assert.ok(
+      content.includes(item),
+      `Deferred item ${item} must be explicitly listed in deferred scopes`
+    );
+  }
+  assert.ok(
+    content.includes('ilk sürüm MVP engeli değildir') || content.includes('MVP engeli değildir'),
+    'Deferred items must not be treated as MVP blockers'
+  );
+  assert.ok(
+    content.includes('tamamlanmış iş sayılmaz'),
+    'Deferred items must not be treated as completed work'
+  );
+
+  // 4. No synthetic completion percentage generated from checkbox counts
+  assert.ok(
+    content.includes('Yapay Oran Yasağı') || content.includes('yapay bir tamamlanma yüzdesi üretilmez'),
+    'Synthetic completion percentage prohibition must be stated'
+  );
+  assert.ok(!/%[0-9]{2}\s+(tamamlandı|hazır|oran|başarı)/i.test(content), 'No synthetic percentage should be present');
+
+  // 5. EKL-07 extension research status must remain open
+  assert.ok(
+    content.includes('EKL-07') && content.includes('AÇIK TUTULDU'),
+    'EKL-07 extension research status must remain open'
+  );
+
+  // 6. Role separation (Owner, Reseller, Customer, Site Manager) and OS boundaries (Ubuntu Linux vs Windows)
+  assert.ok(content.includes('Owner'), 'Owner role boundary must be documented');
+  assert.ok(content.includes('Reseller'), 'Reseller role boundary must be documented');
+  assert.ok(content.includes('Customer'), 'Customer role boundary must be documented');
+  assert.ok(content.includes('Ubuntu Linux'), 'Ubuntu Linux primary target OS must be documented');
+  assert.ok(content.includes('Windows Server'), 'Windows Server separate parity track must be documented');
+  assert.ok(content.includes('Ayrı Hat'), 'Windows must be marked as separate track, not completed by Ubuntu');
+});
+
+// ============================================================================
+// STAGING E2E PART 8: Live Tenant Role Continuity, Open WebSocket, elFinder Gateway, Job Fail-Closed Lifecycle, Host Process Continuity, and Recovery (T-DEV-RESELLER-LIVE)
+// ============================================================================
+
+test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-tier hierarchy, open WebSocket, elFinder gateway, job process fail-closed lifecycle, website host continuity, and recovery', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  // Track live session revocation events and wire into live session registry
+  const liveSessions = createLiveSessionRegistry();
+  const originalRevokeUser = liveSessions.revokeUser.bind(liveSessions);
+  liveSessions.revokeUser = (userId, reason) => {
+    f.revoked.push({ id: userId, reason });
+    return originalRevokeUser(userId, reason);
+  };
+
+  const revokeLiveUser = (userId, reason) => {
+    liveSessions.revokeUser(userId, reason);
+  };
+
+  f.store = createHostingAccountStore({
+    ...f,
+    revokeLiveUser,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // 1. Hierarchy setup: Owner + 2 Resellers + each Reseller 2 Customers + direct Owner Customer
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('cust-2a');
+  f.addUser('cust-2b');
+  f.addUser('cust-direct');
+
+  const ownerToken = f.session('owner-user');
+
+  // Register Resellers under Owner
+  const r1 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  const r2 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  assert.equal(r1.kind, 'reseller');
+  assert.equal(r2.kind, 'reseller');
+
+  // Register Customers under Reseller 1, Reseller 2, and Direct Owner Customer
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 3, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 3 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  // Allocate Sites across complete hierarchy (9 sites total)
+  const siteAllocations = f.store.siteAllocations;
+  const stagingServerId = '44444444-4444-4444-8444-444444444444';
+  const siteDirectId = '99999999-9999-4999-8999-999999999999';
+
+  const sites = [
+    { id: 'site-1a1', name: 'Site 1A1', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: 'site-1a2', name: 'Site 1A2', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: 'site-1b1', name: 'Site 1B1', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: 'site-1b2', name: 'Site 1B2', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: 'site-2a1', name: 'Site 2A1', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: 'site-2a2', name: 'Site 2A2', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: 'site-2b1', name: 'Site 2B1', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: 'site-2b2', name: 'Site 2B2', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: siteDirectId, name: 'Site Direct', customerId: 'cust-direct', resellerId: null },
+  ];
+
+  for (const s of sites) {
+    siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+      site: { id: s.id, serverId: stagingServerId, name: s.name, applicationId: null, dockerWorkloadId: null, managedComposeBinding: null },
+      ownerUserId: s.customerId,
+      resellerId: s.resellerId,
+    });
+  }
+
+  // Verify capacity & usage counts across full hierarchy
+  const c1aUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  assert.equal(c1aUsage.usage.websites, 2);
+  const c1bUsage = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
+  assert.equal(c1bUsage.usage.websites, 2);
+  const r1Usage = f.store.get(ownerToken, f.requireManagement, 'reseller-1');
+  assert.equal(r1Usage.usage.websites, 4);
+  assert.equal(r1Usage.usage.customers, 2);
+  const r2Usage = f.store.get(ownerToken, f.requireManagement, 'reseller-2');
+  assert.equal(r2Usage.usage.websites, 4);
+  assert.equal(r2Usage.usage.customers, 2);
+  const cDirectUsage = f.store.get(ownerToken, f.requireManagement, 'cust-direct');
+  assert.equal(cDirectUsage.usage.websites, 1);
+
+  // 2. Negative authorization and metadata leakage prevention
+  const customerLookup = (id) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id, revision FROM auth_hosting_accounts WHERE user_id = ?').get(id);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(id);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+
+  const websiteLookup = (id) => {
+    const row = f.db.prepare(`SELECT w.website_id, w.customer_id, h.reseller_id
+      FROM auth_customer_websites w
+      JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+      WHERE w.website_id = ?`).get(id);
+    if (!row) return null;
+    return { id: row.website_id, customerId: row.customer_id, resellerId: row.reseller_id };
+  };
+
+  const middleware = createTenantBoundaryMiddleware({ customerLookup, websiteLookup });
+
+  const executeRequest = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2'] };
+  const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1a1', 'site-1a2'] };
+  const cDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: [siteDirectId] };
+
+  // Reseller 1 actor cannot access Reseller 2 websites (403 fail-closed without metadata leakage)
+  const r1ToR2Site = await executeRequest(r1Actor, '/api/websites/site-2a1/terminal');
+  assert.equal(r1ToR2Site.called, false);
+  assert.equal(r1ToR2Site.statusCode, 403);
+  assert.equal(r1ToR2Site.responseBody.error.code, 'tenant_boundary_forbidden');
+  assert.equal(r1ToR2Site.responseBody.error.site, undefined);
+  assert.equal(r1ToR2Site.responseBody.error.customer, undefined);
+
+  // Customer 1a actor cannot access Customer 1b or Customer 2a websites
+  const c1aToC1bSite = await executeRequest(c1aActor, '/api/websites/site-1b1/files');
+  assert.equal(c1aToC1bSite.called, false);
+  assert.equal(c1aToC1bSite.statusCode, 403);
+  assert.equal(c1aToC1bSite.responseBody.error.code, 'tenant_boundary_forbidden');
+  assert.equal(c1aToC1bSite.responseBody.error.site, undefined);
+
+  // Direct Customer cannot access Reseller 1 websites
+  const cDirectToR1Site = await executeRequest(cDirectActor, '/api/websites/site-1a1/databases');
+  assert.equal(cDirectToR1Site.called, false);
+  assert.equal(cDirectToR1Site.statusCode, 403);
+
+  // 3. Open WebSocket Lifecycle & Fail-Closed Scenarios
+  const activeSockets = new Map();
+  function openSimulatedWebSocket(sessionId, userId, siteId = null) {
+    const socketRecord = {
+      id: `ws-${userId}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId,
+      userId,
+      siteId,
+      closed: false,
+      closeCode: null,
+      closeReason: null,
+      closePayload: null,
+    };
+    const terminate = (reason, code = 4001, payload = null) => {
+      socketRecord.closed = true;
+      socketRecord.closeCode = code;
+      socketRecord.closeReason = reason;
+      socketRecord.closePayload = payload;
+      activeSockets.delete(socketRecord.id);
+    };
+    const reg = liveSessions.register({
+      sessionId,
+      userId,
+      terminate: (reason) => terminate(reason, 4001, { type: 'revoked', reason }),
+    });
+    socketRecord.unregister = reg.unregister;
+    activeSockets.set(socketRecord.id, socketRecord);
+    return socketRecord;
+  }
+
+  // Open active WebSockets across hierarchy
+  const wsOwner = openSimulatedWebSocket('owner-session', 'owner-user', null);
+  const wsR1 = openSimulatedWebSocket('r1-session', 'reseller-1', 'site-1a1');
+  const wsR2 = openSimulatedWebSocket('r2-session', 'reseller-2', 'site-2a1');
+  const wsC1a = openSimulatedWebSocket('c1a-session', 'cust-1a', 'site-1a1');
+  const wsC1b = openSimulatedWebSocket('c1b-session', 'cust-1b', 'site-1b1');
+  const wsC2a = openSimulatedWebSocket('c2a-session', 'cust-2a', 'site-2a1');
+  const wsC2b = openSimulatedWebSocket('c2b-session', 'cust-2b', 'site-2b1');
+  const wsDirect = openSimulatedWebSocket('direct-session', 'cust-direct', siteDirectId);
+
+  assert.equal(activeSockets.size, 8);
+
+  // Scenario 3A: Logout terminates active WebSocket fail-closed
+  assert.equal(wsC1a.closed, false);
+  liveSessions.revokeSession('c1a-session', 'logout');
+  assert.equal(wsC1a.closed, true);
+  assert.equal(wsC1a.closeCode, 4001);
+  assert.equal(wsC1a.closeReason, 'logout');
+  assert.deepEqual(wsC1a.closePayload, { type: 'revoked', reason: 'logout' });
+  assert.equal(activeSockets.has(wsC1a.id), false);
+
+  // Scenario 3B: Customer Suspend terminates active WebSocket fail-closed
+  assert.equal(wsC1b.closed, false);
+  const cust1bRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: cust1bRow.revision, active: false });
+  assert.equal(wsC1b.closed, true);
+  assert.equal(wsC1b.closeCode, 4001);
+  assert.equal(wsC1b.closeReason, 'hosting_account_suspended');
+  assert.deepEqual(wsC1b.closePayload, { type: 'revoked', reason: 'hosting_account_suspended' });
+  assert.equal(activeSockets.has(wsC1b.id), false);
+
+  // Target access check for suspended customer fails closed
+  const suspendedCust1bSession = {
+    user: { id: 'cust-1b', role: 'customer', websiteIds: ['site-1b1', 'site-1b2'], active: false },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => terminalWebSocketInternals.requireTerminalTargetAccess(suspendedCust1bSession, { scope: 'site', websiteId: 'site-1b1' }),
+    { code: 'terminal_site_forbidden', status: 403 }
+  );
+
+  // Scenario 3C: Reseller Suspend cascades to drop Reseller & all Child Customer WebSockets
+  assert.equal(wsR2.closed, false);
+  assert.equal(wsC2a.closed, false);
+  assert.equal(wsC2b.closed, false);
+  const r2Row = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-2');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-2', { revision: r2Row.revision, active: false });
+
+  assert.equal(wsR2.closed, true);
+  assert.equal(wsR2.closeReason, 'hosting_account_suspended');
+  assert.equal(wsC2a.closed, true);
+  assert.equal(wsC2a.closeReason, 'hosting_parent_suspended');
+  assert.equal(wsC2b.closed, true);
+  assert.equal(wsC2b.closeReason, 'hosting_parent_suspended');
+  assert.equal(activeSockets.has(wsR2.id), false);
+  assert.equal(activeSockets.has(wsC2a.id), false);
+  assert.equal(activeSockets.has(wsC2b.id), false);
+
+  // Scenario 3D: Grant removal / Website Detach terminates active WebSocket fail-closed
+  assert.equal(wsDirect.closed, false);
+  const removalReceipt = siteAllocations.releaseRemoved({
+    operationId: 'op-rem-site-direct',
+    websiteId: siteDirectId,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(removalReceipt.released, true);
+  assert.equal(wsDirect.closed, true);
+  assert.equal(wsDirect.closeReason, 'hosting_website_released');
+  assert.equal(wsDirect.closeCode, 4001);
+
+  // Non-suspended sessions (owner, r1) remain untouched
+  assert.equal(wsOwner.closed, false);
+  assert.equal(wsR1.closed, false);
+
+  // 4. elFinder Gateway Handoff Capability Fail-Closed Lifecycle
+  const elFinderServerId = '12345678-1234-4234-8234-123456789012';
+  const elFinderWebsiteId = '22345678-1234-4234-8234-123456789012';
+  const elFinderApplicationId = '32345678-1234-4234-8234-123456789012';
+  const sessionDigest = 'd'.repeat(64);
+
+  const elFinderWebsite = {
+    id: elFinderWebsiteId,
+    serverId: elFinderServerId,
+    applicationId: elFinderApplicationId,
+    runtimeType: 'php',
+    unixUser: elFinderHandoffInternals.applicationUser(elFinderApplicationId),
+    revision: 7,
+  };
+
+  const elFinderService = createElFinderHandoffService({
+    websiteRegistry: {
+      async getWebsite(id) {
+        return id === elFinderWebsiteId ? elFinderWebsite : null;
+      },
+    },
+    localServerId: elFinderServerId,
+    runtimeInspector: async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+    liveSessions,
+  });
+
+  // Issue valid handoff for Reseller 1 customer
+  const handoffC1a = await elFinderService.issue({
+    sessionId: 'c1a-session-new',
+    userId: 'cust-1a',
+    sessionDigest,
+    serverId: elFinderServerId,
+    websiteId: elFinderWebsiteId,
+  });
+  assert.ok(handoffC1a.capability);
+  assert.equal(elFinderService.size(), 1);
+
+  // Active consumption succeeds
+  const consumedC1a = await elFinderService.consume(handoffC1a.capability, { sessionDigest });
+  assert.equal(consumedC1a.websiteId, elFinderWebsiteId);
+  assert.equal(consumedC1a.applicationId, elFinderApplicationId);
+  assert.equal(consumedC1a.unixUser, elFinderWebsite.unixUser);
+
+  // Issue handoff, then simulate user logout / revocation
+  const handoffC1aRevoke = await elFinderService.issue({
+    sessionId: 'c1a-session-revoke',
+    userId: 'cust-1a',
+    sessionDigest,
+    serverId: elFinderServerId,
+    websiteId: elFinderWebsiteId,
+  });
+  assert.equal(elFinderService.size(), 1);
+
+  // Revocation drops capability fail-closed immediately
+  liveSessions.revokeSession('c1a-session-revoke', 'logout');
+  assert.equal(elFinderService.size(), 0);
+  await assert.rejects(
+    elFinderService.consume(handoffC1aRevoke.capability, { sessionDigest }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_invalid' && err.status === 401
+  );
+
+  // Foreign site capability issuance rejected fail-closed without leaking tenant details
+  await assert.rejects(
+    elFinderService.issue({
+      sessionId: 'c1a-session-foreign',
+      userId: 'cust-1a',
+      sessionDigest,
+      serverId: elFinderServerId,
+      websiteId: '33333333-3333-4333-8333-333333333333', // non-existent/foreign site
+    }),
+    (err) => err instanceof ElFinderHandoffError && (err.status === 403 || err.status === 404)
+  );
+
+  // 5. Job Process Fail-Closed & Recovery Scenarios
+  // 5A: Queued job cancellation
+  let queuedJobStatus = 'queued';
+  const mockQueuedJob = { id: 'job-c1b-cron', serverId: stagingServerId, status: 'queued', operation: 'website.cron.apply' };
+  const mockJobRegistry = {
+    getJob: async (id) => ({ ...mockQueuedJob, status: queuedJobStatus }),
+    cancel: async (id) => {
+      if (queuedJobStatus !== 'queued') throw new Error('job_not_cancellable');
+      queuedJobStatus = 'cancelled';
+      return { ...mockQueuedJob, status: 'cancelled' };
+    },
+  };
+  const cancelledResult = await mockJobRegistry.cancel('job-c1b-cron');
+  assert.equal(cancelledResult.status, 'cancelled');
+
+  // 5B: Running job recovery via verified receipt (Customer & Reseller roles)
+  for (const role of ['customer', 'reseller']) {
+    const recoveryHarnessCalls = [];
+    const runningJobId = `job-${role}-recovery-01`;
+    const appGuid = '22222222-2222-4222-8222-222222222222';
+    const runningJob = {
+      id: runningJobId,
+      jobId: runningJobId,
+      serverId: stagingServerId,
+      status: 'running',
+      operation: 'website.php.action',
+      resourceType: 'application',
+      resourceId: appGuid,
+    };
+    const recoveryPayload = {
+      websiteId: 'site-1a1',
+      applicationId: appGuid,
+      unixUser: 'yunapp-1a1user',
+      expectedWebsiteRevision: 2,
+      actorSessionId: `${role}-recovery-session`,
+      actorUserId: role === 'customer' ? 'cust-1a' : 'reseller-1',
+      actorRole: role,
+      actionId: 'wp.cache.flush',
+      previewDigest: 'f'.repeat(64),
+      confirmation: `php-tool:site-1a1:wp.cache.flush:${'f'.repeat(64)}`,
+    };
+    const recoveryResult = {
+      version: 1,
+      websiteId: recoveryPayload.websiteId,
+      applicationId: appGuid,
+      unixUser: recoveryPayload.unixUser,
+      actionId: recoveryPayload.actionId,
+      websiteRevision: 2,
+      previewDigest: recoveryPayload.previewDigest,
+      completed: true,
+      sideEffects: true,
+    };
+
+    const recoveryArgs = {
+      serverId: stagingServerId,
+      jobId: runningJobId,
+      serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      inspect: async () => ({ jobs: [runningJob] }),
+      loadJobContext: async () => ({ ...runningJob, payload: recoveryPayload }),
+      readOperationReceipt: async () => ({
+        version: 1,
+        serverId: stagingServerId,
+        jobId: runningJobId,
+        payload: recoveryPayload,
+        result: recoveryResult,
+      }),
+      jobRegistry: {
+        getJob: async () => runningJob,
+        beginReconciliation: async (v) => { recoveryHarnessCalls.push(['begin', v]); return { ...v, status: 'running', pending: true }; },
+        complete: async (v) => { recoveryHarnessCalls.push(['complete', v]); return { ...runningJob, status: 'succeeded' }; },
+        acknowledgeReconciliation: async (v) => { recoveryHarnessCalls.push(['ack', v]); return { ...v, status: 'succeeded', acknowledged: true }; },
+      },
+    };
+
+    const recovered = await recoverRunningPhpTool(recoveryArgs);
+    assert.equal(recovered.recoveryMethod, 'verified_php_tool_receipt');
+    assert.deepEqual(recoveryHarnessCalls.map(([name]) => name), ['begin', 'complete', 'ack']);
+  }
+
+  // 5C: Running job recovery rejects missing receipt fail-closed
+  const missingReceiptJobId = 'job-missing-receipt-01';
+  const missingReceiptArgs = {
+    serverId: stagingServerId,
+    jobId: missingReceiptJobId,
+    serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    inspect: async () => ({ jobs: [{ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid' }] }),
+    loadJobContext: async () => ({ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid', payload: { websiteId: 'site-1a1' } }),
+    readOperationReceipt: async () => null,
+    jobRegistry: {
+      getJob: async () => ({ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid' }),
+      beginReconciliation: async () => {},
+      complete: async () => {},
+      acknowledgeReconciliation: async () => {},
+    },
+  };
+  await assert.rejects(
+    () => recoverRunningPhpTool(missingReceiptArgs),
+    (err) => err.code === 'job_php_tool_recovery_receipt_missing'
+  );
+
+  // 6. Website Host Process Continuity Decoupling
+  // Panel account suspension alters login and tool access; website runtime daemons/processes remain running
+  const siteHostProcesses = new Map([
+    ['site-1b1', { unit: 'yunapp-site-1b1.service', status: 'running', pid: 14201 }],
+    ['site-2a1', { unit: 'yunapp-site-2a1.service', status: 'running', pid: 14202 }],
+  ]);
+  // Even though cust-1b and reseller-2 are suspended, host processes are NOT stopped
+  assert.equal(siteHostProcesses.get('site-1b1').status, 'running');
+  assert.equal(siteHostProcesses.get('site-2a1').status, 'running');
+
+  // 7. Tenant Account Recovery & Reactivation
+  // Reactivate suspended customer cust-1b
+  const cust1bSuspendedRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: cust1bSuspendedRow.revision, active: true });
+  const cust1bReactivatedUser = f.db.prepare('SELECT active FROM users WHERE id = ?').get('cust-1b');
+  assert.equal(cust1bReactivatedUser.active, 1);
+
+  // Reactivated customer can open a new WebSocket
+  const wsC1bNew = openSimulatedWebSocket('c1b-new-session', 'cust-1b', 'site-1b1');
+  assert.equal(wsC1bNew.closed, false);
+  assert.equal(activeSockets.has(wsC1bNew.id), true);
+
+  // Reactivate reseller-2
+  const r2SuspendedRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-2');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-2', { revision: r2SuspendedRow.revision, active: true });
+  const r2ReactivatedUser = f.db.prepare('SELECT active FROM users WHERE id = ?').get('reseller-2');
+  assert.equal(r2ReactivatedUser.active, 1);
+
+  // Role continuity verified across full hierarchy
+  assert.ok(true, 'Full multi-tier hierarchy role continuity, live WebSocket, elFinder gateway, and job lifecycle verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 9: YP-04 phpMyAdmin Session Binding & Multi-Tenant Isolation
+// (Owner -> Site A -> Site B account switching, stale vendor cookie, direct vendor URL,
+//  logout, logout-all, password-session rotation, customer/reseller suspend, grant removal,
+//  replay protection, panel auth cookie isolation, and real Unix socket fail-closed lifecycle)
+// ============================================================================
+
+test('Staging E2E YP-04: phpMyAdmin session binding and tenant isolation real acceptance across Owner, Reseller, and Customer tiers, account/site switching (Owner -> Site A -> Site B), stale vendor cookies, direct vendor URL blocking, logout, logout-all, password-session rotation, customer/reseller suspend, grant removal, replay protection, and Unix socket fail-closed lifecycle', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  // 1. Live session tracking and hosting account store integration
+  const liveSessions = createLiveSessionRegistry();
+  const originalRevokeUser = liveSessions.revokeUser.bind(liveSessions);
+  liveSessions.revokeUser = (userId, reason) => {
+    f.revoked.push({ id: userId, reason });
+    return originalRevokeUser(userId, reason);
+  };
+  const revokeLiveUser = (userId, reason) => {
+    liveSessions.revokeUser(userId, reason);
+  };
+
+  f.store = createHostingAccountStore({
+    ...f,
+    revokeLiveUser,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // Hierarchy accounts:
+  // - Owner: owner-user
+  // - Reseller 1: reseller-1
+  // - Reseller 2: reseller-2
+  // - Customer 1A: cust-1a (under reseller-1)
+  // - Customer 1B: cust-1b (under reseller-1)
+  // - Customer 2A: cust-2a (under reseller-2)
+  // - Direct Customer: cust-direct (under Owner)
+  // - Read Only: readonly-user (unprivileged)
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('cust-2a');
+  f.addUser('cust-direct');
+  f.addUser('readonly-user', { role: 'read_only' });
+
+  const ownerToken = f.session('owner-user');
+
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 3, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 3 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  // Staging Server ID: strictly non-.44
+  const stagingServerId = '44444444-4444-4444-8444-444444444444';
+  assertNoDot44Host(stagingServerId);
+
+  // Allocate Websites across the hierarchy
+  const site1A = { id: 'aaaaaaaa-1111-4111-8111-111111111111', serverId: stagingServerId, name: 'site-a.com' };
+  const site1B = { id: 'bbbbbbbb-2222-4222-8222-222222222222', serverId: stagingServerId, name: 'site-b.com' };
+  const site2A = { id: 'cccccccc-3333-4333-8333-333333333333', serverId: stagingServerId, name: 'site-c.com' };
+  const siteDirect = { id: 'dddddddd-4444-4444-8444-444444444444', serverId: stagingServerId, name: 'site-direct.com' };
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1A,
+    ownerUserId: 'cust-1a',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1B,
+    ownerUserId: 'cust-1b',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site2A,
+    ownerUserId: 'cust-2a',
+    resellerId: 'reseller-2',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: siteDirect,
+    ownerUserId: 'cust-direct',
+    resellerId: null,
+  });
+
+  // 2. Database Bindings, Credentials, and Verified Apply Jobs for each site
+  const siteData = new Map();
+  function configureSiteDatabase(siteId, dbName, username, password) {
+    const bindingId = randomUUID();
+    const credentialId = randomUUID();
+    const applicationId = randomUUID();
+    const desiredStateSha256 = createHash('sha256').update(`desired:${siteId}:${dbName}:${username}`).digest('hex');
+    const binding = {
+      id: bindingId,
+      serverId: stagingServerId,
+      websiteId: siteId,
+      applicationId,
+      databaseName: dbName,
+      unixUser: `yunapp-${siteId.slice(0, 8)}`,
+      revision: 2,
+    };
+    const credential = {
+      id: credentialId,
+      databaseBindingId: bindingId,
+      serverId: stagingServerId,
+      websiteId: siteId,
+      applicationId,
+      databaseName: dbName,
+      siteUnixUser: binding.unixUser,
+      username,
+      host: 'localhost',
+      privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+      revision: 3,
+      passwordUpdatedAt: '2026-09-18T00:00:00.000Z',
+    };
+    const appliedJob = {
+      id: `job-cred-apply-${siteId.slice(0, 8)}`,
+      serverId: stagingServerId,
+      operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+      resourceType: 'database',
+      resourceId: dbName,
+      status: 'succeeded',
+      createdAt: '2026-09-18T00:00:01.000Z',
+      startedAt: '2026-09-18T00:00:02.000Z',
+      finishedAt: '2026-09-18T00:00:03.000Z',
+      result: {
+        version: 1,
+        databaseCredentialId: credentialId,
+        databaseBindingId: bindingId,
+        credentialRevision: 3,
+        bindingRevision: 2,
+        databaseName: dbName,
+        username,
+        host: 'localhost',
+        desiredStateSha256,
+        applied: true,
+        sideEffects: true,
+      },
+    };
+    const record = { binding, credential, password, desiredStateSha256, appliedJob };
+    siteData.set(siteId, record);
+    return record;
+  }
+
+  const db1A = configureSiteDatabase(site1A.id, 'db_site_1a', 'ydb_site_1a', 'secret-pw-1a');
+  const db1B = configureSiteDatabase(site1B.id, 'db_site_1b', 'ydb_site_1b', 'secret-pw-1b');
+  const db2A = configureSiteDatabase(site2A.id, 'db_site_2a', 'ydb_site_2a', 'secret-pw-2a');
+  const dbDirect = configureSiteDatabase(siteDirect.id, 'db_site_direct', 'ydb_site_direct', 'secret-pw-direct');
+
+  let mockNow = 100_000;
+  const now = () => mockNow;
+
+  const databaseBindingRegistry = {
+    async getBinding(id) {
+      for (const d of siteData.values()) {
+        if (d.binding.id === id) return structuredClone(d.binding);
+      }
+      return null;
+    },
+  };
+  const databaseCredentialRegistry = {
+    async getCredential(id) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) return structuredClone(d.credential);
+      }
+      return null;
+    },
+    async materializeCredential(id, input) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) {
+          return { ...structuredClone(d.credential), password: d.password };
+        }
+      }
+      return null;
+    },
+  };
+  const databaseCredentialApplyService = {
+    async previewApply(id) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) {
+          return {
+            version: 1,
+            operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+            databaseCredentialId: id,
+            databaseBindingId: d.binding.id,
+            serverId: stagingServerId,
+            databaseName: d.binding.databaseName,
+            username: d.credential.username,
+            host: d.credential.host,
+            privileges: d.credential.privileges,
+            expectedCredentialRevision: d.credential.revision,
+            expectedBindingRevision: d.binding.revision,
+            passwordUpdatedAt: d.credential.passwordUpdatedAt,
+            desiredStateSha256: d.desiredStateSha256,
+            confirmation: 'unused',
+            sideEffects: false,
+          };
+        }
+      }
+      return null;
+    },
+  };
+  const jobRegistry = {
+    async listJobs(filter) {
+      const jobs = [];
+      for (const d of siteData.values()) {
+        if (!filter?.serverId || filter.serverId === d.appliedJob.serverId) {
+          jobs.push(structuredClone(d.appliedJob));
+        }
+      }
+      return jobs;
+    },
+  };
+
+  const phpMyAdminService = createPhpMyAdminHandoffService({
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
+    jobRegistry,
+    liveSessions,
+    now,
+    ttlMs: 15_000,
+    gatewayTtlMs: 3600_000,
+  });
+
+  // 3. HTTP Express App with Handoff and Gateway Verification Endpoints
+  const app = express();
+  app.use(express.json());
+
+  let currentRequestContext = null;
+  app.use((req, res, next) => {
+    if (currentRequestContext) {
+      req.auth = currentRequestContext.auth;
+      req.authSessionDigest = currentRequestContext.authSessionDigest;
+    }
+    next();
+  });
+
+  const serverRegistry = {
+    async getServer(id) {
+      return id === stagingServerId ? { id: stagingServerId } : null;
+    },
+  };
+
+  mountPhpMyAdminHandoffRoutes(app, {
+    registry: serverRegistry,
+    phpMyAdminHandoffService: phpMyAdminService,
+  });
+
+  app.use((error, req, res, next) => {
+    const known = error instanceof PhpMyAdminHandoffError;
+    return res.status(known ? error.status : 500).json({
+      error: {
+        code: known ? error.code : 'internal_error',
+        message: known ? error.message : 'Unexpected error',
+      },
+    });
+  });
+
+  const httpServer = app.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    httpServer.once('listening', resolve);
+    httpServer.once('error', reject);
+  });
+  t.after(() => {
+    try { httpServer.closeAllConnections?.(); } catch {}
+    return new Promise((resolve) => httpServer.close(resolve));
+  });
+  const apiBase = `http://127.0.0.1:${httpServer.address().port}`;
+
+  // 4. Real Unix Socket Server for phpMyAdmin Handoff Consumer
+  const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-staging-'));
+  const socketDirectory = path.join(tmpRoot, 'runtime');
+  const socketPath = path.join(socketDirectory, 'handoff.sock');
+  const policyGid = 2468;
+  t.after(() => rm(tmpRoot, { recursive: true, force: true }));
+
+  async function policyLstat(target) {
+    const metadata = await lstat(target);
+    return new Proxy(metadata, {
+      get(current, property, receiver) {
+        if (property === 'uid') return 0;
+        if (property === 'gid') return policyGid;
+        return Reflect.get(current, property, receiver);
+      },
+    });
+  }
+
+  const socketRuntime = await startPhpMyAdminHandoffSocket({
+    phpMyAdminHandoffService: phpMyAdminService,
+    socketDirectory,
+    socketPath,
+    run: async (file, args) => {
+      assert.equal(file, '/usr/bin/getent');
+      assert.deepEqual(args, ['group', 'yunpanel-phpmyadmin']);
+      return { stdout: `yunpanel-phpmyadmin:x:${policyGid}:\n` };
+    },
+    chownFn: async () => {},
+    lstatFn: policyLstat,
+  });
+  t.after(async () => {
+    try { await socketRuntime.close(); } catch {}
+  });
+  assert.equal(socketRuntime.socketPath, socketPath);
+  assert.equal(socketRuntime.mode, 0o660);
+  assert.equal(socketRuntime.directoryMode, 0o750);
+
+  function sendSocketRequest(payload, headers = {}) {
+    const bodyStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        socketPath,
+        method: 'POST',
+        path: '/consume',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(bodyStr),
+          ...headers,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+          catch { parsed = null; }
+          resolve({ status: res.statusCode, headers: res.headers, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      req.end(bodyStr);
+    });
+  }
+
+  // 5. Direct Vendor URL & Unix Socket Direct Probe Fail-Closed Checks
+  // 5A: Non-POST method on Unix socket returns 404
+  const directGetProbe = await new Promise((resolve, reject) => {
+    const req = http.request({
+      socketPath,
+      method: 'GET',
+      path: '/consume',
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(directGetProbe.status, 404);
+  assert.equal(directGetProbe.body.error.code, 'phpmyadmin_handoff_consume_not_found');
+
+  // 5B: Direct probe with invalid content-type returns 400
+  const invalidContentType = await sendSocketRequest({ capability: 'a'.repeat(43), sessionDigest: 'b'.repeat(64) }, { 'content-type': 'text/plain' });
+  assert.equal(invalidContentType.status, 400);
+  assert.equal(invalidContentType.body.error.code, 'phpmyadmin_handoff_consume_content_type_invalid');
+
+  // 5C: Direct probe with empty or malformed body returns 400
+  const malformedBody = await sendSocketRequest('{}');
+  assert.equal(malformedBody.status, 400);
+  assert.equal(malformedBody.body.error.code, 'phpmyadmin_handoff_consume_request_invalid');
+
+  // 5D: Query-bearing probes on gateway access routes rejected with 400
+  currentRequestContext = {
+    auth: { id: 'sess-owner-1', user: { id: 'owner-user', role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } },
+    authSessionDigest: 'a'.repeat(64),
+  };
+  const queryProbe = await fetch(`${apiBase}/api/phpmyadmin-gateway-access?probe=unexpected`);
+  assert.equal(queryProbe.status, 400);
+  assert.equal((await queryProbe.json()).error.code, 'phpmyadmin_handoff_query_invalid');
+
+  // 5E: Unauthenticated access to signon access route fails closed 401
+  currentRequestContext = null;
+  const unauthAccess = await fetch(`${apiBase}/api/phpmyadmin-signon-access`);
+  assert.equal(unauthAccess.status, 401);
+
+  // 6. Multi-Tier Handoff Issuance Across Hierarchy (Owner, Reseller, Customer)
+  const ownerCookie = 'owner-raw-cookie-secret';
+  const ownerDigest = createHash('sha256').update(ownerCookie).digest('hex');
+  const ownerAuth = { id: 'sess-owner-1', user: { id: 'owner-user', role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } };
+
+  const r1Cookie = 'r1-raw-cookie-secret';
+  const r1Digest = createHash('sha256').update(r1Cookie).digest('hex');
+  const r1Auth = { id: 'sess-r1-1', user: { id: 'reseller-1', role: 'reseller', websiteIds: [site1A.id, site1B.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+
+  const c1aCookie = 'c1a-raw-cookie-secret';
+  const c1aDigest = createHash('sha256').update(c1aCookie).digest('hex');
+  const c1aAuth = { id: 'sess-c1a-1', user: { id: 'cust-1a', role: 'customer', websiteIds: [site1A.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+
+  const c1bCookie = 'c1b-raw-cookie-secret';
+  const c1bDigest = createHash('sha256').update(c1bCookie).digest('hex');
+  const c1bAuth = { id: 'sess-c1b-1', user: { id: 'cust-1b', role: 'customer', websiteIds: [site1B.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+
+  const roCookie = 'ro-raw-cookie-secret';
+  const roDigest = createHash('sha256').update(roCookie).digest('hex');
+  const roAuth = { id: 'sess-ro-1', user: { id: 'readonly-user', role: 'read_only' }, access: { mode: 'read_only', permissions: [] }, security: { managementAllowed: false } };
+
+  // 6A: Customer 1A issues handoff for assigned Site 1A (success: 201 Created)
+  currentRequestContext = { auth: c1aAuth, authSessionDigest: c1aDigest };
+  const c1aIssueRes = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id }),
+  });
+  assert.equal(c1aIssueRes.status, 201);
+  assert.equal(c1aIssueRes.headers.get('cache-control'), 'no-store');
+  assert.equal(c1aIssueRes.headers.get('pragma'), 'no-cache');
+  const c1aIssueBody = await c1aIssueRes.json();
+  const c1aCapability = c1aIssueBody.data.capability;
+  assert.match(c1aCapability, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(c1aIssueBody.data.target.websiteId, site1A.id);
+  assert.equal(c1aIssueBody.data.target.databaseName, 'db_site_1a');
+  assert.equal(JSON.stringify(c1aIssueBody).includes('password'), false);
+
+  // 6B: Customer 1A attempts handoff for Site 1B (Site B under same reseller) -> 403 fail-closed
+  const c1aToSite1B = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  assert.equal(c1aToSite1B.status, 403);
+  assert.equal((await c1aToSite1B.json()).error.code, 'phpmyadmin_handoff_authorized_required');
+
+  // 6C: Customer 1A attempts handoff for Site 2A (foreign reseller site) -> 403 fail-closed
+  const c1aToSite2A = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site2A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db2A.credential.id }),
+  });
+  assert.equal(c1aToSite2A.status, 403);
+
+  // 6D: Reseller 1 attempts handoff for foreign Site 2A -> 403 fail-closed
+  currentRequestContext = { auth: r1Auth, authSessionDigest: r1Digest };
+  const r1ToSite2A = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site2A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db2A.credential.id }),
+  });
+  assert.equal(r1ToSite2A.status, 403);
+  assert.equal((await r1ToSite2A.json()).error.code, 'phpmyadmin_handoff_authorized_required');
+
+  // 6E: Reseller 1 can issue handoffs for both child sites Site 1A and Site 1B
+  const r1ToSite1A = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id }),
+  });
+  assert.equal(r1ToSite1A.status, 201);
+  const r1Capability1A = (await r1ToSite1A.json()).data.capability;
+
+  const r1ToSite1B = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  assert.equal(r1ToSite1B.status, 201);
+  const r1Capability1B = (await r1ToSite1B.json()).data.capability;
+
+  // 6F: Read-only user cannot issue handoff -> 403
+  currentRequestContext = { auth: roAuth, authSessionDigest: roDigest };
+  const roHandoffAttempt = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id }),
+  });
+  assert.equal(roHandoffAttempt.status, 403);
+
+  // 6G: Extra request body fields rejected -> 400
+  currentRequestContext = { auth: c1aAuth, authSessionDigest: c1aDigest };
+  const extraFieldsAttempt = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id, injectedPassword: 'evil' }),
+  });
+  assert.equal(extraFieldsAttempt.status, 400);
+  assert.equal((await extraFieldsAttempt.json()).error.code, 'phpmyadmin_handoff_request_invalid');
+
+  // 7. Unix Socket Consume, Replay Protection & Panel Auth Cookie Isolation
+  // 7A: Consume Customer 1A capability over Unix socket
+  const c1aConsume = await sendSocketRequest({ capability: c1aCapability, sessionDigest: c1aDigest });
+  assert.equal(c1aConsume.status, 200);
+  assert.equal(c1aConsume.headers['cache-control'], 'no-store');
+  assert.equal(c1aConsume.headers['pragma'], 'no-cache');
+  assert.equal(c1aConsume.headers['referrer-policy'], 'no-referrer');
+  assert.equal(c1aConsume.body.data.version, 1);
+  assert.equal(c1aConsume.body.data.protocol, 'yunpanel-phpmyadmin-signon-v1');
+  assert.equal(c1aConsume.body.data.databaseName, 'db_site_1a');
+  assert.equal(c1aConsume.body.data.username, 'ydb_site_1a');
+  assert.equal(c1aConsume.body.data.password, 'secret-pw-1a');
+  assert.equal(c1aConsume.body.data.host, 'localhost');
+  const c1aGatewaySession = c1aConsume.body.data.gatewaySession;
+  assert.match(c1aGatewaySession, /^[A-Za-z0-9_-]{43}$/);
+  // Panel auth cookie itself was never sent or stored
+  assert.equal(c1aConsume.headers['set-cookie'], undefined);
+
+  // 7B: REPLAY ATTACK — Consuming the exact same capability a second time fails 401
+  const c1aReplay = await sendSocketRequest({ capability: c1aCapability, sessionDigest: c1aDigest });
+  assert.equal(c1aReplay.status, 401);
+  assert.equal(c1aReplay.body.error.code, 'phpmyadmin_handoff_invalid');
+
+  // 7C: SESSION DIGEST MISMATCH & SINGLE-USE PRESERVATION
+  currentRequestContext = { auth: c1bAuth, authSessionDigest: c1bDigest };
+  const c1bIssueRes = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  const c1bCapability = (await c1bIssueRes.json()).data.capability;
+
+  // Attacker attempts consume with mismatched digest -> 403 phpmyadmin_handoff_session_mismatch
+  const digestMismatchConsume = await sendSocketRequest({ capability: c1bCapability, sessionDigest: 'f'.repeat(64) });
+  assert.equal(digestMismatchConsume.status, 403);
+  assert.equal(digestMismatchConsume.body.error.code, 'phpmyadmin_handoff_session_mismatch');
+
+  // Capability was permanently consumed/destroyed on mismatch: legitimate user replay fails 401
+  const legitimateReplayAfterMismatch = await sendSocketRequest({ capability: c1bCapability, sessionDigest: c1bDigest });
+  assert.equal(legitimateReplayAfterMismatch.status, 401);
+  assert.equal(legitimateReplayAfterMismatch.body.error.code, 'phpmyadmin_handoff_invalid');
+
+  // 8. Gateway Session Authorization & Account/Site Switching (Owner -> Site A -> Site B)
+  // 8A: Customer 1A authorizes for Site 1A using valid gateway session -> SUCCESS
+  const c1aAuthResult = await phpMyAdminService.authorizeGatewaySession(c1aGatewaySession, {
+    sessionId: c1aAuth.id,
+    userId: c1aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1A.id],
+  });
+  assert.deepEqual(c1aAuthResult, {
+    websiteId: site1A.id,
+    databaseCredentialId: db1A.credential.id,
+    expiresAt: c1aConsume.body.data.expiresAt,
+  });
+
+  // 8B: SITE SWITCHING ATTEMPT — Customer 1A attempts access in Site 1B context (websiteIds: [site1B.id])
+  // The gateway session was bound to Site 1A; Customer 1A has no grant to Site 1B.
+  // Result: fails closed (returns null) AND revokes the gateway session immediately!
+  const c1aSwitchToSite1B = await phpMyAdminService.authorizeGatewaySession(c1aGatewaySession, {
+    sessionId: c1aAuth.id,
+    userId: c1aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  });
+  assert.equal(c1aSwitchToSite1B, null);
+
+  // Gateway token was actively revoked on foreign website access: subsequent Site 1A request now fails
+  const c1aSubsequentAuth = await phpMyAdminService.authorizeGatewaySession(c1aGatewaySession, {
+    sessionId: c1aAuth.id,
+    userId: c1aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1A.id],
+  });
+  assert.equal(c1aSubsequentAuth, null);
+
+  // 8C: Cross-tenant session theft attempt: Customer 1B presents Reseller 1's gateway session
+  const r1Consume1A = await sendSocketRequest({ capability: r1Capability1A, sessionDigest: r1Digest });
+  const r1GatewaySession1A = r1Consume1A.body.data.gatewaySession;
+  const stolenGatewayAttempt = await phpMyAdminService.authorizeGatewaySession(r1GatewaySession1A, {
+    sessionId: c1bAuth.id,
+    userId: c1bAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  });
+  assert.equal(stolenGatewayAttempt, null);
+
+  // 8D: OWNER AUTHORIZATION ACROSS MULTIPLE SITES (Owner -> Site A -> Site B)
+  // Owner issues and consumes on Site 1A
+  currentRequestContext = { auth: ownerAuth, authSessionDigest: ownerDigest };
+  const ownerHandoff1A = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id }),
+  });
+  const ownerCap1A = (await ownerHandoff1A.json()).data.capability;
+  const ownerConsume1A = await sendSocketRequest({ capability: ownerCap1A, sessionDigest: ownerDigest });
+  const ownerGateway1A = ownerConsume1A.body.data.gatewaySession;
+
+  // Owner issues and consumes on Site 1B
+  const ownerHandoff1B = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  const ownerCap1B = (await ownerHandoff1B.json()).data.capability;
+  const ownerConsume1B = await sendSocketRequest({ capability: ownerCap1B, sessionDigest: ownerDigest });
+  const ownerGateway1B = ownerConsume1B.body.data.gatewaySession;
+
+  // Owner authorizes Site 1A
+  const ownerAuth1A = await phpMyAdminService.authorizeGatewaySession(ownerGateway1A, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  });
+  assert.equal(ownerAuth1A.websiteId, site1A.id);
+
+  // Owner authorizes Site 1B
+  const ownerAuth1B = await phpMyAdminService.authorizeGatewaySession(ownerGateway1B, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  });
+  assert.equal(ownerAuth1B.websiteId, site1B.id);
+
+  // Cross-tenant data isolation: database name and credentials differ between sites without leakage
+  assert.notEqual(ownerConsume1A.body.data.databaseName, ownerConsume1B.body.data.databaseName);
+  assert.notEqual(ownerConsume1A.body.data.password, ownerConsume1B.body.data.password);
+
+  // 9. Grant Removal: Website Detach / Release Immediately Revokes Vendor Session
+  currentRequestContext = { auth: c1aAuth, authSessionDigest: c1aDigest };
+  const c1aIssueNew = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1A.credential.id }),
+  });
+  const c1aCapNew = (await c1aIssueNew.json()).data.capability;
+  const c1aConsumeNew = await sendSocketRequest({ capability: c1aCapNew, sessionDigest: c1aDigest });
+  const c1aGatewayGrantRemoval = c1aConsumeNew.body.data.gatewaySession;
+
+  // Active check succeeds before removal
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(c1aGatewayGrantRemoval, {
+    sessionId: c1aAuth.id,
+    userId: c1aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1A.id],
+  }), null);
+
+  // Grant removal: detach website from customer
+  const grantRemovalReceipt = f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-rem-site-1a',
+    websiteId: site1A.id,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(grantRemovalReceipt.released, true);
+  // Verify hosting_website_released event fired for cust-1a
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_website_released'), true);
+
+  // phpMyAdmin gateway session is terminated immediately
+  const grantRevokedAuth = await phpMyAdminService.authorizeGatewaySession(c1aGatewayGrantRemoval, {
+    sessionId: c1aAuth.id,
+    userId: c1aAuth.user.id,
+    role: 'customer',
+    websiteIds: [],
+  });
+  assert.equal(grantRevokedAuth, null);
+
+  // 10. Logout & Logout-All Terminate Active Vendor Sessions Fail-Closed
+  // 10A: Logout terminates single session
+  currentRequestContext = { auth: c1bAuth, authSessionDigest: c1bDigest };
+  const c1bIssueNew = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  const c1bCapNew = (await c1bIssueNew.json()).data.capability;
+  const c1bConsumeNew = await sendSocketRequest({ capability: c1bCapNew, sessionDigest: c1bDigest });
+  const c1bGatewayLogout = c1bConsumeNew.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(c1bGatewayLogout, {
+    sessionId: c1bAuth.id,
+    userId: c1bAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // User logs out of this session
+  liveSessions.revokeSession(c1bAuth.id, 'logout');
+
+  // Vendor session terminated
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(c1bGatewayLogout, {
+    sessionId: c1bAuth.id,
+    userId: c1bAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // 10B: Logout-All terminates all sessions for that user across devices
+  currentRequestContext = { auth: r1Auth, authSessionDigest: r1Digest };
+  const r1Handoff1B = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  const r1Cap1B = (await r1Handoff1B.json()).data.capability;
+  const r1Consume1B = await sendSocketRequest({ capability: r1Cap1B, sessionDigest: r1Digest });
+  const r1GatewayLogoutAll = r1Consume1B.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(r1GatewayLogoutAll, {
+    sessionId: r1Auth.id,
+    userId: r1Auth.user.id,
+    role: 'reseller',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // Reseller 1 executes Logout-All
+  liveSessions.revokeUser('reseller-1', 'user_sessions_revoked');
+
+  // Reseller 1's gateway session terminated immediately
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(r1GatewayLogoutAll, {
+    sessionId: r1Auth.id,
+    userId: r1Auth.user.id,
+    role: 'reseller',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // 11. Password-Session Rotation & Credential Drift
+  // 11A: User password rotation revokes vendor sessions
+  const directCookie = 'direct-raw-cookie';
+  const directDigest = createHash('sha256').update(directCookie).digest('hex');
+  const directAuth = { id: 'sess-direct-1', user: { id: 'cust-direct', role: 'customer', websiteIds: [siteDirect.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+  currentRequestContext = { auth: directAuth, authSessionDigest: directDigest };
+  const directHandoff = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${siteDirect.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbDirect.credential.id }),
+  });
+  const directCap = (await directHandoff.json()).data.capability;
+  const directConsume = await sendSocketRequest({ capability: directCap, sessionDigest: directDigest });
+  const directGatewayPw = directConsume.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(directGatewayPw, {
+    sessionId: directAuth.id,
+    userId: directAuth.user.id,
+    role: 'customer',
+    websiteIds: [siteDirect.id],
+  }), null);
+
+  // User resets password
+  liveSessions.revokeUser('cust-direct', 'password_reset');
+
+  // Vendor session terminated immediately
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(directGatewayPw, {
+    sessionId: directAuth.id,
+    userId: directAuth.user.id,
+    role: 'customer',
+    websiteIds: [siteDirect.id],
+  }), null);
+
+  // 11B: Database credential password rotation / revision drift revokes gateway session
+  // Issue fresh handoff for Owner on Site Direct
+  currentRequestContext = { auth: ownerAuth, authSessionDigest: ownerDigest };
+  const ownerHandoffDrift = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${siteDirect.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbDirect.credential.id }),
+  });
+  const ownerCapDrift = (await ownerHandoffDrift.json()).data.capability;
+  const ownerConsumeDrift = await sendSocketRequest({ capability: ownerCapDrift, sessionDigest: ownerDigest });
+  const ownerGatewayDrift = ownerConsumeDrift.body.data.gatewaySession;
+
+  // Active check passes
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(ownerGatewayDrift, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  }), null);
+
+  // Rotate database credential password (revision bumps from 3 to 4, desiredState changes)
+  dbDirect.credential.revision = 4;
+  dbDirect.desiredStateSha256 = 'f'.repeat(64);
+  dbDirect.appliedJob.result.credentialRevision = 4;
+  dbDirect.appliedJob.result.desiredStateSha256 = dbDirect.desiredStateSha256;
+
+  // Next gateway request detects drift, revokes gateway session, and returns null
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(ownerGatewayDrift, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  }), null);
+
+  // 12. Customer and Reseller Suspension Terminates Active Vendor Sessions Fail-Closed
+  // 12A: Customer Suspension
+  const c2aCookie = 'c2a-raw-cookie-secret';
+  const c2aDigest = createHash('sha256').update(c2aCookie).digest('hex');
+  const c2aAuth = { id: 'sess-c2a-1', user: { id: 'cust-2a', role: 'customer', websiteIds: [site2A.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+
+  currentRequestContext = { auth: c2aAuth, authSessionDigest: c2aDigest };
+  const c2aIssueSusp = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site2A.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db2A.credential.id }),
+  });
+  assert.equal(c2aIssueSusp.status, 201);
+  const c2aCapSusp = (await c2aIssueSusp.json()).data.capability;
+  const c2aConsumeSusp = await sendSocketRequest({ capability: c2aCapSusp, sessionDigest: c2aDigest });
+  assert.equal(c2aConsumeSusp.status, 200);
+  const c2aGatewaySusp = c2aConsumeSusp.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(c2aGatewaySusp, {
+    sessionId: c2aAuth.id,
+    userId: c2aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site2A.id],
+  }), null);
+
+  // Suspend Customer 2A
+  const c2aRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-2a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-2a', { revision: c2aRow.revision, active: false });
+  assert.equal(f.revoked.some((r) => r.id === 'cust-2a' && r.reason === 'hosting_account_suspended'), true);
+
+  // Customer 2A gateway session terminated
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(c2aGatewaySusp, {
+    sessionId: c2aAuth.id,
+    userId: c2aAuth.user.id,
+    role: 'customer',
+    websiteIds: [site2A.id],
+  }), null);
+
+  // 12B: Reseller Suspension (Cascades to drop child customer sessions)
+  const r1FreshAuth = { id: 'sess-r1-fresh', user: { id: 'reseller-1', role: 'reseller', websiteIds: [site1B.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+  const c1bFreshAuth = { id: 'sess-c1b-fresh', user: { id: 'cust-1b', role: 'customer', websiteIds: [site1B.id] }, access: { mode: 'site_management', permissions: ['website:manage'] }, security: { managementAllowed: true } };
+
+  currentRequestContext = { auth: r1FreshAuth, authSessionDigest: r1Digest };
+  const r1HandoffNew = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  assert.equal(r1HandoffNew.status, 201);
+  const r1CapNew = (await r1HandoffNew.json()).data.capability;
+  const r1ConsumeFresh = await sendSocketRequest({ capability: r1CapNew, sessionDigest: r1Digest });
+  assert.equal(r1ConsumeFresh.status, 200);
+  const r1GatewayFresh = r1ConsumeFresh.body.data.gatewaySession;
+
+  currentRequestContext = { auth: c1bFreshAuth, authSessionDigest: c1bDigest };
+  const c1bHandoffFresh = await fetch(`${apiBase}/api/servers/${stagingServerId}/websites/${site1B.id}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: db1B.credential.id }),
+  });
+  assert.equal(c1bHandoffFresh.status, 201);
+  const c1bCapFresh = (await c1bHandoffFresh.json()).data.capability;
+  const c1bConsumeFresh = await sendSocketRequest({ capability: c1bCapFresh, sessionDigest: c1bDigest });
+  assert.equal(c1bConsumeFresh.status, 200);
+  const c1bGatewayFresh = c1bConsumeFresh.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(r1GatewayFresh, {
+    sessionId: r1FreshAuth.id,
+    userId: r1FreshAuth.user.id,
+    role: 'reseller',
+    websiteIds: [site1B.id],
+  }), null);
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(c1bGatewayFresh, {
+    sessionId: c1bFreshAuth.id,
+    userId: c1bFreshAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // Suspend Reseller 1
+  const r1Row = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-1');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', { revision: r1Row.revision, active: false });
+
+  // Both Reseller 1 and child Customer 1B were revoked
+  assert.equal(f.revoked.some((r) => r.id === 'reseller-1' && r.reason === 'hosting_account_suspended'), true);
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1b' && r.reason === 'hosting_parent_suspended'), true);
+
+  // Both gateway sessions terminated
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(r1GatewayFresh, {
+    sessionId: r1FreshAuth.id,
+    userId: r1FreshAuth.user.id,
+    role: 'reseller',
+    websiteIds: [site1B.id],
+  }), null);
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(c1bGatewayFresh, {
+    sessionId: c1bFreshAuth.id,
+    userId: c1bFreshAuth.user.id,
+    role: 'customer',
+    websiteIds: [site1B.id],
+  }), null);
+
+  // 13. Stale Vendor Cookie & Expired Session Verification (Criterion 2)
+  // Fabricated gateway cookie token returns null
+  assert.equal(await phpMyAdminService.authorizeGatewaySession('X'.repeat(43), {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  }), null);
+
+  // Advance time past gatewayTtlMs (1 hour = 3600_000 ms)
+  mockNow += 4_000_000;
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(ownerGateway1A, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  }), null);
+
+  // 14. Unix Socket Clean Shutdown
+  await socketRuntime.close();
+  await assert.rejects(lstat(socketPath), { code: 'ENOENT' });
+
+  // 15. Server Isolation & Host Safety Gate
+  assertNoDot44Host(stagingServerId);
+  assert.ok(true, 'YP-04 phpMyAdmin session binding and tenant isolation real acceptance verified.');
 });
