@@ -39,9 +39,7 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 
 ## F — Sade reseller uygulaması ve korunmuş Plesk yol haritası
 
-- [ ] **PAR-01 / RS-01–02 — Basit sahiplik ve güvenli entegrasyon.** Owner → isteğe bağlı tek Reseller → Customer → Website; mevcut üyelik/roller ve ID/Unix kullanıcıları korunur. Önce saf kapsam/limit politikası, sonra auth/state bağlantısı, versioned migration/rollback, oturum iptali ve atomik adet kontrolü. Kaynak helper tüm API entegrasyonu değildir.
 - **PAR-02 / RS-03–05 — Basit Customer/Reseller yönetiminde kalan kabul:**
-  - [ ] **RS-04a kabul / RS-03–05 kalan:** Node24/npm11 tam check ve gerçek React/browser/HTTP kabulü; reseller/customer self-service, güvenli site runtime ve hesap lifecycle'ın gerçek session/gateway/WS davranışı. Owner profil + suspend/reactivate UI kaynağı hazır diye RS-02e veya reseller özelliğinin tamamı kapanmaz. Gerçek kontroller T-DEV-OWNER-PROFILES içindedir.
 - **PAR-03 — Sonraki faz, MVP engeli değil:** hosting/reseller paket motoru, add-on, Subscription lifecycle/expiry, overselling, sync/lock/customization ve kapsamlı sahiplik transferi. Yeni kullanıcı kararı olmadan ilk sürüme geri taşınmaz; tamamlandı işareti verilmez. Site seviyesindeki gerçek limitler PROD-15'te kalır.
 - [ ] **PAR-04 — Reseller dışındaki kalan işlevler.** DNS/mail/DB/runtime/Docker/Git/WP/Laravel/backup/security/API/CLI/migration görevleri envanter ID'leriyle korunur. B–E grubundaki işlere çapraz bağlanır, aynı iş iki kez icat edilmez. Reseller markalama sonraki fazdır.
 - [ ] **PAR-05 — OS ve premium/harici eşdeğerlik hatları.** Windows/IIS/.NET/MSSQL/NTFS; ticari sertifika, Sitejet/site-builder, premium security/backup/toolkit ve registrar entegrasyonları. Reseller fatura/abonelik otomasyonu ilk sürümden sonradır. Her satır kendi adapter/lisans/kabulüyle kapanır; Ubuntu veya basit link tüm özellik karşılığı değildir.
