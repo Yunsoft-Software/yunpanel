@@ -17,6 +17,8 @@ import {
   startCertificateRenewalScheduler,
 } from '../src/certificate-renewal-scheduler.js';
 import { createJobRegistry } from '../src/job-registry.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { completeNextJob } from './helpers/job-completion-fixture.js';
 import { certificateHttpInternals } from '../src/certificate-http.js';
 
 const {
@@ -1023,4 +1025,125 @@ test('Live TLS presentation vs persistent metadata equality: metadata equality i
   });
   assert.equal(verifiedTls.verified, true);
   assert.equal(verifiedTls.outcome, 'renewed_and_live_verified');
+});
+
+test('renewalOutcome returns syncing if validTo or validFrom differs between job result and certificate', () => {
+  const beforeCert = {
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: sampleFingerprint.toUpperCase(),
+  };
+
+  const renewedJob = {
+    status: 'succeeded',
+    result: {
+      fingerprint256: renewedFingerprint,
+      validFrom: '2026-09-01T00:00:00.000Z',
+      validTo: '2026-12-01T00:00:00.000Z',
+    },
+  };
+
+  // Case 1: Fingerprint matches but validTo not yet updated in certificate
+  const staleValidToCert = {
+    state: 'active',
+    fingerprint256: renewedFingerprint.toUpperCase(),
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+  };
+  assert.equal(renewalOutcome(renewedJob, beforeCert, staleValidToCert, false), 'syncing');
+
+  // Case 2: Fingerprint matches but validFrom not yet updated in certificate
+  const staleValidFromCert = {
+    state: 'active',
+    fingerprint256: renewedFingerprint.toUpperCase(),
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+  };
+  assert.equal(renewalOutcome(renewedJob, beforeCert, staleValidFromCert, false), 'syncing');
+
+  // Case 3: Both validFrom and validTo match -> renewed
+  const fullySyncedCert = {
+    state: 'active',
+    fingerprint256: renewedFingerprint.toUpperCase(),
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+  };
+  assert.equal(renewalOutcome(renewedJob, beforeCert, fullySyncedCert, false), 'renewed');
+});
+
+test('completed renewal job reconciliation updates validFrom, validTo, fingerprint and attaches to domain', async () => {
+  const certificateRegistry = createCertificateRegistry();
+  const domainRegistry = createDomainRegistry();
+  const jobRegistry = createJobRegistry();
+  const serverId = 'server-rec-test';
+
+  const domain = await domainRegistry.createDomain({
+    serverId,
+    primaryDomain: 'renewal-reconcile.example.com',
+    aliases: [],
+    targetType: 'proxy',
+    target: { upstreamPort: 8080 },
+    httpsMode: 'managed',
+  });
+
+  const cert = await certificateRegistry.createForDomain({
+    domainId: domain.id,
+    serverId,
+    domains: ['renewal-reconcile.example.com'],
+    email: 'admin@example.com',
+  });
+
+  const oldFp = '11:'.repeat(31) + '11';
+  await certificateRegistry.markActive(cert.id, {
+    certName: 'renewal-reconcile.example.com',
+    certificatePath: '/etc/letsencrypt/live/renewal-reconcile.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/renewal-reconcile.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/renewal-reconcile.example.com/privkey.pem',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: oldFp,
+  });
+
+  // Enqueue a renewal job
+  const newFp = '22:'.repeat(31) + '22';
+  await jobRegistry.enqueue({
+    serverId,
+    type: 'ssl.renew',
+    operation: OPERATIONS.SSL_RENEW,
+    payload: { certName: 'renewal-reconcile.example.com', dryRun: false },
+    resourceType: 'certificate',
+    resourceId: cert.id,
+  });
+
+  const renewedResult = {
+    certName: 'renewal-reconcile.example.com',
+    certificatePath: '/etc/letsencrypt/live/renewal-reconcile.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/renewal-reconcile.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/renewal-reconcile.example.com/privkey.pem',
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+    fingerprint256: newFp,
+    dryRun: false,
+    status: 'renewed',
+  };
+
+  await completeNextJob(jobRegistry, {
+    serverId,
+    certificateRegistry,
+    domainRegistry,
+    status: 'succeeded',
+    result: renewedResult,
+  });
+
+  // Check persistent certificate has new dates and fingerprint
+  const updatedCert = await certificateRegistry.getCertificate(cert.id);
+  assert.equal(updatedCert.state, 'active');
+  assert.equal(updatedCert.fingerprint256, newFp);
+  assert.equal(updatedCert.validTo, '2026-12-01T00:00:00.000Z');
+  assert.equal(updatedCert.validFrom, '2026-09-01T00:00:00.000Z');
+  assert.ok(updatedCert.lastRenewedAt);
+
+  // Check domain relationship is attached
+  const updatedDomain = await domainRegistry.getDomain(domain.id);
+  assert.equal(updatedDomain.certificateId, cert.id);
 });

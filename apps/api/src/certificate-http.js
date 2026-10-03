@@ -235,6 +235,16 @@ function renewalOutcome(job, before, certificate, dryRun = false) {
     if (certificate.state !== 'active' || jobFp !== certFp) {
       return 'syncing';
     }
+    if (job.result.validTo) {
+      if (!certificate.validTo || Date.parse(certificate.validTo) !== Date.parse(job.result.validTo)) {
+        return 'syncing';
+      }
+    }
+    if (job.result.validFrom) {
+      if (!certificate.validFrom || Date.parse(certificate.validFrom) !== Date.parse(job.result.validFrom)) {
+        return 'syncing';
+      }
+    }
     if (before?.fingerprint256) {
       const beforeFp = String(before.fingerprint256).toUpperCase();
       if (beforeFp === jobFp) {
@@ -242,6 +252,16 @@ function renewalOutcome(job, before, certificate, dryRun = false) {
       }
     }
     return 'renewed';
+  }
+  if (job?.result?.validTo) {
+    if (!certificate.validTo || Date.parse(certificate.validTo) !== Date.parse(job.result.validTo)) {
+      return 'syncing';
+    }
+  }
+  if (job?.result?.validFrom) {
+    if (!certificate.validFrom || Date.parse(certificate.validFrom) !== Date.parse(job.result.validFrom)) {
+      return 'syncing';
+    }
   }
   return certificate?.state === 'active' ? 'renewed' : 'syncing';
 }
@@ -693,15 +713,36 @@ export function mountCertificateRoutes(app, dependencies = {}) {
         }
       }
 
+      let liveTls = request.body?.liveTls ?? (request.body?.fingerprint256 ? request.body : null);
+      let liveComparison = null;
+      if (liveTls) {
+        liveComparison = compareTlsPresentation(certificate, liveTls);
+      }
+
       const presentation = verifyTlsPresentation({ domain, certificate, inspected });
+      const verified = presentation.verified && (liveComparison ? liveComparison.matches : true);
+      const status = (!liveComparison || liveComparison.matches)
+        ? presentation.status
+        : (liveComparison.reason === 'fingerprint_mismatch' ? 'material_invalid' : 'mismatch');
+      const code = (!liveComparison || liveComparison.matches)
+        ? presentation.code
+        : (liveComparison.reason === 'fingerprint_mismatch' ? 'certificate_material_mismatch' : 'tls_live_mismatch');
+
       return response.json({
         data: {
           certificateId: certificate.id,
           domainId: domain?.id ?? certificate.domainId ?? null,
-          status: presentation.status,
-          code: presentation.code,
-          verified: presentation.verified,
-          presentationChecks: presentation.presentationChecks,
+          status,
+          code,
+          verified,
+          presentationChecks: {
+            ...presentation.presentationChecks,
+            ...(liveComparison ? {
+              liveTlsMatches: liveComparison.matches,
+              liveComparison,
+            } : {}),
+          },
+          liveComparison: liveComparison ?? undefined,
           certificate: publicCertificate(certificate),
         },
       });
@@ -736,7 +777,14 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
       const dryRun = Boolean(request.body?.dryRun ?? request.query?.dryRun ?? job?.result?.dryRun);
       const before = request.body?.before ?? null;
+      const liveTls = request.body?.liveTls ?? null;
       const outcome = renewalOutcome(job, before, certificate, dryRun);
+
+      let liveVerified = null;
+      if (liveTls && certificate) {
+        const liveMatch = compareTlsPresentation(certificate, liveTls);
+        liveVerified = liveMatch.matches;
+      }
 
       const jobErrorCode = job?.error?.code ?? (job?.status === 'failed' ? 'renewal_job_failed' : null);
       const jobErrorMessage = job?.error?.message ?? (job?.status === 'failed' ? 'Renewal job failed' : null);
@@ -750,6 +798,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
         waiting: outcome === 'waiting',
         failed: outcome === 'failed',
         outcome,
+        ...(liveVerified !== null ? { liveTlsMatches: liveVerified } : {}),
       });
 
       return response.json({
@@ -759,6 +808,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
           code: jobErrorCode ?? (outcome === 'failed' ? 'renewal_failed' : outcome),
           error: jobErrorCode ? { code: jobErrorCode, message: jobErrorMessage } : null,
           presentationChecks,
+          liveVerified: liveVerified ?? undefined,
           job: job ? { id: job.id, status: job.status, operation: job.operation } : null,
           certificate: certificate ? publicCertificate(certificate) : null,
         },

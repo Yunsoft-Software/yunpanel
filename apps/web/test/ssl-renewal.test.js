@@ -263,3 +263,20 @@ test('stored certificate name drift cannot be accepted as the approved renewal',
   await start(run); assert.equal(run.flow.getState().status, 'unverified');
   assert.equal(run.flow.getState().syncVersion, 0);
 });
+
+test('completed renewal state is not reverted to syncing by a stale snapshot with older validTo', async () => {
+  const run = setup();
+  const state = await start(run);
+  assert.equal(state.status, 'complete');
+  assert.equal(state.outcome, 'renewed');
+  assert.equal(state.certificate.validTo, renewed.validTo);
+
+  // Stale read returns older certificate dates
+  run.db.certificate = { ...run.db.certificate, ...old };
+  await run.flow.refresh();
+
+  const refreshedState = run.flow.getState();
+  assert.equal(refreshedState.status, 'complete');
+  assert.equal(refreshedState.outcome, 'renewed');
+  assert.equal(refreshedState.certificate.validTo, renewed.validTo);
+});
