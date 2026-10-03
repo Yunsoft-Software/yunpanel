@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { applyDatabaseCredential, createPhpMyAdminHandoff, createWebsiteDatabaseBackup, deleteWebsiteDatabase, finalizeDatabaseCredentialDelete, finalizeWebsiteDatabaseDelete, getWebsiteDatabaseDeletePreview, getWebsiteDatabaseResources, panelRequest, previewDatabaseCredentialApply, previewDatabaseCredentialDelete, previewWebsiteDatabaseRestore, queueDatabaseCredentialDelete, restoreWebsiteDatabase, rotateDatabaseCredential, waitForJob } from '../api.js';
+import { applyDatabaseCredential, createPhpMyAdminHandoff, createWebsiteDatabaseBackup, deleteWebsiteDatabase, finalizeDatabaseCredentialDelete, finalizeWebsiteDatabaseDelete, getWebsiteConsumption, getWebsiteDatabaseDeletePreview, getWebsiteDatabaseResources, panelRequest, previewDatabaseCredentialApply, previewDatabaseCredentialDelete, previewWebsiteDatabaseRestore, queueDatabaseCredentialDelete, restoreWebsiteDatabase, rotateDatabaseCredential, waitForJob } from '../api.js';
 import { databaseBackupChoices, databaseRestorePreviewView, websiteDatabaseDeletePreviewView, formatDatabaseBytes, websiteDatabaseResourcesView } from './database-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
@@ -16,7 +16,127 @@ const DELETE_BLOCKER_LABELS = Object.freeze({
 });
 export default function SiteResourcesPanel(props) {
   if (props.activeTab === 'mail') return <SiteMailPanel key={props.website?.id ?? props.domain.id} {...props} />;
+  if (props.activeTab === 'resources') return <SiteConsumptionWorkspace key={props.website?.id ?? props.domain.id} {...props} />;
   return <DatabaseWorkspace key={props.website?.id ?? props.domain.id} {...props} />;
+}
+
+function SiteConsumptionWorkspace({ domain, website }) {
+  const [consumption, setConsumption] = useState(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState(null);
+
+  const load = useCallback(async () => {
+    if (!website?.id) {
+      setConsumption(null);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      const data = await getWebsiteConsumption(website.id);
+      setConsumption(data);
+    } catch (err) {
+      setError(err.message ?? 'Site tüketim bilgisi yüklenemedi.');
+    } finally {
+      setBusy(false);
+    }
+  }, [website?.id]);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const metrics = consumption?.metrics ?? {};
+  const exceeded = consumption?.exceeded;
+  const warnings = consumption?.warningMetrics ?? [];
+
+  const renderMetricRow = (item, fallbackLabel) => {
+    if (!item) return null;
+    const label = item.label || fallbackLabel;
+    const unit = item.unit && item.unit !== 'count' ? (item.unit === 'percent' ? '%' : ` ${item.unit}`) : '';
+    const measuredDisplay = item.unknown || item.measured === null
+      ? '— (Ölçülemedi)'
+      : (item.unit === 'percent' ? `%${item.measured}` : `${item.measured}${unit}`);
+    const definedDisplay = item.definedLimit !== null
+      ? (item.unit === 'percent' ? `%${item.definedLimit}` : `${item.definedLimit}${unit}`)
+      : 'Sınırsız';
+    const enforcedDisplay = item.enforcedLimit !== null
+      ? (item.unit === 'percent' ? `%${item.enforcedLimit}` : `${item.enforcedLimit}${unit}`)
+      : 'Uygulanmıyor';
+    const badgeState = item.status === 'exceeded'
+      ? 'danger'
+      : item.status === 'warning'
+        ? 'warning'
+        : item.status === 'ok'
+          ? 'success'
+          : 'neutral';
+    const badgeText = item.status === 'exceeded'
+      ? 'Aşıldı'
+      : item.status === 'warning'
+        ? 'Uyarı'
+        : item.status === 'ok'
+          ? 'Normal'
+          : 'Bilinmiyor';
+
+    return (
+      <tr key={item.metric}>
+        <td style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
+        <td style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
+        <td style={{ padding: '0.5rem' }}>{definedDisplay}</td>
+        <td style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
+        <td style={{ padding: '0.5rem' }}>
+          <Badge state={badgeState}>{badgeText}</Badge>
+        </td>
+      </tr>
+    );
+  };
+
+  return (
+    <Section
+      title="Site Kaynak ve Tüketim Görünürlüğü"
+      description={`${domain?.primaryDomain ?? 'Site'} için gerçek ölçülen tüketim ve uygulanan limitler`}
+      actions={<Button icon="refresh" onClick={load} disabled={busy}>Yenile</Button>}
+    >
+      {error && <ErrorNotice error={error} />}
+      {exceeded && (
+        <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem' }}>
+          <strong>Kota Limiti Aşıldı:</strong> Bu siteye ait bir veya daha fazla kaynak sınırı aşılmıştır.
+        </div>
+      )}
+      {!exceeded && warnings.length > 0 && (
+        <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem' }}>
+          <strong>Kaynak Uyarısı:</strong> Bazı kaynaklar tanımlı limitlerin %85'ine ulaşmıştır.
+        </div>
+      )}
+      <div className="ws-table-container" style={{ overflowX: 'auto' }}>
+        <table className="ws-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+          <thead>
+            <tr>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
+            </tr>
+          </thead>
+          <tbody>
+            {renderMetricRow(metrics.diskSpaceMb, 'Disk Alanı')}
+            {renderMetricRow(metrics.diskInodes, 'Disk Inode')}
+            {renderMetricRow(metrics.mailStorageMb, 'Posta Depolama')}
+            {renderMetricRow(metrics.mailboxes, 'Posta Kutusu Sayısı')}
+            {renderMetricRow(metrics.databaseStorageMb, 'Veritabanı Depolama')}
+            {renderMetricRow(metrics.databases, 'Veritabanı Sayısı')}
+            {renderMetricRow(metrics.cpuPercent, 'CPU Kullanımı')}
+            {renderMetricRow(metrics.memoryMb, 'Bellek (RAM)')}
+            {renderMetricRow(metrics.processCount, 'Süreç Sayısı')}
+          </tbody>
+        </table>
+      </div>
+      <p className="ws-muted" style={{ marginTop: '0.75rem', fontSize: '0.85rem' }}>
+        Ölçülen kullanım gerçek sistem ölçümlerine dayanır; ölçülemeyen veya bilinmeyen değerler sıfır sayılmaz (—).
+      </p>
+    </Section>
+  );
 }
 function DatabaseWorkspace({ domain, website, application, server, activeTab }) {
   const { jobs, observe, resourceBusy, updateJob, canManage, isOwner } = useWorkspace();

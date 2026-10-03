@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRegistryError } from './website-registry.js';
+import { buildSiteConsumptionReport } from './customer-quotas.js';
 
 const CREATE_FIELDS = new Set([
   'serverId', 'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'proxyTarget',
@@ -145,7 +146,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null, customerLookup = null } = {}) {
+export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, localServerId = null, customerLookup = null, siteConsumptionInspector = null } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.patch !== 'function') throw new Error('Express application is required');
   if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function'
     || typeof websiteRegistry.getWebsite !== 'function' || typeof websiteRegistry.createWebsite !== 'function'
@@ -235,6 +236,42 @@ export function mountWebsiteRoutes(app, { websiteRegistry, domainRegistry, local
     const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
     const domains = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
     return response.json({ data: domains });
+  }));
+
+  app.get('/api/websites/:websiteId/consumption', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    await checkWebsiteAccess(request, request.params.websiteId);
+    const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
+    const consumption = siteConsumptionInspector
+      ? await siteConsumptionInspector.inspectWebsite(website.id, {
+          customerId: website.customerId ?? null,
+          definedLimits: website.quotas ?? {},
+          enforcedLimits: website.enforcedLimits ?? {},
+        })
+      : buildSiteConsumptionReport({
+          websiteId: website.id,
+          customerId: website.customerId ?? null,
+          definedLimits: website.quotas ?? {},
+          enforcedLimits: website.enforcedLimits ?? {},
+        });
+    return response.json({ data: consumption });
+  }));
+
+  app.get('/api/websites/:websiteId/quotas', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    await checkWebsiteAccess(request, request.params.websiteId);
+    const website = await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId);
+    const consumption = siteConsumptionInspector
+      ? await siteConsumptionInspector.inspectWebsite(website.id, {
+          customerId: website.customerId ?? null,
+          definedLimits: website.quotas ?? {},
+          enforcedLimits: website.enforcedLimits ?? {},
+        })
+      : buildSiteConsumptionReport({
+          websiteId: website.id,
+          customerId: website.customerId ?? null,
+          definedLimits: website.quotas ?? {},
+          enforcedLimits: website.enforcedLimits ?? {},
+        });
+    return response.json({ data: consumption });
   }));
 
   app.post('/api/websites', requirePanelRouteAccess, asyncRoute(async (request, response) => {

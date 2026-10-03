@@ -65,19 +65,19 @@ export default function WebsitesPage() {
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Disk Alanı</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              0 MB / {hostingProfile?.quotas?.maxDiskMb ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
+              {hostingProfile?.usage?.diskMb !== undefined && hostingProfile?.usage?.diskMb !== null ? `${hostingProfile.usage.diskMb} MB` : '—'} / {hostingProfile?.quotas?.maxDiskMb ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Aylık Trafik</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              0 MB / {hostingProfile?.quotas?.maxTrafficMb ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
+              {hostingProfile?.usage?.trafficMb !== undefined && hostingProfile?.usage?.trafficMb !== null ? `${hostingProfile.usage.trafficMb} MB` : '—'} / {hostingProfile?.quotas?.maxTrafficMb ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Veritabanları</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              0 / {hostingProfile?.quotas?.maxDatabases ?? 'Sınırsız'}
+              {hostingProfile?.usage?.databases !== undefined && hostingProfile?.usage?.databases !== null ? hostingProfile.usage.databases : '—'} / {hostingProfile?.quotas?.maxDatabases ?? 'Sınırsız'}
             </div>
           </div>
         </div>
