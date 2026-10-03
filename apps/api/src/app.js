@@ -194,6 +194,9 @@ import { createSystemWatchdogService, SystemWatchdogError } from './system-watch
 import { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
 import { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
 import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
+import { createFirewallService, FirewallServiceError } from './firewall-service.js';
+import { mountFirewallRoutes, FirewallHttpError } from './firewall-http.js';
+import { createNftablesManager, NftablesManagerError } from '@yunpanel/host-runtime';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -214,6 +217,8 @@ export { createSystemWatchdogService, SystemWatchdogError } from './system-watch
 export { mountSystemWatchdogRoutes, SystemWatchdogHttpError } from './system-watchdog-http.js';
 export { createOperationalNotificationService, OperationalNotificationError } from './operational-notification-service.js';
 export { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
+export { createFirewallService, FirewallServiceError } from './firewall-service.js';
+export { mountFirewallRoutes, FirewallHttpError } from './firewall-http.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -360,6 +365,8 @@ export function createApp(allOptions = {}) {
   websiteRestoreService = null,
   pleskImporter = null,
   operationalNotificationService = null,
+  firewallService = null,
+  nftablesManager = null,
   ...options
 } = allOptions;
   const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
@@ -1137,6 +1144,19 @@ export function createApp(allOptions = {}) {
   mountOperationalNotificationRoutes(app, {
     notificationService: resolvedOperationalNotificationService,
   });
+  const resolvedNftablesManager = nftablesManager ?? createNftablesManager();
+  const resolvedAuditStore = options.auditStore ?? options.authStore?.audit ?? options.aiAudit ?? null;
+  const resolvedFirewallService = firewallService ?? createFirewallService({
+    nftablesManager: resolvedNftablesManager,
+    auditStore: resolvedAuditStore,
+    serverRegistry: localRegistry,
+    localServerId,
+  });
+  mountFirewallRoutes(app, {
+    firewallService: resolvedFirewallService,
+    registry: localRegistry,
+    localServerId,
+  });
   app.use(core);
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
@@ -1255,6 +1275,9 @@ export function createApp(allOptions = {}) {
       || error instanceof SystemWatchdogHttpError
       || error instanceof OperationalNotificationError
       || error instanceof OperationalNotificationHttpError
+      || error instanceof FirewallServiceError
+      || error instanceof FirewallHttpError
+      || error instanceof NftablesManagerError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
