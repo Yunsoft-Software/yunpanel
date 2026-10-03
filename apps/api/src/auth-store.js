@@ -232,12 +232,12 @@ export function createAuthStore({
       LEFT JOIN users parent_user ON parent_user.id = parent.user_id
       WHERE h.user_id = ?`).get(userId);
     if (!state) return true;
-    if (state.user_role !== 'site_manager' || state.user_active !== 1) return false;
+    if (!['site_manager', 'reseller', 'customer'].includes(state.user_role) || state.user_active !== 1) return false;
     if (state.kind === 'reseller') return state.reseller_id === null;
     if (state.kind !== 'customer') return false;
     if (state.reseller_id === null) return true;
     return state.parent_kind === 'reseller'
-      && state.parent_role === 'site_manager'
+      && ['site_manager', 'reseller'].includes(state.parent_role)
       && state.parent_active === 1;
   }
 
@@ -331,8 +331,9 @@ export function createAuthStore({
       db.prepare('UPDATE sessions SET last_active_at = ? WHERE id = ?').run(now(), row.id);
       row.last_active_at = now();
     }
-    const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
-    const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
+    const isHostingRole = ['site_manager', 'reseller', 'customer'].includes(row.role);
+    const hosting = isHostingRole ? hostingSessionProfile(row.user_id) : null;
+    const websiteIds = isHostingRole ? websiteIdsForSession(row.user_id, hosting) : null;
     const recovery = db.prepare('SELECT email, verified FROM auth_recovery_emails WHERE user_id = ?').get(row.user_id);
     return {
       id: row.id,

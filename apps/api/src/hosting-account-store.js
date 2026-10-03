@@ -370,7 +370,7 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
 
         const nextQuotas = validateCustomerQuotas(input.quotas);
-        if (actor.role === 'reseller' && parent) {
+        if (parent) {
           assertCustomerQuotaWithinResellerCapacity({ customerQuotas: nextQuotas, resellerLimits: limits(parent.user_id) });
         }
 
