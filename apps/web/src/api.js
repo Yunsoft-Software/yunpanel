@@ -363,5 +363,21 @@ export async function downloadSiteFile(websiteId, targetPath) {
   return new Uint8Array(arrayBuffer);
 }
 
+export async function getWebsiteConsumption(websiteId) {
+  if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
+  const response = await fetch(`/api/websites/${encodeURIComponent(websiteId)}/consumption`, {
+    method: 'GET',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    headers: sessionHeaders('GET'),
+  });
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    throw new Error(payload?.error?.message ?? 'Site tüketim verisi alınamadı');
+  }
+  const payload = await response.json();
+  return payload.data;
+}
+
 export const managedServiceApiInternals = Object.freeze({ managedServiceServerPath, managedServicePath });
 export const databaseApiInternals = Object.freeze({ databaseServerPath, databasePath, databaseCredentialPath, websiteDatabaseBindingDataPath, positiveRevision });
