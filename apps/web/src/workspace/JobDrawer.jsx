@@ -5,8 +5,10 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, EmptyState, ErrorNotice, KeyValues, Modal } from './PanelKit.jsx';
 import {
   jobAttemptCount,
+  jobHealthIndicator,
   jobLifecycle,
   jobResourceTarget,
+  jobStageProgress,
   jobSupportsDeployLogs,
   jobSupportsManualRetry,
   safeJobResultMetadata,
@@ -56,6 +58,8 @@ function JobObservation({ id, close, update, refresh, onRetry }) {
   const lifecycle = jobLifecycle(job);
   const target = jobResourceTarget(job, { domains: domains.items, websites: websites.items });
   const metadata = safeJobResultMetadata(job);
+  const stage = jobStageProgress(job);
+  const health = jobHealthIndicator(job);
   return <Modal title="İşlem durumu" onClose={close}>
     {!job && !error && <div className="ws-loading" role="status"><span className="ws-spinner" />İşlem kaydı doğrulanıyor…</div>}
     <ErrorNotice error={error ?? (job?.status === 'failed' ? job.error?.message ?? job.error?.code ?? 'İşlem başarısız.' : null)} />
@@ -65,8 +69,10 @@ function JobObservation({ id, close, update, refresh, onRetry }) {
         ['Kaynak', target?.href ? <Link key="resource" to={target.href} onClick={close}>{target.label}</Link> : target?.label ?? job.resourceType ?? '—'],
         ['Kaynak kimliği', job.resourceId ?? '—'],
         ['Aşama', lifecycle.stage],
+        ...(stage ? [['Aşama ilerlemesi', stage.label]] : []),
         ['Durum açıklaması', lifecycle.detail],
         ['Deneme sayısı', jobAttemptCount(job) ?? 'Bildirilmedi'],
+        ...(health ? [['Sağlık denetimi', `${health.label} (${health.passed}/${health.total})`]] : []),
         ['Oluşturulma', formatDate(job.createdAt)],
         ['Başlama', formatDate(job.startedAt)],
         ['Tamamlanma', formatDate(jobFinishedAt(job))],
