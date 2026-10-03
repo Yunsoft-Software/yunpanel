@@ -22,16 +22,23 @@ export function JobsPage() {
   const { jobs, refreshAll } = useWorkspace(); const [params, setParams] = useSearchParams();
   const [selected, setSelected] = useState(null); const [busy, setBusy] = useState(false); const [error, setError] = useState(null); const pending = useRef(false);
   const query = params.get('q') ?? ''; const status = params.get('status') ?? 'all';
-  const items = jobs.items.filter((job) => (status === 'all' || status === job.status) && [job.type, job.id, job.resourceId].some((value) => String(value ?? '').toLowerCase().includes(query.toLowerCase()))).sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
+  const resourceType = params.get('resourceType') ?? '';
+  const resourceId = params.get('resourceId') ?? '';
+  const items = jobs.items.filter((job) => (status === 'all' || status === job.status)
+    && (!resourceType || job.resourceType === resourceType)
+    && (!resourceId || job.resourceId === resourceId)
+    && [job.type, job.id, job.resourceId].some((value) => String(value ?? '').toLowerCase().includes(query.toLowerCase())))
+    .sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
   const pages = Math.max(1, Math.ceil(items.length / 20)); const page = Math.min(pages, Math.max(1, Number.parseInt(params.get('page'), 10) || 1));
   function filter(key, value) { setParams((current) => { const next = new URLSearchParams(current); next.set(key, value); if (key !== 'page') next.delete('page'); return next; }, { replace: key === 'q' }); }
+  function clearResourceFilter() { setParams((current) => { const next = new URLSearchParams(current); next.delete('resourceType'); next.delete('resourceId'); next.delete('page'); return next; }); }
   async function cancel() {
     if (pending.current || !selected) return; pending.current = true; setBusy(true); setError(null);
     try { await panelRequest(`/jobs/${encodeURIComponent(selected.id)}/cancel`, { method: 'POST', body: {} }); setSelected(null); refreshAll(); }
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { pending.current = false; setBusy(false); }
   }
-  return <><PageHeading title="İşler" description="Sunucuda sıraya alınan ve tamamlanan işlemler." actions={<Button icon="refresh" onClick={jobs.refresh}>Yenile</Button>} /><Section title="İşlem geçmişi"><div className="ws-filters"><label className="ws-filter-search">İşlem ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="İşlem türü, iş veya kaynak kimliği" /></label><label>Durum<select value={status} onChange={(event) => filter('status', event.target.value)}><option value="all">Tümü</option><option value="queued">Sırada</option><option value="running">Çalışıyor</option><option value="succeeded">Tamamlandı</option><option value="partial">Kısmi başarılı</option><option value="failed">Başarısız</option><option value="cancelled">İptal</option></select></label></div><CollectionNotice resource={jobs} label="İşlem geçmişi" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={items.slice((page - 1) * 20, page * 20)} limit={20} onCancel={jobs.status === 'ready' ? (job) => { setError(null); setSelected(job); } : undefined} busy={busy} />}<footer className="ws-pagination"><span>{items.length} kayıt</span><div className="ws-actions"><Button disabled={page <= 1} onClick={() => filter('page', String(page - 1))}>Önceki</Button><span>{page} / {pages}</span><Button disabled={page >= pages} onClick={() => filter('page', String(page + 1))}>Sonraki</Button></div></footer></Section>{selected && <ConfirmDialog title="Sıradaki işi iptal et" message={`${selected.type ?? selected.operation} işlemi iptal edilecek. İş çalışmaya başladıysa sunucu iptali reddedebilir.`} busy={busy} error={error} onCancel={() => setSelected(null)} onConfirm={cancel} confirmLabel="İşi iptal et" />}</>;
+  return <><PageHeading title="İşler" description="Sunucuda sıraya alınan ve tamamlanan işlemler." actions={<Button icon="refresh" onClick={jobs.refresh}>Yenile</Button>} /><Section title="İşlem geçmişi"><div className="ws-filters"><label className="ws-filter-search">İşlem ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="İşlem türü, iş veya kaynak kimliği" /></label><label>Durum<select value={status} onChange={(event) => filter('status', event.target.value)}><option value="all">Tümü</option><option value="queued">Sırada</option><option value="running">Çalışıyor</option><option value="succeeded">Tamamlandı</option><option value="partial">Kısmi başarılı</option><option value="failed">Başarısız</option><option value="cancelled">İptal</option></select></label>{(resourceType || resourceId) && <Button onClick={clearResourceFilter}>Filtreyi kaldır ({resourceType ? `${resourceType}: ` : ''}{resourceId})</Button>}</div><CollectionNotice resource={jobs} label="İşlem geçmişi" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={items.slice((page - 1) * 20, page * 20)} limit={20} onCancel={jobs.status === 'ready' ? (job) => { setError(null); setSelected(job); } : undefined} busy={busy} />}<footer className="ws-pagination"><span>{items.length} kayıt</span><div className="ws-actions"><Button disabled={page <= 1} onClick={() => filter('page', String(page - 1))}>Önceki</Button><span>{page} / {pages}</span><Button disabled={page >= pages} onClick={() => filter('page', String(page + 1))}>Sonraki</Button></div></footer></Section>{selected && <ConfirmDialog title="Sıradaki işi iptal et" message={`${selected.type ?? selected.operation} işlemi iptal edilecek. İş çalışmaya başladıysa sunucu iptali reddedebilir.`} busy={busy} error={error} onCancel={() => setSelected(null)} onConfirm={cancel} confirmLabel="İşi iptal et" />}</>;
 }
 export function AdvancedDomainsPage() {
   const { domains, certificates, servers, refreshAll } = useWorkspace();
@@ -45,7 +52,7 @@ export function SettingsPage() {
     ? params.get('section') : 'account';
   const categories = [
     ['account', 'Hesap ve erişim'], ['dns', 'DNS ve SSL'],
-    ['ai', 'AI sağlayıcıları'], ['updates', 'Güncellemeler'], ['records', 'İşlemler ve kayıtlar'],
+    ['ai', 'AI sağlayıcıları'], ['updates', 'Güncellemeler'],
   ];
   return <>
     <PageHeading title="Ayarlar" description="Hesap, DNS ve panel politikalarını yönetin." />
@@ -57,7 +64,7 @@ export function SettingsPage() {
     {section === 'dns' && <><CollectionNotice resource={servers} label="Yerel sunucu" /><SystemSettingsPanels canManage={canManage} />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}</>}
     {section === 'ai' && canManage && <AiSettingsPanel />}
     {section === 'updates' && <Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}{import.meta.env.DEV && <p className="ws-muted ws-section-body">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}</Section>}
-    {section === 'records' && <Section title="İşlemler ve kayıtlar"><div className="ws-section-body ws-actions"><LinkButton to="/jobs" icon="jobs">İşlem geçmişi</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/servers#server-diagnostics" icon="server">Sunucu tanılama</LinkButton><LinkButton to="/applications" icon="code">Uygulama envanteri</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton></div></Section>}
+    {section === 'records' && <Section title="İşlemler ve kayıtlar" description="İşlemler, denetim kayıtları ve sistem tanılaması Plesk düzeninde Araçlar ve Ayarlar altındaki Tanılama bölümüne taşınmıştır."><div className="ws-section-body ws-actions"><LinkButton to="/tools-settings" icon="settings">Araçlar ve Ayarlar</LinkButton><LinkButton to="/jobs" icon="jobs">İşlem geçmişi</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/logs" icon="file">Günlükler</LinkButton><LinkButton to="/servers#server-diagnostics" icon="server">Sunucu tanılama</LinkButton><LinkButton to="/applications" icon="code">Uygulama envanteri</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton></div></Section>}
   </>;
 }
 const capabilities = {

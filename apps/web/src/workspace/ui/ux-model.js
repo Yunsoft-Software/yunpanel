@@ -51,6 +51,7 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
   ] },
   { id: 'diagnostics', label: 'Tanılama ve kayıtlar', items: [
     ['/jobs', 'İşlem geçmişi', 'jobs'], ['/audit', 'Denetim kayıtları', 'shield'],
+    ['/logs', 'Sistem ve site günlükleri', 'file'],
     ['/servers#server-diagnostics', 'Sunucu tanılama', 'server'],
     ['/applications', 'Uygulama envanteri', 'code'], ['/domains', 'Gelişmiş alan adı araçları', 'globe'],
   ] },
@@ -86,7 +87,7 @@ export function navigationItemActive(to, pathname) {
       || currentPath === '/db' || currentPath.startsWith('/db/');
   }
   if (to === '/tools-settings') {
-    return (['/tools-settings', '/servers', '/firewall', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
+    return (['/tools-settings', '/servers', '/firewall', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit', '/logs'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
       || (currentPath === '/settings' || (currentPath.startsWith('/settings/') && currentPath !== '/settings/users' && !currentPath.startsWith('/settings/users/'))))
       && currentPath !== '/users' && !currentPath.startsWith('/users/');
   }

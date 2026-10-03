@@ -66,7 +66,7 @@ export default function SiteDetailPage() {
   return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={normalizeSiteTab(normalizedTab)} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
-  const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isReseller } = useWorkspace();
+  const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isSiteManager, isReseller } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
   const domain = domains.items.find((item) => item.id === websiteId)
@@ -164,7 +164,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'domains' && <DomainOperations domain={domain} />}
     {tab === 'dns' && <DnsPanel key={domain.id} domain={domain} domains={domains.items} canManage={canManage} />}
     {tab === 'ssl' && <><CollectionNotice resource={certificates} label="Sertifikalar" /><SslOperations key={domain.id} domain={domain} /></>}
-    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section></>}
+    {tab === 'logs' && <><LogsPanel application={application} domain={domain} server={server} /><Section title="Site işlem kayıtları"><CollectionNotice resource={jobs} label="İşlem kayıtları" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={50} />}</Section>{website?.id && !isSiteManager && <Section title="Site denetim kayıtları" description="Bu web sitesiyle ilişkili yapılandırma ve güvenlik denetim kayıtları." actions={<Link to={`/audit?resourceType=website&resourceId=${encodeURIComponent(website.id)}`}>Tümünü gör</Link>}><div className="ws-section-body"><LinkButton to={`/audit?resourceType=website&resourceId=${encodeURIComponent(website.id)}`} icon="shield">Site denetim geçmişini aç</LinkButton></div></Section>}</>}
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel title="Site terminali" description={`${domain.primaryDomain} · Bu siteye ait kullanıcıyla terminal oturumu.`} target={{ scope: 'site', websiteId: domain.websiteId }} /> : <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} />)}
     {tab === 'files' && <SiteFilesPanel domainId={domain.id} legacyRepair={legacyManagedTarget ? <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} /> : null} />}
     {tab === 'settings' && <>

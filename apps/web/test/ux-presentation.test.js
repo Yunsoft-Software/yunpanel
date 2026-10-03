@@ -46,10 +46,10 @@ test('read-only navigation retains only the existing authorized route set', () =
 test('owner navigation keeps jobs and audit accessible through categorized settings', () => {
   const paths = navigationGroups(true).flatMap((group) => group.items.map(([to]) => to));
   assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
-  assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit'));
+  assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit')); assert.ok(!paths.includes('/logs'));
   assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
   const tools = TOOLS_SETTINGS_GROUPS.flatMap(group => group.items.map(([to]) => to));
-  for (const to of ['/jobs', '/audit']) assert.ok(tools.includes(to));
+  for (const to of ['/jobs', '/audit', '/logs']) assert.ok(tools.includes(to));
 });
 test('website counter uses unique Website records, not hostnames or aliases', () => {
   assert.equal(websiteCount({ status: 'ready', items: [{ id: 'w1', aliases: ['a', 'b'] }, { id: 'w1' }, { id: 'w2' }] }), 2);

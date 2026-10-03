@@ -73,6 +73,7 @@ export function selectedApplication(domain, applications, requestedId) {
 export function siteJobs(domain, application, jobs) {
   return jobs.filter((job) => job.serverId === domain.serverId && (
     (job.resourceType === 'domain' && job.resourceId === domain.id)
+    || (domain.websiteId && job.resourceType === 'website' && job.resourceId === domain.websiteId)
     || (application && job.resourceType === 'application' && job.resourceId === application.id)
     || (domain.certificateId && job.resourceType === 'certificate' && job.resourceId === domain.certificateId)
   )).sort((a, b) => Date.parse(b.createdAt ?? 0) - Date.parse(a.createdAt ?? 0));
