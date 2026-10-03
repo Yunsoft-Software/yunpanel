@@ -35,7 +35,8 @@ function retention(value) {
 function snapshot(value) {
   need(record(value) && SNAP.test(value.id ?? '') && SNAP.test(value.shortId ?? '')
     && normalizedDate(value.time) && ['backup', 'pre_restore'].includes(value.kind));
-  return Object.freeze({ id: value.id, shortId: value.shortId, time: normalizedDate(value.time), kind: value.kind });
+  const status = ['succeeded', 'failed', 'stale'].includes(value.status) ? value.status : 'succeeded';
+  return Object.freeze({ id: value.id, shortId: value.shortId, time: normalizedDate(value.time), kind: value.kind, status });
 }
 
 export function siteBackupBrowser(value, scope) {
@@ -67,6 +68,38 @@ export function siteBackupBrowser(value, scope) {
       snapshots: Object.freeze(repo.snapshots.map(snapshot)),
     });
   });
+
+  const lastSuccessfulBackupAt = normalizedDate(value.lastSuccessfulBackupAt);
+  const nextScheduledRunAt = normalizedDate(value.nextScheduledRunAt);
+  const scopeSummary = record(value.scopeSummary) ? Object.freeze({
+    paths: Number.isSafeInteger(value.scopeSummary.paths) ? value.scopeSummary.paths : set.pathCount,
+    databases: Number.isSafeInteger(value.scopeSummary.databases) ? value.scopeSummary.databases : set.databaseCount,
+    mailboxes: Number.isSafeInteger(value.scopeSummary.mailboxes) ? value.scopeSummary.mailboxes : set.mailCount,
+    dnsZones: Number.isSafeInteger(value.scopeSummary.dnsZones) ? value.scopeSummary.dnsZones : set.dnsCount,
+  }) : Object.freeze({
+    paths: set.pathCount,
+    databases: set.databaseCount,
+    mailboxes: set.mailCount,
+    dnsZones: set.dnsCount,
+  });
+
+  const retentionPolicy = retention(value.retentionPolicy ?? null) ?? (repositories[0]?.retentionPolicy ?? null);
+  const remoteRepositoryStatus = typeof value.remoteRepositoryStatus === 'string'
+    ? value.remoteRepositoryStatus
+    : (repositories.find((r) => r.backend === 'rclone')?.status ?? 'not_configured');
+
+  const restoreOutcome = record(value.restoreOutcome) ? Object.freeze({
+    status: typeof value.restoreOutcome.status === 'string' ? value.restoreOutcome.status : 'none',
+    finishedAt: normalizedDate(value.restoreOutcome.finishedAt),
+    operationId: typeof value.restoreOutcome.operationId === 'string' ? value.restoreOutcome.operationId : null,
+    selective: Boolean(value.restoreOutcome.selective),
+  }) : Object.freeze({
+    status: 'none',
+    finishedAt: null,
+    operationId: null,
+    selective: false,
+  });
+
   return Object.freeze({
     schemaVersion: 1,
     ...scope,
@@ -81,6 +114,12 @@ export function siteBackupBrowser(value, scope) {
     }),
     repositories: Object.freeze(repositories),
     inspectedAt: normalizedDate(value.inspectedAt),
+    lastSuccessfulBackupAt,
+    nextScheduledRunAt,
+    scopeSummary,
+    retentionPolicy,
+    remoteRepositoryStatus,
+    restoreOutcome,
   });
 }
 
@@ -101,17 +140,19 @@ export function resolveSiteBackupAccess({ domainId, domains, websites, canManage
 
 export function siteBackupOperation(value) {
   need(record(value) && UUID.test(value.id ?? '') && UUID.test(value.websiteId ?? '')
-    && ['backup', 'restore'].includes(value.kind)
+    && ['backup', 'restore', 'check', 'plan'].includes(value.kind)
     && ['queued', 'running', 'succeeded', 'failed', 'rolled_back'].includes(value.status));
   return Object.freeze({
     id: value.id,
     websiteId: value.websiteId,
     serverId: value.serverId ?? null,
-    repositoryId: value.repositoryId,
+    repositoryId: value.repositoryId ?? null,
     kind: value.kind,
     snapshotId: value.snapshotId ?? null,
     preRestoreSnapshotId: value.preRestoreSnapshotId ?? null,
-    previewDigest: value.previewDigest,
+    previewDigest: value.previewDigest ?? null,
+    selective: Boolean(value.selective),
+    include: Array.isArray(value.include) ? Object.freeze([...value.include]) : Object.freeze([]),
     status: value.status,
     progress: record(value.progress) ? Object.freeze({ ...value.progress }) : null,
     steps: Array.isArray(value.steps) ? Object.freeze(value.steps.map((s) => Object.freeze({ ...s }))) : Object.freeze([]),
@@ -144,5 +185,8 @@ export function siteBackupErrorMessage(error) {
     website_backup_operation_conflict: 'Bu site için halihazırda çalışan veya kuyrukta olan bir işlem var.',
     website_backup_operation_not_found: 'Yedekleme işlemi bulunamadı.',
     interrupted_by_restart: 'İşlem sistem yeniden başlatması nedeniyle kesintiye uğradı.',
+    repository_check_failed: 'Yedek deposu sağlık kontrolü başarısız oldu.',
+    backup_plan_failed: 'Yedekleme planı ve zamanlaması uygulanamadı.',
+    backup_operation_forbidden: 'Bu işlem için yetkiniz bulunmuyor.',
   })[error?.code] ?? 'Yedekleme bilgileri alınamadı. Yeniden kontrol edin.';
 }

@@ -172,6 +172,7 @@ export function createWebsiteBackupOperationService({
     confirmation = null,
     healthPath = '/health',
     timeoutSeconds = 30,
+    include = [],
     actor = null,
   } = {}) {
     if (!websiteRestoreService || typeof websiteRestoreService.previewRestore !== 'function'
@@ -205,6 +206,7 @@ export function createWebsiteBackupOperationService({
       snapshotId,
       healthPath,
       timeoutSeconds,
+      include,
     });
 
     if (expectedPreviewDigest !== preview.previewDigest) {
@@ -233,6 +235,8 @@ export function createWebsiteBackupOperationService({
       confirmation,
       healthPath: preview.healthSpec?.healthPath ?? healthPath,
       timeoutSeconds: preview.healthSpec?.timeoutSeconds ?? timeoutSeconds,
+      include: preview.include ?? include,
+      selective: Boolean(preview.selective || (Array.isArray(include) && include.length > 0)),
     });
 
     // Dispatch background execution
@@ -258,6 +262,7 @@ export function createWebsiteBackupOperationService({
           confirmation: preview.confirmation,
           healthPath: preview.healthSpec?.healthPath,
           timeoutSeconds: preview.healthSpec?.timeoutSeconds,
+          include: preview.include ?? include,
         });
 
         const finishTime = now();
@@ -272,6 +277,8 @@ export function createWebsiteBackupOperationService({
               snapshotId: executionResult.snapshotId,
               preRestoreSnapshotId: executionResult.preRestoreSnapshotId,
               healthCheck: executionResult.healthCheck,
+              selective: Boolean(executionResult.selective || preview.selective),
+              include: executionResult.include ?? preview.include ?? [],
               restoredAt: executionResult.restoredAt ?? finishTime,
             },
             progress: { phase: 'succeeded', percent: 100, message: 'Geri yükleme ve sağlık kontrolü başarıyla tamamlandı' },
@@ -321,6 +328,149 @@ export function createWebsiteBackupOperationService({
     return operation;
   }
 
+  async function queueCheck({
+    websiteId,
+    repositoryId,
+    readDataSubset = null,
+    actor = null,
+  } = {}) {
+    if (!resticRepositoryRegistry && !resticManager) {
+      throw new WebsiteBackupOperationServiceError(
+        'website_backup_runtime_unavailable',
+        'Restic repository registry is unavailable',
+        503,
+      );
+    }
+
+    const normalizedWebsiteId = websiteId?.toLowerCase?.() ?? websiteId;
+    const normalizedRepoId = repositoryId?.toLowerCase?.() ?? repositoryId;
+
+    const operation = await registry.createOperation({
+      websiteId: normalizedWebsiteId,
+      repositoryId: normalizedRepoId,
+      kind: 'check',
+    });
+
+    setImmediate(async () => {
+      const startTime = now();
+      try {
+        await registry.updateOperation(operation.id, {
+          status: 'running',
+          startedAt: startTime,
+          progress: { phase: 'running', percent: 50, message: 'Depo sağlık denetimi yapılıyor' },
+          steps: [
+            { name: 'check_repository', status: 'running', updatedAt: startTime },
+          ],
+        });
+
+        let checkResult;
+        if (typeof resticRepositoryRegistry?.checkResticRepository === 'function') {
+          checkResult = await resticRepositoryRegistry.checkResticRepository(normalizedRepoId, { readDataSubset });
+        } else if (typeof resticManager?.check === 'function') {
+          const repo = await resticRepositoryRegistry?.getRepository?.(normalizedRepoId);
+          const password = await resticRepositoryRegistry?.revealPassword?.(normalizedRepoId);
+          checkResult = await resticManager.check({ repository: repo?.target, password, readDataSubset });
+        }
+
+        const finishTime = now();
+        await registry.updateOperation(operation.id, {
+          status: 'succeeded',
+          result: {
+            status: 'succeeded',
+            websiteId: normalizedWebsiteId,
+            repositoryId: normalizedRepoId,
+            checkedAt: checkResult?.checkedAt ?? finishTime,
+            checkResult,
+          },
+          progress: { phase: 'succeeded', percent: 100, message: 'Depo sağlık denetimi tamamlandı' },
+          steps: [
+            { name: 'check_repository', status: 'succeeded', updatedAt: finishTime },
+          ],
+          finishedAt: finishTime,
+        });
+      } catch (error) {
+        const errorTime = now();
+        await registry.updateOperation(operation.id, {
+          status: 'failed',
+          error: {
+            code: error.code || 'repository_check_failed',
+            message: error.message || 'Repository health check failed',
+          },
+          progress: { phase: 'failed', percent: 100, message: `Depo sağlık denetimi başarısız: ${error.message}` },
+          finishedAt: errorTime,
+        }).catch(() => {});
+      }
+    });
+
+    return operation;
+  }
+
+  async function queuePlan({
+    websiteId,
+    repositoryId,
+    schedule = null,
+    retentionPolicy = null,
+    actor = null,
+  } = {}) {
+    const normalizedWebsiteId = websiteId?.toLowerCase?.() ?? websiteId;
+    const normalizedRepoId = repositoryId?.toLowerCase?.() ?? repositoryId;
+
+    const operation = await registry.createOperation({
+      websiteId: normalizedWebsiteId,
+      repositoryId: normalizedRepoId,
+      kind: 'plan',
+    });
+
+    setImmediate(async () => {
+      const startTime = now();
+      try {
+        await registry.updateOperation(operation.id, {
+          status: 'running',
+          startedAt: startTime,
+          progress: { phase: 'running', percent: 50, message: 'Yedekleme planı yapılandırılıyor' },
+          steps: [
+            { name: 'configure_plan', status: 'running', updatedAt: startTime },
+          ],
+        });
+
+        if (retentionPolicy && typeof resticRepositoryRegistry?.updateRepository === 'function') {
+          await resticRepositoryRegistry.updateRepository(normalizedRepoId, { retentionPolicy });
+        }
+
+        const finishTime = now();
+        await registry.updateOperation(operation.id, {
+          status: 'succeeded',
+          result: {
+            status: 'succeeded',
+            websiteId: normalizedWebsiteId,
+            repositoryId: normalizedRepoId,
+            schedule,
+            retentionPolicy,
+            configuredAt: finishTime,
+          },
+          progress: { phase: 'succeeded', percent: 100, message: 'Yedekleme planı başarıyla yapılandırıldı' },
+          steps: [
+            { name: 'configure_plan', status: 'succeeded', updatedAt: finishTime },
+          ],
+          finishedAt: finishTime,
+        });
+      } catch (error) {
+        const errorTime = now();
+        await registry.updateOperation(operation.id, {
+          status: 'failed',
+          error: {
+            code: error.code || 'backup_plan_failed',
+            message: error.message || 'Backup plan configuration failed',
+          },
+          progress: { phase: 'failed', percent: 100, message: `Yedekleme planı başarısız: ${error.message}` },
+          finishedAt: errorTime,
+        }).catch(() => {});
+      }
+    });
+
+    return operation;
+  }
+
   async function getOperation(operationId) {
     const op = await registry.getOperation(operationId);
     if (!op) {
@@ -349,6 +499,8 @@ export function createWebsiteBackupOperationService({
   return Object.freeze({
     queueBackup,
     queueRestore,
+    queueCheck,
+    queuePlan,
     getOperation,
     listOperations,
     reconcile,

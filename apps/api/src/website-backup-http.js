@@ -114,6 +114,21 @@ export function mountWebsiteBackupRoutes(app, {
     }));
   }
 
+  if (websiteRestoreService && typeof websiteRestoreService.previewRestore === 'function') {
+    app.post('/api/websites/:websiteId/restore/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const { repositoryId, snapshotId, healthPath, timeoutSeconds, include } = request.body ?? {};
+      const preview = await websiteRestoreService.previewRestore({
+        websiteId: request.params.websiteId,
+        repositoryId,
+        snapshotId,
+        healthPath,
+        timeoutSeconds,
+        include,
+      });
+      return response.json({ data: preview });
+    }));
+  }
+
   const resolvedOperationService = websiteBackupOperationService ?? (
     websiteBackupService
       ? createWebsiteBackupOperationService({
@@ -135,10 +150,14 @@ export function mountWebsiteBackupRoutes(app, {
         tags,
         healthPath,
         timeoutSeconds,
+        include,
+        readDataSubset,
+        schedule,
+        retentionPolicy,
       } = request.body ?? {};
 
-      if (!kind || !['backup', 'restore'].includes(kind)) {
-        throw new WebsiteBackupHttpError('invalid_operation_kind', "kind must be 'backup' or 'restore'", 400);
+      if (!kind || !['backup', 'restore', 'check', 'plan'].includes(kind)) {
+        throw new WebsiteBackupHttpError('invalid_operation_kind', "kind must be 'backup', 'restore', 'check', or 'plan'", 400);
       }
 
       const actor = {
@@ -157,7 +176,7 @@ export function mountWebsiteBackupRoutes(app, {
           tags,
           actor,
         });
-      } else {
+      } else if (kind === 'restore') {
         operation = await resolvedOperationService.queueRestore({
           websiteId: request.params.websiteId,
           repositoryId,
@@ -166,6 +185,22 @@ export function mountWebsiteBackupRoutes(app, {
           confirmation,
           healthPath,
           timeoutSeconds,
+          include,
+          actor,
+        });
+      } else if (kind === 'check') {
+        operation = await resolvedOperationService.queueCheck({
+          websiteId: request.params.websiteId,
+          repositoryId,
+          readDataSubset,
+          actor,
+        });
+      } else if (kind === 'plan') {
+        operation = await resolvedOperationService.queuePlan({
+          websiteId: request.params.websiteId,
+          repositoryId,
+          schedule,
+          retentionPolicy,
           actor,
         });
       }
@@ -205,6 +240,7 @@ export function mountWebsiteBackupRoutes(app, {
         confirmation,
         healthPath,
         timeoutSeconds,
+        include,
       } = request.body ?? {};
 
       const operation = await resolvedOperationService.queueRestore({
@@ -215,6 +251,7 @@ export function mountWebsiteBackupRoutes(app, {
         confirmation,
         healthPath,
         timeoutSeconds,
+        include,
         actor: {
           sessionId: request.auth?.id,
           userId: request.auth?.user?.id,

@@ -34,7 +34,7 @@ const previewDigest = 'a'.repeat(64);
 const backupConfirm = `backup:${siteAId}:${repoId}:${previewDigest}`;
 const restoreConfirm = `restore:${siteAId}:${repoId}:snap-a-1:${previewDigest}`;
 
-async function setupAcceptanceServer(t) {
+async function setupAcceptanceServer(t, { customSnapshots = null } = {}) {
   const websites = new Map([
     [siteAId, { id: siteAId, serverId, name: 'SiteA', runtimeType: 'node', applicationId: 'app-a' }],
     [siteBId, { id: siteBId, serverId, name: 'SiteB', runtimeType: 'php', applicationId: 'app-b' }],
@@ -50,7 +50,7 @@ async function setupAcceptanceServer(t) {
     async listDomains() { return []; },
   };
 
-  const snapshots = [
+  const snapshots = customSnapshots ?? [
     { id: 'a'.repeat(64), shortId: 'aaaaaaaa', time: '2026-09-25T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`], hostname: 'host-a', username: 'root' },
     { id: 'b'.repeat(64), shortId: 'bbbbbbbb', time: '2026-09-25T11:00:00.000Z', paths: ['/secret/site-b'], tags: [`website:${siteBId}`], hostname: 'host-b', username: 'root' },
   ];
@@ -84,6 +84,14 @@ async function setupAcceptanceServer(t) {
       const reqTags = options.tags ?? [];
       return snapshots.filter((snap) => reqTags.every((t) => snap.tags.includes(t)));
     },
+    async checkResticRepository(id) {
+      assert.equal(id, repoId);
+      return { ok: true, checkedAt: new Date().toISOString() };
+    },
+    async updateRetentionPolicy(id, policy) {
+      assert.equal(id, repoId);
+      return { ok: true, retentionPolicy: policy };
+    },
   };
 
   const websiteBackupSetProvider = {
@@ -103,10 +111,13 @@ async function setupAcceptanceServer(t) {
     },
   };
 
+  const operationRegistry = createWebsiteBackupOperationRegistry();
+
   const websiteBackupBrowser = createWebsiteBackupBrowser({
     websiteRegistry,
     resticRepositoryRegistry,
     websiteBackupSetProvider,
+    operationRegistry,
     localServerId: serverId,
   });
 
@@ -132,7 +143,7 @@ async function setupAcceptanceServer(t) {
   };
 
   const websiteRestoreService = {
-    async previewRestore({ websiteId: wId, repositoryId: rId, snapshotId: sId }) {
+    async previewRestore({ websiteId: wId, repositoryId: rId, snapshotId: sId, include = [] }) {
       return {
         websiteId: wId,
         repositoryId: rId,
@@ -140,24 +151,28 @@ async function setupAcceptanceServer(t) {
         previewDigest,
         confirmation: `restore:${wId}:${rId}:${sId}:${previewDigest}`,
         healthSpec: { healthPath: '/health', timeoutSeconds: 30 },
+        include,
+        selective: Array.isArray(include) && include.length > 0,
       };
     },
-    async executeRestore({ websiteId: wId, snapshotId: sId }) {
+    async executeRestore({ websiteId: wId, snapshotId: sId, include = [] }) {
       return {
         status: 'succeeded',
         websiteId: wId,
         snapshotId: sId,
         preRestoreSnapshotId: 'pre-snap-123',
         healthCheck: { satisfied: true },
+        include,
+        selective: Array.isArray(include) && include.length > 0,
       };
     },
   };
 
-  const operationRegistry = createWebsiteBackupOperationRegistry();
   const websiteBackupOperationService = createWebsiteBackupOperationService({
     registry: operationRegistry,
     websiteBackupService,
     websiteRestoreService,
+    resticRepositoryRegistry,
   });
 
   let currentAuth = null;
@@ -636,4 +651,223 @@ test('PROD-08 Acceptance: Plaintext private key leak in restore result is reject
     }),
     (err) => err instanceof DatabaseRestoreJobResultError && err.code === 'disaster_recovery_secret_leak',
   );
+});
+
+test('PROD-13 Acceptance: Backup Manager browser projects 6 key fields and enforces tenant isolation', async (t) => {
+  const { baseUrl, setAuth, operationRegistry } = await setupAcceptanceServer(t);
+
+  // Record a completed restore operation in the durable operation registry
+  const restoreOp = await operationRegistry.createOperation({
+    websiteId: siteAId,
+    serverId,
+    repositoryId: repoId,
+    kind: 'restore',
+    snapshotId: 'aaaaaaaa',
+    previewDigest,
+    confirmation: restoreConfirm,
+    selective: true,
+    include: ['databases', 'paths'],
+  });
+  await operationRegistry.updateOperation(restoreOp.id, {
+    status: 'succeeded',
+    finishedAt: '2026-09-25T10:05:00.000Z',
+    result: { preRestoreSnapshotId: 'pre-snap-123', selective: true, include: ['databases', 'paths'] },
+  });
+
+  setAuth({
+    user: { id: 'user-site-a', role: 'site_manager', websiteIds: [siteAId] },
+    access: { mode: 'site_management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const res = await fetch(`${baseUrl}/api/websites/${siteAId}/backups`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const data = body.data;
+
+  // 1. lastSuccessfulBackupAt
+  assert.ok(data.lastSuccessfulBackupAt !== undefined);
+  assert.equal(typeof data.lastSuccessfulBackupAt, 'string');
+  assert.equal(data.lastSuccessfulBackupAt, '2026-09-25T10:00:00.000Z');
+
+  // 2. nextScheduledRunAt
+  assert.ok(data.nextScheduledRunAt !== undefined);
+
+  // 3. scopeSummary
+  assert.ok(data.scopeSummary);
+  assert.equal(typeof data.scopeSummary.paths, 'number');
+  assert.equal(typeof data.scopeSummary.databases, 'number');
+  assert.equal(typeof data.scopeSummary.mailboxes, 'number');
+  assert.equal(typeof data.scopeSummary.dnsZones, 'number');
+
+  // 4. retentionPolicy
+  assert.ok(data.retentionPolicy);
+  assert.equal(data.retentionPolicy.keepLast, 7);
+
+  // 5. remoteRepositoryStatus
+  assert.ok(data.remoteRepositoryStatus);
+  assert.equal(typeof (data.remoteRepositoryStatus.status ?? data.remoteRepositoryStatus), 'string');
+
+  // 6. restoreOutcome
+  assert.ok(data.restoreOutcome);
+  assert.equal(data.restoreOutcome.status, 'succeeded');
+  assert.equal(data.restoreOutcome.selective, true);
+  assert.equal(data.restoreOutcome.operationId, restoreOp.id);
+  assert.ok(data.restoreOutcome.finishedAt);
+
+  // Isolation check: no secret target, password or host leaks
+  const rawString = JSON.stringify(body);
+  assert.doesNotMatch(rawString, /super-secret-pass/);
+  assert.doesNotMatch(rawString, /\/secret\/var\/backups/);
+  assert.doesNotMatch(rawString, /\/secret\/site-a/);
+});
+
+test('PROD-13 Acceptance: Failed and stale snapshots are distinctly marked and never presented as succeeded', async (t) => {
+  const customSnapshots = [
+    { id: '1'.repeat(64), shortId: '11111111', time: '2026-09-25T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`], hostname: 'host-a', username: 'root' },
+    { id: '2'.repeat(64), shortId: '22222222', time: '2026-09-24T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`, 'failed'], hostname: 'host-a', username: 'root' },
+    { id: '3'.repeat(64), shortId: '33333333', time: '2026-09-23T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`, 'stale'], hostname: 'host-a', username: 'root' },
+  ];
+
+  const { baseUrl, setAuth } = await setupAcceptanceServer(t, { customSnapshots });
+  setAuth({
+    user: { id: 'owner-1', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const res = await fetch(`${baseUrl}/api/websites/${siteAId}/backups`);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  const repo = body.data.repositories[0];
+  assert.equal(repo.snapshots.length, 3);
+
+  const succeededSnap = repo.snapshots.find((s) => s.shortId === '11111111');
+  const failedSnap = repo.snapshots.find((s) => s.shortId === '22222222');
+  const staleSnap = repo.snapshots.find((s) => s.shortId === '33333333');
+
+  assert.equal(succeededSnap.status, 'succeeded');
+  assert.equal(failedSnap.status, 'failed');
+  assert.equal(staleSnap.status, 'stale');
+
+  // Strict check: failed and stale snapshots must NOT be marked as succeeded
+  assert.notEqual(failedSnap.status, 'succeeded');
+  assert.notEqual(staleSnap.status, 'succeeded');
+});
+
+test('PROD-13 Acceptance: Selective restore preview and execution operate through durable job engine with include paths', async (t) => {
+  const { baseUrl, setAuth, operationRegistry } = await setupAcceptanceServer(t);
+  setAuth({
+    user: { id: 'owner-1', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  // 1. Preview selective restore
+  const previewRes = await fetch(`${baseUrl}/api/websites/${siteAId}/restore/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+      include: ['paths', 'databases'],
+    }),
+  });
+  assert.equal(previewRes.status, 200);
+  const previewBody = await previewRes.json();
+  assert.equal(previewBody.data.selective, true);
+  assert.deepEqual(previewBody.data.include, ['paths', 'databases']);
+
+  // 2. Queue selective restore
+  const queueRes = await fetch(`${baseUrl}/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'restore',
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+      expectedPreviewDigest: previewDigest,
+      confirmation: previewBody.data.confirmation,
+      include: ['paths', 'databases'],
+    }),
+  });
+  assert.equal(queueRes.status, 202);
+  const queueBody = await queueRes.json();
+  assert.equal(queueBody.data.kind, 'restore');
+  assert.equal(queueBody.data.selective, true);
+  assert.deepEqual(queueBody.data.include, ['paths', 'databases']);
+
+  // 3. Verify operation persisted in registry
+  const opRecord = await operationRegistry.getOperation(queueBody.data.id);
+  assert.equal(opRecord.selective, true);
+  assert.deepEqual(opRecord.include, ['paths', 'databases']);
+});
+
+test('PROD-13 Acceptance: Repository health check operates through durable job engine', async (t) => {
+  const { baseUrl, setAuth } = await setupAcceptanceServer(t);
+  setAuth({
+    user: { id: 'owner-1', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const res = await fetch(`${baseUrl}/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'check',
+      repositoryId: repoId,
+    }),
+  });
+  assert.equal(res.status, 202);
+  const body = await res.json();
+  assert.equal(body.data.kind, 'check');
+  assert.equal(body.data.repositoryId, repoId);
+
+  // Poll for completion
+  const opId = body.data.id;
+  let status = body.data.status;
+  for (let i = 0; i < 20; i++) {
+    const pollRes = await fetch(`${baseUrl}/api/websites/${siteAId}/backup-operations/${opId}`);
+    const pollBody = await pollRes.json();
+    status = pollBody.data.status;
+    if (['succeeded', 'failed'].includes(status)) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.equal(status, 'succeeded');
+});
+
+test('PROD-13 Acceptance: Backup schedule and retention plan operates through durable job engine', async (t) => {
+  const { baseUrl, setAuth } = await setupAcceptanceServer(t);
+  setAuth({
+    user: { id: 'owner-1', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const res = await fetch(`${baseUrl}/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      kind: 'plan',
+      repositoryId: repoId,
+      schedule: '0 3 * * *',
+      retentionPolicy: { keepLast: 14, keepDaily: 7 },
+    }),
+  });
+  assert.equal(res.status, 202);
+  const body = await res.json();
+  assert.equal(body.data.kind, 'plan');
+
+  // Verify operation completes
+  const opId = body.data.id;
+  let opData = body.data;
+  for (let i = 0; i < 20; i++) {
+    const pollRes = await fetch(`${baseUrl}/api/websites/${siteAId}/backup-operations/${opId}`);
+    const pollBody = await pollRes.json();
+    opData = pollBody.data;
+    if (['succeeded', 'failed'].includes(opData.status)) break;
+    await new Promise((r) => setTimeout(r, 50));
+  }
+  assert.equal(opData.status, 'succeeded');
 });

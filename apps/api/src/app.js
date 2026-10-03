@@ -977,14 +977,6 @@ export function createApp(allOptions = {}) {
       dockerComposeProjectRegistry,
       localServerId,
     });
-    const websiteBackupBrowser = resolvedResticRepositoryRegistry
-      ? createWebsiteBackupBrowser({
-        websiteRegistry,
-        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
-        websiteBackupSetProvider,
-        localServerId,
-      })
-      : null;
     const resolvedWebsiteBackupService = websiteBackupService ?? (
       resolvedResticRepositoryRegistry && resolvedResticManager ? createWebsiteBackupService({
         websiteRegistry,
@@ -1011,6 +1003,15 @@ export function createApp(allOptions = {}) {
     const resolvedWebsiteBackupOperationRegistry = options.websiteBackupOperationRegistry ?? createWebsiteBackupOperationRegistry({
       filePath: options.websiteBackupOperationStorePath ?? null,
     });
+    const websiteBackupBrowser = resolvedResticRepositoryRegistry
+      ? createWebsiteBackupBrowser({
+        websiteRegistry,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry,
+        websiteBackupSetProvider,
+        localServerId,
+        websiteBackupOperationRegistry: resolvedWebsiteBackupOperationRegistry,
+      })
+      : null;
     const resolvedWebsiteBackupOperationService = options.websiteBackupOperationService ?? (
       (resolvedWebsiteBackupService || resolvedWebsiteRestoreService) ? createWebsiteBackupOperationService({
         registry: resolvedWebsiteBackupOperationRegistry,

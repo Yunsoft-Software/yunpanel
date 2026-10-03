@@ -138,6 +138,7 @@ export function createWebsiteRestoreService({
     snapshotId,
     healthPath = '/health',
     timeoutSeconds = 30,
+    include = [],
   } = {}) {
     const website = await resolveTargetWebsite(websiteId);
     await assertIdle(website.id, website.serverId);
@@ -151,6 +152,10 @@ export function createWebsiteRestoreService({
       timeoutSeconds: Number.isInteger(timeoutSeconds) && timeoutSeconds >= 5 && timeoutSeconds <= 120 ? timeoutSeconds : 30,
     });
 
+    const normalizedIncludes = Array.isArray(include)
+      ? Object.freeze([...new Set(include.filter((i) => typeof i === 'string' && i.trim().length > 0).map((i) => i.trim()))].sort())
+      : Object.freeze([]);
+
     const previewPayload = {
       websiteId: website.id,
       websiteRevision: website.revision ?? 1,
@@ -160,6 +165,7 @@ export function createWebsiteRestoreService({
       snapshotTags: Object.freeze([...(snapshot.tags ?? [])].sort()),
       snapshotPaths: Object.freeze([...(snapshot.paths ?? [])].sort()),
       healthSpec,
+      ...(normalizedIncludes.length > 0 ? { include: normalizedIncludes, selective: true } : {}),
     };
 
     const previewDigest = sha256(previewPayload);
@@ -167,6 +173,8 @@ export function createWebsiteRestoreService({
 
     return Object.freeze({
       ...previewPayload,
+      include: normalizedIncludes,
+      selective: normalizedIncludes.length > 0,
       previewDigest,
       confirmation,
     });
@@ -180,6 +188,7 @@ export function createWebsiteRestoreService({
     confirmation,
     healthPath = '/health',
     timeoutSeconds = 30,
+    include = [],
   } = {}) {
     if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)) {
       throw new WebsiteRestoreError('invalid_preview_digest', 'Expected preview digest is invalid', 400);
@@ -195,6 +204,7 @@ export function createWebsiteRestoreService({
       snapshotId,
       healthPath,
       timeoutSeconds,
+      include,
     });
 
     if (preview.previewDigest !== expectedPreviewDigest) {
@@ -293,6 +303,7 @@ export function createWebsiteRestoreService({
         password,
         snapshotId: preview.snapshotId,
         targetDirectory: '/',
+        ...(preview.include?.length > 0 ? { include: [...preview.include] } : {}),
       });
     } catch (restoreError) {
       // Automatic rollback on restore execution failure
@@ -425,6 +436,8 @@ export function createWebsiteRestoreService({
       websiteId: website.id,
       snapshotId: preview.snapshotId,
       preRestoreSnapshotId,
+      selective: Boolean(preview.selective),
+      include: preview.include ?? [],
       healthCheck: Object.freeze({
         satisfied: true,
         statusCode: healthResult.statusCode,
