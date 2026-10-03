@@ -197,6 +197,15 @@ import { mountOperationalNotificationRoutes, OperationalNotificationHttpError } 
 import { createFirewallService, FirewallServiceError } from './firewall-service.js';
 import { mountFirewallRoutes, FirewallHttpError } from './firewall-http.js';
 import { createNftablesManager, NftablesManagerError } from '@yunpanel/host-runtime';
+import {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+} from './production-exit-gate.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -219,6 +228,15 @@ export { createOperationalNotificationService, OperationalNotificationError } fr
 export { mountOperationalNotificationRoutes, OperationalNotificationHttpError } from './operational-notification-http.js';
 export { createFirewallService, FirewallServiceError } from './firewall-service.js';
 export { mountFirewallRoutes, FirewallHttpError } from './firewall-http.js';
+export {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+} from './production-exit-gate.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -931,6 +949,12 @@ export function createApp(allOptions = {}) {
     registry,
     localServerId,
   });
+  const productionExitGateService = options.productionExitGateService ?? createProductionExitGateService({
+    env: process.env,
+  });
+  mountProductionExitGateRoutes(app, {
+    exitGateService: productionExitGateService,
+  });
 
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
@@ -1278,6 +1302,7 @@ export function createApp(allOptions = {}) {
       || error instanceof FirewallServiceError
       || error instanceof FirewallHttpError
       || error instanceof NftablesManagerError
+      || error instanceof ProductionExitGateError
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }

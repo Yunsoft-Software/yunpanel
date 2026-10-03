@@ -178,3 +178,17 @@ export {
   maskSecrets,
   isSensitiveKey,
 } from './secret-masker.js';
+export {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+  LIFECYCLE_STEPS,
+  assertNoDot44Host,
+  evaluateLifecycleGate,
+  evaluateTenantIsolationGate,
+  evaluateFailClosedSecurityGate,
+} from './production-exit-gate.js';
