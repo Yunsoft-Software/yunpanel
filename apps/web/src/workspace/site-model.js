@@ -23,7 +23,7 @@ export function normalizeSiteTab(tab) {
   if (['mail', 'mailbox', 'mailboxes', 'email'].includes(lower)) return 'mail';
   if (['ssl', 'certificate', 'certificates', 'ssl-tls', 'ssl-certificates'].includes(lower)) return 'ssl';
   if (['log', 'logs', 'logging'].includes(lower)) return 'logs';
-  if (['node', 'application', 'app', 'environment'].includes(lower)) return 'node';
+  if (['node', 'application', 'app', 'environment', 'python', 'docker'].includes(lower)) return 'node';
   if (['settings', 'configuration', 'config', 'settings-hosting'].includes(lower)) return 'settings';
   if (['dns', 'dns-records'].includes(lower)) return 'dns';
   if (['domains', 'domain', 'alias', 'aliases'].includes(lower)) return 'domains';

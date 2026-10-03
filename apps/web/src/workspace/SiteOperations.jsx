@@ -5,7 +5,7 @@ import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion } from '../session-client.js';
 import { createSslRequestDraft, sslContactEmail, sslDraftDirty, sslDraftKey, sslDraftSnapshot, sslRequestDraftReducer, validSslContactEmail } from './ssl-request-draft.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
 import { certificateState, formatDate, siteHref } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import SslRenewalPanel from './SslRenewalPanel.jsx';
@@ -22,36 +22,73 @@ function useOperation() {
   return { busy, error, perform };
 }
 
-export function ApplicationOperations({ domain, application, deployOnly = false, disabled = false }) {
+export function ApplicationOperations({ domain, application, website = null, deployOnly = false, disabled = false }) {
   const { applications, jobs, runJob, resourceBusy } = useWorkspace();
   const operation = useOperation(); const [rollback, setRollback] = useState(null);
+  if (!application && website?.runtimeType === 'docker') {
+    return <Section title="Docker iş yükü (Ürün uzantısı)" description={`${domain.primaryDomain} · YunPanel Docker / proxy çalışma alanı`}>
+      <div className="ws-section-body"><div className="ws-actions">
+        <Badge state="active" />
+        <LinkButton to="/docker" icon="external">Docker iş yüklerini yönet</LinkButton>
+      </div></div>
+      <KeyValues items={[
+        ['Çalışma türü', 'Docker (Ürün uzantısı)'],
+        ['İş yükü kimliği', website.dockerWorkloadId ?? 'Yönetilen Docker'],
+        ['Yayın hedefi', domain.targetType === 'proxy' ? `127.0.0.1:${domain.target?.upstreamPort ?? '—'}` : 'Yerel proxy'],
+      ]} />
+      <div className="ws-section-body"><p className="ws-muted">Bu web sitesi YunPanel açık ürün uzantısı olan Docker ile çalışmaktadır. Konteyner yaşam döngüsü ve compose tanımları site bağlamı ile ilişkilidir.</p></div>
+    </Section>;
+  }
   if (!application) return <Section title="Uygulama bağlantısı"><EmptyState icon="code" title="Bu hedef için uygulama seçilmedi" detail="Aynı sunucu ve portla eşleşen Node.js kaydını yukarıdan seçin. Statik sitelerin kalıcı uygulama bağlantısı henüz uygulanmadı; onları Uygulamalar ekranından yönetin." action={<Link to="/applications">Uygulama yönetimine git</Link>} /></Section>;
   const locked = disabled || operation.busy || jobs.status !== 'ready' || applications.status !== 'ready' || resourceBusy('application', application.id);
   const id = encodeURIComponent(application.id);
+  const websiteId = domain?.websiteId ? encodeURIComponent(domain.websiteId) : null;
   async function run(action) {
-    return operation.perform(() => runJob(`/applications/${id}/${action === 'status' ? 'status/refresh' : action}`, {}));
+    const endpoint = websiteId
+      ? `/websites/${websiteId}/application/${action === 'status' ? 'status/refresh' : action}`
+      : `/applications/${id}/${action === 'status' ? 'status/refresh' : action}`;
+    return operation.perform(() => runJob(endpoint, {}));
   }
+  const isPython = application.type === 'python';
+  const isNode = application.type === 'node';
+  const sectionTitle = deployOnly
+    ? 'Git ve yayın yönetimi'
+    : (isPython
+      ? 'Python uygulaması (Ürün uzantısı)'
+      : (isNode ? 'Node.js uygulaması' : `${application.type} uygulaması`));
+  const runtimeItem = [
+    isPython ? 'Python' : (isNode ? 'Node.js' : 'Runtime'),
+    isPython
+      ? (application.runtime?.pythonVersion ? `Python ${application.runtime.pythonVersion}` : 'Python 3 (Ürün uzantısı)')
+      : (application.runtime?.nodeMajor ? `Node.js ${application.runtime.nodeMajor}` : '—'),
+  ];
   return <>
-    <Section title={deployOnly ? 'Git ve yayın yönetimi' : 'Node.js uygulaması'} description={`${application.name} · ${domain.primaryDomain} hedefiyle port eşleşmesi`}>
+    <Section title={sectionTitle} description={`${application.name} · ${domain.primaryDomain} hedefiyle port eşleşmesi`}>
       <div className="ws-section-body"><div className="ws-actions">
         <Badge state={application.state} />
+        {isPython && <Badge state="neutral">Ürün Uzantısı</Badge>}
         <Button icon="git" variant="primary" disabled={locked || Boolean(application.activeDeploymentId)} onClick={() => run('deploy')}>Deploy başlat</Button>
         {!deployOnly && <Button icon="refresh" disabled={locked || !application.currentReleaseId || Boolean(application.activeDeploymentId)} onClick={() => run('restart')}>Yeniden başlat</Button>}
         {!deployOnly && <Button disabled={locked || !application.currentReleaseId} onClick={() => run('status')}>Durumu kontrol et</Button>}
         <Button disabled={locked || !application.previousReleaseId || Boolean(application.activeDeploymentId)} onClick={() => setRollback(application.previousReleaseId)}>Önceki sürüme dön</Button>
       </div><ErrorNotice error={operation.error} /></div>
       <KeyValues items={[
-        ['Uygulama', application.name], ['Node.js', application.runtime?.nodeMajor ? `Node.js ${application.runtime.nodeMajor}` : '—'],
+        ['Uygulama', application.name],
+        runtimeItem,
         ['Başlangıç', application.runtime?.startMode === 'npm' ? `npm run ${application.runtime?.startScript ?? 'start'}` : application.runtime?.entryFile],
         ['Port', application.runtime?.port], ['Servis', application.serviceName], ['Sağlık yolu', application.runtime?.healthPath],
         ['Repository', application.repositoryUrl], ['Branch', application.branch], ['Commit', application.currentCommitSha],
         ['Son deploy', formatDate(application.lastDeployedAt)], ['Aktif release', application.currentReleaseId],
       ]} />
-      <div className="ws-section-body"><p className="ws-muted">İşlemler mevcut uygulama kaydında yürütülür. Buradaki port eşleşmesi yeni bir kalıcı website–uygulama ilişkisi oluşturmaz. Runtime düzenleme ve başlat/durdur API’leri henüz eklenmedi.</p></div>
+      <div className="ws-section-body"><p className="ws-muted">{isPython ? 'Python çalışma ortamı açık YunPanel ürün uzantısı olarak site bağlamında işletilir. Yayın, rollback, ortam değişkenleri ve servis kontrolleri bu ekrandan yürütülür.' : 'İşlemler yetkili web sitesi sınırlarında fail-closed olarak yürütülür.'}</p></div>
     </Section>
     {deployOnly && <Section title="Release geçmişi"><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Release</th><th>Commit</th><th>Yayın zamanı</th><th>Durum</th></tr></thead><tbody>{(application.releases ?? []).map((release) => <tr key={release.releaseId}><td>{release.releaseId}</td><td>{release.commitSha?.slice(0, 12) ?? '—'}</td><td>{formatDate(release.deployedAt)}</td><td>{release.releaseId === application.currentReleaseId ? <Badge state="active" /> : 'Önceki sürüm'}</td></tr>)}</tbody></table></div>{!application.releases?.length && <EmptyState title="Henüz release yok" detail="İlk başarılı deploy sonrasında yayın geçmişi burada görünecek." icon="git" />}</Section>}
     {rollback && <ConfirmDialog title="Önceki sürüme dön" message={`${application.name} uygulaması ${rollback} release’ine dönecek. Başarılı dönüş uygulamanın yayınını değiştirir.`} confirmation={application.name} busy={operation.busy} error={operation.error} onCancel={() => setRollback(null)} onConfirm={async () => {
-      const success = await operation.perform(async () => { if (application.previousReleaseId !== rollback) throw new Error('Önceki release değişti. Pencereyi kapatıp güncel hedefi inceleyin.'); await runJob(`/applications/${id}/rollback`, { releaseId: rollback }); });
+      const success = await operation.perform(async () => {
+        if (application.previousReleaseId !== rollback) throw new Error('Önceki release değişti. Pencereyi kapatıp güncel hedefi inceleyin.');
+        const endpoint = websiteId ? `/websites/${websiteId}/application/rollback` : `/applications/${id}/rollback`;
+        await runJob(endpoint, { releaseId: rollback });
+      });
       if (success) setRollback(null);
     }} confirmLabel="Rollback başlat" />}
   </>;

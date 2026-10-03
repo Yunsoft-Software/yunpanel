@@ -91,7 +91,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const managedTerminalWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = isOwner && !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
-    if (['node', 'deploy'].includes(key)) return Boolean(application);
+    if (['node', 'deploy'].includes(key)) return Boolean(application) || website?.runtimeType === 'docker';
     if (key === 'files') return canManage;
     if (key === 'cron') return canManage;
     if (key === 'backup') return canManage && Boolean(website);
@@ -101,7 +101,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'access') return canManage && (Boolean(website) || tab === 'access');
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
-  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && application?.type === 'php' ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : label]);
+  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : label]);
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
@@ -119,7 +119,7 @@ function SiteWorkspace({ websiteId, tab }) {
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
     ['php', 'PHP / WordPress', 'code'],
-    ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : 'Uygulama', 'code'],
+    ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
     ['access', 'Erişim Hesapları', 'shield'],
@@ -157,7 +157,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'php' && <SitePhpToolsPanel domainId={domain.id} />}
     {tab === 'access' && <SiteAccessPanel domain={domain} website={website} server={server} isOwner={isOwner} canManage={canManage} onChanged={refreshAll} />}
     {tab === 'node' && canManage && (website?.runtimeType === 'php' || application?.type === 'php') && <SitePhpToolsPanel domainId={domain.id} />}
-    {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && <EnvironmentPanel key={application.id} application={application} />}</>}
+    {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} website={website} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && ['node', 'python'].includes(application.type) && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}
     {tab === 'backup' && <SiteBackupPanel domainId={domain.id} />}
     {tab === 'analytics' && <SiteAnalyticsPanel domainId={domain.id} />}
