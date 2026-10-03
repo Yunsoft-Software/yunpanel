@@ -48,9 +48,13 @@ test('console and ember themes enforce equal input heights, label baseline align
   assert.match(consoleTheme, /\.ws-site-admin-fields\s+label\s*>\s*input\s*\{[^}]*height:\s*var\(--ws-control-height\);/);
   assert.match(consoleTheme, /\.ws-site-admin-fields\s+label\s*>\s*input\s*\{[^}]*min-height:\s*var\(--ws-control-height\);/);
   assert.match(consoleTheme, /\.ws-site-admin-fields\s+label\s*>\s*input\s*\{[^}]*box-sizing:\s*border-box;/);
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+label\s*>\s*input:invalid\s*\{[^}]*box-shadow:\s*none;/);
   assert.match(consoleTheme, /\.ws-site-admin-fields\s+input\[type="password"\]::-ms-reveal/);
   assert.match(consoleTheme, /\.ws-site-admin-fields\s+input\[type="password"\]::-ms-clear/);
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+input::-webkit-credentials-auto-fill-button\s*\{[^}]*margin:\s*0;/);
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+\.ws-field-hint\s*\{[^}]*font-size:\s*12px;[^}]*line-height:\s*1\.5;[^}]*margin:\s*0;/);
   assert.match(emberTheme, /\.workspace-shell\s+\.ws-site-admin-fields\s+label\s*>\s*input\s*\{[^}]*height:\s*var\(--ws-control-height\);/);
+  assert.match(emberTheme, /\.workspace-shell\s+\.ws-site-admin-fields\s+label\s*>\s*input\s*\{[^}]*min-height:\s*var\(--ws-control-height\);/);
 });
 
 test('responsive layout preserves equal column sizing and consistent mobile vertical stacking', () => {
