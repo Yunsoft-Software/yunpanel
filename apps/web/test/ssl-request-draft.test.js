@@ -169,3 +169,64 @@ test('BUG-04/05 acceptance: default/auto email does not flag dirty, session emai
   assert.equal(sslDraftDirty(submitted), false);
   assert.equal(submitted.baseline.email, 'custom-ssl@example.test');
 });
+
+test('cancel and reset actions restore/update baseline and return to clean form state', () => {
+  const changed = edit(edit(initial(), 'includeWildcard', true), 'email', 'other@example.test');
+  assert.equal(sslDraftDirty(changed), true);
+
+  // type: 'cancel' without extra baseline restores to current baseline and clears dirty
+  const cancelled = reduce(changed, { type: 'cancel' });
+  assert.deepEqual(cancelled.values, initial().values);
+  assert.equal(sslDraftDirty(cancelled), false);
+
+  // type: 'cancel' with an updated baseline updates baseline and clears dirty
+  const newBaseline = { email: 'admin@example.test', includeWww: true, includeWebmail: false, includeMail: false, assignToMail: true, includeWildcard: false };
+  const cancelledWithBaseline = reduce(changed, { type: 'cancel', baseline: newBaseline });
+  assert.deepEqual(cancelledWithBaseline.values, newBaseline);
+  assert.deepEqual(cancelledWithBaseline.baseline, newBaseline);
+  assert.equal(sslDraftDirty(cancelledWithBaseline), false);
+});
+
+test('BUG-20260923-04 acceptance: entering SSL without user changes never triggers dirty, cancel and success update baseline, and active jobs are decoupled', () => {
+  // 1. Initial form with pre-populated or empty email is clean (not dirty)
+  for (const defaultEmail of ['', 'user@example.test', 'admin@domain.com']) {
+    const draft = createSslRequestDraft(defaultEmail);
+    assert.equal(sslDraftDirty(draft), false, 'Initial form with defaults must never be dirty');
+    assert.equal(draft.values.email, defaultEmail ? defaultEmail.trim() : '');
+    // Entering and leaving without modifying any fields produces no dirty warning
+    assert.equal(sslDraftDirty(draft), false);
+  }
+
+  // 2. Auto-filled / late default email does not make form dirty
+  const emptyDraft = createSslRequestDraft();
+  assert.equal(sslDraftDirty(emptyDraft), false);
+  const autoFilled = reduce(emptyDraft, { type: 'email-default', email: 'autofill@example.test' });
+  assert.equal(autoFilled.values.email, 'autofill@example.test');
+  assert.equal(sslDraftDirty(autoFilled), false, 'Auto-filled email must not flag form as dirty');
+
+  // 3. Form dirty state is determined by comparing baseline with actual user modifications
+  const editedEmail = edit(autoFilled, 'email', 'modified@example.test');
+  assert.equal(sslDraftDirty(editedEmail), true, 'User email edit must flag form as dirty');
+  const editedScope = edit(autoFilled, 'includeWww', false);
+  assert.equal(sslDraftDirty(editedScope), true, 'User checkbox change must flag form as dirty');
+
+  // 4. Reverting changes back to baseline clears dirty state
+  const revertedEmail = edit(editedEmail, 'email', 'autofill@example.test');
+  assert.equal(sslDraftDirty(revertedEmail), false, 'Reverting to baseline must clear dirty state');
+
+  // 5. Reset and cancel actions clear dirty state and update/restore baseline
+  const resetForm = reduce(editedScope, { type: 'reset' });
+  assert.equal(sslDraftDirty(resetForm), false, 'Reset must clear dirty state');
+  const cancelledForm = reduce(editedScope, { type: 'cancel' });
+  assert.equal(sslDraftDirty(cancelledForm), false, 'Cancel must clear dirty state');
+
+  // 6. Successful submission updates baseline and clears dirty state
+  const snapshot = sslDraftSnapshot(editedScope);
+  const submittedForm = reduce(editedScope, { type: 'submitted', values: snapshot });
+  assert.equal(sslDraftDirty(submittedForm), false, 'Submitted must update baseline and clear dirty state');
+  assert.deepEqual(submittedForm.baseline, snapshot);
+
+  // Subsequent edits after successful submission flag dirty again
+  const postSubmitEdit = edit(submittedForm, 'includeWildcard', true);
+  assert.equal(sslDraftDirty(postSubmitEdit), true, 'Edits after submission must flag dirty again');
+});

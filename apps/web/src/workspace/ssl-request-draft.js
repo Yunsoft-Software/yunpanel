@@ -51,17 +51,27 @@ export function sslRequestDraftReducer(state, action) {
     return { ...state, values: { ...state.values, [field]: value },
       emailTouched: state.emailTouched || field === 'email' };
   }
-  if (action?.type === 'reset') {
-    return { ...state, values: { ...state.baseline } };
+  if (action?.type === 'reset' || action?.type === 'cancel') {
+    const source = action.baseline ?? action.values;
+    const nextBaseline = source
+      ? Object.fromEntries(FIELDS.map((key) => [
+          key,
+          key === 'email'
+            ? (validSslContactEmail(source.email) ? source.email.trim() : '')
+            : Boolean(source[key]),
+        ]))
+      : state.baseline;
+    return { ...state, values: { ...nextBaseline }, baseline: { ...nextBaseline } };
   }
   if (action?.type === 'submitted') {
     // Only the caller's successful real request acknowledges a snapshot. A
     // later edit is still dirty; test/queued/failed requests must not call this.
-    const values = action.values;
+    const values = action.values ?? action.baseline;
     if (!values || !validSslContactEmail(values.email)
       || Object.keys(SSL_SCOPE_DEFAULTS).some((key) => typeof values[key] !== 'boolean')) return state;
-    return { ...state, baseline: Object.fromEntries(FIELDS.map((key) => [key,
-      key === 'email' ? values.email.trim() : values[key]])), emailTouched: true };
+    const nextBaseline = Object.fromEntries(FIELDS.map((key) => [key,
+      key === 'email' ? values.email.trim() : values[key]]));
+    return { ...state, values: { ...state.values, email: nextBaseline.email }, baseline: nextBaseline, emailTouched: true };
   }
   return state;
 }
