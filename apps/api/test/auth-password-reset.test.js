@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
+import net from 'node:net';
 import { once } from 'node:events';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
@@ -384,4 +385,140 @@ test('HTTP API: reset password flow endpoints and recovery email endpoints', asy
   assert.equal(setEmailRes.status, 200);
   const updatePayload = await setEmailRes.json();
   assert.equal(updatePayload.data.email, 'updated-owner@example.test');
+});
+
+test('distinct from site-admin addresses, ACME defaults, and unverified recovery emails', async (t) => {
+  const mockMailer = createMockMailer();
+  const { store, filePath } = fixture(t, { mailer: mockMailer });
+  const ownerUser = await setupOwner(store, { email: 'owner@example.com' });
+
+  // 1. Create a site-admin (site_manager) in the database
+  const db = new DatabaseSync(filePath);
+  const siteAdminId = '99999999-8888-7777-6666-555555555555';
+  db.prepare("INSERT INTO users VALUES (?, 'siteadmin', 'some-password-hash', 'site_manager', 1, 1000, 1000)").run(siteAdminId);
+  db.prepare("INSERT INTO auth_recovery_emails VALUES (?, 'siteadmin@example.com', 1, 1000, 1000)").run(siteAdminId);
+  db.close();
+
+  // Reset request for site-admin username must NOT send email
+  const siteAdminUserRes = await store.requestPasswordReset({ identifier: 'siteadmin' });
+  assert.deepEqual(siteAdminUserRes, { sent: true });
+  assert.equal(mockMailer.sent.length, 0, 'Reset request for site-admin username must not send email');
+
+  // Reset request for site-admin email must NOT send email
+  const siteAdminEmailRes = await store.requestPasswordReset({ identifier: 'siteadmin@example.com' });
+  assert.deepEqual(siteAdminEmailRes, { sent: true });
+  assert.equal(mockMailer.sent.length, 0, 'Reset request for site-admin email must not send email');
+
+  // 2. ACME default email address is NOT used as fallback
+  const acmeDefaultRes = await store.requestPasswordReset({ identifier: 'acme-admin@cryptoraichu.website' });
+  assert.deepEqual(acmeDefaultRes, { sent: true });
+  assert.equal(mockMailer.sent.length, 0, 'ACME default email must not trigger password reset');
+
+  // 3. Unverified recovery email for owner must NOT receive reset emails
+  const db2 = new DatabaseSync(filePath);
+  db2.prepare('UPDATE auth_recovery_emails SET verified = 0 WHERE user_id = ?').run(ownerUser.id);
+  db2.close();
+
+  const unverifiedRes = await store.requestPasswordReset({ identifier: 'admin' });
+  assert.deepEqual(unverifiedRes, { sent: true });
+  assert.equal(mockMailer.sent.length, 0, 'Unverified recovery email must not receive reset emails');
+
+  // Restore verified status
+  const db3 = new DatabaseSync(filePath);
+  db3.prepare('UPDATE auth_recovery_emails SET verified = 1 WHERE user_id = ?').run(ownerUser.id);
+  db3.close();
+
+  // Verified owner recovery email receives reset email
+  const verifiedRes = await store.requestPasswordReset({ identifier: 'admin' });
+  assert.deepEqual(verifiedRes, { sent: true });
+  assert.equal(mockMailer.sent.length, 1);
+  assert.equal(mockMailer.sent[0].to, 'owner@example.com');
+});
+
+test('rate limiting is enforced on password reset request and confirm endpoints', async (t) => {
+  const mockMailer = createMockMailer();
+  const { store } = fixture(t, { mailer: mockMailer });
+  await setupOwner(store, { email: 'owner@example.com' });
+
+  // 5 requests per user limit on reset request
+  for (let i = 0; i < 5; i++) {
+    const res = await store.requestPasswordReset({ identifier: 'admin', peer: '10.1.2.3' });
+    assert.deepEqual(res, { sent: true });
+  }
+
+  // 6th request is rate limited (429)
+  await assert.rejects(
+    store.requestPasswordReset({ identifier: 'admin', peer: '10.1.2.3' }),
+    { code: 'rate_limited', status: 429 },
+  );
+
+  // 5 requests per token limit on confirm
+  const dummyToken = 'A'.repeat(43);
+  for (let i = 0; i < 5; i++) {
+    await assert.rejects(
+      store.resetPasswordWithToken({ token: dummyToken, newPassword: 'valid-new-password-123', peer: '10.1.2.4' }),
+      { code: 'invalid_reset_token' },
+    );
+  }
+
+  // 6th request with same token is rate limited (429)
+  await assert.rejects(
+    store.resetPasswordWithToken({ token: dummyToken, newPassword: 'valid-new-password-123', peer: '10.1.2.4' }),
+    { code: 'rate_limited', status: 429 },
+  );
+});
+
+test('secret masking in mailer prevents leaking passwords or reset tokens in error logs', async (t) => {
+  const server = net.createServer((socket) => {
+    socket.write('220 smtp.local ESMTP Mock\r\n');
+    let buffer = '';
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString();
+      while (buffer.includes('\r\n')) {
+        const lineIdx = buffer.indexOf('\r\n');
+        const line = buffer.slice(0, lineIdx);
+        buffer = buffer.slice(lineIdx + 2);
+
+        if (line.startsWith('EHLO')) {
+          socket.write('250-smtp.local Hello\r\n250 AUTH LOGIN\r\n');
+        } else if (line === 'AUTH LOGIN') {
+          socket.write('334 VXNlcm5hbWU6\r\n');
+        } else if (line.startsWith('dXNlcg==')) {
+          socket.write('334 UGFzc3dvcmQ6\r\n');
+        } else {
+          socket.write('535 5.7.8 Authentication credentials invalid\r\n');
+        }
+      }
+    });
+  });
+
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const secretPassword = 'super-secret-smtp-password-123';
+  const mailer = createAuthMailer({
+    host: '127.0.0.1',
+    port,
+    user: 'user',
+    pass: secretPassword,
+  });
+
+  await assert.rejects(
+    async () => {
+      await mailer.sendMail({
+        to: 'owner@example.com',
+        subject: 'Test',
+        text: 'Secret token: abc123def456',
+      });
+    },
+    (err) => {
+      assert.ok(err instanceof Error);
+      assert.ok(!err.message.includes(secretPassword), 'Error message must not contain plaintext password');
+      assert.ok(!err.message.includes(Buffer.from(secretPassword).toString('base64')), 'Error message must not contain base64 password');
+      assert.ok(err.message.includes('[REDACTED]'), 'Error message must show [REDACTED] for sensitive commands');
+      return true;
+    },
+  );
 });
