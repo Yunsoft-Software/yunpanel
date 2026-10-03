@@ -286,9 +286,19 @@ test('BACKUP-UI-04: Owner durable backup/restore flow with durable jobs', async 
   assert.equal(getData.data.id, opId);
 
   // Wait for background execution
-  await new Promise((resolve) => setTimeout(resolve, 60));
+  async function waitForOperationTerminal(id, timeoutMs = 3000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const op = await operationRegistry.getOperation(id);
+      if (op && (op.status === 'succeeded' || op.status === 'failed' || op.status === 'rolled_back')) {
+        return op;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+    return operationRegistry.getOperation(id);
+  }
 
-  const finishedOp = await operationRegistry.getOperation(opId);
+  const finishedOp = await waitForOperationTerminal(opId);
   assert.equal(finishedOp.status, 'succeeded');
   assert.equal(finishedOp.snapshotId, 'snap-new-123');
 
@@ -309,9 +319,7 @@ test('BACKUP-UI-04: Owner durable backup/restore flow with durable jobs', async 
   assert.equal(restoreData.data.status, 'queued');
   const restoreOpId = restoreData.data.id;
 
-  await new Promise((resolve) => setTimeout(resolve, 60));
-
-  const finishedRestore = await operationRegistry.getOperation(restoreOpId);
+  const finishedRestore = await waitForOperationTerminal(restoreOpId);
   assert.equal(finishedRestore.status, 'succeeded');
   assert.equal(finishedRestore.preRestoreSnapshotId, 'pre-snap-123');
 });

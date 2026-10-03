@@ -27,7 +27,7 @@ export function withPanelContext(app, context = ownerManagementContext) {
   const outer = express();
   outer.disable('x-powered-by');
   outer.use((request, _response, next) => {
-    request.auth = context;
+    request.auth = typeof context === 'function' ? context(request) : context;
     next();
   });
   outer.use(app);

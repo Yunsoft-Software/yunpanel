@@ -230,3 +230,109 @@ test('BUG-20260923-04 acceptance: entering SSL without user changes never trigge
   const postSubmitEdit = edit(submittedForm, 'includeWildcard', true);
   assert.equal(sslDraftDirty(postSubmitEdit), true, 'Edits after submission must flag dirty again');
 });
+
+test('BUG-20260923-05 acceptance: SSL communication address resolves from active session user (Owner / site account), avoids silent fallback, remains editable without late overwrite, validates input when missing, and handles role/session switching', () => {
+  // Criterion 2: Resolves from active user (Owner, site_manager, customer, reseller, hosting profile)
+  const ownerSession = { user: { id: 'owner-1', role: 'owner', email: 'owner@example.test' } };
+  const siteMgrSession = { user: { id: 'mgr-1', role: 'site_manager', email: 'manager@site.test' } };
+  const customerSession = { user: { id: 'cust-1', role: 'customer', email: 'customer@site.test' } };
+  const resellerSession = { user: { id: 'res-1', role: 'reseller', email: 'reseller@site.test' } };
+  const hostingProfileSession = { user: { id: 'host-1', role: 'customer', hosting: { contactEmail: 'profile@site.test' } } };
+  const usernameEmailSession = { user: { id: 'user-1', role: 'site_manager', username: 'admin@site.test' } };
+
+  assert.equal(sslContactEmail(ownerSession), 'owner@example.test');
+  assert.equal(sslContactEmail(siteMgrSession), 'manager@site.test');
+  assert.equal(sslContactEmail(customerSession), 'customer@site.test');
+  assert.equal(sslContactEmail(resellerSession), 'reseller@site.test');
+  assert.equal(sslContactEmail(hostingProfileSession), 'profile@site.test');
+  assert.equal(sslContactEmail(usernameEmailSession), 'admin@site.test');
+
+  // No account address -> empty field, never silent global ACME fallback
+  const noAddressSession = {
+    user: { id: 'owner-2', role: 'owner', username: 'admin' },
+    dnsSsl: { acmeEmail: 'global-acme@server.test' },
+  };
+  assert.equal(sslContactEmail(noAddressSession), '');
+
+  // Form initialization with user email
+  const ownerDraft = createSslRequestDraft(sslContactEmail(ownerSession));
+  assert.equal(ownerDraft.values.email, 'owner@example.test');
+  assert.equal(sslDraftDirty(ownerDraft), false);
+
+  const siteMgrDraft = createSslRequestDraft(sslContactEmail(siteMgrSession));
+  assert.equal(siteMgrDraft.values.email, 'manager@site.test');
+  assert.equal(sslDraftDirty(siteMgrDraft), false);
+
+  const emptyDraft = createSslRequestDraft(sslContactEmail(noAddressSession));
+  assert.equal(emptyDraft.values.email, '');
+  assert.equal(sslDraftDirty(emptyDraft), false);
+
+  // Criterion 3: Input remains visible/editable, and late background settings cannot overwrite user modifications
+  const userEdited = edit(ownerDraft, 'email', 'custom-ssl@mycompany.org');
+  assert.equal(userEdited.values.email, 'custom-ssl@mycompany.org');
+  assert.equal(sslDraftDirty(userEdited), true);
+
+  // Late background response attempting to set default email
+  const lateDefaultAttempt = reduce(userEdited, { type: 'email-default', email: 'late-global@server.test' });
+  assert.equal(lateDefaultAttempt.values.email, 'custom-ssl@mycompany.org');
+  assert.equal(lateDefaultAttempt.emailTouched, true);
+
+  // User intentionally clearing email -> late response still cannot overwrite
+  const userCleared = edit(ownerDraft, 'email', '');
+  assert.equal(userCleared.values.email, '');
+  assert.equal(userCleared.emailTouched, true);
+  const lateAttemptOnCleared = reduce(userCleared, { type: 'email-default', email: 'late@server.test' });
+  assert.equal(lateAttemptOnCleared.values.email, '');
+
+  // User reverting back to baseline email -> emailTouched remains true, late response still blocked
+  const userReverted = edit(userEdited, 'email', 'owner@example.test');
+  assert.equal(sslDraftDirty(userReverted), false);
+  const lateAttemptOnReverted = reduce(userReverted, { type: 'email-default', email: 'late@server.test' });
+  assert.equal(lateAttemptOnReverted.values.email, 'owner@example.test');
+
+  // Criterion 4: Oturum kullanıcısının tanımlı e-postası yoksa form sessizce yedek atamaz, kullanıcıdan geçerli e-posta istenir
+  assert.equal(validSslContactEmail(''), false);
+  assert.equal(validSslContactEmail('invalid-email'), false);
+  assert.equal(validSslContactEmail('user@'), false);
+  assert.equal(validSslContactEmail('@domain.com'), false);
+  assert.equal(validSslContactEmail('user@domain'), false);
+  assert.equal(validSslContactEmail('user@domain.com'), true);
+  assert.equal(validSslContactEmail('admin.user+acme@sub.example.test'), true);
+
+  // Submitting an empty or invalid email is rejected
+  assert.equal(reduce(emptyDraft, { type: 'submitted', values: { email: '', ...SSL_SCOPE_DEFAULTS } }), emptyDraft);
+  assert.equal(reduce(emptyDraft, { type: 'submitted', values: { email: 'bad-email', ...SSL_SCOPE_DEFAULTS } }), emptyDraft);
+
+  // When valid email is entered, submission snapshot preserves the exact email
+  const validUserEntry = edit(emptyDraft, 'email', 'user.entered@example.test');
+  const snapshot = sslDraftSnapshot(validUserEntry);
+  assert.equal(snapshot.email, 'user.entered@example.test');
+  assert.equal(validSslContactEmail(snapshot.email), true);
+
+  const submitted = reduce(validUserEntry, { type: 'submitted', values: snapshot });
+  assert.equal(sslDraftDirty(submitted), false);
+  assert.equal(submitted.baseline.email, 'user.entered@example.test');
+
+  // Criterion 5: Role and user session switching isolation
+  const domain = { id: 'domain-1', serverId: 'server-1' };
+  const ownerKey = sslDraftKey(domain, ownerSession, 1);
+  const siteMgrKey = sslDraftKey(domain, siteMgrSession, 1);
+  const customerKey = sslDraftKey(domain, customerSession, 1);
+  const resellerKey = sslDraftKey(domain, resellerSession, 1);
+  const rotatedOwnerKey = sslDraftKey(domain, ownerSession, 2);
+
+  // Each role / user / session generation has a distinct component key
+  assert.notEqual(ownerKey, siteMgrKey);
+  assert.notEqual(siteMgrKey, customerKey);
+  assert.notEqual(customerKey, resellerKey);
+  assert.notEqual(ownerKey, rotatedOwnerKey);
+
+  // Switching between Owner and Site account produces a fresh draft with the new user's email
+  const switchedToSiteMgr = createSslRequestDraft(sslContactEmail(siteMgrSession));
+  assert.equal(switchedToSiteMgr.values.email, 'manager@site.test');
+  assert.notEqual(switchedToSiteMgr.values.email, ownerDraft.values.email);
+
+  // Switching to account without email gives empty draft, no silent fallback
+  const switchedToNoEmail = createSslRequestDraft(sslContactEmail(noAddressSession));
+  assert.equal(switchedToNoEmail.values.email, '');
+});
