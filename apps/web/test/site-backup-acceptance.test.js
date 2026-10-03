@@ -196,3 +196,130 @@ test('createSiteBackupClient executes preview, queue, get, list operations and u
 
   client.dispose();
 });
+
+test('PROD-13 Acceptance: siteBackupBrowser normalizes 6 key fields and handles failed/stale snapshot statuses', () => {
+  const rawBrowser = {
+    schemaVersion: 1,
+    ...scope,
+    backupSet: {
+      digest,
+      runtimeType: 'node',
+      databaseCount: 2,
+      mailCount: 1,
+      dnsCount: 1,
+      pathCount: 3,
+      composeHooksEnabled: true,
+    },
+    repositories: [{
+      id: repoId,
+      name: 'remote-repo',
+      backend: 'rclone',
+      status: 'ready',
+      retentionPolicy: { keepLast: 14, keepDaily: 7 },
+      lastCheckedAt: '2026-09-25T01:00:00.000Z',
+      lastSnapshotAt: '2026-09-25T02:00:00.000Z',
+      snapshotStatus: 'ready',
+      snapshots: [
+        { id: '1'.repeat(64), shortId: '11111111', time: '2026-09-25T02:00:00.000Z', kind: 'backup', status: 'succeeded' },
+        { id: '2'.repeat(64), shortId: '22222222', time: '2026-09-24T02:00:00.000Z', kind: 'backup', status: 'failed' },
+        { id: '3'.repeat(64), shortId: '33333333', time: '2026-09-23T02:00:00.000Z', kind: 'backup', status: 'stale' },
+      ],
+    }],
+    inspectedAt: '2026-09-25T02:30:00.000Z',
+    lastSuccessfulBackupAt: '2026-09-25T02:00:00.000Z',
+    nextScheduledRunAt: '2026-09-26T02:00:00.000Z',
+    scopeSummary: { paths: 3, databases: 2, mailboxes: 1, dnsZones: 1 },
+    retentionPolicy: { keepLast: 14, keepDaily: 7 },
+    remoteRepositoryStatus: 'ready',
+    restoreOutcome: { status: 'succeeded', finishedAt: '2026-09-25T02:15:00.000Z', operationId: opId, selective: true },
+  };
+
+  const browser = siteBackupBrowser(rawBrowser, scope);
+  assert.equal(browser.lastSuccessfulBackupAt, '2026-09-25T02:00:00.000Z');
+  assert.equal(browser.nextScheduledRunAt, '2026-09-26T02:00:00.000Z');
+  assert.deepEqual(browser.scopeSummary, { paths: 3, databases: 2, mailboxes: 1, dnsZones: 1 });
+  assert.deepEqual(browser.retentionPolicy, { keepLast: 14, keepDaily: 7 });
+  assert.equal(browser.remoteRepositoryStatus, 'ready');
+  assert.equal(browser.restoreOutcome.status, 'succeeded');
+  assert.equal(browser.restoreOutcome.selective, true);
+
+  const snaps = browser.repositories[0].snapshots;
+  assert.equal(snaps[0].status, 'succeeded');
+  assert.equal(snaps[1].status, 'failed');
+  assert.equal(snaps[2].status, 'stale');
+  // Failed and stale snapshots are never marked as succeeded
+  assert.notEqual(snaps[1].status, 'succeeded');
+  assert.notEqual(snaps[2].status, 'succeeded');
+});
+
+test('PROD-13 Acceptance: createSiteBackupClient supports selective restore, queueCheck, and queuePlan', async () => {
+  const requests = [];
+  const mockRequest = async (path, options = {}) => {
+    requests.push({ path, ...options });
+    if (path.includes('/restore/preview')) {
+      return {
+        data: {
+          websiteId: scope.websiteId,
+          repositoryId: repoId,
+          snapshotId: '11111111',
+          confirmation: `restore:${scope.websiteId}:${repoId}:11111111:${digest}`,
+          selective: options.body?.include?.length > 0,
+          include: options.body?.include ?? [],
+        },
+      };
+    }
+    if (path.includes('/backup-operations') && options.method === 'POST') {
+      return {
+        data: {
+          id: opId,
+          websiteId: scope.websiteId,
+          repositoryId: repoId,
+          kind: options.body.kind,
+          status: 'queued',
+          selective: Boolean(options.body.selective || options.body.include?.length > 0),
+          include: options.body.include ?? [],
+          createdAt: '2026-09-25T10:00:00.000Z',
+          updatedAt: '2026-09-25T10:00:00.000Z',
+        },
+      };
+    }
+    throw new Error(`Unhandled: ${path}`);
+  };
+
+  const client = createSiteBackupClient({ scope, request: mockRequest });
+
+  // 1. Preview selective restore
+  const preview = await client.previewRestore({
+    repositoryId: repoId,
+    snapshotId: '11111111',
+    include: ['paths', 'databases'],
+  });
+  assert.ok(preview.confirmation.startsWith('restore:'));
+  assert.equal(requests[0].body.include.length, 2);
+
+  // 2. Queue selective restore
+  const restoreOp = await client.queueRestore({
+    repositoryId: repoId,
+    snapshotId: '11111111',
+    expectedPreviewDigest: digest,
+    confirmation: preview.confirmation,
+    include: ['paths', 'databases'],
+  });
+  assert.equal(restoreOp.kind, 'restore');
+  assert.equal(restoreOp.selective, true);
+  assert.deepEqual(restoreOp.include, ['paths', 'databases']);
+
+  // 3. Queue repository check
+  const checkOp = await client.queueCheck({ repositoryId: repoId });
+  assert.equal(checkOp.kind, 'check');
+
+  // 4. Queue backup plan
+  const planOp = await client.queuePlan({
+    repositoryId: repoId,
+    schedule: '0 2 * * *',
+    retentionPolicy: { keepLast: 7 },
+  });
+  assert.equal(planOp.kind, 'plan');
+
+  client.dispose();
+});

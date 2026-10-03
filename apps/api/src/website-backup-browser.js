@@ -31,11 +31,18 @@ function safeSnapshot(value) {
     || typeof value.id !== 'string' || !SNAPSHOT.test(value.id)
     || typeof value.time !== 'string' || !Number.isFinite(Date.parse(value.time))) return null;
   const tags = Array.isArray(value.tags) ? value.tags.filter((tag) => typeof tag === 'string').slice(0, 50) : [];
+  let status = 'succeeded';
+  if (value.status === 'failed' || tags.includes('failed') || tags.includes('error') || Boolean(value.error) || value.failed === true) {
+    status = 'failed';
+  } else if (value.status === 'stale' || tags.includes('stale') || value.stale === true) {
+    status = 'stale';
+  }
   return Object.freeze({
     id: value.id,
     shortId: typeof value.shortId === 'string' && SNAPSHOT.test(value.shortId) ? value.shortId : value.id.slice(0, 8),
     time: new Date(value.time).toISOString(),
     kind: tags.includes('pre-restore') ? 'pre_restore' : 'backup',
+    status,
   });
 }
 
@@ -60,7 +67,11 @@ export function createWebsiteBackupBrowser({
   resticRepositoryRegistry,
   websiteBackupSetProvider,
   localServerId = null,
+  websiteBackupOperationRegistry = null,
+  operationRegistry = null,
+  backupScheduleProvider = null,
 } = {}) {
+  const resolvedOperationRegistry = websiteBackupOperationRegistry ?? operationRegistry;
   if (typeof websiteRegistry?.getWebsite !== 'function'
     || typeof resticRepositoryRegistry?.listRepositories !== 'function'
     || typeof resticRepositoryRegistry?.listSnapshots !== 'function'
@@ -124,12 +135,103 @@ export function createWebsiteBackupBrowser({
       }));
     }
 
+    let lastSuccessfulBackupAt = null;
+    for (const repository of projected) {
+      for (const snap of repository.snapshots) {
+        if (snap.kind === 'backup' && snap.status === 'succeeded') {
+          if (!lastSuccessfulBackupAt || Date.parse(snap.time) > Date.parse(lastSuccessfulBackupAt)) {
+            lastSuccessfulBackupAt = snap.time;
+          }
+        }
+      }
+    }
+
+    const summary = `${backupSet.targetPaths?.length ?? 0} dosya hedefi, ${backupSet.databases?.length ?? 0} veritabanı, ${backupSet.mail?.length ?? 0} posta, ${backupSet.dns?.length ?? 0} DNS`;
+    const scopeSummary = Object.freeze({
+      paths: backupSet.targetPaths?.length ?? 0,
+      files: backupSet.targetPaths?.length ?? 0,
+      databases: backupSet.databases?.length ?? 0,
+      mail: backupSet.mail?.length ?? 0,
+      mailboxes: backupSet.mail?.length ?? 0,
+      dns: backupSet.dns?.length ?? 0,
+      dnsZones: backupSet.dns?.length ?? 0,
+      composeHooks: backupSet.composeHooks?.enabled === true,
+      runtimeType: backupSet.website?.runtimeType ?? null,
+      summary,
+    });
+
+    const retentionPolicy = projected.find((r) => r.retentionPolicy !== null)?.retentionPolicy ?? null;
+
+    const remoteRepo = projected.find((r) => r.backend === 'rclone');
+    const remoteRepositoryStatus = remoteRepo ? Object.freeze({
+      configured: true,
+      repositoryId: remoteRepo.id,
+      name: remoteRepo.name,
+      status: remoteRepo.status,
+      backend: 'rclone',
+      lastCheckedAt: remoteRepo.lastCheckedAt,
+    }) : Object.freeze({
+      configured: false,
+      status: 'unconfigured',
+      backend: null,
+      repositoryId: null,
+      name: null,
+      lastCheckedAt: null,
+    });
+
+    let nextScheduledRunAt = null;
+    if (typeof backupScheduleProvider?.getNextScheduledRun === 'function') {
+      try {
+        const next = await backupScheduleProvider.getNextScheduledRun({ websiteId, serverId: website.serverId });
+        if (next && Number.isFinite(Date.parse(next))) {
+          nextScheduledRunAt = new Date(next).toISOString();
+        }
+      } catch {
+        // ignore
+      }
+    } else if (website.backupSchedule?.nextRunAt && Number.isFinite(Date.parse(website.backupSchedule.nextRunAt))) {
+      nextScheduledRunAt = new Date(website.backupSchedule.nextRunAt).toISOString();
+    }
+
+    let restoreOutcome = null;
+    const opRegistry = resolvedOperationRegistry?.registry ?? resolvedOperationRegistry;
+    if (opRegistry && typeof opRegistry.listOperations === 'function') {
+      try {
+        const ops = await opRegistry.listOperations({ websiteId });
+        const restoreOps = ops.filter((op) => op.kind === 'restore')
+          .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+        if (restoreOps.length > 0) {
+          const latest = restoreOps[0];
+          restoreOutcome = Object.freeze({
+            operationId: latest.id,
+            status: latest.status,
+            snapshotId: latest.snapshotId ?? latest.result?.snapshotId ?? null,
+            preRestoreSnapshotId: latest.preRestoreSnapshotId ?? latest.result?.preRestoreSnapshotId ?? null,
+            restoredAt: latest.finishedAt ?? latest.result?.restoredAt ?? latest.createdAt,
+            finishedAt: latest.finishedAt ?? latest.result?.restoredAt ?? latest.createdAt,
+            rollbackReason: latest.result?.rollbackReason ?? null,
+            healthCheck: latest.result?.healthCheck ? Object.freeze({ ...latest.result.healthCheck }) : null,
+            selective: Boolean(latest.selective || (Array.isArray(latest.include) && latest.include.length > 0)),
+            include: Array.isArray(latest.include) ? Object.freeze([...latest.include]) : Object.freeze([]),
+          });
+        }
+      } catch {
+        // ignore
+      }
+    }
+
     return Object.freeze({
       schemaVersion: 1,
       websiteId,
       serverId: website.serverId,
       backupSet: backupSetSummary(backupSet, websiteId),
       repositories: Object.freeze(projected),
+      lastSuccessfulBackupAt,
+      nextScheduledRunAt,
+      scopeSummary,
+      retentionPolicy,
+      remoteRepositoryStatus,
+      restoreOutcome,
       inspectedAt: new Date().toISOString(),
     });
   }

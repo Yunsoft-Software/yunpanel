@@ -45,12 +45,27 @@ function BackupWorkspace({ scope, generation, isOwner }) {
   const [backupBusy, setBackupBusy] = useState(false);
   const [backupError, setBackupError] = useState(null);
 
+  // Plan modal state
+  const [planModalOpen, setPlanModalOpen] = useState(false);
+  const [planRepoId, setPlanRepoId] = useState('');
+  const [planSchedule, setPlanSchedule] = useState('0 2 * * *');
+  const [planKeepLast, setPlanKeepLast] = useState('7');
+  const [planKeepDaily, setPlanKeepDaily] = useState('7');
+  const [planKeepWeekly, setPlanKeepWeekly] = useState('4');
+  const [planBusy, setPlanBusy] = useState(false);
+  const [planError, setPlanError] = useState(null);
+
   // Restore modal state
   const [restoreTarget, setRestoreTarget] = useState(null);
   const [restorePreview, setRestorePreview] = useState(null);
   const [restorePreviewLoading, setRestorePreviewLoading] = useState(false);
   const [restoreBusy, setRestoreBusy] = useState(false);
   const [restoreError, setRestoreError] = useState(null);
+  const [restoreSelective, setRestoreSelective] = useState(false);
+  const [restoreIncludeFiles, setRestoreIncludeFiles] = useState(true);
+  const [restoreIncludeDb, setRestoreIncludeDb] = useState(true);
+  const [restoreIncludeMail, setRestoreIncludeMail] = useState(true);
+  const [restoreIncludeDns, setRestoreIncludeDns] = useState(true);
 
   useEffect(() => {
     live.current = true;
@@ -142,9 +157,65 @@ function BackupWorkspace({ scope, generation, isOwner }) {
     }
   };
 
+  const computeIncludeList = (selective, files, db, mail, dns) => {
+    if (!selective) return [];
+    const list = [];
+    if (files) list.push('paths');
+    if (db) list.push('databases');
+    if (mail) list.push('mail');
+    if (dns) list.push('dns');
+    return list;
+  };
+
+  const handleOpenPlanModal = () => {
+    const defaultRepo = readyRepositories[0];
+    if (!defaultRepo) return;
+    setPlanRepoId(defaultRepo.id);
+    setPlanModalOpen(true);
+    setPlanError(null);
+  };
+
+  const handleConfirmPlan = async () => {
+    if (!ref.current || !planRepoId) return;
+    setPlanBusy(true);
+    setPlanError(null);
+    try {
+      const op = await ref.current.queuePlan({
+        repositoryId: planRepoId,
+        schedule: planSchedule,
+        retentionPolicy: {
+          keepLast: Number.parseInt(planKeepLast, 10) || 7,
+          keepDaily: Number.parseInt(planKeepDaily, 10) || 7,
+          keepWeekly: Number.parseInt(planKeepWeekly, 10) || 4,
+        },
+      });
+      setActiveOp(op);
+      setPlanModalOpen(false);
+    } catch (err) {
+      setPlanError(siteBackupErrorMessage(err));
+    } finally {
+      setPlanBusy(false);
+    }
+  };
+
+  const handleCheckHealth = async (repository) => {
+    if (!ref.current || !repository) return;
+    try {
+      const op = await ref.current.queueCheck({ repositoryId: repository.id });
+      setActiveOp(op);
+    } catch (err) {
+      setState((prev) => ({ ...prev, error: siteBackupErrorMessage(err) }));
+    }
+  };
+
   // Start restore preview flow
   const handleOpenRestore = async (repository, snapshot) => {
     setRestoreTarget({ repository, snapshot });
+    setRestoreSelective(false);
+    setRestoreIncludeFiles(true);
+    setRestoreIncludeDb(true);
+    setRestoreIncludeMail(true);
+    setRestoreIncludeDns(true);
     setRestorePreview(null);
     setRestoreError(null);
     setRestorePreviewLoading(true);
@@ -152,6 +223,55 @@ function BackupWorkspace({ scope, generation, isOwner }) {
       const preview = await ref.current?.previewRestore({
         repositoryId: repository.id,
         snapshotId: snapshot.id,
+        include: [],
+      });
+      setRestorePreview(preview);
+    } catch (err) {
+      setRestoreError(siteBackupErrorMessage(err));
+    } finally {
+      setRestorePreviewLoading(false);
+    }
+  };
+
+  const handleToggleSelective = async (newSelective) => {
+    setRestoreSelective(newSelective);
+    if (!restoreTarget || !ref.current) return;
+    setRestorePreviewLoading(true);
+    setRestoreError(null);
+    try {
+      const inc = computeIncludeList(newSelective, restoreIncludeFiles, restoreIncludeDb, restoreIncludeMail, restoreIncludeDns);
+      const preview = await ref.current.previewRestore({
+        repositoryId: restoreTarget.repository.id,
+        snapshotId: restoreTarget.snapshot.id,
+        include: inc,
+      });
+      setRestorePreview(preview);
+    } catch (err) {
+      setRestoreError(siteBackupErrorMessage(err));
+    } finally {
+      setRestorePreviewLoading(false);
+    }
+  };
+
+  const handleToggleIncludeItem = async (type, checked) => {
+    const nextFiles = type === 'paths' ? checked : restoreIncludeFiles;
+    const nextDb = type === 'databases' ? checked : restoreIncludeDb;
+    const nextMail = type === 'mail' ? checked : restoreIncludeMail;
+    const nextDns = type === 'dns' ? checked : restoreIncludeDns;
+    if (type === 'paths') setRestoreIncludeFiles(checked);
+    if (type === 'databases') setRestoreIncludeDb(checked);
+    if (type === 'mail') setRestoreIncludeMail(checked);
+    if (type === 'dns') setRestoreIncludeDns(checked);
+
+    if (!restoreTarget || !ref.current) return;
+    setRestorePreviewLoading(true);
+    setRestoreError(null);
+    try {
+      const inc = computeIncludeList(restoreSelective, nextFiles, nextDb, nextMail, nextDns);
+      const preview = await ref.current.previewRestore({
+        repositoryId: restoreTarget.repository.id,
+        snapshotId: restoreTarget.snapshot.id,
+        include: inc,
       });
       setRestorePreview(preview);
     } catch (err) {
@@ -166,6 +286,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
     setRestoreBusy(true);
     setRestoreError(null);
     try {
+      const inc = computeIncludeList(restoreSelective, restoreIncludeFiles, restoreIncludeDb, restoreIncludeMail, restoreIncludeDns);
       const op = await ref.current.queueRestore({
         repositoryId: restoreTarget.repository.id,
         snapshotId: restoreTarget.snapshot.id,
@@ -173,6 +294,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
         confirmation: restorePreview.confirmation,
         healthPath: restorePreview.healthSpec?.healthPath ?? '/health',
         timeoutSeconds: restorePreview.healthSpec?.timeoutSeconds ?? 30,
+        include: inc,
       });
       setActiveOp(op);
       setRestoreTarget(null);
@@ -186,6 +308,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
   return <>
     <Section title="Yedekleme ve Geri Yükleme" description="Bu siteye ait yedek kapsamını ve geri yüklenebilir snapshotları görüntüleyin."
       actions={<div className="ws-actions">
+        {isOwner && <Button icon="clock" disabled={state?.loading || isOperationBusy || readyRepositories.length === 0} onClick={handleOpenPlanModal}>Plan ve Zamanlama</Button>}
         {isOwner && <Button icon="archive" disabled={state?.loading || isOperationBusy || readyRepositories.length === 0} onClick={handleOpenBackupModal}>Yedek Al</Button>}
         <Button icon="refresh" disabled={state?.loading || state?.denied} onClick={() => void ref.current?.load()}>Yedekleri yenile</Button>
       </div>}>
@@ -193,10 +316,12 @@ function BackupWorkspace({ scope, generation, isOwner }) {
         {state?.loading && !data && <p role="status">Yedekleme bilgileri okunuyor…</p>}
         {data && <><p className="ws-muted">{state.fresh ? 'Son kontrol' : 'Önceki kontrol'}: {formatDate(data.inspectedAt)}</p>
           <KeyValues items={[
-            ['Dosya/veri hedef grubu', data.backupSet.pathCount],
-            ['Veritabanı', data.backupSet.databaseCount],
-            ['Posta kapsamı', data.backupSet.mailCount],
-            ['DNS kapsamı', data.backupSet.dnsCount],
+            ['Son başarılı yedek', data.lastSuccessfulBackupAt ? formatDate(data.lastSuccessfulBackupAt) : 'Henüz yok'],
+            ['Sonraki çalışma', data.nextScheduledRunAt ? formatDate(data.nextScheduledRunAt) : 'Planlanmadı'],
+            ['Kapsam özeti', `${data.scopeSummary?.paths ?? data.backupSet.pathCount} dosya yolu, ${data.scopeSummary?.databases ?? data.backupSet.databaseCount} veritabanı, ${data.scopeSummary?.mailboxes ?? data.backupSet.mailCount} posta, ${data.scopeSummary?.dnsZones ?? data.backupSet.dnsCount} DNS`],
+            ['Saklama politikası', retentionLabel(data.retentionPolicy)],
+            ['Uzak depo (rclone)', data.remoteRepositoryStatus === 'ready' ? 'Bağlı ve hazır' : data.remoteRepositoryStatus === 'uninitialized' ? 'Hazırlanmadı' : data.remoteRepositoryStatus === 'error' ? 'Hata / Kontrol gerekli' : 'Yapılandırılmadı'],
+            ['Son geri yükleme sonucu', data.restoreOutcome?.status === 'succeeded' ? `Başarılı${data.restoreOutcome.selective ? ' (Seçici)' : ''}${data.restoreOutcome.finishedAt ? ' · ' + formatDate(data.restoreOutcome.finishedAt) : ''}` : data.restoreOutcome?.status === 'failed' ? 'Başarısız' : data.restoreOutcome?.status === 'rolled_back' ? 'Geri alındı (Rollback)' : 'İşlem yok'],
             ['Docker quiesce', data.backupSet.composeHooksEnabled ? 'Kullanılıyor' : 'Gerekli değil'],
           ]} /></>}
         <p className="ws-muted">{isOwner
@@ -206,7 +331,12 @@ function BackupWorkspace({ scope, generation, isOwner }) {
     </Section>
 
     {/* Active Durable Operation Card */}
-    {activeOp && <Section title={activeOp.kind === 'backup' ? 'Yedekleme İşlemi (Durable Job)' : 'Geri Yükleme İşlemi (Durable Job)'}
+    {activeOp && <Section title={
+      activeOp.kind === 'backup' ? 'Yedekleme İşlemi (Durable Job)'
+      : activeOp.kind === 'restore' ? (activeOp.selective ? 'Seçici Geri Yükleme İşlemi (Durable Job)' : 'Geri Yükleme İşlemi (Durable Job)')
+      : activeOp.kind === 'check' ? 'Depo Sağlık Denetimi (Durable Job)'
+      : 'Yedekleme Planlama İşlemi (Durable Job)'
+    }
       actions={!['queued', 'running'].includes(activeOp.status) && <Button icon="close" onClick={() => setActiveOp(null)}>Kapat</Button>}>
       <div className="ws-section-body">
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', marginBottom: '0.5rem' }}>
@@ -226,7 +356,7 @@ function BackupWorkspace({ scope, generation, isOwner }) {
     </Section>}
 
     {data && data.repositories.length === 0 && <EmptyState icon="archive" title="Yedek deposu yok" detail="Bu sunucu için henüz yapılandırılmış bir Restic deposu bulunmuyor." />}
-    {data?.repositories.map((repository) => <Repository key={repository.id} repository={repository} isOwner={isOwner} isOperationBusy={isOperationBusy} onRestore={(snapshot) => handleOpenRestore(repository, snapshot)} />)}
+    {data?.repositories.map((repository) => <Repository key={repository.id} repository={repository} isOwner={isOwner} isOperationBusy={isOperationBusy} onRestore={(snapshot) => handleOpenRestore(repository, snapshot)} onCheckHealth={(repo) => handleCheckHealth(repo)} />)}
 
     {/* Backup Confirmation Modal */}
     {backupModalOpen && <Modal title="Yeni Site Yedeği Al" onClose={() => !backupBusy && setBackupModalOpen(false)} busy={backupBusy}>
@@ -251,17 +381,131 @@ function BackupWorkspace({ scope, generation, isOwner }) {
       />}
     </Modal>}
 
+    {/* Plan and Schedule Modal */}
+    {planModalOpen && <Modal title="Yedekleme Planı ve Saklama Politikası" onClose={() => !planBusy && setPlanModalOpen(false)} busy={planBusy}>
+      {readyRepositories.length > 1 && <div style={{ marginBottom: '1rem' }}>
+        <label>Yedek Deposu Seçin:
+          <select value={planRepoId} disabled={planBusy} onChange={(e) => setPlanRepoId(e.target.value)}>
+            {readyRepositories.map((r) => <option key={r.id} value={r.id}>{r.name} ({r.backend === 'rclone' ? 'Uzak' : 'Yerel'})</option>)}
+          </select>
+        </label>
+      </div>}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginBottom: '1rem' }}>
+        <label>Zamanlama (Cron İfadesi):
+          <input
+            value={planSchedule}
+            disabled={planBusy}
+            onChange={(e) => setPlanSchedule(e.target.value)}
+            placeholder="0 2 * * *"
+          />
+        </label>
+        <p className="ws-muted" style={{ fontSize: '0.85rem' }}>Örnek: Her gece 02:00 için <code>0 2 * * *</code></p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '0.5rem' }}>
+          <label>Son N Kopya:
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={planKeepLast}
+              disabled={planBusy}
+              onChange={(e) => setPlanKeepLast(e.target.value)}
+            />
+          </label>
+          <label>Günlük:
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={planKeepDaily}
+              disabled={planBusy}
+              onChange={(e) => setPlanKeepDaily(e.target.value)}
+            />
+          </label>
+          <label>Haftalık:
+            <input
+              type="number"
+              min="1"
+              max="100"
+              value={planKeepWeekly}
+              disabled={planBusy}
+              onChange={(e) => setPlanKeepWeekly(e.target.value)}
+            />
+          </label>
+        </div>
+      </div>
+      <ErrorNotice error={planError} />
+      <footer className="ws-modal-footer">
+        <Button disabled={planBusy} onClick={() => !planBusy && setPlanModalOpen(false)}>Vazgeç</Button>
+        <Button variant="primary" disabled={planBusy} onClick={handleConfirmPlan}>
+          {planBusy ? 'Kaydediliyor…' : 'Planı Kaydet'}
+        </Button>
+      </footer>
+    </Modal>}
+
     {/* Restore Confirmation Modal */}
     {restoreTarget && <Modal title={`Snapshot Geri Yükle: ${restoreTarget.snapshot.shortId}`} onClose={() => !restoreBusy && setRestoreTarget(null)} busy={restoreBusy}>
+      <div style={{ marginBottom: '1rem' }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontWeight: 600 }}>
+          <input
+            type="checkbox"
+            checked={restoreSelective}
+            disabled={restoreBusy || restorePreviewLoading}
+            onChange={(e) => void handleToggleSelective(e.target.checked)}
+          />
+          Seçici Geri Yükleme (Kapsamı Özelleştir)
+        </label>
+        {restoreSelective && (
+          <div style={{ margin: '0.75rem 0 0 1.5rem', display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={restoreIncludeFiles}
+                disabled={restoreBusy || restorePreviewLoading}
+                onChange={(e) => void handleToggleIncludeItem('paths', e.target.checked)}
+              />
+              Dosyalar ve web kök dizini (paths)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={restoreIncludeDb}
+                disabled={restoreBusy || restorePreviewLoading}
+                onChange={(e) => void handleToggleIncludeItem('databases', e.target.checked)}
+              />
+              Veritabanları (databases)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={restoreIncludeMail}
+                disabled={restoreBusy || restorePreviewLoading}
+                onChange={(e) => void handleToggleIncludeItem('mail', e.target.checked)}
+              />
+              E-posta hesapları ve kutuları (mail)
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+              <input
+                type="checkbox"
+                checked={restoreIncludeDns}
+                disabled={restoreBusy || restorePreviewLoading}
+                onChange={(e) => void handleToggleIncludeItem('dns', e.target.checked)}
+              />
+              DNS alan bölgeleri ve kayıtları (dns)
+            </label>
+          </div>
+        )}
+      </div>
       {restorePreviewLoading && <p role="status">Geri yükleme önizlemesi ve sağlık kontrolleri hazırlanıyor…</p>}
       <ErrorNotice error={restoreError} />
       {restorePreview && <ConfirmDialog
-        title="Geri Yükleme Onayı"
-        message={`UYARI: Bu işlem sitenin mevcut dosyalarını '${restoreTarget.snapshot.shortId}' (${formatDate(restoreTarget.snapshot.time)}) anlık görüntüsüyle değiştirecektir. İşlem öncesi otomatik bir geri yükleme öncesi anlık görüntü (pre-restore snapshot) alınacak, ardından sağlık kontrolü (/health) doğrulanacaktır. Sağlık kontrolü başarısız olursa sistem otomatik olarak geri alma (rollback) yapacaktır.`}
+        title={restoreSelective ? 'Seçici Geri Yükleme Onayı' : 'Geri Yükleme Onayı'}
+        message={restoreSelective
+          ? `UYARI: Seçilen kapsam '${restoreTarget.snapshot.shortId}' (${formatDate(restoreTarget.snapshot.time)}) anlık görüntüsünden geri yüklenecektir. Otomatik pre-restore snapshot alınacak ve ardından /health sağlık kontrolü çalıştırılacaktır.`
+          : `UYARI: Bu işlem sitenin mevcut dosyalarını '${restoreTarget.snapshot.shortId}' (${formatDate(restoreTarget.snapshot.time)}) anlık görüntüsüyle değiştirecektir. İşlem öncesi otomatik bir geri yükleme öncesi anlık görüntü (pre-restore snapshot) alınacak, ardından sağlık kontrolü (/health) doğrulanacaktır. Sağlık kontrolü başarısız olursa sistem otomatik olarak geri alma (rollback) yapacaktır.`}
         confirmation={restorePreview.confirmation}
         busy={restoreBusy}
         error={restoreError}
-        confirmLabel="Geri Yüklemeyi Başlat"
+        confirmLabel={restoreSelective ? 'Seçici Geri Yüklemeyi Başlat' : 'Geri Yüklemeyi Başlat'}
         onCancel={() => !restoreBusy && setRestoreTarget(null)}
         onConfirm={handleConfirmRestore}
       />}
@@ -269,9 +513,22 @@ function BackupWorkspace({ scope, generation, isOwner }) {
   </>;
 }
 
-function Repository({ repository, isOwner, isOperationBusy, onRestore }) {
+function Repository({ repository, isOwner, isOperationBusy, onRestore, onCheckHealth }) {
   const description = (repository.backend === 'rclone' ? 'Uzak depo' : 'Yerel depo') + ' · ' + repoState(repository.status);
-  return <Section title={repository.name} description={description}>
+  return <Section
+    title={repository.name}
+    description={description}
+    actions={isOwner && (
+      <Button
+        icon="shield"
+        variant="secondary"
+        disabled={isOperationBusy || repository.status !== 'ready'}
+        onClick={() => onCheckHealth(repository)}
+      >
+        Sağlık Denetimi
+      </Button>
+    )}
+  >
     <div className="ws-section-body"><KeyValues items={[
       ['Depo durumu', repoState(repository.status)],
       ['Snapshot görünümü', snapshotState(repository.snapshotStatus)],
@@ -284,13 +541,24 @@ function Repository({ repository, isOwner, isOperationBusy, onRestore }) {
         detail={repository.snapshotStatus === 'error'
           ? 'Snapshot listesi okunamadı; depo yolunu veya ham hatayı site hesabına göstermeden Owner kontrolü gerekir.'
           : 'Bu depoda bu Website etiketiyle eşleşen snapshot bulunamadı.'} />
-      : <div className="ws-table-wrap"><table className="ws-table"><thead><tr><th>Snapshot</th><th>Tür</th><th>Tarih</th>{isOwner && <th>İşlem</th>}</tr></thead><tbody>
-        {repository.snapshots.map((snapshot) => <tr key={snapshot.id}><td><code>{snapshot.shortId}</code></td>
-          <td><Badge state={snapshot.kind === 'pre_restore' ? 'warning' : 'active'}>{snapshot.kind === 'pre_restore' ? 'Geri yükleme öncesi' : 'Site yedeği'}</Badge></td>
-          <td>{formatDate(snapshot.time)}</td>
-          {isOwner && <td>
-            <Button variant="secondary" disabled={isOperationBusy || repository.status !== 'ready'} onClick={() => onRestore(snapshot)}>Geri Yükle</Button>
-          </td>}</tr>)}
+      : <div className="ws-table-wrap"><table className="ws-table"><thead><tr><th>Snapshot</th><th>Tür</th><th>Durum</th><th>Tarih</th>{isOwner && <th>İşlem</th>}</tr></thead><tbody>
+        {repository.snapshots.map((snapshot) => {
+          const isFailed = snapshot.status === 'failed';
+          const isStale = snapshot.status === 'stale';
+          const kindState = isFailed ? 'failed' : isStale ? 'stale' : (snapshot.kind === 'pre_restore' ? 'warning' : 'neutral');
+          const statusBadge = isFailed
+            ? <Badge state="failed">Başarısız</Badge>
+            : isStale
+              ? <Badge state="stale">Eski / Gecikmiş</Badge>
+              : <Badge state="succeeded">Geçerli</Badge>;
+          return (<tr key={snapshot.id}><td><code>{snapshot.shortId}</code></td>
+            <td><Badge state={kindState}>{snapshot.kind === 'pre_restore' ? 'Geri yükleme öncesi' : 'Site yedeği'}</Badge></td>
+            <td>{statusBadge}</td>
+            <td>{formatDate(snapshot.time)}</td>
+            {isOwner && <td>
+              <Button variant="secondary" disabled={isOperationBusy || repository.status !== 'ready' || isFailed} onClick={() => onRestore(snapshot)}>Geri Yükle</Button>
+            </td>}</tr>);
+        })}
       </tbody></table></div>}
   </Section>;
 }

@@ -62,16 +62,16 @@ export function createSiteBackupClient({ scope: input, request, isCurrent = () =
     return siteBackupOperation(response?.data ?? response);
   }
 
-  async function previewRestore({ repositoryId, snapshotId, healthPath = '/health', timeoutSeconds = 30 }) {
+  async function previewRestore({ repositoryId, snapshotId, healthPath = '/health', timeoutSeconds = 30, include = [] }) {
     const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/restore/preview';
     const response = await request(path, {
       method: 'POST',
-      body: { repositoryId, snapshotId, healthPath, timeoutSeconds },
+      body: { repositoryId, snapshotId, healthPath, timeoutSeconds, include },
     });
     return siteBackupPreview(response?.data ?? response);
   }
 
-  async function queueRestore({ repositoryId, snapshotId, expectedPreviewDigest, confirmation, healthPath = '/health', timeoutSeconds = 30 }) {
+  async function queueRestore({ repositoryId, snapshotId, expectedPreviewDigest, confirmation, healthPath = '/health', timeoutSeconds = 30, include = [] }) {
     const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/backup-operations';
     const response = await request(path, {
       method: 'POST',
@@ -83,6 +83,34 @@ export function createSiteBackupClient({ scope: input, request, isCurrent = () =
         confirmation,
         healthPath,
         timeoutSeconds,
+        include,
+      },
+    });
+    return siteBackupOperation(response?.data ?? response);
+  }
+
+  async function queueCheck({ repositoryId, readDataSubset = null } = {}) {
+    const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/backup-operations';
+    const response = await request(path, {
+      method: 'POST',
+      body: {
+        kind: 'check',
+        repositoryId,
+        readDataSubset,
+      },
+    });
+    return siteBackupOperation(response?.data ?? response);
+  }
+
+  async function queuePlan({ repositoryId, schedule, retentionPolicy } = {}) {
+    const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/backup-operations';
+    const response = await request(path, {
+      method: 'POST',
+      body: {
+        kind: 'plan',
+        repositoryId,
+        schedule,
+        retentionPolicy,
       },
     });
     return siteBackupOperation(response?.data ?? response);
@@ -108,6 +136,8 @@ export function createSiteBackupClient({ scope: input, request, isCurrent = () =
     queueBackup,
     previewRestore,
     queueRestore,
+    queueCheck,
+    queuePlan,
     getOperation,
     listOperations,
     subscribe(listener) { listeners.add(listener); return () => listeners.delete(listener); },

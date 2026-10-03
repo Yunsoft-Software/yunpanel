@@ -58,13 +58,14 @@ export function mountWebsiteRestoreRoutes(app, {
   }
 
   app.post('/api/websites/:websiteId/restore/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
-    const { repositoryId, snapshotId, healthPath, timeoutSeconds } = request.body ?? {};
+    const { repositoryId, snapshotId, healthPath, timeoutSeconds, include } = request.body ?? {};
     const preview = await websiteRestoreService.previewRestore({
       websiteId: request.params.websiteId,
       repositoryId,
       snapshotId,
       healthPath,
       timeoutSeconds,
+      include,
     });
     return response.json({ data: preview });
   }));
@@ -77,6 +78,7 @@ export function mountWebsiteRestoreRoutes(app, {
       confirmation,
       healthPath,
       timeoutSeconds,
+      include,
     } = request.body ?? {};
 
     const result = await websiteRestoreService.executeRestore({
@@ -87,6 +89,7 @@ export function mountWebsiteRestoreRoutes(app, {
       confirmation,
       healthPath,
       timeoutSeconds,
+      include,
     });
 
     const statusCode = result.status === 'succeeded' ? 200 : 422;

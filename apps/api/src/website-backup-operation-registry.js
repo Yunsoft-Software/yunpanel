@@ -6,7 +6,7 @@ import { createProcessStoreLock } from './process-store-lock.js';
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const OPERATION_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'rolled_back']);
-const OPERATION_KINDS = new Set(['backup', 'restore']);
+const OPERATION_KINDS = new Set(['backup', 'restore', 'check', 'plan']);
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 
 export class WebsiteBackupOperationRegistryError extends Error {
@@ -34,6 +34,10 @@ export function websiteBackupOperationPublicView(operation) {
     steps: Array.isArray(operation.steps)
       ? Object.freeze(operation.steps.map((step) => Object.freeze({ ...step })))
       : Object.freeze([]),
+    selective: Boolean(operation.selective || (Array.isArray(operation.include) && operation.include.length > 0)),
+    include: Array.isArray(operation.include)
+      ? Object.freeze([...operation.include])
+      : Object.freeze([]),
     result: operation.result ? Object.freeze({ ...operation.result }) : null,
     error: operation.error ? Object.freeze({ code: operation.error.code, message: operation.error.message }) : null,
     restartEvidence: operation.restartEvidence ? Object.freeze({ ...operation.restartEvidence }) : null,
@@ -59,11 +63,24 @@ function defaultStepsForKind(kind, timestamp) {
       { name: 'cleanup', status: 'pending', updatedAt: timestamp },
     ];
   }
-  return [
-    { name: 'pre_restore', status: 'pending', updatedAt: timestamp },
-    { name: 'restore', status: 'pending', updatedAt: timestamp },
-    { name: 'health_check', status: 'pending', updatedAt: timestamp },
-  ];
+  if (kind === 'restore') {
+    return [
+      { name: 'pre_restore', status: 'pending', updatedAt: timestamp },
+      { name: 'restore', status: 'pending', updatedAt: timestamp },
+      { name: 'health_check', status: 'pending', updatedAt: timestamp },
+    ];
+  }
+  if (kind === 'check') {
+    return [
+      { name: 'check_repository', status: 'pending', updatedAt: timestamp },
+    ];
+  }
+  if (kind === 'plan') {
+    return [
+      { name: 'configure_plan', status: 'pending', updatedAt: timestamp },
+    ];
+  }
+  return [];
 }
 
 export function createWebsiteBackupOperationRegistry({
@@ -142,12 +159,14 @@ export function createWebsiteBackupOperationRegistry({
     kind,
     snapshotId = null,
     preRestoreSnapshotId = null,
-    previewDigest,
-    confirmation,
+    previewDigest = null,
+    confirmation = null,
     healthPath = '/health',
     timeoutSeconds = 30,
     tags = [],
     steps = null,
+    include = [],
+    selective = false,
   }) {
     if (!websiteId || !UUID_PATTERN.test(websiteId)) {
       throw new WebsiteBackupOperationRegistryError('invalid_website_id', 'websiteId must be a valid UUID', 400);
@@ -156,12 +175,22 @@ export function createWebsiteBackupOperationRegistry({
       throw new WebsiteBackupOperationRegistryError('invalid_repository_id', 'repositoryId must be a valid UUID', 400);
     }
     if (!OPERATION_KINDS.has(kind)) {
-      throw new WebsiteBackupOperationRegistryError('invalid_operation_kind', `kind must be 'backup' or 'restore'`, 400);
+      throw new WebsiteBackupOperationRegistryError('invalid_operation_kind', `kind must be 'backup', 'restore', 'check', or 'plan'`, 400);
     }
-    if (!previewDigest || !SHA256_PATTERN.test(previewDigest)) {
+    const effectiveDigest = previewDigest ?? (
+      (kind === 'check' || kind === 'plan')
+        ? '0'.repeat(64)
+        : null
+    );
+    const effectiveConfirmation = confirmation ?? (
+      (kind === 'check' || kind === 'plan')
+        ? `${kind}:${websiteId.toLowerCase()}:${repositoryId.toLowerCase()}`
+        : null
+    );
+    if (!effectiveDigest || !SHA256_PATTERN.test(effectiveDigest)) {
       throw new WebsiteBackupOperationRegistryError('invalid_preview_digest', 'previewDigest must be a 64-character SHA-256 hex string', 400);
     }
-    if (!confirmation || typeof confirmation !== 'string') {
+    if (!effectiveConfirmation || typeof effectiveConfirmation !== 'string') {
       throw new WebsiteBackupOperationRegistryError('invalid_confirmation', 'confirmation string is required', 400);
     }
 
@@ -191,11 +220,13 @@ export function createWebsiteBackupOperationRegistry({
         kind,
         snapshotId: snapshotId ? String(snapshotId) : null,
         preRestoreSnapshotId: preRestoreSnapshotId ? String(preRestoreSnapshotId) : null,
-        previewDigest,
-        confirmation,
+        previewDigest: effectiveDigest,
+        confirmation: effectiveConfirmation,
         healthPath: typeof healthPath === 'string' ? healthPath : '/health',
         timeoutSeconds: Number.isSafeInteger(timeoutSeconds) ? timeoutSeconds : 30,
         tags: Array.isArray(tags) ? [...tags] : [],
+        include: Array.isArray(include) ? [...include] : [],
+        selective: Boolean(selective || (Array.isArray(include) && include.length > 0)),
         status: 'queued',
         progress: { phase: 'queued', percent: 0, message: 'İşlem kuyruğa alındı' },
         steps: Array.isArray(steps) && steps.length > 0 ? steps : defaultStepsForKind(kind, currentTime),
