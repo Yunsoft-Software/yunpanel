@@ -77,16 +77,16 @@ export function jobResourceTarget(job, resources = {}) {
 // until the API exposes an explicit, validated measurement contract.
 export function jobLifecycle(job) {
   const status = job?.status;
-  if (status === 'saving') return Object.freeze({ stage: 'Kaydediliyor', progress: '—', detail: 'Değişiklikler sunucuya kaydediliyor.' });
-  if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '—', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.' });
-  if (status === 'running') return Object.freeze({ stage: 'Sunucuda çalışıyor', progress: '—', detail: 'İş sunucuda çalışıyor; sonucu henüz belli değil.' });
-  if (status === 'applying') return Object.freeze({ stage: 'Uygulanıyor', progress: '—', detail: 'Yapılandırma sunucuda uygulanıyor.' });
-  if (status === 'verifying') return Object.freeze({ stage: 'Doğrulanıyor', progress: '—', detail: 'Sunucu işlem sonucu ve durum güncelliği doğrulanıyor.' });
-  if (status === 'partial' || status === 'partial_success') return Object.freeze({ stage: 'Kısmi başarılı', progress: '—', detail: 'İşlem kısmen tamamlandı; bazı adımlar müdahale veya doğrulama gerektiriyor.' });
-  if (status === 'succeeded') return Object.freeze({ stage: 'Tamamlandı', progress: '—', detail: 'Sunucu doğrulanmış başarılı sonuç kaydetti.' });
-  if (status === 'failed') return Object.freeze({ stage: 'Başarısız', progress: '—', detail: 'İşlem başarısız oldu. Hata ayrıntısını ve ilgili kaynak durumunu kontrol edin.' });
-  if (status === 'cancelled') return Object.freeze({ stage: 'İptal edildi', progress: '—', detail: 'İş çalışmadan önce veya desteklenen iptal noktasında kapatıldı.' });
-  return Object.freeze({ stage: 'Bilinmiyor', progress: '—', detail: 'İş yaşam döngüsü doğrulanamadı.' });
+  if (status === 'saving') return Object.freeze({ stage: 'Kaydediliyor', progress: '—', detail: 'Değişiklikler sunucuya kaydediliyor.', isSuccessful: false });
+  if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '—', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.', isSuccessful: false });
+  if (status === 'running') return Object.freeze({ stage: 'Sunucuda çalışıyor', progress: '—', detail: 'İş sunucuda çalışıyor; sonucu henüz belli değil.', isSuccessful: false });
+  if (status === 'applying') return Object.freeze({ stage: 'Uygulanıyor', progress: '—', detail: 'Yapılandırma sunucuda uygulanıyor.', isSuccessful: false });
+  if (status === 'verifying') return Object.freeze({ stage: 'Doğrulanıyor', progress: '—', detail: 'Sunucu işlem sonucu ve durum güncelliği doğrulanıyor.', isSuccessful: false });
+  if (status === 'partial' || status === 'partial_success') return Object.freeze({ stage: 'Kısmi başarılı', progress: '—', detail: 'İşlem kısmen tamamlandı; bazı adımlar müdahale veya doğrulama gerektiriyor.', isSuccessful: false });
+  if (status === 'succeeded') return Object.freeze({ stage: 'Tamamlandı', progress: '—', detail: 'Sunucu doğrulanmış başarılı sonuç kaydetti.', isSuccessful: true });
+  if (status === 'failed') return Object.freeze({ stage: 'Başarısız', progress: '—', detail: 'İşlem başarısız oldu. Hata ayrıntısını ve ilgili kaynak durumunu kontrol edin.', isSuccessful: false });
+  if (status === 'cancelled') return Object.freeze({ stage: 'İptal edildi', progress: '—', detail: 'İş çalışmadan önce veya desteklenen iptal noktasında kapatıldı.', isSuccessful: false });
+  return Object.freeze({ stage: 'Bilinmiyor', progress: '—', detail: 'İş yaşam döngüsü doğrulanamadı.', isSuccessful: false });
 }
 
 export function jobAttemptCount(job) {
@@ -124,14 +124,36 @@ export function jobHealthIndicator(job) {
 // Fixed stage progressions (1/3, 2/3, 3/3) must never be treated as true completion percentages,
 // nor should failed/cancelled states be disguised as completed/successful.
 export function jobStageProgress(job) {
+  const isTerminalFailed = ['failed', 'cancelled'].includes(job?.status);
   const stages = job?.stages ?? job?.progress?.stages ?? null;
   if (stages && typeof stages === 'object' && Number.isInteger(stages.total) && Number.isInteger(stages.current)) {
-    const isTerminalFailed = ['failed', 'cancelled'].includes(job?.status);
     return Object.freeze({
       current: stages.current,
       total: stages.total,
       label: `${stages.current}/${stages.total} aşama`,
       completed: !isTerminalFailed && stages.current === stages.total,
+      isPercentage: false,
+    });
+  }
+  const progress = job?.progress;
+  if (progress && typeof progress === 'object' && Number.isInteger(progress.required) && Number.isInteger(progress.completed)) {
+    return Object.freeze({
+      current: progress.completed,
+      total: progress.required,
+      label: `${progress.completed}/${progress.required} adım`,
+      completed: !isTerminalFailed && progress.completed === progress.required && progress.required > 0,
+      isPercentage: false,
+    });
+  }
+  if (Array.isArray(job?.steps) && job.steps.length > 0) {
+    const requiredSteps = job.steps.filter((s) => s?.required !== false);
+    const total = requiredSteps.length;
+    const completed = requiredSteps.filter((s) => s?.state === 'succeeded').length;
+    return Object.freeze({
+      current: completed,
+      total,
+      label: `${completed}/${total} adım`,
+      completed: !isTerminalFailed && completed === total && total > 0,
       isPercentage: false,
     });
   }
