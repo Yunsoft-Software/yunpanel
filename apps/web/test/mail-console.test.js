@@ -19,3 +19,31 @@ test('mail listing has real filtering and pagination without pretending external
   assert.match(source, /Harici mail sağlayıcısı/);
   assert.doesNotMatch(source, /window\.open|localStorage|sessionStorage/);
 });
+
+test('mailboxes panel exposes connection settings, reception, and test delivery diagnostics', async () => {
+  const mailboxesSource = await readFile(new URL('../src/workspace/MailboxesPanel.jsx', import.meta.url), 'utf8');
+  assert.match(mailboxesSource, /MailboxDiagnosticsModal/);
+  assert.match(mailboxesSource, /getMailboxDeliveryDiagnostics/);
+  assert.match(mailboxesSource, /sendMailboxTestDelivery/);
+  assert.match(mailboxesSource, /İstemci Bağlantı Ayarları/);
+  assert.match(mailboxesSource, /Posta Kutusu Durumu/);
+  assert.match(mailboxesSource, /DNS ve Doğrulama Durumu/);
+  assert.match(mailboxesSource, /Teslimat Testi/);
+});
+
+test('mail DKIM and operations panels expose DNS requirements, connection settings, and authentic delivery test', async () => {
+  const dkimSource = await readFile(new URL('../src/workspace/MailDkimDiagnosticsPanel.jsx', import.meta.url), 'utf8');
+  assert.match(dkimSource, /getMailDeliveryDiagnostics/);
+  assert.match(dkimSource, /sendMailDomainTestDelivery/);
+  assert.match(dkimSource, /İstemci Bağlantı Bilgileri/);
+  assert.match(dkimSource, /DNS Teslimat Gereksinimleri/);
+  assert.match(dkimSource, /Teslimat Testi/);
+
+  const opsSource = await readFile(new URL('../src/workspace/MailOperationsPanel.jsx', import.meta.url), 'utf8');
+  assert.match(opsSource, /ServiceConnectionDiagnosticsPanel/);
+  assert.match(opsSource, /ServiceTestDeliveryPanel/);
+  assert.match(opsSource, /getServerMailDeliveryDiagnostics/);
+  assert.match(opsSource, /sendServerMailTestDelivery/);
+  assert.match(opsSource, /Yönlendirme/);
+  assert.match(opsSource, /secret masking/);
+});

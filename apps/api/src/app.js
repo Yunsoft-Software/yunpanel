@@ -9,6 +9,8 @@ import {
   MailDataBackupError,
   createMailDataInspector,
   createMailDiagnosticsInspector,
+  createMailProtocolHealthInspector,
+  createMailQueueInspector,
   MailDataInspectorError,
   MailDiagnosticsInspectorError,
   createMailboxQuotaInspector,
@@ -324,6 +326,9 @@ export function createApp(allOptions = {}) {
   mailDataBackupManager = createMailDataBackupManager(),
   mailDataOperationsService = null,
   mailDiagnosticsInspector = createMailDiagnosticsInspector(),
+  mailQueueInspector = createMailQueueInspector(),
+  mailProtocolHealthInspector = createMailProtocolHealthInspector(),
+  mailDeliveryDiagnosticsService = null,
   mailDeleteImpactService = null,
   mailDeleteFinalizeService = null,
   mailDkimConfigurationService = null,
@@ -857,15 +862,20 @@ export function createApp(allOptions = {}) {
   if (dkimDns) mountMailDkimDnsRoutes(app, { mailDkimDnsService: dkimDns });
   mountMailDiagnosticsRoutes(app, {
     mailDiagnosticsInspector,
+    mailQueueInspector,
+    mailProtocolHealthInspector,
     mailDkimRegistry,
     mailDomainRegistry,
     domainRegistry,
     mailboxRegistry,
+    mailboxQuotaRegistry,
     mailboxForwardingRegistry,
     mailSrsConfigurationService,
     mailAntivirusHealthInspector,
+    journalLogReader,
     panelSettingsRegistry,
     localServerId,
+    mailDeliveryDiagnosticsService,
   });
   if (mailServiceIdentityRegistry) {
     mountMailServiceIdentityRoutes(app, {

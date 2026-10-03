@@ -6,12 +6,23 @@ import {
   clearMailboxQuota,
   createMailAlias,
   createMailbox,
+  getMailConnectionSettings,
+  getMailDeliveryDiagnostics,
   getMailDiagnostics,
   getMailDkim,
+  getMailDomainDeliveryLogs,
+  getMailDomainQueue,
+  getMailboxConnectionSettings,
+  getMailboxDeliveryDiagnostics,
+  getServerMailConnectionSettings,
+  getServerMailDeliveryDiagnostics,
   listMailDomains,
   listMailboxes,
   previewMailConfiguration,
   rotateMailboxPassword,
+  sendMailDomainTestDelivery,
+  sendMailboxTestDelivery,
+  sendServerMailTestDelivery,
   setMailboxEnabled,
   setMailboxForwarding,
   setMailboxQuota,
@@ -97,5 +108,53 @@ test('managed mail client rejects unsafe revisions and incomplete mutation input
   assert.throws(() => setMailboxForwarding('mailbox-1', { expectedRevision: 0, mode: 'invalid', destinations: ['a@example.test'] }), /forwarding mode is invalid/);
   assert.throws(() => createMailAlias({ mailDomainId: 'domain-1', source: '', destinations: [] }), /mail alias input is invalid/);
   assert.throws(() => applyMailConfiguration('domain-1', { expectedRevision: 1, status: 'enabled', preview: {} }), /preview is required/);
+  assert.throws(() => sendMailDomainTestDelivery('domain-1', { recipient: '' }), /recipient is required/);
+  assert.throws(() => sendMailboxTestDelivery('mailbox-1', { recipient: '' }), /recipient is required/);
+  assert.throws(() => sendServerMailTestDelivery('server-1', { recipient: '' }), /recipient is required/);
   assert.equal(calls, 0);
+});
+
+test('managed mail delivery diagnostics client routes and payloads', async (t) => {
+  setSession({ csrfToken: 'csrf-diag' });
+  const calls = [];
+  t.mock.method(globalThis, 'fetch', async (url, options) => {
+    calls.push({ url, options });
+    return ok({});
+  });
+  const domainId = 'domain-xyz';
+  const mailboxId = 'mailbox-abc';
+  const serverId = 'server-local';
+
+  await getMailDeliveryDiagnostics(domainId);
+  await getMailConnectionSettings(domainId);
+  await getMailDomainQueue(domainId, { limit: 50, search: 'user' });
+  await getMailDomainDeliveryLogs(domainId, { limit: 100, search: 'postfix' });
+  await sendMailDomainTestDelivery(domainId, { recipient: 'test@example.com', subject: 'Ping' });
+  await getMailboxDeliveryDiagnostics(mailboxId);
+  await getMailboxConnectionSettings(mailboxId);
+  await sendMailboxTestDelivery(mailboxId, { recipient: 'inbox@example.com', subject: 'Hello' });
+  await getServerMailDeliveryDiagnostics(serverId);
+  await getServerMailConnectionSettings(serverId);
+  await sendServerMailTestDelivery(serverId, { sender: 'postmaster@example.com', recipient: 'admin@example.com', subject: 'Server Test' });
+
+  assert.deepEqual(calls.map(({ url, options }) => [url, options.method]), [
+    ['/api/panel/mail-domains/domain-xyz/delivery-diagnostics', 'GET'],
+    ['/api/panel/mail-domains/domain-xyz/connection-settings', 'GET'],
+    ['/api/panel/mail-domains/domain-xyz/queue?limit=50&search=user', 'GET'],
+    ['/api/panel/mail-domains/domain-xyz/delivery-logs?limit=100&search=postfix', 'GET'],
+    ['/api/panel/mail-domains/domain-xyz/test-delivery', 'POST'],
+    ['/api/panel/mailboxes/mailbox-abc/delivery-diagnostics', 'GET'],
+    ['/api/panel/mailboxes/mailbox-abc/connection-settings', 'GET'],
+    ['/api/panel/mailboxes/mailbox-abc/test-delivery', 'POST'],
+    ['/api/panel/servers/server-local/mail/delivery-diagnostics', 'GET'],
+    ['/api/panel/servers/server-local/mail/connection-settings', 'GET'],
+    ['/api/panel/servers/server-local/mail/test-delivery', 'POST'],
+  ]);
+  assert.deepEqual(JSON.parse(calls[4].options.body), { recipient: 'test@example.com', subject: 'Ping' });
+  assert.deepEqual(JSON.parse(calls[7].options.body), { recipient: 'inbox@example.com', subject: 'Hello' });
+  assert.deepEqual(JSON.parse(calls[10].options.body), { sender: 'postmaster@example.com', recipient: 'admin@example.com', subject: 'Server Test' });
+  for (const call of calls.filter(({ options }) => options.method !== 'GET')) {
+    assert.equal(call.options.headers['x-csrf-token'], 'csrf-diag');
+  }
+  setSession(null);
 });
