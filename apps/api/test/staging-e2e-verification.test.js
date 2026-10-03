@@ -2091,3 +2091,85 @@ test('Staging E2E PROD-09: Strict .44 host isolation, verification evidence sepa
   assert.equal(unauthGet.statusCode, 401);
   assert.equal(unauthGet.responseBody.error.code, 'unauthorized');
 });
+
+// ============================================================================
+// STAGING E2E PART 8: PAR-00b Feature Parity Matrix, Reseller Scopes & EKL-07
+// ============================================================================
+
+test('Staging E2E PAR-00b: Feature parity matrix completeness, simple Reseller validation, deferred scopes, and open EKL-07 research status', async () => {
+  const fs = await import('node:fs');
+  const path = await import('node:path');
+  const candidates = [
+    new URL('../../../docs/plesk-feature-parity.md', import.meta.url).pathname,
+    path.resolve(process.cwd(), 'docs/plesk-feature-parity.md'),
+    path.resolve(process.cwd(), '../../docs/plesk-feature-parity.md')
+  ];
+  const parityPath = candidates.find((p) => fs.existsSync(p));
+  assert.ok(parityPath && fs.existsSync(parityPath), 'docs/plesk-feature-parity.md must exist');
+
+  const content = fs.readFileSync(parityPath, 'utf8');
+
+  // 1. All 21 groups must be documented
+  for (let i = 1; i <= 21; i++) {
+    const groupNum = String(i).padStart(2, '0');
+    assert.ok(
+      content.includes(`Grup ${groupNum}`),
+      `Feature group ${groupNum} must be documented in parity matrix`
+    );
+  }
+
+  // 2. PAR-01 and PAR-02 simple reseller developments must be reflected
+  assert.ok(content.includes('PAR-01'), 'PAR-01 simple reseller developments must be present');
+  assert.ok(content.includes('PAR-02'), 'PAR-02 simple customer/reseller management must be present');
+  assert.ok(content.includes('RS-01–02'), 'RS-01-02 ownership scope must be present');
+  assert.ok(content.includes('RS-03–05'), 'RS-03-05 customer/reseller management must be present');
+
+  // 3. Deferred reseller items must be classified as deferred / next phase (NOT MVP blockers, NOT completed)
+  const deferredItems = [
+    'Alt Bayi Zinciri',
+    'Ayrı Reseller Hizmet Paketi Motoru',
+    'Hosting Add-on Paketleri',
+    'Abonelik Senkronizasyonu',
+    'Overselling',
+    'Otomatik Faturalama',
+    'Bayi Markalama',
+    'Müşteri ↔ Bayi Dönüşümü',
+    'Toplu Hesap Transferi',
+    'Login-As',
+  ];
+  for (const item of deferredItems) {
+    assert.ok(
+      content.includes(item),
+      `Deferred item ${item} must be explicitly listed in deferred scopes`
+    );
+  }
+  assert.ok(
+    content.includes('ilk sürüm MVP engeli değildir') || content.includes('MVP engeli değildir'),
+    'Deferred items must not be treated as MVP blockers'
+  );
+  assert.ok(
+    content.includes('tamamlanmış iş sayılmaz'),
+    'Deferred items must not be treated as completed work'
+  );
+
+  // 4. No synthetic completion percentage generated from checkbox counts
+  assert.ok(
+    content.includes('Yapay Oran Yasağı') || content.includes('yapay bir tamamlanma yüzdesi üretilmez'),
+    'Synthetic completion percentage prohibition must be stated'
+  );
+  assert.ok(!/%[0-9]{2}\s+(tamamlandı|hazır|oran|başarı)/i.test(content), 'No synthetic percentage should be present');
+
+  // 5. EKL-07 extension research status must remain open
+  assert.ok(
+    content.includes('EKL-07') && content.includes('AÇIK TUTULDU'),
+    'EKL-07 extension research status must remain open'
+  );
+
+  // 6. Role separation (Owner, Reseller, Customer, Site Manager) and OS boundaries (Ubuntu Linux vs Windows)
+  assert.ok(content.includes('Owner'), 'Owner role boundary must be documented');
+  assert.ok(content.includes('Reseller'), 'Reseller role boundary must be documented');
+  assert.ok(content.includes('Customer'), 'Customer role boundary must be documented');
+  assert.ok(content.includes('Ubuntu Linux'), 'Ubuntu Linux primary target OS must be documented');
+  assert.ok(content.includes('Windows Server'), 'Windows Server separate parity track must be documented');
+  assert.ok(content.includes('Ayrı Hat'), 'Windows must be marked as separate track, not completed by Ubuntu');
+});
