@@ -122,6 +122,11 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     const account = await call('updateCustomerLogin', match[1], body);
     return json(response, 200, { data: { account, accessGranted: false, siteAccessGranted: false } });
   }
+  if (match?.[2] === 'login' && request.method === 'DELETE') {
+    const body = await readJson(request).catch(() => ({}));
+    const result = await call('deleteCustomerLogin', match[1], body);
+    return json(response, 200, { data: { ...result, accessGranted: false } });
+  }
   if (match?.[2] === 'profile' && request.method === 'DELETE') {
     requireOwnerActor(actor);
     const body = await readJson(request);
@@ -130,9 +135,9 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
       || body.confirmation !== `unregister-hosting-profile:${match[1]}:${body.revision}`) {
       throw new AuthError('hosting_profile_confirmation_required', 'Confirm removal of this profile using its current revision.');
     }
-    const result = call('unregister', match[1], { revision: body.revision });
+    const result = await call('unregister', match[1], { revision: body.revision });
     return json(response, 200, { data: { ...result, loginDeleted: false, accessGranted: false } });
   }
-  response.setHeader('allow', collection || selfCustomers ? (collection ? 'GET, POST' : 'POST') : ['limits', 'quotas', 'status', 'login'].includes(match[2]) ? 'PATCH' : match[2] === 'profile' ? 'DELETE' : 'GET');
+  response.setHeader('allow', collection || selfCustomers ? (collection ? 'GET, POST' : 'POST') : ['limits', 'quotas', 'status'].includes(match[2]) ? 'PATCH' : match[2] === 'login' ? 'PATCH, DELETE' : match[2] === 'profile' ? 'DELETE' : 'GET');
   throw new AuthError('method_not_allowed', 'Unsupported hosting account operation.', 405);
 }
