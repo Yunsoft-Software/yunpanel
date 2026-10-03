@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { AuthError } from './auth-error.js';
 import { createHostingSiteAllocationStore } from './hosting-site-allocation-store.js';
 import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
@@ -490,6 +490,315 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
         const rows = db.prepare("SELECT user_id FROM auth_hosting_accounts WHERE kind = 'customer' AND reseller_id = ?").all(resellerId);
         return rows.map((r) => r.user_id);
       });
+    },
+    migrateLegacyUserToCustomer(rawToken, requireManagement, input) {
+      const outcome = transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        fields(input, ['userId', 'expectedUserRevision', 'resellerId', 'quotas', 'websites', 'serverId'], ['userId', 'expectedUserRevision', 'resellerId']);
+        if (!identifier(input.userId)) throw error('invalid_hosting_user_id', 'A valid existing user identifier is required.');
+        const expRev = revision(input.expectedUserRevision);
+
+        const user = db.prepare(`SELECT u.*, COALESCE(r.revision, 1) AS revision FROM users u
+          LEFT JOIN auth_user_revisions r ON r.user_id = u.id WHERE u.id = ?`).get(input.userId);
+        if (!user) throw error('hosting_user_not_found', 'Existing login account not found.', 404);
+        if (user.revision !== expRev) throw error('user_revision_conflict', 'Reload the login account before linking it.', 409);
+        if (user.role !== 'site_manager') throw error('hosting_profile_requires_site_manager', 'Use an existing site-scoped login, not an Owner or global read-only account.', 409);
+        if (raw(input.userId)) throw error('hosting_account_exists', 'This login already has a hosting profile.', 409);
+
+        const parent = input.resellerId === null ? null : existing(input.resellerId);
+        assertCustomerCreationScope({ actor, reseller: parent ? projection(parent) : null });
+        if (parent) assertResellerCapacity({ limits: limits(parent.user_id), usage: usage(parent), resource: 'customers' });
+
+        const existingGrants = db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ? ORDER BY website_id')
+          .all(input.userId).map((r) => r.website_id);
+        const websiteIds = input.websites !== undefined ? input.websites : existingGrants;
+        if (!Array.isArray(websiteIds)) throw error('invalid_hosting_account_input', 'Websites must be an array.');
+
+        for (const wid of websiteIds) {
+          if (db.prepare('SELECT 1 FROM auth_customer_websites WHERE website_id = ?').get(wid)
+            || db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE website_id = ?').get(wid)) {
+            throw conflict();
+          }
+        }
+
+        if (input.quotas) {
+          const validated = validateCustomerQuotas(input.quotas);
+          if (parent) assertCustomerQuotaWithinResellerCapacity({ customerQuotas: validated, resellerLimits: limits(parent.user_id) });
+          if (validated.maxWebsites !== null && websiteIds.length > validated.maxWebsites) {
+            throw error('customer_quota_exceeded', 'The customer website quota has been reached.', 409);
+          }
+        }
+
+        if (parent) {
+          const resLimits = limits(parent.user_id);
+          const resUsage = usage(parent);
+          if (resLimits.maxWebsites !== null && (resUsage.websites + websiteIds.length) > resLimits.maxWebsites) {
+            throw error('reseller_limit_reached', 'Customer website quota cannot exceed the reseller maximum websites limit.', 409);
+          }
+        }
+
+        const timestamp = now();
+        const serverId = input.serverId ?? '00000000-0000-4000-8000-000000000001';
+
+        // 1. Delete legacy grants for user first so trigger auth_hosting_account_insert allows insert
+        db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(input.userId);
+
+        // 2. Insert into auth_hosting_accounts
+        db.prepare('INSERT INTO auth_hosting_accounts VALUES (?, ?, ?, 1, ?, ?)')
+          .run(input.userId, 'customer', input.resellerId, timestamp, timestamp);
+
+        // 3. Insert customer quotas if provided
+        if (input.quotas) {
+          const validated = validateCustomerQuotas(input.quotas);
+          db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)')
+            .run(input.userId, validated.maxWebsites, validated.maxDiskMb, validated.maxTrafficMb, validated.maxDatabases, timestamp, timestamp);
+        }
+
+        // 4. Create allocations and customer website records
+        const allocations = [];
+        for (const wid of websiteIds) {
+          const opId = randomUUID();
+          const intentDigest = createHash('sha256').update(`migration:intent:${input.userId}:${wid}`).digest('hex');
+          const websiteDigest = createHash('sha256').update(`migration:website:${wid}:${serverId}`).digest('hex');
+
+          db.prepare(`INSERT INTO auth_hosting_site_allocations
+            (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`).run(opId, wid, input.userId, serverId, intentDigest, websiteDigest, timestamp);
+          db.prepare('INSERT INTO auth_customer_websites (website_id, customer_id, created_at) VALUES (?, ?, ?)')
+            .run(wid, input.userId, timestamp);
+          db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = ? WHERE operation_id = ?")
+            .run(timestamp, opId);
+
+          allocations.push({ operationId: opId, websiteId: wid, serverId, intentDigest, websiteDigest });
+        }
+
+        invalidate(input.userId);
+        if (parent) invalidate(parent.user_id);
+        audit(actor.id, 'hosting.legacy_user_migrated', { type: 'user', id: input.userId });
+
+        const receipt = Object.freeze({
+          migrationId: randomUUID(),
+          customerId: input.userId,
+          resellerId: input.resellerId,
+          serverId,
+          previousGrants: existingGrants,
+          migratedWebsites: [...websiteIds],
+          allocations,
+          quotas: input.quotas ? validateCustomerQuotas(input.quotas) : null,
+          migratedAt: timestamp,
+        });
+
+        const revokes = [input.userId, ...(parent ? [parent.user_id] : [])];
+        return { receipt, revokes };
+      });
+
+      for (const id of outcome.revokes) revokeLiveUser(id, 'hosting_legacy_user_migrated');
+      return outcome.receipt;
+    },
+    rollbackLegacyUserMigration(rawToken, requireManagement, receipt) {
+      const outcome = transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        if (!plain(receipt) || !identifier(receipt.customerId) || !Array.isArray(receipt.migratedWebsites)
+          || !Array.isArray(receipt.previousGrants) || !Array.isArray(receipt.allocations)) {
+          throw error('invalid_hosting_rollback_receipt', 'A valid migration receipt is required.');
+        }
+
+        const account = existing(receipt.customerId);
+        if (account.kind !== 'customer') throw error('hosting_account_state_invalid', 'Account is not a customer.', 503);
+
+        for (const alloc of receipt.allocations) {
+          const row = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE operation_id = ?').get(alloc.operationId);
+          if (!row || row.website_id !== alloc.websiteId || row.customer_id !== receipt.customerId || row.state !== 'attached') {
+            throw error('hosting_site_state_invalid', 'Allocation state drift detected during rollback.', 503);
+          }
+          const owned = db.prepare('SELECT 1 FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?')
+            .get(alloc.websiteId, receipt.customerId);
+          if (!owned) throw error('hosting_site_state_invalid', 'Website ownership drift detected during rollback.', 503);
+        }
+
+        for (const alloc of receipt.allocations) {
+          db.prepare('DELETE FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?')
+            .run(alloc.websiteId, receipt.customerId);
+          db.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ?').run(alloc.operationId);
+        }
+
+        db.prepare('DELETE FROM auth_customer_quotas WHERE customer_id = ?').run(receipt.customerId);
+        db.prepare('DELETE FROM auth_hosting_accounts WHERE user_id = ?').run(receipt.customerId);
+
+        for (const wid of receipt.previousGrants) {
+          db.prepare('INSERT INTO auth_user_websites (user_id, website_id) VALUES (?, ?)').run(receipt.customerId, wid);
+        }
+
+        invalidate(receipt.customerId);
+        if (receipt.resellerId) invalidate(receipt.resellerId);
+        audit(actor.id, 'hosting.legacy_user_migration_rolled_back', { type: 'user', id: receipt.customerId });
+
+        const revokes = [receipt.customerId, ...(receipt.resellerId ? [receipt.resellerId] : [])];
+        return {
+          result: {
+            rolledBack: true,
+            customerId: receipt.customerId,
+            restoredWebsites: [...receipt.previousGrants],
+          },
+          revokes,
+        };
+      });
+
+      for (const id of outcome.revokes) revokeLiveUser(id, 'hosting_legacy_user_migration_rolled_back');
+      return outcome.result;
+    },
+    migrateWebsiteOwnership(rawToken, requireManagement, input) {
+      const outcome = transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        fields(input, ['websiteId', 'targetCustomerId', 'expectedSourceCustomerId']);
+        if (!identifier(input.websiteId) || !identifier(input.targetCustomerId) || !identifier(input.expectedSourceCustomerId)) {
+          throw error('invalid_hosting_account_input', 'Valid website and customer identifiers are required.');
+        }
+
+        const sourceCustomer = existing(input.expectedSourceCustomerId);
+        if (sourceCustomer.kind !== 'customer') throw error('hosting_account_state_invalid', 'Source must be customer.', 409);
+        const targetCustomer = existing(input.targetCustomerId);
+        if (targetCustomer.kind !== 'customer' || !targetCustomer.active) throw error('hosting_account_inactive', 'Target customer must be active.', 403);
+
+        const currentOwnership = db.prepare('SELECT customer_id FROM auth_customer_websites WHERE website_id = ?').get(input.websiteId);
+        if (!currentOwnership || currentOwnership.customer_id !== input.expectedSourceCustomerId) {
+          throw error('hosting_site_identity_conflict', 'Website is not currently owned by expected source customer.', 409);
+        }
+
+        const currentAllocation = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE website_id = ?').get(input.websiteId);
+        if (!currentAllocation || currentAllocation.customer_id !== input.expectedSourceCustomerId || currentAllocation.state !== 'attached') {
+          throw error('hosting_site_state_invalid', 'Current site allocation requires reconciliation.', 503);
+        }
+
+        const targetQuotas = customerQuotas(input.targetCustomerId);
+        if (targetQuotas.maxWebsites !== null) {
+          const currentUsage = customerUsage(input.targetCustomerId);
+          if (currentUsage.websites >= targetQuotas.maxWebsites) {
+            throw error('customer_quota_exceeded', 'Target customer website quota reached.', 409);
+          }
+        }
+
+        const targetParent = targetCustomer.reseller_id ? existing(targetCustomer.reseller_id) : null;
+        if (targetParent) {
+          assertResellerCapacity({ limits: limits(targetParent.user_id), usage: usage(targetParent), resource: 'websites' });
+        }
+
+        const timestamp = now();
+        const newOpId = randomUUID();
+
+        db.prepare('DELETE FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?')
+          .run(input.websiteId, input.expectedSourceCustomerId);
+        db.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ?').run(currentAllocation.operation_id);
+
+        db.prepare(`INSERT INTO auth_hosting_site_allocations
+          (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`).run(
+            newOpId, input.websiteId, input.targetCustomerId, currentAllocation.server_id,
+            currentAllocation.intent_digest, currentAllocation.website_digest, timestamp,
+          );
+        db.prepare('INSERT INTO auth_customer_websites (website_id, customer_id, created_at) VALUES (?, ?, ?)')
+          .run(input.websiteId, input.targetCustomerId, timestamp);
+        db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = ? WHERE operation_id = ?")
+          .run(timestamp, newOpId);
+
+        const revokes = [input.expectedSourceCustomerId, input.targetCustomerId];
+        if (sourceCustomer.reseller_id) revokes.push(sourceCustomer.reseller_id);
+        if (targetCustomer.reseller_id) revokes.push(targetCustomer.reseller_id);
+
+        for (const id of revokes) invalidate(id);
+        audit(actor.id, 'hosting.website_ownership_migrated', {
+          type: 'website',
+          id: input.websiteId,
+          from: input.expectedSourceCustomerId,
+          to: input.targetCustomerId,
+        });
+
+        const receipt = Object.freeze({
+          migrationId: randomUUID(),
+          websiteId: input.websiteId,
+          previousCustomerId: input.expectedSourceCustomerId,
+          targetCustomerId: input.targetCustomerId,
+          previousAllocation: {
+            operationId: currentAllocation.operation_id,
+            serverId: currentAllocation.server_id,
+            intentDigest: currentAllocation.intent_digest,
+            websiteDigest: currentAllocation.website_digest,
+          },
+          newAllocation: {
+            operationId: newOpId,
+            serverId: currentAllocation.server_id,
+          },
+          migratedAt: timestamp,
+        });
+
+        return { receipt, revokes };
+      });
+
+      for (const id of outcome.revokes) revokeLiveUser(id, 'hosting_website_ownership_migrated');
+      return outcome.receipt;
+    },
+    rollbackWebsiteOwnershipMigration(rawToken, requireManagement, receipt) {
+      const outcome = transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        if (!plain(receipt) || !identifier(receipt.websiteId) || !identifier(receipt.previousCustomerId)
+          || !identifier(receipt.targetCustomerId) || !plain(receipt.previousAllocation)) {
+          throw error('invalid_hosting_rollback_receipt', 'A valid migration receipt is required.');
+        }
+
+        const currentOwnership = db.prepare('SELECT customer_id FROM auth_customer_websites WHERE website_id = ?').get(receipt.websiteId);
+        if (!currentOwnership || currentOwnership.customer_id !== receipt.targetCustomerId) {
+          throw error('hosting_site_state_invalid', 'Website ownership drifted before rollback.', 503);
+        }
+
+        const currentAlloc = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE website_id = ?').get(receipt.websiteId);
+        if (!currentAlloc || currentAlloc.customer_id !== receipt.targetCustomerId || currentAlloc.state !== 'attached') {
+          throw error('hosting_site_state_invalid', 'Website allocation drifted before rollback.', 503);
+        }
+
+        const sourceCustomer = existing(receipt.previousCustomerId);
+        const targetCustomer = existing(receipt.targetCustomerId);
+
+        const timestamp = now();
+        db.prepare('DELETE FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?')
+          .run(receipt.websiteId, receipt.targetCustomerId);
+        db.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ?').run(currentAlloc.operation_id);
+
+        const restoredOpId = receipt.previousAllocation.operationId;
+        db.prepare(`INSERT INTO auth_hosting_site_allocations
+          (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+          VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`).run(
+            restoredOpId, receipt.websiteId, receipt.previousCustomerId,
+            receipt.previousAllocation.serverId, receipt.previousAllocation.intentDigest,
+            receipt.previousAllocation.websiteDigest, timestamp,
+          );
+        db.prepare('INSERT INTO auth_customer_websites (website_id, customer_id, created_at) VALUES (?, ?, ?)')
+          .run(receipt.websiteId, receipt.previousCustomerId, timestamp);
+        db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = ? WHERE operation_id = ?")
+          .run(timestamp, restoredOpId);
+
+        const revokes = [receipt.previousCustomerId, receipt.targetCustomerId];
+        if (sourceCustomer.reseller_id) revokes.push(sourceCustomer.reseller_id);
+        if (targetCustomer.reseller_id) revokes.push(targetCustomer.reseller_id);
+
+        for (const id of revokes) invalidate(id);
+        audit(actor.id, 'hosting.website_ownership_migration_rolled_back', {
+          type: 'website',
+          id: receipt.websiteId,
+          restoredCustomer: receipt.previousCustomerId,
+        });
+
+        return {
+          result: {
+            rolledBack: true,
+            websiteId: receipt.websiteId,
+            restoredCustomerId: receipt.previousCustomerId,
+          },
+          revokes,
+        };
+      });
+
+      for (const id of outcome.revokes) revokeLiveUser(id, 'hosting_website_ownership_migration_rolled_back');
+      return outcome.result;
     },
   };
 }

@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { AuthError } from './auth-error.js';
 import { assertResellerCapacity } from './reseller-limits.js';
 import { hostingWebsitesForCapacity } from './hosting-site-allocation-schema.js';
@@ -196,8 +196,21 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
             }
           }
         }
+        if (db.prepare('SELECT 1 FROM auth_user_websites WHERE website_id = ?').get(site.id)) {
+          throw new AuthError('hosting_site_migration_required', 'Existing Website grants require explicit ownership migration.', 409);
+        }
+        const opId = randomUUID();
+        const dummyDigest = '0'.repeat(64);
+        const resolvedServerId = site.serverId ?? '00000000-0000-4000-8000-000000000001';
+        if (!db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE website_id = ?').get(site.id)) {
+          db.prepare(`INSERT INTO auth_hosting_site_allocations
+            (operation_id, website_id, customer_id, server_id, intent_digest, website_digest, state, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'reserved', ?)`).run(opId, site.id, ownerUserId, resolvedServerId, dummyDigest, dummyDigest, now());
+        }
         db.prepare('INSERT OR IGNORE INTO auth_customer_websites (website_id, customer_id, created_at) VALUES (?, ?, ?)')
           .run(site.id, ownerUserId, now());
+        db.prepare("UPDATE auth_hosting_site_allocations SET state = 'attached', attached_at = ? WHERE website_id = ? AND state = 'reserved'")
+          .run(now(), site.id);
         const effectiveResellerId = input.resellerId ?? chain.current.resellerId ?? null;
         const revoke = [chain.current.id, ...(chain.parent ? [chain.parent.user_id] : [])];
         for (const id of revoke) invalidate(id);
