@@ -21,6 +21,7 @@ import ReadOnlyServersPage from './ReadOnlyServersPage.jsx';
 import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
 import UsersPage from './UsersPage.jsx';
 import ResellerCustomersPage from './ResellerCustomersPage.jsx';
+import FirewallPage from './FirewallPage.jsx';
 
 function RouteFailure() {
   return <main className="ws-content"><h1>Sayfa yüklenemedi</h1><p>Beklenmeyen bir arayüz veya veri hatası oluştu. Sayfayı yeniden yükleyin; sorun sürerse API ve web sürümlerini birlikte kontrol edin.</p><button type="button" className="ws-button" onClick={() => window.location.reload()}>Yeniden yükle</button></main>;
@@ -78,6 +79,8 @@ function createWorkspaceRouter() {
       { path: 'applications/new', element: owner(<ApplicationsPage create />) },
       { path: 'domains', element: owner(<AdvancedDomainsPage />) },
       { path: 'servers', element: owner(<ServersPage />) },
+      { path: 'firewall', element: owner(<FirewallPage />) },
+      { path: 'servers/firewall', element: <RedirectWithSearch to="/firewall" /> },
       { path: 'databases', element: manage(<GlobalSiteTool tool="databases" ownerView={<DatabasesPage />} />) },
       { path: 'database', element: <RedirectWithSearch to="/databases" /> },
       { path: 'db', element: <RedirectWithSearch to="/databases" /> },
