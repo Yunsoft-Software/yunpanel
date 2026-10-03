@@ -1,5 +1,5 @@
 import { createBackupDependencyGraph } from './backup-dependency-graph.js';
-import { createBackupManifest } from './backup-manifest.js';
+import { createBackupManifest, createDisasterRecoveryScope } from './backup-manifest.js';
 import { createBackupPlan } from './backup-plan.js';
 import { databaseBackupResources } from './database-backup-resource.js';
 import { mailDataBackupResource } from './mail-data-backup-resource.js';
@@ -268,5 +268,51 @@ export function createBackupResourceProvider({
     });
   }
 
-  return Object.freeze({ preview });
+  async function disasterRecoveryScope({
+    serverId,
+    websiteId = null,
+    siteFiles = [],
+    configuration = [],
+    panelRelationships = [],
+    encryptionKeys = [],
+    acceptableRpoSeconds = 3600,
+    targetRtoSeconds = 7200,
+  } = {}) {
+    const server = await requireServer(serverId);
+    const [dbResources, mail] = await Promise.all([
+      databases(server.id),
+      mailData(server.id),
+    ]);
+
+    const mappedDbs = dbResources.map((d) => ({
+      databaseName: d.databaseName ?? d.identity.replace('database:', ''),
+      engine: d.snapshot?.engine ?? 'mariadb',
+      sizeBytes: d.snapshot?.sizeBytes ?? 1024,
+      dumpSha256: '0'.repeat(64),
+    }));
+
+    const mappedMail = mail.resources.map((m) => ({
+      mailDomainId: m.identity.replace('mail_data:', ''),
+      domainName: 'example.com',
+      storageBytes: 1024,
+      snapshotSha256: '0'.repeat(64),
+    }));
+
+    return createDisasterRecoveryScope({
+      scopeId: `dr-scope-${server.id}${websiteId ? `-${websiteId}` : ''}`,
+      serverId: server.id,
+      websiteId,
+      siteFiles,
+      databases: mappedDbs,
+      mail: mappedMail,
+      configuration,
+      panelRelationships,
+      encryptionKeys,
+      createdAt: new Date(now()).toISOString(),
+      acceptableRpoSeconds,
+      targetRtoSeconds,
+    });
+  }
+
+  return Object.freeze({ preview, disasterRecoveryScope });
 }

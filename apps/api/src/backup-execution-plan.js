@@ -4,12 +4,25 @@ const EXECUTION_VERSION = 1;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const RESOURCE_TYPES = new Set(['application', 'database', 'docker_storage', 'mail_data']);
+const RESOURCE_TYPES = new Set([
+  'application',
+  'database',
+  'docker_storage',
+  'mail_data',
+  'site_files',
+  'configuration',
+  'panel_relationships',
+  'encryption_keys',
+]);
 const EXECUTOR_KINDS = Object.freeze({
   application: 'application_snapshot',
   database: 'database_backup',
   docker_storage: 'docker_storage_backup',
   mail_data: 'mail_data_backup',
+  site_files: 'site_files_backup',
+  configuration: 'configuration_backup',
+  panel_relationships: 'panel_relationships_backup',
+  encryption_keys: 'encryption_keys_backup',
 });
 const MAX_STEPS = 8192;
 
@@ -151,11 +164,47 @@ function mailInput(resource) {
   });
 }
 
+function siteFilesInput(resource) {
+  return Object.freeze({
+    websiteId: resource.websiteId ? uuid(resource.websiteId, 'websiteId') : null,
+    resourceIdentity: resource.identity,
+    details: resource.details ?? {},
+  });
+}
+
+function configurationInput(resource) {
+  return Object.freeze({
+    websiteId: resource.websiteId ? uuid(resource.websiteId, 'websiteId') : null,
+    resourceIdentity: resource.identity,
+    details: resource.details ?? {},
+  });
+}
+
+function panelRelationshipsInput(resource) {
+  return Object.freeze({
+    websiteId: resource.websiteId ? uuid(resource.websiteId, 'websiteId') : null,
+    resourceIdentity: resource.identity,
+    details: resource.details ?? {},
+  });
+}
+
+function encryptionKeysInput(resource) {
+  return Object.freeze({
+    websiteId: resource.websiteId ? uuid(resource.websiteId, 'websiteId') : null,
+    resourceIdentity: resource.identity,
+    details: resource.details ?? {},
+  });
+}
+
 function executionInput(resource) {
   if (resource.type === 'application') return applicationInput(resource);
   if (resource.type === 'database') return databaseInput(resource);
   if (resource.type === 'docker_storage') return dockerInput(resource);
   if (resource.type === 'mail_data') return mailInput(resource);
+  if (resource.type === 'site_files') return siteFilesInput(resource);
+  if (resource.type === 'configuration') return configurationInput(resource);
+  if (resource.type === 'panel_relationships') return panelRelationshipsInput(resource);
+  if (resource.type === 'encryption_keys') return encryptionKeysInput(resource);
   throw new BackupExecutionPlanError('backup_execution_resource_invalid', 'Backup execution resource type is invalid', 409);
 }
 

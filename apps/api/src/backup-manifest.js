@@ -14,6 +14,46 @@ const STORAGE_KINDS = new Set(['bind', 'ephemeral', 'named_volume']);
 const STORAGE_SCOPES = new Set(['host', 'project']);
 const APPLICATION_TYPES = new Set(['static', 'node']);
 const POLICY_DISPOSITIONS = new Set(['include', 'exclude', 'reject']);
+
+export const DISASTER_RECOVERY_CATEGORIES = Object.freeze([
+  'site_files',
+  'database',
+  'mail',
+  'configuration',
+  'panel_relationships',
+  'encryption_keys',
+]);
+
+export function maskDisasterRecoverySecrets(value) {
+  if (value === null || value === undefined) return value;
+  if (typeof value === 'string') {
+    if (value.includes('BEGIN PRIVATE KEY') || value.includes('BEGIN RSA PRIVATE KEY') || value.includes('BEGIN EC PRIVATE KEY') || value.includes('BEGIN OPENSSH PRIVATE KEY')) {
+      return '[REDACTED_PRIVATE_KEY]';
+    }
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return Object.freeze(value.map(maskDisasterRecoverySecrets));
+  }
+  if (typeof value === 'object') {
+    const masked = {};
+    for (const [k, v] of Object.entries(value)) {
+      if (k === 'secretsMasked' || k === 'secretsRedacted') {
+        masked[k] = v;
+      } else if (typeof v === 'string' && (v.includes('BEGIN PRIVATE KEY') || v.includes('BEGIN RSA PRIVATE KEY') || v.includes('BEGIN EC PRIVATE KEY') || v.includes('BEGIN OPENSSH PRIVATE KEY'))) {
+        masked[k] = '[REDACTED_PRIVATE_KEY]';
+      } else if (/private_?key/i.test(k)) {
+        masked[k] = '[REDACTED_PRIVATE_KEY]';
+      } else if (/password|secret|token|credential|salt|argon2/i.test(k)) {
+        masked[k] = '[REDACTED]';
+      } else {
+        masked[k] = maskDisasterRecoverySecrets(v);
+      }
+    }
+    return Object.freeze(masked);
+  }
+  return value;
+}
 const DOCKER_RESOURCE_KEYS = new Set([
   'identity', 'type', 'serverId', 'projectId', 'projectRevision', 'projectName', 'serviceName', 'storage', 'policy',
 ]);
@@ -287,9 +327,296 @@ function normalizeApplicationResource(value, expectedServerId = null) {
   });
 }
 
+function normalizeSiteFilesResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'site_files') {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const websiteId = safeUuid(value.websiteId, 'websiteId');
+  const identity = value.identity ?? `site_files:${websiteId}`;
+  return Object.freeze({
+    identity,
+    type: 'site_files',
+    serverId,
+    websiteId,
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'disaster_recovery_site_files' }),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+function normalizeConfigurationResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'configuration') {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const websiteId = value.websiteId ? safeUuid(value.websiteId, 'websiteId') : null;
+  const identity = value.identity ?? `configuration:${websiteId ?? safeIdentifier(value.name ?? 'global', 'configName')}`;
+  return Object.freeze({
+    identity,
+    type: 'configuration',
+    serverId,
+    ...(websiteId ? { websiteId } : {}),
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'disaster_recovery_configuration' }),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+function normalizePanelRelationshipsResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'panel_relationships') {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const websiteId = value.websiteId ? safeUuid(value.websiteId, 'websiteId') : null;
+  const identity = value.identity ?? `panel_relationships:${websiteId ?? 'global'}`;
+  return Object.freeze({
+    identity,
+    type: 'panel_relationships',
+    serverId,
+    ...(websiteId ? { websiteId } : {}),
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'disaster_recovery_panel_relationships' }),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+function normalizeEncryptionKeysResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'encryption_keys') {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const websiteId = value.websiteId ? safeUuid(value.websiteId, 'websiteId') : null;
+  const identity = value.identity ?? `encryption_keys:${websiteId ?? 'global'}`;
+  return Object.freeze({
+    identity,
+    type: 'encryption_keys',
+    serverId,
+    ...(websiteId ? { websiteId } : {}),
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'disaster_recovery_encryption_keys' }),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+function normalizeDatabaseManifestResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || value.type !== 'database') {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const databaseName = value.databaseName ? safeIdentifier(value.databaseName, 'databaseName') : null;
+  const websiteId = value.websiteId ? safeUuid(value.websiteId, 'websiteId') : null;
+  const identity = value.identity ?? `database:${databaseName ?? websiteId}`;
+  return Object.freeze({
+    identity,
+    type: 'database',
+    serverId,
+    ...(databaseName ? { databaseName } : {}),
+    ...(websiteId ? { websiteId } : {}),
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'managed_database' }),
+    ...(value.snapshot ? { snapshot: value.snapshot } : {}),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+function normalizeMailManifestResource(value, expectedServerId = null) {
+  if (!value || typeof value !== 'object' || Array.isArray(value) || (value.type !== 'mail' && value.type !== 'mail_data')) {
+    throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  if (expectedServerId && serverId !== expectedServerId) {
+    throw new BackupManifestError('backup_manifest_server_mismatch', 'Backup resource belongs to a different server');
+  }
+  const mailDomainId = value.mailDomainId ? safeUuid(value.mailDomainId, 'mailDomainId') : null;
+  const websiteId = value.websiteId ? safeUuid(value.websiteId, 'websiteId') : null;
+  const identity = value.identity ?? `mail:${mailDomainId ?? websiteId}`;
+  return Object.freeze({
+    identity,
+    type: value.type,
+    serverId,
+    ...(mailDomainId ? { mailDomainId } : {}),
+    ...(websiteId ? { websiteId } : {}),
+    policy: value.policy ?? Object.freeze({ disposition: 'include', reason: 'managed_mail' }),
+    ...(value.snapshot ? { snapshot: value.snapshot } : {}),
+    ...(value.details ? { details: maskDisasterRecoverySecrets(value.details) } : {}),
+  });
+}
+
+export function createDisasterRecoveryScope({
+  serverId,
+  websiteId,
+  siteFiles,
+  database,
+  databases,
+  mail,
+  mailData,
+  configuration,
+  panelRelationships,
+  encryptionKeys,
+  createdAt = new Date().toISOString(),
+} = {}) {
+  const normalizedServerId = safeIdentifier(serverId, 'serverId');
+  const normalizedWebsiteId = safeUuid(websiteId, 'websiteId');
+  const resolvedDatabase = database ?? databases;
+  const resolvedMail = mail ?? mailData;
+
+  if (!siteFiles || typeof siteFiles !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery site files scope is invalid');
+  }
+  if (!resolvedDatabase || typeof resolvedDatabase !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery database scope is invalid');
+  }
+  if (!resolvedMail || typeof resolvedMail !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery mail scope is invalid');
+  }
+  if (!configuration || typeof configuration !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery configuration scope is invalid');
+  }
+  if (!panelRelationships || typeof panelRelationships !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery panel relationships scope is invalid');
+  }
+  if (!encryptionKeys || typeof encryptionKeys !== 'object') {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery encryption keys scope is invalid');
+  }
+
+  const maskedSiteFiles = maskDisasterRecoverySecrets(siteFiles);
+  const maskedDatabase = maskDisasterRecoverySecrets(resolvedDatabase);
+  const maskedMail = maskDisasterRecoverySecrets(resolvedMail);
+  const maskedConfig = maskDisasterRecoverySecrets(configuration);
+  const maskedRelationships = maskDisasterRecoverySecrets(panelRelationships);
+  const maskedEncryptionKeys = maskDisasterRecoverySecrets(encryptionKeys);
+
+  const canonicalScope = {
+    version: MANIFEST_VERSION,
+    category: 'disaster_recovery_scope',
+    serverId: normalizedServerId,
+    websiteId: normalizedWebsiteId,
+    categories: DISASTER_RECOVERY_CATEGORIES,
+    siteFiles: maskedSiteFiles,
+    database: maskedDatabase,
+    databases: maskedDatabase,
+    mail: maskedMail,
+    mailData: maskedMail,
+    configuration: maskedConfig,
+    panelRelationships: maskedRelationships,
+    encryptionKeys: maskedEncryptionKeys,
+  };
+
+  const scopeDigest = createHash('sha256').update(JSON.stringify(canonicalScope)).digest('hex');
+
+  return Object.freeze({
+    ...canonicalScope,
+    createdAt: normalizeCreatedAt(createdAt),
+    scopeDigest,
+    secretsMasked: true,
+  });
+}
+
+export function normalizeDisasterRecoveryScope(value) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || value.category !== 'disaster_recovery_scope'
+    || value.version !== MANIFEST_VERSION
+    || typeof value.scopeDigest !== 'string' || value.scopeDigest.length !== 64
+    || value.secretsMasked !== true) {
+    throw new BackupManifestError('backup_manifest_scope_invalid', 'Disaster recovery scope is invalid');
+  }
+  const serverId = safeIdentifier(value.serverId, 'serverId');
+  const websiteId = safeUuid(value.websiteId, 'websiteId');
+
+  for (const cat of DISASTER_RECOVERY_CATEGORIES) {
+    const key = cat === 'site_files' ? 'siteFiles' : cat === 'panel_relationships' ? 'panelRelationships' : cat === 'encryption_keys' ? 'encryptionKeys' : cat;
+    if (!value[key]) {
+      throw new BackupManifestError('incomplete_disaster_recovery_scope', `Disaster recovery scope is missing category ${cat}`);
+    }
+  }
+
+  const serialized = JSON.stringify(value);
+  if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(serialized)) {
+    throw new BackupManifestError('backup_manifest_secret_leak_detected', 'Disaster recovery scope contains unmasked private keys');
+  }
+
+  return Object.freeze({
+    ...value,
+    serverId,
+    websiteId,
+  });
+}
+
+export function disasterRecoveryScopeResources(drScope) {
+  const normalized = normalizeDisasterRecoveryScope(drScope);
+  const resources = [
+    {
+      identity: `site_files:${normalized.websiteId}`,
+      type: 'site_files',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_site_files' }),
+      details: normalized.siteFiles,
+    },
+    {
+      identity: `database:${normalized.websiteId}`,
+      type: 'database',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_database' }),
+      details: normalized.database,
+    },
+    {
+      identity: `mail:${normalized.websiteId}`,
+      type: 'mail',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_mail' }),
+      details: normalized.mail,
+    },
+    {
+      identity: `configuration:${normalized.websiteId}`,
+      type: 'configuration',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_configuration' }),
+      details: normalized.configuration,
+    },
+    {
+      identity: `panel_relationships:${normalized.websiteId}`,
+      type: 'panel_relationships',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_panel_relationships' }),
+      details: normalized.panelRelationships,
+    },
+    {
+      identity: `encryption_keys:${normalized.websiteId}`,
+      type: 'encryption_keys',
+      serverId: normalized.serverId,
+      websiteId: normalized.websiteId,
+      policy: Object.freeze({ disposition: 'include', reason: 'disaster_recovery_encryption_keys' }),
+      details: normalized.encryptionKeys,
+    },
+  ];
+  return Object.freeze(resources.map((r) => normalizeBackupResource(r, normalized.serverId)));
+}
+
 function normalizeBackupResource(value, expectedServerId = null) {
   if (value?.type === 'docker_storage') return normalizeDockerStorageResource(value, expectedServerId);
   if (value?.type === 'application') return normalizeApplicationResource(value, expectedServerId);
+  if (value?.type === 'site_files') return normalizeSiteFilesResource(value, expectedServerId);
+  if (value?.type === 'configuration') return normalizeConfigurationResource(value, expectedServerId);
+  if (value?.type === 'panel_relationships') return normalizePanelRelationshipsResource(value, expectedServerId);
+  if (value?.type === 'encryption_keys') return normalizeEncryptionKeysResource(value, expectedServerId);
+  if (value?.type === 'database') return normalizeDatabaseManifestResource(value, expectedServerId);
+  if (value?.type === 'mail' || value?.type === 'mail_data') return normalizeMailManifestResource(value, expectedServerId);
   throw new BackupManifestError('backup_manifest_resource_invalid', 'Backup resource type is invalid');
 }
 
@@ -424,6 +751,7 @@ export function createBackupManifest({
   serverId,
   dockerProjects = [],
   applicationSnapshots = [],
+  disasterRecoveryScopes = [],
   createdAt = new Date().toISOString(),
 } = {}) {
   const normalizedServerId = safeIdentifier(serverId, 'serverId');
@@ -432,6 +760,9 @@ export function createBackupManifest({
   }
   if (!Array.isArray(applicationSnapshots) || applicationSnapshots.length > MAX_APPLICATIONS) {
     throw new BackupManifestError('backup_manifest_applications_invalid', 'Application snapshot list is invalid');
+  }
+  if (!Array.isArray(disasterRecoveryScopes) || disasterRecoveryScopes.length > 512) {
+    throw new BackupManifestError('backup_manifest_scopes_invalid', 'Disaster recovery scope list is invalid');
   }
   const resources = [];
   for (const project of dockerProjects) {
@@ -452,6 +783,12 @@ export function createBackupManifest({
       throw new BackupManifestError('backup_manifest_server_mismatch', 'Application belongs to a different server');
     }
     resources.push(applicationBackupResource(entry.application, entry.environment ?? null));
+  }
+  for (const drScope of disasterRecoveryScopes) {
+    if (drScope?.serverId !== normalizedServerId) {
+      throw new BackupManifestError('backup_manifest_server_mismatch', 'Disaster recovery scope belongs to a different server');
+    }
+    resources.push(...disasterRecoveryScopeResources(drScope));
   }
   if (resources.length > MAX_RESOURCES) {
     throw new BackupManifestError('backup_manifest_too_large', 'Backup manifest contains too many resources');
@@ -481,5 +818,13 @@ export const backupManifestInternals = Object.freeze({
   normalizeDockerStorageResource,
   normalizeApplicationResource,
   normalizeBackupResource,
+  normalizeSiteFilesResource,
+  normalizeConfigurationResource,
+  normalizePanelRelationshipsResource,
+  normalizeEncryptionKeysResource,
+  normalizeDatabaseManifestResource,
+  normalizeMailManifestResource,
   resourceCounts,
+  disasterRecoveryCategories: DISASTER_RECOVERY_CATEGORIES,
+  maskDisasterRecoverySecrets,
 });
