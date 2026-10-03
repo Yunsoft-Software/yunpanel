@@ -266,6 +266,7 @@ test('TOOLS_SETTINGS_GROUPS: isolates server management, diagnostics and product
   assert.ok(diagGroup.items.some(([to]) => to === '/applications'));
   assert.ok(diagGroup.items.some(([to]) => to === '/jobs'));
   assert.ok(diagGroup.items.some(([to]) => to === '/audit'));
+  assert.ok(diagGroup.items.some(([to]) => to === '/logs'));
   assert.ok(diagGroup.items.some(([to]) => to === '/domains'));
 });
 
@@ -343,6 +344,7 @@ test('navigationItemActive: correctly identifies active routes and handles users
   // Tools & Settings is active on server/settings tools, but NOT on /users or /settings/users
   assert.equal(navigationItemActive('/tools-settings', '/tools-settings'), true);
   assert.equal(navigationItemActive('/tools-settings', '/servers'), true);
+  assert.equal(navigationItemActive('/tools-settings', '/logs'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings?section=dns'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings/users'), false);
   assert.equal(navigationItemActive('/tools-settings', '/users'), false);
