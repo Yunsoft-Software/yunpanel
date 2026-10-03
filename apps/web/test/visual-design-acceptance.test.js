@@ -231,7 +231,7 @@ test('Criterion 3: Owner role has full server management context and all task sc
   const websitesPage = await source('workspace/WebsitesPage.jsx');
   assert.match(websitesPage, /isReseller \? 'Sitelerim' : 'Web Siteleri ve Alan Adları'/);
   assert.match(websitesPage, /isOwner && canManage && <LinkButton to="\/websites\/new" icon="plus" variant="primary">Web sitesi ekle<\/LinkButton>/);
-  assert.match(websitesPage, /isOwner && canManage && <WebsiteRemovalRecoveryPanel \/>/);
+  assert.match(websitesPage, /isOwner && canManage && <WebsiteRemovalRecoveryPanel(?:\s+[^>]*?)?\s*\/>/);
 });
 
 test('Criterion 3: Site User Role 1 (Reseller) has isolated Bayi Menüsü and customer site tools', async () => {
