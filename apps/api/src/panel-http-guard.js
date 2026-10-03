@@ -52,6 +52,8 @@ export function requirePanelRouteAccess(request, response, next) {
       || (isLegacySiteManager && path.startsWith('/api/audit'))
       || path.startsWith('/api/panel/settings')
       || path.startsWith('/api/system/packages')
+      || path.startsWith('/api/firewall')
+      || path.includes('/firewall')
     ) {
       return deny(response, 403, 'forbidden', 'Site-scoped role cannot access global server management.');
     }
