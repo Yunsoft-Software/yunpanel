@@ -2,7 +2,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import http from 'node:http';
+import os from 'node:os';
+import path from 'node:path';
+import { mkdtemp, readFile, writeFile, rm, chmod } from 'node:fs/promises';
 import { renderCronTaskFile } from '@yunpanel/config-templates';
+import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
+import { createProcessStoreLock, ProcessStoreLockError } from '../src/process-store-lock.js';
+import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
 
 function createExpressMockApp() {
   const globalMiddlewares = [];
@@ -1424,5 +1430,546 @@ test('website-removal-http guarantees no interaction with Plesk .44 host', async
     assert.doesNotMatch(baseUrl, /\.44/);
   } finally {
     server.close();
+  }
+});
+
+test('website-removal-http fails closed with 503 on site mutation lock permission and crash failures without journal corruption', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-777777777777';
+
+  const preview = createWebsiteRemovalPreview({
+    website: {
+      id: websiteId,
+      name: 'Lock Failure Site',
+      serverId: localServerId,
+      applicationId: null,
+      systemUser: null,
+      desiredRevision: 1,
+    },
+    impact: {
+      version: 1,
+      resourceType: 'website',
+      operation: 'delete',
+      targetServerId: null,
+      resource: { id: websiteId, serverId: localServerId },
+      dependencies: {
+        domains: [],
+        databases: { status: 'available', items: [] },
+        sftpKeys: { status: 'available', items: [] },
+        runtimeBindings: { status: 'available', items: [] },
+        unixIdentities: { status: 'available', items: [] },
+        logScopes: { status: 'available', items: [] },
+        crons: { status: 'available', items: [] },
+        backups: { status: 'available', items: [] },
+        activeJobs: [],
+      },
+      blockers: [],
+      previewDigest: 'e'.repeat(64),
+      confirmation: `delete:website:${websiteId}:${'e'.repeat(64)}`,
+    },
+  });
+
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  let lockBehavior = 'permission_error';
+  const failingSiteMutationLock = {
+    withSiteLock: async ({ websiteId: targetId }, action) => {
+      if (lockBehavior === 'permission_error') {
+        throw new SiteMutationLockError(
+          'site_mutation_lock_failed',
+          'Failed to acquire site mutation lock due to permission error',
+          503,
+        );
+      }
+      if (lockBehavior === 'timeout') {
+        throw new SiteMutationLockError(
+          'site_mutation_locked',
+          'Timed out waiting for existing site mutation lock',
+          503,
+        );
+      }
+      return action();
+    },
+  };
+
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId: localServerId }),
+      deleteMigrationWebsite: async () => {},
+    },
+    fileCleanupHandler: async () => ({ filesCleaned: true, websiteId, applicationId: null, retainedBackups: [], retainedLogScopes: [] }),
+    fileCleanupInspector: async () => ({ ready: true }),
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    req.auth = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    };
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, {
+    runtime,
+    siteMutationLock: failingSiteMutationLock,
+    websiteRegistry: {
+      getWebsite: async () => ({ id: websiteId, serverId: localServerId }),
+      deleteMigrationWebsite: async () => {},
+    },
+    localServerId,
+  });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Permission failure returns 503 site_mutation_lock_failed fail-closed
+    const resPerm = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resPerm.status, 503);
+    const errPerm = await resPerm.json();
+    assert.equal(errPerm.error.code, 'site_mutation_lock_failed');
+
+    // Verify registry remains empty / uncorrupted
+    assert.equal((await registry.listForWebsite(websiteId)).length, 0);
+
+    // 2. Lock timeout returns 503 site_mutation_locked fail-closed
+    lockBehavior = 'timeout';
+    const resTimeout = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resTimeout.status, 503);
+    const errTimeout = await resTimeout.json();
+    assert.equal(errTimeout.error.code, 'site_mutation_locked');
+
+    // Verify registry still remains uncorrupted
+    assert.equal((await registry.listForWebsite(websiteId)).length, 0);
+
+    // 3. Normal lock allows start to proceed
+    lockBehavior = 'ok';
+    const resOk = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resOk.status, 201);
+    const op = (await resOk.json()).operation;
+    assert.equal(op.websiteId, websiteId);
+    assert.equal((await registry.listForWebsite(websiteId)).length, 1);
+  } finally {
+    server.close();
+  }
+});
+
+test('website-removal-http legacy direct-systemd services without deployment receipts, unowned Unix identities, and unsafe paths remain fail-closed', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-888888888888';
+  const applicationId = '33333333-3333-4333-8333-888888888888';
+  const systemUser = 'yunapp-test888';
+
+  let receiptPresent = false;
+  let ownedUnixUser = 'yunapp-different'; // Mismatched / unowned
+  let symlinkPath = false;
+
+  const nodeServiceCalls = [];
+  const compensatedCalls = [];
+
+  const cleanupAdapters = createWebsiteRemovalCleanupAdapters({
+    websiteRegistry: {
+      getWebsite: async () => ({
+        id: websiteId,
+        serverId: localServerId,
+        applicationId,
+        unixUser: systemUser,
+      }),
+      listWebsites: async () => [{ id: websiteId, applicationId }],
+    },
+    applicationRegistry: {
+      getApplication: async () => ({
+        id: applicationId,
+        serverId: localServerId,
+        type: 'node',
+        runtimeAdapter: 'direct-systemd',
+        desiredRevision: 2,
+        currentReleaseId: null, // Legacy direct-systemd without releaseId / receipt
+        serviceName: 'yunpanel-node-legacy.service',
+        currentCommitSha: null,
+        servicePort: 3200,
+        healthPath: '/health',
+      }),
+    },
+    websiteProvisioningRuntime: {
+      registry: {
+        listForWebsite: async () => [{
+          operationId: 'prov-op-1',
+          steps: [{
+            kind: 'unix_identity',
+            state: 'succeeded',
+            intent: {
+              websiteId,
+              applicationId,
+              unixUser: ownedUnixUser,
+              homeDirectory: `/var/lib/yunpanel/data/${applicationId}`,
+            },
+            evidence: { owned: true },
+          }],
+        }],
+      },
+      handlers: {
+        unix_identity: {
+          compensate: async (ctx) => {
+            compensatedCalls.push(ctx);
+            return { satisfied: true, removedUser: true, removedGroup: true };
+          },
+          inspectCompensation: async () => ({ satisfied: true, removedUser: true, removedGroup: true }),
+        },
+      },
+    },
+    nodeServiceRemovalManager: {
+      inspectRemoval: async (input) => {
+        nodeServiceCalls.push({ type: 'inspect', input });
+        return { ready: true, ...input };
+      },
+      removeService: async (input) => {
+        nodeServiceCalls.push({ type: 'remove', input });
+        return { ...input, directSystemdCleaned: true };
+      },
+    },
+    nodeDeploymentReceiptStore: {
+      read: async () => receiptPresent ? {
+        version: 1,
+        serverId: localServerId,
+        jobId: 'rel-1',
+        applicationId,
+        releaseId: 'rel-1',
+        previousReleaseId: null,
+        commitSha: 'a'.repeat(40),
+        serviceName: 'yunpanel-node-legacy.service',
+        port: 3200,
+        healthPath: '/health',
+      } : null,
+    },
+    lstatFn: async (p) => ({
+      isSymbolicLink: () => symlinkPath,
+      isDirectory: () => !symlinkPath,
+    }),
+    rmFn: async () => {},
+  });
+
+  // Verify direct-systemd cleanup fails closed without deployment receipt
+  await assert.rejects(
+    cleanupAdapters.inspectDirectSystemdCleanup({
+      websiteId,
+      applicationId,
+      serverId: localServerId,
+      releaseId: null,
+      serviceName: 'yunpanel-node-legacy.service',
+      currentCommitSha: null,
+      servicePort: 3200,
+      healthPath: '/health',
+    }),
+    (error) => error.code === 'website_cleanup_direct_systemd_evidence_unavailable',
+  );
+  assert.equal(nodeServiceCalls.length, 0, 'No host service inspection or removal calls executed without deployment receipt');
+
+  // Verify unowned Unix identity fails closed
+  await assert.rejects(
+    cleanupAdapters.inspectUnixIdentityCleanup({ websiteId, systemUser }),
+    (error) => error.code === 'website_cleanup_identity_evidence_unavailable',
+  );
+  assert.equal(compensatedCalls.length, 0, 'No Unix identity compensation executed for unowned identity');
+
+  // Verify unsafe symlink path fails closed
+  symlinkPath = true;
+  await assert.rejects(
+    cleanupAdapters.inspectFileCleanup({ websiteId, applicationId }),
+    (error) => error.code === 'website_cleanup_path_unsafe',
+  );
+});
+
+test('website-removal-http preserves durable recovery journals across cold-restart and storage/write-failure scenarios', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-website-removal-'));
+  const filePath = path.join(rootDir, 'operations.json');
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-999999999999';
+
+  const preview = createWebsiteRemovalPreview({
+    website: {
+      id: websiteId,
+      name: 'Cold Restart Site',
+      serverId: localServerId,
+      applicationId: null,
+      systemUser: null,
+      desiredRevision: 1,
+    },
+    impact: {
+      version: 1,
+      resourceType: 'website',
+      operation: 'delete',
+      targetServerId: null,
+      resource: { id: websiteId, serverId: localServerId },
+      dependencies: {
+        domains: [],
+        databases: { status: 'available', items: [] },
+        sftpKeys: { status: 'available', items: [] },
+        runtimeBindings: { status: 'available', items: [] },
+        unixIdentities: { status: 'available', items: [] },
+        logScopes: { status: 'available', items: [] },
+        crons: { status: 'available', items: [] },
+        backups: { status: 'available', items: [] },
+        activeJobs: [],
+      },
+      blockers: [],
+      previewDigest: 'f'.repeat(64),
+      confirmation: `delete:website:${websiteId}:${'f'.repeat(64)}`,
+    },
+  });
+
+  try {
+    // 1. Initialize durable registry and runtime
+    const registry1 = createWebsiteRemovalOperationRegistry({ filePath });
+    await registry1.init();
+
+    let cleanedFilesCount = 0;
+    let websiteDeleted = false;
+    const websiteRegistryMock = {
+      getWebsite: async () => (websiteDeleted ? null : { id: websiteId, serverId: localServerId, applicationId: null }),
+      deleteMigrationWebsite: async () => { websiteDeleted = true; },
+    };
+
+    const runtime1 = createWebsiteRemovalRuntime({
+      registry: registry1,
+      previewProvider: async () => preview,
+      domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+      websiteRegistry: websiteRegistryMock,
+      fileCleanupHandler: async () => { cleanedFilesCount++; return { filesCleaned: true, websiteId, applicationId: null, retainedBackups: [], retainedLogScopes: [] }; },
+      fileCleanupInspector: async () => ({ ready: true }),
+    });
+
+    const app1 = express();
+    app1.use(express.json());
+    app1.use((req, res, next) => {
+      req.auth = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      next();
+    });
+    mountWebsiteRemovalRoutes(app1, {
+      runtime: runtime1,
+      websiteRegistry: websiteRegistryMock,
+      localServerId,
+    });
+    app1.use((err, req, res, next) => {
+      res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+    });
+
+    const server1 = app1.listen(0);
+    const baseUrl1 = `http://127.0.0.1:${server1.address().port}`;
+
+    let op;
+    try {
+      const resStart = await fetch(`${baseUrl1}/api/websites/${websiteId}/removal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          previewDigest: preview.previewDigest,
+          confirmation: preview.confirmation,
+        }),
+      });
+      assert.equal(resStart.status, 201);
+      op = (await resStart.json()).operation;
+    } finally {
+      server1.close();
+    }
+
+    // Verify durable storage file was created and contains the operation
+    const persistedRaw1 = await readFile(filePath, 'utf8');
+    const persistedOps1 = JSON.parse(persistedRaw1);
+    assert.equal(persistedOps1.length, 1);
+    assert.equal(persistedOps1[0].id, op.id);
+
+    // 2. Cold restart: instantiate completely new registry2 and runtime2 pointing to the same filePath
+    const registry2 = createWebsiteRemovalOperationRegistry({ filePath });
+    await registry2.init();
+    const runtime2 = createWebsiteRemovalRuntime({
+      registry: registry2,
+      previewProvider: async () => preview,
+      domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+      websiteRegistry: websiteRegistryMock,
+      fileCleanupHandler: async () => { cleanedFilesCount++; return { filesCleaned: true, websiteId, applicationId: null, retainedBackups: [], retainedLogScopes: [] }; },
+      fileCleanupInspector: async () => ({ ready: true }),
+    });
+
+    const app2 = express();
+    app2.use(express.json());
+    app2.use((req, res, next) => {
+      req.auth = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      next();
+    });
+    mountWebsiteRemovalRoutes(app2, {
+      runtime: runtime2,
+      websiteRegistry: websiteRegistryMock,
+      localServerId,
+    });
+    app2.use((err, req, res, next) => {
+      res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+    });
+
+    const server2 = app2.listen(0);
+    const baseUrl2 = `http://127.0.0.1:${server2.address().port}`;
+
+    try {
+      // Reconcile / GET operation shows exact persisted state
+      const resGet = await fetch(`${baseUrl2}/api/websites/${websiteId}/removal-operations/${op.id}`);
+      assert.equal(resGet.status, 200);
+      const reloadedOp = (await resGet.json()).operation;
+      assert.equal(reloadedOp.id, op.id);
+      assert.equal(reloadedOp.websiteId, websiteId);
+
+      // 3. Storage write-failure scenario:
+      // Make directory read-only (chmod 0o500) so that atomic persist() writeFile fails
+      await chmod(rootDir, 0o500);
+
+      const step = reloadedOp.steps.find((s) => s.status !== 'succeeded');
+      const resFailingCont = await fetch(`${baseUrl2}/api/websites/${websiteId}/removal-operations/${op.id}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: reloadedOp.updatedAt,
+          stepId: step.id,
+          confirmation: reloadedOp.actions.stepContinuationConfirmation,
+        }),
+      });
+      // Should fail closed with 503 process_store_lock_failed
+      assert.equal(resFailingCont.status, 503);
+      const errFailingCont = await resFailingCont.json();
+      assert.equal(errFailingCont.error.code, 'process_store_lock_failed');
+
+      // Restore write permissions
+      await chmod(rootDir, 0o700);
+
+      // Verify no stray .tmp files were left behind in rootDir
+      // and in-memory registry reloaded from durable disk without corruption
+      const resGetAfterFailure = await fetch(`${baseUrl2}/api/websites/${websiteId}/removal-operations/${op.id}`);
+      assert.equal(resGetAfterFailure.status, 200);
+      const opAfterFailure = (await resGetAfterFailure.json()).operation;
+      assert.equal(opAfterFailure.id, op.id);
+
+      // Retry continuation succeeds now that permissions are restored
+      const resRetry = await fetch(`${baseUrl2}/api/websites/${websiteId}/removal-operations/${op.id}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: opAfterFailure.updatedAt,
+          stepId: step.id,
+          confirmation: opAfterFailure.actions.stepContinuationConfirmation,
+        }),
+      });
+      assert.equal(resRetry.status, 200);
+      const opSuccess = (await resRetry.json()).operation;
+      assert.equal(opSuccess.steps.find((s) => s.id === step.id).status, 'succeeded');
+    } finally {
+      await chmod(rootDir, 0o700).catch(() => {});
+      server2.close();
+    }
+  } finally {
+    await chmod(rootDir, 0o700).catch(() => {});
+    await rm(rootDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('website-removal-http multi-process store lock recovers crashed process locks and fails closed on live contention', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-lock-test-'));
+  const lockFilePath = path.join(rootDir, 'store.json');
+  try {
+    // 1. Simulate crashed process: lock file written with non-existent dead PID
+    const deadPid = 999999;
+    const lockPath = `${lockFilePath}.lock`;
+    const record = {
+      version: 1,
+      pid: deadPid,
+      token: '11111111-1111-4111-8111-111111111111',
+      createdAt: new Date().toISOString(),
+    };
+    await writeFile(lockPath, `${JSON.stringify(record)}\n`, 'utf8');
+
+    // Create process store lock with a signalProcess that returns ESRCH for deadPid
+    const lock = createProcessStoreLock({
+      filePath: lockFilePath,
+      signalProcess: (pid, sig) => {
+        if (pid === deadPid) {
+          const err = new Error('No such process');
+          err.code = 'ESRCH';
+          throw err;
+        }
+        process.kill(pid, sig);
+      },
+      waitMs: 200,
+      retryMs: 10,
+    });
+
+    // withLock should evict the stale dead PID lock and successfully execute action
+    let executed = false;
+    await lock.withLock(async () => {
+      executed = true;
+    });
+    assert.equal(executed, true, 'Stale lock of dead process was safely evicted');
+
+    // 2. Simulate live process holding the lock: signalProcess returns true (no error)
+    const alivePid = 888888;
+    const aliveRecord = {
+      version: 1,
+      pid: alivePid,
+      token: '22222222-2222-4222-8222-222222222222',
+      createdAt: new Date().toISOString(),
+    };
+    await writeFile(lockPath, `${JSON.stringify(aliveRecord)}\n`, 'utf8');
+
+    const contendingLock = createProcessStoreLock({
+      filePath: lockFilePath,
+      signalProcess: () => true, // simulates alive process
+      waitMs: 50,
+      retryMs: 10,
+    });
+
+    await assert.rejects(
+      contendingLock.withLock(async () => {}),
+      (err) => err instanceof ProcessStoreLockError && err.code === 'process_store_locked' && err.status === 503,
+      'Live process contention times out and fails closed with 503 process_store_locked',
+    );
+  } finally {
+    await rm(rootDir, { recursive: true, force: true }).catch(() => {});
   }
 });

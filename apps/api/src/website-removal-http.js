@@ -1,5 +1,7 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRemovalRuntimeError } from './website-removal-runtime.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
+import { ProcessStoreLockError } from './process-store-lock.js';
 import { extractActorTenant } from './tenant-boundary.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -137,7 +139,7 @@ function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
     catch (error) {
-      if (error instanceof WebsiteRemovalRuntimeError) {
+      if (error instanceof WebsiteRemovalRuntimeError || error instanceof SiteMutationLockError || error instanceof ProcessStoreLockError) {
         return next(new WebsiteRemovalHttpError(error.code, error.message, error.status));
       }
       return next(error);

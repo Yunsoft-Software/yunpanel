@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const STORE_VERSION = 1;
 const OPERATION_STATUSES = new Set(['pending', 'running', 'blocked', 'failed', 'removed']);
@@ -763,6 +764,7 @@ export function createDomainRemovalOperationRegistry({
   filePath = null,
   now = () => Date.now(),
   idFactory = randomUUID,
+  storeLockFactory = createProcessStoreLock,
 } = {}) {
   if (typeof now !== 'function' || typeof idFactory !== 'function') {
     throw new DomainRemovalOperationRegistryError(
@@ -773,6 +775,16 @@ export function createDomainRemovalOperationRegistry({
   }
   let state = { version: STORE_VERSION, operations: [] };
   let initialized = filePath === null;
+  const storeLock = filePath
+    ? storeLockFactory({ filePath: path.resolve(filePath) })
+    : null;
+  if (filePath && (!storeLock || typeof storeLock.withLock !== 'function')) {
+    throw new DomainRemovalOperationRegistryError(
+      'domain_removal_store_lock_invalid',
+      'Domain removal store lock is invalid',
+      503,
+    );
+  }
   let writeChain = Promise.resolve();
 
   async function persist() {
@@ -783,15 +795,19 @@ export function createDomainRemovalOperationRegistry({
     writeChain = writeChain.then(async () => {
       await mkdir(directory, { recursive: true, mode: 0o700 });
       await chmod(directory, 0o700);
-      await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporary, filePath);
-      await chmod(filePath, 0o600);
+      try {
+        await writeFile(temporary, content, { encoding: 'utf8', mode: 0o600 });
+        await rename(temporary, filePath);
+        await chmod(filePath, 0o600);
+      } finally {
+        await rm(temporary, { force: true }).catch(() => {});
+      }
     });
     await writeChain;
   }
 
-  async function init() {
-    if (initialized) return;
+  async function reload() {
+    if (!filePath) { initialized = true; return; }
     try {
       const parsed = JSON.parse(await readFile(filePath, 'utf8'));
       if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.operations)
@@ -820,76 +836,103 @@ export function createDomainRemovalOperationRegistry({
     initialized = true;
   }
 
+  async function init() {
+    if (initialized) return;
+    if (!storeLock) { await reload(); return; }
+    await storeLock.withLock(reload);
+  }
+
   async function ensureInitialized() {
     if (!initialized) await init();
   }
 
-  async function create(preview, { parentOperationId = null } = {}) {
+  async function withMutation(action) {
     await ensureInitialized();
-    const normalizedParentOperationId = parentOperationId === null
-      ? null
-      : safeId(parentOperationId, 'parentOperationId');
-    if (normalizedParentOperationId !== null) {
-      const parent = state.operations.find((operation) => operation.id === normalizedParentOperationId);
-      if (!parent || parent.status === 'removed' || parent.domainId === preview?.domain?.id) {
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      try {
+        return await action();
+      } catch (error) {
+        await reload().catch(() => {});
+        throw error;
+      }
+    });
+  }
+
+  async function withRead(action) {
+    await ensureInitialized();
+    if (!storeLock) return action();
+    return storeLock.withLock(async () => {
+      await reload();
+      return action();
+    });
+  }
+
+  async function create(preview, { parentOperationId = null } = {}) {
+    return withMutation(async () => {
+      const normalizedParentOperationId = parentOperationId === null
+        ? null
+        : safeId(parentOperationId, 'parentOperationId');
+      if (normalizedParentOperationId !== null) {
+        const parent = state.operations.find((operation) => operation.id === normalizedParentOperationId);
+        if (!parent || parent.status === 'removed' || parent.domainId === preview?.domain?.id) {
+          throw new DomainRemovalOperationRegistryError(
+            'domain_removal_parent_operation_invalid',
+            'Child Domain removal requires one active parent operation',
+            409,
+          );
+        }
+      }
+      const duplicate = state.operations.find((operation) => (
+        operation.domainId === preview?.domain?.id
+        && operation.domainRevision === preview?.domain?.desiredRevision
+        && operation.previewDigest === preview?.previewDigest
+        && operation.parentOperationId === normalizedParentOperationId
+        && operation.status !== 'removed'
+      ));
+      if (duplicate) return duplicate;
+      const conflict = state.operations.find((operation) => (
+        operation.domainId === preview?.domain?.id && operation.status !== 'removed'
+      ));
+      if (conflict) {
         throw new DomainRemovalOperationRegistryError(
-          'domain_removal_parent_operation_invalid',
-          'Child Domain removal requires one active parent operation',
+          'domain_removal_operation_conflict',
+          'Another Domain removal operation already owns this Domain',
           409,
         );
       }
-    }
-    const duplicate = state.operations.find((operation) => (
-      operation.domainId === preview?.domain?.id
-      && operation.domainRevision === preview?.domain?.desiredRevision
-      && operation.previewDigest === preview?.previewDigest
-      && operation.parentOperationId === normalizedParentOperationId
-      && operation.status !== 'removed'
-    ));
-    if (duplicate) return duplicate;
-    const conflict = state.operations.find((operation) => (
-      operation.domainId === preview?.domain?.id && operation.status !== 'removed'
-    ));
-    if (conflict) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_operation_conflict',
-        'Another Domain removal operation already owns this Domain',
-        409,
+      const operation = operationFromPreview(
+        preview,
+        now,
+        idFactory,
+        normalizedParentOperationId,
       );
-    }
-    const operation = operationFromPreview(
-      preview,
-      now,
-      idFactory,
-      normalizedParentOperationId,
-    );
-    if (state.operations.some((candidate) => candidate.id === operation.id)) {
-      throw invalid('Domain removal operation ID is not unique');
-    }
-    state.operations.push(operation);
-    await persist();
-    return operation;
+      if (state.operations.some((candidate) => candidate.id === operation.id)) {
+        throw invalid('Domain removal operation ID is not unique');
+      }
+      state.operations.push(operation);
+      await persist();
+      return operation;
+    });
   }
 
   async function get(operationId) {
-    await ensureInitialized();
     const id = safeId(operationId, 'operationId');
-    return state.operations.find((operation) => operation.id === id) ?? null;
+    return withRead(() => state.operations.find((operation) => operation.id === id) ?? null);
   }
 
   async function listForDomain(domainId) {
-    await ensureInitialized();
     const id = safeId(domainId, 'domainId');
-    return Object.freeze(state.operations
+    return withRead(() => Object.freeze(state.operations
       .filter((operation) => operation.domainId === id)
-      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)));
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))));
   }
 
   async function listInterrupted() {
-    await ensureInitialized();
-    return Object.freeze(state.operations.filter((operation) => (
+    return withRead(() => Object.freeze(state.operations.filter((operation) => (
       operation.steps.some((step) => step.status === 'running')
-    )));
+    ))));
   }
 
   async function mutate(operation, update) {
@@ -932,145 +975,157 @@ export function createDomainRemovalOperationRegistry({
   }
 
   async function markStepRunning(operationId, stepId) {
-    const operation = requireOperation(await get(operationId));
-    if (operation.status === 'removed') {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_operation_not_runnable',
-        'Domain removal operation cannot run from its current state',
-        409,
-      );
-    }
-    const expected = firstIncomplete(operation);
-    if (!expected || expected.id !== stepId) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_out_of_order',
-        'Domain removal steps must execute in journaled order',
-        409,
-      );
-    }
-    if (expected.status === 'running') return operation;
-    if (!['pending', 'blocked', 'failed'].includes(expected.status)) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_runnable',
-        'Domain removal step cannot run from its current state',
-        409,
-      );
-    }
-    const changedAt = new Date(Math.max(now(), Date.parse(expected.updatedAt) + 1)).toISOString();
-    const steps = operation.steps.map((step) => step.id === stepId
-      ? persistedStep({ ...step, status: 'running', result: null, error: null, updatedAt: changedAt })
-      : step);
-    return mutate(operation, { status: 'running', steps, error: null });
-  }
-
-  async function succeedStep(operationId, stepId, result = {}) {
-    const operation = requireOperation(await get(operationId));
-    const step = operation.steps.find((candidate) => candidate.id === stepId);
-    if (!step) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_found',
-        'Domain removal step was not found',
-        404,
-      );
-    }
-    const normalizedResult = stepResult({
-      referenceId: result.referenceId ?? null,
-      evidenceDigest: result.evidenceDigest ?? null,
-    });
-    if (step.status === 'succeeded') {
-      if (JSON.stringify(step.result) !== JSON.stringify(normalizedResult)) {
+    return withMutation(async () => {
+      const id = safeId(operationId, 'operationId');
+      const operation = requireOperation(state.operations.find((candidate) => candidate.id === id));
+      if (operation.status === 'removed') {
         throw new DomainRemovalOperationRegistryError(
-          'domain_removal_step_result_conflict',
-          'Domain removal step already completed with different evidence',
+          'domain_removal_operation_not_runnable',
+          'Domain removal operation cannot run from its current state',
           409,
         );
       }
-      return operation;
-    }
-    if (step.status !== 'running') {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_running',
-        'Domain removal step is not running',
-        409,
-      );
-    }
-    const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
-    const steps = operation.steps.map((candidate) => candidate.id === stepId
-      ? persistedStep({
-        ...candidate,
-        status: 'succeeded',
-        result: normalizedResult,
+      const expected = firstIncomplete(operation);
+      if (!expected || expected.id !== stepId) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_out_of_order',
+          'Domain removal steps must execute in journaled order',
+          409,
+        );
+      }
+      if (expected.status === 'running') return operation;
+      if (!['pending', 'blocked', 'failed'].includes(expected.status)) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_runnable',
+          'Domain removal step cannot run from its current state',
+          409,
+        );
+      }
+      const changedAt = new Date(Math.max(now(), Date.parse(expected.updatedAt) + 1)).toISOString();
+      const steps = operation.steps.map((step) => step.id === stepId
+        ? persistedStep({ ...step, status: 'running', result: null, error: null, updatedAt: changedAt })
+        : step);
+      return mutate(operation, { status: 'running', steps, error: null });
+    });
+  }
+
+  async function succeedStep(operationId, stepId, result = {}) {
+    return withMutation(async () => {
+      const id = safeId(operationId, 'operationId');
+      const operation = requireOperation(state.operations.find((candidate) => candidate.id === id));
+      const step = operation.steps.find((candidate) => candidate.id === stepId);
+      if (!step) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_found',
+          'Domain removal step was not found',
+          404,
+        );
+      }
+      const normalizedResult = stepResult({
+        referenceId: result.referenceId ?? null,
+        evidenceDigest: result.evidenceDigest ?? null,
+      });
+      if (step.status === 'succeeded') {
+        if (JSON.stringify(step.result) !== JSON.stringify(normalizedResult)) {
+          throw new DomainRemovalOperationRegistryError(
+            'domain_removal_step_result_conflict',
+            'Domain removal step already completed with different evidence',
+            409,
+          );
+        }
+        return operation;
+      }
+      if (step.status !== 'running') {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_running',
+          'Domain removal step is not running',
+          409,
+        );
+      }
+      const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
+      const steps = operation.steps.map((candidate) => candidate.id === stepId
+        ? persistedStep({
+          ...candidate,
+          status: 'succeeded',
+          result: normalizedResult,
+          error: null,
+          updatedAt: changedAt,
+        })
+        : candidate);
+      const removed = steps.every((candidate) => candidate.status === 'succeeded');
+      return mutate(operation, {
+        status: removed ? 'removed' : 'running',
+        steps,
         error: null,
-        updatedAt: changedAt,
-      })
-      : candidate);
-    const removed = steps.every((candidate) => candidate.status === 'succeeded');
-    return mutate(operation, {
-      status: removed ? 'removed' : 'running',
-      steps,
-      error: null,
+      });
     });
   }
 
   async function blockStep(operationId, stepId, error) {
-    const operation = requireOperation(await get(operationId));
-    const step = operation.steps.find((candidate) => candidate.id === stepId);
-    if (!step) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_found',
-        'Domain removal step was not found',
-        404,
-      );
-    }
-    if (!['pending', 'running', 'blocked'].includes(step.status)) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_blockable',
-        'Domain removal step cannot be blocked from its current state',
-        409,
-      );
-    }
-    const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
-    const steps = operation.steps.map((candidate) => candidate.id === stepId
-      ? persistedStep({
-        ...candidate,
-        status: 'blocked',
-        result: null,
-        error: safeError(error),
-        updatedAt: changedAt,
-      })
-      : candidate);
-    return mutate(operation, { status: 'blocked', steps, error: null });
+    return withMutation(async () => {
+      const id = safeId(operationId, 'operationId');
+      const operation = requireOperation(state.operations.find((candidate) => candidate.id === id));
+      const step = operation.steps.find((candidate) => candidate.id === stepId);
+      if (!step) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_found',
+          'Domain removal step was not found',
+          404,
+        );
+      }
+      if (!['pending', 'running', 'blocked'].includes(step.status)) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_blockable',
+          'Domain removal step cannot be blocked from its current state',
+          409,
+        );
+      }
+      const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
+      const steps = operation.steps.map((candidate) => candidate.id === stepId
+        ? persistedStep({
+          ...candidate,
+          status: 'blocked',
+          result: null,
+          error: safeError(error),
+          updatedAt: changedAt,
+        })
+        : candidate);
+      return mutate(operation, { status: 'blocked', steps, error: null });
+    });
   }
 
   async function failStep(operationId, stepId, error) {
-    const operation = requireOperation(await get(operationId));
-    const step = operation.steps.find((candidate) => candidate.id === stepId);
-    if (!step) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_found',
-        'Domain removal step was not found',
-        404,
-      );
-    }
-    if (!['pending', 'running', 'blocked', 'failed'].includes(step.status)) {
-      throw new DomainRemovalOperationRegistryError(
-        'domain_removal_step_not_mutable',
-        'Domain removal step cannot fail from its current state',
-        409,
-      );
-    }
-    const failure = safeError(error);
-    const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
-    const steps = operation.steps.map((candidate) => candidate.id === stepId
-      ? persistedStep({
-        ...candidate,
-        status: 'failed',
-        result: null,
-        error: failure,
-        updatedAt: changedAt,
-      })
-      : candidate);
-    return mutate(operation, { status: 'failed', steps, error: failure });
+    return withMutation(async () => {
+      const id = safeId(operationId, 'operationId');
+      const operation = requireOperation(state.operations.find((candidate) => candidate.id === id));
+      const step = operation.steps.find((candidate) => candidate.id === stepId);
+      if (!step) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_found',
+          'Domain removal step was not found',
+          404,
+        );
+      }
+      if (!['pending', 'running', 'blocked', 'failed'].includes(step.status)) {
+        throw new DomainRemovalOperationRegistryError(
+          'domain_removal_step_not_mutable',
+          'Domain removal step cannot fail from its current state',
+          409,
+        );
+      }
+      const failure = safeError(error);
+      const changedAt = new Date(Math.max(now(), Date.parse(step.updatedAt) + 1)).toISOString();
+      const steps = operation.steps.map((candidate) => candidate.id === stepId
+        ? persistedStep({
+          ...candidate,
+          status: 'failed',
+          result: null,
+          error: failure,
+          updatedAt: changedAt,
+        })
+        : candidate);
+      return mutate(operation, { status: 'failed', steps, error: failure });
+    });
   }
 
   return Object.freeze({

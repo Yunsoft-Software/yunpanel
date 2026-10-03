@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 
@@ -125,8 +125,12 @@ export function createWebsiteRemovalOperationRegistry({
     const directory = path.dirname(filePath);
     const temporary = `${filePath}.${process.pid}.tmp`;
     await mkdir(directory, { recursive: true, mode: 0o700 });
-    await writeFile(temporary, data, { encoding: 'utf8', mode: 0o600 });
-    await rename(temporary, filePath);
+    try {
+      await writeFile(temporary, data, { encoding: 'utf8', mode: 0o600 });
+      await rename(temporary, filePath);
+    } finally {
+      await rm(temporary, { force: true }).catch(() => {});
+    }
   }
 
   async function init() {
