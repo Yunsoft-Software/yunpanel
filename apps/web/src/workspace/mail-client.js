@@ -177,6 +177,70 @@ export function getMailDiagnostics(mailDomainId) {
   return panelRequest(`${mailDomainPath(mailDomainId)}/diagnostics`);
 }
 
+export function getMailDeliveryDiagnostics(mailDomainId) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/delivery-diagnostics`);
+}
+
+export function getMailConnectionSettings(mailDomainId) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/connection-settings`);
+}
+
+export function getMailDomainQueue(mailDomainId, { limit, search } = {}) {
+  const query = new URLSearchParams();
+  if (limit !== undefined) query.set('limit', String(limit));
+  if (search) query.set('search', search);
+  const qs = query.toString();
+  return panelRequest(`${mailDomainPath(mailDomainId)}/queue${qs ? `?${qs}` : ''}`);
+}
+
+export function getMailDomainDeliveryLogs(mailDomainId, { limit, search } = {}) {
+  const query = new URLSearchParams();
+  if (limit !== undefined) query.set('limit', String(limit));
+  if (search) query.set('search', search);
+  const qs = query.toString();
+  return panelRequest(`${mailDomainPath(mailDomainId)}/delivery-logs${qs ? `?${qs}` : ''}`);
+}
+
+export function sendMailDomainTestDelivery(mailDomainId, { recipient, subject } = {}) {
+  if (typeof recipient !== 'string' || !recipient) throw new Error('recipient is required');
+  return panelRequest(`${mailDomainPath(mailDomainId)}/test-delivery`, {
+    method: 'POST',
+    body: { recipient, subject },
+  });
+}
+
+export function getMailboxDeliveryDiagnostics(mailboxId) {
+  return panelRequest(`${mailboxPath(mailboxId)}/delivery-diagnostics`);
+}
+
+export function getMailboxConnectionSettings(mailboxId) {
+  return panelRequest(`${mailboxPath(mailboxId)}/connection-settings`);
+}
+
+export function sendMailboxTestDelivery(mailboxId, { recipient, subject } = {}) {
+  if (typeof recipient !== 'string' || !recipient) throw new Error('recipient is required');
+  return panelRequest(`${mailboxPath(mailboxId)}/test-delivery`, {
+    method: 'POST',
+    body: { recipient, subject },
+  });
+}
+
+export function getServerMailDeliveryDiagnostics(serverId) {
+  return panelRequest(`/servers/${encodeURIComponent(requiredId(serverId, 'serverId'))}/mail/delivery-diagnostics`);
+}
+
+export function getServerMailConnectionSettings(serverId) {
+  return panelRequest(`/servers/${encodeURIComponent(requiredId(serverId, 'serverId'))}/mail/connection-settings`);
+}
+
+export function sendServerMailTestDelivery(serverId, { sender, recipient, subject } = {}) {
+  if (typeof recipient !== 'string' || !recipient) throw new Error('recipient is required');
+  return panelRequest(`/servers/${encodeURIComponent(requiredId(serverId, 'serverId'))}/mail/test-delivery`, {
+    method: 'POST',
+    body: { sender, recipient, subject },
+  });
+}
+
 export function getMailDkim(mailDomainId) {
   return panelRequest(`${mailDomainPath(mailDomainId)}/dkim`);
 }

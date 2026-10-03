@@ -6,15 +6,17 @@ import {
   clearMailboxForwarding,
   clearMailboxQuota,
   createMailbox,
+  getMailboxDeliveryDiagnostics,
   getMailboxForwarding,
   getMailboxQuota,
   rotateMailboxPassword,
+  sendMailboxTestDelivery,
   setMailboxEnabled,
   setMailboxForwarding,
   setMailboxQuota,
 } from './mail-client.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, Modal, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
 
 function destinationList(value) {
   return [...new Set(String(value ?? '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
@@ -55,6 +57,132 @@ function PasswordModal({ mailbox, onClose, onChanged }) {
     finally { setBusy(false); }
   }
   return <Modal title="Mailbox parolasını değiştir" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} /><label>Yeni parola<input type="password" value={password} required autoComplete="new-password" onChange={(event) => setPassword(event.target.value)} /></label><p className="ws-muted">Revision {mailbox.revision} değiştiyse istek fail-closed reddedilir.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button type="submit" variant="primary" disabled={busy || !password}>{busy ? 'Kaydediliyor…' : 'Parolayı değiştir'}</Button></footer></form></Modal>;
+}
+
+function MailboxDiagnosticsModal({ mailbox, onClose }) {
+  const [data, setData] = useState(null);
+  const [busy, setBusy] = useState(true);
+  const [error, setError] = useState(null);
+  const [testRecipient, setTestRecipient] = useState(mailbox.address);
+  const [sending, setSending] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [testError, setTestError] = useState(null);
+
+  const refresh = useCallback(async () => {
+    setBusy(true);
+    setError(null);
+    try {
+      const res = await getMailboxDeliveryDiagnostics(mailbox.id);
+      setData(res);
+    } catch (err) {
+      if (err.name !== 'AbortError') setError(err.message);
+    } finally {
+      setBusy(false);
+    }
+  }, [mailbox.id]);
+
+  useEffect(() => {
+    void refresh();
+  }, [refresh]);
+
+  async function handleSendTest(e) {
+    e.preventDefault();
+    if (!testRecipient) return;
+    setSending(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      const result = await sendMailboxTestDelivery(mailbox.id, {
+        recipient: testRecipient,
+        subject: `YunPanel Test Mail - ${mailbox.address}`,
+      });
+      setTestResult(result);
+    } catch (err) {
+      if (err.name !== 'AbortError') setTestError(err.message);
+    } finally {
+      setSending(false);
+    }
+  }
+
+  const conn = data?.connectionSettings;
+  const dns = data?.dnsRequirements;
+  const reception = data?.reception;
+
+  return (
+    <Modal title={`Bağlantı & Teslimat Tanılama · ${mailbox.address}`} onClose={onClose} busy={busy}>
+      <div className="ws-diagnostics-modal">
+        <ErrorNotice error={error} />
+        {busy && <div className="ws-loading"><span className="ws-spinner" />Tanılama bilgileri alınıyor…</div>}
+        {data && (
+          <>
+            <Section title="İstemci Bağlantı Ayarları" description="E-posta istemcileri (Thunderbird, Outlook, Apple Mail) için bağlantı ve port gereksinimleri.">
+              <KeyValues items={[
+                ['Kullanıcı adı', conn?.username ?? mailbox.address],
+                ['Gelen Sunucu (IMAP)', `${conn?.imap?.host ?? '—'} (Port ${conn?.imap?.ports?.join(', ') ?? '993, 143'})`],
+                ['IMAP Güvenlik/TLS', `${conn?.imap?.tls ?? 'SSL/TLS (Port 993) / STARTTLS (Port 143)'}`],
+                ['Giden Sunucu (SMTP)', `${conn?.smtp?.host ?? '—'} (Port ${conn?.smtp?.ports?.join(', ') ?? '465, 587, 25'})`],
+                ['SMTP Güvenlik/TLS', `${conn?.smtp?.tls ?? 'SSL/TLS (Port 465) / STARTTLS (Port 587)'}`],
+                ['Kimlik Doğrulama', conn?.authentication ?? 'Parola (PLAIN / LOGIN)'],
+              ]} />
+            </Section>
+
+            <Section title="Posta Kutusu Durumu" description="Yerel teslimat ve posta kutusu kabul durumu.">
+              <KeyValues items={[
+                ['Kabul Durumu', <Badge key="reception" state={reception?.canReceive ? 'active' : 'error'}>{reception?.canReceive ? 'Teslimata Hazır' : 'Teslimat Engelli'}</Badge>],
+                ['Yönlendirme Modu', <Badge key="routing" state={data?.routing === 'local' ? 'active' : 'warning'}>{data?.routing === 'local' ? 'Yerel Teslimat' : 'Dış Yönlendirme'}</Badge>],
+                ['Kota Durumu', reception?.quota?.quotaBytes ? `${bytesLabel(reception.quota.quotaBytes)} tanımlı` : 'Sınırsız'],
+              ]} />
+            </Section>
+
+            <Section title="DNS ve Doğrulama Durumu" description="Alan adı SPF, DKIM, DMARC ve MX kayıtlarının canlı doğrulama durumu.">
+              <KeyValues items={[
+                ['MX Kaydı', <Badge key="mx" state={dns?.mx?.status === 'matched' ? 'active' : 'error'}>{dns?.mx?.status === 'matched' ? 'Doğrulandı' : 'Uyumsuz / Eksik'}</Badge>],
+                ['SPF Kaydı', <Badge key="spf" state={dns?.spf?.status === 'valid' ? 'active' : 'error'}>{dns?.spf?.status === 'valid' ? 'Geçerli' : 'Hatalı / Eksik'}</Badge>],
+                ['DKIM Kaydı', <Badge key="dkim" state={dns?.dkim?.status === 'valid' ? 'active' : dns?.dkim?.status === 'unconfigured' ? 'unknown' : 'error'}>{dns?.dkim?.status === 'valid' ? 'Geçerli' : dns?.dkim?.status === 'unconfigured' ? 'Yapılandırılmadı' : 'Hatalı'}</Badge>],
+                ['DMARC Kaydı', <Badge key="dmarc" state={dns?.dmarc?.status === 'valid' ? 'active' : 'warning'}>{dns?.dmarc?.status === 'valid' ? `Geçerli (${dns.dmarc.policy ?? 'none'})` : 'Eksik / Yapılandırılmadı'}</Badge>],
+              ]} />
+            </Section>
+
+            <Section title="Teslimat Testi" description="Gerçek SMTP teslimatı ile test e-postası gönderimi.">
+              <ErrorNotice error={testError} />
+              {testResult && (
+                <div className={`ws-notice ${testResult.delivered ? 'ws-notice-success' : 'ws-notice-warn'}`} role="status">
+                  <strong>{testResult.delivered ? 'Test E-postası Başarıyla Gönderildi' : 'Gönderim Başarısız'}</strong>
+                  <p>Alıcı: {testResult.recipient} ({testResult.routing === 'local' ? 'Yerel Teslim' : 'Dış Teslim'})</p>
+                  {testResult.messageId && <p>Mesaj ID: <code>{testResult.messageId}</code></p>}
+                  {testResult.error && <p>Hata Nedeni: {testResult.error}</p>}
+                </div>
+              )}
+              <form className="ws-form" onSubmit={handleSendTest}>
+                <fieldset disabled={sending}>
+                  <label>Test Alıcı Adresi
+                    <input
+                      type="email"
+                      value={testRecipient}
+                      required
+                      onChange={(e) => setTestRecipient(e.target.value)}
+                      placeholder="test@example.com"
+                    />
+                  </label>
+                  <div className="ws-actions">
+                    <Button type="submit" variant="primary" disabled={sending || !testRecipient}>
+                      {sending ? 'Gönderiliyor…' : 'Test E-postası Gönder'}
+                    </Button>
+                    <Button type="button" icon="refresh" onClick={refresh} disabled={busy || sending}>
+                      Yenile
+                    </Button>
+                  </div>
+                </fieldset>
+              </form>
+            </Section>
+          </>
+        )}
+        <footer className="ws-modal-footer">
+          <Button onClick={onClose}>Kapat</Button>
+        </footer>
+      </div>
+    </Modal>
+  );
 }
 
 function PolicyPanel({ mailbox, onChanged }) {
@@ -102,6 +230,7 @@ export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
   const removalScope = JSON.stringify([domain.id, session?.user?.id, session?.user?.role, sessionVersion(), canManage]);
   const [removing, setRemoving] = useState(null);
   const [creating, setCreating] = useState(false); const [passwordFor, setPasswordFor] = useState(null); const [selected, setSelected] = useState(null);
+  const [diagnosticsFor, setDiagnosticsFor] = useState(null);
   const [busyId, setBusyId] = useState(null); const [error, setError] = useState(null);
   async function toggle(mailbox) {
     setBusyId(mailbox.id); setError(null);
@@ -109,7 +238,7 @@ export default function MailboxesPanel({ domain, mailboxes, onChanged }) {
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { setBusyId(null); }
   }
-  return <><Section title="Mailboxlar" description="Mailbox desired state, parola ve teslim policy yönetimi."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions"><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Mailbox oluştur</Button></div></div>{mailboxes.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Adres</th><th>Durum</th><th>Revizyon</th><th>İşlemler</th></tr></thead><tbody>{mailboxes.map((mailbox) => <tr key={mailbox.id}><td><strong>{mailbox.address}</strong><small>Parola configured</small></td><td><Badge state={mailbox.enabled ? 'active' : 'offline'}>{mailbox.enabled ? 'enabled' : 'disabled'}</Badge></td><td>{mailbox.revision}</td><td><div className="ws-actions"><Button disabled={busyId === mailbox.id} onClick={() => toggle(mailbox)}>{mailbox.enabled ? 'Disable' : 'Enable'}</Button><Button onClick={() => setPasswordFor(mailbox)}>Parola</Button><Button onClick={() => setSelected((current) => current?.id === mailbox.id ? null : mailbox)}>Policy</Button>{canManage && domain.managementMode === 'local' && <Button variant="danger" icon="trash" disabled={busyId === mailbox.id || removing?.scope === removalScope} onClick={() => setRemoving({ scope: removalScope, mailbox: { id: mailbox.id, address: mailbox.address, mailDomainId: domain.id } })}>Sil…</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="mail" title="Mailbox yok" detail="Bu local mail domain için ilk mailbox kaydını oluşturun." action={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Mailbox oluştur</Button>} />}</Section>{selected && mailboxes.some((item) => item.id === selected.id) && <PolicyPanel key={`${selected.id}:${mailboxes.find((item) => item.id === selected.id)?.revision}`} mailbox={mailboxes.find((item) => item.id === selected.id)} onChanged={onChanged} />}{removing?.scope === removalScope && <MailboxRemovalPanel mailbox={removing.mailbox} domain={domain} onChanged={onChanged} onClose={() => setRemoving(null)} onPolicy={() => setSelected(mailboxes.find((item) => item.id === removing.mailbox.id) ?? null)} />}{creating && <MailboxCreateModal domain={domain} onClose={() => setCreating(false)} onChanged={onChanged} />}{passwordFor && <PasswordModal mailbox={passwordFor} onClose={() => setPasswordFor(null)} onChanged={onChanged} />}</>;
+  return <><Section title="Mailboxlar" description="Mailbox desired state, parola ve teslim policy yönetimi."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions"><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Mailbox oluştur</Button></div></div>{mailboxes.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Adres</th><th>Durum</th><th>Revizyon</th><th>İşlemler</th></tr></thead><tbody>{mailboxes.map((mailbox) => <tr key={mailbox.id}><td><strong>{mailbox.address}</strong><small>Parola configured</small></td><td><Badge state={mailbox.enabled ? 'active' : 'offline'}>{mailbox.enabled ? 'enabled' : 'disabled'}</Badge></td><td>{mailbox.revision}</td><td><div className="ws-actions"><Button disabled={busyId === mailbox.id} onClick={() => toggle(mailbox)}>{mailbox.enabled ? 'Disable' : 'Enable'}</Button><Button onClick={() => setDiagnosticsFor(mailbox)}>Tanılama</Button><Button onClick={() => setPasswordFor(mailbox)}>Parola</Button><Button onClick={() => setSelected((current) => current?.id === mailbox.id ? null : mailbox)}>Policy</Button>{canManage && domain.managementMode === 'local' && <Button variant="danger" icon="trash" disabled={busyId === mailbox.id || removing?.scope === removalScope} onClick={() => setRemoving({ scope: removalScope, mailbox: { id: mailbox.id, address: mailbox.address, mailDomainId: domain.id } })}>Sil…</Button>}</div></td></tr>)}</tbody></table></div> : <EmptyState icon="mail" title="Mailbox yok" detail="Bu local mail domain için ilk mailbox kaydını oluşturun." action={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Mailbox oluştur</Button>} />}</Section>{selected && mailboxes.some((item) => item.id === selected.id) && <PolicyPanel key={`${selected.id}:${mailboxes.find((item) => item.id === selected.id)?.revision}`} mailbox={mailboxes.find((item) => item.id === selected.id)} onChanged={onChanged} />}{removing?.scope === removalScope && <MailboxRemovalPanel mailbox={removing.mailbox} domain={domain} onChanged={onChanged} onClose={() => setRemoving(null)} onPolicy={() => setSelected(mailboxes.find((item) => item.id === removing.mailbox.id) ?? null)} />}{creating && <MailboxCreateModal domain={domain} onClose={() => setCreating(false)} onChanged={onChanged} />}{passwordFor && <PasswordModal mailbox={passwordFor} onClose={() => setPasswordFor(null)} onChanged={onChanged} />}{diagnosticsFor && <MailboxDiagnosticsModal mailbox={diagnosticsFor} onClose={() => setDiagnosticsFor(null)} />}</>;
 }
 
 export const mailboxesPanelInternals = Object.freeze({ destinationList, bytesLabel });

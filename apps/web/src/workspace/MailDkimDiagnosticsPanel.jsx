@@ -2,10 +2,12 @@ import { useCallback, useEffect, useState } from 'react';
 import {
   applyMailDkim,
   createMailDkim,
+  getMailDeliveryDiagnostics,
   getMailDiagnostics,
   getMailDkim,
   previewMailDkimApply,
   rotateMailDkim,
+  sendMailDomainTestDelivery,
 } from './mail-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
@@ -42,18 +44,41 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
+  const [deliveryDiagnostics, setDeliveryDiagnostics] = useState(undefined);
+  const [testRecipient, setTestRecipient] = useState('');
+  const [testSending, setTestSending] = useState(false);
+  const [testResult, setTestResult] = useState(null);
+  const [testError, setTestError] = useState(null);
 
   const refresh = useCallback(async () => {
     setError(null);
     try {
-      const [nextKey, nextDiagnostics] = await Promise.all([
+      const [nextKey, nextDiagnostics, nextDelivery] = await Promise.all([
         getMailDkim(domain.id),
         getMailDiagnostics(domain.id),
+        getMailDeliveryDiagnostics(domain.id).catch(() => null),
       ]);
-      setKeyState(nextKey); setDiagnostics(nextDiagnostics); setPreview(null);
+      setKeyState(nextKey); setDiagnostics(nextDiagnostics); setDeliveryDiagnostics(nextDelivery); setPreview(null);
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
   }, [domain.id]);
   useEffect(() => { refresh(); }, [refresh]);
+
+  async function handleSendTest(e) {
+    e.preventDefault();
+    if (!testRecipient) return;
+    setTestSending(true); setTestResult(null); setTestError(null);
+    try {
+      const res = await sendMailDomainTestDelivery(domain.id, {
+        recipient: testRecipient,
+        subject: `YunPanel Domain Test Mail - ${domain.domainName}`,
+      });
+      setTestResult(res);
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setTestError(failure.message);
+    } finally {
+      setTestSending(false);
+    }
+  }
 
   async function buildPreview() {
     if (!keyState) return; setBusy(true); setError(null); setNotice(null);
@@ -80,7 +105,18 @@ export default function MailDkimDiagnosticsPanel({ domain, onChanged }) {
     ['Hazır', <Badge key="ready" state={preview.readyToApply ? 'active' : 'warning'}>{preview.readyToApply ? 'apply edilebilir' : 'DNS hazır değil'}</Badge>], ['Selector', preview.selector], ['Preview digest', preview.previewDigest], ['Config SHA-256', preview.configuration?.sha256 ?? '—'], ['Signing domain', preview.configuration?.domains ?? '—'],
   ]} />{preview.blockers?.length > 0 && <div className="ws-notice ws-notice-warn"><div><strong>DKIM blocker</strong><p>{preview.blockers.join(', ')}</p></div></div>}<Button variant="primary" disabled={busy || !preview.readyToApply || !preview.configuration} onClick={() => setConfirming(true)}>DKIM signing apply</Button></>}</div></Section><Section title="Mail diagnostics" description="DNS ve forwarding readiness sonuçları; secret veya private config içermez."><div className="ws-section-body"><div className="ws-actions"><Button icon="refresh" disabled={busy} onClick={refresh}>Yenile</Button></div>{diagnostics ? <><KeyValues items={[
     ['Attention required', <Badge key="attention" state={diagnostics.attentionRequired ? 'warning' : 'active'}>{diagnostics.attentionRequired ? 'Evet' : 'Hayır'}</Badge>], ['DKIM', dkimDiagnostic ? <Badge key="dkim" state={diagnosticState(dkimDiagnostic.state)}>{dkimDiagnostic.state}</Badge> : '—'], ['Forwarding', forwarding ? <Badge key="fwd" state={diagnosticState(forwarding.state)}>{forwarding.state}</Badge> : '—'], ['External forwarding', forwarding?.externalDestinationCount ?? 0], ['SRS ready', forwarding?.srsReady === null || forwarding?.srsReady === undefined ? '—' : forwarding.srsReady ? 'Evet' : 'Hayır'],
-  ]} />{diagnostics.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Tür</th><th>Sebep</th><th>Aksiyon</th></tr></thead><tbody>{diagnostics.issues.map((issue, index) => <tr key={`${issue.kind ?? 'issue'}:${issue.reasonCode ?? index}`}><td>{issue.kind ?? 'diagnostic'}</td><td><code>{issue.reasonCode ?? issue.code ?? 'attention_required'}</code></td><td>{issue.action ?? '—'}</td></tr>)}</tbody></table></div>}</> : diagnostics === null ? <EmptyState icon="shield" title="Diagnostic sonucu yok" detail="Mail diagnostics henüz sonuç üretmedi." /> : <div className="ws-loading"><span className="ws-spinner" />Diagnostics yükleniyor…</div>}</div></Section>{editing && <DkimKeyModal keyState={keyState || null} domain={domain} onClose={() => setEditing(false)} onChanged={() => { refresh(); onChanged?.(); }} />}{confirming && preview && <ConfirmDialog title="DKIM signing configuration uygula" message={`${domain.domainName} DKIM signing state durable job ile uygulanacak. Public DNS readiness tekrar doğrulanır.`} confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={applyPreview} confirmLabel="DKIM apply" />}</>;
+  ]} />{diagnostics.issues?.length > 0 && <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Tür</th><th>Sebep</th><th>Aksiyon</th></tr></thead><tbody>{diagnostics.issues.map((issue, index) => <tr key={`${issue.kind ?? 'issue'}:${issue.reasonCode ?? index}`}><td>{issue.kind ?? 'diagnostic'}</td><td><code>{issue.reasonCode ?? issue.code ?? 'attention_required'}</code></td><td>{issue.action ?? '—'}</td></tr>)}</tbody></table></div>}</> : diagnostics === null ? <EmptyState icon="shield" title="Diagnostic sonucu yok" detail="Mail diagnostics henüz sonuç üretmedi." /> : <div className="ws-loading"><span className="ws-spinner" />Diagnostics yükleniyor…</div>}</div></Section>{deliveryDiagnostics?.connectionSettings && <Section title="İstemci Bağlantı Bilgileri" description="E-posta istemcileri için alan adı bağlantı ayarları, portlar ve TLS gereksinimleri."><div className="ws-section-body"><KeyValues items={[
+    ['Posta Sunucusu (Host)', deliveryDiagnostics.connectionSettings.hostname],
+    ['IMAP Portları & TLS', `${deliveryDiagnostics.connectionSettings.imap.ports.join(', ')} · ${deliveryDiagnostics.connectionSettings.imap.tls}`],
+    ['SMTP Portları & TLS', `${deliveryDiagnostics.connectionSettings.smtp.ports.join(', ')} · ${deliveryDiagnostics.connectionSettings.smtp.tls}`],
+    ['Kimlik Doğrulama', deliveryDiagnostics.connectionSettings.authentication],
+  ]} /></div></Section>}{deliveryDiagnostics?.dnsRequirements && <Section title="DNS Teslimat Gereksinimleri" description="SPF, DKIM, DMARC ve MX kayıtlarının canlı durumları ve yönlendirme doğrulaması."><div className="ws-section-body"><KeyValues items={[
+    ['MX Kayıtları', <Badge key="mx" state={deliveryDiagnostics.dnsRequirements.mx.status === 'matched' ? 'active' : 'error'}>{deliveryDiagnostics.dnsRequirements.mx.status === 'matched' ? 'Doğrulandı' : 'Uyumsuz / Eksik'}</Badge>],
+    ['SPF Kaydı', <Badge key="spf" state={deliveryDiagnostics.dnsRequirements.spf.status === 'valid' ? 'active' : 'error'}>{deliveryDiagnostics.dnsRequirements.spf.status === 'valid' ? 'Geçerli' : 'Hatalı / Eksik'}</Badge>],
+    ['DKIM Kaydı', <Badge key="dkim" state={deliveryDiagnostics.dnsRequirements.dkim.status === 'valid' ? 'active' : deliveryDiagnostics.dnsRequirements.dkim.status === 'unconfigured' ? 'unknown' : 'error'}>{deliveryDiagnostics.dnsRequirements.dkim.status === 'valid' ? 'Geçerli' : deliveryDiagnostics.dnsRequirements.dkim.status === 'unconfigured' ? 'Yapılandırılmadı' : 'Hatalı'}</Badge>],
+    ['DMARC Kaydı', <Badge key="dmarc" state={deliveryDiagnostics.dnsRequirements.dmarc.status === 'valid' ? 'active' : 'warning'}>{deliveryDiagnostics.dnsRequirements.dmarc.status === 'valid' ? `Geçerli (${deliveryDiagnostics.dnsRequirements.dmarc.policy ?? 'none'})` : 'Eksik / Yapılandırılmadı'}</Badge>],
+    ['Reverse DNS (PTR)', <Badge key="ptr" state={deliveryDiagnostics.dnsRequirements.ptr.status === 'valid' ? 'active' : 'warning'}>{deliveryDiagnostics.dnsRequirements.ptr.status === 'valid' ? 'Geçerli' : 'Bilinmiyor / Uyumsuz'}</Badge>],
+  ]} /></div></Section>}<Section title="Teslimat Testi" description="Gerçek SMTP teslimatı ile test e-postası gönderimi ve canlı teslim sonucu."><div className="ws-section-body"><ErrorNotice error={testError} />{testResult && <div className={`ws-notice ${testResult.delivered ? 'ws-notice-success' : 'ws-notice-warn'}`} role="status"><strong>{testResult.delivered ? 'Test E-postası Başarıyla Gönderildi' : 'Gönderim Başarısız'}</strong><p>Alıcı: {testResult.recipient} ({testResult.routing === 'local' ? 'Yerel Teslim' : 'Dış Teslim'})</p>{testResult.messageId && <p>Mesaj ID: <code>{testResult.messageId}</code></p>}{testResult.error && <p>Hata Nedeni: {testResult.error}</p>}</div>}<form className="ws-form" onSubmit={handleSendTest}><fieldset disabled={testSending}><label>Test Alıcı Adresi<input type="email" value={testRecipient} required onChange={(e) => setTestRecipient(e.target.value)} placeholder="test@example.com" /></label><div className="ws-actions"><Button type="submit" variant="primary" disabled={testSending || !testRecipient}>{testSending ? 'Gönderiliyor…' : 'Test E-postası Gönder'}</Button></div></fieldset></form></div></Section>{editing && <DkimKeyModal keyState={keyState || null} domain={domain} onClose={() => setEditing(false)} onChanged={() => { refresh(); onChanged?.(); }} />}{confirming && preview && <ConfirmDialog title="DKIM signing configuration uygula" message={`${domain.domainName} DKIM signing state durable job ile uygulanacak. Public DNS readiness tekrar doğrulanır.`} confirmation={preview.confirmation} busy={busy} error={error} onCancel={() => setConfirming(false)} onConfirm={applyPreview} confirmLabel="DKIM apply" />}</>;
 }
 
 export const mailDkimDiagnosticsPanelInternals = Object.freeze({ diagnosticState });

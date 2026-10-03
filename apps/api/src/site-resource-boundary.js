@@ -27,7 +27,7 @@ export function needsSiteResourceJson(request) {
   if (!isSiteScoped) return false;
   const path = new URL(request.originalUrl ?? request.url, 'http://panel.internal').pathname.replace(/\/$/, '');
   if (/\/files(?:\/|$)/.test(path)) return false;
-  return /^\/api\/(?:mailboxes|mail-aliases|domains|websites(?:\/|$)|sites(?:\/|$)|terminal(?:\/|$))/.test(path)
+  return /^\/api\/(?:mailboxes|mail-aliases|mail-domains|domains|websites(?:\/|$)|sites(?:\/|$)|terminal(?:\/|$))/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/elfinder-handoffs$/.test(path);
 }
@@ -237,7 +237,7 @@ export function createSiteResourceBoundary(options = {}) {
         return next();
       }
       if ((match = /^\/api\/servers\/([^/]+)\/database-credentials\/([^/]+)(?:\/|$)/.exec(path))) { await credential(decodeId(match[2]), decodeId(match[1])); return next(); }
-      if (/^\/api\/servers\/[^/]+\/(?:databases|database-bindings|database-credentials)(?:\/|$)/.test(path)) throw new ScopeError();
+      if (/^\/api\/servers\/[^/]+\/(?:databases|database-bindings|database-credentials|mail)(?:\/|$)/.test(path)) throw new ScopeError();
       if (path === '/api/mail-domains') {
         if (!readOnly(method)) throw new ScopeError();
         const ids = new Set((await domains()).map((v) => v.id));
@@ -247,7 +247,7 @@ export function createSiteResourceBoundary(options = {}) {
         const ownedMail = await mail(decodeId(match[1]));
         // Site managers change their mailboxes, not shared webmail/DNS provisioning.
         const suffix = path.slice(match[0].replace(/\/$/,'').length);
-        if (!readOnly(method) && suffix && !/^\/config-(?:preview|apply)$/.test(suffix)) throw new ScopeError();
+        if (!readOnly(method) && suffix && !/^\/(?:config-(?:preview|apply)|test-delivery)$/.test(suffix)) throw new ScopeError();
         if (!readOnly(method) && ownedMail.managementMode !== 'local') throw new ScopeError();
         if (method === 'DELETE' || method === 'PATCH') throw new ScopeError();
         if (suffix === '/config-preview' && method === 'POST') {
