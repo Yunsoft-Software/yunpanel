@@ -127,6 +127,8 @@ export function createWebsiteRemovalCleanupAdapters({
         || deploymentReceipt.healthPath !== healthPath) {
         unavailable('website_cleanup_direct_systemd_evidence_unavailable', 'Node deployment receipt does not match current Application state');
       }
+    } else {
+      unavailable('website_cleanup_direct_systemd_evidence_unavailable', 'Legacy direct-systemd service without deployment receipt requires operator recovery');
     }
 
     let host;

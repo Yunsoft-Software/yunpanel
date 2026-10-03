@@ -111,7 +111,17 @@ export function createProcessStoreLock({
           throw new ProcessStoreLockError('process_store_lock_unreadable', 'Existing process store lock requires inspection');
         }
         if (!existing) {
-          throw new ProcessStoreLockError('process_store_lock_unreadable', 'Existing process store lock is invalid');
+          await new Promise((resolve) => setTimeout(resolve, retryMs));
+          try {
+            existing = parseRecord(await readFile(lockPath, 'utf8'));
+          } catch (retryError) {
+            if (retryError?.code === 'ENOENT') {
+              continue;
+            }
+          }
+          if (!existing) {
+            throw new ProcessStoreLockError('process_store_lock_unreadable', 'Existing process store lock is invalid');
+          }
         }
         if (processAlive(existing.pid, signalProcess)) {
           if (Date.now() >= deadline) {

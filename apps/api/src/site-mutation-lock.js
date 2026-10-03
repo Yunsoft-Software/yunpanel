@@ -72,7 +72,11 @@ export function createSiteMutationLock({
       throw new SiteMutationLockError('site_mutation_lock_action_invalid', 'Site mutation lock action is invalid', 400);
     }
 
-    await mkdir(root, { recursive: true, mode: 0o700 });
+    try {
+      await mkdir(root, { recursive: true, mode: 0o700 });
+    } catch {
+      throw new SiteMutationLockError('site_mutation_lock_failed', 'Site mutation lock could not be acquired', 503);
+    }
     const target = path.join(root, `${type}-${id}.lock`);
     const token = randomUUID();
     const record = Object.freeze({
@@ -137,7 +141,11 @@ export function createSiteMutationLock({
         if (processAlive(existing.pid, signalProcess)) {
           throw new SiteMutationLockError('site_mutation_locked', 'Another process is changing this site resource', 409);
         }
-        await rm(target, { force: true });
+        try {
+          await rm(target, { force: true });
+        } catch {
+          throw new SiteMutationLockError('site_mutation_lock_failed', 'Site mutation lock could not be acquired', 503);
+        }
       }
     }
 
