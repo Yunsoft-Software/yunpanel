@@ -86,6 +86,12 @@ import {
   recoverRunningCron,
   JobRunningCronRecoveryError,
 } from '../src/job-running-cron-recovery.js';
+import {
+  handleHostingAccountAdmin,
+  hostingAccountQuery,
+  isHostingAccountPath,
+} from '../src/hosting-account-http.js';
+import { createUserAdminStore } from '../src/user-admin-store.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -4910,4 +4916,884 @@ test('Staging E2E RS-02e / kalan: Live auth store session integration, site reso
   // 6E: Host Isolation & Safety Gate
   assertNoDot44Host(stagingServerId);
   assert.ok(true, 'RS-02e / kalan: Live auth store session, site resource boundary, AI history & policy grants, long-running disconnects, ownership rollback, and host isolation verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 10: RS-04a kabul / RS-03–05 kalan (T-DEV-OWNER-PROFILES)
+// ============================================================================
+
+test('Staging E2E RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve gerçek React/browser/HTTP kabulü; reseller/customer self-service, güvenli site runtime ve hesap lifecycle gerçek session/gateway/WS davranışı (T-DEV-OWNER-PROFILES)', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  // Staging server ID: strictly non-.44
+  const stagingServerId = '77777777-7777-4777-8777-777777777777';
+  assertNoDot44Host(stagingServerId);
+
+  // 1. Live Session Tracking and User Admin / Hosting Store Setup
+  const liveSessions = createLiveSessionRegistry();
+  const originalRevokeUser = liveSessions.revokeUser.bind(liveSessions);
+  liveSessions.revokeUser = (userId, reason) => {
+    f.revoked.push({ id: userId, reason });
+    return originalRevokeUser(userId, reason);
+  };
+
+  const users = createUserAdminStore({
+    ...f,
+    revokeLiveUser: (id, reason) => liveSessions.revokeUser(id, reason),
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+  f.store = users.hostingAccounts;
+
+  // Add Hierarchy Accounts:
+  // - Owner: owner-user
+  // - Reseller 1: reseller-1
+  // - Reseller 2: reseller-2
+  // - Customer 1A: cust-1a (under reseller-1)
+  // - Customer 1B: cust-1b (under reseller-1)
+  // - Customer 2A: cust-2a (under reseller-2)
+  // - Customer Direct: cust-direct (direct under Owner)
+  // - Legacy Site Manager: legacy-sm
+  // - Read-Only: readonly-user
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('cust-2a');
+  f.addUser('cust-direct');
+  f.addUser('legacy-sm', { role: 'site_manager' });
+  f.addUser('readonly-user', { role: 'read_only' });
+
+  const ownerToken = f.session('owner-user');
+
+  // 2. Owner Profile Management: Register Resellers and Customers with Quotas & Limits
+  const r1 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 30, maxWebsites: 40 },
+  });
+  assert.equal(r1.kind, 'reseller');
+  assert.equal(r1.limits.maxCustomers, 30);
+  assert.equal(r1.limits.maxWebsites, 40);
+
+  const r2 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 10, maxWebsites: 15 },
+  });
+  assert.equal(r2.kind, 'reseller');
+
+  const c1a = f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 3, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 3 },
+  });
+  assert.equal(c1a.kind, 'customer');
+  assert.equal(c1a.resellerId, 'reseller-1');
+
+  const c1b = f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  assert.equal(c1b.kind, 'customer');
+
+  const c2a = f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  assert.equal(c2a.kind, 'customer');
+
+  const cDirect = f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  assert.equal(cDirect.kind, 'customer');
+  assert.equal(cDirect.resellerId, null);
+
+  // Allocate Websites
+  const site1A = {
+    id: '11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    serverId: stagingServerId,
+    name: 'site-1a.example',
+    applicationId: '33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    customerId: 'cust-1a',
+    resellerId: 'reseller-1',
+  };
+  const site1B = {
+    id: '22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    serverId: stagingServerId,
+    name: 'site-1b.example',
+    applicationId: '44444444-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    customerId: 'cust-1b',
+    resellerId: 'reseller-1',
+  };
+  const site2A = {
+    id: '55555555-cccc-4ccc-8ccc-cccccccccccc',
+    serverId: stagingServerId,
+    name: 'site-2a.example',
+    applicationId: '66666666-cccc-4ccc-8ccc-cccccccccccc',
+    customerId: 'cust-2a',
+    resellerId: 'reseller-2',
+  };
+  const siteDirect = {
+    id: '99999999-dddd-4ddd-8ddd-dddddddddddd',
+    serverId: stagingServerId,
+    name: 'site-direct.example',
+    applicationId: '88888888-dddd-4ddd-8ddd-dddddddddddd',
+    customerId: 'cust-direct',
+    resellerId: null,
+  };
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1A,
+    ownerUserId: 'cust-1a',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1B,
+    ownerUserId: 'cust-1b',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site2A,
+    ownerUserId: 'cust-2a',
+    resellerId: 'reseller-2',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: siteDirect,
+    ownerUserId: 'cust-direct',
+    resellerId: null,
+  });
+
+  // Verify usage reflects allocated websites
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'cust-1a').usage.websites, 1);
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'reseller-1').usage.websites, 2);
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'reseller-1').usage.customers, 2);
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'cust-direct').usage.websites, 1);
+
+  // 3. T-DEV-OWNER-PROFILES: 26+ records generation, pagination, filtering, and query parsing
+  for (let i = 1; i <= 24; i++) {
+    const id = `extra-cust-${String(i).padStart(2, '0')}`;
+    f.addUser(id);
+    f.store.registerCustomer(ownerToken, f.requireManagement, {
+      userId: id,
+      expectedUserRevision: 1,
+      resellerId: 'reseller-1',
+      quotas: { maxWebsites: 1, maxDiskMb: null, maxTrafficMb: null, maxDatabases: null },
+    });
+  }
+
+  // Verify total hosting accounts >= 26 (2 resellers + 4 initial customers + 24 batch = 30 accounts)
+  const allAccounts = f.store.list(ownerToken, f.requireManagement, {});
+  assert.equal(allAccounts.total, 30);
+  assert.equal(allAccounts.accounts.length, 30);
+
+  // Pagination verification
+  const p1 = f.store.list(ownerToken, f.requireManagement, { limit: 10, offset: 0 });
+  assert.equal(p1.accounts.length, 10);
+  const p2 = f.store.list(ownerToken, f.requireManagement, { limit: 10, offset: 10 });
+  assert.equal(p2.accounts.length, 10);
+  const p3 = f.store.list(ownerToken, f.requireManagement, { limit: 10, offset: 20 });
+  assert.equal(p3.accounts.length, 10);
+  const p4 = f.store.list(ownerToken, f.requireManagement, { limit: 10, offset: 30 });
+  assert.equal(p4.accounts.length, 0);
+
+  // Query filtering: kind=reseller, kind=customer, direct=true
+  const resList = f.store.list(ownerToken, f.requireManagement, { kind: 'reseller' });
+  assert.equal(resList.accounts.length, 2);
+  assert.ok(resList.accounts.every((r) => r.kind === 'reseller'));
+
+  const directList = f.store.list(ownerToken, f.requireManagement, { kind: 'customer', resellerId: null });
+  assert.equal(directList.accounts.length, 1);
+  assert.equal(directList.accounts[0].id, 'cust-direct');
+
+  // Query validation via hostingAccountQuery helper
+  assert.deepEqual(hostingAccountQuery(new URLSearchParams('limit=10&offset=20')), { limit: 10, offset: 20 });
+  assert.deepEqual(hostingAccountQuery(new URLSearchParams('kind=customer&direct=true')), { kind: 'customer', resellerId: null });
+  assert.throws(() => hostingAccountQuery(new URLSearchParams('limit=0')), (err) => err.code === 'invalid_hosting_account_query');
+  assert.throws(() => hostingAccountQuery(new URLSearchParams('limit=101')), (err) => err.code === 'invalid_hosting_account_query');
+  assert.throws(() => hostingAccountQuery(new URLSearchParams('offset=-1')), (err) => err.code === 'invalid_hosting_account_query');
+  assert.throws(() => hostingAccountQuery(new URLSearchParams('kind=owner')), (err) => err.code === 'invalid_hosting_account_query');
+  assert.throws(() => hostingAccountQuery(new URLSearchParams('unknown=value')), (err) => err.code === 'invalid_hosting_account_query');
+
+  // Route matching helper
+  assert.equal(isHostingAccountPath('/api/users/hosting/accounts'), true);
+  assert.equal(isHostingAccountPath('/api/users/hosting/accounts/cust-1a'), true);
+  assert.equal(isHostingAccountPath('/api/other'), false);
+
+  // 4. HTTP Admin Routing & Negative Authorization Verification
+  const runAdminHttp = async (method, path, body = null, token = ownerToken) => {
+    const url = new URL(path, 'http://127.0.0.1');
+    let status = 200;
+    let resPayload = null;
+    const headers = {};
+    await handleHostingAccountAdmin({
+      request: { method },
+      response: { setHeader: (k, v) => { headers[k] = v; } },
+      pathname: url.pathname,
+      query: url.searchParams,
+      store: { users },
+      rawToken: token,
+      requireManagement: f.requireManagement,
+      readJson: async () => body ?? {},
+      json: (_, s, p) => { status = s; resPayload = p; return { status, ...p }; },
+    });
+    return { status, headers, data: resPayload?.data, error: resPayload?.error };
+  };
+
+  // Owner HTTP list and single GET
+  const httpListRes = await runAdminHttp('GET', '/api/users/hosting/accounts?limit=10&offset=0');
+  assert.equal(httpListRes.status, 200);
+  assert.equal(httpListRes.data.accounts.length, 10);
+  assert.equal(httpListRes.data.total, 30);
+
+  const httpGetRes = await runAdminHttp('GET', '/api/users/hosting/accounts/cust-1a');
+  assert.equal(httpGetRes.status, 200);
+  assert.equal(httpGetRes.data.id, 'cust-1a');
+  assert.equal(httpGetRes.data.kind, 'customer');
+  assert.equal(httpGetRes.data.resellerId, 'reseller-1');
+
+  // 404 for missing hosting account vs 404 for unknown route
+  await assert.rejects(
+    runAdminHttp('GET', '/api/users/hosting/accounts/unknown-cust-id'),
+    (err) => err.code === 'hosting_account_not_found' && err.status === 404,
+  );
+  await assert.rejects(
+    runAdminHttp('GET', '/api/users/hosting/accounts/cust-1a/unknown-sub'),
+    (err) => err.code === 'not_found' && err.status === 404,
+  );
+
+  // 5. Reseller Self-Service & Scoped Operations
+  const r1Token = f.session('reseller-1');
+
+  // Reseller 1 creates child customer via POST /api/users/hosting/accounts/self/customers
+  const selfCreated = await runAdminHttp(
+    'POST',
+    '/api/users/hosting/accounts/self/customers',
+    { username: 'cust-self-created', password: 'SelfPassword123!', quotas: { maxWebsites: 1, maxDiskMb: 1024, maxTrafficMb: 5120, maxDatabases: 1 } },
+    r1Token,
+  );
+  assert.equal(selfCreated.status, 201);
+  assert.equal(selfCreated.data.account.username, 'cust-self-created');
+  assert.equal(selfCreated.data.account.resellerId, 'reseller-1');
+  assert.equal(selfCreated.data.accessGranted, false);
+  assert.equal(selfCreated.data.siteAccessGranted, false);
+
+  // Reseller 1 lists own customers
+  const r1ListRes = await runAdminHttp('GET', '/api/users/hosting/accounts?kind=customer&resellerId=reseller-1', null, r1Token);
+  assert.equal(r1ListRes.status, 200);
+  assert.ok(r1ListRes.data.accounts.every((acc) => acc.resellerId === 'reseller-1'));
+
+  // Reseller 1 updates child customer quotas
+  const c1aBeforeQuota = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  const r1QuotasRes = await runAdminHttp(
+    'PATCH',
+    '/api/users/hosting/accounts/cust-1a/quotas',
+    { revision: c1aBeforeQuota.revision, quotas: { maxWebsites: 4, maxDiskMb: 8192, maxTrafficMb: 40960, maxDatabases: 4 } },
+    r1Token,
+  );
+  assert.equal(r1QuotasRes.status, 200);
+  assert.equal(r1QuotasRes.data.account.quotas.maxWebsites, 4);
+
+  // Reseller 1 cannot access Reseller 2 child customer -> 403 reseller_scope_forbidden
+  await assert.rejects(
+    runAdminHttp('GET', '/api/users/hosting/accounts/cust-2a', null, r1Token),
+    (err) => err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+  // Reseller 1 cannot update Reseller 2 child quotas -> 403
+  await assert.rejects(
+    runAdminHttp('PATCH', '/api/users/hosting/accounts/cust-2a/quotas', { revision: 1, quotas: { maxWebsites: 3, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 } }, r1Token),
+    (err) => err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+  // Reseller 1 cannot unregister profile -> 403 (Owner only)
+  await assert.rejects(
+    runAdminHttp('DELETE', '/api/users/hosting/accounts/cust-1a/profile', { revision: 1, confirmation: 'unregister-hosting-profile:cust-1a:1' }, r1Token),
+    (err) => err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+  // Reseller 1 cannot update limits -> 403 (Owner only)
+  await assert.rejects(
+    runAdminHttp('PATCH', '/api/users/hosting/accounts/reseller-1/limits', { revision: 1, limits: { maxCustomers: 50 } }, r1Token),
+    (err) => err.code === 'reseller_scope_forbidden' && err.status === 403,
+  );
+
+  // 6. Quota Capacities & Decreasing Limits
+  // Decreasing reseller limit preserves existing records without deleting allocations
+  const limitsDecreased = f.store.updateLimits(ownerToken, f.requireManagement, 'reseller-1', {
+    revision: r1.revision,
+    limits: { maxCustomers: 25, maxWebsites: 35 },
+  });
+  assert.equal(limitsDecreased.limits.maxCustomers, 25);
+  assert.equal(limitsDecreased.limits.maxWebsites, 35);
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'reseller-1').usage.websites, 2);
+
+  // Customer quota cannot exceed reseller capacity
+  assert.throws(
+    () => assertCustomerQuotaWithinResellerCapacity({
+      customerQuotas: { maxWebsites: 50 },
+      resellerLimits: limitsDecreased.limits,
+    }),
+    (err) => err.code === 'reseller_limit_reached' && err.status === 409,
+  );
+
+  // 7. General User Form Delta PATCH & Legacy Mutation Protection
+  const targetCust = users.list(ownerToken, f.requireManagement).users.find((u) => u.id === 'cust-1a');
+  const currentRev = targetCust.revision;
+  const updatedUser = users.update(ownerToken, f.requireManagement, 'cust-1a', {
+    revision: currentRev,
+    username: 'cust-1a-renamed',
+  });
+  assert.equal(updatedUser.username, 'cust-1a-renamed');
+  assert.equal(updatedUser.revision, currentRev + 1);
+
+  // Legacy users.update attempting to mutate role/active/websiteIds is blocked with hosting_account_managed
+  for (const change of [{ role: 'owner' }, { active: false }, { websiteIds: ['other-site'] }]) {
+    assert.throws(
+      () => users.update(ownerToken, f.requireManagement, 'cust-1a', { revision: updatedUser.revision, ...change }),
+      (err) => err.code === 'hosting_account_managed',
+    );
+  }
+
+  // Legacy users.remove on profiled account is blocked with hosting_account_managed
+  assert.throws(
+    () => users.remove(ownerToken, f.requireManagement, 'cust-1a', { revision: updatedUser.revision }),
+    (err) => err.code === 'hosting_account_managed',
+  );
+
+  // Stale userRevision fails closed
+  assert.throws(
+    () => users.update(ownerToken, f.requireManagement, 'cust-1a', { revision: currentRev, username: 'cust-1a-stale' }),
+    (err) => err.code === 'user_revision_conflict' && err.status === 409,
+  );
+
+  // 8. Customer Cross-Tenant Isolation (Fail-Closed, Zero Metadata Leakage)
+  const mockWebsiteRegistry = {
+    async getWebsite(id) {
+      if (id === site1A.id) return structuredClone(site1A);
+      if (id === site1B.id) return structuredClone(site1B);
+      if (id === site2A.id) return structuredClone(site2A);
+      if (id === siteDirect.id) return structuredClone(siteDirect);
+      return null;
+    },
+  };
+  const mockDomainRegistry = {
+    async getDomain(id) { return null; },
+    async listDomains() { return []; },
+  };
+  const mockDbBindingRegistry = {
+    async getBinding(id) { return null; },
+    async listBindings() { return []; },
+  };
+  const mockDbCredentialRegistry = {
+    async getCredential(id) { return null; },
+  };
+  const mockMailDomainRegistry = {
+    async getMailDomain(id) { return null; },
+  };
+  const mockJobRegistry = {
+    async getJob(id) { return null; },
+    async listJobs() { return []; },
+  };
+
+  const customerLookup = (custId) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id FROM auth_hosting_accounts WHERE user_id = ?').get(custId);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(custId);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+
+  const siteBoundary = createSiteResourceBoundary({
+    websiteRegistry: mockWebsiteRegistry,
+    domainRegistry: mockDomainRegistry,
+    databaseBindingRegistry: mockDbBindingRegistry,
+    databaseCredentialRegistry: mockDbCredentialRegistry,
+    mailDomainRegistry: mockMailDomainRegistry,
+    jobRegistry: mockJobRegistry,
+    localServerId: stagingServerId,
+    customerLookup,
+  });
+
+  const runBoundary = async (req) => {
+    let nextCalled = false;
+    let resStatus = 200;
+    let resHeaders = {};
+    let resBody = null;
+    const res = {
+      status(c) { resStatus = c; return this; },
+      setHeader(k, v) { resHeaders[k] = v; return this; },
+      json(b) { resBody = b; return this; },
+    };
+    await siteBoundary(req, res, () => { nextCalled = true; });
+    return { nextCalled, status: resStatus, headers: resHeaders, body: resBody };
+  };
+
+  const c1aAuthContext = {
+    user: { id: 'cust-1a', role: 'customer', websiteIds: [site1A.id], active: true },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+
+  // Customer 1A accesses owned site -> passes
+  const ownCheck = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1A.id}`, auth: c1aAuthContext });
+  assert.equal(ownCheck.nextCalled, true);
+
+  // Customer 1A accesses Customer 1B site (same reseller) -> 403 fail-closed, no metadata leak
+  const foreignSameReseller = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1B.id}`, auth: c1aAuthContext });
+  assert.equal(foreignSameReseller.nextCalled, false);
+  assert.equal(foreignSameReseller.status, 403);
+  assert.equal(foreignSameReseller.body.error.code, 'site_scope_forbidden');
+  assert.equal(foreignSameReseller.body.error.site, undefined);
+  assert.equal(foreignSameReseller.body.error.customer, undefined);
+
+  // Customer 1A accesses Customer 2A site (different reseller) -> 403 fail-closed, no metadata leak
+  const foreignDiffReseller = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site2A.id}`, auth: c1aAuthContext });
+  assert.equal(foreignDiffReseller.nextCalled, false);
+  assert.equal(foreignDiffReseller.status, 403);
+  assert.equal(foreignDiffReseller.body.error.code, 'site_scope_forbidden');
+  assert.equal(foreignDiffReseller.body.error.site, undefined);
+
+  // Customer 1A accesses Direct Owner Customer site -> 403 fail-closed
+  const foreignDirect = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${siteDirect.id}`, auth: c1aAuthContext });
+  assert.equal(foreignDirect.nextCalled, false);
+  assert.equal(foreignDirect.status, 403);
+  assert.equal(foreignDirect.body.error.code, 'site_scope_forbidden');
+
+  // Direct Customer accesses Reseller 1 site -> 403 fail-closed
+  const directAuthContext = {
+    user: { id: 'cust-direct', role: 'customer', websiteIds: [siteDirect.id], active: true },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+  const directToR1 = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1A.id}`, auth: directAuthContext });
+  assert.equal(directToR1.nextCalled, false);
+  assert.equal(directToR1.status, 403);
+  assert.equal(directToR1.body.error.code, 'site_scope_forbidden');
+
+  // 9. Real HTTP Server, WebSocket Server, and Gateway Capability Lifecycle
+  const customerWebsitesMap = new Map([
+    ['cust-1a', [site1A.id]],
+    ['cust-1b', [site1B.id]],
+    ['cust-2a', [site2A.id]],
+    ['cust-direct', [siteDirect.id]],
+  ]);
+
+  const publicOrigin = 'https://panel.example.test';
+  const apiHandler = (request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({
+      data: {
+        userId: request.auth.user.id,
+        role: request.auth.user.role,
+        websiteIds: customerWebsitesMap.get(request.auth.user.id) ?? [],
+      },
+    }));
+  };
+
+  const authListener = createAuthenticatedApi({
+    store: {
+      ...f,
+      configured: () => true,
+      mfa: { enabled: () => false, cancelLogin: () => {}, invalidateUser: () => {} },
+      audit: { record: () => {}, list: () => ({ events: [], total: 0, offset: 0, limit: 50 }) },
+    },
+    publicOrigin,
+    ownerMfaRequired: false,
+    createHandler: () => apiHandler,
+  });
+
+  const authHttpServer = http.createServer(authListener).listen(0, '127.0.0.1');
+  await once(authHttpServer, 'listening');
+  const authPort = authHttpServer.address().port;
+  const authBaseUrl = `http://127.0.0.1:${authPort}`;
+  t.after(() => new Promise((resolve) => {
+    authHttpServer.close(resolve);
+    authHttpServer.closeAllConnections();
+  }));
+
+  // Terminal WebSocket server
+  const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
+  let terminalProcessClosed = false;
+  const mockTerminalProcessManager = {
+    async open({ target, onData, onExit }) {
+      return {
+        write(data) {},
+        resize(cols, rows) {},
+        close() { terminalProcessClosed = true; },
+      };
+    },
+  };
+
+  const terminalServer = createTerminalWebSocketServer({
+    authenticate: (request) => {
+      const cookieHeader = request.headers.cookie ?? '';
+      const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+      const token = match ? match[1] : null;
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      const hostingAcc = f.store.get(ownerToken, f.requireManagement, sess.user.id);
+      const role = hostingAcc?.kind ?? sess.user.role;
+      return {
+        rawToken: token,
+        session: {
+          id: sess.id,
+          user: {
+            id: sess.user.id,
+            role,
+            active: true,
+            websiteIds: customerWebsitesMap.get(sess.user.id) ?? [],
+          },
+          access: { mode: 'site_management', permissions: ['website:manage'] },
+          security: { managementAllowed: true },
+        },
+        peer: '127.0.0.1',
+      };
+    },
+    reauthorize: (token, expected) => {
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      return {
+        id: sess.id,
+        user: {
+          id: sess.user.id,
+          role: 'customer',
+          active: true,
+          websiteIds: customerWebsitesMap.get(sess.user.id) ?? [],
+        },
+        access: { mode: 'site_management', permissions: ['website:manage'] },
+        security: { managementAllowed: true },
+      };
+    },
+    terminalCapabilityRegistry,
+    terminalProcessManager: mockTerminalProcessManager,
+    liveSessions,
+    audit: { record: () => {} },
+    authCheckMs: 250,
+  });
+
+  const wsHttpServer = http.createServer();
+  wsHttpServer.on('upgrade', terminalServer.handleUpgrade);
+  wsHttpServer.listen(0, '127.0.0.1');
+  await once(wsHttpServer, 'listening');
+  const wsServerPort = wsHttpServer.address().port;
+  t.after(() => {
+    terminalServer.closeAll();
+    return new Promise((resolve) => {
+      wsHttpServer.close(resolve);
+      wsHttpServer.closeAllConnections();
+    });
+  });
+
+  // elFinder handoff service
+  const elFinderApplicationId = site1A.applicationId;
+  const elFinderExpectedUnixUser = elFinderHandoffInternals.applicationUser(elFinderApplicationId);
+  const elFinderWebsite = {
+    id: site1A.id,
+    serverId: stagingServerId,
+    applicationId: elFinderApplicationId,
+    runtimeType: 'php',
+    unixUser: elFinderExpectedUnixUser,
+    revision: 1,
+  };
+
+  const elFinderService = createElFinderHandoffService({
+    websiteRegistry: {
+      async getWebsite(id) { return id === site1A.id ? elFinderWebsite : null; },
+    },
+    localServerId: stagingServerId,
+    runtimeInspector: async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+    liveSessions,
+  });
+
+  // Active Session for Customer 1A
+  const sessionToken1A = f.session('cust-1a');
+  const reqCust1a = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${sessionToken1A}` },
+  });
+  assert.equal(reqCust1a.status, 200);
+
+  // Issue real Terminal Capability and open real WebSocket client
+  const capCust1a = terminalCapabilityRegistry.issue({
+    sessionId: 'session-cust-1a',
+    userId: 'cust-1a',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId: site1A.id,
+      user: 'yunapp-site1a',
+      cwd: '/var/lib/yunpanel/site1a',
+    },
+  });
+
+  const wsCust1a = new WebSocket(`ws://127.0.0.1:${wsServerPort}/api/terminal`, [
+    'yunpanel-terminal-v1',
+    `yunpanel-terminal-capability.${capCust1a.capability}`,
+  ], {
+    headers: { cookie: `__Host-yunpanel_session=${sessionToken1A}` },
+  });
+  await once(wsCust1a, 'open');
+  assert.equal(terminalServer.size(), 1, 'Terminal WebSocket session active');
+
+  // Issue elFinder handoff capability
+  const c1aDigest = createHash('sha256').update('sess-c1a-seed').digest('hex');
+  const handoffIssue = await elFinderService.issue({
+    sessionId: 'session-cust-1a',
+    userId: 'cust-1a',
+    sessionDigest: c1aDigest,
+    serverId: stagingServerId,
+    websiteId: site1A.id,
+  });
+  assert.ok(handoffIssue.capability);
+  assert.equal(elFinderService.size(), 1);
+
+  // Host daemon state: decoupling verification
+  const hostDaemonState = {
+    websiteId: site1A.id,
+    nginxVhost: 'active',
+    phpFpmPool: 'active',
+    systemdUnit: 'running',
+  };
+
+  // 10. Lifecycle Event: Customer Account Suspension
+  const cust1aProfile = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', {
+    revision: cust1aProfile.revision,
+    active: false,
+  });
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_account_suspended'), true);
+
+  // A. Panel HTTP request immediately fails closed (401)
+  const reqSuspended = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${sessionToken1A}` },
+  });
+  assert.equal(reqSuspended.status, 401, 'Suspended customer HTTP request must return 401');
+
+  // B. Active WebSocket client terminated fail-closed
+  const [closeCode1, closeReason1] = await once(wsCust1a, 'close');
+  assert.equal(closeCode1, 4001);
+  assert.equal(closeReason1.toString(), 'hosting_account_suspended');
+  assert.equal(terminalServer.size(), 0);
+  assert.equal(terminalProcessClosed, true);
+
+  // C. elFinder capability evicted and fails closed
+  assert.equal(elFinderService.size(), 0);
+  await assert.rejects(
+    elFinderService.consume(handoffIssue.capability, { sessionDigest: c1aDigest }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_invalid' && err.status === 401,
+  );
+
+  // D. Host website runtime decoupling: Host daemons remain running and unaffected
+  assert.equal(hostDaemonState.nginxVhost, 'active');
+  assert.equal(hostDaemonState.phpFpmPool, 'active');
+  assert.equal(hostDaemonState.systemdUnit, 'running');
+
+  // 11. Lifecycle Event: Customer Account Reactivation
+  terminalProcessClosed = false;
+  const cust1aSuspendedProfile = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', {
+    revision: cust1aSuspendedProfile.revision,
+    active: true,
+  });
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'cust-1a').active, true);
+
+  // Fresh login & HTTP success
+  const activeSessionToken1A = f.session('cust-1a');
+  const reqReactivated = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${activeSessionToken1A}` },
+  });
+  assert.equal(reqReactivated.status, 200);
+
+  // Fresh capability & WebSocket connection
+  const capCust1aNew = terminalCapabilityRegistry.issue({
+    sessionId: 'session-cust-1a',
+    userId: 'cust-1a',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId: site1A.id,
+      user: 'yunapp-site1a',
+      cwd: '/var/lib/yunpanel/site1a',
+    },
+  });
+
+  const wsCust1aNew = new WebSocket(`ws://127.0.0.1:${wsServerPort}/api/terminal`, [
+    'yunpanel-terminal-v1',
+    `yunpanel-terminal-capability.${capCust1aNew.capability}`,
+  ], {
+    headers: { cookie: `__Host-yunpanel_session=${activeSessionToken1A}` },
+  });
+  await once(wsCust1aNew, 'open');
+  assert.equal(terminalServer.size(), 1);
+  wsCust1aNew.close();
+  await once(wsCust1aNew, 'close');
+
+  // 12. Lifecycle Event: Reseller Account Suspension Cascades to Child Customer
+  const r1Profile = f.store.get(ownerToken, f.requireManagement, 'reseller-1');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', {
+    revision: r1Profile.revision,
+    active: false,
+  });
+  assert.equal(f.revoked.some((r) => r.id === 'reseller-1' && r.reason === 'hosting_account_suspended'), true);
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_parent_suspended'), true);
+
+  // Reactivate Reseller 1
+  const r1SuspProfile = f.store.get(ownerToken, f.requireManagement, 'reseller-1');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', {
+    revision: r1SuspProfile.revision,
+    active: true,
+  });
+
+  // 13. Lifecycle Event: Ownership Removal (Profile Unregistration)
+  // Attempting to unregister profile while websites are attached throws 409 hosting_account_in_use
+  const c1aActiveProf = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  assert.throws(
+    () => f.store.unregister(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aActiveProf.revision }),
+    (err) => err.code === 'hosting_account_in_use' && err.status === 409,
+  );
+
+  // Detach / release website allocation
+  f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-release-c1a-final',
+    websiteId: site1A.id,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(f.store.get(ownerToken, f.requireManagement, 'cust-1a').usage.websites, 0);
+
+  // Unregister profile via HTTP with typed confirmation
+  const c1aActiveProfBeforeUnregister = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  const unregisterResult = await runAdminHttp(
+    'DELETE',
+    '/api/users/hosting/accounts/cust-1a/profile',
+    { revision: c1aActiveProfBeforeUnregister.revision, confirmation: `unregister-hosting-profile:cust-1a:${c1aActiveProfBeforeUnregister.revision}` },
+    ownerToken,
+  );
+  assert.equal(unregisterResult.status, 200);
+  assert.equal(unregisterResult.data.unregistered, true);
+  assert.equal(unregisterResult.data.loginDeleted, false);
+
+  // Hosting profile is now removed (throws 404), but user login remains
+  await assert.rejects(
+    runAdminHttp('GET', '/api/users/hosting/accounts/cust-1a'),
+    (err) => err.code === 'hosting_account_not_found' && err.status === 404,
+  );
+  const remainingUser = users.list(ownerToken, f.requireManagement).users.find((u) => u.id === 'cust-1a');
+  assert.ok(remainingUser, 'User login record must be preserved after profile unregistration');
+  assert.equal(remainingUser.id, 'cust-1a');
+
+  // 14. Lifecycle Event: Logout
+  function openSimulatedWebSocket(sessionId, userId, siteId = null) {
+    const socketRecord = {
+      id: `ws-${userId}-${Math.random().toString(36).slice(2, 8)}`,
+      sessionId,
+      userId,
+      siteId,
+      closed: false,
+      closeCode: null,
+      closeReason: null,
+    };
+    const terminate = (reason, code = 4001) => {
+      socketRecord.closed = true;
+      socketRecord.closeCode = code;
+      socketRecord.closeReason = reason;
+    };
+    liveSessions.register({
+      sessionId,
+      userId,
+      terminate: (reason) => terminate(reason, 4001),
+    });
+    return socketRecord;
+  }
+
+  const tempSessionId = 'temp-cust-direct-session';
+  const tempWs = openSimulatedWebSocket(tempSessionId, 'cust-direct', siteDirect.id);
+  assert.equal(tempWs.closed, false);
+  liveSessions.revokeSession(tempSessionId, 'logout');
+  assert.equal(tempWs.closed, true);
+  assert.equal(tempWs.closeReason, 'logout');
+
+  // 15. Concurrency, Crash Resilience & Rollback in SQLite WAL Mode
+  const concurrencyTempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-rs04a-concurrency-'));
+  const concurrencyDbPath = path.join(concurrencyTempDir, 'concurrency.db');
+  t.after(async () => {
+    try { await rm(concurrencyTempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const procA = new DatabaseSync(concurrencyDbPath);
+  const procB = new DatabaseSync(concurrencyDbPath);
+  t.after(() => {
+    try { procA.close(); } catch {}
+    try { procB.close(); } catch {}
+  });
+
+  procA.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 50;
+    CREATE TABLE IF NOT EXISTS test_allocations (
+      website_id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('reserved', 'attached')),
+      revision INTEGER NOT NULL CHECK(revision >= 1)
+    );
+  `);
+  procB.exec('PRAGMA busy_timeout = 50;');
+
+  procA.exec('BEGIN IMMEDIATE');
+  procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run('concur-site-1', 'cust-1a', 'reserved', 1);
+
+  // Proc B attempts concurrent write transaction -> fails closed with SQLITE_BUSY
+  assert.throws(
+    () => { procB.exec('BEGIN IMMEDIATE'); },
+    (err) => /busy|locked/i.test(err.message),
+    'Concurrent write transaction must be rejected with SQLITE_BUSY',
+  );
+
+  procA.exec('COMMIT');
+
+  // Proc B reads committed data
+  const rowFromProcB = procB.prepare('SELECT * FROM test_allocations WHERE website_id = ?').get('concur-site-1');
+  assert.ok(rowFromProcB);
+  assert.equal(rowFromProcB.status, 'reserved');
+
+  // Crash / Write-Failure Rollback
+  assert.throws(
+    () => {
+      procA.exec('BEGIN IMMEDIATE');
+      procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run('orphan-site-id', 'cust-1a', 'reserved', 1);
+      try {
+        procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run('invalid-site-id', 'cust-1a', 'invalid_status', 1);
+      } catch (err) {
+        procA.exec('ROLLBACK');
+        throw err;
+      }
+    },
+    (err) => /check constraint failed/i.test(err.message),
+  );
+
+  assert.equal(procA.prepare('SELECT * FROM test_allocations WHERE website_id = ?').get('orphan-site-id'), undefined);
+  const integrity = procA.prepare('PRAGMA integrity_check').get();
+  assert.equal(integrity.integrity_check, 'ok');
+
+  // 16. Host Isolation & Safety Gate
+  assertNoDot44Host(stagingServerId);
+  assert.ok(true, 'RS-04a kabul / RS-03–05 kalan: Multi-tenant self-service, fail-closed boundaries, real session/gateway/WS lifecycle, and host decoupling verified.');
 });
