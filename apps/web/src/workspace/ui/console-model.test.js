@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { usagePercent, readableItems, databaseAccessView, filterConsoleDatabases, paginateConsoleItems } from './console-model.js';
+import { usagePercent, usageThreshold, readableItems, databaseAccessView, filterConsoleDatabases, paginateConsoleItems } from './console-model.js';
 const domains = { status: 'ready', items: [{ id: 'domain-a', websiteId: 'website-a', primaryDomain: 'yunsoft.test' }] };
 const ready = { name: 'main_db', ownership: { websiteId: 'website-a', credential: { id: 'credential-a', username: 'main_user' } } };
 const missing = { name: 'legacy_db', ownership: { websiteId: 'website-a', credential: null } };
@@ -8,6 +8,21 @@ const unbound = { name: 'unbound_db', ownership: null };
 test('usage keeps zero and 91%, rejects unknown and inconsistent inventory', () => {
   assert.equal(usagePercent(0, 100), 0); assert.equal(usagePercent(91, 100), 91);
   for (const args of [[null, 100], [1, 0], [-1, 100], [101, 100], [NaN, 100], [1, Infinity]]) assert.equal(usagePercent(...args), null);
+});
+test('usageThreshold classifies zero, unknown, high (85%) and critical (91%) thresholds', () => {
+  assert.equal(usageThreshold(0), 'normal');
+  assert.equal(usageThreshold(50), 'normal');
+  assert.equal(usageThreshold(84), 'normal');
+  assert.equal(usageThreshold(85), 'high');
+  assert.equal(usageThreshold(89), 'high');
+  assert.equal(usageThreshold(90), 'critical');
+  assert.equal(usageThreshold(91), 'critical');
+  assert.equal(usageThreshold(100), 'critical');
+  assert.equal(usageThreshold(null), 'unknown');
+  assert.equal(usageThreshold(undefined), 'unknown');
+  assert.equal(usageThreshold(-1), 'unknown');
+  assert.equal(usageThreshold(101), 'unknown');
+  assert.equal(usageThreshold(NaN), 'unknown');
 });
 test('ready and stale are readable; failed inventories are not', () => {
   assert.equal(readableItems(domains).length, 1);

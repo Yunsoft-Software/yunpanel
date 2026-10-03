@@ -58,7 +58,7 @@ export function EmptyState({ title, detail, action, icon = 'box' }) {
   return <div className="ws-empty"><span className="ws-empty-icon"><Icon name={icon} size={26} /></span><h3>{title}</h3><p>{detail}</p>{action}</div>;
 }
 export function CollectionNotice({ resource, label }) {
-  if (resource.status === 'ready') return null;
+  if (resource.status === 'ready' || resource.status === 'disabled') return null;
   if (resource.status === 'loading') return <div className="ws-loading" role="status"><span className="ws-spinner" />{label} yükleniyor…</div>;
   return <div className="ws-notice ws-notice-warn" role="alert"><div><strong>{label}</strong><p>{resource.error?.message ?? 'Veriler alınamadı.'}{resource.status === 'stale' && ` Son başarılı güncelleme: ${formatDate(resource.updatedAt)}.`}</p></div><Button onClick={resource.refresh} icon="refresh">Yeniden dene</Button></div>;
 }
