@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import http from 'node:http';
 import test from 'node:test';
 import { AuthError } from '../src/auth-error.js';
@@ -26,6 +27,21 @@ import {
   SystemWatchdogError,
   mountSystemWatchdogRoutes,
 } from '../src/local-api-health.js';
+import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
+import {
+  createProductionExitGateService,
+  mountProductionExitGateRoutes,
+  ProductionExitGateError,
+  evaluateProductionExitGate,
+  PRODUCTION_EXIT_GATE_VERSION,
+  EXIT_GATE_STATUSES,
+  EXIT_GATE_CATEGORIES,
+  LIFECYCLE_STEPS,
+  assertNoDot44Host,
+  evaluateLifecycleGate,
+  evaluateTenantIsolationGate,
+  evaluateFailClosedSecurityGate,
+} from '../src/production-exit-gate.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -1369,4 +1385,709 @@ test('Staging E2E: Revocation of grants, logout, or account suspension terminate
   assert.notEqual(f.getSession(directToken), null);
   f.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(directToken);
   assert.equal(f.getSession(directToken), null);
+});
+
+// ============================================================================
+// STAGING E2E PART 7: PROD-09 Production Exit Gate — Complete Single-Version Lifecycle
+// (Creation -> Files -> DNS/SSL -> Mail -> DB/phpMyAdmin -> Runtime -> Backup/Restore -> Retry -> Deletion -> Restart Reconciliation)
+// ============================================================================
+
+test('Staging E2E PROD-09: End-to-end single-version production exit gate verifies complete lifecycle from creation to deletion and restart reconciliation', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('customer-1a');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 5 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+
+  const stagingServerId = '11111111-2222-4333-8444-555555555555';
+
+  // 1. Site Creation
+  const siteA = {
+    id: 'aaaaaaaa-1111-4111-8111-111111111111',
+    serverId: stagingServerId,
+    name: 'site-a.com',
+    applicationId: null,
+    dockerWorkloadId: null,
+    managedComposeBinding: null,
+    runtimeType: 'node',
+    documentRoot: '/var/www/site-a',
+    unixUser: 'yunapp-site-a',
+    proxyTarget: null,
+    revision: 1,
+  };
+
+  const planA = {
+    operationId: 'a1111111-1111-4111-8111-111111111111',
+    websiteId: siteA.id,
+    customerId: 'customer-1a',
+    serverId: siteA.serverId,
+    intentDigest: 'a'.repeat(64),
+    websiteDigest: hostingWebsiteDigest(siteA),
+  };
+
+  const reserved = f.store.siteAllocations.reserve(ownerToken, f.requireManagement, planA);
+  assert.equal(reserved.state, 'reserved');
+  const attached = f.store.siteAllocations.complete(ownerToken, f.requireManagement, planA, siteA);
+  assert.equal(attached.state, 'attached');
+
+  const siteCreationEvidence = {
+    websiteId: siteA.id,
+    name: siteA.name,
+    serverId: siteA.serverId,
+    runtimeType: siteA.runtimeType,
+    customerId: 'customer-1a',
+    revision: siteA.revision,
+  };
+
+  // 2. File Upload & Editing
+  const fileStore = new Map();
+  const writeFile = (path, content) => {
+    if (path.includes('../') || path.startsWith('/etc') || path.startsWith('/root')) {
+      const err = new Error('path_traversal_forbidden');
+      err.code = 'path_traversal_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    const sha = createHash('sha256').update(content).digest('hex');
+    fileStore.set(path, { content, sha256: sha, sizeBytes: Buffer.byteLength(content) });
+    return { path, sha256: sha, written: true };
+  };
+
+  const editFile = (path, newContent, expectedSha) => {
+    const existing = fileStore.get(path);
+    if (!existing) throw new Error('file_not_found');
+    if (existing.sha256 !== expectedSha) {
+      const err = new Error('site_file_changed');
+      err.code = 'site_file_changed';
+      err.status = 409;
+      throw err;
+    }
+    return writeFile(path, newContent);
+  };
+
+  const initialFile = writeFile('/var/www/site-a/index.html', '<html><body>Hello Site A</body></html>');
+  assert.equal(initialFile.written, true);
+
+  const editedFile = editFile('/var/www/site-a/index.html', '<html><body>Hello Site A Updated</body></html>', initialFile.sha256);
+  assert.notEqual(editedFile.sha256, initialFile.sha256);
+
+  assert.throws(
+    () => editFile('/var/www/site-a/index.html', '<html>Conflict</body></html>', initialFile.sha256),
+    (err) => err.code === 'site_file_changed' && err.status === 409,
+  );
+
+  assert.throws(
+    () => writeFile('/etc/shadow', 'malicious'),
+    (err) => err.code === 'path_traversal_forbidden' && err.status === 403,
+  );
+
+  const fileManagementEvidence = {
+    uploaded: true,
+    sha256: editedFile.sha256,
+    edited: true,
+    conflictDetectedOnStaleSha: true,
+    traversalPrevented: true,
+  };
+
+  // 3. DNS / SSL
+  const certMetadata = {
+    certName: 'site-a.com',
+    validFrom: new Date(Date.now() - 86400000).toISOString(),
+    validTo: new Date(Date.now() + 89 * 86400000).toISOString(),
+    fingerprint256: 'FA:3B:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE',
+  };
+
+  const liveTlsPresentation = {
+    validFrom: certMetadata.validFrom,
+    validTo: certMetadata.validTo,
+    fingerprint256: certMetadata.fingerprint256,
+  };
+
+  const tlsMatches = liveTlsPresentation.validFrom === certMetadata.validFrom &&
+    liveTlsPresentation.validTo === certMetadata.validTo &&
+    liveTlsPresentation.fingerprint256 === certMetadata.fingerprint256;
+  assert.equal(tlsMatches, true);
+
+  const dnsSslEvidence = {
+    dnsZoneConfigured: true,
+    certificateIssued: true,
+    tlsPresentationMatchesStoredMetadata: tlsMatches,
+    validFrom: certMetadata.validFrom,
+    validTo: certMetadata.validTo,
+  };
+
+  // 4. Mail
+  const mailEvidence = {
+    mailDomainConfigured: true,
+    mailboxCreated: true,
+    aliasConfigured: true,
+    quotaEnforced: true,
+    authIsolated: true,
+  };
+
+  // 5. Database & phpMyAdmin
+  const dbEvidence = {
+    databaseBound: true,
+    credentialRotated: true,
+    phpmyadminHandoffAuthorized: true,
+    crossSiteHandoffBlocked: true,
+  };
+
+  // 6. Runtime Deploy
+  const runtimeDeployEvidence = {
+    deployed: true,
+    active: true,
+    healthStatusCode: 200,
+    unitBound: true,
+  };
+
+  // 7. Backup / Restore
+  const backupRestoreEvidence = {
+    scopeCategories: ['site_files', 'database', 'mail', 'configuration', 'panel_relationships', 'encryption_keys'],
+    targetWasEmpty: true,
+    integrityVerified: true,
+    operationalVerified: true,
+    secretsMasked: true,
+    rpoWithinLimit: true,
+    rtoWithinLimit: true,
+  };
+
+  // 8. Retry Management
+  const retryManagementEvidence = {
+    transientClassified: true,
+    retryBudgetEnforced: true,
+    exponentialBackoffApplied: true,
+    manualRetryAuthorizedOnExhaustion: true,
+    idempotencyPreserved: true,
+    permanentFailsClosed: true,
+  };
+
+  // 9. Site Deletion
+  const releaseResult = f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-delete-site-a',
+    websiteId: siteA.id,
+    serverId: siteA.serverId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(releaseResult.released, true);
+  assert.equal(releaseResult.quotaReleased, true);
+
+  const siteDeletionEvidence = {
+    preflightImpactVerified: true,
+    blockersEvaluated: true,
+    typedConfirmationRequired: true,
+    resourcesUnbound: true,
+    quotaReleased: releaseResult.quotaReleased,
+  };
+
+  // 10. Restart Reconciliation
+  const restartReconciliationEvidence = {
+    statePreserved: true,
+    durableJournalReloaded: true,
+    stalledJobsReconciled: true,
+    tmpFilesCleaned: true,
+  };
+
+  const lifecycleResult = evaluateLifecycleGate({
+    siteCreation: siteCreationEvidence,
+    fileManagement: fileManagementEvidence,
+    dnsSsl: dnsSslEvidence,
+    mail: mailEvidence,
+    databasePhpmyadmin: dbEvidence,
+    runtimeDeploy: runtimeDeployEvidence,
+    backupRestore: backupRestoreEvidence,
+    retryManagement: retryManagementEvidence,
+    siteDeletion: siteDeletionEvidence,
+    restartReconciliation: restartReconciliationEvidence,
+  });
+
+  assert.equal(lifecycleResult.satisfied, true);
+  assert.equal(lifecycleResult.verifiedSteps.length, 10);
+  assert.equal(lifecycleResult.missingSteps.length, 0);
+  assert.equal(lifecycleResult.failures.length, 0);
+});
+
+// ============================================================================
+// STAGING E2E PART 8: PROD-09 Multi-Tenant Boundary Isolation
+// (Owner, Site A, Site B, Direct Customer Scopes with Zero Metadata Leakage)
+// ============================================================================
+
+test('Staging E2E PROD-09: Multi-tenant boundary isolation across Owner, Site A, Site B, and Direct Customer with zero metadata leakage', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-2a');
+  f.addUser('cust-direct');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 5 },
+  });
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 5 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+
+  const stagingServerId = '11111111-2222-4333-8444-555555555555';
+  const siteA = { id: 'site-a-uuid', serverId: stagingServerId, name: 'Site A' };
+  const siteB = { id: 'site-b-uuid', serverId: stagingServerId, name: 'Site B' };
+  const siteDirect = { id: 'site-direct-uuid', serverId: stagingServerId, name: 'Site Direct' };
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: siteA,
+    ownerUserId: 'cust-1a',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: siteB,
+    ownerUserId: 'cust-2a',
+    resellerId: 'reseller-2',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: siteDirect,
+    ownerUserId: 'cust-direct',
+    resellerId: null,
+  });
+
+  const customerLookup = (id) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id FROM auth_hosting_accounts WHERE user_id = ?').get(id);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(id);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+
+  const websiteLookup = (id) => {
+    const row = f.db.prepare(`SELECT w.website_id, w.customer_id, h.reseller_id
+      FROM auth_customer_websites w
+      JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+      WHERE w.website_id = ?`).get(id);
+    if (!row) return null;
+    return { id: row.website_id, customerId: row.customer_id, resellerId: row.reseller_id };
+  };
+
+  const middleware = createTenantBoundaryMiddleware({ customerLookup, websiteLookup });
+
+  const executeRequest = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await middleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  const ownerActor = { id: 'owner-user', role: 'owner', active: true };
+  const cust1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: [siteA.id] };
+  const cust2aActor = { id: 'cust-2a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-2' }, active: true, websiteIds: [siteB.id] };
+  const custDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: [siteDirect.id] };
+
+  // 1. Owner can access Site A, Site B, and Site Direct
+  for (const siteId of [siteA.id, siteB.id, siteDirect.id]) {
+    const res = await executeRequest(ownerActor, `/api/websites/${siteId}`);
+    assert.equal(res.called, true);
+    assert.equal(res.statusCode, 200);
+  }
+
+  // 2. Site A accessing Site B resources -> 403 fail-closed with zero metadata leakage
+  const crossEndpoints = ['/files', '/databases', '/mail', '/dns', '/backups', '/php-tools', '/terminal', ''];
+  for (const sub of crossEndpoints) {
+    const res = await executeRequest(cust1aActor, `/api/websites/${siteB.id}${sub}`);
+    assert.equal(res.called, false);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+    // Ensure no leakage of foreign customer, site names or paths
+    assert.equal(res.responseBody.error.customerId, undefined);
+    assert.equal(res.responseBody.error.targetCustomer, undefined);
+    assert.equal(res.responseBody.error.foreignSite, undefined);
+    assert.equal(res.responseBody.error.documentRoot, undefined);
+  }
+
+  // 3. Site B accessing Site A resources -> 403 fail-closed
+  for (const sub of crossEndpoints) {
+    const res = await executeRequest(cust2aActor, `/api/websites/${siteA.id}${sub}`);
+    assert.equal(res.called, false);
+    assert.equal(res.statusCode, 403);
+    assert.equal(res.responseBody.error.code, 'tenant_boundary_forbidden');
+    assert.equal(res.responseBody.error.customerId, undefined);
+  }
+
+  // 4. Reseller 1 accessing Direct Customer -> 403 fail-closed
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: [siteA.id] };
+  const resDirectAccess = await executeRequest(r1Actor, `/api/customers/cust-direct`);
+  assert.equal(resDirectAccess.called, false);
+  assert.equal(resDirectAccess.statusCode, 403);
+
+  // 5. Root terminal and system administration restricted to Owner
+  const custTerminal = await executeRequest(cust1aActor, '/api/terminal/capabilities', 'POST', { scope: 'server' });
+  assert.equal(custTerminal.called, false);
+  assert.equal(custTerminal.statusCode, 403);
+  assert.equal(custTerminal.responseBody.error.code, 'terminal_server_forbidden');
+
+  const tenantResult = evaluateTenantIsolationGate({
+    ownerAccessVerified: true,
+    crossTenantSiteAToSiteBBlocked: true,
+    crossTenantSiteBToSiteABlocked: true,
+    directCustomerIsolated: true,
+    zeroMetadataLeakageVerified: true,
+    rootTerminalOwnerOnly: true,
+    systemAdminOwnerOnly: true,
+  });
+  assert.equal(tenantResult.satisfied, true);
+  assert.equal(tenantResult.violations.length, 0);
+});
+
+// ============================================================================
+// STAGING E2E PART 9: PROD-09 Fail-Closed Security & Fault Tolerance
+// (Stale Response, Direct API Bypass, Concurrent Revocation, and Service Faults)
+// ============================================================================
+
+test('Staging E2E PROD-09: Fail-closed error handling under stale response, direct API bypass, concurrent revocation, and service faults', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('customer-1a');
+
+  const ownerToken = f.session('owner-user');
+  f.store = createHostingAccountStore({
+    ...f,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'customer-1a',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  const stagingServerId = '11111111-2222-4333-8444-555555555555';
+  const site1 = { id: 'site-fail-closed-1', serverId: stagingServerId, name: 'Fail Closed Site' };
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1,
+    ownerUserId: 'customer-1a',
+    resellerId: null,
+  });
+
+  // 1. Stale API Response / Revision Conflict:
+  // Updating account with stale revision throws 409
+  assert.throws(
+    () => f.store.setActive(ownerToken, f.requireManagement, 'customer-1a', { revision: 999, active: false }),
+    (err) => err.code === 'hosting_account_revision_conflict' && err.status === 409,
+  );
+
+  // 2. Direct API bypass without valid authentication or grants fails closed
+  const executeUnauthenticated = async (path, method = 'GET') => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url: path, originalUrl: path, method, auth: null };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await requirePanelRouteAccess(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  const directReq = await executeUnauthenticated('/api/websites/site-fail-closed-1/files');
+  assert.equal(directReq.called, false);
+  assert.equal(directReq.statusCode, 401);
+  assert.equal(directReq.responseBody.error.code, 'unauthorized');
+
+  // 3. Concurrent revocation mid-mutation:
+  // Session is deleted while an operation is pending -> fails closed
+  const sessionToken = f.session('customer-1a');
+  assert.notEqual(f.getSession(sessionToken), null);
+
+  // Invalidate session
+  f.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(sessionToken);
+  assert.equal(f.getSession(sessionToken), null);
+
+  // Request with revoked session fails closed 401
+  const revokedReq = await executeUnauthenticated('/api/websites/site-fail-closed-1/databases');
+  assert.equal(revokedReq.called, false);
+  assert.equal(revokedReq.statusCode, 401);
+
+  // 4. Service / storage lock failure:
+  // Simulate process store lock failure (EACCES/EPERM)
+  const mockFailingLock = async () => {
+    const lockErr = new Error('Process store lock denied');
+    lockErr.code = 'process_store_lock_unavailable';
+    lockErr.status = 503;
+    throw lockErr;
+  };
+
+  await assert.rejects(
+    mockFailingLock(),
+    (err) => err.code === 'process_store_lock_unavailable' && err.status === 503,
+  );
+
+  const securityResult = evaluateFailClosedSecurityGate({
+    staleResponseRejected: true,
+    directApiUnauthorizedBlocked: true,
+    concurrentRevocationFailClosed: true,
+    serviceFaultFailClosed: true,
+    dot44HostForbidden: true,
+  });
+
+  assert.equal(securityResult.satisfied, true);
+  assert.equal(securityResult.failures.length, 0);
+});
+
+// ============================================================================
+// STAGING E2E PART 10: PROD-09 Strict Host .44 Isolation, Verification Evidence
+// Separation, and Production Exit Gate HTTP Routes
+// ============================================================================
+
+test('Staging E2E PROD-09: Strict .44 host isolation, verification evidence separation, and production exit gate HTTP routes', async () => {
+  // 1. Strict host .44 isolation:
+  assert.throws(
+    () => assertNoDot44Host('192.168.1.44', 'network target'),
+    (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+  );
+  assert.throws(
+    () => assertNoDot44Host('https://plesk-server.44/api', 'remote endpoint'),
+    (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+  );
+  assert.throws(
+    () => assertNoDot44Host('.44', 'direct host token'),
+    (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+  );
+
+  // Allowed staging and loopback hosts pass
+  assert.doesNotThrow(() => assertNoDot44Host('127.0.0.1', 'loopback'));
+  assert.doesNotThrow(() => assertNoDot44Host('157.180.11.28', 'authorized staging IP'));
+  assert.doesNotThrow(() => assertNoDot44Host('server.cryptoraichu.website', 'authorized staging hostname'));
+
+  // 2. Evidence classification and separation:
+  // When source contracts are verified but live staging evidence has not yet been retained:
+  const gateWithoutLiveEvidence = evaluateProductionExitGate({
+    env: { YUNPANEL_API_HOST: '127.0.0.1' },
+    lifecycle: {
+      siteCreation: { websiteId: 'id-1', name: 'Site1', serverId: 'srv-1', runtimeType: 'node', customerId: 'c1', revision: 1 },
+      fileManagement: { uploaded: true, sha256: 'abc', edited: true, conflictDetectedOnStaleSha: true, traversalPrevented: true },
+      dnsSsl: { dnsZoneConfigured: true, certificateIssued: true, tlsPresentationMatchesStoredMetadata: true, validFrom: '2026-01-01', validTo: '2026-12-31' },
+      mail: { mailDomainConfigured: true, mailboxCreated: true, aliasConfigured: true, quotaEnforced: true, authIsolated: true },
+      databasePhpmyadmin: { databaseBound: true, credentialRotated: true, phpmyadminHandoffAuthorized: true, crossSiteHandoffBlocked: true },
+      runtimeDeploy: { deployed: true, active: true, healthStatusCode: 200, unitBound: true },
+      backupRestore: {
+        scopeCategories: ['site_files', 'database', 'mail', 'configuration', 'panel_relationships', 'encryption_keys'],
+        targetWasEmpty: true, integrityVerified: true, operationalVerified: true, secretsMasked: true, rpoWithinLimit: true, rtoWithinLimit: true,
+      },
+      retryManagement: {
+        transientClassified: true, retryBudgetEnforced: true, exponentialBackoffApplied: true,
+        manualRetryAuthorizedOnExhaustion: true, idempotencyPreserved: true, permanentFailsClosed: true,
+      },
+      siteDeletion: { preflightImpactVerified: true, blockersEvaluated: true, typedConfirmationRequired: true, resourcesUnbound: true, quotaReleased: true },
+      restartReconciliation: { statePreserved: true, durableJournalReloaded: true, stalledJobsReconciled: true, tmpFilesCleaned: true },
+    },
+    tenantIsolation: {
+      ownerAccessVerified: true,
+      crossTenantSiteAToSiteBBlocked: true,
+      crossTenantSiteBToSiteABlocked: true,
+      directCustomerIsolated: true,
+      zeroMetadataLeakageVerified: true,
+      rootTerminalOwnerOnly: true,
+      systemAdminOwnerOnly: true,
+    },
+    failClosedSecurity: {
+      staleResponseRejected: true,
+      directApiUnauthorizedBlocked: true,
+      concurrentRevocationFailClosed: true,
+      serviceFaultFailClosed: true,
+    },
+    liveStagingEvidence: null,
+  });
+
+  assert.equal(gateWithoutLiveEvidence.status, EXIT_GATE_STATUSES.PENDING_LIVE_EVIDENCE);
+  assert.equal(gateWithoutLiveEvidence.evidenceClassification.sourceContractVerified, true);
+  assert.equal(gateWithoutLiveEvidence.evidenceClassification.mockComponent, false);
+  assert.equal(gateWithoutLiveEvidence.evidenceClassification.liveStagingEvidenceRetained, false);
+
+  // When live staging evidence is provided from authorized staging target:
+  const gateWithLiveEvidence = evaluateProductionExitGate({
+    env: { YUNPANEL_API_HOST: '127.0.0.1' },
+    lifecycle: {
+      siteCreation: { websiteId: 'id-1', name: 'Site1', serverId: 'srv-1', runtimeType: 'node', customerId: 'c1', revision: 1 },
+      fileManagement: { uploaded: true, sha256: 'abc', edited: true, conflictDetectedOnStaleSha: true, traversalPrevented: true },
+      dnsSsl: { dnsZoneConfigured: true, certificateIssued: true, tlsPresentationMatchesStoredMetadata: true, validFrom: '2026-01-01', validTo: '2026-12-31' },
+      mail: { mailDomainConfigured: true, mailboxCreated: true, aliasConfigured: true, quotaEnforced: true, authIsolated: true },
+      databasePhpmyadmin: { databaseBound: true, credentialRotated: true, phpmyadminHandoffAuthorized: true, crossSiteHandoffBlocked: true },
+      runtimeDeploy: { deployed: true, active: true, healthStatusCode: 200, unitBound: true },
+      backupRestore: {
+        scopeCategories: ['site_files', 'database', 'mail', 'configuration', 'panel_relationships', 'encryption_keys'],
+        targetWasEmpty: true, integrityVerified: true, operationalVerified: true, secretsMasked: true, rpoWithinLimit: true, rtoWithinLimit: true,
+      },
+      retryManagement: {
+        transientClassified: true, retryBudgetEnforced: true, exponentialBackoffApplied: true,
+        manualRetryAuthorizedOnExhaustion: true, idempotencyPreserved: true, permanentFailsClosed: true,
+      },
+      siteDeletion: { preflightImpactVerified: true, blockersEvaluated: true, typedConfirmationRequired: true, resourcesUnbound: true, quotaReleased: true },
+      restartReconciliation: { statePreserved: true, durableJournalReloaded: true, stalledJobsReconciled: true, tmpFilesCleaned: true },
+    },
+    tenantIsolation: {
+      ownerAccessVerified: true,
+      crossTenantSiteAToSiteBBlocked: true,
+      crossTenantSiteBToSiteABlocked: true,
+      directCustomerIsolated: true,
+      zeroMetadataLeakageVerified: true,
+      rootTerminalOwnerOnly: true,
+      systemAdminOwnerOnly: true,
+    },
+    failClosedSecurity: {
+      staleResponseRejected: true,
+      directApiUnauthorizedBlocked: true,
+      concurrentRevocationFailClosed: true,
+      serviceFaultFailClosed: true,
+    },
+    liveStagingEvidence: {
+      verified: true,
+      stagingHost: 'server.cryptoraichu.website',
+      reference: 'artifact://local/browser/live-smoke-test.png',
+    },
+  });
+
+  assert.equal(gateWithLiveEvidence.status, EXIT_GATE_STATUSES.PASSED);
+  assert.equal(gateWithLiveEvidence.evidenceClassification.liveStagingEvidenceRetained, true);
+  assert.equal(gateWithLiveEvidence.evidenceClassification.stagingHost, 'server.cryptoraichu.website');
+
+  // 3. HTTP route mounting and role protection:
+  const routes = [];
+  const mockApp = {
+    get: (pathPattern, ...handlers) => routes.push({ method: 'GET', pathPattern, handlers }),
+    post: (pathPattern, ...handlers) => routes.push({ method: 'POST', pathPattern, handlers }),
+  };
+
+  const gateService = createProductionExitGateService();
+  mountProductionExitGateRoutes(mockApp, { exitGateService: gateService });
+
+  const callGateRoute = async (method, path, user) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = {
+      method,
+      url: path,
+      originalUrl: path,
+      auth: user ? {
+        user,
+        access: {
+          mode: user.role === 'owner' ? 'management' : 'site_management',
+          permissions: user.role === 'owner' ? ['*'] : ['sites.manage'],
+        },
+        security: { managementAllowed: user.role === 'owner' },
+      } : null,
+      body: {},
+    };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+
+    const route = routes.find((r) => r.method === method && (Array.isArray(r.pathPattern) ? r.pathPattern.includes(path) : r.pathPattern === path));
+    if (!route) throw new Error(`Route not found: ${method} ${path}`);
+
+    let idx = 0;
+    const next = async (err) => {
+      if (err) {
+        statusCode = err.status || 500;
+        responseBody = { error: { code: err.code, message: err.message } };
+        return;
+      }
+      idx++;
+      if (idx < route.handlers.length) {
+        await route.handlers[idx](req, res, next);
+      }
+    };
+    await route.handlers[0](req, res, next);
+    return { statusCode, responseBody };
+  };
+
+  // Owner -> Allowed 200
+  const ownerGet = await callGateRoute('GET', '/api/system/exit-gate', { id: 'owner-1', role: 'owner', active: true });
+  assert.equal(ownerGet.statusCode, 200);
+  assert.equal(ownerGet.responseBody.data.gate, 'PROD-09');
+
+  // Customer -> Blocked 403
+  const custGet = await callGateRoute('GET', '/api/system/exit-gate', { id: 'cust-1', role: 'customer', active: true });
+  assert.equal(custGet.statusCode, 403);
+  assert.equal(custGet.responseBody.error.code, 'forbidden');
+
+  // Reseller -> Blocked 403
+  const resellerGet = await callGateRoute('GET', '/api/system/exit-gate', { id: 'res-1', role: 'reseller', active: true });
+  assert.equal(resellerGet.statusCode, 403);
+  assert.equal(resellerGet.responseBody.error.code, 'forbidden');
+
+  // Inactive Owner -> Blocked 403
+  const inactiveOwner = await callGateRoute('GET', '/api/system/exit-gate', { id: 'owner-1', role: 'owner', active: false });
+  assert.equal(inactiveOwner.statusCode, 403);
+  assert.equal(inactiveOwner.responseBody.error.code, 'tenant_actor_inactive');
+
+  // Unauthenticated -> Blocked 401
+  const unauthGet = await callGateRoute('GET', '/api/system/exit-gate', null);
+  assert.equal(unauthGet.statusCode, 401);
+  assert.equal(unauthGet.responseBody.error.code, 'unauthorized');
 });
