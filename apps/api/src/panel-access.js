@@ -21,7 +21,7 @@ const READ_ONLY_RULES = Object.freeze([
   ['servers.read', /^\/api\/notifications\/(?:preferences|history|deliveries|status)$/],
   ['servers.read', /^\/api\/servers\/[^/%]+\/firewall\/(?:status|snapshots(?:\/[^/%]+)?|ports|service-profiles|bans|crowdsec\/decisions)$/],
   ['servers.read', /^\/api\/firewall\/(?:status|snapshots(?:\/[^/%]+)?|ports|service-profiles|bans|crowdsec\/decisions)$/],
-  ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/(?:domains|sftp\/keys))?)?$/],
+  ['websites.read', /^\/api\/websites(?:\/[^/%]+(?:\/(?:domains|sftp\/keys|application(?:\/.*)?|runtime))?)?$/],
   ['applications.read', /^\/api\/applications(?:\/[^/%]+)?$/],
   ['domains.read', /^\/api\/domains(?:\/[^/%]+)?$/],
   ['certificates.read', /^\/api\/certificates(?:\/[^/%]+)?$/],

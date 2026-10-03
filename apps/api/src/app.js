@@ -20,6 +20,9 @@ import {
   RcloneError,
 } from '@yunpanel/host-runtime';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
+import { createApplicationDeployQueue } from './application-deploy-queue.js';
+import { ApplicationEnvironmentRegistryError } from './application-environment-registry.js';
+import { mountApplicationOperationsRoutes, ApplicationOperationsHttpError } from './application-operations-http.js';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
 import { mountApplicationPassengerMigrationRoutes } from './application-passenger-migration-http.js';
 import { mountApplicationProcessRoutes } from './application-process-http.js';
@@ -945,6 +948,24 @@ export function createApp(allOptions = {}) {
     domainRegistry,
     localServerId,
   });
+  const queueDeploy = options.queueDeploy
+    ?? (applicationRegistry && applicationEnvironmentRegistry && jobRegistry
+      ? createApplicationDeployQueue({ applicationRegistry, applicationEnvironmentRegistry, jobRegistry })
+      : null);
+  mountApplicationOperationsRoutes(app, {
+    websiteRegistry,
+    domainRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    jobRegistry,
+    queueDeploy,
+    registry,
+    siteHealthService,
+    journalLogReader,
+    nginxLogReader,
+    localServerId,
+    now: options.now ?? (() => Date.now()),
+  });
   const systemWatchdogService = options.systemWatchdogService ?? createSystemWatchdogService({
     serverRegistry: registry,
     jobRegistry,
@@ -1217,6 +1238,8 @@ export function createApp(allOptions = {}) {
       || error instanceof DatabaseHttpError
       || error instanceof WebsiteDatabaseDeleteHttpError
       || error instanceof PhpMyAdminHandoffError
+      || error instanceof ApplicationOperationsHttpError
+      || error instanceof ApplicationEnvironmentRegistryError
       || error instanceof ElFinderHandoffError
       || error instanceof SiteFileHttpError
       || error instanceof SiteFileManagerError
