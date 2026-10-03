@@ -695,3 +695,160 @@ test('comprehensive multi-tenant hierarchy matrix (Owner, 2 Reseller, 4 Customer
   assertFailClosedNoLeak(await runMatrix('/api/websites/site-2a', { session: customer2BSession }), ['site-2a']);
   assertFailClosedNoLeak(await runMatrix('/api/websites/site-1b', { session: customer2BSession }), ['site-1b']);
 });
+
+test('YP-04: site-admin and owner DB/phpMyAdmin role boundaries, session binding, grant revocation, logout rotation, and replay prevention', async () => {
+  const siteASession = {
+    user: { id: 'admin-a', role: 'site_manager', websiteIds: ['site-a'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const siteBSession = {
+    user: { id: 'admin-b', role: 'site_manager', websiteIds: ['site-b'], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const ownerSession = {
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management' },
+    security: { managementAllowed: true },
+  };
+
+  // 1. Site-admin on Site A can manage credentials, grants, and password rotation for Site A
+  assert.equal((await run('/api/servers/server/websites/site-a/database-resources', { session: siteASession })).called, 1);
+  assert.equal((await run('/api/servers/server/database-bindings/binding-a/credential', { session: siteASession, method: 'POST' })).called, 1);
+  assert.equal((await run('/api/servers/server/database-credentials/credential-a/grants', { session: siteASession, method: 'PATCH' })).called, 1);
+  assert.equal((await run('/api/servers/server/database-credentials/credential-a/password/rotate', { session: siteASession, method: 'POST' })).called, 1);
+  assert.equal((await run('/api/servers/server/database-credentials/credential-a/apply', { session: siteASession, method: 'POST' })).called, 1);
+
+  // 2. Cross-tenant isolation: Site A admin cannot access or manage Site B database resources (Owner -> Site A -> Site B)
+  const crossDbRes = await run('/api/servers/server/websites/site-b/database-resources', { session: siteASession });
+  assert.equal(crossDbRes.called, 0);
+  assert.equal(crossDbRes.res.statusCode, 403);
+
+  const crossBinding = await run('/api/servers/server/database-bindings/binding-b/credential', { session: siteASession, method: 'POST' });
+  assert.equal(crossBinding.called, 0);
+  assert.equal(crossBinding.res.statusCode, 403);
+
+  const crossGrants = await run('/api/servers/server/database-credentials/credential-b/grants', { session: siteASession, method: 'PATCH' });
+  assert.equal(crossGrants.called, 0);
+  assert.equal(crossGrants.res.statusCode, 403);
+
+  const crossRotate = await run('/api/servers/server/database-credentials/credential-b/password/rotate', { session: siteASession, method: 'POST' });
+  assert.equal(crossRotate.called, 0);
+  assert.equal(crossRotate.res.statusCode, 403);
+
+  const crossApply = await run('/api/servers/server/database-credentials/credential-b/apply', { session: siteASession, method: 'POST' });
+  assert.equal(crossApply.called, 0);
+  assert.equal(crossApply.res.statusCode, 403);
+
+  // 3. Database unbind (DELETE) is forbidden for site-admin on any site, but allowed for Owner
+  const unbindA = await run('/api/servers/server/database-bindings/binding-a', { session: siteASession, method: 'DELETE' });
+  assert.equal(unbindA.called, 0);
+  assert.equal(unbindA.res.statusCode, 403);
+
+  const nestedUnbindA = await run('/api/servers/server/websites/site-a/database-bindings/binding-a', { session: siteASession, method: 'DELETE' });
+  assert.equal(nestedUnbindA.called, 0);
+  assert.equal(nestedUnbindA.res.statusCode, 403);
+
+  // Owner is authorized on unbinding and all database operations across all sites
+  assert.equal((await run('/api/servers/server/database-bindings/binding-a', { session: ownerSession, method: 'DELETE' })).called, 1);
+  assert.equal((await run('/api/servers/server/database-bindings/binding-b', { session: ownerSession, method: 'DELETE' })).called, 1);
+  assert.equal((await run('/api/servers/server/websites/site-a/database-resources', { session: ownerSession })).called, 1);
+  assert.equal((await run('/api/servers/server/websites/site-b/database-resources', { session: ownerSession })).called, 1);
+  assert.equal((await run('/api/servers/server/databases', { session: ownerSession })).called, 1);
+
+  // Global database routes are forbidden for site-admin
+  for (const globalPath of ['/api/servers/server/databases', '/api/servers/server/database-bindings']) {
+    const res = await run(globalPath, { session: siteASession });
+    assert.equal(res.called, 0);
+    assert.equal(res.res.statusCode, 403);
+  }
+
+  // 4. phpMyAdmin session handoff: strictly bound to active panel session and current Website grant
+  const ownHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: siteASession,
+    method: 'POST',
+    body: { credentialId: 'credential-a' },
+  });
+  assert.equal(ownHandoff.called, 1);
+
+  // Foreign site handoff attempt fails closed (403)
+  const foreignHandoff = await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs', {
+    session: siteASession,
+    method: 'POST',
+    body: { credentialId: 'credential-b' },
+  });
+  assert.equal(foreignHandoff.called, 0);
+  assert.equal(foreignHandoff.res.statusCode, 403);
+
+  // Mismatched credential (attempting to use Site B credential on Site A) fails closed (403)
+  const mismatchedHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: siteASession,
+    method: 'POST',
+    body: { credentialId: 'credential-b' },
+  });
+  assert.equal(mismatchedHandoff.called, 0);
+  assert.equal(mismatchedHandoff.res.statusCode, 403);
+
+  // Replay attempt with empty/invalid payload fails closed (403)
+  const emptyBodyHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: siteASession,
+    method: 'POST',
+    body: {},
+  });
+  assert.equal(emptyBodyHandoff.called, 0);
+  assert.equal(emptyBodyHandoff.res.statusCode, 403);
+
+  // 5. Grant revocation and session invalidation fail closed immediately
+  const revokedGrantSession = {
+    ...siteASession,
+    user: { ...siteASession.user, websiteIds: [] },
+  };
+  const revokedHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: revokedGrantSession,
+    method: 'POST',
+    body: { credentialId: 'credential-a' },
+  });
+  assert.equal(revokedHandoff.called, 0);
+  assert.equal(revokedHandoff.res.statusCode, 403);
+
+  const revokedDbRes = await run('/api/servers/server/websites/site-a/database-resources', {
+    session: revokedGrantSession,
+  });
+  assert.equal(revokedDbRes.called, 0);
+  assert.equal(revokedDbRes.res.statusCode, 403);
+
+  // Inactive / suspended account fails closed (403)
+  const inactiveSession = {
+    ...siteASession,
+    user: { ...siteASession.user, active: false },
+  };
+  const inactiveHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: inactiveSession,
+    method: 'POST',
+    body: { credentialId: 'credential-a' },
+  });
+  assert.equal(inactiveHandoff.called, 0);
+  assert.equal(inactiveHandoff.res.statusCode, 403);
+
+  // Site account with managementAllowed: false or mode: 'read_only' cannot mutate DB credentials, rotate password, or mint phpMyAdmin handoff
+  const restrictedSession = {
+    ...siteASession,
+    access: { mode: 'read_only' },
+    security: { managementAllowed: false },
+  };
+  const restrictedHandoff = await run('/api/servers/server/websites/site-a/phpmyadmin-handoffs', {
+    session: restrictedSession,
+    method: 'POST',
+    body: { credentialId: 'credential-a' },
+  });
+  assert.equal(restrictedHandoff.called, 0);
+  assert.equal(restrictedHandoff.res.statusCode, 403);
+
+  const restrictedRotate = await run('/api/servers/server/database-credentials/credential-a/password/rotate', {
+    session: restrictedSession,
+    method: 'POST',
+  });
+  assert.equal(restrictedRotate.called, 0);
+  assert.equal(restrictedRotate.res.statusCode, 403);
+});
