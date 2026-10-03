@@ -46,35 +46,35 @@ export default function WebsitesPage() {
     {isCustomer && (
       <Section title="Barındırma Kaynakları ve Kotalar" description="Hesabınıza tahsis edilen kaynak kullanım durumu">
         {isSuspended && (
-          <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '0.75rem', borderRadius: '4px' }}>
+          <div className="ws-notice ws-notice-danger" role="alert">
             <strong>Kaynaklar Kilitli:</strong> Hesabınız askıya alınmıştır ve barındırma kaynaklarınız kilitli durumdadır. Yeniden etkinleştirmek için bayinizle iletişime geçin.
           </div>
         )}
         {isQuotaReached && (
-          <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem', color: '#b45309', backgroundColor: '#fffbeb', padding: '0.75rem', borderRadius: '4px' }}>
+          <div className="ws-notice ws-notice-warning" role="alert">
             <strong>Kota Sınırı:</strong> Web sitesi kotanız ({websiteCount} / {hostingProfile.quotas.maxWebsites}) sınırına ulaşmıştır. Yeni site talepleri için bayinizle iletişime geçin.
           </div>
         )}
-        <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: '1rem' }}>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+        <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '1rem' }}>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Web Siteleri</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
               {websiteCount} / {hostingProfile?.quotas?.maxWebsites ?? 'Sınırsız'}
             </div>
           </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Disk Alanı</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
               0 MB / {hostingProfile?.quotas?.maxDiskMb ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Aylık Trafik</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
               0 MB / {hostingProfile?.quotas?.maxTrafficMb ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
-          <div style={{ padding: '0.75rem', background: 'var(--ws-bg-card, #f9fafb)', border: '1px solid var(--ws-border, #e5e7eb)', borderRadius: '6px' }}>
+          <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Veritabanları</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
               0 / {hostingProfile?.quotas?.maxDatabases ?? 'Sınırsız'}

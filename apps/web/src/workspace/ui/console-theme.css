@@ -16,6 +16,8 @@
   --ws-nav: #0a1321; --ws-nav-text: #c0cde1; --ws-nav-muted: #92a6c0;
   --ws-nav-hover: #14253c; --ws-nav-active: #183652;
   --ws-shadow: 0 2px 8px #07152405; --ws-overlay-shadow: 0 24px 80px #0005;
+  --ws-color-danger: var(--ws-danger); --ws-color-warning: var(--ws-warning);
+  --ws-color-success: var(--ws-success); --ws-color-border: var(--ws-border);
 }
 :root[data-ws-theme="dark"] {
   color-scheme: dark;
@@ -184,7 +186,7 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-notice > div { flex: 1; min-width: 0; }
 .ws-notice > svg { flex: none; }
 .ws-notice p { margin: 3px 0 0; }
-.ws-notice-warn { color: var(--ws-warning); background: var(--ws-warning-soft); border-color: var(--ws-warning); }
+.ws-notice-warn, .ws-notice-warning { color: var(--ws-warning); background: var(--ws-warning-soft); border-color: var(--ws-warning); }
 .ws-notice-error, .ws-notice-danger { color: var(--ws-danger); background: var(--ws-danger-soft); border-color: var(--ws-danger); }
 .ws-section > .ws-notice { margin: 16px 18px; }
 .ws-disclosure > summary, details.ws-section > summary { padding: 16px 20px; color: var(--ws-muted); font-size: 13px; cursor: pointer; list-style-position: inside; }
@@ -300,6 +302,7 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 }
 @media (max-width: 360px) {
   .ws-toolbar-actions .ws-button[title="İşlemler"] .ws-nav-count { display: none; }
+  .ws-toolbar-actions .ws-badge { display: none; }
   .ws-server-metrics { gap: 8px; }
   .ws-server-metrics .ws-usage-ring { width: 65px; height: 65px; }
   .workspace-shell .ws-console-quicklink { flex-direction: column; align-items: flex-start; gap: 7px; }
