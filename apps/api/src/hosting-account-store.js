@@ -36,7 +36,22 @@ function active(value) {
  * read itself/its direct customers and change only those customers' login lifecycle.
  * Registration, limits, unlinking and Website allocation remain Owner-only here.
  */
-export function createHostingAccountStore({ db, now, transaction, getSession, mfa, audit, revokeLiveUser, hashPassword = null, normalizeUsername = null }) {
+export function createHostingAccountStore({
+  db,
+  now,
+  transaction,
+  getSession,
+  mfa,
+  audit,
+  revokeLiveUser,
+  hashPassword = null,
+  normalizeUsername = null,
+  activeResourceChecker = null,
+  websiteRegistry = null,
+  domainRegistry = null,
+  databaseBindingRegistry = null,
+  mailboxRegistry = null,
+}) {
   if (![now, transaction, getSession, mfa?.invalidateUser, audit, revokeLiveUser].every((value) => typeof value === 'function')) {
     throw new TypeError('Hosting accounts require the live auth transaction, MFA, audit and revocation services');
   }
@@ -185,6 +200,71 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
     if (row.kind !== 'customer') throw scopeDenied();
     const parent = row.reseller_id === null ? null : existing(row.reseller_id);
     assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
+  }
+  function assertSafeDeletion(id, row) {
+    if (row.kind === 'reseller') {
+      const hasChildren = db.prepare('SELECT 1 FROM auth_hosting_accounts WHERE reseller_id = ? LIMIT 1').get(id);
+      if (hasChildren) {
+        throw error('hosting_account_in_use', 'Cannot delete reseller entity while child customers exist.', 409);
+      }
+    }
+    const hasCustomerWebsites = db.prepare('SELECT 1 FROM auth_customer_websites WHERE customer_id = ? LIMIT 1').get(id);
+    const hasAllocations = db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE customer_id = ? LIMIT 1').get(id);
+    const hasUserWebsites = db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? LIMIT 1').get(id);
+    if (hasCustomerWebsites || hasAllocations || hasUserWebsites) {
+      throw error('hosting_account_in_use', 'Detach account resources through an explicit migration before removing this profile.', 409);
+    }
+    if (typeof activeResourceChecker === 'function') {
+      const check = activeResourceChecker({ id, customerId: id, resellerId: id, kind: row.kind, role: row.role });
+      if (check && (check.safe === false || check.blocked)) {
+        const res = check.resource || check.resourceType || 'attached resources';
+        throw error('hosting_account_in_use', check.message || `Cannot delete ${row.kind} entity while attached active resources (${res}) exist.`, 409);
+      }
+    }
+    if (websiteRegistry) {
+      if (typeof websiteRegistry.hasResources === 'function' && websiteRegistry.hasResources(id)) {
+        throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active websites exist.`, 409);
+      }
+      if (typeof websiteRegistry.listWebsites === 'function') {
+        const list = websiteRegistry.listWebsites();
+        if (Array.isArray(list) && list.some((s) => s.customerId === id || s.resellerId === id || (row.kind === 'customer' && s.ownerId === id))) {
+          throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active websites exist.`, 409);
+        }
+      }
+    }
+    if (domainRegistry) {
+      if (typeof domainRegistry.hasResources === 'function' && domainRegistry.hasResources(id)) {
+        throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active domains exist.`, 409);
+      }
+      if (typeof domainRegistry.listDomains === 'function') {
+        const list = domainRegistry.listDomains();
+        if (Array.isArray(list) && list.some((d) => d.customerId === id || d.resellerId === id || d.userId === id)) {
+          throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active domains exist.`, 409);
+        }
+      }
+    }
+    if (databaseBindingRegistry) {
+      if (typeof databaseBindingRegistry.hasResources === 'function' && databaseBindingRegistry.hasResources(id)) {
+        throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active databases exist.`, 409);
+      }
+      if (typeof databaseBindingRegistry.listBindings === 'function') {
+        const list = databaseBindingRegistry.listBindings();
+        if (Array.isArray(list) && list.some((b) => b.customerId === id || b.resellerId === id || b.userId === id)) {
+          throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active databases exist.`, 409);
+        }
+      }
+    }
+    if (mailboxRegistry) {
+      if (typeof mailboxRegistry.hasResources === 'function' && mailboxRegistry.hasResources(id)) {
+        throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active mailboxes exist.`, 409);
+      }
+      if (typeof mailboxRegistry.listMailboxes === 'function') {
+        const list = mailboxRegistry.listMailboxes();
+        if (Array.isArray(list) && list.some((m) => m.customerId === id || m.resellerId === id || m.userId === id)) {
+          throw error('hosting_account_in_use', `Cannot delete ${row.kind} entity while attached active mailboxes exist.`, 409);
+        }
+      }
+    }
   }
   const siteAllocations = createHostingSiteAllocationStore({
     db, now, transaction, owner, existing, projection, limits, usage, invalidate, audit, revokeLiveUser, managementActor,
@@ -454,13 +534,8 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       transaction(() => {
         const actor = owner(rawToken, requireManagement);
         fields(input, ['revision']);
-        existing(id, revision(input.revision));
-        if (db.prepare('SELECT 1 FROM auth_hosting_accounts WHERE reseller_id = ? LIMIT 1').get(id)
-          || db.prepare('SELECT 1 FROM auth_customer_websites WHERE customer_id = ? LIMIT 1').get(id)
-          || db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE customer_id = ? LIMIT 1').get(id)
-          || db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? LIMIT 1').get(id)) {
-          throw error('hosting_account_in_use', 'Detach account resources through an explicit migration before removing this profile.', 409);
-        }
+        const row = existing(id, revision(input.revision));
+        assertSafeDeletion(id, row);
         db.prepare('DELETE FROM auth_customer_quotas WHERE customer_id = ?').run(id);
         db.prepare('DELETE FROM auth_reseller_limits WHERE reseller_id = ?').run(id);
         db.prepare('DELETE FROM auth_hosting_accounts WHERE user_id = ?').run(id);
@@ -469,6 +544,34 @@ export function createHostingAccountStore({ db, now, transaction, getSession, mf
       });
       revokeLiveUser(id, 'hosting_account_unlinked');
       return { id, unregistered: true };
+    },
+    async deleteCustomerLogin(rawToken, requireManagement, id, input = {}) {
+      const outcome = transaction(() => {
+        const actor = managementActor(rawToken, requireManagement);
+        if (input && typeof input === 'object' && input.revision !== undefined) {
+          fields(input, ['revision']);
+        }
+        const row = existing(id, input?.revision !== undefined ? revision(input.revision) : undefined);
+        if (row.kind !== 'customer') throw scopeDenied();
+        const parent = row.reseller_id === null ? null : existing(row.reseller_id);
+        assertCustomerManagement({ actor, customer: projection(row), reseller: parent ? projection(parent) : null });
+        assertSafeDeletion(id, row);
+
+        const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
+        mfa.invalidateUser(id);
+        if (hasTable('sessions')) db.prepare('DELETE FROM sessions WHERE user_id = ?').run(id);
+        if (hasTable('auth_customer_quotas')) db.prepare('DELETE FROM auth_customer_quotas WHERE customer_id = ?').run(id);
+        if (hasTable('auth_hosting_accounts')) db.prepare('DELETE FROM auth_hosting_accounts WHERE user_id = ?').run(id);
+        if (hasTable('auth_mfa_recovery')) db.prepare('DELETE FROM auth_mfa_recovery WHERE user_id = ?').run(id);
+        if (hasTable('auth_mfa')) db.prepare('DELETE FROM auth_mfa WHERE user_id = ?').run(id);
+        if (hasTable('auth_recovery_emails')) db.prepare('DELETE FROM auth_recovery_emails WHERE user_id = ?').run(id);
+        if (hasTable('auth_user_revisions')) db.prepare('DELETE FROM auth_user_revisions WHERE user_id = ?').run(id);
+        db.prepare('DELETE FROM users WHERE id = ?').run(id);
+        audit(actor.id, 'hosting.customer_login_deleted', { type: 'user', id });
+        return { id, deleted: true };
+      });
+      revokeLiveUser(id, 'hosting_customer_deleted');
+      return outcome;
     },
     /** Called inside the legacy user store's authorized write transaction. Not an API. */
     assertLegacyMutationAllowed(id, input = null) {

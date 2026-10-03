@@ -636,8 +636,9 @@ export function createAuthStore({
         revokeLiveSession(row.id, 'hosting_scope_inactive');
         return null;
       }
-      const hosting = row.role === 'site_manager' ? hostingSessionProfile(row.user_id) : null;
-      const websiteIds = row.role === 'site_manager' ? websiteIdsForSession(row.user_id, hosting) : null;
+      const isHostingRole = ['site_manager', 'reseller', 'customer'].includes(row.role);
+      const hosting = isHostingRole ? hostingSessionProfile(row.user_id) : null;
+      const websiteIds = isHostingRole ? websiteIdsForSession(row.user_id, hosting) : null;
       const recovery = db.prepare('SELECT email, verified FROM auth_recovery_emails WHERE user_id = ?').get(row.user_id);
       return Object.freeze({
         id: row.id,
