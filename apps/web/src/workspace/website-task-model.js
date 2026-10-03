@@ -74,6 +74,8 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
       createSubdomainHref: isOwner && !domainProblem ? `/websites/new?parent=${encodeURIComponent(domain.id)}` : null,
       manageAliasesHref: canManage && !domainProblem ? siteHref(domain.id, 'domains') : null,
       addAliasHref: canManage && !domainProblem ? siteHref(domain.id, 'domains') : null,
+      removeHref: isOwner && canManage && !domainProblem && Boolean(website) ? siteHref(domain.id, 'settings') : null,
+      removeWebsiteHref: isOwner && canManage && !domainProblem && Boolean(website) ? siteHref(domain.id, 'settings') : null,
     };
   };
 }
