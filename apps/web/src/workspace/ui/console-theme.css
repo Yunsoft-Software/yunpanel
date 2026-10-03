@@ -223,6 +223,8 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-server-metrics .ws-usage-ring { position: relative; display: grid; place-items: center; width: 76px; height: 76px; border-radius: 50%; background: conic-gradient(var(--ws-console-blue) var(--usage,0%),var(--ws-border) 0); }
 .ws-server-metrics .ws-usage-ring::before { position: absolute; inset: 7px; border-radius: 50%; background: var(--ws-surface); content: ''; }
 .ws-server-metrics .ws-usage-ring.is-high { background: conic-gradient(var(--ws-warning) var(--usage,0%),var(--ws-border) 0); }
+.ws-server-metrics .ws-usage-ring.is-critical { background: conic-gradient(var(--ws-danger) var(--usage,0%),var(--ws-border) 0); }
+.ws-server-metrics .ws-usage-ring:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
 .ws-server-metrics .ws-usage-ring.is-unknown { background: var(--ws-border); }
 .ws-server-metrics .ws-usage-ring strong { position: relative; margin: 0; color: var(--ws-text); font-size: 15px; }
 .ws-server-metrics span { display: block; color: var(--ws-muted); font-size: 12px; }
