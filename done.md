@@ -794,3 +794,12 @@
 
 ## 2026-10-02 — WR-04: Yeni development hedefiyle entegrasyon doğrulaması bekleniyor
 - Korunan WR-04 kaynağı önceki özgün tam doğrulamayı ve bağımsız incelemeyi geçti. Firewall entegrasyonu sonrasında ilerleyen development hedefiyle kimlik normalizasyonu, domain kilitleri ve her iki tarafın UX kabul testleri birlikte korunarak bu aday hazırlandı. Bu adayın özgün tam testleri, yeni bağımsız incelemesi ve Git entegrasyonu henüz tamamlanmadı; görev için DONE sonucu verilmedi.
+
+## 2026-10-03 — PROD-05: Plesk yerleşiminde Firewall ve port yönetimi
+- Owner sunucu güvenlik araçları altında (Tools & Settings -> Security -> Firewall / `/firewall`) Plesk yerleşimine uygun gerçek firewall durumu, port ayrımı ve CrowdSec ban yönetimi geliştirildi (`apps/api/src/firewall-service.js`, `apps/api/src/firewall-http.js`, `apps/web/src/workspace/FirewallPage.jsx`, `apps/web/src/workspace/firewall-client.js`, `apps/web/src/workspace/firewall-model.js`).
+- Port ve kural listesinde TCP/UDP, IPv4/IPv6, dinleyen adres/proses (`listenAddress`, `process`), izin politikası (`ALLOW`/`DROP`), kaynak IP/CIDR (`sourceCidr`), servis profili (`system`, `web`, `mail`, `dns`, `custom`) ve son doğrulama zamanı sunuldu.
+- Dinleyen port (`isListening`), firewall izinli port (`isFirewallAllowed`) ve dışarıdan erişilebilir port (`isExternallyReachable`) ayrımı netleştirildi; cloud/sağlayıcı güvenlik duvarı durumu `providerFirewall: { status: 'unknown', advisory: '...' }` olarak hem API hem UI düzeyinde açıkça belirtildi.
+- Servis profili koruması: `localMail` ve `authoritativeDns` profilleri etkin olmadığında gereksiz portların (mail: 25, 143, 465, 587, 993; dns: 53) açılması fail-closed 400 `service_profile_inactive` ile engellendi. Profil kapatıldığında ilgili portlar kapatılıp özel kuralları temizlendi.
+- CrowdSec ban/unban işlevleri (`listBans`, `addBan`, `removeBan`, `inspectCrowdsec`) aynı güvenlik bağlamına bağlandı.
+- Güvenlik kuralı: Host/port taraması yalnızca izin verilen test hedeflerinde (`127.0.0.1`, `localhost`, `::1`, `157.180.11.28`, `server.cryptoraichu.website`) sınırlandırıldı; `.44` veya yetkisiz hedeflere yönelik tarama 403 `unauthorized_test_target` ile engellendi.
+- Odaklı birim ve HTTP entegrasyon testleri `apps/api/test/firewall-service.test.js` (13/13 test) ve `apps/api/test/firewall-http.test.js` (10/10 test) ile web testleri (`firewall-client.test.js`, `firewall-model.test.js`, `firewall-ui-wiring.test.js`) başarıyla doğrulandı; orkestratör doğrulaması bekleniyor (pending orchestrator verification).

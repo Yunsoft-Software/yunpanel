@@ -38,6 +38,7 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false, 
 export const TOOLS_SETTINGS_GROUPS = Object.freeze([
   { id: 'server', label: 'Sunucu ve hizmetler', items: [
     ['/servers', 'Sunucu ve servis yönetimi', 'server'],
+    ['/firewall', 'Güvenlik duvarı ve port yönetimi', 'shield'],
     ['/dashboard', 'Sunucu genel bakışı', 'dashboard'],
     ['/settings?section=dns', 'Sunucu DNS ve SSL ayarları', 'globe'],
     ['/settings?section=updates', 'YunPanel güncellemeleri', 'refresh'],
@@ -85,7 +86,7 @@ export function navigationItemActive(to, pathname) {
       || currentPath === '/db' || currentPath.startsWith('/db/');
   }
   if (to === '/tools-settings') {
-    return (['/tools-settings', '/servers', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
+    return (['/tools-settings', '/servers', '/firewall', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
       || (currentPath === '/settings' || (currentPath.startsWith('/settings/') && currentPath !== '/settings/users' && !currentPath.startsWith('/settings/users/'))))
       && currentPath !== '/users' && !currentPath.startsWith('/users/');
   }
