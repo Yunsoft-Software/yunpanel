@@ -1,7 +1,16 @@
 const GRAPH_VERSION = 1;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const RESOURCE_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,159}$/;
-const RESOURCE_TYPES = new Set(['application', 'database', 'docker_storage', 'mail_data']);
+const RESOURCE_TYPES = new Set([
+  'application',
+  'database',
+  'docker_storage',
+  'mail_data',
+  'site_files',
+  'configuration',
+  'panel_relationships',
+  'encryption_keys',
+]);
 const MAX_ITEMS = 8192;
 
 export class BackupDependencyGraphError extends Error {
@@ -264,6 +273,44 @@ export function createBackupDependencyGraph({
         const website = websiteById.get(domain.websiteId);
         websiteIds.push(website.id);
         references.push(reference('website', website.id, website.revision));
+      }
+    } else if (resource.type === 'site_files') {
+      const website = resource.websiteId ? websiteById.get(resource.websiteId) : null;
+      if (website) {
+        websiteIds.push(website.id);
+        references.push(reference('website', website.id, website.revision));
+        for (const domain of domainsByWebsite.get(website.id) ?? []) {
+          domainIds.push(domain.id);
+          references.push(reference('domain', domain.id, domain.desiredRevision, domain.appliedRevision));
+        }
+      }
+    } else if (resource.type === 'configuration') {
+      if (resource.websiteId && websiteById.has(resource.websiteId)) {
+        const website = websiteById.get(resource.websiteId);
+        websiteIds.push(website.id);
+        references.push(reference('website', website.id, website.revision));
+      }
+      if (resource.domainId && domainById.has(resource.domainId)) {
+        const domain = domainById.get(resource.domainId);
+        domainIds.push(domain.id);
+        references.push(reference('domain', domain.id, domain.desiredRevision, domain.appliedRevision));
+      }
+    } else if (resource.type === 'panel_relationships') {
+      if (resource.websiteId && websiteById.has(resource.websiteId)) {
+        const website = websiteById.get(resource.websiteId);
+        websiteIds.push(website.id);
+        references.push(reference('website', website.id, website.revision));
+      }
+    } else if (resource.type === 'encryption_keys') {
+      if (resource.websiteId && websiteById.has(resource.websiteId)) {
+        const website = websiteById.get(resource.websiteId);
+        websiteIds.push(website.id);
+        references.push(reference('website', website.id, website.revision));
+      }
+      if (resource.domainId && domainById.has(resource.domainId)) {
+        const domain = domainById.get(resource.domainId);
+        domainIds.push(domain.id);
+        references.push(reference('domain', domain.id, domain.desiredRevision, domain.appliedRevision));
       }
     }
 

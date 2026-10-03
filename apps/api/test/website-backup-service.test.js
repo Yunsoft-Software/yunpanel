@@ -5,6 +5,21 @@ import {
   createWebsiteBackupService,
   isWebsiteBackupError,
 } from '../src/website-backup-service.js';
+import {
+  createDisasterRecoveryScope,
+  normalizeDisasterRecoveryScope,
+  maskDisasterRecoverySecrets,
+  DISASTER_RECOVERY_CATEGORIES,
+} from '../src/backup-manifest.js';
+import {
+  verifyDisasterRecoveryRestore,
+  BackupPlanError,
+} from '../src/backup-plan.js';
+import { createBackupResourceProvider } from '../src/backup-resource-provider.js';
+import {
+  sanitizeDisasterRecoveryRestoreResult,
+  DatabaseRestoreJobResultError,
+} from '../src/database-restore-job-result.js';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const otherServerId = 'd0bc7f95-bdbd-4375-904f-50c532fc3faa';
@@ -322,4 +337,289 @@ test('executeBackup compose pause failure cleans up and does not take snapshot',
   assert.equal(calls.createSnapshot.length, 0);
   // Staging directory cleaned up even on failure
   assert.ok(calls.rm.some((r) => r.targetPath === backupSet.stagedRoot));
+});
+
+test('PROD-08 Service: disaster recovery scope creation compiles all 6 domains and masks sensitive secrets', () => {
+  const scope = createDisasterRecoveryScope({
+    serverId,
+    websiteId,
+    siteFiles: [
+      {
+        path: '/var/lib/yunpanel/websites/TestApp/public_html',
+        fileCount: 42,
+        totalBytes: 1048576,
+        contentSha256: 'a'.repeat(64),
+      },
+    ],
+    databases: [
+      {
+        databaseName: 'app_db',
+        engine: 'mariadb',
+        sizeBytes: 2097152,
+        dumpSha256: 'b'.repeat(64),
+      },
+    ],
+    mail: [
+      {
+        mailDomainId: 'domain-mail-1',
+        domainName: 'example.com',
+        storageBytes: 524288,
+        snapshotSha256: 'c'.repeat(64),
+      },
+    ],
+    configuration: [
+      {
+        kind: 'nginx',
+        path: '/etc/nginx/sites-available/example.com.conf',
+        checksum: 'd'.repeat(64),
+      },
+    ],
+    panelRelationships: [
+      {
+        resourceType: 'role_grant',
+        resourceId: 'grant-123',
+        details: { role: 'owner', websiteId },
+      },
+    ],
+    encryptionKeys: [
+      {
+        keyId: 'ssl-key-1',
+        kind: 'tls_private_key',
+        privateKey: '-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----',
+        keyPassword: 'unmasked-pass-123',
+      },
+    ],
+  });
+
+  assert.equal(scope.version, 1);
+  assert.equal(scope.serverId, serverId);
+  assert.equal(scope.websiteId, websiteId);
+  assert.deepEqual(scope.categories, DISASTER_RECOVERY_CATEGORIES);
+
+  // Validate normalization
+  const normalized = normalizeDisasterRecoveryScope(scope);
+  assert.equal(normalized.scopeDigest, scope.scopeDigest);
+  assert.equal(normalized.secretsMasked, true);
+
+  // Validate secret masking
+  const json = JSON.stringify(scope);
+  assert.doesNotMatch(json, /-----BEGIN RSA PRIVATE KEY-----/);
+  assert.doesNotMatch(json, /unmasked-pass-123/);
+  assert.match(json, /\[REDACTED_PRIVATE_KEY\]/);
+  assert.match(json, /\[REDACTED\]/);
+});
+
+test('PROD-08 Service: createBackupResourceProvider provides disasterRecoveryScope with server resources', async () => {
+  const provider = createBackupResourceProvider({
+    serverRegistry: {
+      async getServer(id) {
+        return id === serverId ? { id: serverId, name: 'primary' } : null;
+      },
+    },
+    dockerComposeProjectRegistry: {
+      async listProjects() { return []; },
+    },
+    applicationRegistry: {
+      async listApplications() { return []; },
+    },
+    applicationEnvironmentRegistry: {
+      async environmentStatus() { return { savedRevision: 1, appliedRevision: 1, appliedReleaseId: null }; },
+    },
+    websiteRegistry: {
+      async listWebsites() { return [{ id: websiteId, serverId, name: 'TestApp' }]; },
+    },
+    databaseBindingRegistry: {
+      async listBindings() { return []; },
+    },
+    loadDatabaseInventory: async () => ({
+      engine: 'mariadb',
+      version: '10.11.8',
+      snapshot: {
+        jobId: '1dff50cb-0840-413c-a9d1-d069f8e87743',
+        refreshedAt: '2026-10-03T08:00:00.000Z',
+      },
+      databases: [{
+        name: 'app_db',
+        sizeBytes: 1024,
+      }],
+    }),
+    mailDomainRegistry: {
+      async listMailDomains() { return []; },
+    },
+    domainRegistry: {
+      async getDomain() { return null; },
+      async listDomains() { return []; },
+    },
+    mailDataOperationsService: {
+      async previewBackup() { return { bytes: 0, snapshotSha256: '0'.repeat(64), files: 0 }; },
+    },
+  });
+
+  assert.equal(typeof provider.disasterRecoveryScope, 'function');
+  const scope = await provider.disasterRecoveryScope({
+    serverId,
+    websiteId,
+    siteFiles: [{ path: '/var/lib/yunpanel/websites/TestApp', totalBytes: 1024 }],
+    configuration: [{ kind: 'nginx', path: '/etc/nginx/sites-available/test.conf' }],
+    panelRelationships: [{ resourceType: 'owner', resourceId: 'user-1' }],
+    encryptionKeys: [{ keyId: 'key-1', privateKey: '-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----' }],
+  });
+
+  assert.equal(scope.serverId, serverId);
+  assert.equal(scope.websiteId, websiteId);
+  assert.deepEqual(scope.categories, DISASTER_RECOVERY_CATEGORIES);
+  assert.equal(scope.secretsMasked, true);
+  assert.equal(scope.encryptionKeys[0].privateKey, '[REDACTED_PRIVATE_KEY]');
+  assert.equal(scope.database.length, 1);
+  assert.equal(scope.database[0].databaseName, 'app_db');
+});
+
+test('PROD-08 Service: verifyDisasterRecoveryRestore validates empty authorized target, site health, data integrity, RPO, and RTO', () => {
+  const result = verifyDisasterRecoveryRestore({
+    websiteId,
+    serverId,
+    targetDirectory: '/var/lib/yunpanel/websites/TestApp-DR',
+    allowedTargetRoots: ['/var/lib/yunpanel/websites'],
+    targetWasEmpty: true,
+    disasterTimestamp: '2026-10-03T08:00:00.000Z',
+    snapshotTimestamp: '2026-10-03T07:40:00.000Z', // 20 mins = 1200s RPO
+    recoveryStartedAt: '2026-10-03T08:05:00.000Z',
+    recoveryCompletedAt: '2026-10-03T08:25:00.000Z', // 20 mins = 1200s RTO
+    acceptableRpoSeconds: 3600, // 1h acceptable
+    targetRtoSeconds: 7200,     // 2h target
+    operationalVerification: {
+      siteRunning: true,
+      httpStatus: 200,
+    },
+    integrityVerification: {
+      filesVerified: true,
+      databaseChecksumMatched: true,
+      recordsValidated: true,
+    },
+  });
+
+  assert.equal(result.verified, true);
+  assert.equal(result.status, 'succeeded');
+  assert.equal(result.targetAuthorized, true);
+  assert.equal(result.targetWasEmpty, true);
+  assert.equal(result.operationalVerified, true);
+  assert.equal(result.integrityVerified, true);
+  assert.equal(result.metrics.rpoSeconds, 1200);
+  assert.equal(result.metrics.rpoAccepted, true);
+  assert.equal(result.metrics.rtoSeconds, 1200);
+  assert.equal(result.metrics.rtoAccepted, true);
+
+  // Non-empty target must fail
+  assert.throws(
+    () => verifyDisasterRecoveryRestore({
+      websiteId,
+      serverId,
+      targetDirectory: '/var/lib/yunpanel/websites/TestApp-DR',
+      allowedTargetRoots: ['/var/lib/yunpanel/websites'],
+      targetWasEmpty: false,
+      operationalVerification: { siteRunning: true, httpStatus: 200 },
+      integrityVerification: { filesVerified: true },
+    }),
+    (err) => err instanceof BackupPlanError && err.code === 'target_not_empty',
+  );
+
+  // Unauthorized target must fail
+  assert.throws(
+    () => verifyDisasterRecoveryRestore({
+      websiteId,
+      serverId,
+      targetDirectory: '/var/unauthorized/target',
+      allowedTargetRoots: ['/var/lib/yunpanel/websites'],
+      targetWasEmpty: true,
+      operationalVerification: { siteRunning: true, httpStatus: 200 },
+      integrityVerification: { filesVerified: true },
+    }),
+    (err) => err instanceof BackupPlanError && err.code === 'target_unauthorized',
+  );
+});
+
+test('PROD-08 Service: disaster recovery verification rejects snapshot-only or backup-file-only evidence', () => {
+  assert.throws(
+    () => verifyDisasterRecoveryRestore({
+      websiteId,
+      serverId,
+      targetDirectory: '/var/lib/yunpanel/websites/TestApp',
+      snapshotListOnly: true,
+      targetWasEmpty: true,
+      operationalVerification: { siteRunning: true, httpStatus: 200 },
+      integrityVerification: { filesVerified: true },
+    }),
+    (err) => err instanceof BackupPlanError && err.code === 'disaster_recovery_insufficient_evidence',
+  );
+
+  assert.throws(
+    () => verifyDisasterRecoveryRestore({
+      websiteId,
+      serverId,
+      targetDirectory: '/var/lib/yunpanel/websites/TestApp',
+      backupFileOnly: true,
+      targetWasEmpty: true,
+      operationalVerification: { siteRunning: true, httpStatus: 200 },
+      integrityVerification: { filesVerified: true },
+    }),
+    (err) => err instanceof BackupPlanError && err.code === 'disaster_recovery_insufficient_evidence',
+  );
+});
+
+test('PROD-08 Service: sanitizeDisasterRecoveryRestoreResult enforces RPO, RTO tolerances and masks secrets', () => {
+  const validResult = {
+    recoveryId: 'dr-test-rec-1',
+    websiteId,
+    targetPath: '/var/lib/yunpanel/websites/TestApp-DR',
+    targetWasEmpty: true,
+    targetAuthorized: true,
+    operationalVerified: true,
+    integrityVerified: true,
+    restoredCategories: DISASTER_RECOVERY_CATEGORIES,
+    metrics: {
+      rpoSeconds: 600,
+      acceptableRpoSeconds: 1800,
+      rtoSeconds: 900,
+      targetRtoSeconds: 3600,
+    },
+    verified: true,
+    scope: {
+      adminPassword: 'super-secret-pw',
+      databasePassword: 'db-secret-pw',
+    },
+  };
+
+  const sanitized = sanitizeDisasterRecoveryRestoreResult({ id: 'job-rec-1' }, validResult);
+  assert.equal(sanitized.verified, true);
+  assert.equal(sanitized.restored, true);
+  assert.equal(sanitized.secretsMasked, true);
+  assert.equal(sanitized.scope.adminPassword, '[REDACTED]');
+  assert.equal(sanitized.scope.databasePassword, '[REDACTED]');
+
+  // Exceeded RPO throws
+  assert.throws(
+    () => sanitizeDisasterRecoveryRestoreResult({ id: 'job-rec-1' }, {
+      ...validResult,
+      metrics: { rpoSeconds: 3600, acceptableRpoSeconds: 1800, rtoSeconds: 900, targetRtoSeconds: 3600 },
+    }),
+    (err) => err instanceof DatabaseRestoreJobResultError && err.code === 'disaster_recovery_rpo_exceeded',
+  );
+
+  // Exceeded RTO throws
+  assert.throws(
+    () => sanitizeDisasterRecoveryRestoreResult({ id: 'job-rec-1' }, {
+      ...validResult,
+      metrics: { rpoSeconds: 600, acceptableRpoSeconds: 1800, rtoSeconds: 5000, targetRtoSeconds: 3600 },
+    }),
+    (err) => err instanceof DatabaseRestoreJobResultError && err.code === 'disaster_recovery_rto_exceeded',
+  );
+
+  // Private key leak in result throws
+  assert.throws(
+    () => sanitizeDisasterRecoveryRestoreResult({ id: 'job-rec-1' }, {
+      ...validResult,
+      rawLeakedKey: '-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----',
+    }),
+    (err) => err instanceof DatabaseRestoreJobResultError && err.code === 'disaster_recovery_secret_leak',
+  );
 });
