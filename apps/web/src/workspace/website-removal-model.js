@@ -17,7 +17,7 @@ function bucket(value){
 }
 function domain(value){
  need(record(value)&&SAFE.test(value.id??'')&&text(value.primaryDomain,253));
- return Object.freeze({id:value.id,primaryDomain:value.primaryDomain});
+ return Object.freeze({id:value.id,primaryDomain:value.primaryDomain,parentDomainId:value.parentDomainId??null});
 }
 export function removalPreview(value,scope){
  need(record(value)&&value.version===1&&value.operation==='website_remove'&&record(value.website)
@@ -86,12 +86,17 @@ const blockerLabels=Object.freeze({
  runtime_cleanup_unavailable:'Runtime bağlantısı güvenli biçimde temizlenemiyor.',
  cron_cleanup_unavailable:'Zamanlanmış görevler güvenli biçimde temizlenemiyor.',
  metadata_cleanup_unavailable:'Website metadata lifecycle’ı kullanılamıyor.',
-  application_cleanup_unavailable: 'Uygulama kaydı ve ortam dosyaları için temizleme işlemi kullanılamıyor.',
-  application_env_cleanup_unavailable: 'Application metadata/env cleanup lifecycle’ı kullanılamıyor.',
+ application_env_cleanup_unavailable:'Application metadata/env cleanup lifecycle’ı kullanılamıyor.',
  file_cleanup_preflight_failed:'Canonical site dosya kökleri güvenli olarak doğrulanamadı.',
  unix_cleanup_evidence_unavailable:'Site Unix kullanıcısının ownership receipt’i bulunamadı; legacy kullanıcı otomatik silinmez.',
  runtime_cleanup_adapter_unsupported:'Bu runtime adapterı için doğrulanmış kaldırma yolu henüz yok.',
  runtime_cleanup_unverified:'Runtime binding cleanup durumu doğrulanamadı.',
+ website_removal_cleanup_unverified:'Temizlik adımı doğrulanamadı veya beklenen kanıt eşleşmedi.',
+ website_removal_interrupted:'Silme adımı kesintiye uğradı; açıkça yeniden devam edilmesi gerekiyor.',
+ child_domain_removal_blocked:'Bağlı alan adı silme işlemi engellendi veya tamamlanamadı.',
+ domain_removal_not_ready:'Bağlı alan adı henüz silmeye hazır değil.',
+ website_removal_cron_job_failed:'Zamanlanmış görev temizliği işlemi başarısız oldu.',
+ website_removal_allocation_release_failed:'Barındırma kontenjanı ve kota serbest bırakma işlemi başarısız oldu.',
 });
 export function removalBlockerLabel(code){return blockerLabels[code]??'Silme işlemi için gerekli güvenlik kontrolü tamamlanmadı: '+code;}
 export function removalErrorMessage(error){return ({

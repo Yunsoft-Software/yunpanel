@@ -3,7 +3,7 @@ import {panelRequest} from '../api.js';
 import {Button,ErrorNotice,KeyValues,Section} from './PanelKit.jsx';
 import {globalRemovalOperation,nextRemovalStep,removalErrorMessage} from './website-removal-model.js';
 
-export default function WebsiteRemovalRecoveryPanel(){
+export default function WebsiteRemovalRecoveryPanel({ onChanged }){
  const [state,setState]=useState({operations:[],loading:true,busy:null,error:null,unknown:false});const live=useRef(true);
  async function load(){setState((v)=>({...v,loading:true,error:null}));try{
   const value=await panelRequest('/website-removal-operations');if(!live.current)return;
@@ -17,10 +17,13 @@ export default function WebsiteRemovalRecoveryPanel(){
   try{sent=true;const value=await panelRequest('/website-removal-operations/'+encodeURIComponent(operation.id)+'/continue',{method:'POST',
     body:{expectedUpdatedAt:operation.updatedAt,stepId:step.stepId,confirmation:step.confirmation}});
    const updated=globalRemovalOperation(value);if(live.current)setState((v)=>({...v,operations:v.operations.map((op)=>op.id===updated.id?updated:op)}));
+   if(updated.status==='removed'){onChanged?.();}
   }catch(error){
    if(sent&&!([400,401,403,409].includes(error?.status))){try{
     const current=globalRemovalOperation(await panelRequest('/website-removal-operations/'+encodeURIComponent(operation.id)));
-    if(live.current)setState((v)=>({...v,operations:v.operations.map((op)=>op.id===current.id?current:op),unknown:true,error:'Adım cevabı kayboldu; POST tekrar edilmedi ve journal yeniden okundu.'}));return;
+    if(live.current)setState((v)=>({...v,operations:v.operations.map((op)=>op.id===current.id?current:op),unknown:true,error:'Adım cevabı kayboldu; POST tekrar edilmedi ve journal yeniden okundu.'}));
+    if(current.status==='removed'){onChanged?.();}
+    return;
    }catch{}}
    if(live.current)setState((v)=>({...v,error:removalErrorMessage(error)}));
   }finally{if(live.current)setState((v)=>({...v,busy:null}));}

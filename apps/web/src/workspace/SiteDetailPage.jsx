@@ -133,7 +133,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
-    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button></>} />
+    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
     <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span>{isCustomRuntime && <Badge state="neutral">Ürün Uzantısı</Badge>}</div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />
     <CollectionNotice resource={domains} label="Alan adı verisi" />
@@ -144,7 +144,7 @@ function SiteWorkspace({ websiteId, tab }) {
       <Section title="Site araçları">{toolLinks(shortcuts)}</Section>
       <Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'hosting')}>Barındırma ve DNS</Link>}><KeyValues items={[
         ['Alan adı', domain.primaryDomain], ['Uygulama türü', runtimeLabel], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'], ['Son yayın', formatDate(domain.lastAppliedAt)],
-      ]} />{isOwner && <div className="ws-section-body"><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton></div>}</Section>
+      ]} />{isOwner && <div className="ws-section-body"><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>{website && canManage && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil…</LinkButton>}</div>}</Section>
       {website && isOwner && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
       <details className="ws-section ws-disclosure"><summary>Yayın ve uygulama ayrıntıları</summary><KeyValues items={[
         ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
@@ -177,7 +177,7 @@ function SiteWorkspace({ websiteId, tab }) {
         ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
       ]} /></Section>
       {website && isOwner && <WebsiteIsolationPanel websiteId={website.id} onChanged={refreshAll} />}
-      {website && isOwner && <WebsiteRemovalPanel domainId={domain.id} />}
+      {website && isOwner && <WebsiteRemovalPanel domainId={domain.id} onChanged={refreshAll} />}
       <details className="ws-section ws-disclosure"><summary>Teknik kayıt kimlikleri</summary><KeyValues items={[
         ['Alan adı kimliği', domain.id], ['Site kimliği', website?.id ?? 'Bağlı değil'], ['Hedef türü', domain.targetType],
       ]} />{isOwner && <div className="ws-section-body"><Link to="/domains">Gelişmiş alan adı araçları</Link></div>}</details>
