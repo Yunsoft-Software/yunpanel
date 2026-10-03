@@ -72,3 +72,55 @@ test('resource URLs encode IDs and byte formatting preserves missing data', () =
   assert.equal(siteHref('a/b'), '/websites/a%2Fb/overview');
   assert.equal(formatBytes(null), '—'); assert.equal(formatBytes(0), '0 B');
 });
+
+test('collectionReducer prevents stale polls from overwriting newer certificate validTo or reverting active state', () => {
+  const currentCert = {
+    id: 'cert-1',
+    state: 'active',
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+    fingerprint256: 'NEW_FP',
+    lastRenewedAt: '2026-09-01T00:00:00.000Z',
+  };
+  const ready = collectionReducer(initialCollection(), { type: 'success', items: [currentCert] });
+
+  // A delayed poll arrives with older certificate dates and 'renewing' state
+  const staleCert = {
+    id: 'cert-1',
+    state: 'renewing',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'OLD_FP',
+    lastRenewedAt: null,
+  };
+  const updated = collectionReducer(ready, { type: 'success', items: [staleCert] });
+
+  // Stale poll must NOT overwrite validTo, validFrom, fingerprint, or active state
+  assert.equal(updated.items[0].validTo, currentCert.validTo);
+  assert.equal(updated.items[0].validFrom, currentCert.validFrom);
+  assert.equal(updated.items[0].fingerprint256, currentCert.fingerprint256);
+  assert.equal(updated.items[0].state, 'active');
+  assert.equal(updated.items[0].lastRenewedAt, currentCert.lastRenewedAt);
+});
+
+test('collectionReducer prevents stale polls from clearing domain certificateId or rolling back desiredRevision', () => {
+  const currentDomain = {
+    id: 'domain-1',
+    desiredRevision: 3,
+    certificateId: 'cert-1',
+    primaryDomain: 'example.com',
+  };
+  const ready = collectionReducer(initialCollection(), { type: 'success', items: [currentDomain] });
+
+  // Delayed poll with older desiredRevision and null certificateId
+  const staleDomain = {
+    id: 'domain-1',
+    desiredRevision: 2,
+    certificateId: null,
+    primaryDomain: 'example.com',
+  };
+  const updated = collectionReducer(ready, { type: 'success', items: [staleDomain] });
+
+  assert.equal(updated.items[0].certificateId, 'cert-1');
+  assert.equal(updated.items[0].desiredRevision, 3);
+});

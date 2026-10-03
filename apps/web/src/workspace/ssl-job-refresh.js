@@ -5,12 +5,13 @@ export function createSslJobRefresh() {
   return (jobs) => {
     let refresh = false;
     for (const job of jobs) {
+      const op = job?.operation || job?.type;
       if (!job || typeof job.id !== 'string' || !job.id || job.resourceType !== 'certificate'
-        || !['ssl.issue', 'ssl.renew'].includes(job.operation)
+        || !['ssl.issue', 'ssl.renew'].includes(op)
         || typeof job.resourceId !== 'string' || !job.resourceId
         || typeof job.serverId !== 'string' || !job.serverId
         || !['queued', 'running', 'succeeded', 'failed', 'cancelled'].includes(job.status)) continue;
-      const identity = JSON.stringify([job.serverId, job.resourceId, job.operation]);
+      const identity = JSON.stringify([job.serverId, job.resourceId, op]);
       const previous = seen.get(job.id);
       if (previous && previous.identity !== identity) continue;
       const terminal = ['succeeded', 'failed', 'cancelled'].includes(job.status);

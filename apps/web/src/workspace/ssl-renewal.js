@@ -140,15 +140,19 @@ export function createSslRenewal({ target, request, isCurrent = () => true, canM
       return;
     }
     const view = await snapshot();
-    const outcome = renewalOutcome(next, state.before, view.certificate, state.dryRun);
+    const effectiveCert = (state.status === 'complete' && state.certificate?.validTo && view.certificate?.validTo
+      && Date.parse(state.certificate.validTo) > Date.parse(view.certificate.validTo))
+      ? state.certificate
+      : view.certificate;
+    const outcome = renewalOutcome(next, state.before, effectiveCert, state.dryRun);
     if (outcome === 'syncing') {
-      publish({ status: ++syncReads < 8 ? 'syncing' : 'unverified', job: next, certificate: view.certificate,
+      publish({ status: ++syncReads < 8 ? 'syncing' : 'unverified', job: next, certificate: effectiveCert,
         outcome, error: 'İş tamamlandı, ancak kalıcı sertifika kaydı henüz aynı sonucu göstermiyor. Yenileme tekrar gönderilmeden kayıt yeniden okunacak.' });
       return;
     }
-    const changed = state.outcome !== outcome || !equal(state.certificate, view.certificate);
+    const changed = state.outcome !== outcome || !equal(state.certificate, effectiveCert);
     sealed = false;
-    publish({ status: 'complete', job: next, certificate: view.certificate, outcome, error: null,
+    publish({ status: 'complete', job: next, certificate: effectiveCert, outcome, error: null,
       syncVersion: state.syncVersion + (changed ? 1 : 0) });
   }
   async function prepare(dryRun) {

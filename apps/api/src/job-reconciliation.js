@@ -718,8 +718,10 @@ async function applyReconciliation({
         return { reconciled: true, outcome: 'succeeded', dryRun: true };
       }
       const certificate = await certificateRegistry.markActive(job.resourceId, job.result, { renewal: isRenewal });
-      if (!isRenewal && !certificate.staging && (certificate.purpose ?? 'web') === 'web') {
-        await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
+      if (!certificate.staging && (certificate.purpose ?? 'web') === 'web') {
+        if (domainRegistry && certificate.domainId) {
+          await domainRegistry.attachCertificate(certificate.domainId, certificate.id, { domains: certificate.domains });
+        }
         await certificateRegistry.commitSelection(certificate.id);
       }
 
