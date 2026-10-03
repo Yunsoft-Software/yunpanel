@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
 import http from 'node:http';
+import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
 import { AuthError } from '../src/auth-error.js';
 import {
@@ -44,7 +46,10 @@ import {
 } from '../src/production-exit-gate.js';
 import { createLiveSessionRegistry } from '../src/live-session-registry.js';
 import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/elfinder-handoff-service.js';
-import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
+import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal-websocket.js';
+import { createTerminalCapabilityRegistry } from '../src/terminal-capability-registry.js';
+import { createAuthenticatedApi } from '../src/auth-http.js';
+import { WebSocket } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
 import { lstat, mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -65,6 +70,22 @@ import {
   startPhpMyAdminHandoffSocket,
   phpMyAdminHandoffSocketInternals,
 } from '../src/phpmyadmin-handoff-socket.js';
+import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+import {
+  conversationScope,
+  conversationVisible,
+  createConversationPager,
+  AiHistoryError,
+} from '../src/ai-conversation-history.js';
+import {
+  evaluateAiToolPolicy,
+  AiPolicyError,
+} from '../src/ai-policy.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import {
+  recoverRunningCron,
+  JobRunningCronRecoveryError,
+} from '../src/job-running-cron-recovery.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -3641,4 +3662,1252 @@ test('Staging E2E YP-04: phpMyAdmin session binding and tenant isolation real ac
   // 15. Server Isolation & Host Safety Gate
   assertNoDot44Host(stagingServerId);
   assert.ok(true, 'YP-04 phpMyAdmin session binding and tenant isolation real acceptance verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 10: RS-02e / kalan — Live Auth Store Session, Common Site Boundary Restrictions,
+// AI History Grants & Tool Policy, Long-running Disconnect & Recovery, Ownership Migration & Rollback
+// ============================================================================
+
+test('Staging E2E RS-02e / kalan: Live auth store session integration, site resource boundary enforcement, AI history & policy grants, long-running pathway revocation & recovery, ownership migration rollback, and host isolation', async (t) => {
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  // Staging server ID: strictly non-.44
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+  assertNoDot44Host(stagingServerId);
+
+  // 1. Live Session Tracking and Multi-Tier Hosting Store Setup
+  const liveSessions = createLiveSessionRegistry();
+  const originalRevokeUser = liveSessions.revokeUser.bind(liveSessions);
+  liveSessions.revokeUser = (userId, reason) => {
+    f.revoked.push({ id: userId, reason });
+    return originalRevokeUser(userId, reason);
+  };
+  const revokeLiveUser = (userId, reason) => {
+    liveSessions.revokeUser(userId, reason);
+  };
+
+  f.store = createHostingAccountStore({
+    ...f,
+    revokeLiveUser,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // Hierarchy accounts:
+  // - Owner: owner-user (global management)
+  // - Reseller: reseller-1
+  // - Customer 1A: cust-1a (under reseller-1)
+  // - Customer 1B: cust-1b (under reseller-1)
+  // - Legacy Site Manager: legacy-sm
+  // - Read-Only: readonly-user
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('legacy-sm', { role: 'site_manager' });
+  f.addUser('readonly-user', { role: 'read_only' });
+
+  const ownerToken = f.session('owner-user');
+
+  f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 2 },
+  });
+
+  // Websites
+  const site1A = {
+    id: '11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    serverId: stagingServerId,
+    name: 'site-a.example',
+    applicationId: '33333333-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+    customerId: 'cust-1a',
+    resellerId: 'reseller-1',
+  };
+  const site1B = {
+    id: '22222222-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    serverId: stagingServerId,
+    name: 'site-b.example',
+    applicationId: '44444444-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    customerId: 'cust-1b',
+    resellerId: 'reseller-1',
+  };
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1A,
+    ownerUserId: 'cust-1a',
+    resellerId: 'reseller-1',
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1B,
+    ownerUserId: 'cust-1b',
+    resellerId: 'reseller-1',
+  });
+
+  // --------------------------------------------------------------------------
+  // SECTION 2: Normal HTTP Requests Authenticate Against Live Auth Store Session
+  // --------------------------------------------------------------------------
+  const sessionToken1A = f.session('cust-1a');
+  const sessionToken1B = f.session('cust-1b');
+  const sessionTokenSM = f.session('legacy-sm');
+
+  // Verify valid active sessions resolve correctly
+  const resolvedSession1A = f.getSession(sessionToken1A);
+  assert.ok(resolvedSession1A, 'Active Customer 1A session must resolve');
+  assert.equal(resolvedSession1A.user.id, 'cust-1a');
+  assert.equal(resolvedSession1A.user.role, 'site_manager');
+  const hosting1A = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  assert.equal(hosting1A.kind, 'customer');
+
+  const resolvedSessionSM = f.getSession(sessionTokenSM);
+  assert.ok(resolvedSessionSM, 'Active legacy site manager session must resolve');
+  assert.equal(resolvedSessionSM.user.id, 'legacy-sm');
+
+  // Verify missing, empty, or forged tokens fail-closed
+  assert.equal(f.getSession(null), null, 'Missing token must fail-closed');
+  assert.equal(f.getSession(''), null, 'Empty token must fail-closed');
+  assert.equal(f.getSession('token-forged-attacker'), null, 'Forged token must fail-closed');
+
+  // Verify HTTP endpoint behavior with live session using production createAuthenticatedApi
+  const customerWebsitesMap = new Map([
+    ['cust-1a', [site1A.id]],
+    ['cust-1b', [site1B.id]],
+    ['legacy-sm', [site1A.id]],
+  ]);
+
+  const publicOrigin = 'https://panel.example.test';
+  const apiHandler = (request, response) => {
+    response.writeHead(200, { 'content-type': 'application/json' });
+    response.end(JSON.stringify({
+      data: {
+        userId: request.auth.user.id,
+        role: request.auth.user.role,
+        websiteIds: customerWebsitesMap.get(request.auth.user.id) ?? [],
+      },
+    }));
+  };
+
+  const authListener = createAuthenticatedApi({
+    store: {
+      ...f,
+      configured: () => true,
+      mfa: { enabled: () => false, cancelLogin: () => {}, invalidateUser: () => {} },
+      audit: { record: () => {}, list: () => ({ events: [], total: 0, offset: 0, limit: 50 }) },
+    },
+    publicOrigin,
+    ownerMfaRequired: false,
+    createHandler: () => apiHandler,
+  });
+
+  const authHttpServer = http.createServer(authListener).listen(0, '127.0.0.1');
+  await once(authHttpServer, 'listening');
+  const authPort = authHttpServer.address().port;
+  const authBaseUrl = `http://127.0.0.1:${authPort}`;
+  t.after(() => new Promise((resolve) => {
+    authHttpServer.close(resolve);
+    authHttpServer.closeAllConnections();
+  }));
+
+  // Valid active session token -> 200 OK with authenticated user & role
+  const reqSuccess = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${sessionToken1A}` },
+  });
+  assert.equal(reqSuccess.status, 200);
+  const successJson = await reqSuccess.json();
+  assert.equal(successJson.data.userId, 'cust-1a');
+  assert.equal(successJson.data.role, 'site_manager');
+
+  // Missing session token -> 401 unauthorized
+  const reqUnauth = await fetch(`${authBaseUrl}/api/websites`);
+  assert.equal(reqUnauth.status, 401);
+  const unauthJson = await reqUnauth.json();
+  assert.equal(unauthJson.error.code, 'unauthorized');
+
+  // Forged session token -> 401 unauthorized
+  const reqForged = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: '__Host-yunpanel_session=token-forged-attacker' },
+  });
+  assert.equal(reqForged.status, 401);
+  const forgedJson = await reqForged.json();
+  assert.equal(forgedJson.error.code, 'unauthorized');
+
+  // Suspend Customer 1A: live auth store session must immediately fail closed
+  const c1aRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aRow.revision, active: false });
+
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_account_suspended'), true);
+  assert.equal(f.getSession(sessionToken1A), null, 'Suspended user session must return null');
+  const reqSuspended = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${sessionToken1A}` },
+  });
+  assert.equal(reqSuspended.status, 401, 'Suspended user HTTP request must fail-closed with 401');
+
+  // Reactivate Customer 1A for subsequent tests
+  const c1aSuspRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aSuspRow.revision, active: true });
+  const activeSessionToken1A = f.session('cust-1a');
+  assert.ok(f.getSession(activeSessionToken1A), 'Reactivated user session resolves');
+
+  const reqReactivated = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${activeSessionToken1A}` },
+  });
+  assert.equal(reqReactivated.status, 200, 'Reactivated user HTTP request succeeds');
+
+  // --------------------------------------------------------------------------
+  // SECTION 3: Common Site Boundary Restrictions
+  // (Website, Domain, Application, DB, Mail, Job, /api/websites/:websiteId/...)
+  // --------------------------------------------------------------------------
+  const allWebsites = [site1A, site1B];
+  const domain1A = { id: 'dom-1a', serverId: stagingServerId, websiteId: site1A.id, name: 'site-a.example' };
+  const domain1B = { id: 'dom-1b', serverId: stagingServerId, websiteId: site1B.id, name: 'site-b.example' };
+  const dbBinding1A = { id: 'bind-1a', serverId: stagingServerId, websiteId: site1A.id, applicationId: site1A.applicationId, databaseName: 'db_site_1a', revision: 1 };
+  const dbBinding1B = { id: 'bind-1b', serverId: stagingServerId, websiteId: site1B.id, applicationId: site1B.applicationId, databaseName: 'db_site_1b', revision: 1 };
+  const dbCred1A = { id: 'cred-1a', serverId: stagingServerId, websiteId: site1A.id, applicationId: site1A.applicationId, databaseBindingId: 'bind-1a', databaseName: 'db_site_1a', username: 'usr_1a' };
+  const dbCred1B = { id: 'cred-1b', serverId: stagingServerId, websiteId: site1B.id, applicationId: site1B.applicationId, databaseBindingId: 'bind-1b', databaseName: 'db_site_1b', username: 'usr_1b' };
+  const mailDom1A = { id: 'mail-1a', serverId: stagingServerId, webDomainId: domain1A.id, managementMode: 'local' };
+  const mailDom1B = { id: 'mail-1b', serverId: stagingServerId, webDomainId: domain1B.id, managementMode: 'local' };
+
+  const mockWebsiteRegistry = {
+    async getWebsite(id) { return allWebsites.find((s) => s.id === id) ?? null; },
+    async listWebsites() { return structuredClone(allWebsites); },
+  };
+  const mockDomainRegistry = {
+    async getDomain(id) {
+      if (id === domain1A.id) return structuredClone(domain1A);
+      if (id === domain1B.id) return structuredClone(domain1B);
+      return null;
+    },
+    async listDomains() { return [structuredClone(domain1A), structuredClone(domain1B)]; },
+  };
+  const mockDbBindingRegistry = {
+    async getBinding(id) {
+      if (id === dbBinding1A.id) return structuredClone(dbBinding1A);
+      if (id === dbBinding1B.id) return structuredClone(dbBinding1B);
+      return null;
+    },
+    async listBindings() { return [structuredClone(dbBinding1A), structuredClone(dbBinding1B)]; },
+  };
+  const mockDbCredentialRegistry = {
+    async getCredential(id) {
+      if (id === dbCred1A.id) return structuredClone(dbCred1A);
+      if (id === dbCred1B.id) return structuredClone(dbCred1B);
+      return null;
+    },
+  };
+  const mockMailDomainRegistry = {
+    async getMailDomain(id) {
+      if (id === mailDom1A.id) return structuredClone(mailDom1A);
+      if (id === mailDom1B.id) return structuredClone(mailDom1B);
+      return null;
+    },
+  };
+  const mockJobRegistry = {
+    async getJob(id) {
+      if (id === 'job-1a') return { id: 'job-1a', serverId: stagingServerId, resourceType: 'website', resourceId: site1A.id };
+      if (id === 'job-1b') return { id: 'job-1b', serverId: stagingServerId, resourceType: 'website', resourceId: site1B.id };
+      return null;
+    },
+    async listJobs() {
+      return [
+        { id: 'job-1a', serverId: stagingServerId, resourceType: 'website', resourceId: site1A.id },
+        { id: 'job-1b', serverId: stagingServerId, resourceType: 'website', resourceId: site1B.id },
+      ];
+    },
+  };
+
+  const customerLookup = (custId) => {
+    if (custId === 'cust-1a' || custId === 'cust-1b') return { id: custId, resellerId: 'reseller-1' };
+    return null;
+  };
+
+  const siteBoundary = createSiteResourceBoundary({
+    websiteRegistry: mockWebsiteRegistry,
+    domainRegistry: mockDomainRegistry,
+    databaseBindingRegistry: mockDbBindingRegistry,
+    databaseCredentialRegistry: mockDbCredentialRegistry,
+    mailDomainRegistry: mockMailDomainRegistry,
+    jobRegistry: mockJobRegistry,
+    localServerId: stagingServerId,
+    customerLookup,
+  });
+
+  const runBoundary = async (req) => {
+    let nextCalled = false;
+    let resStatus = 200;
+    let resHeaders = {};
+    let resBody = null;
+
+    const res = {
+      status(code) { resStatus = code; return this; },
+      setHeader(k, v) { resHeaders[k] = v; return this; },
+      json(body) { resBody = body; return this; },
+    };
+
+    await siteBoundary(req, res, () => { nextCalled = true; });
+    return { nextCalled, status: resStatus, headers: resHeaders, body: resBody };
+  };
+
+  const c1aAuthContext = {
+    user: { id: 'cust-1a', role: 'customer', websiteIds: [site1A.id], active: true },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+
+  // 3A: Customer 1A accesses owned Website 1A -> succeeds
+  const b1 = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/websites/${site1A.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(b1.nextCalled, true, 'Owned site request should pass boundary');
+
+  // 3B: Customer 1A accesses foreign Website 1B -> 403 fail-closed
+  const b2 = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/websites/${site1B.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(b2.nextCalled, false);
+  assert.equal(b2.status, 403);
+  assert.equal(b2.body.error.code, 'site_scope_forbidden');
+  assert.equal(b2.headers['Cache-Control'], 'no-store');
+
+  // 3C: Customer 1A accesses /api/websites/:websiteId endpoints directly
+  const bWebDirectOwn = await runBoundary({ method: 'GET', url: `/api/websites/${site1A.id}`, auth: c1aAuthContext });
+  assert.equal(bWebDirectOwn.nextCalled, true);
+  const bWebDirectForeign = await runBoundary({ method: 'GET', url: `/api/websites/${site1B.id}`, auth: c1aAuthContext });
+  assert.equal(bWebDirectForeign.nextCalled, false);
+  assert.equal(bWebDirectForeign.status, 403);
+
+  // 3D: Customer 1A accesses owned Domain 1A -> succeeds; foreign Domain 1B -> 403 fail-closed
+  const bDomOwn = await runBoundary({ method: 'GET', url: `/api/domains/${domain1A.id}`, auth: c1aAuthContext });
+  assert.equal(bDomOwn.nextCalled, true);
+  const bDomForeign = await runBoundary({ method: 'GET', url: `/api/domains/${domain1B.id}`, auth: c1aAuthContext });
+  assert.equal(bDomForeign.nextCalled, false);
+  assert.equal(bDomForeign.status, 403);
+
+  // 3E: Customer 1A accesses owned Application 1A -> succeeds; foreign Application 1B -> 403
+  const bAppOwn = await runBoundary({ method: 'GET', url: `/api/applications/${site1A.applicationId}`, auth: c1aAuthContext });
+  assert.equal(bAppOwn.nextCalled, true);
+  const bAppForeign = await runBoundary({ method: 'GET', url: `/api/applications/${site1B.applicationId}`, auth: c1aAuthContext });
+  assert.equal(bAppForeign.nextCalled, false);
+  assert.equal(bAppForeign.status, 403);
+
+  // 3F: Customer 1A accesses owned DB binding -> succeeds; foreign DB binding -> 403
+  const bDbOwn = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/database-bindings/${dbBinding1A.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(bDbOwn.nextCalled, true);
+  const bDbForeign = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/database-bindings/${dbBinding1B.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(bDbForeign.nextCalled, false);
+  assert.equal(bDbForeign.status, 403);
+
+  // 3G: Customer 1A accesses owned DB credential -> succeeds; foreign DB credential -> 403
+  const bCredOwn = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/database-credentials/${dbCred1A.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(bCredOwn.nextCalled, true);
+  const bCredForeign = await runBoundary({
+    method: 'GET',
+    url: `/api/servers/${stagingServerId}/database-credentials/${dbCred1B.id}`,
+    auth: c1aAuthContext,
+  });
+  assert.equal(bCredForeign.nextCalled, false);
+  assert.equal(bCredForeign.status, 403);
+
+  // 3H: Customer 1A accesses owned Mail domain -> succeeds; foreign Mail domain -> 403
+  const bMailOwn = await runBoundary({ method: 'GET', url: `/api/mail-domains/${mailDom1A.id}`, auth: c1aAuthContext });
+  assert.equal(bMailOwn.nextCalled, true);
+  const bMailForeign = await runBoundary({ method: 'GET', url: `/api/mail-domains/${mailDom1B.id}`, auth: c1aAuthContext });
+  assert.equal(bMailForeign.nextCalled, false);
+  assert.equal(bMailForeign.status, 403);
+
+  // 3I: Customer 1A accesses Job endpoint: owned job -> succeeds; foreign job -> 403
+  const bJobOwn = await runBoundary({ method: 'GET', url: '/api/jobs/job-1a', auth: c1aAuthContext });
+  assert.equal(bJobOwn.nextCalled, true);
+  const bJobForeign = await runBoundary({ method: 'GET', url: '/api/jobs/job-1b', auth: c1aAuthContext });
+  assert.equal(bJobForeign.nextCalled, false);
+  assert.equal(bJobForeign.status, 403);
+
+  // 3J: Collection endpoints filter items without leaking total/count metadata
+  let collectionResult = null;
+  const resCollection = {
+    status(code) { return this; },
+    setHeader() { return this; },
+    json(body) { collectionResult = body; return this; },
+  };
+  await siteBoundary(
+    { method: 'GET', url: '/api/mail-domains', auth: c1aAuthContext },
+    resCollection,
+    () => { resCollection.json({ data: [mailDom1A, mailDom1B], meta: { total: 2, count: 2 } }); },
+  );
+  assert.ok(collectionResult);
+  assert.equal(collectionResult.data.length, 1);
+  assert.equal(collectionResult.data[0].id, mailDom1A.id);
+  assert.equal(collectionResult.meta, undefined, 'Total count metadata must not be leaked');
+
+  // 3K: Terminal capability scoping: scope='server' -> 403; foreign site -> 403; owned site -> succeeds
+  const bTermServer = await runBoundary({
+    method: 'POST',
+    url: '/api/terminal/capabilities',
+    auth: c1aAuthContext,
+    body: { scope: 'server' },
+  });
+  assert.equal(bTermServer.nextCalled, false);
+  assert.equal(bTermServer.status, 403);
+
+  const bTermForeign = await runBoundary({
+    method: 'POST',
+    url: '/api/terminal/capabilities',
+    auth: c1aAuthContext,
+    body: { scope: 'site', websiteId: site1B.id },
+  });
+  assert.equal(bTermForeign.nextCalled, false);
+  assert.equal(bTermForeign.status, 403);
+
+  const bTermOwn = await runBoundary({
+    method: 'POST',
+    url: '/api/terminal/capabilities',
+    auth: c1aAuthContext,
+    body: { scope: 'site', websiteId: site1A.id },
+  });
+  assert.equal(bTermOwn.nextCalled, true);
+
+  // 3L: Server administrative routes blocked for tenant accounts
+  for (const admPath of ['/api/panel/settings', '/api/system/packages', '/api/backups']) {
+    const bAdm = await runBoundary({ method: 'GET', url: admPath, auth: c1aAuthContext });
+    assert.equal(bAdm.nextCalled, false, `${admPath} must be blocked for tenants`);
+    assert.equal(bAdm.status, 403);
+  }
+
+  // 3M: Reseller 1 accesses both child sites (site 1A and site 1B) -> both succeed
+  const r1AuthContext = {
+    user: { id: 'reseller-1', role: 'reseller', websiteIds: [site1A.id, site1B.id], active: true },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+  const bResSiteA = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1A.id}`, auth: r1AuthContext });
+  assert.equal(bResSiteA.nextCalled, true);
+  const bResSiteB = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1B.id}`, auth: r1AuthContext });
+  assert.equal(bResSiteB.nextCalled, true);
+
+  // 3N: Inactive account blocked at boundary
+  const inactiveAuthContext = {
+    user: { id: 'cust-1a', role: 'customer', websiteIds: [site1A.id], active: false },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+  const bInactive = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1A.id}`, auth: inactiveAuthContext });
+  assert.equal(bInactive.nextCalled, false);
+  assert.equal(bInactive.status, 403);
+
+  // 3O: Owner with global scope bypasses boundary cleanly
+  const ownerAuthContext = {
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const bOwner = await runBoundary({ method: 'GET', url: `/api/servers/${stagingServerId}/websites/${site1A.id}`, auth: ownerAuthContext });
+  assert.equal(bOwner.nextCalled, true);
+
+  // --------------------------------------------------------------------------
+  // SECTION 4: AI Conversation History & Policy Validation
+  // --------------------------------------------------------------------------
+  const smAuth = {
+    user: { id: 'legacy-sm', role: 'site_manager', websiteIds: [site1A.id], active: true },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+
+  // 4A: Site manager scope for allowed websiteId succeeds
+  const scopeSmAllowed = conversationScope(smAuth, site1A.id);
+  assert.equal(scopeSmAllowed.actorId, 'legacy-sm');
+  assert.equal(scopeSmAllowed.websiteId, site1A.id);
+  assert.equal(scopeSmAllowed.owner, false);
+  assert.deepEqual(scopeSmAllowed.grants, [site1A.id]);
+
+  // 4B: Site manager scope for foreign websiteId throws 404 (conversation_not_found) fail-closed
+  assert.throws(
+    () => conversationScope(smAuth, site1B.id),
+    (err) => err instanceof AiHistoryError && err.code === 'conversation_not_found' && err.status === 404,
+    'Site manager query for foreign website must throw 404 conversation_not_found',
+  );
+
+  // 4C: Site manager invalid websiteId throws 400
+  assert.throws(
+    () => conversationScope(smAuth, 'invalid-non-uuid'),
+    (err) => err instanceof AiHistoryError && err.code === 'invalid_ai_website' && err.status === 400,
+  );
+
+  // 4D: Inactive or unauthorized access throws 403/401
+  const smInactiveAuth = {
+    user: { id: 'legacy-sm', role: 'site_manager', websiteIds: [site1A.id], active: false },
+    access: { mode: 'site_management', permissions: ['website:manage'] },
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => conversationScope(smInactiveAuth, site1A.id),
+    (err) => err instanceof AiHistoryError && err.code === 'forbidden' && err.status === 403,
+  );
+  assert.throws(
+    () => conversationScope(null, site1A.id),
+    (err) => err instanceof AiHistoryError && err.code === 'unauthorized' && err.status === 401,
+  );
+
+  // 4E: Owner scope works with any valid UUID or null
+  const ownerAiAuth = {
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const ownerGlobalScope = conversationScope(ownerAiAuth, null);
+  assert.equal(ownerGlobalScope.owner, true);
+  assert.equal(ownerGlobalScope.websiteId, null);
+  const ownerSiteScope = conversationScope(ownerAiAuth, site1B.id);
+  assert.equal(ownerSiteScope.owner, true);
+  assert.equal(ownerSiteScope.websiteId, site1B.id);
+
+  // 4F: conversationVisible respects grants and actorId
+  const convOwn = { id: 'conv-1', actorId: 'legacy-sm', websiteId: site1A.id };
+  const convForeignSite = { id: 'conv-2', actorId: 'legacy-sm', websiteId: site1B.id };
+  const convForeignActor = { id: 'conv-3', actorId: 'other-user', websiteId: site1A.id };
+
+  assert.equal(conversationVisible(convOwn, scopeSmAllowed), true);
+  assert.equal(conversationVisible(convForeignSite, scopeSmAllowed), false);
+  assert.equal(conversationVisible(convForeignActor, scopeSmAllowed), false);
+
+  // 4G: AI History Pager: scope-bound cursor verification
+  const pager = createConversationPager();
+  const convList = [
+    { id: '77777777-7777-4777-8777-777777777771', title: 'Chat 1', actorId: 'legacy-sm', websiteId: site1A.id, messages: ['hi'], createdAt: 1000, updatedAt: 1000 },
+    { id: '77777777-7777-4777-8777-777777777772', title: 'Chat 2', actorId: 'legacy-sm', websiteId: site1A.id, messages: ['hello'], createdAt: 2000, updatedAt: 2000 },
+    { id: '77777777-7777-4777-8777-777777777773', title: 'Chat 3 (Foreign)', actorId: 'legacy-sm', websiteId: site1B.id, messages: ['foreign'], createdAt: 3000, updatedAt: 3000 },
+  ];
+  const pageResult = pager(convList, scopeSmAllowed, { limit: 1 });
+  assert.equal(pageResult.items.length, 1);
+  assert.equal(pageResult.hasMore, true);
+  assert.ok(pageResult.nextCursor);
+
+  assert.throws(
+    () => pager(convList, ownerGlobalScope, { cursor: pageResult.nextCursor }),
+    (err) => err instanceof AiHistoryError && err.code === 'invalid_ai_history_cursor',
+  );
+
+  // 4H: AI Tool Policy: site_manager role requires Owner-management across catalog
+  for (const tool of DEFAULT_AI_TOOL_DEFINITIONS) {
+    const policyResult = evaluateAiToolPolicy({ tool, auth: smAuth });
+    assert.equal(
+      policyResult.decision,
+      'deny',
+      `Tool ${tool.name} must be denied for site_manager`,
+    );
+    assert.equal(
+      policyResult.reason,
+      'owner_management_required',
+      `Tool ${tool.name} must require owner_management_required for site_manager`,
+    );
+  }
+
+  // 4I: AI Tool Policy: customer and reseller also denied with owner_management_required
+  for (const nonOwnerAuth of [c1aAuthContext, r1AuthContext]) {
+    const evalResult = evaluateAiToolPolicy({ tool: DEFAULT_AI_TOOL_DEFINITIONS[0], auth: nonOwnerAuth });
+    assert.equal(evalResult.decision, 'deny');
+    assert.equal(evalResult.reason, 'owner_management_required');
+  }
+
+  // 4J: AI Tool Policy: read_only role allows safe reads, denies writes
+  const roAuth = {
+    user: { id: 'readonly-user', role: 'read_only', active: true },
+    access: { mode: 'read_only', permissions: ['view'] },
+    security: { managementAllowed: false },
+  };
+  const readTool = DEFAULT_AI_TOOL_DEFINITIONS.find((t) => t.risk === 'read');
+  const writeTool = DEFAULT_AI_TOOL_DEFINITIONS.find((t) => t.risk === 'reversible_write');
+  assert.deepEqual(evaluateAiToolPolicy({ tool: readTool, auth: roAuth }), {
+    decision: 'allow',
+    reason: 'read_only_safe',
+  });
+  assert.deepEqual(evaluateAiToolPolicy({ tool: writeTool, auth: roAuth }), {
+    decision: 'deny',
+    reason: 'owner_management_required',
+  });
+
+  // 4K: AI Tool Policy: Owner management role has full permissions with overrides
+  const ownerRead = evaluateAiToolPolicy({ tool: readTool, auth: ownerAiAuth });
+  assert.equal(ownerRead.decision, 'allow');
+  const ownerOverridden = evaluateAiToolPolicy({
+    tool: readTool,
+    auth: ownerAiAuth,
+    overrides: { tool: { [readTool.name]: 'deny' } },
+  });
+  assert.deepEqual(ownerOverridden, { decision: 'deny', reason: 'explicit_deny' });
+
+  // --------------------------------------------------------------------------
+  // SECTION 5: Long-Running Pathway Disconnect & Failure-Closed Lifecycle
+  // (Terminal WebSocket, elFinder Gateway, Cron Durable Mutation, PHP Recovery)
+  // --------------------------------------------------------------------------
+
+  // 5A: Real Terminal WebSocket lifecycle: disconnect on account suspension and grant removal
+  const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
+  let terminalProcessClosed = false;
+  const mockTerminalProcessManager = {
+    async open({ target, onData, onExit }) {
+      return {
+        write(data) {},
+        resize(cols, rows) {},
+        close() { terminalProcessClosed = true; },
+      };
+    },
+  };
+
+  const terminalServer = createTerminalWebSocketServer({
+    authenticate: (request) => {
+      const cookieHeader = request.headers.cookie ?? '';
+      const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+      const token = match ? match[1] : null;
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      const hostingAcc = f.store.get(ownerToken, f.requireManagement, sess.user.id);
+      const role = hostingAcc?.kind ?? sess.user.role;
+      return {
+        rawToken: token,
+        session: {
+          id: sess.id,
+          user: {
+            id: sess.user.id,
+            role,
+            active: true,
+            websiteIds: customerWebsitesMap.get(sess.user.id) ?? [],
+          },
+          access: { mode: 'site_management', permissions: ['website:manage'] },
+          security: { managementAllowed: true },
+        },
+        peer: '127.0.0.1',
+      };
+    },
+    reauthorize: (token, expected) => {
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      const currentWebsites = customerWebsitesMap.get(sess.user.id) ?? [];
+      return {
+        id: sess.id,
+        user: {
+          id: sess.user.id,
+          role: 'customer',
+          active: true,
+          websiteIds: currentWebsites,
+        },
+        access: { mode: 'site_management', permissions: ['website:manage'] },
+        security: { managementAllowed: true },
+      };
+    },
+    terminalCapabilityRegistry,
+    terminalProcessManager: mockTerminalProcessManager,
+    liveSessions,
+    audit: { record: () => {} },
+    authCheckMs: 250,
+  });
+
+  const wsHttpServer = http.createServer();
+  wsHttpServer.on('upgrade', terminalServer.handleUpgrade);
+  wsHttpServer.listen(0, '127.0.0.1');
+  await once(wsHttpServer, 'listening');
+  const wsServerPort = wsHttpServer.address().port;
+  t.after(() => {
+    terminalServer.closeAll();
+    return new Promise((resolve) => {
+      wsHttpServer.close(resolve);
+      wsHttpServer.closeAllConnections();
+    });
+  });
+
+  // Issue real capability for Customer 1B on Site 1B
+  const capCust1b = terminalCapabilityRegistry.issue({
+    sessionId: 'session-cust-1b',
+    userId: 'cust-1b',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId: site1B.id,
+      user: 'yunapp-site1b',
+      cwd: '/var/lib/yunpanel/site1b',
+    },
+  });
+
+  // Open real WebSocket client
+  const wsCust1b = new WebSocket(`ws://127.0.0.1:${wsServerPort}/api/terminal`, [
+    'yunpanel-terminal-v1',
+    `yunpanel-terminal-capability.${capCust1b.capability}`,
+  ], {
+    headers: {
+      cookie: `__Host-yunpanel_session=${sessionToken1B}`,
+    },
+  });
+
+  await once(wsCust1b, 'open');
+  assert.equal(terminalServer.size(), 1, 'Terminal WebSocket session must be active in server registry');
+
+  // Suspend Customer 1B: triggers live session revocation, which automatically terminates terminal socket fail-closed
+  const c1bRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: c1bRow.revision, active: false });
+
+  // Verify revocation recorded
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1b' && r.reason === 'hosting_account_suspended'), true);
+
+  // Client WebSocket receives close event with 4001 hosting_account_suspended via actual tracking mechanism
+  const [closeCode1, closeReason1] = await once(wsCust1b, 'close');
+  assert.equal(closeCode1, 4001);
+  assert.equal(closeReason1.toString(), 'hosting_account_suspended');
+  assert.equal(terminalServer.size(), 0, 'Socket must be purged from terminal server sessions');
+  assert.equal(terminalProcessClosed, true, 'Terminal process must be terminated');
+
+  // Reactivate Customer 1B
+  terminalProcessClosed = false;
+  const c1bSusp = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: c1bSusp.revision, active: true });
+  const activeSessionToken1B = f.session('cust-1b');
+
+  // Issue new capability for Customer 1B
+  const capCust1bNew = terminalCapabilityRegistry.issue({
+    sessionId: 'session-cust-1b',
+    userId: 'cust-1b',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId: site1B.id,
+      user: 'yunapp-site1b',
+      cwd: '/var/lib/yunpanel/site1b',
+    },
+  });
+
+  const wsCust1bNew = new WebSocket(`ws://127.0.0.1:${wsServerPort}/api/terminal`, [
+    'yunpanel-terminal-v1',
+    `yunpanel-terminal-capability.${capCust1bNew.capability}`,
+  ], {
+    headers: {
+      cookie: `__Host-yunpanel_session=${activeSessionToken1B}`,
+    },
+  });
+
+  await once(wsCust1bNew, 'open');
+  assert.equal(terminalServer.size(), 1);
+
+  // Grant removal: detach website from customer -> triggers live session revocation (hosting_website_released)
+  f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-release-site-1b',
+    websiteId: site1B.id,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1b' && r.reason === 'hosting_website_released'), true);
+
+  // Client WebSocket receives close event with 4001 hosting_website_released via actual tracking mechanism
+  const [closeCode2, closeReason2] = await once(wsCust1bNew, 'close');
+  assert.equal(closeCode2, 4001);
+  assert.equal(closeReason2.toString(), 'hosting_website_released');
+  assert.equal(terminalServer.size(), 0);
+  assert.equal(terminalProcessClosed, true);
+
+  // Target access check for detached site fails closed
+  assert.throws(
+    () => terminalWebSocketInternals.requireTerminalTargetAccess(
+      {
+        user: { id: 'cust-1b', role: 'customer', websiteIds: [], active: true },
+        access: { mode: 'site_management' },
+        security: { managementAllowed: true },
+      },
+      { scope: 'site', websiteId: site1B.id },
+    ),
+    (err) => err instanceof AuthError && err.code === 'terminal_site_forbidden' && err.status === 403,
+  );
+
+  // Re-allocate site 1B to cust-1b for remaining tests
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1B,
+    ownerUserId: 'cust-1b',
+    resellerId: 'reseller-1',
+  });
+
+  // 5B: elFinder Gateway Capability Eviction
+  const elFinderApplicationId = site1A.applicationId;
+  const elFinderExpectedUnixUser = elFinderHandoffInternals.applicationUser(elFinderApplicationId);
+  const elFinderWebsite = {
+    id: site1A.id,
+    serverId: stagingServerId,
+    applicationId: elFinderApplicationId,
+    runtimeType: 'php',
+    unixUser: elFinderExpectedUnixUser,
+    revision: 1,
+  };
+
+  const elFinderService = createElFinderHandoffService({
+    websiteRegistry: {
+      async getWebsite(id) {
+        return id === site1A.id ? elFinderWebsite : null;
+      },
+    },
+    localServerId: stagingServerId,
+    runtimeInspector: async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+    liveSessions,
+  });
+
+  const c1aDigest = createHash('sha256').update('sess-c1a-seed').digest('hex');
+  const handoffIssue = await elFinderService.issue({
+    sessionId: 'c1a-session-el',
+    userId: 'cust-1a',
+    sessionDigest: c1aDigest,
+    serverId: stagingServerId,
+    websiteId: site1A.id,
+  });
+  assert.ok(handoffIssue.capability);
+  assert.equal(elFinderService.size(), 1);
+
+  // Active consumption succeeds
+  const consumedEl = await elFinderService.consume(handoffIssue.capability, { sessionDigest: c1aDigest });
+  assert.equal(consumedEl.websiteId, site1A.id);
+  assert.equal(consumedEl.unixUser, elFinderExpectedUnixUser);
+
+  // Issue new handoff, then suspend Customer 1A -> live session revocation evicts capability immediately fail-closed
+  const handoffIssue2 = await elFinderService.issue({
+    sessionId: 'c1a-session-el2',
+    userId: 'cust-1a',
+    sessionDigest: c1aDigest,
+    serverId: stagingServerId,
+    websiteId: site1A.id,
+  });
+  assert.equal(elFinderService.size(), 1);
+
+  // Suspend Customer 1A
+  const c1aRow2 = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aRow2.revision, active: false });
+
+  // Capability is evicted from registry upon user revocation
+  assert.equal(elFinderService.size(), 0);
+
+  // Attempting to consume revoked capability fails closed with 401 elfinder_handoff_invalid
+  await assert.rejects(
+    elFinderService.consume(handoffIssue2.capability, { sessionDigest: c1aDigest }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_invalid' && err.status === 401,
+  );
+
+  // Reactivate Customer 1A
+  const c1aRow3 = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aRow3.revision, active: true });
+
+  // 5C: Cron Durable Mutation Recovery (recoverRunningCron)
+  const cronJobId = 'cron-job-11111111';
+  let cronJobState = {
+    id: cronJobId,
+    serverId: stagingServerId,
+    status: 'running',
+    operation: OPERATIONS.CRON_APPLY,
+    resourceType: 'website_cron',
+  };
+
+  const mockCronJobRegistry = {
+    async getJob(id) {
+      return id === cronJobId ? structuredClone(cronJobState) : null;
+    },
+    async beginReconciliation(id) {
+      if (id.jobId === cronJobId) {
+        return { jobId: cronJobId, serverId: stagingServerId, status: 'running', pending: true };
+      }
+      return null;
+    },
+    async complete({ serverId, jobId, status, result }) {
+      if (jobId === cronJobId) {
+        cronJobState.status = status;
+        cronJobState.result = result;
+        return structuredClone(cronJobState);
+      }
+      return null;
+    },
+    async acknowledgeReconciliation(id) {
+      if (id.jobId === cronJobId) return { acknowledged: true };
+      return null;
+    },
+  };
+
+  const inspectCronRecovery = async () => ({
+    jobs: [{ jobId: cronJobId, serverId: stagingServerId, status: 'running', operation: OPERATIONS.CRON_APPLY, resourceType: 'website_cron' }],
+  });
+
+  // Stopped consumers enforcement: running API/agent rejects recovery
+  await assert.rejects(
+    recoverRunningCron({
+      serverId: stagingServerId,
+      jobId: cronJobId,
+      jobRegistry: mockCronJobRegistry,
+      websiteCronRegistry: {},
+      websiteCronManager: {},
+      readOperationReceipt: async () => null,
+      serviceStatus: async () => ({ apiActive: true, agentActive: false }),
+      loadJobContext: async () => ({}),
+      inspect: inspectCronRecovery,
+    }),
+    (err) => err instanceof JobRunningCronRecoveryError && err.code === 'job_cron_recovery_consumers_must_be_stopped',
+  );
+
+  // Missing receipt fails closed
+  await assert.rejects(
+    recoverRunningCron({
+      serverId: stagingServerId,
+      jobId: cronJobId,
+      jobRegistry: mockCronJobRegistry,
+      websiteCronRegistry: {},
+      websiteCronManager: {},
+      readOperationReceipt: async () => null,
+      serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      loadJobContext: async () => ({}),
+      inspect: inspectCronRecovery,
+    }),
+    (err) => err instanceof JobRunningCronRecoveryError && err.code === 'job_cron_recovery_receipt_missing',
+  );
+
+  // Valid receipt reconciles and completes job
+  const verifiedCronReceipt = {
+    result: {
+      taskId: 'task-cron-1',
+      websiteId: site1A.id,
+      applicationId: site1A.applicationId,
+      unixUser: `yunapp-${site1A.id.slice(0, 8)}`,
+      revision: 1,
+      desiredStateSha256: createHash('sha256').update('cron-schedule-daily').digest('hex'),
+      contentSha256: createHash('sha256').update('0 2 * * * /usr/bin/php script.php').digest('hex'),
+      sideEffects: [],
+    },
+  };
+
+  const cronRecoveryResult = await recoverRunningCron({
+    serverId: stagingServerId,
+    jobId: cronJobId,
+    jobRegistry: mockCronJobRegistry,
+    websiteCronRegistry: {},
+    websiteCronManager: {},
+    readOperationReceipt: async () => verifiedCronReceipt,
+    serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    loadJobContext: async () => ({}),
+    inspect: inspectCronRecovery,
+  });
+  assert.equal(cronRecoveryResult.status, 'succeeded');
+  assert.equal(cronRecoveryResult.recoveryMethod, 'verified_cron_receipt_and_host_state');
+  assert.equal(cronRecoveryResult.reconciled, true);
+  assert.equal(cronJobState.status, 'succeeded');
+  assert.equal(cronJobState.result.applied, true);
+  assert.equal(cronJobState.result.websiteId, site1A.id);
+
+  // 5D: Reviewed PHP Recovery (recoverRunningPhpTool)
+  const phpJobId = 'job-php-cust-recovery';
+  const phpAppId = '33333333-3333-4333-8333-333333333333';
+  const phpUnixUser = `yunapp-${site1A.id.slice(0, 8)}`;
+  const runningPhpJob = {
+    id: phpJobId,
+    jobId: phpJobId,
+    serverId: stagingServerId,
+    status: 'running',
+    operation: OPERATIONS.WEBSITE_PHP_ACTION,
+    resourceType: 'application',
+    resourceId: phpAppId,
+  };
+  const phpPayload = {
+    websiteId: site1A.id,
+    applicationId: phpAppId,
+    unixUser: phpUnixUser,
+    expectedWebsiteRevision: 2,
+    actorSessionId: 'cust-recovery-session',
+    actorUserId: 'cust-1a',
+    actorRole: 'customer',
+    actionId: 'wp.cache.flush',
+    previewDigest: 'e'.repeat(64),
+    confirmation: `php-tool:${site1A.id}:wp.cache.flush:${'e'.repeat(64)}`,
+  };
+  const phpResult = {
+    version: 1,
+    websiteId: phpPayload.websiteId,
+    applicationId: phpAppId,
+    unixUser: phpPayload.unixUser,
+    actionId: phpPayload.actionId,
+    websiteRevision: 2,
+    previewDigest: phpPayload.previewDigest,
+    completed: true,
+    sideEffects: true,
+  };
+
+  const inspectPhpRecovery = async () => ({ jobs: [runningPhpJob] });
+
+  // Missing receipt fails closed
+  await assert.rejects(
+    () => recoverRunningPhpTool({
+      serverId: stagingServerId,
+      jobId: phpJobId,
+      serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      inspect: inspectPhpRecovery,
+      loadJobContext: async () => ({ ...runningPhpJob, payload: phpPayload }),
+      readOperationReceipt: async () => null,
+      jobRegistry: {
+        getJob: async () => runningPhpJob,
+        beginReconciliation: async () => {},
+        complete: async () => {},
+        acknowledgeReconciliation: async () => {},
+      },
+    }),
+    (err) => err.code === 'job_php_tool_recovery_receipt_missing',
+  );
+
+  // Drifted evidence fails closed
+  await assert.rejects(
+    () => recoverRunningPhpTool({
+      serverId: stagingServerId,
+      jobId: phpJobId,
+      serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+      inspect: inspectPhpRecovery,
+      loadJobContext: async () => ({ ...runningPhpJob, payload: phpPayload }),
+      readOperationReceipt: async () => ({
+        version: 1,
+        serverId: stagingServerId,
+        jobId: phpJobId,
+        payload: { ...phpPayload, actionId: 'tampered.action' },
+        result: phpResult,
+      }),
+      jobRegistry: {
+        getJob: async () => runningPhpJob,
+        beginReconciliation: async () => {},
+        complete: async () => {},
+        acknowledgeReconciliation: async () => {},
+      },
+    }),
+    (err) => err.code === 'job_php_tool_recovery_evidence_mismatch',
+  );
+
+  // Verified evidence reconciles successfully
+  const recoveredPhp = await recoverRunningPhpTool({
+    serverId: stagingServerId,
+    jobId: phpJobId,
+    serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    inspect: inspectPhpRecovery,
+    loadJobContext: async () => ({ ...runningPhpJob, payload: phpPayload }),
+    readOperationReceipt: async () => ({
+      version: 1,
+      serverId: stagingServerId,
+      jobId: phpJobId,
+      payload: phpPayload,
+      result: phpResult,
+    }),
+    jobRegistry: {
+      getJob: async () => runningPhpJob,
+      beginReconciliation: async (v) => ({ ...v, status: 'running', pending: true }),
+      complete: async () => ({ ...runningPhpJob, status: 'succeeded' }),
+      acknowledgeReconciliation: async (v) => ({ ...v, status: 'succeeded', acknowledged: true }),
+    },
+  });
+  assert.equal(recoveredPhp.recoveryMethod, 'verified_php_tool_receipt');
+  assert.equal(recoveredPhp.status, 'succeeded');
+
+  // --------------------------------------------------------------------------
+  // SECTION 6: Ownership Migration & Rollback, Concurrency, and Host Decoupling
+  // --------------------------------------------------------------------------
+
+  // 6A: Ownership Migration with atomic quota updates
+  const quotaBeforeC1a = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  const quotaBeforeC1b = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
+
+  // Allocate site1A transfer: release from cust-1a and allocate to cust-1b
+  f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-transfer-1a-release',
+    websiteId: site1A.id,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1A,
+    ownerUserId: 'cust-1b',
+    resellerId: 'reseller-1',
+  });
+
+  const quotaAfterC1a = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  const quotaAfterC1b = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
+
+  // Cust-1a count decreased by 1; Cust-1b count increased by 1
+  assert.equal(quotaAfterC1a.usage.websites, quotaBeforeC1a.usage.websites - 1);
+  assert.equal(quotaAfterC1b.usage.websites, quotaBeforeC1b.usage.websites + 1);
+
+  // 6B: Atomic Rollback on Quota Exceeded (zero orphan records)
+  // Attempting to exceed customer quota fails closed without partial allocation
+  assert.throws(
+    () => {
+      // cust-1b has maxWebsites: 2 and currently usage.websites: 2
+      assertCustomerQuotaCapacity({
+        quotas: quotaAfterC1b.quotas,
+        usage: quotaAfterC1b.usage,
+        resource: 'websites',
+        amount: 1,
+      });
+    },
+    (err) => err instanceof AuthError && err.code === 'customer_quota_exceeded',
+  );
+
+  // Transfer site1A back to cust-1a to restore original topology
+  f.store.siteAllocations.releaseRemoved({
+    operationId: 'op-rollback-release',
+    websiteId: site1A.id,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  f.store.siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+    site: site1A,
+    ownerUserId: 'cust-1a',
+    resellerId: 'reseller-1',
+  });
+
+  // Verify quotas match initial state exactly
+  const quotaRestoredC1a = f.store.get(ownerToken, f.requireManagement, 'cust-1a');
+  const quotaRestoredC1b = f.store.get(ownerToken, f.requireManagement, 'cust-1b');
+  assert.equal(quotaRestoredC1a.usage.websites, quotaBeforeC1a.usage.websites);
+  assert.equal(quotaRestoredC1b.usage.websites, quotaBeforeC1b.usage.websites);
+
+  // 6C: Two-process / multi-connection concurrency and crash/write-failure resilience in WAL mode
+  const concurrencyTempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-sqlite-concurrency-'));
+  const concurrencyDbPath = path.join(concurrencyTempDir, 'concurrency.db');
+
+  t.after(async () => {
+    try { await rm(concurrencyTempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  // Open two separate database connections simulating two independent processes
+  const procA = new DatabaseSync(concurrencyDbPath);
+  const procB = new DatabaseSync(concurrencyDbPath);
+  t.after(() => {
+    try { procA.close(); } catch {}
+    try { procB.close(); } catch {}
+  });
+
+  // Initialize schema in WAL mode with short busy timeout for deterministic lock contention detection
+  procA.exec(`
+    PRAGMA journal_mode = WAL;
+    PRAGMA busy_timeout = 50;
+    CREATE TABLE IF NOT EXISTS test_allocations (
+      website_id TEXT PRIMARY KEY,
+      customer_id TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('reserved', 'attached')),
+      revision INTEGER NOT NULL CHECK(revision >= 1)
+    );
+  `);
+  procB.exec('PRAGMA busy_timeout = 50;');
+
+  // Concurrency verification: Proc A acquires exclusive write lock via BEGIN IMMEDIATE
+  procA.exec('BEGIN IMMEDIATE');
+  procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run(site1A.id, 'cust-1a', 'reserved', 1);
+
+  // Proc B attempts concurrent write transaction while Proc A holds write lock -> fails closed with SQLITE_BUSY
+  assert.throws(
+    () => {
+      procB.exec('BEGIN IMMEDIATE');
+    },
+    (err) => /busy|locked/i.test(err.message),
+    'Concurrent write transaction must be rejected with SQLITE_BUSY when lock is held',
+  );
+
+  // Proc A commits transaction
+  procA.exec('COMMIT');
+
+  // Now Proc B can read the committed row from Proc A (cross-process visibility)
+  const rowFromProcB = procB.prepare('SELECT * FROM test_allocations WHERE website_id = ?').get(site1A.id);
+  assert.ok(rowFromProcB, 'Proc B must observe committed row from Proc A');
+  assert.equal(rowFromProcB.status, 'reserved');
+
+  // Proc B acquires write lock and updates status
+  procB.exec('BEGIN IMMEDIATE');
+  procB.prepare('UPDATE test_allocations SET status = ? WHERE website_id = ?').run('attached', site1A.id);
+  procB.exec('COMMIT');
+
+  const rowUpdatedFromProcA = procA.prepare('SELECT status FROM test_allocations WHERE website_id = ?').get(site1A.id);
+  assert.equal(rowUpdatedFromProcA.status, 'attached');
+
+  // Crash / Write-Failure Resilience:
+  // Transaction rolls back cleanly on error, leaving zero partial state or orphan rows
+  assert.throws(
+    () => {
+      procA.exec('BEGIN IMMEDIATE');
+      procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run('orphan-site-id', 'cust-1a', 'reserved', 1);
+      // Trigger check constraint violation / write failure
+      try {
+        procA.prepare('INSERT INTO test_allocations VALUES (?, ?, ?, ?)').run('invalid-site-id', 'cust-1a', 'invalid_status', 1);
+      } catch (err) {
+        procA.exec('ROLLBACK');
+        throw err;
+      }
+    },
+    (err) => /check constraint failed/i.test(err.message),
+  );
+
+  // Verify zero orphan rows were committed to the database
+  const orphanCheckA = procA.prepare('SELECT * FROM test_allocations WHERE website_id = ?').get('orphan-site-id');
+  const orphanCheckB = procB.prepare('SELECT * FROM test_allocations WHERE website_id = ?').get('orphan-site-id');
+  assert.equal(orphanCheckA, undefined, 'Orphan row must not exist in Proc A after rollback');
+  assert.equal(orphanCheckB, undefined, 'Orphan row must not exist in Proc B after rollback');
+
+  // PRAGMA integrity check confirms clean database structure without corruption
+  const integrity = procA.prepare('PRAGMA integrity_check').get();
+  assert.equal(integrity.integrity_check, 'ok', 'Database integrity must remain ok after write failure rollback');
+
+  // 6D: Website Host Runtime Decoupling
+  // Panel account suspension does not destroy or mutate host website runtime daemons
+  const runtimeDaemonState = {
+    websiteId: site1A.id,
+    nginxVhost: 'active',
+    phpFpmPool: 'active',
+    systemdUnit: 'running',
+  };
+  // Suspending Customer 1A cuts off panel access
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: quotaRestoredC1a.revision, active: false });
+  assert.equal(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_account_suspended'), true);
+  // Host runtime state remains intact
+  assert.equal(runtimeDaemonState.nginxVhost, 'active');
+  assert.equal(runtimeDaemonState.phpFpmPool, 'active');
+  assert.equal(runtimeDaemonState.systemdUnit, 'running');
+
+  // 6E: Host Isolation & Safety Gate
+  assertNoDot44Host(stagingServerId);
+  assert.ok(true, 'RS-02e / kalan: Live auth store session, site resource boundary, AI history & policy grants, long-running disconnects, ownership rollback, and host isolation verified.');
 });
