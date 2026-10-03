@@ -42,10 +42,11 @@ export function mountElFinderHandoffRoutes(app, {
     asyncRoute(async (request, response) => {
       emptyQuery(request.query);
       const auth = request.auth;
-      const isOwner = auth?.user?.role === 'owner'
+      const active = auth?.user?.active !== false && auth?.user?.active !== 0;
+      const isOwner = active
+        && auth?.user?.role === 'owner'
         && auth?.access?.mode === 'management'
         && auth?.security?.managementAllowed === true;
-      const active = auth?.user?.active !== false && auth?.user?.active !== 0;
       const isSiteActor = active
         && ['site_manager', 'reseller', 'customer'].includes(auth?.user?.role)
         && auth?.access?.mode === 'site_management'
