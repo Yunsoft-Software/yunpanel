@@ -86,12 +86,13 @@ function createSmtpSession({ host, port, secure = false, timeoutMs = 10_000 }) {
       });
     }
 
-    async function sendCommand(cmd, expectedCode) {
+    async function sendCommand(cmd, expectedCode, { redact = false } = {}) {
       socket.write(`${cmd}\r\n`);
       const response = await readResponse();
       const code = Number(response.slice(0, 3));
       if (code !== expectedCode) {
-        throw new Error(`SMTP command failed: ${cmd.split(' ')[0]} -> expected ${expectedCode}, got ${code} (${response})`);
+        const cmdName = redact ? '[REDACTED]' : cmd.split(' ')[0].slice(0, 32);
+        throw new Error(`SMTP command failed: ${cmdName} -> expected ${expectedCode}, got ${code} (${response})`);
       }
       return response;
     }
@@ -185,8 +186,8 @@ export function createAuthMailer({
       await session.sendCommand('EHLO localhost', 250);
       if (user && pass) {
         await session.sendCommand('AUTH LOGIN', 334);
-        await session.sendCommand(Buffer.from(user).toString('base64'), 334);
-        await session.sendCommand(Buffer.from(pass).toString('base64'), 235);
+        await session.sendCommand(Buffer.from(user).toString('base64'), 334, { redact: true });
+        await session.sendCommand(Buffer.from(pass).toString('base64'), 235, { redact: true });
       }
       await session.sendCommand(`MAIL FROM:<${fromAddress}>`, 250);
       await session.sendCommand(`RCPT TO:<${validatedTo}>`, 250);
@@ -206,7 +207,7 @@ export function createAuthMailer({
       ].join('\r\n');
 
       const body = `${headers}\r\n\r\n${text}\r\n.`;
-      await session.sendCommand(body, 250);
+      await session.sendCommand(body, 250, { redact: true });
       session.close();
       return { sent: true, messageId, accepted: [validatedTo] };
     } catch (error) {
