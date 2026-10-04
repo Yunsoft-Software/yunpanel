@@ -79,6 +79,75 @@ test('conversation ownership, legacy preservation, paging and storage failures t
       await assert.rejects(conflict.createConversation({ auth: owner }), { code: 'ai_history_store_unavailable' });
       assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
       await assert.rejects(conflict.listConversations({ auth: owner }), { code: 'ai_history_store_unavailable' });
+
+      // Unowned conversation migration, rollback, V1 backup preservation, 100-limit and locking
+      await writeFile(filePath, JSON.stringify(raw));
+      const migService = make();
+      await assert.rejects(migService.listUnownedConversations({ auth: manager }), { status: 403 });
+      const unowned = await migService.listUnownedConversations({ auth: owner });
+      assert.equal(unowned.length, 1);
+      assert.equal(unowned[0].id, legacy.id);
+
+      await assert.rejects(migService.migrateUnownedConversations({
+        assignments: [{ conversationId: legacy.id, targetActorId: 'owner-b' }],
+        auth: manager,
+      }), { status: 403 });
+
+      await assert.rejects(migService.migrateUnownedConversations({
+        assignments: [{ conversationId: legacy.id, targetActorId: owner.user.id }],
+        auth: owner,
+      }), { code: 'ai_conversation_limit', status: 409 });
+      assert.equal(JSON.parse(await readFile(filePath, 'utf8')).conversations.length, 101);
+
+      await assert.rejects(migService.migrateUnownedConversations({
+        assignments: [
+          { conversationId: legacy.id, targetActorId: 'owner-b' },
+          { conversationId: legacy.id, targetActorId: 'owner-b' },
+        ],
+        auth: owner,
+      }), { code: 'invalid_migration_assignments', status: 400 });
+
+      const migResult = await migService.migrateUnownedConversations({
+        assignments: [{ conversationId: legacy.id, targetActorId: other.user.id }],
+        auth: owner,
+      });
+      assert.equal(migResult.count, 1);
+      assert.equal(migResult.migrated[0].id, legacy.id);
+      assert.ok(await migService.getConversation(legacy.id, { auth: other }));
+      assert.equal(await migService.getConversation(legacy.id, { auth: owner }), null);
+
+      await assert.rejects(migService.migrateUnownedConversations({
+        assignments: [{ conversationId: legacy.id, targetActorId: 'owner-c' }],
+        auth: owner,
+      }), { code: 'conversation_already_owned', status: 409 });
+
+      await assert.rejects(migService.rollbackUnownedConversations({
+        conversationIds: [legacy.id],
+        auth: manager,
+      }), { status: 403 });
+
+      await assert.rejects(migService.rollbackUnownedConversations({
+        conversationIds: [legacy.id, legacy.id],
+        auth: owner,
+      }), { code: 'invalid_rollback_request', status: 400 });
+
+      const rollResult = await migService.rollbackUnownedConversations({
+        conversationIds: [legacy.id],
+        auth: owner,
+      });
+      assert.equal(rollResult.count, 1);
+      assert.equal(await migService.getConversation(legacy.id, { auth: other }), null);
+      const unownedAgain = await migService.listUnownedConversations({ auth: owner });
+      assert.equal(unownedAgain.length, 1);
+
+      await assert.rejects(migService.rollbackToV1Backup({ auth: manager }), { status: 403 });
+
+      const v1Restore = await migService.rollbackToV1Backup({ auth: owner });
+      assert.equal(v1Restore.success, true);
+      assert.equal(v1Restore.restoredCount, 1);
+      assert.equal((await stat(filePath + '.v1-backup')).mode & 0o777, 0o600);
+      assert.equal((await stat(filePath)).mode & 0o777, 0o600);
+      assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
     } finally { await rm(dir, { recursive: true, force: true }); }
   `;
   assert.doesNotThrow(() => execFileSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {
@@ -139,6 +208,18 @@ test('real mounted conversation handlers preserve the auth boundary and reject a
       result = await invoke('get', route, { auth: null }); assert.equal(result.error.status, 401);
       result = await invoke('get', route + '/:conversationId', { params: { conversationId: id } }); assert.equal(result.body.data.title, 'owner-only');
       result = await invoke('delete', route + '/:conversationId', { params: { conversationId: id } }); assert.equal(result.body.data.success, true);
+      const unownedGet = routes.get('get /api/ai/conversations/unowned');
+      const unownedMigrate = routes.get('post /api/ai/conversations/unowned/migrate');
+      const unownedRollback = routes.get('post /api/ai/conversations/unowned/rollback');
+      assert.ok(unownedGet); assert.ok(unownedMigrate); assert.ok(unownedRollback);
+      const mockRes = { status(code) { this.statusCode = code; return this; }, json(val) { this.body = val; return this; } };
+      const nonOwner = { auth: { user: { id: 'manager-a', role: 'site_manager' } }, query: {}, body: {} };
+      await unownedGet[0](nonOwner, mockRes, () => {});
+      assert.equal(mockRes.statusCode, 403);
+      await unownedMigrate[0](nonOwner, mockRes, () => {});
+      assert.equal(mockRes.statusCode, 403);
+      await unownedRollback[0](nonOwner, mockRes, () => {});
+      assert.equal(mockRes.statusCode, 403);
     } finally { await rm(directory, { recursive: true, force: true }); }
   `;
   assert.doesNotThrow(() => execFileSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {

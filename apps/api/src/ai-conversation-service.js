@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdir, readFile, rename, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { createAiOrchestrator } from './ai-orchestrator.js';
 import { createProviderFromConfig } from './ai-provider-adapters.js';
@@ -114,7 +114,11 @@ export function createAiConversationService({
       }
       conversations.clear();
       for (const [id, item] of loaded) conversations.set(id, item);
-      if (data.version === 1) legacySource = raw;
+      if (data.version === 1) {
+        legacySource = raw;
+      } else {
+        legacySource = null;
+      }
     } catch (error) {
       if (error.code !== 'ENOENT') {
         throw new AiConversationError('ai_history_store_unavailable', 'Conversation history could not be read safely.', 503);
@@ -154,9 +158,14 @@ export function createAiConversationService({
       conversations: Array.from(conversations.values()),
     }, null, 2);
     const tempPath = `${filePath}.${randomUUID().slice(0, 8)}.tmp`;
-    await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
-    await chmod(tempPath, 0o600);
-    await rename(tempPath, filePath);
+    try {
+      await writeFile(tempPath, payload, { encoding: 'utf8', mode: 0o600 });
+      await chmod(tempPath, 0o600);
+      await rename(tempPath, filePath);
+    } catch (err) {
+      await rm(tempPath, { force: true }).catch(() => {});
+      throw err;
+    }
   }
 
   async function mutate(action) {
@@ -276,11 +285,16 @@ export function createAiConversationService({
     if (!Array.isArray(assignments) || assignments.length === 0) {
       throw new AiConversationError('invalid_migration_assignments', 'Assignments must be a non-empty array.', 400);
     }
+    const seenConvIds = new Set();
     for (const item of assignments) {
       if (!item || typeof item.conversationId !== 'string' || !UUID.test(item.conversationId)
         || typeof item.targetActorId !== 'string' || !ACTOR.test(item.targetActorId)) {
         throw new AiConversationError('invalid_migration_assignments', 'Invalid assignment format.', 400);
       }
+      if (seenConvIds.has(item.conversationId)) {
+        throw new AiConversationError('invalid_migration_assignments', `Duplicate conversationId ${item.conversationId} in assignments.`, 400);
+      }
+      seenConvIds.add(item.conversationId);
     }
     await init();
     return await mutate(async () => {
@@ -327,10 +341,15 @@ export function createAiConversationService({
     if (!Array.isArray(conversationIds) || conversationIds.length === 0) {
       throw new AiConversationError('invalid_rollback_request', 'conversationIds must be a non-empty array.', 400);
     }
+    const seenRollbackIds = new Set();
     for (const id of conversationIds) {
       if (typeof id !== 'string' || !UUID.test(id)) {
         throw new AiConversationError('invalid_rollback_request', 'Invalid conversation ID in rollback request.', 400);
       }
+      if (seenRollbackIds.has(id)) {
+        throw new AiConversationError('invalid_rollback_request', `Duplicate conversation ID ${id} in rollback request.`, 400);
+      }
+      seenRollbackIds.add(id);
     }
     await init();
     return await mutate(async () => {
@@ -392,6 +411,9 @@ export function createAiConversationService({
         backupIds.add(item.id);
         const existing = conversations.get(item.id);
         if (existing) {
+          existing.title = item.title ?? existing.title;
+          existing.messages = Array.isArray(item.messages) ? structuredClone(item.messages) : existing.messages;
+          existing.websiteId = item.websiteId ?? existing.websiteId ?? null;
           existing.actorId = null;
           delete existing.migratedAt;
           existing.updatedAt = timestamp;
