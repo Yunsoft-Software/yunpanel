@@ -9,6 +9,9 @@ import { createTenantBoundaryMiddleware } from '../src/tenant-boundary.js';
 
 // Also run client/web removal wiring checks
 import '../../web/test/mailbox-removal-wiring.test.js';
+import '../../web/test/mailbox-access-preparation.test.js';
+import '../../web/test/mailbox-access-guard.test.js';
+import '../../web/test/admin-layout.test.js';
 
 const appUrl = new URL('../src/app.js', import.meta.url);
 const mailboxHttpUrl = new URL('../src/mailbox-http.js', import.meta.url);
