@@ -34,8 +34,6 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 
 ## E — Önceki açık işler: korunur, yeni UX kararıyla uygulanır
 
-- [ ] **P2 — Kabul sonrası migration temizliği.** Legacy direct-systemd compatibility ve diğer fallback'ler yalnız gerçek replacement kabulünden sonra kaldırılır. UX yeniden yerleştirme, dosya yöneticisi/terminal veya çalışan runtime motorunu silme gerekçesi değildir.
-
 ## F — Sade reseller uygulaması ve korunmuş Plesk yol haritası
 
 - **PAR-02 / RS-03–05 — Basit Customer/Reseller yönetiminde kalan kabul:**
