@@ -1,4 +1,5 @@
 import { AI_TOOL_CONFIRMATION, AI_TOOL_RISKS } from './ai-tool-catalog.js';
+import { createAiMcpAdapter } from './ai-mcp-adapter.js';
 
 const NAME_PATTERN = /^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9]*)+$/;
 const POLICIES = new Set(['allow', 'confirm', 'deny']);
@@ -173,8 +174,21 @@ export function createAiToolRegistry({ definitions = [] } = {}) {
     return handler({ input: normalizeInput(input, tool.inputSchema), context, tool: publicView(tool, true) });
   }
 
-  return Object.freeze({ list, get, bind, prepare, execute });
+  const registryApi = Object.freeze({
+    list,
+    get,
+    bind,
+    prepare,
+    execute,
+    createMcpAdapter(options = {}) {
+      return createAiMcpAdapter({ registry: registryApi, ...options });
+    },
+  });
+
+  return registryApi;
 }
+
+export { createAiMcpAdapter, AiMcpError, MCP_ERROR_CODES } from './ai-mcp-adapter.js';
 
 export const aiToolRegistryInternals = Object.freeze({
   maxInputBytes: MAX_INPUT_BYTES,

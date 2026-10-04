@@ -34,7 +34,6 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 
 ## E — Önceki açık işler: korunur, yeni UX kararıyla uygulanır
 
-- [ ] **P1.5 — MCP uyumluluğu.** Aynı Tool Registry/Policy Engine üzerinden harici AI istemcileri için adaptör; UX ve production çekirdek görevlerinden sonra. HTTP/UI varlığı MCP tamamlanması değildir.
 - [ ] **P2 — Kabul sonrası migration temizliği.** Legacy direct-systemd compatibility ve diğer fallback'ler yalnız gerçek replacement kabulünden sonra kaldırılır. UX yeniden yerleştirme, dosya yöneticisi/terminal veya çalışan runtime motorunu silme gerekçesi değildir.
 
 ## F — Sade reseller uygulaması ve korunmuş Plesk yol haritası
