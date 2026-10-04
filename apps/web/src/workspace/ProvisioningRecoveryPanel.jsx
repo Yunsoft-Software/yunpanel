@@ -44,6 +44,8 @@ export default function ProvisioningRecoveryPanel({ websiteId, canManage = false
   if (!websiteId) return null;
   return <RecoveryPanel key={identity} websiteId={websiteId} canManage={canManage} onChanged={onChanged} />;
 }
+export { ProvisioningRecoveryPanel };
+
 function RecoveryPanel({ websiteId, canManage, onChanged }) {
   const [state, setState] = useState(EMPTY_RECOVERY);
   const client = useRef(null);
