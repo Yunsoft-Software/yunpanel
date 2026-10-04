@@ -62,7 +62,7 @@ Kaynak ADMIN-RESULT-01–04 ile `development` dalında tamamlandı; [kaynak/test
 
 - [x] Node >=24.11.1/npm >=11 ile tam checkout/npm ci/lint/test/build. Yeni `site-admin-provisioning.test.js`, `site-create-mount-contract.test.js`, `site-admin-result.test.js` ile mevcut create/user/auth/form/provisioning regresyonlarını birlikte çalıştır; gerçek app.js import ve HTTP/auth/CSRF zincirini doğrula.
 - [ ] Gerçek kullanıcı deposunda hesap yaratılmasını bekle; normalize kullanıcı adı, actorId audit'i, site_manager rolü, aktiflik ve yalnız beklenen Website bağı doğrulansın. Yeni hesapla gerçek giriş ve Site A→Site B erişim reddi denensin.
-- [ ] Hesap çakışması/hash/store hatası, eksik bağımlılık ve eski/bozuk API cevabında site kaydı ile hesap sonucu ayrı görünsün. Host planı tamamlanınca hesap uyarısı kaybolmasın. Replay mevcut hesabı yeniden yaratmasın, parolasını veya site yetkisini değiştirmesin; kalıcı operation→user uzlaştırmasını ayrıca tamamla.
+- [x] Hesap çakışması/hash/store hatası, eksik bağımlılık ve eski/bozuk API cevabında site kaydı ile hesap sonucu ayrı görünsün. Host planı tamamlanınca hesap uyarısı kaybolmasın. Replay mevcut hesabı yeniden yaratmasın, parolasını veya site yetkisini değiştirmesin; kalıcı operation→user uzlaştırmasını ayrıca tamamla.
 - [ ] Hash sırasında yetki iptali/Website silme, iki süreç yarışı ve hesap sonrası provisioning registry yazma hatalarını test et. Atomik yetki/kilit ve kalıcı sonuç kaydı bu kaynak dilimiyle kapanmadı. Gerçek React/router/mobil/klavye/koyu tema ve mevcut kullanıcı yönetimi/Genel Bakış/Dosyalar bağlantılarını doğrula. `.44` kesinlikle hariç; canlı deploy bu tur yapılmadı.
 
 ## T-DEV-RECOVERY — Manuel kurulum kurtarma (2026-09-23)
