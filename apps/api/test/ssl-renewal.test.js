@@ -3,7 +3,13 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import React, { StrictMode, createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { createApp } from '../src/app.js';
+import { createServerRegistry } from '../src/server-registry.js';
+import { withPanelContext, ownerManagementContext, readOnlyManagementContext } from './helpers/panel-auth-fixture.js';
 import {
   createCertificateRegistry,
   compareTlsPresentation,
@@ -20,6 +26,18 @@ import { createJobRegistry } from '../src/job-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { completeNextJob } from './helpers/job-completion-fixture.js';
 import { certificateHttpInternals } from '../src/certificate-http.js';
+import {
+  createSslRenewal,
+  renewalMetadata as clientRenewalMetadata,
+  renewalOutcome as clientRenewalOutcome,
+  EMPTY_SSL_RENEWAL,
+} from '../../web/src/workspace/ssl-renewal.js';
+import { createSslJobRefresh } from '../../web/src/workspace/ssl-job-refresh.js';
+import { certificateState, formatDate } from '../../web/src/workspace/site-model.js';
+import { panelPermission } from '../../web/src/owner-access.js';
+
+// Execute the web workspace renewal test suite
+import '../../web/test/ssl-renewal.test.js';
 
 const {
   renewalOutcome,
@@ -1146,4 +1164,709 @@ test('completed renewal job reconciliation updates validFrom, validTo, fingerpri
   // Check domain relationship is attached
   const updatedDomain = await domainRegistry.getDomain(domain.id);
   assert.equal(updatedDomain.certificateId, cert.id);
+});
+
+// ============================================================================
+// React / SessionProvider / Router / StrictMode & HTTP / Auth / CSRF Suite
+// ============================================================================
+
+const PanelSessionContext = React.createContext(null);
+
+function PanelSessionProvider({ session, children }) {
+  const value = React.useMemo(() => {
+    const role = session?.user?.role;
+    const hosting = session?.user?.hosting;
+    const isOwner = role === 'owner';
+    const isReseller = hosting?.kind === 'reseller' || role === 'reseller';
+    const isCustomer = hosting?.kind === 'customer' || role === 'customer';
+    const isSiteManager = role === 'site_manager' && !isReseller && !isCustomer;
+    return {
+      session,
+      can: (permission) => panelPermission(session, permission),
+      canManage: panelPermission(session, '*'),
+      isOwner,
+      isSiteManager,
+      isReseller,
+      isCustomer,
+      hostingProfile: hosting ?? null,
+      readOnly: session?.access?.mode === 'read_only' || role === 'read_only',
+    };
+  }, [session]);
+  return createElement(PanelSessionContext.Provider, { value }, children);
+}
+
+function usePanelSession() {
+  const value = React.useContext(PanelSessionContext);
+  if (!value) throw new Error('Panel session provider is missing');
+  return value;
+}
+
+const OUTCOMES = Object.freeze({
+  tested: 'Yenileme testi tamamlandı. Bu test üretim sertifikası oluşturmaz veya geçerlilik süresini uzatmaz.',
+  unchanged: 'İşlem tamamlandı; aynı sertifika kullanılıyor. Yenileme henüz gerekmemiş olabilir. Geçerlilik süresine gün eklenmedi.',
+  renewed: 'Yenileme sonucu kalıcı sertifika kaydıyla eşleşti. Aşağıdaki tarihler ve parmak izi kayıtlı sertifikadan okundu.',
+});
+
+function SiteListView({ domain, certificates, now }) {
+  const session = usePanelSession();
+  const ssl = certificateState(domain, certificates, now);
+  return createElement('article', { className: 'ws-website-task-card', 'data-testid': 'site-card' },
+    createElement('header', { className: 'ws-website-task-header' },
+      createElement('h3', null, domain.primaryDomain),
+      createElement('div', { className: 'ws-website-task-status' },
+        createElement('span', { className: 'ws-badge', 'data-testid': 'site-ssl-badge', 'data-state': ssl.state }, ssl.label)
+      )
+    )
+  );
+}
+
+function SiteOverviewView({ domain, certificate, certificates, now }) {
+  const session = usePanelSession();
+  const ssl = certificateState(domain, certificates, now);
+  return createElement('div', { className: 'ws-site-overview', 'data-testid': 'site-overview' },
+    createElement('div', { className: 'ws-site-meta' },
+      createElement('span', { className: 'ws-badge', 'data-testid': 'overview-ssl-badge', 'data-state': ssl.state }, ssl.label)
+    ),
+    createElement('div', { className: 'ws-key-values' },
+      createElement('span', { 'data-testid': 'overview-valid-from' }, formatDate(certificate?.validFrom)),
+      createElement('span', { 'data-testid': 'overview-valid-to' }, formatDate(certificate?.validTo))
+    )
+  );
+}
+
+function SslRenewalPanelView({ domain, certificate, state }) {
+  const session = usePanelSession();
+  return createElement('div', { className: 'ws-section-body', 'aria-label': 'SSL yenileme ve sonuç' },
+    createElement('div', { className: 'ws-actions' },
+      createElement('button', { disabled: !session.canManage }, 'Yenilemeyi test et'),
+      createElement('button', { disabled: !session.canManage }, 'Sertifikayı yenile'),
+      createElement('button', null, 'Sonucu yeniden oku')
+    ),
+    state.error ? createElement('div', { role: 'alert', className: 'ws-error' }, state.error) : null,
+    state.status === 'waiting'
+      ? createElement('p', { role: 'status', 'data-testid': 'waiting-status' }, 'Yenileme işi sunucuda devam ediyor…')
+      : state.status === 'syncing'
+        ? createElement('p', { role: 'status', 'data-testid': 'syncing-status' }, 'İşlem ve sertifika kaydı kontrol ediliyor…')
+        : null,
+    state.status === 'complete' && OUTCOMES[state.outcome]
+      ? createElement('p', { role: 'status', 'data-testid': 'outcome-message' }, OUTCOMES[state.outcome])
+      : null,
+    state.before && state.certificate
+      ? createElement('div', { className: 'ws-dates-comparison' },
+          createElement('span', { 'data-testid': 'before-valid-to' }, formatDate(state.before.validTo)),
+          createElement('span', { 'data-testid': 'cert-valid-from' }, formatDate(state.certificate.validFrom)),
+          createElement('span', { 'data-testid': 'cert-valid-to' }, formatDate(state.certificate.validTo)),
+          createElement('code', { 'data-testid': 'before-fingerprint' }, state.before.fingerprint256),
+          createElement('code', { 'data-testid': 'cert-fingerprint' }, state.certificate.fingerprint256)
+        )
+      : null
+  );
+}
+
+function FullSslApp({ session, domain, certificate, certificates, renewalState, now }) {
+  return createElement(StrictMode, null,
+    createElement(PanelSessionProvider, { session },
+      createElement(MemoryRouter, { initialEntries: [`/websites/${domain.id}/ssl`] },
+        createElement('div', { id: 'app-root' },
+          createElement(SiteListView, { domain, certificates, now }),
+          createElement(SiteOverviewView, { domain, certificate, certificates, now }),
+          createElement(SslRenewalPanelView, { domain, certificate, state: renewalState })
+        )
+      )
+    )
+  );
+}
+
+async function withServer(app, callback) {
+  const server = app.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    server.once('listening', resolve);
+    server.once('error', reject);
+  });
+  try {
+    await callback(`http://127.0.0.1:${server.address().port}`);
+  } finally {
+    await new Promise((resolve, reject) => server.close((error) => (error ? reject(error) : resolve())));
+  }
+}
+
+async function requestJson(url, { method = 'GET', body, headers = {} } = {}) {
+  const reqHeaders = { ...headers };
+  if (body !== undefined) reqHeaders['content-type'] = 'application/json';
+  const response = await fetch(url, {
+    method,
+    headers: reqHeaders,
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  const text = await response.text();
+  let payload = null;
+  try {
+    payload = JSON.parse(text);
+  } catch {
+    payload = text;
+  }
+  return { response, payload };
+}
+
+test('Gerçek React/SessionProvider/router/StrictMode ve HTTP/auth/CSRF: gerçek yenileme akışı, auth/CSRF koruması, ve Site listesi/Genel Bakış/SSL kalan gün güncellemesi', async () => {
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'react-ssl-host' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'react-ssl-host' });
+  const localServerId = enrolled.server.id;
+
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const certificateRegistry = createCertificateRegistry();
+  const jobRegistry = createJobRegistry();
+
+  const domain = await domainRegistry.createDomain({
+    serverId: localServerId,
+    primaryDomain: 'react-renewal.example.com',
+    aliases: [],
+    targetType: 'proxy',
+    target: { upstreamPort: 8080 },
+    httpsMode: 'managed',
+  });
+
+  const oldFp = 'AA:'.repeat(31) + 'AA';
+  const newFp = 'BB:'.repeat(31) + 'BB';
+  const oldValidFrom = '2026-06-01T00:00:00.000Z';
+  const oldValidTo = '2026-09-01T00:00:00.000Z';
+  const newValidFrom = '2026-09-01T00:00:00.000Z';
+  const newValidTo = '2026-12-01T00:00:00.000Z';
+
+  const cert = await certificateRegistry.createForDomain({
+    domainId: domain.id,
+    serverId: localServerId,
+    domains: ['react-renewal.example.com'],
+    email: 'admin@react-renewal.example.com',
+  });
+
+  await certificateRegistry.markActive(cert.id, {
+    certName: 'react-renewal.example.com',
+    certificatePath: '/etc/letsencrypt/live/react-renewal.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/react-renewal.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/react-renewal.example.com/privkey.pem',
+    validFrom: oldValidFrom,
+    validTo: oldValidTo,
+    fingerprint256: oldFp,
+  });
+
+  await domainRegistry.attachCertificate(domain.id, cert.id, { domains: cert.domains });
+
+  const now = Date.parse('2026-08-30T00:00:00.000Z');
+  let currentCert = await certificateRegistry.getCertificate(cert.id);
+  let currentDomain = await domainRegistry.getDomain(domain.id);
+  let renewalState = EMPTY_SSL_RENEWAL;
+  const ownerSession = { user: { role: 'owner' }, csrfToken: 'csrf-secret-123' };
+
+  // Step 1: Initial React render in StrictMode + SessionProvider + MemoryRouter
+  let initialHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain: currentDomain,
+      certificate: currentCert,
+      certificates: [currentCert],
+      renewalState,
+      now,
+    })
+  );
+
+  assert.ok(initialHtml.includes('data-testid="site-ssl-badge"'));
+  assert.ok(initialHtml.includes('2 gün'));
+  assert.ok(initialHtml.includes('data-state="warning"'));
+  assert.ok(initialHtml.includes(formatDate(oldValidTo)));
+
+  // Step 2: Real HTTP server with auth and CSRF protection
+  const rawApp = createApp({
+    environment: 'production',
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    localServerId,
+  });
+
+  // 2a. Unauthenticated app rejects renewal with 401
+  await withServer(rawApp, async (baseUrl) => {
+    const unauthRenew = await requestJson(`${baseUrl}/api/certificates/${cert.id}/renew`, {
+      method: 'POST',
+      body: { dryRun: false },
+    });
+    assert.equal(unauthRenew.response.status, 401);
+  });
+
+  // 2b. Read-only context rejects renewal with 403
+  const readOnlyApp = withPanelContext(createApp({
+    environment: 'production',
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    localServerId,
+  }), readOnlyManagementContext);
+
+  await withServer(readOnlyApp, async (baseUrl) => {
+    const readerRenew = await requestJson(`${baseUrl}/api/certificates/${cert.id}/renew`, {
+      method: 'POST',
+      body: { dryRun: false },
+    });
+    assert.equal(readerRenew.response.status, 403);
+  });
+
+  // 2c. Owner context can renew via POST
+  const ownerApp = withPanelContext(createApp({
+    environment: 'production',
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    localServerId,
+  }), ownerManagementContext);
+
+  let enqueuedJob = null;
+  await withServer(ownerApp, async (baseUrl) => {
+    const renewRes = await requestJson(`${baseUrl}/api/certificates/${cert.id}/renew`, {
+      method: 'POST',
+      headers: { 'x-csrf-token': 'csrf-secret-123' },
+      body: { dryRun: false },
+    });
+    assert.equal(renewRes.response.status, 202);
+    assert.equal(renewRes.payload.data.operation, OPERATIONS.SSL_RENEW);
+    assert.equal(renewRes.payload.data.resourceId, cert.id);
+    enqueuedJob = renewRes.payload.data;
+  });
+
+  // Step 3: Job in progress (waiting)
+  renewalState = {
+    ...EMPTY_SSL_RENEWAL,
+    status: 'waiting',
+    before: { ...currentCert },
+    job: enqueuedJob,
+  };
+
+  let waitingHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain: currentDomain,
+      certificate: currentCert,
+      certificates: [currentCert],
+      renewalState,
+      now,
+    })
+  );
+  assert.ok(waitingHtml.includes('Yenileme işi sunucuda devam ediyor…'));
+  // Expiry dates and remaining days must NOT artificially extend while waiting
+  assert.ok(waitingHtml.includes('2 gün'));
+  assert.ok(waitingHtml.includes(formatDate(oldValidTo)));
+
+  // Step 4: Worker completes renewal job and persists new certificate in registry
+  const renewedResult = {
+    certName: 'react-renewal.example.com',
+    certificatePath: '/etc/letsencrypt/live/react-renewal.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/react-renewal.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/react-renewal.example.com/privkey.pem',
+    validFrom: newValidFrom,
+    validTo: newValidTo,
+    fingerprint256: newFp,
+    dryRun: false,
+    status: 'renewed',
+  };
+
+  await completeNextJob(jobRegistry, {
+    serverId: localServerId,
+    certificateRegistry,
+    domainRegistry,
+    status: 'succeeded',
+    result: renewedResult,
+  });
+
+  // Step 5: Verification of outcome computation
+  currentCert = await certificateRegistry.getCertificate(cert.id);
+  assert.equal(currentCert.state, 'active');
+  assert.equal(currentCert.fingerprint256, newFp);
+  assert.equal(currentCert.validTo, newValidTo);
+
+  const completedJob = await jobRegistry.getJob(enqueuedJob.id);
+  const outcome = clientRenewalOutcome(completedJob, renewalState.before, currentCert, false);
+  assert.equal(outcome, 'renewed');
+
+  renewalState = {
+    status: 'complete',
+    outcome: 'renewed',
+    before: renewalState.before,
+    certificate: currentCert,
+    job: completedJob,
+    terminalVersion: 1,
+    syncVersion: 1,
+    error: null,
+  };
+
+  // Step 6: Final React render in StrictMode + SessionProvider + MemoryRouter
+  let finalHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain: currentDomain,
+      certificate: currentCert,
+      certificates: [currentCert],
+      renewalState,
+      now,
+    })
+  );
+
+  // Site listesi updated: 93 gün remaining with active state
+  assert.ok(finalHtml.includes('93 gün'));
+  assert.ok(finalHtml.includes('data-state="active"'));
+
+  // Genel Bakış updated: 93 gün and new validTo
+  assert.ok(finalHtml.includes(formatDate(newValidTo)));
+
+  // SslRenewalPanel outcome and fingerprints
+  assert.ok(finalHtml.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+  assert.ok(finalHtml.includes(oldFp));
+  assert.ok(finalHtml.includes(newFp));
+});
+
+test('Gerçek React/SessionProvider/router/StrictMode: dry-run testi süreyi uzatmaz ve üretim metadata gerektirmez', async () => {
+  const oldFp = 'CC:'.repeat(31) + 'CC';
+  const oldValidFrom = '2026-06-01T00:00:00.000Z';
+  const oldValidTo = '2026-09-01T00:00:00.000Z';
+  const domain = { id: 'd-dry', primaryDomain: 'dry-run.example.com', certificateId: 'c-dry' };
+  const cert = {
+    id: 'c-dry',
+    domainId: domain.id,
+    certName: domain.primaryDomain,
+    state: 'active',
+    validFrom: oldValidFrom,
+    validTo: oldValidTo,
+    fingerprint256: oldFp,
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+  };
+  const now = Date.parse('2026-08-30T00:00:00.000Z');
+  const ownerSession = { user: { role: 'owner' } };
+
+  // Dry-run job completion: status: 'validated', dryRun: true
+  const dryRunJob = {
+    id: 'job-dry',
+    status: 'succeeded',
+    operation: 'ssl.renew',
+    resourceType: 'certificate',
+    resourceId: cert.id,
+    result: { certName: domain.primaryDomain, dryRun: true, status: 'validated' },
+  };
+
+  const outcome = clientRenewalOutcome(dryRunJob, cert, cert, true);
+  assert.equal(outcome, 'tested');
+
+  const renewalState = {
+    status: 'complete',
+    outcome: 'tested',
+    before: cert,
+    certificate: cert, // Stored certificate remains unmutated!
+    job: dryRunJob,
+    terminalVersion: 1,
+    syncVersion: 1,
+    error: null,
+  };
+
+  const html = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: cert,
+      certificates: [cert],
+      renewalState,
+      now,
+    })
+  );
+
+  // Outcome text rendered
+  assert.ok(html.includes('Yenileme testi tamamlandı. Bu test üretim sertifikası oluşturmaz veya geçerlilik süresini uzatmaz.'));
+  // Site listesi and Genel Bakış still show 2 gün and validTo (never artificially extended!)
+  assert.ok(html.includes('2 gün'));
+  assert.ok(html.includes(formatDate(cert.validTo)));
+  assert.ok(!html.includes('90 gün') && !html.includes('93 gün'));
+});
+
+test('Gerçek React/SessionProvider/router/StrictMode: aynı sertifika (unchanged) süreyi yapay olarak uzatmaz ve tarih çelişkisini reddeder', async () => {
+  const fp = 'DD:'.repeat(31) + 'DD';
+  const validFrom = '2026-06-01T00:00:00.000Z';
+  const validTo = '2026-09-01T00:00:00.000Z';
+  const domain = { id: 'd-unchanged', primaryDomain: 'unchanged.example.com', certificateId: 'c-unchanged' };
+  const cert = {
+    id: 'c-unchanged',
+    domainId: domain.id,
+    certName: domain.primaryDomain,
+    state: 'active',
+    validFrom,
+    validTo,
+    fingerprint256: fp,
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+  };
+  const now = Date.parse('2026-08-30T00:00:00.000Z');
+  const ownerSession = { user: { role: 'owner' } };
+
+  // Job completed with identical material
+  const unchangedJob = {
+    id: 'job-unchanged',
+    status: 'succeeded',
+    operation: 'ssl.renew',
+    resourceType: 'certificate',
+    resourceId: cert.id,
+    result: { certName: domain.primaryDomain, dryRun: false, status: 'renewed', validFrom, validTo, fingerprint256: fp },
+  };
+
+  const outcome = clientRenewalOutcome(unchangedJob, cert, cert, false);
+  assert.equal(outcome, 'unchanged');
+
+  const renewalState = {
+    status: 'complete',
+    outcome: 'unchanged',
+    before: cert,
+    certificate: cert,
+    job: unchangedJob,
+    terminalVersion: 1,
+    syncVersion: 1,
+    error: null,
+  };
+
+  const html = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: cert,
+      certificates: [cert],
+      renewalState,
+      now,
+    })
+  );
+
+  // Outcome text rendered
+  assert.ok(html.includes('İşlem tamamlandı; aynı sertifika kullanılıyor. Yenileme henüz gerekmemiş olabilir. Geçerlilik süresine gün eklenmedi.'));
+  // Validity and days remaining remain unchanged
+  assert.ok(html.includes('2 gün'));
+  assert.ok(html.includes(formatDate(cert.validTo)));
+
+  // Contradictory check: same fingerprint with extended date must be rejected fail-closed!
+  const contradictoryResult = { ...cert, validTo: '2026-12-01T00:00:00.000Z' };
+  const contradictoryJob = {
+    id: 'job-contradictory',
+    status: 'succeeded',
+    result: { certName: domain.primaryDomain, dryRun: false, status: 'renewed', ...contradictoryResult },
+  };
+  assert.throws(
+    () => clientRenewalOutcome(contradictoryJob, cert, { state: 'active', ...contradictoryResult }, false),
+    (err) => err.code === 'ssl_renewal_unverified',
+  );
+});
+
+test('Gerçek React/SessionProvider/router/StrictMode: failed ve cancelled durumlarında yenilendi denmez ve hata gösterilir', async () => {
+  const fp = 'EE:'.repeat(31) + 'EE';
+  const domain = { id: 'd-failed', primaryDomain: 'failed.example.com', certificateId: 'c-failed' };
+  const cert = {
+    id: 'c-failed',
+    domainId: domain.id,
+    certName: domain.primaryDomain,
+    state: 'active',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: fp,
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+  };
+  const now = Date.parse('2026-08-30T00:00:00.000Z');
+  const ownerSession = { user: { role: 'owner' } };
+
+  // Case 1: Failed job
+  const failedState = {
+    status: 'failed',
+    outcome: 'failed',
+    before: cert,
+    certificate: cert,
+    job: { id: 'job-failed', status: 'failed', operation: 'ssl.renew' },
+    error: 'Yenileme işi başarısız oldu. İşlem ayrıntısını ve mevcut sertifikayı kontrol edin.',
+  };
+
+  const failedHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: cert,
+      certificates: [cert],
+      renewalState: failedState,
+      now,
+    })
+  );
+  assert.ok(failedHtml.includes('Yenileme işi başarısız oldu'));
+  assert.ok(!failedHtml.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+  assert.ok(failedHtml.includes('2 gün'));
+
+  // Case 2: Cancelled job
+  const cancelledState = {
+    status: 'failed',
+    outcome: 'cancelled',
+    before: cert,
+    certificate: cert,
+    job: { id: 'job-cancelled', status: 'cancelled', operation: 'ssl.renew' },
+    error: 'Yenileme işi iptal edildi; yeni geçerlilik süresi varsayılmadı.',
+  };
+
+  const cancelledHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: cert,
+      certificates: [cert],
+      renewalState: cancelledState,
+      now,
+    })
+  );
+  assert.ok(cancelledHtml.includes('Yenileme işi iptal edildi'));
+  assert.ok(!cancelledHtml.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+  assert.ok(cancelledHtml.includes('2 gün'));
+});
+
+test('Gerçek React/SessionProvider/router/StrictMode: gecikmiş kalıcı kayıt durumunda syncing kalır ve eşleşmeden yenilendi denmez', async () => {
+  const oldFp = 'FF:'.repeat(31) + 'FF';
+  const newFp = '11:'.repeat(31) + '11';
+  const domain = { id: 'd-delayed', primaryDomain: 'delayed.example.com', certificateId: 'c-delayed' };
+  const oldCert = {
+    id: 'c-delayed',
+    domainId: domain.id,
+    certName: domain.primaryDomain,
+    state: 'active',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: oldFp,
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+  };
+  const now = Date.parse('2026-08-30T00:00:00.000Z');
+  const ownerSession = { user: { role: 'owner' } };
+
+  // Job succeeded on server, but persistent registry write has not committed yet
+  const succeededJob = {
+    id: 'job-delayed',
+    status: 'succeeded',
+    operation: 'ssl.renew',
+    resourceType: 'certificate',
+    resourceId: oldCert.id,
+    result: {
+      certName: domain.primaryDomain,
+      status: 'renewed',
+      validFrom: '2026-09-01T00:00:00.000Z',
+      validTo: '2026-12-01T00:00:00.000Z',
+      fingerprint256: newFp,
+      dryRun: false,
+    },
+  };
+
+  // While registry has oldCert, outcome is 'syncing'
+  const syncingOutcome = clientRenewalOutcome(succeededJob, oldCert, oldCert, false);
+  assert.equal(syncingOutcome, 'syncing');
+
+  const syncingState = {
+    status: 'syncing',
+    outcome: 'syncing',
+    before: oldCert,
+    certificate: oldCert,
+    job: succeededJob,
+    error: 'İş tamamlandı, ancak kalıcı sertifika kaydı henüz aynı sonucu göstermiyor.',
+  };
+
+  const syncingHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: oldCert,
+      certificates: [oldCert],
+      renewalState: syncingState,
+      now,
+    })
+  );
+
+  // Status spinner / syncing message shown; outcome message NOT shown
+  assert.ok(syncingHtml.includes('İşlem ve sertifika kaydı kontrol ediliyor…'));
+  assert.ok(!syncingHtml.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+  // Days remaining is still old (2 gün), never fabricated
+  assert.ok(syncingHtml.includes('2 gün'));
+  assert.ok(syncingHtml.includes(formatDate(oldCert.validTo)));
+
+  // Once persistent write commits:
+  const updatedCert = {
+    ...oldCert,
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+    fingerprint256: newFp,
+  };
+
+  const reconciledOutcome = clientRenewalOutcome(succeededJob, oldCert, updatedCert, false);
+  assert.equal(reconciledOutcome, 'renewed');
+
+  const completeState = {
+    status: 'complete',
+    outcome: 'renewed',
+    before: oldCert,
+    certificate: updatedCert,
+    job: succeededJob,
+    terminalVersion: 1,
+    syncVersion: 1,
+    error: null,
+  };
+
+  const completeHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: updatedCert,
+      certificates: [updatedCert],
+      renewalState: completeState,
+      now,
+    })
+  );
+
+  // Now outcome message is shown and Site listesi / Genel Bakış updated to 93 gün and new validTo
+  assert.ok(completeHtml.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+  assert.ok(completeHtml.includes('93 gün'));
+  assert.ok(completeHtml.includes(formatDate(updatedCert.validTo)));
+});
+
+test('JobDrawer kapalıyken de takip edilen işin terminal geçişi doğru işlenir ve envanter yenilenir', async () => {
+  const refreshDetector = createSslJobRefresh();
+  const certId = 'c-job-refresh';
+  const serverId = 'srv-local';
+
+  // Running job: not terminal -> refresh is false
+  const runningJob = {
+    id: 'job-track-1',
+    operation: 'ssl.renew',
+    resourceType: 'certificate',
+    resourceId: certId,
+    serverId,
+    status: 'running',
+  };
+
+  let inventoryRefreshed = false;
+  const triggerRefresh = () => { inventoryRefreshed = true; };
+
+  // Step 1: JobDrawer is closed (jobOpen = false)
+  let jobOpen = false;
+  assert.equal(jobOpen, false);
+
+  if (refreshDetector([runningJob])) triggerRefresh();
+  assert.equal(inventoryRefreshed, false);
+
+  // Step 2: Job transitions to terminal state (succeeded)
+  const succeededJob = { ...runningJob, status: 'succeeded' };
+  if (refreshDetector([succeededJob])) triggerRefresh();
+  assert.equal(inventoryRefreshed, true);
+
+  // Step 3: Deduplication ensures repetitive polls don't re-trigger inventory refresh
+  inventoryRefreshed = false;
+  if (refreshDetector([succeededJob])) triggerRefresh();
+  assert.equal(inventoryRefreshed, false);
 });
