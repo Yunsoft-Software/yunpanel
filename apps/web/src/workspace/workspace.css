@@ -44,7 +44,8 @@
 .ws-button svg { width: 16px; height: 16px; flex-shrink: 0; }
 .workspace-shell :is(button, a, input, select, textarea):focus-visible, .ws-modal :is(button, input, select, textarea):focus-visible { outline: 3px solid #abc7fb; outline-offset: 3px; }
 .workspace-shell input, .workspace-shell select, .workspace-shell textarea, .ws-modal input, .ws-modal select, .ws-modal textarea { width: 100%; min-width: 0; padding: 10px 11px; background: white; border: 1px solid #cad4e2; border-radius: 7px; color: var(--ws-text); font-family: inherit; font-size: 13px; line-height: 1.4; }
-.workspace-shell label, .ws-modal label { display: grid; gap: 7px; font-size: 12px; font-weight: 600; }
+.workspace-shell label, .ws-modal label { display: grid; gap: 7px; font-size: 12px; font-weight: 600; overflow-wrap: anywhere; word-break: break-word; }
+.ws-modal label strong { overflow-wrap: anywhere; word-break: break-word; }
 .workspace-shell fieldset, .ws-modal fieldset { border: 0; padding: 0; margin: 0; min-width: 0; }
 .ws-section { background: var(--ws-surface); border: 1px solid var(--ws-border); border-radius: var(--ws-radius); margin: 0 0 20px; overflow: hidden; }
 details.ws-section > summary { cursor: pointer; padding: 19px 22px; font-weight: 650; }

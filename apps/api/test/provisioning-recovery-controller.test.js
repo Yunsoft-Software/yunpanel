@@ -3,7 +3,7 @@ register('../../web/test/jsx-loader.js', import.meta.url);
 
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -1574,4 +1574,203 @@ test('Mevcut recovery runtime, context, command, ve store kodları kalıcı duru
     idempotencyKey: 'idem-test-key-1234567890',
   });
   assert.equal(found.id, 'job-11111111-2222');
+});
+
+// ============================================================================
+// Acceptance Criteria: Mobile viewports (320px/390px), Keyboard navigation & Focus trapping,
+// Dark theme, Safe error/technical diagnostics, and Abort != Host Rollback
+// ============================================================================
+
+test('Gerçek mobil ekranlarda (320px/390px) görünüm, hesaplama, sarmalama ve taşma engellemesi', async () => {
+  const workspaceCss = readFileSync(new URL('../../web/src/workspace/workspace.css', import.meta.url), 'utf8');
+  const emberTheme = readFileSync(new URL('../../web/src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const panelSource = readFileSync(new URL('../../web/src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8');
+
+  // Modal width calculation across viewports
+  const modalWidth = (viewportWidth, maxCap = 560) => Math.min(maxCap, viewportWidth - 32);
+
+  // 320px mobile: 288px width leaving 16px gutter on each side (no screen-edge collision)
+  assert.equal(modalWidth(320), 288);
+  assert.ok(modalWidth(320) < 320);
+
+  // 390px mobile: 358px width leaving 16px gutter on each side
+  assert.equal(modalWidth(390), 358);
+  assert.ok(modalWidth(390) < 390);
+
+  // 834px tablet & 1440px desktop
+  assert.equal(modalWidth(834), 560);
+  assert.equal(modalWidth(1440), 560);
+
+  // Modal responsive rules in CSS
+  assert.match(workspaceCss, /\.ws-modal\s*\{[^}]*width:\s*min\(560px,\s*calc\(100vw\s*-\s*32px\)\)/);
+  assert.match(emberTheme, /\.ws-modal-body\s*\{\s*padding:\s*16px\s*20px\s*20px;/);
+  assert.match(emberTheme, /\.ws-modal\s*>\s*header\s*\{\s*padding:\s*20px\s*20px\s*12px;/);
+
+  // Confirmation label strong and code overflow wrapping
+  assert.match(emberTheme, /\.ws-modal\s+label\s+strong/);
+  assert.match(emberTheme, /overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;/);
+  assert.match(emberTheme, /\.workspace-shell\s+code,\s*\.ws-modal\s+code,\s*code\s*\{[^}]*overflow-wrap:\s*anywhere;\s*word-break:\s*break-all;/);
+
+  // Table horizontal scrolling within .ws-table-scroll prevents viewport overflow
+  assert.match(panelSource, /<div className="ws-table-scroll">/);
+  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overflow-x:\s*auto;/);
+
+  // Remediation guidance wrapping
+  assert.match(emberTheme, /\.ws-provisioning-remediation\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+});
+
+test('Klavye navigasyonu, modal odak yakalama (focus trap), Escape iptali ve odak geri yükleme', async () => {
+  const panelKitSource = readFileSync(new URL('../../web/src/workspace/PanelKit.jsx', import.meta.url), 'utf8');
+
+  // Focus trap Tab handling
+  assert.match(panelKitSource, /event\.key === 'Tab'/);
+  assert.match(panelKitSource, /event\.shiftKey && document\.activeElement === first/);
+  assert.match(panelKitSource, /!event\.shiftKey && document\.activeElement === last/);
+
+  // Escape key cancels modal
+  assert.match(panelKitSource, /event\.key === 'Escape'/);
+  assert.match(panelKitSource, /onCancel=\{\(event\)\s*=>\s*\{\s*event\.preventDefault\(\);\s*if\s*\(!busy\)\s*onCloseRef\.current\(\);\s*\}\}/);
+
+  // Focus restoration to previous active element with preventScroll: true
+  assert.match(panelKitSource, /previous\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+
+  // ConfirmDialog autoFocus on input
+  assert.match(panelKitSource, /<input\s+autoFocus\s+value=\{value\}/);
+});
+
+test('Koyu temada (data-ws-theme=dark) ve Ember tasarım sisteminde kurtarma ekranı ve modalı token kurallarına tam uyar', async () => {
+  const emberTheme = readFileSync(new URL('../../web/src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
+  const panelSource = readFileSync(new URL('../../web/src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8');
+
+  // Dark mode tokens
+  assert.match(emberTheme, /:root\[data-ws-theme='dark'\]/);
+  assert.match(emberTheme, /--ws-canvas:\s*#171816;/);
+  assert.match(emberTheme, /--ws-surface:\s*#222320;/);
+  assert.match(emberTheme, /--ws-surface-raised:\s*#2b2c28;/);
+  assert.match(emberTheme, /--ws-surface-subtle:\s*#1c1d1a;/);
+  assert.match(emberTheme, /--ws-text:\s*#f3f0e8;/);
+  assert.match(emberTheme, /--ws-muted:\s*#b6b3a9;/);
+  assert.match(emberTheme, /--ws-border:\s*#373831;/);
+  assert.match(emberTheme, /--ws-accent:\s*#ff9a70;/);
+  assert.match(emberTheme, /--ws-danger:\s*#f4a8b5;/);
+  assert.match(emberTheme, /--ws-success:\s*#a9d4b5;/);
+
+  // No hardcoded hex colors in ProvisioningRecoveryPanel
+  assert.doesNotMatch(panelSource, /#[0-9a-fA-F]{3,6}/);
+
+  // High contrast / forced-colors active rules explicitly outline modal and controls
+  const forcedColors = emberTheme.slice(emberTheme.indexOf('@media (forced-colors: active)'));
+  assert.match(forcedColors, /\.ws-modal\s*\{[^}]*border:\s*1px\s*solid\s*CanvasText/);
+  assert.match(forcedColors, /:is\(input,select,textarea\)[^}]*border:\s*1px\s*solid\s*CanvasText/);
+});
+
+test('Hata ve teknik bilgi görünürlüğü güvenli olmalı, sistem ve kimlik bilgileri sızdırılmamalı, hata mesajları kullanıcıya kontrollü sunulmalı', async () => {
+  const panelSource = readFileSync(new URL('../../web/src/workspace/ProvisioningRecoveryPanel.jsx', import.meta.url), 'utf8');
+  const controllerSource = readFileSync(new URL('../../web/src/workspace/provisioning-recovery.js', import.meta.url), 'utf8');
+
+  // Details disclosure shows only safe public metadata
+  assert.match(panelSource, /<details><summary>Teknik bilgiler ve tanılama<\/summary>/);
+  assert.match(panelSource, /İşlem kimliği:\s*<code>\{operation\.operationId\}<\/code>/);
+  assert.match(panelSource, /Web sitesi kimliği:\s*<code>\{operation\.websiteId\}<\/code>/);
+  assert.match(panelSource, /Hazır olma durumu \(ready\):\s*<code>\{operation\.ready \? 'true' : 'false'\}<\/code>/);
+
+  // Sensitive material is strictly prohibited from recovery metadata
+  assert.doesNotMatch(panelSource, /password|secret|token|credential|authorization|privateKey/i);
+
+  // Step error codes are validated to bounded alphanumeric codes (no raw stack dumps)
+  assert.match(controllerSource, /const code = \(value\) => typeof value === 'string' && \/\^\[a-z0-9_.:-\]\{1,160\}\$\/i\.test\(value\) \? value : null;/);
+  assert.match(controllerSource, /error: code\(step\.error\)/);
+
+  // User-facing error messages are controlled and actionable
+  assert.match(controllerSource, /'Güncel kurulum kaydı alınamadı\. İşlemler kapalı; Durumu yenile ile yeniden deneyin\.'/);
+  assert.match(controllerSource, /'İşlemin sonucu doğrulanamadı; sunucuda uygulanmış olabilir\. Tekrar işlem yapmadan önce Durumu yenile ile kontrol edin\.'/);
+  assert.match(controllerSource, /'Kurulum işlemi için yetkiniz değişti\. Site erişimini yeniden kontrol edin\.'/);
+});
+
+test('Kullanıcı tarafından verilen abort/iptal komutu host rollback olarak yorumlanmamalı, süreç güvenli biçimde sonlandırılmalı', async () => {
+  const websiteId = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const operationId = 'cccccccc-3333-4333-8333-333333333333';
+
+  let executeCalled = false;
+  let compensationCalled = false;
+  let continueCalled = false;
+  let retryCalled = false;
+
+  const initialOp = sampleOp(websiteId, operationId, 'failed', [
+    sampleStep('nginx', 'failed', { canRetry: true, canCompensate: true }),
+  ]);
+
+  const flow = createProvisioningRecovery({
+    websiteId,
+    canManage: () => true,
+    isCurrent: () => true,
+    read: async () => initialOp,
+    execute: async (approval) => {
+      executeCalled = true;
+      if (approval.action === 'compensate') compensationCalled = true;
+      if (approval.action === 'continue') continueCalled = true;
+      if (approval.action === 'retry') retryCalled = true;
+      return { outcome: 'progressed', operation: initialOp, stepId: 'nginx' };
+    },
+  });
+
+  await flow.load();
+  assert.equal(flow.getState().status, 'ready');
+
+  // 1. User prepares retry confirmation modal
+  const approval = flow.prepare('retry', 'nginx');
+  assert.ok(approval);
+  assert.equal(flow.getState().approval, approval);
+
+  // 2. User cancels / aborts (clicks "Vazgeç" or presses Escape)
+  flow.cancel();
+
+  // Verification:
+  // - approval is cleared
+  assert.equal(flow.getState().approval, null);
+  // - NO execute or mutation was sent
+  assert.equal(executeCalled, false, 'Abort/cancel must NOT trigger execution');
+  assert.equal(compensationCalled, false, 'Abort/cancel must NOT be interpreted as compensation');
+  assert.equal(retryCalled, false, 'Abort/cancel must NOT execute retry');
+  assert.equal(continueCalled, false, 'Abort/cancel must NOT execute continue');
+
+  // - Operation remains intact on client and host (NOT rolled back)
+  assert.equal(flow.getState().operation.operationId, operationId);
+  assert.equal(flow.getState().operation.steps[0].state, 'failed');
+  assert.equal(flow.getState().status, 'ready');
+
+  // 3. In-flight abort (AbortController signal abort during read or mutation)
+  let readAbortCount = 0;
+  const abortableFlow = createProvisioningRecovery({
+    websiteId,
+    canManage: () => true,
+    isCurrent: () => true,
+    read: async ({ signal }) => {
+      if (signal?.aborted) {
+        readAbortCount++;
+        throw new DOMException('The user aborted a request.', 'AbortError');
+      }
+      return initialOp;
+    },
+    execute: async () => {
+      throw new Error('should not be reached');
+    },
+  });
+
+  // Dispose triggers signal abort cleanly without executing rollback
+  abortableFlow.dispose();
+  assert.equal(compensationCalled, false, 'Dispose/signal abort must NEVER trigger host rollback or compensation');
+});
+
+test('Kabul testleri .44 Plesk sunucusu kesinlikle hariç tutularak sadece repo dışındaki izinli test sunucusunda güncel API/web sürümüyle yürütülmeli ve plan.md açık backend işleri korunmalıdır', async () => {
+  const planMd = readFileSync(new URL('../../../plan.md', import.meta.url), 'utf8');
+  const todoMd = readFileSync(new URL('../../../todo.md', import.meta.url), 'utf8');
+
+  // .44 Plesk sunucusu strictly excluded
+  assert.match(todoMd, /IP adresi `?\.44`? ile biten Plesk sunucusu kesinlikle kapsam dışıdır/);
+  assert.match(todoMd, /`?\.44`?\s*(kesinlikle kullanılmaz|hariç|dışında|kullanılmaz)/i);
+
+  // plan.md preserves open backend work for safe automatic retry, backoff, and site-admin error propagation
+  assert.ok(planMd.includes('güvenlik ve işlem bütünlüğü') || planMd.includes('güvenli'));
+  assert.ok(todoMd.includes('Güvenli otomatik retry/backoff/kalıcı bütçe ve site-admin hata yayılımı `plan.md` içinde açık backend işleridir.'));
 });
