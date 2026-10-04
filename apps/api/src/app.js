@@ -222,6 +222,39 @@ import {
   ResellerBrandingDeferredError,
   CapabilityRegistryError,
 } from './non-reseller-capabilities.js';
+import {
+  mountOsExternalParityRoutes,
+  OS_EQUIVALENCE_INVENTORY,
+  EXTERNAL_PARITY_INVENTORY,
+  DEFERRED_BILLING_INVENTORY,
+  FORBIDDEN_BILLING_KEYS,
+  assertNoResellerBillingPollution,
+  assertResellerBillingDeferred,
+  assertPreserveLinuxTenantIsolation,
+  OsEquivalenceError,
+  ExternalIntegrationError,
+  ResellerBillingDeferredError,
+  LinuxIsolationViolationError,
+  WindowsPlatformAdapter,
+  IisWebAdapter,
+  DotNetRuntimeAdapter,
+  MssqlDatabaseAdapter,
+  NtfsPermissionAdapter,
+  WindowsMailDnsAdapter,
+  CommercialCertificateAdapter,
+  SitejetBuilderAdapter,
+  PremiumSecurityAdapter,
+  PremiumBackupAdapter,
+  PremiumToolkitAdapter,
+  DomainRegistrarAdapter,
+  createDefaultOsAdapters,
+  createDefaultExternalAdapters,
+  getOsEquivalenceAdapter,
+  listOsEquivalenceAdapters,
+  getExternalParityAdapter,
+  listExternalParityAdapters,
+  listDeferredBillingItems,
+} from './os-external-parity.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -264,6 +297,39 @@ export {
   ResellerBrandingDeferredError,
   CapabilityRegistryError,
 } from './non-reseller-capabilities.js';
+export {
+  mountOsExternalParityRoutes,
+  OS_EQUIVALENCE_INVENTORY,
+  EXTERNAL_PARITY_INVENTORY,
+  DEFERRED_BILLING_INVENTORY,
+  FORBIDDEN_BILLING_KEYS,
+  assertNoResellerBillingPollution,
+  assertResellerBillingDeferred,
+  assertPreserveLinuxTenantIsolation,
+  OsEquivalenceError,
+  ExternalIntegrationError,
+  ResellerBillingDeferredError,
+  LinuxIsolationViolationError,
+  WindowsPlatformAdapter,
+  IisWebAdapter,
+  DotNetRuntimeAdapter,
+  MssqlDatabaseAdapter,
+  NtfsPermissionAdapter,
+  WindowsMailDnsAdapter,
+  CommercialCertificateAdapter,
+  SitejetBuilderAdapter,
+  PremiumSecurityAdapter,
+  PremiumBackupAdapter,
+  PremiumToolkitAdapter,
+  DomainRegistrarAdapter,
+  createDefaultOsAdapters,
+  createDefaultExternalAdapters,
+  getOsEquivalenceAdapter,
+  listOsEquivalenceAdapters,
+  getExternalParityAdapter,
+  listExternalParityAdapters,
+  listDeferredBillingItems,
+} from './os-external-parity.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -1009,6 +1075,7 @@ export function createApp(allOptions = {}) {
     exitGateService: productionExitGateService,
   });
   mountNonResellerCapabilitiesRoutes(app);
+  mountOsExternalParityRoutes(app);
 
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({

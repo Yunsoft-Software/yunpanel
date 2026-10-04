@@ -39,7 +39,7 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 - **PAR-02 / RS-03–05 — Basit Customer/Reseller yönetiminde kalan kabul:**
 - **PAR-03 — Sonraki faz, MVP engeli değil:** hosting/reseller paket motoru, add-on, Subscription lifecycle/expiry, overselling, sync/lock/customization ve kapsamlı sahiplik transferi. Yeni kullanıcı kararı olmadan ilk sürüme geri taşınmaz; tamamlandı işareti verilmez. Site seviyesindeki gerçek limitler PROD-15'te kalır.
 - [x] **PAR-04 — Reseller dışındaki kalan işlevler (2026-10-04):** DNS/mail/DB/runtime/Docker/Git/WP/Laravel/backup/security/API/CLI/migration görevleri envanter ID'leriyle korundu; B-E görev bağlantıları ve non-reseller yetenek kataloğu bağlandı; reseller markalama sonraki faza ertelendi; kiracı sınırları fail-closed doğrulandı.
-- [ ] **PAR-05 — OS ve premium/harici eşdeğerlik hatları.** Windows/IIS/.NET/MSSQL/NTFS; ticari sertifika, Sitejet/site-builder, premium security/backup/toolkit ve registrar entegrasyonları. Reseller fatura/abonelik otomasyonu ilk sürümden sonradır. Her satır kendi adapter/lisans/kabulüyle kapanır; Ubuntu veya basit link tüm özellik karşılığı değildir.
+- [x] **PAR-05 — OS ve premium/harici eşdeğerlik hatları (2026-10-04):** Windows/IIS/.NET/MSSQL/NTFS adaptör sözleşmeleri ve işletim sistemi sınırları Linux tenant izolasyonunu koruyacak şekilde fail-closed tanımlandı; ticari sertifika, Sitejet, premium güvenlik/yedekleme/araç kiti ve domain registrar harici yaşam döngüsü sözleşmeleri bağlandı; yapılandırılmamış/desteklenmeyen hatlar fail-closed kapatıldı; reseller faturalama ve abonelik otomasyonu ilk sürüm MVP engeli olmaksızın sonraki faza ertelendi.
 
 ## Uygulama ve kapanış
 
