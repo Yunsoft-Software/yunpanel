@@ -10,11 +10,12 @@ const CODES = Object.freeze({
   auth_busy: 'site_admin_busy',
   website_not_found: 'site_admin_website_deleted',
   forbidden: 'site_admin_actor_forbidden',
+  invalid_credentials: 'site_admin_actor_forbidden',
   auth_store_locked: 'site_admin_locked',
   store_locked: 'site_admin_locked',
 });
 
-export async function provisionSiteAdmin({ input, result, userAdminStore, actorId } = {}) {
+export async function provisionSiteAdmin({ input, result, userAdminStore, actorId, ...extra } = {}) {
   const websiteId = typeof result?.website?.id === 'string' && UUID.test(result.website.id) ? result.website.id : null;
   const outcome = (status, code = null) => Object.freeze({ status, websiteId, code });
   if (input?.siteAdmin == null) return outcome('not_requested');
@@ -31,7 +32,12 @@ export async function provisionSiteAdmin({ input, result, userAdminStore, actorI
   if (typeof actorId !== 'string' || !actorId || actorId.length > 128) return outcome('attention', 'site_admin_actor_unavailable');
   if (typeof userAdminStore?.createSiteManager !== 'function') return outcome('attention', 'site_admin_unavailable');
   try {
-    const user = await userAdminStore.createSiteManager({ username, password: input.siteAdmin.password, websiteId, actorId });
+    const callArgs = { username, password: input.siteAdmin.password, websiteId, actorId };
+    if (extra.operationId !== undefined) callArgs.operationId = extra.operationId;
+    if (extra.rawToken !== undefined) callArgs.rawToken = extra.rawToken;
+    if (extra.requireManagement !== undefined) callArgs.requireManagement = extra.requireManagement;
+    if (extra.websiteLookup !== undefined) callArgs.websiteLookup = extra.websiteLookup;
+    const user = await userAdminStore.createSiteManager(callArgs);
     if (!record(user) || typeof user.id !== 'string' || !UUID.test(user.id)
       || user.username !== username || user.role !== 'site_manager' || user.active !== true
       || !Array.isArray(user.websiteIds) || user.websiteIds.length !== 1 || user.websiteIds[0] !== websiteId) {
