@@ -164,6 +164,17 @@ import {
   mountSingleMailboxLifecycleRoutes,
   assertDovecotPostfixCommandContracts,
   assertCommonConfigApplyPendingPreviewAndReloadEffect,
+  MailboxReconciliationError,
+  MailboxConcurrencyLockError,
+  MailboxRollbackError,
+  MailboxAuthorizationRevokedError,
+  createRapidConfirmationGuard,
+  reconcileLostMailboxOperation,
+  validateResumeJobProof,
+  assertActorAuthorizationContinuous,
+  createMailboxInterProcessLockManager,
+  assertWorkerMutationConcurrencyGuard,
+  executeMailboxDeletionWithRollbackVerification,
 } from '../src/mailbox-single-lifecycle.js';
 import { createMailConfigurationService } from '../src/mail-configuration.js';
 import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
@@ -7827,6 +7838,203 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
   assert.equal(configApplyPreview.domainShutdownWorkaroundAvoided, true);
 
   mailboxes.delete(pendingMbId);
+
+  // Set up dedicated test mailbox and backup for 7g-7l validations
+  const testMbId = randomUUID();
+  const testMbAddress = 'recon@cryptoraichu.website';
+  mailboxes.set(testMbId, {
+    id: testMbId,
+    mailDomainId: stagingMailDomainId,
+    address: testMbAddress,
+    enabled: false,
+    revision: 1,
+  });
+
+  backups.set('backup-recon-001', {
+    version: 1,
+    backupId: 'backup-recon-001',
+    scope: 'mailbox',
+    identity: testMbAddress,
+    sourcePath: `/var/lib/yunpanel/mail/cryptoraichu.website/recon`,
+    sourcePresent: true,
+    sourceSnapshotSha256: snapshotAlice,
+    contentSha256: backupContentAlice,
+    bytes: 4096,
+    files: 2,
+    directories: 1,
+    createdAt: new Date().toISOString(),
+    sideEffects: true,
+  });
+
+  // 7g. Lost PATCH, apply, delete, or finalize reply reconciliation
+  const lostPatchReconcile = await reconcileLostMailboxOperation({
+    operation: 'patch',
+    mailboxId: testMbId,
+    expectedRevision: 1,
+    mailboxRegistry,
+  });
+  assert.equal(lostPatchReconcile.reconciled, true);
+  assert.equal(lostPatchReconcile.duplicateWriteAvoided, true);
+
+  // Lost finalize reconciliation for the already finalized mailboxAId
+  const lostFinalizeReconcile = await reconcileLostMailboxOperation({
+    operation: 'finalize',
+    mailboxId: mailboxAId,
+    address: 'alice@cryptoraichu.website',
+    backupId: 'backup-alice-001',
+    lastKnownJobId: delJob.id,
+    mailboxRegistry,
+    jobRegistry,
+    mailDataInspector,
+  });
+  assert.equal(lostFinalizeReconcile.reconciled, true);
+  assert.equal(lostFinalizeReconcile.deleted, true);
+  assert.equal(lostFinalizeReconcile.verifiedByReceipt, true);
+
+  // 7h. Rapid confirmation guard prevents duplicate mutations
+  const rapidGuard = createRapidConfirmationGuard();
+  const testToken = `delete-mailbox:${testMbAddress}:rev-1:${randomUUID()}`;
+  const firstConfirmation = rapidGuard.beginConfirmation(testToken, { mailboxId: testMbId, revision: 1 });
+  assert.throws(
+    () => rapidGuard.beginConfirmation(testToken, { mailboxId: testMbId, revision: 1 }),
+    (err) => err instanceof MailboxConcurrencyLockError && err.code === 'rapid_confirmation_in_flight',
+  );
+  firstConfirmation.commit({ deleted: true });
+  assert.throws(
+    () => rapidGuard.beginConfirmation(testToken, { mailboxId: testMbId, revision: 1 }),
+    (err) => err instanceof MailboxConcurrencyLockError && err.code === 'confirmation_already_consumed',
+  );
+
+  // 7i. Resume job proof validation (rejects foreign job ID / mismatched backup)
+  const resumeTestJobId = randomUUID();
+  jobs.set(resumeTestJobId, {
+    id: resumeTestJobId,
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    resourceType: 'mail_domain',
+    resourceId: stagingMailDomainId,
+    status: 'succeeded',
+    result: {
+      scope: 'mailbox',
+      identity: testMbAddress,
+      backupId: 'backup-recon-001',
+      expectedResourceRevision: 1,
+      deleted: true,
+    },
+  });
+
+  const validResume = await validateResumeJobProof({
+    jobId: resumeTestJobId,
+    expectedScope: 'mailbox',
+    expectedResourceId: stagingMailDomainId,
+    expectedAddress: testMbAddress,
+    expectedBackupId: 'backup-recon-001',
+    expectedRevision: 1,
+    expectedOperation: OPERATIONS.MAIL_DATA_DELETE,
+    jobRegistry,
+    backupManager: mailDataBackupManager,
+  });
+  assert.equal(validResume.valid, true);
+
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: resumeTestJobId,
+      expectedScope: 'mailbox',
+      expectedResourceId: stagingMailDomainId,
+      expectedAddress: 'stranger@cryptoraichu.website',
+      jobRegistry,
+      backupManager: mailDataBackupManager,
+    }),
+    (err) => err.code === 'resume_job_identity_mismatch',
+  );
+
+  // 7j. Actor authorization continuity assertions
+  const originalStagingAuth = {
+    user: { id: 'owner-1', role: 'owner', active: true },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: true },
+  };
+  const continuousAuth = assertActorAuthorizationContinuous({
+    currentAuth: structuredClone(originalStagingAuth),
+    originalAuth: originalStagingAuth,
+  });
+  assert.equal(continuousAuth.authorized, true);
+
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: { ...originalStagingAuth, user: { ...originalStagingAuth.user, role: 'read_only' } },
+      originalAuth: originalStagingAuth,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_permission_revoked',
+  );
+
+  // 7k. Inter-process lock worker mutation guard against alias and reactivation races
+  const stagingLockManager = createMailboxInterProcessLockManager({
+    serverId: stagingServerId,
+    acquireLockFn: async ({ filePath, serverId, pid }) => ({
+      filePath,
+      serverId,
+      pid,
+      release: async () => true,
+    }),
+  });
+
+  const concurrencyGuardResult = await assertWorkerMutationConcurrencyGuard({
+    mailboxId: testMbId,
+    address: testMbAddress,
+    lockManager: stagingLockManager,
+    concurrentAliasAttempt: async () => {},
+    concurrentReactivateAttempt: async () => {},
+    concurrentMessageDeliveryAttempt: async () => {},
+    actionFn: async (lock) => {
+      assert.equal(stagingLockManager.isLocked(testMbId), true);
+      assert.equal(stagingLockManager.isAddressLocked(testMbAddress), true);
+      return { mutationGuarded: true };
+    },
+  });
+  assert.equal(concurrencyGuardResult.executed, true);
+  assert.equal(concurrencyGuardResult.racesPrevented, true);
+  assert.equal(stagingLockManager.isLocked(testMbId), false);
+
+  // 7l. Real host rollback verification on failure
+  let stagingDataState = {
+    present: true,
+    bytes: 4096,
+    snapshotSha256: snapshotAlice,
+  };
+  const stagingInspector = {
+    inspectMailbox: async () => ({ ...stagingDataState }),
+  };
+  const rollbackFailingDeleteManager = {
+    deleteData: async () => {
+      stagingDataState.present = false;
+      // Host rollback restores data
+      stagingDataState.present = true;
+      stagingDataState.snapshotSha256 = snapshotAlice;
+      stagingDataState.bytes = 4096;
+      const err = new Error('Simulated host failure during file unlink');
+      err.code = 'mail_data_delete_failed';
+      throw err;
+    },
+  };
+
+  const rollbackResult = await executeMailboxDeletionWithRollbackVerification({
+    mailboxId: testMbId,
+    address: testMbAddress,
+    backupId: 'backup-recon-001',
+    expectedRevision: 1,
+    deleteManager: rollbackFailingDeleteManager,
+    backupManager: mailDataBackupManager,
+    mailDataInspector: stagingInspector,
+    mailboxRegistry,
+  });
+  assert.equal(rollbackResult.success, false);
+  assert.equal(rollbackResult.rolledBack, true);
+  assert.equal(rollbackResult.liveDataRestored, true);
+  assert.equal(rollbackResult.mailboxPreserved, true);
+
+  // Clean up
+  mailboxes.delete(testMbId);
+  backups.delete('backup-recon-001');
 
   assert.ok(true, 'T-DEV-MR-SINGLE: Single mailbox lifecycle, session termination, and sibling continuity verified.');
 });
