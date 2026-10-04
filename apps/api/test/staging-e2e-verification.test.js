@@ -162,7 +162,10 @@ import {
   assertSiblingMailboxContinuity,
   createSingleMailboxLifecycleCoordinator,
   mountSingleMailboxLifecycleRoutes,
+  assertDovecotPostfixCommandContracts,
+  assertCommonConfigApplyPendingPreviewAndReloadEffect,
 } from '../src/mailbox-single-lifecycle.js';
+import { createMailConfigurationService } from '../src/mail-configuration.js';
 import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
 import { createMailDataOperationsService, MailDataOperationsError } from '../src/mail-data-operations.js';
 import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../src/mail-delete-finalize.js';
@@ -7109,6 +7112,13 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
       mailboxes.delete(id);
       return { id, deleted: true };
     },
+    async materializeEnabledAccounts() {
+      const HASH = '$argon2id$v=19$m=65536,t=3,p=1$' + Buffer.alloc(16, 5).toString('base64').replace(/=+$/, '') + '$' + Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '');
+      return [...mailboxes.values()]
+        .filter((m) => m.enabled)
+        .sort((a, b) => a.address.localeCompare(b.address))
+        .map((m) => ({ address: m.address, passwordHash: HASH }));
+    },
   };
 
   const mailDomainRegistry = {
@@ -7139,6 +7149,9 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
         return aliases.filter((a) => a.mailDomainId === filter.mailDomainId).map((a) => structuredClone(a));
       }
       return aliases.map((a) => structuredClone(a));
+    },
+    async materializeEnabledAliases() {
+      return [];
     },
   };
 
@@ -7769,6 +7782,51 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
   mailboxes.delete(testBoxId);
   mailboxDataStore.delete('test-enabled@cryptoraichu.website');
   backups.delete('backup-test-01');
+
+  // 7e. Field-only lookup, absence exit codes, cache flush, and single-user kick/who in real Dovecot/Postfix contracts
+  const dovecotPostfixContracts = await assertDovecotPostfixCommandContracts({
+    run: commandRunner,
+    targetAddress: 'alice@cryptoraichu.website',
+  });
+  assert.equal(dovecotPostfixContracts.identity, 'alice@cryptoraichu.website');
+  assert.equal(dovecotPostfixContracts.contractsVerified, true);
+  assert.equal(dovecotPostfixContracts.quiesced.accessDisabled, true);
+  assert.equal(dovecotPostfixContracts.quiesced.sessionsCleared, true);
+
+  // 7f. Common config apply with pending changes & reload effect without whole-domain shutdown workaround
+  const stagingMailConfigService = createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+  });
+
+  const pendingMbId = randomUUID();
+  mailboxes.set(pendingMbId, {
+    id: pendingMbId,
+    mailDomainId: stagingMailDomainId,
+    address: 'charlie@cryptoraichu.website',
+    enabled: true,
+    revision: 1,
+  });
+
+  const configApplyPreview = await assertCommonConfigApplyPendingPreviewAndReloadEffect({
+    mailConfigurationService: stagingMailConfigService,
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailDomainId: stagingMailDomainId,
+    targetMailboxId: mailboxAId,
+    otherPendingMailboxId: pendingMbId,
+  });
+
+  assert.equal(configApplyPreview.domainStatus, 'enabled');
+  assert.equal(configApplyPreview.targetExcluded, true);
+  assert.equal(configApplyPreview.pendingIncluded, true);
+  assert.equal(configApplyPreview.accountsCount, 2);
+  assert.ok(configApplyPreview.configurationSha256);
+  assert.ok(configApplyPreview.previewDigest);
+  assert.equal(configApplyPreview.domainShutdownWorkaroundAvoided, true);
+
+  mailboxes.delete(pendingMbId);
 
   assert.ok(true, 'T-DEV-MR-SINGLE: Single mailbox lifecycle, session termination, and sibling continuity verified.');
 });

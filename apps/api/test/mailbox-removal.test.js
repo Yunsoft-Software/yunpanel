@@ -29,6 +29,22 @@ import {
   mountMailboxRoutes,
 } from '../src/mailbox-http.js';
 import {
+  createSingleMailboxLifecycleCoordinator,
+  createMailboxProtocolSessionTracker,
+  createMailboxAccessGuard,
+  MailboxAccessError,
+  mailboxAccessInternals,
+  assertDovecotPostfixCommandContracts,
+  assertCommonConfigApplyPendingPreviewAndReloadEffect,
+} from '../src/mailbox-single-lifecycle.js';
+import {
+  createMailConfigurationService,
+  MailConfigurationError,
+} from '../src/mail-configuration.js';
+import {
+  recoverRunningMailData,
+} from '../src/job-running-mail-data-recovery.js';
+import {
   MailboxRegistryError,
 } from '../src/mailbox-registry.js';
 import {
@@ -1732,5 +1748,345 @@ test('Criterion 5: Finalization and cleanup of mailbox registry records', async 
       confirmation: validConfirmation,
     }),
     (err) => err instanceof MailDeleteFinalizeError && err.code === 'mailbox_not_found' && err.status === 404
+  );
+});
+
+test('Criterion 6: Field-only lookup, strict absence exit codes, cache flush, and single-user kick/who in real Dovecot/Postfix contracts without accepting errors or unmanaged configs as absence', async () => {
+  const targetAddress = 'alice@example.com';
+  const siblingAddress = 'bob@example.com';
+
+  const executedCommands = [];
+  const validMockRunner = async (file, args) => {
+    executedCommands.push({ file, args });
+    const fullCmd = `${file} ${args.join(' ')}`;
+
+    // 1. Postfix managed lookups verification
+    if (file === '/usr/sbin/postconf') {
+      if (args[0] === '-h' && args[1] === 'virtual_mailbox_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf', stderr: '' };
+      }
+      if (args[0] === '-h' && args[1] === 'smtpd_sender_login_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+      }
+      throw new Error(`Unexpected postconf parameter: ${args[1]}`);
+    }
+
+    // 2. Postfix postmap absence query
+    if (file === '/usr/sbin/postmap') {
+      assert.equal(args[0], '-q');
+      const queriedAddress = args[1];
+      if (queriedAddress === targetAddress) {
+        // Strict absence: exit code 1 with empty stdout and stderr
+        const err = new Error('not found');
+        err.code = 1;
+        err.stdout = '';
+        err.stderr = '';
+        throw err;
+      }
+      // If someone queries sibling, it is present (exit 0)
+      return { stdout: siblingAddress, stderr: '' };
+    }
+
+    // 3. Dovecot commands
+    if (file === '/usr/bin/doveadm') {
+      const sub = args[0];
+
+      // Field-only passdb lookup: -f user
+      if (sub === 'auth' && args[1] === 'lookup') {
+        assert.ok(args.includes('-f'), 'Passdb lookup must be field-only');
+        assert.equal(args[args.indexOf('-f') + 1], 'user', 'Field-only passdb lookup must specify user');
+        const queriedAddress = args.at(-1);
+        if (queriedAddress === targetAddress) {
+          const err = new Error('user not found');
+          err.code = 67;
+          err.stdout = '';
+          err.stderr = `passdb lookup: user ${targetAddress} doesn't exist`;
+          throw err;
+        }
+        return { stdout: queriedAddress, stderr: '' };
+      }
+
+      // Field-only userdb lookup: -f uid
+      if (sub === 'user') {
+        assert.ok(args.includes('-f'), 'Userdb lookup must be field-only');
+        assert.equal(args[args.indexOf('-f') + 1], 'uid', 'Field-only userdb lookup must specify uid');
+        const queriedAddress = args.at(-1);
+        if (queriedAddress === targetAddress) {
+          const err = new Error('user not found');
+          err.code = 67;
+          err.stdout = '';
+          err.stderr = `userdb lookup: user ${targetAddress} doesn't exist`;
+          throw err;
+        }
+        return { stdout: '1000', stderr: '' };
+      }
+
+      // Cache flush
+      if (sub === 'auth' && args[1] === 'cache' && args[2] === 'flush') {
+        assert.equal(args[3], targetAddress, 'Cache flush must target only the specified address');
+        return { stdout: '3 cache entries flushed', stderr: '' };
+      }
+
+      // Kick user
+      if (sub === 'kick') {
+        assert.equal(args[1], targetAddress, 'Kick must target strictly the single chosen address');
+        assert.ok(!args.includes('-A'), 'Kick must never terminate all accounts with -A');
+        assert.ok(!args.includes('*'), 'Kick must never terminate with wildcard');
+        return { stdout: targetAddress, stderr: '' };
+      }
+
+      // Who active sessions
+      if (args.includes('who')) {
+        const queriedAddress = args.at(-1);
+        assert.equal(queriedAddress, targetAddress, 'Who must target only the specified address');
+        // No active sessions remaining
+        return { stdout: 'username\tproto\tpid\tip', stderr: '' };
+      }
+    }
+
+    throw new Error(`Unexpected command: ${fullCmd}`);
+  };
+
+  // Positive verification of Dovecot/Postfix contracts
+  const contractResult = await assertDovecotPostfixCommandContracts({
+    run: validMockRunner,
+    targetAddress,
+  });
+  assert.equal(contractResult.identity, targetAddress);
+  assert.equal(contractResult.contractsVerified, true);
+  assert.equal(contractResult.quiesced.accessDisabled, true);
+  assert.equal(contractResult.quiesced.sessionsCleared, true);
+
+  // Verify that Dovecot passdb field-only lookup used -f user across all services
+  const passdbLookups = executedCommands.filter((c) => c.file === '/usr/bin/doveadm' && c.args[0] === 'auth' && c.args[1] === 'lookup');
+  assert.equal(passdbLookups.length >= 8, true, 'Quiesce and verify must check all auth services');
+  for (const call of passdbLookups) {
+    const fIdx = call.args.indexOf('-f');
+    assert.equal(fIdx !== -1, true);
+    assert.equal(call.args[fIdx + 1], 'user');
+    assert.equal(call.args.at(-1), targetAddress);
+  }
+
+  // Verify that Dovecot userdb field-only lookup used -f uid across all services
+  const userdbLookups = executedCommands.filter((c) => c.file === '/usr/bin/doveadm' && c.args[0] === 'user');
+  assert.equal(userdbLookups.length >= 8, true, 'Quiesce and verify must check all userdb services');
+  for (const call of userdbLookups) {
+    const fIdx = call.args.indexOf('-f');
+    assert.equal(fIdx !== -1, true);
+    assert.equal(call.args[fIdx + 1], 'uid');
+    assert.equal(call.args.at(-1), targetAddress);
+  }
+
+  // Verify kick and who strictly isolated to targetAddress
+  const kicks = executedCommands.filter((c) => c.file === '/usr/bin/doveadm' && c.args[0] === 'kick');
+  assert.equal(kicks.length, 1);
+  assert.deepEqual(kicks[0].args, ['kick', targetAddress]);
+
+  // Negative tests: error codes or unmanaged config MUST NEVER be accepted as absence
+  // 1. Postconf unmanaged config map
+  const unmanagedRunner = async (file, args) => {
+    if (file === '/usr/sbin/postconf') {
+      return { stdout: 'hash:/etc/postfix/unmanaged_map', stderr: '' };
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: unmanagedRunner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_configuration_unverified'
+  );
+
+  // 2. Postmap exit code 75 (tempfail / sqlite error)
+  const postmap75Runner = async (file, args) => {
+    if (file === '/usr/sbin/postmap') {
+      const err = new Error('temporary failure');
+      err.code = 75;
+      err.stdout = '';
+      err.stderr = 'postmap: fatal: sqlite table error';
+      throw err;
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: postmap75Runner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_check_failed'
+  );
+
+  // 3. Dovecot auth lookup exit code 75 (tempfail / missing dovecot.conf)
+  const doveadmAuth75Runner = async (file, args) => {
+    if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'lookup') {
+      const err = new Error('doveadm auth tempfail');
+      err.code = 75;
+      err.stdout = '';
+      err.stderr = 'stat(/etc/dovecot/dovecot.conf) failed: No such file or directory';
+      throw err;
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: doveadmAuth75Runner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_check_failed'
+  );
+
+  // 4. Dovecot userdb lookup exit code 75
+  const doveadmUser75Runner = async (file, args) => {
+    if (file === '/usr/bin/doveadm' && args[0] === 'user') {
+      const err = new Error('userdb tempfail');
+      err.code = 75;
+      err.stdout = '';
+      err.stderr = 'doveadm(user): fatal: userdb lookup service unavailable';
+      throw err;
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: doveadmUser75Runner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_check_failed'
+  );
+
+  // 5. Postmap exit code 0 (account still enabled in postfix)
+  const postmapEnabledRunner = async (file, args) => {
+    if (file === '/usr/sbin/postmap') {
+      return { stdout: 'user@example.com', stderr: '' };
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: postmapEnabledRunner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_still_enabled'
+  );
+
+  // 6. Cache flush invalid output format
+  const badFlushRunner = async (file, args) => {
+    if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'cache' && args[2] === 'flush') {
+      return { stdout: 'failed to flush cache', stderr: '' };
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: badFlushRunner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_cache_unverified'
+  );
+
+  // 7. Active sessions remaining after kick
+  const remainingSessionRunner = async (file, args) => {
+    if (file === '/usr/bin/doveadm' && args.includes('who')) {
+      return { stdout: 'username\tproto\tpid\tip\nalice@example.com\timap\t1234\t10.0.0.1', stderr: '' };
+    }
+    return validMockRunner(file, args);
+  };
+  await assert.rejects(
+    assertDovecotPostfixCommandContracts({ run: remainingSessionRunner, targetAddress }),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_sessions_remaining'
+  );
+});
+
+test('Criterion 7: Common config apply previews all recorded pending changes and proves service reload effect without whole-domain shutdown workaround', async () => {
+  const domainId = 'domain-shared-01';
+  const targetMailboxId = 'mb-target-01';
+  const siblingMailboxId = 'mb-sibling-02';
+  const pendingMailboxId = 'mb-pending-03';
+  const domainName = 'example.com';
+
+  const domain = {
+    id: domainId,
+    domainName,
+    managementMode: 'local',
+    status: 'enabled',
+    revision: 3,
+  };
+
+  const mailboxes = new Map([
+    [targetMailboxId, {
+      id: targetMailboxId,
+      mailDomainId: domainId,
+      address: 'target@example.com',
+      enabled: false, // Disabled pending deletion
+      revision: 2,
+    }],
+    [siblingMailboxId, {
+      id: siblingMailboxId,
+      mailDomainId: domainId,
+      address: 'sibling@example.com',
+      enabled: true,
+      revision: 1,
+    }],
+    [pendingMailboxId, {
+      id: pendingMailboxId,
+      mailDomainId: domainId,
+      address: 'pending-new@example.com',
+      enabled: true,
+      revision: 1,
+    }],
+  ]);
+
+  const passwordHash = '$argon2id$v=19$m=65536,t=3,p=1$' + Buffer.alloc(16, 5).toString('base64').replace(/=+$/, '') + '$' + Buffer.alloc(32, 6).toString('base64').replace(/=+$/, '');
+
+  const mailDomainRegistry = {
+    getMailDomain: async (id) => (id === domain.id ? { ...domain } : null),
+    listMailDomains: async () => [{ ...domain }],
+  };
+
+  const mailboxRegistry = {
+    getMailbox: async (id) => (mailboxes.has(id) ? { ...mailboxes.get(id) } : null),
+    listMailboxes: async () => [...mailboxes.values()].map((m) => ({ ...m })),
+    materializeEnabledAccounts: async () =>
+      [...mailboxes.values()]
+        .filter((m) => m.enabled)
+        .map((m) => ({ address: m.address, passwordHash })),
+    setEnabled: async (id, { expectedRevision, enabled }) => {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new Error('not found');
+      mb.enabled = enabled;
+      mb.revision = expectedRevision + 1;
+      return { ...mb };
+    },
+  };
+
+  const mailAliasRegistry = {
+    materializeEnabledAliases: async () => [{ source: 'info@example.com', destinations: ['sibling@example.com'] }],
+  };
+
+  const mailConfigurationService = createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+  });
+
+  // 1. Verify common config apply preview includes pending changes and proves reload effect
+  // Domain status remains 'enabled'! Target is excluded, pending mailbox is included.
+  const previewResult = await assertCommonConfigApplyPendingPreviewAndReloadEffect({
+    mailConfigurationService,
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailDomainId: domainId,
+    targetMailboxId,
+    otherPendingMailboxId: pendingMailboxId,
+  });
+
+  assert.equal(previewResult.domainStatus, 'enabled');
+  assert.equal(previewResult.targetExcluded, true);
+  assert.equal(previewResult.pendingIncluded, true);
+  assert.equal(previewResult.accountsCount, 2); // sibling + pending-new
+  assert.ok(previewResult.configurationSha256);
+  assert.ok(previewResult.previewDigest);
+  assert.equal(previewResult.domainShutdownWorkaroundAvoided, true);
+
+  // 2. Reject domain shutdown workaround if domain status is changed to disabled
+  const disabledDomain = { ...domain, status: 'disabled' };
+  const disruptedDomainRegistry = {
+    getMailDomain: async (id) => (id === domain.id ? { ...disabledDomain } : null),
+    listMailDomains: async () => [{ ...disabledDomain }],
+  };
+  await assert.rejects(
+    async () => assertCommonConfigApplyPendingPreviewAndReloadEffect({
+      mailConfigurationService,
+      mailDomainRegistry: disruptedDomainRegistry,
+      mailboxRegistry,
+      mailDomainId: domainId,
+      targetMailboxId,
+      otherPendingMailboxId: pendingMailboxId,
+    }),
+    (err) => err.code === 'domain_workaround_detected',
+    'Domain shutdown workaround must be detected and rejected'
   );
 });

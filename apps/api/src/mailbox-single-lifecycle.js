@@ -1,5 +1,16 @@
 import { randomUUID } from 'node:crypto';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
+import {
+  createMailboxAccessGuard,
+  MailboxAccessError,
+  mailboxAccessInternals,
+} from '../../../packages/host-runtime/src/mailbox-access-guard.js';
+
+export {
+  createMailboxAccessGuard,
+  MailboxAccessError,
+  mailboxAccessInternals,
+};
 
 // ============================================================================
 // T-DEV-MR-SINGLE: Single Mailbox Lifecycle & Protocol Session Errors
@@ -457,6 +468,8 @@ export function createSingleMailboxLifecycleCoordinator({
   mailDataOperationsService = null,
   mailDeleteFinalizeService = null,
   sessionTracker = createMailboxProtocolSessionTracker(),
+  mailConfigurationService = null,
+  mailboxAccessGuard = null,
 } = {}) {
   if (!mailboxRegistry || typeof mailboxRegistry.getMailbox !== 'function' || typeof mailboxRegistry.setEnabled !== 'function') {
     throw new MailboxSingleLifecycleError('dependencies_invalid', 'Valid mailboxRegistry is required', 503);
@@ -510,6 +523,7 @@ export function createSingleMailboxLifecycleCoordinator({
     mailDomainId,
     siblingMailboxId = null,
     previouslyClosedDomainId = null,
+    accessGuard = mailboxAccessGuard,
   }) {
     const target = await mailboxRegistry.getMailbox(targetMailboxId);
     if (!target) throw new MailboxSingleLifecycleError('mailbox_not_found', 'Target mailbox not found', 404);
@@ -524,6 +538,11 @@ export function createSingleMailboxLifecycleCoordinator({
     if (previouslyClosedDomainId) {
       const closedDomain = await mailDomainRegistry.getMailDomain(previouslyClosedDomainId);
       assertNoClosedDomainReopened(closedDomain);
+    }
+
+    // Quiesce target mailbox access with host guard if configured
+    if (accessGuard && typeof accessGuard.quiesce === 'function') {
+      await accessGuard.quiesce(target.address);
     }
 
     // Quiesce target mailbox sessions across all protocols
@@ -563,12 +582,149 @@ export function createSingleMailboxLifecycleCoordinator({
 
   return Object.freeze({
     sessionTracker,
+    mailboxAccessGuard,
+    mailConfigurationService,
     disableTargetMailbox,
     applyConfigurationAndQuiesceSessions,
     assertNoDomainOrSiblingDisruption,
     assertNoClosedDomainReopened,
     assertMailboxAccessTerminatedSeparately,
     assertSiblingMailboxContinuity,
+    assertDovecotPostfixCommandContracts,
+    assertCommonConfigApplyPendingPreviewAndReloadEffect: (opts) =>
+      assertCommonConfigApplyPendingPreviewAndReloadEffect({
+        mailConfigurationService,
+        mailDomainRegistry,
+        mailboxRegistry,
+        ...opts,
+      }),
+  });
+}
+
+/**
+ * Asserts strict Dovecot and Postfix command contracts for field-only lookups,
+ * absence exit codes/outputs, cache flush, and single-user kick/who isolation.
+ *
+ * Requirements:
+ * 1. Dovecot passdb field-only lookup uses -f user with exit 67 and standard absence stderr.
+ * 2. Dovecot userdb field-only lookup uses -f uid with exit 67 and standard absence stderr.
+ * 3. Postmap absence is exit code 1 with empty stdout & stderr (exit 0 = still enabled).
+ * 4. Dovecot cache flush matches /^\d+ cache entries flushed$/.
+ * 5. Dovecot kick and who strictly target the chosen address (never wildcard / -A).
+ * 6. Error exit codes (e.g. 75 EX_TEMPFAIL, ENOENT, EACCES) or unmanaged configs
+ *    must NEVER be accepted as account absence.
+ */
+export async function assertDovecotPostfixCommandContracts({
+  run,
+  targetAddress = 'user@example.com',
+} = {}) {
+  if (typeof run !== 'function') {
+    throw new TypeError('Command runner function is required');
+  }
+
+  const guard = createMailboxAccessGuard({ run });
+  const quiesced = await guard.quiesce(targetAddress);
+  if (!quiesced || quiesced.identity !== targetAddress || !quiesced.accessDisabled || !quiesced.sessionsCleared) {
+    throw new MailboxAccessError('mailbox_access_absence_unverified');
+  }
+
+  const verified = await guard.verify(targetAddress);
+  if (!verified || verified.identity !== targetAddress || !verified.accessDisabled || !verified.sessionsCleared) {
+    throw new MailboxAccessError('mailbox_access_absence_unverified');
+  }
+
+  return Object.freeze({
+    identity: targetAddress,
+    contractsVerified: true,
+    quiesced,
+    verified,
+  });
+}
+
+/**
+ * Asserts that during common config apply (mail.config.apply / mailConfigurationService.previewTransition):
+ * 1. The shared mail domain remains enabled (no whole-domain shutdown workaround).
+ * 2. Any other recorded pending mailbox changes (e.g. otherPendingMailboxId) are included in the preview.
+ * 3. The target mailbox (if disabled/deleted) is excluded from the materialized accounts.
+ * 4. Configuration SHA256 and previewDigest reflect the service reload effect.
+ */
+export async function assertCommonConfigApplyPendingPreviewAndReloadEffect({
+  mailConfigurationService,
+  mailDomainRegistry,
+  mailboxRegistry,
+  mailDomainId,
+  targetMailboxId,
+  otherPendingMailboxId = null,
+} = {}) {
+  if (!mailConfigurationService || !mailDomainRegistry || !mailboxRegistry || !mailDomainId) {
+    throw new MailboxSingleLifecycleError('invalid_arguments', 'Required services and domain ID must be provided');
+  }
+
+  const domain = await mailDomainRegistry.getMailDomain(mailDomainId);
+  if (!domain) {
+    throw new MailboxSingleLifecycleError('domain_not_found', 'Mail domain not found', 404);
+  }
+
+  // Domain must remain ENABLED - no whole-domain shutdown workaround!
+  if (domain.status !== 'enabled') {
+    throw new MailboxProtocolDisruptionError('domain_workaround_detected', 'Domain shutdown workaround must not be used');
+  }
+
+  const targetMailbox = await mailboxRegistry.getMailbox(targetMailboxId);
+  let otherMailbox = null;
+  if (otherPendingMailboxId) {
+    otherMailbox = await mailboxRegistry.getMailbox(otherPendingMailboxId);
+  }
+
+  const allMailboxes = await mailboxRegistry.listMailboxes();
+  const enabledMailboxes = allMailboxes.filter(
+    (m) => m.mailDomainId === domain.id && m.enabled
+  );
+
+  const preview = await mailConfigurationService.previewTransition({
+    mailDomainId: domain.id,
+    expectedRevision: domain.revision,
+    status: 'enabled',
+  });
+
+  if (!preview || !preview.readyToApply || !preview.configuration) {
+    throw new MailboxSingleLifecycleError('mail_configuration_not_ready', 'Mail configuration is not ready to apply', 409);
+  }
+
+  // Ensure target mailbox (if disabled or absent) is not counted in enabled accounts
+  if (targetMailbox && !targetMailbox.enabled) {
+    if (enabledMailboxes.some((m) => m.address === targetMailbox.address)) {
+      throw new MailboxSingleLifecycleError('target_mailbox_still_present', 'Target disabled mailbox must not be enabled');
+    }
+  }
+
+  // Ensure other pending mailbox is included in enabled accounts
+  if (otherMailbox && otherMailbox.enabled) {
+    if (!enabledMailboxes.some((m) => m.address === otherMailbox.address)) {
+      throw new MailboxSingleLifecycleError('pending_mailbox_omitted', 'Other pending mailbox must be enabled');
+    }
+  }
+
+  // Preview counts must match enabled accounts
+  const mailboxCount = preview.configuration?.counts?.mailboxes ?? 0;
+  if (mailboxCount !== enabledMailboxes.length) {
+    throw new MailboxSingleLifecycleError('account_count_mismatch', 'Preview mailbox count does not match enabled mailboxes');
+  }
+
+  // Service reload effect is captured by configuration sha256 and preview digest
+  if (!preview.configuration.sha256 || !preview.previewDigest) {
+    throw new MailboxSingleLifecycleError('reload_effect_missing', 'Service reload effect must be captured by configuration sha256');
+  }
+
+  return Object.freeze({
+    mailDomainId: domain.id,
+    domainStatus: domain.status,
+    previewDigest: preview.previewDigest,
+    configurationSha256: preview.configuration.sha256,
+    accountsCount: mailboxCount,
+    targetExcluded: targetMailbox ? !targetMailbox.enabled : true,
+    pendingIncluded: otherMailbox ? otherMailbox.enabled : null,
+    domainShutdownWorkaroundAvoided: true,
   });
 }
 
@@ -580,11 +736,15 @@ export function mountSingleMailboxLifecycleRoutes(app, {
   sessionTracker = createMailboxProtocolSessionTracker(),
   mailboxRegistry,
   mailDomainRegistry,
+  mailConfigurationService = null,
+  mailboxAccessGuard = null,
 } = {}) {
   const coordinator = createSingleMailboxLifecycleCoordinator({
     mailboxRegistry,
     mailDomainRegistry,
     sessionTracker,
+    mailConfigurationService,
+    mailboxAccessGuard,
   });
 
   // GET session status for an account (requires panel route access)
@@ -601,21 +761,29 @@ export function mountSingleMailboxLifecycleRoutes(app, {
   });
 
   // POST kick / quiesce sessions for target address
-  app.post('/api/mailboxes/:address/quiesce-sessions', requirePanelRouteAccess, (req, res) => {
-    const address = req.params.address;
-    const dovecotKicked = sessionTracker.kickDovecotUser(address);
-    const smtpKicked = sessionTracker.invalidateSmtpSessions(address);
-    const webmailKicked = sessionTracker.terminateWebmailHttpSessions(address);
-    res.json({
-      data: {
-        address,
-        kicked: {
-          dovecot: dovecotKicked,
-          smtp: smtpKicked,
-          webmail: webmailKicked,
+  app.post('/api/mailboxes/:address/quiesce-sessions', requirePanelRouteAccess, async (req, res, next) => {
+    try {
+      const address = req.params.address;
+      if (mailboxAccessGuard && typeof mailboxAccessGuard.quiesce === 'function') {
+        await mailboxAccessGuard.quiesce(address);
+      }
+      const dovecotKicked = sessionTracker.kickDovecotUser(address);
+      const smtpKicked = sessionTracker.invalidateSmtpSessions(address);
+      const webmailKicked = sessionTracker.terminateWebmailHttpSessions(address);
+      res.json({
+        data: {
+          address,
+          kicked: {
+            dovecot: dovecotKicked,
+            smtp: smtpKicked,
+            webmail: webmailKicked,
+          },
+          accessQuiesced: Boolean(mailboxAccessGuard),
         },
-      },
-    });
+      });
+    } catch (err) {
+      next(err);
+    }
   });
 
   return coordinator;

@@ -332,3 +332,104 @@ test('resource revision drift leaves running mail data job unresolved before evi
   assert.equal(evidenceRead, false);
   assert.equal(state.calls.some(([name]) => name === 'complete'), false);
 });
+
+test('mailbox data delete recovery succeeds with domainStatus enabled without whole-domain shutdown workaround', async () => {
+  const state = base({ operation: OPERATIONS.MAIL_DATA_DELETE, domainStatus: 'enabled' });
+  state.dependencies.inspectBackup = async (id) => {
+    assert.equal(id, 'mail-backup-selected');
+    return {
+      backupId: id,
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+      sourcePresent: true,
+      sourceSnapshotSha256: snapshot,
+      contentSha256: content,
+      bytes: 100,
+      files: 2,
+      directories: 3,
+    };
+  };
+  state.dependencies.inspectRestored = async () => { throw new Error('not used'); };
+  state.dependencies.inspectDeleted = async (input) => {
+    assert.deepEqual(input, {
+      transactionId: jobId,
+      backupId: 'mail-backup-selected',
+      scope: 'mailbox',
+      identity: 'owner@example.com',
+    });
+    return {
+      satisfied: true,
+      result: {
+        version: 1,
+        transactionId: jobId,
+        backupId: 'mail-backup-selected',
+        scope: 'mailbox',
+        identity: 'owner@example.com',
+        sourcePresent: true,
+        contentSha256: content,
+        bytes: 100,
+        files: 2,
+        directories: 3,
+        deleted: true,
+        sideEffects: true,
+      },
+    };
+  };
+
+  const recovered = await recoverRunningMailData(state.dependencies);
+  assert.equal(recovered.operation, OPERATIONS.MAIL_DATA_DELETE);
+  assert.equal(recovered.recoveryMethod, 'verified_mail_data_delete_receipt_backup_and_absence');
+  const completion = state.calls.find(([name]) => name === 'complete')[1];
+  assert.deepEqual(completion.result, state.result);
+});
+
+test('mailbox data delete recovery fails closed when mailbox itself remains enabled', async () => {
+  const state = base({ operation: OPERATIONS.MAIL_DATA_DELETE, domainStatus: 'enabled' });
+  state.dependencies.mailboxRegistry.getMailbox = async () => ({
+    id: mailboxId,
+    mailDomainId,
+    address: 'owner@example.com',
+    revision: 3,
+    enabled: true, // Still enabled!
+  });
+  state.dependencies.inspectBackup = async () => ({ backupId: 'mail-backup-selected' });
+  state.dependencies.inspectRestored = async () => { throw new Error('not used'); };
+  state.dependencies.inspectDeleted = async () => ({ satisfied: true });
+
+  await assert.rejects(
+    recoverRunningMailData(state.dependencies),
+    (error) => error instanceof JobRunningMailDataRecoveryError
+      && error.code === 'job_mail_data_recovery_mailbox_not_disabled',
+  );
+  assert.equal(state.calls.some(([name]) => name === 'complete'), false);
+});
+
+test('domain-scope delete recovery still requires domainStatus to be disabled', async () => {
+  const state = base({ operation: OPERATIONS.MAIL_DATA_DELETE, domainStatus: 'enabled' });
+  state.payload.scope = 'domain';
+  state.payload.resourceId = mailDomainId;
+  state.payload.identity = 'example.com';
+  state.payload.expectedResourceRevision = 5;
+  state.receipt.scope = 'domain';
+  state.receipt.resourceId = mailDomainId;
+  state.receipt.identity = 'example.com';
+  state.dependencies.inspectBackup = async () => ({ backupId: 'mail-backup-selected' });
+  state.dependencies.inspectRestored = async () => { throw new Error('not used'); };
+  state.dependencies.inspectDeleted = async () => ({ satisfied: true });
+  state.dependencies.loadJobContext = async () => ({
+    id: jobId,
+    serverId,
+    status: 'running',
+    operation: OPERATIONS.MAIL_DATA_DELETE,
+    resourceType: 'mail_domain',
+    resourceId: mailDomainId,
+    payload: state.payload,
+  });
+
+  await assert.rejects(
+    recoverRunningMailData(state.dependencies),
+    (error) => error instanceof JobRunningMailDataRecoveryError
+      && error.code === 'job_mail_data_recovery_domain_not_disabled',
+  );
+  assert.equal(state.calls.some(([name]) => name === 'complete'), false);
+});

@@ -177,6 +177,13 @@ async function assertCurrentResource(intent, { mailDomainRegistry, mailboxRegist
         'Mail-domain resource changed after the operation was queued',
       );
     }
+    if ([OPERATIONS.MAIL_DATA_RESTORE, OPERATIONS.MAIL_DATA_DELETE].includes(intent.operation)
+      && mailDomain.status !== 'disabled') {
+      throw new JobRunningMailDataRecoveryError(
+        'job_mail_data_recovery_domain_not_disabled',
+        'Mail-domain must remain disabled while recovering mail data restore or deletion',
+      );
+    }
   } else {
     let mailbox;
     try { mailbox = await mailboxRegistry.getMailbox(intent.resourceId); }
@@ -190,13 +197,18 @@ async function assertCurrentResource(intent, { mailDomainRegistry, mailboxRegist
         'Mailbox resource changed after the operation was queued',
       );
     }
-  }
-  if ([OPERATIONS.MAIL_DATA_RESTORE, OPERATIONS.MAIL_DATA_DELETE].includes(intent.operation)
-    && mailDomain.status !== 'disabled') {
-    throw new JobRunningMailDataRecoveryError(
-      'job_mail_data_recovery_domain_not_disabled',
-      'Mail-domain must remain disabled while recovering mail data restore or deletion',
-    );
+    if (intent.operation === OPERATIONS.MAIL_DATA_RESTORE && mailDomain.status !== 'disabled') {
+      throw new JobRunningMailDataRecoveryError(
+        'job_mail_data_recovery_domain_not_disabled',
+        'Mail-domain must remain disabled while recovering mail data restore',
+      );
+    }
+    if (intent.operation === OPERATIONS.MAIL_DATA_DELETE && mailbox.enabled !== false) {
+      throw new JobRunningMailDataRecoveryError(
+        'job_mail_data_recovery_mailbox_not_disabled',
+        'Mailbox must remain disabled while recovering mail data deletion',
+      );
+    }
   }
   return mailDomain;
 }
