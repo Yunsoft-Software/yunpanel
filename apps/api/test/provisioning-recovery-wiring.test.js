@@ -271,3 +271,40 @@ test('provisioning recovery wires backend atomic lock and fail-closed concurrenc
   assert.match(controllerCode, /latest\.operationId\s*!==\s*approval\.operationId/);
   assert.match(controllerCode, /status:\s*uncertain\s*\?\s*'uncertain'\s*:\s*state\.operation\s*\?\s*'stale'\s*:\s*'error'/);
 });
+
+test('provisioning recovery wires mobile layout, keyboard focus trapping, dark theme tokens, and abort isolation', async () => {
+  const panelCode = await source('../../web/src/workspace/ProvisioningRecoveryPanel.jsx');
+  const panelKitCode = await source('../../web/src/workspace/PanelKit.jsx');
+  const controllerCode = await source('../../web/src/workspace/provisioning-recovery.js');
+  const workspaceCss = await source('../../web/src/workspace/workspace.css');
+  const emberTheme = await source('../../web/src/workspace/ui/ember-theme.css');
+
+  // 1. Mobile layout & overflow prevention: table-scroll, modal calculation, label word break
+  assert.match(panelCode, /<div className="ws-table-scroll">/);
+  assert.match(workspaceCss, /\.ws-table-scroll\s*\{[^}]*overflow-x:\s*auto;/);
+  assert.match(workspaceCss, /\.ws-modal\s*\{[^}]*width:\s*min\(560px,\s*calc\(100vw\s*-\s*32px\)\)/);
+  assert.match(emberTheme, /\.ws-modal\s+label\s+strong/);
+  assert.match(emberTheme, /overflow-wrap:\s*anywhere;\s*word-break:\s*break-word;/);
+
+  // 2. Keyboard focus trap, escape key, and focus restoration
+  assert.match(panelKitCode, /event\.key === 'Tab'/);
+  assert.match(panelKitCode, /event\.key === 'Escape'/);
+  assert.match(panelKitCode, /previous\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+  assert.match(panelKitCode, /autoFocus/);
+
+  // 3. Dark theme token usage and no hardcoded colors
+  assert.match(emberTheme, /:root\[data-ws-theme='dark'\]/);
+  assert.doesNotMatch(panelCode, /#[0-9a-fA-F]{3,6}/);
+
+  // 4. Safe technical information disclosure (only operationId, websiteId, ready)
+  assert.match(panelCode, /<details><summary>Teknik bilgiler ve tanılama<\/summary>/);
+  assert.match(panelCode, /operation\.operationId/);
+  assert.match(panelCode, /operation\.websiteId/);
+  assert.match(panelCode, /operation\.ready/);
+  assert.doesNotMatch(panelCode, /password|secret|token|credential/i);
+
+  // 5. Abort != host rollback: cancel resets approval without mutation, abort signal stops request
+  assert.match(panelCode, /onCancel=\{\(\) => client\.current\?\.cancel\(\)\}/);
+  assert.match(controllerCode, /function cancel\(\)\s*\{\s*if\s*\(!disposed && !writing && isCurrent\(\) === true\)\s*publish\(\{\s*approval:\s*null\s*\}\);\s*\}/);
+  assert.match(panelCode, /Sayfadan ayrılmak sunucuda başlamış bir işi geri almaz\./);
+});

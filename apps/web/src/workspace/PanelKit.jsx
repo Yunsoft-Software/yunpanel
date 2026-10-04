@@ -136,7 +136,7 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
 export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, confirmation, error, confirmLabel = 'Onayla' }) {
   const [value, setValue] = useState('');
   return <Modal title={title} onClose={onCancel} busy={busy}><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && (!confirmation || value === confirmation)) onConfirm(); }}>
-    {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
+    {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input autoFocus value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
     <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant="danger" type="submit" disabled={busy || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
   </form></Modal>;
 }
