@@ -351,3 +351,122 @@ test('Session switching and denied mutate trigger fail-closed reset in AiDrawer'
   // mutate catches 401/403 and calls deniedRef
   assert.match(drawerSource, /failure\?\.status === 401 \|\| failure\?\.status === 403 \|\| failure\?\.code === 'forbidden' \|\| failure\?\.code === 'unauthorized'/);
 });
+
+test('Comprehensive acceptance: >20 equal-time chats, concurrent mutation races, cursor restart, circular cursor and retry', async () => {
+  // 1. >20 equal-time conversations pagination across pages to final page
+  const fixedTime = '2026-09-24T00:00:00.000Z';
+  const page1Items = Array.from({ length: 20 }, (_, i) => makeItem(i + 1, { createdAt: fixedTime, updatedAt: fixedTime }));
+  const page2Items = Array.from({ length: 5 }, (_, i) => makeItem(i + 21, { createdAt: fixedTime, updatedAt: fixedTime }));
+  const calls = [];
+
+  let circularMode = false;
+  let restartMode = false;
+
+  const history = createAiHistory({
+    actorId: 'owner-a',
+    websiteId: siteA,
+    read: async (options) => {
+      calls.push(options);
+      if (restartMode) {
+        const err = new Error('Sayfa anahtarı geçersiz');
+        err.code = 'invalid_ai_history_cursor';
+        err.status = 400;
+        throw err;
+      }
+      if (circularMode) {
+        return makePage(page2Items, options.cursor || 'circular-cursor-token');
+      }
+      if (!options.cursor) {
+        return makePage(page1Items, 'cursor-page-2');
+      }
+      if (options.cursor === 'cursor-page-2') {
+        return makePage(page2Items, null);
+      }
+      throw new Error(`Unexpected cursor: ${options.cursor}`);
+    },
+  });
+
+  // Load first page (20 items)
+  await history.load();
+  assert.equal(history.getState().items.length, 20);
+  assert.equal(history.getState().hasMore, true);
+  assert.equal(history.getState().nextCursor, 'cursor-page-2');
+
+  // Race 1: Concurrent new message on older item during older page inspection
+  history.upsert(makeItem(1, { createdAt: fixedTime, updatedAt: '2026-09-24T01:00:00.000Z', messageCount: 5 }));
+  // Item updatedAt updated, ordering preserved
+  const updatedItem1 = history.getState().items.find((it) => it.id === makeItem(1).id);
+  assert.equal(updatedItem1.messageCount, 5);
+  assert.equal(history.getState().hasMore, true);
+
+  // Race 2: Concurrent brand new chat created during older page inspection
+  const brandNew = makeItem(99, { createdAt: '2026-09-24T02:00:00.000Z', updatedAt: '2026-09-24T02:00:00.000Z' });
+  history.upsert(brandNew);
+  // Brand new appears at top (index 0)
+  assert.equal(history.getState().items[0].id, brandNew.id);
+  assert.equal(history.getState().items.length, 21);
+  assert.equal(history.getState().nextCursor, 'cursor-page-2');
+
+  // Race 3: Concurrent deletion of an item
+  history.remove(page1Items[1].id);
+  assert.equal(history.getState().items.some((it) => it.id === page1Items[1].id), false);
+
+  // Load older page (more) -> appends page 2 items, final page reached
+  await history.more();
+  const stateAfterPage2 = history.getState();
+  assert.equal(stateAfterPage2.hasMore, false);
+  assert.equal(stateAfterPage2.nextCursor, null);
+  // All remaining page 2 items are present
+  assert.ok(page2Items.every((it) => stateAfterPage2.items.some((row) => row.id === it.id)));
+
+  // Test cursor restart / instance switching
+  restartMode = true;
+  const historyRestart = createAiHistory({
+    actorId: 'owner-a',
+    websiteId: siteA,
+    read: async (options) => {
+      calls.push(options);
+      if (!options.cursor) return makePage(page1Items, 'cursor-token-stale');
+      const err = new Error('Sayfa anahtarı geçersiz veya süresi dolmuş.');
+      err.code = 'invalid_ai_history_cursor';
+      err.status = 400;
+      throw err;
+    },
+  });
+  await historyRestart.load();
+  await historyRestart.more();
+  assert.equal(historyRestart.getState().status, 'error');
+  assert.equal(historyRestart.getState().reloadRequired, true);
+  // Subsequent more() is blocked
+  const callCountBefore = calls.length;
+  await historyRestart.more();
+  assert.equal(calls.length, callCountBefore);
+  // Clean reload from start succeeds
+  await historyRestart.load();
+  assert.equal(historyRestart.getState().status, 'ready');
+  assert.equal(historyRestart.getState().reloadRequired, false);
+
+  // Test circular cursor detection
+  circularMode = true;
+  const historyCircular = createAiHistory({
+    actorId: 'owner-a',
+    websiteId: siteA,
+    read: async (options) => {
+      if (!options.cursor) return makePage(page1Items, 'token-loop');
+      return makePage(page2Items, 'token-loop');
+    },
+  });
+  await historyCircular.load();
+  await historyCircular.more();
+  assert.equal(historyCircular.getState().status, 'error');
+  assert.equal(historyCircular.getState().reloadRequired, true);
+  // Verify fetch loop is blocked
+  await historyCircular.more();
+  assert.equal(historyCircular.getState().status, 'error');
+
+  // Verify modal scroller and composer draft contracts in source
+  assert.match(drawerSource, /messagesRef/);
+  assert.doesNotMatch(drawerSource, /localStorage|sessionStorage/);
+  assert.match(drawerSource, /mutate/);
+  assert.doesNotMatch(drawerSource, /setTimeout\([^)]*mutate/);
+});

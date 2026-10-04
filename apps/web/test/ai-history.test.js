@@ -44,6 +44,8 @@ test('expired cursor requires reload rather than repeatedly requesting the stale
 test('repeated or circular cursors cannot cause an automatic fetch loop', async () => {
   const run = harness(async ({ cursor }) => cursor ? page([item(1)], cursor) : page([item(2)], 'next'));
   await run.history.load(); await run.history.more(); assert.equal(run.history.getState().status, 'error'); assert.equal(run.history.getState().items.length, 1);
+  assert.equal(run.history.getState().reloadRequired, true);
+  await run.history.more(); assert.equal(run.calls.length, 2);
 });
 test('overlapping pages deduplicate identities and cannot replace a newer local header', async () => {
   const run = harness(async ({ cursor }) => cursor ? page([item(2), item(1)]) : page([item(3), item(2)], 'next'));
