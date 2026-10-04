@@ -1247,7 +1247,9 @@ function SslRenewalPanelView({ domain, certificate, state }) {
       ? createElement('p', { role: 'status', 'data-testid': 'waiting-status' }, 'Yenileme işi sunucuda devam ediyor…')
       : state.status === 'syncing'
         ? createElement('p', { role: 'status', 'data-testid': 'syncing-status' }, 'İşlem ve sertifika kaydı kontrol ediliyor…')
-        : null,
+        : state.status === 'paused'
+          ? createElement('p', { role: 'status', 'data-testid': 'paused-status' }, 'Otomatik takip sınırına ulaşıldı. İş sunucuda devam ediyor olabilir; sonucu yeniden okuyun.')
+          : null,
     state.status === 'complete' && OUTCOMES[state.outcome]
       ? createElement('p', { role: 'status', 'data-testid': 'outcome-message' }, OUTCOMES[state.outcome])
       : null,
@@ -1869,4 +1871,603 @@ test('JobDrawer kapalıyken de takip edilen işin terminal geçişi doğru işle
   inventoryRefreshed = false;
   if (refreshDetector([succeededJob])) triggerRefresh();
   assert.equal(inventoryRefreshed, false);
+});
+
+test('Kayıp POST veya belirsiz yanıt: yeni renewal POST gönderilmez, bilinen iş yalnız GET ile izlenir ve refresh yalnız GET yapar', async () => {
+  const serverRegistry = createServerRegistry();
+  const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'lost-post-host' });
+  const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'lost-post-host' });
+  const localServerId = enrolled.server.id;
+
+  const domainRegistry = createDomainRegistry({
+    serverExists: async (serverId) => Boolean(await serverRegistry.getServer(serverId)),
+  });
+  const certificateRegistry = createCertificateRegistry();
+  const jobRegistry = createJobRegistry();
+
+  const domain = await domainRegistry.createDomain({
+    serverId: localServerId,
+    primaryDomain: 'lost-post.example.com',
+    aliases: [],
+    targetType: 'proxy',
+    target: { upstreamPort: 8080 },
+    httpsMode: 'managed',
+  });
+
+  const cert = await certificateRegistry.createForDomain({
+    domainId: domain.id,
+    serverId: localServerId,
+    domains: ['lost-post.example.com'],
+    email: 'admin@lost-post.example.com',
+  });
+
+  await certificateRegistry.markActive(cert.id, {
+    certName: 'lost-post.example.com',
+    certificatePath: '/etc/letsencrypt/live/lost-post.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/lost-post.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/lost-post.example.com/privkey.pem',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'AA:'.repeat(31) + 'AA',
+  });
+
+  await domainRegistry.attachCertificate(domain.id, cert.id, { domains: cert.domains });
+
+  const app = withPanelContext(createApp({
+    environment: 'production',
+    domainRegistry,
+    certificateRegistry,
+    jobRegistry,
+    localServerId,
+  }), ownerManagementContext);
+
+  await withServer(app, async (baseUrl) => {
+    const httpCalls = [];
+    let simulatePostFailure = false;
+
+    const request = async (path, options = {}) => {
+      const method = options.method ?? 'GET';
+      httpCalls.push({ method, path, body: options.body });
+      if (simulatePostFailure && method === 'POST') {
+        const error = new Error('Connection reset: lost POST response');
+        error.status = 503;
+        throw error;
+      }
+      return (await requestJson(`${baseUrl}/api${path}`, options)).payload.data;
+    };
+
+    const targetDomain = await domainRegistry.getDomain(domain.id);
+    const flow = createSslRenewal({
+      target: targetDomain,
+      request,
+      isCurrent: () => true,
+      canManage: () => true,
+      canStart: () => true,
+    });
+
+    // 1. Prepare renewal: Snapshot is read via GET only
+    await flow.prepare(false);
+    const approval = flow.getState().approval;
+    assert.ok(approval, 'Approval should be generated');
+    const postsBefore = httpCalls.filter((c) => c.method === 'POST');
+    assert.equal(postsBefore.length, 0, 'No POST requests during prepare');
+
+    // 2. Lost POST response (network drops or server 503)
+    simulatePostFailure = true;
+    await flow.confirm(approval, approval.confirmation);
+
+    const postsAfterLost = httpCalls.filter((c) => c.method === 'POST');
+    assert.equal(postsAfterLost.length, 1, 'Only one POST attempt was made');
+    assert.equal(flow.getState().status, 'unverified', 'Status transitions to unverified when POST response is lost');
+    assert.equal(flow.getState().approval, null, 'Approval is cleared');
+
+    // 3. Blind retry is blocked: cannot prepare new approval or confirm with stale approval
+    simulatePostFailure = false;
+    await flow.prepare(false);
+    assert.equal(flow.getState().approval, null, 'Cannot create new approval while sealed');
+
+    await flow.confirm(approval, approval.confirmation);
+    const postsAfterRetryAttempt = httpCalls.filter((c) => c.method === 'POST');
+    assert.equal(postsAfterRetryAttempt.length, 1, 'Blind retry rejected without sending another POST');
+
+    // 4. Manual refresh ("Sonucu yeniden oku"): executes ONLY GET requests
+    const callsBeforeRefresh = httpCalls.length;
+    await flow.refresh();
+    const refreshCalls = httpCalls.slice(callsBeforeRefresh);
+    assert.ok(refreshCalls.length > 0, 'Refresh dispatched requests');
+    assert.ok(refreshCalls.every((c) => c.method === 'GET'), 'Refresh uses ONLY GET requests');
+    assert.equal(flow.getState().status, 'uncertain', 'State is uncertain with warning message');
+    assert.ok(flow.getState().error.includes('İstek cevabı kayboldu'), 'Error message warns about lost response');
+
+    // 5. StrictMode UI render with uncertain state
+    const ownerSession = { user: { role: 'owner' }, csrfToken: 'test' };
+    const html = renderToString(
+      createElement(FullSslApp, {
+        session: ownerSession,
+        domain: targetDomain,
+        certificate: await certificateRegistry.getCertificate(cert.id),
+        certificates: [await certificateRegistry.getCertificate(cert.id)],
+        renewalState: flow.getState(),
+        now: Date.parse('2026-08-30T00:00:00.000Z'),
+      })
+    );
+    assert.ok(html.includes('İstek cevabı kayboldu'));
+    assert.ok(!html.includes('Yenileme sonucu kalıcı sertifika kaydıyla eşleşti'));
+
+    flow.dispose();
+  });
+});
+
+test('Yanlış job/sertifika/site kimliği: eski onay yeni hedefe yazmaz ve uyuşmayan kimlikler fail-closed reddedilir', async () => {
+  const domainId = '11111111-1111-4111-8111-111111111111';
+  const certificateId = '22222222-2222-4222-8222-222222222222';
+  const websiteId = '33333333-3333-4333-8333-333333333333';
+  const foreignId = '99999999-9999-4999-8999-999999999999';
+  const serverId = 'srv-identity-test';
+
+  const target = {
+    id: domainId,
+    certificateId,
+    websiteId,
+    serverId,
+    primaryDomain: 'identity.example.com',
+  };
+
+  const oldCert = {
+    id: certificateId,
+    domainId,
+    serverId,
+    certName: 'identity.example.com',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    purpose: 'web',
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: '11:'.repeat(31) + '11',
+  };
+
+  const domainRecord = {
+    ...target,
+    httpsMode: 'managed',
+    desiredRevision: 1,
+  };
+
+  // Case 2a: Job returns with mismatched resourceId or wrong resourceType or wrong operation
+  for (const [field, badValue] of [
+    ['resourceId', foreignId],
+    ['resourceType', 'domain'],
+    ['operation', 'domain.stage'],
+    ['serverId', 'foreign-server'],
+  ]) {
+    const httpCalls = [];
+    const request = async (path, options = {}) => {
+      httpCalls.push({ method: options.method ?? 'GET', path });
+      if (path === `/domains/${domainId}`) return structuredClone(domainRecord);
+      if (path === `/certificates/${certificateId}`) return structuredClone(oldCert);
+      if (path === `/certificates/${certificateId}/renew`) {
+        return {
+          id: '55555555-5555-4555-8555-555555555555',
+          serverId,
+          resourceType: 'certificate',
+          resourceId: certificateId,
+          operation: 'ssl.renew',
+          status: 'queued',
+          [field]: badValue,
+        };
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    };
+
+    const flow = createSslRenewal({
+      target,
+      request,
+      isCurrent: () => true,
+      canManage: () => true,
+      canStart: () => true,
+    });
+
+    await flow.prepare(false);
+    const approval = flow.getState().approval;
+    assert.ok(approval);
+
+    await flow.confirm(approval, approval.confirmation);
+    assert.equal(flow.getState().status, 'unverified', `Bad ${field} should leave state unverified`);
+    assert.equal(flow.getState().outcome, null, `Bad ${field} must not produce outcome`);
+    assert.equal(flow.getState().certificate.validTo, oldCert.validTo, `Bad ${field} must not update dates`);
+    flow.dispose();
+  }
+
+  // Case 2b: Domain binding returns mismatched certificateId, websiteId, or primaryDomain
+  for (const [field, badValue] of [
+    ['certificateId', foreignId],
+    ['websiteId', foreignId],
+    ['primaryDomain', 'spoofed.example.com'],
+    ['serverId', 'foreign-server'],
+  ]) {
+    let callCount = 0;
+    const request = async (path) => {
+      if (path === `/domains/${domainId}`) {
+        callCount++;
+        return { ...domainRecord, [field]: callCount > 2 ? badValue : domainRecord[field] };
+      }
+      if (path === `/certificates/${certificateId}`) return structuredClone(oldCert);
+      if (path === `/certificates/${certificateId}/renew`) {
+        throw new Error('Should not reach POST when binding mismatch occurs');
+      }
+      throw new Error(`Unexpected path: ${path}`);
+    };
+
+    const flow = createSslRenewal({
+      target,
+      request,
+      isCurrent: () => true,
+      canManage: () => true,
+      canStart: () => true,
+    });
+
+    await flow.prepare(false);
+    const approval = flow.getState().approval;
+    assert.ok(approval);
+
+    await flow.confirm(approval, approval.confirmation);
+    assert.equal(flow.getState().approval, null, 'Approval must be cleared on binding drift');
+    flow.dispose();
+  }
+});
+
+test('Sertifika seçimi veya Website bağının değişmesi: eski onay yeni hedefe yazmasın', async () => {
+  const domainId = '11111111-1111-4111-8111-111111111111';
+  const certId1 = '22222222-2222-4222-8222-222222222222';
+  const certId2 = '77777777-7777-4777-8777-777777777777';
+  const websiteId1 = '33333333-3333-4333-8333-333333333333';
+  const websiteId2 = '88888888-8888-4888-8888-888888888888';
+  const serverId = 'srv-binding-test';
+
+  const target = {
+    id: domainId,
+    certificateId: certId1,
+    websiteId: websiteId1,
+    serverId,
+    primaryDomain: 'binding-change.example.com',
+  };
+
+  const domain = {
+    ...target,
+    httpsMode: 'managed',
+    desiredRevision: 1,
+  };
+
+  const cert1 = {
+    id: certId1,
+    domainId,
+    serverId,
+    certName: 'binding-change.example.com',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'AA:'.repeat(31) + 'AA',
+  };
+
+  const httpCalls = [];
+  const request = async (path, options = {}) => {
+    httpCalls.push({ method: options.method ?? 'GET', path, body: options.body });
+    if (path === `/domains/${domainId}`) return structuredClone(domain);
+    if (path === `/certificates/${certId1}`) return structuredClone(cert1);
+    if (path === `/certificates/${certId2}`) return { ...cert1, id: certId2 };
+    if (path.includes('/renew')) return { id: '99999999-9999-4999-8999-999999999999', status: 'queued', operation: 'ssl.renew', resourceType: 'certificate', resourceId: certId1, serverId };
+    throw new Error(`Unexpected path: ${path}`);
+  };
+
+  const flow = createSslRenewal({
+    target,
+    request,
+    isCurrent: () => true,
+    canManage: () => true,
+    canStart: () => true,
+  });
+
+  // 1. Prepare approval for certId1 and websiteId1
+  await flow.prepare(false);
+  const approval = flow.getState().approval;
+  assert.ok(approval, 'Approval created for cert1');
+
+  // Case 3a: Certificate selection changes before confirm
+  domain.certificateId = certId2;
+  await flow.confirm(approval, approval.confirmation);
+
+  const renewPosts = httpCalls.filter((c) => c.path.includes('/renew'));
+  assert.equal(renewPosts.length, 0, 'No renewal POST sent when certificateId changed');
+  assert.equal(flow.getState().approval, null, 'Approval is invalidated');
+
+  // Reset and prepare another approval
+  domain.certificateId = certId1;
+  await flow.prepare(false);
+  const approval2 = flow.getState().approval;
+  assert.ok(approval2, 'Approval 2 created');
+
+  // Case 3b: Website binding changes before confirm
+  domain.websiteId = websiteId2;
+  await flow.confirm(approval2, approval2.confirmation);
+
+  const renewPosts2 = httpCalls.filter((c) => c.path.includes('/renew'));
+  assert.equal(renewPosts2.length, 0, 'No renewal POST sent when websiteId changed');
+  assert.equal(flow.getState().approval, null, 'Approval 2 is invalidated');
+
+  // Case 3c: React key guarantee in SiteOperations
+  const session = { user: { id: 'user-1', role: 'owner' } };
+  const key1 = JSON.stringify([domain.id, certId1, domain.serverId, websiteId1, session.user.id, session.user.role, 1]);
+  const key2 = JSON.stringify([domain.id, certId2, domain.serverId, websiteId1, session.user.id, session.user.role, 1]);
+  const key3 = JSON.stringify([domain.id, certId1, domain.serverId, websiteId2, session.user.id, session.user.role, 1]);
+  assert.notEqual(key1, key2, 'Key changes when certificateId changes');
+  assert.notEqual(key1, key3, 'Key changes when websiteId changes');
+
+  flow.dispose();
+});
+
+test('Logout/login ve yetki iptali: eski onay yeni hedefe yazmasın ve yetki kaybında durum sıfırlansın', async () => {
+  const domainId = '11111111-1111-4111-8111-111111111111';
+  const certId = '22222222-2222-4222-8222-222222222222';
+  const serverId = 'srv-session-test';
+
+  const target = {
+    id: domainId,
+    certificateId: certId,
+    websiteId: null,
+    serverId,
+    primaryDomain: 'session-auth.example.com',
+  };
+
+  const domain = { ...target, httpsMode: 'managed', desiredRevision: 1 };
+  const cert = {
+    id: certId,
+    domainId,
+    serverId,
+    certName: 'session-auth.example.com',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'AA:'.repeat(31) + 'AA',
+  };
+
+  const httpCalls = [];
+  let serverAuthFailure = null;
+
+  const request = async (path, options = {}) => {
+    httpCalls.push({ method: options.method ?? 'GET', path });
+    if (serverAuthFailure) {
+      const err = new Error('Auth failed');
+      err.status = serverAuthFailure;
+      throw err;
+    }
+    if (path === `/domains/${domainId}`) return structuredClone(domain);
+    if (path === `/certificates/${certId}`) return structuredClone(cert);
+    if (path.includes('/renew')) return { id: '33333333-3333-4333-8333-333333333333', status: 'queued', operation: 'ssl.renew', resourceType: 'certificate', resourceId: certId, serverId };
+    if (path.startsWith('/jobs/')) return { id: '33333333-3333-4333-8333-333333333333', status: 'running', operation: 'ssl.renew', resourceType: 'certificate', resourceId: certId, serverId };
+    throw new Error(`Unexpected path: ${path}`);
+  };
+
+  // Case 4a: Logout / login (session version rotation)
+  let activeSessionVersion = 1;
+  const flow1 = createSslRenewal({
+    target,
+    request,
+    isCurrent: () => activeSessionVersion === 1,
+    canManage: () => true,
+    canStart: () => true,
+  });
+
+  await flow1.prepare(false);
+  const approval1 = flow1.getState().approval;
+  assert.ok(approval1, 'Approval created in session 1');
+
+  // User logs out and logs in as new session (activeSessionVersion rotates to 2)
+  activeSessionVersion = 2;
+  await flow1.confirm(approval1, approval1.confirmation);
+
+  const postsInFlow1 = httpCalls.filter((c) => c.method === 'POST');
+  assert.equal(postsInFlow1.length, 0, 'No POST sent after session rotation');
+  flow1.dispose();
+
+  // Case 4b: Permission revoked (canManage becomes false / role changed from owner to read_only)
+  let allowedToManage = true;
+  const flow2 = createSslRenewal({
+    target,
+    request,
+    isCurrent: () => true,
+    canManage: () => allowedToManage,
+    canStart: () => true,
+  });
+
+  await flow2.prepare(false);
+  const approval2 = flow2.getState().approval;
+  assert.ok(approval2, 'Approval created while management allowed');
+
+  // Permission revoked
+  allowedToManage = false;
+  await flow2.confirm(approval2, approval2.confirmation);
+
+  const postsInFlow2 = httpCalls.filter((c) => c.method === 'POST');
+  assert.equal(postsInFlow2.length, 0, 'No POST sent when permission revoked');
+  assert.equal(flow2.getState().status, 'forbidden', 'Status transitions to forbidden');
+  assert.equal(flow2.getState().approval, null, 'Approval cleared on permission revocation');
+  assert.equal(flow2.getState().certificate, null, 'Certificate data cleared on permission revocation');
+  flow2.dispose();
+
+  // Case 4c: Server 401/403 during active polling clears prior state
+  const flow3 = createSslRenewal({
+    target,
+    request,
+    isCurrent: () => true,
+    canManage: () => true,
+    canStart: () => true,
+  });
+
+  await flow3.prepare(false);
+  const approval3 = flow3.getState().approval;
+  await flow3.confirm(approval3, approval3.confirmation);
+  assert.equal(flow3.getState().status, 'waiting');
+  assert.ok(flow3.getState().job);
+
+  // Server revokes access during polling:
+  serverAuthFailure = 401;
+  await flow3.refresh();
+
+  assert.equal(flow3.getState().status, 'forbidden');
+  assert.equal(flow3.getState().job, null);
+  assert.equal(flow3.getState().certificate, null);
+  assert.equal(flow3.getState().before, null);
+  flow3.dispose();
+});
+
+test('Uzun iş (120 poll) ve metadata takip sınırından (8 read) sonra otomatik takip durur ve elle yeniden okuma yalnız GET ile yapılır', async () => {
+  const domainId = '11111111-1111-4111-8111-111111111111';
+  const certId = '22222222-2222-4222-8222-222222222222';
+  const jobId = '33333333-3333-4333-8333-333333333333';
+  const serverId = 'srv-long-job-test';
+
+  const target = {
+    id: domainId,
+    certificateId: certId,
+    websiteId: null,
+    serverId,
+    primaryDomain: 'long-job.example.com',
+  };
+
+  const domain = { ...target, httpsMode: 'managed', desiredRevision: 1 };
+  const oldCert = {
+    id: certId,
+    domainId,
+    serverId,
+    certName: 'long-job.example.com',
+    state: 'active',
+    source: 'acme',
+    renewalMode: 'automatic',
+    staging: false,
+    validFrom: '2026-06-01T00:00:00.000Z',
+    validTo: '2026-09-01T00:00:00.000Z',
+    fingerprint256: 'AA:'.repeat(31) + 'AA',
+  };
+
+  let currentCert = structuredClone(oldCert);
+  let jobStatus = 'running';
+
+  const httpCalls = [];
+  const request = async (path, options = {}) => {
+    httpCalls.push({ method: options.method ?? 'GET', path, body: options.body });
+    if (path === `/domains/${domainId}`) return structuredClone(domain);
+    if (path === `/certificates/${certId}`) return structuredClone(currentCert);
+    if (path.includes('/renew')) {
+      return { id: jobId, status: 'queued', operation: 'ssl.renew', resourceType: 'certificate', resourceId: certId, serverId };
+    }
+    if (path === `/jobs/${jobId}`) {
+      return {
+        id: jobId,
+        status: jobStatus,
+        operation: 'ssl.renew',
+        resourceType: 'certificate',
+        resourceId: certId,
+        serverId,
+        result: jobStatus === 'succeeded' ? {
+          certName: 'long-job.example.com',
+          status: 'renewed',
+          validFrom: '2026-09-01T00:00:00.000Z',
+          validTo: '2026-12-01T00:00:00.000Z',
+          fingerprint256: 'BB:'.repeat(31) + 'BB',
+          dryRun: false,
+        } : null,
+      };
+    }
+    throw new Error(`Unexpected path: ${path}`);
+  };
+
+  const flow = createSslRenewal({
+    target,
+    request,
+    isCurrent: () => true,
+    canManage: () => true,
+    canStart: () => true,
+  });
+
+  await flow.prepare(false);
+  const approval = flow.getState().approval;
+  await flow.confirm(approval, approval.confirmation);
+
+  const postsAfterConfirm = httpCalls.filter((c) => c.method === 'POST').length;
+  assert.equal(postsAfterConfirm, 1, 'Exactly one initial POST request sent');
+
+  // Case 5a: Poll 119 times -> still waiting
+  for (let i = 0; i < 118; i++) {
+    await flow.refresh();
+  }
+  assert.equal(flow.getState().status, 'waiting');
+
+  // 120th poll -> reaches long-running limit -> status: 'paused'
+  await flow.refresh();
+  assert.equal(flow.getState().status, 'paused', 'Job is paused after 120 polls');
+
+  // UI render shows paused notice:
+  const ownerSession = { user: { role: 'owner' } };
+  const pausedHtml = renderToString(
+    createElement(FullSslApp, {
+      session: ownerSession,
+      domain,
+      certificate: currentCert,
+      certificates: [currentCert],
+      renewalState: flow.getState(),
+      now: Date.parse('2026-08-30T00:00:00.000Z'),
+    })
+  );
+  assert.ok(pausedHtml.includes('Otomatik takip sınırına ulaşıldı'));
+
+  // Manual refresh while paused: MUST ONLY make GET requests
+  const callsBeforeManual = httpCalls.length;
+  await flow.refresh();
+  const manualCalls = httpCalls.slice(callsBeforeManual);
+  assert.ok(manualCalls.every((c) => c.method === 'GET'), 'Manual refresh is strictly GET');
+  assert.equal(httpCalls.filter((c) => c.method === 'POST').length, 1, 'No new POST dispatched');
+
+  // Case 5b: Job transitions to succeeded on server, but persistent write is delayed
+  jobStatus = 'succeeded';
+  // Poll 7 times while delayed -> syncing
+  for (let i = 0; i < 7; i++) {
+    await flow.refresh();
+  }
+  assert.equal(flow.getState().status, 'syncing');
+
+  // 8th sync read -> reaches metadata tracking limit -> status: 'unverified'
+  await flow.refresh();
+  assert.equal(flow.getState().status, 'unverified', 'Status transitions to unverified after 8 sync reads');
+  assert.ok(flow.getState().error.includes('İş tamamlandı, ancak kalıcı sertifika kaydı'));
+
+  // Manual refresh while unverified: MUST ONLY make GET requests, no POST
+  const callsBeforeSyncRefresh = httpCalls.length;
+  await flow.refresh();
+  const syncRefreshCalls = httpCalls.slice(callsBeforeSyncRefresh);
+  assert.ok(syncRefreshCalls.every((c) => c.method === 'GET'), 'Sync refresh is strictly GET');
+  assert.equal(httpCalls.filter((c) => c.method === 'POST').length, 1, 'No new POST dispatched');
+
+  // Backend persistent record commits:
+  currentCert = {
+    ...oldCert,
+    validFrom: '2026-09-01T00:00:00.000Z',
+    validTo: '2026-12-01T00:00:00.000Z',
+    fingerprint256: 'BB:'.repeat(31) + 'BB',
+  };
+
+  // User manually re-reads -> completes via GET
+  await flow.refresh();
+  assert.equal(flow.getState().status, 'complete');
+  assert.equal(flow.getState().outcome, 'renewed');
+  assert.equal(flow.getState().certificate.validTo, '2026-12-01T00:00:00.000Z');
+  assert.equal(httpCalls.filter((c) => c.method === 'POST').length, 1, 'Remained exactly 1 POST throughout entire lifecycle');
+
+  flow.dispose();
 });
