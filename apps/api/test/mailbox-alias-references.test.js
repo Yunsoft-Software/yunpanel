@@ -70,3 +70,23 @@ test('real impact service preserves the existing 50-identity local bound', async
 test('real impact service wraps unknown global inventory as unavailable, never safe to delete', async () => {
   await assert.rejects(impactService(async (filter) => filter ? [] : null).inspectMailbox(mailbox.id), { code: 'mail_delete_impact_unavailable', status: 503 });
 });
+
+test('foreign alias ID and private domain do not leak in error payloads, serialized impact, or blocker summaries', async () => {
+  const foreignAlias = {
+    id: 'super-secret-foreign-tenant-alias-uuid',
+    mailDomainId: 'foreign-domain-id-secret',
+    address: 'secret-alias@foreign-company.test',
+    destinations: [mailbox.address, 'another@foreign-company.test'],
+  };
+  const impact = await impactService(async (filter) => filter ? [local] : [local, foreignAlias]).inspectMailbox(mailbox.id);
+  assert.equal(impact.safeToDelete, false);
+  assert.equal(impact.dependencies.aliasReferences.count, 2);
+  assert.deepEqual(impact.dependencies.aliasReferences.ids, ['local-alias']);
+  assert.deepEqual(impact.blockers, [{ code: 'mailbox_alias_reference_configured', count: 2 }]);
+
+  const serialized = JSON.stringify(impact);
+  assert.equal(serialized.includes('super-secret-foreign-tenant-alias-uuid'), false);
+  assert.equal(serialized.includes('foreign-domain-id-secret'), false);
+  assert.equal(serialized.includes('secret-alias@foreign-company.test'), false);
+  assert.equal(serialized.includes('foreign-company.test'), false);
+});

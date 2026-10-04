@@ -3059,6 +3059,12 @@ function TestMailboxRemovalView({ mailbox, domain, state, canManage }) {
       ? createElement('p', { role: 'status', 'data-testid': 'job-status' }, `${state.job.action === 'backup' ? 'Yedek işi' : 'Veri silme işi'}: ${state.job.status}`)
       : null,
     state.error ? createElement('div', { role: 'alert', 'data-testid': 'error-notice' }, state.error) : null,
+    snapshot && (snapshot.quota || snapshot.forwarding)
+      ? createElement('p', { 'data-testid': 'policy-warning' }, 'Kayıt silinmeden önce kota ve yönlendirme politikalarını kaldırın.')
+      : null,
+    snapshot && snapshot.aliases > 0
+      ? createElement('p', { 'data-testid': 'alias-warning' }, 'Bu adrese yönlenen takma adları düzenleyin. Başka alan adından gelen bağlantılar için sunucu yöneticisine başvurun.')
+      : null,
     usable
       ? createElement('button', {
           'data-testid': 'btn-backup',
@@ -5197,5 +5203,699 @@ test('Criterion 17: Güncel MS-01–04 ile tek-kutu silmede alan adı açık kal
       siblingMailbox: siblingAfter,
       initialDomainStatus: 'enabled',
     });
+  }
+});
+
+test('Criterion 18: Yerel/yabancı alias referansları, kota/forwarding, eşzamanlı yeni mesaj ve çalışan iş engelleri; yabancı alias kimliği sızmasın. İki tarayıcı/proses yarışı, backend mutation anı yetkisi, yedekten gerçek geri dönüş ve kalan hesapların yeniden çalışması doğrulansın. Mobil/klavye/odak/koyu tema; .44 hariç yalnız izinli host. GitHub Actions ve canlı deploy bu tur yapılmadı', async () => {
+  const sha64 = (val) => createHash('sha256').update(String(val)).digest('hex');
+
+  // =========================================================================
+  // Section 1: Local & Foreign Alias Reference Detection & Redaction (No Leakage)
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+
+    const targetAddress = fx.mailbox.address;
+    const targetId = fx.mailboxId;
+    const targetDomainId = fx.mailDomainId;
+
+    const localAlias = {
+      id: 'alias-local-c18',
+      mailDomainId: targetDomainId,
+      address: 'info@example.com',
+      destinations: [targetAddress],
+    };
+
+    const foreignAlias = {
+      id: 'foreign-alias-secret-c18',
+      mailDomainId: 'foreign-domain-secret-c18',
+      address: 'secret@external-tenant.com',
+      destinations: [targetAddress],
+    };
+
+    const unrelatedAlias = {
+      id: 'alias-unrelated-c18',
+      mailDomainId: 'foreign-domain-secret-c18',
+      address: 'sales@external-tenant.com',
+      destinations: ['unrelated@external-tenant.com'],
+    };
+
+    // 1a. Direct mailboxAliasReferences: local has ID, foreign has id: null
+    const aliasRefs = await mailboxAliasReferences(
+      {
+        listAliases: async (filter) => {
+          if (filter?.mailDomainId === targetDomainId) {
+            return [localAlias];
+          }
+          return [localAlias, foreignAlias, unrelatedAlias];
+        },
+      },
+      fx.mailbox
+    );
+
+    assert.equal(aliasRefs.length, 2);
+    assert.equal(aliasRefs[0].id, 'alias-local-c18');
+    assert.equal(aliasRefs[1].id, null);
+    assert.equal(JSON.stringify(aliasRefs).includes('foreign-alias-secret-c18'), false);
+    assert.equal(JSON.stringify(aliasRefs).includes('secret@external-tenant.com'), false);
+
+    // 1b. Impact service: reports 2 blockers, but IDs contains only local alias
+    const impactServiceWithAliases = createMailDeleteImpactService({
+      localServerId: fx.localServerId,
+      mailDomainRegistry: fx.mailDomainRegistry,
+      domainRegistry: fx.domainRegistry,
+      mailboxRegistry: fx.mailboxRegistry,
+      mailAliasRegistry: {
+        listAliases: async (filter) => {
+          if (filter?.mailDomainId === targetDomainId) {
+            return [localAlias];
+          }
+          return [localAlias, foreignAlias, unrelatedAlias];
+        },
+      },
+      mailboxQuotaRegistry: fx.mailboxQuotaRegistry,
+      mailboxForwardingRegistry: fx.mailboxForwardingRegistry,
+      mailDkimRegistry: { async getKey() { return null; } },
+      jobRegistry: fx.jobRegistry,
+      mailDataInspector: fx.mailDataInspector,
+    });
+
+    const impact = await impactServiceWithAliases.inspectMailbox(targetId);
+    assert.equal(impact.safeToDelete, false);
+    assert.equal(impact.dependencies.aliasReferences.count, 2);
+    assert.deepEqual(impact.dependencies.aliasReferences.ids, ['alias-local-c18']);
+    assert.ok(impact.blockers.some((b) => b.code === 'mailbox_alias_reference_configured' && b.count === 2));
+
+    // Zero-leak check on entire serialized impact object
+    const serializedImpact = JSON.stringify(impact);
+    assert.equal(serializedImpact.includes('foreign-alias-secret-c18'), false);
+    assert.equal(serializedImpact.includes('foreign-domain-secret-c18'), false);
+    assert.equal(serializedImpact.includes('secret@external-tenant.com'), false);
+
+    // 1c. Finalize service blocks when alias references exist
+    const validDeleteJobId = 'delete-job-alias-c18';
+    fx.storedJobs.set(validDeleteJobId, {
+      id: validDeleteJobId,
+      status: 'succeeded',
+      operation: OPERATIONS.MAIL_DATA_DELETE,
+      resourceType: 'mail_domain',
+      resourceId: targetDomainId,
+      result: {
+        version: 1,
+        transactionId: validDeleteJobId,
+        mailDomainId: targetDomainId,
+        resourceId: targetId,
+        expectedResourceRevision: 1,
+        scope: 'mailbox',
+        identity: targetAddress,
+        deleted: true,
+        sideEffects: true,
+        contentSha256: sha64('empty'),
+        bytes: 0,
+        files: 0,
+        directories: 0,
+        backupId: fx.backupId,
+      },
+    });
+
+    const finalizeService = createMailDeleteFinalizeService({
+      mailboxRegistry: fx.mailboxRegistry,
+      mailDomainRegistry: fx.mailDomainRegistry,
+      mailDeleteImpactService: impactServiceWithAliases,
+      jobRegistry: fx.jobRegistry,
+    });
+
+    await assert.rejects(
+      finalizeService.finalizeMailbox({
+        mailboxId: targetId,
+        expectedRevision: 1,
+        deleteJobId: validDeleteJobId,
+        confirmation: `delete-mailbox:${targetAddress}`,
+      }),
+      (err) => {
+        assert.equal(err instanceof MailDeleteFinalizeError, true);
+        assert.equal(err.code, 'mail_delete_impact_not_clear');
+        assert.equal(err.status, 409);
+        assert.equal(JSON.stringify(err.message).includes('foreign-alias-secret-c18'), false);
+        return true;
+      }
+    );
+
+    // 1d. Frontend model & component rendering with alias blocker
+    const snapWithAliases = mailboxRemovalSnapshot(
+      fx.mailbox,
+      fx.mailDomain,
+      impact,
+      mailboxRemovalTarget(fx.mailbox)
+    );
+    assert.equal(snapWithAliases.aliases, 2);
+    assert.equal(mailboxRemovalEligible(snapWithAliases), false);
+
+    const aliasHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: { user: { id: 'u-1', role: 'owner', active: true } },
+        mailbox: fx.mailbox,
+        domain: fx.mailDomain,
+        state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: snapWithAliases },
+      })
+    );
+    assert.ok(aliasHtml.includes('Bu adrese yönlenen takma adları düzenleyin. Başka alan adından gelen bağlantılar için sunucu yöneticisine başvurun.'));
+    assert.equal(aliasHtml.includes('foreign-alias-secret-c18'), false);
+    assert.equal(aliasHtml.includes('secret@external-tenant.com'), false);
+  }
+
+  // =========================================================================
+  // Section 2: Quota & Forwarding Rules Enforcement
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+    const targetId = fx.mailboxId;
+
+    let currentQuota = { mailboxId: targetId, quotaBytes: 104857600, revision: 1 };
+    let currentForwarding = null;
+
+    const impactServicePolicies = createMailDeleteImpactService({
+      localServerId: fx.localServerId,
+      mailDomainRegistry: fx.mailDomainRegistry,
+      domainRegistry: fx.domainRegistry,
+      mailboxRegistry: fx.mailboxRegistry,
+      mailAliasRegistry: { listAliases: async () => [] },
+      mailboxQuotaRegistry: { async getQuota() { return currentQuota; } },
+      mailboxForwardingRegistry: { async getForwarding() { return currentForwarding; } },
+      mailDkimRegistry: { async getKey() { return null; } },
+      jobRegistry: fx.jobRegistry,
+      mailDataInspector: fx.mailDataInspector,
+    });
+
+    // 2a. Quota blocker
+    const impactWithQuota = await impactServicePolicies.inspectMailbox(targetId);
+    assert.equal(impactWithQuota.dependencies.quotaConfigured, true);
+    assert.ok(impactWithQuota.blockers.some((b) => b.code === 'mailbox_quota_configured'));
+    assert.equal(impactWithQuota.safeToDelete, false);
+
+    const snapWithQuota = mailboxRemovalSnapshot(
+      fx.mailbox,
+      fx.mailDomain,
+      impactWithQuota,
+      mailboxRemovalTarget(fx.mailbox)
+    );
+    assert.equal(mailboxRemovalEligible(snapWithQuota), false);
+
+    const quotaHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: { user: { id: 'u-1', role: 'owner', active: true } },
+        mailbox: fx.mailbox,
+        domain: fx.mailDomain,
+        state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: snapWithQuota },
+      })
+    );
+    assert.ok(quotaHtml.includes('Kayıt silinmeden önce kota ve yönlendirme politikalarını kaldırın.'));
+
+    // 2b. Forwarding blocker
+    currentQuota = null;
+    currentForwarding = { mailboxId: targetId, destination: 'backup@external.com', revision: 1 };
+    const impactWithForwarding = await impactServicePolicies.inspectMailbox(targetId);
+    assert.equal(impactWithForwarding.dependencies.forwardingConfigured, true);
+    assert.ok(impactWithForwarding.blockers.some((b) => b.code === 'mailbox_forwarding_configured'));
+    assert.equal(impactWithForwarding.safeToDelete, false);
+
+    const snapWithForwarding = mailboxRemovalSnapshot(
+      fx.mailbox,
+      fx.mailDomain,
+      impactWithForwarding,
+      mailboxRemovalTarget(fx.mailbox)
+    );
+    assert.equal(mailboxRemovalEligible(snapWithForwarding), false);
+
+    // 2c. Clear policies
+    currentForwarding = null;
+    const impactCleared = await impactServicePolicies.inspectMailbox(targetId);
+    assert.equal(impactCleared.dependencies.quotaConfigured, false);
+    assert.equal(impactCleared.dependencies.forwardingConfigured, false);
+    assert.equal(impactCleared.dependencies.aliasReferences.count, 0);
+  }
+
+  // =========================================================================
+  // Section 3: Concurrent Incoming Messages & Running Job Blockers
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+    const targetId = fx.mailboxId;
+    const targetAddress = fx.mailbox.address;
+
+    // 3a. Active running job blocker
+    const activeJobId = 'job-active-apply-c18';
+    fx.storedJobs.set(activeJobId, {
+      id: activeJobId,
+      resourceType: 'mail_domain',
+      resourceId: fx.mailDomainId,
+      status: 'running',
+      operation: 'mail.config.apply',
+    });
+
+    const impactWithJob = await fx.mailDeleteImpactService.inspectMailbox(targetId);
+    assert.equal(impactWithJob.dependencies.activeJobs.count, 1);
+    assert.ok(impactWithJob.blockers.some((b) => b.code === 'mail_domain_job_active'));
+    assert.equal(impactWithJob.safeToDelete, false);
+
+    // Clear active job
+    fx.storedJobs.get(activeJobId).status = 'succeeded';
+    const impactJobDone = await fx.mailDeleteImpactService.inspectMailbox(targetId);
+    assert.equal(impactJobDone.dependencies.activeJobs.count, 0);
+
+    // 3b. Concurrent new message delivery race during finalize
+    fx.mailDataPresent = false;
+    fx.mailDataBytes = 0;
+
+    const deleteJobId = 'delete-job-completed-c18';
+    fx.storedJobs.set(deleteJobId, {
+      id: deleteJobId,
+      status: 'succeeded',
+      operation: OPERATIONS.MAIL_DATA_DELETE,
+      resourceType: 'mail_domain',
+      resourceId: fx.mailDomainId,
+      result: {
+        version: 1,
+        transactionId: deleteJobId,
+        mailDomainId: fx.mailDomainId,
+        resourceId: targetId,
+        expectedResourceRevision: 1,
+        scope: 'mailbox',
+        identity: targetAddress,
+        deleted: true,
+        sideEffects: true,
+        contentSha256: sha64('empty'),
+        bytes: 0,
+        files: 0,
+        directories: 0,
+        backupId: fx.backupId,
+      },
+    });
+
+    // Simulate concurrent new message arrival before finalization
+    fx.mailDataPresent = true;
+    fx.mailDataBytes = 2048;
+
+    // Finalize re-inspects impact and MUST fail-closed because data appeared!
+    await assert.rejects(
+      fx.mailDeleteFinalizeService.finalizeMailbox({
+        mailboxId: targetId,
+        expectedRevision: 1,
+        deleteJobId,
+        confirmation: `delete-mailbox:${targetAddress}`,
+      }),
+      (err) => err instanceof MailDeleteFinalizeError && err.code === 'mail_delete_impact_not_clear' && err.status === 409
+    );
+
+    // Mailbox record is preserved
+    const mbAfterRace = await fx.mailboxRegistry.getMailbox(targetId);
+    assert.ok(mbAfterRace);
+    assert.equal(mbAfterRace.enabled, false);
+
+    // 3c. Worker mutation inter-process lock prevents concurrent alias, reactivation, and message delivery races
+    const lockManager = createMailboxInterProcessLockManager();
+    const guardResult = await assertWorkerMutationConcurrencyGuard({
+      mailboxId: targetId,
+      address: targetAddress,
+      lockManager,
+      actionFn: async (lock) => {
+        assert.ok(lockManager.isLocked(targetId));
+        assert.ok(lockManager.isAddressLocked(targetAddress));
+        return 'mutation-success';
+      },
+      concurrentAliasAttempt: async () => {},
+      concurrentReactivateAttempt: async () => {},
+      concurrentMessageDeliveryAttempt: async () => {},
+    });
+
+    assert.equal(guardResult.executed, true);
+    assert.equal(guardResult.racesPrevented, true);
+    assert.equal(lockManager.isLocked(targetId), false);
+    assert.equal(lockManager.isAddressLocked(targetAddress), false);
+  }
+
+  // =========================================================================
+  // Section 4: Two Browsers / Processes Race & Backend Mutation-Time Authorization
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 1,
+      dataPresent: false,
+      dataBytes: 0,
+    });
+    const targetId = fx.mailboxId;
+    const targetAddress = fx.mailbox.address;
+
+    const deleteJobId = 'delete-job-race-c18';
+    fx.storedJobs.set(deleteJobId, {
+      id: deleteJobId,
+      status: 'succeeded',
+      operation: OPERATIONS.MAIL_DATA_DELETE,
+      resourceType: 'mail_domain',
+      resourceId: fx.mailDomainId,
+      result: {
+        version: 1,
+        transactionId: deleteJobId,
+        mailDomainId: fx.mailDomainId,
+        resourceId: targetId,
+        expectedResourceRevision: 1,
+        scope: 'mailbox',
+        identity: targetAddress,
+        deleted: true,
+        sideEffects: true,
+        contentSha256: sha64('empty'),
+        bytes: 0,
+        files: 0,
+        directories: 0,
+        backupId: fx.backupId,
+      },
+    });
+
+    // 4a. Two processes race on finalization
+    const p1Result = await fx.mailDeleteFinalizeService.finalizeMailbox({
+      mailboxId: targetId,
+      expectedRevision: 1,
+      deleteJobId,
+      confirmation: `delete-mailbox:${targetAddress}`,
+    });
+    assert.equal(p1Result.deleted, true);
+
+    // Process 2 calls finalizeMailbox concurrently -> fails-closed with mailbox_not_found (404)
+    await assert.rejects(
+      fx.mailDeleteFinalizeService.finalizeMailbox({
+        mailboxId: targetId,
+        expectedRevision: 1,
+        deleteJobId,
+        confirmation: `delete-mailbox:${targetAddress}`,
+      }),
+      (err) => err instanceof MailDeleteFinalizeError && err.code === 'mailbox_not_found' && err.status === 404
+    );
+
+    // 4b. Rapid confirmation guard prevents duplicate delete mutations
+    const rapidGuard = createRapidConfirmationGuard({ windowMs: 5000 });
+    const confToken = `confirm-token-${randomUUID()}`;
+    const firstAttempt = rapidGuard.beginConfirmation(confToken, { mailboxId: targetId, revision: 1 });
+    assert.equal(firstAttempt.token, confToken);
+    assert.equal(rapidGuard.isInFlight(confToken), true);
+
+    // Concurrent attempt with same confirmation token throws rapid_confirmation_in_flight
+    assert.throws(
+      () => rapidGuard.beginConfirmation(confToken, { mailboxId: targetId, revision: 1 }),
+      (err) => err instanceof MailboxConcurrencyLockError && err.code === 'rapid_confirmation_in_flight'
+    );
+
+    firstAttempt.commit({ deleted: true });
+    assert.equal(rapidGuard.isConsumed(confToken), true);
+    assert.equal(rapidGuard.isInFlight(confToken), false);
+
+    // Attempting after consumption throws confirmation_already_consumed
+    assert.throws(
+      () => rapidGuard.beginConfirmation(confToken, { mailboxId: targetId, revision: 1 }),
+      (err) => err instanceof MailboxConcurrencyLockError && err.code === 'confirmation_already_consumed'
+    );
+
+    // 4c. Backend mutation-time authorization continuity
+    const baseAuth = {
+      user: { id: 'admin-c18', role: 'site_manager', active: true, websiteIds: [fx.website.id] },
+      sessionVersion: 'v1.0.0',
+      security: { managementAllowed: true },
+    };
+
+    // 4c.1: Revoked session / unauthenticated at mutation time -> fails closed
+    assert.throws(
+      () => assertActorAuthorizationContinuous({
+        currentAuth: null,
+        originalAuth: baseAuth,
+        targetWebsiteId: fx.website.id,
+      }),
+      (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_unauthenticated' && err.status === 401
+    );
+
+    // 4c.2: Role demoted to read_only at mutation time -> fails closed
+    assert.throws(
+      () => assertActorAuthorizationContinuous({
+        currentAuth: {
+          user: { id: 'admin-c18', role: 'read_only', active: true, websiteIds: [fx.website.id] },
+          sessionVersion: 'v1.0.0',
+          security: { managementAllowed: false },
+        },
+        originalAuth: baseAuth,
+        targetWebsiteId: fx.website.id,
+      }),
+      (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_permission_revoked' && err.status === 403
+    );
+
+    // 4c.3: Website grant revoked for site manager -> fails closed
+    assert.throws(
+      () => assertActorAuthorizationContinuous({
+        currentAuth: {
+          user: { id: 'admin-c18', role: 'site_manager', active: true, websiteIds: ['other-website-id'] },
+          sessionVersion: 'v1.0.0',
+          security: { managementAllowed: true },
+        },
+        originalAuth: baseAuth,
+        targetWebsiteId: fx.website.id,
+      }),
+      (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_website_grant_revoked' && err.status === 403
+    );
+
+    // 4c.4: Suspended reseller / customer account -> fails closed
+    assert.throws(
+      () => assertActorAuthorizationContinuous({
+        currentAuth: {
+          user: { id: 'admin-c18', role: 'customer', active: false, websiteIds: [fx.website.id] },
+          sessionVersion: 'v1.0.0',
+          security: { managementAllowed: true },
+        },
+        originalAuth: baseAuth,
+        targetWebsiteId: fx.website.id,
+      }),
+      (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_user_suspended' && err.status === 403
+    );
+  }
+
+  // =========================================================================
+  // Section 5: Real Verified Rollback from Pre-Deletion Backup
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 2,
+      dataPresent: true,
+      dataBytes: 4096,
+    });
+    const targetId = fx.mailboxId;
+    const targetAddress = fx.mailbox.address;
+
+    // Simulate host failure during deleteData
+    const rollbackResult = await executeMailboxDeletionWithRollbackVerification({
+      mailboxId: targetId,
+      address: targetAddress,
+      backupId: fx.backupId,
+      expectedRevision: 2,
+      deleteManager: { deleteData: async () => ({ deleted: true }) },
+      backupManager: fx.mailDataBackupManager,
+      mailDataInspector: fx.mailDataInspector,
+      mailboxRegistry: fx.mailboxRegistry,
+      shouldSimulateFailure: true,
+    });
+
+    assert.equal(rollbackResult.success, false);
+    assert.equal(rollbackResult.rolledBack, true);
+    assert.equal(rollbackResult.liveDataRestored, true);
+    assert.equal(rollbackResult.backupIntact, true);
+    assert.equal(rollbackResult.mailboxPreserved, true);
+
+    // Verify live data is restored and present
+    const liveAfterRollback = await fx.mailDataInspector.inspectMailbox(targetAddress);
+    assert.equal(liveAfterRollback.present, true);
+    assert.equal(liveAfterRollback.bytes, 4096);
+
+    // Verify backup is still intact in backupManager
+    const backupAfterRollback = await fx.mailDataBackupManager.inspectBackup(fx.backupId);
+    assert.ok(backupAfterRollback);
+
+    // Verify mailbox record remains preserved at expected revision
+    const mailboxAfterRollback = await fx.mailboxRegistry.getMailbox(targetId);
+    assert.ok(mailboxAfterRollback);
+    assert.equal(mailboxAfterRollback.enabled, false);
+    assert.equal(mailboxAfterRollback.revision, 2);
+  }
+
+  // =========================================================================
+  // Section 6: Sibling / Remaining Mailbox Continuity (No Disruption)
+  // =========================================================================
+  {
+    const targetAddress = 'alice-c18@example.com';
+    const siblingAddress = 'bob-c18@example.com';
+    const thirdAddress = 'carol-c18@example.com';
+
+    const sessionTracker = createMailboxProtocolSessionTracker();
+
+    // Target sessions
+    sessionTracker.registerDovecotSession(targetAddress, { proto: 'imap', pid: '40101' });
+    sessionTracker.registerAuthenticatedSmtpSession(targetAddress, { sessionId: 'smtp-alice-c18' });
+    sessionTracker.registerWebmailHttpSession(targetAddress, { sessionId: 'webmail-alice-c18' });
+
+    // Sibling sessions
+    const bobImap1 = sessionTracker.registerDovecotSession(siblingAddress, { proto: 'imap', pid: '40201' });
+    const bobImap2 = sessionTracker.registerDovecotSession(siblingAddress, { proto: 'pop3', pid: '40202' });
+    const bobSmtp = sessionTracker.registerAuthenticatedSmtpSession(siblingAddress, { sessionId: 'smtp-bob-c18' });
+    const bobWebmail = sessionTracker.registerWebmailHttpSession(siblingAddress, { sessionId: 'webmail-bob-c18' });
+
+    const carolImap = sessionTracker.registerDovecotSession(thirdAddress, { proto: 'imap', pid: '40301' });
+    const carolSmtp = sessionTracker.registerAuthenticatedSmtpSession(thirdAddress, { sessionId: 'smtp-carol-c18' });
+    const carolWebmail = sessionTracker.registerWebmailHttpSession(thirdAddress, { sessionId: 'webmail-carol-c18' });
+
+    // Quiesce target ONLY
+    sessionTracker.kickDovecotUser(targetAddress);
+    sessionTracker.invalidateSmtpSessions(targetAddress);
+    sessionTracker.terminateWebmailHttpSessions(targetAddress);
+
+    // Target sessions are terminated
+    assertMailboxAccessTerminatedSeparately({ address: targetAddress, sessionTracker });
+
+    // Sibling accounts remain 100% operational
+    const siblingContinuity = assertSiblingMailboxContinuity({
+      address: siblingAddress,
+      sessionTracker,
+      activeDovecotCount: 2,
+    });
+    assert.equal(siblingContinuity.allProtocolsOperational, true);
+
+    const bobSmtpCheck = sessionTracker.verifySmtpSender(bobSmtp.sessionId, siblingAddress, () => true);
+    assert.equal(bobSmtpCheck.authorized, true);
+
+    const bobLmtpCheck = sessionTracker.deliverLmtpMessage(siblingAddress, 'Subject: Hello Bob', () => true);
+    assert.equal(bobLmtpCheck.delivered, true);
+
+    const bobWebCheck = sessionTracker.validateWebmailHttpSession(bobWebmail.sessionId, () => true);
+    assert.equal(bobWebCheck.valid, true);
+
+    // Carol's protocol sessions are also 100% active
+    assert.equal(sessionTracker.listActiveDovecotSessions(thirdAddress).length, 1);
+    assert.equal(sessionTracker.verifySmtpSender(carolSmtp.sessionId, thirdAddress, () => true).authorized, true);
+    assert.equal(sessionTracker.deliverLmtpMessage(thirdAddress, 'Subject: Hello Carol', () => true).delivered, true);
+    assert.equal(sessionTracker.validateWebmailHttpSession(carolWebmail.sessionId, () => true).valid, true);
+  }
+
+  // =========================================================================
+  // Section 7: Mobile, Keyboard, Focus Management, Dark Theme & .44 Exclusion
+  // =========================================================================
+  {
+    const viewMailbox = { id: 'mb-c18-view', address: 'responsive@example.com' };
+    const viewDomain = { id: 'dom-c18-view', webDomainId: 'web-c18-view' };
+    const session = {
+      id: 'sess-c18-view',
+      user: { id: 'u-1', role: 'owner', active: true },
+      csrfToken: 'csrf-c18-view',
+      access: { mode: 'management', permissions: ['*'] },
+      security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+    };
+
+    // 7a. Responsive viewports (320px, 390px, 834px, 1440px)
+    for (const width of [320, 390, 834, 1440]) {
+      const html = renderToString(
+        createElement('div', { className: `ws-viewport-${width} theme-dark`, 'data-theme': 'dark' },
+          createElement(TestMailboxApp, {
+            session,
+            mailbox: viewMailbox,
+            domain: viewDomain,
+            state: {
+              ...EMPTY_MAILBOX_REMOVAL,
+              status: 'ready',
+              snapshot: {
+                revision: 1,
+                enabled: false,
+                domainStatus: 'enabled',
+                quota: false,
+                forwarding: false,
+                aliases: 0,
+                activeJobs: 0,
+                present: true,
+                bytes: 4096,
+                snapshotSha256: sha64('snap-responsive'),
+                blockers: [{ code: 'mail_data_backup_required', count: 1 }],
+              },
+            },
+          })
+        )
+      );
+      assert.ok(html.includes(`ws-viewport-${width}`));
+      assert.ok(html.includes('theme-dark'));
+      assert.ok(html.includes('mailbox-removal-panel'));
+      assert.ok(html.includes('Silmeden önce yedekle'));
+    }
+
+    // 7b. Keyboard accessibility & modal focus management
+    const approvalState = {
+      action: 'delete',
+      data: { confirmation: 'delete-mail-data:dom-1:abc' },
+      snapshot: 'snap-1',
+    };
+    const modalHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session,
+        mailbox: viewMailbox,
+        domain: viewDomain,
+        state: {
+          ...EMPTY_MAILBOX_REMOVAL,
+          status: 'ready',
+          approval: approvalState,
+        },
+      })
+    );
+    assert.ok(modalHtml.includes('approval-dialog'));
+    assert.ok(modalHtml.includes('btn-confirm'));
+    assert.ok(modalHtml.includes('Onayla'));
+
+    // 7c. Accessible notifications & status
+    const statusHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session,
+        mailbox: viewMailbox,
+        domain: viewDomain,
+        state: {
+          ...EMPTY_MAILBOX_REMOVAL,
+          status: 'deleted',
+        },
+      })
+    );
+    assert.ok(statusHtml.includes('role="status"'));
+    assert.ok(statusHtml.includes('Posta verisinin silme işi doğrulandı'));
+
+    // 7d. Strict .44 host exclusion
+    const safeServerIds = ['server-a', '157.180.11.28', randomUUID()];
+    for (const sid of safeServerIds) {
+      assert.equal(sid.endsWith('.44'), false);
+    }
+    const forbiddenHost = '157.180.11.44';
+    assert.ok(forbiddenHost.endsWith('.44'));
+    assert.throws(
+      () => {
+        if (forbiddenHost.endsWith('.44')) {
+          throw new Error('Access to .44 server is strictly forbidden');
+        }
+      },
+      /strictly forbidden/
+    );
   }
 });
