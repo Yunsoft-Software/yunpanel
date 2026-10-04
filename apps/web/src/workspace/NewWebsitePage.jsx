@@ -193,6 +193,8 @@ function WebsiteForm({ parentId }) {
             <label>Yönetici e-posta adresi
               <input
                 type="email"
+                name="adminEmail"
+                autoComplete="email"
                 aria-describedby="website-admin-email-hint"
                 required
                 placeholder="yonetici@example.com"
@@ -206,6 +208,7 @@ function WebsiteForm({ parentId }) {
             <label>Yönetici parolası
               <input
                 type="password"
+                name="adminPassword"
                 aria-describedby="website-admin-password-hint"
                 required
                 minLength={12}

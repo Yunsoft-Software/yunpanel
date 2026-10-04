@@ -23,13 +23,15 @@ test('both account inputs have distinct accessible descriptions below their cont
   assert.match(fields, /Panel girişi için kullanılır; posta kutusu hesabından ayrıdır/);
 });
 
-test('email/password controls keep their constraints and controlled form updates', () => {
+test('email/password controls keep their constraints, autofill support, and controlled form updates', () => {
   assert.match(fields, /type="email"[\s\S]*?required/);
+  assert.match(fields, /autoComplete="email"/);
   assert.match(fields, /type="password"[\s\S]*?required[\s\S]*?minLength=\{12\}/);
   assert.match(fields, /autoComplete="new-password"/);
   for (const key of ['adminEmail', 'adminPassword']) {
     assert.ok(fields.includes(`value={form.${key}}`));
     assert.ok(fields.includes(`update('${key}', event.target.value)`));
+    assert.ok(fields.includes(`name="${key}"`));
   }
   assert.doesNotMatch(fields, /defaultValue=|dangerouslySetInnerHTML/);
 });
@@ -61,4 +63,13 @@ test('responsive layout preserves equal column sizing and consistent mobile vert
   assert.match(consoleTheme, /\.ws-form-grid\s*\{\s*display:\s*grid;\s*grid-template-columns:\s*repeat\(2,minmax\(0,1fr\)\);\s*gap:\s*18px;\s*\}/);
   assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)[\s\S]*?\.ws-form-grid\s*\{\s*grid-template-columns:\s*minmax\(0,1fr\);/);
   assert.match(consoleTheme, /@media\s*\(max-width:\s*640px\)[\s\S]*?--ws-control-height:\s*44px;/);
+});
+
+test('text wrapping and overflow prevention are enforced across hints and labels for 200% zoom and narrow viewports', () => {
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+label\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+\.ws-field-hint\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(consoleTheme, /\.ws-site-admin-fields\s+\.ws-field-hint\s*\{[^}]*word-break:\s*break-word;/);
+  assert.match(consoleTheme, /\.ws-notice\s*>\s*span\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(emberTheme, /\.workspace-shell\s+\.ws-site-admin-fields\s+\.ws-field-hint\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(emberTheme, /\.workspace-shell\s+\.ws-site-admin-fields\s+\.ws-field-hint\s*\{[^}]*word-break:\s*break-word;/);
 });

@@ -93,7 +93,10 @@
 .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border-radius: var(--ws-radius-control); border-color: var(--ws-control-border); background: var(--ws-surface-subtle); }
 .workspace-shell :is(input,select,textarea):disabled, .ws-modal :is(input,select,textarea):disabled { opacity: .55; cursor: not-allowed; background: var(--ws-surface-subtle); color: var(--ws-muted); }
 .workspace-shell code, .ws-modal code, code { overflow-wrap: anywhere; word-break: break-all; }
+.workspace-shell .ws-site-admin-fields { align-items: start; }
+.workspace-shell .ws-site-admin-fields label { min-width: 0; overflow-wrap: anywhere; }
 .workspace-shell .ws-site-admin-fields label > input { height: var(--ws-control-height); min-height: var(--ws-control-height); border-radius: var(--ws-radius-control); }
+.workspace-shell .ws-site-admin-fields .ws-field-hint { overflow-wrap: anywhere; word-break: break-word; }
 .workspace-shell :is(input,textarea)::placeholder, .ws-modal :is(input,textarea)::placeholder { opacity: 1; }
 .workspace-shell input:is([type='checkbox'],[type='radio']), .ws-modal input:is([type='checkbox'],[type='radio']) { accent-color: var(--ws-brand); }
 .workspace-shell :is(button,a,input,select,textarea,summary):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary):focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
