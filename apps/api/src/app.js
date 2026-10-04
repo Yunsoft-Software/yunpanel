@@ -211,6 +211,17 @@ import {
   EXIT_GATE_STATUSES,
   EXIT_GATE_CATEGORIES,
 } from './production-exit-gate.js';
+import {
+  mountNonResellerCapabilitiesRoutes,
+  NON_RESELLER_INVENTORY,
+  TASK_GROUPS,
+  assertNoResellerBrandingPollution,
+  assertTenantBoundaryForCapability,
+  getCapabilityById,
+  listCapabilities,
+  ResellerBrandingDeferredError,
+  CapabilityRegistryError,
+} from './non-reseller-capabilities.js';
 
 const DOCKER_COMPOSE_API_CONTEXT = Symbol.for('yunpanel.docker-compose-api-context');
 
@@ -242,6 +253,17 @@ export {
   EXIT_GATE_STATUSES,
   EXIT_GATE_CATEGORIES,
 } from './production-exit-gate.js';
+export {
+  mountNonResellerCapabilitiesRoutes,
+  NON_RESELLER_INVENTORY,
+  TASK_GROUPS,
+  assertNoResellerBrandingPollution,
+  assertTenantBoundaryForCapability,
+  getCapabilityById,
+  listCapabilities,
+  ResellerBrandingDeferredError,
+  CapabilityRegistryError,
+} from './non-reseller-capabilities.js';
 
 function localServerRegistryView(registry, localServerId) {
   if (!localServerId) return registry;
@@ -986,6 +1008,7 @@ export function createApp(allOptions = {}) {
   mountProductionExitGateRoutes(app, {
     exitGateService: productionExitGateService,
   });
+  mountNonResellerCapabilitiesRoutes(app);
 
   if (databaseBindingRegistry) {
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({

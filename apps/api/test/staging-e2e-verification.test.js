@@ -31,6 +31,18 @@ import {
 } from '../src/local-api-health.js';
 import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
 import {
+  NON_RESELLER_INVENTORY,
+  TASK_GROUPS,
+  FORBIDDEN_BRANDING_KEYS,
+  assertNoResellerBrandingPollution,
+  assertTenantBoundaryForCapability,
+  getCapabilityById,
+  listCapabilities,
+  ResellerBrandingDeferredError,
+  CapabilityRegistryError,
+  mountNonResellerCapabilitiesRoutes,
+} from '../src/non-reseller-capabilities.js';
+import {
   createProductionExitGateService,
   mountProductionExitGateRoutes,
   ProductionExitGateError,
@@ -6412,4 +6424,222 @@ test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd c
   // Final Gate Verification
   assertNoDot44Host(stagingServerId);
   assert.ok(true, 'P2: Legacy direct-systemd compatibility safely maintained, migration fallback audit passed, runtime engines and file manager/terminal non-regression verified.');
+});
+
+// ============================================================================
+// STAGING E2E PAR-04: Non-Reseller Capabilities Retention, Cross-Connections,
+// Reseller Branding Deferral & Multi-Tier Tenant Boundary Enforcement
+// ============================================================================
+
+test('Staging E2E PAR-04: Non-reseller capabilities retention with established inventory IDs, cross-connections to groups B-E, reseller branding deferral, and fail-closed tenant boundary enforcement', async (t) => {
+  // 1. Establish inventory integrity across all domains
+  const inventory = NON_RESELLER_INVENTORY;
+  assert.ok(inventory && typeof inventory === 'object', 'Non-reseller inventory catalog must exist');
+
+  const requiredDomains = [
+    'dns', 'mail', 'database', 'runtime', 'docker', 'git',
+    'wordpress', 'backup', 'security', 'api', 'migration', 'monitoring', 'extensions',
+  ];
+  for (const domain of requiredDomains) {
+    const caps = listCapabilities({ category: domain });
+    assert.ok(caps.length > 0, `Domain '${domain}' must have non-reseller capabilities`);
+    for (const cap of caps) {
+      assert.equal(cap.reimplementationPrevented, true, `Capability ${cap.id} must prevent reimplementation`);
+      assert.ok(cap.groupCrossConnects.length > 0, `Capability ${cap.id} must cross-connect to groups B-E`);
+    }
+  }
+
+  // 2. Cross-connection assertions to Task Groups B, C, D, E
+  const allCaps = Object.values(inventory);
+  const groupB = allCaps.filter((c) => c.groupCrossConnects.includes(TASK_GROUPS.GROUP_B));
+  const groupC = allCaps.filter((c) => c.groupCrossConnects.includes(TASK_GROUPS.GROUP_C));
+  const groupD = allCaps.filter((c) => c.groupCrossConnects.includes(TASK_GROUPS.GROUP_D));
+  const groupE = allCaps.filter((c) => c.groupCrossConnects.includes(TASK_GROUPS.GROUP_E));
+
+  assert.ok(groupB.length >= 20, 'Group B cross-connect count must be >= 20');
+  assert.ok(groupC.length >= 35, 'Group C cross-connect count must be >= 35');
+  assert.ok(groupD.length >= 40, 'Group D cross-connect count must be >= 40');
+  assert.ok(groupE.length >= 8, 'Group E cross-connect count must be >= 8');
+
+  // 3. Reseller branding deferral: fail-closed validation rejecting premature branding
+  for (const forbiddenKey of FORBIDDEN_BRANDING_KEYS) {
+    assert.throws(
+      () => assertNoResellerBrandingPollution({ [forbiddenKey]: 'Custom Brand' }),
+      (err) => err instanceof ResellerBrandingDeferredError && err.status === 403,
+      `Should throw ResellerBrandingDeferredError for forbidden key ${forbiddenKey}`,
+    );
+  }
+  // Deep/nested branding keys also rejected
+  assert.throws(
+    () => assertNoResellerBrandingPollution({ settings: { theme: { customLogo: 'https://cdn.example.com/logo.png' } } }),
+    (err) => err instanceof ResellerBrandingDeferredError && err.status === 403,
+  );
+  // Clean payload passes without throwing
+  assert.doesNotThrow(() => {
+    assertNoResellerBrandingPollution({ name: 'Valid Panel Config', debug: false, port: 8080 });
+  });
+
+  // 4. Multi-tier tenant boundary enforcement fail-closed
+  const ownerActor = { user: { id: 'owner-e2e', role: 'owner', active: true } };
+  const resellerActor = {
+    user: {
+      id: 'reseller-e2e',
+      role: 'reseller',
+      active: true,
+      websiteIds: ['site-r1'],
+      hosting: { kind: 'reseller', resellerId: 'reseller-e2e', websiteIds: ['site-r1'] },
+    },
+  };
+  const customerActor = {
+    user: {
+      id: 'customer-e2e',
+      role: 'customer',
+      active: true,
+      websiteIds: ['site-c1'],
+      hosting: { kind: 'customer', customerId: 'customer-e2e', resellerId: 'reseller-e2e', websiteIds: ['site-c1'] },
+    },
+  };
+  const inactiveActor = { user: { id: 'inactive-user', role: 'owner', active: false } };
+
+  // Inactive actor fails closed with tenant_actor_inactive
+  assert.throws(
+    () => assertTenantBoundaryForCapability({ actor: inactiveActor, capabilityId: 'DNS-01' }),
+    (err) => err instanceof TenantBoundaryError && err.code === 'tenant_actor_inactive' && err.status === 403,
+  );
+
+  // Owner has access to owner_only capability (e.g. DNSSEC, AXFR, Firewall)
+  const ownerSec = assertTenantBoundaryForCapability({ actor: ownerActor, capabilityId: 'SEC-01' });
+  assert.equal(ownerSec.authorized, true);
+
+  // Reseller is denied owner_only capability
+  assert.throws(
+    () => assertTenantBoundaryForCapability({ actor: resellerActor, capabilityId: 'SEC-01' }),
+    (err) => err instanceof TenantBoundaryError && err.code === 'tenant_boundary_forbidden' && err.status === 403,
+  );
+
+  // Customer is denied owner_only or management_scoped capability
+  assert.throws(
+    () => assertTenantBoundaryForCapability({ actor: customerActor, capabilityId: 'SEC-01' }),
+    (err) => err instanceof TenantBoundaryError && err.code === 'tenant_boundary_forbidden' && err.status === 403,
+  );
+  assert.throws(
+    () => assertTenantBoundaryForCapability({ actor: customerActor, capabilityId: 'DNS-02' }),
+    (err) => err instanceof TenantBoundaryError && err.code === 'tenant_boundary_forbidden' && err.status === 403,
+  );
+
+  // Customer accessing their own site is permitted
+  const custSiteAccess = assertTenantBoundaryForCapability({
+    actor: customerActor,
+    capabilityId: 'DNS-01',
+    targetSiteId: 'site-c1',
+  });
+  assert.equal(custSiteAccess.authorized, true);
+
+  // Customer accessing a foreign site fails closed
+  assert.throws(
+    () => assertTenantBoundaryForCapability({
+      actor: customerActor,
+      capabilityId: 'DNS-01',
+      targetSiteId: 'site-foreign',
+    }),
+    (err) => err instanceof TenantBoundaryError && err.code === 'site_scope_forbidden' && err.status === 403,
+  );
+
+  // 5. Express HTTP Route Integration with requirePanelRouteAccess guard on real HTTP listener
+  const app = express();
+  app.use(express.json());
+  let currentAuth = null;
+  app.use((req, res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+  mountNonResellerCapabilitiesRoutes(app);
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = address.port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const internalReq = async (method, reqPath, body = null) => {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: '127.0.0.1',
+        port,
+        path: reqPath,
+        method,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  };
+
+  // 5a. Unauthenticated request -> 401 unauthorized
+  currentAuth = null;
+  const unauthRes = await internalReq('GET', '/api/system/capabilities');
+  assert.equal(unauthRes.status, 401);
+  assert.equal(unauthRes.body.error.code, 'unauthorized');
+
+  // 5b. Authenticated Owner -> 200 with all capabilities and deferred branding status
+  currentAuth = {
+    user: { id: 'owner-e2e', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const ownerRes = await internalReq('GET', '/api/system/capabilities');
+  assert.equal(ownerRes.status, 200);
+  assert.ok(ownerRes.body.data.total >= 60);
+  assert.equal(ownerRes.body.data.resellerBrandingStatus, 'deferred_to_next_phase');
+
+  // 5c. Branding validation endpoint rejects premature branding
+  const badBrandingRes = await internalReq('POST', '/api/system/capabilities/validate-branding', {
+    customLogo: 'https://cdn.example.com/logo.png',
+  });
+  assert.equal(badBrandingRes.status, 403);
+  assert.equal(badBrandingRes.body.error.code, 'reseller_branding_deferred');
+
+  const cleanBrandingRes = await internalReq('POST', '/api/system/capabilities/validate-branding', {
+    configName: 'standard-production',
+  });
+  assert.equal(cleanBrandingRes.status, 200);
+  assert.equal(cleanBrandingRes.body.data.valid, true);
+
+  // 5d. Customer role access filtering via HTTP
+  currentAuth = {
+    user: { id: 'customer-e2e', role: 'customer', active: true },
+    access: { mode: 'site_management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const custRes = await internalReq('GET', '/api/system/capabilities');
+  assert.equal(custRes.status, 200);
+  assert.ok(custRes.body.data.total < ownerRes.body.data.total);
+  for (const cap of custRes.body.data.capabilities) {
+    assert.notEqual(cap.scopeLevel, 'owner_only');
+    assert.ok(cap.rolesAllowed.includes('customer'));
+  }
+
+  // Customer querying owner-only capability returns 403
+  const custForbiddenRes = await internalReq('GET', '/api/system/capabilities/SEC-01');
+  assert.equal(custForbiddenRes.status, 403);
+  assert.equal(custForbiddenRes.body.error.code, 'tenant_boundary_forbidden');
+
+  // Customer querying allowed capability returns 200
+  const custAllowedRes = await internalReq('GET', '/api/system/capabilities/DNS-01');
+  assert.equal(custAllowedRes.status, 200);
+  assert.equal(custAllowedRes.body.data.id, 'DNS-01');
+
+  assert.ok(true, 'PAR-04: Non-reseller capabilities, cross-connections, branding deferral, and tenant boundaries fully verified in staging E2E suite.');
 });
