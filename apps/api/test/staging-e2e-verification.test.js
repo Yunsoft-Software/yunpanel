@@ -91,6 +91,8 @@ import {
 } from '../src/production-exit-gate.js';
 import { createLiveSessionRegistry } from '../src/live-session-registry.js';
 import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/elfinder-handoff-service.js';
+import { mountElFinderHandoffRoutes } from '../src/elfinder-handoff-http.js';
+import { createElFinderHandoffConsumerHandler } from '../src/elfinder-handoff-socket.js';
 import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal-websocket.js';
 import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
@@ -2421,16 +2423,24 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   const siteAllocations = f.store.siteAllocations;
   const stagingServerId = '44444444-4444-4444-8444-444444444444';
   const siteDirectId = '99999999-9999-4999-8999-999999999999';
+  const site1a1Id = '11111111-1111-4111-8111-111111111111';
+  const site1a2Id = '11111111-1111-4111-8111-111111111112';
+  const site1b1Id = '11111111-1111-4111-8111-111111111121';
+  const site1b2Id = '11111111-1111-4111-8111-111111111122';
+  const site2a1Id = '22222222-2222-4222-8222-222222222211';
+  const site2a2Id = '22222222-2222-4222-8222-222222222212';
+  const site2b1Id = '22222222-2222-4222-8222-222222222221';
+  const site2b2Id = '22222222-2222-4222-8222-222222222222';
 
   const sites = [
-    { id: 'site-1a1', name: 'Site 1A1', customerId: 'cust-1a', resellerId: 'reseller-1' },
-    { id: 'site-1a2', name: 'Site 1A2', customerId: 'cust-1a', resellerId: 'reseller-1' },
-    { id: 'site-1b1', name: 'Site 1B1', customerId: 'cust-1b', resellerId: 'reseller-1' },
-    { id: 'site-1b2', name: 'Site 1B2', customerId: 'cust-1b', resellerId: 'reseller-1' },
-    { id: 'site-2a1', name: 'Site 2A1', customerId: 'cust-2a', resellerId: 'reseller-2' },
-    { id: 'site-2a2', name: 'Site 2A2', customerId: 'cust-2a', resellerId: 'reseller-2' },
-    { id: 'site-2b1', name: 'Site 2B1', customerId: 'cust-2b', resellerId: 'reseller-2' },
-    { id: 'site-2b2', name: 'Site 2B2', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: site1a1Id, name: 'Site 1A1', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: site1a2Id, name: 'Site 1A2', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: site1b1Id, name: 'Site 1B1', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: site1b2Id, name: 'Site 1B2', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: site2a1Id, name: 'Site 2A1', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: site2a2Id, name: 'Site 2A2', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: site2b1Id, name: 'Site 2B1', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: site2b2Id, name: 'Site 2B2', customerId: 'cust-2b', resellerId: 'reseller-2' },
     { id: siteDirectId, name: 'Site Direct', customerId: 'cust-direct', resellerId: null },
   ];
 
@@ -2489,12 +2499,12 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
     return { called, statusCode, responseBody };
   };
 
-  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: ['site-1a1', 'site-1a2', 'site-1b1', 'site-1b2'] };
-  const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: ['site-1a1', 'site-1a2'] };
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: [site1a1Id, site1a2Id, site1b1Id, site1b2Id] };
+  const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: [site1a1Id, site1a2Id] };
   const cDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: [siteDirectId] };
 
   // Reseller 1 actor cannot access Reseller 2 websites (403 fail-closed without metadata leakage)
-  const r1ToR2Site = await executeRequest(r1Actor, '/api/websites/site-2a1/terminal');
+  const r1ToR2Site = await executeRequest(r1Actor, `/api/websites/${site2a1Id}/terminal`);
   assert.equal(r1ToR2Site.called, false);
   assert.equal(r1ToR2Site.statusCode, 403);
   assert.equal(r1ToR2Site.responseBody.error.code, 'tenant_boundary_forbidden');
@@ -2502,147 +2512,60 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   assert.equal(r1ToR2Site.responseBody.error.customer, undefined);
 
   // Customer 1a actor cannot access Customer 1b or Customer 2a websites
-  const c1aToC1bSite = await executeRequest(c1aActor, '/api/websites/site-1b1/files');
+  const c1aToC1bSite = await executeRequest(c1aActor, `/api/websites/${site1b1Id}/files`);
   assert.equal(c1aToC1bSite.called, false);
   assert.equal(c1aToC1bSite.statusCode, 403);
   assert.equal(c1aToC1bSite.responseBody.error.code, 'tenant_boundary_forbidden');
   assert.equal(c1aToC1bSite.responseBody.error.site, undefined);
 
   // Direct Customer cannot access Reseller 1 websites
-  const cDirectToR1Site = await executeRequest(cDirectActor, '/api/websites/site-1a1/databases');
+  const cDirectToR1Site = await executeRequest(cDirectActor, `/api/websites/${site1a1Id}/databases`);
   assert.equal(cDirectToR1Site.called, false);
   assert.equal(cDirectToR1Site.statusCode, 403);
 
-  // 3. Open WebSocket Lifecycle & Fail-Closed Scenarios
-  const activeSockets = new Map();
-  function openSimulatedWebSocket(sessionId, userId, siteId = null) {
-    const socketRecord = {
-      id: `ws-${userId}-${Math.random().toString(36).slice(2, 8)}`,
-      sessionId,
-      userId,
-      siteId,
-      closed: false,
-      closeCode: null,
-      closeReason: null,
-      closePayload: null,
-    };
-    const terminate = (reason, code = 4001, payload = null) => {
-      socketRecord.closed = true;
-      socketRecord.closeCode = code;
-      socketRecord.closeReason = reason;
-      socketRecord.closePayload = payload;
-      activeSockets.delete(socketRecord.id);
-    };
-    const reg = liveSessions.register({
-      sessionId,
-      userId,
-      terminate: (reason) => terminate(reason, 4001, { type: 'revoked', reason }),
-    });
-    socketRecord.unregister = reg.unregister;
-    activeSockets.set(socketRecord.id, socketRecord);
-    return socketRecord;
+  // 3. Open WebSocket Lifecycle, elFinder Gateway Handoff, and In-Flight Fail-Closed Verification over Real HTTP & WebSocket
+  const r1Token = f.session('reseller-1');
+  const r2Token = f.session('reseller-2');
+  const c1aToken = f.session('cust-1a');
+  const c1bToken = f.session('cust-1b');
+  const c2aToken = f.session('cust-2a');
+  const c2bToken = f.session('cust-2b');
+  const cDirectToken = f.session('cust-direct');
+
+  function getUserWebsites(userId, role) {
+    if (role === 'owner') return sites.map((s) => s.id);
+    if (role === 'reseller') {
+      return f.db.prepare(`
+        SELECT w.website_id
+        FROM auth_customer_websites w
+        JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+        WHERE h.reseller_id = ?
+      `).all(userId).map((r) => r.website_id);
+    }
+    return f.db.prepare('SELECT website_id FROM auth_customer_websites WHERE customer_id = ?')
+      .all(userId).map((r) => r.website_id);
   }
 
-  // Open active WebSockets across hierarchy
-  const wsOwner = openSimulatedWebSocket('owner-session', 'owner-user', null);
-  const wsR1 = openSimulatedWebSocket('r1-session', 'reseller-1', 'site-1a1');
-  const wsR2 = openSimulatedWebSocket('r2-session', 'reseller-2', 'site-2a1');
-  const wsC1a = openSimulatedWebSocket('c1a-session', 'cust-1a', 'site-1a1');
-  const wsC1b = openSimulatedWebSocket('c1b-session', 'cust-1b', 'site-1b1');
-  const wsC2a = openSimulatedWebSocket('c2a-session', 'cust-2a', 'site-2a1');
-  const wsC2b = openSimulatedWebSocket('c2b-session', 'cust-2b', 'site-2b1');
-  const wsDirect = openSimulatedWebSocket('direct-session', 'cust-direct', siteDirectId);
+  const websiteRecords = new Map();
+  for (const s of sites) {
+    const appId = randomUUID();
+    websiteRecords.set(s.id, {
+      id: s.id,
+      serverId: stagingServerId,
+      applicationId: appId,
+      runtimeType: 'php',
+      unixUser: elFinderHandoffInternals.applicationUser(appId),
+      revision: 1,
+    });
+  }
 
-  assert.equal(activeSockets.size, 8);
-
-  // Scenario 3A: Logout terminates active WebSocket fail-closed
-  assert.equal(wsC1a.closed, false);
-  liveSessions.revokeSession('c1a-session', 'logout');
-  assert.equal(wsC1a.closed, true);
-  assert.equal(wsC1a.closeCode, 4001);
-  assert.equal(wsC1a.closeReason, 'logout');
-  assert.deepEqual(wsC1a.closePayload, { type: 'revoked', reason: 'logout' });
-  assert.equal(activeSockets.has(wsC1a.id), false);
-
-  // Scenario 3B: Customer Suspend terminates active WebSocket fail-closed
-  assert.equal(wsC1b.closed, false);
-  const cust1bRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
-  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: cust1bRow.revision, active: false });
-  assert.equal(wsC1b.closed, true);
-  assert.equal(wsC1b.closeCode, 4001);
-  assert.equal(wsC1b.closeReason, 'hosting_account_suspended');
-  assert.deepEqual(wsC1b.closePayload, { type: 'revoked', reason: 'hosting_account_suspended' });
-  assert.equal(activeSockets.has(wsC1b.id), false);
-
-  // Target access check for suspended customer fails closed
-  const suspendedCust1bSession = {
-    user: { id: 'cust-1b', role: 'customer', websiteIds: ['site-1b1', 'site-1b2'], active: false },
-    access: { mode: 'site_management', permissions: ['sites.manage'] },
-    security: { managementAllowed: true },
-  };
-  assert.throws(
-    () => terminalWebSocketInternals.requireTerminalTargetAccess(suspendedCust1bSession, { scope: 'site', websiteId: 'site-1b1' }),
-    { code: 'terminal_site_forbidden', status: 403 }
-  );
-
-  // Scenario 3C: Reseller Suspend cascades to drop Reseller & all Child Customer WebSockets
-  assert.equal(wsR2.closed, false);
-  assert.equal(wsC2a.closed, false);
-  assert.equal(wsC2b.closed, false);
-  const r2Row = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-2');
-  f.store.setActive(ownerToken, f.requireManagement, 'reseller-2', { revision: r2Row.revision, active: false });
-
-  assert.equal(wsR2.closed, true);
-  assert.equal(wsR2.closeReason, 'hosting_account_suspended');
-  assert.equal(wsC2a.closed, true);
-  assert.equal(wsC2a.closeReason, 'hosting_parent_suspended');
-  assert.equal(wsC2b.closed, true);
-  assert.equal(wsC2b.closeReason, 'hosting_parent_suspended');
-  assert.equal(activeSockets.has(wsR2.id), false);
-  assert.equal(activeSockets.has(wsC2a.id), false);
-  assert.equal(activeSockets.has(wsC2b.id), false);
-
-  // Scenario 3D: Grant removal / Website Detach terminates active WebSocket fail-closed
-  assert.equal(wsDirect.closed, false);
-  const removalReceipt = siteAllocations.releaseRemoved({
-    operationId: 'op-rem-site-direct',
-    websiteId: siteDirectId,
-    serverId: stagingServerId,
-    applicationId: null,
-    websiteAbsent: true,
-    applicationAbsent: false,
-  });
-  assert.equal(removalReceipt.released, true);
-  assert.equal(wsDirect.closed, true);
-  assert.equal(wsDirect.closeReason, 'hosting_website_released');
-  assert.equal(wsDirect.closeCode, 4001);
-
-  // Non-suspended sessions (owner, r1) remain untouched
-  assert.equal(wsOwner.closed, false);
-  assert.equal(wsR1.closed, false);
-
-  // 4. elFinder Gateway Handoff Capability Fail-Closed Lifecycle
-  const elFinderServerId = '12345678-1234-4234-8234-123456789012';
-  const elFinderWebsiteId = '22345678-1234-4234-8234-123456789012';
-  const elFinderApplicationId = '32345678-1234-4234-8234-123456789012';
-  const sessionDigest = 'd'.repeat(64);
-
-  const elFinderWebsite = {
-    id: elFinderWebsiteId,
-    serverId: elFinderServerId,
-    applicationId: elFinderApplicationId,
-    runtimeType: 'php',
-    unixUser: elFinderHandoffInternals.applicationUser(elFinderApplicationId),
-    revision: 7,
-  };
-
-  const elFinderService = createElFinderHandoffService({
+  const elFinderHandoffService = createElFinderHandoffService({
     websiteRegistry: {
       async getWebsite(id) {
-        return id === elFinderWebsiteId ? elFinderWebsite : null;
+        return websiteRecords.get(id) ?? null;
       },
     },
-    localServerId: elFinderServerId,
+    localServerId: stagingServerId,
     runtimeInspector: async (intent) => ({
       satisfied: true,
       adapter: 'elfinder-fpm',
@@ -2656,53 +2579,479 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
     }),
     liveSessions,
   });
+  const elFinderService = elFinderHandoffService;
 
-  // Issue valid handoff for Reseller 1 customer
-  const handoffC1a = await elFinderService.issue({
-    sessionId: 'c1a-session-new',
-    userId: 'cust-1a',
-    sessionDigest,
-    serverId: elFinderServerId,
-    websiteId: elFinderWebsiteId,
+  const serverRegistry = {
+    async getServer(id) {
+      return id === stagingServerId ? { id: stagingServerId } : null;
+    },
+  };
+
+  const apiApp = express();
+  apiApp.use(express.json());
+
+  apiApp.use((req, res, next) => {
+    const cookieHeader = req.headers.cookie ?? '';
+    const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+    const token = match ? match[1] : null;
+    if (token) {
+      const sess = f.getSession(token);
+      if (sess) {
+        const uRow = f.db.prepare('SELECT active, role FROM users WHERE id = ?').get(sess.user.id);
+        const isActive = uRow && uRow.active === 1;
+        const hostingAcc = f.db.prepare('SELECT kind FROM auth_hosting_accounts WHERE user_id = ?').get(sess.user.id);
+        const role = hostingAcc?.kind ?? sess.user.role;
+        const websiteIds = getUserWebsites(sess.user.id, role);
+        req.auth = {
+          id: sess.id,
+          rawToken: token,
+          user: {
+            id: sess.user.id,
+            role,
+            active: isActive,
+            websiteIds,
+          },
+          access: {
+            mode: role === 'owner' ? 'management' : 'site_management',
+            permissions: role === 'owner' ? ['*'] : ['sites.manage'],
+          },
+          security: { managementAllowed: true },
+        };
+        req.authSessionDigest = createHash('sha256').update(token).digest('hex');
+      }
+    }
+    next();
   });
-  assert.ok(handoffC1a.capability);
-  assert.equal(elFinderService.size(), 1);
 
-  // Active consumption succeeds
-  const consumedC1a = await elFinderService.consume(handoffC1a.capability, { sessionDigest });
-  assert.equal(consumedC1a.websiteId, elFinderWebsiteId);
-  assert.equal(consumedC1a.applicationId, elFinderApplicationId);
-  assert.equal(consumedC1a.unixUser, elFinderWebsite.unixUser);
-
-  // Issue handoff, then simulate user logout / revocation
-  const handoffC1aRevoke = await elFinderService.issue({
-    sessionId: 'c1a-session-revoke',
-    userId: 'cust-1a',
-    sessionDigest,
-    serverId: elFinderServerId,
-    websiteId: elFinderWebsiteId,
+  mountElFinderHandoffRoutes(apiApp, {
+    registry: serverRegistry,
+    elFinderHandoffService,
   });
-  assert.equal(elFinderService.size(), 1);
 
-  // Revocation drops capability fail-closed immediately
-  liveSessions.revokeSession('c1a-session-revoke', 'logout');
-  assert.equal(elFinderService.size(), 0);
+  apiApp.post('/api/auth/logout', (req, res) => {
+    if (!req.auth) {
+      return res.status(401).json({ error: { code: 'unauthorized', message: 'Sign in to continue.' } });
+    }
+    const targetSessionId = req.auth.id;
+    liveSessions.revokeSession(targetSessionId, 'logout');
+    f.db.prepare('DELETE FROM sessions WHERE id = ?').run(targetSessionId);
+    res.setHeader('Set-Cookie', '__Host-yunpanel_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict');
+    return res.status(204).end();
+  });
+
+  apiApp.get('/api/websites', (req, res) => {
+    if (!req.auth || !req.auth.user.active) {
+      return res.status(401).json({ error: { code: 'unauthorized', message: 'Sign in to continue.' } });
+    }
+    return res.status(200).json({ data: { websiteIds: req.auth.user.websiteIds } });
+  });
+
+  apiApp.get('/api/websites/:websiteId/in-flight-gateway', (req, res) => {
+    if (!req.auth || !req.auth.user.active) {
+      return res.status(401).json({ error: { code: 'unauthorized', message: 'Sign in to continue.' } });
+    }
+    if (req.auth.user.role !== 'owner' && !req.auth.user.websiteIds.includes(req.params.websiteId)) {
+      return res.status(403).json({ error: { code: 'tenant_boundary_forbidden', message: 'Forbidden' } });
+    }
+    res.writeHead(200, {
+      'Content-Type': 'text/plain',
+      'Cache-Control': 'no-cache',
+      Connection: 'keep-alive',
+    });
+    res.write('STREAM_START\n');
+    const reg = liveSessions.register({
+      sessionId: req.auth.id,
+      userId: req.auth.user.id,
+      terminate: () => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.destroy();
+        }
+      },
+    });
+    req.on('close', () => reg.unregister());
+  });
+
+  apiApp.use((err, req, res, _next) => {
+    const status = err.status ?? (err instanceof ElFinderHandoffError ? err.status : 500);
+    return res.status(status).json({
+      error: {
+        code: err.code ?? 'internal_error',
+        message: err.message,
+      },
+    });
+  });
+
+  const authHttpServer = http.createServer(apiApp);
+  await new Promise((resolve) => authHttpServer.listen(0, '127.0.0.1', resolve));
+  const authPort = authHttpServer.address().port;
+  const authBaseUrl = `http://127.0.0.1:${authPort}`;
+  t.after(() => new Promise((resolve) => {
+    authHttpServer.close(resolve);
+    authHttpServer.closeAllConnections();
+  }));
+
+  const consumerHandler = createElFinderHandoffConsumerHandler({ elFinderHandoffService });
+  const consumerServer = http.createServer(consumerHandler);
+  await new Promise((resolve) => consumerServer.listen(0, '127.0.0.1', resolve));
+  const consumerPort = consumerServer.address().port;
+  const consumerBaseUrl = `http://127.0.0.1:${consumerPort}`;
+  t.after(() => new Promise((resolve) => {
+    consumerServer.close(resolve);
+    consumerServer.closeAllConnections();
+  }));
+
+  const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
+  let terminalProcessClosed = false;
+  const mockTerminalProcessManager = {
+    async open() {
+      return {
+        write() {},
+        resize() {},
+        close() { terminalProcessClosed = true; },
+      };
+    },
+  };
+
+  const terminalServer = createTerminalWebSocketServer({
+    authenticate: (request) => {
+      const cookieHeader = request.headers.cookie ?? '';
+      const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+      const token = match ? match[1] : null;
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      const userRow = f.db.prepare('SELECT active, role FROM users WHERE id = ?').get(sess.user.id);
+      if (!userRow || !userRow.active) throw new AuthError('unauthorized', 'Account is suspended.', 401);
+      const hostingAcc = f.db.prepare('SELECT kind FROM auth_hosting_accounts WHERE user_id = ?').get(sess.user.id);
+      const role = hostingAcc?.kind ?? sess.user.role;
+      const websiteIds = getUserWebsites(sess.user.id, role);
+      return {
+        rawToken: token,
+        session: {
+          id: sess.id,
+          user: {
+            id: sess.user.id,
+            role,
+            active: true,
+            websiteIds,
+          },
+          access: {
+            mode: role === 'owner' ? 'management' : 'site_management',
+            permissions: role === 'owner' ? ['*'] : ['sites.manage'],
+          },
+          security: { managementAllowed: true },
+        },
+        peer: '127.0.0.1',
+      };
+    },
+    reauthorize: (token) => {
+      const sess = f.getSession(token);
+      if (!sess) throw new AuthError('unauthorized', 'Sign in to continue.', 401);
+      const userRow = f.db.prepare('SELECT active, role FROM users WHERE id = ?').get(sess.user.id);
+      if (!userRow || !userRow.active) throw new AuthError('unauthorized', 'Account is suspended.', 401);
+      const hostingAcc = f.db.prepare('SELECT kind FROM auth_hosting_accounts WHERE user_id = ?').get(sess.user.id);
+      const role = hostingAcc?.kind ?? sess.user.role;
+      const websiteIds = getUserWebsites(sess.user.id, role);
+      return {
+        id: sess.id,
+        user: {
+          id: sess.user.id,
+          role,
+          active: true,
+          websiteIds,
+        },
+        access: {
+          mode: role === 'owner' ? 'management' : 'site_management',
+          permissions: role === 'owner' ? ['*'] : ['sites.manage'],
+        },
+        security: { managementAllowed: true },
+      };
+    },
+    terminalCapabilityRegistry,
+    terminalProcessManager: mockTerminalProcessManager,
+    liveSessions,
+    audit: { record: () => {} },
+    authCheckMs: 250,
+  });
+
+  authHttpServer.on('upgrade', (req, socket, head) => {
+    terminalServer.handleUpgrade(req, socket, head);
+  });
+  t.after(() => {
+    terminalServer.closeAll();
+  });
+
+  async function openRealWebSocket(userId, token, target) {
+    const cap = terminalCapabilityRegistry.issue({
+      sessionId: `session-${userId}`,
+      userId,
+      target,
+    });
+    const ws = new WebSocket(`ws://127.0.0.1:${authPort}/api/terminal`, [
+      'yunpanel-terminal-v1',
+      `yunpanel-terminal-capability.${cap.capability}`,
+    ], {
+      headers: { cookie: `__Host-yunpanel_session=${token}` },
+    });
+    let closeResolve;
+    const closePromise = new Promise((resolve) => {
+      closeResolve = resolve;
+    });
+    ws.on('close', (code, reason) => {
+      ws.closedCode = code;
+      ws.closedReason = reason ? reason.toString() : '';
+      closeResolve([code, reason]);
+    });
+    ws.waitForClose = () => {
+      if (ws.readyState === WebSocket.CLOSED) {
+        return Promise.resolve([ws.closedCode ?? ws._closeCode, ws.closedReason ?? ws._closeMessage?.toString()]);
+      }
+      return closePromise;
+    };
+    await once(ws, 'open');
+    return ws;
+  }
+
+  function openInFlightRequest(token, websiteId) {
+    return new Promise((resolve) => {
+      let aborted = false;
+      let abortResolve = null;
+      const abortPromise = new Promise((r) => { abortResolve = r; });
+      const markAborted = () => {
+        if (!aborted) {
+          aborted = true;
+          abortResolve?.({ aborted: true });
+        }
+      };
+
+      const req = http.request(`${authBaseUrl}/api/websites/${websiteId}/in-flight-gateway`, {
+        headers: { cookie: `__Host-yunpanel_session=${token}` },
+      }, (res) => {
+        res.on('close', markAborted);
+        res.on('error', markAborted);
+        res.on('data', (chunk) => {
+          if (chunk.toString().includes('STREAM_START')) {
+            resolve({
+              req,
+              res,
+              waitForAbort: () => {
+                if (aborted || res.destroyed || res.closed || req.destroyed) {
+                  return Promise.resolve({ aborted: true });
+                }
+                return abortPromise;
+              },
+            });
+          }
+        });
+      });
+      req.on('close', markAborted);
+      req.on('error', markAborted);
+      req.end();
+    });
+  }
+
+  async function issueElFinderCapability(token, websiteId) {
+    const res = await fetch(`${authBaseUrl}/api/servers/${stagingServerId}/websites/${websiteId}/elfinder-handoffs`, {
+      method: 'POST',
+      headers: {
+        cookie: `__Host-yunpanel_session=${token}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+    });
+    const status = res.status;
+    const body = await res.json().catch(() => null);
+    return { status, body, capability: body?.data?.capability };
+  }
+
+  async function consumeElFinderCapability(capability, token) {
+    const sessionDigest = createHash('sha256').update(token).digest('hex');
+    const res = await fetch(`${consumerBaseUrl}/consume`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ capability, sessionDigest }),
+    });
+    const status = res.status;
+    const body = await res.json().catch(() => null);
+    return { status, body };
+  }
+
+  // Open active WebSockets across hierarchy
+  const wsOwner = await openRealWebSocket('owner-user', ownerToken, { scope: 'server', serverId: stagingServerId, user: 'root', cwd: '/root' });
+  const wsR1 = await openRealWebSocket('reseller-1', r1Token, { scope: 'site', serverId: stagingServerId, websiteId: site1a1Id, user: 'yunapp-r1', cwd: `/var/lib/yunpanel/${site1a1Id}` });
+  const wsR2 = await openRealWebSocket('reseller-2', r2Token, { scope: 'site', serverId: stagingServerId, websiteId: site2a1Id, user: 'yunapp-r2', cwd: `/var/lib/yunpanel/${site2a1Id}` });
+  const wsC1a = await openRealWebSocket('cust-1a', c1aToken, { scope: 'site', serverId: stagingServerId, websiteId: site1a1Id, user: 'yunapp-c1a', cwd: `/var/lib/yunpanel/${site1a1Id}` });
+  const wsC1b = await openRealWebSocket('cust-1b', c1bToken, { scope: 'site', serverId: stagingServerId, websiteId: site1b1Id, user: 'yunapp-c1b', cwd: `/var/lib/yunpanel/${site1b1Id}` });
+  const wsC2a = await openRealWebSocket('cust-2a', c2aToken, { scope: 'site', serverId: stagingServerId, websiteId: site2a1Id, user: 'yunapp-c2a', cwd: `/var/lib/yunpanel/${site2a1Id}` });
+  const wsC2b = await openRealWebSocket('cust-2b', c2bToken, { scope: 'site', serverId: stagingServerId, websiteId: site2b1Id, user: 'yunapp-c2b', cwd: `/var/lib/yunpanel/${site2b1Id}` });
+  const wsDirect = await openRealWebSocket('cust-direct', cDirectToken, { scope: 'site', serverId: stagingServerId, websiteId: siteDirectId, user: 'yunapp-cdirect', cwd: `/var/lib/yunpanel/${siteDirectId}` });
+
+  assert.equal(terminalServer.size(), 8);
+
+  // In-flight HTTP gateway streams
+  const httpC1a = await openInFlightRequest(c1aToken, site1a1Id);
+  const httpC1b = await openInFlightRequest(c1bToken, site1b1Id);
+  const httpR2 = await openInFlightRequest(r2Token, site2a1Id);
+  const httpDirect = await openInFlightRequest(cDirectToken, siteDirectId);
+
+  // Issue elFinder capabilities across hierarchy
+  const elC1a = await issueElFinderCapability(c1aToken, site1a1Id);
+  assert.equal(elC1a.status, 201);
+  assert.ok(elC1a.capability);
+
+  const elC1b = await issueElFinderCapability(c1bToken, site1b1Id);
+  assert.equal(elC1b.status, 201);
+  assert.ok(elC1b.capability);
+
+  const elR2 = await issueElFinderCapability(r2Token, site2a1Id);
+  assert.equal(elR2.status, 201);
+  assert.ok(elR2.capability);
+
+  const elC2a = await issueElFinderCapability(c2aToken, site2a1Id);
+  assert.equal(elC2a.status, 201);
+  assert.ok(elC2a.capability);
+
+  const elDirect = await issueElFinderCapability(cDirectToken, siteDirectId);
+  assert.equal(elDirect.status, 201);
+  assert.ok(elDirect.capability);
+
+  // Active elFinder consumption succeeds over real HTTP before revocation
+  const initialConsumeC1a = await consumeElFinderCapability(elC1a.capability, c1aToken);
+  assert.equal(initialConsumeC1a.status, 200);
+  assert.equal(initialConsumeC1a.body.data.websiteId, site1a1Id);
+
+  const elC1aRevoke = await issueElFinderCapability(c1aToken, site1a1Id);
+  assert.equal(elC1aRevoke.status, 201);
+
+  // Scenario 3A: Logout terminates active WebSocket, in-flight HTTP gateway, and elFinder capability fail-closed
+  assert.equal(wsC1a.readyState, WebSocket.OPEN);
+  const logoutRes = await fetch(`${authBaseUrl}/api/auth/logout`, {
+    method: 'POST',
+    headers: { cookie: `__Host-yunpanel_session=${c1aToken}` },
+  });
+  assert.equal(logoutRes.status, 204);
+
+  const [wsC1aCode, wsC1aReason] = await wsC1a.waitForClose();
+  assert.equal(wsC1aCode, 4001);
+  assert.equal(wsC1aReason.toString(), 'logout');
+
+  const httpC1aAbort = await httpC1a.waitForAbort();
+  assert.equal(httpC1aAbort.aborted, true);
+
+  const consumeAfterLogout = await consumeElFinderCapability(elC1aRevoke.capability, c1aToken);
+  assert.equal(consumeAfterLogout.status, 401);
+  assert.equal(consumeAfterLogout.body.error.code, 'elfinder_handoff_invalid');
+
+  const getAfterLogout = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${c1aToken}` },
+  });
+  assert.equal(getAfterLogout.status, 401);
+
   await assert.rejects(
-    elFinderService.consume(handoffC1aRevoke.capability, { sessionDigest }),
-    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_invalid' && err.status === 401
+    openRealWebSocket('cust-1a', c1aToken, { scope: 'site', serverId: stagingServerId, websiteId: site1a1Id, user: 'yunapp-c1a', cwd: `/var/lib/yunpanel/${site1a1Id}` })
   );
+
+  // Scenario 3B: Customer Suspend terminates active WebSocket, in-flight HTTP gateway, and elFinder capability fail-closed
+  assert.equal(wsC1b.readyState, WebSocket.OPEN);
+  const cust1bRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1b', { revision: cust1bRow.revision, active: false });
+
+  const [wsC1bCode, wsC1bReason] = await wsC1b.waitForClose();
+  assert.equal(wsC1bCode, 4001);
+  assert.equal(wsC1bReason.toString(), 'hosting_account_suspended');
+
+  const httpC1bAbort = await httpC1b.waitForAbort();
+  assert.equal(httpC1bAbort.aborted, true);
+
+  const consumeAfterCustSuspend = await consumeElFinderCapability(elC1b.capability, c1bToken);
+  assert.equal(consumeAfterCustSuspend.status, 401);
+  assert.equal(consumeAfterCustSuspend.body.error.code, 'elfinder_handoff_invalid');
+
+  const getAfterCustSuspend = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${c1bToken}` },
+  });
+  assert.equal(getAfterCustSuspend.status, 401);
+
+  const issueAfterCustSuspend = await issueElFinderCapability(c1bToken, site1b1Id);
+  assert.ok([401, 403].includes(issueAfterCustSuspend.status));
+
+  const suspendedCust1bSession = {
+    user: { id: 'cust-1b', role: 'customer', websiteIds: [site1b1Id, site1b2Id], active: false },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => terminalWebSocketInternals.requireTerminalTargetAccess(suspendedCust1bSession, { scope: 'site', websiteId: site1b1Id }),
+    { code: 'terminal_site_forbidden', status: 403 }
+  );
+
+  // Scenario 3C: Reseller Suspend cascades to drop Reseller & all Child Customer WebSockets, in-flight gateways, and elFinder capabilities
+  assert.equal(wsR2.readyState, WebSocket.OPEN);
+  assert.equal(wsC2a.readyState, WebSocket.OPEN);
+  assert.equal(wsC2b.readyState, WebSocket.OPEN);
+  const r2Row = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-2');
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-2', { revision: r2Row.revision, active: false });
+
+  const [wsR2Code, wsR2Reason] = await wsR2.waitForClose();
+  assert.equal(wsR2Code, 4001);
+  assert.equal(wsR2Reason.toString(), 'hosting_account_suspended');
+
+  const [wsC2aCode, wsC2aReason] = await wsC2a.waitForClose();
+  assert.equal(wsC2aCode, 4001);
+  assert.equal(wsC2aReason.toString(), 'hosting_parent_suspended');
+
+  const [wsC2bCode, wsC2bReason] = await wsC2b.waitForClose();
+  assert.equal(wsC2bCode, 4001);
+  assert.equal(wsC2bReason.toString(), 'hosting_parent_suspended');
+
+  const httpR2Abort = await httpR2.waitForAbort();
+  assert.equal(httpR2Abort.aborted, true);
+
+  const consumeR2 = await consumeElFinderCapability(elR2.capability, r2Token);
+  assert.equal(consumeR2.status, 401);
+  assert.equal(consumeR2.body.error.code, 'elfinder_handoff_invalid');
+
+  const consumeC2a = await consumeElFinderCapability(elC2a.capability, c2aToken);
+  assert.equal(consumeC2a.status, 401);
+  assert.equal(consumeC2a.body.error.code, 'elfinder_handoff_invalid');
+
+  const getAfterR2Suspend = await fetch(`${authBaseUrl}/api/websites`, {
+    headers: { cookie: `__Host-yunpanel_session=${r2Token}` },
+  });
+  assert.equal(getAfterR2Suspend.status, 401);
+
+  // Scenario 3D: Grant removal / Website Detach terminates active WebSocket, in-flight gateway, and elFinder capability fail-closed
+  assert.equal(wsDirect.readyState, WebSocket.OPEN);
+  const removalReceipt = siteAllocations.releaseRemoved({
+    operationId: 'op-rem-site-direct',
+    websiteId: siteDirectId,
+    serverId: stagingServerId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+  assert.equal(removalReceipt.released, true);
+
+  const [wsDirectCode, wsDirectReason] = await wsDirect.waitForClose();
+  assert.equal(wsDirectCode, 4001);
+  assert.equal(wsDirectReason.toString(), 'hosting_website_released');
+
+  const httpDirectAbort = await httpDirect.waitForAbort();
+  assert.equal(httpDirectAbort.aborted, true);
+
+  const consumeDirect = await consumeElFinderCapability(elDirect.capability, cDirectToken);
+  assert.equal(consumeDirect.status, 401);
+  assert.equal(consumeDirect.body.error.code, 'elfinder_handoff_invalid');
+
+  const issueDirectAfterRemoval = await issueElFinderCapability(cDirectToken, siteDirectId);
+  assert.ok([401, 403, 404].includes(issueDirectAfterRemoval.status));
+
+  // Non-suspended sessions (owner, r1) remain untouched
+  assert.equal(wsOwner.readyState, WebSocket.OPEN);
+  assert.equal(wsR1.readyState, WebSocket.OPEN);
 
   // Foreign site capability issuance rejected fail-closed without leaking tenant details
-  await assert.rejects(
-    elFinderService.issue({
-      sessionId: 'c1a-session-foreign',
-      userId: 'cust-1a',
-      sessionDigest,
-      serverId: elFinderServerId,
-      websiteId: '33333333-3333-4333-8333-333333333333', // non-existent/foreign site
-    }),
-    (err) => err instanceof ElFinderHandoffError && (err.status === 403 || err.status === 404)
-  );
+  const issueForeign = await issueElFinderCapability(r1Token, '33333333-3333-4333-8333-333333333333');
+  assert.ok([403, 404].includes(issueForeign.status));
 
   // 5. Job Process Fail-Closed & Recovery Scenarios
   // 5A: Queued job cancellation
@@ -2734,7 +3083,7 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
       resourceId: appGuid,
     };
     const recoveryPayload = {
-      websiteId: 'site-1a1',
+      websiteId: site1a1Id,
       applicationId: appGuid,
       unixUser: 'yunapp-1a1user',
       expectedWebsiteRevision: 2,
@@ -2743,7 +3092,7 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
       actorRole: role,
       actionId: 'wp.cache.flush',
       previewDigest: 'f'.repeat(64),
-      confirmation: `php-tool:site-1a1:wp.cache.flush:${'f'.repeat(64)}`,
+      confirmation: `php-tool:${site1a1Id}:wp.cache.flush:${'f'.repeat(64)}`,
     };
     const recoveryResult = {
       version: 1,
@@ -2790,7 +3139,7 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
     jobId: missingReceiptJobId,
     serviceStatus: async () => ({ apiActive: false, agentActive: false }),
     inspect: async () => ({ jobs: [{ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid' }] }),
-    loadJobContext: async () => ({ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid', payload: { websiteId: 'site-1a1' } }),
+    loadJobContext: async () => ({ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid', payload: { websiteId: site1a1Id } }),
     readOperationReceipt: async () => null,
     jobRegistry: {
       getJob: async () => ({ id: missingReceiptJobId, jobId: missingReceiptJobId, serverId: stagingServerId, status: 'running', operation: 'website.php.action', resourceType: 'application', resourceId: 'app-guid' }),
@@ -2807,12 +3156,12 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   // 6. Website Host Process Continuity Decoupling
   // Panel account suspension alters login and tool access; website runtime daemons/processes remain running
   const siteHostProcesses = new Map([
-    ['site-1b1', { unit: 'yunapp-site-1b1.service', status: 'running', pid: 14201 }],
-    ['site-2a1', { unit: 'yunapp-site-2a1.service', status: 'running', pid: 14202 }],
+    [site1b1Id, { unit: 'yunapp-site-1b1.service', status: 'running', pid: 14201 }],
+    [site2a1Id, { unit: 'yunapp-site-2a1.service', status: 'running', pid: 14202 }],
   ]);
   // Even though cust-1b and reseller-2 are suspended, host processes are NOT stopped
-  assert.equal(siteHostProcesses.get('site-1b1').status, 'running');
-  assert.equal(siteHostProcesses.get('site-2a1').status, 'running');
+  assert.equal(siteHostProcesses.get(site1b1Id).status, 'running');
+  assert.equal(siteHostProcesses.get(site2a1Id).status, 'running');
 
   // 7. Tenant Account Recovery & Reactivation
   // Reactivate suspended customer cust-1b
@@ -2821,16 +3170,39 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   const cust1bReactivatedUser = f.db.prepare('SELECT active FROM users WHERE id = ?').get('cust-1b');
   assert.equal(cust1bReactivatedUser.active, 1);
 
-  // Reactivated customer can open a new WebSocket
-  const wsC1bNew = openSimulatedWebSocket('c1b-new-session', 'cust-1b', 'site-1b1');
-  assert.equal(wsC1bNew.closed, false);
-  assert.equal(activeSockets.has(wsC1bNew.id), true);
+  // Reactivated customer can open a new real WebSocket
+  const c1bNewToken = f.session('cust-1b');
+  const wsC1bNew = await openRealWebSocket('cust-1b', c1bNewToken, {
+    scope: 'site',
+    serverId: stagingServerId,
+    websiteId: site1b1Id,
+    user: 'yunapp-c1b-new',
+    cwd: `/var/lib/yunpanel/${site1b1Id}`,
+  });
+  assert.equal(wsC1bNew.readyState, WebSocket.OPEN);
 
   // Reactivate reseller-2
   const r2SuspendedRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('reseller-2');
   f.store.setActive(ownerToken, f.requireManagement, 'reseller-2', { revision: r2SuspendedRow.revision, active: true });
   const r2ReactivatedUser = f.db.prepare('SELECT active FROM users WHERE id = ?').get('reseller-2');
   assert.equal(r2ReactivatedUser.active, 1);
+
+  // Reactivated reseller can open a new real WebSocket
+  const r2NewToken = f.session('reseller-2');
+  const wsR2New = await openRealWebSocket('reseller-2', r2NewToken, {
+    scope: 'site',
+    serverId: stagingServerId,
+    websiteId: site2a1Id,
+    user: 'yunapp-r2-new',
+    cwd: `/var/lib/yunpanel/${site2a1Id}`,
+  });
+  assert.equal(wsR2New.readyState, WebSocket.OPEN);
+
+  // Clean up remaining open WebSockets
+  wsOwner.close();
+  wsR1.close();
+  wsC1bNew.close();
+  wsR2New.close();
 
   // Role continuity verified across full hierarchy
   assert.ok(true, 'Full multi-tier hierarchy role continuity, live WebSocket, elFinder gateway, and job lifecycle verified.');
@@ -5795,35 +6167,32 @@ test('Staging E2E RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve ger
   assert.equal(remainingUser.id, 'cust-1a');
 
   // 14. Lifecycle Event: Logout
-  function openSimulatedWebSocket(sessionId, userId, siteId = null) {
-    const socketRecord = {
-      id: `ws-${userId}-${Math.random().toString(36).slice(2, 8)}`,
-      sessionId,
-      userId,
-      siteId,
-      closed: false,
-      closeCode: null,
-      closeReason: null,
-    };
-    const terminate = (reason, code = 4001) => {
-      socketRecord.closed = true;
-      socketRecord.closeCode = code;
-      socketRecord.closeReason = reason;
-    };
-    liveSessions.register({
-      sessionId,
-      userId,
-      terminate: (reason) => terminate(reason, 4001),
-    });
-    return socketRecord;
-  }
+  const tempDirectToken = f.session('cust-direct');
+  const capDirectLogout = terminalCapabilityRegistry.issue({
+    sessionId: 'session-cust-direct',
+    userId: 'cust-direct',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId: siteDirect.id,
+      user: 'yunapp-sitedirect',
+      cwd: '/var/lib/yunpanel/sitedirect',
+    },
+  });
+  const wsDirectLogout = new WebSocket(`ws://127.0.0.1:${wsServerPort}/api/terminal`, [
+    'yunpanel-terminal-v1',
+    `yunpanel-terminal-capability.${capDirectLogout.capability}`,
+  ], {
+    headers: { cookie: `__Host-yunpanel_session=${tempDirectToken}` },
+  });
+  await once(wsDirectLogout, 'open');
+  assert.equal(terminalServer.size(), 1);
 
-  const tempSessionId = 'temp-cust-direct-session';
-  const tempWs = openSimulatedWebSocket(tempSessionId, 'cust-direct', siteDirect.id);
-  assert.equal(tempWs.closed, false);
-  liveSessions.revokeSession(tempSessionId, 'logout');
-  assert.equal(tempWs.closed, true);
-  assert.equal(tempWs.closeReason, 'logout');
+  liveSessions.revokeSession('session-cust-direct', 'logout');
+  const [logoutCode, logoutReason] = await once(wsDirectLogout, 'close');
+  assert.equal(logoutCode, 4001);
+  assert.equal(logoutReason.toString(), 'logout');
+  assert.equal(terminalServer.size(), 0);
 
   // 15. Concurrency, Crash Resilience & Rollback in SQLite WAL Mode
   const concurrencyTempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-rs04a-concurrency-'));
