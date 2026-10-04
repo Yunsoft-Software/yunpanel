@@ -151,6 +151,27 @@ import {
   domainWebsiteTargetBindingInternals,
 } from '../src/domain-registry.js';
 import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import {
+  MailboxSingleLifecycleError,
+  MailboxSessionTerminationError,
+  MailboxProtocolDisruptionError,
+  createMailboxProtocolSessionTracker,
+  assertNoDomainOrSiblingDisruption,
+  assertNoClosedDomainReopened,
+  assertMailboxAccessTerminatedSeparately,
+  assertSiblingMailboxContinuity,
+  createSingleMailboxLifecycleCoordinator,
+  mountSingleMailboxLifecycleRoutes,
+} from '../src/mailbox-single-lifecycle.js';
+import { createMailboxRegistry, MailboxRegistryError } from '../src/mailbox-registry.js';
+import { createMailDataOperationsService, MailDataOperationsError } from '../src/mail-data-operations.js';
+import { createMailDeleteFinalizeService, MailDeleteFinalizeError } from '../src/mail-delete-finalize.js';
+import { createMailDeleteImpactService } from '../src/mail-delete-impact.js';
+import { mountMailboxRoutes } from '../src/mailbox-http.js';
+import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
+import { mountMailDataRoutes } from '../src/mail-data-http.js';
+import { createMailboxAccessGuard, MailboxAccessError } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
+import { createMailDataDeleteManager, MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -6916,4 +6937,838 @@ test('Staging E2E PAR-05: Windows OS equivalence boundaries (WIN-01..06) fail-cl
   assert.equal(cleanBillRes.body.data.valid, true);
 
   assert.ok(true, 'PAR-05: Windows OS equivalence boundaries, fail-closed contracts, external lifecycle boundaries, and reseller billing deferral verified.');
+});
+
+// ============================================================================
+// STAGING E2E T-DEV-MR-SINGLE: Single Mailbox Removal Lifecycle & Session Guard
+// ============================================================================
+
+test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/uygula/yedekle/sil; B\'nin SMTP/IMAP/webmail kullanımı sürsün. A\'nın mevcut Dovecot oturumları, yeni auth/teslimat reddi', async (t) => {
+  const stagingServerId = randomUUID();
+  const stagingWebDomainId = randomUUID();
+  const stagingMailDomainId = randomUUID();
+  const dormantWebDomainId = randomUUID();
+  const dormantMailDomainId = randomUUID();
+  const mailboxAId = randomUUID();
+  const mailboxBId = randomUUID();
+
+  const sha256Str = (val) => createHash('sha256').update(val).digest('hex');
+  const snapshotAlice = sha256Str('alice-initial-maildir-state');
+  const snapshotBob = sha256Str('bob-initial-maildir-state');
+  const backupContentAlice = sha256Str('alice-backup-archive-content');
+
+  // 1. Setup Domains and Mailboxes in Active Mail Domain
+  const activeMailDomain = {
+    id: stagingMailDomainId,
+    webDomainId: stagingWebDomainId,
+    domainName: 'cryptoraichu.website',
+    managementMode: 'local',
+    status: 'enabled',
+    revision: 10,
+  };
+
+  const dormantMailDomain = {
+    id: dormantMailDomainId,
+    webDomainId: dormantWebDomainId,
+    domainName: 'dormant.cryptoraichu.website',
+    managementMode: 'local',
+    status: 'disabled',
+    revision: 3,
+  };
+
+  const activeWebDomain = {
+    id: stagingWebDomainId,
+    serverId: stagingServerId,
+    primaryDomain: 'cryptoraichu.website',
+    websiteId: randomUUID(),
+  };
+
+  const dormantWebDomain = {
+    id: dormantWebDomainId,
+    serverId: stagingServerId,
+    primaryDomain: 'dormant.cryptoraichu.website',
+    websiteId: randomUUID(),
+  };
+
+  const mailboxes = new Map([
+    [mailboxAId, {
+      id: mailboxAId,
+      mailDomainId: stagingMailDomainId,
+      address: 'alice@cryptoraichu.website',
+      enabled: true,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }],
+    [mailboxBId, {
+      id: mailboxBId,
+      mailDomainId: stagingMailDomainId,
+      address: 'bob@cryptoraichu.website',
+      enabled: true,
+      revision: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    }],
+  ]);
+
+  const mailboxDataStore = new Map([
+    ['alice@cryptoraichu.website', {
+      present: true,
+      bytes: 10240,
+      snapshotSha256: snapshotAlice,
+      dataPath: '/var/vmail/cryptoraichu.website/alice',
+    }],
+    ['bob@cryptoraichu.website', {
+      present: true,
+      bytes: 20480,
+      snapshotSha256: snapshotBob,
+      dataPath: '/var/vmail/cryptoraichu.website/bob',
+    }],
+  ]);
+
+  const backups = new Map([
+    ['backup-alice-001', {
+      version: 1,
+      backupId: 'backup-alice-001',
+      scope: 'mailbox',
+      identity: 'alice@cryptoraichu.website',
+      sourcePath: '/var/vmail/cryptoraichu.website/alice',
+      sourcePresent: true,
+      sourceSnapshotSha256: snapshotAlice,
+      contentSha256: backupContentAlice,
+      bytes: 10240,
+      files: 5,
+      directories: 3,
+      createdAt: new Date().toISOString(),
+      sideEffects: true,
+    }],
+  ]);
+
+  const aliases = [];
+  const quotas = new Map();
+  const forwardings = new Map();
+  const jobs = new Map();
+  const enqueuedJobs = [];
+
+  // Protocol Session Tracker
+  const sessionTracker = createMailboxProtocolSessionTracker();
+
+  // Register baseline sessions for Mailbox A (Alice)
+  sessionTracker.registerDovecotSession('alice@cryptoraichu.website', { proto: 'imap', pid: '3001', ip: '192.168.1.10' });
+  sessionTracker.registerDovecotSession('alice@cryptoraichu.website', { proto: 'pop3', pid: '3002', ip: '192.168.1.10' });
+  sessionTracker.registerAuthenticatedSmtpSession('alice@cryptoraichu.website', { sessionId: 'smtp-alice-sess-01', clientIp: '192.168.1.10' });
+  sessionTracker.registerWebmailHttpSession('alice@cryptoraichu.website', { sessionId: 'webmail-alice-sess-01' });
+
+  // Register baseline sessions for Mailbox B (Bob)
+  sessionTracker.registerDovecotSession('bob@cryptoraichu.website', { proto: 'imap', pid: '4001', ip: '192.168.1.20' });
+  sessionTracker.registerDovecotSession('bob@cryptoraichu.website', { proto: 'imap', pid: '4002', ip: '192.168.1.21' });
+  sessionTracker.registerAuthenticatedSmtpSession('bob@cryptoraichu.website', { sessionId: 'smtp-bob-sess-01', clientIp: '192.168.1.20' });
+  sessionTracker.registerWebmailHttpSession('bob@cryptoraichu.website', { sessionId: 'webmail-bob-sess-01' });
+
+  // Mailbox Registry Mock
+  const mailboxRegistry = {
+    async getMailbox(id) {
+      return mailboxes.has(id) ? structuredClone(mailboxes.get(id)) : null;
+    },
+    async listMailboxes(filter = {}) {
+      const list = [...mailboxes.values()];
+      if (filter.mailDomainId) {
+        return list.filter((m) => m.mailDomainId === filter.mailDomainId).map((m) => structuredClone(m));
+      }
+      return list.map((m) => structuredClone(m));
+    },
+    async createMailbox(input) {
+      const id = randomUUID();
+      const record = { id, mailDomainId: input.mailDomainId, address: input.address, enabled: input.enabled ?? true, revision: 1 };
+      mailboxes.set(id, record);
+      return structuredClone(record);
+    },
+    async rotatePassword(id, { expectedRevision }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) throw new MailboxRegistryError('stale_mailbox_revision', 'Revision mismatch', 409);
+      mb.revision += 1;
+      return structuredClone(mb);
+    },
+    async setEnabled(id, { expectedRevision, enabled }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) throw new MailboxRegistryError('stale_mailbox_revision', 'Revision mismatch', 409);
+      mb.enabled = Boolean(enabled);
+      mb.revision += 1;
+      mb.updatedAt = new Date().toISOString();
+      return structuredClone(mb);
+    },
+    async deleteMailbox(id, { expectedRevision, confirmation }) {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mb.revision !== expectedRevision) throw new MailboxRegistryError('stale_mailbox_revision', 'Revision mismatch', 409);
+      if (confirmation !== `delete-mailbox:${mb.address}`) {
+        throw new MailboxRegistryError('mailbox_confirmation_mismatch', 'Mailbox confirmation mismatch', 409);
+      }
+      mailboxes.delete(id);
+      return { id, deleted: true };
+    },
+  };
+
+  const mailDomainRegistry = {
+    async getMailDomain(id) {
+      if (id === stagingMailDomainId) return structuredClone(activeMailDomain);
+      if (id === dormantMailDomainId) return structuredClone(dormantMailDomain);
+      return null;
+    },
+    async listMailDomains() {
+      return [structuredClone(activeMailDomain), structuredClone(dormantMailDomain)];
+    },
+    async deleteMailDomain() {
+      throw new Error('mailDomain deletion not expected during single mailbox removal');
+    },
+  };
+
+  const domainRegistry = {
+    async getDomain(id) {
+      if (id === stagingWebDomainId) return structuredClone(activeWebDomain);
+      if (id === dormantWebDomainId) return structuredClone(dormantWebDomain);
+      return null;
+    },
+  };
+
+  const mailAliasRegistry = {
+    async listAliases(filter) {
+      if (filter?.mailDomainId) {
+        return aliases.filter((a) => a.mailDomainId === filter.mailDomainId).map((a) => structuredClone(a));
+      }
+      return aliases.map((a) => structuredClone(a));
+    },
+  };
+
+  const mailboxQuotaRegistry = {
+    async getQuota(id) { return quotas.get(id) ?? null; },
+  };
+
+  const mailboxForwardingRegistry = {
+    async getForwarding(id) { return forwardings.get(id) ?? null; },
+  };
+
+  const mailDkimRegistry = {
+    async getKey() { return null; },
+  };
+
+  const jobRegistry = {
+    async listJobs(filter = {}) {
+      let list = [...jobs.values()];
+      if (filter.resourceType) list = list.filter((j) => j.resourceType === filter.resourceType);
+      if (filter.resourceId) list = list.filter((j) => j.resourceId === filter.resourceId);
+      return list.map((j) => structuredClone(j));
+    },
+    async getJob(id) {
+      return jobs.get(id) ? structuredClone(jobs.get(id)) : null;
+    },
+    async enqueue(input) {
+      const id = randomUUID();
+      const job = {
+        id,
+        serverId: input.serverId,
+        type: input.type,
+        operation: input.operation,
+        resourceType: input.resourceType,
+        resourceId: input.resourceId,
+        status: 'queued',
+        payload: structuredClone(input.payload),
+        idempotencyKey: input.idempotencyKey,
+      };
+      jobs.set(id, job);
+      enqueuedJobs.push(job);
+      return structuredClone(job);
+    },
+  };
+
+  const mailDataInspector = {
+    async inspectMailbox(address) {
+      const data = mailboxDataStore.get(address);
+      if (!data) return { present: false, bytes: 0, snapshotSha256: null };
+      return {
+        version: 1,
+        scope: 'mailbox',
+        identity: address,
+        dataPath: data.dataPath,
+        present: data.present,
+        bytes: data.bytes,
+        snapshotSha256: data.snapshotSha256,
+        sideEffects: false,
+      };
+    },
+    async inspectDomain(domainName) {
+      return {
+        version: 1,
+        scope: 'domain',
+        identity: domainName,
+        present: true,
+        bytes: 30720,
+        snapshotSha256: sha256Str('domain-data'),
+        sideEffects: false,
+      };
+    },
+  };
+
+  const mailDataBackupManager = {
+    async inspectBackup(id) {
+      return backups.get(id) ? structuredClone(backups.get(id)) : null;
+    },
+    async materializeBackup(id) {
+      const b = backups.get(id);
+      if (!b) throw new Error('backup not found');
+      return { manifest: structuredClone(b) };
+    },
+  };
+
+  const mailDeleteImpact = createMailDeleteImpactService({
+    localServerId: stagingServerId,
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDkimRegistry,
+    jobRegistry,
+    mailDataInspector,
+  });
+
+  const mailDataOperations = createMailDataOperationsService({
+    localServerId: stagingServerId,
+    mailDomainRegistry,
+    domainRegistry,
+    mailboxRegistry,
+    mailDataInspector,
+    mailDataBackupManager,
+    mailDeleteImpactService: mailDeleteImpact,
+    jobRegistry,
+  });
+
+  const mailDeleteFinalize = createMailDeleteFinalizeService({
+    mailboxRegistry,
+    mailDomainRegistry,
+    mailDeleteImpactService: mailDeleteImpact,
+    jobRegistry,
+  });
+
+  // Dovecot & Postfix command runner simulating live OS host state
+  const commandLog = [];
+  const commandRunner = async (file, args, options = {}) => {
+    commandLog.push({ file, args: [...args] });
+    const fileBase = file.split('/').at(-1);
+
+    if (fileBase === 'postconf') {
+      const param = args[1];
+      if (param === 'virtual_mailbox_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf', stderr: '' };
+      }
+      if (param === 'smtpd_sender_login_maps') {
+        return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+      }
+      return { stdout: '', stderr: '' };
+    }
+
+    if (fileBase === 'postmap') {
+      const address = args[1];
+      const mb = [...mailboxes.values()].find((m) => m.address === address);
+      if (mb && mb.enabled) {
+        return { stdout: `user-${address}`, stderr: '' };
+      }
+      const err = new Error('not found');
+      err.code = 1;
+      err.stdout = '';
+      err.stderr = '';
+      throw err;
+    }
+
+    if (fileBase === 'doveadm') {
+      const sub = args[0];
+      if (sub === 'auth' && args[1] === 'lookup') {
+        const address = args.at(-1);
+        const mb = [...mailboxes.values()].find((m) => m.address === address);
+        if (mb && mb.enabled) {
+          return { stdout: address, stderr: '' };
+        }
+        const err = new Error('user not found');
+        err.code = 67;
+        err.stdout = '';
+        err.stderr = `passdb lookup: user ${address} doesn't exist`;
+        throw err;
+      }
+      if (sub === 'user') {
+        const address = args.at(-1);
+        const mb = [...mailboxes.values()].find((m) => m.address === address);
+        if (mb && mb.enabled) {
+          return { stdout: '1000', stderr: '' };
+        }
+        const err = new Error('user not found');
+        err.code = 67;
+        err.stdout = '';
+        err.stderr = `userdb lookup: user ${address} doesn't exist`;
+        throw err;
+      }
+      if (sub === 'auth' && args[1] === 'cache' && args[2] === 'flush') {
+        return { stdout: '1 cache entries flushed', stderr: '' };
+      }
+      if (sub === 'kick') {
+        const address = args[1];
+        sessionTracker.kickDovecotUser(address);
+        return { stdout: address, stderr: '' };
+      }
+      if (args.includes('who')) {
+        const address = args.at(-1);
+        return { stdout: sessionTracker.doveadmWhoOutput(address), stderr: '' };
+      }
+    }
+
+    throw new Error(`Unexpected command in test: ${file} ${args.join(' ')}`);
+  };
+
+  const accessGuard = createMailboxAccessGuard({ run: commandRunner });
+
+  // Mount Express application with panel security guards
+  const app = express();
+  app.use(express.json());
+  let currentAuth = {
+    user: { id: 'owner-e2e', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  app.use((req, _res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+
+  mountMailboxRoutes(app, {
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDomainRegistry,
+    domainRegistry,
+    mailDeleteFinalizeService: mailDeleteFinalize,
+    localServerId: stagingServerId,
+  });
+
+  mountMailDeleteImpactRoutes(app, {
+    mailDeleteImpactService: mailDeleteImpact,
+  });
+
+  mountMailDataRoutes(app, {
+    mailDataOperationsService: mailDataOperations,
+  });
+
+  mountSingleMailboxLifecycleRoutes(app, {
+    sessionTracker,
+    mailboxRegistry,
+    mailDomainRegistry,
+  });
+
+  app.use((error, _req, res, _next) => {
+    const status = error.status || (error instanceof MailboxRegistryError ? error.status : 400);
+    res.status(status).json({
+      error: { code: error.code || 'internal_error', message: error.message },
+    });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const apiReq = async (method, reqPath, body = null) => {
+    const res = await fetch(`http://127.0.0.1:${port}${reqPath}`, {
+      method,
+      headers: body !== null ? { 'Content-Type': 'application/json' } : {},
+      body: body !== null ? JSON.stringify(body) : undefined,
+    });
+    const text = await res.text();
+    let parsed;
+    try { parsed = JSON.parse(text); } catch { parsed = text; }
+    return { status: res.status, body: parsed };
+  };
+
+  // ========================================================================
+  // VERIFICATION SECTION 1: Baseline Invariants & Mailbox B Continuity
+  // ========================================================================
+  assert.equal(activeMailDomain.status, 'enabled', 'Active mail domain must be enabled initially');
+  assert.equal(dormantMailDomain.status, 'disabled', 'Dormant mail domain must be disabled initially');
+  const initA = await mailboxRegistry.getMailbox(mailboxAId);
+  const initB = await mailboxRegistry.getMailbox(mailboxBId);
+  assert.equal(initA.enabled, true, 'Mailbox A is initially enabled');
+  assert.equal(initB.enabled, true, 'Mailbox B is initially enabled');
+
+  // Verify Mailbox B's baseline continuity:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+    activeDovecotCount: 2,
+  });
+
+  // ========================================================================
+  // VERIFICATION SECTION 2: Step 1 - Kapat (Disable Mailbox A)
+  // ========================================================================
+  const disableRes = await apiReq('PATCH', `/api/mailboxes/${mailboxAId}`, {
+    expectedRevision: 1,
+    enabled: false,
+  });
+  assert.equal(disableRes.status, 200, 'Mailbox A disable should succeed with 200');
+  assert.equal(disableRes.body.data.enabled, false);
+  assert.equal(disableRes.body.data.revision, 2);
+
+  // Invariant assertions:
+  assertNoDomainOrSiblingDisruption({
+    sharedDomain: activeMailDomain,
+    siblingMailbox: await mailboxRegistry.getMailbox(mailboxBId),
+    initialDomainStatus: 'enabled',
+  });
+  assertNoClosedDomainReopened(dormantMailDomain);
+
+  // Mailbox B continuity after Mailbox A disable:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+    activeDovecotCount: 2,
+  });
+
+  // ========================================================================
+  // VERIFICATION SECTION 3: Step 2 - Uygula & Quiesce Sessions
+  // ========================================================================
+  // Simulating config apply for the shared domain with unchanged 'enabled' status
+  assert.equal(activeMailDomain.status, 'enabled', 'Domain must remain enabled during configuration apply');
+  assert.equal(dormantMailDomain.status, 'disabled', 'Closed domain must NOT be reopened');
+
+  // Quiesce target mailbox sessions:
+  sessionTracker.kickDovecotUser('alice@cryptoraichu.website');
+  sessionTracker.invalidateSmtpSessions('alice@cryptoraichu.website');
+  sessionTracker.terminateWebmailHttpSessions('alice@cryptoraichu.website');
+
+  // SEPARATE VERIFICATION of all 5 termination requirements for Mailbox A:
+  // 1. Dovecot sessions terminated:
+  const activeDovecotA = sessionTracker.listActiveDovecotSessions('alice@cryptoraichu.website');
+  assert.equal(activeDovecotA.length, 0, 'Mailbox A must have 0 active Dovecot sessions');
+  const whoOutputA = await commandRunner('/usr/bin/doveadm', ['-f', 'tab', 'who', '-1', 'alice@cryptoraichu.website']);
+  assert.equal(whoOutputA.stdout.trim(), 'username\tproto\tpid\tip', 'Dovecot who output for A must have only header rows');
+
+  // 2. New authentication and delivery rejected for Mailbox A:
+  await assert.rejects(
+    commandRunner('/usr/bin/doveadm', ['auth', 'lookup', '-x', 'service=imap', '-f', 'user', 'alice@cryptoraichu.website']),
+    (err) => err.code === 67 && err.stderr.includes("passdb lookup: user alice@cryptoraichu.website doesn't exist"),
+    'New Dovecot auth lookup for Mailbox A must fail closed with exit code 67',
+  );
+  await assert.rejects(
+    commandRunner('/usr/sbin/postmap', ['-q', 'alice@cryptoraichu.website', 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf']),
+    (err) => err.code === 1,
+    'Postfix delivery lookup for Mailbox A must fail closed with exit code 1',
+  );
+  await assert.rejects(
+    commandRunner('/usr/bin/doveadm', ['user', '-x', 'service=lmtp', '-f', 'uid', 'alice@cryptoraichu.website']),
+    (err) => err.code === 67,
+    'Dovecot userdb lookup for Mailbox A must fail closed with exit code 67',
+  );
+
+  // 3. Pre-authenticated SMTP sessions invalidated for Mailbox A:
+  assert.throws(
+    () => sessionTracker.verifySmtpSender('smtp-alice-sess-01', 'alice@cryptoraichu.website', (addr) => {
+      const mb = [...mailboxes.values()].find((m) => m.address === addr);
+      return mb ? mb.enabled : false;
+    }),
+    (err) => err instanceof MailboxSingleLifecycleError && ['smtp_sender_disabled', 'smtp_auth_invalid'].includes(err.code),
+    'Pre-authenticated SMTP session for Mailbox A must be invalidated and rejected',
+  );
+
+  // 4. Ongoing LMTP deliveries rejected for Mailbox A:
+  assert.throws(
+    () => sessionTracker.deliverLmtpMessage('alice@cryptoraichu.website', 'Subject: Test mail to A', (addr) => {
+      const mb = [...mailboxes.values()].find((m) => m.address === addr);
+      return mb ? mb.enabled : false;
+    }),
+    (err) => err instanceof MailboxSingleLifecycleError && err.code === 'lmtp_recipient_not_found',
+    'Ongoing LMTP delivery for Mailbox A must be rejected with 550 recipient not found',
+  );
+
+  // 5. Ongoing Webmail HTTP sessions terminated for Mailbox A:
+  assert.throws(
+    () => sessionTracker.validateWebmailHttpSession('webmail-alice-sess-01', (addr) => {
+      const mb = [...mailboxes.values()].find((m) => m.address === addr);
+      return mb ? mb.enabled : false;
+    }),
+    (err) => err instanceof MailboxSingleLifecycleError && ['webmail_account_disabled', 'webmail_session_invalid'].includes(err.code),
+    'Webmail HTTP session for Mailbox A must be terminated with 401',
+  );
+
+  // Comprehensive assertion helper confirms all 5 channels terminated:
+  const separateProof = assertMailboxAccessTerminatedSeparately({
+    address: 'alice@cryptoraichu.website',
+    sessionTracker,
+  });
+  assert.equal(separateProof.allChannelsTerminated, true);
+
+  // Sibling Mailbox B continuity during & after apply:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+    activeDovecotCount: 2,
+  });
+  // Verify Bob's Dovecot lookup, Postfix lookup, SMTP sending, LMTP receiving, and Webmail HTTP session
+  const passdbBob = await commandRunner('/usr/bin/doveadm', ['auth', 'lookup', '-x', 'service=imap', '-f', 'user', 'bob@cryptoraichu.website']);
+  assert.equal(passdbBob.stdout, 'bob@cryptoraichu.website');
+  const postmapBob = await commandRunner('/usr/sbin/postmap', ['-q', 'bob@cryptoraichu.website', 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf']);
+  assert.equal(postmapBob.stdout, 'user-bob@cryptoraichu.website');
+
+  const bobSmtp = sessionTracker.verifySmtpSender('smtp-bob-sess-01', 'bob@cryptoraichu.website', () => true);
+  assert.equal(bobSmtp.authorized, true);
+
+  const bobLmtp = sessionTracker.deliverLmtpMessage('bob@cryptoraichu.website', 'Subject: Test mail to Bob', () => true);
+  assert.equal(bobLmtp.delivered, true);
+
+  const bobWebmail = sessionTracker.validateWebmailHttpSession('webmail-bob-sess-01', () => true);
+  assert.equal(bobWebmail.valid, true);
+
+  // Invariant checks:
+  assertNoDomainOrSiblingDisruption({
+    sharedDomain: activeMailDomain,
+    siblingMailbox: await mailboxRegistry.getMailbox(mailboxBId),
+  });
+  assertNoClosedDomainReopened(dormantMailDomain);
+
+  // ========================================================================
+  // VERIFICATION SECTION 4: Step 3 - Yedekle (Backup Mailbox A Data)
+  // ========================================================================
+  // Impact check shows data backup is required before deletion
+  const impactRes = await apiReq('GET', `/api/mailboxes/${mailboxAId}/delete-impact`);
+  assert.equal(impactRes.status, 200);
+  assert.equal(impactRes.body.data.requiresDataBackup, true);
+
+  const backupPreviewRes = await apiReq('GET', `/api/mailboxes/${mailboxAId}/data/backup-preview`);
+  assert.equal(backupPreviewRes.status, 200);
+  const backupPreview = backupPreviewRes.body.data;
+  assert.equal(backupPreview.operation, 'mail_data_backup');
+  assert.equal(backupPreview.identity, 'alice@cryptoraichu.website');
+
+  const queueBackupRes = await apiReq('POST', `/api/mailboxes/${mailboxAId}/data/backup`, {
+    expectedRevision: backupPreview.expectedRevision,
+    expectedPreviewDigest: backupPreview.previewDigest,
+    confirmation: backupPreview.confirmation,
+  });
+  assert.equal(queueBackupRes.status, 202);
+  const backupJob = enqueuedJobs.find((j) => j.type === 'mail_data_backup');
+  assert.ok(backupJob, 'Backup job must be enqueued');
+  jobs.get(backupJob.id).status = 'succeeded';
+  jobs.get(backupJob.id).result = {
+    version: 1,
+    transactionId: backupJob.id,
+    backupId: 'backup-alice-001',
+    mailDomainId: stagingMailDomainId,
+    resourceId: mailboxAId,
+    expectedResourceRevision: 2,
+    scope: 'mailbox',
+    identity: 'alice@cryptoraichu.website',
+    sourcePresent: true,
+    contentSha256: backupContentAlice,
+    bytes: 10240,
+  };
+
+  // Mailbox B continuity remains intact during backup:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+  });
+
+  // ========================================================================
+  // VERIFICATION SECTION 5: Step 4 - Sil (Delete Mailbox A Data with Quiesce)
+  // ========================================================================
+  const delPreviewRes = await apiReq('POST', `/api/mailboxes/${mailboxAId}/data/delete-preview`, {
+    backupId: 'backup-alice-001',
+  });
+  assert.equal(delPreviewRes.status, 200);
+  const delPreview = delPreviewRes.body.data;
+  assert.equal(delPreview.operation, 'mail_data_delete');
+  assert.equal(delPreview.identity, 'alice@cryptoraichu.website');
+
+  const queueDelRes = await apiReq('POST', `/api/mailboxes/${mailboxAId}/data/delete`, {
+    backupId: 'backup-alice-001',
+    expectedRevision: delPreview.expectedRevision,
+    expectedPreviewDigest: delPreview.previewDigest,
+    confirmation: delPreview.confirmation,
+  });
+  assert.equal(queueDelRes.status, 202);
+  const delJob = enqueuedJobs.find((j) => j.type === 'mail_data_delete');
+  assert.ok(delJob, 'Delete data job must be enqueued');
+
+  // Simulate host worker execution with accessGuard quiesce:
+  const quiesceResult = await accessGuard.quiesce('alice@cryptoraichu.website');
+  assert.equal(quiesceResult.accessDisabled, true);
+  assert.equal(quiesceResult.sessionsCleared, true);
+
+  // Command runner was called for Alice only, NEVER for Bob:
+  const kicked = commandLog.filter((c) => c.args[0] === 'kick').map((c) => c.args[1]);
+  assert.ok(kicked.includes('alice@cryptoraichu.website'));
+  assert.ok(!kicked.includes('bob@cryptoraichu.website'));
+
+  // Mark data delete job as succeeded:
+  mailboxDataStore.get('alice@cryptoraichu.website').present = false;
+  mailboxDataStore.get('alice@cryptoraichu.website').bytes = 0;
+  jobs.get(delJob.id).status = 'succeeded';
+  jobs.get(delJob.id).result = {
+    version: 1,
+    transactionId: delJob.id,
+    backupId: 'backup-alice-001',
+    mailDomainId: stagingMailDomainId,
+    resourceId: mailboxAId,
+    expectedResourceRevision: 2,
+    scope: 'mailbox',
+    identity: 'alice@cryptoraichu.website',
+    sourcePresent: true,
+    contentSha256: backupContentAlice,
+    bytes: 10240,
+    files: 5,
+    directories: 3,
+    deleted: true,
+    sideEffects: true,
+  };
+
+  // Mailbox B continuity remains intact during data deletion:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+  });
+  assert.equal(mailboxDataStore.get('bob@cryptoraichu.website').present, true);
+
+  // ========================================================================
+  // VERIFICATION SECTION 6: Step 5 - Kaydı Kaldır (Finalize Deletion)
+  // ========================================================================
+  const finalizeRes = await apiReq('DELETE', `/api/mailboxes/${mailboxAId}`, {
+    expectedRevision: 2,
+    deleteJobId: delJob.id,
+    confirmation: 'delete-mailbox:alice@cryptoraichu.website',
+  });
+  assert.equal(finalizeRes.status, 200);
+  assert.equal(finalizeRes.body.data.deleted, true);
+  assert.equal(finalizeRes.body.data.id, mailboxAId);
+
+  // Post-deletion verification:
+  const deletedCheck = await mailboxRegistry.getMailbox(mailboxAId);
+  assert.equal(deletedCheck, null, 'Mailbox A must be absent from registry');
+  const getDelRes = await apiReq('GET', `/api/mailboxes/${mailboxAId}`);
+  assert.equal(getDelRes.status, 404, 'GET on deleted mailbox A must return 404');
+
+  // Mailbox B remains present and enabled:
+  const mbBAfter = await mailboxRegistry.getMailbox(mailboxBId);
+  assert.ok(mbBAfter, 'Mailbox B must exist');
+  assert.equal(mbBAfter.enabled, true, 'Mailbox B must still be enabled');
+  assert.equal(mbBAfter.address, 'bob@cryptoraichu.website');
+  assert.equal(mbBAfter.revision, 1, 'Mailbox B revision must be untouched');
+
+  // Shared domain and dormant domain invariants:
+  assert.equal(activeMailDomain.status, 'enabled', 'Shared mail domain must remain enabled');
+  assert.equal(dormantMailDomain.status, 'disabled', 'Dormant mail domain must remain disabled');
+  assertNoDomainOrSiblingDisruption({
+    sharedDomain: activeMailDomain,
+    siblingMailbox: mbBAfter,
+  });
+  assertNoClosedDomainReopened(dormantMailDomain);
+
+  // Mailbox B uninterrupted full operations across SMTP, IMAP, and Webmail:
+  assertSiblingMailboxContinuity({
+    address: 'bob@cryptoraichu.website',
+    sessionTracker,
+    activeDovecotCount: 2,
+  });
+
+  // Listing mailboxes for domain returns only Mailbox B:
+  const listAfter = await apiReq('GET', `/api/mailboxes?mailDomainId=${stagingMailDomainId}`);
+  assert.equal(listAfter.status, 200);
+  assert.equal(listAfter.body.data.length, 1);
+  assert.equal(listAfter.body.data[0].id, mailboxBId);
+  assert.equal(listAfter.body.data[0].address, 'bob@cryptoraichu.website');
+
+  // ========================================================================
+  // VERIFICATION SECTION 7: Fail-Closed Security & Negative Constraints
+  // ========================================================================
+  // 7a. Deleting an enabled mailbox directly without disabling fails with 409
+  const testBoxId = randomUUID();
+  mailboxes.set(testBoxId, {
+    id: testBoxId,
+    mailDomainId: stagingMailDomainId,
+    address: 'test-enabled@cryptoraichu.website',
+    enabled: true,
+    revision: 1,
+  });
+  mailboxDataStore.set('test-enabled@cryptoraichu.website', { present: true, bytes: 512, snapshotSha256: sha256Str('t') });
+  backups.set('backup-test-01', {
+    version: 1,
+    backupId: 'backup-test-01',
+    scope: 'mailbox',
+    identity: 'test-enabled@cryptoraichu.website',
+    sourcePath: '/var/vmail/cryptoraichu.website/test-enabled',
+    sourcePresent: true,
+    sourceSnapshotSha256: sha256Str('t'),
+    contentSha256: sha256Str('c'),
+    bytes: 512,
+  });
+  const badDelPreview = await apiReq('POST', `/api/mailboxes/${testBoxId}/data/delete-preview`, {
+    backupId: 'backup-test-01',
+  });
+  assert.equal(badDelPreview.status, 409);
+  assert.equal(badDelPreview.body.error.code, 'mail_data_delete_mailbox_disable_required');
+
+  // 7b. Reopened closed domain assertion catches any unauthorized state flip
+  assert.throws(
+    () => assertNoClosedDomainReopened({ domainName: 'dormant.cryptoraichu.website', status: 'enabled' }),
+    (err) => err instanceof MailboxProtocolDisruptionError && err.code === 'closed_domain_reopened',
+  );
+
+  // 7c. Sibling disruption assertion catches unexpected disabled state
+  assert.throws(
+    () => assertNoDomainOrSiblingDisruption({
+      sharedDomain: { domainName: 'cryptoraichu.website', status: 'disabled' },
+      siblingMailbox: { address: 'bob@cryptoraichu.website', enabled: true },
+    }),
+    (err) => err instanceof MailboxProtocolDisruptionError && err.code === 'domain_disrupted',
+  );
+  assert.throws(
+    () => assertNoDomainOrSiblingDisruption({
+      sharedDomain: { domainName: 'cryptoraichu.website', status: 'enabled' },
+      siblingMailbox: { address: 'bob@cryptoraichu.website', enabled: false },
+    }),
+    (err) => err instanceof MailboxProtocolDisruptionError && err.code === 'sibling_disrupted',
+  );
+
+  // 7d. Stubborn session fails closed during access guard quiesce
+  const stubbornRunner = async (file, args) => {
+    if (args.includes('who')) {
+      return { stdout: 'username\tproto\tpid\tip\nstubborn@test.com\timap\t9999\t1.2.3.4\n', stderr: '' };
+    }
+    if (args[0] === 'kick') return { stdout: 'stubborn@test.com', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'cache') return { stdout: '1 cache entries flushed', stderr: '' };
+    if (args[0] === 'auth' && args[1] === 'lookup') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "passdb lookup: user stubborn@test.com doesn't exist"; throw err;
+    }
+    if (args[0] === 'user') {
+      const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = "userdb lookup: user stubborn@test.com doesn't exist"; throw err;
+    }
+    if (file.endsWith('/postconf')) {
+      return { stdout: args[1] === 'virtual_mailbox_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf', stderr: '' };
+    }
+    if (file.endsWith('/postmap')) {
+      const err = new Error('missing'); err.code = 1; err.stdout = ''; err.stderr = ''; throw err;
+    }
+    throw new Error('unexpected');
+  };
+  const stubbornGuard = createMailboxAccessGuard({ run: stubbornRunner });
+  await assert.rejects(
+    stubbornGuard.quiesce('stubborn@test.com'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_sessions_remaining',
+    'Stubborn sessions must fail closed with mailbox_access_sessions_remaining',
+  );
+
+  // Clean up test box
+  mailboxes.delete(testBoxId);
+  mailboxDataStore.delete('test-enabled@cryptoraichu.website');
+  backups.delete('backup-test-01');
+
+  assert.ok(true, 'T-DEV-MR-SINGLE: Single mailbox lifecycle, session termination, and sibling continuity verified.');
 });
