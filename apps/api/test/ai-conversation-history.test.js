@@ -69,3 +69,13 @@ test('empty and final pages have null cursor and never expose message/tool paylo
   assert.deepEqual(Object.keys(result.items[0]), ['id', 'title', 'websiteId', 'createdAt', 'updatedAt', 'messageCount']);
   assert.equal(JSON.stringify(result).includes('private'), false); assert.equal(Object.isFrozen(result.items), true);
 });
+
+test('site-scoped roles (reseller, customer) enforce website boundaries and fail closed', () => {
+  for (const role of ['reseller', 'customer']) {
+    const userAuth = { user: { id: `user-${role}`, role, websiteIds: [siteA] }, access: { mode: 'site_management' }, security: { managementAllowed: true } };
+    const scope = conversationScope(userAuth);
+    assert.equal(conversationVisible(row(1, { actorId: `user-${role}` }), scope), true);
+    assert.equal(conversationVisible(row(1, { actorId: `user-${role}`, websiteId: siteB }), scope), false);
+    assert.throws(() => conversationScope(userAuth, siteB), { status: 404 });
+  }
+});

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
+import { setSession } from '../src/session-client.js';
+import { streamAiMessage } from '../src/workspace/ai-client.js';
 import {
   createAiHistory,
   createAiConversationReader,
@@ -269,4 +271,83 @@ test('Criterion 8: long history, responsive mobile layout, and accessibility key
   assert.match(drawerSource, /role="log"/);
   assert.match(drawerSource, /aria-live="polite"/);
   assert.match(drawerSource, /aria-label="Sohbet mesajları"/);
+});
+
+/* ==========================================================================
+   Criterion 1 & 2: streamAiMessage and session termination fail-closed
+   ========================================================================== */
+
+test('Criterion 1 & 2: streamAiMessage streams SSE chunks with CSRF token and throws on 403/404 fail-closed', async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    setSession({ csrfToken: 'acceptance-csrf-token' });
+    let capturedUrl, capturedOptions;
+
+    // Test SSE streaming
+    globalThis.fetch = async (url, options) => {
+      capturedUrl = url;
+      capturedOptions = options;
+      const stream = new ReadableStream({
+        start(controller) {
+          controller.enqueue(new TextEncoder().encode('event: thinking\ndata: {"type":"thinking","turn":1}\n\n'));
+          controller.enqueue(new TextEncoder().encode('event: text\ndata: {"type":"text","text":"Hello World"}\n\n'));
+          controller.close();
+        },
+      });
+      return new Response(stream, {
+        status: 200,
+        headers: { 'content-type': 'text/event-stream' },
+      });
+    };
+
+    const events = [];
+    await streamAiMessage({ conversationId: 'conv-123', text: 'hi' }, {
+      onEvent: (ev) => events.push(ev),
+    });
+
+    assert.equal(capturedUrl, '/api/panel/ai/conversations/conv-123/messages/stream');
+    assert.equal(capturedOptions.method, 'POST');
+    assert.equal(capturedOptions.headers['x-csrf-token'], 'acceptance-csrf-token');
+    assert.deepEqual(events, [
+      { type: 'thinking', turn: 1 },
+      { type: 'text', text: 'Hello World' },
+    ]);
+
+    // Test fail-closed 403 response
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'forbidden', message: 'Access denied' } }), {
+      status: 403,
+      headers: { 'content-type': 'application/json' },
+    });
+
+    await assert.rejects(
+      () => streamAiMessage({ conversationId: 'conv-other', text: 'hi' }),
+      (err) => err.status === 403 && err.code === 'forbidden',
+    );
+
+    // Test fail-closed 404 response
+    globalThis.fetch = async () => new Response(JSON.stringify({ error: { code: 'conversation_not_found', message: 'Not found' } }), {
+      status: 404,
+      headers: { 'content-type': 'application/json' },
+    });
+
+    await assert.rejects(
+      () => streamAiMessage({ conversationId: 'conv-missing', text: 'hi' }),
+      (err) => err.status === 404 && err.code === 'conversation_not_found',
+    );
+  } finally {
+    globalThis.fetch = originalFetch;
+    setSession(null);
+  }
+});
+
+test('Session switching and denied mutate trigger fail-closed reset in AiDrawer', () => {
+  // Drawer ties scope key to session identity and version
+  assert.match(drawerSource, /identity = JSON\.stringify\(\[domainId, session\?\.user\?\.id, session\?\.user\?\.role, session\?\.user\?\.websiteIds, sessionVersion\(\)\]\)/);
+  // Unmounts if no session user
+  assert.match(drawerSource, /if \(!open \|\| !session\?\.user\?\.id\) return null;/);
+  // Denied resets state and drafts
+  assert.match(drawerSource, /setHistory\(.*status:\s*'forbidden'/);
+  assert.match(drawerSource, /drafts\.current\.clear\(\)/);
+  // mutate catches 401/403 and calls deniedRef
+  assert.match(drawerSource, /failure\?\.status === 401 \|\| failure\?\.status === 403 \|\| failure\?\.code === 'forbidden' \|\| failure\?\.code === 'unauthorized'/);
 });

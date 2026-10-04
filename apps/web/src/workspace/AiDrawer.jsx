@@ -47,7 +47,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
   const [sending, setSending] = useState(false);
   const [inputVal, setInputVal] = useState('');
   const [error, setError] = useState(null);
-  const scope = useRef(null), active = useRef(null), pending = useRef(false), drafts = useRef(new Map());
+  const scope = useRef(null), active = useRef(null), pending = useRef(false), drafts = useRef(new Map()), deniedRef = useRef(null);
   const messagesRef = useRef(null);
   function select(id) {
     active.current = id; setActiveConvId(id); setInputVal(drafts.current.get(id ?? 'new') ?? '');
@@ -62,6 +62,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
       setDetail({ id: null, status: 'forbidden', conversation: null, error: null });
       setInputVal(''); drafts.current.clear();
     }
+    deniedRef.current = denied;
     list = createAiHistory({ actorId, websiteId, isCurrent: current,
       read: (options) => listAiConversationPage(websiteId, options),
       onState: (value) => {
@@ -79,7 +80,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
     });
     scope.current = { list, reader, current, signal: life.signal };
     void list.load();
-    return () => { life.abort(); list.dispose(); reader.dispose(); scope.current = null; };
+    return () => { deniedRef.current = null; life.abort(); list.dispose(); reader.dispose(); scope.current = null; };
   }, [actorId, websiteId]);
   useEffect(() => { void scope.current?.reader.load(activeConvId); }, [activeConvId]);
   const activeConversation = detail.id === activeConvId ? detail.conversation : null;
@@ -94,9 +95,13 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
     pending.current = true; setSending(true); setError(null);
     try { await action(client); }
     catch (failure) {
-      if (client.current()) setError(failure?.code === 'ai_conversation_limit'
-        ? '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti silin.'
-        : 'İşlem sonucu doğrulanamadı. Tekrar göndermeden önce geçmişi yenileyin.');
+      if (failure?.status === 401 || failure?.status === 403 || failure?.code === 'forbidden' || failure?.code === 'unauthorized') {
+        deniedRef.current?.();
+      } else if (client.current()) {
+        setError(failure?.code === 'ai_conversation_limit'
+          ? '100 sohbet sınırına ulaşıldı. Yeni sohbet için eski bir sohbeti silin.'
+          : 'İşlem sonucu doğrulanamadı. Tekrar göndermeden önce geçmişi yenileyin.');
+      }
     } finally { pending.current = false; if (client.current()) setSending(false); }
   }
   async function newConversation(client, title) {
