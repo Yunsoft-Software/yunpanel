@@ -10,6 +10,7 @@ import express from 'express';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
 import { provisionSiteAdmin } from '../src/site-admin-provisioning.js';
+import { mountSiteCreateRoutes } from '../src/site-create-http.js';
 import {
   extractActorTenant,
   assertWebsiteBelongsToTenant,
@@ -413,4 +414,414 @@ test('Gerçek kullanıcı deposunda hesap yaratılmasını bekle; normalize kull
     headers: { cookie: `yunpanel_session=${loginA.token}` },
   });
   assert.equal(revokedRes.status, 401);
+});
+
+test('Hash sırasında yetki iptali/Website silme, iki süreç yarışı ve hesap sonrası provisioning registry yazma hatalarını test et. Atomik yetki/kilit ve kalıcı sonuç kaydı', async (t) => {
+  const { store, filePath } = createRealStoreFixture(t);
+
+  // Setup owner
+  const { token: setupToken } = store.issueSetupToken();
+  const ownerUser = await store.completeSetup({
+    setupToken,
+    username: 'SecurityOwner',
+    password: 'OwnerPassword123!',
+  });
+  const ownerLogin = await store.login({
+    username: 'SecurityOwner',
+    password: 'OwnerPassword123!',
+  });
+  const rawToken = ownerLogin.token;
+
+  const targetWebsiteId = '11111111-2222-4333-8444-555555555555';
+  const serverId = '66666666-7777-4888-8999-000000000000';
+  let websiteExists = true;
+  let onNextHash = null;
+  const dynamicWebsiteLookup = async (id) => {
+    if (id !== targetWebsiteId || !websiteExists) return null;
+    if (onNextHash) {
+      const cb = onNextHash;
+      onNextHash = null;
+      setImmediate(cb);
+    }
+    return { id, serverId };
+  };
+
+  // -------------------------------------------------------------------------
+  // 1. Hash hesaplama sırasında yetki iptali (fail-closed, yetkisiz kayıt yok)
+  // -------------------------------------------------------------------------
+  {
+    // A) rawToken ile oturum iptali (session revoked during password hashing)
+    const revokeOpId = '77777777-1111-4111-8111-111111111111';
+    const revokeInput = {
+      operationId: revokeOpId,
+      serverId,
+      siteAdmin: { email: 'revoked-session@example.test', password: 'ValidPassword123!' },
+    };
+    const revokeResult = {
+      created: true,
+      resumed: false,
+      operationId: revokeOpId,
+      website: { id: targetWebsiteId, serverId },
+      primaryDomain: { websiteId: targetWebsiteId },
+    };
+
+    const tempSession = (await store.login({ username: 'SecurityOwner', password: 'OwnerPassword123!' })).token;
+    onNextHash = () => {
+      store.revokeSession(tempSession);
+    };
+
+    const outcomeA = await provisionSiteAdmin({
+      input: revokeInput,
+      result: revokeResult,
+      userAdminStore: store.users,
+      actorId: ownerUser.id,
+      rawToken: tempSession,
+      requireManagement: (s) => s,
+      websiteLookup: dynamicWebsiteLookup,
+    });
+
+    assert.deepEqual(outcomeA, { status: 'attention', websiteId: targetWebsiteId, code: 'site_admin_actor_forbidden' });
+
+    const db = new DatabaseSync(filePath);
+    try {
+      const row = db.prepare('SELECT * FROM users WHERE username = ?').get('revoked-session@example.test');
+      assert.equal(row, undefined, 'No user record must be created when session is revoked during hash');
+      const opRow = db.prepare('SELECT * FROM auth_operation_users WHERE operation_id = ?').get(revokeOpId);
+      assert.equal(opRow, undefined, 'No auth_operation_users entry must exist');
+    } finally {
+      db.close();
+    }
+
+    // B) actorId ile kullanıcı deaktive edilmesi (actor deactivated during password hashing)
+    const deactOpId = '77777777-2222-4222-8222-222222222222';
+    const deactInput = {
+      operationId: deactOpId,
+      serverId,
+      siteAdmin: { email: 'deact-actor@example.test', password: 'ValidPassword123!' },
+    };
+    const deactResult = {
+      created: true,
+      resumed: false,
+      operationId: deactOpId,
+      website: { id: targetWebsiteId, serverId },
+      primaryDomain: { websiteId: targetWebsiteId },
+    };
+
+    onNextHash = () => {
+      const dbDeact = new DatabaseSync(filePath);
+      dbDeact.prepare('UPDATE users SET active = 0 WHERE id = ?').run(ownerUser.id);
+      dbDeact.close();
+    };
+
+    const outcomeB = await provisionSiteAdmin({
+      input: deactInput,
+      result: deactResult,
+      userAdminStore: store.users,
+      actorId: ownerUser.id,
+      websiteLookup: dynamicWebsiteLookup,
+    });
+
+    assert.deepEqual(outcomeB, { status: 'attention', websiteId: targetWebsiteId, code: 'site_admin_actor_forbidden' });
+
+    const dbCheckB = new DatabaseSync(filePath);
+    try {
+      const row = dbCheckB.prepare('SELECT * FROM users WHERE username = ?').get('deact-actor@example.test');
+      assert.equal(row, undefined, 'No user record must be created when actor is deactivated during hash');
+    } finally {
+      dbCheckB.prepare('UPDATE users SET active = 1 WHERE id = ?').run(ownerUser.id);
+      dbCheckB.close();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 2. Hash hesaplama sırasında Website silme (fail-closed, yetkisiz kayıt yok)
+  // -------------------------------------------------------------------------
+  {
+    const deleteOpId = '88888888-1111-4111-8111-111111111111';
+    const deleteInput = {
+      operationId: deleteOpId,
+      serverId,
+      siteAdmin: { email: 'deleted-site@example.test', password: 'ValidPassword123!' },
+    };
+    const deleteResult = {
+      created: true,
+      resumed: false,
+      operationId: deleteOpId,
+      website: { id: targetWebsiteId, serverId },
+      primaryDomain: { websiteId: targetWebsiteId },
+    };
+
+    websiteExists = true;
+    onNextHash = () => {
+      websiteExists = false;
+    };
+
+    const outcomeDelete = await provisionSiteAdmin({
+      input: deleteInput,
+      result: deleteResult,
+      userAdminStore: store.users,
+      actorId: ownerUser.id,
+      websiteLookup: dynamicWebsiteLookup,
+    });
+
+    assert.deepEqual(outcomeDelete, { status: 'attention', websiteId: targetWebsiteId, code: 'site_admin_website_deleted' });
+
+    const db = new DatabaseSync(filePath);
+    try {
+      const row = db.prepare('SELECT * FROM users WHERE username = ?').get('deleted-site@example.test');
+      assert.equal(row, undefined, 'No user record must be created when website is removed during hash');
+      const binding = db.prepare('SELECT * FROM auth_user_websites WHERE website_id = ?').all(targetWebsiteId);
+      assert.equal(binding.length, 0, 'No website binding must be created');
+      const opRow = db.prepare('SELECT * FROM auth_operation_users WHERE operation_id = ?').get(deleteOpId);
+      assert.equal(opRow, undefined, 'No auth_operation_users entry must exist');
+    } finally {
+      db.close();
+      websiteExists = true;
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 3. İki eşzamanlı süreç yarışı (Race condition: atomik yetki ve kilit)
+  // -------------------------------------------------------------------------
+  {
+    // A) Aynı kullanıcı adı için iki eşzamanlı süreç yarışı
+    const raceUsername = 'concurrent-race@example.test';
+    const site1 = '11111111-aaaa-4111-8111-111111111111';
+    const site2 = '22222222-bbbb-4222-8222-222222222222';
+    const raceOp1 = 'aaaaaaaa-1111-4111-8111-111111111111';
+    const raceOp2 = 'bbbbbbbb-2222-4222-8222-222222222222';
+
+    const [call1, call2] = await Promise.allSettled([
+      store.users.createSiteManager({
+        username: raceUsername,
+        password: 'ValidPassword123!',
+        websiteId: site1,
+        actorId: ownerUser.id,
+        operationId: raceOp1,
+      }),
+      store.users.createSiteManager({
+        username: raceUsername,
+        password: 'ValidPassword123!',
+        websiteId: site2,
+        actorId: ownerUser.id,
+        operationId: raceOp2,
+      }),
+    ]);
+
+    const fulfilled = [call1, call2].filter((c) => c.status === 'fulfilled');
+    const rejected = [call1, call2].filter((c) => c.status === 'rejected');
+    assert.equal(fulfilled.length, 1, 'Exactly one concurrent call must succeed');
+    assert.equal(rejected.length, 1, 'Exactly one concurrent call must be rejected');
+    assert.equal(rejected[0].reason?.code, 'username_taken');
+    assert.equal(rejected[0].reason?.status, 409);
+
+    const db = new DatabaseSync(filePath);
+    try {
+      const userCount = db.prepare('SELECT count(*) as count FROM users WHERE username = ?').get(raceUsername);
+      assert.equal(userCount.count, 1, 'Database must contain exactly 1 user with race username');
+    } finally {
+      db.close();
+    }
+
+    // B) Aynı operationId için iki eşzamanlı süreç yarışı (idempotent race)
+    const idempotentOpId = 'cccccccc-3333-4333-8333-333333333333';
+    const idemUsername = 'idempotent-race@example.test';
+    const idemSiteId = '33333333-cccc-4333-8333-333333333333';
+
+    const [idem1, idem2] = await Promise.all([
+      store.users.createSiteManager({
+        username: idemUsername,
+        password: 'ValidPassword123!',
+        websiteId: idemSiteId,
+        actorId: ownerUser.id,
+        operationId: idempotentOpId,
+      }),
+      store.users.createSiteManager({
+        username: idemUsername,
+        password: 'ValidPassword123!',
+        websiteId: idemSiteId,
+        actorId: ownerUser.id,
+        operationId: idempotentOpId,
+      }),
+    ]);
+
+    assert.equal(idem1.id, idem2.id, 'Both concurrent calls with same operationId must return the exact same user');
+    assert.equal(idem1.username, idemUsername);
+
+    const dbIdem = new DatabaseSync(filePath);
+    try {
+      const opCount = dbIdem.prepare('SELECT count(*) as count FROM auth_operation_users WHERE operation_id = ?').get(idempotentOpId);
+      assert.equal(opCount.count, 1, 'Exactly 1 operation user row must be stored');
+      const userCount = dbIdem.prepare('SELECT count(*) as count FROM users WHERE username = ?').get(idemUsername);
+      assert.equal(userCount.count, 1, 'Exactly 1 user must exist');
+    } finally {
+      dbIdem.close();
+    }
+  }
+
+  // -------------------------------------------------------------------------
+  // 4. Hesap sonrası provisioning registry yazma hatalarında atomik kilit ve kalıcı sonuç kaydı
+  // -------------------------------------------------------------------------
+  {
+    const provSiteId = '44444444-dddd-4444-8444-444444444444';
+    const provOpId = 'dddddddd-4444-4444-8444-444444444444';
+    const provUsername = 'prov-fail-admin@example.test';
+    const provPassword = 'ValidPassword123!';
+
+    const input = {
+      operationId: provOpId,
+      serverId,
+      siteAdmin: { email: provUsername, password: provPassword },
+    };
+
+    let siteCreated = false;
+    const mockCreateSite = async () => {
+      if (!siteCreated) {
+        siteCreated = true;
+        return {
+          operationId: provOpId,
+          created: true,
+          resumed: false,
+          website: { id: provSiteId, serverId },
+          primaryDomain: { websiteId: provSiteId },
+        };
+      }
+      return {
+        operationId: provOpId,
+        created: false,
+        resumed: true,
+        website: { id: provSiteId, serverId },
+        primaryDomain: { websiteId: provSiteId },
+      };
+    };
+
+    let provisioningAttempt = 0;
+    const failingProvisioningRegistry = {
+      create: async (plan) => {
+        provisioningAttempt++;
+        if (provisioningAttempt === 1) {
+          const err = new Error('Provisioning registry database write failed');
+          err.code = 'provisioning_registration_failed';
+          err.status = 503;
+          throw err;
+        }
+        return { ...plan, persisted: true, ready: true };
+      },
+    };
+
+    const routes = new Map();
+    mountSiteCreateRoutes({
+      post: (path, ...handlers) => routes.set(path, handlers),
+    }, {
+      localServerId: serverId,
+      userAdminStore: store.users,
+      createSite: mockCreateSite,
+      provisioningPlanner: async () => ({
+        operationId: provOpId,
+        websiteId: provSiteId,
+        fixture: true,
+      }),
+      previewSiteCreate: async () => ({
+        operationId: provOpId,
+        ids: { websiteId: provSiteId },
+        hostname: { primaryDomain: 'prov-fail.example.test' },
+        previewDigest: 'b'.repeat(64),
+        confirmation: `create-site:${provOpId}:${'b'.repeat(64)}`,
+        plan: { website: { id: provSiteId, serverId } },
+        steps: { websiteReady: true },
+        blockers: [],
+      }),
+      websiteProvisioningRegistry: failingProvisioningRegistry,
+    });
+
+    const handler = routes.get('/api/sites')[1];
+    const invokeRoute = async (body) => {
+      const res = {
+        statusCode: 200,
+        status(n) { this.statusCode = n; return this; },
+        json(val) { this.body = val; return this; },
+      };
+      const req = {
+        body,
+        auth: {
+          user: { id: ownerUser.id, username: ownerUser.username, role: 'owner' },
+          access: { mode: 'management', permissions: ['*'] },
+          security: { managementAllowed: true },
+        },
+      };
+      await handler(req, res, (err) => { res.error = err; });
+      return res;
+    };
+
+    const requestBody = {
+      input,
+      previewDigest: 'b'.repeat(64),
+      confirmation: `create-site:${provOpId}:${'b'.repeat(64)}`,
+    };
+
+    // First attempt: Account is created, but provisioning registry write fails
+    const firstRes = await invokeRoute(requestBody);
+    assert.equal(firstRes.statusCode, 201, 'Site creation returns 201');
+    assert.equal(firstRes.body.data.created, true);
+    assert.equal(firstRes.body.data.website.id, provSiteId);
+    assert.deepEqual(firstRes.body.data.siteAdmin, {
+      status: 'created',
+      websiteId: provSiteId,
+      code: null,
+    });
+    assert.equal(firstRes.body.data.provisioningError?.code, 'provisioning_registration_failed');
+    assert.equal(firstRes.body.data.provisioningError?.status, 503);
+
+    // Verify atomic lock & durable result in SQLite: account was durably saved
+    const dbProv = new DatabaseSync(filePath);
+    let createdUserRow;
+    try {
+      createdUserRow = dbProv.prepare('SELECT * FROM users WHERE username = ?').get(provUsername);
+      assert.ok(createdUserRow, 'Site admin user must be durably saved in SQLite');
+      assert.equal(createdUserRow.role, 'site_manager');
+      assert.equal(createdUserRow.active, 1);
+
+      const opRow = dbProv.prepare('SELECT * FROM auth_operation_users WHERE operation_id = ?').get(provOpId);
+      assert.ok(opRow, 'auth_operation_users must record the operationId mapping');
+      assert.equal(opRow.operation_id, provOpId);
+      assert.equal(opRow.user_id, createdUserRow.id);
+      assert.equal(opRow.website_id, provSiteId);
+    } finally {
+      dbProv.close();
+    }
+
+    // Operation user reconciliation functions verify durable state
+    const opUser = store.users.getOperationUser(provOpId);
+    assert.ok(opUser);
+    assert.equal(opUser.userId, createdUserRow.id);
+    assert.equal(opUser.websiteId, provSiteId);
+    assert.equal(opUser.user.username, provUsername);
+
+    const reconciledUser = store.users.reconcileOperationUser(provOpId, provSiteId);
+    assert.ok(reconciledUser);
+    assert.equal(reconciledUser.id, createdUserRow.id);
+
+    // Second attempt (replay / retry):
+    // Provisioning registry succeeds this time, and siteAdmin result is safely handled via replay protection
+    const replayRes = await invokeRoute(requestBody);
+    assert.equal(replayRes.statusCode, 200, 'Replay returns 200 OK');
+    assert.equal(replayRes.body.data.created, false);
+    assert.equal(replayRes.body.data.siteAdmin.status, 'attention');
+    assert.equal(replayRes.body.data.siteAdmin.code, 'site_admin_replay_requires_review');
+    assert.equal(replayRes.body.data.provisioning.persisted, true);
+    assert.equal(replayRes.body.data.provisioning.ready, true);
+
+    // SQLite verification: user was NOT recreated, password_hash not touched, no duplicate rows
+    const dbReplay = new DatabaseSync(filePath);
+    try {
+      const userAfter = dbReplay.prepare('SELECT * FROM users WHERE username = ?').get(provUsername);
+      assert.equal(userAfter.id, createdUserRow.id);
+      assert.equal(userAfter.password_hash, createdUserRow.password_hash, 'Password hash must be preserved unchanged');
+
+      const opCount = dbReplay.prepare('SELECT count(*) as count FROM auth_operation_users WHERE operation_id = ?').get(provOpId);
+      assert.equal(opCount.count, 1, 'auth_operation_users must have exactly 1 row');
+    } finally {
+      dbReplay.close();
+    }
+  }
 });

@@ -140,6 +140,9 @@ function localInput(input, localServerId) {
 }
 
 function provisioningPlanner(dependencies) {
+  if (typeof dependencies.provisioningPlanner === 'function') {
+    return dependencies.provisioningPlanner;
+  }
   return dependencies.localServerId
     ? dnsAwareSiteCreateProvisioningPlan
     : mailAwareSiteCreateProvisioningPlan;
@@ -258,7 +261,14 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
     let siteAdminError = null;
     try {
       siteAdmin = await provisionSiteAdmin({
-        input, result, userAdminStore: dependencies.userAdminStore, actorId: request.auth?.user?.id,
+        input,
+        result,
+        userAdminStore: dependencies.userAdminStore,
+        actorId: request.auth?.user?.id,
+        operationId: result?.operationId ?? input?.operationId ?? null,
+        rawToken: extractRawToken(request),
+        requireManagement: resolveRequireManagement(dependencies, request),
+        websiteLookup: dependencies.websiteRegistry ? (id) => dependencies.websiteRegistry.getWebsite(id) : (dependencies.websiteLookup ?? null),
       });
       if (siteAdmin?.status === 'attention') {
         siteAdminError = Object.freeze({
