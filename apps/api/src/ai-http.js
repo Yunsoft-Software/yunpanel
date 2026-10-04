@@ -1,4 +1,5 @@
 import { createAiActionPlan, verifyAiActionExecution } from './ai-action-plan.js';
+import { createAiMcpAdapter } from './ai-mcp-adapter.js';
 import { evaluateAiToolPolicy } from './ai-policy.js';
 import { createProviderFromConfig } from './ai-provider-adapters.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -168,6 +169,7 @@ export function mountAiRoutes(app, {
   policyStore = null,
   providerRegistry = null,
   conversationService = null,
+  mcpAdapter = null,
 } = {}) {
   validateDependencies(app, registry, audit, policyOverrides, policyStore, providerRegistry);
 
@@ -469,6 +471,52 @@ export function mountAiRoutes(app, {
       throw error;
     }
   }));
+
+  if (mcpAdapter) {
+    app.get('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+      return response.json(mcpAdapter.initialize());
+    }));
+
+    app.post('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
+      const result = await mcpAdapter.handleMessage(request.body, {
+        auth: request.auth,
+        overrides,
+      });
+      if (result === null) {
+        return response.status(204).end();
+      }
+      return response.json(result);
+    }));
+  }
+}
+
+export function mountAiMcpRoutes(app, {
+  mcpAdapter = null,
+  registry = null,
+  audit = null,
+  policyStore = null,
+  policyOverrides = {},
+} = {}) {
+  const adapter = mcpAdapter ?? (registry ? createAiMcpAdapter({ registry, audit, policyStore, policyOverrides }) : null);
+  if (!adapter) {
+    throw new AiHttpError('invalid_ai_mcp_adapter', 'MCP adapter or tool registry is required');
+  }
+  app.get('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+    return response.json(adapter.initialize());
+  }));
+  app.post('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
+    const result = await adapter.handleMessage(request.body, {
+      auth: request.auth,
+      overrides,
+    });
+    if (result === null) {
+      return response.status(204).end();
+    }
+    return response.json(result);
+  }));
+  return adapter;
 }
 
 export const aiHttpInternals = Object.freeze({
