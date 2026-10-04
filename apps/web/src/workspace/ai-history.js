@@ -46,7 +46,11 @@ export function createAiHistory({ actorId, websiteId = null, read, isCurrent = (
         || typeof page.legacyUnassigned !== 'boolean'
         || (page.hasMore ? typeof page.nextCursor !== 'string' || !page.nextCursor || page.nextCursor.length > 1024 || !page.items.length
           : page.nextCursor !== null)) throw bad();
-      if (page.hasMore && (page.nextCursor === cursor || consumed.has(page.nextCursor))) throw bad();
+      if (page.hasMore && (page.nextCursor === cursor || consumed.has(page.nextCursor))) {
+        const err = bad();
+        err.code = 'invalid_ai_history_cursor';
+        throw err;
+      }
       const items = page.items.map((item) => aiHistorySummary(item, websiteId));
       if (new Set(items.map((item) => item.id)).size !== items.length) throw bad();
       if (cursor) consumed.add(cursor);

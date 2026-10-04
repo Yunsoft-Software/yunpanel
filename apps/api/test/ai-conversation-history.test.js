@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { conversationScope, conversationVisible, createConversationPager } from '../src/ai-conversation-history.js';
+import { conversationScope, conversationVisible, createConversationPager, AiHistoryError } from '../src/ai-conversation-history.js';
 const siteA = '11111111-1111-4111-8111-111111111111';
 const siteB = '22222222-2222-4222-8222-222222222222';
 const auth = (id = 'owner-a') => ({ user: { id, role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } });
@@ -78,4 +78,108 @@ test('site-scoped roles (reseller, customer) enforce website boundaries and fail
     assert.equal(conversationVisible(row(1, { actorId: `user-${role}`, websiteId: siteB }), scope), false);
     assert.throws(() => conversationScope(userAuth, siteB), { status: 404 });
   }
+});
+
+test('paging >20 conversations with equal creation times enforces strict descending tie-breaker and null final cursor', () => {
+  const page = createConversationPager();
+  const scope = conversationScope(auth());
+  const fixedTime = '2026-09-24T12:00:00.000Z';
+  const list = Array.from({ length: 45 }, (_, i) => row(i, { createdAt: fixedTime, updatedAt: fixedTime }));
+
+  // Page 1: limit 20
+  const page1 = page(list, scope, { limit: 20 });
+  assert.equal(page1.items.length, 20);
+  assert.equal(page1.hasMore, true);
+  assert.ok(page1.nextCursor);
+
+  // Page 2: limit 20
+  const page2 = page(list, scope, { cursor: page1.nextCursor, limit: 20 });
+  assert.equal(page2.items.length, 20);
+  assert.equal(page2.hasMore, true);
+  assert.ok(page2.nextCursor);
+  assert.notEqual(page2.nextCursor, page1.nextCursor);
+
+  // Page 3: final page (remaining 5 items)
+  const page3 = page(list, scope, { cursor: page2.nextCursor, limit: 20 });
+  assert.equal(page3.items.length, 5);
+  assert.equal(page3.hasMore, false);
+  assert.equal(page3.nextCursor, null);
+
+  // Ensure all 45 items are unique, strictly descending by id tie-breaker
+  const seenIds = [...page1.items, ...page2.items, ...page3.items].map((item) => item.id);
+  assert.equal(seenIds.length, 45);
+  assert.equal(new Set(seenIds).size, 45);
+  const expectedOrder = list.map((item) => item.id).sort().reverse();
+  assert.deepEqual(seenIds, expectedOrder);
+
+  // Requesting with page 2 cursor again returns deterministic page 3
+  const repeat = page(list, scope, { cursor: page2.nextCursor, limit: 20 });
+  assert.deepEqual(repeat.items.map((r) => r.id), page3.items.map((r) => r.id));
+  assert.equal(repeat.hasMore, false);
+  assert.equal(repeat.nextCursor, null);
+});
+
+test('concurrent mutations during older page browsing preserve keyset pagination and data integrity', () => {
+  const page = createConversationPager();
+  const scope = conversationScope(auth());
+  const fixedTime = '2026-09-24T12:00:00.000Z';
+  const list = Array.from({ length: 30 }, (_, i) => row(i, { createdAt: fixedTime, updatedAt: fixedTime }));
+
+  // Retrieve page 1
+  const page1 = page(list, scope, { limit: 20 });
+  assert.equal(page1.items.length, 20);
+  assert.equal(page1.hasMore, true);
+  const heldCursor = page1.nextCursor;
+
+  // Race 1: An older conversation from page 1 gets a new message (updatedAt changes)
+  list[0].updatedAt = '2026-09-25T15:30:00.000Z';
+  list[0].messages.push({ text: 'new incoming message while user is on older page' });
+
+  // Race 2: A brand new conversation is created with newer createdAt
+  const brandNew = row(99, { createdAt: '2026-09-25T16:00:00.000Z', updatedAt: '2026-09-25T16:00:00.000Z' });
+  list.unshift(brandNew);
+
+  // Race 3: The cursor anchor conversation (item 19) is deleted from store
+  const anchorIndex = list.findIndex((item) => item.id === page1.items.at(-1).id);
+  assert.ok(anchorIndex !== -1);
+  list.splice(anchorIndex, 1);
+
+  // Race 4: An item that was destined for page 2 is also deleted
+  const page2ItemIndex = list.findIndex((item) => item.id === row(5).id);
+  if (page2ItemIndex !== -1) list.splice(page2ItemIndex, 1);
+
+  // Now fetch page 2 using the held cursor
+  const page2 = page(list, scope, { cursor: heldCursor, limit: 20 });
+
+  // Keyset cursor based on [createdAt, anchorId] strictly filters items older than anchor
+  // - Does NOT include brandNew (createdAt is newer)
+  // - Does NOT duplicate any page 1 items
+  // - Successfully retrieves remaining items without skipping or throwing
+  for (const item of page2.items) {
+    assert.ok(!page1.items.some((p1) => p1.id === item.id), `Page 1 item ${item.id} was duplicated in page 2`);
+    assert.notEqual(item.id, brandNew.id, 'Brand new conversation should not appear in older page');
+  }
+  assert.equal(page2.hasMore, false);
+  assert.equal(page2.nextCursor, null);
+});
+
+test('restarted service or instance switching rejects stale cursors and requires clean reload', () => {
+  const pagerA = createConversationPager();
+  const pagerB = createConversationPager(); // different secret (restart / different replica)
+  const scope = conversationScope(auth());
+  const list = Array.from({ length: 30 }, (_, i) => row(i));
+
+  const page1 = pagerA(list, scope, { limit: 20 });
+  assert.ok(page1.nextCursor);
+
+  // Requesting page 2 on pagerB with pagerA's cursor must fail closed
+  assert.throws(
+    () => pagerB(list, scope, { cursor: page1.nextCursor, limit: 20 }),
+    (err) => err instanceof AiHistoryError && err.code === 'invalid_ai_history_cursor' && err.status === 400,
+  );
+
+  // Pager B can cleanly reload from start with null cursor
+  const freshReload = pagerB(list, scope, { cursor: null, limit: 20 });
+  assert.equal(freshReload.items.length, 20);
+  assert.equal(freshReload.hasMore, true);
 });
