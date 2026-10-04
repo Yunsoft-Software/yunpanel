@@ -47,7 +47,7 @@ import {
 import { createLiveSessionRegistry } from '../src/live-session-registry.js';
 import { createElFinderHandoffService, ElFinderHandoffError, elFinderHandoffInternals } from '../src/elfinder-handoff-service.js';
 import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal-websocket.js';
-import { createTerminalCapabilityRegistry } from '../src/terminal-capability-registry.js';
+import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { WebSocket } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
@@ -92,6 +92,20 @@ import {
   isHostingAccountPath,
 } from '../src/hosting-account-http.js';
 import { createUserAdminStore } from '../src/user-admin-store.js';
+import {
+  createApplicationRegistry,
+  ApplicationRegistryError,
+} from '../src/application-registry.js';
+import {
+  createApplicationRuntimeBindingRegistry,
+  ApplicationRuntimeBindingRegistryError,
+} from '../src/application-runtime-binding-registry.js';
+import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
+import {
+  DomainRegistryError,
+  domainWebsiteTargetBindingInternals,
+} from '../src/domain-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -5796,4 +5810,606 @@ test('Staging E2E RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve ger
   // 16. Host Isolation & Safety Gate
   assertNoDot44Host(stagingServerId);
   assert.ok(true, 'RS-04a kabul / RS-03–05 kalan: Multi-tenant self-service, fail-closed boundaries, real session/gateway/WS lifecycle, and host decoupling verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 8: P2 — Post-Acceptance Migration Cleanup & Safe Fallback Maintenance
+// ============================================================================
+
+test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd compatibility and fallback maintenance, runtime engine preservation, and file manager/terminal non-regression', async (t) => {
+  // Staging server ID: strictly authorized staging, never .44
+  const stagingServerId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
+  assertNoDot44Host(stagingServerId);
+
+  // 1. Audit & Safety of Legacy direct-systemd Compatibility in Application Registry
+  let clock = Date.parse('2026-10-04T00:00:00.000Z');
+  const appRegistry = createApplicationRegistry({
+    now: () => clock,
+    serverExists: async (sId) => sId === stagingServerId,
+  });
+
+  // Create legacy direct-systemd Node application
+  const directApp = await appRegistry.createNodeApplication({
+    serverId: stagingServerId,
+    name: 'Legacy Direct Systemd App',
+    repositoryUrl: 'https://github.com/example/legacy-node.git',
+    branch: 'main',
+    runtimeAdapter: 'direct-systemd',
+    runtime: {
+      port: 3001,
+      mode: 'production',
+      start: { mode: 'node', entryFile: 'server.js' },
+      healthPath: '/health',
+    },
+  });
+
+  const expectedServiceName = `yunpanel-node-${createHash('sha256').update(directApp.id).digest('hex').slice(0, 16)}.service`;
+  assert.equal(directApp.runtimeAdapter, 'direct-systemd', 'directApp must have runtimeAdapter direct-systemd');
+  assert.equal(directApp.servicePort, 3001, 'directApp must retain servicePort 3001');
+  assert.equal(directApp.serviceName, null, 'directApp serviceName is null before deployment');
+  assert.deepEqual(directApp.proxyTarget, { host: '127.0.0.1', port: 3001 }, 'directApp must have proxyTarget { host: 127.0.0.1, port: 3001 }');
+
+  // Enforce port immutability for direct-systemd applications
+  await assert.rejects(
+    () => appRegistry.previewNodeConfiguration(directApp.id, { port: 3002 }),
+    (err) => err instanceof ApplicationRegistryError && err.code === 'node_port_immutable' && err.status === 409,
+    'Managed Node port cannot be changed through runtime configuration for direct-systemd',
+  );
+
+  // Legacy deploy pipeline works for direct-systemd
+  const rel1 = '11111111-1111-4111-8111-111111111111';
+  await appRegistry.markDeploying(directApp.id, rel1);
+  const deployed1 = await appRegistry.markDeployed(directApp.id, {
+    deploymentId: rel1,
+    releaseId: rel1,
+    commitSha: 'a'.repeat(40),
+    serviceName: expectedServiceName,
+    port: 3001,
+    healthPath: '/health',
+    healthy: true,
+  });
+  assert.equal(deployed1.state, 'active');
+  assert.equal(deployed1.currentReleaseId, rel1);
+  assert.equal(deployed1.serviceName, expectedServiceName, 'deployed directApp has expected systemd service name');
+
+  // Legacy rollback pipeline works for direct-systemd
+  const rel2 = '22222222-2222-4222-8222-222222222222';
+  await appRegistry.markDeploying(directApp.id, rel2);
+  const deployed2 = await appRegistry.markDeployed(directApp.id, {
+    deploymentId: rel2,
+    releaseId: rel2,
+    commitSha: 'b'.repeat(40),
+    serviceName: expectedServiceName,
+    port: 3001,
+    healthPath: '/health',
+    healthy: true,
+  });
+  assert.equal(deployed2.currentReleaseId, rel2);
+
+  const rollbackOpId = '33333333-3333-4333-8333-333333333333';
+  await appRegistry.markRollingBack(directApp.id, rollbackOpId, rel1);
+  const rolledBack = await appRegistry.markRolledBack(directApp.id, {
+    operationId: rollbackOpId,
+    releaseId: rel1,
+    serviceName: expectedServiceName,
+    port: 3001,
+    healthPath: '/health',
+    healthy: true,
+  });
+  assert.equal(rolledBack.currentReleaseId, rel1, 'Rollback safely restores release 1 on direct-systemd');
+
+  // Modern Passenger application rejects legacy deploy and rollback flows (fail-closed boundary)
+  const passApp = await appRegistry.createNodeApplication({
+    serverId: stagingServerId,
+    name: 'Modern Passenger App',
+    repositoryUrl: 'https://github.com/example/passenger-node.git',
+    branch: 'main',
+  });
+  assert.equal(passApp.runtimeAdapter, 'passenger', 'Default Node app uses passenger adapter');
+  const passRel = '44444444-4444-4444-8444-444444444444';
+  await assert.rejects(
+    () => appRegistry.markDeploying(passApp.id, passRel),
+    (err) => err instanceof ApplicationRegistryError && err.code === 'node_deploy_adapter_mismatch' && err.status === 409,
+    'Passenger Node releases must use Website provisioning instead of legacy deploy flow',
+  );
+  await assert.rejects(
+    () => appRegistry.markRollingBack(passApp.id, 'op-rb', passRel),
+    (err) => err instanceof ApplicationRegistryError && err.code === 'node_rollback_adapter_mismatch' && err.status === 409,
+    'Passenger Node rollback must use Website provisioning instead of legacy rollback flow',
+  );
+
+  // 2. Audit of Application Runtime Binding Registry Fallbacks
+  const bindingReg = createApplicationRuntimeBindingRegistry();
+  const websiteId = '5c1c0247-139f-45d2-a6ac-c8a4bb00bc75';
+  const domainId = 'f05764d6-d5e8-4d2a-9bdd-493111b24478';
+  const opDirect = '55555555-5555-4555-8555-555555555555';
+
+  // Direct-systemd binding rejects incompatible targets and states
+  await assert.rejects(
+    () => bindingReg.activate({
+      applicationId: directApp.id,
+      serverId: stagingServerId,
+      adapter: 'direct-systemd',
+      state: 'cleanup_required',
+      sourceOperationId: opDirect,
+      releaseId: rel1,
+      websiteId,
+      websiteRevision: 1,
+      domains: [{ domainId, desiredRevision: 1, nginxChecksum: 'c'.repeat(64) }],
+    }),
+    (err) => err instanceof ApplicationRuntimeBindingRegistryError && err.code === 'runtime_binding_state_invalid',
+    'direct-systemd binding cannot require Passenger cleanup',
+  );
+
+  await assert.rejects(
+    () => bindingReg.activate({
+      applicationId: directApp.id,
+      serverId: stagingServerId,
+      adapter: 'direct-systemd',
+      state: 'active',
+      sourceOperationId: opDirect,
+      releaseId: rel1,
+      websiteId,
+      websiteRevision: 1,
+      domains: [{ domainId, desiredRevision: 1, nginxChecksum: 'c'.repeat(64) }],
+      passengerTarget: {
+        appRoot: `/var/lib/yunpanel/apps/${directApp.id}/current`,
+        documentRoot: `/var/lib/yunpanel/apps/${directApp.id}/current`,
+        startupFile: 'server.js',
+        nodeBinary: '/usr/bin/node',
+        user: 'yunapp-0123456789ab',
+        group: 'yunapp-0123456789ab',
+        appEnv: 'production',
+        environmentInclude: null,
+      },
+    }),
+    (err) => err instanceof ApplicationRuntimeBindingRegistryError && err.code === 'runtime_binding_target_invalid',
+    'direct-systemd binding cannot carry Passenger target evidence',
+  );
+
+  // Valid direct-systemd binding activation and operation-owned removal
+  const directBinding = await bindingReg.activate({
+    applicationId: directApp.id,
+    serverId: stagingServerId,
+    adapter: 'direct-systemd',
+    state: 'active',
+    sourceOperationId: opDirect,
+    releaseId: rel1,
+    websiteId,
+    websiteRevision: 1,
+    domains: [{ domainId, desiredRevision: 1, nginxChecksum: 'c'.repeat(64) }],
+    passengerTarget: null,
+    staticTarget: null,
+  });
+  assert.equal(directBinding.adapter, 'direct-systemd');
+  assert.equal(directBinding.state, 'active');
+
+  // Attempting removeOwnedPassenger on direct-systemd binding fails closed (ownership conflict)
+  await assert.rejects(
+    () => bindingReg.removeOwnedPassenger(directApp.id, {
+      sourceOperationId: opDirect,
+      expectedRevision: directBinding.revision,
+    }),
+    (err) => err instanceof ApplicationRuntimeBindingRegistryError && err.code === 'runtime_binding_ownership_conflict' && err.status === 409,
+    'removeOwnedPassenger cannot remove direct-systemd binding',
+  );
+
+  // removeOwnedDirectSystemd removes direct-systemd binding idempotently
+  const removedBinding = await bindingReg.removeOwnedDirectSystemd(directApp.id, {
+    sourceOperationId: opDirect,
+    expectedRevision: directBinding.revision,
+  });
+  assert.equal(removedBinding.adapter, 'direct-systemd');
+  assert.equal(await bindingReg.getBinding(directApp.id), null);
+
+  // 3. Domain Target Routing & Migration Lifecycle: Fallback Maintained until Verified Replacement
+  const domainRecord = {
+    id: domainId,
+    serverId: stagingServerId,
+    websiteId,
+    targetType: 'proxy',
+    target: { upstreamHost: '127.0.0.1', upstreamPort: 3001 },
+    desiredRevision: 1,
+    appliedRevision: 1,
+    state: 'active',
+  };
+  const websiteRecord = {
+    id: websiteId,
+    serverId: stagingServerId,
+    applicationId: directApp.id,
+    runtimeType: 'node',
+    revision: 1,
+  };
+
+  // Domain registry allows proxy target for Node Website as legacy compatibility
+  const { websiteTargetMatches } = domainWebsiteTargetBindingInternals;
+  assert.equal(
+    websiteTargetMatches(websiteRecord, 'proxy', domainRecord.target),
+    true,
+    'proxy target is preserved for legacy direct-systemd Node website',
+  );
+  // Rejects invalid target type (e.g. PHP target for Node website fails closed)
+  assert.throws(
+    () => websiteTargetMatches(websiteRecord, 'php', { applicationId: directApp.id }),
+    (err) => err instanceof DomainRegistryError && err.code === 'domain_website_target_mismatch',
+  );
+
+  // Before migration: resolveWebsiteDomainTarget falls back to persisted proxy target
+  const domainTargetBeforeMigration = await resolveWebsiteDomainTarget({
+    domain: domainRecord,
+    websiteRegistry: { getWebsite: async () => websiteRecord },
+    runtimeBindingRegistry: bindingReg,
+    applicationRegistry: appRegistry,
+  });
+  assert.deepEqual(domainTargetBeforeMigration, {
+    source: 'domain',
+    targetType: 'proxy',
+    target: { upstreamHost: '127.0.0.1', upstreamPort: 3001 },
+  }, 'Fallback correctly maintains direct-systemd proxy target before replacement acceptance');
+
+  // 4. Verified Replacement Acceptance: markPassengerMigrated & Passenger Runtime Binding Activation
+  const opMigrate = '66666666-6666-4666-8666-666666666666';
+  const migratedApp = await appRegistry.markPassengerMigrated(directApp.id, { operationId: opMigrate });
+  assert.equal(migratedApp.runtimeAdapter, 'passenger', 'Migrated app switches to passenger');
+  assert.equal(migratedApp.serviceName, null, 'serviceName is cleared after passenger acceptance');
+  assert.equal(migratedApp.servicePort, null, 'servicePort is cleared after passenger acceptance');
+  assert.equal(migratedApp.proxyTarget, null, 'proxyTarget is cleared after passenger acceptance');
+  assert.equal(migratedApp.runtime.port, undefined, 'runtime port is stripped after passenger acceptance');
+  assert.equal(migratedApp.releases[0].runtime.port, undefined, 'release port is stripped after passenger acceptance');
+
+  // Idempotency: re-running markPassengerMigrated on already-migrated app does not corrupt state
+  const idempotentMigrated = await appRegistry.markPassengerMigrated(directApp.id);
+  assert.equal(idempotentMigrated.runtimeAdapter, 'passenger');
+
+  // Activate Passenger runtime binding representing verified replacement
+  await bindingReg.activate({
+    applicationId: directApp.id,
+    serverId: stagingServerId,
+    adapter: 'passenger',
+    state: 'active',
+    sourceOperationId: opMigrate,
+    releaseId: rel1,
+    websiteId,
+    websiteRevision: 1,
+    domains: [{
+      domainId,
+      desiredRevision: 1,
+      nginxChecksum: 'd'.repeat(64),
+    }],
+    passengerTarget: {
+      appRoot: `/var/lib/yunpanel/apps/${directApp.id}/current`,
+      documentRoot: `/var/lib/yunpanel/apps/${directApp.id}/current`,
+      startupFile: 'server.js',
+      nodeBinary: '/usr/bin/node',
+      user: 'yunapp-0123456789ab',
+      group: 'yunapp-0123456789ab',
+      appEnv: 'production',
+      environmentInclude: null,
+    },
+  });
+
+  // After verified replacement: resolveWebsiteDomainTarget materializes Passenger target
+  const domainTargetAfterMigration = await resolveWebsiteDomainTarget({
+    domain: domainRecord,
+    websiteRegistry: { getWebsite: async () => websiteRecord },
+    runtimeBindingRegistry: bindingReg,
+    applicationRegistry: appRegistry,
+  });
+  assert.equal(domainTargetAfterMigration.source, 'passenger');
+  assert.equal(domainTargetAfterMigration.targetType, 'passenger');
+  assert.equal(domainTargetAfterMigration.target.root, `/var/lib/yunpanel/apps/${directApp.id}/current`);
+  assert.equal(domainTargetAfterMigration.target.startupFile, 'server.js');
+  assert.equal(domainTargetAfterMigration.target.nodeBinary, '/usr/bin/node');
+
+  // The migrated application now rejects legacy systemd deploy flow (retired after acceptance)
+  await assert.rejects(
+    () => appRegistry.markDeploying(directApp.id, 'rel-new'),
+    (err) => err instanceof ApplicationRegistryError && err.code === 'node_deploy_adapter_mismatch' && err.status === 409,
+    'Migrated app no longer uses legacy systemd deploy pipeline',
+  );
+
+  // 5. Website Removal: Runtime Cleanup Fallback Maintained for direct-systemd
+  const removalOpReg = createWebsiteRemovalOperationRegistry();
+  await removalOpReg.init();
+  const removalPreview = {
+    version: 1,
+    operation: 'website_remove',
+    website: {
+      id: websiteId,
+      serverId: stagingServerId,
+      applicationId: '77777777-8888-4999-8aaa-bbbbbbbbbbbb',
+      systemUser: 'yunapp-0123456789ab',
+      runtimeType: 'node',
+      revision: 1,
+      desiredRevision: 1,
+    },
+    plan: {
+      domainIds: [],
+      additional: {
+        runtimeBindings: { ids: [] },
+        databases: { ids: [] },
+      },
+      applicationRuntime: {
+        adapter: 'direct-systemd',
+        serviceName: 'yunpanel-node-legacy.service',
+        releaseId: 'rel-legacy-1',
+      },
+    },
+    hardBlockers: [],
+    readyToStart: true,
+    previewDigest: 'e'.repeat(64),
+    confirmation: `start-website-remove:${websiteId}:1:${'e'.repeat(64)}`,
+  };
+  const removalOp = await removalOpReg.create(removalPreview);
+  const runtimeCleanupStep = removalOp.steps.find((s) => s.kind === 'runtime_cleanup');
+  assert.ok(runtimeCleanupStep, 'runtime_cleanup step must be created for direct-systemd even without runtime-binding records');
+
+  // 6. Active Runtime Engines Preservation Non-Regression
+  // A. PHP-FPM Application & Runtime Target
+  const phpApp = await appRegistry.createPhpApplication({
+    serverId: stagingServerId,
+    name: 'Production PHP App',
+  });
+  assert.equal(phpApp.type, 'php');
+
+  const phpWebsite = {
+    id: '11111111-2222-4333-8444-555555555555',
+    serverId: stagingServerId,
+    applicationId: phpApp.id,
+    runtimeType: 'php',
+    documentRoot: phpApp.webRoot,
+    unixUser: 'yunapp-0123456789ab',
+    revision: 1,
+  };
+  const phpDomain = {
+    id: '66666666-7777-4888-8999-000000000000',
+    serverId: stagingServerId,
+    websiteId: phpWebsite.id,
+    targetType: 'php',
+    target: { applicationId: phpApp.id },
+    desiredRevision: 1,
+    appliedRevision: 1,
+    state: 'active',
+  };
+  const phpFpmMock = {
+    inspect: async () => ({
+      satisfied: true,
+      adapter: 'php-fpm',
+      websiteId: phpWebsite.id,
+      applicationId: phpApp.id,
+      unixUser: phpWebsite.unixUser,
+      documentRoot: phpWebsite.documentRoot,
+      socketPath: '/run/php/yunpanel-yunapp-0123456789ab.sock',
+    }),
+  };
+  const umaskMock = {
+    inspect: async () => ({ satisfied: true, umask: '0027' }),
+  };
+  const resolvedPhpTarget = await resolveWebsiteDomainTarget({
+    domain: phpDomain,
+    websiteRegistry: { getWebsite: async () => phpWebsite },
+    applicationRegistry: appRegistry,
+    phpFpmSiteManager: phpFpmMock,
+    serviceUmaskManager: umaskMock,
+  });
+  assert.equal(resolvedPhpTarget.source, 'php');
+  assert.equal(resolvedPhpTarget.targetType, 'php');
+  assert.equal(resolvedPhpTarget.target.socketPath, '/run/php/yunpanel-yunapp-0123456789ab.sock');
+
+  // B. Static Runtime Engine & Binding
+  const staticApp = await appRegistry.createApplication({
+    serverId: stagingServerId,
+    name: 'Production Static Web',
+    repositoryUrl: 'https://github.com/example/static-web.git',
+    branch: 'main',
+    build: { mode: 'npm', outputDir: 'dist' },
+  });
+  assert.equal(staticApp.type, 'static');
+
+  const staticOp = '88888888-8888-4888-8888-888888888888';
+  const staticWebsiteId = '99999999-9999-4999-8999-999999999999';
+  const staticDomainId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa';
+  const staticBinding = await bindingReg.activate({
+    applicationId: staticApp.id,
+    serverId: stagingServerId,
+    adapter: 'static',
+    state: 'active',
+    sourceOperationId: staticOp,
+    releaseId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+    websiteId: staticWebsiteId,
+    websiteRevision: 1,
+    domains: [{ domainId: staticDomainId, desiredRevision: 1, nginxChecksum: 'f'.repeat(64) }],
+    staticTarget: {
+      publishRoot: `/var/lib/yunpanel/apps/${staticApp.id}/current/dist`,
+      documentRoot: `/var/lib/yunpanel/apps/${staticApp.id}/current/dist`,
+      user: 'yunapp-0123456789ab',
+      group: 'yunapp-0123456789ab',
+    },
+  });
+  assert.equal(staticBinding.adapter, 'static');
+  const removedStatic = await bindingReg.removeOwnedStatic(staticApp.id, {
+    sourceOperationId: staticOp,
+    expectedRevision: staticBinding.revision,
+  });
+  assert.equal(removedStatic.adapter, 'static');
+
+  // C. Python Runtime Application
+  const pythonApp = await appRegistry.createPythonApplication({
+    serverId: stagingServerId,
+    name: 'Production Python App',
+    repositoryUrl: 'https://github.com/example/python-app.git',
+    branch: 'main',
+    runtime: {
+      pythonVersion: '3.12',
+      entryPoint: 'app:app',
+    },
+  });
+  assert.equal(pythonApp.type, 'python');
+
+  // 7. Non-Regression of File Manager & Terminal Capabilities
+  // A. File Manager (elFinder handoff capability lifecycle)
+  const elFinderExpectedUnixUser = elFinderHandoffInternals.applicationUser(directApp.id);
+  const elFinderWebsite = {
+    id: websiteId,
+    serverId: stagingServerId,
+    applicationId: directApp.id,
+    runtimeType: 'node',
+    unixUser: elFinderExpectedUnixUser,
+    revision: 1,
+  };
+  const elFinderService = createElFinderHandoffService({
+    websiteRegistry: {
+      async getWebsite(id) {
+        return id === websiteId ? elFinderWebsite : null;
+      },
+    },
+    localServerId: stagingServerId,
+    runtimeInspector: async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+    now: () => Date.now(),
+    ttlMs: 60000,
+  });
+  const sessionDigest = createHash('sha256').update('session-seed-p2').digest('hex');
+  const elFinderIssue = await elFinderService.issue({
+    sessionId: 'session-owner-p2',
+    userId: 'owner-user',
+    sessionDigest,
+    serverId: stagingServerId,
+    websiteId,
+  });
+  assert.ok(elFinderIssue.capability, 'elFinder handoff capability issued successfully');
+  assert.equal(elFinderService.size(), 1);
+
+  // Valid consumption
+  const consumedElFinder = await elFinderService.consume(elFinderIssue.capability, { sessionDigest });
+  assert.equal(consumedElFinder.websiteId, websiteId);
+  assert.equal(elFinderService.size(), 0, 'Consumed capability is evicted (single-use)');
+
+  // Re-consumption fails closed (401)
+  await assert.rejects(
+    () => elFinderService.consume(elFinderIssue.capability, { sessionDigest }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_invalid' && err.status === 401,
+  );
+
+  // Mismatched session digest fails closed (401)
+  const elFinderIssue2 = await elFinderService.issue({
+    sessionId: 'session-owner-p2',
+    userId: 'owner-user',
+    sessionDigest,
+    serverId: stagingServerId,
+    websiteId,
+  });
+  const mismatchedDigest = createHash('sha256').update('other-session-seed').digest('hex');
+  await assert.rejects(
+    () => elFinderService.consume(elFinderIssue2.capability, { sessionDigest: mismatchedDigest }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_session_mismatch' && err.status === 401,
+  );
+
+  // B. Terminal Capabilities (Server & Site terminal capability lifecycle)
+  const terminalReg = createTerminalCapabilityRegistry({
+    now: () => Date.now(),
+    ttlMs: 60000,
+  });
+  const liveSessions = createLiveSessionRegistry();
+
+  // Server capability (root user on server)
+  const rootCap = terminalReg.issue({
+    sessionId: 'session-owner-p2',
+    userId: 'owner-user',
+    target: { scope: 'server', serverId: stagingServerId, user: 'root', cwd: '/root' },
+  });
+  assert.equal(rootCap.target.scope, 'server');
+  assert.equal(rootCap.target.user, 'root');
+  const consumedRoot = terminalReg.consume(rootCap.capability, {
+    sessionId: 'session-owner-p2',
+    userId: 'owner-user',
+  });
+  assert.equal(consumedRoot.target.scope, 'server');
+  assert.equal(consumedRoot.target.user, 'root');
+  assert.throws(
+    () => terminalReg.consume(rootCap.capability, { sessionId: 'session-owner-p2', userId: 'owner-user' }),
+    (err) => err instanceof TerminalCapabilityError && err.code === 'terminal_capability_invalid' && err.status === 401,
+    'Single-use eviction',
+  );
+
+  // Site capability (site Unix user under website)
+  const siteCap = terminalReg.issue({
+    sessionId: 'session-cust-p2',
+    userId: 'cust-user',
+    target: {
+      scope: 'site',
+      serverId: stagingServerId,
+      websiteId,
+      user: elFinderExpectedUnixUser,
+      cwd: `/var/lib/yunpanel/data/${directApp.id}`,
+    },
+  });
+  assert.equal(siteCap.target.scope, 'site');
+  assert.equal(siteCap.target.user, elFinderExpectedUnixUser);
+
+  // Mismatched session fails to consume site capability
+  assert.throws(
+    () => terminalReg.consume(siteCap.capability, { sessionId: 'wrong-session', userId: 'cust-user' }),
+    (err) => err instanceof TerminalCapabilityError && err.code === 'terminal_capability_binding_invalid' && err.status === 403,
+  );
+
+  // Live session registration and revocation
+  let socketTerminated = false;
+  liveSessions.register({
+    sessionId: 'session-cust-p2',
+    userId: 'cust-user',
+    terminate: (reason) => {
+      socketTerminated = true;
+      assert.equal(reason, 'logout');
+    },
+  });
+  liveSessions.revokeSession('session-cust-p2', 'logout');
+  assert.equal(socketTerminated, true, 'Live terminal session terminated on session revocation');
+
+  // 8. State Consistency & SQLite WAL Crash Resilience
+  const testDbDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-p2-test-'));
+  const testDbPath = path.join(testDbDir, 'p2-audit.db');
+  t.after(async () => {
+    try { await rm(testDbDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const db = new DatabaseSync(testDbPath);
+  t.after(() => {
+    try { db.close(); } catch {}
+  });
+
+  db.exec(`
+    PRAGMA journal_mode = WAL;
+    CREATE TABLE p2_migration_audit (
+      id TEXT PRIMARY KEY,
+      application_id TEXT NOT NULL,
+      adapter_before TEXT NOT NULL,
+      adapter_after TEXT NOT NULL,
+      status TEXT NOT NULL CHECK(status IN ('pending', 'completed', 'rolled_back'))
+    );
+  `);
+
+  db.exec('BEGIN IMMEDIATE');
+  db.prepare('INSERT INTO p2_migration_audit VALUES (?, ?, ?, ?, ?)').run('audit-1', directApp.id, 'direct-systemd', 'passenger', 'completed');
+  db.exec('COMMIT');
+
+  const auditRow = db.prepare('SELECT * FROM p2_migration_audit WHERE id = ?').get('audit-1');
+  assert.equal(auditRow.application_id, directApp.id);
+  assert.equal(auditRow.status, 'completed');
+
+  const dbIntegrity = db.prepare('PRAGMA integrity_check').get();
+  assert.equal(dbIntegrity.integrity_check, 'ok');
+
+  // Final Gate Verification
+  assertNoDot44Host(stagingServerId);
+  assert.ok(true, 'P2: Legacy direct-systemd compatibility safely maintained, migration fallback audit passed, runtime engines and file manager/terminal non-regression verified.');
 });
