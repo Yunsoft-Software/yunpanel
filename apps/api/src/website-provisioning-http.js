@@ -2,6 +2,7 @@ import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { mountWebsiteIsolationAuditRoutes } from './website-isolation-audit-http.js';
 import { canBeginCompensationInOrder } from './website-provisioning-compensation-order.js';
 import { extractActorTenant } from './tenant-boundary.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -191,7 +192,12 @@ async function requireWebsiteAccess(request, targetWebsiteId, { websiteRegistry,
 function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
-    catch (error) { return next(error); }
+    catch (error) {
+      if (error instanceof SiteMutationLockError || error?.name === 'SiteMutationLockError') {
+        return next(new WebsiteProvisioningHttpError(error.code, error.message, error.status ?? 409));
+      }
+      return next(error);
+    }
   };
 }
 
@@ -201,6 +207,7 @@ export function mountWebsiteProvisioningRoutes(app, {
   isolationMigration = null,
   websiteRegistry = null,
   localServerId = null,
+  siteMutationLock = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.get !== 'function' || typeof registry.getLatestForWebsite !== 'function'
@@ -213,6 +220,20 @@ export function mountWebsiteProvisioningRoutes(app, {
 
   const projectOperation = (operation) => publicOperation(operation, orchestrator.supportsCompensation);
   const projectResult = (result) => publicResult(result, orchestrator.supportsCompensation);
+
+  async function withOptionalLock(targetWebsiteId, action) {
+    if (!siteMutationLock || orchestrator?.hasSiteMutationLock) {
+      return action();
+    }
+    if (typeof siteMutationLock.withSiteLock !== 'function') {
+      throw new WebsiteProvisioningHttpError(
+        'website_provisioning_lock_unavailable',
+        'Website provisioning site mutation lock is invalid',
+        503,
+      );
+    }
+    return siteMutationLock.withSiteLock({ websiteId: targetWebsiteId }, action);
+  }
 
   app.get('/api/sites/:websiteId/provisioning/latest', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const id = websiteId(request.params.websiteId);
@@ -245,9 +266,11 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    const result = await orchestrator.runNext(id, actor);
-    const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-    return response.status(status).json({ data: projectResult(result) });
+    return withOptionalLock(operation.websiteId, async () => {
+      const result = await orchestrator.runNext(id, actor);
+      const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
+      return response.status(status).json({ data: projectResult(result) });
+    });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -257,9 +280,11 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    const result = await orchestrator.retryStep(id, provisioningStepId, actor);
-    const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-    return response.status(status).json({ data: projectResult(result) });
+    return withOptionalLock(operation.websiteId, async () => {
+      const result = await orchestrator.retryStep(id, provisioningStepId, actor);
+      const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
+      return response.status(status).json({ data: projectResult(result) });
+    });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/compensate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -269,8 +294,10 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    const result = await orchestrator.compensateStep(id, provisioningStepId, actor);
-    return response.status(200).json({ data: projectResult(result) });
+    return withOptionalLock(operation.websiteId, async () => {
+      const result = await orchestrator.compensateStep(id, provisioningStepId, actor);
+      return response.status(200).json({ data: projectResult(result) });
+    });
   }));
 }
 

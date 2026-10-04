@@ -165,6 +165,7 @@ import { WebsiteProvisioningHandlerError } from './website-provisioning-handlers
 import { mountWebsiteProvisioningRoutes, WebsiteProvisioningHttpError } from './website-provisioning-http.js';
 import { WebsiteProvisioningOrchestratorError } from './website-provisioning-orchestrator.js';
 import { WebsiteProvisioningRegistryError } from './website-provisioning-registry.js';
+import { SiteMutationLockError } from './site-mutation-lock.js';
 import { mountWebsiteSftpKeyRoutes, WebsiteSftpKeyHttpError } from './website-sftp-key-http.js';
 import { WebsiteSftpKeyRegistryError } from './website-sftp-key-registry.js';
 import { WebsiteSftpKeyServiceError } from './website-sftp-key-service.js';
@@ -790,6 +791,7 @@ export function createApp(allOptions = {}) {
       isolationMigration: websiteProvisioningRuntime.isolationMigration,
       websiteRegistry,
       localServerId,
+      siteMutationLock,
     });
   }
   mountResourceImpactRoutes(app, {
@@ -1402,6 +1404,7 @@ export function createApp(allOptions = {}) {
       || error instanceof WebsiteProvisioningHttpError
       || error instanceof WebsiteProvisioningOrchestratorError
       || error instanceof WebsiteProvisioningRegistryError
+      || error instanceof SiteMutationLockError
       || error instanceof WebsiteRegistryError
       || error instanceof WebsiteSftpKeyHttpError
       || error instanceof WebsiteSftpKeyRegistryError

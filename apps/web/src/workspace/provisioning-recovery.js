@@ -119,7 +119,8 @@ export function createProvisioningRecovery({ websiteId, read, execute, isCurrent
   }
   async function perform(approval, confirmation) {
     if (disposed || writing || isCurrent() !== true || state.status !== 'ready'
-      || !approval || approval !== state.approval || confirmation !== approval.confirmation) return state;
+      || !approval || approval !== state.approval || confirmation !== approval.confirmation
+      || !state.operation || approval.operationId !== state.operation.operationId) return state;
     if (canManage() !== true) { denied(); return state; }
     writing = true; controller?.abort(); controller = new AbortController(); const version = ++generation;
     const signal = controller.signal;
@@ -130,7 +131,8 @@ export function createProvisioningRecovery({ websiteId, read, execute, isCurrent
       if (!current(version)) return state;
       if (canManage() !== true) { denied(); return state; }
       const latest = recoveryOperation(value, websiteId);
-      if (stamp(latest) !== approval.snapshot || !recoveryAllowed(latest, approval.action, approval.stepId)) {
+      if (stamp(latest) !== approval.snapshot || !recoveryAllowed(latest, approval.action, approval.stepId)
+        || latest.operationId !== approval.operationId) {
         publish({ status: 'ready', operation: latest, approval: null, error: 'Kurulum kaydı değişti. Güncel adımları inceleyip işlemi yeniden onaylayın.' });
         return state;
       }
