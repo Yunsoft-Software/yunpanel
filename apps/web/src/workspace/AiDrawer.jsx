@@ -138,6 +138,17 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
         <div className="ws-actions"><strong>SOHBETLER</strong><Button variant="primary" icon="plus" disabled={sending || denied} onClick={handleNewChat}>Yeni</Button><Button disabled={loading || denied} icon="refresh" aria-label="Geçmişi yenile" title="Geçmişi yenile" onClick={() => scope.current?.list.load()} /></div>
         <small>{websiteId ? 'Site bağlamı · ' : ''}Ürün uzantısı · En yeni oluşturulanlar önce</small>
         <div className="ws-ai-history-list" tabIndex={0} aria-label="Kaydırılabilir sohbet listesi" aria-busy={loading}
+          onKeyDown={(event) => {
+            if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+              const buttons = Array.from(event.currentTarget.querySelectorAll('.ws-ai-conversation-select'));
+              const idx = buttons.indexOf(document.activeElement);
+              if (idx !== -1) {
+                event.preventDefault();
+                const next = event.key === 'ArrowDown' ? Math.min(idx + 1, buttons.length - 1) : Math.max(idx - 1, 0);
+                buttons[next]?.focus();
+              }
+            }
+          }}
           onScroll={(event) => {
             const node = event.currentTarget;
             if (!loading && !history.error && history.hasMore && node.scrollHeight - node.clientHeight - node.scrollTop < 64) void loadMore();
@@ -168,13 +179,14 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
               {websiteId && <Button disabled={sending} onClick={() => handleSend('Bu sitenin loglarını incele')}>📄 Site logları</Button>}
               <Button disabled={sending} onClick={() => handleSend('Yedek durumunu incele')}>💾 Yedek durumu</Button></div>
           </div>}
-          {!denied && activeConversation?.messages.map((msg) => <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%' }}>
-            <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '14px', lineHeight: '1.5', whiteSpace: 'pre-wrap',
-              background: msg.role === 'user' ? 'var(--primary-color, #2563eb)' : 'var(--bg-secondary, #f3f4f6)', color: msg.role === 'user' ? '#ffffff' : 'inherit' }}>{msg.text}</div>
+          {!denied && activeConversation?.messages.map((msg) => <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', minWidth: 0, boxSizing: 'border-box' }}>
+            <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '14px', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
+              background: msg.role === 'user' ? 'var(--ws-accent, var(--primary-color, #2563eb))' : 'var(--ws-surface-subtle, var(--bg-secondary, #f3f4f6))', color: msg.role === 'user' ? 'var(--ws-on-accent, #ffffff)' : 'var(--ws-text, inherit)' }}
+              aria-label={msg.role === 'user' ? 'Kullanıcı mesajı' : 'AI yanıtı'}>{msg.text}</div>
             {Array.isArray(msg.toolExecutions) && msg.toolExecutions.length > 0 && <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {msg.toolExecutions.map((tool, idx) => <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', display: 'flex', alignItems: 'center', gap: '4px' }}><span style={{ color: '#10b981' }}>✓</span><code>{tool.name}</code> çalıştırıldı</div>)}
+              {msg.toolExecutions.map((tool, idx) => <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', display: 'flex', alignItems: 'center', gap: '4px', overflowWrap: 'anywhere', wordBreak: 'break-all' }}><span style={{ color: 'var(--ws-success, #10b981)' }}>✓</span><code style={{ fontFamily: 'var(--ws-font-code, monospace)' }}>{tool.name}</code> çalıştırıldı</div>)}
             </div>}
-            {Array.isArray(msg.proposals) && msg.proposals.length > 0 && <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            {Array.isArray(msg.proposals) && msg.proposals.length > 0 && <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0, maxWidth: '100%' }}>
               {msg.proposals.map((prop) => <ActionProposalCard key={prop.id || prop.callId} proposal={prop} onExecuted={() => scope.current?.reader.load(active.current)} />)}
             </div>}
           </div>)}
@@ -226,14 +238,19 @@ function ActionProposalCard({ proposal, onExecuted }) {
   return (
     <div
       style={{
-        border: '1px solid #f59e0b',
-        background: '#fffbeb',
+        border: '1px solid var(--ws-warning, #f59e0b)',
+        background: 'var(--ws-warning-soft, #fffbeb)',
         borderRadius: '8px',
         padding: '12px 14px',
-        color: '#92400e',
+        color: 'var(--ws-warning, #92400e)',
+        minWidth: 0,
+        maxWidth: '100%',
+        boxSizing: 'border-box',
+        overflowWrap: 'anywhere',
+        wordBreak: 'break-word',
       }}
     >
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px', gap: '8px', flexWrap: 'wrap' }}>
         <strong>⚠️ Eylem Onayı Gerekiyor</strong>
         <Badge state={executed ? 'succeeded' : 'warning'}>
           {executed ? 'Yürütüldü' : proposal.toolName}
@@ -244,26 +261,26 @@ function ActionProposalCard({ proposal, onExecuted }) {
         AI bu işlemi gerçekleştirmek için yetki istiyor. Lütfen parametreleri kontrol edin.
       </p>
 
-      <div style={{ background: '#fef3c7', padding: '8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'monospace', marginBottom: '10px' }}>
+      <div style={{ background: 'var(--ws-surface-subtle, #fef3c7)', padding: '8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--ws-font-code, monospace)', marginBottom: '10px', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
         {JSON.stringify(proposal.input, null, 2)}
       </div>
 
-      {error && <div style={{ color: '#b91c1c', fontSize: '12px', marginBottom: '8px' }}>{error}</div>}
+      {error && <div style={{ color: 'var(--ws-danger, #b91c1c)', fontSize: '12px', marginBottom: '8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{error}</div>}
 
       {executed ? (
-        <div style={{ color: '#047857', fontWeight: 600, fontSize: '13px' }}>
+        <div style={{ color: 'var(--ws-success, #047857)', fontWeight: 600, fontSize: '13px' }}>
           ✓ İşlem başarıyla kuyruğa alındı.
         </div>
       ) : (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0 }}>
           {requiresExactConfirmation && (
-            <label style={{ fontSize: '12px' }}>
-              Onaylamak için <strong>{plan.confirmation}</strong> yazın:
+            <label style={{ fontSize: '12px', display: 'grid', gap: '4px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>
+              <span>Onaylamak için <strong>{plan.confirmation}</strong> yazın:</span>
               <input
                 type="text"
                 value={confirmInput}
                 onChange={(e) => setConfirmInput(e.target.value)}
-                style={{ width: '100%', marginTop: '4px', padding: '6px', fontSize: '13px' }}
+                style={{ width: '100%', marginTop: '4px', padding: '6px', fontSize: '13px', boxSizing: 'border-box' }}
                 placeholder={plan.confirmation}
               />
             </label>
