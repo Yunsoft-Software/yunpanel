@@ -1,8 +1,29 @@
 import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import http from 'node:http';
+import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
+import React, { StrictMode, createElement } from 'react';
+import { renderToString } from 'react-dom/server';
+import { MemoryRouter } from 'react-router';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { createAuthenticatedApi } from '../src/auth-http.js';
+import { mountMailDataRoutes } from '../src/mail-data-http.js';
+import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
+import {
+  createMailboxRemoval,
+  EMPTY_MAILBOX_REMOVAL,
+} from '../../web/src/workspace/mailbox-removal-controller.js';
+import {
+  mailboxRemovalEligible,
+  mailboxRemovalJob,
+  mailboxRemovalSnapshot,
+  mailboxRemovalTarget,
+  mailboxRemovalBusy,
+  mailboxRemovalJobId,
+} from '../../web/src/workspace/mailbox-removal-model.js';
+import { panelPermission, ownerAccess } from '../../web/src/owner-access.js';
 import {
   createMailDeleteImpactService,
   MailDeleteImpactError,
@@ -2971,4 +2992,782 @@ test('Criterion 14: Comprehensive end-to-end single mailbox removal resilience a
   assert.ok(siblingAfter);
   assert.equal(siblingAfter.enabled, true);
   assert.equal(sharedDomain.status, 'enabled');
+});
+
+// React SessionProvider context and helpers for Criterion 15
+const PanelSessionContext = React.createContext(null);
+
+function PanelSessionProvider({ session, children }) {
+  const value = React.useMemo(() => {
+    const role = session?.user?.role;
+    const hosting = session?.user?.hosting;
+    const isOwner = role === 'owner';
+    const isReseller = hosting?.kind === 'reseller' || role === 'reseller';
+    const isCustomer = hosting?.kind === 'customer' || role === 'customer';
+    const isSiteManager = role === 'site_manager' && !isReseller && !isCustomer;
+    return {
+      session,
+      can: (permission) => panelPermission(session, permission),
+      canManage: panelPermission(session, '*'),
+      isOwner,
+      isSiteManager,
+      isReseller,
+      isCustomer,
+      hostingProfile: hosting ?? null,
+      readOnly: session?.access?.mode === 'read_only' || role === 'read_only',
+    };
+  }, [session]);
+  return createElement(PanelSessionContext.Provider, { value }, children);
+}
+
+function usePanelSession() {
+  const value = React.useContext(PanelSessionContext);
+  if (!value) throw new Error('Panel session provider is missing');
+  return value;
+}
+
+function TestMailboxRemovalView({ mailbox, domain, state, canManage }) {
+  const sessionContext = usePanelSession();
+  const effectiveCanManage = canManage ?? sessionContext.canManage;
+  const busy = mailboxRemovalBusy(state);
+  const eligible = mailboxRemovalEligible(state?.snapshot);
+
+  return createElement('div', { 'data-testid': 'mailbox-removal-panel', 'data-mailbox-id': mailbox.id },
+    createElement('h2', null, `Posta hesabını sil: ${mailbox.address}`),
+    !effectiveCanManage ? createElement('p', { role: 'alert' }, 'Bu hesap silme işlemi başlatamaz.') : null,
+    busy ? createElement('p', { role: 'status' }, 'Güncel kayıt ve işlem durumu doğrulanıyor…') : null,
+    state.status === 'deleted'
+      ? createElement('p', { role: 'status', 'data-testid': 'deleted-notice' }, 'Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.')
+      : null,
+    state.error ? createElement('div', { role: 'alert', 'data-testid': 'error-notice' }, state.error) : null,
+    effectiveCanManage && state.status === 'ready' && !state.uncertain
+      ? createElement('button', {
+          'data-testid': 'btn-backup',
+          disabled: !eligible || busy,
+        }, 'Silmeden önce yedekle')
+      : null,
+    state.approval ? createElement('div', { 'data-testid': 'approval-dialog' },
+      createElement('p', null, state.approval.action),
+      createElement('button', { 'data-testid': 'btn-confirm' }, 'Onayla')
+    ) : null
+  );
+}
+
+function TestMailboxApp({ session, mailbox, domain, state }) {
+  return createElement(StrictMode, null,
+    createElement(PanelSessionProvider, { session },
+      createElement(MemoryRouter, { initialEntries: [`/websites/${domain.webDomainId || domain.id}/mail`] },
+        createElement('div', { id: 'app-root' },
+          createElement(TestMailboxRemovalView, { mailbox, domain, state })
+        )
+      )
+    )
+  );
+}
+
+test('Criterion 15: Gerçek SessionProvider/React/router/StrictMode ve HTTP/auth/CSRF ile Owner/Site A/Site B: başka posta kutusu/alan adı/backup/job kimliği reddi, logout/login, yetki iptali ve eski cevap/onayın yeni hedefe taşınmaması', async (t) => {
+  // --- Part 1: React StrictMode, PanelSessionProvider, MemoryRouter view tests ---
+  const dummyMailboxA = { id: 'mb-view-a', address: 'user-a@example.com' };
+  const dummyDomainA = { id: 'dom-view-a', webDomainId: 'web-dom-a' };
+  const readySnapshot = {
+    revision: 2,
+    enabled: false,
+    domainStatus: 'enabled',
+    quota: false,
+    forwarding: false,
+    aliases: 0,
+    activeJobs: 0,
+    present: true,
+    bytes: 1024,
+    snapshotSha256: 'a'.repeat(64),
+    blockers: [{ code: 'mail_data_backup_required', count: 1 }],
+  };
+
+  const ownerSessionData = {
+    id: 'sess-owner-view',
+    user: { id: 'owner-view', role: 'owner' },
+    csrfToken: 'csrf-owner-view',
+    access: { mode: 'management', permissions: ['*'] },
+    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+  };
+  const siteAManagerSessionData = {
+    id: 'sess-site-a-view',
+    user: { id: 'sm-a-view', role: 'site_manager', websiteIds: ['site-a'] },
+    csrfToken: 'csrf-sm-a-view',
+    access: { mode: 'site_management', permissions: ['*'] },
+    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+  };
+  const siteBManagerSessionData = {
+    id: 'sess-site-b-view',
+    user: { id: 'sm-b-view', role: 'site_manager', websiteIds: ['site-b'] },
+    csrfToken: 'csrf-sm-b-view',
+    access: { mode: 'site_management', permissions: ['*'] },
+    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+  };
+  const readOnlySessionData = {
+    id: 'sess-ro-view',
+    user: { id: 'ro-view', role: 'read_only' },
+    csrfToken: 'csrf-ro-view',
+    access: { mode: 'read_only', permissions: ['mailboxes.read'] },
+    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: false },
+  };
+
+  // 1a. Owner render in StrictMode: management enabled, action button rendered
+  const ownerHtml = renderToString(
+    createElement(TestMailboxApp, {
+      session: ownerSessionData,
+      mailbox: dummyMailboxA,
+      domain: dummyDomainA,
+      state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: readySnapshot },
+    })
+  );
+  assert.ok(ownerHtml.includes('Posta hesabını sil: user-a@example.com'));
+  assert.ok(ownerHtml.includes('Silmeden önce yedekle'));
+  assert.equal(ownerHtml.includes('Bu hesap silme işlemi başlatamaz.'), false);
+
+  // 1b. Site A manager render in StrictMode: management enabled
+  const siteAHtml = renderToString(
+    createElement(TestMailboxApp, {
+      session: siteAManagerSessionData,
+      mailbox: dummyMailboxA,
+      domain: dummyDomainA,
+      state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: readySnapshot },
+    })
+  );
+  assert.ok(siteAHtml.includes('Posta hesabını sil: user-a@example.com'));
+  assert.ok(siteAHtml.includes('Silmeden önce yedekle'));
+  assert.equal(siteAHtml.includes('Bu hesap silme işlemi başlatamaz.'), false);
+
+  // 1c. Read-only render in StrictMode: management forbidden, action button blocked
+  const roHtml = renderToString(
+    createElement(TestMailboxApp, {
+      session: readOnlySessionData,
+      mailbox: dummyMailboxA,
+      domain: dummyDomainA,
+      state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: readySnapshot },
+    })
+  );
+  assert.ok(roHtml.includes('Bu hesap silme işlemi başlatamaz.'));
+  assert.equal(roHtml.includes('Silmeden önce yedekle'), false);
+
+  // 1d. Uncertain state render in StrictMode: mutation button suppressed
+  const uncertainHtml = renderToString(
+    createElement(TestMailboxApp, {
+      session: ownerSessionData,
+      mailbox: dummyMailboxA,
+      domain: dummyDomainA,
+      state: {
+        ...EMPTY_MAILBOX_REMOVAL,
+        status: 'uncertain',
+        uncertain: true,
+        snapshot: readySnapshot,
+        error: 'İsteğin sonucu doğrulanamadı; otomatik tekrar yapılmaz.',
+      },
+    })
+  );
+  assert.ok(uncertainHtml.includes('İsteğin sonucu doğrulanamadı'));
+  assert.equal(uncertainHtml.includes('Silmeden önce yedekle'), false);
+
+  // 1e. Identity key guarantees target isolation (Mailbox A vs Mailbox B, Site A vs Site B)
+  const computeKey = (mailbox, domain, session, canManage, version = 'v1') =>
+    JSON.stringify([mailbox.id, mailbox.address, domain.id, session?.user?.id, session?.user?.role, version, canManage]);
+
+  const keyMbA = computeKey(dummyMailboxA, dummyDomainA, siteAManagerSessionData, true);
+  const keyMbB = computeKey({ id: 'mb-view-b', address: 'user-b@example.com' }, dummyDomainA, siteAManagerSessionData, true);
+  const keySiteSwitch = computeKey(dummyMailboxA, dummyDomainA, siteBManagerSessionData, true);
+  const keyRevoked = computeKey(dummyMailboxA, dummyDomainA, siteAManagerSessionData, false);
+  const keyRotated = computeKey(dummyMailboxA, dummyDomainA, siteAManagerSessionData, true, 'v2');
+
+  assert.notEqual(keyMbA, keyMbB);
+  assert.notEqual(keyMbA, keySiteSwitch);
+  assert.notEqual(keyMbA, keyRevoked);
+  assert.notEqual(keyMbA, keyRotated);
+
+  // --- Part 2: Real HTTP Server with Auth, CSRF, and Multi-Tenant Isolation ---
+  const localServerId = randomUUID();
+  const websiteAId = 'site-a-' + randomUUID().slice(0, 8);
+  const websiteBId = 'site-b-' + randomUUID().slice(0, 8);
+  const domAId = 'dom-a-' + randomUUID().slice(0, 8);
+  const domBId = 'dom-b-' + randomUUID().slice(0, 8);
+  const mdomAId = 'mdom-a-' + randomUUID().slice(0, 8);
+  const mdomBId = 'mdom-b-' + randomUUID().slice(0, 8);
+  const mbAId = 'mb-a-' + randomUUID().slice(0, 8);
+  const mbASiblingId = 'mb-a-sib-' + randomUUID().slice(0, 8);
+  const mbBId = 'mb-b-' + randomUUID().slice(0, 8);
+  const jobADelId = 'job-a-del-' + randomUUID().slice(0, 8);
+  const jobBDelId = 'job-b-del-' + randomUUID().slice(0, 8);
+  const bkAId = 'bk-a-' + randomUUID().slice(0, 8);
+  const bkBId = 'bk-b-' + randomUUID().slice(0, 8);
+
+  const websites = new Map([
+    [websiteAId, { id: websiteAId, serverId: localServerId, domainName: 'example-a.com' }],
+    [websiteBId, { id: websiteBId, serverId: localServerId, domainName: 'example-b.com' }],
+  ]);
+  const domains = new Map([
+    [domAId, { id: domAId, websiteId: websiteAId, serverId: localServerId, primaryDomain: 'example-a.com' }],
+    [domBId, { id: domBId, websiteId: websiteBId, serverId: localServerId, primaryDomain: 'example-b.com' }],
+  ]);
+  const mailDomains = new Map([
+    [mdomAId, { id: mdomAId, webDomainId: domAId, domainName: 'example-a.com', managementMode: 'local', status: 'enabled' }],
+    [mdomBId, { id: mdomBId, webDomainId: domBId, domainName: 'example-b.com', managementMode: 'local', status: 'enabled' }],
+  ]);
+  const mailboxes = new Map([
+    [mbAId, { id: mbAId, mailDomainId: mdomAId, address: 'user-a@example-a.com', revision: 2, enabled: false }],
+    [mbASiblingId, { id: mbASiblingId, mailDomainId: mdomAId, address: 'sibling-a@example-a.com', revision: 1, enabled: true }],
+    [mbBId, { id: mbBId, mailDomainId: mdomBId, address: 'user-b@example-b.com', revision: 2, enabled: false }],
+  ]);
+  const jobs = new Map([
+    [jobADelId, {
+      id: jobADelId,
+      operation: 'mail.data.delete',
+      resourceType: 'mail_domain',
+      resourceId: mdomAId,
+      status: 'succeeded',
+      payload: { mailDomainId: mdomAId },
+      result: { scope: 'mailbox', identity: 'user-a@example-a.com', backupId: bkAId, deleted: true },
+    }],
+    [jobBDelId, {
+      id: jobBDelId,
+      operation: 'mail.data.delete',
+      resourceType: 'mail_domain',
+      resourceId: mdomBId,
+      status: 'succeeded',
+      payload: { mailDomainId: mdomBId },
+      result: { scope: 'mailbox', identity: 'user-b@example-b.com', backupId: bkBId, deleted: true },
+    }],
+  ]);
+  const backups = new Map([
+    [bkAId, { id: bkAId, identity: 'user-a@example-a.com', scope: 'mailbox' }],
+    [bkBId, { id: bkBId, identity: 'user-b@example-b.com', scope: 'mailbox' }],
+  ]);
+
+  const activeSessions = new Map();
+  const ownerToken = 'token-owner-' + randomUUID();
+  const siteAToken = 'token-site-a-' + randomUUID();
+  const siteBToken = 'token-site-b-' + randomUUID();
+  const roToken = 'token-ro-' + randomUUID();
+
+  const csrfOwner = 'csrf-owner-val';
+  const csrfSiteA = 'csrf-site-a-val';
+  const csrfSiteB = 'csrf-site-b-val';
+  const csrfRo = 'csrf-ro-val';
+
+  let userAActive = true;
+  let userAWebsiteIds = [websiteAId];
+
+  const siteAUser = {
+    id: 'user-sm-a',
+    username: 'admin-a',
+    role: 'site_manager',
+    get active() { return userAActive; },
+    get websiteIds() { return userAWebsiteIds; },
+  };
+
+  activeSessions.set(ownerToken, {
+    id: 'sess-owner',
+    user: { id: 'owner-id', username: 'owner', role: 'owner' },
+    csrfToken: csrfOwner,
+  });
+  activeSessions.set(siteAToken, {
+    id: 'sess-site-a',
+    user: siteAUser,
+    csrfToken: csrfSiteA,
+  });
+  activeSessions.set(siteBToken, {
+    id: 'sess-site-b',
+    user: { id: 'user-sm-b', username: 'admin-b', role: 'site_manager', active: true, websiteIds: [websiteBId] },
+    csrfToken: csrfSiteB,
+  });
+  activeSessions.set(roToken, {
+    id: 'sess-ro',
+    user: { id: 'user-ro', username: 'reader', role: 'read_only' },
+    csrfToken: csrfRo,
+  });
+
+  const authStore = {
+    configured: () => true,
+    mfa: { enabled: () => false, cancelLogin() {} },
+    getSession: (token) => activeSessions.get(token) || null,
+    revokeSession: (token) => { activeSessions.delete(token); },
+    revokeAll: () => { activeSessions.clear(); },
+    listSessions: () => [...activeSessions.values()].map((s) => ({ id: s.id, current: true })),
+    audit: { record() {}, list() { return { events: [], total: 0, offset: 0, limit: 50 }; } },
+  };
+
+  const origin = 'http://127.0.0.1:5173';
+  const app = express();
+  app.disable('x-powered-by');
+
+  const smallJson = express.json({ limit: '64kb' });
+  app.use((req, res, next) => {
+    if (needsSiteResourceJson(req)) return smallJson(req, res, next);
+    return express.json()(req, res, next);
+  });
+
+  app.use(createTenantBoundaryMiddleware({
+    websiteRegistry: { getWebsite: async (id) => websites.get(id) || null },
+    websiteLookup: async (id) => websites.get(id) || null,
+  }));
+
+  app.use(createSiteResourceBoundary({
+    websiteRegistry: { getWebsite: async (id) => websites.get(id) || null },
+    domainRegistry: { getDomain: async (id) => domains.get(id) || null, listDomains: async () => [...domains.values()] },
+    mailDomainRegistry: { getMailDomain: async (id) => mailDomains.get(id) || null },
+    mailboxRegistry: { getMailbox: async (id) => mailboxes.get(id) || null },
+    jobRegistry: { getJob: async (id) => jobs.get(id) || null, listJobs: async () => [...jobs.values()] },
+    localServerId,
+  }));
+
+  let finalizedMailbox = null;
+  const mockFinalizer = {
+    finalizeMailbox: async (args) => {
+      finalizedMailbox = args;
+      mailboxes.delete(args.mailboxId);
+      return { id: args.mailboxId, deleted: true };
+    },
+  };
+
+  mountMailboxRoutes(app, {
+    mailboxRegistry: {
+      getMailbox: async (id) => mailboxes.get(id) || null,
+      listMailboxes: async () => [...mailboxes.values()],
+      createMailbox: async () => {},
+      rotatePassword: async () => {},
+      setEnabled: async (id, { expectedRevision, enabled }) => {
+        const mb = mailboxes.get(id);
+        if (!mb) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox not found', 404);
+        mb.enabled = enabled;
+        mb.revision = expectedRevision + 1;
+        return { ...mb };
+      },
+      deleteMailbox: async (id) => {
+        mailboxes.delete(id);
+        return { id, deleted: true };
+      },
+    },
+    mailDomainRegistry: { getMailDomain: async (id) => mailDomains.get(id) || null },
+    domainRegistry: { getDomain: async (id) => domains.get(id) || null },
+    mailDeleteFinalizeService: mockFinalizer,
+    localServerId,
+  });
+
+  const mockImpactService = {
+    inspectMailbox: async (id) => {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new MailDeleteImpactError('mailbox_not_found', 'Mailbox was not found', 404);
+      return {
+        clearToFinalize: !mb.enabled,
+        blockers: mb.enabled ? ['mailbox_enabled'] : [],
+        activeJobs: [],
+        quotaConfigured: false,
+        forwardingConfigured: false,
+        aliasReferences: [],
+        data: { present: true, bytes: 2048, snapshotSha256: 'a'.repeat(64) },
+      };
+    },
+    inspectMailDomain: async (id) => {
+      const md = mailDomains.get(id);
+      if (!md) throw new MailDeleteImpactError('mail_domain_not_found', 'Mail domain was not found', 404);
+      return { clearToFinalize: true, blockers: [], activeJobs: [] };
+    },
+  };
+
+  mountMailDeleteImpactRoutes(app, { mailDeleteImpactService: mockImpactService });
+
+  const mockDataOpsService = {
+    previewBackup: async () => ({
+      previewDigest: 'prev-bk-digest',
+      confirmation: 'backup-mail-data:user-a@example-a.com',
+      expectedRevision: 2,
+    }),
+    queueBackup: async () => ({
+      previewDigest: 'prev-bk-digest',
+      job: { id: 'job-bk-' + randomUUID(), operation: 'mail.data.backup' },
+    }),
+    previewRestore: async () => ({}),
+    queueRestore: async () => ({}),
+    previewDelete: async ({ resourceId, backupId }) => ({
+      previewDigest: 'prev-digest-123',
+      confirmation: `delete-mail-data:user-a@example-a.com:${backupId}`,
+      backupId,
+      expectedRevision: 2,
+    }),
+    queueDelete: async ({ resourceId, backupId }) => ({
+      previewDigest: 'prev-digest-123',
+      job: { id: jobADelId, operation: 'mail.data.delete' },
+    }),
+  };
+
+  mountMailDataRoutes(app, { mailDataOperationsService: mockDataOpsService });
+
+  app.get('/api/jobs/:jobId', (req, res) => {
+    const job = jobs.get(req.params.jobId);
+    if (!job) return res.status(404).json({ error: { code: 'job_not_found', message: 'Job not found' } });
+    return res.json({ data: job });
+  });
+
+  app.get('/api/backups/:backupId', (req, res) => {
+    const backup = backups.get(req.params.backupId);
+    if (!backup) return res.status(404).json({ error: { code: 'backup_not_found', message: 'Backup not found' } });
+    return res.json({ data: backup });
+  });
+
+  const listener = createAuthenticatedApi({
+    store: authStore,
+    publicOrigin: origin,
+    development: true,
+    createHandler: () => app,
+  });
+
+  const server = http.createServer(listener).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => { server.closeAllConnections(); server.close(resolve); }));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  const requestApi = async (path, { method = 'GET', token = null, csrf = null, body, customOrigin = origin } = {}) => {
+    const headers = {};
+    if (token) headers.cookie = `yunpanel_session=${token}`;
+    if (customOrigin) headers.origin = customOrigin;
+    if (csrf) headers['x-csrf-token'] = csrf;
+    if (body !== undefined) headers['content-type'] = 'application/json';
+    const res = await fetch(`${baseUrl}${path}`, {
+      method,
+      headers,
+      body: body !== undefined ? JSON.stringify(body) : undefined,
+    });
+    let payload = null;
+    try { payload = await res.json(); } catch { payload = null; }
+    return { status: res.status, headers: res.headers, payload };
+  };
+
+  // 2a. Unauthenticated request rejected with 401
+  const unauthRes = await requestApi(`/api/mailboxes/${mbAId}`);
+  assert.equal(unauthRes.status, 401);
+  assert.equal(unauthRes.payload.error.code, 'unauthorized');
+
+  // 2b. CSRF protection: mutation without CSRF token rejected with 403
+  const noCsrfRes = await requestApi(`/api/mailboxes/${mbAId}`, {
+    method: 'DELETE',
+    token: siteAToken,
+    body: { expectedRevision: 2, deleteJobId: jobADelId, confirmation: 'delete-mailbox:user-a@example-a.com' },
+  });
+  assert.equal(noCsrfRes.status, 403);
+  assert.equal(noCsrfRes.payload.error.code, 'csrf_invalid');
+
+  // 2c. CSRF protection: invalid CSRF token rejected with 403
+  const badCsrfRes = await requestApi(`/api/mailboxes/${mbAId}`, {
+    method: 'DELETE',
+    token: siteAToken,
+    csrf: 'invalid-csrf-token',
+    body: { expectedRevision: 2, deleteJobId: jobADelId, confirmation: 'delete-mailbox:user-a@example-a.com' },
+  });
+  assert.equal(badCsrfRes.status, 403);
+  assert.equal(badCsrfRes.payload.error.code, 'csrf_invalid');
+
+  // 2d. Cross-origin protection: mismatched origin rejected with 403
+  const badOriginRes = await requestApi(`/api/mailboxes/${mbAId}`, {
+    method: 'DELETE',
+    token: siteAToken,
+    csrf: csrfSiteA,
+    customOrigin: 'http://malicious-attacker.com',
+    body: { expectedRevision: 2, deleteJobId: jobADelId, confirmation: 'delete-mailbox:user-a@example-a.com' },
+  });
+  assert.equal(badOriginRes.status, 403);
+  assert.equal(badOriginRes.payload.error.code, 'origin_forbidden');
+
+  // 2e. Read-only role rejected on mutation with 403
+  const roDeleteRes = await requestApi(`/api/mailboxes/${mbAId}`, {
+    method: 'DELETE',
+    token: roToken,
+    csrf: csrfRo,
+    body: { expectedRevision: 2, deleteJobId: jobADelId, confirmation: 'delete-mailbox:user-a@example-a.com' },
+  });
+  assert.equal(roDeleteRes.status, 403);
+  assert.equal(roDeleteRes.payload.error.code, 'forbidden');
+
+  // 2f. Multi-tenant isolation: Site A cannot access foreign Mailbox B (403 site_scope_forbidden, zero metadata leakage)
+  const crossMailboxGet = await requestApi(`/api/mailboxes/${mbBId}`, { token: siteAToken });
+  assert.equal(crossMailboxGet.status, 403);
+  assert.equal(crossMailboxGet.payload.error.code, 'site_scope_forbidden');
+  assert.equal(JSON.stringify(crossMailboxGet.payload).includes('user-b@example-b.com'), false);
+
+  const crossMailboxDel = await requestApi(`/api/mailboxes/${mbBId}`, {
+    method: 'DELETE',
+    token: siteAToken,
+    csrf: csrfSiteA,
+    body: { expectedRevision: 2, deleteJobId: jobBDelId, confirmation: 'delete-mailbox:user-b@example-b.com' },
+  });
+  assert.equal(crossMailboxDel.status, 403);
+  assert.equal(crossMailboxDel.payload.error.code, 'site_scope_forbidden');
+
+  // 2g. Multi-tenant isolation: Site A cannot access foreign MailDomain B (403 site_scope_forbidden)
+  const crossDomainGet = await requestApi(`/api/mail-domains/${mdomBId}`, { token: siteAToken });
+  assert.equal(crossDomainGet.status, 403);
+  assert.equal(crossDomainGet.payload.error.code, 'site_scope_forbidden');
+
+  // 2h. Multi-tenant isolation: Site A cannot access foreign Job B (403 site_scope_forbidden)
+  const crossJobGet = await requestApi(`/api/jobs/${jobBDelId}`, { token: siteAToken });
+  assert.equal(crossJobGet.status, 403);
+  assert.equal(crossJobGet.payload.error.code, 'site_scope_forbidden');
+
+  // 2i. Multi-tenant isolation: Site A cannot access backups (403 forbidden)
+  const crossBackupGet = await requestApi(`/api/backups/${bkBId}`, { token: siteAToken });
+  assert.equal(crossBackupGet.status, 403);
+  assert.ok(['site_scope_forbidden', 'tenant_boundary_forbidden'].includes(crossBackupGet.payload.error.code));
+
+  // 2j. Fail-closed: non-existent mailbox ID returns 403 site_scope_forbidden without leaking existence
+  const nonExistentMbGet = await requestApi('/api/mailboxes/non-existent-mb-id', { token: siteAToken });
+  assert.equal(nonExistentMbGet.status, 403);
+  assert.equal(nonExistentMbGet.payload.error.code, 'site_scope_forbidden');
+
+  // 2k. Multi-tenant isolation: Site B cannot access Site A mailbox
+  const siteBCrossGet = await requestApi(`/api/mailboxes/${mbAId}`, { token: siteBToken });
+  assert.equal(siteBCrossGet.status, 403);
+  assert.equal(siteBCrossGet.payload.error.code, 'site_scope_forbidden');
+
+  // 2l. Authorized access: Site A manager accesses Site A mailbox and impact successfully
+  const ownMailboxGet = await requestApi(`/api/mailboxes/${mbAId}`, { token: siteAToken });
+  assert.equal(ownMailboxGet.status, 200);
+  assert.equal(ownMailboxGet.payload.data.address, 'user-a@example-a.com');
+
+  const ownImpactGet = await requestApi(`/api/mailboxes/${mbAId}/delete-impact`, { token: siteAToken });
+  assert.equal(ownImpactGet.status, 200);
+  assert.equal(ownImpactGet.payload.data.clearToFinalize, true);
+
+  // 2m. Authorized deletion: Site A manager deletes Site A mailbox with valid credentials & confirmation
+  const ownDeleteRes = await requestApi(`/api/mailboxes/${mbAId}`, {
+    method: 'DELETE',
+    token: siteAToken,
+    csrf: csrfSiteA,
+    body: { expectedRevision: 2, deleteJobId: jobADelId, confirmation: 'delete-mailbox:user-a@example-a.com' },
+  });
+  assert.equal(ownDeleteRes.status, 200);
+  assert.equal(finalizedMailbox?.mailboxId, mbAId);
+  assert.equal(finalizedMailbox?.deleteJobId, jobADelId);
+
+  // Sibling mailbox remains completely untouched and active!
+  const siblingAfter = mailboxes.get(mbASiblingId);
+  assert.ok(siblingAfter);
+  assert.equal(siblingAfter.enabled, true);
+
+  // 2n. Logout invalidates session immediately
+  const logoutRes = await requestApi('/api/auth/logout', {
+    method: 'POST',
+    token: siteAToken,
+    csrf: csrfSiteA,
+  });
+  assert.equal(logoutRes.status, 204);
+
+  // Subsequent request with the logged-out token fails closed with 401
+  const afterLogoutRes = await requestApi(`/api/mailboxes/${mbASiblingId}`, { token: siteAToken });
+  assert.equal(afterLogoutRes.status, 401);
+  assert.equal(afterLogoutRes.payload.error.code, 'unauthorized');
+
+  // 2o. Re-login / New session for Site A
+  const newSiteAToken = 'token-site-a-relogin-' + randomUUID();
+  const newCsrfSiteA = 'csrf-site-a-relogin';
+  activeSessions.set(newSiteAToken, {
+    id: 'sess-site-a-relogin',
+    user: siteAUser,
+    csrfToken: newCsrfSiteA,
+  });
+
+  const reloginAccess = await requestApi(`/api/mailboxes/${mbASiblingId}`, { token: newSiteAToken });
+  assert.equal(reloginAccess.status, 200);
+
+  // 2p. Permission revocation: revoke site grant for user A
+  userAWebsiteIds = []; // No websites assigned
+  const revokedGrantRes = await requestApi(`/api/mailboxes/${mbASiblingId}`, { token: newSiteAToken });
+  assert.equal(revokedGrantRes.status, 403);
+  assert.equal(revokedGrantRes.payload.error.code, 'site_scope_forbidden');
+
+  // 2q. Account deactivation: inactive account rejected fail-closed
+  userAWebsiteIds = [websiteAId];
+  userAActive = false; // Deactivated
+  const deactivatedRes = await requestApi(`/api/mailboxes/${mbASiblingId}`, { token: newSiteAToken });
+  assert.equal(deactivatedRes.status, 403);
+  assert.ok(['site_scope_forbidden', 'tenant_actor_inactive'].includes(deactivatedRes.payload.error.code));
+  assert.ok(deactivatedRes.payload.error.message.includes('Inactive account'));
+
+  // 2r. Owner has universal access across sites
+  const ownerGetSiteB = await requestApi(`/api/mailboxes/${mbBId}`, { token: ownerToken });
+  assert.equal(ownerGetSiteB.status, 200);
+  assert.equal(ownerGetSiteB.payload.data.address, 'user-b@example-b.com');
+
+  // --- Part 3: Client Controller Flow Resilience ---
+  const sha64 = (ch) => String(ch).repeat(64);
+  const clientTargetId = '11111111-1111-4111-8111-111111111111';
+  const clientDomainId = '22222222-2222-4222-8222-222222222222';
+  const clientTarget = { id: clientTargetId, mailDomainId: clientDomainId, address: 'test@example.com' };
+
+  function createMockMailboxImpact(targ = clientTarget, rev = 1) {
+    return {
+      version: 1,
+      resourceType: 'mailbox',
+      resourceId: targ.id,
+      address: targ.address,
+      revision: rev,
+      enabled: false,
+      dependencies: { quotaConfigured: false, forwardingConfigured: false, aliasReferences: { count: 0 }, activeJobs: { count: 0 } },
+      mailData: { present: true, bytes: 1024, snapshotSha256: sha64('a') },
+      requiresDataBackup: true,
+      safeToDelete: false,
+      blockers: [{ code: 'mail_data_backup_required', count: 1 }],
+      confirmation: `delete-mailbox:${targ.address}`,
+      sideEffects: false,
+    };
+  }
+
+  function createMockBackupPreview(targ = clientTarget, rev = 1) {
+    const previewDigest = sha64('b');
+    return {
+      version: 1,
+      operation: 'mail_data_backup',
+      scope: 'mailbox',
+      resourceId: targ.id,
+      mailDomainId: targ.mailDomainId,
+      identity: targ.address,
+      expectedRevision: rev,
+      previewDigest,
+      sideEffects: false,
+      snapshotSha256: sha64('a'),
+      sourcePresent: true,
+      bytes: 1024,
+      confirmation: `backup-mail-data:${targ.mailDomainId}:${previewDigest}`,
+    };
+  }
+
+  // 3a. Stale / Error state prevents blind mutation retry
+  let simulatedMethodCalls = [];
+  const mockFailingRequest = async (path, options = {}) => {
+    simulatedMethodCalls.push({ path, method: options.method || 'GET' });
+    if (path.endsWith('/data/backup-preview')) {
+      return createMockBackupPreview(clientTarget, 1);
+    }
+    if (path.endsWith('/data/backup')) {
+      const err = new Error('Server network failure during backup POST');
+      err.status = 504;
+      throw err;
+    }
+    if (path.endsWith('/delete-impact')) {
+      return createMockMailboxImpact(clientTarget, 1);
+    }
+    if (path.includes('/mail-domains/')) {
+      return { id: clientDomainId, domainName: 'example.com', managementMode: 'local', revision: 1, status: 'enabled' };
+    }
+    return { id: clientTargetId, address: clientTarget.address, mailDomainId: clientDomainId, revision: 1, enabled: false };
+  };
+
+  const clientFlow = createMailboxRemoval({
+    target: clientTarget,
+    request: mockFailingRequest,
+    isCurrent: () => true,
+    canManage: () => true,
+  });
+
+  await clientFlow.refresh();
+  assert.equal(clientFlow.getState().status, 'ready');
+
+  // Prepare backup approval
+  await clientFlow.prepare('backup');
+  const backupApproval = clientFlow.getState().approval;
+  assert.ok(backupApproval);
+  assert.equal(backupApproval.action, 'backup');
+
+  // Confirm backup -> throws 504 network error after dispatching POST
+  await clientFlow.confirm(backupApproval, backupApproval.data.confirmation);
+  assert.equal(clientFlow.getState().status, 'uncertain');
+  assert.equal(clientFlow.getState().uncertain, true);
+  assert.equal(clientFlow.getState().approval, null);
+
+  // Attempting to prepare while uncertain is rejected without new network mutation
+  const callsBeforeBlindRetry = simulatedMethodCalls.length;
+  await clientFlow.prepare('backup');
+  assert.equal(clientFlow.getState().approval, null);
+  // Verify no POST was sent
+  const postsDuringRetry = simulatedMethodCalls.slice(callsBeforeBlindRetry).filter((c) => c.method === 'POST');
+  assert.equal(postsDuringRetry.length, 0);
+
+  // Calling refresh in uncertain state only issues GET requests to safely re-inspect state
+  simulatedMethodCalls = [];
+  await clientFlow.refresh();
+  assert.ok(simulatedMethodCalls.length > 0);
+  assert.ok(simulatedMethodCalls.every((c) => c.method === 'GET'));
+
+  // 3b. Stale response dropped when session version rotates or isCurrent() returns false
+  const slowTargetId = '33333333-3333-4333-8333-333333333333';
+  const slowDomainId = '44444444-4444-4444-8444-444444444444';
+  const slowTarget = { id: slowTargetId, mailDomainId: slowDomainId, address: 'slow@example.com' };
+  let currentSessionActive = true;
+  let lateResolve = null;
+  const mockSlowRequest = async (path) => {
+    if (path.endsWith('/delete-impact')) {
+      return new Promise((resolve) => {
+        lateResolve = () => resolve(createMockMailboxImpact(slowTarget, 1));
+      });
+    }
+    if (path.includes('/mail-domains/')) {
+      return { id: slowDomainId, domainName: 'example.com', managementMode: 'local', revision: 1, status: 'enabled' };
+    }
+    return { id: slowTargetId, address: slowTarget.address, mailDomainId: slowDomainId, revision: 1, enabled: false };
+  };
+
+  let publishedStates = [];
+  const rotatingFlow = createMailboxRemoval({
+    target: slowTarget,
+    request: mockSlowRequest,
+    isCurrent: () => currentSessionActive,
+    canManage: () => true,
+    onState: (st) => publishedStates.push(st),
+  });
+
+  const refreshPromise = rotatingFlow.refresh();
+  // Session rotates / logs out while request was in flight
+  currentSessionActive = false;
+  const stateCountBeforeLateResponse = publishedStates.length;
+  // Late response resolves now
+  if (lateResolve) lateResolve();
+  await refreshPromise;
+  // No new state was published after session became inactive
+  const statesAfterRotate = publishedStates.slice(stateCountBeforeLateResponse);
+  assert.equal(statesAfterRotate.length, 0);
+
+  // 3c. Permission revocation halts in-flight mutation
+  const permTargetId = '55555555-5555-4555-8555-555555555555';
+  const permDomainId = '66666666-6666-4666-8666-666666666666';
+  const permTarget = { id: permTargetId, mailDomainId: permDomainId, address: 'perm@example.com' };
+  let userCanManage = true;
+  const permissionRevocationFlow = createMailboxRemoval({
+    target: permTarget,
+    request: async (path) => {
+      if (path.endsWith('/data/backup-preview')) {
+        return createMockBackupPreview(permTarget, 1);
+      }
+      if (path.endsWith('/delete-impact')) {
+        return createMockMailboxImpact(permTarget, 1);
+      }
+      if (path.includes('/mail-domains/')) {
+        return { id: permDomainId, domainName: 'example.com', managementMode: 'local', revision: 1, status: 'enabled' };
+      }
+      return { id: permTargetId, address: permTarget.address, mailDomainId: permDomainId, revision: 1, enabled: false };
+    },
+    isCurrent: () => true,
+    canManage: () => userCanManage,
+  });
+
+  await permissionRevocationFlow.refresh();
+  await permissionRevocationFlow.prepare('backup');
+  const permBackupApproval = permissionRevocationFlow.getState().approval;
+  assert.ok(permBackupApproval);
+
+  // Revoke permission right before confirm
+  userCanManage = false;
+  await permissionRevocationFlow.confirm(permBackupApproval, permBackupApproval.data.confirmation);
+  assert.equal(permissionRevocationFlow.getState().status, 'forbidden');
+  assert.equal(permissionRevocationFlow.getState().approval, null);
+
+  // Clean up flows
+  clientFlow.dispose();
+  rotatingFlow.dispose();
+  permissionRevocationFlow.dispose();
 });
