@@ -3030,21 +3030,44 @@ function TestMailboxRemovalView({ mailbox, domain, state, canManage }) {
   const sessionContext = usePanelSession();
   const effectiveCanManage = canManage ?? sessionContext.canManage;
   const busy = mailboxRemovalBusy(state);
-  const eligible = mailboxRemovalEligible(state?.snapshot);
+  const snapshot = state?.snapshot;
+  const usable = effectiveCanManage && !busy && state.status === 'ready' && !state.uncertain;
+  const eligible = usable && mailboxRemovalEligible(snapshot);
 
   return createElement('div', { 'data-testid': 'mailbox-removal-panel', 'data-mailbox-id': mailbox.id },
     createElement('h2', null, `Posta hesabını sil: ${mailbox.address}`),
     !effectiveCanManage ? createElement('p', { role: 'alert' }, 'Bu hesap silme işlemi başlatamaz.') : null,
-    busy ? createElement('p', { role: 'status' }, 'Güncel kayıt ve işlem durumu doğrulanıyor…') : null,
+    busy ? createElement('p', { role: 'status' }, state.status === 'sending' ? 'İşlem yanıtı bekleniyor…' : 'Güncel kayıt ve işlem durumu doğrulanıyor…') : null,
     state.status === 'deleted'
       ? createElement('p', { role: 'status', 'data-testid': 'deleted-notice' }, 'Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.')
       : null,
+    state.receipt && state.status !== 'deleted'
+      ? createElement('p', { role: 'status', 'data-testid': 'receipt-notice' }, 'Veri silme işi doğrulandı. Hesap kaydı henüz kaldırılmadı; son onay gereklidir.')
+      : null,
+    state.uncertain
+      ? createElement('p', { role: 'alert', 'data-testid': 'uncertain-notice' }, 'Yeni bir yedek/silme isteği başlatılmayacak. İşlem geçmişindeki mevcut yedek veya silme işinin kimliğini aşağıdan doğrulayın.')
+      : null,
+    state.job
+      ? createElement('p', { role: 'status', 'data-testid': 'job-status' }, `${state.job.action === 'backup' ? 'Yedek işi' : 'Veri silme işi'}: ${state.job.status}`)
+      : null,
     state.error ? createElement('div', { role: 'alert', 'data-testid': 'error-notice' }, state.error) : null,
-    effectiveCanManage && state.status === 'ready' && !state.uncertain
+    usable
       ? createElement('button', {
           'data-testid': 'btn-backup',
-          disabled: !eligible || busy,
+          disabled: !eligible || Boolean(state.receipt),
         }, 'Silmeden önce yedekle')
+      : null,
+    usable
+      ? createElement('button', {
+          'data-testid': 'btn-delete',
+          disabled: !eligible || !state.backupId || Boolean(state.receipt),
+        }, '2. Posta verisini sil…')
+      : null,
+    usable
+      ? createElement('button', {
+          'data-testid': 'btn-finalize',
+          disabled: !usable || !state.receipt || state.receipt.revision !== snapshot?.revision || !mailboxRemovalEligible(snapshot, { allowData: false }),
+        }, '3. Hesap kaydını kaldır…')
       : null,
     state.approval ? createElement('div', { 'data-testid': 'approval-dialog' },
       createElement('p', null, state.approval.action),
@@ -3770,4 +3793,737 @@ test('Criterion 15: Gerçek SessionProvider/React/router/StrictMode ve HTTP/auth
   clientFlow.dispose();
   rotatingFlow.dispose();
   permissionRevocationFlow.dispose();
+});
+
+test('Criterion 16: Gerçek doğrulanmış yedek → veri silme işi → mailbox finalize; 202/failed/cancelled ve veri silinmiş-kayıt kalmış durumlarında tam başarı gösterilmesin. Kayıp POST, iki hızlı onay, mevcut job kimliğiyle yalnız GET devamı ve finalize yanıtı kaybı/404 uzlaştırması; aynı yazma kör tekrarlanmasın', async (t) => {
+  const sha64 = (val) => createHash('sha256').update(String(val)).digest('hex');
+
+  const c16TargetId = 'c1600000-0000-4000-8000-000000000001';
+  const c16DomainId = 'c1600000-0000-4000-8000-000000000002';
+  const c16Target = { id: c16TargetId, mailDomainId: c16DomainId, address: 'c16-user@example.com' };
+  const c16Base = `/mailboxes/${c16TargetId}`;
+
+  const c16Session = {
+    id: 'sess-owner-c16',
+    user: { id: 'owner-c16', role: 'owner' },
+    csrfToken: 'csrf-c16',
+    access: { mode: 'management', permissions: ['*'] },
+    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+  };
+
+  function createC16Fixture(overrides = {}) {
+    const db = {
+      revision: 1,
+      domainStatus: 'enabled',
+      enabled: false,
+      present: true,
+      bytes: 4096,
+      snapshot: sha64('c16-snapshot-data'),
+      quota: false,
+      forwarding: false,
+      aliases: 0,
+      removed: false,
+      jobs: new Map(),
+      autoFinish: true,
+      ...overrides,
+    };
+
+    const mailbox = () => ({
+      ...c16Target,
+      revision: db.revision,
+      enabled: db.enabled,
+    });
+
+    const domain = () => ({
+      id: c16DomainId,
+      webDomainId: 'c16-wdom',
+      domainName: 'example.com',
+      managementMode: 'local',
+      status: db.domainStatus,
+      revision: 2,
+    });
+
+    function impact() {
+      const activeJobs = [...db.jobs.values()].filter((j) => ['queued', 'running'].includes(j.status)).length;
+      const blockers = [];
+      if (db.present) blockers.push({ code: 'mail_data_backup_required', count: 1 });
+      if (db.quota) blockers.push({ code: 'mailbox_quota_configured', count: 1 });
+      if (db.forwarding) blockers.push({ code: 'mailbox_forwarding_configured', count: 1 });
+      if (db.aliases > 0) blockers.push({ code: 'mailbox_alias_reference_configured', count: db.aliases });
+      if (activeJobs > 0) blockers.push({ code: 'mail_domain_job_active', count: activeJobs });
+
+      return {
+        version: 1,
+        resourceType: 'mailbox',
+        resourceId: c16TargetId,
+        address: c16Target.address,
+        revision: db.revision,
+        enabled: db.enabled,
+        dependencies: {
+          quotaConfigured: db.quota,
+          forwardingConfigured: db.forwarding,
+          aliasReferences: { count: db.aliases },
+          activeJobs: { count: activeJobs },
+        },
+        mailData: {
+          present: db.present,
+          bytes: db.bytes,
+          snapshotSha256: db.snapshot,
+        },
+        requiresDataBackup: db.present,
+        safeToDelete: blockers.length === 0,
+        blockers,
+        confirmation: `delete-mailbox:${c16Target.address}`,
+        sideEffects: false,
+      };
+    }
+
+    function preview(action, backupId = null) {
+      const previewDigest = sha64(`c16-preview-${action}-${db.revision}`);
+      const common = {
+        version: 1,
+        operation: `mail_data_${action}`,
+        scope: 'mailbox',
+        resourceId: c16TargetId,
+        mailDomainId: c16DomainId,
+        identity: c16Target.address,
+        expectedRevision: db.revision,
+        previewDigest,
+        sideEffects: false,
+      };
+      if (action === 'backup') {
+        return {
+          ...common,
+          snapshotSha256: db.snapshot,
+          sourcePresent: db.present,
+          bytes: db.bytes,
+          confirmation: `backup-mail-data:${c16DomainId}:${previewDigest}`,
+        };
+      }
+      return {
+        ...common,
+        backupId,
+        backupContentSha256: sha64('backup-content-sha'),
+        backupBytes: 4096,
+        targetSnapshotSha256: db.snapshot,
+        targetPresent: db.present,
+        targetBytes: db.bytes,
+        confirmation: `delete-mail-data:${c16DomainId}:${previewDigest}`,
+      };
+    }
+
+    function finish(job) {
+      if (job.status !== 'queued') return job;
+      const result = {
+        version: 1,
+        scope: 'mailbox',
+        mailDomainId: c16DomainId,
+        identity: c16Target.address,
+        contentSha256: sha64('backup-content-sha'),
+        bytes: db.bytes,
+        files: db.present ? 8 : 0,
+        directories: db.present ? 2 : 0,
+        sideEffects: true,
+        sourcePresent: db.present,
+      };
+      if (job.operation === 'mail.data.backup') {
+        Object.assign(result, { backupId: job.id, backedUp: true, sourceSnapshotSha256: db.snapshot });
+      } else {
+        Object.assign(result, {
+          transactionId: job.id,
+          backupId: job.input.backupId,
+          resourceId: c16TargetId,
+          expectedResourceRevision: db.revision,
+          deleted: true,
+        });
+        db.present = false;
+        db.bytes = 0;
+        db.snapshot = sha64('empty-mail-data');
+      }
+      job.status = 'succeeded';
+      job.result = result;
+      return job;
+    }
+
+    async function request(path, options = {}) {
+      const method = options.method ?? 'GET';
+      if (path === c16Base && method === 'GET') {
+        if (db.removed) {
+          const err = new Error('Mailbox was not found');
+          err.status = 404;
+          err.code = 'mailbox_not_found';
+          throw err;
+        }
+        return mailbox();
+      }
+      if (path === `/mail-domains/${c16DomainId}` && method === 'GET') return domain();
+      if (path === `${c16Base}/delete-impact` && method === 'GET') return impact();
+      if (path === `${c16Base}/data/backup-preview` && method === 'GET') return preview('backup');
+      if (path === `${c16Base}/data/delete-preview` && method === 'POST') return preview('delete', options.body?.backupId);
+      if (path === `${c16Base}/data/backup` || path === `${c16Base}/data/delete`) {
+        const action = path.endsWith('/backup') ? 'backup' : 'delete';
+        const job = {
+          id: `${action}-job-${db.jobs.size + 1}`,
+          operation: `mail.data.${action}`,
+          resourceType: 'mail_domain',
+          resourceId: c16DomainId,
+          status: 'queued',
+          input: options.body,
+        };
+        db.jobs.set(job.id, job);
+        return { previewDigest: options.body.expectedPreviewDigest, job: { ...job } };
+      }
+      if (path.startsWith('/jobs/') && method === 'GET') {
+        const jobId = path.slice('/jobs/'.length);
+        const job = db.jobs.get(jobId);
+        if (!job) {
+          const err = new Error('Job not found');
+          err.status = 404;
+          err.code = 'job_not_found';
+          throw err;
+        }
+        return structuredClone(db.autoFinish ? finish(job) : job);
+      }
+      if (path === c16Base && method === 'DELETE') {
+        db.removed = true;
+        return {
+          id: c16TargetId,
+          resourceType: 'mailbox',
+          deleted: true,
+          deleteJobId: options.body.deleteJobId,
+          backupId: db.jobs.get(options.body.deleteJobId).result.backupId,
+        };
+      }
+      throw new Error(`Unexpected fixture request: ${method} ${path}`);
+    }
+
+    return { db, mailbox, domain, impact, preview, finish, request };
+  }
+
+  function setupFlow(extra = {}) {
+    const api = createC16Fixture(extra.dbOverrides);
+    const calls = [];
+    const states = [];
+    let intercept = null;
+    const flow = createMailboxRemoval({
+      target: c16Target,
+      canManage: () => true,
+      request: async (path, options) => {
+        calls.push({ path, ...options });
+        return intercept ? intercept(path, options, api.request) : api.request(path, options);
+      },
+      onState: (st) => states.push(st),
+      ...extra,
+    });
+    return { ...api, flow, calls, states, setIntercept: (fn) => { intercept = fn; } };
+  }
+
+  const mutations = (run) => run.calls.filter((c) => (c.method === 'POST' && !c.path.endsWith('-preview')) || c.method === 'DELETE');
+  const action = async (run, act) => {
+    await run.flow.prepare(act);
+    const approval = run.flow.getState().approval;
+    assert.ok(approval, `Approval must be prepared for action ${act}`);
+    return run.flow.confirm(approval, approval.data.confirmation);
+  };
+
+  // =========================================================================
+  // Section 1: Sequential Lifecycle (Backup -> Delete Job -> Mailbox Finalize)
+  // =========================================================================
+  {
+    const run = setupFlow();
+    await run.flow.refresh();
+    assert.equal(run.flow.getState().status, 'ready');
+    assert.equal(mutations(run).length, 0);
+
+    // 1a. Cannot skip to Step 2 (delete) before verified backup exists
+    await run.flow.prepare('delete');
+    assert.equal(run.flow.getState().approval, null);
+    assert.equal(mutations(run).length, 0);
+    await run.flow.refresh();
+
+    // 1b. Cannot skip to Step 3 (finalize) before delete receipt exists
+    await run.flow.prepare('finalize');
+    assert.equal(run.flow.getState().approval, null);
+    assert.equal(mutations(run).length, 0);
+    await run.flow.refresh();
+
+    // 1c. Step 1: Backup prepared and confirmed
+    await action(run, 'backup');
+    assert.equal(run.flow.getState().backupId, 'backup-job-1');
+    assert.equal(mutations(run).length, 1);
+    assert.equal(run.db.present, true);
+
+    // 1d. Step 2: Delete prepared (with verified backupId) and confirmed
+    await action(run, 'delete');
+    assert.equal(run.flow.getState().receipt.id, 'delete-job-2');
+    assert.equal(run.flow.getState().receipt.backupId, 'backup-job-1');
+    assert.equal(run.flow.getState().status, 'ready');
+    assert.equal(run.flow.getState().result, null);
+    assert.equal(run.db.removed, false); // Record is NOT removed yet
+    assert.equal(run.db.present, false); // Host data IS removed
+    assert.equal(mutations(run).length, 2);
+
+    // 1e. Step 3: Finalize prepared and confirmed
+    await action(run, 'finalize');
+    assert.equal(run.flow.getState().status, 'deleted');
+    assert.equal(run.db.removed, true); // Record is now removed
+    assert.equal(run.flow.getState().result.deleteJobId, 'delete-job-2');
+    assert.equal(run.flow.getState().result.backupId, 'backup-job-1');
+    assert.equal(mutations(run).length, 3);
+    assert.deepEqual(mutations(run)[2].body, {
+      confirmation: `delete-mailbox:${c16Target.address}`,
+      expectedRevision: 1,
+      deleteJobId: 'delete-job-2',
+    });
+    run.flow.dispose();
+  }
+
+  // =========================================================================
+  // Section 2: Non-Success Invariants (202 Accepted, failed, cancelled, and data-deleted-record-remaining)
+  // =========================================================================
+  // 2a. 202 Accepted / Queued / Running backup job is NEVER full deletion success
+  {
+    const run = setupFlow({ dbOverrides: { autoFinish: false } });
+    await run.flow.refresh();
+    await action(run, 'backup');
+    assert.equal(run.flow.getState().status, 'waiting');
+    assert.equal(run.flow.getState().backupId, null);
+    assert.notEqual(run.flow.getState().status, 'deleted');
+    assert.equal(run.flow.getState().result, null);
+
+    // StrictMode view render: renders job status, NEVER renders deleted notice
+    const waitingHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: run.flow.getState(),
+      })
+    );
+    assert.ok(waitingHtml.includes('Yedek işi: queued'));
+    assert.equal(waitingHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'), false);
+
+    // Backend reconciler: running job returns reconciled: false, status: 'waiting'
+    const mockJobs = new Map([
+      ['running-job-1', { id: 'running-job-1', operation: 'mail.data.delete', status: 'running', resourceId: c16DomainId }],
+    ]);
+    const runningRec = await reconcileLostMailboxOperation({
+      operation: 'delete',
+      mailboxId: c16TargetId,
+      address: c16Target.address,
+      backupId: 'bk-test',
+      lastKnownJobId: 'running-job-1',
+      jobRegistry: { getJob: async (id) => mockJobs.get(id) || null },
+      mailboxRegistry: { getMailbox: async () => ({ id: c16TargetId, enabled: false, revision: 1 }) },
+    });
+    assert.equal(runningRec.reconciled, false);
+    assert.equal(runningRec.status, 'waiting');
+    run.flow.dispose();
+  }
+
+  // 2b. Failed and Cancelled jobs are NEVER full deletion success and never auto-queue writes
+  {
+    const run = setupFlow({ dbOverrides: { autoFinish: false } });
+    await run.flow.refresh();
+    await action(run, 'backup');
+    run.db.jobs.get('backup-job-1').status = 'failed';
+    await run.flow.refresh();
+    assert.equal(run.flow.getState().uncertain, true);
+    assert.notEqual(run.flow.getState().status, 'deleted');
+    assert.equal(run.flow.getState().backupId, null);
+    assert.ok(run.flow.getState().error.includes('İş tamamlanmadı'));
+
+    // Backend reconciler: failed job throws delete_job_failed
+    const mockJobsFailed = new Map([
+      ['failed-job-1', { id: 'failed-job-1', operation: 'mail.data.delete', status: 'failed', resourceId: c16DomainId }],
+    ]);
+    await assert.rejects(
+      reconcileLostMailboxOperation({
+        operation: 'delete',
+        mailboxId: c16TargetId,
+        address: c16Target.address,
+        backupId: 'bk-test',
+        lastKnownJobId: 'failed-job-1',
+        jobRegistry: { getJob: async (id) => mockJobsFailed.get(id) || null },
+        mailboxRegistry: { getMailbox: async () => ({ id: c16TargetId, enabled: false, revision: 1 }) },
+      }),
+      (err) => err instanceof MailboxReconciliationError && err.code === 'delete_job_failed'
+    );
+
+    // Cancelled job cannot be resumed
+    const mockJobsCancelled = new Map([
+      ['cancelled-job-1', { id: 'cancelled-job-1', operation: 'mail.data.delete', status: 'cancelled', resourceId: c16DomainId }],
+    ]);
+    await assert.rejects(
+      validateResumeJobProof({
+        jobId: 'cancelled-job-1',
+        jobRegistry: { getJob: async (id) => mockJobsCancelled.get(id) || null },
+      }),
+      (err) => err.code === 'resume_job_unsuccessful'
+    );
+    run.flow.dispose();
+  }
+
+  // 2c. Veri silinmiş - Kayıt kalmış (data deleted on host, but mailbox record still in registry)
+  // NEVER shows full deletion success!
+  {
+    const run = setupFlow();
+    await run.flow.refresh();
+    await action(run, 'backup');
+    await action(run, 'delete');
+
+    // Data is deleted on host, but mailbox record still exists
+    assert.equal(run.db.present, false);
+    assert.equal(run.db.removed, false);
+
+    // Frontend state: receipt present, ready for Step 3, BUT status !== 'deleted'
+    const curState = run.flow.getState();
+    assert.equal(curState.status, 'ready');
+    assert.notEqual(curState.status, 'deleted');
+    assert.equal(curState.result, null);
+    assert.ok(curState.receipt);
+
+    // StrictMode view render: renders warning notice, Step 3 button enabled, NEVER renders deleted notice
+    const partialHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: curState,
+      })
+    );
+    assert.ok(partialHtml.includes('Veri silme işi doğrulandı. Hesap kaydı henüz kaldırılmadı; son onay gereklidir.'));
+    assert.ok(partialHtml.includes('3. Hesap kaydını kaldır…'));
+    assert.equal(partialHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'), false);
+
+    // Backend reconciler: finalize with mailbox record still present returns reconciled: false, action: 'finalize_not_completed'
+    const activeMailboxes = new Map([
+      [c16TargetId, { id: c16TargetId, address: c16Target.address, mailDomainId: c16DomainId, enabled: false, revision: 1 }],
+    ]);
+    const finReconcile = await reconcileLostMailboxOperation({
+      operation: 'finalize',
+      mailboxId: c16TargetId,
+      address: c16Target.address,
+      backupId: 'backup-job-1',
+      lastKnownJobId: 'delete-job-2',
+      mailboxRegistry: { getMailbox: async (id) => activeMailboxes.get(id) || null },
+    });
+    assert.equal(finReconcile.reconciled, false);
+    assert.equal(finReconcile.action, 'finalize_not_completed');
+    assert.equal(finReconcile.deleted, undefined);
+    run.flow.dispose();
+  }
+
+  // =========================================================================
+  // Section 3: Lost POST & Read-Only GET Continuation (No Blind Mutation Retry)
+  // =========================================================================
+  {
+    const run = setupFlow();
+    await run.flow.refresh();
+    await action(run, 'backup');
+    assert.equal(mutations(run).length, 1);
+
+    // Simulate lost response on POST /data/delete
+    run.setIntercept(async (path, options, next) => {
+      if (path === `${c16Base}/data/delete` && options.method === 'POST') {
+        await next(path, options); // server processed it
+        throw Object.assign(new Error('Network timeout / lost reply'), { code: 'ECONNRESET' });
+      }
+      return next(path, options);
+    });
+
+    await action(run, 'delete');
+    // Flow enters uncertain state, no blind mutation re-attempt
+    assert.equal(run.flow.getState().status, 'uncertain');
+    assert.equal(run.flow.getState().uncertain, true);
+    assert.equal(run.flow.getState().approval, null);
+
+    // Prepare is blocked while uncertain
+    await run.flow.prepare('delete');
+    assert.equal(run.flow.getState().approval, null);
+    assert.equal(mutations(run).length, 2); // exactly 1 backup + 1 delete sent, no retry
+
+    // Client resumes with existing job ID using ONLY read-only GET
+    run.setIntercept(null); // clear network fault
+    const callsDuringResume = [];
+    run.setIntercept((path, options, next) => {
+      callsDuringResume.push({ path, method: options.method ?? 'GET' });
+      return next(path, options);
+    });
+
+    await run.flow.resume('delete-job-2');
+
+    // Verify all calls made during resume are read-only GET
+    assert.ok(callsDuringResume.length > 0);
+    for (const call of callsDuringResume) {
+      assert.equal(call.method, 'GET', `Resume call must be read-only GET, got ${call.method} ${call.path}`);
+    }
+    assert.equal(mutations(run).length, 2); // still exactly 2, zero duplicate mutations!
+
+    // Flow safely adopts delete receipt and clears uncertain flag
+    assert.equal(run.flow.getState().receipt.id, 'delete-job-2');
+    assert.equal(run.flow.getState().uncertain, false);
+    assert.equal(run.flow.getState().status, 'ready');
+
+    // Can proceed cleanly to finalize
+    await action(run, 'finalize');
+    assert.equal(run.flow.getState().status, 'deleted');
+    assert.equal(run.db.removed, true);
+    run.flow.dispose();
+  }
+
+  // =========================================================================
+  // Section 4: Two Rapid Confirmations Guard
+  // =========================================================================
+  {
+    // Client-side in-flight guard prevents duplicate POST
+    const run = setupFlow();
+    await run.flow.refresh();
+    await run.flow.prepare('backup');
+    const app = run.flow.getState().approval;
+    assert.ok(app);
+
+    // Call confirm twice concurrently
+    const p1 = run.flow.confirm(app, app.data.confirmation);
+    const p2 = run.flow.confirm(app, app.data.confirmation);
+    await Promise.all([p1, p2]);
+
+    assert.equal(mutations(run).length, 1); // exactly 1 POST dispatched, duplicate blocked!
+
+    // Backend rapid confirmation guard rejects concurrent & consumed tokens
+    const rapidGuard = createRapidConfirmationGuard();
+    const token = 'delete-mailbox:alice@example.com:rev-1';
+    const c1 = rapidGuard.beginConfirmation(token, { mailboxId: 'mb-1', revision: 1 });
+    assert.equal(c1.token, token);
+    assert.equal(rapidGuard.isInFlight(token), true);
+
+    // Rapid second call throws 409
+    assert.throws(
+      () => rapidGuard.beginConfirmation(token, { mailboxId: 'mb-1', revision: 1 }),
+      (err) => err instanceof MailboxConcurrencyLockError && err.code === 'rapid_confirmation_in_flight'
+    );
+
+    // Committing consumes the token
+    c1.commit({ deleted: true });
+    assert.equal(rapidGuard.isConsumed(token), true);
+
+    // Subsequent call on consumed token throws 409
+    assert.throws(
+      () => rapidGuard.beginConfirmation(token, { mailboxId: 'mb-1', revision: 1 }),
+      (err) => err instanceof MailboxConcurrencyLockError && err.code === 'confirmation_already_consumed'
+    );
+    run.flow.dispose();
+  }
+
+  // =========================================================================
+  // Section 5: Finalize Reply Loss & 404 Reconciliation
+  // =========================================================================
+  {
+    const deleteJobReceipt = {
+      id: 'delete-job-rec-1',
+      operation: 'mail.data.delete',
+      status: 'succeeded',
+      result: {
+        version: 1,
+        scope: 'mailbox',
+        identity: c16Target.address,
+        backupId: 'backup-rec-1',
+        deleted: true,
+      },
+    };
+    const jobRegistryMock = {
+      getJob: async (id) => (id === 'delete-job-rec-1' ? deleteJobReceipt : null),
+    };
+
+    // 5a. Finalize reply lost after successful server deletion (mailbox absent from registry)
+    const emptyMailboxes = new Map();
+    const mailDataInspectorMock = {
+      inspectMailbox: async (addr) => ({ present: false, bytes: 0, snapshotSha256: null }),
+    };
+
+    const reconciledSuccess = await reconcileLostMailboxOperation({
+      operation: 'finalize',
+      mailboxId: c16TargetId,
+      address: c16Target.address,
+      backupId: 'backup-rec-1',
+      lastKnownJobId: 'delete-job-rec-1',
+      mailboxRegistry: { getMailbox: async (id) => emptyMailboxes.get(id) || null },
+      jobRegistry: jobRegistryMock,
+      mailDataInspector: mailDataInspectorMock,
+    });
+
+    assert.equal(reconciledSuccess.reconciled, true);
+    assert.equal(reconciledSuccess.deleted, true);
+    assert.equal(reconciledSuccess.action, 'reconciled_finalize_success');
+    assert.equal(reconciledSuccess.verifiedByReceipt, true);
+
+    // 5b. Finalize 404 WITHOUT verified delete job receipt is REJECTED (404 alone is never proof)
+    await assert.rejects(
+      reconcileLostMailboxOperation({
+        operation: 'finalize',
+        mailboxId: c16TargetId,
+        address: c16Target.address,
+        backupId: 'backup-rec-1',
+        lastKnownJobId: null, // missing receipt!
+        mailboxRegistry: { getMailbox: async () => null },
+        jobRegistry: jobRegistryMock,
+        mailDataInspector: mailDataInspectorMock,
+      }),
+      (err) => err instanceof MailboxReconciliationError && err.code === 'finalize_unverified_missing_receipt'
+    );
+
+    // 5c. Finalize 404 with delete job identity mismatch is REJECTED
+    await assert.rejects(
+      reconcileLostMailboxOperation({
+        operation: 'finalize',
+        mailboxId: c16TargetId,
+        address: 'different-user@example.com', // wrong address!
+        backupId: 'backup-rec-1',
+        lastKnownJobId: 'delete-job-rec-1',
+        mailboxRegistry: { getMailbox: async () => null },
+        jobRegistry: jobRegistryMock,
+        mailDataInspector: mailDataInspectorMock,
+      }),
+      (err) => err instanceof MailboxReconciliationError && err.code === 'finalize_unverified_identity_mismatch'
+    );
+
+    // 5d. Finalize 404 with backup ID mismatch is REJECTED
+    await assert.rejects(
+      reconcileLostMailboxOperation({
+        operation: 'finalize',
+        mailboxId: c16TargetId,
+        address: c16Target.address,
+        backupId: 'wrong-backup-id', // wrong backup ID!
+        lastKnownJobId: 'delete-job-rec-1',
+        mailboxRegistry: { getMailbox: async () => null },
+        jobRegistry: jobRegistryMock,
+        mailDataInspector: mailDataInspectorMock,
+      }),
+      (err) => err instanceof MailboxReconciliationError && err.code === 'finalize_backup_mismatch'
+    );
+
+    // 5e. Finalize 404 where host mail data is STILL PRESENT is REJECTED (data not deleted)
+    const dirtyInspectorMock = {
+      inspectMailbox: async () => ({ present: true, bytes: 4096, snapshotSha256: sha64('dirty') }),
+    };
+    await assert.rejects(
+      reconcileLostMailboxOperation({
+        operation: 'finalize',
+        mailboxId: c16TargetId,
+        address: c16Target.address,
+        backupId: 'backup-rec-1',
+        lastKnownJobId: 'delete-job-rec-1',
+        mailboxRegistry: { getMailbox: async () => null },
+        jobRegistry: jobRegistryMock,
+        mailDataInspector: dirtyInspectorMock,
+      }),
+      (err) => err instanceof MailboxReconciliationError && err.code === 'finalize_data_still_present'
+    );
+
+    // 5f. Client flow: missing mailbox without receipt marks absent, never deleted
+    const missingRun = setupFlow();
+    missingRun.db.removed = true;
+    await missingRun.flow.refresh();
+    assert.equal(missingRun.flow.getState().status, 'absent');
+    assert.equal(missingRun.flow.getState().result, null);
+    assert.notEqual(missingRun.flow.getState().status, 'deleted');
+    assert.ok(missingRun.flow.getState().error.includes('Posta kutusu kaydı bulunamadı'));
+    missingRun.flow.dispose();
+  }
+
+  // =========================================================================
+  // Section 6: React StrictMode View Assertions Across Lifecycle States
+  // =========================================================================
+  {
+    const readySnap = {
+      revision: 1,
+      enabled: false,
+      domainStatus: 'enabled',
+      quota: false,
+      forwarding: false,
+      aliases: 0,
+      activeJobs: 0,
+      present: true,
+      bytes: 4096,
+      snapshotSha256: sha64('snap-view'),
+      blockers: [{ code: 'mail_data_backup_required', count: 1 }],
+    };
+
+    // 6a. Ready state: backup button enabled
+    const readyHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: { ...EMPTY_MAILBOX_REMOVAL, status: 'ready', snapshot: readySnap },
+      })
+    );
+    assert.ok(readyHtml.includes('Silmeden önce yedekle'));
+    assert.equal(readyHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'), false);
+
+    // 6b. Waiting state (202): job status shown, never full success
+    const waitHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: { ...EMPTY_MAILBOX_REMOVAL, status: 'waiting', snapshot: readySnap, job: { id: 'backup-job-1', action: 'backup', status: 'queued' } },
+      })
+    );
+    assert.ok(waitHtml.includes('Yedek işi: queued'));
+    assert.equal(waitHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'), false);
+
+    // 6c. Receipt present (data deleted, record remaining): warning notice and Step 3 button
+    const receiptSnap = { ...readySnap, present: false, bytes: 0, blockers: [] };
+    const receiptHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: {
+          ...EMPTY_MAILBOX_REMOVAL,
+          status: 'ready',
+          snapshot: receiptSnap,
+          backupId: 'backup-job-1',
+          receipt: { id: 'delete-job-2', revision: 1, backupId: 'backup-job-1' },
+        },
+      })
+    );
+    assert.ok(receiptHtml.includes('Veri silme işi doğrulandı. Hesap kaydı henüz kaldırılmadı; son onay gereklidir.'));
+    assert.ok(receiptHtml.includes('3. Hesap kaydını kaldır…'));
+    assert.equal(receiptHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'), false);
+
+    // 6d. Uncertain state (lost POST): alert shown, no action buttons
+    const uncertHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: {
+          ...EMPTY_MAILBOX_REMOVAL,
+          status: 'uncertain',
+          uncertain: true,
+          snapshot: readySnap,
+          error: 'İsteğin sonucu doğrulanamadı.',
+        },
+      })
+    );
+    assert.ok(uncertHtml.includes('Yeni bir yedek/silme isteği başlatılmayacak'));
+    assert.equal(uncertHtml.includes('Silmeden önce yedekle'), false);
+
+    // 6e. Deleted state (full success after finalize): success notice
+    const deletedHtml = renderToString(
+      createElement(TestMailboxApp, {
+        session: c16Session,
+        mailbox: c16Target,
+        domain: { id: c16DomainId, webDomainId: 'c16-wdom' },
+        state: {
+          ...EMPTY_MAILBOX_REMOVAL,
+          status: 'deleted',
+          result: { id: c16TargetId, deleteJobId: 'delete-job-2', backupId: 'backup-job-1' },
+        },
+      })
+    );
+    assert.ok(deletedHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'));
+  }
 });
