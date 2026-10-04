@@ -470,16 +470,25 @@ export function createAiConversationService({
       if (auth?.user?.active === false || auth?.security?.managementAllowed === false) {
         return false;
       }
+      if (auth?.user?.role !== 'owner' && conv.websiteId && Array.isArray(auth?.user?.websiteIds) && !auth.user.websiteIds.includes(conv.websiteId)) {
+        return false;
+      }
       if (typeof activeAuthChecker === 'function') {
         try {
           const res = await activeAuthChecker({
-            sessionId: auth?.session?.id || auth?.sessionId,
+            sessionId: auth?.session?.id || auth?.sessionId || auth?.id,
             userId: auth?.user?.id,
             role: auth?.user?.role,
             user: auth?.user,
             auth,
           }, conv.websiteId);
           if (!res || res.revoked === true || res.active === false || (res.user && res.user.active === false)) {
+            return false;
+          }
+          if (auth?.user?.role !== 'owner' && conv.websiteId && Array.isArray(res.websiteIds) && !res.websiteIds.includes(conv.websiteId)) {
+            return false;
+          }
+          if (auth?.user?.role !== 'owner' && conv.websiteId && res.user && Array.isArray(res.user.websiteIds) && !res.user.websiteIds.includes(conv.websiteId)) {
             return false;
           }
         } catch {
@@ -614,11 +623,14 @@ export function createAiConversationService({
               result = await resolvedToolRegistry.execute({
                 name: proposal.name,
                 input: proposal.input,
-                context: { actorId: auth.user.id, role: auth.user.role },
+                context: { actorId: auth.user.id, role: auth.user.role, signal: abortController.signal },
               });
             } catch (err) {
               result = { error: err.message, code: err.code || 'tool_execution_failed' };
             }
+
+            await checkAuthOrAbort();
+            if (authRevoked) throw new AiConversationError('forbidden', 'Live authorization or session revoked.', 403);
 
             toolExecutions.push({ name: proposal.name, input: proposal.input, result });
             if (onEvent) onEvent({ type: 'tool_result', name: proposal.name, result });

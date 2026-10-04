@@ -13,7 +13,7 @@ export function conversationScope(auth, websiteId = null) {
     throw new AiHistoryError('unauthorized', 'Authenticated conversation owner is required.', 401);
   }
   const owner = user.role === 'owner' && auth.access?.mode === 'management' && auth.access?.permissions?.includes('*');
-  const manager = user.role === 'site_manager' && auth.access?.mode === 'site_management' && Array.isArray(user.websiteIds);
+  const manager = ['site_manager', 'reseller', 'customer'].includes(user.role) && auth.access?.mode === 'site_management' && Array.isArray(user.websiteIds);
   if (user.active === false || auth.security?.managementAllowed !== true || (!owner && !manager)) {
     throw new AiHistoryError('forbidden', 'Conversation access is not allowed.', 403);
   }

@@ -1,4 +1,5 @@
 import { panelRequest } from '../api.js';
+import { sessionHeaders } from '../session-client.js';
 
 export function getAiProviders() {
   return panelRequest('/ai/providers');
@@ -89,6 +90,62 @@ export function sendAiMessage({ conversationId, text }, { signal } = {}) {
     body: { text },
     ...(signal ? { signal } : {}),
   });
+}
+
+export async function streamAiMessage({ conversationId, text }, { onEvent, signal } = {}) {
+  const url = `/api/panel/ai/conversations/${encodeURIComponent(conversationId)}/messages/stream`;
+  const response = await fetch(url, {
+    method: 'POST',
+    credentials: 'same-origin',
+    cache: 'no-store',
+    redirect: 'error',
+    signal,
+    headers: {
+      ...sessionHeaders('POST'),
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({ text }),
+  });
+
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null);
+    const error = new Error(payload?.error?.message ?? `Request failed with HTTP ${response.status}`);
+    error.code = payload?.error?.code ?? `http_${response.status}`;
+    error.status = response.status;
+    throw error;
+  }
+
+  if (!response.body) return;
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split('\n');
+    buffer = lines.pop();
+
+    for (const line of lines) {
+      if (line.startsWith('data: ')) {
+        try {
+          const data = JSON.parse(line.slice(6));
+          if (onEvent) onEvent(data);
+        } catch {
+          // ignore unparseable chunk
+        }
+      }
+    }
+  }
+  if (buffer.startsWith('data: ')) {
+    try {
+      const data = JSON.parse(buffer.slice(6));
+      if (onEvent) onEvent(data);
+    } catch {
+      // ignore
+    }
+  }
 }
 
 export function executeAiTool({ toolName, input = {}, previewDigest = null, confirmation = null }) {

@@ -45,6 +45,20 @@ function normalizeBody(body, allowed) {
   return value;
 }
 
+function assertNoActorSpoofing(request) {
+  const currentActorId = request.auth?.user?.id;
+  const candidateActorId = request.body?.actorId
+    ?? request.body?.actor_id
+    ?? request.query?.actorId
+    ?? request.query?.actor_id
+    ?? request.headers?.['x-actor-id']
+    ?? request.headers?.['x-yunpanel-actor-id']
+    ?? request.headers?.['x-actor'];
+  if (candidateActorId !== undefined && candidateActorId !== currentActorId) {
+    throw new AiHttpError('forbidden', 'Actor impersonation is forbidden.', 403);
+  }
+}
+
 function previewBody(body) {
   const value = normalizeBody(body, new Set(['input']));
   return { input: value.input ?? {} };
@@ -294,6 +308,7 @@ export function mountAiRoutes(app, {
     }));
 
     app.get('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      assertNoActorSpoofing(request);
       const query = normalizeBody(request.query, new Set(['websiteId', 'limit', 'cursor']));
       const websiteId = query.websiteId ?? null;
       if ((websiteId !== null && typeof websiteId !== 'string')
@@ -309,64 +324,107 @@ export function mountAiRoutes(app, {
     }));
 
     app.post('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      assertNoActorSpoofing(request);
+      normalizeBody(request.query, new Set());
       const body = normalizeBody(request.body, new Set(['title', 'websiteId']));
       const conversation = await conversationService.createConversation({ title: body.title, websiteId: body.websiteId ?? null, auth: request.auth });
       return response.status(201).json({ data: conversation });
     }));
 
     app.get('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      assertNoActorSpoofing(request);
+      normalizeBody(request.query, new Set());
       const conversation = await conversationService.getConversation(request.params.conversationId, { auth: request.auth });
       if (!conversation) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
       return response.json({ data: conversation });
     }));
 
     app.delete('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      assertNoActorSpoofing(request);
+      normalizeBody(request.query, new Set());
       const deleted = await conversationService.deleteConversation(request.params.conversationId, { auth: request.auth });
       if (!deleted) throw new AiHttpError('conversation_not_found', 'Conversation not found', 404);
       return response.json({ data: { success: true } });
     }));
 
     app.post('/api/ai/conversations/:conversationId/messages', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      assertNoActorSpoofing(request);
+      normalizeBody(request.query, new Set());
+      const body = normalizeBody(request.body, new Set(['text']));
+      if (typeof body.text !== 'string' || body.text.trim().length === 0) {
+        throw new AiHttpError('invalid_message_text', 'Message text cannot be empty', 400);
+      }
       const abortController = new AbortController();
-      request.on?.('close', () => {
+      response.on?.('close', () => {
         if (!response.writableEnded) abortController.abort();
       });
-      const text = request.body?.text;
       const message = await conversationService.sendMessage({
         conversationId: request.params.conversationId,
-        text,
-        auth: request.auth,
+        text: body.text,
+        auth: request.auth ? { ...request.auth, rawToken: request.rawToken } : request.auth,
         signal: abortController.signal,
+        authorizeActor: request.reauthorize || request.authorizeActor || undefined,
       });
       return response.json({ data: message });
     }));
 
     app.post('/api/ai/conversations/:conversationId/messages/stream', requirePanelRouteAccess, async (request, response) => {
-      response.setHeader('content-type', 'text/event-stream');
-      response.setHeader('cache-control', 'no-cache');
-      response.setHeader('connection', 'keep-alive');
-      response.setHeader('x-accel-buffering', 'no');
-      response.flushHeaders?.();
+      let headersSent = false;
+      const ensureHeaders = () => {
+        if (!headersSent && !response.headersSent) {
+          response.setHeader('content-type', 'text/event-stream');
+          response.setHeader('cache-control', 'no-cache');
+          response.setHeader('connection', 'keep-alive');
+          response.setHeader('x-accel-buffering', 'no');
+          response.flushHeaders?.();
+          headersSent = true;
+        }
+      };
 
       const abortController = new AbortController();
-      request.on?.('close', () => {
+      response.on?.('close', () => {
         if (!response.writableEnded) abortController.abort();
       });
 
       const sendEvent = (event) => {
+        ensureHeaders();
         response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
       };
 
       try {
+        assertNoActorSpoofing(request);
+        normalizeBody(request.query, new Set());
+        const body = normalizeBody(request.body, new Set(['text']));
+        if (typeof body.text !== 'string' || body.text.trim().length === 0) {
+          throw new AiHttpError('invalid_message_text', 'Message text cannot be empty', 400);
+        }
+
         await conversationService.sendMessage({
           conversationId: request.params.conversationId,
-          text: request.body?.text,
-          auth: request.auth,
+          text: body.text,
+          auth: request.auth ? { ...request.auth, rawToken: request.rawToken } : request.auth,
           onEvent: sendEvent,
           signal: abortController.signal,
+          authorizeActor: request.reauthorize || request.authorizeActor || undefined,
         });
-        response.end();
+        if (headersSent) {
+          response.end();
+        } else {
+          ensureHeaders();
+          response.end();
+        }
       } catch (err) {
+        if (!headersSent && !response.headersSent) {
+          const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600
+            ? err.status
+            : (err.statusCode || (err.code === 'forbidden' ? 403 : err.code === 'not_found' ? 404 : (err.code === 'invalid_message_text' || err.code === 'invalid_ai_request') ? 400 : 500));
+          return response.status(status).json({
+            error: {
+              code: err.code || 'chat_error',
+              message: err.message,
+            },
+          });
+        }
         sendEvent({ type: 'error', code: err.code || 'chat_error', message: err.message });
         response.end();
       }
@@ -520,6 +578,7 @@ export function mountAiMcpRoutes(app, {
 }
 
 export const aiHttpInternals = Object.freeze({
+  assertNoActorSpoofing,
   normalizeToolName,
   normalizeBody,
   previewBody,
