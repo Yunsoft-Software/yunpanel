@@ -165,12 +165,12 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-form { display: grid; gap: 18px; padding: var(--ws-section-pad); }
 .ws-form-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 18px; }
 .ws-site-admin-fields { align-items: start; }
-.ws-site-admin-fields label { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; padding: 0; font-size: 12px; font-weight: 550; line-height: 1.4; align-self: start; }
+.ws-site-admin-fields label { display: flex; flex-direction: column; gap: 7px; min-width: 0; margin: 0; padding: 0; font-size: 12px; font-weight: 550; line-height: 1.4; align-self: start; overflow-wrap: anywhere; }
 .ws-site-admin-fields label > input { box-sizing: border-box; width: 100%; height: var(--ws-control-height); min-height: var(--ws-control-height); padding: 10px 12px; font-size: 14px; line-height: 1.4; margin: 0; }
 .ws-site-admin-fields label > input:invalid { box-shadow: none; }
 .ws-site-admin-fields input[type="password"]::-ms-reveal, .ws-site-admin-fields input[type="password"]::-ms-clear { display: none; width: 0; height: 0; }
 .ws-site-admin-fields input::-webkit-credentials-auto-fill-button { margin: 0; }
-.ws-site-admin-fields .ws-field-hint { font-size: 12px; line-height: 1.5; color: var(--ws-muted); margin: 0; }
+.ws-site-admin-fields .ws-field-hint { font-size: 12px; line-height: 1.5; color: var(--ws-muted); margin: 0; overflow-wrap: anywhere; word-break: break-word; }
 .ws-form h3 { margin: 0; font-size: 14px; }
 .ws-form-divider { margin-top: 0; padding-top: 20px; border-top: 1px solid var(--ws-border); }
 .ws-form-footer { display: flex; justify-content: flex-end; flex-wrap: wrap; gap: 10px; padding-top: 18px; border-top: 1px solid var(--ws-border); }
@@ -184,6 +184,7 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 @keyframes ws-spin { to { transform: rotate(360deg); } }
 .ws-notice { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0 20px; padding: 14px 16px; border: 1px solid var(--ws-info); border-radius: 8px; color: var(--ws-info); background: var(--ws-info-soft); font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }
 .ws-notice > div { flex: 1; min-width: 0; }
+.ws-notice > span { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .ws-notice > svg { flex: none; }
 .ws-notice p { margin: 3px 0 0; }
 .ws-notice-warn, .ws-notice-warning { color: var(--ws-warning); background: var(--ws-warning-soft); border-color: var(--ws-warning); }
