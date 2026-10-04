@@ -23,6 +23,7 @@ import {
   mountWebsiteProvisioningRoutes,
   WebsiteProvisioningHttpError,
 } from '../src/website-provisioning-http.js';
+import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
 import {
   createProvisioningRecovery,
   EMPTY_RECOVERY,
@@ -580,4 +581,412 @@ test('Real Express API enforces fail-closed tenant boundary, session revocation,
   assert.equal(liveFlow.getState().status, 'forbidden');
   assert.equal(liveFlow.getState().operation, null, 'Old operation wiped upon 401');
   assert.equal(liveFlow.getState().approval, null, 'Old approval wiped upon 401');
+});
+
+// ============================================================================
+// Criterion 6: Backend atomic lock protects shared resources against race conditions (two browsers or processes)
+// ============================================================================
+
+test('Two browsers or processes racing on shared resource are serialized and protected by backend atomic lock (409 Conflict)', async (t) => {
+  globalThis.fetch = nativeFetch;
+  const { store, tempDir } = createRealAuthFixture(t);
+
+  // Setup owner
+  const { token: setupToken } = store.issueSetupToken();
+  const ownerUser = await store.completeSetup({
+    setupToken,
+    username: 'OwnerLockTest',
+    password: 'OwnerPassword123!',
+  });
+  const loginOwner = await store.login({ username: 'OwnerLockTest', password: 'OwnerPassword123!' });
+  const authCookie = '__Host-yunpanel_session';
+  const ownerCookie = `${authCookie}=${loginOwner.token}`;
+
+  const websites = new Map([
+    [siteAId, { id: siteAId, serverId: localServerId, customerId: 'cust-a' }],
+  ]);
+
+  let opA = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed')]);
+  const mockRegistry = {
+    get: async (id) => (id === opAId ? opA : null),
+    getLatestForWebsite: async (wid) => (wid === siteAId ? opA : null),
+  };
+
+  const lockRoot = path.join(tempDir, 'site-locks');
+  const siteMutationLock = createSiteMutationLock({ root: lockRoot });
+
+  let mutationInFlight = false;
+  let releaseMutation;
+  const mutationGate = new Promise((resolve) => { releaseMutation = resolve; });
+  const orchestratorCalls = [];
+
+  const mockOrchestrator = {
+    retryStep: async (id, stepId, actor) => {
+      mutationInFlight = true;
+      orchestratorCalls.push({ action: 'retry', id, stepId, actor });
+      await mutationGate;
+      opA = sampleOp(siteAId, opAId, 'partial', [sampleStep('nginx', 'succeeded')]);
+      return { outcome: 'progressed', operation: opA, stepId: 'nginx' };
+    },
+    runNext: async () => ({ outcome: 'progressed', operation: opA }),
+    compensateStep: async () => ({ outcome: 'compensated', operation: opA }),
+    supportsCompensation: () => true,
+  };
+
+  const app = express();
+  app.disable('x-powered-by');
+  app.use(express.json());
+
+  mountWebsiteProvisioningRoutes(app, {
+    registry: mockRegistry,
+    orchestrator: mockOrchestrator,
+    websiteRegistry: { getWebsite: async (id) => websites.get(id) || null },
+    localServerId,
+    siteMutationLock,
+  });
+
+  app.use((err, req, res, next) => {
+    res.status(err.status || 500).json({
+      error: {
+        code: err.code || 'internal_error',
+        message: err.message,
+      },
+    });
+  });
+
+  const origin = 'https://server.cryptoraichu.website';
+  const listener = createAuthenticatedApi({
+    store,
+    publicOrigin: origin,
+    development: true,
+    ownerMfaRequired: false,
+    createHandler: () => app,
+  });
+
+  const server = http.createServer(listener);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const base = `http://127.0.0.1:${server.address().port}`;
+  t.after(() => {
+    if (releaseMutation) releaseMutation();
+    server.close();
+  });
+
+  // Browser 1 sends mutation POST (retry step 'nginx')
+  const browser1Promise = fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: {
+      cookie: ownerCookie,
+      'content-type': 'application/json',
+      origin,
+      'x-csrf-token': loginOwner.session.csrfToken,
+    },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
+  });
+
+  // Wait until Browser 1 has acquired the atomic lock and entered the orchestrator
+  while (!mutationInFlight) {
+    await new Promise((r) => setTimeout(r, 10));
+  }
+
+  // Browser 2 (or a concurrent process) attempts mutation on the same site while Browser 1 is holding the lock
+  const browser2Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: {
+      cookie: ownerCookie,
+      'content-type': 'application/json',
+      origin,
+      'x-csrf-token': loginOwner.session.csrfToken,
+    },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
+  });
+
+  // Browser 2 MUST receive 409 Conflict from backend atomic lock
+  assert.equal(browser2Res.status, 409, 'Concurrent mutation on locked site resource must fail with 409 Conflict');
+  const browser2Json = await browser2Res.json();
+  assert.equal(browser2Json.error.code, 'site_mutation_locked');
+  assert.match(browser2Json.error.message, /Another process is changing this site resource/);
+
+  // Now release Browser 1's mutation
+  releaseMutation();
+  const browser1Res = await browser1Promise;
+  assert.ok([200, 202].includes(browser1Res.status));
+  const browser1Json = await browser1Res.json();
+  assert.equal(browser1Json.data.outcome, 'progressed');
+
+  // Verify orchestrator was executed only ONCE (Browser 1 only; Browser 2 was blocked by atomic lock)
+  assert.equal(orchestratorCalls.length, 1);
+
+  // Allow lock cleanup to settle
+  await new Promise((r) => setTimeout(r, 50));
+
+  // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
+  const browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: {
+      cookie: ownerCookie,
+      'content-type': 'application/json',
+      origin,
+      'x-csrf-token': loginOwner.session.csrfToken,
+    },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
+  });
+  assert.ok([200, 202].includes(browser3Res.status));
+  assert.equal(orchestratorCalls.length, 2);
+});
+
+test('Two separate OS processes contending on siteMutationLock enforce atomic exclusivity and 409 conflict', async (t) => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-lock-test-'));
+  t.after(() => {
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const lockRoot = path.join(tempDir, 'process-locks');
+  const lockProcA = createSiteMutationLock({ root: lockRoot, pid: process.pid });
+  const lockProcB = createSiteMutationLock({ root: lockRoot, pid: process.pid });
+
+  let procAInLock = false;
+  let releaseProcA;
+  const procAGate = new Promise((resolve) => { releaseProcA = resolve; });
+
+  const procAPromise = lockProcA.withSiteLock({ websiteId: siteAId }, async () => {
+    procAInLock = true;
+    await procAGate;
+    return 'proc_a_done';
+  });
+
+  while (!procAInLock) {
+    await new Promise((r) => setTimeout(r, 5));
+  }
+
+  // Process B contends for the same website resource while Process A holds it
+  let procBError = null;
+  try {
+    await lockProcB.withSiteLock({ websiteId: siteAId }, async () => 'proc_b_done');
+  } catch (err) {
+    procBError = err;
+  }
+
+  assert.ok(procBError instanceof SiteMutationLockError);
+  assert.equal(procBError.status, 409);
+  assert.equal(procBError.code, 'site_mutation_locked');
+
+  releaseProcA();
+  const procAResult = await procAPromise;
+  assert.equal(procAResult, 'proc_a_done');
+
+  // Once Process A has finished, Process B acquires successfully
+  const procBSubsequent = await lockProcB.withSiteLock({ websiteId: siteAId }, async () => 'proc_b_success');
+  assert.equal(procBSubsequent, 'proc_b_success');
+});
+
+// ============================================================================
+// Criterion 7: Client never auto-retries on 409, 429, 5xx, or network drop (fail-closed)
+// ============================================================================
+
+test('When 409 conflict, 429, 5xx, or network failure occurs during recovery mutation, client never auto-retries and stays fail-closed', async (t) => {
+  for (const errorStatus of [409, 429, 500, 503, 'network']) {
+    let postCount = 0;
+    const currentOp = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed')]);
+
+    const flow = createProvisioningRecovery({
+      websiteId: siteAId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => currentOp,
+      execute: async () => {
+        postCount++;
+        if (errorStatus === 'network') {
+          throw new TypeError('Failed to fetch (network drop)');
+        }
+        const err = new Error(`Server returned HTTP ${errorStatus}`);
+        err.status = errorStatus;
+        throw err;
+      },
+    });
+
+    await flow.load();
+    assert.equal(flow.getState().status, 'ready');
+
+    const approval = flow.prepare('retry', 'nginx');
+    assert.ok(approval);
+
+    // Perform mutation -> server errors with errorStatus
+    const postResult = await flow.perform(approval, approval.confirmation);
+
+    // Client MUST transition to 'uncertain', clear approval, and NOT auto-retry
+    assert.equal(postResult.status, 'uncertain', `Status should be uncertain for error ${errorStatus}`);
+    assert.equal(postResult.approval, null, `Approval must be cleared for error ${errorStatus}`);
+    assert.equal(postCount, 1, `Must transmit exactly 1 POST without auto-retry for error ${errorStatus}`);
+    assert.match(postResult.error, /İşlemin sonucu doğrulanamadı.*Durumu yenile/);
+
+    // Attempting to re-perform old approval is rejected
+    await flow.perform(approval, approval.confirmation);
+    assert.equal(postCount, 1, 'No additional POST on old approval call');
+
+    // Action preparation is locked while in uncertain state
+    assert.equal(flow.prepare('continue'), null);
+    assert.equal(flow.prepare('retry', 'nginx'), null);
+    assert.equal(flow.prepare('compensate', 'nginx'), null);
+  }
+});
+
+// ============================================================================
+// Criterion 8: Durumu yenile performs ONLY a GET request; new mutation requires explicit approval
+// ============================================================================
+
+test('Durumu yenile performs ONLY a GET request, and subsequent mutation requires fresh explicit approval', async () => {
+  let getCount = 0;
+  let postCount = 0;
+  let currentOp = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed')]);
+
+  let shouldFail = true;
+  const flow = createProvisioningRecovery({
+    websiteId: siteAId,
+    canManage: () => true,
+    isCurrent: () => true,
+    read: async () => {
+      getCount++;
+      return currentOp;
+    },
+    execute: async (appr) => {
+      postCount++;
+      if (shouldFail) {
+        const err = new Error('HTTP 409 Conflict');
+        err.status = 409;
+        throw err;
+      }
+      const progressedOp = sampleOp(siteAId, opAId, 'partial', [sampleStep('nginx', 'succeeded')]);
+      return { outcome: 'progressed', operation: progressedOp, stepId: appr.stepId, operationId: opAId };
+    },
+  });
+
+  // Initial load: 1 GET, 0 POST
+  await flow.load();
+  assert.equal(getCount, 1);
+  assert.equal(postCount, 0);
+
+  // Prepare and perform failing mutation
+  const apprFail = flow.prepare('retry', 'nginx');
+  assert.ok(apprFail);
+  await flow.perform(apprFail, apprFail.confirmation);
+  assert.equal(flow.getState().status, 'uncertain');
+  assert.equal(flow.getState().approval, null);
+  assert.equal(postCount, 1);
+
+  const getsBeforeRefresh = getCount;
+  const postsBeforeRefresh = postCount;
+
+  // "Durumu yenile" triggered (calls load())
+  shouldFail = false;
+  currentOp = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed', { canRetry: true })]);
+  await flow.load();
+
+  // VERIFY: Exactly 1 GET was performed, ZERO POSTs performed
+  assert.equal(getCount, getsBeforeRefresh + 1, 'Durumu yenile must make a GET request');
+  assert.equal(postCount, postsBeforeRefresh, 'Durumu yenile must NEVER make a POST request');
+
+  // State is now 'ready', but approval remains null (no auto-mutation)
+  const refreshedState = flow.getState();
+  assert.equal(refreshedState.status, 'ready');
+  assert.equal(refreshedState.approval, null, 'Approval must remain null after Durumu yenile');
+
+  // New mutation requires explicit user action: prepare() then perform()
+  const freshApproval = flow.prepare('retry', 'nginx');
+  assert.ok(freshApproval, 'Fresh approval prepared explicitly');
+  await flow.perform(freshApproval, freshApproval.confirmation);
+
+  assert.equal(postCount, postsBeforeRefresh + 1, 'Mutation only sent after fresh explicit approval');
+  assert.equal(flow.getState().status, 'ready');
+  assert.equal(flow.getState().changes, 1);
+});
+
+// ============================================================================
+// Criterion 9: Modal open while target/steps/capabilities change or rapid double clicks
+// ============================================================================
+
+test('While confirmation modal is open, operation/step/capability changes or rapid double-clicks transmit only ONE POST to current exact target', async () => {
+  // Scenario A: Operation changes while modal is open
+  {
+    let writes = 0;
+    let serverRecord = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed')]);
+    const flow = createProvisioningRecovery({
+      websiteId: siteAId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => serverRecord,
+      execute: async () => { writes++; return { outcome: 'progressed', operation: serverRecord }; },
+    });
+
+    await flow.load();
+    const approval = flow.prepare('retry', 'nginx');
+    assert.ok(approval);
+
+    // Server operation changed before user confirmed modal (e.g. new operationId or timestamp)
+    serverRecord = sampleOp(siteAId, randomUUID(), 'failed', [sampleStep('nginx', 'failed')]);
+
+    const result = await flow.perform(approval, approval.confirmation);
+    assert.equal(writes, 0, 'No POST must be sent when operation identity shifted');
+    assert.equal(result.approval, null, 'Approval cleared on mismatch');
+    assert.match(result.error, /yeniden onaylayın/);
+  }
+
+  // Scenario B: Step capability changes while modal is open (e.g. canRetry becomes false)
+  {
+    let writes = 0;
+    let stepState = 'failed';
+    let canRetry = true;
+    const flow = createProvisioningRecovery({
+      websiteId: siteAId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => sampleOp(siteAId, opAId, stepState, [sampleStep('nginx', stepState, { canRetry })]),
+      execute: async () => { writes++; return { outcome: 'progressed' }; },
+    });
+
+    await flow.load();
+    const approval = flow.prepare('retry', 'nginx');
+    assert.ok(approval);
+
+    // Step state changes to succeeded / canRetry becomes false
+    stepState = 'succeeded';
+    canRetry = false;
+
+    const result = await flow.perform(approval, approval.confirmation);
+    assert.equal(writes, 0, 'No POST must be sent when step capability changed');
+    assert.equal(result.approval, null);
+    assert.match(result.error, /yeniden onaylayın/);
+  }
+
+  // Scenario C: Rapid double confirmation (double-click) sends ONLY ONE POST
+  {
+    let writes = 0;
+    const gate = new Promise((resolve) => setTimeout(resolve, 30));
+    const opRecord = sampleOp(siteAId, opAId, 'failed', [sampleStep('nginx', 'failed')]);
+    const progressedOp = sampleOp(siteAId, opAId, 'partial', [sampleStep('nginx', 'succeeded')]);
+    const flow = createProvisioningRecovery({
+      websiteId: siteAId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => opRecord,
+      execute: async () => {
+        writes++;
+        await gate;
+        return { outcome: 'progressed', operation: progressedOp, stepId: 'nginx', operationId: opAId };
+      },
+    });
+
+    await flow.load();
+    const approval = flow.prepare('retry', 'nginx');
+    assert.ok(approval);
+
+    // Two concurrent calls to perform with the same approval (simulating rapid double clicks)
+    const [res1, res2] = await Promise.all([
+      flow.perform(approval, approval.confirmation),
+      flow.perform(approval, approval.confirmation),
+    ]);
+
+    assert.equal(writes, 1, 'Exactly ONE POST must be transmitted on rapid double clicks');
+    assert.equal(flow.getState().changes, 1);
+    assert.equal(flow.getState().approval, null);
+  }
 });

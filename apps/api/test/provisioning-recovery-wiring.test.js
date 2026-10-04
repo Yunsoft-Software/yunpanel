@@ -253,3 +253,21 @@ test('provisioning HTTP server boundary enforces fail-closed authorization acros
     server.close();
   }
 });
+
+test('provisioning recovery wires backend atomic lock and fail-closed concurrency protection', async () => {
+  const httpCode = await source('../src/website-provisioning-http.js');
+  const appCode = await source('../src/app.js');
+  const controllerCode = await source('../../web/src/workspace/provisioning-recovery.js');
+
+  // Backend wires siteMutationLock and translates SiteMutationLockError to 409
+  assert.match(httpCode, /import\s*\{\s*SiteMutationLockError\s*\}\s*from\s*'\.\/site-mutation-lock\.js'/);
+  assert.match(httpCode, /siteMutationLock\s*=\s*null/);
+  assert.match(httpCode, /withOptionalLock\(operation\.websiteId/);
+  assert.match(httpCode, /error\s*instanceof\s*SiteMutationLockError/);
+  assert.match(appCode, /mountWebsiteProvisioningRoutes\([\s\S]*siteMutationLock/);
+
+  // Client recovery controller enforces single POST on matching target, fail-closed on 409/429/5xx, and GET-only refresh
+  assert.match(controllerCode, /approval\.operationId\s*!==\s*state\.operation\.operationId/);
+  assert.match(controllerCode, /latest\.operationId\s*!==\s*approval\.operationId/);
+  assert.match(controllerCode, /status:\s*uncertain\s*\?\s*'uncertain'\s*:\s*state\.operation\s*\?\s*'stale'\s*:\s*'error'/);
+});

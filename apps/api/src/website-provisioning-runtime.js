@@ -903,6 +903,7 @@ export function createWebsiteProvisioningRuntime({
     registry,
     handlers,
     orchestrator,
+    hasSiteMutationLock: Boolean(siteMutationLock),
     get isolationMigration() {
       return isolationMigration;
     },
