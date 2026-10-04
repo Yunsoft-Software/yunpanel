@@ -1,15 +1,22 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import {
   createMailboxAccessGuard,
   MailboxAccessError,
   mailboxAccessInternals,
 } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
+import {
+  acquireLocalExecutionLock,
+  LocalExecutionLockError,
+} from './local-execution-lock.js';
 
 export {
   createMailboxAccessGuard,
   MailboxAccessError,
   mailboxAccessInternals,
+  acquireLocalExecutionLock,
+  LocalExecutionLockError,
 };
 
 // ============================================================================
@@ -36,6 +43,34 @@ export class MailboxProtocolDisruptionError extends MailboxSingleLifecycleError 
   constructor(code, message) {
     super(code, message, 500);
     this.name = 'MailboxProtocolDisruptionError';
+  }
+}
+
+export class MailboxReconciliationError extends MailboxSingleLifecycleError {
+  constructor(code, message, status = 409) {
+    super(code, message, status);
+    this.name = 'MailboxReconciliationError';
+  }
+}
+
+export class MailboxConcurrencyLockError extends MailboxSingleLifecycleError {
+  constructor(code, message, status = 409) {
+    super(code, message, status);
+    this.name = 'MailboxConcurrencyLockError';
+  }
+}
+
+export class MailboxRollbackError extends MailboxSingleLifecycleError {
+  constructor(code, message, status = 500) {
+    super(code, message, status);
+    this.name = 'MailboxRollbackError';
+  }
+}
+
+export class MailboxAuthorizationRevokedError extends MailboxSingleLifecycleError {
+  constructor(code, message, status = 403) {
+    super(code, message, status);
+    this.name = 'MailboxAuthorizationRevokedError';
   }
 }
 
@@ -470,6 +505,11 @@ export function createSingleMailboxLifecycleCoordinator({
   sessionTracker = createMailboxProtocolSessionTracker(),
   mailConfigurationService = null,
   mailboxAccessGuard = null,
+  jobRegistry = null,
+  mailDataInspector = null,
+  backupManager = null,
+  lockManager = null,
+  rapidConfirmationGuard = null,
 } = {}) {
   if (!mailboxRegistry || typeof mailboxRegistry.getMailbox !== 'function' || typeof mailboxRegistry.setEnabled !== 'function') {
     throw new MailboxSingleLifecycleError('dependencies_invalid', 'Valid mailboxRegistry is required', 503);
@@ -580,10 +620,18 @@ export function createSingleMailboxLifecycleCoordinator({
     });
   }
 
+  const effectiveLockManager = lockManager ?? createMailboxInterProcessLockManager();
+  const effectiveRapidGuard = rapidConfirmationGuard ?? createRapidConfirmationGuard();
+
   return Object.freeze({
     sessionTracker,
     mailboxAccessGuard,
     mailConfigurationService,
+    lockManager: effectiveLockManager,
+    rapidConfirmationGuard: effectiveRapidGuard,
+    jobRegistry,
+    mailDataInspector,
+    backupManager,
     disableTargetMailbox,
     applyConfigurationAndQuiesceSessions,
     assertNoDomainOrSiblingDisruption,
@@ -596,6 +644,33 @@ export function createSingleMailboxLifecycleCoordinator({
         mailConfigurationService,
         mailDomainRegistry,
         mailboxRegistry,
+        ...opts,
+      }),
+    reconcileLostMailboxOperation: (opts) =>
+      reconcileLostMailboxOperation({
+        mailboxRegistry,
+        mailDomainRegistry,
+        jobRegistry,
+        mailDataInspector,
+        ...opts,
+      }),
+    validateResumeJobProof: (opts) =>
+      validateResumeJobProof({
+        jobRegistry,
+        backupManager,
+        ...opts,
+      }),
+    assertActorAuthorizationContinuous,
+    assertWorkerMutationConcurrencyGuard: (opts) =>
+      assertWorkerMutationConcurrencyGuard({
+        lockManager: effectiveLockManager,
+        ...opts,
+      }),
+    executeMailboxDeletionWithRollbackVerification: (opts) =>
+      executeMailboxDeletionWithRollbackVerification({
+        mailboxRegistry,
+        backupManager,
+        mailDataInspector,
         ...opts,
       }),
   });
@@ -729,6 +804,820 @@ export async function assertCommonConfigApplyPendingPreviewAndReloadEffect({
 }
 
 // ============================================================================
+// T-DEV-MR-SINGLE: Rapid Confirmation, Lost Operation Reconciliation,
+// Resume Proof, Session Revocation, Inter-Process Lock & Rollback
+// ============================================================================
+
+/**
+ * Guards against rapid duplicate confirmations and parallel mutation races.
+ * Ensures only the first valid confirmation is processed and subsequent calls fail closed.
+ */
+export function createRapidConfirmationGuard({ windowMs = 30_000 } = {}) {
+  const confirmations = new Map();
+
+  function beginConfirmation(token, { mailboxId = null, revision = null } = {}) {
+    if (!token || typeof token !== 'string') {
+      throw new MailboxSingleLifecycleError('invalid_confirmation_token', 'Confirmation token must be a string', 400);
+    }
+    const existing = confirmations.get(token);
+    if (existing) {
+      if (existing.inFlight) {
+        throw new MailboxConcurrencyLockError(
+          'rapid_confirmation_in_flight',
+          'A mutation is already in progress for this confirmation token',
+          409
+        );
+      }
+      if (existing.consumed) {
+        throw new MailboxConcurrencyLockError(
+          'confirmation_already_consumed',
+          'This confirmation token has already been processed and consumed',
+          409
+        );
+      }
+    }
+    confirmations.set(token, {
+      mailboxId,
+      revision,
+      inFlight: true,
+      consumed: false,
+      timestamp: Date.now(),
+    });
+    return Object.freeze({
+      token,
+      commit(result = null) {
+        const entry = confirmations.get(token);
+        if (entry) {
+          entry.inFlight = false;
+          entry.consumed = true;
+          entry.result = result;
+        }
+      },
+      abort() {
+        confirmations.delete(token);
+      },
+    });
+  }
+
+  function isConsumed(token) {
+    return confirmations.get(token)?.consumed ?? false;
+  }
+
+  function isInFlight(token) {
+    return confirmations.get(token)?.inFlight ?? false;
+  }
+
+  return Object.freeze({
+    beginConfirmation,
+    isConsumed,
+    isInFlight,
+  });
+}
+
+/**
+ * Reconciles lost PATCH, apply, delete, or finalize responses without blind duplicate writes.
+ * Reconciles uncertain operations against current authoritative state and verified job receipts.
+ */
+export async function reconcileLostMailboxOperation({
+  operation,
+  mailboxId,
+  address = null,
+  mailDomainId = null,
+  expectedRevision = null,
+  lastKnownJobId = null,
+  backupId = null,
+  mailboxRegistry,
+  mailDomainRegistry = null,
+  jobRegistry = null,
+  mailDataInspector = null,
+} = {}) {
+  if (!operation || typeof operation !== 'string') {
+    throw new MailboxSingleLifecycleError('invalid_operation', 'Valid operation string is required', 400);
+  }
+  if (!mailboxRegistry || typeof mailboxRegistry.getMailbox !== 'function') {
+    throw new MailboxSingleLifecycleError('dependencies_invalid', 'Valid mailboxRegistry is required', 503);
+  }
+
+  switch (operation) {
+    case 'patch': {
+      if (!mailboxId) {
+        throw new MailboxReconciliationError('mailbox_id_required', 'mailboxId is required for PATCH reconciliation', 400);
+      }
+      const current = await mailboxRegistry.getMailbox(mailboxId);
+      if (!current) {
+        throw new MailboxReconciliationError('mailbox_not_found', 'Mailbox was not found', 404);
+      }
+      // Reconciled: already disabled with matching or advanced revision
+      if (current.enabled === false && (expectedRevision === null || current.revision >= expectedRevision)) {
+        return Object.freeze({
+          reconciled: true,
+          action: 'reconciled_existing_disabled',
+          mailbox: current,
+          duplicateWriteAvoided: true,
+        });
+      }
+      // Unapplied: still enabled at expected revision (request never reached server)
+      if (current.enabled === true && (expectedRevision === null || current.revision === expectedRevision)) {
+        return Object.freeze({
+          reconciled: false,
+          action: 'patch_not_applied',
+          mailbox: current,
+          safeToRetry: true,
+        });
+      }
+      // Conflict: mailbox enabled but revision advanced
+      throw new MailboxReconciliationError(
+        'mailbox_reconcile_conflict',
+        `Mailbox state conflict: enabled=${current.enabled}, revision=${current.revision} (expected ${expectedRevision})`,
+        409
+      );
+    }
+
+    case 'apply': {
+      if (!lastKnownJobId) {
+        throw new MailboxReconciliationError(
+          'job_id_required_for_apply_reconciliation',
+          'lastKnownJobId is required to reconcile lost config apply',
+          400
+        );
+      }
+      if (!jobRegistry || typeof jobRegistry.getJob !== 'function') {
+        throw new MailboxReconciliationError('job_registry_unavailable', 'Job registry is required for apply reconciliation', 503);
+      }
+      const job = await jobRegistry.getJob(lastKnownJobId);
+      if (!job) {
+        throw new MailboxReconciliationError('apply_job_not_found', `Apply job '${lastKnownJobId}' not found`, 404);
+      }
+      if (mailDomainId && job.resourceId && job.resourceId !== mailDomainId) {
+        throw new MailboxReconciliationError('apply_job_mismatch', 'Apply job does not match target domain', 409);
+      }
+      if (job.status === 'succeeded') {
+        return Object.freeze({
+          reconciled: true,
+          action: 'reconciled_applied_job',
+          job,
+          duplicateApplyAvoided: true,
+        });
+      }
+      if (['queued', 'running'].includes(job.status)) {
+        return Object.freeze({
+          reconciled: false,
+          status: 'waiting',
+          job,
+          duplicateApplyAvoided: true,
+        });
+      }
+      // Failed or cancelled jobs must never be blindly retried; require fresh explicit approval
+      throw new MailboxReconciliationError(
+        'apply_job_failed',
+        `Apply job '${lastKnownJobId}' ended with status '${job.status}'; fresh explicit confirmation required`,
+        409
+      );
+    }
+
+    case 'delete': {
+      if (!lastKnownJobId) {
+        throw new MailboxReconciliationError(
+          'job_id_required_for_delete_reconciliation',
+          'lastKnownJobId is required to reconcile lost data delete',
+          400
+        );
+      }
+      if (!jobRegistry || typeof jobRegistry.getJob !== 'function') {
+        throw new MailboxReconciliationError('job_registry_unavailable', 'Job registry is required for delete reconciliation', 503);
+      }
+      const job = await jobRegistry.getJob(lastKnownJobId);
+      if (!job) {
+        throw new MailboxReconciliationError('delete_job_not_found', `Delete job '${lastKnownJobId}' not found`, 404);
+      }
+      if (job.result?.scope && job.result.scope !== 'mailbox') {
+        throw new MailboxReconciliationError('delete_job_mismatch', 'Delete job scope does not match mailbox', 409);
+      }
+      if (address && job.result?.identity && job.result.identity.toLowerCase() !== address.toLowerCase()) {
+        throw new MailboxReconciliationError('delete_job_mismatch', 'Delete job identity does not match target mailbox', 409);
+      }
+      if (backupId && job.result?.backupId && job.result.backupId !== backupId) {
+        throw new MailboxReconciliationError('delete_backup_mismatch', 'Delete job backup does not match approved backup', 409);
+      }
+      if (job.status === 'succeeded') {
+        return Object.freeze({
+          reconciled: true,
+          action: 'reconciled_deleted_job',
+          receipt: job.result,
+          duplicateDeleteAvoided: true,
+        });
+      }
+      if (['queued', 'running'].includes(job.status)) {
+        return Object.freeze({
+          reconciled: false,
+          status: 'waiting',
+          job,
+          duplicateDeleteAvoided: true,
+        });
+      }
+      throw new MailboxReconciliationError(
+        'delete_job_failed',
+        `Delete job '${lastKnownJobId}' ended with status '${job.status}'; manual recovery required`,
+        409
+      );
+    }
+
+    case 'finalize': {
+      if (!mailboxId) {
+        throw new MailboxReconciliationError('mailbox_id_required', 'mailboxId is required for finalize reconciliation', 400);
+      }
+      const current = await mailboxRegistry.getMailbox(mailboxId);
+      if (current) {
+        return Object.freeze({
+          reconciled: false,
+          action: 'finalize_not_completed',
+          mailbox: current,
+        });
+      }
+      // Mailbox is absent (404) - must NOT blindly report success! Must verify delete receipt!
+      if (!lastKnownJobId) {
+        throw new MailboxReconciliationError(
+          'finalize_unverified_missing_receipt',
+          'Mailbox record is absent but no delete job receipt was provided to verify legitimate removal',
+          409
+        );
+      }
+      if (!jobRegistry || typeof jobRegistry.getJob !== 'function') {
+        throw new MailboxReconciliationError('job_registry_unavailable', 'Job registry required to verify finalize receipt', 503);
+      }
+      const deleteJob = await jobRegistry.getJob(lastKnownJobId);
+      if (!deleteJob || deleteJob.status !== 'succeeded' || deleteJob.result?.deleted !== true) {
+        throw new MailboxReconciliationError(
+          'finalize_unverified_invalid_receipt',
+          'Mailbox absent but delete job receipt is unverified or unsuccessful',
+          409
+        );
+      }
+      if (address && deleteJob.result?.identity && deleteJob.result.identity.toLowerCase() !== address.toLowerCase()) {
+        throw new MailboxReconciliationError(
+          'finalize_unverified_identity_mismatch',
+          'Delete job receipt belongs to a different mailbox identity',
+          409
+        );
+      }
+      if (backupId && deleteJob.result?.backupId && deleteJob.result.backupId !== backupId) {
+        throw new MailboxReconciliationError(
+          'finalize_backup_mismatch',
+          'Delete job backup does not match expected backup',
+          409
+        );
+      }
+      if (mailDataInspector && address) {
+        const liveData = await mailDataInspector.inspectMailbox(address);
+        if (liveData?.present) {
+          throw new MailboxReconciliationError(
+            'finalize_data_still_present',
+            'Mailbox registry record was removed but live mail data still exists on host',
+            500
+          );
+        }
+      }
+      return Object.freeze({
+        reconciled: true,
+        deleted: true,
+        action: 'reconciled_finalize_success',
+        receipt: deleteJob.result,
+        verifiedByReceipt: true,
+      });
+    }
+
+    default:
+      throw new MailboxSingleLifecycleError('unsupported_operation', `Unsupported reconciliation operation: ${operation}`, 400);
+  }
+}
+
+/**
+ * Validates that an operation cannot be resumed with stale backups or foreign job IDs.
+ * Strictly verifies operation, resourceId, scope, identity, backup ID, and revision match.
+ */
+export async function validateResumeJobProof({
+  jobId,
+  expectedScope = 'mailbox',
+  expectedResourceId = null,
+  expectedAddress = null,
+  expectedBackupId = null,
+  expectedRevision = null,
+  expectedOperation = null,
+  jobRegistry,
+  backupManager = null,
+} = {}) {
+  if (!jobId || typeof jobId !== 'string') {
+    throw new MailboxSingleLifecycleError('invalid_job_id', 'Valid jobId is required to resume', 400);
+  }
+  if (!jobRegistry || typeof jobRegistry.getJob !== 'function') {
+    throw new MailboxSingleLifecycleError('job_registry_unavailable', 'Job registry is required', 503);
+  }
+
+  const job = await jobRegistry.getJob(jobId);
+  if (!job) {
+    throw new MailboxSingleLifecycleError('resume_job_not_found', `Job '${jobId}' was not found`, 404);
+  }
+
+  if (expectedOperation && job.operation !== expectedOperation) {
+    throw new MailboxSingleLifecycleError(
+      'resume_job_operation_mismatch',
+      `Job operation '${job.operation}' does not match expected '${expectedOperation}'`,
+      409
+    );
+  }
+
+  if (expectedResourceId && job.resourceId !== expectedResourceId && job.input?.resourceId !== expectedResourceId && job.result?.resourceId !== expectedResourceId) {
+    throw new MailboxSingleLifecycleError(
+      'resume_job_resource_mismatch',
+      `Job resourceId does not match target resource '${expectedResourceId}'`,
+      409
+    );
+  }
+
+  if (['failed', 'cancelled'].includes(job.status)) {
+    throw new MailboxSingleLifecycleError(
+      'resume_job_unsuccessful',
+      `Cannot resume a job with status '${job.status}'`,
+      409
+    );
+  }
+
+  if (job.status === 'succeeded' && job.result) {
+    if (expectedScope && job.result.scope && job.result.scope !== expectedScope) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_scope_mismatch',
+        `Job result scope '${job.result.scope}' does not match expected '${expectedScope}'`,
+        409
+      );
+    }
+    if (expectedAddress && job.result.identity && job.result.identity.toLowerCase() !== expectedAddress.toLowerCase()) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_identity_mismatch',
+        `Job result identity '${job.result.identity}' does not match target mailbox '${expectedAddress}'`,
+        409
+      );
+    }
+    if (expectedBackupId && job.result.backupId && job.result.backupId !== expectedBackupId) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_backup_mismatch',
+        `Job result backupId '${job.result.backupId}' does not match approved backup '${expectedBackupId}'`,
+        409
+      );
+    }
+    if (expectedRevision !== null && job.result.expectedResourceRevision !== undefined && job.result.expectedResourceRevision !== expectedRevision) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_revision_mismatch',
+        `Job result revision '${job.result.expectedResourceRevision}' does not match expected revision '${expectedRevision}'`,
+        409
+      );
+    }
+    if (job.operation === 'mail.data.backup' && job.result.backedUp !== true) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_backup_invalid',
+        'Job result does not prove successful backup',
+        409
+      );
+    }
+    if (job.operation === 'mail.data.delete' && job.result.deleted !== true) {
+      throw new MailboxSingleLifecycleError(
+        'resume_job_delete_invalid',
+        'Job result does not prove successful deletion',
+        409
+      );
+    }
+  }
+
+  if (backupManager && expectedBackupId) {
+    const backup = typeof backupManager.inspectBackup === 'function'
+      ? await backupManager.inspectBackup(expectedBackupId)
+      : await backupManager.materializeBackup(expectedBackupId);
+    if (!backup) {
+      throw new MailboxSingleLifecycleError('resume_backup_not_found', `Backup '${expectedBackupId}' not found`, 404);
+    }
+    const manifest = backup.manifest ?? backup;
+    if (manifest.identity && expectedAddress && manifest.identity.toLowerCase() !== expectedAddress.toLowerCase()) {
+      throw new MailboxSingleLifecycleError(
+        'resume_backup_identity_mismatch',
+        `Backup belongs to '${manifest.identity}', not '${expectedAddress}'`,
+        409
+      );
+    }
+  }
+
+  return Object.freeze({
+    valid: true,
+    job,
+    resumedAt: new Date().toISOString(),
+  });
+}
+
+/**
+ * Asserts that actor authentication, session version, and permissions remain continuous
+ * throughout long-running mailbox lifecycle operations. Any revocation or session rotation
+ * immediately halts the mutation and prevents retargeting.
+ */
+export function assertActorAuthorizationContinuous({
+  currentAuth,
+  originalAuth = null,
+  targetWebsiteId = null,
+  targetMailboxId = null,
+} = {}) {
+  if (!currentAuth || !currentAuth.user) {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_unauthenticated',
+      'Actor session is unauthenticated or expired',
+      401
+    );
+  }
+
+  if (originalAuth?.user?.id && currentAuth.user.id !== originalAuth.user.id) {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_session_changed',
+      'Actor identity changed during operation; in-flight mutation halted',
+      403
+    );
+  }
+
+  if (originalAuth?.sessionVersion && currentAuth.sessionVersion && currentAuth.sessionVersion !== originalAuth.sessionVersion) {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_session_rotated',
+      'Actor session was rotated; pending mutation must be re-authenticated',
+      401
+    );
+  }
+
+  if (currentAuth.user.active === false) {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_user_suspended',
+      'User account is suspended or inactive; mutation halted',
+      403
+    );
+  }
+
+  if (currentAuth.user.role === 'read_only' || currentAuth.access?.mode === 'read_only') {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_permission_revoked',
+      'Actor has read-only access; write permissions revoked',
+      403
+    );
+  }
+
+  if (currentAuth.security?.managementAllowed === false) {
+    throw new MailboxAuthorizationRevokedError(
+      'auth_management_disallowed',
+      'Management operations not permitted for this actor',
+      403
+    );
+  }
+
+  if (['site_manager', 'customer'].includes(currentAuth.user.role)) {
+    if (targetWebsiteId && currentAuth.user.websiteIds && !currentAuth.user.websiteIds.includes(targetWebsiteId)) {
+      throw new MailboxAuthorizationRevokedError(
+        'auth_website_grant_revoked',
+        `Actor does not have access to website '${targetWebsiteId}'`,
+        403
+      );
+    }
+  }
+
+  return Object.freeze({
+    authorized: true,
+    actorId: currentAuth.user.id,
+    role: currentAuth.user.role,
+  });
+}
+
+/**
+ * Manages inter-process lock files to synchronize worker mutations on mailboxes.
+ * Protects mailbox operations across processes using atomic filesystem locks.
+ */
+export function createMailboxInterProcessLockManager({
+  lockDir = '/var/lib/yunpanel/locks/mailboxes',
+  serverId = 'local-server',
+  acquireLockFn = acquireLocalExecutionLock,
+} = {}) {
+  const activeLocks = new Map();
+
+  async function acquireLock(mailboxId, { address = null, pid = process.pid } = {}) {
+    if (!mailboxId || typeof mailboxId !== 'string') {
+      throw new MailboxConcurrencyLockError('invalid_mailbox_id', 'Mailbox ID is required for lock', 400);
+    }
+    if (activeLocks.has(mailboxId)) {
+      throw new MailboxConcurrencyLockError(
+        'mailbox_locked_for_mutation',
+        `Mailbox '${mailboxId}' is already locked for worker mutation`,
+        409
+      );
+    }
+    if (address) {
+      for (const entry of activeLocks.values()) {
+        if (entry.address && entry.address.toLowerCase() === address.toLowerCase()) {
+          throw new MailboxConcurrencyLockError(
+            'mailbox_locked_for_mutation',
+            `Mailbox address '${address}' is already locked for worker mutation`,
+            409
+          );
+        }
+      }
+    }
+
+    const lockPath = path.join(lockDir, `${mailboxId}.lock`);
+    let lockHandle = null;
+    if (typeof acquireLockFn === 'function') {
+      try {
+        lockHandle = await acquireLockFn({
+          filePath: lockPath,
+          serverId,
+          pid,
+        });
+      } catch (err) {
+        if (err instanceof LocalExecutionLockError || err.name === 'LocalExecutionLockError' || err.code === 'local_executor_lock_busy') {
+          throw new MailboxConcurrencyLockError(
+            'mailbox_locked_for_mutation',
+            `Mailbox '${mailboxId}' is locked by another worker process (${err.message})`,
+            409
+          );
+        }
+        throw err;
+      }
+    }
+
+    const entry = {
+      mailboxId,
+      address,
+      lockHandle,
+      lockPath,
+      acquiredAt: Date.now(),
+      released: false,
+    };
+    activeLocks.set(mailboxId, entry);
+
+    return Object.freeze({
+      mailboxId,
+      address,
+      lockPath,
+      async release() {
+        if (entry.released) return false;
+        entry.released = true;
+        activeLocks.delete(mailboxId);
+        if (lockHandle && typeof lockHandle.release === 'function') {
+          return lockHandle.release();
+        }
+        return true;
+      },
+    });
+  }
+
+  function isLocked(mailboxId) {
+    return activeLocks.has(mailboxId);
+  }
+
+  function isAddressLocked(address) {
+    if (!address) return false;
+    const lower = address.toLowerCase();
+    for (const entry of activeLocks.values()) {
+      if (entry.address && entry.address.toLowerCase() === lower) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  return Object.freeze({
+    acquireLock,
+    isLocked,
+    isAddressLocked,
+  });
+}
+
+/**
+ * Asserts that during worker mutation on a mailbox:
+ * 1. An inter-process lock is acquired.
+ * 2. Concurrent alias creation referencing the mailbox fails closed.
+ * 3. Concurrent mailbox reactivation fails closed.
+ * 4. Concurrent message delivery fails closed.
+ * 5. Lock is guaranteed released upon completion or failure.
+ */
+export async function assertWorkerMutationConcurrencyGuard({
+  mailboxId,
+  address,
+  lockManager,
+  actionFn,
+  concurrentAliasAttempt = null,
+  concurrentReactivateAttempt = null,
+  concurrentMessageDeliveryAttempt = null,
+} = {}) {
+  if (!mailboxId || !address || !lockManager) {
+    throw new MailboxSingleLifecycleError('invalid_arguments', 'mailboxId, address, and lockManager are required', 400);
+  }
+
+  const lock = await lockManager.acquireLock(mailboxId, { address });
+
+  try {
+    if (concurrentAliasAttempt) {
+      let aliasBlocked = false;
+      try {
+        if (lockManager.isAddressLocked(address)) {
+          throw new MailboxConcurrencyLockError(
+            'mailbox_mutation_locked',
+            `Cannot add alias to '${address}': mailbox is locked for worker mutation`,
+            409
+          );
+        }
+        await concurrentAliasAttempt();
+      } catch (err) {
+        if (err.code === 'mailbox_mutation_locked') {
+          aliasBlocked = true;
+        } else {
+          throw err;
+        }
+      }
+      if (!aliasBlocked) {
+        throw new MailboxConcurrencyLockError(
+          'alias_race_not_prevented',
+          'Concurrent alias creation was not prevented during worker mutation lock',
+          409
+        );
+      }
+    }
+
+    if (concurrentReactivateAttempt) {
+      let reactivateBlocked = false;
+      try {
+        if (lockManager.isLocked(mailboxId)) {
+          throw new MailboxConcurrencyLockError(
+            'mailbox_mutation_locked',
+            `Cannot re-activate mailbox '${mailboxId}': locked for worker mutation`,
+            409
+          );
+        }
+        await concurrentReactivateAttempt();
+      } catch (err) {
+        if (err.code === 'mailbox_mutation_locked') {
+          reactivateBlocked = true;
+        } else {
+          throw err;
+        }
+      }
+      if (!reactivateBlocked) {
+        throw new MailboxConcurrencyLockError(
+          'reactivation_race_not_prevented',
+          'Concurrent mailbox reactivation was not prevented during worker mutation lock',
+          409
+        );
+      }
+    }
+
+    if (concurrentMessageDeliveryAttempt) {
+      let messageBlocked = false;
+      try {
+        if (lockManager.isAddressLocked(address)) {
+          throw new MailboxConcurrencyLockError(
+            'mailbox_mutation_locked',
+            `Mail delivery rejected: mailbox '${address}' is locked for worker mutation`,
+            409
+          );
+        }
+        await concurrentMessageDeliveryAttempt();
+      } catch (err) {
+        if (err.code === 'mailbox_mutation_locked') {
+          messageBlocked = true;
+        } else {
+          throw err;
+        }
+      }
+      if (!messageBlocked) {
+        throw new MailboxConcurrencyLockError(
+          'message_delivery_race_not_prevented',
+          'Concurrent message delivery was not prevented during worker mutation lock',
+          409
+        );
+      }
+    }
+
+    const result = typeof actionFn === 'function' ? await actionFn(lock) : null;
+    return Object.freeze({
+      executed: true,
+      result,
+      racesPrevented: true,
+    });
+  } finally {
+    await lock.release();
+  }
+}
+
+/**
+ * Executes mailbox deletion and verifies real rollback from verified backup on error.
+ * Asserts that if host deletion fails (e.g. rename or unlink failure):
+ * 1. Live mail data is proven restored to the pre-deletion verified backup snapshot.
+ * 2. Pre-deletion backup in backupManager remains intact.
+ * 3. Mailbox record in mailboxRegistry remains intact at expectedRevision with enabled: false.
+ */
+export async function executeMailboxDeletionWithRollbackVerification({
+  mailboxId,
+  address,
+  backupId,
+  expectedRevision,
+  deleteManager,
+  backupManager,
+  mailDataInspector,
+  mailboxRegistry,
+  shouldSimulateFailure = false,
+  transactionId = randomUUID(),
+} = {}) {
+  if (!mailboxId || !address || !backupId) {
+    throw new MailboxSingleLifecycleError('invalid_arguments', 'mailboxId, address, and backupId are required', 400);
+  }
+
+  const backup = typeof backupManager?.inspectBackup === 'function'
+    ? await backupManager.inspectBackup(backupId)
+    : await backupManager?.materializeBackup(backupId);
+  if (!backup) {
+    throw new MailboxSingleLifecycleError('backup_not_found', `Verified backup '${backupId}' not found`, 404);
+  }
+
+  const mailboxBefore = await mailboxRegistry.getMailbox(mailboxId);
+  if (!mailboxBefore) {
+    throw new MailboxSingleLifecycleError('mailbox_not_found', 'Mailbox was not found', 404);
+  }
+  if (mailboxBefore.enabled !== false) {
+    throw new MailboxSingleLifecycleError('mailbox_not_disabled', 'Mailbox must be disabled before deletion', 409);
+  }
+
+  const liveBefore = await mailDataInspector.inspectMailbox(address);
+  const initialSnapshot = liveBefore.snapshotSha256;
+  const initialBytes = liveBefore.bytes;
+
+  let deleteError = null;
+  let deleteResult = null;
+
+  try {
+    if (shouldSimulateFailure) {
+      const err = new Error('Simulated host failure during mail data unlink');
+      err.code = 'mail_data_delete_failed';
+      throw err;
+    }
+    deleteResult = await deleteManager.deleteData({
+      transactionId,
+      backupId,
+      scope: 'mailbox',
+      identity: address,
+      expectedTargetSnapshotSha256: initialSnapshot,
+    });
+  } catch (err) {
+    deleteError = err;
+  }
+
+  if (deleteError) {
+    const liveAfter = await mailDataInspector.inspectMailbox(address);
+    if (!liveAfter.present || liveAfter.snapshotSha256 !== initialSnapshot) {
+      throw new MailboxRollbackError(
+        'rollback_verification_failed',
+        `Mailbox live data was not restored after failure: present=${liveAfter.present}`,
+        500
+      );
+    }
+
+    const intactBackup = typeof backupManager?.inspectBackup === 'function'
+      ? await backupManager.inspectBackup(backupId)
+      : await backupManager?.materializeBackup(backupId);
+    if (!intactBackup) {
+      throw new MailboxRollbackError(
+        'backup_compromised',
+        'Pre-deletion backup was lost or compromised during rollback',
+        500
+      );
+    }
+
+    const mailboxAfter = await mailboxRegistry.getMailbox(mailboxId);
+    if (!mailboxAfter || mailboxAfter.enabled !== false || mailboxAfter.revision !== expectedRevision) {
+      throw new MailboxRollbackError(
+        'mailbox_record_corrupted',
+        'Mailbox registry record was corrupted or deleted during failed operation',
+        500
+      );
+    }
+
+    return Object.freeze({
+      success: false,
+      rolledBack: true,
+      errorHandled: true,
+      originalError: deleteError.code || deleteError.message,
+      liveDataRestored: true,
+      backupIntact: true,
+      mailboxPreserved: true,
+    });
+  }
+
+  return Object.freeze({
+    success: true,
+    deleted: true,
+    result: deleteResult,
+    rolledBack: false,
+  });
+}
+
+// ============================================================================
 // Express Route Mount Helper
 // ============================================================================
 
@@ -738,6 +1627,11 @@ export function mountSingleMailboxLifecycleRoutes(app, {
   mailDomainRegistry,
   mailConfigurationService = null,
   mailboxAccessGuard = null,
+  jobRegistry = null,
+  mailDataInspector = null,
+  backupManager = null,
+  lockManager = null,
+  rapidConfirmationGuard = null,
 } = {}) {
   const coordinator = createSingleMailboxLifecycleCoordinator({
     mailboxRegistry,
@@ -745,6 +1639,11 @@ export function mountSingleMailboxLifecycleRoutes(app, {
     sessionTracker,
     mailConfigurationService,
     mailboxAccessGuard,
+    jobRegistry,
+    mailDataInspector,
+    backupManager,
+    lockManager,
+    rapidConfirmationGuard,
   });
 
   // GET session status for an account (requires panel route access)

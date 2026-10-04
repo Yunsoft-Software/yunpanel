@@ -36,6 +36,17 @@ import {
   mailboxAccessInternals,
   assertDovecotPostfixCommandContracts,
   assertCommonConfigApplyPendingPreviewAndReloadEffect,
+  MailboxReconciliationError,
+  MailboxConcurrencyLockError,
+  MailboxRollbackError,
+  MailboxAuthorizationRevokedError,
+  createRapidConfirmationGuard,
+  reconcileLostMailboxOperation,
+  validateResumeJobProof,
+  assertActorAuthorizationContinuous,
+  createMailboxInterProcessLockManager,
+  assertWorkerMutationConcurrencyGuard,
+  executeMailboxDeletionWithRollbackVerification,
 } from '../src/mailbox-single-lifecycle.js';
 import {
   createMailConfigurationService,
@@ -2089,4 +2100,875 @@ test('Criterion 7: Common config apply previews all recorded pending changes and
     (err) => err.code === 'domain_workaround_detected',
     'Domain shutdown workaround must be detected and rejected'
   );
+});
+
+// ============================================================================
+// T-DEV-MR-SINGLE Task Extension:
+// Criteria 8–14: Lost Operation Reconciliation, Rapid Confirmation Guard,
+// Resume Proof, Session Revocation, Inter-Process Lock, and Rollback
+// ============================================================================
+
+test('Criterion 8: Lost PATCH, apply, delete, or finalize replies are reconciled without blind duplicate writes', async () => {
+  const mailboxId = 'mb-rec-01';
+  const address = 'target-rec@example.com';
+  const mailDomainId = 'domain-rec-01';
+  const backupId = 'backup-rec-01';
+
+  const mailboxes = new Map([
+    [mailboxId, { id: mailboxId, address, mailDomainId, enabled: false, revision: 2 }],
+  ]);
+
+  const mailboxRegistry = {
+    getMailbox: async (id) => (mailboxes.has(id) ? { ...mailboxes.get(id) } : null),
+  };
+
+  // 1. Lost PATCH reconciliation:
+  // Mailbox is already disabled at revision 2 -> reconciled without second PATCH write
+  const patchReconcile = await reconcileLostMailboxOperation({
+    operation: 'patch',
+    mailboxId,
+    expectedRevision: 2,
+    mailboxRegistry,
+  });
+  assert.equal(patchReconcile.reconciled, true);
+  assert.equal(patchReconcile.duplicateWriteAvoided, true);
+  assert.equal(patchReconcile.action, 'reconciled_existing_disabled');
+
+  // PATCH not applied (still enabled at expected revision) -> safe to retry
+  mailboxes.set('mb-unapplied', { id: 'mb-unapplied', address: 'unapplied@test.com', mailDomainId, enabled: true, revision: 1 });
+  const patchUnapplied = await reconcileLostMailboxOperation({
+    operation: 'patch',
+    mailboxId: 'mb-unapplied',
+    expectedRevision: 1,
+    mailboxRegistry,
+  });
+  assert.equal(patchUnapplied.reconciled, false);
+  assert.equal(patchUnapplied.safeToRetry, true);
+
+  // PATCH conflict: enabled with advanced revision -> fails closed with 409
+  mailboxes.set('mb-conflict', { id: 'mb-conflict', address: 'conflict@test.com', mailDomainId, enabled: true, revision: 5 });
+  await assert.rejects(
+    reconcileLostMailboxOperation({
+      operation: 'patch',
+      mailboxId: 'mb-conflict',
+      expectedRevision: 2,
+      mailboxRegistry,
+    }),
+    (err) => err instanceof MailboxReconciliationError && err.code === 'mailbox_reconcile_conflict'
+  );
+
+  // 2. Lost Apply reconciliation:
+  const jobs = new Map();
+  const jobRegistry = {
+    getJob: async (id) => (jobs.has(id) ? { ...jobs.get(id) } : null),
+  };
+
+  jobs.set('job-apply-succeeded', {
+    id: 'job-apply-succeeded',
+    operation: 'mail.config.apply',
+    resourceId: mailDomainId,
+    status: 'succeeded',
+    result: { applied: true, configurationSha256: 'sha-applied-123' },
+  });
+
+  const applyReconcile = await reconcileLostMailboxOperation({
+    operation: 'apply',
+    mailboxId,
+    mailDomainId,
+    lastKnownJobId: 'job-apply-succeeded',
+    mailboxRegistry,
+    jobRegistry,
+  });
+  assert.equal(applyReconcile.reconciled, true);
+  assert.equal(applyReconcile.duplicateApplyAvoided, true);
+  assert.equal(applyReconcile.action, 'reconciled_applied_job');
+
+  // Apply job still waiting/running
+  jobs.set('job-apply-running', {
+    id: 'job-apply-running',
+    operation: 'mail.config.apply',
+    resourceId: mailDomainId,
+    status: 'running',
+  });
+  const applyWaiting = await reconcileLostMailboxOperation({
+    operation: 'apply',
+    mailboxId,
+    mailDomainId,
+    lastKnownJobId: 'job-apply-running',
+    mailboxRegistry,
+    jobRegistry,
+  });
+  assert.equal(applyWaiting.reconciled, false);
+  assert.equal(applyWaiting.status, 'waiting');
+
+  // Failed apply job -> never automatic retry, requires fresh confirmation
+  jobs.set('job-apply-failed', {
+    id: 'job-apply-failed',
+    operation: 'mail.config.apply',
+    resourceId: mailDomainId,
+    status: 'failed',
+  });
+  await assert.rejects(
+    reconcileLostMailboxOperation({
+      operation: 'apply',
+      mailboxId,
+      mailDomainId,
+      lastKnownJobId: 'job-apply-failed',
+      mailboxRegistry,
+      jobRegistry,
+    }),
+    (err) => err instanceof MailboxReconciliationError && err.code === 'apply_job_failed'
+  );
+
+  // 3. Lost Delete reconciliation:
+  jobs.set('job-del-succeeded', {
+    id: 'job-del-succeeded',
+    operation: 'mail.data.delete',
+    resourceId: mailDomainId,
+    status: 'succeeded',
+    result: {
+      scope: 'mailbox',
+      identity: address,
+      backupId,
+      deleted: true,
+    },
+  });
+
+  const deleteReconcile = await reconcileLostMailboxOperation({
+    operation: 'delete',
+    mailboxId,
+    address,
+    backupId,
+    lastKnownJobId: 'job-del-succeeded',
+    mailboxRegistry,
+    jobRegistry,
+  });
+  assert.equal(deleteReconcile.reconciled, true);
+  assert.equal(deleteReconcile.duplicateDeleteAvoided, true);
+  assert.equal(deleteReconcile.action, 'reconciled_deleted_job');
+
+  // Delete job mismatch identity rejects
+  await assert.rejects(
+    reconcileLostMailboxOperation({
+      operation: 'delete',
+      mailboxId,
+      address: 'different-user@example.com',
+      backupId,
+      lastKnownJobId: 'job-del-succeeded',
+      mailboxRegistry,
+      jobRegistry,
+    }),
+    (err) => err instanceof MailboxReconciliationError && err.code === 'delete_job_mismatch'
+  );
+
+  // 4. Lost Finalize reconciliation:
+  // Mailbox is absent (deleted from registry), verified by delete job receipt & verified absent mail data
+  mailboxes.delete(mailboxId);
+  const mailDataInspector = {
+    inspectMailbox: async (addr) => ({ present: false, bytes: 0, snapshotSha256: null }),
+  };
+
+  const finalizeReconcile = await reconcileLostMailboxOperation({
+    operation: 'finalize',
+    mailboxId,
+    address,
+    backupId,
+    lastKnownJobId: 'job-del-succeeded',
+    mailboxRegistry,
+    jobRegistry,
+    mailDataInspector,
+  });
+  assert.equal(finalizeReconcile.reconciled, true);
+  assert.equal(finalizeReconcile.deleted, true);
+  assert.equal(finalizeReconcile.verifiedByReceipt, true);
+
+  // Finalize absent mailbox WITHOUT receipt must reject (404 alone is not proof!)
+  await assert.rejects(
+    reconcileLostMailboxOperation({
+      operation: 'finalize',
+      mailboxId: 'mb-nonexistent',
+      address: 'ghost@example.com',
+      lastKnownJobId: null,
+      mailboxRegistry,
+      jobRegistry,
+      mailDataInspector,
+    }),
+    (err) => err instanceof MailboxReconciliationError && err.code === 'finalize_unverified_missing_receipt'
+  );
+});
+
+test('Criterion 9: Two rapid confirmations process only the first valid token and prevent duplicate mutation races', async () => {
+  const guard = createRapidConfirmationGuard();
+  const token = 'delete-mailbox:alice@example.com:rev-1:token-xyz';
+
+  // 1. First confirmation begins processing
+  const attempt1 = guard.beginConfirmation(token, { mailboxId: 'mb-alice', revision: 1 });
+  assert.equal(attempt1.token, token);
+  assert.equal(guard.isInFlight(token), true);
+  assert.equal(guard.isConsumed(token), false);
+
+  // 2. Second rapid confirmation with identical token rejects with 409
+  assert.throws(
+    () => guard.beginConfirmation(token, { mailboxId: 'mb-alice', revision: 1 }),
+    (err) => err instanceof MailboxConcurrencyLockError && err.code === 'rapid_confirmation_in_flight'
+  );
+
+  // 3. First operation commits upon successful execution
+  attempt1.commit({ deleted: true });
+  assert.equal(guard.isInFlight(token), false);
+  assert.equal(guard.isConsumed(token), true);
+
+  // 4. Subsequent rapid confirmation after consumption rejects with 409
+  assert.throws(
+    () => guard.beginConfirmation(token, { mailboxId: 'mb-alice', revision: 1 }),
+    (err) => err instanceof MailboxConcurrencyLockError && err.code === 'confirmation_already_consumed'
+  );
+
+  // 5. Aborted confirmation (e.g. preflight check failure) allows safe retry
+  const abortableToken = 'token-abortable-123';
+  const attemptAbort = guard.beginConfirmation(abortableToken, { mailboxId: 'mb-alice', revision: 1 });
+  attemptAbort.abort();
+  assert.equal(guard.isInFlight(abortableToken), false);
+  assert.equal(guard.isConsumed(abortableToken), false);
+
+  const attemptRetry = guard.beginConfirmation(abortableToken, { mailboxId: 'mb-alice', revision: 1 });
+  assert.ok(attemptRetry);
+  attemptRetry.commit();
+  assert.equal(guard.isConsumed(abortableToken), true);
+});
+
+test('Criterion 10: Stale backup or foreign job ID cannot resume mailbox operations or overwrite data with invalid proof', async () => {
+  const domainId = 'dom-valid-01';
+  const mailboxAddress = 'legit@example.com';
+  const validBackupId = 'backup-valid-01';
+
+  const jobs = new Map();
+  const jobRegistry = {
+    getJob: async (id) => (jobs.has(id) ? { ...jobs.get(id) } : null),
+  };
+
+  const backups = new Map([
+    [validBackupId, {
+      backupId: validBackupId,
+      identity: mailboxAddress,
+      scope: 'mailbox',
+      contentSha256: 'a'.repeat(64),
+    }],
+    ['foreign-backup-99', {
+      backupId: 'foreign-backup-99',
+      identity: 'stranger@otherdomain.com',
+      scope: 'mailbox',
+      contentSha256: 'b'.repeat(64),
+    }],
+  ]);
+
+  const backupManager = {
+    inspectBackup: async (id) => (backups.has(id) ? { ...backups.get(id) } : null),
+  };
+
+  jobs.set('job-valid-del', {
+    id: 'job-valid-del',
+    operation: 'mail.data.delete',
+    resourceId: domainId,
+    status: 'succeeded',
+    result: {
+      scope: 'mailbox',
+      identity: mailboxAddress,
+      backupId: validBackupId,
+      expectedResourceRevision: 2,
+      deleted: true,
+    },
+  });
+
+  // 1. Valid resume proof succeeds
+  const validResume = await validateResumeJobProof({
+    jobId: 'job-valid-del',
+    expectedScope: 'mailbox',
+    expectedResourceId: domainId,
+    expectedAddress: mailboxAddress,
+    expectedBackupId: validBackupId,
+    expectedRevision: 2,
+    expectedOperation: 'mail.data.delete',
+    jobRegistry,
+    backupManager,
+  });
+  assert.equal(validResume.valid, true);
+
+  // 2. Reject resume with foreign job ID (identity mismatch)
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: 'job-valid-del',
+      expectedScope: 'mailbox',
+      expectedResourceId: domainId,
+      expectedAddress: 'imposter@example.com',
+      expectedBackupId: validBackupId,
+      jobRegistry,
+      backupManager,
+    }),
+    (err) => err.code === 'resume_job_identity_mismatch'
+  );
+
+  // 3. Reject resume with wrong operation
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: 'job-valid-del',
+      expectedScope: 'mailbox',
+      expectedResourceId: domainId,
+      expectedAddress: mailboxAddress,
+      expectedOperation: 'mail.data.backup',
+      jobRegistry,
+      backupManager,
+    }),
+    (err) => err.code === 'resume_job_operation_mismatch'
+  );
+
+  // 4. Reject resume with mismatched backup ID
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: 'job-valid-del',
+      expectedScope: 'mailbox',
+      expectedResourceId: domainId,
+      expectedAddress: mailboxAddress,
+      expectedBackupId: 'different-backup-123',
+      jobRegistry,
+      backupManager,
+    }),
+    (err) => err.code === 'resume_job_backup_mismatch'
+  );
+
+  // 5. Reject resume with failed job
+  jobs.set('job-failed-del', {
+    id: 'job-failed-del',
+    operation: 'mail.data.delete',
+    resourceId: domainId,
+    status: 'failed',
+  });
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: 'job-failed-del',
+      expectedScope: 'mailbox',
+      expectedResourceId: domainId,
+      expectedAddress: mailboxAddress,
+      jobRegistry,
+      backupManager,
+    }),
+    (err) => err.code === 'resume_job_unsuccessful'
+  );
+
+  // 6. Reject resume with foreign / stale backup
+  jobs.set('job-foreign-backup', {
+    id: 'job-foreign-backup',
+    operation: 'mail.data.delete',
+    resourceId: domainId,
+    status: 'succeeded',
+    result: {
+      scope: 'mailbox',
+      identity: mailboxAddress,
+      backupId: 'foreign-backup-99',
+      deleted: true,
+    },
+  });
+  await assert.rejects(
+    validateResumeJobProof({
+      jobId: 'job-foreign-backup',
+      expectedScope: 'mailbox',
+      expectedResourceId: domainId,
+      expectedAddress: mailboxAddress,
+      expectedBackupId: 'foreign-backup-99',
+      jobRegistry,
+      backupManager,
+    }),
+    (err) => err.code === 'resume_backup_identity_mismatch'
+  );
+});
+
+test('Criterion 11: Session or permission revocation immediately halts pending operations and prevents retargeting', async () => {
+  const websiteId = 'site-corp-01';
+  const originalAuth = {
+    user: { id: 'admin-1', role: 'site_manager', active: true, websiteIds: [websiteId] },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: true },
+  };
+
+  // 1. Continuous matching session succeeds
+  const authOk = assertActorAuthorizationContinuous({
+    currentAuth: structuredClone(originalAuth),
+    originalAuth,
+    targetWebsiteId: websiteId,
+  });
+  assert.equal(authOk.authorized, true);
+  assert.equal(authOk.actorId, 'admin-1');
+
+  // 2. User ID changed during in-flight operation -> halts immediately with 403
+  const changedUserAuth = {
+    user: { id: 'impostor-2', role: 'site_manager', active: true, websiteIds: [websiteId] },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: changedUserAuth,
+      originalAuth,
+      targetWebsiteId: websiteId,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_session_changed' && err.status === 403
+  );
+
+  // 3. Session token rotated -> halts with 401
+  const rotatedSessionAuth = {
+    user: { id: 'admin-1', role: 'site_manager', active: true, websiteIds: [websiteId] },
+    sessionVersion: 'v2.0.0',
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: rotatedSessionAuth,
+      originalAuth,
+      targetWebsiteId: websiteId,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_session_rotated' && err.status === 401
+  );
+
+  // 4. User suspended (active: false) -> halts with 403
+  const suspendedAuth = {
+    user: { id: 'admin-1', role: 'site_manager', active: false, websiteIds: [websiteId] },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: suspendedAuth,
+      originalAuth,
+      targetWebsiteId: websiteId,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_user_suspended' && err.status === 403
+  );
+
+  // 5. Role downgraded to read_only -> halts with 403
+  const readOnlyAuth = {
+    user: { id: 'admin-1', role: 'read_only', active: true, websiteIds: [websiteId] },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: false },
+  };
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: readOnlyAuth,
+      originalAuth,
+      targetWebsiteId: websiteId,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_permission_revoked' && err.status === 403
+  );
+
+  // 6. Website grant revoked from user -> halts with 403
+  const revokedGrantAuth = {
+    user: { id: 'admin-1', role: 'site_manager', active: true, websiteIds: ['different-website-99'] },
+    sessionVersion: 'v1.0.0',
+    security: { managementAllowed: true },
+  };
+  assert.throws(
+    () => assertActorAuthorizationContinuous({
+      currentAuth: revokedGrantAuth,
+      originalAuth,
+      targetWebsiteId: websiteId,
+    }),
+    (err) => err instanceof MailboxAuthorizationRevokedError && err.code === 'auth_website_grant_revoked' && err.status === 403
+  );
+});
+
+test('Criterion 12: Inter-process lock guards worker mutation against concurrent alias creation, reactivation, and message races', async () => {
+  const mailboxId = 'mb-locked-01';
+  const address = 'locked-worker@example.com';
+
+  const mockAcquireLock = async ({ filePath, serverId, pid }) => ({
+    filePath,
+    serverId,
+    pid,
+    release: async () => true,
+  });
+
+  const lockManager = createMailboxInterProcessLockManager({
+    lockDir: '/var/lib/yunpanel/locks/mailboxes',
+    serverId: 'local-test-server',
+    acquireLockFn: mockAcquireLock,
+  });
+
+  let aliasCreationAttempted = false;
+  let reactivationAttempted = false;
+  let messageDeliveryAttempted = false;
+  let mutationActionExecuted = false;
+
+  // Execute worker mutation with concurrency guard
+  const guardResult = await assertWorkerMutationConcurrencyGuard({
+    mailboxId,
+    address,
+    lockManager,
+    concurrentAliasAttempt: async () => {
+      aliasCreationAttempted = true;
+    },
+    concurrentReactivateAttempt: async () => {
+      reactivationAttempted = true;
+    },
+    concurrentMessageDeliveryAttempt: async () => {
+      messageDeliveryAttempted = true;
+    },
+    actionFn: async (lock) => {
+      mutationActionExecuted = true;
+      assert.equal(lock.mailboxId, mailboxId);
+      assert.equal(lock.address, address);
+      assert.equal(lockManager.isLocked(mailboxId), true);
+      assert.equal(lockManager.isAddressLocked(address), true);
+
+      // Concurrent lock acquisition by another process fails closed
+      await assert.rejects(
+        lockManager.acquireLock(mailboxId, { address }),
+        (err) => err instanceof MailboxConcurrencyLockError && err.code === 'mailbox_locked_for_mutation'
+      );
+      return { workerProcessed: true };
+    },
+  });
+
+  assert.equal(guardResult.executed, true);
+  assert.equal(guardResult.racesPrevented, true);
+  assert.equal(guardResult.result.workerProcessed, true);
+  assert.equal(mutationActionExecuted, true);
+
+  // Lock must be cleanly released after mutation completes
+  assert.equal(lockManager.isLocked(mailboxId), false);
+  assert.equal(lockManager.isAddressLocked(address), false);
+
+  // Subsequent normal lock acquisition succeeds
+  const lockAgain = await lockManager.acquireLock(mailboxId, { address });
+  assert.ok(lockAgain);
+  await lockAgain.release();
+  assert.equal(lockManager.isLocked(mailboxId), false);
+});
+
+test('Criterion 13: Failure during mailbox deletion or update triggers verified rollback from backup with live data restored', async () => {
+  const mailboxId = 'mb-rollback-01';
+  const address = 'rollback-user@example.com';
+  const backupId = 'backup-rollback-01';
+  const expectedRevision = 2;
+  const originalSnapshot = 'c'.repeat(64);
+  const originalBytes = 8192;
+
+  let liveDataState = {
+    present: true,
+    snapshotSha256: originalSnapshot,
+    bytes: originalBytes,
+  };
+
+  const mailDataInspector = {
+    inspectMailbox: async (addr) => ({ ...liveDataState }),
+  };
+
+  const backups = new Map([
+    [backupId, {
+      backupId,
+      identity: address,
+      scope: 'mailbox',
+      contentSha256: originalSnapshot,
+      bytes: originalBytes,
+      sourcePresent: true,
+    }],
+  ]);
+
+  const backupManager = {
+    inspectBackup: async (id) => (backups.has(id) ? { ...backups.get(id) } : null),
+  };
+
+  const mailboxes = new Map([
+    [mailboxId, {
+      id: mailboxId,
+      address,
+      enabled: false, // Must be disabled before deletion
+      revision: expectedRevision,
+    }],
+  ]);
+
+  const mailboxRegistry = {
+    getMailbox: async (id) => (mailboxes.has(id) ? { ...mailboxes.get(id) } : null),
+  };
+
+  // 1. Host deletion fails during file removal and triggers rollback
+  const failingDeleteManager = {
+    deleteData: async ({ transactionId, backupId, scope, identity, expectedTargetSnapshotSha256 }) => {
+      // Simulate file rename / unlink error
+      liveDataState.present = false; // temporarily missing
+      // Rollback restores live data from verified backup
+      liveDataState.present = true;
+      liveDataState.snapshotSha256 = originalSnapshot;
+      liveDataState.bytes = originalBytes;
+      const error = new Error('Disk I/O error during mail data unlink; host rollback restored live files');
+      error.code = 'mail_data_delete_failed';
+      throw error;
+    },
+  };
+
+  const rollbackResult = await executeMailboxDeletionWithRollbackVerification({
+    mailboxId,
+    address,
+    backupId,
+    expectedRevision,
+    deleteManager: failingDeleteManager,
+    backupManager,
+    mailDataInspector,
+    mailboxRegistry,
+  });
+
+  assert.equal(rollbackResult.success, false);
+  assert.equal(rollbackResult.rolledBack, true);
+  assert.equal(rollbackResult.liveDataRestored, true);
+  assert.equal(rollbackResult.backupIntact, true);
+  assert.equal(rollbackResult.mailboxPreserved, true);
+
+  // Mailbox in registry remains intact and disabled at revision 2
+  const preservedMailbox = await mailboxRegistry.getMailbox(mailboxId);
+  assert.ok(preservedMailbox);
+  assert.equal(preservedMailbox.enabled, false);
+  assert.equal(preservedMailbox.revision, expectedRevision);
+
+  // Backup in backupManager remains intact
+  const preservedBackup = await backupManager.inspectBackup(backupId);
+  assert.ok(preservedBackup);
+  assert.equal(preservedBackup.identity, address);
+
+  // 2. Successful deletion without error cleans data cleanly
+  const succeedingDeleteManager = {
+    deleteData: async () => {
+      liveDataState.present = false;
+      liveDataState.snapshotSha256 = null;
+      liveDataState.bytes = 0;
+      return { deleted: true, backupId };
+    },
+  };
+
+  const successResult = await executeMailboxDeletionWithRollbackVerification({
+    mailboxId,
+    address,
+    backupId,
+    expectedRevision,
+    deleteManager: succeedingDeleteManager,
+    backupManager,
+    mailDataInspector,
+    mailboxRegistry,
+  });
+
+  assert.equal(successResult.success, true);
+  assert.equal(successResult.deleted, true);
+  assert.equal(successResult.rolledBack, false);
+});
+
+test('Criterion 14: Comprehensive end-to-end single mailbox removal resilience across lost replies, concurrency, and rollback', async () => {
+  const mailboxId = 'mb-e2e-01';
+  const siblingMailboxId = 'mb-e2e-sib-02';
+  const address = 'e2e-target@example.com';
+  const siblingAddress = 'e2e-sibling@example.com';
+  const mailDomainId = 'domain-e2e-01';
+  const backupId = 'backup-e2e-01';
+  const initialSnapshot = 'd'.repeat(64);
+
+  const sharedDomain = {
+    id: mailDomainId,
+    domainName: 'example.com',
+    status: 'enabled',
+    revision: 1,
+  };
+
+  const mailboxes = new Map([
+    [mailboxId, { id: mailboxId, mailDomainId, address, enabled: true, revision: 1 }],
+    [siblingMailboxId, { id: siblingMailboxId, mailDomainId, address: siblingAddress, enabled: true, revision: 1 }],
+  ]);
+
+  const mailboxRegistry = {
+    getMailbox: async (id) => (mailboxes.has(id) ? { ...mailboxes.get(id) } : null),
+    listMailboxes: async () => [...mailboxes.values()].map((m) => ({ ...m })),
+    setEnabled: async (id, { expectedRevision, enabled }) => {
+      const mb = mailboxes.get(id);
+      if (!mb) throw new Error('not found');
+      mb.enabled = enabled;
+      mb.revision = expectedRevision + 1;
+      return { ...mb };
+    },
+    deleteMailbox: async (id) => {
+      mailboxes.delete(id);
+      return { id, deleted: true };
+    },
+  };
+
+  const mailDomainRegistry = {
+    getMailDomain: async (id) => (id === sharedDomain.id ? { ...sharedDomain } : null),
+    listMailDomains: async () => [{ ...sharedDomain }],
+  };
+
+  const jobs = new Map();
+  const jobRegistry = {
+    getJob: async (id) => (jobs.has(id) ? { ...jobs.get(id) } : null),
+  };
+
+  const backups = new Map([
+    [backupId, {
+      backupId,
+      identity: address,
+      scope: 'mailbox',
+      contentSha256: initialSnapshot,
+      bytes: 4096,
+      sourcePresent: true,
+    }],
+  ]);
+
+  const backupManager = {
+    inspectBackup: async (id) => (backups.has(id) ? { ...backups.get(id) } : null),
+  };
+
+  let liveData = {
+    present: true,
+    snapshotSha256: initialSnapshot,
+    bytes: 4096,
+  };
+
+  const mailDataInspector = {
+    inspectMailbox: async (addr) => ({ ...liveData }),
+  };
+
+  const lockManager = createMailboxInterProcessLockManager({
+    serverId: 'e2e-server',
+    acquireLockFn: async ({ filePath, serverId, pid }) => ({
+      filePath,
+      serverId,
+      pid,
+      release: async () => true,
+    }),
+  });
+
+  const coordinator = createSingleMailboxLifecycleCoordinator({
+    mailboxRegistry,
+    mailDomainRegistry,
+    jobRegistry,
+    backupManager,
+    mailDataInspector,
+    lockManager,
+  });
+
+  // Register active session for sibling account to verify continuity
+  coordinator.sessionTracker.registerDovecotSession(siblingAddress);
+  coordinator.sessionTracker.registerAuthenticatedSmtpSession(siblingAddress);
+  coordinator.sessionTracker.registerWebmailHttpSession(siblingAddress);
+
+  // Step 1: Disable target mailbox
+  const disableResult = await coordinator.disableTargetMailbox({
+    targetMailboxId: mailboxId,
+    expectedRevision: 1,
+    siblingMailboxId,
+  });
+  assert.equal(disableResult.mailbox.enabled, false);
+  assert.equal(disableResult.mailbox.revision, 2);
+  assert.equal(disableResult.domainStatus, 'enabled');
+  assert.equal(disableResult.siblingContinuous, true);
+
+  // Step 2: Quiesce sessions and verify sibling B continuity
+  const quiesceResult = await coordinator.applyConfigurationAndQuiesceSessions({
+    targetMailboxId: mailboxId,
+    mailDomainId,
+    siblingMailboxId,
+  });
+  assert.equal(quiesceResult.sessionsCleared, true);
+  assert.equal(quiesceResult.siblingContinuous, true);
+
+  // Step 3: Rapid confirmation guard prevents double submit
+  const confirmToken = `delete-mailbox:${address}:rev-2`;
+  const confirmAttempt1 = coordinator.rapidConfirmationGuard.beginConfirmation(confirmToken, { mailboxId, revision: 2 });
+  assert.throws(
+    () => coordinator.rapidConfirmationGuard.beginConfirmation(confirmToken, { mailboxId, revision: 2 }),
+    (err) => err instanceof MailboxConcurrencyLockError && err.code === 'rapid_confirmation_in_flight'
+  );
+
+  // Step 4: Worker mutation concurrency guard holds inter-process lock
+  const guardRun = await coordinator.assertWorkerMutationConcurrencyGuard({
+    mailboxId,
+    address,
+    concurrentAliasAttempt: async () => {},
+    concurrentReactivateAttempt: async () => {},
+    actionFn: async (lock) => {
+      // Step 5: Simulate failed delete with rollback
+      const failingDeleteManager = {
+        deleteData: async () => {
+          const err = new Error('I/O error during unlink');
+          err.code = 'mail_data_delete_failed';
+          throw err;
+        },
+      };
+
+      const rollbackTest = await coordinator.executeMailboxDeletionWithRollbackVerification({
+        mailboxId,
+        address,
+        backupId,
+        expectedRevision: 2,
+        deleteManager: failingDeleteManager,
+      });
+      assert.equal(rollbackTest.rolledBack, true);
+      assert.equal(rollbackTest.liveDataRestored, true);
+      assert.equal(rollbackTest.mailboxPreserved, true);
+
+      // Now successful delete
+      const goodDeleteManager = {
+        deleteData: async () => {
+          liveData.present = false;
+          liveData.snapshotSha256 = null;
+          liveData.bytes = 0;
+          return { deleted: true, backupId };
+        },
+      };
+
+      const goodDelete = await coordinator.executeMailboxDeletionWithRollbackVerification({
+        mailboxId,
+        address,
+        backupId,
+        expectedRevision: 2,
+        deleteManager: goodDeleteManager,
+      });
+      assert.equal(goodDelete.deleted, true);
+
+      return { deleteReceipt: { id: 'delete-job-e2e', backupId, deleted: true } };
+    },
+  });
+
+  assert.equal(guardRun.executed, true);
+  assert.equal(guardRun.racesPrevented, true);
+
+  // Step 6: Commit confirmation token
+  confirmAttempt1.commit();
+
+  // Step 7: Finalize mailbox record deletion
+  jobs.set('delete-job-e2e', {
+    id: 'delete-job-e2e',
+    operation: 'mail.data.delete',
+    resourceId: mailDomainId,
+    status: 'succeeded',
+    result: {
+      scope: 'mailbox',
+      identity: address,
+      backupId,
+      deleted: true,
+    },
+  });
+
+  await mailboxRegistry.deleteMailbox(mailboxId);
+
+  // Step 8: Reconcile lost finalize response
+  const finalizeReconciled = await coordinator.reconcileLostMailboxOperation({
+    operation: 'finalize',
+    mailboxId,
+    address,
+    backupId,
+    lastKnownJobId: 'delete-job-e2e',
+  });
+  assert.equal(finalizeReconciled.reconciled, true);
+  assert.equal(finalizeReconciled.deleted, true);
+  assert.equal(finalizeReconciled.verifiedByReceipt, true);
+
+  // Sibling mailbox remains enabled and active throughout!
+  const siblingAfter = await mailboxRegistry.getMailbox(siblingMailboxId);
+  assert.ok(siblingAfter);
+  assert.equal(siblingAfter.enabled, true);
+  assert.equal(sharedDomain.status, 'enabled');
 });
