@@ -20,22 +20,23 @@ export default function MailboxRemovalPanel(props) {
   const identity = JSON.stringify([props.mailbox.id, props.mailbox.address, props.domain.id, session?.user?.id, session?.user?.role, sessionVersion(), canManage]);
   return <RemovalSession key={identity} {...props} canManage={canManage} />;
 }
-function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClose }) {
-  const [state, setState] = useState(EMPTY_MAILBOX_REMOVAL);
+export function RemovalSession({ mailbox, domain, canManage, onChanged, onPolicy, onClose, initialState = EMPTY_MAILBOX_REMOVAL, createFlow }) {
+  const [state, setState] = useState(initialState);
   const [jobId, setJobId] = useState('');
   const [accessBusy, setAccessBusy] = useState(false);
   const client = useRef(null), changed = useRef(onChanged), notified = useRef(false);
   useEffect(() => { changed.current = onChanged; }, [onChanged]);
   useEffect(() => {
+    if (initialState !== EMPTY_MAILBOX_REMOVAL && !createFlow) return undefined;
     const version = sessionVersion();
-    const flow = createMailboxRemoval({
+    const flow = (createFlow ?? createMailboxRemoval)({
       target: { id: mailbox.id, address: mailbox.address, mailDomainId: domain.id }, request: panelRequest,
       isCurrent: () => version === sessionVersion() && !sessionTransitionPending(), canManage: () => canManage,
       onState: setState,
     });
     client.current = flow; void flow.refresh();
     return () => { flow.dispose(); if (client.current === flow) client.current = null; };
-  }, [mailbox.id, mailbox.address, domain.id, canManage]);
+  }, [mailbox.id, mailbox.address, domain.id, canManage, initialState, createFlow]);
   useEffect(() => {
     if (state.status !== 'waiting') return undefined;
     const timer = setTimeout(() => { void client.current?.refresh(); }, 2000);
