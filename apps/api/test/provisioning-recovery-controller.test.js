@@ -2,8 +2,8 @@ import { register } from 'node:module';
 register('../../web/test/jsx-loader.js', import.meta.url);
 
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { createHash, randomUUID } from 'node:crypto';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -31,6 +31,11 @@ import {
   recoveryBusy,
   recoveryOperation,
 } from '../../web/src/workspace/provisioning-recovery.js';
+import { createWebsiteProvisioningRegistry } from '../src/website-provisioning-registry.js';
+import { createWebsiteProvisioningOrchestrator } from '../src/website-provisioning-orchestrator.js';
+import { createJobRecoveryStore } from '../src/job-recovery-store.js';
+import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
+import { createJobIdempotencyLookup } from '../src/job-idempotency-lookup.js';
 
 const siteAId = 'aaaaaaaa-1111-4111-8111-111111111111';
 const siteBId = 'bbbbbbbb-2222-4222-8222-222222222222';
@@ -989,4 +994,584 @@ test('While confirmation modal is open, operation/step/capability changes or rap
     assert.equal(flow.getState().changes, 1);
     assert.equal(flow.getState().approval, null);
   }
+});
+
+// ============================================================================
+// Criterion: Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership ve restart
+// ============================================================================
+
+test('Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership ve restart with durable filesystem registry and process restart', async (t) => {
+  globalThis.fetch = nativeFetch;
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'prov-durable-e2e-'));
+  const authDbPath = path.join(tempDir, 'auth.sqlite');
+  const provJsonPath = path.join(tempDir, 'provisioning.json');
+
+  t.after(() => {
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const authStore = createAuthStore({ filePath: authDbPath });
+  t.after(() => {
+    try { authStore.close(); } catch {}
+  });
+
+  const { token: setupToken } = authStore.issueSetupToken();
+  const ownerUser = await authStore.completeSetup({ setupToken, username: 'OwnerDurable', password: 'OwnerPassword123!' });
+  const ownerLogin = await authStore.login({ username: 'OwnerDurable', password: 'OwnerPassword123!' });
+
+  const testSiteAId = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const testSiteBId = 'bbbbbbbb-2222-4222-8222-222222222222';
+  const testServerId = 'ssssssss-5555-4555-8555-555555555555';
+
+  const userA = await authStore.users.createSiteManager({
+    username: 'admin.sitea.durable@example.test',
+    password: 'SiteAPassword123!',
+    websiteId: testSiteAId,
+    actorId: ownerUser.id,
+  });
+  const loginA = await authStore.login({ username: 'admin.sitea.durable@example.test', password: 'SiteAPassword123!' });
+
+  const userB = await authStore.users.createSiteManager({
+    username: 'admin.siteb.durable@example.test',
+    password: 'SiteBPassword123!',
+    websiteId: testSiteBId,
+    actorId: ownerUser.id,
+  });
+  const loginB = await authStore.login({ username: 'admin.siteb.durable@example.test', password: 'SiteBPassword123!' });
+
+  // Inactive tenant user
+  const userInactive = await authStore.users.createSiteManager({
+    username: 'inactive.durable@example.test',
+    password: 'InactivePass123!',
+    websiteId: testSiteAId,
+    actorId: ownerUser.id,
+  });
+  const loginInact = await authStore.login({ username: 'inactive.durable@example.test', password: 'InactivePass123!' });
+  const dbSync = new DatabaseSync(authDbPath);
+  dbSync.prepare('UPDATE users SET active = 0 WHERE id = ?').run(userInactive.id);
+  dbSync.close();
+
+  const websites = new Map([
+    [testSiteAId, { id: testSiteAId, serverId: testServerId, customerId: userA.id }],
+    [testSiteBId, { id: testSiteBId, serverId: testServerId, customerId: userB.id }],
+  ]);
+
+  let unixRan = 0;
+  let nginxRan = 0;
+  let nginxFail = true;
+  let telemetryCompensated = 0;
+
+  const handlers = {
+    unix_identity: {
+      apply: async () => { unixRan++; return { satisfied: true, uid: 1001 }; },
+      inspect: async () => ({ satisfied: unixRan > 0 }),
+    },
+    nginx: {
+      apply: async () => {
+        nginxRan++;
+        if (nginxFail) throw new Error('nginx_config_invalid');
+        return { satisfied: true, active: true };
+      },
+      inspect: async () => ({ satisfied: !nginxFail && nginxRan > 0 }),
+      compensate: async () => ({ satisfied: true }),
+      inspectCompensation: async () => ({ satisfied: true }),
+    },
+    telemetry: {
+      apply: async () => ({ satisfied: true }),
+      inspect: async () => ({ satisfied: true }),
+      compensate: async () => { telemetryCompensated++; return { satisfied: true }; },
+      inspectCompensation: async () => ({ satisfied: telemetryCompensated > 0 }),
+    },
+  };
+
+  const registry = createWebsiteProvisioningRegistry({ filePath: provJsonPath });
+  await registry.init();
+  const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers });
+
+  const testOpId = randomUUID();
+  await registry.create({
+    operationId: testOpId,
+    websiteId: testSiteAId,
+    resources: { website: { id: testSiteAId } },
+    steps: [
+      { id: 'unix_identity', kind: 'unix_identity', required: true, intent: { user: 'app' } },
+      { id: 'nginx', kind: 'nginx', required: true, intent: { domain: 'sitea.test' } },
+      { id: 'telemetry', kind: 'telemetry', required: false, state: 'succeeded', evidence: { setup: true }, compensation: { state: 'pending' }, intent: {} },
+    ],
+  });
+
+  function createServer(reg, orch) {
+    const app = express();
+    app.disable('x-powered-by');
+    app.use(express.json());
+    mountWebsiteProvisioningRoutes(app, {
+      registry: reg,
+      orchestrator: orch,
+      websiteRegistry: { getWebsite: async (id) => websites.get(id) || null },
+      localServerId: testServerId,
+    });
+    app.use((err, req, res, next) => {
+      res.status(err.status || 500).json({ code: err.code, message: err.message });
+    });
+    const origin = 'https://server.cryptoraichu.website';
+    const listener = createAuthenticatedApi({
+      store: authStore,
+      publicOrigin: origin,
+      development: true,
+      ownerMfaRequired: false,
+      createHandler: () => app,
+    });
+    return http.createServer(listener);
+  }
+
+  let server = createServer(registry, orchestrator);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  let port = server.address().port;
+  let base = `http://127.0.0.1:${port}`;
+
+  const cookieA = `__Host-yunpanel_session=${loginA.token}`;
+  const cookieB = `__Host-yunpanel_session=${loginB.token}`;
+  const cookieInact = `__Host-yunpanel_session=${loginInact.token}`;
+  const ownerCookie = `__Host-yunpanel_session=${ownerLogin.token}`;
+
+  const csrfA = loginA.session.csrfToken;
+  const csrfB = loginB.session.csrfToken;
+  const csrfInact = loginInact.session.csrfToken;
+
+  // --- Step A: Tenant Ownership & Fail-Closed Isolation ---
+  // Foreign tenant (Site B manager) cannot continue Site A operation
+  let res = await fetch(`${base}/api/sites/provisioning/${testOpId}/continue`, {
+    method: 'POST',
+    headers: { cookie: cookieB, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfB },
+    body: JSON.stringify({ confirmation: `continue-site-provisioning:${testOpId}` }),
+  });
+  assert.equal(res.status, 404, 'Foreign tenant continue must 404 fail-closed');
+
+  // Foreign tenant cannot retry Site A step
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: { cookie: cookieB, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfB },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${testOpId}:nginx` }),
+  });
+  assert.equal(res.status, 404, 'Foreign tenant retry must 404 fail-closed');
+
+  // Foreign tenant cannot compensate Site A step
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/telemetry/compensate`, {
+    method: 'POST',
+    headers: { cookie: cookieB, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfB },
+    body: JSON.stringify({ confirmation: `compensate-site-provisioning:${testOpId}:telemetry` }),
+  });
+  assert.equal(res.status, 404, 'Foreign tenant compensate must 404 fail-closed');
+
+  // Inactive tenant is rejected with 401
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/continue`, {
+    method: 'POST',
+    headers: { cookie: cookieInact, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfInact },
+    body: JSON.stringify({ confirmation: `continue-site-provisioning:${testOpId}` }),
+  });
+  assert.equal(res.status, 401, 'Inactive tenant must receive 401');
+
+  // --- Step B: Real Continue & Durable Persistence ---
+  // Authorized Site A manager continues step 1 (unix_identity succeeds)
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/continue`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `continue-site-provisioning:${testOpId}` }),
+  });
+  assert.equal(res.status, 202);
+  let json = await res.json();
+  assert.equal(json.data.outcome, 'progressed');
+  assert.equal(json.data.stepId, 'unix_identity');
+  assert.equal(json.data.operation.steps.find((s) => s.id === 'unix_identity').state, 'succeeded');
+
+  // Continue step 2 (nginx fails on first run)
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/continue`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `continue-site-provisioning:${testOpId}` }),
+  });
+  assert.equal(res.status, 200);
+  json = await res.json();
+  assert.equal(json.data.outcome, 'failed');
+  assert.equal(json.data.stepId, 'nginx');
+  assert.equal(json.data.operation.steps.find((s) => s.id === 'nginx').state, 'failed');
+  assert.equal(json.data.operation.steps.find((s) => s.id === 'nginx').canRetry, true);
+
+  // --- Step C: Restart Safety & Durable State Recovery ---
+  // Close the server and instantiate fresh registry from disk file
+  await new Promise((resolve) => server.close(resolve));
+  const restartedRegistry = createWebsiteProvisioningRegistry({ filePath: provJsonPath });
+  await restartedRegistry.init();
+  const recoveredOp = await restartedRegistry.get(testOpId);
+  assert.equal(recoveredOp.steps.find((s) => s.id === 'unix_identity').state, 'succeeded');
+  assert.equal(recoveredOp.steps.find((s) => s.id === 'nginx').state, 'failed');
+  assert.equal(recoveredOp.steps.find((s) => s.id === 'telemetry').state, 'succeeded');
+
+  // Remount server with restarted registry
+  nginxFail = false; // problem resolved
+  const restartedOrchestrator = createWebsiteProvisioningOrchestrator({ registry: restartedRegistry, handlers });
+  server = createServer(restartedRegistry, restartedOrchestrator);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  port = server.address().port;
+  base = `http://127.0.0.1:${port}`;
+  t.after(() => server.close());
+
+  // --- Step D: Real Retry on Restarted Server ---
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${testOpId}:nginx` }),
+  });
+  assert.equal(res.status, 200);
+  json = await res.json();
+  assert.equal(json.data.outcome, 'ready');
+  assert.equal(json.data.operation.ready, true);
+  assert.equal(json.data.operation.steps.find((s) => s.id === 'nginx').state, 'succeeded');
+
+  // --- Step E: Deterministic Idempotency ---
+  // Calling continue on already-ready operation is deterministic and idempotent
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/continue`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `continue-site-provisioning:${testOpId}` }),
+  });
+  assert.equal(res.status, 200);
+  json = await res.json();
+  assert.equal(json.data.outcome, 'ready');
+  assert.equal(json.data.operation.ready, true);
+
+  // Calling retry on already-succeeded step is rejected with 409
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/nginx/retry`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `retry-site-provisioning:${testOpId}:nginx` }),
+  });
+  assert.equal(res.status, 409);
+
+  // --- Step F: Separate Optional Compensation from Mandatory Readiness ---
+  // Compensating optional step 'telemetry' succeeds and leaves mandatory readiness intact
+  res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/telemetry/compensate`, {
+    method: 'POST',
+    headers: { cookie: cookieA, 'content-type': 'application/json', origin: 'https://server.cryptoraichu.website', 'x-csrf-token': csrfA },
+    body: JSON.stringify({ confirmation: `compensate-site-provisioning:${testOpId}:telemetry` }),
+  });
+  assert.equal(res.status, 200);
+  json = await res.json();
+  assert.equal(json.data.outcome, 'compensated');
+  assert.equal(json.data.stepId, 'telemetry');
+  assert.equal(json.data.operation.ready, true, 'Mandatory steps remain ready even after optional compensation');
+  assert.equal(json.data.operation.progress.completed, 2);
+  assert.equal(json.data.operation.progress.required, 2);
+  assert.equal(json.data.operation.progress.remaining, 0);
+
+  // Owner can also access Site A provisioning
+  res = await fetch(`${base}/api/sites/${testSiteAId}/provisioning/latest`, { headers: { cookie: ownerCookie } });
+  assert.equal(res.status, 200);
+});
+
+test('Yüksek eski deneme sayısı sunucunun izin verdiği manuel retry eylemlerini istemci tarafında engellememelidir', async () => {
+  const websiteId = '11111111-1111-4111-8111-111111111111';
+  const operationId = '22222222-2222-4222-8222-222222222222';
+
+  // Server record with high previous attempt counts (100 attempts on operation and 100 on failed step)
+  const failedStep = {
+    id: 'nginx',
+    kind: 'nginx',
+    state: 'failed',
+    required: true,
+    canRetry: true,
+    canCompensate: true,
+    error: 'nginx_bind_timeout',
+    attempts: 100,
+    compensation: { state: 'pending', error: null },
+  };
+
+  const initialServerOp = {
+    operationId,
+    websiteId,
+    ready: false,
+    status: 'failed',
+    attempts: 100,
+    updatedAt: '2026-10-04T12:00:00.000Z',
+    createdAt: '2026-10-04T11:00:00.000Z',
+    steps: [failedStep],
+  };
+
+  let executionCount = 0;
+  const flow = createProvisioningRecovery({
+    websiteId,
+    canManage: () => true,
+    isCurrent: () => true,
+    read: async () => initialServerOp,
+    execute: async (approval) => {
+      executionCount++;
+      assert.equal(approval.action, 'retry');
+      assert.equal(approval.stepId, 'nginx');
+      return {
+        operationId,
+        outcome: 'ready',
+        stepId: 'nginx',
+        operation: {
+          ...initialServerOp,
+          ready: true,
+          status: 'ready',
+          steps: [{
+            ...failedStep,
+            state: 'succeeded',
+            canRetry: false,
+            error: null,
+            attempts: 101,
+          }],
+        },
+      };
+    },
+  });
+
+  // Client loads server operation with high attempt counts
+  await flow.load();
+  const state = flow.getState();
+  assert.equal(state.status, 'ready');
+  assert.equal(state.operation.ready, false);
+
+  // High attempt count MUST NOT block recoveryAllowed for manual retry
+  assert.equal(recoveryAllowed(state.operation, 'retry', 'nginx'), true, 'Server-permitted manual retry must be allowed despite high attempt count');
+
+  // Client prepares retry approval
+  const approval = flow.prepare('retry', 'nginx');
+  assert.ok(approval, 'Client must prepare approval for manual retry');
+  assert.equal(approval.confirmation, `retry-site-provisioning:${operationId}:nginx`);
+
+  // Client executes manual retry
+  const resultState = await flow.perform(approval, approval.confirmation);
+  assert.equal(resultState.status, 'ready');
+  assert.equal(resultState.operation.ready, true);
+  assert.equal(resultState.error, null);
+  assert.equal(executionCount, 1, 'Manual retry was executed exactly once');
+});
+
+test('İsteğe bağlı geri alma ile zorunlu adım readiness ayrışmalı, failed, blocked veya compensation_failed durumları asla başarı sayılmamalıdır', async () => {
+  const websiteId = '11111111-1111-4111-8111-111111111111';
+  const operationId = '22222222-2222-4222-8222-222222222222';
+
+  const requiredStep = {
+    id: 'nginx',
+    kind: 'nginx',
+    required: true,
+    state: 'succeeded',
+    canRetry: false,
+    canCompensate: false,
+    compensation: { state: 'not_required', error: null },
+  };
+
+  const optionalStep = {
+    id: 'analytics',
+    kind: 'analytics',
+    required: false,
+    state: 'succeeded',
+    canRetry: false,
+    canCompensate: true,
+    compensation: { state: 'pending', error: null },
+  };
+
+  const baseOperation = {
+    operationId,
+    websiteId,
+    ready: true,
+    status: 'ready',
+    steps: [requiredStep, optionalStep],
+  };
+
+  // Case 1: Optional step compensation fails (compensation_failed)
+  // Mandatory readiness stays true, but outcome compensation_failed is NEVER treated as success!
+  {
+    const failedCompOperation = {
+      ...baseOperation,
+      steps: [
+        requiredStep,
+        { ...optionalStep, compensation: { state: 'failed', error: 'cleanup_failed' } },
+      ],
+    };
+
+    const flow = createProvisioningRecovery({
+      websiteId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => baseOperation,
+      execute: async () => ({
+        operationId,
+        stepId: 'analytics',
+        outcome: 'compensation_failed',
+        operation: failedCompOperation,
+      }),
+    });
+
+    await flow.load();
+    const approval = flow.prepare('compensate', 'analytics');
+    const state = await flow.perform(approval, approval.confirmation);
+
+    assert.equal(state.status, 'ready');
+    assert.equal(state.operation.ready, true, 'Mandatory step remains ready');
+    assert.match(state.error, /Kurulum tamamlanmadı/, 'compensation_failed must expose error');
+    assert.equal(state.notice, null, 'compensation_failed must NEVER be treated as success or produce success notice');
+  }
+
+  // Case 2: Step failure (outcome: 'failed') is NEVER treated as success
+  {
+    const failedOp = {
+      operationId,
+      websiteId,
+      ready: false,
+      status: 'failed',
+      steps: [{ ...requiredStep, state: 'failed', canRetry: true, error: 'service_failed' }],
+    };
+
+    const flow = createProvisioningRecovery({
+      websiteId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => failedOp,
+      execute: async () => ({
+        operationId,
+        stepId: 'nginx',
+        outcome: 'failed',
+        operation: failedOp,
+      }),
+    });
+
+    await flow.load();
+    const approval = flow.prepare('retry', 'nginx');
+    const state = await flow.perform(approval, approval.confirmation);
+
+    assert.equal(state.status, 'ready');
+    assert.equal(state.operation.ready, false);
+    assert.match(state.error, /Kurulum tamamlanmadı/, 'failed outcome must expose error');
+    assert.equal(state.notice, null, 'failed outcome must NEVER produce success notice');
+  }
+
+  // Case 3: Step blocked (outcome: 'blocked') is NEVER treated as success
+  {
+    const blockedOp = {
+      operationId,
+      websiteId,
+      ready: false,
+      status: 'blocked',
+      steps: [{ ...requiredStep, state: 'blocked', canRetry: false, error: 'resource_blocked' }],
+    };
+
+    const flow = createProvisioningRecovery({
+      websiteId,
+      canManage: () => true,
+      isCurrent: () => true,
+      read: async () => blockedOp,
+      execute: async () => ({
+        operationId,
+        stepId: 'nginx',
+        outcome: 'blocked',
+        operation: blockedOp,
+      }),
+    });
+
+    await flow.load();
+    const approval = flow.prepare('continue');
+    const state = await flow.perform(approval, approval.confirmation);
+
+    assert.equal(state.status, 'ready');
+    assert.equal(state.operation.ready, false);
+    assert.match(state.error, /Kurulum tamamlanmadı/, 'blocked outcome must expose error');
+    assert.equal(state.notice, null, 'blocked outcome must NEVER produce success notice');
+  }
+});
+
+test('Mevcut recovery runtime, context, command, ve store kodları kalıcı durum mantığını ve idempotency bütünlüğünü korur', async (t) => {
+  const tempDir = mkdtempSync(path.join(os.tmpdir(), 'job-rec-check-'));
+  const storePath = path.join(tempDir, 'recovery-store.json');
+  const contextPath = path.join(tempDir, 'job-store.json');
+
+  t.after(() => {
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  // 1. Verify JobRecoveryStore persistence, reload, and idempotency
+  const store = createJobRecoveryStore({ filePath: storePath });
+  await store.init();
+  await store.add({ serverId: 'server-alpha', jobId: 'job-11111111-2222' });
+  // Duplicate add is a no-op (idempotent)
+  await store.add({ serverId: 'server-alpha', jobId: 'job-11111111-2222' });
+  let snapshot = await store.snapshot();
+  assert.equal(snapshot.jobs.length, 1);
+  assert.equal(snapshot.jobs[0].jobId, 'job-11111111-2222');
+
+  // Verify reload from disk
+  const reloadedStore = createJobRecoveryStore({ filePath: storePath });
+  await reloadedStore.init();
+  snapshot = await reloadedStore.snapshot();
+  assert.equal(snapshot.jobs.length, 1);
+  assert.equal(snapshot.jobs[0].jobId, 'job-11111111-2222');
+
+  // 2. Verify JobRecoveryContextReader
+  writeFileSync(contextPath, JSON.stringify({
+    version: 1,
+    jobs: [{
+      id: 'job-11111111-2222',
+      serverId: 'server-alpha',
+      operation: 'backup',
+      resourceType: 'database',
+      resourceId: 'test_db',
+      status: 'succeeded',
+      attempts: 5,
+      payload: { db: 'test_db' },
+    }],
+  }));
+  const reader = createJobRecoveryContextReader({ filePath: contextPath });
+  const context = await reader.read('job-11111111-2222');
+  assert.equal(context.id, 'job-11111111-2222');
+  assert.equal(context.attempts, 5);
+  assert.equal(context.status, 'succeeded');
+
+  // 3. Verify JobIdempotencyLookup
+  const mockJobRegistry = {
+    getJob: async (id) => ({
+      id,
+      serverId: 'server-alpha',
+      type: 'backup',
+      operation: 'backup',
+      resourceType: 'database',
+      resourceId: 'test_db',
+    }),
+  };
+
+  const expectedDigest = createHash('sha256').update(JSON.stringify({
+    serverId: 'server-alpha',
+    type: 'backup',
+    operation: 'backup',
+    payload: { db: 'test_db' },
+    resourceType: 'database',
+    resourceId: 'test_db',
+  })).digest('hex');
+
+  writeFileSync(contextPath, JSON.stringify({
+    version: 1,
+    jobs: [{
+      id: 'job-11111111-2222',
+      serverId: 'server-alpha',
+      type: 'backup',
+      operation: 'backup',
+      resourceType: 'database',
+      resourceId: 'test_db',
+      idempotencyKey: 'idem-test-key-1234567890',
+      idempotencyDigest: expectedDigest,
+    }],
+  }));
+
+  const lookup = createJobIdempotencyLookup({ filePath: contextPath, jobRegistry: mockJobRegistry });
+  const found = await lookup.find({
+    serverId: 'server-alpha',
+    type: 'backup',
+    operation: 'backup',
+    payload: { db: 'test_db' },
+    resourceType: 'database',
+    resourceId: 'test_db',
+    idempotencyKey: 'idem-test-key-1234567890',
+  });
+  assert.equal(found.id, 'job-11111111-2222');
 });
