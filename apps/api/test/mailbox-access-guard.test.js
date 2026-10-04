@@ -303,3 +303,87 @@ test('mail data delete manager blocks deletion when mailbox access guard fails',
     (error) => error instanceof MailboxAccessError && error.code === 'mailbox_access_sessions_remaining',
   );
 });
+
+test('mailbox access guard fails closed when postconf reveals unmanaged lookup map (unmanaged config is never absence)', async () => {
+  const { runner } = createMockRunner({
+    '/usr/sbin/postconf -h virtual_mailbox_maps': () => ({
+      stdout: 'hash:/etc/postfix/unmanaged-virtual-mailboxes\n',
+      stderr: '',
+    }),
+  });
+  const guard = createMailboxAccessGuard({ run: runner });
+
+  await assert.rejects(
+    async () => guard.quiesce(targetAddress),
+    (error) => error instanceof MailboxAccessError && error.code === 'mailbox_access_configuration_unverified',
+  );
+});
+
+test('mailbox access guard fails closed when dovecot auth lookup exits with code 75 tempfail (error is never absence)', async () => {
+  const { runner } = createMockRunner({
+    '/usr/bin/doveadm auth lookup -x service=imap -f user user@example.com': () => {
+      const err = new Error('Fatal: Failed to read configuration: stat(/etc/dovecot/dovecot.conf) failed');
+      err.code = 75;
+      err.stdout = '';
+      err.stderr = 'Fatal: Failed to read configuration: stat(/etc/dovecot/dovecot.conf) failed';
+      throw err;
+    },
+  });
+  const guard = createMailboxAccessGuard({ run: runner });
+
+  await assert.rejects(
+    async () => guard.quiesce(targetAddress),
+    (error) => error instanceof MailboxAccessError && error.code === 'mailbox_access_check_failed',
+  );
+});
+
+test('mailbox access guard fails closed when dovecot userdb lookup exits with code 75 tempfail (error is never absence)', async () => {
+  const { runner } = createMockRunner({
+    '/usr/bin/doveadm user -x service=imap -f uid user@example.com': () => {
+      const err = new Error('Fatal: Temporary failure');
+      err.code = 75;
+      err.stdout = '';
+      err.stderr = 'Temporary failure in userdb';
+      throw err;
+    },
+  });
+  const guard = createMailboxAccessGuard({ run: runner });
+
+  await assert.rejects(
+    async () => guard.quiesce(targetAddress),
+    (error) => error instanceof MailboxAccessError && error.code === 'mailbox_access_check_failed',
+  );
+});
+
+test('mailbox access guard fails closed when dovecot cache flush emits invalid output', async () => {
+  const { runner } = createMockRunner({
+    '/usr/bin/doveadm auth cache flush user@example.com': () => ({
+      stdout: 'failed to flush cache\n',
+      stderr: '',
+    }),
+  });
+  const guard = createMailboxAccessGuard({ run: runner });
+
+  await assert.rejects(
+    async () => guard.quiesce(targetAddress),
+    (error) => error instanceof MailboxAccessError && error.code === 'mailbox_access_cache_unverified',
+  );
+});
+
+test('mailbox access guard verifies Dovecot kick and who command contracts target only chosen address', async () => {
+  const { runner, executed } = createMockRunner();
+  const guard = createMailboxAccessGuard({ run: runner });
+
+  await guard.quiesce(targetAddress);
+
+  const kickCalls = executed.filter(({ file, args }) => file === '/usr/bin/doveadm' && args[0] === 'kick');
+  assert.equal(kickCalls.length, 1);
+  assert.deepEqual(kickCalls[0].args, ['kick', targetAddress]);
+
+  const whoCalls = executed.filter(({ file, args }) => file === '/usr/bin/doveadm' && args[2] === 'who');
+  assert.equal(whoCalls.length, 1);
+  assert.deepEqual(whoCalls[0].args, ['-f', 'tab', 'who', '-1', targetAddress]);
+
+  // Ensure no wildcard or multi-user kicks occur
+  assert.equal(executed.some(({ args }) => args.includes('-A') || args.includes('*') || args.includes('?')), false);
+});
