@@ -43,6 +43,39 @@ import {
   mountNonResellerCapabilitiesRoutes,
 } from '../src/non-reseller-capabilities.js';
 import {
+  OS_EQUIVALENCE_INVENTORY,
+  EXTERNAL_PARITY_INVENTORY,
+  DEFERRED_BILLING_INVENTORY,
+  FORBIDDEN_BILLING_KEYS,
+  assertNoResellerBillingPollution,
+  assertResellerBillingDeferred,
+  assertPreserveLinuxTenantIsolation,
+  OsEquivalenceError,
+  ExternalIntegrationError,
+  ResellerBillingDeferredError,
+  LinuxIsolationViolationError,
+  WindowsPlatformAdapter,
+  IisWebAdapter,
+  DotNetRuntimeAdapter,
+  MssqlDatabaseAdapter,
+  NtfsPermissionAdapter,
+  WindowsMailDnsAdapter,
+  CommercialCertificateAdapter,
+  SitejetBuilderAdapter,
+  PremiumSecurityAdapter,
+  PremiumBackupAdapter,
+  PremiumToolkitAdapter,
+  DomainRegistrarAdapter,
+  createDefaultOsAdapters,
+  createDefaultExternalAdapters,
+  getOsEquivalenceAdapter,
+  listOsEquivalenceAdapters,
+  getExternalParityAdapter,
+  listExternalParityAdapters,
+  listDeferredBillingItems,
+  mountOsExternalParityRoutes,
+} from '../src/os-external-parity.js';
+import {
   createProductionExitGateService,
   mountProductionExitGateRoutes,
   ProductionExitGateError,
@@ -6642,4 +6675,245 @@ test('Staging E2E PAR-04: Non-reseller capabilities retention with established i
   assert.equal(custAllowedRes.body.data.id, 'DNS-01');
 
   assert.ok(true, 'PAR-04: Non-reseller capabilities, cross-connections, branding deferral, and tenant boundaries fully verified in staging E2E suite.');
+});
+
+// ============================================================================
+// STAGING E2E PAR-05: OS Equivalence Boundaries, Adapter Contracts,
+// External Lifecycle Parity, and Reseller Billing Deferral Enforcement
+// ============================================================================
+
+test('Staging E2E PAR-05: Windows OS equivalence boundaries (WIN-01..06) fail-closed preserving Linux tenant isolation, external lifecycle contracts fail-closed when unconfigured, and reseller billing is explicitly deferred to post-MVP', async (t) => {
+  // 1. Windows OS Equivalence Inventory and Strict Host Distinction
+  const osLines = listOsEquivalenceAdapters();
+  assert.equal(osLines.length, 6, 'Must inventory all 6 Windows equivalence lines');
+  for (const line of osLines) {
+    assert.equal(line.status, 'separate_track_fail_closed');
+    assert.equal(line.ubuntuEquivalenceClaimed, false, 'Ubuntu cannot be claimed as Windows equivalent');
+    assert.equal(line.linuxIsolationPreserved, true, 'Linux tenant isolation must be preserved');
+  }
+
+  // Verify adapter contract methods throw OsEquivalenceError (fail-closed) on Linux host
+  const osAdapters = createDefaultOsAdapters();
+  await assert.rejects(
+    () => osAdapters['WIN-01'].getServiceStatus('W3SVC'),
+    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported' && err.status === 501,
+  );
+  await assert.rejects(
+    () => osAdapters['WIN-02'].createSite({ siteName: 'win.local' }),
+    (err) => err instanceof OsEquivalenceError && err.code === 'windows_platform_unsupported',
+  );
+  await assert.rejects(
+    () => osAdapters['WIN-03'].configureRuntime('site-1', 'net8.0'),
+    (err) => err instanceof OsEquivalenceError,
+  );
+  await assert.rejects(
+    () => osAdapters['WIN-04'].createDatabase('win_db'),
+    (err) => err instanceof OsEquivalenceError,
+  );
+  await assert.rejects(
+    () => osAdapters['WIN-05'].setAcl('C:\\inetpub', 'IUSR', 'FullControl'),
+    (err) => err instanceof OsEquivalenceError,
+  );
+  await assert.rejects(
+    () => osAdapters['WIN-06'].createMailbox('win.local', 'admin', 500),
+    (err) => err instanceof OsEquivalenceError,
+  );
+
+  // 2. Linux Tenant Isolation Preservation
+  const ownerActor = { user: { id: 'owner-e2e', role: 'owner', active: true } };
+  const customerActor = {
+    user: {
+      id: 'customer-e2e',
+      role: 'customer',
+      active: true,
+      websiteIds: ['site-c1'],
+      hosting: { kind: 'customer', customerId: 'customer-e2e', resellerId: 'reseller-e2e', websiteIds: ['site-c1'] },
+    },
+  };
+  const ownerIso = assertPreserveLinuxTenantIsolation({ actor: ownerActor });
+  assert.equal(ownerIso.authorized, true);
+  const custIso = assertPreserveLinuxTenantIsolation({ actor: customerActor, siteId: 'site-c1' });
+  assert.equal(custIso.authorized, true);
+  assert.throws(
+    () => assertPreserveLinuxTenantIsolation({ actor: customerActor, siteId: 'site-foreign' }),
+    (err) => err instanceof LinuxIsolationViolationError && err.status === 403,
+  );
+
+  // 3. External Lifecycle Boundaries & Fail-Closed Behavior
+  const extLines = listExternalParityAdapters();
+  assert.equal(extLines.length, 6, 'Must inventory all 6 external parity integration lines');
+  for (const line of extLines) {
+    assert.equal(line.status, 'external_unconfigured_fail_closed');
+    assert.equal(line.requiresConfig, true);
+  }
+
+  const unconfiguredAdapters = createDefaultExternalAdapters();
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-CERT-01'].requestOrder({ domain: 'shop.net' }),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'commercial_certificate_unconfigured' && err.status === 501,
+  );
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-BUILD-01'].createBuilderSession({ siteId: 's1', domain: 's1.com' }),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'sitebuilder_unconfigured' && err.status === 501,
+  );
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-SEC-01'].scheduleMalwareScan({ siteId: 's1' }),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_security_unconfigured' && err.status === 501,
+  );
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-BAK-01'].registerRemoteVault({ provider: 'acronis', vaultName: 'V1' }),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_backup_unconfigured' && err.status === 501,
+  );
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-TOOL-01'].prepareSmartUpdate({ siteId: 's1' }),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'premium_toolkit_unconfigured' && err.status === 501,
+  );
+  await assert.rejects(
+    () => unconfiguredAdapters['EXT-REG-01'].checkDomainAvailability('shop.net'),
+    (err) => err instanceof ExternalIntegrationError && err.code === 'registrar_unconfigured' && err.status === 501,
+  );
+
+  // Configured external adapter deterministic lifecycle execution
+  const configuredAdapters = createDefaultExternalAdapters({
+    'EXT-CERT-01': { apiKey: 'live-key-1' },
+    'EXT-BUILD-01': { webhookSecret: 'secret-sig-1' },
+    'EXT-REG-01': { apiKey: 'reg-key-1' },
+  });
+  const certOrder = await configuredAdapters['EXT-CERT-01'].requestOrder({ domain: 'test.com' });
+  assert.ok(certOrder.orderId);
+  assert.equal(certOrder.status, 'pending_validation');
+  const regAvail = await configuredAdapters['EXT-REG-01'].checkDomainAvailability('test.com');
+  assert.equal(regAvail.available, true);
+
+  // 4. Reseller Billing and Subscription Automation Deferral
+  const deferredList = listDeferredBillingItems();
+  assert.equal(deferredList.length, 5);
+  for (const item of deferredList) {
+    assert.equal(item.status, 'post_mvp_deferred');
+    assert.equal(item.isMvpBlocker, false);
+  }
+
+  for (const forbiddenKey of FORBIDDEN_BILLING_KEYS) {
+    assert.throws(
+      () => assertNoResellerBillingPollution({ [forbiddenKey]: true }),
+      (err) => err instanceof ResellerBillingDeferredError && err.status === 403,
+    );
+  }
+  assert.throws(
+    () => assertResellerBillingDeferred('syncWhmcsSubscriptions'),
+    (err) => err instanceof ResellerBillingDeferredError,
+  );
+
+  // 5. Express HTTP Route Integration with requirePanelRouteAccess
+  const app = express();
+  app.use(express.json());
+  let currentAuth = null;
+  app.use((req, res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+  mountOsExternalParityRoutes(app);
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const address = server.address();
+  const port = address.port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const internalReq = async (method, reqPath, body = null) => {
+    return new Promise((resolve, reject) => {
+      const options = {
+        hostname: '127.0.0.1',
+        port,
+        path: reqPath,
+        method,
+        headers: { 'Content-Type': 'application/json' },
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      if (body) req.write(JSON.stringify(body));
+      req.end();
+    });
+  };
+
+  // 5a. Unauthenticated request -> 401
+  currentAuth = null;
+  const unauthRes = await internalReq('GET', '/api/system/parity/os');
+  assert.equal(unauthRes.status, 401);
+
+  // 5b. Authenticated Owner -> 200 with all lines
+  currentAuth = {
+    user: { id: 'owner-e2e', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const ownerOsRes = await internalReq('GET', '/api/system/parity/os');
+  assert.equal(ownerOsRes.status, 200);
+  assert.equal(ownerOsRes.body.data.total, 6);
+
+  const ownerExtRes = await internalReq('GET', '/api/system/parity/external');
+  assert.equal(ownerExtRes.status, 200);
+  assert.equal(ownerExtRes.body.data.total, 6);
+
+  const ownerDefRes = await internalReq('GET', '/api/system/parity/deferred-billing');
+  assert.equal(ownerDefRes.status, 200);
+  assert.equal(ownerDefRes.body.data.blocksInitialRelease, false);
+
+  // 5c. Customer role access filtering
+  currentAuth = {
+    user: { id: 'customer-e2e', role: 'customer', active: true },
+    access: { mode: 'site_management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const custOsRes = await internalReq('GET', '/api/system/parity/os');
+  assert.equal(custOsRes.status, 200);
+  assert.ok(custOsRes.body.data.total < ownerOsRes.body.data.total);
+
+  // Customer querying owner-only line returns 403
+  const custForbidden = await internalReq('GET', '/api/system/parity/os/WIN-01');
+  assert.equal(custForbidden.status, 403);
+  assert.equal(custForbidden.body.error.code, 'tenant_boundary_forbidden');
+
+  // 5d. Fail-closed adapter execution via HTTP
+  currentAuth = {
+    user: { id: 'owner-e2e', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const execOsRes = await internalReq('POST', '/api/system/parity/os/WIN-01/execute', {
+    method: 'getServiceStatus',
+    args: ['W3SVC'],
+  });
+  assert.equal(execOsRes.status, 501);
+  assert.equal(execOsRes.body.error.code, 'windows_platform_unsupported');
+
+  const execExtRes = await internalReq('POST', '/api/system/parity/external/EXT-BUILD-01/execute', {
+    method: 'createBuilderSession',
+    params: { siteId: 's1', domain: 'd1.com' },
+  });
+  assert.equal(execExtRes.status, 501);
+  assert.equal(execExtRes.body.error.code, 'sitebuilder_unconfigured');
+
+  // 5e. Billing validation endpoint rejects premature billing
+  const badBillRes = await internalReq('POST', '/api/system/parity/validate-billing', {
+    billingAutomation: { cron: '0 0 1 * *' },
+  });
+  assert.equal(badBillRes.status, 403);
+  assert.equal(badBillRes.body.error.code, 'reseller_billing_deferred');
+
+  const cleanBillRes = await internalReq('POST', '/api/system/parity/validate-billing', {
+    quotaProfile: 'standard',
+  });
+  assert.equal(cleanBillRes.status, 200);
+  assert.equal(cleanBillRes.body.data.valid, true);
+
+  assert.ok(true, 'PAR-05: Windows OS equivalence boundaries, fail-closed contracts, external lifecycle boundaries, and reseller billing deferral verified.');
 });
