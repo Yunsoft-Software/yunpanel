@@ -50,7 +50,15 @@ import {
   mountMailboxRoutes,
 } from '../src/mailbox-http.js';
 import {
+  createMailDataDeleteManager,
+  MailDataDeleteError,
+} from '@yunpanel/host-runtime';
+import {
   createSingleMailboxLifecycleCoordinator,
+  assertNoDomainOrSiblingDisruption,
+  assertNoClosedDomainReopened,
+  assertMailboxAccessTerminatedSeparately,
+  assertSiblingMailboxContinuity,
   createMailboxProtocolSessionTracker,
   createMailboxAccessGuard,
   MailboxAccessError,
@@ -4525,5 +4533,669 @@ test('Criterion 16: Gerçek doğrulanmış yedek → veri silme işi → mailbox
       })
     );
     assert.ok(deletedHtml.includes('Posta verisinin silme işi doğrulandı ve hesap kaydı kaldırıldı.'));
+  }
+});
+
+test('Criterion 17: Güncel MS-01–04 ile tek-kutu silmede alan adı açık kalsın; yalnız seçilen hesabın gerçek SMTP/IMAP/Postfix/Dovecot/Roundcube erişimi denetlensin. Domain-scope toplu silmenin kendi domain disabled şartı korunur. Disabled kayıt tek başına canlı kapanma kanıtı değildir; ayrıntılı kabul yukarıdaki T-DEV-MR-SINGLE içindedir', async () => {
+  const sha64 = (val) => createHash('sha256').update(String(val)).digest('hex');
+
+  // =========================================================================
+  // Section 1: Single Mailbox Deletion Flow Operates With Domain Open & Active
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: true,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+
+    const targetId = fx.mailboxId;
+    const siblingId = fx.siblingMailboxId;
+    const domainId = fx.mailDomainId;
+
+    // Verify initial states: Domain is enabled, both target and sibling are enabled
+    const domainBefore = await fx.mailDomainRegistry.getMailDomain(domainId);
+    assert.equal(domainBefore.status, 'enabled');
+    const targetBefore = await fx.mailboxRegistry.getMailbox(targetId);
+    assert.equal(targetBefore.enabled, true);
+    const siblingBefore = await fx.mailboxRegistry.getMailbox(siblingId);
+    assert.equal(siblingBefore.enabled, true);
+
+    // Disable target mailbox ONLY (Step 1 of single removal)
+    const disabledTarget = await fx.mailboxRegistry.setEnabled(targetId, {
+      expectedRevision: 1,
+      enabled: false,
+    });
+    assert.equal(disabledTarget.enabled, false);
+    assert.equal(disabledTarget.revision, 2);
+    fx.mailbox.enabled = false;
+    fx.mailbox.revision = 2;
+
+    // CRITICAL: Mail domain remains strictly OPEN and ACTIVE (not disabled)
+    const domainAfter = await fx.mailDomainRegistry.getMailDomain(domainId);
+    assert.equal(domainAfter.status, 'enabled');
+    assert.equal(domainAfter.revision, domainBefore.revision);
+
+    // CRITICAL: Sibling mailbox remains enabled
+    const siblingAfter = await fx.mailboxRegistry.getMailbox(siblingId);
+    assert.equal(siblingAfter.enabled, true);
+    assert.equal(siblingAfter.revision, siblingBefore.revision);
+
+    // Assert no domain disruption or sibling disruption
+    assertNoDomainOrSiblingDisruption({
+      sharedDomain: domainAfter,
+      siblingMailbox: siblingAfter,
+      initialDomainStatus: 'enabled',
+    });
+
+    // Preview backup for target mailbox operates while domain is 'enabled'
+    const backupPreview = await fx.mailDataOperationsService.previewBackup({
+      scope: 'mailbox',
+      resourceId: targetId,
+    });
+    assert.equal(backupPreview.scope, 'mailbox');
+    assert.equal(backupPreview.identity, fx.mailbox.address);
+
+    const queuedBackup = await fx.mailDataOperationsService.queueBackup({
+      scope: 'mailbox',
+      resourceId: targetId,
+      expectedRevision: 2,
+      expectedPreviewDigest: backupPreview.previewDigest,
+      confirmation: backupPreview.confirmation,
+    });
+    assert.ok(queuedBackup.job);
+
+    const bRes1 = await fx.hostOperations.executeOperation(
+      OPERATIONS.MAIL_DATA_BACKUP,
+      queuedBackup.job.payload,
+      {
+        jobId: queuedBackup.job.id,
+        serverId: fx.localServerId,
+        type: 'mail_data_backup',
+        resourceType: 'mail_domain',
+        resourceId: fx.mailDomainId,
+      }
+    );
+    fx.storedJobs.set(queuedBackup.job.id, {
+      ...queuedBackup.job,
+      status: 'succeeded',
+      result: sanitizeMailDataBackupResult(queuedBackup.job, bRes1),
+    });
+
+    // Preview delete for target mailbox operates while domain is 'enabled'
+    const deletePreview = await fx.mailDataOperationsService.previewDelete({
+      scope: 'mailbox',
+      resourceId: targetId,
+      backupId: fx.backupId,
+    });
+    assert.equal(deletePreview.scope, 'mailbox');
+    assert.equal(deletePreview.identity, fx.mailbox.address);
+
+    const queuedDelete = await fx.mailDataOperationsService.queueDelete({
+      scope: 'mailbox',
+      resourceId: targetId,
+      backupId: fx.backupId,
+      expectedRevision: 2,
+      expectedPreviewDigest: deletePreview.previewDigest,
+      confirmation: deletePreview.confirmation,
+    });
+    assert.ok(queuedDelete.job);
+
+    // Domain remains enabled throughout
+    const domainFinal = await fx.mailDomainRegistry.getMailDomain(domainId);
+    assert.equal(domainFinal.status, 'enabled');
+  }
+
+  // =========================================================================
+  // Section 2: Selective Real SMTP, IMAP, Postfix, Dovecot, Roundcube Access Quiescing
+  // =========================================================================
+  {
+    const targetAddress = 'alice@example.com';
+    const siblingAddress = 'bob@example.com';
+    const thirdAddress = 'carol@example.com';
+
+    const sessionTracker = createMailboxProtocolSessionTracker();
+
+    // 2a. Register active sessions for target mailbox (alice)
+    const aliceDesktopImap = sessionTracker.registerDovecotSession(targetAddress, { proto: 'imap', pid: '10101' });
+    const aliceRoundcubeImap = sessionTracker.registerDovecotSession(targetAddress, { proto: 'imap', pid: '10102' });
+    const aliceSmtp = sessionTracker.registerAuthenticatedSmtpSession(targetAddress, { sessionId: 'smtp-alice-1' });
+    const aliceWebmail = sessionTracker.registerWebmailHttpSession(targetAddress, { sessionId: 'webmail-alice-1' });
+
+    // 2b. Register active sessions for sibling mailboxes (bob and carol)
+    const bobDesktopImap = sessionTracker.registerDovecotSession(siblingAddress, { proto: 'imap', pid: '20201' });
+    const bobRoundcubeImap = sessionTracker.registerDovecotSession(siblingAddress, { proto: 'imap', pid: '20202' });
+    const bobSmtp = sessionTracker.registerAuthenticatedSmtpSession(siblingAddress, { sessionId: 'smtp-bob-1' });
+    const bobWebmail = sessionTracker.registerWebmailHttpSession(siblingAddress, { sessionId: 'webmail-bob-1' });
+
+    const carolImap = sessionTracker.registerDovecotSession(thirdAddress, { proto: 'imap', pid: '30301' });
+    const carolSmtp = sessionTracker.registerAuthenticatedSmtpSession(thirdAddress, { sessionId: 'smtp-carol-1' });
+    const carolWebmail = sessionTracker.registerWebmailHttpSession(thirdAddress, { sessionId: 'webmail-carol-1' });
+
+    // Verify initial active session counts
+    assert.equal(sessionTracker.listActiveDovecotSessions(targetAddress).length, 2);
+    assert.equal(sessionTracker.listActiveDovecotSessions(siblingAddress).length, 2);
+    assert.equal(sessionTracker.listActiveDovecotSessions(thirdAddress).length, 1);
+
+    // Mock command runner for mailbox access guard tracking executed commands
+    const executedCommands = [];
+    const mockRunner = async (file, args, options) => {
+      executedCommands.push({ file, args: [...args], options });
+      const cmdStr = `${file} ${args.join(' ')}`;
+
+      // Postfix lookups
+      if (file === '/usr/sbin/postconf') {
+        if (args[1] === 'virtual_mailbox_maps') {
+          return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf\n', stderr: '' };
+        }
+        if (args[1] === 'smtpd_sender_login_maps') {
+          return { stdout: 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf\n', stderr: '' };
+        }
+      }
+
+      // Postfix postmap queries: absence for alice (code 1), present for bob (code 0)
+      if (file === '/usr/sbin/postmap') {
+        const queryAddress = args[1];
+        if (queryAddress === targetAddress) {
+          const err = new Error('not found');
+          err.code = 1;
+          err.stdout = '';
+          err.stderr = '';
+          throw err;
+        }
+        return { stdout: 'found\n', stderr: '' };
+      }
+
+      // Dovecot commands
+      if (file === '/usr/bin/doveadm') {
+        if (args[0] === 'auth' && args[1] === 'cache' && args[2] === 'flush') {
+          assert.equal(args[3], targetAddress, 'Dovecot cache flush must target ONLY the selected mailbox');
+          return { stdout: '1 cache entries flushed\n', stderr: '' };
+        }
+        if (args[0] === 'auth' && args[1] === 'lookup') {
+          const addr = args[args.length - 1];
+          if (addr === targetAddress) {
+            const err = new Error('user not found');
+            err.code = 67;
+            err.stdout = '';
+            err.stderr = `passdb lookup: user ${addr} doesn't exist`;
+            throw err;
+          }
+          return { stdout: `user=${addr}\n`, stderr: '' };
+        }
+        if (args[0] === 'user') {
+          const addr = args[args.length - 1];
+          if (addr === targetAddress) {
+            const err = new Error('user not found');
+            err.code = 67;
+            err.stdout = '';
+            err.stderr = `userdb lookup: user ${addr} doesn't exist`;
+            throw err;
+          }
+          return { stdout: 'uid=5000\n', stderr: '' };
+        }
+        if (args[0] === 'kick') {
+          assert.equal(args[1], targetAddress, 'Dovecot kick must target ONLY the selected mailbox');
+          sessionTracker.kickDovecotUser(targetAddress);
+          return { stdout: '', stderr: '' };
+        }
+        if (args[0] === '-f' && args[1] === 'tab' && args[2] === 'who') {
+          assert.equal(args[args.length - 1], targetAddress, 'Dovecot who must target ONLY the selected mailbox');
+          const remaining = sessionTracker.listActiveDovecotSessions(targetAddress);
+          if (remaining.length === 0) {
+            return { stdout: 'username\tproto\tpid\tip\n', stderr: '' };
+          }
+          const rows = remaining.map((s) => `${s.address}\t${s.proto}\t${s.pid}\t${s.ip}`).join('\n');
+          return { stdout: `username\tproto\tpid\tip\n${rows}\n`, stderr: '' };
+        }
+      }
+
+      throw new Error(`Unexpected command: ${cmdStr}`);
+    };
+
+    const guard = createMailboxAccessGuard({ run: mockRunner });
+
+    // Quiesce target mailbox
+    const quiesceProof = await guard.quiesce(targetAddress);
+    assert.equal(quiesceProof.identity, targetAddress);
+    assert.equal(quiesceProof.accessDisabled, true);
+    assert.equal(quiesceProof.sessionsCleared, true);
+
+    // Verify commands executed were strictly isolated to targetAddress
+    assert.ok(executedCommands.length > 0);
+    for (const cmd of executedCommands) {
+      assert.equal(cmd.args.includes('*'), false, 'Never use wildcard user mask');
+      assert.equal(cmd.args.includes('-A'), false, 'Never kick all users');
+      for (const arg of cmd.args) {
+        if (arg.includes('@')) {
+          assert.equal(arg, targetAddress, `Command argument ${arg} must match targetAddress only`);
+        }
+      }
+    }
+
+    // Invalidate target mailbox SMTP and Webmail sessions
+    sessionTracker.invalidateSmtpSessions(targetAddress);
+    sessionTracker.terminateWebmailHttpSessions(targetAddress);
+
+    // Target mailbox protocol sessions verification: ALL TERMINATED
+    assert.equal(sessionTracker.listActiveDovecotSessions(targetAddress).length, 0);
+
+    // Target mailbox cannot send SMTP
+    assert.throws(
+      () => sessionTracker.verifySmtpSender(aliceSmtp.sessionId, targetAddress, () => false),
+      (err) => err.code === 'smtp_sender_disabled' || err.code === 'smtp_auth_invalid'
+    );
+
+    // Target mailbox cannot receive LMTP delivery
+    assert.throws(
+      () => sessionTracker.deliverLmtpMessage(targetAddress, 'Subject: Test', () => false),
+      (err) => err.code === 'lmtp_recipient_not_found'
+    );
+
+    // Target mailbox cannot use Webmail session
+    assert.throws(
+      () => sessionTracker.validateWebmailHttpSession(aliceWebmail.sessionId, () => false),
+      (err) => err.code === 'webmail_account_disabled' || err.code === 'webmail_session_invalid'
+    );
+
+    // Target access terminated separately check passes
+    assertMailboxAccessTerminatedSeparately({
+      address: targetAddress,
+      sessionTracker,
+    });
+
+    // 2c. SIBLING MAILBOX CONTINUITY: Sibling accounts (bob & carol) REMAIN FULLY OPERATIONAL!
+    // Bob's Dovecot sessions (desktop + Roundcube webmail) are 100% active
+    const bobActiveDovecot = sessionTracker.listActiveDovecotSessions(siblingAddress);
+    assert.equal(bobActiveDovecot.length, 2);
+    assert.ok(bobActiveDovecot.some((s) => s.id === bobDesktopImap.id && s.active));
+    assert.ok(bobActiveDovecot.some((s) => s.id === bobRoundcubeImap.id && s.active));
+
+    // Bob can continue sending authenticated SMTP
+    const bobSmtpCheck = sessionTracker.verifySmtpSender(bobSmtp.sessionId, siblingAddress, () => true);
+    assert.equal(bobSmtpCheck.authorized, true);
+    assert.equal(bobSmtpCheck.sender, siblingAddress);
+
+    // Bob can continue receiving incoming LMTP deliveries
+    const bobLmtpCheck = sessionTracker.deliverLmtpMessage(siblingAddress, 'Subject: Hello Bob', () => true);
+    assert.equal(bobLmtpCheck.delivered, true);
+    assert.equal(bobLmtpCheck.recipient, siblingAddress);
+
+    // Bob's Webmail HTTP session remains valid
+    const bobWebmailCheck = sessionTracker.validateWebmailHttpSession(bobWebmail.sessionId, () => true);
+    assert.equal(bobWebmailCheck.valid, true);
+
+    // Carol's protocol sessions are also 100% active
+    assert.equal(sessionTracker.listActiveDovecotSessions(thirdAddress).length, 1);
+    assert.equal(sessionTracker.verifySmtpSender(carolSmtp.sessionId, thirdAddress, () => true).authorized, true);
+    assert.equal(sessionTracker.deliverLmtpMessage(thirdAddress, 'Subject: Hello Carol', () => true).delivered, true);
+    assert.equal(sessionTracker.validateWebmailHttpSession(carolWebmail.sessionId, () => true).valid, true);
+
+    // assertSiblingMailboxContinuity passes
+    const siblingContinuity = assertSiblingMailboxContinuity({
+      address: siblingAddress,
+      sessionTracker,
+      activeDovecotCount: 2,
+    });
+    assert.equal(siblingContinuity.allProtocolsOperational, true);
+  }
+
+  // =========================================================================
+  // Section 3: Disabled Record Alone is NOT Proof of Live Shutdown (Fail-Closed)
+  // =========================================================================
+  {
+    const targetAddress = 'target-check@example.com';
+
+    // 3a. Postfix virtual_mailbox_maps still present (postmap exit 0) -> fails-closed
+    {
+      const runnerStillDelivered = async (file, args) => {
+        if (file === '/usr/sbin/postconf') {
+          return { stdout: args[1] === 'smtpd_sender_login_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf\n' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf\n', stderr: '' };
+        }
+        if (file === '/usr/sbin/postmap') return { stdout: 'still-delivered\n', stderr: '' };
+        throw new Error('should not reach');
+      };
+      const guard = createMailboxAccessGuard({ run: runnerStillDelivered });
+      await assert.rejects(
+        guard.quiesce(targetAddress),
+        (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_still_enabled'
+      );
+    }
+
+    // 3b. Dovecot passdb auth still succeeds -> fails-closed
+    {
+      const runnerStillAuth = async (file, args) => {
+        if (file === '/usr/sbin/postconf') {
+          return { stdout: args[1] === 'smtpd_sender_login_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf\n' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf\n', stderr: '' };
+        }
+        if (file === '/usr/sbin/postmap') {
+          const err = new Error('not found'); err.code = 1; err.stdout = ''; err.stderr = ''; throw err;
+        }
+        if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'cache') {
+          return { stdout: '1 cache entries flushed\n', stderr: '' };
+        }
+        if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'lookup') {
+          return { stdout: `user=${targetAddress}\n`, stderr: '' };
+        }
+        throw new Error('should not reach');
+      };
+      const guard = createMailboxAccessGuard({ run: runnerStillAuth });
+      await assert.rejects(
+        guard.quiesce(targetAddress),
+        (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_still_enabled'
+      );
+    }
+
+    // 3c. Dovecot session remaining after kick -> fails-closed
+    {
+      const runnerSessionsRemaining = async (file, args) => {
+        if (file === '/usr/sbin/postconf') {
+          return { stdout: args[1] === 'smtpd_sender_login_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf\n' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf\n', stderr: '' };
+        }
+        if (file === '/usr/sbin/postmap') {
+          const err = new Error('not found'); err.code = 1; err.stdout = ''; err.stderr = ''; throw err;
+        }
+        if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'cache') return { stdout: '1 cache entries flushed\n', stderr: '' };
+        if (file === '/usr/bin/doveadm' && args[0] === 'auth' && args[1] === 'lookup') {
+          const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = `passdb lookup: user ${targetAddress} doesn't exist`; throw err;
+        }
+        if (file === '/usr/bin/doveadm' && args[0] === 'user') {
+          const err = new Error('not found'); err.code = 67; err.stdout = ''; err.stderr = `userdb lookup: user ${targetAddress} doesn't exist`; throw err;
+        }
+        if (file === '/usr/bin/doveadm' && args[0] === 'kick') return { stdout: '', stderr: '' };
+        if (file === '/usr/bin/doveadm' && args[2] === 'who') {
+          return { stdout: `username\tproto\tpid\tip\n${targetAddress}\timap\t1234\t127.0.0.1\n`, stderr: '' };
+        }
+        throw new Error('should not reach');
+      };
+      const guard = createMailboxAccessGuard({ run: runnerSessionsRemaining });
+      await assert.rejects(
+        guard.quiesce(targetAddress),
+        (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_sessions_remaining'
+      );
+    }
+
+    // 3d. Unexpected error exit code (e.g. exit 75 EX_TEMPFAIL or EACCES) is NOT absence
+    {
+      const runnerTempfail = async (file, args) => {
+        if (file === '/usr/sbin/postconf') {
+          return { stdout: args[1] === 'smtpd_sender_login_maps' ? 'proxy:sqlite:/etc/postfix/yunpanel-sql/sender-login.cf\n' : 'proxy:sqlite:/etc/postfix/yunpanel-sql/virtual-mailboxes.cf\n', stderr: '' };
+        }
+        if (file === '/usr/sbin/postmap') {
+          const err = new Error('tempfail'); err.code = 75; err.stdout = ''; err.stderr = 'temporary lookup failure'; throw err;
+        }
+        throw new Error('should not reach');
+      };
+      const guard = createMailboxAccessGuard({ run: runnerTempfail });
+      await assert.rejects(
+        guard.quiesce(targetAddress),
+        (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_check_failed'
+      );
+    }
+
+    // 3e. Host data delete manager fails-closed when access guard cannot verify quiescing
+    {
+      const failingGuard = {
+        quiesce: async () => ({ identity: targetAddress, accessDisabled: false, sessionsCleared: false }),
+        verify: async () => ({ identity: targetAddress, accessDisabled: false, sessionsCleared: false }),
+      };
+      const mockInspector = {
+        inspectMailbox: async () => ({ present: true, bytes: 4096, snapshotSha256: sha64('data'), dataPath: '/var/vmail/target' }),
+        inspectDomain: async () => ({ present: true, bytes: 8192, snapshotSha256: sha64('domain-data') }),
+      };
+      const mockBackupMgr = {
+        materializeBackup: async () => ({
+          manifest: {
+            backupId: 'b-1',
+            scope: 'mailbox',
+            identity: targetAddress,
+            sourcePresent: true,
+            sourcePath: '/var/vmail/target',
+            contentSha256: sha64('content'),
+            bytes: 4096,
+            files: 1,
+            directories: 1,
+          },
+        }),
+        inspectBackup: async () => ({ backupId: 'b-1', scope: 'mailbox', identity: targetAddress, sourcePresent: true }),
+      };
+
+      const deleteManager = createMailDataDeleteManager({
+        backupManager: mockBackupMgr,
+        mailDataInspector: mockInspector,
+        mailboxAccessGuard: failingGuard,
+        run: async () => ({ stdout: 'vmail:x:5000:5000::/var/vmail:/usr/sbin/nologin\n' }),
+      });
+
+      await assert.rejects(
+        deleteManager.deleteData({
+          identity: targetAddress,
+          scope: 'mailbox',
+          backupId: 'b-1',
+          expectedTargetSnapshotSha256: sha64('data'),
+          transactionId: 'tx-fail-closed-1',
+        }),
+        (err) => err instanceof MailDataDeleteError && err.code === 'mailbox_access_unverified'
+      );
+
+      const dataAfter = await mockInspector.inspectMailbox(targetAddress);
+      assert.equal(dataAfter.present, true);
+    }
+  }
+
+  // =========================================================================
+  // Section 4: Domain-Scope Batch Deletion Enforces Domain Disabled Precondition
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: false,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+
+    const domainId = fx.mailDomainId;
+    const mailboxId = fx.mailboxId;
+
+    // 4a. Domain-scope delete PREVIEW fails when domain is 'enabled'
+    await assert.rejects(
+      fx.mailDataOperationsService.previewDelete({
+        scope: 'domain',
+        resourceId: domainId,
+        backupId: fx.backupId,
+      }),
+      (err) => err instanceof MailDataOperationsError
+        && err.code === 'mail_data_delete_domain_disable_required'
+        && err.status === 409
+    );
+
+    // 4b. Domain-scope restore PREVIEW fails when domain is 'enabled'
+    await assert.rejects(
+      fx.mailDataOperationsService.previewRestore({
+        scope: 'domain',
+        resourceId: domainId,
+        backupId: fx.backupId,
+      }),
+      (err) => err instanceof MailDataOperationsError
+        && err.code === 'mail_data_restore_domain_disable_required'
+        && err.status === 409
+    );
+
+    // 4c. Contrast: Single mailbox delete PREVIEW succeeds when domain is 'enabled' (mailbox enabled: false)
+    const singleMailboxPreview = await fx.mailDataOperationsService.previewDelete({
+      scope: 'mailbox',
+      resourceId: mailboxId,
+      backupId: fx.backupId,
+    });
+    assert.equal(singleMailboxPreview.scope, 'mailbox');
+    assert.ok(singleMailboxPreview.previewDigest);
+
+    // 4d. Contrast: Single mailbox delete PREVIEW fails if mailbox is still enabled (domain status is irrelevant)
+    fx.mailboxesMap.get(mailboxId).enabled = true;
+    await assert.rejects(
+      fx.mailDataOperationsService.previewDelete({
+        scope: 'mailbox',
+        resourceId: mailboxId,
+        backupId: fx.backupId,
+      }),
+      (err) => err instanceof MailDataOperationsError
+        && err.code === 'mail_data_delete_mailbox_disable_required'
+        && err.status === 409
+    );
+    fx.mailboxesMap.get(mailboxId).enabled = false;
+
+    // 4e. When domain IS disabled and mailboxes removed, domain-scope operations succeed
+    fx.mailDomain.status = 'disabled';
+    fx.mailDomain.revision = 2;
+    fx.mailboxesMap.delete(fx.mailboxId);
+    fx.mailboxesMap.delete(fx.siblingMailboxId);
+
+    const domainBackupId = 'dom-backup-' + randomUUID().slice(0, 8);
+    fx.backupsMap.set(domainBackupId, {
+      version: 1,
+      backupId: domainBackupId,
+      scope: 'domain',
+      identity: fx.mailDomain.domainName,
+      sourcePath: `/var/lib/yunpanel/mail/${fx.mailDomain.domainName}`,
+      sourcePresent: true,
+      sourceSnapshotSha256: fx.snapshotDigest,
+      contentSha256: fx.backupContentDigest,
+      bytes: 8192,
+      files: 16,
+      directories: 4,
+      createdAt: new Date().toISOString(),
+      sideEffects: true,
+    });
+
+    const domainDeletePreview = await fx.mailDataOperationsService.previewDelete({
+      scope: 'domain',
+      resourceId: domainId,
+      backupId: domainBackupId,
+    });
+    assert.equal(domainDeletePreview.scope, 'domain');
+    assert.equal(domainDeletePreview.mailDomainId, domainId);
+    assert.ok(domainDeletePreview.previewDigest);
+
+    const queuedDomainDelete = await fx.mailDataOperationsService.queueDelete({
+      scope: 'domain',
+      resourceId: domainId,
+      backupId: domainBackupId,
+      expectedRevision: 2,
+      expectedPreviewDigest: domainDeletePreview.previewDigest,
+      confirmation: domainDeletePreview.confirmation,
+    });
+    assert.equal(queuedDomainDelete.job.payload.scope, 'domain');
+  }
+
+  // =========================================================================
+  // Section 5: End-to-End Multi-Account Lifecycle & Finalization
+  // =========================================================================
+  {
+    const fx = createMailboxRemovalFixture({
+      domainStatus: 'enabled',
+      mailboxEnabled: true,
+      mailboxRevision: 1,
+      dataPresent: true,
+    });
+
+    const targetId = fx.mailboxId;
+    const siblingId = fx.siblingMailboxId;
+    const domainId = fx.mailDomainId;
+
+    // Step 1: Disable target mailbox
+    await fx.mailboxRegistry.setEnabled(targetId, {
+      expectedRevision: 1,
+      enabled: false,
+    });
+    fx.mailbox.enabled = false;
+    fx.mailbox.revision = 2;
+
+    // Verify domain is still enabled
+    const domainCheck1 = await fx.mailDomainRegistry.getMailDomain(domainId);
+    assert.equal(domainCheck1.status, 'enabled');
+
+    // Step 2: Backup target mailbox
+    const bPreview = await fx.mailDataOperationsService.previewBackup({
+      scope: 'mailbox',
+      resourceId: targetId,
+    });
+    const qBackup = await fx.mailDataOperationsService.queueBackup({
+      scope: 'mailbox',
+      resourceId: targetId,
+      expectedRevision: 2,
+      expectedPreviewDigest: bPreview.previewDigest,
+      confirmation: bPreview.confirmation,
+    });
+    const bRes5 = await fx.hostOperations.executeOperation(
+      OPERATIONS.MAIL_DATA_BACKUP,
+      qBackup.job.payload,
+      { jobId: qBackup.job.id, serverId: fx.localServerId, type: 'mail_data_backup', resourceType: 'mail_domain', resourceId: domainId }
+    );
+    fx.storedJobs.set(qBackup.job.id, {
+      ...qBackup.job,
+      status: 'succeeded',
+      result: sanitizeMailDataBackupResult(qBackup.job, bRes5),
+    });
+
+    // Step 3: Delete target mailbox data on host
+    const dPreview = await fx.mailDataOperationsService.previewDelete({
+      scope: 'mailbox',
+      resourceId: targetId,
+      backupId: fx.backupId,
+    });
+    const qDelete = await fx.mailDataOperationsService.queueDelete({
+      scope: 'mailbox',
+      resourceId: targetId,
+      backupId: fx.backupId,
+      expectedRevision: 2,
+      expectedPreviewDigest: dPreview.previewDigest,
+      confirmation: dPreview.confirmation,
+    });
+    const delResult = await fx.hostOperations.executeOperation(
+      OPERATIONS.MAIL_DATA_DELETE,
+      qDelete.job.payload,
+      { jobId: qDelete.job.id, serverId: fx.localServerId, type: 'mail_data_delete', resourceType: 'mail_domain', resourceId: domainId }
+    );
+    assert.equal(delResult.deleted, true);
+    fx.storedJobs.set(qDelete.job.id, {
+      ...qDelete.job,
+      status: 'succeeded',
+      result: sanitizeMailDataDeleteResult(qDelete.job, delResult),
+    });
+
+    // Step 4: Finalize mailbox deletion (cleanup registry records)
+    const finalized = await fx.mailDeleteFinalizeService.finalizeMailbox({
+      mailboxId: targetId,
+      expectedRevision: 2,
+      deleteJobId: qDelete.job.id,
+      confirmation: `delete-mailbox:${fx.mailbox.address}`,
+    });
+    assert.equal(finalized.deleted, true);
+
+    // Step 5: Post-deletion verification
+    // 5a. Target mailbox record is completely removed
+    const targetAfter = await fx.mailboxRegistry.getMailbox(targetId);
+    assert.equal(targetAfter, null);
+
+    // 5b. Mail domain remains strictly OPEN and ACTIVE
+    const domainAfter = await fx.mailDomainRegistry.getMailDomain(domainId);
+    assert.equal(domainAfter.status, 'enabled');
+
+    // 5c. Sibling mailbox remains in registry, enabled, with untouched revision
+    const siblingAfter = await fx.mailboxRegistry.getMailbox(siblingId);
+    assert.equal(siblingAfter.enabled, true);
+    assert.equal(siblingAfter.revision, 1);
+
+    // 5d. Sibling active sessions remain intact
+    const siblingSessions = fx.activeSessions.get(fx.siblingMailbox.address);
+    assert.equal(siblingSessions.length, 2);
+
+    // 5e. Invariants hold: no domain disruption, sibling continuity verified
+    assertNoDomainOrSiblingDisruption({
+      sharedDomain: domainAfter,
+      siblingMailbox: siblingAfter,
+      initialDomainStatus: 'enabled',
+    });
   }
 });
