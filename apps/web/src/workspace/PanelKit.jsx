@@ -74,9 +74,26 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
   useEffect(() => {
     const dialog = ref.current; const previous = document.activeElement;
     if (!dialog.open) dialog.showModal();
-    return () => { dialog.close(); if (previous?.isConnected) previous.focus(); };
+    return () => { dialog.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
   }, []);
-  return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-labelledby={titleId} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
+  const handleKeyDown = (event) => {
+    if (event.key === 'Tab') {
+      const dialog = ref.current;
+      if (!dialog) return;
+      const focusable = Array.from(dialog.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+      if (focusable.length < 2) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    }
+  };
+  return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
 }
 export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, confirmation, error, confirmLabel = 'Onayla' }) {
   const [value, setValue] = useState('');

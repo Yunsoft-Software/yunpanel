@@ -20,7 +20,7 @@
 .workspace-shell :is(button, input, select, textarea), .ws-modal :is(button, input, select, textarea) {
   font-family: var(--ws-font-body);
 }
-.workspace-shell :is(h1, h2), .ws-modal h2, .ws-brand strong,
+.workspace-shell :is(h1, h2), .ws-modal :is(h1, h2, h3), .ws-brand strong,
 .workspace-shell .ws-metric > strong, .ws-server-metrics .ws-usage-ring strong {
   font-family: var(--ws-font-display); font-weight: 500; letter-spacing: -.025em;
 }

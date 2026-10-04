@@ -44,5 +44,63 @@
   }
 }
 
-.ws-ai-sidebar > small { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; flex-shrink: 0; }
+.ws-ai-sidebar > small { white-space: nowrap; text-overflow: ellipsis; overflow: hidden; flex-shrink: 0; display: block; max-width: 100%; }
 .ws-ai-sidebar > .ws-actions { flex-shrink: 0; }
+
+/* Modal containment: keep outer modal locked so inner history and messages scroll independently */
+.ws-modal:has(.ws-ai-layout) {
+  overflow: hidden;
+}
+.ws-modal:has(.ws-ai-layout) .ws-modal-body {
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+
+/* Long text, code, notice, button and message wrapping */
+.ws-ai-history-row > button:last-child { flex: 0 0 auto; }
+.ws-ai-messages > div { min-width: 0; max-width: 85%; box-sizing: border-box; }
+.ws-ai-chat .ws-notice, .ws-ai-sidebar .ws-notice { min-width: 0; max-width: 100%; overflow-wrap: anywhere; word-break: break-word; }
+.ws-ai-chat .ws-notice > span, .ws-ai-sidebar .ws-notice > span { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.ws-ai-composer button { flex: 0 0 auto; white-space: nowrap; }
+
+/* Responsive adjustments for 320px, 390px and 200% zoom scaling */
+@media (max-width: 360px) {
+  .ws-ai-layout.ws-ai-history-layout { gap: 8px; }
+  .ws-ai-sidebar > .ws-actions { flex-wrap: wrap; gap: 4px; }
+  .ws-ai-composer { gap: 4px; }
+}
+
+/* Short screens, landscape displays and mobile virtual keyboard adaptation */
+@media (max-height: 540px) {
+  .ws-ai-layout.ws-ai-history-layout {
+    height: min(65vh, calc(100vh - 80px));
+    height: min(65dvh, calc(100dvh - 80px));
+    gap: 8px;
+  }
+  .ws-modal:has(.ws-ai-layout) > header {
+    padding: 10px 16px 8px;
+  }
+  .ws-modal:has(.ws-ai-layout) .ws-modal-body {
+    padding: 8px 16px 12px;
+  }
+}
+
+@media (max-width: 900px) and (orientation: landscape) and (max-height: 540px) {
+  .ws-ai-layout.ws-ai-history-layout {
+    grid-template-columns: minmax(160px, 220px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr);
+    height: min(75vh, calc(100vh - 70px));
+    height: min(75dvh, calc(100dvh - 70px));
+    gap: 10px;
+  }
+}
+
+@media (max-width: 700px) and (max-height: 500px) and (orientation: portrait) {
+  .ws-ai-layout.ws-ai-history-layout {
+    grid-template-rows: minmax(80px, 24%) minmax(0, 1fr);
+    height: calc(100dvh - 80px);
+    gap: 6px;
+  }
+}

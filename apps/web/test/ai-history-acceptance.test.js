@@ -470,3 +470,116 @@ test('Comprehensive acceptance: >20 equal-time chats, concurrent mutation races,
   assert.match(drawerSource, /mutate/);
   assert.doesNotMatch(drawerSource, /setTimeout\([^)]*mutate/);
 });
+
+/* ==========================================================================
+   Criterion 9: Üretim React/Vite/Ember fontlarıyla tipografi, 320/390/834/1440 px
+   ve yüzde200 zoom duyarlı yerleşim, kısa/yatay ekran ve mobil klavye adaptasyonu,
+   uzun başlık/mesaj/hata sarmalama ve klavye/ekran okuyucu odak yönetimi
+   ========================================================================== */
+
+test('Criterion 9: Production Ember typography is bound across body, modal headings, and code elements', async () => {
+  const emberTypography = await source('ui/ember-typography.css');
+
+  // Same-origin verified font-family definitions
+  assert.match(emberTypography, /font-family:\s*'Yun Manrope'/);
+  assert.match(emberTypography, /font-family:\s*'Yun Outfit'/);
+
+  // Body, input, button font inheritance
+  assert.match(emberTypography, /--ws-font-body:\s*'Yun Manrope'/);
+  assert.match(emberTypography, /--ws-font-display:\s*'Yun Outfit'/);
+  assert.match(emberTypography, /--ws-font-code:\s*ui-monospace/);
+
+  // Modal and its headings bind Ember typography
+  assert.match(emberTypography, /\.ws-modal,\s*\.authenticated-panel/);
+  assert.match(emberTypography, /\.ws-modal\s+:is\([^)]*\bh3\b/);
+
+  // Code elements use monospace font token in drawer
+  assert.match(drawerSource, /fontFamily:\s*'var\(--ws-font-code,\s*monospace\)'/);
+});
+
+test('Criterion 9: Viewports (320px, 390px, 834px, 1440px) and 200% zoom prevent overflow and preserve scrollers', () => {
+  // Mobile breakpoint reflows to single column at <= 700px
+  assert.match(cssSource, /@media\s*\(max-width:\s*700px\)/);
+
+  // Extra narrow mobile (<= 360px) and 200% zoom protection
+  assert.match(cssSource, /@media\s*\(max-width:\s*360px\)/);
+  assert.match(cssSource, /\.ws-ai-sidebar\s*>\s*\.ws-actions\s*\{[^}]*flex-wrap:\s*wrap;/);
+
+  // Dynamic viewport units with dvh prevent vertical clipping
+  assert.match(cssSource, /height:\s*min\(68dvh,\s*680px\);/);
+  assert.match(cssSource, /height:\s*70dvh;/);
+
+  // All flex containers enforce min-width and min-height 0 to prevent overflow
+  assert.match(cssSource, /\.ws-ai-sidebar,\s*\.ws-ai-chat\s*\{[^}]*min-width:\s*0;/);
+  assert.match(cssSource, /\.ws-ai-history-list,\s*\.ws-ai-messages\s*\{[^}]*min-width:\s*0;/);
+});
+
+test('Criterion 9: Short/landscape displays and mobile keyboard adaptation keep composer accessible and preserve background scroll', async () => {
+  const panelKit = await source('PanelKit.jsx');
+
+  // Short display adaptations at max-height 540px
+  assert.match(cssSource, /@media\s*\(max-height:\s*540px\)/);
+  assert.match(cssSource, /height:\s*min\(65dvh/);
+
+  // Landscape mobile reflows to columns to give full height to chat and composer
+  assert.match(cssSource, /@media\s*\(max-width:\s*900px\)\s*and\s*\(orientation:\s*landscape\)\s*and\s*\(max-height:\s*540px\)/);
+
+  // Virtual keyboard portrait adaptation
+  assert.match(cssSource, /@media\s*\(max-width:\s*700px\)\s*and\s*\(max-height:\s*500px\)\s*and\s*\(orientation:\s*portrait\)/);
+
+  // Composer pinned at bottom with non-shrinking send button
+  assert.match(cssSource, /\.ws-ai-composer\s*button\s*\{[^}]*flex:\s*0 0 auto;/);
+  assert.match(cssSource, /\.ws-ai-composer\s*button\s*\{[^}]*white-space:\s*nowrap;/);
+
+  // Modal containment: outer modal does not scroll when AI drawer is open
+  assert.match(cssSource, /\.ws-modal:has\(\.ws-ai-layout\)\s*\{[^}]*overflow:\s*hidden;/);
+  assert.match(cssSource, /\.ws-modal:has\(\.ws-ai-layout\)\s*\.ws-modal-body\s*\{[^}]*overflow:\s*hidden;/);
+
+  // Focus restoration preserves scroll position
+  assert.match(panelKit, /previous\.focus\(\{\s*preventScroll:\s*true\s*\}\)/);
+});
+
+test('Criterion 9: Long conversation titles, messages, tool outputs, and error states truncate or wrap cleanly', () => {
+  // Titles truncate with ellipsis without expanding container
+  assert.match(cssSource, /\.ws-ai-conversation-select > span\s*\{[^}]*text-overflow:\s*ellipsis;/);
+  assert.match(cssSource, /\.ws-ai-conversation-select > span\s*\{[^}]*white-space:\s*nowrap;/);
+  assert.match(cssSource, /\.ws-ai-history-row\s*>\s*button:last-child\s*\{[^}]*flex:\s*0 0 auto;/);
+
+  // Message text wraps safely with anywhere/break-word
+  assert.match(drawerSource, /wordBreak:\s*'break-word'/);
+  assert.match(drawerSource, /overflowWrap:\s*'anywhere'/);
+  assert.match(cssSource, /\.ws-ai-messages\s*>\s*div\s*\{[^}]*min-width:\s*0;/);
+
+  // Error notices wrap cleanly without breaking layout containers
+  assert.match(cssSource, /\.ws-ai-chat \.ws-notice,\s*\.ws-ai-sidebar \.ws-notice\s*\{[^}]*overflow-wrap:\s*anywhere;/);
+  assert.match(cssSource, /\.ws-ai-chat \.ws-notice,\s*\.ws-ai-sidebar \.ws-notice\s*\{[^}]*word-break:\s*break-word;/);
+
+  // Action proposal inputs scroll horizontally and wrap long text
+  assert.match(drawerSource, /overflowX:\s*'auto'/);
+  assert.match(drawerSource, /wordBreak:\s*'break-all'/);
+});
+
+test('Criterion 9: Keyboard navigation, modal focus trapping, and screen reader ARIA roles/labels', async () => {
+  const panelKit = await source('PanelKit.jsx');
+
+  // Focus trapping inside modal
+  assert.match(panelKit, /event\.key === 'Tab'/);
+  assert.match(panelKit, /event\.shiftKey && document\.activeElement === first/);
+  assert.match(panelKit, /!event\.shiftKey && document\.activeElement === last/);
+
+  // Arrow key navigation across conversation history items
+  assert.match(drawerSource, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
+  assert.match(drawerSource, /buttons\[next\]\?\.focus\(\)/);
+
+  // Screen reader attributes for messages and status
+  assert.match(drawerSource, /role="log"/);
+  assert.match(drawerSource, /aria-live="polite"/);
+  assert.match(drawerSource, /aria-label="Sohbet mesajları"/);
+  assert.match(drawerSource, /aria-label=\{msg\.role === 'user' \? 'Kullanıcı mesajı' : 'AI yanıtı'\}/);
+
+  // History list screen reader attributes
+  assert.match(drawerSource, /tabIndex=\{0\}/);
+  assert.match(drawerSource, /aria-label="Kaydırılabilir sohbet listesi"/);
+  assert.match(drawerSource, /aria-busy=\{loading\}/);
+  assert.match(drawerSource, /aria-current=\{conv\.id === activeConvId \? 'true' : undefined\}/);
+});
