@@ -1,4 +1,5 @@
 function formatExpiry(certificate) {
+  if (!certificate || typeof certificate !== 'object') return 'Bilinmiyor';
   if (certificate.staging && certificate.state === 'validated') return 'Validation passed';
   if (!certificate.validTo) return certificate.staging ? 'No certificate saved' : 'Waiting for certificate';
   const date = new Date(certificate.validTo);
@@ -9,7 +10,8 @@ function formatExpiry(certificate) {
 }
 
 export default function CertificateList({ certificates, access, busyId = null, onRenew = null }) {
-  if (!certificates.length) {
+  const list = Array.isArray(certificates) ? certificates : [];
+  if (!list.length) {
     return (
       <div className="domain-empty">
         <strong>{access === 'protected' ? 'Certificate inventory protected' : 'No managed certificate yet'}</strong>
@@ -24,37 +26,41 @@ export default function CertificateList({ certificates, access, busyId = null, o
 
   return (
     <div className="domain-list">
-      {certificates.map((certificate) => (
-        <article className="domain-row" key={certificate.id}>
-          <div className="domain-primary">
-            <span className={`status-dot ${certificate.state === 'active' || certificate.state === 'validated' ? 'online' : certificate.state === 'error' ? 'failed' : 'pending'}`} />
-            <div>
-              <strong>{certificate.certName}</strong>
-              <span>{certificate.staging ? 'ACME dry-run validation' : 'Production ACME certificate'}</span>
+      {list.map((certificate, index) => {
+        if (!certificate || typeof certificate !== 'object') return null;
+        const certId = certificate.id ?? `cert-${index}`;
+        return (
+          <article className="domain-row" key={certId}>
+            <div className="domain-primary">
+              <span className={`status-dot ${certificate.state === 'active' || certificate.state === 'validated' ? 'online' : certificate.state === 'error' ? 'failed' : 'pending'}`} />
+              <div>
+                <strong>{certificate.certName ?? '—'}</strong>
+                <span>{certificate.staging ? 'ACME dry-run validation' : 'Production ACME certificate'}</span>
+              </div>
             </div>
-          </div>
-          <div className="domain-cell">
-            <span>State</span>
-            <strong>{certificate.state}</strong>
-          </div>
-          <div className="domain-cell">
-            <span>{certificate.staging ? 'Validation' : 'Expiry'}</span>
-            <strong>{formatExpiry(certificate)}</strong>
-          </div>
-          <div className="domain-cell">
-            <span>Domains</span>
-            <strong>{certificate.domains?.length ?? 0}</strong>
-          </div>
-          <div className={`domain-state ${certificate.state === 'active' || certificate.state === 'validated' ? 'active' : certificate.state === 'error' ? 'error' : 'draft'}`}>
-            {certificate.staging ? 'validation' : 'managed'}
-          </div>
-          {onRenew && !certificate.staging && certificate.state === 'active' && (
-            <div className="row-actions">
-              <button className="secondary-button" type="button" disabled={busyId === certificate.id} onClick={() => onRenew(certificate)}>Renewal dry-run</button>
+            <div className="domain-cell">
+              <span>State</span>
+              <strong>{certificate.state ?? 'unknown'}</strong>
             </div>
-          )}
-        </article>
-      ))}
+            <div className="domain-cell">
+              <span>{certificate.staging ? 'Validation' : 'Expiry'}</span>
+              <strong>{formatExpiry(certificate)}</strong>
+            </div>
+            <div className="domain-cell">
+              <span>Domains</span>
+              <strong>{Array.isArray(certificate.domains) ? certificate.domains.length : 0}</strong>
+            </div>
+            <div className={`domain-state ${certificate.state === 'active' || certificate.state === 'validated' ? 'active' : certificate.state === 'error' ? 'error' : 'draft'}`}>
+              {certificate.staging ? 'validation' : 'managed'}
+            </div>
+            {onRenew && !certificate.staging && certificate.state === 'active' && (
+              <div className="row-actions">
+                <button className="secondary-button" type="button" disabled={busyId === certificate.id} onClick={() => onRenew(certificate)}>Renewal dry-run</button>
+              </div>
+            )}
+          </article>
+        );
+      })}
     </div>
   );
 }

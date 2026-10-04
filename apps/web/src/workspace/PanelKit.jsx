@@ -73,15 +73,50 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   useEffect(() => {
     const dialog = ref.current; const previous = document.activeElement;
-    if (!dialog.open) dialog.showModal();
-    return () => { dialog.close(); if (previous?.isConnected) previous.focus({ preventScroll: true }); };
+    if (dialog && !dialog.open) {
+      if (typeof dialog.showModal === 'function') {
+        try { dialog.showModal(); } catch {}
+      } else {
+        dialog.setAttribute('open', '');
+      }
+    }
+    const focusable = dialog ? Array.from(dialog.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')) : [];
+    const initial = dialog?.querySelector('[autofocus]') || focusable[0];
+    if (initial && typeof initial.focus === 'function') {
+      try { initial.focus(); } catch {}
+    }
+    return () => {
+      if (dialog && dialog.open) {
+        if (typeof dialog.close === 'function') {
+          try { dialog.close(); } catch {}
+        } else {
+          dialog.removeAttribute('open');
+        }
+      }
+      if (previous && typeof previous.focus === 'function') {
+        try { previous.focus({ preventScroll: true }); } catch {}
+      }
+    };
   }, []);
   const handleKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      event.preventDefault();
+      if (!busy) onCloseRef.current?.();
+      return;
+    }
     if (event.key === 'Tab') {
       const dialog = ref.current;
       if (!dialog) return;
       const focusable = Array.from(dialog.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'));
-      if (focusable.length < 2) return;
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      if (focusable.length === 1) {
+        event.preventDefault();
+        focusable[0].focus();
+        return;
+      }
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
       if (event.shiftKey && document.activeElement === first) {
@@ -90,10 +125,13 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
       } else if (!event.shiftKey && document.activeElement === last) {
         event.preventDefault();
         first.focus();
+      } else if (!dialog.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
       }
     }
   };
-  return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
+  return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
 }
 export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, confirmation, error, confirmLabel = 'Onayla' }) {
   const [value, setValue] = useState('');
