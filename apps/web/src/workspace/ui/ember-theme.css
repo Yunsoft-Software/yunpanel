@@ -91,6 +91,8 @@
 .workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary) { background: transparent; }
 .workspace-shell .ws-toolbar-actions .ws-button:not(.ws-button-primary):hover { background: var(--ws-surface); }
 .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border-radius: var(--ws-radius-control); border-color: var(--ws-control-border); background: var(--ws-surface-subtle); }
+.workspace-shell :is(input,select,textarea):disabled, .ws-modal :is(input,select,textarea):disabled { opacity: .55; cursor: not-allowed; background: var(--ws-surface-subtle); color: var(--ws-muted); }
+.workspace-shell code, .ws-modal code, code { overflow-wrap: anywhere; word-break: break-all; }
 .workspace-shell .ws-site-admin-fields label > input { height: var(--ws-control-height); min-height: var(--ws-control-height); border-radius: var(--ws-radius-control); }
 .workspace-shell :is(input,textarea)::placeholder, .ws-modal :is(input,textarea)::placeholder { opacity: 1; }
 .workspace-shell input:is([type='checkbox'],[type='radio']), .ws-modal input:is([type='checkbox'],[type='radio']) { accent-color: var(--ws-brand); }
@@ -272,7 +274,8 @@
   .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
 }
 @media (forced-colors: active) {
-  .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article), .ws-modal { border: 1px solid CanvasText; }
+  .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article,.ws-notice), .ws-modal { border: 1px solid CanvasText; }
+  .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border: 1px solid CanvasText; }
   .workspace-shell :is(.ws-nav a.active,.ys-site-primary a[aria-current],.ys-resource-tabs button[aria-current]) { outline: 2px solid Highlight; }
   .workspace-shell :is(.ws-table,.yf-table,.ys-resource-table) td { border-bottom: 1px solid CanvasText; }
   .workspace-shell .ws-usage-ring { border: 3px solid CanvasText; }

@@ -16,7 +16,15 @@ function useOperation() {
     if (pending.current) return false;
     pending.current = true; setBusy(true); setError(null);
     try { await action(); return true; }
-    catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); return false; }
+    catch (failure) {
+      if (failure.name !== 'AbortError') {
+        const message = (typeof failure?.message === 'string' && failure.message)
+          ? failure.message
+          : 'İşlem sırasında beklenmeyen bir hata oluştu.';
+        setError(message);
+      }
+      return false;
+    }
     finally { pending.current = false; setBusy(false); }
   }
   return { busy, error, perform };
@@ -154,7 +162,7 @@ function SslOperationForm({ domain, session }) {
   const certificate = ssl.certificate;
   const locked = !canManage || operation.busy || certificates.status !== 'ready' || domains.status !== 'ready' || jobs.status !== 'ready'
     || resourceBusy('domain', domain.id) || (certificate && resourceBusy('certificate', certificate.id))
-    || certificates.items.some((item) => item.domainId === domain.id && ['issuing', 'renewing'].includes(item.state));
+    || (Array.isArray(certificates.items) && certificates.items.some((item) => item?.domainId === domain.id && ['issuing', 'renewing'].includes(item?.state)));
   const canIssue = !locked && !domain.certificateId;
 
   const buildRequestedDomains = (values) => {
@@ -193,6 +201,9 @@ function SslOperationForm({ domain, session }) {
           method: 'POST',
           body: { changes: { httpsMode: 'managed' } },
         });
+        if (!preview || typeof preview !== 'object' || !preview.previewDigest || !preview.confirmation) {
+          throw new Error('Alan adı HTTPS önizleme yanıtı eksik veya geçersiz.');
+        }
         await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`, {
           method: 'PATCH',
           body: {
@@ -201,16 +212,34 @@ function SslOperationForm({ domain, session }) {
             confirmation: preview.confirmation,
           },
         });
-        currentDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+        const updatedDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+        currentDomain = updatedDomain?.domain ?? updatedDomain?.data ?? updatedDomain ?? currentDomain;
+        if (!currentDomain || typeof currentDomain !== 'object') {
+          throw new Error('Alan adı bilgileri sunucudan okunamadı.');
+        }
       }
       if (currentDomain.stagedRevision !== currentDomain.desiredRevision || !currentDomain.stagedChecksum) {
         const stageJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/stage`, { method: 'POST', body: {} });
-        await waitForJob(stageJob.id);
-        currentDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+        const stageJobId = stageJob?.id ?? stageJob?.job?.id ?? stageJob?.data?.id;
+        if (stageJobId) {
+          await waitForJob(stageJob.id ?? stageJobId);
+        } else if (stageJob?.status !== 'succeeded') {
+          throw new Error('Alan adı hazırlama (stage) iş kaydı alınamadı.');
+        }
+        const stagedDomain = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}`);
+        currentDomain = stagedDomain?.domain ?? stagedDomain?.data ?? stagedDomain ?? currentDomain;
+        if (!currentDomain || typeof currentDomain !== 'object') {
+          throw new Error('Alan adı hazırlama sonrasında güncel durum okunamadı.');
+        }
       }
       if (currentDomain.appliedRevision !== currentDomain.desiredRevision || currentDomain.state !== 'active') {
         const activateJob = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
-        await waitForJob(activateJob.id);
+        const activateJobId = activateJob?.id ?? activateJob?.job?.id ?? activateJob?.data?.id;
+        if (activateJobId) {
+          await waitForJob(activateJob.id ?? activateJobId);
+        } else if (activateJob?.status !== 'succeeded') {
+          throw new Error('Alan adı etkinleştirme (activate) iş kaydı alınamadı.');
+        }
       }
       const issueJob = await runJob(`/domains/${encodeURIComponent(currentDomain.id)}/certificates/issue`, {
         email: submitted.email,
@@ -222,17 +251,19 @@ function SslOperationForm({ domain, session }) {
         const finished = await waitForJob(issueJob.id);
         if (finished?.status === 'succeeded') {
           const postStage = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/stage`, { method: 'POST', body: {} });
-          await waitForJob(postStage.id);
+          const postStageId = postStage?.id ?? postStage?.job?.id ?? postStage?.data?.id;
+          if (postStageId) await waitForJob(postStage.id ?? postStageId);
           const postActivate = await panelRequest(`/domains/${encodeURIComponent(currentDomain.id)}/activate`, { method: 'POST', body: {} });
           await waitForJob(postActivate.id);
           if (submitted.assignToMail) {
             try {
               const currentIdentity = await panelRequest('/mail-service-identity').catch(() => null);
+              const identData = currentIdentity?.data ?? currentIdentity;
               await panelRequest('/mail-service-identity', {
                 method: 'PUT',
                 body: {
                   webDomainId: currentDomain.id,
-                  expectedRevision: currentIdentity?.data?.revision ?? 0,
+                  expectedRevision: identData?.revision ?? 0,
                 },
               });
             } catch (err) {
@@ -262,64 +293,69 @@ function SslOperationForm({ domain, session }) {
       {domain.appliedRevision !== domain.desiredRevision && <div className="ws-actions" style={{ marginBottom: 16 }}><Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Yapılandırmayı hazırla</Button><Button variant="primary" disabled={locked || domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/activate`))}>Yapılandırmayı etkinleştir</Button></div>}
       <label>Sertifika iletişim e-postası<input type="email" value={email} required maxLength={254} placeholder="E-posta adresiniz" aria-describedby={emailHintId} onChange={(event) => edit('email', event.target.value)} disabled={locked} /></label>
       <p id={emailHintId} className="ws-muted">{defaultEmail ? 'Başlangıç adresi hesabınızdan alınır; gerektiğinde değiştirebilirsiniz.' : 'Hesabınızda kullanılabilir e-posta adresi bulunamadı. Sertifika için iletişim adresinizi girin.'}</p>
-      <div style={{ margin: '14px 0', padding: '12px', border: '1px solid var(--ws-color-border, #e2e8f0)', borderRadius: '6px' }}>
-        <strong style={{ display: 'block', marginBottom: '8px' }}>Korunacak alan adları:</strong>
+      <div style={{ margin: '14px 0', padding: '12px', border: '1px solid var(--ws-border, #ddd8ce)', borderRadius: 'var(--ws-radius-small, 8px)', background: 'var(--ws-surface-subtle, transparent)' }}>
+        <strong style={{ display: 'block', marginBottom: '8px', color: 'var(--ws-text)' }}>Korunacak alan adları:</strong>
         <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'default' }}>
-            <input type="checkbox" checked disabled />
-            <span><strong>{domain.primaryDomain}</strong> (Ana alan adı — zorunlu)</span>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'default', color: 'var(--ws-text)', minWidth: 0 }}>
+            <input type="checkbox" checked disabled style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }} />
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>{domain.primaryDomain}</strong> (Ana alan adı — zorunlu)</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
               type="checkbox"
               checked={includeWww}
               onChange={(e) => edit('includeWww', e.target.checked)}
               disabled={locked}
+              style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span><strong>www.{domain.primaryDomain}</strong> ve alan adını koru</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>www.{domain.primaryDomain}</strong> ve alan adını koru</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
               type="checkbox"
               checked={includeWebmail}
               onChange={(e) => edit('includeWebmail', e.target.checked)}
               disabled={locked}
+              style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span><strong>webmail.{domain.primaryDomain}</strong> webmail arayüzünü koru</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>webmail.{domain.primaryDomain}</strong> webmail arayüzünü koru</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
               type="checkbox"
               checked={includeMail}
               onChange={(e) => edit('includeMail', e.target.checked)}
               disabled={locked}
+              style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span><strong>mail.{domain.primaryDomain}</strong> posta sunucusunu koru</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}><strong>mail.{domain.primaryDomain}</strong> posta sunucusunu koru</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
               type="checkbox"
               checked={assignToMail}
               onChange={(e) => edit('assignToMail', e.target.checked)}
               disabled={locked}
+              style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span>Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Sertifikayı posta alan adına ata (Postfix/Dovecot TLS SNI)</span>
           </label>
-          <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer' }}>
+          <label style={{ display: 'flex', alignItems: 'flex-start', gap: '8px', cursor: 'pointer', color: 'var(--ws-text)', minWidth: 0 }}>
             <input
               type="checkbox"
               checked={includeWildcard}
               onChange={(e) => edit('includeWildcard', e.target.checked)}
               disabled={locked}
+              style={{ marginTop: '3px', flexShrink: 0, accentColor: 'var(--ws-brand)' }}
             />
-            <span>Joker (Wildcard) sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
+            <span style={{ minWidth: 0, overflowWrap: 'anywhere' }}>Joker (Wildcard) sertifika çıkar (<strong>*.{domain.primaryDomain}</strong>)</span>
           </label>
           {includeWildcard && (
-            <p className="ws-muted" style={{ margin: '0 0 0 24px', fontSize: '0.85rem', color: '#f59e0b' }}>
+            <p className="ws-muted" style={{ margin: '0 0 0 24px', fontSize: '0.85rem', color: 'var(--ws-warning, #75521c)' }}>
               ⚠️ Joker sertifikalar Cloudflare DNS-01 doğrulaması gerektirir.
             </p>
           )}
-          {domain.aliases?.length > 0 && <p className="ws-muted">Bu sitenin ek alan adları da kapsama dahildir: {domain.aliases.join(', ')}</p>}
+          {domain.aliases?.length > 0 && <p className="ws-muted" style={{ overflowWrap: 'anywhere' }}>Bu sitenin ek alan adları da kapsama dahildir: {domain.aliases.join(', ')}</p>}
         </div>
       </div>
       <div className="ws-actions"><Button type="submit" variant="primary" disabled={!canIssue || !validSslContactEmail(email)}>SSL sertifikası al</Button><Button disabled={!canIssue || !validSslContactEmail(email)} onClick={() => issue(true)}>ACME doğrulamasını test et</Button><Button type="button" disabled={locked || !dirty} onClick={() => dispatchDraft({ type: 'reset' })}>Değişiklikleri sıfırla</Button></div>
