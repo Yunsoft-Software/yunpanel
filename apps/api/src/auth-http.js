@@ -353,14 +353,14 @@ export function createAuthenticatedApi({
         return json(response, 204);
       }
       if (pathname === '/api/auth/logout' && request.method === 'POST') {
-        store.revokeSession(rawToken);
+        store.revokeSession(rawToken, null, 'logout');
         if (challengeToken) store.mfa.cancelLogin(challengeToken);
         setCookie(response, '');
         setMfaCookie(response, '');
         return json(response, 204);
       }
       if (pathname === '/api/auth/logout-all' && request.method === 'POST') {
-        store.revokeAll(rawToken);
+        store.revokeAll(rawToken, 'logout');
         setCookie(response, '');
         setMfaCookie(response, '');
         return json(response, 204);

@@ -659,7 +659,7 @@ export function createAuthStore({
       if (!current) throw invalid();
       return db.prepare('SELECT id, created_at AS createdAt, last_active_at AS lastActiveAt, expires_at AS expiresAt FROM sessions WHERE user_id = ? AND expires_at > ? AND last_active_at > ? ORDER BY created_at DESC').all(current.user.id, now(), now() - idleMs).map((session) => ({ ...session, current: session.id === current.id }));
     },
-    revokeSession(rawToken, sessionId = null) {
+    revokeSession(rawToken, sessionId = null, reason = 'session_revoked') {
       const current = getSession(rawToken);
       if (!current) return;
       const targetSessionId = sessionId ?? current.id;
@@ -668,9 +668,9 @@ export function createAuthStore({
         event(current.user.id, 'session.revoked');
         return changed;
       });
-      if (revoked) revokeLiveSession(targetSessionId, 'session_revoked');
+      if (revoked) revokeLiveSession(targetSessionId, reason);
     },
-    revokeAll(rawToken) {
+    revokeAll(rawToken, reason = 'user_sessions_revoked') {
       const current = getSession(rawToken);
       if (!current) throw invalid();
       transaction(() => {
@@ -678,7 +678,7 @@ export function createAuthStore({
         mfa.invalidateUser(current.user.id);
         event(current.user.id, 'sessions.revoked');
       });
-      revokeLiveUser(current.user.id, 'user_sessions_revoked');
+      revokeLiveUser(current.user.id, reason);
     },
     async changePassword(rawToken, currentPassword, newPassword) {
       const current = getSession(rawToken);
