@@ -459,6 +459,7 @@ function TestRecoveryApp({ session, targetWebsiteId = websiteId, canManage = fal
 async function mountRecoveryPanel({ session, targetWebsiteId = websiteId, canManage = false, operation = null, fetchHandler = null }) {
   const container = doc.createElement('div');
   const root = createRoot(container);
+  const prevFetch = globalThis.fetch;
 
   if (fetchHandler) {
     globalThis.fetch = fetchHandler;
@@ -482,9 +483,13 @@ async function mountRecoveryPanel({ session, targetWebsiteId = websiteId, canMan
     container,
     root,
     unmount: async () => {
-      await act(async () => {
-        root.unmount();
-      });
+      try {
+        await act(async () => {
+          root.unmount();
+        });
+      } finally {
+        globalThis.fetch = prevFetch;
+      }
     },
   };
 }
@@ -695,7 +700,14 @@ test('usePanelSession throws error when invoked outside PanelSessionProvider', (
   );
 });
 
-test('Real lifecycle execution inside StrictMode: createProvisioningRecovery operates with SessionProvider context', async () => {
+test('Real lifecycle execution inside StrictMode: createProvisioningRecovery operates with SessionProvider context', async (t) => {
+  const prevFetch = globalThis.fetch;
+  if (t && typeof t.after === 'function') {
+    t.after(() => {
+      globalThis.fetch = prevFetch;
+    });
+  }
+
   const failedOp = recoveryOperation(op('failed', {
     steps: [
       step('failed', { id: 'nginx', kind: 'nginx', canRetry: true, error: 'website_nginx_activation_failed' }),
@@ -788,4 +800,5 @@ test('Real lifecycle execution inside StrictMode: createProvisioningRecovery ope
     root.unmount();
   });
   assert.equal(container.childNodes.length, 0);
+  globalThis.fetch = prevFetch;
 });
