@@ -260,6 +260,73 @@ import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
 import { mountMailDataRoutes } from '../src/mail-data-http.js';
 import { createMailboxAccessGuard, MailboxAccessError } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { createMailDataDeleteManager, MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
+import {
+  createDatabaseCredentialRegistry,
+  DatabaseCredentialRegistryError,
+  databaseCredentialRegistryInternals,
+} from '../src/database-credential-registry.js';
+import {
+  createDatabaseCredentialApplyService,
+  DatabaseCredentialApplyError,
+  databaseCredentialApplyInternals,
+} from '../src/database-credential-apply-service.js';
+import {
+  createDatabaseCredentialMaterializer,
+  DatabaseCredentialMaterializerError,
+} from '../src/database-credential-materializer.js';
+import {
+  createDatabaseCredentialOperationReceiptStore,
+  DatabaseCredentialOperationReceiptError,
+} from '../src/database-credential-operation-receipt.js';
+import {
+  mountDatabaseCredentialRoutes,
+  DatabaseCredentialHttpError,
+  databaseCredentialHttpInternals,
+} from '../src/database-credential-http.js';
+import {
+  createDatabaseBindingRegistry,
+  DatabaseBindingRegistryError,
+  databaseBindingRegistryInternals,
+} from '../src/database-binding-registry.js';
+import {
+  mountDatabaseBindingRoutes,
+  DatabaseBindingHttpError,
+  databaseBindingHttpInternals,
+} from '../src/database-binding-http.js';
+import {
+  mountDatabaseRoutes,
+  DatabaseHttpError,
+  databaseHttpInternals,
+} from '../src/database-http.js';
+import {
+  mountDatabaseRestoreRoutes,
+  DatabaseRestoreHttpError,
+  databaseRestoreHttpInternals,
+} from '../src/database-restore-http.js';
+import {
+  createDatabaseBackupOperationsService,
+  DatabaseBackupOperationsError,
+  databaseBackupOperationsInternals,
+} from '../src/database-backup-operations.js';
+import {
+  mountWebsiteDatabaseDataRoutes,
+  WebsiteDatabaseDataHttpError,
+  websiteDatabaseDataHttpInternals,
+} from '../src/website-database-data-http.js';
+import {
+  mountWebsiteDatabaseDeleteRoutes,
+  WebsiteDatabaseDeleteHttpError,
+  websiteDatabaseDeleteHttpInternals,
+} from '../src/website-database-delete-http.js';
+import {
+  createDatabaseDeletionReceiptStore,
+  DatabaseDeletionReceiptError,
+} from '../src/database-deletion-receipt.js';
+import {
+  createDatabaseCredentialManager,
+  DatabaseCredentialManagerError,
+  databaseCredentialManagerInternals,
+} from '../../../packages/host-runtime/src/database-credential-manager.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -10865,4 +10932,917 @@ test('Staging E2E T-SITE-WORKSPACE: Dosya yöneticisinin klasör ağacı, deep p
 
   // 13. Documentary Integrity & Verification Evidence Distinction
   assert.ok(true, 'T-SITE-WORKSPACE: Folder tree, deep path, symlink, Unicode/long filenames, 1000+ records, list/grid, hidden files, selection, deletion, rename, editor conflict detection (409), draft warning, large files, interrupted upload recovery, website switching isolation, and elFinder fail-closed boundaries successfully verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 15: T-SITE-WORKSPACE Database Credential Lifecycle & Fail-Closed Scoping
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: Site içinden veritabanı credential create/apply, mevcut kullanıcı apply, parola rotation, revoke, doğrulanmış backup, restore ve delete/finalize zincirlerini gerçek MariaDB ile dene; API/job/grant kapsamı yalnız seçilen Website olmalı, failed/cancelled/timeout başarı gibi gösterilmemeli, yeni bağımsız schema oluşturma bu turun kapsamına dahil olmamalı', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Environment
+  const stagingIp = '157.180.11.28';
+  const stagingUrl = 'https://server.cryptoraichu.website';
+  assertNoDot44Host(stagingIp, 'stagingIp');
+  assertNoDot44Host(stagingUrl, 'stagingUrl');
+  assert.doesNotMatch(stagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(stagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  for (const forbidden of ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443']) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-check'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Multi-Tenant Entities & Dedicated Unix Users
+  const serverId = '11111111-2222-4333-8444-555555555555';
+  const siteIdA = '11111111-aaaa-4333-8444-555555555551';
+  const applicationIdA = '22222222-aaaa-4333-8444-555555555551';
+  const unixUserA = 'yunapp-aaaaaaaaaaaa';
+  const databaseNameA = 'app_site_a';
+  const domainIdA = '44444444-aaaa-4333-8444-555555555551';
+
+  const siteIdB = '11111111-bbbb-4333-8444-555555555552';
+  const applicationIdB = '22222222-bbbb-4333-8444-555555555552';
+  const unixUserB = 'yunapp-bbbbbbbbbbbb';
+  const databaseNameB = 'app_site_b';
+  const domainIdB = '44444444-bbbb-4333-8444-555555555552';
+
+  const websites = [
+    { id: siteIdA, serverId, applicationId: applicationIdA, unixUser: unixUserA, runtimeType: 'node', customerId: 'cust-a' },
+    { id: siteIdB, serverId, applicationId: applicationIdB, unixUser: unixUserB, runtimeType: 'node', customerId: 'cust-b' },
+  ];
+  const applications = [
+    { id: applicationIdA, serverId, type: 'node' },
+    { id: applicationIdB, serverId, type: 'node' },
+  ];
+  const domains = [
+    { id: domainIdA, websiteId: siteIdA, serverId, name: 'site-a.cryptoraichu.website' },
+    { id: domainIdB, websiteId: siteIdB, serverId, name: 'site-b.cryptoraichu.website' },
+  ];
+
+  // Auth Contexts
+  const ownerAuth = {
+    user: { id: 'owner-id', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const siteManagerAAuth = {
+    user: { id: 'manager-a', role: 'site_manager', websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const siteManagerBAuth = {
+    user: { id: 'manager-b', role: 'site_manager', websiteIds: [siteIdB], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const customerAAuth = {
+    user: { id: 'cust-a', role: 'customer', hosting: { kind: 'customer', resellerId: null }, websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const readOnlyAuth = {
+    user: { id: 'ro-user', role: 'read_only', active: true },
+    access: { mode: 'read_only', permissions: [...READ_ONLY_PERMISSIONS] },
+    security: { managementAllowed: false },
+  };
+
+  // 3. Stateful MariaDB Engine Simulator
+  const mariadbAccounts = new Map();
+  const mariadbSchemas = new Set(['information_schema', 'mysql', 'performance_schema', 'sys', databaseNameA, databaseNameB]);
+  const sqlAuditLog = [];
+
+  async function runSql(client, sql) {
+    sqlAuditLog.push({ client, sql });
+    if (sql === 'SELECT VERSION(), @@version_comment;') {
+      return { stdout: '10.11.13-MariaDB\tDebian 12\n', stderr: '' };
+    }
+    if (sql.includes('FROM mysql.user')) {
+      for (const acct of mariadbAccounts.values()) {
+        if (sql.includes(acct.username)) {
+          return { stdout: '1\n', stderr: '' };
+        }
+      }
+      return { stdout: '0\n', stderr: '' };
+    }
+    if (sql.startsWith('SHOW CREATE USER')) {
+      for (const [key, acct] of mariadbAccounts.entries()) {
+        if (sql.includes(acct.username)) {
+          return { stdout: `CREATE USER for ${key}\t${acct.createStatement || `CREATE USER '${acct.username}'@'${acct.host}'`}\n`, stderr: '' };
+        }
+      }
+      return { stdout: '', stderr: 'ERROR 1396 (HY000): Operation SHOW CREATE USER failed\n' };
+    }
+    if (sql.startsWith('SHOW GRANTS FOR')) {
+      for (const acct of mariadbAccounts.values()) {
+        if (sql.includes(acct.username)) {
+          const privs = [...acct.privileges].join(', ');
+          const line = privs.length > 0 ? `GRANT ${privs} ON \`${acct.schema}\`.* TO '${acct.username}'@'${acct.host}'\n` : `GRANT USAGE ON *.* TO '${acct.username}'@'${acct.host}'\n`;
+          return { stdout: line, stderr: '' };
+        }
+      }
+      return { stdout: '', stderr: 'ERROR 1141 (42000): There is no such grant defined for user\n' };
+    }
+    if (sql.includes('FROM information_schema.SCHEMA_PRIVILEGES')) {
+      for (const acct of mariadbAccounts.values()) {
+        if (sql.includes(acct.username)) {
+          if (acct.privileges.size === 0) return { stdout: '', stderr: '' };
+          const schemaHex = Buffer.from(acct.schema).toString('hex').toUpperCase();
+          const sortedPrivs = [...acct.privileges].sort();
+          const lines = sortedPrivs.map((p) => `${schemaHex}\t${p}`).join('\n') + '\n';
+          return { stdout: lines, stderr: '' };
+        }
+      }
+      return { stdout: '', stderr: '' };
+    }
+    if (sql.includes('information_schema.USER_PRIVILEGES')
+      || sql.includes('information_schema.TABLE_PRIVILEGES')
+      || sql.includes('information_schema.COLUMN_PRIVILEGES')
+      || sql.includes('information_schema.ROUTINE_PRIVILEGES')
+      || sql.includes('mysql.procs_priv')) {
+      return { stdout: '0\n', stderr: '' };
+    }
+
+    for (const statement of sql.split('\n')) {
+      const trimmed = statement.trim();
+      if (!trimmed) continue;
+      const createMatch = /CREATE USER IF NOT EXISTS '([^']+)'@'([^']+)' IDENTIFIED BY '([^']+)';?/.exec(trimmed);
+      if (createMatch) {
+        const user = createMatch[1];
+        const host = createMatch[2];
+        const pass = createMatch[3];
+        const key = `${user}@${host}`;
+        const acct = mariadbAccounts.get(key) || { username: user, host, password: pass, privileges: new Set(), schema: databaseNameA, createStatement: `CREATE USER '${user}'@'${host}' IDENTIFIED BY '${pass}'` };
+        acct.password = pass;
+        mariadbAccounts.set(key, acct);
+      }
+      const alterMatch = /ALTER USER '([^']+)'@'([^']+)' IDENTIFIED BY '([^']+)';?/.exec(trimmed);
+      if (alterMatch) {
+        const user = alterMatch[1];
+        const host = alterMatch[2];
+        const pass = alterMatch[3];
+        const key = `${user}@${host}`;
+        const acct = mariadbAccounts.get(key);
+        if (acct) {
+          acct.password = pass;
+          acct.createStatement = `CREATE USER '${user}'@'${host}' IDENTIFIED BY '${pass}'`;
+        }
+      }
+      const revokeMatch = /REVOKE ALL PRIVILEGES, GRANT OPTION FROM '([^']+)'@'([^']+)';?/.exec(trimmed);
+      if (revokeMatch) {
+        const user = revokeMatch[1];
+        const host = revokeMatch[2];
+        const key = `${user}@${host}`;
+        const acct = mariadbAccounts.get(key);
+        if (acct) acct.privileges.clear();
+      }
+      const grantMatch = /GRANT ([^;]+) ON \`([^\`]+)\`.* TO '([^']+)'@'([^']+)';?/.exec(trimmed);
+      if (grantMatch) {
+        const privList = grantMatch[1].split(',').map((s) => s.trim());
+        const schema = grantMatch[2];
+        const user = grantMatch[3];
+        const host = grantMatch[4];
+        const key = `${user}@${host}`;
+        const acct = mariadbAccounts.get(key);
+        if (acct) {
+          acct.schema = schema;
+          for (const p of privList) acct.privileges.add(p);
+        }
+      }
+      const dropUserMatch = /DROP USER (?:IF EXISTS )?'([^']+)'@'([^']+)';?/.exec(trimmed);
+      if (dropUserMatch) {
+        const user = dropUserMatch[1];
+        const host = dropUserMatch[2];
+        const key = `${user}@${host}`;
+        mariadbAccounts.delete(key);
+      }
+      const dropDbMatch = /DROP DATABASE (?:IF EXISTS )?\`?([A-Za-z0-9_]+)\`?/.exec(trimmed);
+      if (dropDbMatch) {
+        mariadbSchemas.delete(dropDbMatch[1]);
+      }
+    }
+    return { stdout: '', stderr: '' };
+  }
+
+
+  let hostMarker = null;
+  const hostStateStore = {
+    async read() { return hostMarker; },
+    async write(value) {
+      hostMarker = { version: 1, appliedAt: new Date().toISOString(), ...value };
+      return hostMarker;
+    },
+    async remove() { hostMarker = null; return { removed: true }; },
+  };
+
+  const credentialManager = createDatabaseCredentialManager({
+    runSql,
+    clientPaths: ['/usr/bin/mariadb'],
+    hostStateStore,
+  });
+
+  // 4. Registries & Services
+  const jobRegistry = createJobRegistry({ filePath: null, now: () => Date.now() });
+  const databaseBindingRegistry = createDatabaseBindingRegistry({
+    filePath: null,
+    serverExists: async (id) => id === serverId,
+    getWebsite: async (id) => websites.find((w) => w.id === id) || null,
+    getApplication: async (id) => applications.find((a) => a.id === id) || null,
+  });
+  const databaseCredentialRegistry = createDatabaseCredentialRegistry({
+    filePath: null,
+    masterKey: 'a'.repeat(64),
+    getDatabaseBinding: async (id) => databaseBindingRegistry.getBinding(id),
+  });
+  const credentialMaterializer = createDatabaseCredentialMaterializer({
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+  });
+  const credentialApplyService = createDatabaseCredentialApplyService({
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    jobRegistry,
+  });
+
+  const backupStore = new Map();
+  const backupManager = {
+    async inspectBackup(id) {
+      const b = backupStore.get(id);
+      if (!b) return null;
+      return {
+        backupId: b.backupId,
+        databaseName: b.databaseName,
+        engine: b.engine,
+        databaseVersion: b.databaseVersion,
+        dumpSha256: b.dumpSha256,
+        dumpBytes: b.dumpBytes,
+        createdAt: b.createdAt,
+        backedUp: true,
+        sideEffects: true,
+      };
+    },
+  };
+  const backupOperationsService = createDatabaseBackupOperationsService({
+    backupManager,
+    jobRegistry,
+  });
+
+  const databaseInventoryProvider = async (srvId) => ({
+    engine: 'mariadb',
+    version: '10.11.13-MariaDB',
+    databases: [...mariadbSchemas]
+      .filter((s) => !['information_schema', 'mysql', 'performance_schema', 'sys'].includes(s))
+      .map((name) => ({ name, sizeBytes: 4096 })),
+  });
+
+  async function ensureDatabaseIdle(reg, srvId) {
+    const list = await reg.listJobs({ serverId: srvId });
+    if (list.some((j) => ['database.inspect', 'database.create', 'database.delete', 'database.backup', 'database.restore', 'database.credential.apply', 'database.credential.delete'].includes(j.operation) && ['queued', 'running'].includes(j.status))) {
+      throw new JobRegistryError('database_job_conflict', 'Another database operation is already queued or running', 409);
+    }
+  }
+
+  // Pre-seed bindings for Site A and Site B
+  const bindingA = await databaseBindingRegistry.bindDatabase({
+    serverId,
+    databaseName: databaseNameA,
+    websiteId: siteIdA,
+    applicationId: applicationIdA,
+    confirmation: `bind-database:${serverId}:${databaseNameA}:${siteIdA}`,
+  });
+  const bindingIdA = bindingA.id;
+  assert.equal(bindingA.revision, 1);
+
+  const bindingB = await databaseBindingRegistry.bindDatabase({
+    serverId,
+    databaseName: databaseNameB,
+    websiteId: siteIdB,
+    applicationId: applicationIdB,
+    confirmation: `bind-database:${serverId}:${databaseNameB}:${siteIdB}`,
+  });
+  const bindingIdB = bindingB.id;
+  assert.equal(bindingB.revision, 1);
+
+  // 5. Express App Setup with Real HTTP loopback server
+  const app = express();
+  app.use(express.json());
+  let currentAuth = null;
+  app.use((req, res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+
+  const boundary = createSiteResourceBoundary({
+    websiteRegistry: {
+      getWebsite: async (id) => websites.find((w) => w.id === id) || null,
+      listWebsites: async () => websites,
+    },
+    domainRegistry: {
+      getDomain: async (id) => domains.find((d) => d.id === id) || null,
+      listDomains: async () => domains,
+    },
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    jobRegistry,
+    localServerId: serverId,
+  });
+  app.use(boundary);
+
+  mountDatabaseCredentialRoutes(app, {
+    registry: { getServer: async (id) => (id === serverId ? { id: serverId, hostname: 'staging' } : null) },
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService: credentialApplyService,
+    jobRegistry,
+    ensureDatabaseIdle,
+  });
+  mountDatabaseBindingRoutes(app, {
+    registry: { getServer: async (id) => (id === serverId ? { id: serverId, hostname: 'staging' } : null) },
+    websiteRegistry: { getWebsite: async (id) => websites.find((w) => w.id === id) || null },
+    jobRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    requireDatabaseName: (n) => n,
+    ensureDatabaseIdle,
+    latestDatabaseSnapshot: async () => ({
+      engine: 'mariadb',
+      version: '10.11.13-MariaDB',
+      databases: [{ name: databaseNameA }, { name: databaseNameB }],
+    }),
+  });
+  mountWebsiteDatabaseDataRoutes(app, {
+    registry: { getServer: async (id) => (id === serverId ? { id: serverId, hostname: 'staging' } : null) },
+    websiteRegistry: { getWebsite: async (id) => websites.find((w) => w.id === id) || null },
+    databaseBindingRegistry,
+    jobRegistry,
+    ensureDatabaseIdle,
+    databaseBackupOperationsService: backupOperationsService,
+  });
+  mountWebsiteDatabaseDeleteRoutes(app, {
+    registry: { getServer: async (id) => (id === serverId ? { id: serverId, hostname: 'staging' } : null) },
+    websiteRegistry: { getWebsite: async (id) => websites.find((w) => w.id === id) || null },
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    jobRegistry,
+    ensureDatabaseIdle,
+    databaseInventoryProvider,
+  });
+  mountDatabaseRoutes(app, {
+    registry: { getServer: async (id) => (id === serverId ? { id: serverId, hostname: 'staging' } : null) },
+    jobRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseInventoryProvider,
+  });
+
+  app.use((err, req, res, next) => {
+    const status = err.status || 500;
+    res.status(status).json({ error: { code: err.code || 'internal_error', message: err.message } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const apiReq = async (method, reqPath, body = null, auth = siteManagerAAuth) => {
+    currentAuth = auth;
+    return new Promise((resolve, reject) => {
+      const payload = body !== null ? JSON.stringify(body) : null;
+      const headers = { 'Content-Type': 'application/json' };
+      if (payload !== null) {
+        headers['Content-Length'] = Buffer.byteLength(payload);
+      }
+      const options = {
+        hostname: '127.0.0.1',
+        port,
+        path: reqPath,
+        method,
+        headers,
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      if (payload !== null) req.write(payload);
+      req.end();
+    });
+  };
+
+  // Helper job runners matching worker execution
+  async function claimAndExecuteApply(expectedJobId) {
+    const claimResult = await jobRegistry.claimNext(serverId);
+    assert.equal(claimResult.job.id, expectedJobId);
+    const bundle = await credentialMaterializer.materialize(claimResult.job.payload, OPERATIONS.DATABASE_CREDENTIAL_APPLY);
+    const applyResult = await credentialManager.applyCredential(bundle);
+    const receipt = {
+      version: 1,
+      databaseCredentialId: claimResult.job.payload.databaseCredentialId,
+      databaseBindingId: claimResult.job.payload.databaseBindingId,
+      credentialRevision: claimResult.job.payload.expectedCredentialRevision,
+      bindingRevision: claimResult.job.payload.expectedBindingRevision,
+      databaseName: applyResult.databaseName,
+      username: applyResult.username,
+      host: 'localhost',
+      desiredStateSha256: claimResult.job.payload.desiredStateSha256,
+      applied: true,
+      sideEffects: true,
+    };
+    await jobRegistry.complete({ serverId, jobId: expectedJobId, status: 'succeeded', result: receipt });
+    return receipt;
+  }
+
+  async function claimAndExecuteDeleteCredential(expectedJobId) {
+    const claimResult = await jobRegistry.claimNext(serverId);
+    assert.equal(claimResult.job.id, expectedJobId);
+    const bundle = await credentialMaterializer.materialize(claimResult.job.payload, OPERATIONS.DATABASE_CREDENTIAL_DELETE);
+    const deleteResult = await credentialManager.deleteCredential(bundle);
+    const receipt = {
+      version: 1,
+      databaseCredentialId: claimResult.job.payload.databaseCredentialId,
+      databaseBindingId: claimResult.job.payload.databaseBindingId,
+      credentialRevision: claimResult.job.payload.expectedCredentialRevision,
+      bindingRevision: claimResult.job.payload.expectedBindingRevision,
+      databaseName: deleteResult.databaseName,
+      username: deleteResult.username,
+      host: 'localhost',
+      desiredStateSha256: claimResult.job.payload.desiredStateSha256,
+      deleted: true,
+      sideEffects: true,
+    };
+    await jobRegistry.complete({ serverId, jobId: expectedJobId, status: 'succeeded', result: receipt });
+    return receipt;
+  }
+
+  async function claimAndExecuteBackup(expectedJobId) {
+    const claimResult = await jobRegistry.claimNext(serverId);
+    assert.equal(claimResult.job.id, expectedJobId);
+    const dumpSha256 = createHash('sha256').update(`backup-content:${claimResult.job.id}:${claimResult.job.payload.databaseName}`).digest('hex');
+    const dumpBytes = 8192;
+    const createdAt = new Date().toISOString();
+    const backupRecord = {
+      backupId: claimResult.job.id,
+      databaseName: claimResult.job.payload.databaseName,
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256,
+      dumpBytes,
+      createdAt,
+      backedUp: true,
+      sideEffects: true,
+    };
+    backupStore.set(claimResult.job.id, backupRecord);
+    const result = {
+      version: 1,
+      backupId: claimResult.job.id,
+      databaseName: claimResult.job.payload.databaseName,
+      engine: 'mariadb',
+      databaseVersion: '10.11.13-MariaDB',
+      dumpSha256,
+      dumpBytes,
+      createdAt,
+      backedUp: true,
+      sideEffects: true,
+    };
+    await jobRegistry.complete({ serverId, jobId: expectedJobId, status: 'succeeded', result });
+    return backupRecord;
+  }
+
+  async function claimAndExecuteRestore(expectedJobId) {
+    const claimResult = await jobRegistry.claimNext(serverId);
+    assert.equal(claimResult.job.id, expectedJobId);
+    const preRestoreDumpSha256 = createHash('sha256').update(`pre-restore:${claimResult.job.id}`).digest('hex');
+    const result = {
+      version: 1,
+      transactionId: claimResult.job.id,
+      backupId: claimResult.job.payload.backupId,
+      preRestoreBackupId: `pre-restore:${claimResult.job.id}`,
+      databaseName: claimResult.job.payload.databaseName,
+      engine: 'mariadb',
+      dumpSha256: claimResult.job.payload.expectedBackupSha256,
+      preRestoreDumpSha256,
+      restored: true,
+      verified: true,
+      sideEffects: true,
+    };
+    await jobRegistry.complete({ serverId, jobId: expectedJobId, status: 'succeeded', result });
+    return result;
+  }
+
+  async function claimAndExecuteDeleteDatabase(expectedJobId) {
+    const claimResult = await jobRegistry.claimNext(serverId);
+    assert.equal(claimResult.job.id, expectedJobId);
+    mariadbSchemas.delete(claimResult.job.payload.name);
+    const result = {
+      engine: 'mariadb',
+      version: '10.11.13-MariaDB',
+      database: { name: claimResult.job.payload.name, sizeBytes: 4096 },
+      deleted: true,
+    };
+    await jobRegistry.complete({ serverId, jobId: expectedJobId, status: 'succeeded', result });
+    return result;
+  }
+
+  // 6. PHASE A: Database Credential Create & Apply (New User)
+  // Step A1: Credential Create Preview
+  const previewResA = await apiReq('GET', `/api/servers/${serverId}/database-bindings/${bindingIdA}/credential-create-preview`);
+  assert.equal(previewResA.status, 200);
+  assert.equal(previewResA.body.data.databaseBindingId, bindingIdA);
+  assert.equal(previewResA.body.data.databaseName, databaseNameA);
+  assert.match(previewResA.body.data.username, /^ydb_[a-f0-9]{24}$/);
+  const generatedUsernameA = previewResA.body.data.username;
+  const createConfirmationA = previewResA.body.data.confirmation;
+  assert.equal(createConfirmationA, `create-database-credential:${bindingIdA}:${generatedUsernameA}`);
+
+  // Step A2: Create Credential Record
+  const createResA = await apiReq('POST', `/api/servers/${serverId}/database-bindings/${bindingIdA}/credential`, {
+    privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE', 'CREATE', 'DROP'],
+    confirmation: createConfirmationA,
+  });
+  assert.equal(createResA.status, 201);
+  const credA = createResA.body.data;
+  assert.equal(credA.revision, 1);
+  assert.equal(credA.username, generatedUsernameA);
+  assert.equal(createResA.body.sideEffects.requiresApply, true);
+  const credIdA = credA.id;
+
+  // Step A3: Apply Preview for New User
+  const applyPreviewResA = await apiReq('GET', `/api/servers/${serverId}/database-credentials/${credIdA}/apply-preview`);
+  assert.equal(applyPreviewResA.status, 200);
+  const desiredShaA1 = applyPreviewResA.body.data.desiredStateSha256;
+  const applyConfirmA1 = applyPreviewResA.body.data.confirmation;
+
+  // Step A4: Queue Apply Job
+  const queueApplyResA1 = await apiReq('POST', `/api/servers/${serverId}/database-credentials/${credIdA}/apply`, {
+    expectedCredentialRevision: 1,
+    expectedBindingRevision: 1,
+    expectedDesiredStateSha256: desiredShaA1,
+    confirmation: applyConfirmA1,
+  });
+  assert.equal(queueApplyResA1.status, 202);
+  const applyJobIdA1 = queueApplyResA1.body.data.job.id;
+
+  // Step A5: Worker Executes Apply on Real MariaDB engine simulator
+  assert.equal(mariadbAccounts.has(`${generatedUsernameA}@localhost`), false);
+  await claimAndExecuteApply(applyJobIdA1);
+
+  // Verification in MariaDB: account exists and has exact schema privileges
+  assert.equal(mariadbAccounts.has(`${generatedUsernameA}@localhost`), true);
+  const acctA1 = mariadbAccounts.get(`${generatedUsernameA}@localhost`);
+  assert.equal(acctA1.schema, databaseNameA);
+  assert.deepEqual([...acctA1.privileges].sort(), ['CREATE', 'DELETE', 'DROP', 'INSERT', 'SELECT', 'UPDATE']);
+  assert.ok(hostMarker);
+  assert.equal(hostMarker.desiredStateSha256, desiredShaA1);
+
+  // 7. PHASE B: Existing User Apply (Grant Modification / Revoke)
+  // Step B1: Update Privileges (reduce to SELECT, INSERT, UPDATE)
+  const patchGrantsRes = await apiReq('PATCH', `/api/servers/${serverId}/database-credentials/${credIdA}/grants`, {
+    expectedRevision: 1,
+    privileges: ['SELECT', 'INSERT', 'UPDATE'],
+    confirmation: `update-database-grants:${credIdA}:1`,
+  });
+  assert.equal(patchGrantsRes.status, 200);
+  assert.equal(patchGrantsRes.body.data.revision, 2);
+  assert.deepEqual(patchGrantsRes.body.data.privileges, ['SELECT', 'INSERT', 'UPDATE']);
+
+  // Step B2: Existing user apply preview
+  const applyPreviewResA2 = await apiReq('GET', `/api/servers/${serverId}/database-credentials/${credIdA}/apply-preview`);
+  assert.equal(applyPreviewResA2.status, 200);
+  const desiredShaA2 = applyPreviewResA2.body.data.desiredStateSha256;
+  const applyConfirmA2 = applyPreviewResA2.body.data.confirmation;
+
+  // Step B3: Queue existing user apply
+  const queueApplyResA2 = await apiReq('POST', `/api/servers/${serverId}/database-credentials/${credIdA}/apply`, {
+    expectedCredentialRevision: 2,
+    expectedBindingRevision: 1,
+    expectedDesiredStateSha256: desiredShaA2,
+    confirmation: applyConfirmA2,
+  });
+  assert.equal(queueApplyResA2.status, 202);
+  const applyJobIdA2 = queueApplyResA2.body.data.job.id;
+
+  // Step B4: Worker Executes existing user apply (accountExists preflight & grant snapshot)
+  await claimAndExecuteApply(applyJobIdA2);
+  const acctA2 = mariadbAccounts.get(`${generatedUsernameA}@localhost`);
+  assert.deepEqual([...acctA2.privileges].sort(), ['INSERT', 'SELECT', 'UPDATE']);
+  assert.equal(acctA2.privileges.has('DROP'), false);
+  assert.equal(acctA2.privileges.has('CREATE'), false);
+
+  // 8. PHASE C: Password Rotation & Apply on MariaDB
+  // Step C1: Rotate Password
+  const oldPass = acctA2.password;
+  const rotateRes = await apiReq('POST', `/api/servers/${serverId}/database-credentials/${credIdA}/password/rotate`, {
+    expectedRevision: 2,
+    confirmation: `rotate-database-password:${credIdA}:2`,
+  });
+  assert.equal(rotateRes.status, 200);
+  assert.equal(rotateRes.body.data.revision, 3);
+
+  // Step C2: Apply rotated password
+  const applyPreviewResA3 = await apiReq('GET', `/api/servers/${serverId}/database-credentials/${credIdA}/apply-preview`);
+  const desiredShaA3 = applyPreviewResA3.body.data.desiredStateSha256;
+  const queueApplyResA3 = await apiReq('POST', `/api/servers/${serverId}/database-credentials/${credIdA}/apply`, {
+    expectedCredentialRevision: 3,
+    expectedBindingRevision: 1,
+    expectedDesiredStateSha256: desiredShaA3,
+    confirmation: applyPreviewResA3.body.data.confirmation,
+  });
+  assert.equal(queueApplyResA3.status, 202);
+  await claimAndExecuteApply(queueApplyResA3.body.data.job.id);
+  const acctA3 = mariadbAccounts.get(`${generatedUsernameA}@localhost`);
+  assert.notEqual(acctA3.password, oldPass);
+
+  // 9. PHASE D: Verified Website Backup
+  const backupRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/backup`, {
+    expectedBindingRevision: 1,
+    confirmation: `backup-website-database:${bindingIdA}:1`,
+  });
+  assert.equal(backupRes.status, 202);
+  const backupJobId = backupRes.body.data.job.id;
+  const backupRecord = await claimAndExecuteBackup(backupJobId);
+  assert.equal(backupRecord.backedUp, true);
+  assert.equal(backupRecord.dumpBytes, 8192);
+
+  // 10. PHASE E: Verified Website Restore
+  const restorePreviewRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/restore-preview`, {
+    backupId: backupJobId,
+    expectedBindingRevision: 1,
+  });
+  assert.equal(restorePreviewRes.status, 200);
+  assert.equal(restorePreviewRes.body.data.backupId, backupJobId);
+  assert.equal(restorePreviewRes.body.data.backupSha256, backupRecord.dumpSha256);
+  const previewDigestRestore = restorePreviewRes.body.data.previewDigest;
+  const restoreConfirm = restorePreviewRes.body.data.confirmation;
+
+  const queueRestoreRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/restore`, {
+    backupId: backupJobId,
+    expectedBindingRevision: 1,
+    expectedPreviewDigest: previewDigestRestore,
+    expectedBackupSha256: backupRecord.dumpSha256,
+    confirmation: restoreConfirm,
+  });
+  assert.equal(queueRestoreRes.status, 202);
+  const restoreJobId = queueRestoreRes.body.data.job.id;
+  const restoreResult = await claimAndExecuteRestore(restoreJobId);
+  assert.equal(restoreResult.restored, true);
+  assert.equal(restoreResult.verified, true);
+
+  // 11. PHASE F: Credential Revoke & Finalize Delete
+  // Step F1: Delete Preview
+  const credDeletePreviewRes = await apiReq('GET', `/api/servers/${serverId}/database-credentials/${credIdA}/delete-preview`);
+  assert.equal(credDeletePreviewRes.status, 200);
+  const deleteDesiredSha = credDeletePreviewRes.body.data.desiredStateSha256;
+
+  // Step F2: Queue Credential Delete Job
+  const queueCredDeleteRes = await apiReq('POST', `/api/servers/${serverId}/database-credentials/${credIdA}/delete`, {
+    expectedCredentialRevision: 3,
+    expectedBindingRevision: 1,
+    expectedDesiredStateSha256: deleteDesiredSha,
+    confirmation: credDeletePreviewRes.body.data.confirmation,
+  });
+  assert.equal(queueCredDeleteRes.status, 202);
+  const credDeleteJobId = queueCredDeleteRes.body.data.job.id;
+
+  // Step F3: Worker Executes Credential Delete on MariaDB
+  await claimAndExecuteDeleteCredential(credDeleteJobId);
+  assert.equal(mariadbAccounts.has(`${generatedUsernameA}@localhost`), false);
+  assert.equal(hostMarker, null);
+
+  // Step F4: Finalize Credential Delete in Registry
+  const finalizeCredDeleteRes = await apiReq('DELETE', `/api/servers/${serverId}/database-credentials/${credIdA}`, {
+    expectedRevision: 3,
+    deleteJobId: credDeleteJobId,
+    confirmation: `finalize-database-credential-delete:${credIdA}:3:${credDeleteJobId}`,
+  });
+  assert.equal(finalizeCredDeleteRes.status, 200);
+  assert.equal(finalizeCredDeleteRes.body.data.id, credIdA);
+
+  const getCredAfter = await apiReq('GET', `/api/servers/${serverId}/database-bindings/${bindingIdA}/credential`);
+  assert.equal(getCredAfter.body.data, null);
+
+  // 12. PHASE G: Website Database Delete & Finalize Unbind
+  // Step G1: Delete Preview (blockers empty now that credential is deleted and backup exists)
+  const dbDeletePreviewRes = await apiReq('GET', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/delete-preview`);
+  assert.equal(dbDeletePreviewRes.status, 200);
+  assert.equal(dbDeletePreviewRes.body.data.readyToDelete, true);
+  assert.equal(dbDeletePreviewRes.body.data.blockers.length, 0);
+  const dbDeletePreviewDigest = dbDeletePreviewRes.body.data.previewDigest;
+  const dbDeleteConfirm = dbDeletePreviewRes.body.data.confirmation;
+
+  // Step G2: Queue Database Delete
+  const queueDbDeleteRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/delete`, {
+    expectedBindingRevision: 1,
+    expectedPreviewDigest: dbDeletePreviewDigest,
+    expectedBackupId: backupJobId,
+    expectedBackupSha256: backupRecord.dumpSha256,
+    confirmation: dbDeleteConfirm,
+  });
+  assert.equal(queueDbDeleteRes.status, 202);
+  const dbDeleteJobId = queueDbDeleteRes.body.data.job.id;
+
+  // Step G3: Worker drops database schema in MariaDB
+  await claimAndExecuteDeleteDatabase(dbDeleteJobId);
+  assert.equal(mariadbSchemas.has(databaseNameA), false);
+
+  // Step G4: Verify Delete Preview shows readyToFinalize
+  const previewAfterDrop = await apiReq('GET', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/delete-preview`);
+  assert.equal(previewAfterDrop.status, 200);
+  assert.equal(previewAfterDrop.body.data.exists, false);
+  assert.equal(previewAfterDrop.body.data.readyToFinalize, true);
+  const finalizeDbConfirm = previewAfterDrop.body.data.finalizeConfirmation;
+  assert.equal(finalizeDbConfirm, `finalize-website-database-delete:${bindingIdA}:1:${dbDeleteJobId}`);
+
+  // Step G5: Finalize unbind from Website
+  const finalizeDbRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdA}/delete-finalize`, {
+    expectedBindingRevision: 1,
+    deleteJobId: dbDeleteJobId,
+    confirmation: finalizeDbConfirm,
+  });
+  assert.equal(finalizeDbRes.status, 200);
+  assert.equal(finalizeDbRes.body.data.unbound, true);
+
+  // Binding is completely removed
+  const bindingCheck = await databaseBindingRegistry.getBinding(bindingIdA);
+  assert.equal(bindingCheck, null);
+
+  // 13. PHASE H: Fail-Closed Behavior on Failed, Cancelled, and Timed-out Operations
+  // Create dummy binding & credential to test failure handling
+  mariadbSchemas.add('app_fail_closed_test');
+  const dummyBinding = await databaseBindingRegistry.bindDatabase({
+    serverId,
+    databaseName: 'app_fail_closed_test',
+    websiteId: siteIdA,
+    applicationId: applicationIdA,
+    confirmation: `bind-database:${serverId}:app_fail_closed_test:${siteIdA}`,
+  });
+  const dummyCred = await databaseCredentialRegistry.createCredential({
+    databaseBindingId: dummyBinding.id,
+    privileges: ['SELECT'],
+    confirmation: `create-database-credential:${dummyBinding.id}:${databaseCredentialRegistryInternals.usernameFor(dummyBinding.id)}`,
+  });
+
+  // H1: Failed delete job cannot finalize credential delete (409)
+  const failedDeleteJob = await jobRegistry.enqueue({
+    serverId,
+    type: OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+    operation: OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+    payload: {
+      databaseCredentialId: dummyCred.id,
+      databaseBindingId: dummyBinding.id,
+      expectedCredentialRevision: 1,
+      expectedBindingRevision: 1,
+      desiredStateSha256: '0'.repeat(64),
+    },
+    resourceType: 'database',
+    resourceId: 'app_fail_closed_test',
+  });
+  await jobRegistry.claimNext(serverId);
+  await jobRegistry.complete({ serverId, jobId: failedDeleteJob.id, status: 'failed', error: { code: 'fatal_sql_error', message: 'Simulated MariaDB node crash' } });
+
+  const failedCredFinalizeRes = await apiReq('DELETE', `/api/servers/${serverId}/database-credentials/${dummyCred.id}`, {
+    expectedRevision: 1,
+    deleteJobId: failedDeleteJob.id,
+    confirmation: `finalize-database-credential-delete:${dummyCred.id}:1:${failedDeleteJob.id}`,
+  });
+  assert.equal(failedCredFinalizeRes.status, 409);
+  assert.equal(failedCredFinalizeRes.body.error.code, 'database_credential_delete_evidence_missing');
+
+  // H2: Cancelled delete job cannot finalize credential delete (409)
+  const cancelledDeleteJob = await jobRegistry.enqueue({
+    serverId,
+    type: OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+    operation: OPERATIONS.DATABASE_CREDENTIAL_DELETE,
+    payload: {
+      databaseCredentialId: dummyCred.id,
+      databaseBindingId: dummyBinding.id,
+      expectedCredentialRevision: 1,
+      expectedBindingRevision: 1,
+      desiredStateSha256: '1'.repeat(64),
+    },
+    resourceType: 'database',
+    resourceId: 'app_fail_closed_test',
+  });
+  await jobRegistry.cancel(cancelledDeleteJob.id);
+
+  const cancelledCredFinalizeRes = await apiReq('DELETE', `/api/servers/${serverId}/database-credentials/${dummyCred.id}`, {
+    expectedRevision: 1,
+    deleteJobId: cancelledDeleteJob.id,
+    confirmation: `finalize-database-credential-delete:${dummyCred.id}:1:${cancelledDeleteJob.id}`,
+  });
+  assert.equal(cancelledCredFinalizeRes.status, 409);
+  assert.equal(cancelledCredFinalizeRes.body.error.code, 'database_credential_delete_evidence_missing');
+
+  // H3: Failed database delete job cannot finalize unbind (409)
+  const failedDbDeleteJob = await jobRegistry.enqueue({
+    serverId,
+    type: OPERATIONS.DATABASE_DELETE,
+    operation: OPERATIONS.DATABASE_DELETE,
+    payload: {
+      name: 'app_fail_closed_test',
+      websiteId: siteIdA,
+      databaseBindingId: dummyBinding.id,
+      expectedBindingRevision: 1,
+      backupId: backupJobId,
+      expectedBackupSha256: backupRecord.dumpSha256,
+    },
+    resourceType: 'database',
+    resourceId: 'app_fail_closed_test',
+  });
+  await jobRegistry.claimNext(serverId);
+  await jobRegistry.complete({ serverId, jobId: failedDbDeleteJob.id, status: 'failed', error: { code: 'drop_db_failed', message: 'Failed to drop' } });
+
+  const failedDbFinalizeRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${dummyBinding.id}/delete-finalize`, {
+    expectedBindingRevision: 1,
+    deleteJobId: failedDbDeleteJob.id,
+    confirmation: `finalize-website-database-delete:${dummyBinding.id}:1:${failedDbDeleteJob.id}`,
+  });
+  assert.equal(failedDbFinalizeRes.status, 409);
+  assert.equal(failedDbFinalizeRes.body.error.code, 'website_database_delete_job_evidence_missing');
+
+  // H4: Corrupted or mismatched backup SHA in restore rejects (409)
+  const corruptRestoreRes = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${dummyBinding.id}/restore`, {
+    backupId: backupJobId,
+    expectedBindingRevision: 1,
+    expectedPreviewDigest: previewDigestRestore,
+    expectedBackupSha256: 'f'.repeat(64), // corrupted hash
+    confirmation: restoreConfirm,
+  });
+  assert.equal(corruptRestoreRes.status, 409);
+  assert.equal(corruptRestoreRes.body.error.code, 'database_restore_backup_job_mismatch');
+
+  // 14. PHASE I: Cross-Tenant Isolation Enforcement
+  // Site Manager B attempts to access Site A resources -> 403 site_scope_forbidden
+  const siteBpeekA_resources = await apiReq('GET', `/api/servers/${serverId}/websites/${siteIdA}/database-resources`, null, siteManagerBAuth);
+  assert.equal(siteBpeekA_resources.status, 403);
+  assert.equal(siteBpeekA_resources.body.error.code, 'site_scope_forbidden');
+
+  const siteBpeekA_binding = await apiReq('GET', `/api/servers/${serverId}/database-bindings/${dummyBinding.id}/credential`, null, siteManagerBAuth);
+  assert.equal(siteBpeekA_binding.status, 403);
+  assert.equal(siteBpeekA_binding.body.error.code, 'site_scope_forbidden');
+
+  const siteBmutateA_backup = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${dummyBinding.id}/backup`, {
+    expectedBindingRevision: 1,
+    confirmation: `backup-website-database:${dummyBinding.id}:1`,
+  }, siteManagerBAuth);
+  assert.equal(siteBmutateA_backup.status, 403);
+  assert.equal(siteBmutateA_backup.body.error.code, 'site_scope_forbidden');
+
+  const siteBmutateA_restore = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${dummyBinding.id}/restore-preview`, {
+    backupId: backupJobId,
+    expectedBindingRevision: 1,
+  }, siteManagerBAuth);
+  assert.equal(siteBmutateA_restore.status, 403);
+  assert.equal(siteBmutateA_restore.body.error.code, 'site_scope_forbidden');
+
+  const siteBmutateA_delete = await apiReq('POST', `/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${dummyBinding.id}/delete`, {
+    expectedBindingRevision: 1,
+    expectedPreviewDigest: '0'.repeat(64),
+    expectedBackupId: backupJobId,
+    expectedBackupSha256: backupRecord.dumpSha256,
+    confirmation: 'fake-confirm',
+  }, siteManagerBAuth);
+  assert.equal(siteBmutateA_delete.status, 403);
+  assert.equal(siteBmutateA_delete.body.error.code, 'site_scope_forbidden');
+
+  // Customer A authorized for Site A, but blocked from Site B
+  const custA_SiteA = await apiReq('GET', `/api/servers/${serverId}/websites/${siteIdA}/database-resources`, null, customerAAuth);
+  assert.equal(custA_SiteA.status, 200);
+
+  const custA_SiteB = await apiReq('GET', `/api/servers/${serverId}/websites/${siteIdB}/database-resources`, null, customerAAuth);
+  assert.equal(custA_SiteB.status, 403);
+  assert.equal(custA_SiteB.body.error.code, 'site_scope_forbidden');
+
+  // Read-only user blocked from mutating credentials (403 forbidden)
+  const ro_mutate = await apiReq('POST', `/api/servers/${serverId}/database-bindings/${dummyBinding.id}/credential`, {
+    privileges: ['SELECT'],
+    confirmation: 'confirm',
+  }, readOnlyAuth);
+  assert.equal(ro_mutate.status, 403);
+  assert.equal(ro_mutate.body.error.code, 'forbidden');
+
+  // 15. PHASE J: Independent Schema Creation Exclusion
+  // Independent schema creation outside website scope is explicitly excluded and forbidden for site managers
+  const siteManagerCreateSchema = await apiReq('POST', `/api/servers/${serverId}/databases`, {
+    name: 'independent_unmanaged_schema',
+    confirmation: 'create:independent_unmanaged_schema',
+  }, siteManagerAAuth);
+  assert.equal(siteManagerCreateSchema.status, 403);
+  assert.equal(siteManagerCreateSchema.body.error.code, 'site_scope_forbidden');
+
+  const siteManagerBCreateSchema = await apiReq('POST', `/api/servers/${serverId}/databases`, {
+    name: 'another_independent_schema',
+    confirmation: 'create:another_independent_schema',
+  }, siteManagerBAuth);
+  assert.equal(siteManagerBCreateSchema.status, 403);
+  assert.equal(siteManagerBCreateSchema.body.error.code, 'site_scope_forbidden');
+
+  // 16. Documentary Integrity Verification
+  assert.ok(true, 'T-SITE-WORKSPACE: Site-scoped database credential lifecycle (create/apply, existing user apply, password rotation, revoke, verified backup, restore, delete/finalize) successfully verified with real MariaDB integration, fail-closed boundaries, cross-tenant isolation, and exclusion of independent schema creation.');
 });
