@@ -250,6 +250,9 @@ export function createSiteResourceBoundary(options = {}) {
         if (!readOnly(method) && suffix && !/^\/(?:config-(?:preview|apply)|test-delivery)$/.test(suffix)) throw new ScopeError();
         if (!readOnly(method) && ownedMail.managementMode !== 'local') throw new ScopeError();
         if (method === 'DELETE' || method === 'PATCH') throw new ScopeError();
+        if (['/config-preview', '/config-apply'].includes(suffix) && request.body?.status && ownedMail.status && request.body.status !== ownedMail.status) {
+          throw new ScopeError();
+        }
         if (suffix === '/config-preview' && method === 'POST') {
           const original = response.json.bind(response);
           response.json = (payload) => {
