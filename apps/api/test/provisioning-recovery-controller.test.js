@@ -3,7 +3,7 @@ register('../../web/test/jsx-loader.js', import.meta.url);
 
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,9 +12,11 @@ import test from 'node:test';
 import express from 'express';
 
 const nativeFetch = globalThis.fetch;
-// Run web controller unit and optional-step tests
+// Run web controller unit and optional-step tests alongside site-create submission and wiring regressions
 await import('../../web/test/provisioning-recovery-controller.test.js');
 await import('../../web/test/provisioning-recovery-optional.test.js');
+await import('../../web/test/site-create-submission.test.js');
+await import('../../web/test/site-create-result-wiring.test.js');
 globalThis.fetch = nativeFetch;
 
 import { createAuthenticatedApi } from '../src/auth-http.js';
@@ -722,7 +724,10 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   assert.equal(orchestratorCalls.length, 1);
 
   // Allow lock cleanup to settle
-  await new Promise((r) => setTimeout(r, 50));
+  const lockFilePath = path.join(lockRoot, `website-${siteAId}.lock`);
+  for (let i = 0; i < 100 && existsSync(lockFilePath); i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
 
   // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
   const browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {

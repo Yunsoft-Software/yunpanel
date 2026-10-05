@@ -459,6 +459,7 @@ function TestRecoveryApp({ session, targetWebsiteId = websiteId, canManage = fal
 async function mountRecoveryPanel({ session, targetWebsiteId = websiteId, canManage = false, operation = null, fetchHandler = null }) {
   const container = doc.createElement('div');
   const root = createRoot(container);
+  const previousFetch = globalThis.fetch;
 
   if (fetchHandler) {
     globalThis.fetch = fetchHandler;
@@ -485,6 +486,7 @@ async function mountRecoveryPanel({ session, targetWebsiteId = websiteId, canMan
       await act(async () => {
         root.unmount();
       });
+      globalThis.fetch = previousFetch;
     },
   };
 }
@@ -696,96 +698,101 @@ test('usePanelSession throws error when invoked outside PanelSessionProvider', (
 });
 
 test('Real lifecycle execution inside StrictMode: createProvisioningRecovery operates with SessionProvider context', async () => {
-  const failedOp = recoveryOperation(op('failed', {
-    steps: [
-      step('failed', { id: 'nginx', kind: 'nginx', canRetry: true, error: 'website_nginx_activation_failed' }),
-    ],
-  }), websiteId);
+  const previousFetch = globalThis.fetch;
+  try {
+    const failedOp = recoveryOperation(op('failed', {
+      steps: [
+        step('failed', { id: 'nginx', kind: 'nginx', canRetry: true, error: 'website_nginx_activation_failed' }),
+      ],
+    }), websiteId);
 
-  globalThis.fetch = async () => ({
-    ok: true,
-    status: 200,
-    headers: { get: () => 'application/json' },
-    json: async () => ({ data: failedOp }),
-  });
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      headers: { get: () => 'application/json' },
+      json: async () => ({ data: failedOp }),
+    });
 
-  const ownerSession = {
-    user: { id: 'owner-uid', role: 'owner' },
-    access: { mode: 'management', permissions: ['*'] },
-    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
-  };
+    const ownerSession = {
+      user: { id: 'owner-uid', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true },
+    };
 
-  const container = doc.createElement('div');
-  const root = createRoot(container);
+    const container = doc.createElement('div');
+    const root = createRoot(container);
 
-  // Step 1: Real mount inside StrictMode with SessionProvider context
-  await act(async () => {
-    root.render(
-      createElement(StrictMode, null,
-        createElement(PanelSessionProvider, { session: ownerSession },
-          createElement(MemoryRouter, null,
-            createElement(ProvisioningRecoveryPanel, { websiteId, canManage: true })
+    // Step 1: Real mount inside StrictMode with SessionProvider context
+    await act(async () => {
+      root.render(
+        createElement(StrictMode, null,
+          createElement(PanelSessionProvider, { session: ownerSession },
+            createElement(MemoryRouter, null,
+              createElement(ProvisioningRecoveryPanel, { websiteId, canManage: true })
+            )
           )
         )
-      )
-    );
-  });
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
 
-  assert.ok(container.textContent.includes('Nginx'));
-  assert.ok(container.textContent.includes('Yeniden dene'));
+    assert.ok(container.textContent.includes('Nginx'));
+    assert.ok(container.textContent.includes('Yeniden dene'));
 
-  // Step 2: User interaction triggers active ConfirmDialog
-  const retryBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON').find((b) => b.textContent.includes('Yeniden dene'));
-  assert.ok(retryBtn, 'retry button should be in DOM');
-  await act(async () => {
-    retryBtn.click();
-  });
-  assert.ok(container.textContent.includes('adımını yeniden dene'));
+    // Step 2: User interaction triggers active ConfirmDialog
+    const retryBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON').find((b) => b.textContent.includes('Yeniden dene'));
+    assert.ok(retryBtn, 'retry button should be in DOM');
+    await act(async () => {
+      retryBtn.click();
+    });
+    assert.ok(container.textContent.includes('adımını yeniden dene'));
 
-  // Step 3: Canceling ConfirmDialog clears approval
-  const cancelBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON').find((b) => b.textContent.includes('Vazgeç'));
-  assert.ok(cancelBtn, 'cancel button should be in DOM');
-  await act(async () => {
-    cancelBtn.click();
-  });
-  assert.equal(container.textContent.includes('adımını yeniden dene'), false);
+    // Step 3: Canceling ConfirmDialog clears approval
+    const cancelBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON').find((b) => b.textContent.includes('Vazgeç'));
+    assert.ok(cancelBtn, 'cancel button should be in DOM');
+    await act(async () => {
+      cancelBtn.click();
+    });
+    assert.equal(container.textContent.includes('adımını yeniden dene'), false);
 
-  // Step 4: Reopen dialog, then transition session context to read-only
-  await act(async () => {
-    retryBtn.click();
-  });
-  assert.ok(container.textContent.includes('adımını yeniden dene'));
+    // Step 4: Reopen dialog, then transition session context to read-only
+    await act(async () => {
+      retryBtn.click();
+    });
+    assert.ok(container.textContent.includes('adımını yeniden dene'));
 
-  const roSession = {
-    user: { id: 'ro-uid', role: 'read_only' },
-    access: { mode: 'read_only', permissions: ['sites.read'] },
-    security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: false },
-  };
-  await act(async () => {
-    root.render(
-      createElement(StrictMode, null,
-        createElement(PanelSessionProvider, { session: roSession },
-          createElement(MemoryRouter, null,
-            createElement(ProvisioningRecoveryPanel, { websiteId, canManage: false })
+    const roSession = {
+      user: { id: 'ro-uid', role: 'read_only' },
+      access: { mode: 'read_only', permissions: ['sites.read'] },
+      security: { ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: false },
+    };
+    await act(async () => {
+      root.render(
+        createElement(StrictMode, null,
+          createElement(PanelSessionProvider, { session: roSession },
+            createElement(MemoryRouter, null,
+              createElement(ProvisioningRecoveryPanel, { websiteId, canManage: false })
+            )
           )
         )
-      )
-    );
-  });
-  await act(async () => {
-    await new Promise((resolve) => setTimeout(resolve, 20));
-  });
+      );
+    });
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 20));
+    });
 
-  assert.equal(container.textContent.includes('Yeniden dene'), false);
-  assert.equal(container.textContent.includes('Devam et'), false);
-  assert.ok(container.textContent.includes('Durumu yenile'));
+    assert.equal(container.textContent.includes('Yeniden dene'), false);
+    assert.equal(container.textContent.includes('Devam et'), false);
+    assert.ok(container.textContent.includes('Durumu yenile'));
 
-  // Step 5: Clean unmount inside StrictMode
-  await act(async () => {
-    root.unmount();
-  });
-  assert.equal(container.childNodes.length, 0);
+    // Step 5: Clean unmount inside StrictMode
+    await act(async () => {
+      root.unmount();
+    });
+    assert.equal(container.childNodes.length, 0);
+  } finally {
+    globalThis.fetch = previousFetch;
+  }
 });
