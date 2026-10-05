@@ -298,19 +298,89 @@
 @media (max-width: 700px) {
   .workspace-shell .ys-resource-table tbody tr { border: 0; border-radius: 15px; background: var(--ws-surface-subtle); margin: 0 12px 12px; }
 }
+/* Accessibility & Cross-Browser Acceptance: 200% Zoom, Keyboard Focus, Chromium/Firefox, Screen Reader, Reduced Motion, Forced Colors, Touch */
+:root {
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+.workspace-shell :is([tabindex="0"],[role="button"],[role="tab"],[role="link"]):focus-visible,
+.ws-modal :is([tabindex="0"],[role="button"],[role="tab"],[role="link"]):focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
+.workspace-shell .ws-button-primary:focus-visible,
+.ws-modal .ws-button-primary:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; box-shadow: 0 0 0 2px var(--ws-surface); }
+.workspace-shell .ws-skip:focus, .workspace-shell .ws-skip:focus-visible {
+  top: 12px; background: var(--ws-surface-raised); color: var(--ws-text);
+  border: 2px solid var(--ws-focus); border-radius: var(--ws-radius-control);
+  box-shadow: var(--ws-overlay-shadow); outline: 2px solid var(--ws-focus); outline-offset: 2px;
+  font-weight: 650; text-decoration: none; z-index: 1000;
+}
+.workspace-shell .ws-metric { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.workspace-shell .ws-metric > strong { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.workspace-shell .ws-badge { max-width: 100%; overflow-wrap: anywhere; word-break: break-word; white-space: normal; }
+.workspace-shell .ws-keyvalues dt, .workspace-shell .ws-keyvalues dd { min-width: 0; overflow-wrap: anywhere; word-break: break-word; }
+.workspace-shell .ws-toolbar { flex-wrap: wrap; gap: 8px; }
+.workspace-shell .ws-toolbar-actions { flex-wrap: wrap; gap: 6px; }
+.workspace-shell .ws-pagination { flex-wrap: wrap; gap: 8px; }
+.ws-modal { max-height: calc(100vh - 20px); max-height: calc(100dvh - 20px); overscroll-behavior-y: contain; }
+.ws-modal > header { flex-wrap: wrap; }
+.ws-modal-footer { flex-wrap: wrap; }
+.workspace-shell, .workspace-shell *, .ws-modal, .ws-modal * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ws-control-border) transparent;
+}
+.workspace-shell ::-webkit-scrollbar, .ws-modal ::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+.workspace-shell ::-webkit-scrollbar-track, .ws-modal ::-webkit-scrollbar-track {
+  background: transparent;
+}
+.workspace-shell ::-webkit-scrollbar-thumb, .ws-modal ::-webkit-scrollbar-thumb {
+  background: var(--ws-control-border);
+  border-radius: 4px;
+}
+.workspace-shell ::-webkit-scrollbar-thumb:hover, .ws-modal ::-webkit-scrollbar-thumb:hover {
+  background: var(--ws-muted);
+}
+button::-moz-focus-inner, input::-moz-focus-inner {
+  border: 0;
+  padding: 0;
+}
+.ws-sr-only, .sr-only {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
+}
 @media (pointer: coarse) {
   .workspace-shell .ws-button, .ws-modal .ws-button, .workspace-shell .yf-row-actions .ws-button { min-height: 44px; }
   .workspace-shell .yf-row-actions .ws-button { min-width: 40px; }
+  .workspace-shell .ws-nav a { min-height: 44px; }
+  .workspace-shell .ys-site-primary a { min-height: 44px; }
+  .workspace-shell .ys-resource-tabs button { min-height: 44px; }
+  .workspace-shell .ws-tabs a { min-height: 44px; display: inline-flex; align-items: center; }
+  .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { min-height: 44px; }
+  .workspace-shell .ws-pagination button, .workspace-shell .ws-pagination a { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
   .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 @media (forced-colors: active) {
   .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article,.ws-notice), .ws-modal { border: 1px solid CanvasText; }
   .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border: 1px solid CanvasText; }
-  .workspace-shell :is(.ws-nav a.active,.ys-site-primary a[aria-current],.ys-resource-tabs button[aria-current]) { outline: 2px solid Highlight; }
+  .workspace-shell :is(.ws-nav a.active,.ys-site-primary a[aria-current],.ys-resource-tabs button[aria-current],.ws-tabs a[aria-current]) { outline: 2px solid Highlight; }
   .workspace-shell :is(.ws-table,.yf-table,.ys-resource-table) td { border-bottom: 1px solid CanvasText; }
   .workspace-shell .ws-usage-ring { border: 3px solid CanvasText; }
+  .workspace-shell :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible { outline: 2px solid Highlight !important; outline-offset: 3px; }
+  .workspace-shell .ws-badge { border: 1px solid CanvasText; }
+  .workspace-shell :is(button,input,select,textarea):disabled, .ws-modal :is(button,input,select,textarea):disabled { border-color: GrayText !important; color: GrayText !important; }
+  .workspace-shell :is(input,select,textarea):is([aria-invalid="true"],.is-error,.ws-input-error) { border: 2px solid Mark !important; outline: 1px solid Mark !important; }
+  .workspace-shell :is(.ws-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) tbody tr:is(.is-selected, [aria-selected="true"], .ws-context-row) { outline: 2px solid Highlight; }
 }
 .workspace-shell .ws-site-create-result:focus { outline: none; }
 .workspace-shell .ws-site-create-result:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 2px; border-radius: var(--ws-radius); }
