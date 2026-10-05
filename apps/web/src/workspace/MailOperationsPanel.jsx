@@ -88,26 +88,26 @@ function ServiceConnectionDiagnosticsPanel({ serverId }) {
         )}
         {protocols.length > 0 && (
           <div className="ws-table-scroll">
-            <table className="ws-table">
+            <table className="ws-table" role="table" aria-label="Mail protokolleri">
               <thead>
-                <tr>
-                  <th>Protokol</th>
-                  <th>Port</th>
-                  <th>Durum</th>
-                  <th>TLS Modu</th>
+                <tr role="row">
+                  <th scope="col">Protokol</th>
+                  <th scope="col">Port</th>
+                  <th scope="col">Durum</th>
+                  <th scope="col">TLS Modu</th>
                 </tr>
               </thead>
               <tbody>
                 {protocols.map((p) => (
-                  <tr key={p.id}>
-                    <td><strong>{p.id.toUpperCase()}</strong></td>
-                    <td><code>{p.port}</code></td>
-                    <td>
+                  <tr key={p.id} role="row">
+                    <td role="cell"><strong>{p.id.toUpperCase()}</strong></td>
+                    <td role="cell"><code>{p.port}</code></td>
+                    <td role="cell">
                       <Badge state={p.satisfied ? 'active' : 'error'}>
                         {p.satisfied ? 'Dinliyor (Aktif)' : 'Dinlemiyor'}
                       </Badge>
                     </td>
-                    <td>{p.port === 465 || p.port === 993 ? 'Doğrudan SSL/TLS' : 'STARTTLS'}</td>
+                    <td role="cell">{p.port === 465 || p.port === 993 ? 'Doğrudan SSL/TLS' : 'STARTTLS'}</td>
                   </tr>
                 ))}
               </tbody>
@@ -188,7 +188,7 @@ function QueuePanel({ serverId }) {
   }, [serverId, search]);
   useEffect(() => { load(); }, [serverId]);
   const items = queue?.entries ?? [];
-  return <Section title="Postfix mail queue" description="Bounded postqueue envanteri; yerel ve dış posta yönlendirmesi ayrılır, parolalar ve secret'lar masked tutulur."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label className="ws-filter-search">Queue ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form></div>{items.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Queue ID</th><th>Queue</th><th>Yönlendirme</th><th>Gönderen</th><th>Alıcılar</th><th>Boyut</th><th>Geliş</th></tr></thead><tbody>{items.map((item) => <tr key={item.queueId}><td><code>{item.queueId}</code></td><td>{item.queueName}</td><td><Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>{item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : item.routing ?? '—'}</Badge></td><td>{item.sender || '<>'}</td><td>{item.recipients.map((recipient) => <small key={recipient.address}>{recipient.address}{recipient.delayReason ? ` · ${recipient.delayReason}` : ''}</small>)}</td><td>{bytesLabel(item.messageSize)}</td><td>{formatDate(item.arrivalTime)}</td></tr>)}</tbody></table></div> : queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />}{queue?.page && <div className="ws-section-body"><p className="ws-muted">{queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}{queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}</p></div>}</Section>;
+  return <Section title="Postfix mail queue" description="Bounded postqueue envanteri; yerel ve dış posta yönlendirmesi ayrılır, parolalar ve secret'lar masked tutulur."><div className="ws-section-body"><ErrorNotice error={error} /><form className="ws-filters" onSubmit={(event) => { event.preventDefault(); load(); }}><label className="ws-filter-search">Queue ara<input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="queue ID, sender veya recipient" /></label><Button type="submit" disabled={busy}>{busy ? 'Okunuyor…' : 'Ara'}</Button><Button type="button" icon="refresh" disabled={busy} onClick={load}>Yenile</Button></form></div>{items.length ? <div className="ws-table-scroll"><table className="ws-table" role="table" aria-label="Mail kuyruğu"><thead><tr role="row"><th scope="col">Queue ID</th><th scope="col">Queue</th><th scope="col">Yönlendirme</th><th scope="col">Gönderen</th><th scope="col">Alıcılar</th><th scope="col">Boyut</th><th scope="col">Geliş</th></tr></thead><tbody>{items.map((item) => <tr key={item.queueId} role="row"><td role="cell"><code>{item.queueId}</code></td><td role="cell">{item.queueName}</td><td role="cell"><Badge state={item.routing === 'local' ? 'active' : item.routing === 'external' ? 'warning' : 'neutral'}>{item.routing === 'local' ? 'Yerel' : item.routing === 'external' ? 'Dış' : item.routing ?? '—'}</Badge></td><td role="cell">{item.sender || '<>'}</td><td role="cell">{item.recipients.map((recipient) => <small key={recipient.address}>{recipient.address}{recipient.delayReason ? ` · ${recipient.delayReason}` : ''}</small>)}</td><td role="cell">{bytesLabel(item.messageSize)}</td><td role="cell">{formatDate(item.arrivalTime)}</td></tr>)}</tbody></table></div> : queue && <EmptyState icon="mail" title="Queue boş" detail="Filtreye uyan bekleyen Postfix mesajı yok." />}{queue?.page && <div className="ws-section-body"><p className="ws-muted">{queue.page.count} kayıt · {queue.page.scanned} tarandı{queue.page.hasMore ? ' · daha fazla kayıt var' : ''}{queue.page.malformed ? ` · ${queue.page.malformed} bozuk kayıt atlandı` : ''}</p></div>}</Section>;
 }
 
 function LogsPanel({ serverId }) {

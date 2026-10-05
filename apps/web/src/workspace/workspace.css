@@ -63,7 +63,8 @@ details.ws-section > .ws-section { margin: 16px; }
 .ws-metric small { color: var(--ws-muted); font-size: 11px; }
 .ws-two-columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 20px; align-items: start; }
 .ws-equal-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; align-items: start; }
-.ws-table-scroll { width: 100%; overflow-x: auto; }
+.ws-table-scroll { width: 100%; max-width: 100%; overflow-x: auto; overscroll-behavior-x: contain; -webkit-overflow-scrolling: touch; }
+.ws-table-scroll table { min-width: 100%; }
 .ws-table { border-collapse: collapse; width: 100%; text-align: left; font-size: 12px; }
 .ws-table th { color: var(--ws-muted); background: #f9fafc; padding: 11px 20px; font-weight: 600; font-size: 11px; border-bottom: 1px solid var(--ws-border); white-space: nowrap; }
 .ws-table td { padding: 16px 20px; border-bottom: 1px solid #edf0f5; vertical-align: middle; }
