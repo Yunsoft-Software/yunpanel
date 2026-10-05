@@ -1279,7 +1279,15 @@ async function serveStatic(request, response, webRoot, pathname) {
     const metadata = await stat(filePath);
     if (metadata.isDirectory()) filePath = path.join(filePath, 'index.html');
     await stat(filePath);
-  } catch { filePath = path.join(webRoot, 'index.html'); }
+  } catch {
+    filePath = path.join(webRoot, 'index.html');
+    try {
+      await stat(filePath);
+    } catch {
+      reply(response, 404, 'File not found.');
+      return;
+    }
+  }
   const extension = path.extname(filePath).toLowerCase();
   response.writeHead(200, {
     'cache-control': extension === '.html' ? 'no-store' : 'public, max-age=300',

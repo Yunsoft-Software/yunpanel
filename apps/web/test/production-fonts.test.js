@@ -1,10 +1,20 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { readFile, readdir, stat } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
 import http from 'node:http';
 import path from 'node:path';
 import { createPanelServer } from '../server.js';
 import { gitBlobHash, UI_FONTS, verifyFontAsset } from '../../../scripts/prepare-ui-fonts.mjs';
+
+async function ensureProductionBuild() {
+  const distIndex = new URL('../dist/index.html', import.meta.url);
+  try {
+    await stat(distIndex);
+  } catch {
+    execSync('npm run build', { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore' });
+  }
+}
 
 const proxyToken = 'p'.repeat(43);
 const TURKISH_CHARS = ['İ', 'ı', 'Ğ', 'ğ', 'Ş', 'ş', 'Ç', 'ç', 'Ö', 'ö', 'Ü', 'ü'];
@@ -98,6 +108,7 @@ function parseAdvanceWidths(buf, tables) {
 }
 
 async function withProductionServer(run) {
+  await ensureProductionBuild();
   const webRoot = path.resolve(new URL('../dist', import.meta.url).pathname);
   const server = createPanelServer({
     allowedClientIps: '127.0.0.1',
@@ -168,6 +179,7 @@ test('production server: OFL license files return 200 with text/plain charset ut
 });
 
 test('production Vite build index.html includes font preloads and stylesheet with swap display preventing CLS', async () => {
+  await ensureProductionBuild();
   const distDir = new URL('../dist/', import.meta.url);
   const indexHtml = await readFile(new URL('index.html', distDir), 'utf8');
 
