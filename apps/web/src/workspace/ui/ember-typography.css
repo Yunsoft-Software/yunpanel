@@ -25,7 +25,9 @@
   font-family: var(--ws-font-display); font-weight: 500; letter-spacing: -.025em;
 }
 .workspace-shell :is(code, pre, kbd), .ws-modal :is(code, pre, kbd),
-.workspace-shell .yf-editor textarea, .ws-modal .yf-editor textarea {
+.workspace-shell .yf-editor textarea, .ws-modal .yf-editor textarea,
+.workspace-shell :is(.ws-terminal-surface, .ws-terminal-surface *),
+.ws-modal :is(.ws-terminal-surface, .ws-terminal-surface *) {
   font-family: var(--ws-font-code); font-feature-settings: normal;
 }
 /* Keep terminal geometry controlled by its own monospace font metrics. */
