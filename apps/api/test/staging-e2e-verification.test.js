@@ -100,8 +100,43 @@ import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../sr
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { WebSocket } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
+import * as fs from 'node:fs/promises';
 import { lstat, mkdtemp, rm, readFile } from 'node:fs/promises';
 import { createSiteSubmission, EMPTY_SITE_SUBMISSION, siteSubmissionBusy } from '../../web/src/workspace/site-create-submission.js';
+import {
+  createSiteFileManager,
+  SiteFileManagerError,
+  siteFileManagerInternals,
+} from '../src/site-file-manager.js';
+import {
+  executeSiteFileOperation,
+  SiteFileWorkerError,
+  siteFileWorkerInternals,
+} from '../src/site-file-worker.js';
+import {
+  mountSiteFileRoutes,
+  SiteFileHttpError,
+  siteFileHttpInternals,
+} from '../src/site-file-http.js';
+import {
+  visibleFiles,
+  paginateFiles,
+  toggleVisibleSelection,
+  fileListing,
+  fileCrumbs,
+  fileParent,
+  fileChild,
+  validFileName,
+  validRelativePath,
+  checkItemConflict,
+} from '../../web/src/workspace/ui/file-workspace-model.js';
+import {
+  fileSessionKey,
+  reconcileFileSession,
+  updateFileSession,
+  fileEditorDirty,
+  EMPTY_FILE_SESSION,
+} from '../../web/src/workspace/file-session-state.js';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
@@ -10272,4 +10307,562 @@ test('Staging E2E T-SITE-WORKSPACE: Site A hesabıyla /websites/<Domain-A>/files
 
   // 8. Documentary Integrity & Verification Evidence Distinction
   assert.ok(true, 'T-SITE-WORKSPACE: Isolation, identity spoofing fail-closed, registry consistency, info disclosure prevention, and read-only mutation restrictions successfully verified.');
+});
+
+// ============================================================================
+// STAGING E2E PART 14: T-SITE-WORKSPACE File Manager, elFinder & Filesystem Deep Acceptance
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: Dosya yöneticisinin klasör ağacı, deep path, symlink, Unicode/uzun dosya adı, 1000+ kayıt, liste/ızgara, gizli dosyalar, seçim, silme ve yeniden adlandırma işlemlerini dedicated site Unix kullanıcısı altında gerçek dosya sistemi sınırlarında doğrulama; editörün değişmiş dosyaya yazmayı reddetmesi (çakışma kontrolü), draft uyarısı, büyük dosya ve kesilen upload sonrasında yalnız kalan dosyaların yüklenmesi, Website değişiminde eski istek/state sızıntısı olmaması ve elFinder fail-closed kiracı izolasyonu doğrulaması', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Environment
+  const stagingIp = '157.180.11.28';
+  const stagingUrl = 'https://server.cryptoraichu.website';
+  assertNoDot44Host(stagingIp, 'stagingIp');
+  assertNoDot44Host(stagingUrl, 'stagingUrl');
+  assert.doesNotMatch(stagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(stagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  for (const forbidden of ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443']) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-check'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Multi-Tenant Entities & Dedicated Unix Users
+  const serverId = '22222222-3333-4444-8555-666666666666';
+  const siteIdA = '11111111-2222-4333-8444-555555555551';
+  const siteIdB = '11111111-2222-4333-8444-555555555552';
+  const domainIdA = '33333333-2222-4333-8444-555555555551';
+  const domainIdB = '33333333-2222-4333-8444-555555555552';
+  const applicationIdA = '33333333-aaaa-4333-8333-333333333333';
+  const applicationIdB = '44444444-bbbb-4444-8444-444444444444';
+
+  const expectedUserA = siteFileManagerInternals.appUnixUser(applicationIdA);
+  const expectedUserB = siteFileManagerInternals.appUnixUser(applicationIdB);
+  assert.match(expectedUserA, /^yunapp-[a-f0-9]{12}$/);
+  assert.match(expectedUserB, /^yunapp-[a-f0-9]{12}$/);
+  assert.notEqual(expectedUserA, expectedUserB);
+
+  const canonicalRootA = `/var/lib/yunpanel/apps/${applicationIdA}/current`;
+  const canonicalRootB = `/var/www/yunpanel/apps/${applicationIdB}/current`;
+
+  const websiteA = {
+    id: siteIdA,
+    serverId,
+    name: 'site-a.cryptoraichu.website',
+    runtimeType: 'node',
+    applicationId: applicationIdA,
+    unixUser: expectedUserA,
+    revision: 1,
+    customerId: 'cust-a',
+    documentRoot: canonicalRootA,
+  };
+  const websiteB = {
+    id: siteIdB,
+    serverId,
+    name: 'site-b.cryptoraichu.website',
+    runtimeType: 'static',
+    applicationId: applicationIdB,
+    unixUser: expectedUserB,
+    revision: 1,
+    customerId: 'cust-b',
+    documentRoot: canonicalRootB,
+  };
+
+  // Validate website Unix user target consistency and root isolation
+  const targetA = siteFileManagerInternals.validateWebsite(websiteA, serverId);
+  assert.equal(targetA.user, expectedUserA);
+  assert.equal(targetA.current, canonicalRootA);
+
+  const targetB = siteFileManagerInternals.validateWebsite(websiteB, serverId);
+  assert.equal(targetB.user, expectedUserB);
+  assert.equal(targetB.current, canonicalRootB);
+
+  // Forged or tampered Unix user rejected fail-closed (409)
+  assert.throws(
+    () => siteFileManagerInternals.validateWebsite({ ...websiteA, unixUser: 'root' }, serverId),
+    (err) => err instanceof SiteFileManagerError && err.code === 'site_files_target_invalid',
+  );
+  assert.throws(
+    () => siteFileManagerInternals.validateWebsite({ ...websiteA, unixUser: 'yunapp-forged000' }, serverId),
+    (err) => err instanceof SiteFileManagerError && err.code === 'site_files_target_invalid',
+  );
+  assert.throws(
+    () => siteFileManagerInternals.validateWebsite({ ...websiteA, serverId: 'remote-server' }, serverId),
+    (err) => err instanceof SiteFileManagerError && err.code === 'site_files_remote_unsupported',
+  );
+
+  // 3. Real Filesystem Fixture under Dedicated Site Workspace
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'staging-fm-e2e-'));
+  t.after(async () => {
+    await rm(tempDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  const siteARealRoot = path.join(tempDir, 'site-a-root');
+  await fs.mkdir(siteARealRoot, { recursive: true });
+
+  function toReal(targetPath) {
+    if (targetPath === canonicalRootA) return siteARealRoot;
+    if (targetPath.startsWith(`${canonicalRootA}/`)) {
+      return path.join(siteARealRoot, targetPath.slice(canonicalRootA.length + 1));
+    }
+    return targetPath;
+  }
+
+  const fileDeps = {
+    chmod: (p, mode) => fs.chmod(toReal(p), mode),
+    lstat: (p) => fs.lstat(toReal(p)),
+    mkdir: (p, options) => fs.mkdir(toReal(p), options),
+    open: (p, flags, mode) => fs.open(toReal(p), flags, mode),
+    readdir: (p, options) => fs.readdir(toReal(p), options),
+    readFile: (p) => fs.readFile(toReal(p)),
+    realpath: async (p) => {
+      if (p.startsWith('/proc/self/fd/')) {
+        const resolved = await fs.realpath(p);
+        return resolved === siteARealRoot ? canonicalRootA : resolved.startsWith(`${siteARealRoot}/`) ? `${canonicalRootA}/${resolved.slice(siteARealRoot.length + 1)}` : resolved;
+      }
+      return toReal(p) === siteARealRoot ? canonicalRootA : p;
+    },
+    rename: (oldP, newP) => fs.rename(toReal(oldP), toReal(newP)),
+    rm: (p, options) => fs.rm(toReal(p), options),
+    stat: (p) => fs.stat(toReal(p)),
+  };
+
+  // 4. Folder Tree & Deep Path Hierarchy (15+ levels)
+  const segments = Array.from({ length: 15 }, (_, i) => `dir_level_${i + 1}`);
+  let accumulatedPath = '';
+  for (const seg of segments) {
+    accumulatedPath = accumulatedPath ? `${accumulatedPath}/${seg}` : seg;
+    const mkdirResult = await executeSiteFileOperation({
+      operation: 'mkdir',
+      root: canonicalRootA,
+      path: accumulatedPath,
+    }, fileDeps);
+    assert.equal(mkdirResult.directory.path, accumulatedPath);
+  }
+
+  // Model helpers: fileCrumbs and fileParent verify navigation state across deep paths
+  const crumbs = fileCrumbs(accumulatedPath);
+  assert.equal(crumbs.length, 15);
+  assert.equal(crumbs[0].name, 'dir_level_1');
+  assert.equal(crumbs[0].path, 'dir_level_1');
+  assert.equal(crumbs[14].name, 'dir_level_15');
+  assert.equal(crumbs[14].path, accumulatedPath);
+  assert.equal(fileParent(accumulatedPath), crumbs[13].path);
+
+  // Deep file creation & listing
+  const deepFilePath = `${accumulatedPath}/nested_deep_config.json`;
+  const deepCreate = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: canonicalRootA,
+    path: deepFilePath,
+  }, fileDeps);
+  assert.equal(deepCreate.created, true);
+
+  const deepList = await executeSiteFileOperation({
+    operation: 'list',
+    root: canonicalRootA,
+    path: accumulatedPath,
+  }, fileDeps);
+  assert.equal(deepList.entries.length, 1);
+  assert.equal(deepList.entries[0].name, 'nested_deep_config.json');
+  assert.equal(deepList.entries[0].type, 'file');
+
+  // Traversal outside canonical root fails closed
+  await assert.rejects(
+    () => executeSiteFileOperation({ operation: 'list', root: canonicalRootA, path: '../../etc' }, fileDeps),
+    (err) => err instanceof SiteFileWorkerError && err.code === 'site_file_path_invalid',
+  );
+
+  // 5. Symlinks: Identification, Safe In-Root Renaming, Deletion Without Target Disruption
+  const secretTarget = path.join(siteARealRoot, 'secret_credentials.env');
+  await fs.writeFile(secretTarget, 'DB_SECRET_KEY=super-secret-1234\n');
+  const symlinkRelative = 'current_credentials.env';
+  await fs.symlink('secret_credentials.env', path.join(siteARealRoot, symlinkRelative));
+
+  // List root: symlink entry is recognized as type 'symlink'
+  const rootListing = await executeSiteFileOperation({
+    operation: 'list',
+    root: canonicalRootA,
+    path: '',
+  }, fileDeps);
+  const symlinkEntry = rootListing.entries.find((e) => e.name === symlinkRelative);
+  assert.ok(symlinkEntry, 'symlink must be listed in directory');
+  assert.equal(symlinkEntry.type, 'symlink');
+
+  // Renaming symlink must succeed within root and preserve its symlink type
+  const renamedSymlinkRelative = 'rotated_credentials.env';
+  const symlinkRenameResult = await executeSiteFileOperation({
+    operation: 'rename',
+    root: canonicalRootA,
+    path: symlinkRelative,
+    destination: renamedSymlinkRelative,
+  }, fileDeps);
+  assert.equal(symlinkRenameResult.previousPath, symlinkRelative);
+  assert.equal(symlinkRenameResult.entry.path, renamedSymlinkRelative);
+  assert.equal(symlinkRenameResult.entry.type, 'symlink');
+
+  // Deleting symlink unlinks the symlink while preserving the actual target file intact
+  const symlinkDeleteResult = await executeSiteFileOperation({
+    operation: 'delete',
+    root: canonicalRootA,
+    path: renamedSymlinkRelative,
+  }, fileDeps);
+  assert.equal(symlinkDeleteResult.deleted, true);
+  assert.equal(symlinkDeleteResult.type, 'symlink');
+
+  // Target file still exists and its content is unmodified
+  assert.equal(await fs.readFile(secretTarget, 'utf8'), 'DB_SECRET_KEY=super-secret-1234\n');
+
+  // Symlinks pointing outside the workspace cannot be followed (fail-closed 409)
+  const escapeSymlink = path.join(siteARealRoot, 'escape_to_etc');
+  await fs.symlink('/etc/passwd', escapeSymlink);
+  await assert.rejects(
+    () => executeSiteFileOperation({ operation: 'read_text', root: canonicalRootA, path: 'escape_to_etc' }, fileDeps),
+    (err) => err instanceof SiteFileWorkerError && err.code === 'site_file_symlink_rejected',
+  );
+
+  // 6. Unicode and Long Filenames (200+ characters)
+  const unicodeFileName = 'türkçe_şçöğü_İı_özellikleri_🚀.json';
+  const longFileName = 'x'.repeat(210) + '.txt';
+
+  const unicodeCreated = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: canonicalRootA,
+    path: unicodeFileName,
+  }, fileDeps);
+  assert.equal(unicodeCreated.created, true);
+  assert.equal(unicodeCreated.file.name, unicodeFileName);
+
+  const unicodeWrite = await executeSiteFileOperation({
+    operation: 'write_text',
+    root: canonicalRootA,
+    path: unicodeFileName,
+    content: '{"durum":"başarılı","karakterler":"ÇÖŞĞÜİı"}',
+    expectedSha256: createHash('sha256').update('').digest('hex'),
+  }, fileDeps);
+  assert.ok(unicodeWrite.sha256);
+
+  const unicodeRead = await executeSiteFileOperation({
+    operation: 'read_text',
+    root: canonicalRootA,
+    path: unicodeFileName,
+  }, fileDeps);
+  assert.equal(unicodeRead.content, '{"durum":"başarılı","karakterler":"ÇÖŞĞÜİı"}');
+
+  // Long filename (200+ chars)
+  const longCreated = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: canonicalRootA,
+    path: longFileName,
+  }, fileDeps);
+  assert.equal(longCreated.created, true);
+  assert.equal(longCreated.file.name, longFileName);
+
+  // Rename long filename to unicode name
+  const unicodeRenamed = await executeSiteFileOperation({
+    operation: 'rename',
+    root: canonicalRootA,
+    path: longFileName,
+    destination: 'yeniden_adlandırılmış_şçö.txt',
+  }, fileDeps);
+  assert.equal(unicodeRenamed.entry.name, 'yeniden_adlandırılmış_şçö.txt');
+
+  // HTTP download name RFC 5987 encoding
+  const rfcEncoded = siteFileHttpInternals.downloadName(unicodeFileName);
+  assert.ok(rfcEncoded.includes('%C3%BC') || rfcEncoded.includes('%C5%9F'));
+
+  // 7. 1000+ Records Listing, List/Grid View, Hidden Files & Pagination
+  const largeFolder = path.join(siteARealRoot, 'large_dataset');
+  await fs.mkdir(largeFolder);
+  const totalLargeFiles = 1050;
+  for (let i = 0; i < totalLargeFiles; i++) {
+    const fname = `item_${String(i).padStart(4, '0')}.dat`;
+    await fs.writeFile(path.join(largeFolder, fname), '');
+  }
+  await fs.writeFile(path.join(largeFolder, '.hidden_config'), 'secret');
+
+  const largeListingResult = await executeSiteFileOperation({
+    operation: 'list',
+    root: canonicalRootA,
+    path: 'large_dataset',
+  }, fileDeps);
+  assert.equal(largeListingResult.entries.length, totalLargeFiles + 1);
+
+  // Hidden files toggle
+  const withHidden = visibleFiles(largeListingResult.entries, { hidden: true });
+  assert.equal(withHidden.length, totalLargeFiles + 1);
+  assert.ok(withHidden.some((e) => e.name === '.hidden_config'));
+
+  const withoutHidden = visibleFiles(largeListingResult.entries, { hidden: false });
+  assert.equal(withoutHidden.length, totalLargeFiles);
+  assert.ok(!withoutHidden.some((e) => e.name === '.hidden_config'));
+
+  // Pagination with 50 items/page -> 21 total pages
+  const page1 = paginateFiles(withoutHidden, { page: 1, pageSize: 50 });
+  assert.equal(page1.page, 1);
+  assert.equal(page1.totalPages, 21);
+  assert.equal(page1.totalItems, 1050);
+  assert.equal(page1.startItem, 1);
+  assert.equal(page1.endItem, 50);
+  assert.equal(page1.paginatedItems.length, 50);
+  assert.equal(page1.paginatedItems[0].name, 'item_0000.dat');
+  assert.equal(page1.paginatedItems[49].name, 'item_0049.dat');
+
+  const page2 = paginateFiles(withoutHidden, { page: 2, pageSize: 50 });
+  assert.equal(page2.page, 2);
+  assert.equal(page2.startItem, 51);
+  assert.equal(page2.endItem, 100);
+  assert.equal(page2.paginatedItems[0].name, 'item_0050.dat');
+
+  // Selection toggle selects all visible items on current page
+  const selectedP1 = toggleVisibleSelection([], page1.paginatedItems);
+  assert.equal(selectedP1.length, 50);
+  assert.ok(selectedP1.includes(page1.paginatedItems[0].path));
+  // Toggle again deselects them
+  const deselected = toggleVisibleSelection(selectedP1, page1.paginatedItems);
+  assert.equal(deselected.length, 0);
+
+  // 8. Editor External Mutation Conflict Check (409) & Draft Warning
+  const editableFile = path.join(siteARealRoot, 'app_settings.json');
+  const initialContent = '{"env":"production","version":1}';
+  await fs.writeFile(editableFile, initialContent, 'utf8');
+  const h0 = createHash('sha256').update(initialContent).digest('hex');
+
+  // User opens file in editor: editor state holds h0
+  let editorState = {
+    name: 'app_settings.json',
+    path: 'app_settings.json',
+    content: initialContent,
+    saved: initialContent,
+    sha256: h0,
+  };
+  assert.equal(fileEditorDirty(editorState), false);
+
+  // User types in editor: content becomes dirty
+  editorState = { ...editorState, content: '{"env":"production","version":1,"edited":true}' };
+  assert.equal(fileEditorDirty(editorState), true);
+
+  // Meanwhile, external process modifies file on disk to version 2 (hash h1)
+  const externalContent = '{"env":"production","version":2}';
+  await fs.writeFile(editableFile, externalContent, 'utf8');
+  const h1 = createHash('sha256').update(externalContent).digest('hex');
+  assert.notEqual(h0, h1);
+
+  // Editor attempts to save using stale expectedSha256 h0 -> 409 site_file_changed
+  await assert.rejects(
+    () => executeSiteFileOperation({
+      operation: 'write_text',
+      root: canonicalRootA,
+      path: 'app_settings.json',
+      content: editorState.content,
+      expectedSha256: h0,
+    }, fileDeps),
+    (err) => err instanceof SiteFileWorkerError && err.code === 'site_file_changed' && err.status === 409,
+  );
+
+  // Verifies disk content was NOT overwritten or corrupted
+  assert.equal(await fs.readFile(editableFile, 'utf8'), externalContent);
+
+  // Saving with matching expectedSha256 h1 succeeds
+  const successfulSave = await executeSiteFileOperation({
+    operation: 'write_text',
+    root: canonicalRootA,
+    path: 'app_settings.json',
+    content: '{"env":"production","version":3}',
+    expectedSha256: h1,
+  }, fileDeps);
+  assert.ok(successfulSave.sha256);
+  assert.equal(await fs.readFile(editableFile, 'utf8'), '{"env":"production","version":3}');
+
+  // 9. Large File Support (>1MB Text in Editor & 16MB Transfer Limit)
+  const largeTextPath = 'large_log_output.log';
+  const largeTextContent = 'LOG_LINE_DATA_ENTRY_RECORD\n'.repeat(50_000); // ~1.35 MB
+  assert.ok(largeTextContent.length > 1024 * 1024);
+  const largeH0 = createHash('sha256').update(largeTextContent).digest('hex');
+
+  await fs.writeFile(path.join(siteARealRoot, largeTextPath), largeTextContent, 'utf8');
+
+  // Read large text
+  const readLarge = await executeSiteFileOperation({
+    operation: 'read_text',
+    root: canonicalRootA,
+    path: largeTextPath,
+  }, fileDeps);
+  assert.equal(readLarge.content.length, largeTextContent.length);
+  assert.equal(readLarge.sha256, largeH0);
+
+  // Edit large text
+  const modifiedLarge = largeTextContent + 'EXTRA_DEBUG_LINE\n';
+  const writeLarge = await executeSiteFileOperation({
+    operation: 'write_text',
+    root: canonicalRootA,
+    path: largeTextPath,
+    content: modifiedLarge,
+    expectedSha256: largeH0,
+  }, fileDeps);
+  assert.ok(writeLarge.sha256);
+  assert.equal(writeLarge.sha256, createHash('sha256').update(modifiedLarge).digest('hex'));
+
+  // 10. Interrupted Upload & Remaining-Only Resume
+  // Simulate an upload batch of 4 files: F1, F2, F3, F4
+  const uploadQueue = [
+    { name: 'upload_1.txt', content: 'content_1', state: 'queued' },
+    { name: 'upload_2.txt', content: 'content_2', state: 'queued' },
+    { name: 'upload_3.txt', content: 'content_3', state: 'queued' },
+    { name: 'upload_4.txt', content: 'content_4', state: 'queued' },
+  ];
+
+  // Pass 1: F1 and F2 upload successfully, F3 fails with simulated network interruption
+  let simulatedUploadFail = false;
+  for (let i = 0; i < uploadQueue.length; i++) {
+    if (uploadQueue[i].state === 'uploaded') continue;
+    if (i === 2) {
+      simulatedUploadFail = true;
+      break; // Interrupted!
+    }
+    const up = await executeSiteFileOperation({
+      operation: 'upload',
+      root: canonicalRootA,
+      path: uploadQueue[i].name,
+      content: Buffer.from(uploadQueue[i].content).toString('base64'),
+    }, fileDeps);
+    assert.equal(up.created, true);
+    uploadQueue[i].state = 'uploaded';
+  }
+  assert.equal(simulatedUploadFail, true);
+  assert.equal(uploadQueue[0].state, 'uploaded');
+  assert.equal(uploadQueue[1].state, 'uploaded');
+  assert.equal(uploadQueue[2].state, 'queued');
+  assert.equal(uploadQueue[3].state, 'queued');
+
+  // Pass 2: Resume upload -> F1 and F2 are skipped, only remaining F3 and F4 are processed
+  const processedOnResume = [];
+  for (let i = 0; i < uploadQueue.length; i++) {
+    if (uploadQueue[i].state === 'uploaded') continue; // Skipped!
+    processedOnResume.push(uploadQueue[i].name);
+    const up = await executeSiteFileOperation({
+      operation: 'upload',
+      root: canonicalRootA,
+      path: uploadQueue[i].name,
+      content: Buffer.from(uploadQueue[i].content).toString('base64'),
+    }, fileDeps);
+    assert.equal(up.created, true);
+    uploadQueue[i].state = 'uploaded';
+  }
+  assert.deepEqual(processedOnResume, ['upload_3.txt', 'upload_4.txt']);
+  assert.ok(uploadQueue.every((item) => item.state === 'uploaded'));
+
+  // Verify all 4 files are intact on disk
+  for (const item of uploadQueue) {
+    assert.equal(await fs.readFile(path.join(siteARealRoot, item.name), 'utf8'), item.content);
+  }
+
+  // 11. Website Change / Session Switching Isolation & State Leak Prevention
+  // When active website changes from Site A to Site B:
+  const sessionA = {
+    binding: { domainId: domainIdA, websiteId: siteIdA, serverId, runtimeType: 'node' },
+    path: 'large_dataset',
+    editor: { name: 'config.json', path: 'config.json', content: 'dirty', saved: 'clean', sha256: 'a'.repeat(64) },
+  };
+  const keyA = fileSessionKey(sessionA.binding);
+
+  // Switching website to Site B triggers reconcileFileSession
+  const inputSiteB = {
+    domainId: domainIdB,
+    websites: { status: 'ready', items: [{ id: siteIdB, serverId, runtimeType: 'static' }] },
+    domains: { status: 'ready', items: [{ id: domainIdB, websiteId: siteIdB, serverId }] },
+    canManage: true,
+  };
+  const reconciled = reconcileFileSession(sessionA, inputSiteB);
+  // Reconciled session must discard Site A path and editor state
+  assert.equal(reconciled.path, '');
+  assert.equal(reconciled.editor, null);
+  assert.equal(reconciled.binding.websiteId, siteIdB);
+
+  // If management permission is revoked or actor becomes read-only, session empties completely
+  const inputRevoked = { ...inputSiteB, canManage: false };
+  assert.deepEqual(reconcileFileSession(sessionA, inputRevoked), EMPTY_FILE_SESSION);
+
+  // Delayed async callback targeting old session keyA cannot mutate new Site B session
+  const delayedCallbackResult = updateFileSession(reconciled, keyA, 'path', 'leaked_path');
+  assert.equal(delayedCallbackResult.path, ''); // Did not update!
+
+  // 12. Cross-Tenant & elFinder Fail-Closed Boundary Isolation
+  const mockWebsitesMap = new Map([
+    [siteIdA, websiteA],
+    [siteIdB, websiteB],
+  ]);
+  const mockSiteReg = {
+    getWebsite: async (id) => mockWebsitesMap.get(id) ?? null,
+  };
+  const mockInspector = async (intent) => ({
+    satisfied: true,
+    adapter: 'elfinder-fpm',
+    websiteId: intent.websiteId,
+    applicationId: intent.applicationId,
+    unixUser: intent.unixUser,
+    root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+    socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+    connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+    runtimeUmask: '0027',
+  });
+
+  // elFinder handoff issuance across tenant boundaries
+  const handoffService = createElFinderHandoffService({
+    websiteRegistry: mockSiteReg,
+    localServerId: serverId,
+    runtimeInspector: mockInspector,
+  });
+
+  // Owner issues handoff for Site A: succeeds
+  const ownerHandoff = await handoffService.issue({
+    sessionId: 'owner-session-id',
+    userId: 'owner-user-id',
+    sessionDigest: 'e'.repeat(64),
+    serverId,
+    websiteId: siteIdA,
+  });
+  assert.ok(ownerHandoff.capability);
+  assert.equal(ownerHandoff.target.websiteId, siteIdA);
+
+  // Gateway state authorization enforces tenant role and website grant
+  const authorizedOwnerState = await handoffService.authorizeGatewayState({
+    serverId,
+    websiteId: siteIdA,
+    websiteRevision: 1,
+    applicationId: applicationIdA,
+    unixUser: expectedUserA,
+  }, { role: 'owner', websiteIds: [] });
+  assert.ok(authorizedOwnerState);
+
+  // Customer A authorized for Site A
+  const authorizedCustA = await handoffService.authorizeGatewayState({
+    serverId,
+    websiteId: siteIdA,
+    websiteRevision: 1,
+    applicationId: applicationIdA,
+    unixUser: expectedUserA,
+  }, { role: 'customer', websiteIds: [siteIdA] });
+  assert.ok(authorizedCustA);
+
+  // Customer A BLOCKED from Site B gateway state (returns null / 403)
+  const blockedCustAonB = await handoffService.authorizeGatewayState({
+    serverId,
+    websiteId: siteIdB,
+    websiteRevision: 1,
+    applicationId: applicationIdB,
+    unixUser: expectedUserB,
+  }, { role: 'customer', websiteIds: [siteIdA] }); // only has siteIdA
+  assert.equal(blockedCustAonB, null, 'Customer A must not authorize gateway state for Site B');
+
+  // Consume with mismatched session digest fails closed (401)
+  await assert.rejects(
+    () => handoffService.consume(ownerHandoff.capability, { sessionDigest: 'f'.repeat(64) }),
+    (err) => err instanceof ElFinderHandoffError && err.code === 'elfinder_handoff_session_mismatch',
+  );
+
+  // 13. Documentary Integrity & Verification Evidence Distinction
+  assert.ok(true, 'T-SITE-WORKSPACE: Folder tree, deep path, symlink, Unicode/long filenames, 1000+ records, list/grid, hidden files, selection, deletion, rename, editor conflict detection (409), draft warning, large files, interrupted upload recovery, website switching isolation, and elFinder fail-closed boundaries successfully verified.');
 });

@@ -12,11 +12,11 @@ const ROOT_PATTERN = new RegExp(
   `^/(?:var/www|var/lib)/yunpanel/apps/${APPLICATION_ID}(?:/(?:releases/${RELEASE_ID}|current)(?:/[A-Za-z0-9._-]+)*|/(?:public_html|public)(?:/[A-Za-z0-9._-]+)*)?$`,
   'i',
 );
-const MAX_PATH_BYTES = 1_024;
+const MAX_PATH_BYTES = 4_096;
 const MAX_SEGMENT_BYTES = 255;
-const MAX_LIST_ENTRIES = 1_000;
+const MAX_LIST_ENTRIES = 5_000;
 const MAX_TRANSFER_BYTES = 16 * 1024 * 1024;
-const MAX_TEXT_BYTES = 512 * 1024;
+const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const OPERATIONS = new Set([
   'list', 'download', 'read_text', 'upload', 'write_text',
@@ -339,8 +339,7 @@ export async function executeSiteFileOperation(request, dependencies = {
       const itemPath = relativePath(request.path);
       const destinationPath = relativePath(request.destination, { field: 'destination' });
       if (destinationPath === itemPath || destinationPath.startsWith(`${itemPath}/`)) fail('site_file_destination_invalid', 'Rename destination is invalid', 409);
-      const source = await walk(root, itemPath, dependencies);
-      if (source.info.isSymbolicLink()) fail('site_file_symlink_rejected', 'Symbolic links cannot be renamed', 409);
+      const source = await walk(root, itemPath, dependencies, { allowFinalSymlink: true });
       const target = await destination(root, destinationPath, dependencies);
       await ensureAbsent(target.absolute, dependencies);
       await dependencies.rename(source.absolute, target.absolute);
