@@ -118,6 +118,8 @@ import {
   phpMyAdminHandoffSocketInternals,
 } from '../src/phpmyadmin-handoff-socket.js';
 import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+import { createJobRegistry } from '../src/job-registry.js';
+import { createProcessStoreLock } from '../src/process-store-lock.js';
 import {
   conversationScope,
   conversationVisible,
@@ -3203,6 +3205,367 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   wsR1.close();
   wsC1bNew.close();
   wsR2New.close();
+
+  // 8. Veri İçeren Ownership Migration / Rollback ve Canlı Tenant Reauthorization
+  // Site 1A2 (site1a2Id) is initially owned by cust-1a.
+  const c1aLiveToken = f.session('cust-1a');
+  const c1bLiveToken = f.session('cust-1b');
+
+  // Reauthorization checks on live tokens:
+  const authBeforeMigrate1a = f.store.reauthorizeTenantWebsite(c1aLiveToken, site1a2Id);
+  assert.equal(authBeforeMigrate1a.authorized, true);
+  assert.equal(authBeforeMigrate1a.customerId, 'cust-1a');
+
+  // Non-owner cust-1b is not authorized for site1a2Id:
+  const authBeforeMigrate1b = f.store.reauthorizeTenantWebsite(c1bLiveToken, site1a2Id);
+  assert.equal(authBeforeMigrate1b, null);
+
+  // Stale/logged-out token fail-closed: 401
+  assert.throws(
+    () => f.store.reauthorizeTenantWebsite('stale-invalid-token', site1a2Id, { throwOnError: true }),
+    (err) => err.code === 'unauthorized' && err.status === 401,
+  );
+  assert.equal(f.store.reauthorizeTenantWebsite('stale-invalid-token', site1a2Id), null);
+
+  // Unauthorized migration attempts must fail-closed:
+  // Non-owner customer attempting migration: 403
+  assert.throws(
+    () => f.store.migrateWebsiteOwnership(c1aLiveToken, f.requireManagement, {
+      websiteId: site1a2Id,
+      targetCustomerId: 'cust-1b',
+      expectedSourceCustomerId: 'cust-1a',
+    }),
+    (err) => err.code === 'forbidden' && err.status === 403,
+  );
+
+  // Reseller attempting migration: 403
+  assert.throws(
+    () => f.store.migrateWebsiteOwnership(r1Token, f.requireManagement, {
+      websiteId: site1a2Id,
+      targetCustomerId: 'cust-1b',
+      expectedSourceCustomerId: 'cust-1a',
+    }),
+    (err) => err.code === 'forbidden' && err.status === 403,
+  );
+
+  // Unauthenticated / invalid token: 401
+  assert.throws(
+    () => f.store.migrateWebsiteOwnership('invalid-session-token-xyz', f.requireManagement, {
+      websiteId: site1a2Id,
+      targetCustomerId: 'cust-1b',
+      expectedSourceCustomerId: 'cust-1a',
+    }),
+    (err) => err.code === 'unauthorized' && err.status === 401,
+  );
+
+  // Mismatched source customer fails with 409
+  assert.throws(
+    () => f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+      websiteId: site1a2Id,
+      targetCustomerId: 'cust-1b',
+      expectedSourceCustomerId: 'cust-direct',
+    }),
+    (err) => err.code === 'hosting_site_identity_conflict' && err.status === 409,
+  );
+
+  // Target customer website quota exceeded fails with 409
+  assert.throws(
+    () => f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+      websiteId: site1a2Id,
+      targetCustomerId: 'cust-1b',
+      expectedSourceCustomerId: 'cust-1a',
+    }),
+    (err) => err.code === 'customer_quota_exceeded' && err.status === 409,
+  );
+
+  // Owner increases target customer cust-1b quota to allow migration
+  const cust1bAccRow = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1b');
+  f.store.updateCustomerQuotas(ownerToken, f.requireManagement, 'cust-1b', {
+    revision: cust1bAccRow.revision,
+    quotas: { maxWebsites: 4, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 4 },
+  });
+
+  // Open active WebSocket on site1a2Id for cust-1a before migration
+  const wsC1a2 = await openRealWebSocket('cust-1a', c1aLiveToken, {
+    scope: 'site',
+    serverId: stagingServerId,
+    websiteId: site1a2Id,
+    user: 'yunapp-c1a2',
+    cwd: `/var/lib/yunpanel/${site1a2Id}`,
+  });
+  assert.equal(wsC1a2.readyState, WebSocket.OPEN);
+
+  // Issue elFinder capability on site1a2Id for cust-1a
+  const elC1a2 = await issueElFinderCapability(c1aLiveToken, site1a2Id);
+  assert.equal(elC1a2.status, 201);
+
+  // Owner executes ownership migration from cust-1a to cust-1b
+  const site1a2MigrationReceipt = f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+    websiteId: site1a2Id,
+    targetCustomerId: 'cust-1b',
+    expectedSourceCustomerId: 'cust-1a',
+  });
+  assert.ok(site1a2MigrationReceipt.migrationId);
+  assert.equal(site1a2MigrationReceipt.websiteId, site1a2Id);
+  assert.equal(site1a2MigrationReceipt.previousCustomerId, 'cust-1a');
+  assert.equal(site1a2MigrationReceipt.targetCustomerId, 'cust-1b');
+
+  // Verify live WebSocket dropped fail-closed upon ownership migration
+  const [wsC1a2Code, wsC1a2Reason] = await wsC1a2.waitForClose();
+  assert.equal(wsC1a2Code, 4001);
+  assert.equal(wsC1a2Reason.toString(), 'hosting_website_ownership_migrated');
+
+  // Old customer cust-1a's elFinder capability now rejected fail-closed
+  const consumeAfterMigrate = await consumeElFinderCapability(elC1a2.capability, c1aLiveToken);
+  assert.equal(consumeAfterMigrate.status, 401);
+
+  // Live session for cust-1a was invalidated during migration; creating new session for cust-1a
+  const c1aAfterMigrateToken = f.session('cust-1a');
+  const authAfterMigrate1a = f.store.reauthorizeTenantWebsite(c1aAfterMigrateToken, site1a2Id);
+  assert.equal(authAfterMigrate1a, null);
+  assert.throws(
+    () => f.store.reauthorizeTenantWebsite(c1aAfterMigrateToken, site1a2Id, { throwOnError: true }),
+    (err) => err.code === 'site_scope_forbidden' && err.status === 403,
+  );
+
+  // Subsequent HTTP requests by cust-1a for site1a2Id fail fail-closed
+  const cust1aMigratedAccess = await executeRequest({
+    id: 'cust-1a',
+    role: 'customer',
+    hosting: { kind: 'customer', resellerId: 'reseller-1' },
+    active: true,
+    websiteIds: getUserWebsites('cust-1a', 'customer'),
+  }, `/api/websites/${site1a2Id}/files`);
+  assert.equal(cust1aMigratedAccess.called, false);
+  assert.equal(cust1aMigratedAccess.statusCode, 403);
+
+  // Target customer cust-1b signs in: live tenant reauthorization on site1a2Id SUCCEEDS
+  const c1bAfterMigrateToken = f.session('cust-1b');
+  const authAfterMigrate1b = f.store.reauthorizeTenantWebsite(c1bAfterMigrateToken, site1a2Id);
+  assert.equal(authAfterMigrate1b.authorized, true);
+  assert.equal(authAfterMigrate1b.customerId, 'cust-1b');
+
+  // Rollback ownership migration with live tenant reauthorization:
+  // Unauthorized rollback attempts fail-closed
+  assert.throws(
+    () => f.store.rollbackWebsiteOwnershipMigration(c1bAfterMigrateToken, f.requireManagement, site1a2MigrationReceipt),
+    (err) => err.code === 'forbidden' && err.status === 403,
+  );
+  assert.throws(
+    () => f.store.rollbackWebsiteOwnershipMigration('invalid-token', f.requireManagement, site1a2MigrationReceipt),
+    (err) => err.code === 'unauthorized' && err.status === 401,
+  );
+
+  // Open active WebSocket on site1a2Id for cust-1b
+  const wsC1b2 = await openRealWebSocket('cust-1b', c1bAfterMigrateToken, {
+    scope: 'site',
+    serverId: stagingServerId,
+    websiteId: site1a2Id,
+    user: 'yunapp-c1b2',
+    cwd: `/var/lib/yunpanel/${site1a2Id}`,
+  });
+  assert.equal(wsC1b2.readyState, WebSocket.OPEN);
+
+  // Owner performs rollback
+  const site1a2Rollback = f.store.rollbackWebsiteOwnershipMigration(ownerToken, f.requireManagement, site1a2MigrationReceipt);
+  assert.equal(site1a2Rollback.rolledBack, true);
+  assert.equal(site1a2Rollback.restoredCustomerId, 'cust-1a');
+
+  // cust-1b WebSocket dropped fail-closed
+  const [wsC1b2Code, wsC1b2Reason] = await wsC1b2.waitForClose();
+  assert.equal(wsC1b2Code, 4001);
+  assert.equal(wsC1b2Reason.toString(), 'hosting_website_ownership_migration_rolled_back');
+
+  // Live tenant reauthorization: cust-1b signs in again, now fails on site1a2Id
+  const c1bAfterRollbackToken = f.session('cust-1b');
+  const authAfterRollback1b = f.store.reauthorizeTenantWebsite(c1bAfterRollbackToken, site1a2Id);
+  assert.equal(authAfterRollback1b, null);
+
+  // cust-1a signs in again: live tenant reauthorization RESTORED
+  const c1aAfterRollbackToken = f.session('cust-1a');
+  const authAfterRollback1a = f.store.reauthorizeTenantWebsite(c1aAfterRollbackToken, site1a2Id);
+  assert.equal(authAfterRollback1a.authorized, true);
+  assert.equal(authAfterRollback1a.customerId, 'cust-1a');
+
+  // 9. İki OS Process Yarışı, Process Crash ve Write-Failure Dayanıklılığı
+  // 9A: İki bağımsız SQLite bağlantısı üzerinde eşzamanlı transaction yarışması
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-proc-race-'));
+  t.after(async () => {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  });
+  const sharedDbPath = path.join(tmpDir, 'shared-auth.db');
+  const procDb1 = new DatabaseSync(sharedDbPath);
+  const procDb2 = new DatabaseSync(sharedDbPath);
+  t.after(() => {
+    try { procDb1.close(); } catch {}
+    try { procDb2.close(); } catch {}
+  });
+
+  procDb1.exec('PRAGMA journal_mode = WAL;');
+  procDb1.exec('PRAGMA busy_timeout = 100;');
+  procDb2.exec('PRAGMA busy_timeout = 100;');
+  procDb1.exec('CREATE TABLE test_tenant_lock (id TEXT PRIMARY KEY, tenant_id TEXT, state TEXT);');
+
+  // Process 1 acquires immediate lock
+  procDb1.exec('BEGIN IMMEDIATE');
+  procDb1.exec("INSERT INTO test_tenant_lock VALUES ('lock-1', 'tenant-1', 'active');");
+
+  // Process 2 attempts write while Process 1 holds lock -> SQLITE_BUSY / database locked fail-closed
+  assert.throws(
+    () => {
+      procDb2.exec('BEGIN IMMEDIATE');
+    },
+    (err) => err && (err.code === 'SQLITE_BUSY' || err.message?.includes('busy') || err.message?.includes('locked')),
+  );
+
+  // Process 1 commits cleanly
+  procDb1.exec('COMMIT');
+
+  // Process 2 can now read committed state without corruption
+  const readP2 = procDb2.prepare('SELECT * FROM test_tenant_lock WHERE id = ?').get('lock-1');
+  assert.equal(readP2.tenant_id, 'tenant-1');
+  assert.equal(readP2.state, 'active');
+
+  // 9B: Write-failure / constraint violation rollback preserving zero orphan state
+  procDb1.exec('BEGIN IMMEDIATE');
+  procDb1.exec("INSERT INTO test_tenant_lock VALUES ('lock-2', 'tenant-1', 'pending');");
+  let writeFailed = false;
+  try {
+    procDb1.exec("INSERT INTO test_tenant_lock VALUES ('lock-2', 'tenant-2', 'conflict');");
+  } catch {
+    writeFailed = true;
+    procDb1.exec('ROLLBACK');
+  }
+  assert.equal(writeFailed, true);
+
+  // Integrity check passes and zero partial rows committed
+  const integrity = procDb1.prepare('PRAGMA integrity_check').get();
+  assert.equal(integrity.integrity_check, 'ok');
+  const orphanLock = procDb1.prepare("SELECT count(*) AS count FROM test_tenant_lock WHERE id = 'lock-2'").get();
+  assert.equal(orphanLock.count, 0);
+
+  // 9C: Dead Process Crash Lock Recovery
+  const lockFilePath = path.join(tmpDir, 'shared-store.json');
+  const deadPid = 99999999;
+  const deadSignalProcess = (pid, signal) => {
+    const err = new Error('No such process');
+    err.code = 'ESRCH';
+    throw err;
+  };
+
+  const liveLock = createProcessStoreLock({
+    filePath: lockFilePath,
+    pid: process.pid,
+    signalProcess: deadSignalProcess,
+  });
+
+  const deadRecord = JSON.stringify({
+    version: 1,
+    pid: deadPid,
+    token: randomUUID(),
+    createdAt: new Date().toISOString(),
+  });
+  const { writeFile: fsWriteFile } = await import('node:fs/promises');
+  await fsWriteFile(`${lockFilePath}.lock`, deadRecord, 'utf8');
+
+  let liveActionExecuted = false;
+  await liveLock.withLock(async () => {
+    liveActionExecuted = true;
+  });
+  assert.equal(liveActionExecuted, true);
+
+  // 10. Long-running Job Mutation Başlangıcında Canlı Tenant Reauthorization
+  const jobStorePath = path.join(tmpDir, 'jobs.json');
+  const testJobRegistry = createJobRegistry({
+    filePath: jobStorePath,
+    now: () => Date.now(),
+    reauthorize: (auth, job) => f.store.reauthorizeJobActor(auth),
+  });
+  await testJobRegistry.init();
+
+  // 10A: Job enqueued with customer authorization, but customer suspended before mutation start
+  const enqSuspended = await testJobRegistry.enqueue({
+    serverId: stagingServerId,
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example-1a1.com', checksum: 'a'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-site1a1',
+    authorization: { actorId: 'cust-1a', role: 'customer', websiteId: site1a1Id },
+  });
+  assert.equal(enqSuspended.status, 'queued');
+
+  // Suspend cust-1a before job claim
+  const c1aRowBefore = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aRowBefore.revision, active: false });
+
+  // Claim next job: live tenant reauthorization at mutation start detects suspended account
+  const claimedSuspended = await testJobRegistry.claimNext(stagingServerId);
+  assert.equal(claimedSuspended.cancelled, true);
+  assert.equal(claimedSuspended.reason, 'job_tenant_reauthorization_failed');
+  assert.equal(claimedSuspended.job.status, 'cancelled');
+  assert.equal(claimedSuspended.job.error.code, 'job_tenant_reauthorization_failed');
+
+  // Ensure job was safely halted without running
+  const persistedJobSuspended = await testJobRegistry.getJob(enqSuspended.id);
+  assert.equal(persistedJobSuspended.status, 'cancelled');
+
+  // Reactivate cust-1a
+  const c1aRowSuspended = f.db.prepare('SELECT revision FROM auth_hosting_accounts WHERE user_id = ?').get('cust-1a');
+  f.store.setActive(ownerToken, f.requireManagement, 'cust-1a', { revision: c1aRowSuspended.revision, active: true });
+
+  // 10B: Job enqueued with website that was migrated away before mutation start
+  f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+    websiteId: site1a2Id,
+    targetCustomerId: 'cust-1b',
+    expectedSourceCustomerId: 'cust-1a',
+  });
+
+  const enqMigrated = await testJobRegistry.enqueue({
+    serverId: stagingServerId,
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example-1a2.com', checksum: 'b'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-site1a2',
+    authorization: { actorId: 'cust-1b', role: 'customer', websiteId: site1a2Id },
+  });
+  assert.equal(enqMigrated.status, 'queued');
+
+  // Migrate site1a2Id away to cust-1a before worker claims it
+  f.store.migrateWebsiteOwnership(ownerToken, f.requireManagement, {
+    websiteId: site1a2Id,
+    targetCustomerId: 'cust-1a',
+    expectedSourceCustomerId: 'cust-1b',
+  });
+
+  // Claim next job: live tenant reauthorization detects cust-1b no longer owns site1a2Id
+  const claimedMigrated = await testJobRegistry.claimNext(stagingServerId);
+  assert.equal(claimedMigrated.cancelled, true);
+  assert.equal(claimedMigrated.reason, 'job_tenant_reauthorization_failed');
+  assert.equal(claimedMigrated.job.status, 'cancelled');
+  assert.equal(claimedMigrated.job.error.code, 'job_tenant_reauthorization_failed');
+
+  // 10C: Job enqueued with active authorized tenant starts successfully
+  const enqValid = await testJobRegistry.enqueue({
+    serverId: stagingServerId,
+    type: 'website.domain.activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: { primaryDomain: 'example-1a2-valid.com', checksum: 'c'.repeat(64) },
+    resourceType: 'domain',
+    resourceId: 'domain-site1a2-valid',
+    authorization: { actorId: 'cust-1a', role: 'customer', websiteId: site1a2Id },
+  });
+  assert.equal(enqValid.status, 'queued');
+
+  const claimedValid = await testJobRegistry.claimNext(stagingServerId);
+  assert.equal(claimedValid.job.status, 'running');
+  assert.equal(claimedValid.job.id, enqValid.id);
+  assert.ok(claimedValid.authorization);
+
+  // 10D: Direct reauthorizeJob verification
+  const checkValid = await testJobRegistry.reauthorizeJob(claimedValid.job.id, (auth) => f.store.reauthorizeJobActor(auth));
+  assert.equal(checkValid.authorized, true);
 
   // Role continuity verified across full hierarchy
   assert.ok(true, 'Full multi-tier hierarchy role continuity, live WebSocket, elFinder gateway, and job lifecycle verified.');

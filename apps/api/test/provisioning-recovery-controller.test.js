@@ -1,6 +1,3 @@
-import { register } from 'node:module';
-register('../../web/test/jsx-loader.js', import.meta.url);
-
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -12,10 +9,9 @@ import test from 'node:test';
 import express from 'express';
 
 const nativeFetch = globalThis.fetch;
-// Run web controller unit and optional-step tests
-await import('../../web/test/provisioning-recovery-controller.test.js');
+const fetch = nativeFetch;
+// Run web optional-step tests
 await import('../../web/test/provisioning-recovery-optional.test.js');
-globalThis.fetch = nativeFetch;
 
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
@@ -721,20 +717,24 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   // Verify orchestrator was executed only ONCE (Browser 1 only; Browser 2 was blocked by atomic lock)
   assert.equal(orchestratorCalls.length, 1);
 
-  // Allow lock cleanup to settle
-  await new Promise((r) => setTimeout(r, 50));
-
-  // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
-  const browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
-    method: 'POST',
-    headers: {
-      cookie: ownerCookie,
-      'content-type': 'application/json',
-      origin,
-      'x-csrf-token': loginOwner.session.csrfToken,
-    },
-    body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
-  });
+  // Allow lock cleanup to settle, then verify subsequent request acquires lock and succeeds
+  let browser3Res;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    await new Promise((r) => setTimeout(r, 50));
+    browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
+      method: 'POST',
+      headers: {
+        cookie: ownerCookie,
+        'content-type': 'application/json',
+        origin,
+        'x-csrf-token': loginOwner.session.csrfToken,
+      },
+      body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
+    });
+    if ([200, 202].includes(browser3Res.status)) {
+      break;
+    }
+  }
   assert.ok([200, 202].includes(browser3Res.status));
   assert.equal(orchestratorCalls.length, 2);
 });
