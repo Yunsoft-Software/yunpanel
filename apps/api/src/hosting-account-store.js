@@ -78,8 +78,9 @@ export function createHostingAccountStore({
   function owner(rawToken, requireManagement) {
     if (typeof requireManagement !== 'function') throw new TypeError('A live Owner/MFA policy is required');
     const current = getSession(rawToken);
+    if (!current?.id || !current?.user?.id) throw error('unauthorized', 'Sign in to continue.', 401);
     const approved = requireManagement(current);
-    if (!current?.id || approved?.id !== current.id || approved?.user?.id !== current.user?.id
+    if (approved?.id !== current.id || approved?.user?.id !== current.user?.id
       || current.user?.role !== 'owner' || approved.user.role !== 'owner') {
       throw error('forbidden', 'Owner access is required.', 403);
     }
@@ -902,6 +903,188 @@ export function createHostingAccountStore({
 
       for (const id of outcome.revokes) revokeLiveUser(id, 'hosting_website_ownership_migration_rolled_back');
       return outcome.result;
+    },
+    reauthorizeTenantWebsite(rawTokenOrActor, websiteId, { throwOnError = false } = {}) {
+      if (!identifier(websiteId)) {
+        if (throwOnError) throw error('site_scope_forbidden', 'Invalid website identifier.', 403);
+        return null;
+      }
+
+      let actor = null;
+      let session = null;
+      if (typeof rawTokenOrActor === 'string') {
+        session = getSession(rawTokenOrActor);
+        if (!session?.user?.id) {
+          if (throwOnError) throw error('unauthorized', 'Sign in to continue.', 401);
+          return null;
+        }
+        actor = session.user;
+      } else if (rawTokenOrActor && typeof rawTokenOrActor === 'object') {
+        if (rawTokenOrActor.rawToken) {
+          session = getSession(rawTokenOrActor.rawToken);
+          if (!session?.user?.id) {
+            if (throwOnError) throw error('unauthorized', 'Sign in to continue.', 401);
+            return null;
+          }
+          actor = session.user;
+        } else {
+          actor = rawTokenOrActor.user || rawTokenOrActor;
+        }
+      }
+
+      if (!actor || !identifier(actor.id)) {
+        if (throwOnError) throw error('unauthorized', 'Sign in to continue.', 401);
+        return null;
+      }
+
+      return transaction(() => {
+        const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actor.id);
+        if (!user || user.active !== 1) {
+          if (throwOnError) throw error('account_suspended', 'Account is suspended.', 403);
+          return null;
+        }
+
+        if (user.role === 'owner') {
+          const alloc = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE website_id = ?').get(websiteId);
+          if (!alloc || alloc.state !== 'attached') {
+            if (throwOnError) throw error('site_scope_forbidden', 'Site is not attached or allocated.', 403);
+            return null;
+          }
+          return {
+            authorized: true,
+            actorId: user.id,
+            role: 'owner',
+            kind: 'owner',
+            websiteId,
+            customerId: alloc.customer_id,
+            resellerId: null,
+          };
+        }
+
+        const hostingRow = raw(user.id);
+        if (hostingRow) {
+          if (!hostingRow.active) {
+            if (throwOnError) throw error('account_suspended', 'Hosting account is suspended.', 403);
+            return null;
+          }
+
+          if (hostingRow.kind === 'customer') {
+            if (hostingRow.reseller_id) {
+              const parent = raw(hostingRow.reseller_id);
+              const parentUser = db.prepare('SELECT active FROM users WHERE id = ?').get(hostingRow.reseller_id);
+              if (!parent || !parent.active || !parentUser || parentUser.active !== 1) {
+                if (throwOnError) throw error('account_suspended', 'Parent reseller is suspended.', 403);
+                return null;
+              }
+            }
+
+            const owned = db.prepare('SELECT 1 FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?').get(websiteId, user.id);
+            const alloc = db.prepare("SELECT 1 FROM auth_hosting_site_allocations WHERE website_id = ? AND customer_id = ? AND state = 'attached'").get(websiteId, user.id);
+            if (!owned || !alloc) {
+              if (throwOnError) throw error('site_scope_forbidden', 'Website is not attached to this customer account.', 403);
+              return null;
+            }
+
+            return {
+              authorized: true,
+              actorId: user.id,
+              role: user.role,
+              kind: 'customer',
+              websiteId,
+              customerId: user.id,
+              resellerId: hostingRow.reseller_id,
+            };
+          }
+
+          if (hostingRow.kind === 'reseller') {
+            const childOwnership = db.prepare(`SELECT w.website_id, w.customer_id, h.active AS child_active, u.active AS user_active
+              FROM auth_customer_websites w
+              JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+              JOIN users u ON u.id = w.customer_id
+              WHERE w.website_id = ? AND h.reseller_id = ?`).get(websiteId, user.id);
+
+            const alloc = db.prepare("SELECT 1 FROM auth_hosting_site_allocations WHERE website_id = ? AND state = 'attached'").get(websiteId);
+
+            if (!childOwnership || !alloc || !childOwnership.child_active || childOwnership.user_active !== 1) {
+              if (throwOnError) throw error('site_scope_forbidden', 'Website is not owned by an active child customer.', 403);
+              return null;
+            }
+
+            return {
+              authorized: true,
+              actorId: user.id,
+              role: user.role,
+              kind: 'reseller',
+              websiteId,
+              customerId: childOwnership.customer_id,
+              resellerId: user.id,
+            };
+          }
+        }
+
+        if (user.role === 'site_manager') {
+          const grant = db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? AND website_id = ?').get(user.id, websiteId);
+          if (!grant) {
+            if (throwOnError) throw error('site_scope_forbidden', 'Website is not granted to this login.', 403);
+            return null;
+          }
+          return {
+            authorized: true,
+            actorId: user.id,
+            role: 'site_manager',
+            kind: 'legacy_user',
+            websiteId,
+            customerId: null,
+            resellerId: null,
+          };
+        }
+
+        if (throwOnError) throw error('site_scope_forbidden', 'Access to website is not permitted.', 403);
+        return null;
+      });
+    },
+    reauthorizeJobActor(authorization, { throwOnError = false } = {}) {
+      if (!authorization || typeof authorization !== 'object') {
+        if (throwOnError) throw error('unauthorized', 'Job authorization is missing or invalid.', 401);
+        return null;
+      }
+      const actorId = authorization.actorId || authorization.userId || authorization.customerId;
+      const websiteId = authorization.websiteId || authorization.resourceId;
+      if (!actorId) {
+        if (throwOnError) throw error('unauthorized', 'Job authorization actor is missing.', 401);
+        return null;
+      }
+      if (websiteId) {
+        return this.reauthorizeTenantWebsite({ id: actorId }, websiteId, { throwOnError });
+      }
+      return transaction(() => {
+        const user = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actorId);
+        if (!user || user.active !== 1) {
+          if (throwOnError) throw error('account_suspended', 'Account is suspended.', 403);
+          return null;
+        }
+        const hostingRow = raw(user.id);
+        if (hostingRow) {
+          if (!hostingRow.active) {
+            if (throwOnError) throw error('account_suspended', 'Hosting account is suspended.', 403);
+            return null;
+          }
+          if (hostingRow.kind === 'customer' && hostingRow.reseller_id) {
+            const parent = raw(hostingRow.reseller_id);
+            const parentUser = db.prepare('SELECT active FROM users WHERE id = ?').get(hostingRow.reseller_id);
+            if (!parent || !parent.active || !parentUser || parentUser.active !== 1) {
+              if (throwOnError) throw error('account_suspended', 'Parent reseller is suspended.', 403);
+              return null;
+            }
+          }
+        }
+        return {
+          authorized: true,
+          actorId: user.id,
+          role: user.role,
+          kind: hostingRow?.kind || user.role,
+        };
+      });
     },
   };
 }

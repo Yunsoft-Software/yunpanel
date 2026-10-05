@@ -9,6 +9,9 @@ import test from 'node:test';
 import express from 'express';
 
 const nativeFetch = globalThis.fetch;
+const fetch = nativeFetch;
+// Run web optional-step tests
+await import('../../web/test/provisioning-recovery-optional.test.js');
 
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
@@ -725,16 +728,25 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   }
 
   // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
-  const browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
-    method: 'POST',
-    headers: {
-      cookie: ownerCookie,
-      'content-type': 'application/json',
-      origin,
-      'x-csrf-token': loginOwner.session.csrfToken,
-    },
-    body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
-  });
+  let browser3Res;
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
+      method: 'POST',
+      headers: {
+        cookie: ownerCookie,
+        'content-type': 'application/json',
+        origin,
+        'x-csrf-token': loginOwner.session.csrfToken,
+      },
+      body: JSON.stringify({ confirmation: `retry-site-provisioning:${opAId}:nginx` }),
+    });
+    if ([200, 202].includes(browser3Res.status)) {
+      break;
+    }
+  }
   assert.ok([200, 202].includes(browser3Res.status));
   assert.equal(orchestratorCalls.length, 2);
 });

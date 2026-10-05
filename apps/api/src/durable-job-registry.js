@@ -438,6 +438,7 @@ export function createDurableJobRegistry({
     cancel: (...args) => mutate('cancel', args),
     retryJob: (...args) => mutate('retryJob', args),
     manualRetry: (...args) => mutate('manualRetry', args),
+    reauthorizeJob: (...args) => mutate('reauthorizeJob', args),
     beginReconciliation,
     acknowledgeReconciliation,
     getReconciliationJob,

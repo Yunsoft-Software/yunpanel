@@ -1197,7 +1197,9 @@ export function createJobRegistry({
   retryBackoffBaseMs = 0,
   retryBackoffMaxMs = 30000,
   maxAttempts = 5,
+  reauthorize = null,
 } = {}) {
+  const defaultReauthorize = typeof reauthorize === 'function' ? reauthorize : null;
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
@@ -1409,8 +1411,9 @@ export function createJobRegistry({
     return publicJob(existing);
   }
 
-  async function claimNext(serverId) {
+  async function claimNext(serverId, options = {}) {
     await ensureInitialized();
+    const reauthorizeFn = options?.reauthorize ?? defaultReauthorize;
     const claim = claimChain.catch(() => {}).then(async () => {
       const job = state.jobs.find((candidate) => candidate.serverId === serverId
         && candidate.status === 'queued'
@@ -1420,6 +1423,37 @@ export function createJobRegistry({
         job.authorization,
         { optional: true },
       );
+
+      if (typeof reauthorizeFn === 'function' && (privateAuthorization || options?.reauthorizeAlways)) {
+        let authResult = null;
+        let authError = null;
+        try {
+          authResult = await reauthorizeFn(privateAuthorization, job);
+        } catch (err) {
+          authError = err;
+        }
+
+        const isAuthorized = authError === null
+          && authResult !== false
+          && (authResult === true || (authResult && authResult.authorized !== false));
+
+        if (!isAuthorized) {
+          job.status = 'cancelled';
+          job.finishedAt = new Date(now()).toISOString();
+          job.error = {
+            code: 'job_tenant_reauthorization_failed',
+            message: authError?.message || authResult?.message || 'Live tenant reauthorization failed at mutation start',
+          };
+          await persist();
+          return {
+            job: publicJob(job),
+            cancelled: true,
+            reason: 'job_tenant_reauthorization_failed',
+            error: job.error,
+          };
+        }
+      }
+
       job.status = 'running';
       job.startedAt = new Date(now()).toISOString();
       job.attempts += 1;
@@ -1552,7 +1586,55 @@ export function createJobRegistry({
     return publicJob(job);
   }
 
+  async function reauthorizeJob(jobId, reauthorizeFn = defaultReauthorize) {
+    await ensureInitialized();
+    if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
+    const job = state.jobs.find((candidate) => candidate.id === jobId);
+    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+    if (typeof reauthorizeFn !== 'function') throw new JobRegistryError('invalid_reauthorize_handler', 'Reauthorize function is required');
+
+    const privateAuthorization = normalizeJobAuthorization(
+      job.authorization,
+      { optional: true },
+    );
+    let authResult = null;
+    let authError = null;
+    try {
+      authResult = await reauthorizeFn(privateAuthorization, job);
+    } catch (err) {
+      authError = err;
+    }
+
+    const isAuthorized = authError === null
+      && authResult !== false
+      && (authResult === true || (authResult && authResult.authorized !== false));
+
+    if (!isAuthorized) {
+      if (['queued', 'running'].includes(job.status)) {
+        job.status = 'cancelled';
+        job.finishedAt = new Date(now()).toISOString();
+        job.error = {
+          code: 'job_tenant_reauthorization_failed',
+          message: authError?.message || authResult?.message || 'Live tenant reauthorization failed',
+        };
+        await persist();
+      }
+      return {
+        job: publicJob(job),
+        authorized: false,
+        reason: 'job_tenant_reauthorization_failed',
+        error: job.error,
+      };
+    }
+
+    return {
+      job: publicJob(job),
+      authorized: true,
+      context: authResult,
+    };
+  }
+
   const manualRetry = retryJob;
 
-  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs, retryJob, manualRetry };
+  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs, retryJob, manualRetry, reauthorizeJob };
 }
