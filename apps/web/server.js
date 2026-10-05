@@ -1275,23 +1275,44 @@ async function serveStatic(request, response, webRoot, pathname) {
   const requestedPath = path.resolve(webRoot, `.${decodedPath}`);
   if (requestedPath !== webRoot && !requestedPath.startsWith(`${webRoot}${path.sep}`)) { reply(response, 403, 'Forbidden.'); return; }
   let filePath = requestedPath;
+  let metadata;
   try {
-    const metadata = await stat(filePath);
-    if (metadata.isDirectory()) filePath = path.join(filePath, 'index.html');
-    await stat(filePath);
-  } catch { filePath = path.join(webRoot, 'index.html'); }
+    metadata = await stat(filePath);
+    if (metadata.isDirectory()) {
+      filePath = path.join(filePath, 'index.html');
+      metadata = await stat(filePath);
+    }
+  } catch {
+    filePath = path.join(webRoot, 'index.html');
+    try {
+      metadata = await stat(filePath);
+    } catch {
+      reply(response, 404, 'File not found.');
+      return;
+    }
+  }
+  if (!metadata || !metadata.isFile()) {
+    reply(response, 404, 'File not found.');
+    return;
+  }
   const extension = path.extname(filePath).toLowerCase();
   response.writeHead(200, {
     'cache-control': extension === '.html' ? 'no-store' : 'public, max-age=300',
+    'content-length': String(metadata.size),
     'content-type': CONTENT_TYPES.get(extension) ?? 'application/octet-stream',
     'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
-    'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
+    'referrer-policy': 'no-referrer',
+    'x-accel-buffering': 'no',
+    'x-content-type-options': 'nosniff',
+    'x-frame-options': 'DENY',
   });
   if (request.method === 'HEAD') { response.end(); return; }
-  createReadStream(filePath).on('error', () => {
+  const stream = createReadStream(filePath);
+  stream.on('error', () => {
     if (!response.headersSent) reply(response, 500, 'Unable to read panel asset.');
     else response.destroy();
-  }).pipe(response);
+  });
+  stream.pipe(response);
 }
 
 export function createPanelServer(options = {}) {

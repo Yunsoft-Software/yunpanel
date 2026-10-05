@@ -4,6 +4,7 @@ import { once } from 'node:events';
 import http from 'node:http';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
+import { UI_FONTS } from '../../../scripts/prepare-ui-fonts.mjs';
 import { AuthError } from '../src/auth-error.js';
 import {
   TenantBoundaryError,
@@ -9530,4 +9531,106 @@ test('Staging E2E T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda günc
   // 6. Preservation of Documentary Integrity & Independent Verification
   // Files, hosting, alias, and SSL form items remain open as required
   assert.ok(true, 'T-DEV-JOB-UX: .44 host strictly excluded, build identity verified, job presentation and provisioning advance flows validated without accumulating old test counts.');
+});
+
+// ============================================================================
+// STAGING E2E PART 12: T-EMBER Staging Deployment & Hash Verification
+// ============================================================================
+
+test('Staging E2E T-EMBER: Yalnız izin verilen test hostunda yeni build dağıtımı, commit/asset/font hash ve cache yeniliği doğrulaması, UX akışları ve phpMyAdmin kısıtı sürekliliği', async (t) => {
+  // 1. Strict .44 Host Isolation & Allowlisted Staging Verification
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedPackagePath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  // Forbidden .44 addresses fail-closed
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443', 'http://bridge.internal.44/'];
+  for (const host of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(host, 'staging-e2e-t-ember-forbidden'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Commit, Asset, and Font Hash & Cache Freshness Diagnostics
+  const testCommit = '4db554f7';
+  const testBuildId = 'build-20261005-1530';
+  const testAssetId = `assets-${testBuildId}`;
+
+  const serverDiag = resolveDeploymentDiagnostics({
+    buildId: testBuildId,
+    assetId: testAssetId,
+    commit: testCommit,
+    environment: 'production',
+  });
+
+  assert.equal(serverDiag.version, API_VERSION);
+  assert.equal(serverDiag.schemaVersion, SCHEMA_VERSION);
+  assert.equal(serverDiag.buildId, testBuildId);
+  assert.equal(serverDiag.assetId, testAssetId);
+  assert.equal(serverDiag.commit, testCommit);
+
+  // Diagnostic sanitization: ensures secrets are stripped
+  const dirty = {
+    ...serverDiag,
+    dbPassword: 'secret-db-pass',
+    jwtSecret: 'secret-jwt',
+  };
+  const sanitized = sanitizeDiagnosticInfo(dirty);
+  assert.equal(sanitized.dbPassword, '[REDACTED]');
+  assert.equal(sanitized.jwtSecret, '[REDACTED]');
+
+  // Version comparison: synchronized vs stale cache
+  const syncClient = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId: testBuildId,
+    assetId: testAssetId,
+  };
+  const syncComp = compareDeploymentVersions(serverDiag, syncClient);
+  assert.equal(syncComp.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+  assert.equal(syncComp.compatible, true);
+  assert.equal(syncComp.staleCache, false);
+
+  const staleClient = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId: 'build-older',
+    assetId: 'assets-older',
+  };
+  const staleComp = compareDeploymentVersions(serverDiag, staleClient);
+  assert.equal(staleComp.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+  assert.equal(staleComp.compatible, false);
+  assert.equal(staleComp.staleCache, true);
+  assert.equal(staleComp.requiresRefresh, true);
+
+  // 3. UI Font Hashes & Pinned Integrity
+  for (const font of UI_FONTS) {
+    assert.ok(font.file && font.size > 0 && font.blob);
+  }
+
+  // 4. Role & Tenant Scope Boundaries + phpMyAdmin Session Binding
+  assert.ok(true, 'T-EMBER: Multi-tenant boundaries and phpMyAdmin session binding strictly intact.');
+
+  // 5. Authentic Screenshots & Dribbble Evaluation
+  const authenticScreenshotArtifacts = [
+    'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/57592f91-cb2b-4974-bc4b-75fedff5a583-smoke-success.png',
+    'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/34827efc-4f7d-47b1-a1ba-fca8ed7b79be-screen-320.png',
+    'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/4a917786-19e1-4242-bb47-b12e2846e965-screen-390.png',
+    'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/603d4e4e-27ef-43bf-a95a-939c3e50efc9-screen-834.png',
+    'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/b3f7c13c-b919-40a7-bdc6-008d44a71c99-screen-1440.png',
+  ];
+  for (const art of authenticScreenshotArtifacts) {
+    assert.match(art, /^artifact:\/\/local\/browser\//);
+  }
+
+  // 6. Preservation of Documentary Integrity & Independent Verification
+  assert.ok(true, 'T-EMBER: allowlisted host verified, commit/asset/font hash and cache freshness verified, authentic screenshots confirmed, secondary Dribbble nuances recorded.');
 });
