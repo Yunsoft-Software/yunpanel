@@ -54,7 +54,10 @@ function WebsiteForm({ parentId }) {
   const [operationId] = useState(() => crypto.randomUUID());
   const [dirty, setDirty] = useState(false); const [sharedBusy, setSharedBusy] = useState(false); const [error, setError] = useState(null); const [created, setCreated] = useState(null); const [sharedConfirmation, setSharedConfirmation] = useState(null);
   const [submission, setSubmission] = useState(EMPTY_SITE_SUBMISSION);
-  const pending = useRef(false); const scope = useRef(null);
+  const pending = useRef(false); const scope = useRef(null); const sharedResultRef = useRef(null);
+  useEffect(() => {
+    if (created) sharedResultRef.current?.focus();
+  }, [created]);
   useEffect(() => {
     const controller = new AbortController();
     const version = sessionVersion();
@@ -65,6 +68,8 @@ function WebsiteForm({ parentId }) {
         setSubmission(state);
         if (state.created || state.phase === 'uncertain') {
           setDirty(false);
+          setForm((value) => ({ ...value, adminPassword: '' }));
+        } else if (state.phase === 'error' || state.error) {
           setForm((value) => ({ ...value, adminPassword: '' }));
         }
       },
@@ -130,7 +135,10 @@ function WebsiteForm({ parentId }) {
       const input = siteCreateInputFromForm({ form, operationId, serverId, domain, selectedApplication: selected });
       const state = await current.flow.submit(input, { signal: current.signal });
       if (current.isCurrent() && (state.created || state.phase === 'uncertain')) refreshAll();
-    } catch (failure) { if (current.isCurrent() && failure.name !== 'AbortError') setError(failure.message); }
+    } catch (failure) {
+      if (current.isCurrent() && failure.name !== 'AbortError') setError(failure.message);
+      setForm((value) => ({ ...value, adminPassword: '' }));
+    }
     finally { pending.current = false; }
   }
   async function confirmSharedSite() {
@@ -168,7 +176,7 @@ function WebsiteForm({ parentId }) {
   return <>
     <nav className="ws-breadcrumb" aria-label="Konum"><Link to="/websites">Web siteleri</Link><span>/</span><span>Yeni kayıt</span></nav>
     <PageHeading title={form.mode === 'subdomain' ? 'Alt alan adı ekle' : 'Web sitesi ekle'} description="Ayrı bir uygulama oluşturun, kullanılmamış bir uygulamayı bağlayın veya açıkça mevcut Website’i paylaşın." />
-    {submission.created || submission.phase === 'uncertain' ? <SiteCreateResult state={submission} /> : created ? <Section title="Alan adı bağlantısı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Alan adı mevcut Website’e bağlandı. Yayın ve servis durumunu site araçlarından kontrol edin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
+    {submission.created || submission.phase === 'uncertain' ? <SiteCreateResult state={submission} /> : created ? <div ref={sharedResultRef} tabIndex={-1} aria-live="polite" aria-atomic="true" className="ws-site-create-result" style={{ outline: 'none' }}><Section title="Alan adı bağlantısı oluşturuldu"><EmptyState icon="check" title={created.primaryDomain} detail="Alan adı mevcut Website’e bağlandı. Yayın ve servis durumunu site araçlarından kontrol edin." action={<LinkButton variant="primary" icon="arrow" to={siteHref(created.id, 'files')}>Dosyaları aç</LinkButton>} /></Section></div> : <Section title="Site yapılandırması" description="Bağımsız alan adı ve alt alan adı varsayılan olarak ayrı Website, Application ve Unix kimliği alır.">
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={servers} label="Yerel sunucu" />{(existingType || sharedMode) && <><CollectionNotice resource={applications} label="Uygulamalar" /><CollectionNotice resource={websites} label="Website bağları" /></>}
       <form className="ws-form" onSubmit={submit}><ErrorNotice error={error ?? submission.error} /><fieldset disabled={baseLocked}>
         <h3>1. Alan adı</h3><div className="ws-form-grid" style={{ marginTop: 16 }}>

@@ -289,3 +289,5 @@
   .workspace-shell :is(.ws-table,.yf-table,.ys-resource-table) td { border-bottom: 1px solid CanvasText; }
   .workspace-shell .ws-usage-ring { border: 3px solid CanvasText; }
 }
+.workspace-shell .ws-site-create-result:focus { outline: none; }
+.workspace-shell .ws-site-create-result:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 2px; border-radius: var(--ws-radius); }

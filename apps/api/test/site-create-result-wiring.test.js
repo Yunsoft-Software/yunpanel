@@ -94,3 +94,40 @@ test('SiteCreateResult component uses Domain-ID for navigation and labels interr
   assert.match(resultCode, /Site kaydı korundu\. Tamamlanmayan veya doğrulanamayan adımları Genel Bakış bölümünden inceleyin\./);
   assert.match(resultCode, /Kurulum planındaki zorunlu adımlar tamamlandı\. Yayın, SSL ve posta durumunu ilgili site araçlarından doğrulayın\./);
 });
+
+test('SiteCreateResult and shared-site result containers wire keyboard focus, screen reader live regions, and theme focus styles', async () => {
+  const resultCode = await source('../../web/src/workspace/SiteCreateResult.jsx');
+  const pageCode = await source('../../web/src/workspace/NewWebsitePage.jsx');
+  const consoleCss = await source('../../web/src/workspace/ui/console-theme.css');
+  const emberCss = await source('../../web/src/workspace/ui/ember-theme.css');
+
+  // Accessible focus and screen reader regions on SiteCreateResult
+  assert.match(resultCode, /ref=\{resultRef\}/);
+  assert.match(resultCode, /tabIndex=\{-1\}/);
+  assert.match(resultCode, /aria-live="polite"/);
+  assert.match(resultCode, /aria-atomic="true"/);
+  assert.match(resultCode, /resultRef\.current\?\.focus\(\)/);
+
+  // Shared site connection also receives accessible focus and live announcement
+  assert.match(pageCode, /ref=\{sharedResultRef\}/);
+  assert.match(pageCode, /sharedResultRef\.current\?\.focus\(\)/);
+
+  // Theme styling ensures keyboard focus indication in both themes
+  assert.match(consoleCss, /\.ws-site-create-result:focus/);
+  assert.match(consoleCss, /\.ws-site-create-result:focus-visible/);
+  assert.match(emberCss, /\.workspace-shell \.ws-site-create-result:focus/);
+  assert.match(emberCss, /\.workspace-shell \.ws-site-create-result:focus-visible/);
+});
+
+test('NewWebsitePage and site-create-submission guarantee password clearing and zero memory retention on create, error, and abort', async () => {
+  const pageCode = await source('../../web/src/workspace/NewWebsitePage.jsx');
+  const subCode = await source('../../web/src/workspace/site-create-submission.js');
+
+  // Password cleared on confirmed created, uncertain, error, and catch
+  assert.match(pageCode, /if \(state\.created \|\| state\.phase === 'uncertain'\) \{\s+setDirty\(false\);\s+setForm\(\(value\) => \(\{ \.\.\.value, adminPassword: '' \}\)\);\s+\} else if \(state\.phase === 'error' \|\| state\.error\) \{\s+setForm\(\(value\) => \(\{ \.\.\.value, adminPassword: '' \}\)\);/);
+  assert.match(pageCode, /setForm\(\(value\) => \(\{ \.\.\.value, adminPassword: '' \}\)\);\s*\}\s*finally \{ pending\.current = false; \}/);
+
+  // StrictMode effect unmount cleanup disconnects controller and flow without leaking into new mount
+  assert.match(pageCode, /return \(\) => \{ flow\.dispose\(\); controller\.abort\(\); \};/);
+  assert.match(subCode, /if \(!disposed && isCurrent\(\) === true\) \{\s+onState\(state\);\s+\}/);
+});

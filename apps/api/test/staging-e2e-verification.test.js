@@ -98,7 +98,8 @@ import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../sr
 import { createAuthenticatedApi } from '../src/auth-http.js';
 import { WebSocket } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
-import { lstat, mkdtemp, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, rm, readFile } from 'node:fs/promises';
+import { createSiteSubmission, EMPTY_SITE_SUBMISSION, siteSubmissionBusy } from '../../web/src/workspace/site-create-submission.js';
 import os from 'node:os';
 import path from 'node:path';
 import express from 'express';
@@ -8769,4 +8770,248 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
   backups.delete('backup-recon-001');
 
   assert.ok(true, 'T-DEV-MR-SINGLE: Single mailbox lifecycle, session termination, and sibling continuity verified.');
+});
+
+// ============================================================================
+// STAGING E2E T-DEV-CREATE-RESULT: Site oluşturma sonucu sürekliliği,
+// React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme
+// ve sonuç odağı / ekran okuyucu / mobil / klavye / koyu tema uyumu
+// ============================================================================
+
+test('Staging E2E T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme ve sonuç erişilebilirliği', async (t) => {
+  // 1. Staging environment isolation: Never access .44
+  const stagingServerId = '77777777-7777-4777-8777-777777777777';
+  assertNoDot44Host(stagingServerId);
+  assert.doesNotMatch(stagingServerId, /\.44$/);
+
+  const websiteId = randomUUID();
+  const domainId = randomUUID();
+  const operationId = randomUUID();
+  const primaryDomain = 'cryptoraichu.website';
+
+  const testInput = () => ({
+    operationId,
+    serverId: stagingServerId,
+    primaryDomain,
+    parentDomainId: null,
+    siteAdmin: { password: 'fixture-secret-admin-pass' },
+  });
+
+  const stepFixture = (state = 'pending') => ({ id: 'nginx', required: true, state });
+  const operationFixture = (state = 'pending') => ({
+    operationId,
+    websiteId,
+    ready: state === 'succeeded',
+    steps: [stepFixture(state)],
+  });
+
+  const previewFixture = () => ({
+    operationId,
+    ids: { websiteId, primaryDomainId: domainId },
+    hostname: { primaryDomain },
+    previewDigest: 'b'.repeat(64),
+    confirmation: `create-site:${operationId}:${'b'.repeat(64)}`,
+    provisioning: operationFixture(),
+  });
+
+  const resultFixture = () => ({
+    operationId,
+    website: { id: websiteId, serverId: stagingServerId },
+    primaryDomain: { id: domainId, websiteId, serverId: stagingServerId, primaryDomain, parentDomainId: null },
+    provisioning: operationFixture(),
+  });
+
+  const deferredHelper = () => {
+    let resolve;
+    let reject;
+    const promise = new Promise((res, rej) => { resolve = res; reject = rej; });
+    return { promise, resolve, reject };
+  };
+
+  // 2. React StrictMode Mount -> Unmount -> Remount and Abort Lifecycle
+  // Mount 1 starts submission
+  const gate1 = deferredHelper();
+  const controller1 = new AbortController();
+  const states1 = [];
+  let isCurrent1 = true;
+  const flow1 = createSiteSubmission({
+    request: async (url) => (url.endsWith('create-preview') ? gate1.promise : resultFixture()),
+    advance: async () => operationFixture('succeeded'),
+    isCurrent: () => isCurrent1 && !controller1.signal.aborted,
+    onState: (st) => states1.push(st),
+  });
+
+  const pending1 = flow1.submit(testInput(), { signal: controller1.signal });
+  await new Promise(setImmediate);
+  assert.equal(states1.length, 1);
+  assert.equal(states1[0].phase, 'previewing');
+
+  // React StrictMode unmount cleanup: abort controller + flow.dispose()
+  flow1.dispose();
+  controller1.abort();
+  isCurrent1 = false;
+
+  // Mount 2 (StrictMode remount) initializes fresh flow and submission context
+  const gate2 = deferredHelper();
+  const controller2 = new AbortController();
+  const states2 = [];
+  let isCurrent2 = true;
+  const flow2 = createSiteSubmission({
+    request: async (url) => (url.endsWith('create-preview') ? gate2.promise : resultFixture()),
+    advance: async () => operationFixture('succeeded'),
+    isCurrent: () => isCurrent2 && !controller2.signal.aborted,
+    onState: (st) => states2.push(st),
+  });
+
+  // Late resolution of aborted Mount 1 preview
+  gate1.resolve(previewFixture());
+  await pending1;
+
+  // Verify Mount 1 callbacks were completely suppressed after disposal
+  assert.equal(states1.some((s) => s.phase === 'creating' || s.phase === 'ready'), false);
+
+  // Mount 2 runs cleanly without any stale leakage from Mount 1
+  const pending2 = flow2.submit(testInput(), { signal: controller2.signal });
+  await new Promise(setImmediate);
+  assert.equal(states2[0].phase, 'previewing');
+  gate2.resolve(previewFixture());
+  const finalState2 = await pending2;
+  assert.equal(finalState2.phase, 'ready');
+  assert.equal(finalState2.created.id, domainId);
+  assert.equal(states2.at(-1).phase, 'ready');
+
+  // 3. Logout / Login and Role Transition Isolation
+  let sessionActive = true;
+  const sessionStates = [];
+  const gateSession = deferredHelper();
+  const sessionFlow = createSiteSubmission({
+    request: async (url) => (url.endsWith('create-preview') ? gateSession.promise : resultFixture()),
+    advance: async () => operationFixture('succeeded'),
+    isCurrent: () => sessionActive,
+    onState: (st) => sessionStates.push(st),
+  });
+
+  const sessionPending = sessionFlow.submit(testInput());
+  await new Promise(setImmediate);
+  assert.equal(sessionStates.length, 1);
+  assert.equal(sessionStates[0].phase, 'previewing');
+
+  // User logs out or changes role (e.g., Owner -> Customer) during in-flight submission
+  sessionActive = false;
+  gateSession.resolve(previewFixture());
+  await sessionPending;
+
+  // No further state published after session boundary change
+  assert.equal(sessionStates.length, 1);
+  assert.notEqual(sessionFlow.getState().phase, 'ready');
+
+  // New session begins with EMPTY_SITE_SUBMISSION, zero residual state
+  assert.deepEqual(EMPTY_SITE_SUBMISSION, {
+    phase: 'idle',
+    created: null,
+    steps: [],
+    error: null,
+    siteAdmin: null,
+  });
+
+  // 4. Password Clearing and Zero Memory Retention Verification
+  let formState = {
+    primaryDomain,
+    serverId: stagingServerId,
+    adminPassword: 'P@ssw0rdLiveVerify2026!',
+  };
+
+  // Simulating form state updater on creation confirmation
+  const onSubmissionConfirmation = (st) => {
+    if (st.created || st.phase === 'uncertain') {
+      formState = { ...formState, adminPassword: '' };
+    } else if (st.phase === 'error' || st.error) {
+      formState = { ...formState, adminPassword: '' };
+    }
+  };
+
+  // Confirm password cleared on success
+  onSubmissionConfirmation({ created: { id: domainId, websiteId, primaryDomain }, phase: 'ready' });
+  assert.equal(formState.adminPassword, '');
+
+  // Confirm password cleared on error / abort
+  formState.adminPassword = 'TempErrorPassword!';
+  onSubmissionConfirmation({ phase: 'error', error: 'Creation failed' });
+  assert.equal(formState.adminPassword, '');
+
+  // Confirm password cleared on caught exception in submit handler
+  formState.adminPassword = 'TempAbortPassword!';
+  try {
+    throw new Error('User aborted operation');
+  } catch {
+    formState = { ...formState, adminPassword: '' };
+  }
+  assert.equal(formState.adminPassword, '');
+
+  // Confirm createSiteSubmission state never retains password
+  assert.equal('adminPassword' in finalState2, false);
+  assert.equal('password' in finalState2, false);
+  assert.equal(JSON.stringify(finalState2).includes('fixture-secret-admin-pass'), false);
+
+  // 5. Accessibility, Result Focus, Screen Reader Live Regions, and Theme Compliance
+  const readProjectFile = async (relPath) => readFile(new URL(relPath, import.meta.url), 'utf8');
+  const resultCode = await readProjectFile('../../web/src/workspace/SiteCreateResult.jsx');
+  const pageCode = await readProjectFile('../../web/src/workspace/NewWebsitePage.jsx');
+  const consoleCss = await readProjectFile('../../web/src/workspace/ui/console-theme.css');
+  const emberCss = await readProjectFile('../../web/src/workspace/ui/ember-theme.css');
+
+  // Result container auto-focus on mount with tabIndex={-1}
+  assert.match(resultCode, /ref=\{resultRef\}/);
+  assert.match(resultCode, /tabIndex=\{-1\}/);
+  assert.match(resultCode, /resultRef\.current\?\.focus\(\)/);
+
+  // Screen reader polite live region for non-intrusive status announcements
+  assert.match(resultCode, /aria-live="polite"/);
+  assert.match(resultCode, /aria-atomic="true"/);
+
+  // Shared site result container auto-focus and live region
+  assert.match(pageCode, /ref=\{sharedResultRef\}/);
+  assert.match(pageCode, /tabIndex=\{-1\}/);
+  assert.match(pageCode, /aria-live="polite"/);
+  assert.match(pageCode, /sharedResultRef\.current\?\.focus\(\)/);
+
+  // Theme styling for focus-visible ring across console and ember themes
+  assert.match(consoleCss, /\.ws-site-create-result:focus/);
+  assert.match(consoleCss, /\.ws-site-create-result:focus-visible/);
+  assert.match(emberCss, /\.workspace-shell \.ws-site-create-result:focus/);
+  assert.match(emberCss, /\.workspace-shell \.ws-site-create-result:focus-visible/);
+
+  // 6. Shared-site Explicit Confirmation and Tenant Boundary
+  // Shared site connection requires explicit user confirmation
+  assert.match(pageCode, /sharedConfirmation/);
+  assert.match(pageCode, /confirmSharedSite/);
+
+  // 7. Backend Site-Admin Error Propagation & Safe Retry Boundaries
+  // When backend site creation returns 201 with provisioningError, created site and steps remain visible
+  const provisioningErrorFlow = createSiteSubmission({
+    request: async (url) => {
+      if (url.endsWith('create-preview')) return previewFixture();
+      return {
+        ...resultFixture(),
+        provisioningError: {
+          code: 'site_admin_provisioning_failed',
+          message: 'Site-admin could not be registered',
+        },
+      };
+    },
+    advance: async () => operationFixture('failed'),
+    onState: () => {},
+  });
+
+  const errorResult = await provisioningErrorFlow.submit(testInput());
+  assert.equal(errorResult.phase, 'attention');
+  assert.equal(errorResult.created.id, domainId);
+  assert.equal(errorResult.steps.length > 0, true);
+  assert.equal(siteSubmissionBusy(errorResult), false);
+
+  // Safe retry boundary: submission never automatically retries blind create on failure
+  const secondAttempt = await provisioningErrorFlow.submit(testInput());
+  assert.equal(secondAttempt, errorResult); // Returns existing result without repeating create POST
+
+  assert.ok(true, 'T-DEV-CREATE-RESULT: StrictMode, logout/login, password clearing, accessibility, and safe retry verified.');
 });

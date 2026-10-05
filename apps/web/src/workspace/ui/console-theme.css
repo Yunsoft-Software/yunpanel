@@ -343,3 +343,5 @@ body:has(.workspace-shell) { background: var(--ws-canvas); }
 .ws-health-clear { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; color: var(--ws-success); font-size: 13px; }
 .ws-health-clear small { margin-left: auto; color: var(--ws-muted); font-size: 11px; }
 @media (max-width: 640px) { .ws-history { padding: 16px; } .ws-history-header { flex-wrap: wrap; } .ws-history-legend { gap: 10px; } .ws-health-clear small { margin-left: 0; width: 100%; } }
+.ws-site-create-result:focus { outline: none; }
+.ws-site-create-result:focus-visible { outline: 2px solid var(--ws-focus, #3b82f6); outline-offset: 2px; border-radius: var(--ws-radius); }

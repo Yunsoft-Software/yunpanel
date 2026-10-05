@@ -74,7 +74,9 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
   let disposed = false;
   function publish(patch) {
     state = Object.freeze({ ...state, ...patch });
-    onState(state);
+    if (!disposed && isCurrent() === true) {
+      onState(state);
+    }
   }
   async function submit(input, { signal } = {}) {
     // A create POST is single-attempt for this form, even when its reply is lost.
