@@ -8,7 +8,7 @@ import { newerJob, trackJob } from './job-tracking.js';
 import { workspaceResources } from './workspace-resources.js';
 import { createSslJobRefresh } from './ssl-job-refresh.js';
 
-const WorkspaceContext = createContext(null);
+export const WorkspaceContext = createContext(null);
 export function WorkspaceProvider({ children }) {
   const { pathname } = useLocation();
   const { can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly } = usePanelSession();

@@ -22,6 +22,9 @@ test('source navigation, existing observation, logs, diagnostics and queued canc
   assert.match(drawer, /safeJobResultMetadata\(job\)/);
   assert.match(drawer, /logs\/deploy\?limit=50/);
   assert.match(drawer, /job\.diagnosis/);
+  assert.match(drawer, /job\?\.status === 'queued'/);
+  assert.match(drawer, /handleCancel/);
+  assert.match(drawer, /İşi iptal et/);
   assert.match(table, /jobResourceTarget\(job/);
   assert.match(table, /onCancel && job.status === 'queued'/);
   assert.match(table, /onClick=\{\(\) => observe\(job\)\}/);

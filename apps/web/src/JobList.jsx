@@ -1,3 +1,5 @@
+import { jobAttemptCount, jobLifecycle } from './workspace/job-presentation.js';
+
 function formatTime(value) {
   if (!value) return '—';
   const date = new Date(value);
@@ -45,14 +47,14 @@ export default function JobList({ jobs, access, busyId = null, onCancel = null, 
           </div>
           <div className="domain-cell">
             <span>Attempts</span>
-            <strong>{job.attempts ?? 0}</strong>
+            <strong>{jobAttemptCount(job) !== null ? jobAttemptCount(job) : '—'}</strong>
           </div>
           <div className="domain-cell">
             <span>Created</span>
             <strong>{formatTime(job.createdAt)}</strong>
           </div>
-          <div className={`domain-state ${job.status === 'succeeded' ? 'active' : job.status === 'failed' ? 'error' : 'draft'}`}>
-            {job.status}
+          <div className={`domain-state ${job.status === 'succeeded' ? 'active' : job.status === 'failed' ? 'error' : job.status === 'cancelled' ? 'cancelled' : 'draft'}`}>
+            {job.status ?? jobLifecycle(job).stage}
           </div>
           {onCancel && job.status === 'queued' && (
             <div className="row-actions">
