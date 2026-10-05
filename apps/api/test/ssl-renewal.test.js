@@ -2471,3 +2471,253 @@ test('Uzun iş (120 poll) ve metadata takip sınırından (8 read) sonra otomati
 
   flow.dispose();
 });
+
+test('Acceptance criteria: DNS/provider error conditions, panel metadata vs live TLS, and PROD-06 mail identity partial outcome', async () => {
+  const certificateRegistry = createCertificateRegistry();
+  const jobRegistry = createJobRegistry();
+  const serverId = 'srv-dns-test';
+  const domainId = 'dom-dns-test';
+
+  const validFrom = '2026-07-01T00:00:00.000Z';
+  const validTo = '2026-10-15T00:00:00.000Z';
+  const oldFingerprint = '11:'.repeat(31) + '11';
+  const newFingerprint = '22:'.repeat(31) + '22';
+  const newValidFrom = '2026-10-01T00:00:00.000Z';
+  const newValidTo = '2027-01-01T00:00:00.000Z';
+  const credentialId = '11111111-1111-4111-8111-111111111111';
+  const dnsZoneId = '22222222-2222-4222-8222-222222222222';
+
+  // 1. DNS-01 provider credential error / missing credentials fail-closed in renewal sweep
+  const dnsCert = await certificateRegistry.createForDomain({
+    domainId,
+    serverId,
+    domains: ['dns-provider.example.com'],
+    email: 'ops@example.com',
+    challenge: {
+      type: 'dns-01',
+      provider: 'cloudflare',
+      credentialId,
+      dnsZoneId,
+      propagationSeconds: 30,
+    },
+  });
+  await certificateRegistry.markActive(dnsCert.id, {
+    certName: 'dns-provider.example.com',
+    certificatePath: '/etc/letsencrypt/live/dns-provider.example.com/cert.pem',
+    fullchainPath: '/etc/letsencrypt/live/dns-provider.example.com/fullchain.pem',
+    privateKeyPath: '/etc/letsencrypt/live/dns-provider.example.com/privkey.pem',
+    validFrom,
+    validTo,
+    fingerprint256: oldFingerprint,
+  });
+
+  // Mock DNS credential registry with unconfigured / missing credentials
+  const unconfiguredDnsRegistry = {
+    getForZone: async (zoneId) => ({
+      id: credentialId,
+      provider: 'cloudflare',
+      configured: false, // NOT configured!
+    }),
+  };
+
+  const sweepUnconfigured = await runCertificateRenewalSweep({
+    certificateRegistry,
+    jobRegistry,
+    dnsProviderCredentialRegistry: unconfiguredDnsRegistry,
+    now: () => Date.parse('2026-10-01T00:00:00.000Z'),
+  });
+  assert.equal(sweepUnconfigured.length, 0, 'Sweep skips cert when DNS provider credential is unconfigured');
+  const certAfterSkip = await certificateRegistry.getCertificate(dnsCert.id);
+  assert.equal(certAfterSkip.state, 'active', 'Certificate state remains active without false mutation');
+
+  // Mock DNS credential registry throwing provider error
+  const failingDnsRegistry = {
+    getForZone: async () => {
+      const err = new Error('DNS provider API timeout');
+      err.code = 'dns_provider_timeout';
+      throw err;
+    },
+  };
+  const sweepProviderErr = await runCertificateRenewalSweep({
+    certificateRegistry,
+    jobRegistry,
+    dnsProviderCredentialRegistry: failingDnsRegistry,
+    now: () => Date.parse('2026-10-01T00:00:00.000Z'),
+  });
+  assert.equal(sweepProviderErr.length, 0, 'Sweep fails closed when DNS provider query fails');
+
+  // Configured DNS provider registry enqueues renewal job with challenge info
+  const configuredDnsRegistry = {
+    getForZone: async (zoneId) => ({
+      id: credentialId,
+      provider: 'cloudflare',
+      configured: true,
+    }),
+  };
+  const sweepConfigured = await runCertificateRenewalSweep({
+    certificateRegistry,
+    jobRegistry,
+    dnsProviderCredentialRegistry: configuredDnsRegistry,
+    now: () => Date.parse('2026-10-01T00:00:00.000Z'),
+  });
+  assert.equal(sweepConfigured.length, 1, 'Sweep succeeds and enqueues renewal job when DNS provider credential is valid');
+  assert.equal(sweepConfigured[0].payload.challenge.type, 'dns-01');
+
+  // 2. DNS challenge failure during renewal job
+  const failedDnsJob = {
+    status: 'failed',
+    error: { message: 'DNS challenge validation failed: NXDOMAIN on _acme-challenge.dns-provider.example.com', code: 'dns_challenge_failed' },
+  };
+  const outcomeDnsFail = verifyRenewalOutcome({
+    certificate: certAfterSkip,
+    before: certAfterSkip,
+    job: failedDnsJob,
+    liveTls: null,
+  });
+  assert.equal(outcomeDnsFail.outcome, 'failed');
+  assert.equal(outcomeDnsFail.verified, false);
+  assert.match(outcomeDnsFail.error, /NXDOMAIN/);
+
+  // 3. Panel metadata equality alone is NEVER live TLS proof
+  const renewedCertRecord = {
+    ...certAfterSkip,
+    validFrom: newValidFrom,
+    validTo: newValidTo,
+    fingerprint256: newFingerprint,
+    state: 'active',
+  };
+  const successfulJob = {
+    status: 'succeeded',
+    result: {
+      certName: 'dns-provider.example.com',
+      status: 'renewed',
+      validFrom: newValidFrom,
+      validTo: newValidTo,
+      fingerprint256: newFingerprint,
+      dryRun: false,
+    },
+  };
+
+  // Even though panel record matches job result perfectly, missing or unresolvable live TLS probe (e.g. ENOTFOUND) leaves outcome unverified
+  const unprobedOutcome = verifyRenewalOutcome({
+    certificate: renewedCertRecord,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: null,
+  });
+  assert.equal(unprobedOutcome.outcome, 'pending_live_tls_verification');
+  assert.equal(unprobedOutcome.verified, false, 'Panel metadata equality alone is NOT live TLS proof');
+
+  // Live TLS probe returning mismatched certificate (e.g. SNI mismatch or wrong certificate presented)
+  const mismatchedLiveOutcome = verifyRenewalOutcome({
+    certificate: renewedCertRecord,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: {
+      fingerprint256: '99:'.repeat(31) + '99',
+      validFrom: newValidFrom,
+      validTo: newValidTo,
+    },
+  });
+  assert.equal(mismatchedLiveOutcome.outcome, 'live_tls_mismatch');
+  assert.equal(mismatchedLiveOutcome.verified, false);
+  assert.equal(mismatchedLiveOutcome.reason, 'fingerprint_mismatch');
+
+  // Live TLS probe still presenting previous certificate (reload pending)
+  const pendingReloadOutcome = verifyRenewalOutcome({
+    certificate: renewedCertRecord,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: {
+      fingerprint256: oldFingerprint,
+      validFrom,
+      validTo,
+    },
+  });
+  assert.equal(pendingReloadOutcome.outcome, 'pending_service_reload');
+  assert.equal(pendingReloadOutcome.reason, 'live_tls_presents_previous_certificate');
+  assert.equal(pendingReloadOutcome.verified, false);
+
+  // 4. Initial issuance & post-renewal mail identity / stage / activate partial outcomes (PROD-06 boundary)
+  // When live TLS matches, but mail identity assignment failed or completed partially:
+  const mailIdentityPartialCert = {
+    ...renewedCertRecord,
+    lastReloadOutcome: {
+      service: 'mail_identity',
+      status: 'partial',
+      stage: 'activate',
+      error: 'Postfix SNI map updated but Dovecot TLS reload timed out',
+    },
+  };
+  const mailPartialOutcome = verifyRenewalOutcome({
+    certificate: mailIdentityPartialCert,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: {
+      fingerprint256: newFingerprint,
+      validFrom: newValidFrom,
+      validTo: newValidTo,
+    },
+  });
+  assert.equal(mailPartialOutcome.outcome, 'partial');
+  assert.equal(mailPartialOutcome.verified, false);
+  assert.equal(mailPartialOutcome.reason, 'post_ssl_mail_identity_assignment_failed');
+  assert.equal(mailPartialOutcome.partial, true);
+
+  // Diagnosis for mail identity partial failure
+  const mailDiag = certificateDiagnosis(mailIdentityPartialCert);
+  assert.equal(mailDiag.severity, 'warning');
+  assert.equal(mailDiag.code, 'certificate_reload_partial');
+  assert.match(mailDiag.message, /mail service identity assignment/i);
+  assert.match(mailDiag.action, /retry mail identity assignment/i);
+
+  // Mail identity total reload failure
+  const mailIdentityFailedCert = {
+    ...renewedCertRecord,
+    lastReloadOutcome: {
+      service: 'mail_identity',
+      status: 'failed',
+      stage: 'activate',
+      error: 'Failed to bind mail TLS identity certificate',
+    },
+  };
+  const mailFailedOutcome = verifyRenewalOutcome({
+    certificate: mailIdentityFailedCert,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: {
+      fingerprint256: newFingerprint,
+      validFrom: newValidFrom,
+      validTo: newValidTo,
+    },
+  });
+  assert.equal(mailFailedOutcome.outcome, 'partial_service_reload');
+  assert.equal(mailFailedOutcome.verified, false);
+  assert.equal(mailFailedOutcome.reason, 'post_ssl_mail_identity_assignment_failed');
+
+  const mailFailedDiag = certificateDiagnosis(mailIdentityFailedCert);
+  assert.equal(mailFailedDiag.severity, 'warning');
+  assert.equal(mailFailedDiag.code, 'certificate_reload_failed');
+  assert.match(mailFailedDiag.message, /mail service identity assignment failed/i);
+
+  // 5. Full live TLS match with clean reload outcome
+  const cleanCert = {
+    ...renewedCertRecord,
+    lastReloadOutcome: {
+      service: 'nginx',
+      status: 'succeeded',
+    },
+  };
+  const fullyVerifiedOutcome = verifyRenewalOutcome({
+    certificate: cleanCert,
+    before: certAfterSkip,
+    job: successfulJob,
+    liveTls: {
+      fingerprint256: newFingerprint,
+      validFrom: newValidFrom,
+      validTo: newValidTo,
+    },
+  });
+  assert.equal(fullyVerifiedOutcome.outcome, 'renewed_and_live_verified');
+  assert.equal(fullyVerifiedOutcome.verified, true);
+});
