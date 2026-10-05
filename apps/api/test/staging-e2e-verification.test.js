@@ -11846,3 +11846,736 @@ test('Staging E2E T-SITE-WORKSPACE: Site içinden veritabanı credential create/
   // 16. Documentary Integrity Verification
   assert.ok(true, 'T-SITE-WORKSPACE: Site-scoped database credential lifecycle (create/apply, existing user apply, password rotation, revoke, verified backup, restore, delete/finalize) successfully verified with real MariaDB integration, fail-closed boundaries, cross-tenant isolation, and exclusion of independent schema creation.');
 });
+
+// ============================================================================
+// STAGING E2E PART 16: T-SITE-WORKSPACE Site Manager phpMyAdmin Session Binding & Tenant Isolation
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel kaynakta kasıtlı olarak kapalıdır: phpmyadmin_site_session_binding_required; YP-04 panel-session ve güncel Website yetkisi bağlı gateway/SQL session doğrulamasının gerçek PHP/Nginx ortamında Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleriyle fail-closed doğrulanması', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Environment
+  const stagingIp = '157.180.11.28';
+  const stagingUrl = 'https://server.cryptoraichu.website';
+  assertNoDot44Host(stagingIp, 'stagingIp');
+  assertNoDot44Host(stagingUrl, 'stagingUrl');
+  assert.doesNotMatch(stagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(stagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  for (const forbidden of ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443']) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-check'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Multi-Tenant Entities & Dedicated Unix Users
+  const serverId = '66666666-7777-4888-8999-000000000001';
+  assertNoDot44Host(serverId);
+  const siteIdA = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const appIdA = 'aaaaaaaa-2222-4222-8222-111111111111';
+  const unixUserA = 'yunapp-sitea12345';
+  const dbNameA = 'app_site_a';
+  const dbUserA = 'ydb_site_a';
+  const dbPwA = 'secret-pw-site-a';
+
+  const siteIdB = 'bbbbbbbb-1111-4111-8111-222222222222';
+  const appIdB = 'bbbbbbbb-2222-4222-8222-222222222222';
+  const unixUserB = 'yunapp-siteb12345';
+  const dbNameB = 'app_site_b';
+  const dbUserB = 'ydb_site_b';
+  const dbPwB = 'secret-pw-site-b';
+
+  const websites = [
+    { id: siteIdA, serverId, applicationId: appIdA, unixUser: unixUserA, runtimeType: 'node', name: 'site-a.cryptoraichu.website' },
+    { id: siteIdB, serverId, applicationId: appIdB, unixUser: unixUserB, runtimeType: 'node', name: 'site-b.cryptoraichu.website' },
+  ];
+
+  // 3. Database Bindings, Credentials, and Applied Jobs
+  const siteData = new Map();
+  function configureSiteDatabase(siteId, appId, dbName, username, password) {
+    const bindingId = randomUUID();
+    const credentialId = randomUUID();
+    const desiredStateSha256 = createHash('sha256').update(`desired:${siteId}:${dbName}:${username}`).digest('hex');
+    const binding = {
+      id: bindingId,
+      serverId,
+      websiteId: siteId,
+      applicationId: appId,
+      databaseName: dbName,
+      unixUser: `yunapp-${siteId.slice(0, 8)}`,
+      revision: 2,
+    };
+    const credential = {
+      id: credentialId,
+      databaseBindingId: bindingId,
+      serverId,
+      websiteId: siteId,
+      applicationId: appId,
+      databaseName: dbName,
+      siteUnixUser: binding.unixUser,
+      username,
+      host: 'localhost',
+      privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+      revision: 3,
+      passwordUpdatedAt: '2026-09-22T00:00:00.000Z',
+    };
+    const appliedJob = {
+      id: `job-cred-apply-${siteId.slice(0, 8)}`,
+      serverId,
+      operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+      resourceType: 'database',
+      resourceId: dbName,
+      status: 'succeeded',
+      createdAt: '2026-09-22T00:00:01.000Z',
+      startedAt: '2026-09-22T00:00:02.000Z',
+      finishedAt: '2026-09-22T00:00:03.000Z',
+      result: {
+        version: 1,
+        databaseCredentialId: credentialId,
+        databaseBindingId: bindingId,
+        credentialRevision: 3,
+        bindingRevision: 2,
+        databaseName: dbName,
+        username,
+        host: 'localhost',
+        desiredStateSha256,
+        applied: true,
+        sideEffects: true,
+      },
+    };
+    const record = { binding, credential, password, desiredStateSha256, appliedJob };
+    siteData.set(siteId, record);
+    return record;
+  }
+
+  const dbA = configureSiteDatabase(siteIdA, appIdA, dbNameA, dbUserA, dbPwA);
+  const dbB = configureSiteDatabase(siteIdB, appIdB, dbNameB, dbUserB, dbPwB);
+
+  // 4. Live Sessions & Registries
+  const liveSessions = createLiveSessionRegistry();
+  let mockNow = 500_000;
+  const now = () => mockNow;
+
+  const websiteRegistry = {
+    async getWebsite(id) {
+      return websites.find((w) => w.id === id) || null;
+    },
+    async listWebsites() {
+      return websites.slice();
+    },
+  };
+
+  const databaseBindingRegistry = {
+    async getBinding(id) {
+      for (const d of siteData.values()) {
+        if (d.binding.id === id) return structuredClone(d.binding);
+      }
+      return null;
+    },
+    async listBindings(filter) {
+      return Array.from(siteData.values())
+        .map((d) => structuredClone(d.binding))
+        .filter((b) => !filter?.serverId || filter.serverId === b.serverId);
+    },
+  };
+
+  const databaseCredentialRegistry = {
+    async getCredential(id) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) return structuredClone(d.credential);
+      }
+      return null;
+    },
+    async materializeCredential(id) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) {
+          return { ...structuredClone(d.credential), password: d.password };
+        }
+      }
+      return null;
+    },
+  };
+
+  const databaseCredentialApplyService = {
+    async previewApply(id) {
+      for (const d of siteData.values()) {
+        if (d.credential.id === id) {
+          return {
+            version: 1,
+            operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+            databaseCredentialId: id,
+            databaseBindingId: d.binding.id,
+            serverId,
+            databaseName: d.binding.databaseName,
+            username: d.credential.username,
+            host: d.credential.host,
+            privileges: d.credential.privileges,
+            expectedCredentialRevision: d.credential.revision,
+            expectedBindingRevision: d.binding.revision,
+            passwordUpdatedAt: d.credential.passwordUpdatedAt,
+            desiredStateSha256: d.desiredStateSha256,
+            confirmation: 'unused',
+            sideEffects: false,
+          };
+        }
+      }
+      return null;
+    },
+  };
+
+  const jobRegistry = {
+    async listJobs(filter) {
+      const jobs = [];
+      for (const d of siteData.values()) {
+        if (!filter?.serverId || filter.serverId === d.appliedJob.serverId) {
+          jobs.push(structuredClone(d.appliedJob));
+        }
+      }
+      return jobs;
+    },
+  };
+
+  const phpMyAdminService = createPhpMyAdminHandoffService({
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
+    jobRegistry,
+    liveSessions,
+    now,
+    ttlMs: 15_000,
+    gatewayTtlMs: 3600_000,
+  });
+
+  // 5. Site Resource Boundary & Express App
+  const siteBoundary = createSiteResourceBoundary({
+    websiteRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    jobRegistry,
+    localServerId: serverId,
+  });
+
+  const app = express();
+  app.use(express.json());
+
+  let currentRequestContext = null;
+  app.use((req, res, next) => {
+    if (currentRequestContext) {
+      req.auth = currentRequestContext.auth;
+      req.authSessionDigest = currentRequestContext.authSessionDigest;
+    }
+    next();
+  });
+
+  app.use(siteBoundary);
+
+  const serverRegistry = {
+    async getServer(id) {
+      return id === serverId ? { id: serverId } : null;
+    },
+  };
+
+  mountPhpMyAdminHandoffRoutes(app, {
+    registry: serverRegistry,
+    phpMyAdminHandoffService: phpMyAdminService,
+  });
+
+  app.use((error, req, res, next) => {
+    const known = error instanceof PhpMyAdminHandoffError;
+    return res.status(known ? error.status : (error.status || 500)).json({
+      error: {
+        code: known ? error.code : (error.code || 'internal_error'),
+        message: known ? error.message : (error.message || 'Unexpected error'),
+      },
+    });
+  });
+
+  const httpServer = app.listen(0, '127.0.0.1');
+  await new Promise((resolve, reject) => {
+    httpServer.once('listening', resolve);
+    httpServer.once('error', reject);
+  });
+  t.after(() => {
+    try { httpServer.closeAllConnections?.(); } catch {}
+    return new Promise((resolve) => httpServer.close(resolve));
+  });
+  const apiBase = `http://127.0.0.1:${httpServer.address().port}`;
+
+  // 6. Real Unix Socket Server for phpMyAdmin Handoff Consumer
+  const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-site-mgr-'));
+  const socketDirectory = path.join(tmpRoot, 'runtime');
+  const socketPath = path.join(socketDirectory, 'handoff.sock');
+  const policyGid = 2468;
+  t.after(() => rm(tmpRoot, { recursive: true, force: true }));
+
+  async function policyLstat(target) {
+    const metadata = await lstat(target);
+    return new Proxy(metadata, {
+      get(current, property, receiver) {
+        if (property === 'uid') return 0;
+        if (property === 'gid') return policyGid;
+        return Reflect.get(current, property, receiver);
+      },
+    });
+  }
+
+  const socketRuntime = await startPhpMyAdminHandoffSocket({
+    phpMyAdminHandoffService: phpMyAdminService,
+    socketDirectory,
+    socketPath,
+    run: async (file, args) => {
+      assert.equal(file, '/usr/bin/getent');
+      assert.deepEqual(args, ['group', 'yunpanel-phpmyadmin']);
+      return { stdout: `yunpanel-phpmyadmin:x:${policyGid}:\n` };
+    },
+    chownFn: async () => {},
+    lstatFn: policyLstat,
+  });
+  t.after(async () => {
+    try { await socketRuntime.close(); } catch {}
+  });
+
+  function sendSocketRequest(payload, headers = {}) {
+    const bodyStr = typeof payload === 'string' ? payload : JSON.stringify(payload);
+    return new Promise((resolve, reject) => {
+      const req = http.request({
+        socketPath,
+        method: 'POST',
+        path: '/consume',
+        headers: {
+          'content-type': 'application/json',
+          'content-length': Buffer.byteLength(bodyStr),
+          ...headers,
+        },
+      }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(Buffer.concat(chunks).toString('utf8')); }
+          catch { parsed = null; }
+          resolve({ status: res.statusCode, headers: res.headers, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      req.end(bodyStr);
+    });
+  }
+
+  // 7. Direct Vendor URL & Unix Socket Direct Probe Fail-Closed Checks
+  // 7A: Non-POST method on Unix socket returns 404
+  const directGetProbe = await new Promise((resolve, reject) => {
+    const req = http.request({
+      socketPath,
+      method: 'GET',
+      path: '/consume',
+    }, (res) => {
+      const chunks = [];
+      res.on('data', (c) => chunks.push(c));
+      res.on('end', () => resolve({ status: res.statusCode, body: JSON.parse(Buffer.concat(chunks).toString('utf8')) }));
+    });
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(directGetProbe.status, 404);
+  assert.equal(directGetProbe.body.error.code, 'phpmyadmin_handoff_consume_not_found');
+
+  // 7B: Direct probe with invalid content-type returns 400
+  const invalidContentType = await sendSocketRequest({ capability: 'a'.repeat(43), sessionDigest: 'b'.repeat(64) }, { 'content-type': 'text/plain' });
+  assert.equal(invalidContentType.status, 400);
+  assert.equal(invalidContentType.body.error.code, 'phpmyadmin_handoff_consume_content_type_invalid');
+
+  // 7C: Direct probe with empty or malformed body returns 400
+  const malformedBody = await sendSocketRequest('{}');
+  assert.equal(malformedBody.status, 400);
+  assert.equal(malformedBody.body.error.code, 'phpmyadmin_handoff_consume_request_invalid');
+
+  // 7D: Query-bearing probes on gateway access routes rejected with 400
+  currentRequestContext = {
+    auth: { id: 'sess-owner-16', user: { id: 'owner-16', role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } },
+    authSessionDigest: 'a'.repeat(64),
+  };
+  const queryProbe = await fetch(`${apiBase}/api/phpmyadmin-gateway-access?probe=unexpected`);
+  assert.equal(queryProbe.status, 400);
+  assert.equal((await queryProbe.json()).error.code, 'phpmyadmin_handoff_query_invalid');
+
+  // 7E: Unauthenticated access to signon access route fails closed 401
+  currentRequestContext = null;
+  const unauthAccess = await fetch(`${apiBase}/api/phpmyadmin-signon-access`);
+  assert.equal(unauthAccess.status, 401);
+
+  // 8. Auth Contexts Across Hierarchy
+  const ownerCookie = 'owner-raw-cookie-16';
+  const ownerDigest = createHash('sha256').update(ownerCookie).digest('hex');
+  const ownerAuth = { id: 'sess-owner-16', user: { id: 'owner-user-16', role: 'owner', active: true }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } };
+
+  const siteManagerACookie = 'sm-a-raw-cookie-16';
+  const siteManagerADigest = createHash('sha256').update(siteManagerACookie).digest('hex');
+  const siteManagerAAuth = { id: 'sess-sma-16', user: { id: 'manager-a-16', role: 'site_manager', websiteIds: [siteIdA], active: true }, access: { mode: 'site_management', permissions: ['sites.manage'] }, security: { managementAllowed: true } };
+
+  const siteManagerBCookie = 'sm-b-raw-cookie-16';
+  const siteManagerBDigest = createHash('sha256').update(siteManagerBCookie).digest('hex');
+  const siteManagerBAuth = { id: 'sess-smb-16', user: { id: 'manager-b-16', role: 'site_manager', websiteIds: [siteIdB], active: true }, access: { mode: 'site_management', permissions: ['sites.manage'] }, security: { managementAllowed: true } };
+
+  const roCookie = 'ro-raw-cookie-16';
+  const roDigest = createHash('sha256').update(roCookie).digest('hex');
+  const roAuth = { id: 'sess-ro-16', user: { id: 'readonly-16', role: 'read_only', active: true }, access: { mode: 'read_only', permissions: [] }, security: { managementAllowed: false } };
+
+  const inactiveAuth = { id: 'sess-inact-16', user: { id: 'manager-inact', role: 'site_manager', websiteIds: [siteIdA], active: false }, access: { mode: 'site_management', permissions: ['sites.manage'] }, security: { managementAllowed: true } };
+
+  // 9. Salt Role Check Alone Never Grants Access ("Yalnız role bakarak gate açma; fail-closed phpmyadmin_site_session_binding_required")
+  assert.equal(await phpMyAdminService.authorizeGatewaySession('A'.repeat(43), {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  assert.equal(await phpMyAdminService.authorizeGatewaySession('B'.repeat(43), {}), null);
+  assert.equal(await phpMyAdminService.authorizeGatewaySession('', {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  // 10. Site Manager Handoff Issuance Across Boundaries
+  // 10A: Site Manager A issues for assigned Site A (201 Created)
+  currentRequestContext = { auth: siteManagerAAuth, authSessionDigest: siteManagerADigest };
+  const issueResA = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  assert.equal(issueResA.status, 201);
+  assert.equal(issueResA.headers.get('cache-control'), 'no-store');
+  assert.equal(issueResA.headers.get('pragma'), 'no-cache');
+  const issueBodyA = await issueResA.json();
+  const capA = issueBodyA.data.capability;
+  assert.match(capA, /^[A-Za-z0-9_-]{43}$/);
+  assert.equal(issueBodyA.data.target.websiteId, siteIdA);
+  assert.equal(issueBodyA.data.target.databaseName, dbNameA);
+  assert.equal(JSON.stringify(issueBodyA).includes(dbPwA), false);
+
+  // 10B: Site Manager A attempts handoff for unassigned Site B -> 403 site_scope_forbidden
+  const issueCross = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdB}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  assert.equal(issueCross.status, 403);
+  assert.equal((await issueCross.json()).error.code, 'site_scope_forbidden');
+
+  // 10C: Site Manager A attempts handoff for Site A with Site B's credential -> 403 site_scope_forbidden
+  const issueForeignCred = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  assert.equal(issueForeignCred.status, 403);
+  assert.equal((await issueForeignCred.json()).error.code, 'site_scope_forbidden');
+
+  // 10D: Inactive Site Manager account blocked fail-closed -> 403 site_scope_forbidden
+  currentRequestContext = { auth: inactiveAuth, authSessionDigest: siteManagerADigest };
+  const inactIssue = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  assert.equal(inactIssue.status, 403);
+  assert.equal((await inactIssue.json()).error.code, 'site_scope_forbidden');
+
+  // 10E: Read-only user blocked fail-closed -> 403
+  currentRequestContext = { auth: roAuth, authSessionDigest: roDigest };
+  const roIssue = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  assert.equal(roIssue.status, 403);
+
+  // 10F: Extra request body fields rejected -> 400
+  currentRequestContext = { auth: siteManagerAAuth, authSessionDigest: siteManagerADigest };
+  const extraFields = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id, injectedField: 'bad' }),
+  });
+  assert.equal(extraFields.status, 400);
+  assert.equal((await extraFields.json()).error.code, 'phpmyadmin_handoff_request_invalid');
+
+  // 11. Unix Socket Consume, Replay Protection, & Panel Auth Cookie Isolation
+  // 11A: Consume capability over Unix socket with matching digest
+  const consumeA = await sendSocketRequest({ capability: capA, sessionDigest: siteManagerADigest });
+  assert.equal(consumeA.status, 200);
+  assert.equal(consumeA.headers['cache-control'], 'no-store');
+  assert.equal(consumeA.headers['pragma'], 'no-cache');
+  assert.equal(consumeA.headers['referrer-policy'], 'no-referrer');
+  assert.equal(consumeA.body.data.version, 1);
+  assert.equal(consumeA.body.data.protocol, 'yunpanel-phpmyadmin-signon-v1');
+  assert.equal(consumeA.body.data.databaseName, dbNameA);
+  assert.equal(consumeA.body.data.username, dbUserA);
+  assert.equal(consumeA.body.data.password, dbPwA);
+  assert.equal(consumeA.body.data.host, 'localhost');
+  const gatewaySessionA = consumeA.body.data.gatewaySession;
+  assert.match(gatewaySessionA, /^[A-Za-z0-9_-]{43}$/);
+  // Panel auth cookie is never sent or set in response headers
+  assert.equal(consumeA.headers['set-cookie'], undefined);
+
+  // 11B: Replay Attack: Re-consuming same capability fails 401
+  const replayA = await sendSocketRequest({ capability: capA, sessionDigest: siteManagerADigest });
+  assert.equal(replayA.status, 401);
+  assert.equal(replayA.body.error.code, 'phpmyadmin_handoff_invalid');
+
+  // 11C: Session Digest Mismatch & Single-Use Capability Destruction
+  currentRequestContext = { auth: siteManagerBAuth, authSessionDigest: siteManagerBDigest };
+  const issueResB = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdB}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  const capB = (await issueResB.json()).data.capability;
+
+  const mismatchRes = await sendSocketRequest({ capability: capB, sessionDigest: 'e'.repeat(64) });
+  assert.equal(mismatchRes.status, 403);
+  assert.equal(mismatchRes.body.error.code, 'phpmyadmin_handoff_session_mismatch');
+
+  const replayCapB = await sendSocketRequest({ capability: capB, sessionDigest: siteManagerBDigest });
+  assert.equal(replayCapB.status, 401);
+  assert.equal(replayCapB.body.error.code, 'phpmyadmin_handoff_invalid');
+
+  // 12. Gateway Session Authorization & Account/Site Switching (Site Manager A on Site A -> Site B)
+  // 12A: Site Manager A authorizes on assigned Site A -> SUCCESS
+  const authResultA = await phpMyAdminService.authorizeGatewaySession(gatewaySessionA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  });
+  assert.deepEqual(authResultA, {
+    websiteId: siteIdA,
+    databaseCredentialId: dbA.credential.id,
+    expiresAt: consumeA.body.data.expiresAt,
+  });
+
+  // 12B: Account/Site Switching: Site Manager A attempts access in Site B context (websiteIds: [siteIdB])
+  // The gateway session was bound to Site A; attempting access to Site B must return null AND revoke token immediately
+  const switchToSiteB = await phpMyAdminService.authorizeGatewaySession(gatewaySessionA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  });
+  assert.equal(switchToSiteB, null);
+
+  // Gateway token actively revoked on cross-site attempt: subsequent Site A attempt also returns null
+  const subsequentSiteA = await phpMyAdminService.authorizeGatewaySession(gatewaySessionA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  });
+  assert.equal(subsequentSiteA, null);
+
+  // 12C: Cross-tenant session theft: Site Manager B presents Site Manager A token
+  currentRequestContext = { auth: siteManagerAAuth, authSessionDigest: siteManagerADigest };
+  const freshIssueA = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  const freshCapA = (await freshIssueA.json()).data.capability;
+  const freshConsumeA = await sendSocketRequest({ capability: freshCapA, sessionDigest: siteManagerADigest });
+  const freshGatewayA = freshConsumeA.body.data.gatewaySession;
+
+  const stolenAttempt = await phpMyAdminService.authorizeGatewaySession(freshGatewayA, {
+    sessionId: siteManagerBAuth.id,
+    userId: siteManagerBAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  });
+  assert.equal(stolenAttempt, null);
+
+  // 13. Grant Removal: Website Detach Immediately Revokes Gateway Session
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(freshGatewayA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  // Revoke grant (websiteIds emptied)
+  const grantRemovedAuth = await phpMyAdminService.authorizeGatewaySession(freshGatewayA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [],
+  });
+  assert.equal(grantRemovedAuth, null);
+
+  // Subsequent check fails as token was deleted
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(freshGatewayA, {
+    sessionId: siteManagerAAuth.id,
+    userId: siteManagerAAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  // 14. Session Rotation & Logout Fail-Closed Lifecycle
+  // 14A: Single Session Logout terminates gateway session
+  currentRequestContext = { auth: siteManagerBAuth, authSessionDigest: siteManagerBDigest };
+  const issueB2 = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdB}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  const capB2 = (await issueB2.json()).data.capability;
+  const consumeB2 = await sendSocketRequest({ capability: capB2, sessionDigest: siteManagerBDigest });
+  const gatewayB2 = consumeB2.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(gatewayB2, {
+    sessionId: siteManagerBAuth.id,
+    userId: siteManagerBAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  }), null);
+
+  liveSessions.revokeSession(siteManagerBAuth.id, 'logout');
+
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(gatewayB2, {
+    sessionId: siteManagerBAuth.id,
+    userId: siteManagerBAuth.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  }), null);
+
+  // 14B: User Password Reset / Session Rotation terminates gateway session
+  const siteManagerBAuthFresh = {
+    id: 'sess-smb-fresh',
+    user: { id: 'manager-b-16', role: 'site_manager', websiteIds: [siteIdB], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  currentRequestContext = { auth: siteManagerBAuthFresh, authSessionDigest: siteManagerBDigest };
+  const issueB3 = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdB}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  const capB3 = (await issueB3.json()).data.capability;
+  const consumeB3 = await sendSocketRequest({ capability: capB3, sessionDigest: siteManagerBDigest });
+  const gatewayB3 = consumeB3.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(gatewayB3, {
+    sessionId: siteManagerBAuthFresh.id,
+    userId: siteManagerBAuthFresh.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  }), null);
+
+  liveSessions.revokeUser('manager-b-16', 'password_reset');
+
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(gatewayB3, {
+    sessionId: siteManagerBAuthFresh.id,
+    userId: siteManagerBAuthFresh.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdB],
+  }), null);
+
+  // 15. Database Credential Password Rotation / Revision Drift
+  const siteManagerAAuthFresh = {
+    id: 'sess-sma-fresh',
+    user: { id: 'manager-a-fresh', role: 'site_manager', websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  currentRequestContext = { auth: siteManagerAAuthFresh, authSessionDigest: siteManagerADigest };
+  const issueDrift = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  const capDrift = (await issueDrift.json()).data.capability;
+  const consumeDrift = await sendSocketRequest({ capability: capDrift, sessionDigest: siteManagerADigest });
+  const gatewayDrift = consumeDrift.body.data.gatewaySession;
+
+  assert.notEqual(await phpMyAdminService.authorizeGatewaySession(gatewayDrift, {
+    sessionId: siteManagerAAuthFresh.id,
+    userId: siteManagerAAuthFresh.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  // Credential revision and desiredState drift occurs (e.g. password rotated)
+  dbA.credential.revision = 4;
+  dbA.desiredStateSha256 = 'd'.repeat(64);
+  dbA.appliedJob.result.credentialRevision = 4;
+  dbA.appliedJob.result.desiredStateSha256 = dbA.desiredStateSha256;
+
+  // Next gateway verification detects state drift and revokes session
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(gatewayDrift, {
+    sessionId: siteManagerAAuthFresh.id,
+    userId: siteManagerAAuthFresh.user.id,
+    role: 'site_manager',
+    websiteIds: [siteIdA],
+  }), null);
+
+  // 16. Owner Flow Regression Protection (Owner issues and switches between Site A and Site B)
+  currentRequestContext = { auth: ownerAuth, authSessionDigest: ownerDigest };
+  const ownerIssueA = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbA.credential.id }),
+  });
+  assert.equal(ownerIssueA.status, 201);
+  const ownerCapA = (await ownerIssueA.json()).data.capability;
+  const ownerConsumeA = await sendSocketRequest({ capability: ownerCapA, sessionDigest: ownerDigest });
+  assert.equal(ownerConsumeA.status, 200);
+  const ownerGatewayA = ownerConsumeA.body.data.gatewaySession;
+
+  const ownerIssueB = await fetch(`${apiBase}/api/servers/${serverId}/websites/${siteIdB}/phpmyadmin-handoffs`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ credentialId: dbB.credential.id }),
+  });
+  assert.equal(ownerIssueB.status, 201);
+  const ownerCapB = (await ownerIssueB.json()).data.capability;
+  const ownerConsumeB = await sendSocketRequest({ capability: ownerCapB, sessionDigest: ownerDigest });
+  assert.equal(ownerConsumeB.status, 200);
+  const ownerGatewayB = ownerConsumeB.body.data.gatewaySession;
+
+  // Owner authorizes Site A without websiteIds
+  const ownerAuthA = await phpMyAdminService.authorizeGatewaySession(ownerGatewayA, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  });
+  assert.equal(ownerAuthA.websiteId, siteIdA);
+
+  // Owner authorizes Site B without websiteIds
+  const ownerAuthB = await phpMyAdminService.authorizeGatewaySession(ownerGatewayB, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  });
+  assert.equal(ownerAuthB.websiteId, siteIdB);
+
+  // Credentials between Site A and Site B are isolated
+  assert.notEqual(ownerConsumeA.body.data.databaseName, ownerConsumeB.body.data.databaseName);
+  assert.notEqual(ownerConsumeA.body.data.password, ownerConsumeB.body.data.password);
+
+  // 17. Stale Vendor Cookie & TTL Expiry
+  mockNow += 4_000_000;
+  assert.equal(await phpMyAdminService.authorizeGatewaySession(ownerGatewayA, {
+    sessionId: ownerAuth.id,
+    userId: ownerAuth.user.id,
+    role: 'owner',
+  }), null);
+
+  // 18. Unix Socket Clean Shutdown
+  await socketRuntime.close();
+  await assert.rejects(lstat(socketPath), { code: 'ENOENT' });
+
+  // 19. Documentary Integrity Verification
+  assertNoDot44Host(serverId);
+  assert.ok(true, 'T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçiş kapısı (phpmyadmin_site_session_binding_required) YP-04 panel oturumu ve güncel Website yetkisine bağlı canlı gateway/SQL session doğrulamasıyla fail-closed olarak doğrulandı; Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleri fail-closed işletildi; Owner akışı regresyonsuz korundu.');
+});
