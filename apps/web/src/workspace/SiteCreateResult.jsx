@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
 import { siteHref } from './site-model.js';
 import { siteSubmissionBusy } from './site-create-submission.js';
@@ -38,13 +39,20 @@ export function SiteCreateProgress({ state }) {
 }
 export default function SiteCreateResult({ state }) {
   const domain = state.created;
-  return <Section title={domain ? 'Site kaydı oluşturuldu' : 'Oluşturma sonucu kontrol edilmeli'}>
+  const resultRef = useRef(null);
+
+  useEffect(() => {
+    resultRef.current?.focus();
+  }, []);
+
+  return <div ref={resultRef} tabIndex={-1} aria-live="polite" aria-atomic="true" className="ws-site-create-result" style={{ outline: 'none' }}>
+    <Section title={domain ? 'Site kaydı oluşturuldu' : 'Oluşturma sonucu kontrol edilmeli'}>
     <EmptyState icon={domain ? 'globe' : 'clock'} title={domain?.primaryDomain ?? 'Sunucudaki sonuç henüz doğrulanamadı'}
       detail={domain ? 'Kayıt oluşturma ile servislerin çalışır duruma gelmesi ayrı aşamalardır.'
         : 'Aynı formdan otomatik veya tekrarlı oluşturma yapılmayacak. Önce mevcut siteleri kontrol edin.'} />
     <div className="ws-section-body"><ErrorNotice error={state.error} />
       {domain && state.siteAdmin && state.siteAdmin.status !== 'not_requested' && <div
-        className={state.siteAdmin.status === 'attention' ? 'ws-notice ws-notice-warn' : 'ws-notice'} role="status">
+        className={state.siteAdmin.status === 'attention' ? 'ws-notice ws-notice-warn' : 'ws-notice'} role="status" aria-live="polite">
         <div><strong>{state.siteAdmin.status === 'created' ? 'Yönetici hesabı oluşturuldu' : 'Yönetici hesabı kontrol edilmeli'}</strong>
           <p>{siteAdminMessage(state.siteAdmin)}</p>
           {state.siteAdmin.status === 'attention' && <LinkButton to="/settings/users">Kullanıcıları kontrol et</LinkButton>}
@@ -63,5 +71,6 @@ export default function SiteCreateResult({ state }) {
       ['Web sitesi kimliği', domain?.websiteId ?? '—'],
       ['Aşama (phase)', state.phase],
     ]} /></details>
-  </Section>;
+  </Section>
+  </div>;
 }

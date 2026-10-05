@@ -49,3 +49,16 @@ test('shared-site explicit confirmation and scoped domain API remain available',
   assert.match(page, /onConfirm=\{confirmSharedSite\}/);
   assert.match(page, /body: sharedConfirmation.input, signal: current.signal/);
 });
+test('result focus and screen reader live region are wired for keyboard and assistive navigation', () => {
+  assert.match(result, /ref=\{resultRef\}/);
+  assert.match(result, /tabIndex=\{-1\}/);
+  assert.match(result, /aria-live="polite"/);
+  assert.match(result, /className="ws-site-create-result"/);
+  assert.match(result, /resultRef\.current\?\.focus\(\)/);
+  assert.match(page, /ref=\{sharedResultRef\}/);
+  assert.match(page, /sharedResultRef\.current\?\.focus\(\)/);
+});
+test('password field clears on error and failure states preventing memory retention', () => {
+  assert.match(page, /else if \(state\.phase === 'error' \|\| state\.error\) \{\s+setForm\(\(value\) => \(\{ \.\.\.value, adminPassword: '' \}\)\)/);
+  assert.match(page, /setForm\(\(value\) => \(\{ \.\.\.value, adminPassword: '' \}\)\);\s*\}\s*finally \{ pending\.current = false; \}/);
+});

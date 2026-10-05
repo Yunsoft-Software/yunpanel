@@ -313,3 +313,76 @@ test('post-account provisioning error rejection with siteAdmin attention indicat
   assert.ok(state.error.includes('yönetici hesabı doğrulanamadı'));
   assert.equal(advanced, 0);
 });
+
+test('React StrictMode unmount and remount cycle: old in-flight response never leaks into new flow', async () => {
+  const gate1 = deferred();
+  const gate2 = deferred();
+  let controller1 = new AbortController();
+  let current1 = true;
+  const states1 = [];
+  const flow1 = createSiteSubmission({
+    request: async (url) => url.endsWith('create-preview') ? gate1.promise : result(),
+    advance: async () => operation('succeeded'),
+    isCurrent: () => current1 && !controller1.signal.aborted,
+    onState: (state) => states1.push(state),
+  });
+
+  // Start submission on first mount
+  const pending1 = flow1.submit(input(), { signal: controller1.signal });
+
+  // StrictMode cleanup: dispose and abort
+  flow1.dispose();
+  controller1.abort();
+  current1 = false;
+
+  // Remount creates fresh flow2
+  let controller2 = new AbortController();
+  let current2 = true;
+  const states2 = [];
+  const flow2 = createSiteSubmission({
+    request: async (url) => url.endsWith('create-preview') ? gate2.promise : result(),
+    advance: async () => operation('succeeded'),
+    isCurrent: () => current2 && !controller2.signal.aborted,
+    onState: (state) => states2.push(state),
+  });
+
+  // Old delayed promise resolves
+  gate1.resolve(preview());
+  await pending1;
+
+  // Flow1 must have stopped publishing
+  assert.equal(states1.some((s) => s.phase === 'creating' || s.phase === 'ready'), false);
+
+  // Flow2 submits cleanly without pollution from flow1
+  const pending2 = flow2.submit(input(), { signal: controller2.signal });
+  gate2.resolve(preview());
+  const final2 = await pending2;
+  assert.equal(final2.phase, 'ready');
+  assert.equal(states2.at(-1).phase, 'ready');
+});
+
+test('logout and login session rotation suppresses in-flight submission and prevents response leakage', async () => {
+  const gate = deferred();
+  let sessionValid = true;
+  const states = [];
+  const flow = createSiteSubmission({
+    request: async (url) => url.endsWith('create-preview') ? gate.promise : result(),
+    advance: async () => operation('succeeded'),
+    isCurrent: () => sessionValid,
+    onState: (state) => states.push(state),
+  });
+
+  const pending = flow.submit(input());
+  await new Promise(setImmediate);
+  assert.equal(states.length, 1);
+  assert.equal(states[0].phase, 'previewing');
+
+  // User logs out while preview was pending
+  sessionValid = false;
+  gate.resolve(preview());
+  await pending;
+
+  // No further state was published after logout
+  assert.equal(states.length, 1);
+  assert.notEqual(flow.getState().phase, 'ready');
+});
