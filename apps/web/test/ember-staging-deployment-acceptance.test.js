@@ -229,6 +229,8 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
     assert.equal(htmlRes.status, 200);
     assert.equal(htmlRes.headers.get('cache-control'), 'no-store');
     assert.equal(htmlRes.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(htmlRes.headers.get('x-accel-buffering'), 'no');
+    assert.ok(Number.parseInt(htmlRes.headers.get('content-length'), 10) > 0);
 
     // Built hashed assets must be public, max-age=300
     const cssRes = await fetch(`http://127.0.0.1:${port}/assets/${mainCss}`, {
@@ -237,6 +239,8 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
     assert.equal(cssRes.status, 200);
     assert.equal(cssRes.headers.get('cache-control'), 'public, max-age=300');
     assert.equal(cssRes.headers.get('x-content-type-options'), 'nosniff');
+    assert.equal(cssRes.headers.get('x-accel-buffering'), 'no');
+    assert.ok(Number.parseInt(cssRes.headers.get('content-length'), 10) > 0);
 
     // Font files must be public, max-age=300 with font/ttf
     const fontRes = await fetch(`http://127.0.0.1:${port}/fonts/ember/manrope-75274da585.ttf`, {
@@ -245,6 +249,8 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
     assert.equal(fontRes.status, 200);
     assert.equal(fontRes.headers.get('content-type'), 'font/ttf');
     assert.equal(fontRes.headers.get('cache-control'), 'public, max-age=300');
+    assert.equal(fontRes.headers.get('x-accel-buffering'), 'no');
+    assert.equal(fontRes.headers.get('content-length'), '164700');
   });
 });
 
