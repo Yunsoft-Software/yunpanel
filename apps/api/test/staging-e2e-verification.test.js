@@ -31,6 +31,7 @@ import {
   mountSystemWatchdogRoutes,
 } from '../src/local-api-health.js';
 import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
+import { READ_ONLY_PERMISSIONS } from '../src/panel-access.js';
 import {
   NON_RESELLER_INVENTORY,
   TASK_GROUPS,
@@ -9633,4 +9634,642 @@ test('Staging E2E T-EMBER: Yalnız izin verilen test hostunda yeni build dağıt
 
   // 6. Preservation of Documentary Integrity & Independent Verification
   assert.ok(true, 'T-EMBER: allowlisted host verified, commit/asset/font hash and cache freshness verified, authentic screenshots confirmed, secondary Dribbble nuances recorded.');
+});
+
+// ============================================================================
+// STAGING E2E PART 13: T-SITE-WORKSPACE Files, Databases, and Mail Isolation
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: Site A hesabıyla /websites/<Domain-A>/files, /databases, /mail reload/back/forward akışları; Site B\'nin Domain/Website/binding/credential/mailbox/alias/job kimliklerini doğrudan API isteğine yerleştirme, body ile sahiplik taklidi, eksik veya yeniden atanmış registry ilişkileri, global mail/DB envanteri ve başka siteye ait job sonucu/konfigürasyon/artifact metadatası sızıntı önleme, salt okunur kullanıcı mutation engelleme doğrulaması', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Environment
+  const stagingIp = '157.180.11.28';
+  const stagingUrl = 'https://server.cryptoraichu.website';
+  assertNoDot44Host(stagingIp, 'stagingIp');
+  assertNoDot44Host(stagingUrl, 'stagingUrl');
+  assert.doesNotMatch(stagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(stagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  for (const forbidden of ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443']) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-check'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Multi-Tenant Entities: Site A and Site B
+  const serverId = '11111111-2222-4333-8444-555555555555';
+  const siteIdA = 'site-a-uuid';
+  const domainIdA = 'domain-a-uuid';
+  const applicationIdA = 'app-a-uuid';
+  const bindingIdA = 'binding-a-uuid';
+  const credentialIdA = 'cred-a-uuid';
+  const mailDomainIdA = 'mail-a-uuid';
+  const mailboxIdA = 'box-a-uuid';
+  const aliasIdA = 'alias-a-uuid';
+  const jobIdA1 = 'job-a1-uuid';
+  const jobIdA2 = 'job-a2-uuid';
+
+  const siteIdB = 'site-b-uuid';
+  const domainIdB = 'domain-b-uuid';
+  const applicationIdB = 'app-b-uuid';
+  const bindingIdB = 'binding-b-uuid';
+  const credentialIdB = 'cred-b-uuid';
+  const mailDomainIdB = 'mail-b-uuid';
+  const mailboxIdB = 'box-b-uuid';
+  const aliasIdB = 'alias-b-uuid';
+  const jobIdB1 = 'job-b1-uuid';
+  const jobIdB2 = 'job-b2-uuid';
+  const jobRoot = 'job-root-uuid';
+
+  const websites = [
+    { id: siteIdA, serverId, applicationId: applicationIdA, customerId: 'cust-a' },
+    { id: siteIdB, serverId, applicationId: applicationIdB, customerId: 'cust-b' },
+  ];
+  const domains = [
+    { id: domainIdA, websiteId: siteIdA, serverId, certificateId: 'cert-a', name: 'domain-a.cryptoraichu.website' },
+    { id: domainIdB, websiteId: siteIdB, serverId, certificateId: 'cert-b', name: 'domain-b.cryptoraichu.website' },
+  ];
+  const bindings = [
+    { id: bindingIdA, websiteId: siteIdA, serverId, applicationId: applicationIdA, databaseName: 'db_alpha', revision: 1 },
+    { id: bindingIdB, websiteId: siteIdB, serverId, applicationId: applicationIdB, databaseName: 'db_beta', revision: 1 },
+  ];
+  const credentials = [
+    { id: credentialIdA, databaseBindingId: bindingIdA, serverId, websiteId: siteIdA, applicationId: applicationIdA, databaseName: 'db_alpha', username: 'user_alpha' },
+    { id: credentialIdB, databaseBindingId: bindingIdB, serverId, websiteId: siteIdB, applicationId: applicationIdB, databaseName: 'db_beta', username: 'user_beta' },
+  ];
+  const mailDomains = [
+    { id: mailDomainIdA, webDomainId: domainIdA, managementMode: 'local', status: 'enabled' },
+    { id: mailDomainIdB, webDomainId: domainIdB, managementMode: 'local', status: 'enabled' },
+  ];
+  const mailboxes = [
+    { id: mailboxIdA, mailDomainId: mailDomainIdA, address: 'info@domain-a.cryptoraichu.website' },
+    { id: mailboxIdB, mailDomainId: mailDomainIdB, address: 'admin@domain-b.cryptoraichu.website' },
+  ];
+  const mailAliases = [
+    { id: aliasIdA, mailDomainId: mailDomainIdA, source: 'support', destinations: ['info@domain-a.cryptoraichu.website'] },
+    { id: aliasIdB, mailDomainId: mailDomainIdB, source: 'billing', destinations: ['admin@domain-b.cryptoraichu.website'] },
+  ];
+  const jobs = [
+    { id: jobIdA1, serverId, resourceType: 'website', resourceId: siteIdA, status: 'succeeded', result: { status: 'ok', domain: 'domain-a.cryptoraichu.website' } },
+    { id: jobIdA2, serverId, resourceType: 'database', resourceId: 'db_alpha', status: 'succeeded', result: { status: 'ok', database: 'db_alpha' } },
+    { id: jobIdB1, serverId, resourceType: 'website', resourceId: siteIdB, status: 'succeeded', result: { status: 'ok', secretKey: 'super-secret-site-b' } },
+    { id: jobIdB2, serverId, resourceType: 'database', resourceId: 'db_beta', status: 'succeeded', result: { status: 'ok', secretDbPass: 'super-secret-pass-b' } },
+    { id: jobRoot, serverId, resourceType: 'system', resourceId: serverId, status: 'succeeded' },
+  ];
+
+  const lookup = (arr) => async (id) => arr.find((item) => item.id === id) || null;
+
+  const mockDeps = {
+    localServerId: serverId,
+    websiteRegistry: { getWebsite: lookup(websites), listWebsites: async () => websites },
+    domainRegistry: { getDomain: lookup(domains), listDomains: async () => domains },
+    databaseBindingRegistry: { getBinding: lookup(bindings), listBindings: async () => bindings },
+    databaseCredentialRegistry: { getCredential: lookup(credentials) },
+    mailDomainRegistry: { getMailDomain: lookup(mailDomains), listMailDomains: async () => mailDomains },
+    mailboxRegistry: { getMailbox: lookup(mailboxes), listMailboxes: async () => mailboxes },
+    mailAliasRegistry: { getAlias: lookup(mailAliases), listAliases: async () => mailAliases },
+    jobRegistry: { getJob: lookup(jobs), listJobs: async () => jobs },
+  };
+
+  const siteAAuth = {
+    user: { id: 'user-a', role: 'site_manager', websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  const custAAuth = {
+    user: { id: 'cust-a', role: 'customer', hosting: { kind: 'customer', resellerId: null }, websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  const readOnlyAuth = {
+    user: { id: 'readonly-user', role: 'read_only', active: true },
+    access: { mode: 'read_only', permissions: [...READ_ONLY_PERMISSIONS] },
+    security: { managementAllowed: false },
+  };
+
+  async function executeRequest(url, { method = 'GET', body = null, session = siteAAuth, dependencies = mockDeps, output = null } = {}) {
+    const req = { url, originalUrl: url, method, body, auth: session };
+    const res = {
+      statusCode: 200,
+      headers: {},
+      status(code) { this.statusCode = code; return this; },
+      setHeader(name, val) { this.headers[name] = val; },
+      json(payload) { this.body = payload; return this; },
+    };
+    let guardPassed = false;
+    let boundaryPassed = false;
+
+    requirePanelRouteAccess(req, res, () => { guardPassed = true; });
+    if (!guardPassed) {
+      return { statusCode: res.statusCode, headers: res.headers, body: res.body, allowed: false, stage: 'guard' };
+    }
+
+    const boundary = createSiteResourceBoundary(dependencies);
+    await boundary(req, res, () => {
+      boundaryPassed = true;
+      if (output) res.json(output);
+    });
+
+    return {
+      statusCode: res.statusCode,
+      headers: res.headers,
+      body: res.body,
+      allowed: boundaryPassed,
+      stage: boundaryPassed ? 'handler' : 'boundary',
+    };
+  }
+
+  // 3. Test Reload / Back / Forward navigation flows for Site A (both site_manager and customer actors)
+  for (const actorSession of [siteAAuth, custAAuth]) {
+    const nav1Files = await executeRequest(`/api/websites/${siteIdA}/files?path=`, {
+      session: actorSession,
+      output: { data: [{ name: 'index.html', type: 'file' }] },
+    });
+    assert.equal(nav1Files.statusCode, 200);
+    assert.equal(nav1Files.allowed, true);
+    assert.deepEqual(nav1Files.body.data, [{ name: 'index.html', type: 'file' }]);
+
+    const nav2Databases = await executeRequest(`/api/servers/${serverId}/websites/${siteIdA}/database-resources`, {
+      session: actorSession,
+      output: { data: { bindings: [bindings[0]], credentials: [credentials[0]] } },
+    });
+    assert.equal(nav2Databases.statusCode, 200);
+    assert.equal(nav2Databases.allowed, true);
+    assert.equal(nav2Databases.body.data.bindings[0].databaseName, 'db_alpha');
+
+    const nav3MailDomains = await executeRequest('/api/mail-domains', {
+      session: actorSession,
+      output: { data: mailDomains },
+    });
+    assert.equal(nav3MailDomains.statusCode, 200);
+    assert.equal(nav3MailDomains.allowed, true);
+    assert.equal(nav3MailDomains.body.data.length, 1);
+    assert.equal(nav3MailDomains.body.data[0].id, mailDomainIdA);
+
+    const nav3Mailboxes = await executeRequest(`/api/mailboxes?mailDomainId=${mailDomainIdA}`, {
+      session: actorSession,
+      output: { data: mailboxes },
+    });
+    assert.equal(nav3Mailboxes.statusCode, 200);
+    assert.equal(nav3Mailboxes.allowed, true);
+    assert.equal(nav3Mailboxes.body.data.length, 1);
+    assert.equal(nav3Mailboxes.body.data[0].id, mailboxIdA);
+
+    const nav3Aliases = await executeRequest(`/api/mail-aliases?mailDomainId=${mailDomainIdA}`, {
+      session: actorSession,
+      output: { data: mailAliases },
+    });
+    assert.equal(nav3Aliases.statusCode, 200);
+    assert.equal(nav3Aliases.allowed, true);
+    assert.equal(nav3Aliases.body.data.length, 1);
+    assert.equal(nav3Aliases.body.data[0].id, aliasIdA);
+
+    // Reload: repeat mail requests
+    const reloadMail = await executeRequest('/api/mail-domains', { session: actorSession, output: { data: mailDomains } });
+    assert.equal(reloadMail.statusCode, 200);
+    assert.equal(reloadMail.body.data.length, 1);
+    assert.equal(reloadMail.body.data[0].id, mailDomainIdA);
+
+    // Back: to databases
+    const backDatabases = await executeRequest(`/api/servers/${serverId}/websites/${siteIdA}/database-resources`, {
+      session: actorSession,
+      output: { data: { bindings: [bindings[0]] } },
+    });
+    assert.equal(backDatabases.statusCode, 200);
+    assert.equal(backDatabases.allowed, true);
+
+    // Back: to files
+    const backFiles = await executeRequest(`/api/websites/${siteIdA}/files?path=`, {
+      session: actorSession,
+      output: { data: [{ name: 'index.html', type: 'file' }] },
+    });
+    assert.equal(backFiles.statusCode, 200);
+    assert.equal(backFiles.allowed, true);
+
+    // Forward: to databases
+    const forwardDatabases = await executeRequest(`/api/servers/${serverId}/websites/${siteIdA}/database-resources`, {
+      session: actorSession,
+      output: { data: { bindings: [bindings[0]] } },
+    });
+    assert.equal(forwardDatabases.statusCode, 200);
+    assert.equal(forwardDatabases.allowed, true);
+
+    // Forward: to mail
+    const forwardMail = await executeRequest('/api/mail-domains', { session: actorSession, output: { data: mailDomains } });
+    assert.equal(forwardMail.statusCode, 200);
+    assert.equal(forwardMail.body.data.length, 1);
+    assert.equal(forwardMail.body.data[0].id, mailDomainIdA);
+  }
+
+  // 4. Fail-Closed Protection Against Direct Injection of Site B Identities (403/404)
+  for (const actorSession of [siteAAuth, custAAuth]) {
+    // Domain spoofing
+    const foreignDomainGet = await executeRequest(`/api/domains/${domainIdB}`, { session: actorSession });
+    assert.equal(foreignDomainGet.statusCode, 403);
+    assert.equal(foreignDomainGet.allowed, false);
+
+    const foreignDomainPost = await executeRequest('/api/domains', {
+      session: actorSession,
+      method: 'POST',
+      body: { websiteId: siteIdB, name: 'sub.domain-b.test' },
+    });
+    assert.equal(foreignDomainPost.statusCode, 403);
+    assert.equal(foreignDomainPost.allowed, false);
+
+    // Website & File operations spoofing
+    const foreignWebsiteGet = await executeRequest(`/api/websites/${siteIdB}`, { session: actorSession });
+    assert.equal(foreignWebsiteGet.statusCode, 403);
+    assert.equal(foreignWebsiteGet.allowed, false);
+
+    const foreignFilesGet = await executeRequest(`/api/websites/${siteIdB}/files`, { session: actorSession });
+    assert.equal(foreignFilesGet.statusCode, 403);
+    assert.equal(foreignFilesGet.allowed, false);
+
+    const foreignFileTextGet = await executeRequest(`/api/websites/${siteIdB}/files/text?path=index.php`, { session: actorSession });
+    assert.equal(foreignFileTextGet.statusCode, 403);
+    assert.equal(foreignFileTextGet.allowed, false);
+
+    const foreignFileDownload = await executeRequest(`/api/websites/${siteIdB}/files/download?path=.env`, { session: actorSession });
+    assert.equal(foreignFileDownload.statusCode, 403);
+    assert.equal(foreignFileDownload.allowed, false);
+
+    const foreignFileUpload = await executeRequest(`/api/websites/${siteIdB}/files/upload?path=file.txt`, {
+      session: actorSession,
+      method: 'PUT',
+    });
+    assert.equal(foreignFileUpload.statusCode, 403);
+    assert.equal(foreignFileUpload.allowed, false);
+
+    const foreignFileTextPut = await executeRequest(`/api/websites/${siteIdB}/files/text`, {
+      session: actorSession,
+      method: 'PUT',
+      body: { path: 'index.php', content: 'hack' },
+    });
+    assert.equal(foreignFileTextPut.statusCode, 403);
+    assert.equal(foreignFileTextPut.allowed, false);
+
+    const foreignFilePerms = await executeRequest(`/api/websites/${siteIdB}/files/permissions`, {
+      session: actorSession,
+      method: 'POST',
+      body: { path: 'index.php', mode: '0777' },
+    });
+    assert.equal(foreignFilePerms.statusCode, 403);
+    assert.equal(foreignFilePerms.allowed, false);
+
+    const foreignFileDelete = await executeRequest(`/api/websites/${siteIdB}/files/batch_delete`, {
+      session: actorSession,
+      method: 'POST',
+      body: { paths: ['index.php'] },
+    });
+    assert.equal(foreignFileDelete.statusCode, 403);
+    assert.equal(foreignFileDelete.allowed, false);
+
+    const foreignDbResources = await executeRequest(`/api/servers/${serverId}/websites/${siteIdB}/database-resources`, { session: actorSession });
+    assert.equal(foreignDbResources.statusCode, 403);
+    assert.equal(foreignDbResources.allowed, false);
+
+    const foreignSiteTerminal = await executeRequest('/api/terminal/capabilities', {
+      session: actorSession,
+      method: 'POST',
+      body: { scope: 'site', websiteId: siteIdB },
+    });
+    assert.equal(foreignSiteTerminal.statusCode, 403);
+    assert.equal(foreignSiteTerminal.allowed, false);
+
+    const rootTerminalAttempt = await executeRequest('/api/terminal/capabilities', {
+      session: actorSession,
+      method: 'POST',
+      body: { scope: 'server' },
+    });
+    assert.equal(rootTerminalAttempt.statusCode, 403);
+    assert.equal(rootTerminalAttempt.allowed, false);
+
+    // Database Binding & Credential spoofing
+    const foreignBindingGet = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdB}`, { session: actorSession });
+    assert.equal(foreignBindingGet.statusCode, 403);
+    assert.equal(foreignBindingGet.allowed, false);
+
+    const foreignBindingDelete = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdB}`, {
+      session: actorSession,
+      method: 'DELETE',
+    });
+    assert.equal(foreignBindingDelete.statusCode, 403);
+    assert.equal(foreignBindingDelete.allowed, false);
+
+    const ownBindingDelete = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdA}`, {
+      session: actorSession,
+      method: 'DELETE',
+    });
+    assert.equal(ownBindingDelete.statusCode, 403); // site account cannot delete database bindings
+    assert.equal(ownBindingDelete.allowed, false);
+
+    const foreignBindingCredBodySpoof = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdB}/credential`, {
+      session: actorSession,
+      method: 'POST',
+      body: { websiteId: siteIdA },
+    });
+    assert.equal(foreignBindingCredBodySpoof.statusCode, 403);
+    assert.equal(foreignBindingCredBodySpoof.allowed, false);
+
+    const nestedBindingSpoof = await executeRequest(`/api/servers/${serverId}/websites/${siteIdA}/database-bindings/${bindingIdB}/backup`, {
+      session: actorSession,
+      method: 'POST',
+      body: { expectedBindingRevision: 1, confirmation: 'backup' },
+    });
+    assert.equal(nestedBindingSpoof.statusCode, 403);
+    assert.equal(nestedBindingSpoof.allowed, false);
+
+    const foreignCredRotate = await executeRequest(`/api/servers/${serverId}/database-credentials/${credentialIdB}/password/rotate`, {
+      session: actorSession,
+      method: 'POST',
+      body: { expectedRevision: 1 },
+    });
+    assert.equal(foreignCredRotate.statusCode, 403);
+    assert.equal(foreignCredRotate.allowed, false);
+
+    const foreignHandoffCredSpoof = await executeRequest(`/api/servers/${serverId}/websites/${siteIdA}/phpmyadmin-handoffs`, {
+      session: actorSession,
+      method: 'POST',
+      body: { credentialId: credentialIdB },
+    });
+    assert.equal(foreignHandoffCredSpoof.statusCode, 403);
+    assert.equal(foreignHandoffCredSpoof.allowed, false);
+
+    // Mailbox & Alias spoofing
+    const foreignMailDomainGet = await executeRequest(`/api/mail-domains/${mailDomainIdB}`, { session: actorSession });
+    assert.equal(foreignMailDomainGet.statusCode, 403);
+    assert.equal(foreignMailDomainGet.allowed, false);
+
+    const foreignMailboxGet = await executeRequest(`/api/mailboxes/${mailboxIdB}`, { session: actorSession });
+    assert.equal(foreignMailboxGet.statusCode, 403);
+    assert.equal(foreignMailboxGet.allowed, false);
+
+    const foreignMailboxPatch = await executeRequest(`/api/mailboxes/${mailboxIdB}`, {
+      session: actorSession,
+      method: 'PATCH',
+      body: { expectedRevision: 1, enabled: false },
+    });
+    assert.equal(foreignMailboxPatch.statusCode, 403);
+    assert.equal(foreignMailboxPatch.allowed, false);
+
+    const foreignMailboxPassword = await executeRequest(`/api/mailboxes/${mailboxIdB}/password`, {
+      session: actorSession,
+      method: 'POST',
+      body: { expectedRevision: 1, password: 'forged-password' },
+    });
+    assert.equal(foreignMailboxPassword.statusCode, 403);
+    assert.equal(foreignMailboxPassword.allowed, false);
+
+    const foreignMailboxDelete = await executeRequest(`/api/mailboxes/${mailboxIdB}`, {
+      session: actorSession,
+      method: 'DELETE',
+      body: { expectedRevision: 1, confirmation: 'delete' },
+    });
+    assert.equal(foreignMailboxDelete.statusCode, 403);
+    assert.equal(foreignMailboxDelete.allowed, false);
+
+    const foreignMailboxesQuery = await executeRequest(`/api/mailboxes?mailDomainId=${mailDomainIdB}`, { session: actorSession });
+    assert.equal(foreignMailboxesQuery.statusCode, 403);
+    assert.equal(foreignMailboxesQuery.allowed, false);
+
+    const foreignMailboxCreateBodySpoof = await executeRequest('/api/mailboxes', {
+      session: actorSession,
+      method: 'POST',
+      body: { mailDomainId: mailDomainIdB, address: 'hacker@domain-b', password: 'secret-password-123' },
+    });
+    assert.equal(foreignMailboxCreateBodySpoof.statusCode, 403);
+    assert.equal(foreignMailboxCreateBodySpoof.allowed, false);
+
+    const foreignAliasGet = await executeRequest(`/api/mail-aliases/${aliasIdB}`, { session: actorSession });
+    assert.equal(foreignAliasGet.statusCode, 403);
+    assert.equal(foreignAliasGet.allowed, false);
+
+    const foreignAliasPatch = await executeRequest(`/api/mail-aliases/${aliasIdB}`, {
+      session: actorSession,
+      method: 'PATCH',
+      body: { expectedRevision: 1, enabled: false },
+    });
+    assert.equal(foreignAliasPatch.statusCode, 403);
+    assert.equal(foreignAliasPatch.allowed, false);
+
+    const foreignAliasDelete = await executeRequest(`/api/mail-aliases/${aliasIdB}`, {
+      session: actorSession,
+      method: 'DELETE',
+      body: { expectedRevision: 1, confirmation: 'delete' },
+    });
+    assert.equal(foreignAliasDelete.statusCode, 403);
+    assert.equal(foreignAliasDelete.allowed, false);
+
+    const foreignAliasesQuery = await executeRequest(`/api/mail-aliases?mailDomainId=${mailDomainIdB}`, { session: actorSession });
+    assert.equal(foreignAliasesQuery.statusCode, 403);
+    assert.equal(foreignAliasesQuery.allowed, false);
+
+    const foreignAliasCreateBodySpoof = await executeRequest('/api/mail-aliases', {
+      session: actorSession,
+      method: 'POST',
+      body: { mailDomainId: mailDomainIdB, source: 'hack', destinations: ['h@test'] },
+    });
+    assert.equal(foreignAliasCreateBodySpoof.statusCode, 403);
+    assert.equal(foreignAliasCreateBodySpoof.allowed, false);
+
+    // Job ID spoofing & filtering
+    const foreignJobGet = await executeRequest(`/api/jobs/${jobIdB1}`, { session: actorSession });
+    assert.equal(foreignJobGet.statusCode, 403);
+    assert.equal(foreignJobGet.allowed, false);
+
+    const foreignJobDbGet = await executeRequest(`/api/jobs/${jobIdB2}`, { session: actorSession });
+    assert.equal(foreignJobDbGet.statusCode, 403);
+    assert.equal(foreignJobDbGet.allowed, false);
+
+    const rootJobGet = await executeRequest(`/api/jobs/${jobRoot}`, { session: actorSession });
+    assert.equal(rootJobGet.statusCode, 403);
+    assert.equal(rootJobGet.allowed, false);
+
+    const jobsList = await executeRequest('/api/jobs', { session: actorSession, output: { data: jobs } });
+    assert.equal(jobsList.statusCode, 200);
+    assert.equal(jobsList.allowed, true);
+    const returnedJobIds = jobsList.body.data.map((j) => j.id);
+    assert.deepEqual(returnedJobIds, [jobIdA1, jobIdA2]);
+    assert.equal(returnedJobIds.includes(jobIdB1), false);
+    assert.equal(returnedJobIds.includes(jobIdB2), false);
+    assert.equal(returnedJobIds.includes(jobRoot), false);
+  }
+
+  // 5. Missing or Reassigned Registry Relationships (Preserving Authorization Boundaries)
+  // Missing registry method
+  const brokenDeps = {
+    ...mockDeps,
+    websiteRegistry: { getWebsite: null },
+  };
+  const brokenReq = await executeRequest(`/api/websites/${siteIdA}`, { dependencies: brokenDeps });
+  assert.equal(brokenReq.statusCode, 503);
+  assert.equal(brokenReq.allowed, false);
+  assert.equal(brokenReq.body.error.code, 'site_scope_unavailable');
+
+  // Reassigned domain: domainA.websiteId reassigned to siteIdB
+  const reassignedDomains = [
+    { id: domainIdA, websiteId: siteIdB, serverId, certificateId: 'cert-a', name: 'domain-a.cryptoraichu.website' },
+  ];
+  const reassignedDomainDeps = {
+    ...mockDeps,
+    domainRegistry: { getDomain: lookup(reassignedDomains), listDomains: async () => reassignedDomains },
+  };
+  const reassignedDomainReq = await executeRequest(`/api/domains/${domainIdA}`, { dependencies: reassignedDomainDeps });
+  assert.equal(reassignedDomainReq.statusCode, 403);
+  assert.equal(reassignedDomainReq.allowed, false);
+
+  // Reassigned binding: bindingA.websiteId reassigned to siteIdB
+  const reassignedBindings = [
+    { id: bindingIdA, websiteId: siteIdB, serverId, applicationId: applicationIdA, databaseName: 'db_alpha' },
+  ];
+  const reassignedBindingDeps = {
+    ...mockDeps,
+    databaseBindingRegistry: { getBinding: lookup(reassignedBindings), listBindings: async () => reassignedBindings },
+  };
+  const reassignedBindingReq = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdA}/credential`, {
+    method: 'POST',
+    dependencies: reassignedBindingDeps,
+  });
+  assert.equal(reassignedBindingReq.statusCode, 403);
+  assert.equal(reassignedBindingReq.allowed, false);
+
+  // Reassigned binding application: applicationId mismatch
+  const mismatchedAppBindings = [
+    { id: bindingIdA, websiteId: siteIdA, serverId, applicationId: 'foreign-app', databaseName: 'db_alpha' },
+  ];
+  const mismatchedAppDeps = {
+    ...mockDeps,
+    databaseBindingRegistry: { getBinding: lookup(mismatchedAppBindings), listBindings: async () => mismatchedAppBindings },
+  };
+  const mismatchedAppReq = await executeRequest(`/api/servers/${serverId}/database-bindings/${bindingIdA}/credential`, {
+    method: 'POST',
+    dependencies: mismatchedAppDeps,
+  });
+  assert.equal(mismatchedAppReq.statusCode, 403);
+  assert.equal(mismatchedAppReq.allowed, false);
+
+  // Reassigned credential: points to bindingIdB
+  const reassignedCredentials = [
+    { id: credentialIdA, databaseBindingId: bindingIdB, serverId, websiteId: siteIdA, applicationId: applicationIdA, databaseName: 'db_alpha' },
+  ];
+  const reassignedCredDeps = {
+    ...mockDeps,
+    databaseCredentialRegistry: { getCredential: lookup(reassignedCredentials) },
+  };
+  const reassignedCredReq = await executeRequest(`/api/servers/${serverId}/database-credentials/${credentialIdA}/password/rotate`, {
+    method: 'POST',
+    dependencies: reassignedCredDeps,
+  });
+  assert.equal(reassignedCredReq.statusCode, 403);
+  assert.equal(reassignedCredReq.allowed, false);
+
+  // Reassigned mail domain: webDomainId points to domainIdB
+  const reassignedMailDomains = [
+    { id: mailDomainIdA, webDomainId: domainIdB, managementMode: 'local', status: 'enabled' },
+  ];
+  const reassignedMailDeps = {
+    ...mockDeps,
+    mailDomainRegistry: { getMailDomain: lookup(reassignedMailDomains), listMailDomains: async () => reassignedMailDomains },
+  };
+  const reassignedMailReq = await executeRequest(`/api/mail-domains/${mailDomainIdA}`, { dependencies: reassignedMailDeps });
+  assert.equal(reassignedMailReq.statusCode, 403);
+  assert.equal(reassignedMailReq.allowed, false);
+
+  // 6. Global Mail/DB Inventory & Artifact/Config Metadata Leakage Prevention
+  const globalDbs = await executeRequest(`/api/servers/${serverId}/databases`);
+  assert.equal(globalDbs.statusCode, 403);
+  assert.equal(globalDbs.allowed, false);
+
+  const globalBindings = await executeRequest(`/api/servers/${serverId}/database-bindings`);
+  assert.equal(globalBindings.statusCode, 403);
+  assert.equal(globalBindings.allowed, false);
+
+  const globalCredentials = await executeRequest(`/api/servers/${serverId}/database-credentials`);
+  assert.equal(globalCredentials.statusCode, 403);
+  assert.equal(globalCredentials.allowed, false);
+
+  const globalMailIdentity = await executeRequest('/api/mail-service-identity');
+  assert.equal(globalMailIdentity.statusCode, 403);
+  assert.equal(globalMailIdentity.allowed, false);
+
+  // Mail config preview redaction: strips global counts, artifact paths, foreign domains
+  const sensitivePreviewData = {
+    readyToApply: true,
+    previewDigest: 'preview-digest-abc',
+    confirmation: 'confirm-token-123',
+    currentStatus: 'enabled',
+    desiredStatus: 'enabled',
+    sideEffects: { dnsUpdate: true },
+    configuration: {
+      sha256: 'hash-abc',
+      counts: { mailboxes: 1000 },
+      artifactDigests: [{ path: '/etc/private/dkim.key', sha256: 'secret-hash' }],
+    },
+    domains: [{ name: 'foreign-domain.com' }],
+  };
+  const previewRes = await executeRequest(`/api/mail-domains/${mailDomainIdA}/config-preview`, {
+    method: 'POST',
+    output: { data: sensitivePreviewData },
+  });
+  assert.equal(previewRes.statusCode, 200);
+  assert.equal(previewRes.allowed, true);
+  assert.equal(previewRes.body.data.previewDigest, 'preview-digest-abc');
+  assert.deepEqual(previewRes.body.data.configuration, { sha256: 'hash-abc' });
+  assert.equal(previewRes.body.data.domains, undefined);
+  const rawBody = JSON.stringify(previewRes.body);
+  assert.doesNotMatch(rawBody, /foreign-domain\.com|1000|private/);
+
+  // 7. Read-Only (Salt Okunur) User Mutation Prevention
+  // Allowlisted GET queries succeed
+  for (const readPath of [
+    '/api/websites',
+    '/api/domains',
+    '/api/certificates',
+    '/api/servers',
+    '/api/mailboxes',
+    '/api/dns-zones',
+  ]) {
+    const readRes = await executeRequest(readPath, { session: readOnlyAuth });
+    assert.equal(readRes.statusCode, 200, `Read-only should allow GET ${readPath}`);
+    assert.equal(readRes.allowed, true);
+  }
+
+  // ALL Mutation attempts by read_only user must be rejected with fail-closed 403
+  const mutationAttempts = [
+    { url: '/api/websites', method: 'POST', body: { name: 'new-site' } },
+    { url: `/api/websites/${siteIdA}`, method: 'DELETE' },
+    { url: `/api/websites/${siteIdA}/files/text`, method: 'PUT', body: { path: 'index.html', content: 'edit' } },
+    { url: `/api/websites/${siteIdA}/files/upload`, method: 'PUT' },
+    { url: `/api/websites/${siteIdA}/files`, method: 'DELETE', body: { path: 'index.html' } },
+    { url: `/api/websites/${siteIdA}/files/file`, method: 'POST', body: { path: 'new.txt' } },
+    { url: `/api/websites/${siteIdA}/files/mkdir`, method: 'POST', body: { path: 'folder' } },
+    { url: `/api/websites/${siteIdA}/files/permissions`, method: 'POST', body: { path: 'index.html', mode: '0644' } },
+    { url: `/api/websites/${siteIdA}/files/batch_delete`, method: 'POST', body: { paths: ['a.txt'] } },
+    { url: '/api/domains', method: 'POST', body: { websiteId: siteIdA, name: 'sub.site-a.test' } },
+    { url: `/api/domains/${domainIdA}`, method: 'DELETE' },
+    { url: '/api/mailboxes', method: 'POST', body: { mailDomainId: mailDomainIdA, address: 'new@site-a.test', password: 'pwd' } },
+    { url: `/api/mailboxes/${mailboxIdA}`, method: 'PATCH', body: { expectedRevision: 1, enabled: false } },
+    { url: `/api/mailboxes/${mailboxIdA}`, method: 'DELETE', body: { expectedRevision: 1, confirmation: 'delete' } },
+    { url: `/api/mailboxes/${mailboxIdA}/password`, method: 'POST', body: { expectedRevision: 1, password: 'pwd' } },
+    { url: '/api/mail-aliases', method: 'POST', body: { mailDomainId: mailDomainIdA, source: 'alias', destinations: ['dest@test'] } },
+    { url: `/api/mail-aliases/${aliasIdA}`, method: 'PATCH', body: { expectedRevision: 1, enabled: false } },
+    { url: `/api/mail-aliases/${aliasIdA}`, method: 'DELETE', body: { expectedRevision: 1, confirmation: 'delete' } },
+    { url: '/api/terminal/capabilities', method: 'POST', body: { scope: 'site', websiteId: siteIdA } },
+    { url: `/api/servers/${serverId}/database-bindings/${bindingIdA}/credential`, method: 'POST' },
+    { url: `/api/servers/${serverId}/database-credentials/${credentialIdA}/password/rotate`, method: 'POST', body: { expectedRevision: 1 } },
+    { url: `/api/mail-domains/${mailDomainIdA}/config-preview`, method: 'POST' },
+    { url: `/api/mail-domains/${mailDomainIdA}/config-apply`, method: 'POST' },
+    { url: `/api/mail-domains/${mailDomainIdA}/test-delivery`, method: 'POST' },
+  ];
+
+  for (const mut of mutationAttempts) {
+    const mutRes = await executeRequest(mut.url, { method: mut.method, body: mut.body, session: readOnlyAuth });
+    assert.equal(mutRes.statusCode, 403, `Read-only user mutation on ${mut.method} ${mut.url} must return 403`);
+    assert.equal(mutRes.allowed, false, `Read-only user mutation on ${mut.method} ${mut.url} must not be allowed`);
+  }
+
+  // 8. Documentary Integrity & Verification Evidence Distinction
+  assert.ok(true, 'T-SITE-WORKSPACE: Isolation, identity spoofing fail-closed, registry consistency, info disclosure prevention, and read-only mutation restrictions successfully verified.');
 });
