@@ -50,7 +50,7 @@ test('failed later request retains created site, clears busy, and never permits 
   assert.equal(JSON.stringify(run.states).includes('fixture-secret'), false);
 });
 
-for (const status of ['failed', 'blocked', 'applying', 'compensating', 'compensated', 'pending']) {
+for (const status of ['failed', 'blocked', 'interrupted', 'applying', 'compensating', 'compensated', 'pending']) {
   test(`${status} provisioning remains visible but never claims successful readiness`, async () => {
     const run = harness({ advance: async (_id, { onStep }) => {
       const op = operation(status);
@@ -242,6 +242,8 @@ test('post-account provisioning error in create result preserves created site an
   assert.equal(state.created.id, domainId);
   assert.equal(state.siteAdmin.status, 'created');
   assert.ok(state.error.includes('kurulum planı kaydedilemedi'));
+  assert.equal(state.steps.length, 1);
+  assert.equal(state.steps[0].id, 'nginx');
   assert.equal(advanced, 0);
 });
 
@@ -265,6 +267,8 @@ test('post-account provisioning error rejection preserves created site from erro
   assert.equal(state.created.id, domainId);
   assert.equal(state.siteAdmin.status, 'created');
   assert.ok(state.error.includes('kurulum planı kaydedilemedi'));
+  assert.equal(state.steps.length, 1);
+  assert.equal(state.steps[0].id, 'nginx');
   assert.equal(advanced, 0);
 });
 

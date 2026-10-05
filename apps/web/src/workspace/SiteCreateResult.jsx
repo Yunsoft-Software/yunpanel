@@ -15,7 +15,7 @@ const STEP_LABELS = Object.freeze({
 const STATE_LABELS = Object.freeze({
   pending: 'Bekliyor', saving: 'Kaydediliyor', applying: 'İşleniyor', verifying: 'Doğrulanıyor',
   succeeded: 'Tamamlandı', partial: 'Kısmi başarılı',
-  failed: 'Başarısız', blocked: 'Engel var', compensating: 'Geri alınıyor', compensated: 'Geri alındı',
+  failed: 'Başarısız', blocked: 'Engel var', interrupted: 'Kesintiye uğradı', compensating: 'Geri alınıyor', compensated: 'Geri alındı',
 });
 export function SiteCreateProgress({ state }) {
   if (state.phase === 'idle' || state.phase === 'error') return null;
