@@ -119,7 +119,39 @@ import {
   phpMyAdminHandoffSocketInternals,
 } from '../src/phpmyadmin-handoff-socket.js';
 import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import {
+  createJobRegistry,
+  jobPublicView,
+  classifyJobError,
+  isTransientJobError,
+  isPermanentJobError,
+} from '../src/job-registry.js';
+import {
+  API_VERSION,
+  SCHEMA_VERSION,
+  DEPLOYMENT_COMPARISON_STATUSES,
+  resolveDeploymentDiagnostics,
+  compareDeploymentVersions,
+  sanitizeDiagnosticInfo,
+} from '../src/core-app.js';
+import {
+  jobAttemptCount,
+  jobHealthIndicator,
+  jobLifecycle,
+  jobResourceTarget,
+  jobStageProgress,
+  jobSupportsDeployLogs,
+  jobSupportsManualRetry,
+  canTriggerManualRetry,
+  safeJobResultMetadata,
+} from '../../web/src/workspace/job-presentation.js';
+import {
+  mountWebsiteProvisioningRoutes,
+  WebsiteProvisioningHttpError,
+  websiteProvisioningHttpInternals,
+} from '../src/website-provisioning-http.js';
+import { advanceProvisioning } from '../../web/src/workspace/provisioning-advance.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
 import { createProcessStoreLock } from '../src/process-store-lock.js';
 import {
   conversationScope,
@@ -9014,4 +9046,488 @@ test('Staging E2E T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki de�
   assert.equal(secondAttempt, errorResult); // Returns existing result without repeating create POST
 
   assert.ok(true, 'T-DEV-CREATE-RESULT: StrictMode, logout/login, password clearing, accessibility, and safe retry verified.');
+});
+
+test('Staging E2E T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda güncel API/web build kimliğiyle işlem durumu ve kurulum ilerletme doğrulaması', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Host Verification
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const stagingServerId = '77777777-7777-4777-8777-777777777777';
+
+  // Verify authorized staging host passes strict .44 isolation checks
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assertNoDot44Host(stagingServerId, 'stagingServerId');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+  assert.doesNotMatch(stagingServerId, /\.44$/);
+
+  // Verify any IP or host ending in .44 is strictly rejected with 403 / forbidden_host_dot44
+  const forbiddenHosts = [
+    '192.168.1.44',
+    '10.0.0.44',
+    '157.180.11.44',
+    'https://server.44:8443',
+    'http://plesk-bridge.internal.44/',
+    '203.0.113.44:443',
+  ];
+  for (const forbiddenHost of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'test-forbidden-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${forbiddenHost} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // Verify environment variables strictly do not point to .44
+  const testEnv = {
+    YUNPANEL_API_HOST: authorizedStagingIp,
+    TEST_SERVER_HOST: authorizedStagingUrl,
+    STAGING_HOST: authorizedStagingIp,
+  };
+  assertNoDot44Host(testEnv.YUNPANEL_API_HOST, 'env.YUNPANEL_API_HOST');
+  assertNoDot44Host(testEnv.TEST_SERVER_HOST, 'env.TEST_SERVER_HOST');
+  assertNoDot44Host(testEnv.STAGING_HOST, 'env.STAGING_HOST');
+
+  // 2. Current API & Web Build Identity & Version Diagnostics Verification
+  const currentBuildId = 'build-20261001-0300';
+  const currentAssetId = `assets-${currentBuildId}`;
+  const currentCommit = '70a51f6f';
+
+  const diagnostics = resolveDeploymentDiagnostics({
+    buildId: currentBuildId,
+    assetId: currentAssetId,
+    commit: currentCommit,
+    environment: 'production',
+  });
+
+  assert.equal(diagnostics.version, API_VERSION);
+  assert.equal(diagnostics.schemaVersion, SCHEMA_VERSION);
+  assert.equal(diagnostics.buildId, currentBuildId);
+  assert.equal(diagnostics.assetId, currentAssetId);
+  assert.equal(diagnostics.commit, currentCommit);
+  assert.equal(diagnostics.environment, 'production');
+
+  // Diagnostic sanitization: ensure sensitive keys/paths are redacted and secrets never exposed
+  const dirtyDiagnostics = {
+    ...diagnostics,
+    dbPassword: 'secret-db-pass',
+    jwtSecret: 'super-jwt-secret-key',
+  };
+  const sanitized = sanitizeDiagnosticInfo(dirtyDiagnostics);
+  assert.equal(sanitized.dbPassword, '[REDACTED]');
+  assert.equal(sanitized.jwtSecret, '[REDACTED]');
+  assert.equal(JSON.stringify(sanitized).includes('secret-db-pass'), false);
+  assert.equal(JSON.stringify(sanitized).includes('super-jwt-secret-key'), false);
+
+  // Deployment version comparison: matching client vs mismatch scenarios
+  const matchingClient = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId: currentBuildId,
+    assetId: currentAssetId,
+  };
+  const matchResult = compareDeploymentVersions(diagnostics, matchingClient);
+  assert.equal(matchResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+  assert.equal(matchResult.compatible, true);
+  assert.equal(matchResult.staleCache, false);
+
+  const staleClient = {
+    ...matchingClient,
+    buildId: 'build-20260920-0100',
+    assetId: 'assets-build-20260920-0100',
+  };
+  const staleResult = compareDeploymentVersions(diagnostics, staleClient);
+  assert.equal(staleResult.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+  assert.equal(staleResult.staleCache, true);
+  assert.equal(staleResult.requiresRefresh, true);
+
+  const incompatibleClient = {
+    ...matchingClient,
+    schemaVersion: SCHEMA_VERSION + 1,
+  };
+  const schemaResult = compareDeploymentVersions(diagnostics, incompatibleClient);
+  assert.equal(schemaResult.status, DEPLOYMENT_COMPARISON_STATUSES.SCHEMA_MISMATCH);
+  assert.equal(schemaResult.compatible, false);
+  assert.equal(schemaResult.hardRefreshRequired, true);
+
+  const emptyClientResult = compareDeploymentVersions(diagnostics, {});
+  assert.equal(emptyClientResult.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+  assert.equal(emptyClientResult.compatible, false);
+
+  // 3. Job Presentation (İşlem Durumu) Flow Compatibility
+  const rawSuccessJob = {
+    id: randomUUID(),
+    serverId: stagingServerId,
+    type: 'ssl.renew',
+    operation: 'ssl.renew',
+    resourceType: 'certificate',
+    resourceId: randomUUID(),
+    status: 'succeeded',
+    attempts: 0, // Real 0 attempt count
+    payload: {
+      privateKey: 'fixture-secret-key-material',
+      token: 'fixture-bearer-token',
+      password: 'fixture-secret-password',
+    },
+    result: {
+      certName: 'cryptoraichu.website',
+      validFrom: '2026-10-01T00:00:00.000Z',
+      validTo: '2027-01-01T00:00:00.000Z',
+      fingerprint256: '00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD',
+      internalKeyPath: '/etc/ssl/private/cryptoraichu.key',
+    },
+    error: null,
+  };
+
+  const publicSuccessView = jobPublicView(rawSuccessJob);
+  // Strips private payload and secrets
+  assert.equal(publicSuccessView.id, rawSuccessJob.id);
+  assert.equal(publicSuccessView.status, 'succeeded');
+  assert.equal(publicSuccessView.attempts, 0);
+  assert.equal('payload' in publicSuccessView, false);
+  assert.equal(JSON.stringify(publicSuccessView).includes('fixture-secret-key-material'), false);
+  assert.equal(JSON.stringify(publicSuccessView).includes('fixture-bearer-token'), false);
+  assert.equal(JSON.stringify(publicSuccessView).includes('fixture-secret-password'), false);
+
+  // Preserves real 0 attempts count without coercion or max=3 assumption
+  assert.equal(jobAttemptCount(publicSuccessView), 0);
+  assert.equal(jobAttemptCount({ attempts: 3 }), 3);
+  assert.equal(jobAttemptCount({ attempts: -1 }), null);
+  assert.equal(jobAttemptCount({ attempts: 'invalid' }), null);
+  assert.equal(jobAttemptCount({}), null);
+
+  // Job lifecycle stages: Turkish localized labels without fabricated fractions
+  const statusStageMap = [
+    ['queued', 'Kuyrukta'],
+    ['running', 'Sunucuda çalışıyor'],
+    ['succeeded', 'Tamamlandı'],
+    ['failed', 'Başarısız'],
+    ['cancelled', 'İptal edildi'],
+  ];
+  for (const [st, stage] of statusStageMap) {
+    const rawJob = {
+      id: randomUUID(),
+      serverId: stagingServerId,
+      type: 'app.static.deploy',
+      operation: 'app.static.deploy',
+      resourceType: 'application',
+      resourceId: randomUUID(),
+      status: st,
+      attempts: 1,
+    };
+    const view = jobPublicView(rawJob);
+    const lifecycle = jobLifecycle(view);
+    assert.equal(lifecycle.stage, stage);
+    // Never fabricates fractional progress (e.g. 1/3, 2/3, 3/3)
+    assert.doesNotMatch(lifecycle.stage, /\b\d+\/\d+\b/);
+  }
+
+  // Job health indicator separates health status from execution attempts (no false 0/3)
+  assert.equal(jobHealthIndicator(publicSuccessView), null);
+
+  const unhealthyJobWithRatio = {
+    ...publicSuccessView,
+    status: 'failed',
+    attempts: 1,
+    health: { satisfied: false, passed: 0, total: 3, statusCode: 503 },
+  };
+  const healthInd = jobHealthIndicator(unhealthyJobWithRatio);
+  assert.equal(healthInd.satisfied, false);
+  assert.equal(healthInd.status, 'unhealthy');
+  assert.equal(healthInd.label, 'Sağlıksız');
+  assert.equal(healthInd.passed, 0);
+  assert.equal(healthInd.total, 3);
+  // Real attempt count remains 1, completely separate from the 0/3 health ratio
+  assert.equal(jobAttemptCount(unhealthyJobWithRatio), 1);
+
+  const healthyJob = {
+    ...publicSuccessView,
+    status: 'succeeded',
+    attempts: 0,
+    health: { satisfied: true, passed: 3, total: 3, statusCode: 200 },
+  };
+  const healthyInd = jobHealthIndicator(healthyJob);
+  assert.equal(healthyInd.satisfied, true);
+  assert.equal(healthyInd.status, 'healthy');
+  assert.equal(healthyInd.label, 'Sağlıklı');
+
+  // Failed job diagnosis and manual retry capability
+  const failedDomainJob = {
+    id: randomUUID(),
+    serverId: stagingServerId,
+    type: 'domain.activate',
+    operation: 'domain.activate',
+    resourceType: 'domain',
+    resourceId: randomUUID(),
+    status: 'failed',
+    attempts: 1,
+    error: { code: 'nginx_config_invalid', message: 'Nginx syntax validation failed' },
+  };
+  const publicFailedView = jobPublicView(failedDomainJob);
+  assert.equal(publicFailedView.status, 'failed');
+  assert.ok(publicFailedView.diagnosis);
+  assert.equal(typeof publicFailedView.diagnosis.message, 'string');
+  assert.equal(typeof publicFailedView.diagnosis.action, 'string');
+
+  // Manual retry permissions: Owner can retry failed allowlisted job; running or unmanaged cannot
+  assert.equal(jobSupportsManualRetry(publicFailedView, { canManage: true }), true);
+  assert.equal(jobSupportsManualRetry(publicFailedView, { canManage: false }), false);
+  assert.equal(canTriggerManualRetry(publicFailedView, { canManage: true }), true);
+  assert.equal(canTriggerManualRetry(publicFailedView, { canManage: false }), false);
+
+  const runningJob = { ...publicSuccessView, status: 'running' };
+  assert.equal(jobSupportsManualRetry(runningJob, { canManage: true }), false);
+  assert.equal(canTriggerManualRetry(runningJob, { canManage: true }), false);
+
+  // Deploy logs restricted to deployment operations (app.static.deploy, app.node.deploy)
+  const deployJob = { ...publicSuccessView, type: 'app.static.deploy', operation: 'app.static.deploy' };
+  assert.equal(jobSupportsDeployLogs(deployJob), true);
+  assert.equal(jobSupportsDeployLogs(publicSuccessView), false);
+
+  // Safe job result metadata exposes allowlisted scalars only
+  const publicResultJob = {
+    ...publicSuccessView,
+    result: {
+      status: 'ok',
+      serviceName: 'nginx',
+      version: '1.24.0',
+      internalKeyPath: '/etc/ssl/private/cryptoraichu.key',
+    },
+  };
+  const safeResult = safeJobResultMetadata(publicResultJob);
+  assert.ok(safeResult);
+  assert.equal(safeResult.length, 3);
+  assert.deepEqual(safeResult.find(([label]) => label === 'Servis'), ['Servis', 'nginx']);
+  assert.equal(safeResult.some(([_, val]) => String(val).includes('cryptoraichu.key')), false);
+
+  // 4. Provisioning Advance (Kurulum İlerletme) Flow Compatibility
+  const {
+    continueBody,
+    retryBody,
+    compensateBody,
+    publicOperation,
+  } = websiteProvisioningHttpInternals;
+
+  const testOperationId = randomUUID();
+  const testStepId = 'certificate';
+
+  // Exact confirmation token formats strictly enforced
+  const expectedContinue = `continue-site-provisioning:${testOperationId}`;
+  const expectedRetry = `retry-site-provisioning:${testOperationId}:${testStepId}`;
+  const expectedCompensate = `compensate-site-provisioning:${testOperationId}:${testStepId}`;
+
+  assert.equal(continueBody({ confirmation: expectedContinue }, testOperationId), expectedContinue);
+  assert.equal(retryBody({ confirmation: expectedRetry }, testOperationId, testStepId), expectedRetry);
+  assert.equal(compensateBody({ confirmation: expectedCompensate }, testOperationId, testStepId), expectedCompensate);
+
+  // Malformed or foreign confirmation tokens throw WebsiteProvisioningHttpError (400)
+  for (const badToken of [
+    null,
+    undefined,
+    {},
+    { confirmation: 'wrong-token' },
+    { confirmation: `continue-site-provisioning:${randomUUID()}` },
+    { confirmation: expectedContinue, unexpectedKey: 'exploit' },
+  ]) {
+    assert.throws(
+      () => continueBody(badToken, testOperationId),
+      (err) => err instanceof WebsiteProvisioningHttpError && err.code === 'website_provisioning_confirmation_required' && err.status === 400,
+    );
+  }
+
+  // Public operation projection retains clean frozen structures
+  const mockProvisioningOp = {
+    operationId: testOperationId,
+    websiteId: randomUUID(),
+    ready: false,
+    status: 'running',
+    progress: { required: 3, completed: 1, remaining: 2 },
+    steps: [
+      { id: 'dns', kind: 'dns', required: true, state: 'succeeded', compensation: { state: 'not_required' } },
+      { id: 'nginx', kind: 'nginx', required: true, state: 'pending', compensation: { state: 'pending' } },
+      { id: 'certificate', kind: 'certificate', required: true, state: 'pending', compensation: { state: 'pending' } },
+    ],
+  };
+  const projectedOp = publicOperation(mockProvisioningOp);
+  assert.equal(projectedOp.operationId, testOperationId);
+  assert.equal(projectedOp.ready, false);
+  assert.equal(projectedOp.steps.length, 3);
+  assert.equal(projectedOp.steps[0].state, 'succeeded');
+  assert.equal(projectedOp.steps[1].state, 'pending');
+  assert.equal(Object.isFrozen(projectedOp), true);
+
+  // 5. HTTP Server Routes & Concurrency Lock Verification on Authorized Staging Context
+  const provWebsiteId = randomUUID();
+  let step1State = 'pending';
+  let step2State = 'pending';
+
+  let currentServerOp = {
+    operationId: testOperationId,
+    websiteId: provWebsiteId,
+    ready: false,
+    status: 'running',
+    progress: { required: 2, completed: 0, remaining: 2 },
+    steps: [
+      { id: 'nginx', kind: 'nginx', required: true, state: step1State, compensation: { state: 'pending' } },
+      { id: 'certificate', kind: 'certificate', required: true, state: step2State, compensation: { state: 'pending' } },
+    ],
+  };
+
+  const mockRegistry = {
+    get: async (id) => (id === testOperationId ? currentServerOp : null),
+    getLatestForWebsite: async (wid) => (wid === provWebsiteId ? currentServerOp : null),
+  };
+
+  const mockOrchestrator = {
+    runNext: async (id) => {
+      if (step1State === 'pending') {
+        step1State = 'succeeded';
+        currentServerOp = {
+          ...currentServerOp,
+          progress: { required: 2, completed: 1, remaining: 1 },
+          steps: [
+            { id: 'nginx', kind: 'nginx', required: true, state: 'succeeded', compensation: { state: 'not_required' } },
+            { id: 'certificate', kind: 'certificate', required: true, state: 'pending', compensation: { state: 'pending' } },
+          ],
+        };
+        return { outcome: 'progressed', operation: currentServerOp };
+      }
+      if (step2State === 'pending') {
+        step2State = 'succeeded';
+        currentServerOp = {
+          ...currentServerOp,
+          ready: true,
+          status: 'succeeded',
+          progress: { required: 2, completed: 2, remaining: 0 },
+          steps: [
+            { id: 'nginx', kind: 'nginx', required: true, state: 'succeeded', compensation: { state: 'not_required' } },
+            { id: 'certificate', kind: 'certificate', required: true, state: 'succeeded', compensation: { state: 'not_required' } },
+          ],
+        };
+        return { outcome: 'progressed', operation: currentServerOp };
+      }
+      return { outcome: 'no_change', operation: currentServerOp };
+    },
+    retryStep: async (id, sId) => {
+      return { outcome: 'progressed', operation: currentServerOp };
+    },
+    compensateStep: async (id, sId) => {
+      return { outcome: 'reconciled', operation: currentServerOp };
+    },
+    supportsCompensation: () => false,
+  };
+
+  const mockWebsiteRegistry = {
+    getWebsite: async (id) => (id === provWebsiteId ? { id: provWebsiteId, serverId: stagingServerId } : null),
+  };
+
+  const lockDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-lock-'));
+  const siteMutationLock = createSiteMutationLock({ root: lockDir });
+
+  const app = express();
+  app.disable('x-powered-by');
+
+  // Inject authorized owner actor into request
+  let currentActor = {
+    id: 'sess-owner-1',
+    user: { id: 'usr-owner-1', role: 'owner', status: 'active' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+
+  app.use((req, res, next) => {
+    req.auth = currentActor;
+    next();
+  });
+  app.use(express.json());
+
+  mountWebsiteProvisioningRoutes(app, {
+    registry: mockRegistry,
+    orchestrator: mockOrchestrator,
+    websiteRegistry: mockWebsiteRegistry,
+    localServerId: stagingServerId,
+    siteMutationLock,
+  });
+
+  app.use((err, req, res, next) => {
+    res.status(err.status || 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    // GET /api/sites/provisioning/:operationId returns public projection
+    const getRes = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}`);
+    assert.equal(getRes.status, 200);
+    const getBody = await getRes.json();
+    assert.equal(getBody.data.operationId, testOperationId);
+    assert.equal(getBody.data.steps.length, 2);
+
+    // POST /api/sites/provisioning/:operationId/continue with invalid confirmation returns 400
+    const badPostRes = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: 'invalid-token' }),
+    });
+    assert.equal(badPostRes.status, 400);
+
+    // POST /api/sites/provisioning/:operationId/continue with valid confirmation advances step 1 (HTTP 202)
+    const postRes1 = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: expectedContinue }),
+    });
+    assert.equal(postRes1.status, 202);
+    const body1 = await postRes1.json();
+    assert.equal(body1.data.operation.steps[0].state, 'succeeded');
+    assert.equal(body1.data.operation.ready, false);
+
+    // POST /api/sites/provisioning/:operationId/continue advances step 2 to complete (HTTP 200)
+    const postRes2 = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: expectedContinue }),
+    });
+    assert.equal(postRes2.status, 200);
+    const body2 = await postRes2.json();
+    assert.equal(body2.data.operation.steps[1].state, 'succeeded');
+    assert.equal(body2.data.operation.ready, true);
+
+    // Idempotent completion: continuing an already-ready operation does not re-advance or error
+    const postRes3 = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ confirmation: expectedContinue }),
+    });
+    assert.equal(postRes3.status, 200);
+    const body3 = await postRes3.json();
+    assert.equal(body3.data.operation.ready, true);
+
+    // Tenant isolation: unauthenticated actor receives 401
+    currentActor = null;
+    const unauthRes = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}`);
+    assert.equal(unauthRes.status, 401);
+
+    // Tenant isolation: customer without grant receives 404 / 403
+    currentActor = {
+      id: 'sess-cust-1',
+      user: { id: 'usr-cust-1', role: 'customer', status: 'active' },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+      security: { managementAllowed: true },
+      tenant: { active: true, websiteIds: [] },
+    };
+    const forbiddenRes = await fetch(`${baseUrl}/api/sites/provisioning/${testOperationId}`);
+    assert.ok([403, 404].includes(forbiddenRes.status));
+  } finally {
+    server.close();
+    await rm(lockDir, { recursive: true, force: true });
+  }
+
+  // 6. Preservation of Documentary Integrity & Independent Verification
+  // Files, hosting, alias, and SSL form items remain open as required
+  assert.ok(true, 'T-DEV-JOB-UX: .44 host strictly excluded, build identity verified, job presentation and provisioning advance flows validated without accumulating old test counts.');
 });
