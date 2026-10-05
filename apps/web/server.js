@@ -52,7 +52,9 @@ const CONTENT_TYPES = new Map([
   ['.css', 'text/css; charset=utf-8'], ['.html', 'text/html; charset=utf-8'],
   ['.ico', 'image/x-icon'], ['.js', 'text/javascript; charset=utf-8'],
   ['.json', 'application/json; charset=utf-8'], ['.map', 'application/json; charset=utf-8'],
-  ['.png', 'image/png'], ['.svg', 'image/svg+xml'], ['.webp', 'image/webp'],
+  ['.otf', 'font/otf'], ['.png', 'image/png'], ['.svg', 'image/svg+xml'],
+  ['.ttf', 'font/ttf'], ['.txt', 'text/plain; charset=utf-8'],
+  ['.webp', 'image/webp'], ['.woff', 'font/woff'], ['.woff2', 'font/woff2'],
 ]);
 const PROXY_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const TRUSTED_PROXY_DEFAULT = '127.0.0.1,::1';
@@ -1282,7 +1284,7 @@ async function serveStatic(request, response, webRoot, pathname) {
   response.writeHead(200, {
     'cache-control': extension === '.html' ? 'no-store' : 'public, max-age=300',
     'content-type': CONTENT_TYPES.get(extension) ?? 'application/octet-stream',
-    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
+    'content-security-policy': "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'",
     'referrer-policy': 'no-referrer', 'x-content-type-options': 'nosniff', 'x-frame-options': 'DENY',
   });
   if (request.method === 'HEAD') { response.end(); return; }

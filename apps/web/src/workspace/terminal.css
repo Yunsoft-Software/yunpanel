@@ -16,10 +16,12 @@
   height: min(60vh, 640px);
   min-height: 320px;
   padding: 10px;
+  font-family: var(--ws-font-code, ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace);
 }
 
 .ws-terminal-surface .xterm {
   height: 100%;
+  font-family: var(--ws-font-code, ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace);
 }
 
 
