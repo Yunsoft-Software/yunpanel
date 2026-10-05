@@ -79,12 +79,12 @@ function SiteConsumptionWorkspace({ domain, website }) {
           : 'Bilinmiyor';
 
     return (
-      <tr key={item.metric}>
-        <td style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
-        <td style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
-        <td style={{ padding: '0.5rem' }}>{definedDisplay}</td>
-        <td style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
-        <td style={{ padding: '0.5rem' }}>
+      <tr key={item.metric} role="row">
+        <td role="cell" style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
+        <td role="cell" style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
+        <td role="cell" style={{ padding: '0.5rem' }}>{definedDisplay}</td>
+        <td role="cell" style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
+        <td role="cell" style={{ padding: '0.5rem' }}>
           <Badge state={badgeState}>{badgeText}</Badge>
         </td>
       </tr>
@@ -108,15 +108,15 @@ function SiteConsumptionWorkspace({ domain, website }) {
           <strong>Kaynak Uyarısı:</strong> Bazı kaynaklar tanımlı limitlerin %85'ine ulaşmıştır.
         </div>
       )}
-      <div className="ws-table-container" style={{ overflowX: 'auto' }}>
-        <table className="ws-table" style={{ width: '100%', borderCollapse: 'collapse' }}>
+      <div className="ws-table-scroll ws-table-container" style={{ overflowX: 'auto', overscrollBehaviorX: 'contain', width: '100%', maxWidth: '100%' }}>
+        <table className="ws-table" role="table" aria-label="Kaynak Tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
-            <tr>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
+            <tr role="row">
+              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
+              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
+              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
+              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
+              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
             </tr>
           </thead>
           <tbody>
