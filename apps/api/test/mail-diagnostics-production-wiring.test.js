@@ -9,7 +9,7 @@ async function text(name) {
 }
 
 test('production app mounts the local mail diagnostics inspector as a read-only route', async () => {
-  const appSource = await text('app.js');
+  const appSource = await text('management-app.js');
 
   assert.match(appSource, /createMailDiagnosticsInspector/);
   assert.match(appSource, /mailDiagnosticsInspector = createMailDiagnosticsInspector\(\)/);

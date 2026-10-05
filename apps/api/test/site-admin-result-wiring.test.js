@@ -31,7 +31,7 @@ import '../../web/test/site-create-result-wiring.test.js';
 const origin = 'https://panel.example.test';
 const csrfToken = 'site-admin-wiring-csrf';
 
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 const siteCreateHttpUrl = new URL('../src/site-create-http.js', import.meta.url);
 const siteAdminProvisioningUrl = new URL('../src/site-admin-provisioning.js', import.meta.url);
 const authStoreUrl = new URL('../src/auth-store.js', import.meta.url);

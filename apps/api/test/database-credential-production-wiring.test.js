@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 const runtimeUrl = new URL('../src/job-running-database-credential-recovery-runtime.js', import.meta.url);
 const cliUrl = new URL('../../../scripts/job-recovery.mjs', import.meta.url);
 const envUrl = new URL('../../../.env.example', import.meta.url);

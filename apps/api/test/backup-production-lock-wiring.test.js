@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 
 test('production bootstrap persists aggregate backup operations and enforces the derived Docker project lock', async () => {
   const source = await readFile(indexUrl, 'utf8');

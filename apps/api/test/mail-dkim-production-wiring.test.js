@@ -8,7 +8,7 @@ const text = (name) => readFile(source(name), 'utf8');
 test('production API shares managed DKIM desired-state and DNS-retirement state with HTTP and local execution', async () => {
   const [indexSource, appSource, configuredSource] = await Promise.all([
     text('index.js'),
-    text('app.js'),
+    text('management-app.js'),
     text('configured-local-runtime.js'),
   ]);
 

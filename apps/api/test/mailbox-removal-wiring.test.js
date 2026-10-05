@@ -13,7 +13,7 @@ import '../../web/test/mailbox-access-preparation.test.js';
 import '../../web/test/mailbox-access-guard.test.js';
 import '../../web/test/admin-layout.test.js';
 
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 const mailboxHttpUrl = new URL('../src/mailbox-http.js', import.meta.url);
 const finalizeUrl = new URL('../src/mail-delete-finalize.js', import.meta.url);
 const impactUrl = new URL('../src/mail-delete-impact.js', import.meta.url);

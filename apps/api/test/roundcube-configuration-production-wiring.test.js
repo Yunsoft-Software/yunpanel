@@ -9,7 +9,7 @@ async function text(name) {
 }
 
 test('production API mounts local Roundcube configuration control plane and preserves typed errors', async () => {
-  const appSource = await text('app.js');
+  const appSource = await text('management-app.js');
 
   assert.match(appSource, /RoundcubeConfigurationHttpError, mountRoundcubeConfigurationRoutes/);
   assert.match(appSource, /roundcubeConfigurationService = null/);

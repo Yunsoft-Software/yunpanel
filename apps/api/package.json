@@ -7,7 +7,8 @@
     "dev": "NODE_ENV=development node --watch src/index.js",
     "start": "node src/index.js",
     "auth": "node ../../scripts/auth.mjs",
-    "test": "node test/runner.js"
+    "test": "node test/runner.js",
+    "lint": "node ../../scripts/validate-repository.mjs"
   },
   "dependencies": {
     "@yunpanel/config-templates": "*",
