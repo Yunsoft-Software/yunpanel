@@ -2,7 +2,7 @@ import { siteAdminResult } from './site-admin-result.js';
 
 // Presentation sequencing for the existing site-create API, not a host/retry engine.
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-const STEP_STATES = new Set(['pending', 'applying', 'succeeded', 'failed', 'blocked', 'compensating', 'compensated']);
+const STEP_STATES = new Set(['pending', 'applying', 'succeeded', 'failed', 'blocked', 'interrupted', 'compensating', 'compensated']);
 const record = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 const validId = (value) => typeof value === 'string' && UUID.test(value);
 const invalid = () => new Error('Site oluşturma sonucu doğrulanamadı.');
@@ -20,11 +20,22 @@ function expectedResult(preview, input) {
     || preview.confirmation !== `create-site:${input.operationId}:${preview.previewDigest}`
     || !validId(preview.provisioning?.operationId)
     || preview.provisioning.websiteId !== preview.ids.websiteId) throw invalid();
+  let initialSteps = [];
+  if (Array.isArray(preview.provisioning?.steps)) {
+    try {
+      const parsed = provisioningState(preview.provisioning, {
+        provisioningId: preview.provisioning.operationId,
+        websiteId: preview.ids.websiteId,
+      });
+      initialSteps = parsed.steps;
+    } catch {}
+  }
   return Object.freeze({
     operationId: input.operationId, provisioningId: preview.provisioning.operationId,
     websiteId: preview.ids.websiteId, domainId: preview.ids.primaryDomainId,
     serverId: input.serverId, primaryDomain: input.primaryDomain,
     parentDomainId: input.parentDomainId ?? null,
+    initialSteps: Object.freeze(initialSteps),
   });
 }
 function createdRecord(result, expected) {
@@ -96,8 +107,19 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       // Commit the verified record to the screen BEFORE any further await.
       publish({ phase: 'recorded', created, siteAdmin, error: null });
       if (result.provisioningError) {
+        let initialSteps = [];
+        if (result.provisioning) {
+          try {
+            const parsed = provisioningState(result.provisioning, expected);
+            initialSteps = parsed.steps;
+          } catch {}
+        }
+        if (initialSteps.length === 0 && expected.initialSteps?.length > 0) {
+          initialSteps = expected.initialSteps;
+        }
         publish({
           phase: 'attention',
+          ...(initialSteps.length > 0 ? { steps: initialSteps } : {}),
           error: (siteAdmin?.status === 'attention')
             ? 'Site kaydı oluşturuldu, ancak yönetici hesabı doğrulanamadı ve kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.'
             : 'Site kaydı ve yönetici hesabı oluşturuldu, ancak kurulum planı kaydedilemedi. Genel Bakış bölümünden kontrol edin.',
@@ -126,14 +148,25 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       if (current()) {
         let recoveredCreated = state.created;
         let recoveredSiteAdmin = state.siteAdmin;
+        let recoveredSteps = state.steps;
         if (!recoveredCreated && err?.data && record(err.data) && expected) {
           try {
             recoveredCreated = createdRecord(err.data, expected);
             recoveredSiteAdmin = siteAdminResult(err.data.siteAdmin, { requested: snapshot.siteAdmin != null, websiteId: expected.websiteId });
           } catch {}
         }
+        if ((!recoveredSteps || recoveredSteps.length === 0) && err?.data?.provisioning && expected) {
+          try {
+            const parsed = provisioningState(err.data.provisioning, expected);
+            recoveredSteps = parsed.steps;
+          } catch {}
+        }
+        if ((!recoveredSteps || recoveredSteps.length === 0) && (state.created || recoveredCreated) && expected?.initialSteps?.length > 0) {
+          recoveredSteps = expected.initialSteps;
+        }
         publish({
           ...(recoveredCreated ? { created: recoveredCreated, siteAdmin: recoveredSiteAdmin } : {}),
+          ...(recoveredSteps?.length ? { steps: recoveredSteps } : {}),
           phase: stage === 'preview' ? 'error' : (state.created || recoveredCreated) ? 'attention' : 'uncertain',
           error: stage === 'preview'
             ? 'Önizleme doğrulanamadı. Formu ve güncel site bilgilerini kontrol edip tekrar deneyin.'
