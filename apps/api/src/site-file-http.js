@@ -180,14 +180,16 @@ export function mountSiteFileRoutes(app, { siteFileManager } = {}) {
     return response.json({ data });
   }));
 
-  app.post('/api/websites/:websiteId/files/batch-delete', requirePanelRouteAccess, SMALL_JSON, asyncRoute(async (request, response) => {
+  const batchDeleteRoute = asyncRoute(async (request, response) => {
     if (!exactObject(request.body, ['paths', 'confirmation'])
       || !Array.isArray(request.body.paths) || request.body.confirmation !== `batch-delete:${request.params.websiteId}`) {
       throw new SiteFileHttpError('site_file_batch_delete_confirmation_required', 'Exact Website batch deletion confirmation is required');
     }
     const data = await siteFileManager.execute(request.params.websiteId, { operation: 'batch_delete', paths: request.body.paths });
     return response.json({ data });
-  }));
+  });
+  app.post('/api/websites/:websiteId/files/batch-delete', requirePanelRouteAccess, SMALL_JSON, batchDeleteRoute);
+  app.post('/api/websites/:websiteId/files/batch_delete', requirePanelRouteAccess, SMALL_JSON, batchDeleteRoute);
 }
 
 export const siteFileHttpInternals = Object.freeze({ downloadName, queryPath });

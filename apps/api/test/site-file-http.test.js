@@ -170,6 +170,19 @@ test('site-file-http: delete single and batch_delete', async (t) => {
   assert.equal(batchRes.status, 200);
   const batchData = (await batchRes.json()).data;
   assert.equal(batchData.deleted.length, 2);
+
+  // batch delete with underscore route alias
+  const batchUnderscoreRes = await request(`/api/websites/${WEBSITE_ID}/files/batch_delete`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      paths: ['f3.txt'],
+      confirmation: `batch-delete:${WEBSITE_ID}`,
+    }),
+  });
+  assert.equal(batchUnderscoreRes.status, 200);
+  const batchUnderscoreData = (await batchUnderscoreRes.json()).data;
+  assert.equal(batchUnderscoreData.deleted.length, 1);
 });
 
 

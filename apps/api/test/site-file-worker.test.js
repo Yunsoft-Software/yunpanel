@@ -267,3 +267,153 @@ test('permissions reject a descriptor redirected outside the Website before muta
   await assert.rejects(executeSiteFileOperation({ operation: 'permissions', root: FAKE_ROOT, path: 'target', mode: '0755' }, redirected), error => error.code === 'site_file_changed');
   assert.equal((await fs.stat(path.join(tempDir, 'target'))).mode & 0o7777, 0o640);
 });
+
+test('site-file-worker: deep path operations up to 15 levels', async (t) => {
+  const { deps } = await createFixture(t);
+  const segments = Array.from({ length: 15 }, (_, i) => `level${i + 1}`);
+  let currentPath = '';
+  for (const seg of segments) {
+    currentPath = currentPath ? `${currentPath}/${seg}` : seg;
+    await executeSiteFileOperation({ operation: 'mkdir', root: FAKE_ROOT, path: currentPath }, deps);
+  }
+  const deepFilePath = `${currentPath}/deep-file.txt`;
+  const created = await executeSiteFileOperation({ operation: 'create_file', root: FAKE_ROOT, path: deepFilePath }, deps);
+  assert.equal(created.created, true);
+  assert.equal(created.file.path, deepFilePath);
+
+  const listRes = await executeSiteFileOperation({ operation: 'list', root: FAKE_ROOT, path: currentPath }, deps);
+  assert.equal(listRes.entries.length, 1);
+  assert.equal(listRes.entries[0].name, 'deep-file.txt');
+
+  const delRes = await executeSiteFileOperation({ operation: 'delete', root: FAKE_ROOT, path: deepFilePath }, deps);
+  assert.equal(delRes.deleted, true);
+});
+
+test('site-file-worker: symlink listing, renaming, and deleting without target disruption', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const targetFile = path.join(tempDir, 'actual-data.txt');
+  await fs.writeFile(targetFile, 'target content 123');
+  const symlinkFile = path.join(tempDir, 'link-data.txt');
+  await fs.symlink('actual-data.txt', symlinkFile);
+
+  // List directory - verifies symlink detection
+  const listRes = await executeSiteFileOperation({ operation: 'list', root: FAKE_ROOT, path: '' }, deps);
+  const linkEntry = listRes.entries.find((e) => e.name === 'link-data.txt');
+  assert.ok(linkEntry);
+  assert.equal(linkEntry.type, 'symlink');
+
+  // Rename symlink - must succeed without following
+  const renameRes = await executeSiteFileOperation({
+    operation: 'rename',
+    root: FAKE_ROOT,
+    path: 'link-data.txt',
+    destination: 'renamed-link.txt',
+  }, deps);
+  assert.equal(renameRes.previousPath, 'link-data.txt');
+  assert.equal(renameRes.entry.path, 'renamed-link.txt');
+  assert.equal(renameRes.entry.type, 'symlink');
+
+  // Delete symlink - must delete symlink but retain target file
+  const delRes = await executeSiteFileOperation({
+    operation: 'delete',
+    root: FAKE_ROOT,
+    path: 'renamed-link.txt',
+  }, deps);
+  assert.equal(delRes.deleted, true);
+  assert.equal(delRes.type, 'symlink');
+
+  // Verify target file still exists and has original content
+  assert.equal(await fs.readFile(targetFile, 'utf8'), 'target content 123');
+});
+
+test('site-file-worker: Unicode and long filenames', async (t) => {
+  const { deps } = await createFixture(t);
+  const unicodeName = 'türkçe_şçöğü_İı_日本語_🚀.txt';
+  const longName = 'a'.repeat(200) + '.txt';
+
+  // Create Unicode file
+  const createdUnicode = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: FAKE_ROOT,
+    path: unicodeName,
+  }, deps);
+  assert.equal(createdUnicode.created, true);
+  assert.equal(createdUnicode.file.name, unicodeName);
+
+  // Write and read Unicode content
+  const writeRes = await executeSiteFileOperation({
+    operation: 'write_text',
+    root: FAKE_ROOT,
+    path: unicodeName,
+    content: 'İçerik: Başarılı Türkçe karakter testi. Şğöçü.',
+    expectedSha256: createHash('sha256').update('').digest('hex'),
+  }, deps);
+  assert.ok(writeRes.sha256);
+
+  const readRes = await executeSiteFileOperation({
+    operation: 'read_text',
+    root: FAKE_ROOT,
+    path: unicodeName,
+  }, deps);
+  assert.equal(readRes.content, 'İçerik: Başarılı Türkçe karakter testi. Şğöçü.');
+
+  // Create long filename
+  const createdLong = await executeSiteFileOperation({
+    operation: 'create_file',
+    root: FAKE_ROOT,
+    path: longName,
+  }, deps);
+  assert.equal(createdLong.created, true);
+  assert.equal(createdLong.file.name, longName);
+
+  // Rename long filename to another unicode name
+  const renamed = await executeSiteFileOperation({
+    operation: 'rename',
+    root: FAKE_ROOT,
+    path: longName,
+    destination: 'yeni_ad_şöğ.txt',
+  }, deps);
+  assert.equal(renamed.entry.name, 'yeni_ad_şöğ.txt');
+});
+
+test('site-file-worker: 1000+ entries listing in a single directory', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const fileCount = 1050;
+  for (let i = 0; i < fileCount; i++) {
+    await fs.writeFile(path.join(tempDir, `item_${String(i).padStart(4, '0')}.txt`), '');
+  }
+
+  const listing = await executeSiteFileOperation({
+    operation: 'list',
+    root: FAKE_ROOT,
+    path: '',
+  }, deps);
+  assert.equal(listing.entries.length, fileCount);
+  assert.equal(listing.entries[0].name, 'item_0000.txt');
+  assert.equal(listing.entries[fileCount - 1].name, `item_${String(fileCount - 1).padStart(4, '0')}.txt`);
+});
+
+test('site-file-worker: large text file operations in editor (>1MB)', async (t) => {
+  const { tempDir, deps } = await createFixture(t);
+  const largeContent = 'A'.repeat(1024 * 1024 + 100); // ~1.0001 MB
+  await fs.writeFile(path.join(tempDir, 'large.txt'), largeContent, 'utf8');
+  const initialSha = createHash('sha256').update(largeContent).digest('hex');
+
+  const readRes = await executeSiteFileOperation({
+    operation: 'read_text',
+    root: FAKE_ROOT,
+    path: 'large.txt',
+  }, deps);
+  assert.equal(readRes.content.length, largeContent.length);
+  assert.equal(readRes.sha256, initialSha);
+
+  const updatedContent = 'B'.repeat(1024 * 1024 + 200);
+  const writeRes = await executeSiteFileOperation({
+    operation: 'write_text',
+    root: FAKE_ROOT,
+    path: 'large.txt',
+    content: updatedContent,
+    expectedSha256: initialSha,
+  }, deps);
+  assert.equal(writeRes.sha256, createHash('sha256').update(updatedContent).digest('hex'));
+});
