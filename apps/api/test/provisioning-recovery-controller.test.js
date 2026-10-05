@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -719,7 +719,10 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   assert.equal(orchestratorCalls.length, 1);
 
   // Allow lock cleanup to settle
-  await new Promise((r) => setTimeout(r, 50));
+  const lockFilePath = path.join(lockRoot, `website-${siteAId}.lock`);
+  for (let i = 0; i < 100 && existsSync(lockFilePath); i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
 
   // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
   const browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
