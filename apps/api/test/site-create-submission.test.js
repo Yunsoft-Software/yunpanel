@@ -30,6 +30,18 @@ import {
 } from '../../web/src/workspace/site-create-submission.js';
 import { siteHref } from '../../web/src/workspace/site-model.js';
 import { website as createWebsiteFixture } from '../test-support/hosting-site-fixture.js';
+import {
+  createProvisioningRecovery,
+  EMPTY_RECOVERY,
+  recoveryAllowed,
+  recoveryBusy,
+  recoveryOperation,
+} from '../../web/src/workspace/provisioning-recovery.js';
+import { advanceProvisioning } from '../../web/src/workspace/provisioning-advance.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { mkdtempSync, rmSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 
 function fakeApp() {
   const routes = { get: new Map(), post: new Map() };
@@ -427,9 +439,10 @@ function fakeStore(role) {
   };
 }
 
-function provisioningRuntime() {
+function provisioningRuntime(siteMutationLock = null) {
   const checksum = 'f'.repeat(64);
   return createWebsiteProvisioningRuntime({
+    siteMutationLock,
     identityManager: {
       apply: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
       inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
@@ -459,7 +472,9 @@ function provisioningRuntime() {
   });
 }
 
-async function resources() {
+async function resources(t = null) {
+  const lockDir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-lock-sub-'));
+  const siteMutationLock = createSiteMutationLock({ root: lockDir });
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken({ label: 'site-submission-http' });
   const enrolled = await registry.enrollServer({ token: enrollment.token, hostname: 'site-submission-host' });
@@ -478,11 +493,16 @@ async function resources() {
   const getWebDomain = async (id) => domainRegistry.getDomain(id);
   const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
-  const websiteProvisioningRuntime = provisioningRuntime();
+  const websiteProvisioningRuntime = provisioningRuntime(siteMutationLock);
   await Promise.all([
     applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
     dnsHostingRegistry.init(), mailDomainRegistry.init(), websiteProvisioningRuntime.init(),
   ]);
+  if (t?.after) {
+    t.after(() => {
+      try { rmSync(lockDir, { recursive: true, force: true }); } catch {}
+    });
+  }
   return {
     registry,
     applicationRegistry,
@@ -492,6 +512,8 @@ async function resources() {
     dnsHostingRegistry,
     mailDomainRegistry,
     websiteProvisioningRuntime,
+    siteMutationLock,
+    lockDir,
     serverId: enrolled.server.id,
   };
 }
@@ -855,4 +877,228 @@ test('unauthenticated and read-only attempts are rejected at API route boundary 
   // Ensure no sites or domains were created
   assert.equal((await state.websiteRegistry.listWebsites()).length, 0);
   assert.equal((await state.domainRegistry.listDomains()).length, 0);
+});
+
+test('Yaratılmış site sonrasında ilerletme hatasında yeni site oluşturmadan mevcut sonuca/Genel Bakış recovery\'ye dön. Manuel continue/retry/compensate, stale kayıt, çift tıklama, oturum kaybı, ortak kilit, idempotency ve restart kabulü', async (t) => {
+  const state = await resources(t);
+  const api = await listener(t, 'owner', state);
+  let createPostsAttempted = 0;
+  let advanceAttempts = 0;
+
+  const adapter = createClientAdapter({
+    base: api.base,
+    requestInterceptor: async (pathname) => {
+      if (pathname === '/sites') createPostsAttempted++;
+      return undefined;
+    },
+    advanceInterceptor: async (operationId) => {
+      advanceAttempts++;
+      const err = new Error('Gateway Timeout during provisioning advance');
+      err.status = 504;
+      err.code = 'gateway_timeout';
+      throw err;
+    },
+  });
+
+  const flow = createSiteSubmission(adapter);
+  const input = siteInput(state.serverId, {
+    name: 'Recovery Workflow Site',
+    primaryDomain: 'recovery-workflow.example.test',
+  });
+
+  // 1. Initial submission creates site successfully on backend but advance fails
+  const submissionState = await flow.submit(input);
+  assert.equal(submissionState.phase, 'attention');
+  assert.ok(submissionState.created, 'Created site must be preserved upon advance error');
+  assert.equal(submissionState.created.primaryDomain, input.primaryDomain);
+  assert.ok(submissionState.error.includes('Genel Bakış'), 'Error message must direct to Genel Bakış');
+  assert.equal(createPostsAttempted, 1);
+  assert.equal(advanceAttempts, 1);
+
+  // 2. Sealed controller refuses subsequent create attempts, preventing duplicate sites
+  const duplicateAttempt = await flow.submit(input);
+  assert.equal(duplicateAttempt.phase, 'attention');
+  assert.equal(createPostsAttempted, 1, 'No second create POST must be sent from sealed form');
+
+  const websites = await state.websiteRegistry.listWebsites();
+  assert.equal(websites.length, 1, 'Only one website must exist in registry');
+  assert.equal(websites[0].id, submissionState.created.websiteId);
+
+  const domains = await state.domainRegistry.listDomains();
+  assert.equal(domains.length, 1, 'Only one domain must exist in registry');
+  assert.equal(domains[0].id, submissionState.created.id);
+
+  // 3. Overview link points to existing result and Genel Bakış
+  const domainId = submissionState.created.id;
+  const websiteId = submissionState.created.websiteId;
+  const overviewUrl = siteHref(domainId, 'overview');
+  assert.equal(overviewUrl, `/websites/${domainId}/overview`);
+
+  // 4. Genel Bakış recovery flow connects to the existing site and operation
+  let isCurrentSession = true;
+  let canManageUser = true;
+  let simulatedToken = 'valid-session';
+  let recoveryContinues = 0;
+  let recoveryRetries = 0;
+  let recoveryCompensates = 0;
+
+  const recoveryFlow = createProvisioningRecovery({
+    websiteId,
+    canManage: () => canManageUser,
+    isCurrent: () => isCurrentSession,
+    read: async ({ signal } = {}) => {
+      const res = await fetch(`${api.base}/api/sites/${websiteId}/provisioning/latest`, {
+        headers: {
+          cookie: `__Host-yunpanel_session=${simulatedToken}`,
+        },
+        signal,
+      });
+      if (res.status === 401 || res.status === 403) {
+        const err = new Error('Auth error');
+        err.status = res.status;
+        throw err;
+      }
+      const json = await res.json();
+      return json.data;
+    },
+    execute: async (approval, { signal } = {}) => {
+      let endpoint = `/api/sites/provisioning/${approval.operationId}/continue`;
+      if (approval.action === 'retry') {
+        recoveryRetries++;
+        endpoint = `/api/sites/provisioning/${approval.operationId}/steps/${approval.stepId}/retry`;
+      } else if (approval.action === 'compensate') {
+        recoveryCompensates++;
+        endpoint = `/api/sites/provisioning/${approval.operationId}/steps/${approval.stepId}/compensate`;
+      } else {
+        recoveryContinues++;
+      }
+      const res = await fetch(`${api.base}${endpoint}`, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          cookie: `__Host-yunpanel_session=${simulatedToken}`,
+          origin,
+          'x-csrf-token': csrfToken,
+        },
+        body: JSON.stringify({ confirmation: approval.confirmation }),
+        signal,
+      });
+      if (!res.ok) {
+        const json = await res.json().catch(() => ({}));
+        const err = new Error(json?.message || `Request failed with ${res.status}`);
+        err.status = res.status;
+        err.code = json?.code;
+        throw err;
+      }
+      const json = await res.json();
+      return json.data;
+    },
+  });
+
+  await recoveryFlow.load();
+  const recState = recoveryFlow.getState();
+  assert.equal(recState.status, 'ready');
+  assert.ok(recState.operation, 'Operation must be loaded in recovery flow');
+  assert.equal(recState.operation.websiteId, websiteId);
+  const operationId = recState.operation.operationId;
+
+  // 5. Stale record scenario: if operation changes before confirm, reject mutation
+  const pendingStep = recState.operation.steps.find((s) => s.state === 'pending');
+  assert.ok(pendingStep, 'Must find a pending step for recovery');
+  const approval = recoveryFlow.prepare('continue');
+  assert.ok(approval, 'Approval must be prepared');
+
+  await state.websiteProvisioningRuntime.registry.beginStep({
+    operationId,
+    stepId: pendingStep.id,
+  });
+
+  const staleResult = await recoveryFlow.perform(approval, approval.confirmation);
+  assert.equal(staleResult.status, 'ready');
+  assert.equal(staleResult.approval, null);
+  assert.ok(staleResult.error.includes('Kurulum kaydı değişti'));
+
+  // 6. Double click / concurrent confirmation: sends only ONE POST
+  await recoveryFlow.load();
+  const freshOp = recoveryFlow.getState().operation;
+  assert.ok(freshOp);
+  const nextStep = freshOp.steps.find((s) => s.state !== 'succeeded') || freshOp.steps[0];
+  const nextAction = nextStep.canRetry ? 'retry' : 'continue';
+  const nextApproval = recoveryFlow.prepare(nextAction, nextAction === 'continue' ? null : nextStep.id);
+  const postCallsBefore = recoveryContinues + recoveryRetries + recoveryCompensates;
+
+  await Promise.all([
+    recoveryFlow.perform(nextApproval, nextApproval.confirmation),
+    recoveryFlow.perform(nextApproval, nextApproval.confirmation),
+  ]);
+  const postCallsAfter = recoveryContinues + recoveryRetries + recoveryCompensates;
+  assert.equal(postCallsAfter - postCallsBefore, 1, 'Only one mutation POST is sent on rapid double-click');
+
+  // 7. Session loss scenario (401/403): clears recovery records and approvals immediately
+  await recoveryFlow.load();
+  const sessOp = recoveryFlow.getState().operation;
+  assert.ok(sessOp);
+  const sessStep = sessOp.steps.find((s) => s.state !== 'succeeded') || sessOp.steps[0];
+  const sessAction = sessStep.canRetry ? 'retry' : 'continue';
+  const sessApproval = recoveryFlow.prepare(sessAction, sessAction === 'continue' ? null : sessStep.id);
+
+  simulatedToken = 'invalid-session';
+  const sessionLossResult = await recoveryFlow.perform(sessApproval, sessApproval.confirmation);
+  assert.equal(sessionLossResult.status, 'forbidden');
+  assert.equal(sessionLossResult.operation, null);
+  assert.equal(sessionLossResult.approval, null);
+  simulatedToken = 'valid-session';
+
+  // 8. Shared lock (siteMutationLock 409 Conflict):
+  await recoveryFlow.load();
+  const lockOp = recoveryFlow.getState().operation;
+  assert.ok(lockOp);
+  const lockStep = lockOp.steps.find((s) => s.state !== 'succeeded') || lockOp.steps[0];
+  const lockAction = lockStep.canRetry ? 'retry' : 'continue';
+  const lockApproval = recoveryFlow.prepare(lockAction, lockAction === 'continue' ? null : lockStep.id);
+
+  let releaseMutationLock;
+  let lockAcquired;
+  const lockHoldGate = new Promise((resolve) => { releaseMutationLock = resolve; });
+  const lockAcquiredGate = new Promise((resolve) => { lockAcquired = resolve; });
+
+  const holdingLockPromise = state.siteMutationLock.withWebsiteLock(websiteId, async () => {
+    lockAcquired();
+    await lockHoldGate;
+  });
+  await lockAcquiredGate;
+
+  const lockResult = await recoveryFlow.perform(lockApproval, lockApproval.confirmation);
+  assert.ok(lockResult.error);
+  assert.equal(recoveryBusy(lockResult), false, 'Client must remain fail-closed without auto-retry');
+  releaseMutationLock();
+  await holdingLockPromise;
+
+  // 9. Idempotency & Restart:
+  await recoveryFlow.load();
+  const currentOp = recoveryFlow.getState().operation;
+  assert.ok(currentOp);
+
+  const reloadedOp = await state.websiteProvisioningRuntime.registry.get(operationId);
+  assert.equal(reloadedOp.operationId, operationId);
+  assert.equal(reloadedOp.websiteId, websiteId);
+
+  // 10. Bounded manual retry limits & auto-retry stopped:
+  const testFailOp = {
+    operationId: crypto.randomUUID(),
+    websiteId,
+    ready: false,
+    status: 'failed',
+    steps: [
+      { id: 'nginx', kind: 'nginx', required: true, state: 'failed', canRetry: true, error: 'nginx_failed', compensation: { state: 'pending' } },
+    ],
+  };
+  let autoAdvanceCalls = 0;
+  const autoResult = await advanceProvisioning({
+    operationId: testFailOp.operationId,
+    read: async () => testFailOp,
+    advance: async () => { autoAdvanceCalls++; return { outcome: 'failed', operation: testFailOp }; },
+  });
+  assert.equal(autoAdvanceCalls, 0, 'Auto-advance must NOT auto-retry on failed step');
+  assert.equal(autoResult.ready, false);
 });
