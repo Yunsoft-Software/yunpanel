@@ -11,7 +11,7 @@ async function text(name) {
 test('production API constructs and shares quota, forwarding and explicit TLS managed mail state', async () => {
   const [indexSource, appSource] = await Promise.all([
     text('index.js'),
-    text('app.js'),
+    text('management-app.js'),
   ]);
 
   assert.match(indexSource, /createMailboxQuotaRegistry\(\{/);

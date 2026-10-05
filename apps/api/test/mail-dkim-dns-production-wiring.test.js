@@ -7,7 +7,7 @@ const text = (name) => readFile(source(name), 'utf8');
 
 test('production app reuses one DKIM DNS service for provider routes and key lifecycle reconciliation', async () => {
   const [appSource, dnsSource, dkimHttpSource] = await Promise.all([
-    text('app.js'),
+    text('management-app.js'),
     text('mail-dkim-dns.js'),
     text('mail-dkim-http.js'),
   ]);

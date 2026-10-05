@@ -32,7 +32,7 @@ test('production shutdown revokes sockets and closes ttyd sessions before closin
 
 
 test('production createApp mounts the authenticated ttyd session bridge', async () => {
-  const source = await readFile(new URL('../src/app.js', import.meta.url), 'utf8');
+  const source = await readFile(new URL('../src/management-app.js', import.meta.url), 'utf8');
   assert.match(source, /mountTtydSessionRoutes/);
   assert.match(source, /ttydSessionManager = null/);
   assert.match(source, /if \(ttydSessionManager\) \{[\s\S]*mountTtydSessionRoutes\(app, \{[\s\S]*terminalCapabilityRegistry,[\s\S]*ttydSessionManager/);

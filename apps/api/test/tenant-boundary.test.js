@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import './site-manager-auth-csrf.test.js';
 import { AuthError } from '../src/auth-error.js';
 import {
   TenantBoundaryError,

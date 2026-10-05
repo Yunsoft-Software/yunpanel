@@ -256,7 +256,7 @@ test('provisioning HTTP server boundary enforces fail-closed authorization acros
 
 test('provisioning recovery wires backend atomic lock and fail-closed concurrency protection', async () => {
   const httpCode = await source('../src/website-provisioning-http.js');
-  const appCode = await source('../src/app.js');
+  const appCode = await source('../src/management-app.js');
   const controllerCode = await source('../../web/src/workspace/provisioning-recovery.js');
 
   // Backend wires siteMutationLock and translates SiteMutationLockError to 409

@@ -8,7 +8,7 @@ import { classifyManagementMutation } from '../src/management-audit.js';
 const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const apiSource = path.resolve(testDirectory, '../src');
 const SOURCE_FILES = [
-  'app.js',
+  'management-app.js',
   'core-app.js',
   'site-create-http.js',
   'resource-impact-http.js',

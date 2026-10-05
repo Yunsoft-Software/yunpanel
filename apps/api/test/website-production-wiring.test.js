@@ -8,7 +8,7 @@ const testDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(testDirectory, '../../..');
 const source = readFileSync(path.join(repositoryRoot, 'apps/api/src/index.js'), 'utf8');
 const envExample = readFileSync(path.join(repositoryRoot, '.env.example'), 'utf8');
-const appSource = readFileSync(path.join(repositoryRoot, 'apps/api/src/app.js'), 'utf8');
+const appSource = readFileSync(path.join(repositoryRoot, 'apps/api/src/management-app.js'), 'utf8');
 
 test('production API persists and initializes Website registry explicitly', () => {
   assert.match(source, /import \{ createWebsiteRegistry \} from '\.\/website-registry\.js';/);

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 
 test('production boot creates elFinder handoff state from Website registry and live panel sessions', async () => {
   const source = await readFile(indexUrl, 'utf8');

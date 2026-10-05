@@ -11,7 +11,7 @@ async function text(name) {
 test('production bootstrap persists and shares one Roundcube Domain mapping registry', async () => {
   const [indexSource, appSource, postinstSource] = await Promise.all([
     text('index.js'),
-    text('app.js'),
+    text('management-app.js'),
     readFile(new URL('../../../packaging/debian/postinst', import.meta.url), 'utf8'),
   ]);
 
@@ -34,7 +34,7 @@ test('production bootstrap persists and shares one Roundcube Domain mapping regi
 
 test('PowerDNS mail desired state receives only live shared webmail readiness', async () => {
   const [appSource, powerDnsSource, mailIntentSource] = await Promise.all([
-    text('app.js'),
+    text('management-app.js'),
     text('powerdns-http.js'),
     text('dns-zone-mail-intent.js'),
   ]);
@@ -72,7 +72,7 @@ test('Domain removal uses the same mapping inventory and durable mapping lifecyc
 test('Mail Domain configuration, impact and removal runtime wire shared Roundcube mapping registry', async () => {
   const [indexSource, appSource, mailRemovalSource] = await Promise.all([
     text('index.js'),
-    text('app.js'),
+    text('management-app.js'),
     text('mail-domain-removal-production-runtime.js'),
   ]);
 

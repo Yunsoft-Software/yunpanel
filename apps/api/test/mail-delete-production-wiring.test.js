@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-const appUrl = new URL('../src/app.js', import.meta.url);
+const appUrl = new URL('../src/management-app.js', import.meta.url);
 const mailboxHttpUrl = new URL('../src/mailbox-http.js', import.meta.url);
 
 test('production app wires fresh impact into mail data delete and guarded finalization', async () => {

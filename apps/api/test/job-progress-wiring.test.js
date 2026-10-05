@@ -22,7 +22,7 @@ test('Backend job-progress wiring: provisioning routes enforce exact confirmatio
 });
 
 test('Backend job-progress wiring: app.js wires siteMutationLock into website provisioning routes', async () => {
-  const appCode = await source('../src/app.js');
+  const appCode = await source('../src/management-app.js');
 
   assert.match(appCode, /mountWebsiteProvisioningRoutes\(/);
   assert.match(appCode, /siteMutationLock/);
