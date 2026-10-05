@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -419,7 +419,10 @@ test('Real Express API enforces fail-closed tenant boundary, session revocation,
   const server = http.createServer(listener);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
-  t.after(() => server.close());
+  t.after(() => {
+    try { server.closeAllConnections?.(); } catch {}
+    server.close();
+  });
 
   // Test 1: Unauthenticated request receives 401
   let res = await fetch(`${base}/api/sites/${siteAId}/provisioning/latest`);
@@ -669,6 +672,7 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   const base = `http://127.0.0.1:${server.address().port}`;
   t.after(() => {
     if (releaseMutation) releaseMutation();
+    try { server.closeAllConnections?.(); } catch {}
     server.close();
   });
 
@@ -717,10 +721,18 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   // Verify orchestrator was executed only ONCE (Browser 1 only; Browser 2 was blocked by atomic lock)
   assert.equal(orchestratorCalls.length, 1);
 
-  // Allow lock cleanup to settle, then verify subsequent request acquires lock and succeeds
+  // Allow lock cleanup to settle
+  const lockFilePath = path.join(lockRoot, `website-${siteAId}.lock`);
+  for (let i = 0; i < 100 && existsSync(lockFilePath); i += 1) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+
+  // After Browser 1 releases lock, a subsequent request can acquire lock and succeed
   let browser3Res;
   for (let attempt = 0; attempt < 20; attempt += 1) {
-    await new Promise((r) => setTimeout(r, 50));
+    if (attempt > 0) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
     browser3Res = await fetch(`${base}/api/sites/provisioning/${opAId}/steps/nginx/retry`, {
       method: 'POST',
       headers: {
@@ -1006,13 +1018,17 @@ test('Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership 
   const authDbPath = path.join(tempDir, 'auth.sqlite');
   const provJsonPath = path.join(tempDir, 'provisioning.json');
 
-  t.after(() => {
-    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
-  });
-
+  let activeServer = null;
   const authStore = createAuthStore({ filePath: authDbPath });
-  t.after(() => {
+  t.after(async () => {
+    try {
+      if (activeServer) {
+        activeServer.closeAllConnections?.();
+        await new Promise((r) => activeServer.close(r));
+      }
+    } catch {}
     try { authStore.close(); } catch {}
+    try { rmSync(tempDir, { recursive: true, force: true }); } catch {}
   });
 
   const { token: setupToken } = authStore.issueSetupToken();
@@ -1126,6 +1142,7 @@ test('Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership 
 
   let server = createServer(registry, orchestrator);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  activeServer = server;
   let port = server.address().port;
   let base = `http://127.0.0.1:${port}`;
 
@@ -1199,7 +1216,11 @@ test('Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership 
 
   // --- Step C: Restart Safety & Durable State Recovery ---
   // Close the server and instantiate fresh registry from disk file
-  await new Promise((resolve) => server.close(resolve));
+  try {
+    server.closeAllConnections?.();
+    await new Promise((resolve) => server.close(resolve));
+  } catch {}
+  activeServer = null;
   const restartedRegistry = createWebsiteProvisioningRegistry({ filePath: provJsonPath });
   await restartedRegistry.init();
   const recoveredOp = await restartedRegistry.get(testOpId);
@@ -1212,9 +1233,9 @@ test('Gerçek continue/retry/compensate, kalıcı durum, idempotency, ownership 
   const restartedOrchestrator = createWebsiteProvisioningOrchestrator({ registry: restartedRegistry, handlers });
   server = createServer(restartedRegistry, restartedOrchestrator);
   await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  activeServer = server;
   port = server.address().port;
   base = `http://127.0.0.1:${port}`;
-  t.after(() => server.close());
 
   // --- Step D: Real Retry on Restarted Server ---
   res = await fetch(`${base}/api/sites/provisioning/${testOpId}/steps/nginx/retry`, {
