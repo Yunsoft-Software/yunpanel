@@ -36,6 +36,7 @@ test('real overview recovery and files use Domain ID, never Website ID', () => {
 });
 test('progress uses actual step states and existing components without invented fractions', () => {
   assert.match(result, /failed: 'Başarısız', blocked: 'Engel var'/);
+  assert.match(result, /interrupted: 'Kesintiye uğradı'/);
   assert.match(result, /compensated: 'Geri alındı'/);
   assert.match(result, /<KeyValues items=\{state.steps.map/);
   assert.match(result, /const busy = siteSubmissionBusy\(state\)/);
