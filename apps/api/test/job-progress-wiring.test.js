@@ -50,9 +50,15 @@ test('Backend job-progress wiring: audited job registry preserves safe metadata 
 test('Web-to-API wiring parity: web provisioning client calls exact backend endpoints and confirmations', async () => {
   const clientCode = await source('../../web/src/workspace/provisioning-client.js');
 
-  assert.match(clientCode, /\/sites\/provisioning\/\$\{encodeURIComponent\(id\)\}/);
-  assert.match(clientCode, /\/sites\/provisioning\/\$\{encodeURIComponent\(id\)\}\/continue/);
-  assert.match(clientCode, /continue-site-provisioning:\$\{uuid\(operationId/);
-  assert.match(clientCode, /retry-site-provisioning:\$\{uuid\(operationId/);
-  assert.match(clientCode, /compensate-site-provisioning:\$\{uuid\(operationId/);
+  assert.match(clientCode, /\/sites\/provisioning\/\${encodeURIComponent\(id\)}/);
+  assert.match(clientCode, /\/sites\/provisioning\/\${encodeURIComponent\(id\)}\/continue/);
+  assert.match(clientCode, /continue-site-provisioning:\${uuid\(operationId/);
+  assert.match(clientCode, /retry-site-provisioning:\${uuid\(operationId/);
+  assert.match(clientCode, /compensate-site-provisioning:\${uuid\(operationId/);
+});
+
+test('Backend job-progress wiring: provisioning routes release siteMutationLock before sending response', async () => {
+  const httpCode = await source('../src/website-provisioning-http.js');
+
+  assert.match(httpCode, /const result = await withOptionalLock\(operation\.websiteId, async \(\) => \{\s*return orchestrator\.runNext\(id, actor\);\s*\}\);/);
 });

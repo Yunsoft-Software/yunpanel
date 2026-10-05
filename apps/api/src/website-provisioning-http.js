@@ -266,11 +266,11 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    return withOptionalLock(operation.websiteId, async () => {
-      const result = await orchestrator.runNext(id, actor);
-      const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-      return response.status(status).json({ data: projectResult(result) });
+    const result = await withOptionalLock(operation.websiteId, async () => {
+      return orchestrator.runNext(id, actor);
     });
+    const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
+    return response.status(status).json({ data: projectResult(result) });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/retry', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -280,11 +280,11 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    return withOptionalLock(operation.websiteId, async () => {
-      const result = await orchestrator.retryStep(id, provisioningStepId, actor);
-      const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
-      return response.status(status).json({ data: projectResult(result) });
+    const result = await withOptionalLock(operation.websiteId, async () => {
+      return orchestrator.retryStep(id, provisioningStepId, actor);
     });
+    const status = ['progressed', 'reconciled'].includes(result.outcome) && !result.operation.ready ? 202 : 200;
+    return response.status(status).json({ data: projectResult(result) });
   }));
 
   app.post('/api/sites/provisioning/:operationId/steps/:stepId/compensate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -294,10 +294,10 @@ export function mountWebsiteProvisioningRoutes(app, {
     const operation = await registry.get(id);
     if (!operation) throw provisioningNotFound();
     const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId });
-    return withOptionalLock(operation.websiteId, async () => {
-      const result = await orchestrator.compensateStep(id, provisioningStepId, actor);
-      return response.status(200).json({ data: projectResult(result) });
+    const result = await withOptionalLock(operation.websiteId, async () => {
+      return orchestrator.compensateStep(id, provisioningStepId, actor);
     });
+    return response.status(200).json({ data: projectResult(result) });
   }));
 }
 
