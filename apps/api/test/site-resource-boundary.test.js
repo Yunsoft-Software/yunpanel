@@ -121,6 +121,34 @@ test('site config preview preserves exact apply tokens but omits global domain a
  assert.equal(v.called,1);assert.equal(v.res.body.data.previewDigest,'digest');assert.deepEqual(v.res.body.data.configuration,{sha256:'hash'});assert.equal(v.res.body.data.domains,undefined);assert.doesNotMatch(JSON.stringify(v.res.body),/other\.test|1000|private/);
 });
 
+test('disabled mail domain cannot be enabled via site-scoped config preview or apply', async () => {
+ const disabledMail = [{ id: 'mail-dis', webDomainId: 'domain-a', managementMode: 'local', status: 'disabled' }];
+ const deps = { ...options, mailDomainRegistry: { getMailDomain: async (id) => disabledMail.find((m) => m.id === id) || null } };
+ const attemptPreview = await run('/api/mail-domains/mail-dis/config-preview', {
+  method: 'POST',
+  body: { expectedRevision: 1, status: 'enabled' },
+  dependencies: deps,
+ });
+ assert.equal(attemptPreview.res.statusCode, 403);
+ assert.equal(attemptPreview.called, 0);
+
+ const attemptApply = await run('/api/mail-domains/mail-dis/config-apply', {
+  method: 'POST',
+  body: { expectedRevision: 1, status: 'enabled', previewDigest: 'a'.repeat(64), configurationSha256: 'b'.repeat(64), confirmation: 'confirm' },
+  dependencies: deps,
+ });
+ assert.equal(attemptApply.res.statusCode, 403);
+ assert.equal(attemptApply.called, 0);
+
+ const validPreview = await run('/api/mail-domains/mail-dis/config-preview', {
+  method: 'POST',
+  body: { expectedRevision: 1, status: 'disabled' },
+  dependencies: deps,
+  output: { data: { readyToApply: true, previewDigest: 'd', confirmation: 'c', currentStatus: 'disabled', desiredStatus: 'disabled' } },
+ });
+ assert.equal(validPreview.called, 1);
+});
+
 test('reseller actor site resource boundary enforces child customer scope and rejects foreign/owner resources', async () => {
  const resellerSession = {
   user: { id: 'reseller-1', role: 'reseller', websiteIds: ['site-a'], active: true },

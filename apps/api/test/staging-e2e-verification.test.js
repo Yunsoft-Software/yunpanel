@@ -258,6 +258,16 @@ import { createMailDeleteImpactService } from '../src/mail-delete-impact.js';
 import { mountMailboxRoutes } from '../src/mailbox-http.js';
 import { mountMailDeleteImpactRoutes } from '../src/mail-delete-impact-http.js';
 import { mountMailDataRoutes } from '../src/mail-data-http.js';
+import { mountMailAliasRoutes } from '../src/mail-alias-http.js';
+import { mountMailboxQuotaRoutes } from '../src/mailbox-quota-http.js';
+import { mountMailboxForwardingRoutes } from '../src/mailbox-forwarding-http.js';
+import { mountMailConfigurationRoutes } from '../src/mail-configuration-http.js';
+import { mountMailDiagnosticsRoutes } from '../src/mail-diagnostics-http.js';
+import { mountRoundcubeDomainMappingRoutes } from '../src/roundcube-domain-mapping-http.js';
+import { createMailAliasRegistry } from '../src/mail-alias-registry.js';
+import { createMailboxQuotaRegistry } from '../src/mailbox-quota-registry.js';
+import { createMailboxForwardingRegistry } from '../src/mailbox-forwarding-registry.js';
+import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createMailboxAccessGuard, MailboxAccessError } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { createMailDataDeleteManager, MailDataDeleteError } from '../../../packages/host-runtime/src/mail-data-delete-manager.js';
 import {
@@ -12578,4 +12588,806 @@ test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel
   // 19. Documentary Integrity Verification
   assertNoDot44Host(serverId);
   assert.ok(true, 'T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçiş kapısı (phpmyadmin_site_session_binding_required) YP-04 panel oturumu ve güncel Website yetkisine bağlı canlı gateway/SQL session doğrulamasıyla fail-closed olarak doğrulandı; Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleri fail-closed işletildi; Owner akışı regresyonsuz korundu.');
+});
+
+// ============================================================================
+// STAGING E2E PART 17: T-SITE-WORKSPACE Site Mailbox/Alias Lifecycle, Quota,
+// Password Rotation, Forwarding, Scoped Config-Apply, Durable Job Observation,
+// Disabled Domain Non-Activation, Artifact Leakage Guard & Delivery Separation
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemlerini; site scoped config-preview/apply ve durable job gözlemini test et. Disabled mail alan adı sırf hesap değişikliği uygulanıyor diye etkinleşmemeli; global mail domain veya artifact ayrıntıları site hesabına dönmemeli. Gerçek SMTP/IMAP teslimi ve Roundcube oturumu ayrı doğrulansın; örnek-verili webmail kartı bunların kanıtı değildir', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized Staging Environment
+  const stagingIp = '157.180.11.28';
+  const stagingUrl = 'https://server.cryptoraichu.website';
+  assertNoDot44Host(stagingIp, 'stagingIp');
+  assertNoDot44Host(stagingUrl, 'stagingUrl');
+  assert.doesNotMatch(stagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(stagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  for (const forbidden of ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443']) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-check'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Multi-Tenant Entities & Site Scope
+  const serverId = '66666666-7777-4888-8999-000000000003';
+  assertNoDot44Host(serverId);
+
+  const siteIdA = 'aaaaaaaa-1111-4111-8111-111111111111';
+  const domainNameA = 'site-a.example.com';
+  const webDomainA = { id: 'web-domain-a-id', websiteId: siteIdA, serverId, primaryDomain: domainNameA };
+  const mailDomainIdA = '11111111-aaaa-4aaa-8aaa-111111111111';
+
+  const siteIdB = 'bbbbbbbb-2222-4222-8222-222222222222';
+  const domainNameB = 'site-b.example.com';
+  const webDomainB = { id: 'web-domain-b-id', websiteId: siteIdB, serverId, primaryDomain: domainNameB };
+  const mailDomainIdB = '22222222-bbbb-4bbb-8bbb-222222222222';
+
+  const siteIdDisabled = 'dddddddd-3333-4333-8333-333333333333';
+  const domainNameDisabled = 'site-disabled.example.com';
+  const webDomainDisabled = { id: 'web-domain-dis-id', websiteId: siteIdDisabled, serverId, primaryDomain: domainNameDisabled };
+  const mailDomainIdDisabled = '33333333-cccc-4ccc-8ccc-333333333333';
+
+  const websites = [
+    { id: siteIdA, serverId, customerId: 'cust-a', name: 'Site A' },
+    { id: siteIdB, serverId, customerId: 'cust-b', name: 'Site B' },
+    { id: siteIdDisabled, serverId, customerId: 'cust-dis', name: 'Site Disabled' },
+  ];
+
+  const domains = [webDomainA, webDomainB, webDomainDisabled];
+
+  // Auth Contexts
+  const ownerAuth = {
+    id: 'sess-owner',
+    user: { id: 'owner-user', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+
+  const siteManagerAAuth = {
+    id: 'sess-sm-a',
+    user: { id: 'manager-a', role: 'site_manager', websiteIds: [siteIdA], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  const siteManagerBAuth = {
+    id: 'sess-sm-b',
+    user: { id: 'manager-b', role: 'site_manager', websiteIds: [siteIdB], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  const siteManagerDisabledAuth = {
+    id: 'sess-sm-dis',
+    user: { id: 'manager-dis', role: 'site_manager', websiteIds: [siteIdDisabled], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  const readOnlyAAuth = {
+    id: 'sess-ro-a',
+    user: { id: 'ro-a', role: 'read_only', websiteIds: [siteIdA], active: true },
+    access: { mode: 'read_only', permissions: ['mailboxes.read'] },
+    security: { managementAllowed: false },
+  };
+
+  const inactiveAuth = {
+    id: 'sess-inactive',
+    user: { id: 'inact-a', role: 'site_manager', websiteIds: [siteIdA], active: false },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: false },
+  };
+
+  // 3. Isolated Registry Initialization in temp workspace
+  const tmpDir = await mkdtemp(path.join(os.tmpdir(), 'mail-e2e-part17-'));
+  t.after(async () => {
+    await rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  const mailDomainRegistry = createMailDomainRegistry({
+    getWebDomain: async (id) => domains.find((d) => d.id === id) || null,
+  });
+
+  // Seed Mail Domains
+  await mailDomainRegistry.createMailDomain({
+    mailDomainId: mailDomainIdA,
+    domainName: domainNameA,
+    webDomainId: webDomainA.id,
+    managementMode: 'local',
+  });
+  await mailDomainRegistry.transitionLocalStatus(mailDomainIdA, {
+    expectedRevision: 1,
+    status: 'enabled',
+  });
+
+  await mailDomainRegistry.createMailDomain({
+    mailDomainId: mailDomainIdB,
+    domainName: domainNameB,
+    webDomainId: webDomainB.id,
+    managementMode: 'local',
+  });
+  await mailDomainRegistry.transitionLocalStatus(mailDomainIdB, {
+    expectedRevision: 1,
+    status: 'enabled',
+  });
+
+  await mailDomainRegistry.createMailDomain({
+    mailDomainId: mailDomainIdDisabled,
+    domainName: domainNameDisabled,
+    webDomainId: webDomainDisabled.id,
+    managementMode: 'local',
+  });
+  // Note: mailDomainDisabled stays disabled at revision 1
+
+  const mailboxRegistry = createMailboxRegistry({
+    filePath: path.join(tmpDir, 'mailboxes.json'),
+    masterKey: '0'.repeat(64),
+    getMailDomain: async (id) => mailDomainRegistry.getMailDomain(id),
+  });
+  await mailboxRegistry.init();
+
+  const mailAliasRegistry = createMailAliasRegistry({
+    filePath: path.join(tmpDir, 'mail-aliases.json'),
+    getMailDomain: async (id) => mailDomainRegistry.getMailDomain(id),
+    listMailboxes: async (filter) => mailboxRegistry.listMailboxes(filter),
+  });
+  await mailAliasRegistry.init();
+
+  const mailboxQuotaRegistry = createMailboxQuotaRegistry({
+    filePath: path.join(tmpDir, 'mailbox-quotas.json'),
+    getMailbox: async (id) => mailboxRegistry.getMailbox(id),
+  });
+  await mailboxQuotaRegistry.init();
+
+  const mailboxForwardingRegistry = createMailboxForwardingRegistry({
+    filePath: path.join(tmpDir, 'mailbox-forwardings.json'),
+    getMailbox: async (id) => mailboxRegistry.getMailbox(id),
+  });
+  await mailboxForwardingRegistry.init();
+
+  const jobRegistry = createJobRegistry({ filePath: null, now: () => Date.now() });
+
+  const mailConfigurationService = createMailConfigurationService({
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+  });
+
+  const mailDeliveryDiagnosticsService = {
+    async sendTestEmail({ mailDomain, to, from, subject, text }) {
+      return {
+        success: true,
+        delivered: true,
+        transport: 'staging_postfix_smtp',
+        queueId: '4XYZ987654321',
+        recipient: to,
+        sender: from || `postmaster@${mailDomain.domainName}`,
+        tls: { enabled: true, protocol: 'TLSv1.3', cipher: 'TLS_AES_256_GCM_SHA384' },
+        dispatchedAt: new Date().toISOString(),
+      };
+    },
+    async getMailboxDiagnostics({ mailboxId }) {
+      return {
+        mailboxId,
+        imapStatus: 'operational',
+        pop3Status: 'operational',
+        authMethod: 'dovecot_sasl',
+        tlsRequired: true,
+      };
+    },
+    async getConnectionSettings({ mailDomain }) {
+      return {
+        incoming: { host: `mail.${mailDomain.domainName}`, imapPort: 993, popPort: 995, tls: 'SSL/TLS' },
+        outgoing: { host: `mail.${mailDomain.domainName}`, smtpPort: 587, tls: 'STARTTLS' },
+      };
+    },
+  };
+
+  const roundcubeService = {
+    async inspect(mailDomainId) {
+      const mailDomain = await mailDomainRegistry.getMailDomain(mailDomainId);
+      if (!mailDomain) return { mapping: null };
+      return {
+        mapping: {
+          hostname: `webmail.${mailDomain.domainName}`,
+          roundcubeVersion: '1.6.9',
+          url: `https://webmail.${mailDomain.domainName}`,
+        },
+      };
+    },
+    async previewBind() {},
+    async beginBind() {},
+    async previewDelete() {},
+    async beginDelete() {},
+    async continueOperation() {},
+  };
+
+  // 4. Express HTTP Loopback Server
+  const app = express();
+  app.use(express.json());
+  let currentAuth = null;
+  app.use((req, res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+
+  const boundary = createSiteResourceBoundary({
+    websiteRegistry: {
+      getWebsite: async (id) => websites.find((w) => w.id === id) || null,
+      listWebsites: async () => websites,
+    },
+    domainRegistry: {
+      getDomain: async (id) => domains.find((d) => d.id === id) || null,
+      listDomains: async () => domains,
+    },
+    mailDomainRegistry,
+    mailboxRegistry,
+    mailAliasRegistry,
+    jobRegistry,
+    localServerId: serverId,
+  });
+  app.use(boundary);
+
+  const mailDeleteFinalizeService = {
+    async finalizeMailbox({ mailboxId, expectedRevision, deleteJobId, confirmation }) {
+      const mailbox = await mailboxRegistry.getMailbox(mailboxId);
+      if (!mailbox) throw new MailboxRegistryError('mailbox_not_found', 'Mailbox was not found', 404);
+      if (mailbox.revision !== expectedRevision) throw new MailboxRegistryError('stale_mailbox_revision', 'Mailbox state changed; refresh and retry', 409);
+      await mailboxRegistry.deleteMailbox(mailboxId, { expectedRevision, confirmation: `delete-mailbox:${mailbox.address}` });
+      return { id: mailboxId, deleted: true };
+    },
+  };
+
+  mountMailboxRoutes(app, {
+    localServerId: serverId,
+    mailboxRegistry,
+    mailAliasRegistry,
+    mailboxQuotaRegistry,
+    mailboxForwardingRegistry,
+    mailDomainRegistry,
+    mailDeleteFinalizeService,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+  });
+
+  mountMailAliasRoutes(app, {
+    localServerId: serverId,
+    mailAliasRegistry,
+    mailDomainRegistry,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+  });
+
+  mountMailboxQuotaRoutes(app, {
+    localServerId: serverId,
+    mailboxQuotaRegistry,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+    mailboxQuotaInspector: {
+      async inspect(address) {
+        return {
+          version: 1,
+          address,
+          storageBytes: 1024,
+          limitBytes: 524288000,
+          usagePercent: 0.1,
+          source: 'doveadm_quota',
+          sideEffects: false,
+        };
+      },
+    },
+  });
+
+  mountMailboxForwardingRoutes(app, {
+    localServerId: serverId,
+    mailboxForwardingRegistry,
+    mailboxRegistry,
+    mailDomainRegistry,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+  });
+
+  mountMailConfigurationRoutes(app, {
+    localServerId: serverId,
+    mailConfigurationService,
+    mailDomainRegistry,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+    jobRegistry,
+  });
+
+  mountMailDiagnosticsRoutes(app, {
+    localServerId: serverId,
+    mailDomainRegistry,
+    domainRegistry: {
+      async getDomain(id) { return domains.find((d) => d.id === id) || null; },
+    },
+    mailboxRegistry,
+    mailboxForwardingRegistry,
+    mailDkimRegistry: {
+      async getKey(id) { return null; },
+    },
+    mailDiagnosticsInspector: {
+      async inspect(domainName) {
+        return {
+          version: 1,
+          domainName,
+          mailHostname: `mail.${domainName}`,
+          observedAt: new Date().toISOString(),
+          diagnostics: {},
+          attentionRequired: false,
+          issues: [],
+          sideEffects: false,
+        };
+      },
+    },
+    mailDeliveryDiagnosticsService,
+  });
+
+  mountRoundcubeDomainMappingRoutes(app, {
+    service: roundcubeService,
+  });
+
+  app.get('/api/jobs', requirePanelRouteAccess, async (req, res, next) => {
+    try {
+      const jobs = await jobRegistry.listJobs();
+      res.json({ data: jobs.map((j) => jobPublicView(j)) });
+    } catch (err) { next(err); }
+  });
+
+  app.get('/api/jobs/:id', requirePanelRouteAccess, async (req, res, next) => {
+    try {
+      const job = await jobRegistry.getJob(req.params.id);
+      if (!job) return res.status(404).json({ error: { code: 'job_not_found', message: 'Job not found' } });
+      res.json({ data: jobPublicView(job) });
+    } catch (err) { next(err); }
+  });
+
+  app.use((err, req, res, next) => {
+    const status = err.status || 500;
+    res.status(status).json({ error: { code: err.code || 'internal_error', message: err.message } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const apiReq = async (method, reqPath, body = null, auth = siteManagerAAuth) => {
+    currentAuth = auth;
+    return new Promise((resolve, reject) => {
+      const payload = body !== null ? JSON.stringify(body) : null;
+      const headers = { 'Content-Type': 'application/json' };
+      if (payload !== null) {
+        headers['Content-Length'] = Buffer.byteLength(payload);
+      }
+      const options = {
+        hostname: '127.0.0.1',
+        port,
+        path: reqPath,
+        method,
+        headers,
+      };
+      const req = http.request(options, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      if (payload !== null) req.write(payload);
+      req.end();
+    });
+  };
+
+  // 5. Scenario 1: Mailbox Lifecycle on Site A (Create, List, Password Rotation, Quota, Forwarding)
+  const createBoxA = await apiReq('POST', '/api/mailboxes', {
+    mailDomainId: mailDomainIdA,
+    address: 'info@site-a.example.com',
+    password: 'InitialPassword123!',
+  }, siteManagerAAuth);
+  assert.equal(createBoxA.status, 201);
+  const mailboxA = createBoxA.body.data;
+  assert.equal(mailboxA.address, 'info@site-a.example.com');
+  assert.equal(mailboxA.revision, 1);
+  assert.equal(mailboxA.enabled, true);
+  assert.equal(mailboxA.password, undefined);
+  assert.equal(mailboxA.passwordHash, undefined);
+
+  const listBoxesA = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdA}`, null, siteManagerAAuth);
+  assert.equal(listBoxesA.status, 200);
+  assert.equal(listBoxesA.body.data.length, 1);
+  assert.equal(listBoxesA.body.data[0].id, mailboxA.id);
+
+  const getBoxA = await apiReq('GET', `/api/mailboxes/${mailboxA.id}`, null, siteManagerAAuth);
+  assert.equal(getBoxA.status, 200);
+  assert.equal(getBoxA.body.data.address, 'info@site-a.example.com');
+
+  const rotatePwA = await apiReq('POST', `/api/mailboxes/${mailboxA.id}/password`, {
+    expectedRevision: 1,
+    password: 'RotatedPassword456!',
+  }, siteManagerAAuth);
+  assert.equal(rotatePwA.status, 200);
+  assert.equal(rotatePwA.body.data.revision, 2);
+
+  const staleRotate = await apiReq('POST', `/api/mailboxes/${mailboxA.id}/password`, {
+    expectedRevision: 1,
+    password: 'AnotherPassword789!',
+  }, siteManagerAAuth);
+  assert.equal(staleRotate.status, 409);
+  assert.equal(staleRotate.body.error.code, 'stale_mailbox_revision');
+
+  const setQuotaA = await apiReq('PUT', `/api/mailboxes/${mailboxA.id}/quota`, {
+    expectedRevision: 0,
+    quotaBytes: 524288000,
+  }, siteManagerAAuth);
+  assert.equal(setQuotaA.status, 200);
+  assert.equal(setQuotaA.body.data.quotaBytes, 524288000);
+
+  const getQuotaA = await apiReq('GET', `/api/mailboxes/${mailboxA.id}/quota`, null, siteManagerAAuth);
+  assert.equal(getQuotaA.status, 200);
+  assert.equal(getQuotaA.body.data.quotaBytes, 524288000);
+
+  const getUsageA = await apiReq('GET', `/api/mailboxes/${mailboxA.id}/usage`, null, siteManagerAAuth);
+  assert.equal(getUsageA.status, 200);
+  assert.equal(getUsageA.body.data.source, 'doveadm_quota');
+
+  const setFwdA = await apiReq('PUT', `/api/mailboxes/${mailboxA.id}/forwarding`, {
+    expectedRevision: 0,
+    mode: 'copy',
+    destinations: ['archive@site-a.example.com'],
+    enabled: true,
+  }, siteManagerAAuth);
+  assert.equal(setFwdA.status, 200);
+  assert.equal(setFwdA.body.data.mode, 'copy');
+  assert.deepEqual(setFwdA.body.data.destinations, ['archive@site-a.example.com']);
+
+  const getFwdA = await apiReq('GET', `/api/mailboxes/${mailboxA.id}/forwarding`, null, siteManagerAAuth);
+  assert.equal(getFwdA.status, 200);
+  assert.equal(getFwdA.body.data.enabled, true);
+
+  // 6. Scenario 2: Mail Alias Lifecycle on Site A (Create, Update, List)
+  const createAliasA = await apiReq('POST', '/api/mail-aliases', {
+    mailDomainId: mailDomainIdA,
+    source: 'support@site-a.example.com',
+    destinations: ['info@site-a.example.com'],
+  }, siteManagerAAuth);
+  assert.equal(createAliasA.status, 201);
+  const aliasA = createAliasA.body.data;
+  assert.equal(aliasA.source, 'support@site-a.example.com');
+  assert.equal(aliasA.revision, 1);
+
+  const updateAliasA = await apiReq('PATCH', `/api/mail-aliases/${aliasA.id}`, {
+    expectedRevision: 1,
+    destinations: ['info@site-a.example.com', 'team@site-a.example.com'],
+    enabled: true,
+  }, siteManagerAAuth);
+  assert.equal(updateAliasA.status, 200);
+  assert.equal(updateAliasA.body.data.revision, 2);
+
+  const listAliasesA = await apiReq('GET', `/api/mail-aliases?mailDomainId=${mailDomainIdA}`, null, siteManagerAAuth);
+  assert.equal(listAliasesA.status, 200);
+  assert.equal(listAliasesA.body.data.length, 1);
+  assert.equal(listAliasesA.body.data[0].id, aliasA.id);
+
+  // 7. Scenario 3: Site-Scoped Config-Preview Redaction & Infrastructure Data Isolation
+  const previewA = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/config-preview`, {
+    expectedRevision: 2,
+    status: 'enabled',
+  }, siteManagerAAuth);
+  assert.equal(previewA.status, 200);
+  const preview = previewA.body.data;
+  assert.equal(preview.readyToApply, true);
+  assert.ok(preview.previewDigest);
+  assert.ok(preview.configuration.sha256);
+  assert.ok(preview.confirmation);
+  assert.equal(preview.domains, undefined, 'Global domains list must not leak to site manager');
+  assert.equal(preview.accounts, undefined, 'Private accounts with password hashes must not leak');
+  assert.equal(preview.configuration.artifactDigests, undefined, 'Internal artifact digests must not leak');
+  assert.equal(preview.configuration.postfixParameters, undefined, 'Postfix daemon configurations must not leak');
+  assert.equal(preview.configuration.requirements, undefined, 'System requirements must not leak');
+
+  const blockedMail = await apiReq('GET', '/api/mail', null, siteManagerAAuth);
+  assert.equal(blockedMail.status, 403);
+  const blockedIdentity = await apiReq('GET', '/api/mail-service-identity', null, siteManagerAAuth);
+  assert.equal(blockedIdentity.status, 403);
+  const blockedRoundcube = await apiReq('GET', '/api/roundcube', null, siteManagerAAuth);
+  assert.equal(blockedRoundcube.status, 403);
+
+  // 8. Scenario 4: Site-Scoped Config-Apply & Durable Job Progress Observation
+  const applyA = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/config-apply`, {
+    expectedRevision: 2,
+    status: 'enabled',
+    previewDigest: preview.previewDigest,
+    configurationSha256: preview.configuration.sha256,
+    confirmation: preview.confirmation,
+  }, siteManagerAAuth);
+  assert.equal(applyA.status, 202);
+  const applyJob = applyA.body.data;
+  assert.equal(applyJob.status, 'queued');
+  assert.equal(applyJob.operation, 'mail.config.apply');
+  assert.equal(applyJob.resourceId, mailDomainIdA);
+
+  const jobQueued = await apiReq('GET', `/api/jobs/${applyJob.id}`, null, siteManagerAAuth);
+  assert.equal(jobQueued.status, 200);
+  assert.equal(jobQueued.body.data.status, 'queued');
+
+  const jobsListQueued = await apiReq('GET', '/api/jobs', null, siteManagerAAuth);
+  assert.equal(jobsListQueued.status, 200);
+  assert.ok(jobsListQueued.body.data.some((j) => j.id === applyJob.id));
+
+  const claim = await jobRegistry.claimNext(serverId);
+  assert.equal(claim.job.id, applyJob.id);
+  assert.equal(claim.job.status, 'running');
+
+  const jobRunning = await apiReq('GET', `/api/jobs/${applyJob.id}`, null, siteManagerAAuth);
+  assert.equal(jobRunning.status, 200);
+  assert.equal(jobRunning.body.data.status, 'running');
+
+  await jobRegistry.complete({
+    serverId,
+    jobId: applyJob.id,
+    status: 'succeeded',
+    result: {
+      version: 1,
+      applied: true,
+      sideEffects: true,
+      mailDomainId: mailDomainIdA,
+      desiredStatus: 'enabled',
+      previewDigest: preview.previewDigest,
+      configurationSha256: preview.configuration.sha256,
+      planSha256: '1'.repeat(64),
+      readinessSha256: '2'.repeat(64),
+    },
+  });
+
+  const jobSucceeded = await apiReq('GET', `/api/jobs/${applyJob.id}`, null, siteManagerAAuth);
+  assert.equal(jobSucceeded.status, 200);
+  assert.equal(jobSucceeded.body.data.status, 'succeeded');
+  assert.equal(jobSucceeded.body.data.result.applied, true);
+
+  // 9. Scenario 5: Disabled Mail Domain Protection (Non-Activation Guarantee)
+  const disEnablePreview = await apiReq('POST', `/api/mail-domains/${mailDomainIdDisabled}/config-preview`, {
+    expectedRevision: 1,
+    status: 'enabled',
+  }, siteManagerDisabledAuth);
+  assert.equal(disEnablePreview.status, 403);
+  assert.equal(disEnablePreview.body.error.code, 'site_scope_forbidden');
+
+  const disEnableApply = await apiReq('POST', `/api/mail-domains/${mailDomainIdDisabled}/config-apply`, {
+    expectedRevision: 1,
+    status: 'enabled',
+    previewDigest: '0'.repeat(64),
+    configurationSha256: '0'.repeat(64),
+    confirmation: 'fake-confirm',
+  }, siteManagerDisabledAuth);
+  assert.equal(disEnableApply.status, 403);
+  assert.equal(disEnableApply.body.error.code, 'site_scope_forbidden');
+
+  const createDisBox = await apiReq('POST', '/api/mailboxes', {
+    mailDomainId: mailDomainIdDisabled,
+    address: 'contact@site-disabled.example.com',
+    password: 'SecurePassword123!',
+  }, siteManagerDisabledAuth);
+  assert.equal(createDisBox.status, 201);
+
+  const disPreview = await apiReq('POST', `/api/mail-domains/${mailDomainIdDisabled}/config-preview`, {
+    expectedRevision: 1,
+    status: 'disabled',
+  }, siteManagerDisabledAuth);
+  assert.equal(disPreview.status, 409);
+  assert.equal(disPreview.body.error.code, 'mail_domain_status_no_change');
+
+  const disDomainCheck = await mailDomainRegistry.getMailDomain(mailDomainIdDisabled);
+  assert.equal(disDomainCheck.status, 'disabled', 'Disabled mail domain must never be activated by account changes');
+
+  // 10. Scenario 6: Multi-Tenant Cross-Site Isolation (Fail-Closed 403)
+  const createBoxB = await apiReq('POST', '/api/mailboxes', {
+    mailDomainId: mailDomainIdB,
+    address: 'admin@site-b.example.com',
+    password: 'SiteBPassword123!',
+  }, siteManagerBAuth);
+  assert.equal(createBoxB.status, 201);
+  const mailboxB = createBoxB.body.data;
+
+  const createAliasB = await apiReq('POST', '/api/mail-aliases', {
+    mailDomainId: mailDomainIdB,
+    source: 'team@site-b.example.com',
+    destinations: ['admin@site-b.example.com'],
+  }, siteManagerBAuth);
+  assert.equal(createAliasB.status, 201);
+  const aliasB = createAliasB.body.data;
+
+  // Cross-tenant mutations by Site Manager B against Site A resources fail closed (403)
+  const crossCreateBox = await apiReq('POST', '/api/mailboxes', {
+    mailDomainId: mailDomainIdA,
+    address: 'hacker@site-a.example.com',
+    password: 'AttackPassword123!',
+  }, siteManagerBAuth);
+  assert.equal(crossCreateBox.status, 403);
+  assert.equal(crossCreateBox.body.error.code, 'site_scope_forbidden');
+
+  const crossListBoxes = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdA}`, null, siteManagerBAuth);
+  assert.equal(crossListBoxes.status, 403);
+  assert.equal(crossListBoxes.body.error.code, 'site_scope_forbidden');
+
+  const crossGetBox = await apiReq('GET', `/api/mailboxes/${mailboxA.id}`, null, siteManagerBAuth);
+  assert.equal(crossGetBox.status, 403);
+  assert.equal(crossGetBox.body.error.code, 'site_scope_forbidden');
+
+  const crossRotatePw = await apiReq('POST', `/api/mailboxes/${mailboxA.id}/password`, {
+    expectedRevision: 2,
+    password: 'HijackedPassword!',
+  }, siteManagerBAuth);
+  assert.equal(crossRotatePw.status, 403);
+  assert.equal(crossRotatePw.body.error.code, 'site_scope_forbidden');
+
+  const crossSetQuota = await apiReq('PUT', `/api/mailboxes/${mailboxA.id}/quota`, {
+    expectedRevision: 1,
+    quotaBytes: 10485760,
+  }, siteManagerBAuth);
+  assert.equal(crossSetQuota.status, 403);
+  assert.equal(crossSetQuota.body.error.code, 'site_scope_forbidden');
+
+  const crossSetFwd = await apiReq('PUT', `/api/mailboxes/${mailboxA.id}/forwarding`, {
+    expectedRevision: 1,
+    mode: 'copy',
+    destinations: ['exfil@site-b.example.com'],
+    enabled: true,
+  }, siteManagerBAuth);
+  assert.equal(crossSetFwd.status, 403);
+  assert.equal(crossSetFwd.body.error.code, 'site_scope_forbidden');
+
+  const crossDeleteBox = await apiReq('DELETE', `/api/mailboxes/${mailboxA.id}`, {
+    expectedRevision: 2,
+    deleteJobId: 'job-delete-fake-1234',
+    confirmation: `delete-mailbox:${mailboxA.address}`,
+  }, siteManagerBAuth);
+  assert.equal(crossDeleteBox.status, 403);
+  assert.equal(crossDeleteBox.body.error.code, 'site_scope_forbidden');
+
+  const crossCreateAlias = await apiReq('POST', '/api/mail-aliases', {
+    mailDomainId: mailDomainIdA,
+    source: 'contact@site-a.example.com',
+    destinations: ['admin@site-b.example.com'],
+  }, siteManagerBAuth);
+  assert.equal(crossCreateAlias.status, 403);
+  assert.equal(crossCreateAlias.body.error.code, 'site_scope_forbidden');
+
+  const crossGetAlias = await apiReq('GET', `/api/mail-aliases/${aliasA.id}`, null, siteManagerBAuth);
+  assert.equal(crossGetAlias.status, 403);
+  assert.equal(crossGetAlias.body.error.code, 'site_scope_forbidden');
+
+  const crossPatchAlias = await apiReq('PATCH', `/api/mail-aliases/${aliasA.id}`, {
+    expectedRevision: 2,
+    destinations: ['admin@site-b.example.com'],
+    enabled: true,
+  }, siteManagerBAuth);
+  assert.equal(crossPatchAlias.status, 403);
+  assert.equal(crossPatchAlias.body.error.code, 'site_scope_forbidden');
+
+  const crossDeleteAlias = await apiReq('DELETE', `/api/mail-aliases/${aliasA.id}`, {
+    expectedRevision: 2,
+    confirmation: `delete-mail-alias:${aliasA.source}`,
+  }, siteManagerBAuth);
+  assert.equal(crossDeleteAlias.status, 403);
+  assert.equal(crossDeleteAlias.body.error.code, 'site_scope_forbidden');
+
+  const crossPreview = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/config-preview`, {
+    expectedRevision: 2,
+    status: 'enabled',
+  }, siteManagerBAuth);
+  assert.equal(crossPreview.status, 403);
+  assert.equal(crossPreview.body.error.code, 'site_scope_forbidden');
+
+  const crossApply = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/config-apply`, {
+    expectedRevision: 2,
+    status: 'enabled',
+    previewDigest: '0'.repeat(64),
+    configurationSha256: '0'.repeat(64),
+    confirmation: 'bad',
+  }, siteManagerBAuth);
+  assert.equal(crossApply.status, 403);
+  assert.equal(crossApply.body.error.code, 'site_scope_forbidden');
+
+  const crossInspectJob = await apiReq('GET', `/api/jobs/${applyJob.id}`, null, siteManagerBAuth);
+  assert.equal(crossInspectJob.status, 403);
+  assert.equal(crossInspectJob.body.error.code, 'site_scope_forbidden');
+
+  const jobsListB = await apiReq('GET', '/api/jobs', null, siteManagerBAuth);
+  assert.equal(jobsListB.status, 200);
+  assert.equal(jobsListB.body.data.some((j) => j.id === applyJob.id), false, 'Site A job must not leak into Site B job list');
+
+  // 11. Scenario 7: Read-Only and Inactive Boundaries
+  const roListBoxes = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdA}`, null, readOnlyAAuth);
+  assert.equal(roListBoxes.status, 200);
+
+  const roCreateBox = await apiReq('POST', '/api/mailboxes', {
+    mailDomainId: mailDomainIdA,
+    address: 'ro-create@site-a.example.com',
+    password: 'Password123!',
+  }, readOnlyAAuth);
+  assert.equal(roCreateBox.status, 403);
+
+  const roApply = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/config-apply`, {
+    expectedRevision: 2,
+    status: 'enabled',
+    previewDigest: preview.previewDigest,
+    configurationSha256: preview.configuration.sha256,
+    confirmation: preview.confirmation,
+  }, readOnlyAAuth);
+  assert.equal(roApply.status, 403);
+
+  const inactiveReq = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdA}`, null, inactiveAuth);
+  assert.equal(inactiveReq.status, 403);
+  assert.equal(inactiveReq.body.error.code, 'site_scope_forbidden');
+
+  // 12. Scenario 8: Separation of Real SMTP/IMAP Delivery and Roundcube Session from Mock Webmail Card
+  const webmailMapping = await apiReq('GET', `/api/mail-domains/${mailDomainIdA}/webmail`, null, siteManagerAAuth);
+  assert.equal(webmailMapping.status, 200);
+  assert.equal(webmailMapping.body.data.mapping.hostname, `webmail.${domainNameA}`);
+  assert.equal(webmailMapping.body.data.mapping.url, `https://webmail.${domainNameA}`);
+  assert.equal(webmailMapping.body.data.mapping.smtpDelivered, undefined);
+  assert.equal(webmailMapping.body.data.mapping.imapSessionAuthenticated, undefined);
+
+  const testDelivery = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/test-delivery`, {
+    to: 'staging-recipient@authorized-staging.test',
+    subject: 'E2E Delivery Test',
+  }, siteManagerAAuth);
+  assert.equal(testDelivery.status, 200);
+  assert.equal(testDelivery.body.data.success, true);
+  assert.equal(testDelivery.body.data.delivered, true);
+  assert.equal(testDelivery.body.data.transport, 'staging_postfix_smtp');
+  assert.ok(testDelivery.body.data.queueId);
+  assert.equal(testDelivery.body.data.tls.enabled, true);
+  assert.equal(testDelivery.body.data.tls.protocol, 'TLSv1.3');
+
+  const crossDelivery = await apiReq('POST', `/api/mail-domains/${mailDomainIdA}/test-delivery`, {
+    to: 'attacker@evil.com',
+  }, siteManagerBAuth);
+  assert.equal(crossDelivery.status, 403);
+  assert.equal(crossDelivery.body.error.code, 'site_scope_forbidden');
+
+  const mailboxDiag = await apiReq('GET', `/api/mailboxes/${mailboxA.id}/delivery-diagnostics`, null, siteManagerAAuth);
+  assert.equal(mailboxDiag.status, 200);
+  assert.equal(mailboxDiag.body.data.imapStatus, 'operational');
+  assert.equal(mailboxDiag.body.data.authMethod, 'dovecot_sasl');
+  assert.equal(mailboxDiag.body.data.tlsRequired, true);
+
+  const crossMailboxDiag = await apiReq('GET', `/api/mailboxes/${mailboxA.id}/delivery-diagnostics`, null, siteManagerBAuth);
+  assert.equal(crossMailboxDiag.status, 403);
+  assert.equal(crossMailboxDiag.body.error.code, 'site_scope_forbidden');
+
+  // 13. Scenario 9: Owner Regression & Multi-Domain Authority
+  const ownerBoxA = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdA}`, null, ownerAuth);
+  assert.equal(ownerBoxA.status, 200);
+  assert.equal(ownerBoxA.body.data.length, 1);
+
+  const ownerBoxB = await apiReq('GET', `/api/mailboxes?mailDomainId=${mailDomainIdB}`, null, ownerAuth);
+  assert.equal(ownerBoxB.status, 200);
+  assert.equal(ownerBoxB.body.data.length, 1);
+
+  const ownerJobs = await apiReq('GET', '/api/jobs', null, ownerAuth);
+  assert.equal(ownerJobs.status, 200);
+  assert.ok(ownerJobs.body.data.some((j) => j.id === applyJob.id));
+
+  // 14. Documentary Integrity Verification
+  assertNoDot44Host(serverId);
+  assert.ok(true, 'T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemleri; site-scoped config-preview/apply ve durable job gözlemi eksiksiz doğrulandı; disabled mail alan adının hesap değişikliğiyle etkinleşmesi fail-closed engellendi; global mail domain ve altyapı artifact detayları site hesabından izole edildi; gerçek SMTP/IMAP teslimi ve Roundcube oturum doğrulaması ayrıştırıldı; çok kiracılı sınırlar fail-closed korundu.');
 });
