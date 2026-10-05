@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, writeFile, rm, readdir } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, readdir, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { gitBlobHash, prepareUiFonts, UI_FONTS, verifyFontAsset } from '../../../scripts/prepare-ui-fonts.mjs';
@@ -54,3 +54,39 @@ test('check-only detects missing assets and does not silently download', () => t
   const result = await prepareUiFonts({ directory, assets: [asset], check: true });
   assert.equal(result[0].source, 'existing');
 }));
+test('corrupted destination asset fails check-only validation', () => temporary(async (directory) => {
+  await writeFile(join(directory, asset.file), Buffer.from('corrupted font bytes'));
+  await assert.rejects(prepareUiFonts({ directory, assets: [asset], check: true }), /missing|integrity/);
+}));
+test('corrupted cache directory asset fails offline validation without false positive installation', () => temporary(async (directory) => {
+  const cacheDirectory = join(directory, 'cache');
+  await mkdir(cacheDirectory, { recursive: true });
+  await writeFile(join(cacheDirectory, asset.file), Buffer.from('corrupted cache bytes'));
+  await assert.rejects(
+    prepareUiFonts({
+      directory: join(directory, 'out'),
+      cacheDirectory,
+      assets: [asset],
+      fetchImpl: () => { throw new Error('offline network unreachable'); },
+    }),
+    /offline network unreachable|integrity/
+  );
+}));
+test('OFL licenses and font files are packaged together in ember public font assets', async () => {
+  const publicDir = new URL('../public/fonts/ember/', import.meta.url);
+  const files = await readdir(publicDir);
+  const ttfFiles = files.filter((f) => f.endsWith('.ttf'));
+  const oflFiles = files.filter((f) => f.endsWith('-OFL.txt'));
+  assert.equal(ttfFiles.length, 2);
+  assert.equal(oflFiles.length, 2);
+  assert.ok(files.includes('manrope-75274da585.ttf'));
+  assert.ok(files.includes('manrope-OFL.txt'));
+  assert.ok(files.includes('outfit-466d6245f9.ttf'));
+  assert.ok(files.includes('outfit-OFL.txt'));
+  for (const f of files) {
+    const assetMeta = UI_FONTS.find((a) => a.file === f);
+    assert.ok(assetMeta, `Unexpected or unmanaged file in fonts directory: ${f}`);
+    const fileBytes = await readFile(new URL(`../public/fonts/ember/${f}`, import.meta.url));
+    assert.doesNotThrow(() => verifyFontAsset(fileBytes, assetMeta));
+  }
+});
