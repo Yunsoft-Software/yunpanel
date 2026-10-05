@@ -1,4 +1,5 @@
 const RESOURCE_LABELS = Object.freeze({
+  website: 'Web sitesi',
   domain: 'Alan adı',
   server: 'Sunucu',
   system: 'Sunucu',
@@ -9,6 +10,7 @@ const RESOURCE_LABELS = Object.freeze({
   dns_zone: 'DNS zone',
   mail_domain: 'Mail domain',
   docker_project: 'Docker projesi',
+  job: 'İşlem',
 });
 
 const DEPLOY_LOG_OPERATIONS = new Set(['app.static.deploy', 'app.node.deploy']);
@@ -55,6 +57,11 @@ export function jobResourceTarget(job, resources = {}) {
   const resourceId = typeof job?.resourceId === 'string' && job.resourceId ? job.resourceId : null;
   if (!resourceType || !resourceId) return null;
   const label = RESOURCE_LABELS[resourceType] ?? 'Kaynak';
+  if (resourceType === 'website') {
+    const domain = (resources?.domains ?? []).find((item) => item.websiteId === resourceId);
+    const targetId = domain ? domain.id : resourceId;
+    return Object.freeze({ label, href: `/websites/${encodeURIComponent(targetId)}/overview` });
+  }
   if (resourceType === 'domain') return Object.freeze({ label, href: `/websites/${encodeURIComponent(resourceId)}/overview` });
   if (resourceType === 'application') {
     const domain = linkedSiteForApplication(resourceId, resources);
@@ -70,6 +77,7 @@ export function jobResourceTarget(job, resources = {}) {
   if (resourceType === 'dns_zone') return Object.freeze({ label, href: '/domains' });
   if (resourceType === 'backup') return Object.freeze({ label, href: '/backups' });
   if (resourceType === 'server' || resourceType === 'system') return Object.freeze({ label, href: '/servers' });
+  if (resourceType === 'job') return Object.freeze({ label, href: '/jobs' });
   return Object.freeze({ label, href: null });
 }
 
@@ -127,20 +135,22 @@ export function jobStageProgress(job) {
   const isTerminalFailed = ['failed', 'cancelled'].includes(job?.status);
   const stages = job?.stages ?? job?.progress?.stages ?? null;
   if (stages && typeof stages === 'object' && Number.isInteger(stages.total) && Number.isInteger(stages.current)) {
+    const current = isTerminalFailed && stages.current >= stages.total ? Math.max(0, stages.total - 1) : stages.current;
     return Object.freeze({
-      current: stages.current,
+      current,
       total: stages.total,
-      label: `${stages.current}/${stages.total} aşama`,
+      label: `${current}/${stages.total} aşama`,
       completed: !isTerminalFailed && stages.current === stages.total,
       isPercentage: false,
     });
   }
   const progress = job?.progress;
   if (progress && typeof progress === 'object' && Number.isInteger(progress.required) && Number.isInteger(progress.completed)) {
+    const completed = isTerminalFailed && progress.completed >= progress.required ? Math.max(0, progress.required - 1) : progress.completed;
     return Object.freeze({
-      current: progress.completed,
+      current: completed,
       total: progress.required,
-      label: `${progress.completed}/${progress.required} adım`,
+      label: `${completed}/${progress.required} adım`,
       completed: !isTerminalFailed && progress.completed === progress.required && progress.required > 0,
       isPercentage: false,
     });
@@ -148,7 +158,10 @@ export function jobStageProgress(job) {
   if (Array.isArray(job?.steps) && job.steps.length > 0) {
     const requiredSteps = job.steps.filter((s) => s?.required !== false);
     const total = requiredSteps.length;
-    const completed = requiredSteps.filter((s) => s?.state === 'succeeded').length;
+    let completed = requiredSteps.filter((s) => s?.state === 'succeeded').length;
+    if (isTerminalFailed && completed >= total && total > 0) {
+      completed = Math.max(0, total - 1);
+    }
     return Object.freeze({
       current: completed,
       total,

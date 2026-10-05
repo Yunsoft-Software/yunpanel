@@ -16,17 +16,19 @@ import {
 import { formatDate, jobActive, jobFinishedAt } from './site-model.js';
 import { observeJob } from './observe-job.js';
 
-export default function JobDrawer({ onRetry } = {}) {
+export default function JobDrawer({ onRetry, onCancel } = {}) {
   const { observedJob: job, jobOpen, closeJob, updateJob, refreshAll } = useWorkspace();
   if (!jobOpen || !job) return null;
   // Close/reopen and switching jobs create a fresh observer with no trusted data.
-  return <JobObservation key={job.id} id={job.id} close={closeJob} update={updateJob} refresh={refreshAll} onRetry={onRetry} />;
+  return <JobObservation key={job.id} id={job.id} close={closeJob} update={updateJob} refresh={refreshAll} onRetry={onRetry} onCancel={onCancel} />;
 }
 
-function JobObservation({ id, close, update, refresh, onRetry }) {
+export function JobObservation({ id, close, update, refresh, onRetry, onCancel }) {
   const { domains, websites } = useWorkspace();
   const [state, setState] = useState({ job: null, error: null });
   const [logs, setLogs] = useState({ status: 'idle', data: null, error: null });
+  const [cancelling, setCancelling] = useState(false);
+  const [cancelError, setCancelError] = useState(null);
   useEffect(() => observeJob({ id, request: panelRequest, onState: setState, onJob: update, onDone: refresh }), [id, update, refresh]);
   const { job, error } = state;
   const supportsLogs = jobSupportsDeployLogs(job);
@@ -55,6 +57,24 @@ function JobObservation({ id, close, update, refresh, onRetry }) {
       .catch((failure) => { if (active && failure.name !== 'AbortError') setLogs((current) => ({ ...current, status: current.data ? 'stale' : 'error', error: failure.message })); });
     return () => { active = false; controller.abort(); };
   }, [id, supportsLogs, job?.status]);
+  const handleCancel = useCallback(async () => {
+    if (cancelling) return;
+    setCancelling(true);
+    setCancelError(null);
+    try {
+      if (typeof onCancel === 'function') {
+        await onCancel(job);
+      } else {
+        const response = await panelRequest(`/jobs/${encodeURIComponent(id)}/cancel`, { method: 'POST', body: {} });
+        if (response?.data) update(response.data);
+        refresh();
+      }
+    } catch (failure) {
+      if (failure.name !== 'AbortError') setCancelError(failure.message);
+    } finally {
+      setCancelling(false);
+    }
+  }, [id, job, cancelling, onCancel, update, refresh]);
   const lifecycle = jobLifecycle(job);
   const target = jobResourceTarget(job, { domains: domains.items, websites: websites.items });
   const metadata = safeJobResultMetadata(job);
@@ -63,6 +83,7 @@ function JobObservation({ id, close, update, refresh, onRetry }) {
   return <Modal title="İşlem durumu" onClose={close}>
     {!job && !error && <div className="ws-loading" role="status"><span className="ws-spinner" />İşlem kaydı doğrulanıyor…</div>}
     <ErrorNotice error={error ?? (job?.status === 'failed' ? job.error?.message ?? job.error?.code ?? 'İşlem başarısız.' : null)} />
+    <ErrorNotice error={cancelError} />
     {job && <><div className="ws-job-status"><Badge state={job.status} /><h3>{job.type ?? job.operation}</h3><p>{jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : ['partial', 'partial_success'].includes(job.status) ? 'İşlem kısmen tamamlandı. Bazı adımlar tamamlandı; kalanlar için müdahale veya doğrulama gerekebilir.' : 'İşlem sonucunu aşağıdan inceleyin.'}</p></div>
       <KeyValues items={[
         ['İş kimliği', job.id],
@@ -89,6 +110,11 @@ function JobObservation({ id, close, update, refresh, onRetry }) {
       {supportsLogs && <div className="ws-section-body"><div className="ws-actions"><strong>Deploy logu</strong><Button icon="refresh" disabled={logs.status === 'loading' || logs.status === 'refreshing'} onClick={loadLogs}>Yenile</Button></div><ErrorNotice error={logs.error} />{logs.status === 'loading' && !logs.data && <div className="ws-loading" role="status"><span className="ws-spinner" />Deploy logu yükleniyor…</div>}{logs.data?.entries?.length ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Zaman</th><th>Seviye</th><th>Aşama</th><th>Mesaj</th></tr></thead><tbody>{logs.data.entries.map((entry, index) => <tr key={entry.cursor ?? `${entry.timestamp}:${index}`}><td>{formatDate(entry.timestamp)}</td><td>{entry.level}</td><td>{entry.stage ?? '—'}</td><td><code>{entry.message}</code></td></tr>)}</tbody></table></div> : logs.data && <EmptyState icon="file" title="Deploy logu yok" detail="Bu iş için saklanan bounded deploy log kaydı bulunamadı." />}</div>}
     </>}
     <footer className="ws-modal-footer">
+      {job?.status === 'queued' && (
+        <Button variant="danger" disabled={cancelling} onClick={handleCancel}>
+          {cancelling ? 'İptal ediliyor…' : 'İşi iptal et'}
+        </Button>
+      )}
       {typeof onRetry === 'function' && jobSupportsManualRetry(job, { canManage: true }) && (
         <Button variant="primary" onClick={() => onRetry(job)}>Yeniden dene</Button>
       )}

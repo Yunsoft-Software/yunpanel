@@ -34,6 +34,12 @@ test('job resource links prefer exact linked site routes when available', () => 
   assert.deepEqual(jobResourceTarget({ resourceType: 'docker_project', resourceId: domainId }), {
     label: 'Docker projesi', href: `/docker/${domainId}`,
   });
+  assert.deepEqual(jobResourceTarget({ resourceType: 'website', resourceId: websiteId }, resources), {
+    label: 'Web sitesi', href: `/websites/${domainId}/overview`,
+  });
+  assert.deepEqual(jobResourceTarget({ resourceType: 'job', resourceId: '11111111-1111-4111-8111-111111111111' }), {
+    label: 'İşlem', href: '/jobs',
+  });
 });
 
 for (const [status, stage] of [
@@ -196,7 +202,7 @@ test('job stage progress strictly distinguishes phases from execution attempts a
   assert.equal(stepsProgress.isPercentage, false);
   assert.equal(jobAttemptCount(stepsJob), 2);
 
-  // CRITICAL: Failed and cancelled jobs must NEVER appear completed even if all stages are reached
+  // CRITICAL: Failed and cancelled jobs must NEVER appear completed, 3/3, or 100% even if all stages are reached
   const failedAllStages = {
     status: 'failed',
     attempts: 3,
@@ -204,6 +210,8 @@ test('job stage progress strictly distinguishes phases from execution attempts a
   };
   const failedProg = jobStageProgress(failedAllStages);
   assert.equal(failedProg.completed, false);
+  assert.notEqual(failedProg.current, failedProg.total);
+  assert.doesNotMatch(failedProg.label, /3\s*\/\s*3/);
 
   const cancelledAllStages = {
     status: 'cancelled',
@@ -212,6 +220,8 @@ test('job stage progress strictly distinguishes phases from execution attempts a
   };
   const cancelledProg = jobStageProgress(cancelledAllStages);
   assert.equal(cancelledProg.completed, false);
+  assert.notEqual(cancelledProg.current, cancelledProg.total);
+  assert.doesNotMatch(cancelledProg.label, /3\s*\/\s*3/);
 
   // Succeeded job with all stages reached is completed
   const succeededAllStages = {
@@ -295,10 +305,11 @@ test('manual retry via Yeniden dene allows authorized users to retry exhausted j
   assert.equal(jobSupportsManualRetry('job', { canManage: true }), false);
 });
 
-test('UI components JobDrawer and JobsTable decouple stage, health and attempt indicators', async () => {
-  const [drawerSource, tableSource] = await Promise.all([
+test('UI components JobDrawer, JobsTable and JobList decouple stage, health and attempt indicators', async () => {
+  const [drawerSource, tableSource, listSource] = await Promise.all([
     readFile(new URL('../src/workspace/JobDrawer.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/JobsTable.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/JobList.jsx', import.meta.url), 'utf8'),
   ]);
 
   // Both components must import attempt count, health indicator and stage progress
@@ -318,4 +329,13 @@ test('UI components JobDrawer and JobsTable decouple stage, health and attempt i
   assert.match(drawerSource, /Yeniden dene/);
   assert.match(tableSource, /jobSupportsManualRetry/);
   assert.match(tableSource, /Yeniden dene/);
+
+  // JobDrawer must support cancellation for queued jobs
+  assert.match(drawerSource, /job\?\.status === 'queued'/);
+  assert.match(drawerSource, /handleCancel/);
+  assert.match(drawerSource, /İşi iptal et/);
+
+  // JobList must preserve real 0 attempts and not silently coerce missing/corrupt values
+  assert.match(listSource, /jobAttemptCount/);
+  assert.doesNotMatch(listSource, /job\.attempts \?\? 0/);
 });
