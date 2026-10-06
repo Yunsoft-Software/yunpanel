@@ -3,6 +3,13 @@ import { fileURLToPath } from 'node:url';
 import { transformWithOxc } from 'vite';
 
 export async function load(url, context, nextLoad) {
+  if (url.endsWith('.css')) {
+    return {
+      format: 'module',
+      shortCircuit: true,
+      source: 'export default {};',
+    };
+  }
   if (url.endsWith('.jsx')) {
     const filePath = fileURLToPath(url);
     const source = await fs.readFile(filePath, 'utf8');
