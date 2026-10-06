@@ -169,9 +169,18 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.post('/api/servers/:serverId/database-credentials/:credentialId/apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    await credential(request.params.serverId, request.params.credentialId);
+    const state = await credential(request.params.serverId, request.params.credentialId);
     const body = exactBody(request.body, APPLY_FIELDS, 'database_credential_apply_input_invalid');
-    const queued = await databaseCredentialApplyService.queueApply({ credentialId: request.params.credentialId, ...body });
+    const authorization = request.auth?.user ? {
+      actorId: request.auth.user.id,
+      userId: request.auth.user.id,
+      websiteId: state.credential.websiteId,
+      resourceId: state.credential.websiteId,
+    } : null;
+    const queued = await databaseCredentialApplyService.queueApply(
+      { credentialId: request.params.credentialId, ...body },
+      { authorization },
+    );
     return response.status(202).json({ data: queued });
   }));
 
@@ -183,9 +192,18 @@ export function mountDatabaseCredentialRoutes(app, {
 
   app.post('/api/servers/:serverId/database-credentials/:credentialId/delete', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    await credential(request.params.serverId, request.params.credentialId);
+    const state = await credential(request.params.serverId, request.params.credentialId);
     const body = exactBody(request.body, APPLY_FIELDS, 'database_credential_delete_input_invalid');
-    const queued = await databaseCredentialApplyService.queueDelete({ credentialId: request.params.credentialId, ...body });
+    const authorization = request.auth?.user ? {
+      actorId: request.auth.user.id,
+      userId: request.auth.user.id,
+      websiteId: state.credential.websiteId,
+      resourceId: state.credential.websiteId,
+    } : null;
+    const queued = await databaseCredentialApplyService.queueDelete(
+      { credentialId: request.params.credentialId, ...body },
+      { authorization },
+    );
     return response.status(202).json({ data: queued });
   }));
 

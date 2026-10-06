@@ -212,7 +212,9 @@ export function createHostingAccountStore({
     const hasCustomerWebsites = db.prepare('SELECT 1 FROM auth_customer_websites WHERE customer_id = ? LIMIT 1').get(id);
     const hasAllocations = db.prepare('SELECT 1 FROM auth_hosting_site_allocations WHERE customer_id = ? LIMIT 1').get(id);
     const hasUserWebsites = db.prepare('SELECT 1 FROM auth_user_websites WHERE user_id = ? LIMIT 1').get(id);
-    if (hasCustomerWebsites || hasAllocations || hasUserWebsites) {
+    const hasOpTable = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_operation_users'").get());
+    const hasOperationUsers = hasOpTable && Boolean(db.prepare('SELECT 1 FROM auth_operation_users WHERE user_id = ? LIMIT 1').get(id));
+    if (hasCustomerWebsites || hasAllocations || hasUserWebsites || hasOperationUsers) {
       throw error('hosting_account_in_use', 'Detach account resources through an explicit migration before removing this profile.', 409);
     }
     if (typeof activeResourceChecker === 'function') {
@@ -352,12 +354,14 @@ export function createHostingAccountStore({
       // with the supplied revision before and after any asynchronous password hashing.
       transaction(() => managementActor(rawToken, requireManagement));
       const credentials = customerCredentialServices();
-      fields(input, ['revision', 'username', 'password'], ['revision']);
-      if (!Object.hasOwn(input, 'username') && !Object.hasOwn(input, 'password')) {
+      fields(input, ['revision', 'username', 'email', 'password'], ['revision']);
+      if (!Object.hasOwn(input, 'username') && !Object.hasOwn(input, 'email') && !Object.hasOwn(input, 'password')) {
         throw error('empty_hosting_customer_update', 'Choose a customer login field to change.');
       }
       const expectedRevision = revision(input.revision);
-      const name = Object.hasOwn(input, 'username') ? credentials.normalizeUsername(input.username) : null;
+      const name = Object.hasOwn(input, 'email')
+        ? credentials.normalizeUsername(input.email)
+        : (Object.hasOwn(input, 'username') ? credentials.normalizeUsername(input.username) : null);
       transaction(() => {
         const actor = managementActor(rawToken, requireManagement);
         const row = existing(id, expectedRevision);
@@ -566,6 +570,7 @@ export function createHostingAccountStore({
         if (hasTable('auth_mfa_recovery')) db.prepare('DELETE FROM auth_mfa_recovery WHERE user_id = ?').run(id);
         if (hasTable('auth_mfa')) db.prepare('DELETE FROM auth_mfa WHERE user_id = ?').run(id);
         if (hasTable('auth_recovery_emails')) db.prepare('DELETE FROM auth_recovery_emails WHERE user_id = ?').run(id);
+        if (hasTable('auth_operation_users')) db.prepare('DELETE FROM auth_operation_users WHERE user_id = ?').run(id);
         if (hasTable('auth_user_revisions')) db.prepare('DELETE FROM auth_user_revisions WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM users WHERE id = ?').run(id);
         audit(actor.id, 'hosting.customer_login_deleted', { type: 'user', id });
