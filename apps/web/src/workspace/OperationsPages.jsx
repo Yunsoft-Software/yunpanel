@@ -51,8 +51,10 @@ export function SettingsPage() {
   const section = ['account', 'dns', 'ai', 'updates', 'records'].includes(params.get('section'))
     ? params.get('section') : 'account';
   const categories = [
-    ['account', 'Hesap ve erişim'], ['dns', 'DNS ve SSL'],
-    ['ai', 'AI sağlayıcıları'], ['updates', 'Güncellemeler'],
+    ['account', 'Hesap ve erişim'],
+    ['dns', 'DNS ve SSL'],
+    ['ai', 'AI sağlayıcıları'],
+    ['updates', 'Güncellemeler'],
   ];
   return <>
     <PageHeading title="Ayarlar" description="Hesap, DNS ve panel politikalarını yönetin." />

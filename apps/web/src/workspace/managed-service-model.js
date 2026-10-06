@@ -45,12 +45,16 @@ export function managedServiceStatus(service) {
     if (service.health?.configuration === 'invalid') {
       return Object.freeze({ state: 'warning', label: 'Yapılandırma hatalı' });
     }
+    if (service.health?.status === 'unverified' || service.health?.status === 'unknown') {
+      return Object.freeze({ state: 'unknown', label: 'Bilinmiyor' });
+    }
     return Object.freeze({ state: 'active', label: 'Kurulu' });
   }
   if (service.active === true) return Object.freeze({ state: 'active', label: 'Çalışıyor' });
   const inspectionFailed = Array.isArray(service.units) && service.units.some((unit) => unit?.inspectionError === true);
   if (inspectionFailed) return Object.freeze({ state: 'warning', label: 'Durum doğrulanamadı' });
-  return Object.freeze({ state: 'off', label: 'Durduruldu' });
+  if (service.active === false) return Object.freeze({ state: 'off', label: 'Durduruldu' });
+  return Object.freeze({ state: 'unknown', label: 'Bilinmiyor' });
 }
 
 export function managedServiceVersion(service) {
