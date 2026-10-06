@@ -153,3 +153,65 @@ test('YP-16: Accessibility CSS covers .is-critical, keyboard focus-visible, and 
   // Reduced motion
   assert.match(workspaceCss, /@media \(prefers-reduced-motion: reduce\) \{ \.ws-server-metrics \.ws-usage-ring \{ transition: none; \} \}/);
 });
+
+test('YP-16 / T-VISUAL: Website list is removed from Overview; replaced by total website count and accessible link', async () => {
+  const readOnlySrc = await source('workspace/ReadOnlyDashboardPage.jsx');
+  const dashSrc = await source('workspace/DashboardPage.jsx');
+
+  // ReadOnlyDashboardPage must not contain a website table listing individual domains
+  assert.doesNotMatch(readOnlySrc, /<table className="ws-table"><thead><tr><th>Alan adı/, 'ReadOnlyDashboardPage must not list websites in a table');
+  assert.doesNotMatch(readOnlySrc, /domains\.items\.slice\(0,\s*6\)/, 'ReadOnlyDashboardPage must not slice/list individual website records');
+
+  // ReadOnlyDashboardPage must display the website count and accessible link to /websites
+  assert.match(readOnlySrc, /ws-site-count/, 'Must use ws-site-count class for prominent count');
+  assert.match(readOnlySrc, /knownCount\(domains\)/, 'Must display known domain count');
+  assert.match(readOnlySrc, /to="\/websites"/, 'Must contain link to /websites');
+  assert.match(readOnlySrc, /aria-label="Web siteleri listesine git"/, 'Must provide accessible link label');
+
+  // DashboardPage also provides site count and accessible link, without a website list table
+  assert.doesNotMatch(dashSrc, /<table[^>]*>[\s\S]*?primaryDomain/, 'DashboardPage must not render a table listing website domains');
+  assert.match(dashSrc, /websiteCount\(websites\)/, 'DashboardPage presents website count');
+  assert.match(dashSrc, /to="\/websites"/, 'DashboardPage links to /websites');
+  assert.match(dashSrc, /aria-label=/, 'DashboardPage links provide accessible aria labels');
+});
+
+test('YP-16 / T-VISUAL: UsageRing handles 0%, unknown, 91%, high, error states with gauge arc and accessible text', async () => {
+  const dashSrc = await source('workspace/DashboardPage.jsx');
+  const consoleCss = await source('workspace/ui/console-theme.css');
+  const emberCss = await source('workspace/ui/ember-theme.css');
+  const workspaceCss = await source('workspace/workspace.css');
+
+  // UsageRing handles error state and server error fallback
+  assert.match(dashSrc, /is-error/, 'UsageRing must support is-error class');
+  assert.match(dashSrc, /kullanım verisinde hata/, 'UsageRing must describe error in ariaState');
+  assert.match(dashSrc, /server\?\.connectivity === 'error'/, 'ServerSummary handles server error state');
+
+  // CSS arc definitions (conic-gradient gauge/arc)
+  for (const [name, css] of [['workspaceCss', workspaceCss], ['consoleCss', consoleCss], ['emberCss', emberCss]]) {
+    assert.match(css, /conic-gradient/, `${name} must use conic-gradient for gauge arcs`);
+    assert.match(css, /\.ws-usage-ring\.is-high/, `${name} must style high usage arc`);
+    assert.match(css, /\.ws-usage-ring\.is-critical/, `${name} must style critical usage arc`);
+    assert.match(css, /\.ws-usage-ring\.is-unknown/, `${name} must style unknown usage ring`);
+    assert.match(css, /\.ws-usage-ring\.is-error/, `${name} must style error usage ring`);
+    assert.match(css, /\.ws-site-count/, `${name} must style ws-site-count`);
+  }
+});
+
+test('YP-16 / T-VISUAL: Long jobs and logs do not overflow the panel layout and retain full details and access', async () => {
+  const consoleCss = await source('workspace/ui/console-theme.css');
+  const emberCss = await source('workspace/ui/ember-theme.css');
+  const workspaceCss = await source('workspace/workspace.css');
+
+  // Table td and code wrapping
+  for (const [name, css] of [['workspaceCss', workspaceCss], ['consoleCss', consoleCss], ['emberCss', emberCss]]) {
+    assert.match(css, /\.ws-table td/, `${name} must style .ws-table td`);
+    assert.match(css, /overflow-wrap:\s*anywhere/, `${name} must wrap long content anywhere`);
+    assert.match(css, /\.ws-table-scroll/, `${name} must support .ws-table-scroll`);
+  }
+
+  // JobsTable and LogsPanel use .ws-table-scroll for contained scrolling
+  const jobsTableSrc = await source('workspace/JobsTable.jsx');
+  const logsPanelSrc = await source('workspace/LogsPanel.jsx');
+  assert.match(jobsTableSrc, /className="ws-table-scroll"/);
+  assert.match(logsPanelSrc, /className="ws-table-scroll"/);
+});

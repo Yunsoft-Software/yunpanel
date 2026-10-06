@@ -138,6 +138,7 @@
 .workspace-shell :is(.ws-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) tbody tr:is(.is-selected, [aria-selected="true"], .ws-context-row) { background: var(--ws-accent-soft); color: var(--ws-text); }
 .workspace-shell :is(.ws-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) tbody tr:is(.is-selected, [aria-selected="true"], .ws-context-row) td { color: var(--ws-text); }
 .workspace-shell :is(.ws-table, .yf-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) td { overflow-wrap: anywhere; word-break: break-word; }
+.workspace-shell :is(.ws-table, .yf-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) td code { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
 .workspace-shell .ws-domain-name, .workspace-shell .ws-domain-name a, .workspace-shell .yf-tree-name, .workspace-shell .yf-name { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .workspace-shell .ws-table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .workspace-shell .ws-pagination { border-top: 0; color: var(--ws-muted); padding-top: 18px; }
@@ -165,9 +166,11 @@
 .workspace-shell .ws-server-metrics .ws-usage-ring { background: conic-gradient(var(--ws-brand) var(--usage,0%),var(--ws-surface-raised) 0); }
 .workspace-shell .ws-server-metrics .ws-usage-ring.is-high { background: conic-gradient(var(--ws-warning) var(--usage,0%),var(--ws-surface-raised) 0); }
 .workspace-shell .ws-server-metrics .ws-usage-ring.is-critical { background: conic-gradient(var(--ws-danger) var(--usage,0%),var(--ws-surface-raised) 0); }
+.workspace-shell .ws-server-metrics .ws-usage-ring.is-error { background: var(--ws-danger); }
 .workspace-shell .ws-server-metrics .ws-usage-ring:focus-visible { outline: 2px solid var(--ws-focus); outline-offset: 3px; }
 .workspace-shell .ws-server-metrics .ws-usage-ring.is-unknown { background: var(--ws-surface-raised); }
 .workspace-shell .ws-server-metrics .ws-usage-ring::before { inset: 5px; }
+.workspace-shell .ws-site-count { font-size: 36px; line-height: 1; font-weight: 700; color: var(--ws-brand, var(--ws-accent)); }
 .workspace-shell .ws-history-grid { opacity: .42; stroke-dasharray: 2 6; }
 .workspace-shell .ws-history-wait { border: 0; border-radius: 18px; background: var(--ws-surface-subtle); }
 .workspace-shell .ws-history-header h3 { font-family: var(--ws-font-display); font-weight: 500; }
