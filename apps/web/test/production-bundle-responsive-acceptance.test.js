@@ -168,7 +168,9 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
 
   // Database table
   assert.match(databases, /<table className="ws-table ws-db-table" role="table" aria-label="Veritabanları">/);
-  assert.match(databases, /<tr key=\{database\.name\} role="row"><td role="cell">/);
+  assert.match(databases, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı<\/th>/);
+  assert.match(databases, /<tbody role="rowgroup">/);
+  assert.match(databases, /<tr key=\{database\.name\} role="row"><td role="cell" data-label="Veritabanı">/);
 
   // Site consumption resource table
   assert.match(siteResources, /<table className="ws-table" role="table" aria-label="Kaynak Tüketimi"/);

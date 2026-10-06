@@ -80,11 +80,11 @@ function SiteConsumptionWorkspace({ domain, website }) {
 
     return (
       <tr key={item.metric} role="row">
-        <td role="cell" style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
-        <td role="cell" style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
-        <td role="cell" style={{ padding: '0.5rem' }}>{definedDisplay}</td>
-        <td role="cell" style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
-        <td role="cell" style={{ padding: '0.5rem' }}>
+        <td role="cell" data-label="Kaynak" style={{ fontWeight: 500, padding: '0.5rem' }}>{label}</td>
+        <td role="cell" data-label="Ölçülen Kullanım" style={{ padding: '0.5rem' }}>{measuredDisplay}</td>
+        <td role="cell" data-label="Tanımlı Limit" style={{ padding: '0.5rem' }}>{definedDisplay}</td>
+        <td role="cell" data-label="Sistem Tarafından Uygulanan Limit" style={{ padding: '0.5rem' }}>{enforcedDisplay}</td>
+        <td role="cell" data-label="Durum" style={{ padding: '0.5rem' }}>
           <Badge state={badgeState}>{badgeText}</Badge>
         </td>
       </tr>
@@ -110,16 +110,16 @@ function SiteConsumptionWorkspace({ domain, website }) {
       )}
       <div className="ws-table-scroll ws-table-container" style={{ overflowX: 'auto', overscrollBehaviorX: 'contain', width: '100%', maxWidth: '100%' }}>
         <table className="ws-table" role="table" aria-label="Kaynak Tüketimi" style={{ width: '100%', borderCollapse: 'collapse' }}>
-          <thead>
+          <thead role="rowgroup">
             <tr role="row">
-              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
-              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
-              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
-              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
-              <th scope="col" style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
+              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Kaynak</th>
+              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Ölçülen Kullanım</th>
+              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Tanımlı Limit</th>
+              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Sistem Tarafından Uygulanan Limit</th>
+              <th scope="col" role="columnheader" style={{ textAlign: 'left', padding: '0.5rem' }}>Durum</th>
             </tr>
           </thead>
-          <tbody>
+          <tbody role="rowgroup">
             {renderMetricRow(metrics.diskSpaceMb, 'Disk Alanı')}
             {renderMetricRow(metrics.diskInodes, 'Disk Inode')}
             {renderMetricRow(metrics.mailStorageMb, 'Posta Depolama')}
@@ -343,7 +343,7 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
       <div className="ys-resource-summary"><span><strong>{databaseResources === undefined ? '—' : databases.length}</strong> veritabanı</span><span><strong>{databaseResources === undefined ? '—' : databases.filter((entry) => entry.credential).length}</strong> erişim kullanıcısı</span><span><Icon name="shield" size={14} /> Bu siteye özel</span></div>
       <div className="ys-resource-search"><Icon name="search" /><label><span className="ws-sr-only">Site veritabanlarında ara</span><input type="search" placeholder="Veritabanı veya kullanıcı ara…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></div>
       {busy && databaseResources === undefined && <div className="ws-loading" role="status"><span className="ws-spinner" />Veritabanları yükleniyor…</div>}
-      {filtered.length > 0 ? <div className="ws-table-scroll"><table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları"><thead><tr><th scope="col">Veritabanı</th><th scope="col">Kullanıcı</th><th scope="col">Erişim</th><th scope="col">İşlemler</th></tr></thead><tbody>{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell"><div className="ys-db-title"><span><Icon name="database" size={21} /></span><div><strong>{binding.databaseName}</strong><small>{domain.primaryDomain}</small></div></div></td><td role="cell" data-label="Kullanıcı"><code>{credential?.username ?? 'Henüz oluşturulmadı'}</code></td><td role="cell"><Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge></td><td role="cell"><div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button></div></td></tr>)}</tbody></table></div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
+      {filtered.length > 0 ? <div className="ws-table-scroll"><table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th><th scope="col" role="columnheader">Kullanıcı</th><th scope="col" role="columnheader">Erişim</th><th scope="col" role="columnheader">İşlemler</th></tr></thead><tbody role="rowgroup">{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell" data-label="Veritabanı"><div className="ys-db-title"><span><Icon name="database" size={21} /></span><div><strong>{binding.databaseName}</strong><small>{domain.primaryDomain}</small></div></div></td><td role="cell" data-label="Kullanıcı"><code>{credential?.username ?? 'Henüz oluşturulmadı'}</code></td><td role="cell" data-label="Erişim"><Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge></td><td role="cell" data-label="İşlemler"><div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button></div></td></tr>)}</tbody></table></div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
     </Section>}
     {chosen && <Modal title={chosen.binding.databaseName} onClose={() => setSelectedBinding(null)} busy={busy}><KeyValues items={[
       ['Site',domain.primaryDomain],['Veritabanı kullanıcısı',chosen.credential?.username ?? 'Yok'],['İzinler',chosen.credential?.privileges.join(', ') ?? 'Yok'],
