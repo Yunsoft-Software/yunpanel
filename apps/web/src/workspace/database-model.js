@@ -100,7 +100,7 @@ function databaseHealth(value) {
   };
 }
 
-const ROUNDCUBE_SCHEMA = /^roundcube(?:mail)?(?:_|$)/i;
+const ROUNDCUBE_SCHEMA = /^roundcube(?:_|$|mail)/i;
 
 export function validDatabaseName(value) {
   return typeof value === 'string'

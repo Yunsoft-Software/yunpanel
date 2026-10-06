@@ -135,12 +135,20 @@ test('Owner GET reads live inventory while explicit legacy inspection remains a 
 });
 
 test('Roundcube schemas are hidden in authenticated inventory and blocked from mutations', async (t) => {
+  const roundcubeNames = [
+    'roundcube',
+    'roundcube_sessions',
+    'roundcube_default',
+    'roundcubemail',
+    'RoundcubeMail_archive',
+    'roundcubemail2',
+    'roundcubemailprod',
+  ];
   const { request, jobRegistry, serverId } = await fixture(t, 'owner', {
     databaseInventoryProvider: async () => ({
       engine: 'mariadb', version: '10.11.13-MariaDB', databases: [
         { name: 'live_db', sizeBytes: 42 },
-        { name: 'roundcube', sizeBytes: 512 },
-        { name: 'RoundcubeMail_archive', sizeBytes: 128 },
+        ...roundcubeNames.map((name, index) => ({ name, sizeBytes: 100 * (index + 1) })),
       ],
     }),
   });
@@ -148,7 +156,7 @@ test('Roundcube schemas are hidden in authenticated inventory and blocked from m
   const response = await request(route);
   assert.equal(response.status, 200);
   assert.deepEqual((await response.json()).data.databases, [{ name: 'live_db', sizeBytes: 42 }]);
-  for (const name of ['roundcube', 'RoundcubeMail_archive']) {
+  for (const name of roundcubeNames) {
     const encoded = encodeURIComponent(name);
     for (const [path, method, body] of [
       [route, 'POST', { name, confirmation: `create:${name}` }],
@@ -156,6 +164,7 @@ test('Roundcube schemas are hidden in authenticated inventory and blocked from m
       [`${route}/${encoded}/backup`, 'POST', { confirmation: `backup:${name}` }],
       [`${route}/${encoded}/drop-preview`, 'GET'],
       [`${route}/${encoded}/restore-preview`, 'POST', { backupId: 'unrelated' }],
+      [`${route}/${encoded}/restore`, 'POST', { backupId: 'unrelated', expectedPreviewDigest: 'a'.repeat(64), expectedBackupSha256: 'b'.repeat(64), confirmation: 'bad' }],
     ]) {
       const denied = await request(path, { method, body });
       assert.equal(denied.status, 400, `${method} ${path}`);

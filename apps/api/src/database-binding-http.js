@@ -1,3 +1,4 @@
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { databaseCredentialRegistryInternals } from './database-credential-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -71,7 +72,8 @@ export function mountDatabaseBindingRoutes(app, {
   app.get('/api/servers/:serverId/database-bindings', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
     const current = await server(request.params.serverId);
-    return response.json({ data: await databaseBindingRegistry.listBindings({ serverId: current.id }) });
+    const bindings = await databaseBindingRegistry.listBindings({ serverId: current.id });
+    return response.json({ data: bindings.filter((binding) => !isInfrastructureDatabase(binding?.databaseName)) });
   }));
 
   app.get('/api/servers/:serverId/websites/:websiteId/database-resources', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -124,6 +126,7 @@ export function mountDatabaseBindingRoutes(app, {
     }
     const credentialByBinding = new Map(credentials.map((credential) => [credential.databaseBindingId, credential]));
     const databases = bindings
+      .filter((binding) => !isInfrastructureDatabase(binding?.databaseName))
       .map((binding) => Object.freeze({
         binding: Object.freeze({
           id: binding.id,
@@ -156,6 +159,9 @@ export function mountDatabaseBindingRoutes(app, {
     emptyQuery(request.query);
     const current = await server(request.params.serverId);
     const name = requireDatabaseName(request.params.name);
+    if (isInfrastructureDatabase(name)) {
+      throw new DatabaseBindingHttpError('invalid_database_name', 'Database name is invalid', 400);
+    }
     const body = exactBody(request.body, BIND_FIELDS, 'database_binding_input_invalid');
     await ensureDatabaseIdle(jobRegistry, current.id);
     const snapshot = await latestDatabaseSnapshot(jobRegistry, current.id);

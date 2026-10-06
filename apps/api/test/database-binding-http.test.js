@@ -245,3 +245,22 @@ test('database binding route rejects extra fields before registry mutation', asy
   assert.equal((await response.json()).error.code, 'database_binding_input_invalid');
   assert.deepEqual(calls, []);
 });
+
+test('database binding routes hide and reject internal Roundcube databases', async (t) => {
+  const roundcubeNames = ['roundcube', 'roundcube_sessions', 'roundcubemail', 'roundcubemail2'];
+  const { base, calls } = await listen(t);
+  for (const name of roundcubeNames) {
+    const response = await fetch(`${base}/api/servers/${serverId}/databases/${name}/bind`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        websiteId,
+        applicationId,
+        confirmation: `bind-database:${serverId}:${name}:${websiteId}`,
+      }),
+    });
+    assert.equal(response.status, 400, `bind ${name}`);
+    assert.equal((await response.json()).error.code, 'invalid_database_name');
+  }
+  assert.equal(calls.some(([callName]) => callName === 'bind'), false);
+});

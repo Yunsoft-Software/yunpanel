@@ -18,6 +18,14 @@ test('database names mirror the host/protocol safety boundary', () => {
   assert.equal(validDatabaseName('Customer42'), true);
   assert.equal(validDatabaseName('mysql'), false);
   assert.equal(validDatabaseName('information_schema'), false);
+  assert.equal(validDatabaseName('roundcube'), false);
+  assert.equal(validDatabaseName('roundcube_db'), false);
+  assert.equal(validDatabaseName('roundcube_sessions'), false);
+  assert.equal(validDatabaseName('roundcubemail'), false);
+  assert.equal(validDatabaseName('RoundcubeMail'), false);
+  assert.equal(validDatabaseName('RoundcubeMail_archive'), false);
+  assert.equal(validDatabaseName('roundcubemail2'), false);
+  assert.equal(validDatabaseName('roundcubemailprod'), false);
   assert.equal(validDatabaseName('app-main'), false);
   assert.equal(validDatabaseName('../app'), false);
 });
@@ -50,6 +58,8 @@ test('database inventory view sorts safe rows and computes total size without tr
     databases: [
       { name: 'zeta', sizeBytes: 2048 },
       { name: 'mysql', sizeBytes: 999 },
+      { name: 'roundcube', sizeBytes: 5000 },
+      { name: 'roundcubemail_archive', sizeBytes: 3000 },
       { name: 'alpha', sizeBytes: 1024, ownership },
       { name: 'broken-name', sizeBytes: 1 },
     ],

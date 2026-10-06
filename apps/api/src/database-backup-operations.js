@@ -1,8 +1,8 @@
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const BACKUP_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -27,7 +27,7 @@ export class DatabaseBackupOperationsError extends Error {
 }
 
 function databaseName(value) {
-  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASES.has(value.toLowerCase())) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || isInfrastructureDatabase(value)) {
     throw new DatabaseBackupOperationsError('database_restore_name_invalid', 'Database restore schema name is invalid');
   }
   return value;

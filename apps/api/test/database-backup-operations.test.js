@@ -189,3 +189,24 @@ test('restore queue rejects stale preview and serializes with other database wor
     (error) => error instanceof DatabaseBackupOperationsError && error.code === 'database_job_conflict',
   );
 });
+
+test('restore operations reject internal Roundcube schemas', async () => {
+  const { service } = fixture();
+  for (const name of ['roundcube', 'roundcube_sessions', 'roundcubemail', 'roundcubemail2']) {
+    await assert.rejects(
+      service.previewRestore({ serverId, databaseName: name, backupId }),
+      (error) => error instanceof DatabaseBackupOperationsError && error.code === 'database_restore_name_invalid',
+    );
+    await assert.rejects(
+      service.queueRestore({
+        serverId,
+        databaseName: name,
+        backupId,
+        expectedPreviewDigest: 'a'.repeat(64),
+        expectedBackupSha256: 'b'.repeat(64),
+        confirmation: 'test',
+      }),
+      (error) => error instanceof DatabaseBackupOperationsError && error.code === 'database_restore_name_invalid',
+    );
+  }
+});
