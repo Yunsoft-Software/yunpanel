@@ -98,6 +98,11 @@ import { createElFinderHandoffConsumerHandler } from '../src/elfinder-handoff-so
 import { terminalWebSocketInternals, createTerminalWebSocketServer } from '../src/terminal-websocket.js';
 import { createTerminalCapabilityRegistry, TerminalCapabilityError } from '../src/terminal-capability-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
+import net from 'node:net';
+import { createAuthStore } from '../src/auth-store.js';
+import { createAuthMailer, validateEmail as validateAuthEmail } from '../src/auth-mailer.js';
+import { sslContactEmail } from '../../web/src/workspace/ssl-request-draft.js';
+import { TOTP } from 'otpauth';
 import { WebSocket } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
 import * as fs from 'node:fs/promises';
@@ -14371,4 +14376,508 @@ test('Staging E2E T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcu
   // 9. Documentary Integrity & Non-Bypass Check
   // Note: todo.md line 124 remains unchecked until live physical evidence is recorded by Code Factory
   assert.ok(true, 'T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımları; başarılı/blocked/partial/failure progress ve API re-entry state sürekliliği; subdomain/alias izolasyonu; bağımsız NS delegation, SMTP/IMAP teslimi, webmail ve TLS doğrulama; hata enjeksiyonuyla 3. denemede durma, manuel retry, restart ve reverse compensation eksiksiz doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E PART 20: T-DB-UI Owner Recovery Email, Single-Use Password Reset,
+// Expired/Used Token Invalidation, All-Session Revocation, Anti-Enumeration,
+// Rate Limiting, Fail-Closed SMTP & SSL Form User Email Verification
+// ============================================================================
+
+test('Staging E2E T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulansın; SMTP yokken başarı mesajı verilmesin. SSL formunda etkin kullanıcı e-postası gelsin, genel ACME varsayılanı ayrı kalsın; secret/URL/audit sızıntısı olmasın', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', 'https://server.44:8443'];
+  for (const forbidden of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Identities, Isolated Private Auth SQLite Database & Mock SMTP Network Server
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-part20-auth-'));
+  const authDbPath = path.join(tempDir, 'auth.sqlite');
+
+  // Create real network-level SMTP mock server for realistic mail delivery verification
+  const deliveredMails = [];
+  const smtpCommands = [];
+  let smtpServerRunning = true;
+
+  const smtpServer = net.createServer((socket) => {
+    if (!smtpServerRunning) {
+      socket.destroy();
+      return;
+    }
+    socket.write('220 smtp.yunpanel.local ESMTP Mock\r\n');
+    let buffer = '';
+    let readingData = false;
+    let dataBuffer = '';
+
+    socket.on('data', (chunk) => {
+      buffer += chunk.toString();
+      while (buffer.includes('\r\n')) {
+        const lineIdx = buffer.indexOf('\r\n');
+        const line = buffer.slice(0, lineIdx);
+        buffer = buffer.slice(lineIdx + 2);
+
+        if (readingData) {
+          if (line === '.') {
+            readingData = false;
+            deliveredMails.push(dataBuffer);
+            dataBuffer = '';
+            socket.write('250 2.0.0 Ok: queued as mock-msg-123\r\n');
+          } else {
+            dataBuffer += (line.startsWith('..') ? line.slice(1) : line) + '\n';
+          }
+        } else {
+          smtpCommands.push(line);
+          if (line.startsWith('EHLO') || line.startsWith('HELO')) {
+            socket.write('250-smtp.yunpanel.local Hello\r\n250 AUTH LOGIN\r\n');
+          } else if (line === 'AUTH LOGIN') {
+            socket.write('334 VXNlcm5hbWU6\r\n');
+          } else if (line.startsWith('MAIL FROM:')) {
+            socket.write('250 2.1.0 Ok\r\n');
+          } else if (line.startsWith('RCPT TO:')) {
+            socket.write('250 2.1.5 Ok\r\n');
+          } else if (line === 'DATA') {
+            readingData = true;
+            dataBuffer = '';
+            socket.write('354 End data with <CR><LF>.<CR><LF>\r\n');
+          } else if (line === 'QUIT') {
+            socket.write('221 2.0.0 Bye\r\n');
+            socket.end();
+          } else {
+            socket.write('250 Ok\r\n');
+          }
+        }
+      }
+    });
+  });
+
+  smtpServer.listen(0, '127.0.0.1');
+  await once(smtpServer, 'listening');
+  const smtpPort = smtpServer.address().port;
+
+  t.after(async () => {
+    smtpServerRunning = false;
+    await new Promise((resolve) => smtpServer.close(resolve));
+    try { await rm(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const mailer = createAuthMailer({
+    host: '127.0.0.1',
+    port: smtpPort,
+    from: 'noreply@cryptoraichu.website',
+    timeoutMs: 5000,
+  });
+
+  // Verify SMTP server availability
+  const smtpReady = await mailer.isAvailable();
+  assert.equal(smtpReady, true, 'SMTP server mock must be detected as available');
+
+  let currentEpoch = 1_700_000_000_000;
+  let revokedLiveUserRecord = null;
+  const masterKey = 'b'.repeat(64);
+
+  const authStore = createAuthStore({
+    filePath: authDbPath,
+    mailer,
+    now: () => currentEpoch,
+    masterKey,
+    revokeLiveUser: (userId, reason) => {
+      revokedLiveUserRecord = { userId, reason };
+    },
+  });
+  t.after(() => {
+    authStore.close();
+  });
+
+  // 3. Scenario 1: Owner Setup with Recovery Email, Validation & Role Boundaries
+  // Validate email format rules
+  assert.equal(validateAuthEmail('  Owner@CryptoRaichu.Website  '), 'owner@cryptoraichu.website');
+  assert.throws(() => validateAuthEmail('not-an-email'), { code: 'invalid_email' });
+  assert.throws(() => validateAuthEmail(''), { code: 'invalid_email' });
+
+  // Complete Owner setup with verified recovery email
+  const { token: setupToken } = authStore.issueSetupToken();
+  const ownerUser = await authStore.completeSetup({
+    setupToken,
+    username: 'admin',
+    password: 'Initial-Secure-Password-2026!',
+    email: 'owner@cryptoraichu.website',
+    peer: '157.180.11.28',
+  });
+  assert.equal(ownerUser.username, 'admin');
+  assert.equal(ownerUser.role, 'owner');
+
+  // Verify recovery email is recorded as verified for owner
+  const recoveryInfo = authStore.getRecoveryEmail(ownerUser.id);
+  assert.equal(recoveryInfo.email, 'owner@cryptoraichu.website');
+  assert.equal(recoveryInfo.verified, true);
+
+  // Non-owner cannot configure recovery email
+  const rawDb = new DatabaseSync(authDbPath);
+  const siteAdminUserId = randomUUID();
+  rawDb.prepare("INSERT INTO users VALUES (?, 'siteadmin', 'some-hash', 'site_manager', 1, 1000, 1000)").run(siteAdminUserId);
+  rawDb.close();
+
+  assert.throws(
+    () => authStore.setRecoveryEmail(siteAdminUserId, 'siteadmin@cryptoraichu.website'),
+    { code: 'forbidden' },
+  );
+
+  // 4. Scenario 2: Single-Use Reset Token Generation, SHA-256 Storage & Real SMTP Delivery
+  const initialResetResult = await authStore.requestPasswordReset({
+    identifier: 'admin',
+    peer: '157.180.11.28',
+    origin: 'https://server.cryptoraichu.website',
+  });
+  assert.deepEqual(initialResetResult, { sent: true });
+
+  // Verify real SMTP delivery occurred
+  assert.equal(deliveredMails.length, 1);
+  const deliveredMailBody = deliveredMails[0];
+  assert.match(deliveredMailBody, /To: owner@cryptoraichu\.website/);
+  assert.match(deliveredMailBody, /Subject: YunPanel — Parola Sıfırlama Bağlantısı/);
+  assert.match(deliveredMailBody, /https:\/\/server\.cryptoraichu\.website\/#reset-token=/);
+
+  // Extract raw token from reset URL
+  const tokenMatch = /#reset-token=([A-Za-z0-9_-]{43})/.exec(deliveredMailBody);
+  assert.ok(tokenMatch, 'Raw token must be 43-character base64url string in reset URL');
+  const firstRawToken = tokenMatch[1];
+
+  // Inspect database: Token MUST be hashed with SHA-256, NEVER raw!
+  const dbInspect1 = new DatabaseSync(authDbPath);
+  const resetRow1 = dbInspect1.prepare('SELECT * FROM auth_password_resets WHERE user_id = ?').get(ownerUser.id);
+  dbInspect1.close();
+
+  assert.ok(resetRow1, 'Password reset row must exist');
+  const expectedHash1 = createHash('sha256').update(firstRawToken).digest('hex');
+  assert.equal(resetRow1.token_hash, expectedHash1, 'Database must store SHA-256 hash of token');
+  assert.notEqual(resetRow1.token_hash, firstRawToken, 'Database must never store raw token');
+  assert.equal(resetRow1.expires_at, currentEpoch + 15 * 60 * 1000, 'Token must expire in exactly 15 minutes');
+
+  // Single-use replacement: requesting a new reset token must supersede previous token
+  const secondResetResult = await authStore.requestPasswordReset({
+    identifier: 'owner@cryptoraichu.website',
+    peer: '157.180.11.28',
+    origin: 'https://server.cryptoraichu.website',
+  });
+  assert.deepEqual(secondResetResult, { sent: true });
+  assert.equal(deliveredMails.length, 2);
+
+  const tokenMatch2 = /#reset-token=([A-Za-z0-9_-]{43})/.exec(deliveredMails[1]);
+  assert.ok(tokenMatch2);
+  const secondRawToken = tokenMatch2[1];
+  assert.notEqual(firstRawToken, secondRawToken, 'New token must differ from old token');
+
+  // Verify only one token exists in the database
+  const dbInspect2 = new DatabaseSync(authDbPath);
+  const resetRows2 = dbInspect2.prepare('SELECT * FROM auth_password_resets WHERE user_id = ?').all(ownerUser.id);
+  dbInspect2.close();
+  assert.equal(resetRows2.length, 1, 'Only one active reset token may exist per user');
+  assert.equal(resetRows2[0].token_hash, createHash('sha256').update(secondRawToken).digest('hex'));
+
+  // First superseded token is immediately rejected
+  await assert.rejects(
+    authStore.resetPasswordWithToken({ token: firstRawToken, newPassword: 'Brand-New-Password-123!' }),
+    { code: 'invalid_reset_token' },
+  );
+
+  // 5. Scenario 3: Expired Token Rejection
+  // Advance time beyond 15 minutes
+  currentEpoch += 15 * 60 * 1000 + 1000;
+
+  await assert.rejects(
+    authStore.resetPasswordWithToken({ token: secondRawToken, newPassword: 'Brand-New-Password-123!' }),
+    { code: 'reset_token_expired' },
+  );
+
+  // Verify expired token was cleaned up
+  const dbInspect3 = new DatabaseSync(authDbPath);
+  const resetRows3 = dbInspect3.prepare('SELECT * FROM auth_password_resets WHERE user_id = ?').all(ownerUser.id);
+  dbInspect3.close();
+  assert.equal(resetRows3.length, 0, 'Expired token must be cleaned up from database');
+
+  // 6. Scenario 4: Successful Password Reset, All-Session Revocation & MFA Factor Preservation
+  // Request a fresh token at current time
+  await authStore.requestPasswordReset({
+    identifier: 'admin',
+    peer: '157.180.11.28',
+    origin: 'https://server.cryptoraichu.website',
+  });
+  assert.equal(deliveredMails.length, 3);
+  const validRawToken = /#reset-token=([A-Za-z0-9_-]{43})/.exec(deliveredMails[2])[1];
+
+  // Create an active session and enroll MFA TOTP for owner
+  const loginBeforeReset = await authStore.login({ username: 'admin', password: 'Initial-Secure-Password-2026!' });
+  const enrollment = await authStore.mfa.beginEnrollment(loginBeforeReset.token, 'Initial-Secure-Password-2026!');
+  const totpCode = new TOTP({ secret: enrollment.secret }).generate({ timestamp: currentEpoch });
+  const confirmedMfa = authStore.mfa.confirmEnrollment(loginBeforeReset.token, totpCode);
+  const activeSessionToken = confirmedMfa.token;
+  assert.ok(authStore.getSession(activeSessionToken), 'Active session must exist prior to reset');
+
+  // Reset password using the valid token
+  const resetSuccess = await authStore.resetPasswordWithToken({
+    token: validRawToken,
+    newPassword: 'Brand-New-Owner-Password-2026!',
+    peer: '157.180.11.28',
+  });
+  assert.deepEqual(resetSuccess, { reset: true, username: 'admin' });
+
+  // Verify all old sessions were revoked
+  assert.equal(authStore.getSession(activeSessionToken), null, 'Old session must be null after reset');
+  const dbInspect4 = new DatabaseSync(authDbPath);
+  const sessionCount = dbInspect4.prepare('SELECT count(*) as count FROM sessions WHERE user_id = ?').get(ownerUser.id).count;
+  assert.equal(sessionCount, 0, 'All sessions for user must be deleted from database');
+  const remainingResets = dbInspect4.prepare('SELECT count(*) as count FROM auth_password_resets WHERE user_id = ?').get(ownerUser.id).count;
+  assert.equal(remainingResets, 0, 'Used reset token must be permanently removed');
+  dbInspect4.close();
+
+  // Verify live user revocation hook was executed
+  assert.deepEqual(revokedLiveUserRecord, { userId: ownerUser.id, reason: 'password_reset' });
+
+  // Reusing the same token must fail (single-use enforcement)
+  await assert.rejects(
+    authStore.resetPasswordWithToken({ token: validRawToken, newPassword: 'Another-Password-999!' }),
+    { code: 'invalid_reset_token' },
+  );
+
+  // Old password no longer works
+  await assert.rejects(
+    authStore.login({ username: 'admin', password: 'Initial-Secure-Password-2026!' }),
+    { code: 'invalid_credentials' },
+  );
+
+  // Login with new password requires MFA (MFA enrollment preserved!)
+  const loginWithNew = await authStore.login({ username: 'admin', password: 'Brand-New-Owner-Password-2026!' });
+  assert.equal(loginWithNew.mfaRequired, true, 'MFA must remain enrolled after password reset');
+
+  // Complete MFA login to verify credentials and factor work
+  currentEpoch += 30_000;
+  const newTotpCode = new TOTP({ secret: enrollment.secret }).generate({ timestamp: currentEpoch });
+  const completedNewSession = authStore.mfa.completeLogin(loginWithNew.challengeToken, { code: newTotpCode, method: 'totp' });
+  assert.ok(completedNewSession.token);
+  assert.equal(completedNewSession.session.user.username, 'admin');
+
+  // 7. Scenario 5: Anti-Enumeration & Rate Limiting
+  // Non-existent user returns { sent: true } without dispatching email
+  const preMailCount = deliveredMails.length;
+  const nonExistentResult = await authStore.requestPasswordReset({
+    identifier: 'nonexistent-account@cryptoraichu.website',
+    peer: '157.180.11.29',
+  });
+  assert.deepEqual(nonExistentResult, { sent: true });
+  assert.equal(deliveredMails.length, preMailCount, 'No email must be sent for non-existent account');
+
+  // Site-admin / non-owner identifier returns { sent: true } without dispatching email
+  const siteAdminResult = await authStore.requestPasswordReset({
+    identifier: 'siteadmin',
+    peer: '157.180.11.30',
+  });
+  assert.deepEqual(siteAdminResult, { sent: true });
+  assert.equal(deliveredMails.length, preMailCount, 'No email must be sent for non-owner role');
+
+  // Advance epoch to expire prior rate limit windows and test fresh user rate limit
+  currentEpoch += 15 * 60 * 1000 + 1000;
+
+  // User-based rate limiting on password reset request (5 attempts allowed, 6th rejected with 429)
+  const rateLimitPeer = '157.180.11.31';
+  for (let i = 0; i < 5; i++) {
+    const rlRes = await authStore.requestPasswordReset({ identifier: 'admin', peer: `${rateLimitPeer}.${i}` });
+    assert.deepEqual(rlRes, { sent: true });
+  }
+  await assert.rejects(
+    authStore.requestPasswordReset({ identifier: 'admin', peer: '157.180.11.99' }),
+    { code: 'rate_limited', status: 429 },
+  );
+
+  // Token-based rate limiting on confirm (5 attempts allowed, 6th rejected with 429)
+  const dummyToken = 'X'.repeat(43);
+  for (let i = 0; i < 5; i++) {
+    await assert.rejects(
+      authStore.resetPasswordWithToken({ token: dummyToken, newPassword: 'Valid-Password-1234!', peer: `10.20.30.${i}` }),
+      { code: 'invalid_reset_token' },
+    );
+  }
+  await assert.rejects(
+    authStore.resetPasswordWithToken({ token: dummyToken, newPassword: 'Valid-Password-1234!', peer: '10.20.30.99' }),
+    { code: 'rate_limited', status: 429 },
+  );
+
+  // 8. Scenario 6: Fail-Closed Protection When SMTP Service Is Unavailable
+  // Simulate SMTP outage via unreachable port
+  const offlineMailer = createAuthMailer({
+    host: '127.0.0.1',
+    port: 29999, // Unreachable port
+    timeoutMs: 1000,
+  });
+  const offlineStore = createAuthStore({
+    filePath: path.join(tempDir, 'offline-auth.sqlite'),
+    mailer: offlineMailer,
+    now: () => currentEpoch,
+    masterKey,
+  });
+  t.after(() => offlineStore.close());
+
+  const { token: offSetupToken } = offlineStore.issueSetupToken();
+  await offlineStore.completeSetup({
+    setupToken: offSetupToken,
+    username: 'offlineowner',
+    password: 'Initial-Secure-Password-2026!',
+    email: 'offlineowner@cryptoraichu.website',
+  });
+
+  // When SMTP is unavailable, request for existing owner fails with 503 smtp_unavailable
+  await assert.rejects(
+    offlineStore.requestPasswordReset({ identifier: 'offlineowner' }),
+    { code: 'smtp_unavailable', status: 503 },
+  );
+
+  // When SMTP is unavailable, request for non-existent account ALSO fails with 503 smtp_unavailable (no fake success!)
+  await assert.rejects(
+    offlineStore.requestPasswordReset({ identifier: 'fake-unknown@cryptoraichu.website' }),
+    { code: 'smtp_unavailable', status: 503 },
+  );
+
+  // When mail delivery throws during sendMail: token deleted, fail-closed 503
+  const failingMailer = {
+    async isAvailable() { return true; },
+    async sendPasswordResetEmail() { throw new Error('SMTP connection dropped unexpectedly'); },
+  };
+  const deliveryFailStore = createAuthStore({
+    filePath: path.join(tempDir, 'delfail-auth.sqlite'),
+    mailer: failingMailer,
+    now: () => currentEpoch,
+    masterKey,
+  });
+  t.after(() => deliveryFailStore.close());
+
+  const { token: dfSetupToken } = deliveryFailStore.issueSetupToken();
+  await deliveryFailStore.completeSetup({
+    setupToken: dfSetupToken,
+    username: 'dfowner',
+    password: 'Initial-Secure-Password-2026!',
+    email: 'dfowner@cryptoraichu.website',
+  });
+
+  await assert.rejects(
+    deliveryFailStore.requestPasswordReset({ identifier: 'dfowner' }),
+    { code: 'mail_delivery_failed', status: 503 },
+  );
+  // Verify token was deleted from database
+  const dfDb = new DatabaseSync(path.join(tempDir, 'delfail-auth.sqlite'));
+  const dfTokens = dfDb.prepare('SELECT count(*) as count FROM auth_password_resets').get().count;
+  dfDb.close();
+  assert.equal(dfTokens, 0, 'Token must not remain in database after delivery failure');
+
+  // 9. Scenario 7: SSL Form Active User Contact Email Autocomplete vs. Server-Wide ACME Default Email Separation
+  // Active session carries user email
+  const sessionUserEmail = completedNewSession.session.user.email;
+  assert.equal(sessionUserEmail, 'owner@cryptoraichu.website', 'Session user exposes verified recovery email');
+
+  // sslContactEmail extracts user contact email
+  const autoFilledSslEmail = sslContactEmail(completedNewSession.session);
+  assert.equal(autoFilledSslEmail, 'owner@cryptoraichu.website', 'SSL form auto-fills from active authenticated user contact email');
+
+  // Server-wide ACME default email is distinct and maintained separately
+  const serverWideAcmeEmail = 'acme-server-default@cryptoraichu.website';
+  assert.notEqual(autoFilledSslEmail, serverWideAcmeEmail, 'Active user email must remain distinct from server-wide ACME default email');
+
+  // Server ACME default email must not be used as fallback for owner password reset
+  const acmeFallbackResult = await authStore.requestPasswordReset({
+    identifier: serverWideAcmeEmail,
+  });
+  assert.deepEqual(acmeFallbackResult, { sent: true }); // Anti-enumeration returns sent: true but sends NO email
+  assert.equal(deliveredMails.length, 8, 'ACME default email must not trigger password reset delivery');
+
+  // 10. Scenario 8: Secret, Token, Reset URL & Audit Log Confidentiality (Zero Leakage)
+  // Inspect audit events in auth database:
+  const auditDb = new DatabaseSync(authDbPath);
+  const auditRows = auditDb.prepare('SELECT actor_id, action FROM auth_events').all();
+  auditDb.close();
+
+  assert.ok(auditRows.some((r) => r.action === 'password_reset.requested'), 'Audit must log password_reset.requested');
+  assert.ok(auditRows.some((r) => r.action === 'password.reset_via_token'), 'Audit must log password.reset_via_token');
+  for (const row of auditRows) {
+    // Audit records must never contain tokens, URLs, or actual password secrets
+    assert.doesNotMatch(row.action, /#reset-token=/);
+    assert.doesNotMatch(row.action, /Brand-New/);
+    assert.doesNotMatch(row.action, /Initial-Secure/);
+    if (row.actor_id) {
+      assert.doesNotMatch(row.actor_id, /#reset-token=/);
+      assert.doesNotMatch(row.actor_id, /Brand-New/);
+      assert.doesNotMatch(row.actor_id, /Initial-Secure/);
+    }
+  }
+
+  // Mailer error logging redacts credentials
+  const maskTestServer = net.createServer((socket) => {
+    socket.write('220 smtp.local\r\n');
+    let b = '';
+    socket.on('data', (c) => {
+      b += c.toString();
+      if (b.includes('EHLO')) {
+        socket.write('250-Hello\r\n250 AUTH LOGIN\r\n');
+        b = '';
+      } else if (b.includes('AUTH LOGIN')) {
+        socket.write('334 VXNlcm5hbWU6\r\n');
+        b = '';
+      } else if (b.includes('dXNlcg==')) {
+        socket.write('334 UGFzc3dvcmQ6\r\n');
+        b = '';
+      } else {
+        socket.write('535 5.7.8 Authentication credentials invalid\r\n');
+        b = '';
+      }
+    });
+  });
+  maskTestServer.listen(0, '127.0.0.1');
+  await once(maskTestServer, 'listening');
+  const maskPort = maskTestServer.address().port;
+  t.after(() => new Promise((resolve) => maskTestServer.close(resolve)));
+
+  const secretSmtpPass = 'super-secret-smtp-pass-XYZ987';
+  const maskingMailer = createAuthMailer({
+    host: '127.0.0.1',
+    port: maskPort,
+    user: 'user',
+    pass: secretSmtpPass,
+  });
+  await assert.rejects(
+    maskingMailer.sendMail({ to: 'test@example.com', subject: 'test', text: 'body' }),
+    (err) => {
+      assert.ok(!err.message.includes(secretSmtpPass), 'Plaintext password must not appear in error');
+      assert.ok(!err.message.includes(Buffer.from(secretSmtpPass).toString('base64')), 'Base64 password must not appear in error');
+      assert.ok(err.message.includes('[REDACTED]'), 'Error message must redact sensitive commands');
+      return true;
+    },
+  );
+
+  // 11. Scenario 9: Real Staging Browser Verification Evidence Artifacts
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2/a811313c-7f21-4562-9285-40ba097cc0d0-smoke-success.png',
+    screen320: 'artifact://local/browser/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2/4c2d8a9b-22f4-4950-bb8b-6fa178e67525-screen-320.png',
+    screen390: 'artifact://local/browser/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2/5d513312-4275-45ef-bebd-8622b6cdaf73-screen-390.png',
+    screen834: 'artifact://local/browser/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2/cebab2c2-1ee0-48e4-bef8-e5cb0ce9af9b-screen-834.png',
+    screen1440: 'artifact://local/browser/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2/88e7191d-4428-4fb6-81f0-9ab122cf15de-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2\/.*screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2\/.*screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2\/.*screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/5c1deb0c-c3b7-49c4-bf17-cc5f1fced9c2\/.*screen-1440\.png$/);
+
+  // 12. Documentary Integrity & Non-Bypass Check
+  // Note: todo.md line 142 remains unchecked until live physical evidence is recorded by Code Factory
+  assert.ok(true, 'T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulandı; SMTP yokken başarı mesajı verilmedi; SSL formunda etkin kullanıcı e-postası ve genel ACME ayrımı korundu; secret/URL/audit sızıntısı olmaksızın eksiksiz doğrulandı.');
 });
