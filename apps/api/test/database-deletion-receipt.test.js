@@ -97,3 +97,15 @@ test('database deletion receipt requires exact database identity', async () => {
     );
   });
 });
+
+test('database deletion receipt rejects internal Roundcube schemas', async () => {
+  await withTemp(async (root) => {
+    const store = createDatabaseDeletionReceiptStore({ root: path.join(root, 'receipts') });
+    for (const name of ['roundcube', 'roundcube_sessions', 'roundcubemail', 'roundcubemail2']) {
+      await assert.rejects(
+        store.write({ serverId, jobId, databaseName: name, result: { ...result, database: { name, sizeBytes: 4096 } } }),
+        { code: 'database_deletion_receipt_name_invalid' },
+      );
+    }
+  });
+});

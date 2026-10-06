@@ -1,7 +1,8 @@
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import { randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { assertUuid, isInfrastructureDatabase } from '@yunpanel/shared';
+import { assertUuid } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
@@ -291,6 +292,7 @@ export function createDatabaseBindingRegistry({
     const normalizedWebsiteId = websiteId === null ? null : uuid(websiteId, 'websiteId');
     const normalizedApplicationId = applicationId === null ? null : uuid(applicationId, 'applicationId');
     return state.bindings
+      .filter((binding) => !isInfrastructureDatabase(binding.databaseName))
       .filter((binding) => normalizedServerId === null || binding.serverId === normalizedServerId)
       .filter((binding) => normalizedWebsiteId === null || binding.websiteId === normalizedWebsiteId)
       .filter((binding) => normalizedApplicationId === null || binding.applicationId === normalizedApplicationId)

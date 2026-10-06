@@ -1,5 +1,6 @@
 import { createDatabaseDumpManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 import {
   createDatabaseBackupOperationsService,
   DatabaseBackupOperationsError,
@@ -8,7 +9,6 @@ import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const BACKUP_FIELDS = new Set(['expectedBindingRevision', 'confirmation']);
 const RESTORE_PREVIEW_FIELDS = new Set(['backupId', 'expectedBindingRevision']);
 const RESTORE_APPLY_FIELDS = new Set([
@@ -59,7 +59,7 @@ function requireStrings(body, fields, code) {
 function validDatabaseName(value) {
   return typeof value === 'string'
     && DATABASE_NAME_PATTERN.test(value)
-    && !RESERVED_DATABASES.has(value.toLowerCase());
+    && !isInfrastructureDatabase(value);
 }
 
 function asyncRoute(handler) {

@@ -1,12 +1,12 @@
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { isInfrastructureDatabase } from '@yunpanel/shared';
 
 const STORE_VERSION = 1;
 const DEFAULT_ROOT = '/var/lib/yunpanel/recovery/database-deletions';
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const SERVER_ID_PATTERN = /^[A-Za-z0-9._:-]{1,128}$/;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
-const RESERVED_DATABASES = new Set(['information_schema', 'mysql', 'performance_schema', 'sys']);
 const RECEIPT_KEYS = Object.freeze(['version', 'recordedAt', 'serverId', 'jobId', 'databaseName', 'ownership', 'result']);
 const OWNERSHIP_KEYS = Object.freeze(['websiteId', 'databaseBindingId', 'expectedBindingRevision', 'backupId', 'expectedBackupSha256']);
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -23,7 +23,7 @@ export class DatabaseDeletionReceiptError extends Error {
 }
 
 function normalizeDatabaseName(value) {
-  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || RESERVED_DATABASES.has(value.toLowerCase())) {
+  if (typeof value !== 'string' || !DATABASE_NAME_PATTERN.test(value) || isInfrastructureDatabase(value)) {
     throw new DatabaseDeletionReceiptError('database_deletion_receipt_name_invalid', 'Database deletion receipt name is invalid');
   }
   return value;
