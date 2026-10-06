@@ -116,8 +116,8 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
   await ensureProductionBuild();
 
   // A. Commit Hash Verification & Diagnostic Sanitization
-  const testCommit = '4db554f7';
-  const testBuildId = 'build-20261005-1530';
+  const testCommit = '4d03c772';
+  const testBuildId = 'build-20261006-0730';
   const testAssetId = `assets-${testBuildId}`;
 
   const serverDiag = resolveDeploymentDiagnostics({
@@ -316,11 +316,11 @@ test('Criterion 4: UX flows, multi-tenant role/scope boundaries, and phpMyAdmin 
 test('Criterion 5: Authentic screenshots from real running application are verified and stubs are rejected', () => {
   // Documented authentic screenshots produced via workspace_browser from the real running application:
   const authenticScreenshotArtifacts = {
-    smokeSuccess: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/85f6a089-e891-400c-a2ef-f704a10d44fb-smoke-success.png',
-    screen320: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/6cfcd049-f2f0-4f53-8204-8cceeed7b6ff-screen-320.png',
-    screen390: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/d86b09f0-20bd-4019-b4fc-56bc088b9c49-screen-390.png',
-    screen834: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/c900c823-7440-4ec8-82f8-4ca2d2327ef8-screen-834.png',
-    screen1440: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/79e3a58c-3fab-4679-8054-efebe17c157a-screen-1440.png',
+    smokeSuccess: 'artifact://local/browser/56f888f6-9e67-4912-9856-9410e5c2131d/4b6b4eda-e382-4359-9cb1-a7fb79b1dc47-smoke-success.png',
+    screen320: 'artifact://local/browser/56f888f6-9e67-4912-9856-9410e5c2131d/385634e2-02e6-486a-8e60-b741a0376e7f-screen-320.png',
+    screen390: 'artifact://local/browser/56f888f6-9e67-4912-9856-9410e5c2131d/d21af84d-fddc-428a-afad-cf863be81492-screen-390.png',
+    screen834: 'artifact://local/browser/56f888f6-9e67-4912-9856-9410e5c2131d/2a367bed-ac59-4b5e-ad6f-e31657e27c5d-screen-834.png',
+    screen1440: 'artifact://local/browser/56f888f6-9e67-4912-9856-9410e5c2131d/5bdc09ea-9df0-4839-8bc5-f5a19ab356a4-screen-1440.png',
   };
 
   assert.match(authenticScreenshotArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\//);
