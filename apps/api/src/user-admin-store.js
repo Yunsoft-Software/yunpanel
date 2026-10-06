@@ -167,8 +167,8 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
       });
     },
     update(rawToken, requireManagement, id, input) {
-      fields(input, ['revision', 'username', 'passwordHash', 'role', 'active', 'websiteIds']);
-      if (!['username', 'passwordHash', 'role', 'active', 'websiteIds'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
+      fields(input, ['revision', 'username', 'email', 'passwordHash', 'role', 'active', 'websiteIds']);
+      if (!['username', 'email', 'passwordHash', 'role', 'active', 'websiteIds'].some((key) => Object.hasOwn(input, key))) throw new AuthError('empty_user_update', 'Choose an account field to change.');
       if (input.websiteIds !== undefined && (!Array.isArray(input.websiteIds) || input.websiteIds.some((item) => typeof item !== 'string' || !item))) {
         throw new AuthError('invalid_website_ids', 'websiteIds must be an array of string identifiers.');
       }
@@ -177,7 +177,9 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         const actor = requireActor(rawToken, requireManagement);
         const user = existing(id, input.revision);
         hostingAccounts.assertLegacyMutationAllowed(id, input);
-        const name = Object.hasOwn(input, 'username') ? normalizeUsername(input.username) : user.username;
+        const name = Object.hasOwn(input, 'email')
+          ? normalizeUsername(input.email)
+          : (Object.hasOwn(input, 'username') ? normalizeUsername(input.username) : user.username);
         const nextRole = Object.hasOwn(input, 'role') ? role(input.role) : user.role;
         const nextActive = Object.hasOwn(input, 'active') ? active(input.active) : Boolean(user.active);
         unique(name, id);
@@ -206,6 +208,12 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         } else {
           db.prepare('UPDATE users SET username = ?, role = ?, active = ? WHERE id = ?').run(name, nextRole, Number(nextActive), id);
         }
+        const hasRecoveryTable = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_recovery_emails'").get());
+        if (hasRecoveryTable && Object.hasOwn(input, 'email')) {
+          db.prepare(`INSERT INTO auth_recovery_emails (user_id, email, verified, created_at, updated_at)
+            VALUES (?, ?, 1, ?, ?)
+            ON CONFLICT(user_id) DO UPDATE SET email = excluded.email, updated_at = excluded.updated_at`).run(id, name, now(), now());
+        }
         db.prepare('INSERT INTO auth_user_revisions VALUES (?, ?, ?) ON CONFLICT(user_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at')
           .run(id, user.revision + 1, now());
         revoke(id);
@@ -224,14 +232,20 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         protectOwner(user, null, false);
         if (user.role === 'site_manager') {
           const bound = db.prepare('SELECT count(*) AS count FROM auth_user_websites WHERE user_id = ?').get(id)?.count ?? 0;
-          if (bound > 0) {
+          const hasOpTable = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_operation_users'").get());
+          const boundOps = hasOpTable ? (db.prepare('SELECT count(*) AS count FROM auth_operation_users WHERE user_id = ?').get(id)?.count ?? 0) : 0;
+          if (bound > 0 || boundOps > 0) {
             throw new AuthError('site_manager_delete_blocked', 'Site yöneticisi silinemez; önce bağlı web sitesi silinmelidir.', 409);
           }
         }
         revoke(id);
         db.prepare('DELETE FROM auth_user_websites WHERE user_id = ?').run(id);
+        const hasOpTable = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_operation_users'").get());
+        if (hasOpTable) db.prepare('DELETE FROM auth_operation_users WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM auth_mfa_recovery WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM auth_mfa WHERE user_id = ?').run(id);
+        const hasRecoveryTable = Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'auth_recovery_emails'").get());
+        if (hasRecoveryTable) db.prepare('DELETE FROM auth_recovery_emails WHERE user_id = ?').run(id);
         db.prepare('DELETE FROM users WHERE id = ?').run(id);
         record(actor.user.id, id, 'user.deleted');
       });

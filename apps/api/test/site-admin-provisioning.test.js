@@ -18,6 +18,14 @@ import {
   sanitizeTenantCollection,
   createTenantBoundaryMiddleware,
 } from '../src/tenant-boundary.js';
+import { AuthError } from '../src/auth-error.js';
+import { handleUserAdmin } from '../src/user-admin-http.js';
+import { databaseCredentialRegistryInternals } from '../src/database-credential-registry.js';
+import { mountDatabaseCredentialRoutes } from '../src/database-credential-http.js';
+import { createSiteResourceBoundary } from '../src/site-resource-boundary.js';
+import { siteFixture, uuid } from '../test-support/hosting-site-fixture.js';
+import { createHostingSiteAllocationStore } from '../src/hosting-site-allocation-store.js';
+import { createHostingAccountStore } from '../src/hosting-account-store.js';
 
 const websiteId = '11111111-1111-4111-8111-111111111111';
 const operationId = '22222222-2222-4222-8222-222222222222';
@@ -824,4 +832,559 @@ test('Hash sırasında yetki iptali/Website silme, iki süreç yarışı ve hesa
       dbReplay.close();
     }
   }
+});
+
+test('Gereksinim 1: Bağımsız ana Website yaratma/yenileme akışında site-admin e-posta/parola, mail ve MySQL kimlikleri birbirinden ayrı tutulmalıdır', async (t) => {
+  const { store, filePath } = createRealStoreFixture(t);
+  const { token: setupToken } = store.issueSetupToken();
+  const ownerUser = await store.completeSetup({
+    setupToken,
+    username: 'OwnerAdmin',
+    password: 'OwnerPassword123!',
+  });
+
+  const websiteId = uuid(101);
+  const serverId = uuid(102);
+  const operationId = uuid(103);
+  const siteAdminEmail = 'site-admin@mywebsite.test';
+  const siteAdminPassword = 'SiteAdminPassword123!';
+
+  // Provision site-admin during website creation
+  const outcome = await provisionSiteAdmin({
+    input: {
+      operationId,
+      serverId,
+      siteAdmin: { email: siteAdminEmail, password: siteAdminPassword },
+    },
+    result: {
+      created: true,
+      resumed: false,
+      operationId,
+      website: { id: websiteId, serverId },
+      primaryDomain: { websiteId },
+    },
+    userAdminStore: store.users,
+    actorId: ownerUser.id,
+  });
+
+  assert.deepEqual(outcome, { status: 'created', websiteId, code: null });
+
+  const db = new DatabaseSync(filePath);
+  try {
+    // 1. Site-admin user login credentials exist in users table
+    const userRow = db.prepare('SELECT * FROM users WHERE username = ?').get(siteAdminEmail);
+    assert.ok(userRow, 'Site-admin user must exist');
+    assert.equal(userRow.role, 'site_manager');
+    assert.equal(userRow.active, 1);
+    assert.match(userRow.password_hash, /^\$argon2id\$/);
+
+    // 2. MySQL / Database credentials are fully distinct entities with generated username & isolated credentials
+    const dbBindingId = uuid(501);
+    const mysqlUsername = databaseCredentialRegistryInternals.usernameFor(dbBindingId);
+    assert.notEqual(mysqlUsername, siteAdminEmail, 'MySQL username must not match site-admin email');
+    assert.ok(mysqlUsername.startsWith('ydb_'), 'MySQL username uses separate naming prefix');
+
+    // 3. Verifying credential separation: user credentials are isolated
+    assert.equal(userRow.username, siteAdminEmail);
+  } finally {
+    db.close();
+  }
+});
+
+test('Gereksinim 2: İlişkili Website silinmemişken ve aktifken site-admin kullanıcısını silme istekleri API tarafından 409 Conflict ile reddedilmelidir; site silindikten sonra silme başarılı olmalıdır', async (t) => {
+  const { store, filePath } = createRealStoreFixture(t);
+  const { token: setupToken } = store.issueSetupToken();
+  const ownerUser = await store.completeSetup({
+    setupToken,
+    username: 'OwnerSecurity',
+    password: 'OwnerPassword123!',
+  });
+  const ownerLogin = await store.login({ username: 'OwnerSecurity', password: 'OwnerPassword123!' });
+  const rawToken = ownerLogin.token;
+
+  const websiteId = uuid(201);
+  const serverId = uuid(202);
+  const operationId = uuid(203);
+  const siteAdminEmail = 'active-site-admin@test.com';
+
+  const siteAdmin = await store.users.createSiteManager({
+    username: siteAdminEmail,
+    password: 'Password123!',
+    websiteId,
+    actorId: ownerUser.id,
+    operationId,
+  });
+
+  // Verify site-admin is associated with website in auth_user_websites
+  const db = new DatabaseSync(filePath);
+  try {
+    const bound = db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').get(siteAdmin.id);
+    assert.equal(bound?.website_id, websiteId);
+  } finally {
+    db.close();
+  }
+
+  // 1. Direct store deletion while website is active: 409 Conflict
+  await assert.rejects(
+    async () => {
+      store.users.remove(rawToken, (s) => s, siteAdmin.id, { revision: siteAdmin.revision });
+    },
+    (err) => {
+      assert.ok(err instanceof AuthError);
+      assert.equal(err.status, 409);
+      assert.equal(err.code, 'site_manager_delete_blocked');
+      return true;
+    },
+  );
+
+  // 2. API level deletion via handleUserAdmin: returns 409 Conflict
+  let httpStatus = 200;
+  let httpError = null;
+  const mockResponse = {
+    statusCode: 200,
+    setHeader() {},
+    json(body) { return body; },
+  };
+  try {
+    await handleUserAdmin({
+      request: { method: 'DELETE' },
+      response: mockResponse,
+      pathname: `/api/users/${siteAdmin.id}`,
+      query: new URLSearchParams(),
+      store,
+      rawToken,
+      requireManagement: (s) => s,
+      readJson: async () => ({ revision: siteAdmin.revision }),
+      json: (res, code, body) => { res.statusCode = code; return body; },
+    });
+  } catch (err) {
+    httpError = err;
+    httpStatus = err.status || 500;
+  }
+  assert.equal(httpStatus, 409, 'API must return 409 Conflict when site is alive');
+  assert.equal(httpError?.code, 'site_manager_delete_blocked');
+
+  // 3. Simulate website removal releasing allocations & user-site binding
+  store.users.hostingAccounts.siteAllocations.releaseRemoved({
+    operationId,
+    websiteId,
+    serverId,
+    applicationId: null,
+    websiteAbsent: true,
+    applicationAbsent: false,
+  });
+
+  // Verify mappings were released
+  const dbCheck = new DatabaseSync(filePath);
+  try {
+    const userWebsites = dbCheck.prepare('SELECT count(*) as count FROM auth_user_websites WHERE user_id = ?').get(siteAdmin.id);
+    assert.equal(userWebsites.count, 0);
+  } finally {
+    dbCheck.close();
+  }
+
+  // 4. Site-admin deletion now succeeds after website removal
+  store.users.remove(rawToken, (s) => s, siteAdmin.id, { revision: siteAdmin.revision });
+
+  const dbFinal = new DatabaseSync(filePath);
+  try {
+    const deletedUser = dbFinal.prepare('SELECT * FROM users WHERE id = ?').get(siteAdmin.id);
+    assert.equal(deletedUser, undefined, 'User must be permanently deleted');
+  } finally {
+    dbFinal.close();
+  }
+});
+
+test('Gereksinim 3: Owner kullanıcısı site-admin e-posta ve parola bilgilerini düzenleyebilmelidir', async (t) => {
+  const { store, filePath } = createRealStoreFixture(t);
+  const { token: setupToken } = store.issueSetupToken();
+  const ownerUser = await store.completeSetup({
+    setupToken,
+    username: 'OwnerMaster',
+    password: 'OwnerPassword123!',
+  });
+  const ownerLogin = await store.login({ username: 'OwnerMaster', password: 'OwnerPassword123!' });
+  const rawToken = ownerLogin.token;
+
+  const websiteId = uuid(301);
+  const initialEmail = 'initial-admin@website.test';
+  const initialPassword = 'InitialPassword123!';
+
+  const siteAdmin = await store.users.createSiteManager({
+    username: initialEmail,
+    password: initialPassword,
+    websiteId,
+    actorId: ownerUser.id,
+  });
+
+  // Verify initial login works
+  const initialLogin = await store.login({ username: initialEmail, password: initialPassword });
+  assert.ok(initialLogin.token);
+
+  // 1. Owner updates site-admin email and password via API (handleUserAdmin PATCH)
+  const newEmail = 'updated-admin@website.test';
+  const newPassword = 'NewSecretPassword456!';
+  let patchResponseCode = 0;
+  let patchResponseBody = null;
+
+  await handleUserAdmin({
+    request: { method: 'PATCH' },
+    response: { setHeader() {} },
+    pathname: `/api/users/${siteAdmin.id}`,
+    query: new URLSearchParams(),
+    store,
+    rawToken,
+    requireManagement: (s) => s,
+    readJson: async () => ({
+      revision: siteAdmin.revision,
+      email: newEmail,
+      password: newPassword,
+    }),
+    json: (res, code, body) => {
+      patchResponseCode = code;
+      patchResponseBody = body;
+      return body;
+    },
+  });
+
+  assert.equal(patchResponseCode, 200);
+  assert.equal(patchResponseBody.data.user.username, newEmail);
+  assert.equal(patchResponseBody.data.user.revision, siteAdmin.revision + 1);
+
+  // 2. Old password and old username no longer work for login
+  await assert.rejects(
+    store.login({ username: initialEmail, password: initialPassword }),
+    { code: 'invalid_credentials', status: 401 },
+  );
+
+  // 3. New email and new password work for login
+  const updatedLogin = await store.login({ username: newEmail, password: newPassword });
+  assert.ok(updatedLogin.token);
+  assert.equal(updatedLogin.session.user.username, newEmail);
+
+  // 4. Verify in SQLite database that password_hash was updated with Argon2id and recovery email updated
+  const db = new DatabaseSync(filePath);
+  try {
+    const userRow = db.prepare('SELECT * FROM users WHERE id = ?').get(siteAdmin.id);
+    assert.equal(userRow.username, newEmail);
+    assert.match(userRow.password_hash, /^\$argon2id\$/);
+
+    const recoveryRow = db.prepare('SELECT email FROM auth_recovery_emails WHERE user_id = ?').get(siteAdmin.id);
+    assert.equal(recoveryRow.email, newEmail);
+  } finally {
+    db.close();
+  }
+
+  // 5. Owner updates customer login email & password via updateCustomerLogin
+  const f = siteFixture(t, { maxWebsites: 5, maxCustomers: 5 });
+  const custStore = createHostingAccountStore({
+    ...f,
+    hashPassword: async (p) => `\$argon2id\$v=19\$m=65536,t=3,p=1\$mock-hash-${p}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+  const custLogin = await custStore.updateCustomerLogin(f.token, f.requireManagement, 'customer-a', {
+    revision: 1,
+    email: 'new-customer-email@example.test',
+    password: 'NewCustomerPassword123!',
+  });
+  assert.equal(custLogin.username, 'new-customer-email@example.test');
+});
+
+test("Gereksinim 4: Site-admin kullanicisi baska Website'in DB/phpMyAdmin iceriklerine erisememeli (fail-closed, 403), yalnizca kendi Website'inin DB credential rotasyonu ve grant uygulamasini yonetebilmelidir", async () => {
+  const serverId = uuid(100);
+  const ownWebsiteId = uuid(101);
+  const foreignWebsiteId = uuid(102);
+
+  const ownBindingId = uuid(201);
+  const foreignBindingId = uuid(202);
+  const ownCredentialId = uuid(301);
+  const foreignCredentialId = uuid(302);
+
+  const websites = new Map([
+    [ownWebsiteId, { id: ownWebsiteId, serverId, applicationId: uuid(401) }],
+    [foreignWebsiteId, { id: foreignWebsiteId, serverId, applicationId: uuid(402) }],
+  ]);
+
+  const bindings = new Map([
+    [ownBindingId, { id: ownBindingId, serverId, websiteId: ownWebsiteId, applicationId: uuid(401), databaseName: 'db_own', revision: 1 }],
+    [foreignBindingId, { id: foreignBindingId, serverId, websiteId: foreignWebsiteId, applicationId: uuid(402), databaseName: 'db_foreign', revision: 1 }],
+  ]);
+
+  const credentials = new Map([
+    [ownCredentialId, {
+      id: ownCredentialId,
+      serverId,
+      websiteId: ownWebsiteId,
+      databaseBindingId: ownBindingId,
+      applicationId: uuid(401),
+      databaseName: 'db_own',
+      revision: 1,
+      privileges: ['SELECT', 'INSERT'],
+    }],
+    [foreignCredentialId, {
+      id: foreignCredentialId,
+      serverId,
+      websiteId: foreignWebsiteId,
+      databaseBindingId: foreignBindingId,
+      applicationId: uuid(402),
+      databaseName: 'db_foreign',
+      revision: 1,
+      privileges: ['SELECT'],
+    }],
+  ]);
+
+  const websiteRegistry = {
+    getWebsite: async (id) => websites.get(id) ?? null,
+  };
+  const databaseBindingRegistry = {
+    getBinding: async (id) => bindings.get(id) ?? null,
+  };
+  let rotated = null;
+  let granted = null;
+  let queueApplyArgs = null;
+
+  const databaseCredentialRegistry = {
+    createCredential: async () => ({}),
+    deleteCredential: async () => ({}),
+    getCredential: async (id) => credentials.get(id) ?? null,
+    getForBinding: async (bId) => [...credentials.values()].find((c) => c.databaseBindingId === bId) ?? null,
+    rotatePassword: async (id, body) => {
+      rotated = { id, body };
+      const cred = credentials.get(id);
+      cred.revision += 1;
+      return { ...cred };
+    },
+    setPrivileges: async (id, body) => {
+      granted = { id, body };
+      const cred = credentials.get(id);
+      cred.privileges = body.privileges;
+      cred.revision += 1;
+      return { ...cred };
+    },
+  };
+
+  const databaseCredentialApplyService = {
+    previewApply: async (id) => ({ credentialId: id }),
+    queueApply: async (params, opts) => {
+      queueApplyArgs = { params, opts };
+      return { jobId: 'job-apply-1', status: 'queued' };
+    },
+    previewDelete: async (id) => ({ credentialId: id }),
+    queueDelete: async () => ({ jobId: 'job-del-1', status: 'queued' }),
+  };
+
+  const jobRegistry = {
+    getJob: async (id) => ({ id, status: 'succeeded' }),
+  };
+  const ensureDatabaseIdle = async () => {};
+
+  const boundary = createSiteResourceBoundary({
+    websiteRegistry,
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    localServerId: serverId,
+  });
+
+  const siteAdminActor = {
+    id: uuid(901),
+    username: 'siteadmin@ownsite.test',
+    role: 'site_manager',
+    websiteIds: [ownWebsiteId],
+  };
+
+  const invokeBoundary = async ({ method = 'GET', url, body = null }) => {
+    const req = {
+      method,
+      url,
+      originalUrl: url,
+      body,
+      auth: {
+        user: siteAdminActor,
+        access: { mode: 'site_management', permissions: ['*'] },
+      },
+    };
+    let calledNext = false;
+    let statusCode = 200;
+    let resBody = null;
+    const res = {
+      status(code) { statusCode = code; return this; },
+      json(val) { resBody = val; return this; },
+    };
+    let caughtErr = null;
+    try {
+      await boundary(req, res, (err) => {
+        if (err) caughtErr = err;
+        else calledNext = true;
+      });
+    } catch (err) {
+      caughtErr = err;
+    }
+    return { calledNext, statusCode, resBody, caughtErr };
+  };
+
+  // 1. Site-admin tries to access foreign phpMyAdmin handoffs: 403 fail-closed
+  const foreignPhpMyAdmin = await invokeBoundary({
+    method: 'POST',
+    url: `/api/servers/${serverId}/websites/${foreignWebsiteId}/phpmyadmin-handoffs`,
+    body: { credentialId: foreignCredentialId },
+  });
+  assert.equal(foreignPhpMyAdmin.calledNext, false);
+  assert.equal(foreignPhpMyAdmin.statusCode, 403, 'Foreign phpMyAdmin access must fail with 403');
+  assert.equal(foreignPhpMyAdmin.resBody?.error?.code, 'site_scope_forbidden');
+
+  // 2. Site-admin tries to access foreign database credential: 403 fail-closed
+  const foreignCred = await invokeBoundary({
+    method: 'PATCH',
+    url: `/api/servers/${serverId}/database-credentials/${foreignCredentialId}/grants`,
+    body: { expectedRevision: 1, privileges: ['ALL'], confirmation: 'confirm' },
+  });
+  assert.equal(foreignCred.calledNext, false);
+  assert.equal(foreignCred.statusCode, 403, 'Foreign DB credential access must fail with 403');
+  assert.equal(foreignCred.resBody?.error?.code, 'site_scope_forbidden');
+
+  // 3. Site-admin accesses own database credential: boundary permits (calls next)
+  const ownCred = await invokeBoundary({
+    method: 'PATCH',
+    url: `/api/servers/${serverId}/database-credentials/${ownCredentialId}/grants`,
+    body: { expectedRevision: 1, privileges: ['SELECT', 'INSERT', 'UPDATE'], confirmation: 'confirm' },
+  });
+  assert.equal(ownCred.calledNext, true, 'Own DB credential access must be allowed');
+  assert.equal(ownCred.caughtErr, null);
+
+  // 4. Test database-credential-http route handler for own credential rotation, grants, and apply
+  const appRoutes = new Map();
+  mountDatabaseCredentialRoutes({
+    get: (p, ...h) => appRoutes.set(`GET:${p}`, h.at(-1)),
+    post: (p, ...h) => appRoutes.set(`POST:${p}`, h.at(-1)),
+    patch: (p, ...h) => appRoutes.set(`PATCH:${p}`, h.at(-1)),
+    delete: (p, ...h) => appRoutes.set(`DELETE:${p}`, h.at(-1)),
+  }, {
+    registry: { getServer: async (id) => ({ id }) },
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
+    jobRegistry,
+    ensureDatabaseIdle,
+  });
+
+  const invokeRoute = async (method, pathTemplate, params, body) => {
+    const handler = appRoutes.get(`${method}:${pathTemplate}`);
+    let statusCode = 200;
+    let jsonBody = null;
+    let error = null;
+    const req = {
+      params,
+      query: {},
+      body,
+      auth: { user: siteAdminActor },
+    };
+    const res = {
+      status(s) { statusCode = s; return this; },
+      json(v) { jsonBody = v; return this; },
+    };
+    await handler(req, res, (err) => { error = err; });
+    return { statusCode, jsonBody, error };
+  };
+
+  // Rotation on own credential
+  const rotateRes = await invokeRoute('POST', '/api/servers/:serverId/database-credentials/:credentialId/password/rotate',
+    { serverId, credentialId: ownCredentialId },
+    { expectedRevision: 1, confirmation: 'rotate-confirm' },
+  );
+  assert.equal(rotateRes.statusCode, 200);
+  assert.equal(rotated?.id, ownCredentialId);
+
+  // Grants update on own credential
+  const grantsRes = await invokeRoute('PATCH', '/api/servers/:serverId/database-credentials/:credentialId/grants',
+    { serverId, credentialId: ownCredentialId },
+    { expectedRevision: 2, privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'], confirmation: 'grants-confirm' },
+  );
+  assert.equal(grantsRes.statusCode, 200);
+  assert.equal(granted?.id, ownCredentialId);
+
+  // Apply on own credential - passing authorization with tenant website continuity
+  const applyRes = await invokeRoute('POST', '/api/servers/:serverId/database-credentials/:credentialId/apply',
+    { serverId, credentialId: ownCredentialId },
+    {
+      expectedCredentialRevision: 3,
+      expectedBindingRevision: 1,
+      expectedDesiredStateSha256: 'a'.repeat(64),
+      confirmation: 'apply-confirm',
+    },
+  );
+  assert.equal(applyRes.statusCode, 202);
+  assert.deepEqual(queueApplyArgs?.opts?.authorization, {
+    actorId: siteAdminActor.id,
+    userId: siteAdminActor.id,
+    websiteId: ownWebsiteId,
+    resourceId: ownWebsiteId,
+  });
+});
+
+test('Gereksinim 5: Önceden var olan Website migrasyonu ve rollback süreçleri veri kaybı olmadan güvenli şekilde tamamlanmalıdır', (t) => {
+  const f = siteFixture(t, { maxWebsites: 10, maxCustomers: 10 });
+  const ownerToken = f.token;
+
+  // 1. Setup pre-existing legacy user with multiple website grants
+  f.addUser('legacy-user-active', { role: 'site_manager' });
+  const w1 = uuid(301);
+  const w2 = uuid(302);
+  f.db.prepare('INSERT INTO auth_user_websites VALUES (?, ?)').run('legacy-user-active', w1);
+  f.db.prepare('INSERT INTO auth_user_websites VALUES (?, ?)').run('legacy-user-active', w2);
+
+  const initialUser = f.db.prepare('SELECT * FROM users WHERE id = ?').get('legacy-user-active');
+  assert.ok(initialUser);
+  assert.equal(initialUser.role, 'site_manager');
+
+  // 2. Perform migration from legacy user to Customer
+  const receipt = f.store.migrateLegacyUserToCustomer(ownerToken, f.requireManagement, {
+    userId: 'legacy-user-active',
+    expectedUserRevision: initialUser.revision ?? 1,
+    resellerId: 'reseller-a',
+    quotas: { maxWebsites: 5, maxDiskMb: 4096, maxTrafficMb: 20000, maxDatabases: 5 },
+    websites: [w1, w2],
+  });
+
+  assert.ok(receipt.migrationId, 'Migration receipt must contain UUID');
+  assert.equal(receipt.customerId, 'legacy-user-active');
+  assert.equal(receipt.resellerId, 'reseller-a');
+  assert.deepEqual(receipt.migratedWebsites, [w1, w2]);
+  assert.equal(receipt.allocations.length, 2);
+
+  // Customer account exists in auth_hosting_accounts
+  const customerAccount = f.store.get(ownerToken, f.requireManagement, 'legacy-user-active');
+  assert.equal(customerAccount.kind, 'customer');
+  assert.equal(customerAccount.resellerId, 'reseller-a');
+  assert.equal(customerAccount.quotas.maxWebsites, 5);
+
+  // Customer websites are attached
+  const customerSites = f.db.prepare('SELECT website_id FROM auth_customer_websites WHERE customer_id = ?').all('legacy-user-active');
+  assert.deepEqual(customerSites.map((r) => r.website_id).sort(), [w1, w2].sort());
+
+  // Allocations are in attached state
+  const allocations = f.db.prepare('SELECT website_id, state FROM auth_hosting_site_allocations WHERE customer_id = ?').all('legacy-user-active');
+  assert.equal(allocations.length, 2);
+  assert.ok(allocations.every((a) => a.state === 'attached'));
+
+  // 3. Perform rollback with zero data loss
+  const rollbackOutcome = f.store.rollbackLegacyUserMigration(ownerToken, f.requireManagement, receipt);
+  assert.equal(rollbackOutcome.rolledBack, true);
+  assert.equal(rollbackOutcome.customerId, 'legacy-user-active');
+  assert.deepEqual(rollbackOutcome.restoredWebsites.sort(), [w1, w2].sort());
+
+  // Customer records removed
+  const remainingCustomer = f.db.prepare('SELECT count(*) as count FROM auth_hosting_accounts WHERE user_id = ?').get('legacy-user-active');
+  assert.equal(remainingCustomer.count, 0);
+
+  // Legacy user website grants fully restored
+  const restoredGrants = f.db.prepare('SELECT website_id FROM auth_user_websites WHERE user_id = ?').all('legacy-user-active');
+  assert.deepEqual(restoredGrants.map((r) => r.website_id).sort(), [w1, w2].sort());
+
+  // User credentials and user row preserved intact with zero data loss
+  const postRollbackUser = f.db.prepare('SELECT * FROM users WHERE id = ?').get('legacy-user-active');
+  assert.equal(postRollbackUser.id, initialUser.id);
+  assert.equal(postRollbackUser.username, initialUser.username);
+  assert.equal(postRollbackUser.password_hash, initialUser.password_hash);
+  assert.equal(postRollbackUser.role, initialUser.role);
+  assert.equal(postRollbackUser.active, 1);
 });

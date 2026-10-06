@@ -314,8 +314,17 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
       const proof = removalEvidence(value);
       const result = transaction(() => {
         hostingWebsitesForCapacity(db);
+        const hasTable = (name) => Boolean(db.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?").get(name));
         const row = db.prepare('SELECT * FROM auth_hosting_site_allocations WHERE website_id = ?').get(proof.websiteId);
-        if (!row) return { receipt: Object.freeze({ websiteId: proof.websiteId, released: false, quotaReleased: false }), revoke: [] };
+        if (!row) {
+          if (hasTable('auth_user_websites')) {
+            db.prepare('DELETE FROM auth_user_websites WHERE website_id = ?').run(proof.websiteId);
+          }
+          if (hasTable('auth_operation_users')) {
+            db.prepare('DELETE FROM auth_operation_users WHERE website_id = ?').run(proof.websiteId);
+          }
+          return { receipt: Object.freeze({ websiteId: proof.websiteId, released: false, quotaReleased: false }), revoke: [] };
+        }
         if (row.server_id !== proof.serverId) throw conflict();
 
         const ownership = db.prepare('SELECT customer_id FROM auth_customer_websites WHERE website_id = ?').get(proof.websiteId) ?? null;
@@ -341,6 +350,12 @@ export function createHostingSiteAllocationStore({ db, now, transaction, owner, 
 
         if (row.state === 'attached') {
           db.prepare('DELETE FROM auth_customer_websites WHERE website_id = ? AND customer_id = ?').run(proof.websiteId, row.customer_id);
+        }
+        if (hasTable('auth_user_websites')) {
+          db.prepare('DELETE FROM auth_user_websites WHERE website_id = ?').run(proof.websiteId);
+        }
+        if (hasTable('auth_operation_users')) {
+          db.prepare('DELETE FROM auth_operation_users WHERE website_id = ?').run(proof.websiteId);
         }
         const deleted = db.prepare('DELETE FROM auth_hosting_site_allocations WHERE operation_id = ? AND website_id = ?')
           .run(row.operation_id, proof.websiteId);
