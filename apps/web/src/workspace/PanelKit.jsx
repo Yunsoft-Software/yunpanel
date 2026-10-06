@@ -63,10 +63,18 @@ export function CollectionNotice({ resource, label }) {
   return <div className="ws-notice ws-notice-warn" role="alert"><div><strong>{label}</strong><p>{resource.error?.message ?? 'Veriler alınamadı.'}{resource.status === 'stale' && ` Son başarılı güncelleme: ${formatDate(resource.updatedAt)}.`}</p></div><Button onClick={resource.refresh} icon="refresh">Yeniden dene</Button></div>;
 }
 export function ErrorNotice({ error }) {
-  return error ? <div role="alert" className="ws-notice ws-notice-error"><Icon name="alert" /><span>{error}</span></div> : null;
+  if (!error) return null;
+  const message = typeof error === 'string' ? error : (error?.message ?? (typeof error === 'object' ? JSON.stringify(error) : String(error)));
+  return <div role="alert" className="ws-notice ws-notice-error"><Icon name="alert" /><span>{message}</span></div>;
 }
 export function KeyValues({ items }) {
-  return <dl className="ws-keyvalues">{items.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value ?? '—'}</dd></div>)}</dl>;
+  return <dl className="ws-keyvalues">{items.map(([label, value]) => {
+    let display = value;
+    if (value != null && typeof value === 'object' && !value.$$typeof) {
+      display = value.message ?? value.label ?? value.name ?? JSON.stringify(value);
+    }
+    return <div key={label}><dt>{label}</dt><dd>{display ?? '—'}</dd></div>;
+  })}</dl>;
 }
 export function Modal({ title, children, onClose, busy = false, wide = false }) {
   const ref = useRef(null); const titleId = useId();

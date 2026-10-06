@@ -63,6 +63,7 @@ export default function DashboardPage() {
   const certsReadable = ['ready', 'stale'].includes(certificates.status) && ['ready', 'stale'].includes(domains.status);
   const certItems = readableItems(certificates);
   const domainItems = readableItems(domains);
+  const hasCerts = certsReadable && certItems.length > 0;
   const warnings = certsReadable ? domainItems.map((domain) => ({ domain, ssl: certificateState(domain, certItems) })).filter(({ ssl }) => ['warning', 'expired', 'error'].includes(ssl.state)) : [];
   const activeJobs = knownCount(jobs, (job) => ['queued', 'running'].includes(job.status));
   const failedJobs = knownCount(jobs, (job) => job.status === 'failed');
