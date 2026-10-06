@@ -160,9 +160,9 @@ export default function AiSettingsPanel() {
                     justifyContent: 'space-between',
                     alignItems: 'center',
                     padding: '12px 14px',
-                    border: '1px solid var(--border-color, #e5e7eb)',
+                    border: '1px solid var(--ws-border)',
                     borderRadius: '8px',
-                    background: prov.active ? 'var(--bg-highlight, #f0fdf4)' : 'var(--bg-card, #ffffff)',
+                    background: prov.active ? 'var(--ws-accent-soft)' : 'var(--ws-surface)',
                   }}
                 >
                   <div>
@@ -171,16 +171,16 @@ export default function AiSettingsPanel() {
                       <Badge state={prov.active ? 'active' : 'neutral'}>
                         {prov.active ? 'Aktif Sağlayıcı' : prov.type}
                       </Badge>
-                      <span style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)' }}>
+                      <span style={{ fontSize: '12px', color: 'var(--ws-muted)' }}>
                         Model: {prov.defaultModel || 'varsayılan'}
                       </span>
                     </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', marginTop: '4px' }}>
+                    <div style={{ fontSize: '12px', color: 'var(--ws-muted)', marginTop: '4px' }}>
                       {prov.hasApiKey ? `Anahtar: ${prov.maskedApiKey}` : 'API Anahtarı yok (Yerel)'}
                       {prov.baseUrl && ` · URL: ${prov.baseUrl}`}
                     </div>
                     {testResult && testResult.id === prov.id && (
-                      <div style={{ fontSize: '12px', marginTop: '4px', color: testResult.ok ? '#059669' : '#dc2626' }}>
+                      <div style={{ fontSize: '12px', marginTop: '4px', color: testResult.ok ? 'var(--ws-success)' : 'var(--ws-danger)' }}>
                         {testResult.ok ? '✓ ' : '✕ '} {testResult.message}
                       </div>
                     )}
@@ -215,9 +215,9 @@ export default function AiSettingsPanel() {
             onSubmit={handleSave}
             style={{
               padding: '16px',
-              border: '1px solid var(--border-color, #d1d5db)',
+              border: '1px solid var(--ws-border)',
               borderRadius: '8px',
-              background: 'var(--bg-secondary, #f9fafb)',
+              background: 'var(--ws-surface-subtle)',
               display: 'flex',
               flexDirection: 'column',
               gap: '12px',
@@ -311,9 +311,9 @@ export default function AiSettingsPanel() {
         )}
 
         {/* Global Security Policy Info */}
-        <div style={{ padding: '12px 14px', background: 'var(--bg-secondary, #f3f4f6)', borderRadius: '8px', fontSize: '13px' }}>
+        <div style={{ padding: '12px 14px', background: 'var(--ws-surface-subtle)', borderRadius: '8px', fontSize: '13px' }}>
           <strong>🛡️ Güvenlik Sınırı ve İzolasyon Sözleşmesi:</strong>
-          <p style={{ margin: '4px 0 0 0', color: 'var(--text-muted, #6b7280)' }}>
+          <p style={{ margin: '4px 0 0 0', color: 'var(--ws-muted)' }}>
             AI Asistanı sunucuda ham terminal komutları veya kabuk scriptleri çalıştırmaz. Bütün eylemler şema kontrollü dahili adapterlar üzerinden yürütülür. Okuma işlemleri otomatik tamamlanırken, yeniden başlatma, dağıtım ve yedekleme gibi eylemler Onay Kartı üzerinden sizin açık onayınızla yürütülür.
           </p>
         </div>
