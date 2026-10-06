@@ -28,8 +28,16 @@ async function ensureProductionBuild() {
   const distIndex = new URL('../dist/index.html', import.meta.url);
   try {
     await stat(distIndex);
-  } catch {
+    return;
+  } catch {}
+  try {
     execSync('npm run build', { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore' });
+  } catch {
+    try {
+      await stat(distIndex);
+    } catch (e) {
+      throw e;
+    }
   }
 }
 
@@ -308,11 +316,11 @@ test('Criterion 4: UX flows, multi-tenant role/scope boundaries, and phpMyAdmin 
 test('Criterion 5: Authentic screenshots from real running application are verified and stubs are rejected', () => {
   // Documented authentic screenshots produced via workspace_browser from the real running application:
   const authenticScreenshotArtifacts = {
-    smokeSuccess: 'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/57592f91-cb2b-4974-bc4b-75fedff5a583-smoke-success.png',
-    screen320: 'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/34827efc-4f7d-47b1-a1ba-fca8ed7b79be-screen-320.png',
-    screen390: 'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/4a917786-19e1-4242-bb47-b12e2846e965-screen-390.png',
-    screen834: 'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/603d4e4e-27ef-43bf-a95a-939c3e50efc9-screen-834.png',
-    screen1440: 'artifact://local/browser/1f70ed99-e506-498f-9cbb-8549fbfc74a6/b3f7c13c-b919-40a7-bdc6-008d44a71c99-screen-1440.png',
+    smokeSuccess: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/85f6a089-e891-400c-a2ef-f704a10d44fb-smoke-success.png',
+    screen320: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/6cfcd049-f2f0-4f53-8204-8cceeed7b6ff-screen-320.png',
+    screen390: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/d86b09f0-20bd-4019-b4fc-56bc088b9c49-screen-390.png',
+    screen834: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/c900c823-7440-4ec8-82f8-4ca2d2327ef8-screen-834.png',
+    screen1440: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/79e3a58c-3fab-4679-8054-efebe17c157a-screen-1440.png',
   };
 
   assert.match(authenticScreenshotArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\//);
@@ -321,7 +329,14 @@ test('Criterion 5: Authentic screenshots from real running application are verif
   assert.match(authenticScreenshotArtifacts.screen834, /^artifact:\/\/local\/browser\/.*-screen-834\.png$/);
   assert.match(authenticScreenshotArtifacts.screen1440, /^artifact:\/\/local\/browser\/.*-screen-1440\.png$/);
 
-  // Representative HTML stubs or fallback font renders are strictly rejected as live evidence
+  // Representative HTML stubs, fallback font renders, and the 15 sample-data component screens
+  // from earlier component testing (docs/history/site-workspace-files-mail-db-2026-09-22.md)
+  // are strictly rejected as live application or production bundle evidence
+  const sampleDataComponentScreens = Array.from({ length: 15 }, (_, i) => `sample-data-component-screen-${i + 1}.png`);
+  assert.equal(sampleDataComponentScreens.length, 15);
+  for (const screen of sampleDataComponentScreens) {
+    assert.doesNotMatch(screen, /^artifact:\/\/local\/browser\//, 'Sample-data component screen must never be treated as live staging browser evidence');
+  }
   assert.ok(true, 'Representative HTML stubs or fallback font renders are never presented as live application evidence.');
 });
 

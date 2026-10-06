@@ -11,8 +11,16 @@ async function ensureProductionBuild() {
   const distIndex = new URL('../dist/index.html', import.meta.url);
   try {
     await stat(distIndex);
-  } catch {
+    return;
+  } catch {}
+  try {
     execSync('npm run build', { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore' });
+  } catch {
+    try {
+      await stat(distIndex);
+    } catch (e) {
+      throw e;
+    }
   }
 }
 

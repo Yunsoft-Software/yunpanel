@@ -1,6 +1,24 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFile, access } from 'node:fs/promises';
+import { readFile, access, stat } from 'node:fs/promises';
+import { execSync } from 'node:child_process';
+
+async function ensureProductionBuild() {
+  const distIndex = new URL('../dist/index.html', import.meta.url);
+  try {
+    await stat(distIndex);
+    return;
+  } catch {}
+  try {
+    execSync('npm run build', { cwd: new URL('..', import.meta.url).pathname, stdio: 'ignore' });
+  } catch {
+    try {
+      await stat(distIndex);
+    } catch (e) {
+      throw e;
+    }
+  }
+}
 
 const readWeb = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8');
 const readSrc = (path) => readFile(new URL(`../src/${path}`, import.meta.url), 'utf8');
@@ -8,6 +26,7 @@ const readSrc = (path) => readFile(new URL(`../src/${path}`, import.meta.url), '
 /* ==========================================================================\n   1. Production Bundle Assets & Dist Verification\n   ========================================================================== */
 
 test('Production bundle dist assets: built index.html, bundled CSS and JS exist and contain theme tokens', async () => {
+  await ensureProductionBuild();
   // Verify dist/index.html exists
   const distHtml = await readWeb('dist/index.html');
   assert.ok(distHtml.includes('<!DOCTYPE html>') || distHtml.includes('<html'), 'dist/index.html must exist and contain HTML document');
