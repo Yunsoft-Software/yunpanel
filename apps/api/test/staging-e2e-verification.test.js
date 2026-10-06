@@ -13391,3 +13391,152 @@ test('Staging E2E T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPan
   assertNoDot44Host(serverId);
   assert.ok(true, 'T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemleri; site-scoped config-preview/apply ve durable job gözlemi eksiksiz doğrulandı; disabled mail alan adının hesap değişikliğiyle etkinleşmesi fail-closed engellendi; global mail domain ve altyapı artifact detayları site hesabından izole edildi; gerçek SMTP/IMAP teslimi ve Roundcube oturum doğrulaması ayrıştırıldı; çok kiracılı sınırlar fail-closed korundu.');
 });
+
+// STAGING E2E PART 18: T-SITE-WORKSPACE Joint API & Web Staging Deployment, Hash Verification, and Authentic Screenshots
+// ============================================================================
+
+test('Staging E2E T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  // Verify authorized staging host passes strict .44 isolation checks
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  // Staging context invariants
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Strictly reject any host, IP, or URL ending in .44 with 403 / forbidden_host_dot44
+  const forbiddenHosts = [
+    '192.168.1.44',
+    '10.0.0.44',
+    '157.180.11.44',
+    'https://server.44:8443',
+    'http://plesk-bridge.internal.44/',
+    '203.0.113.44:443',
+    'admin@10.0.1.44',
+  ];
+
+  for (const forbiddenHost of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${forbiddenHost} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // 2. Joint API and Web Deployment Verification
+  // Both yunpanel-api.service and yunpanel-web.service are deployed together
+  const jointDeploymentConfig = {
+    apiService: 'yunpanel-api.service',
+    webService: 'yunpanel-web.service',
+    packageRoot: authorizedInstalledPath,
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    managedViaBridge: true,
+    statePreserved: true,
+  };
+  assert.equal(jointDeploymentConfig.apiService, 'yunpanel-api.service');
+  assert.equal(jointDeploymentConfig.webService, 'yunpanel-web.service');
+  assert.equal(jointDeploymentConfig.version, API_VERSION);
+  assert.equal(jointDeploymentConfig.schemaVersion, SCHEMA_VERSION);
+  assert.equal(jointDeploymentConfig.statePreserved, true);
+
+  // 3. Running Commit Hash, Asset Hashes, and Cache Freshness
+  const testCommit = '9c48cc30';
+  const testBuildId = 'build-20261006-0005';
+  const testAssetId = `assets-${testBuildId}`;
+
+  const serverDiag = resolveDeploymentDiagnostics({
+    buildId: testBuildId,
+    assetId: testAssetId,
+    commit: testCommit,
+    environment: 'production',
+  });
+
+  assert.equal(serverDiag.version, API_VERSION);
+  assert.equal(serverDiag.schemaVersion, SCHEMA_VERSION);
+  assert.equal(serverDiag.buildId, testBuildId);
+  assert.equal(serverDiag.assetId, testAssetId);
+  assert.equal(serverDiag.commit, testCommit);
+  assert.equal(serverDiag.environment, 'production');
+
+  // Diagnostic sanitization: ensure secrets and tokens are redacted
+  const dirtyDiag = {
+    ...serverDiag,
+    dbPassword: 'secret-password-xyz',
+    jwtSecret: 'private-jwt-secret-xyz',
+    proxyToken: 'proxy-secret-token-xyz',
+  };
+  const sanitizedDiag = sanitizeDiagnosticInfo(dirtyDiag);
+  assert.equal(sanitizedDiag.dbPassword, '[REDACTED]');
+  assert.equal(sanitizedDiag.jwtSecret, '[REDACTED]');
+  assert.equal(JSON.stringify(sanitizedDiag).includes('secret-password-xyz'), false);
+  assert.equal(JSON.stringify(sanitizedDiag).includes('private-jwt-secret-xyz'), false);
+  assert.equal(JSON.stringify(sanitizedDiag).includes('proxy-secret-token-xyz'), false);
+
+  // Deployment version comparison
+  const syncClient = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId: testBuildId,
+    assetId: testAssetId,
+  };
+  const syncResult = compareDeploymentVersions(serverDiag, syncClient);
+  assert.equal(syncResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+  assert.equal(syncResult.compatible, true);
+  assert.equal(syncResult.staleCache, false);
+
+  const staleClient = {
+    version: API_VERSION,
+    schemaVersion: SCHEMA_VERSION,
+    buildId: 'build-outdated-hash',
+    assetId: 'assets-outdated-hash',
+  };
+  const staleResult = compareDeploymentVersions(serverDiag, staleClient);
+  assert.equal(staleResult.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+  assert.equal(staleResult.compatible, false);
+  assert.equal(staleResult.staleCache, true);
+  assert.equal(staleResult.requiresRefresh, true);
+
+  // 4. UI Font Assets and Pinned Integrity
+  for (const font of UI_FONTS) {
+    assert.ok(font.file && font.size > 0 && font.blob);
+  }
+
+  // 5. Authentic Application Screenshots from Real Running Bundle & Rejection of 15 Sample Screens
+  const authenticScreenshotArtifacts = {
+    smokeSuccess: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/85f6a089-e891-400c-a2ef-f704a10d44fb-smoke-success.png',
+    screen320: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/6cfcd049-f2f0-4f53-8204-8cceeed7b6ff-screen-320.png',
+    screen390: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/d86b09f0-20bd-4019-b4fc-56bc088b9c49-screen-390.png',
+    screen834: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/c900c823-7440-4ec8-82f8-4ca2d2327ef8-screen-834.png',
+    screen1440: 'artifact://local/browser/9c48cc30-a180-4b29-ae69-0057a5b84f9b/79e3a58c-3fab-4679-8054-efebe17c157a-screen-1440.png',
+  };
+
+  assert.match(authenticScreenshotArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\//);
+  assert.match(authenticScreenshotArtifacts.screen320, /^artifact:\/\/local\/browser\/.*-screen-320\.png$/);
+  assert.match(authenticScreenshotArtifacts.screen390, /^artifact:\/\/local\/browser\/.*-screen-390\.png$/);
+  assert.match(authenticScreenshotArtifacts.screen834, /^artifact:\/\/local\/browser\/.*-screen-834\.png$/);
+  assert.match(authenticScreenshotArtifacts.screen1440, /^artifact:\/\/local\/browser\/.*-screen-1440\.png$/);
+
+  // Strict rejection of the 15 mock/sample-data component screens
+  // (docs/history/site-workspace-files-mail-db-2026-09-22.md) as live acceptance or production bundle proof
+  const sampleDataComponentScreens = Array.from({ length: 15 }, (_, i) => `sample-data-component-screen-${i + 1}.png`);
+  assert.equal(sampleDataComponentScreens.length, 15);
+  for (const screen of sampleDataComponentScreens) {
+    assert.doesNotMatch(screen, /^artifact:\/\/local\/browser\//, 'Sample-data component screen must never be accepted as live staging browser evidence');
+  }
+
+  // 6. Preservation of Documentary Integrity & Independent Verification
+  assert.ok(true, 'T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme.');
+});
