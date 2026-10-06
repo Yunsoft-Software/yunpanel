@@ -43,6 +43,8 @@ import { DatabaseCredentialRegistryError } from './database-credential-registry.
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { mountPhpMyAdminHandoffRoutes } from './phpmyadmin-handoff-http.js';
 import { PhpMyAdminHandoffError } from './phpmyadmin-handoff-service.js';
+import { mountPgAdminHandoffRoutes } from './pgadmin-handoff-http.js';
+import { PgAdminHandoffError } from './pgadmin-handoff-service.js';
 import { mountWebsiteDatabaseDataRoutes } from './website-database-data-http.js';
 import { mountWebsiteDatabaseDeleteRoutes, WebsiteDatabaseDeleteHttpError } from './website-database-delete-http.js';
 import { createDnsHostingRegistry } from './dns-hosting-registry.js';
@@ -397,6 +399,7 @@ export function createApp(allOptions = {}) {
   databaseCredentialRegistry = null,
   databaseCredentialApplyService = null,
   phpMyAdminHandoffService = null,
+  pgAdminHandoffService = null,
   elFinderHandoffService = null,
   siteFileManager = null,
   databaseInventoryProvider = null,
@@ -1240,6 +1243,12 @@ export function createApp(allOptions = {}) {
       phpMyAdminHandoffService,
     });
   }
+  if (pgAdminHandoffService) {
+    mountPgAdminHandoffRoutes(app, {
+      registry: localRegistry,
+      pgAdminHandoffService,
+    });
+  }
   if (elFinderHandoffService) {
     mountElFinderHandoffRoutes(app, {
       registry: localRegistry,
@@ -1323,6 +1332,7 @@ export function createApp(allOptions = {}) {
       || error instanceof DatabaseHttpError
       || error instanceof WebsiteDatabaseDeleteHttpError
       || error instanceof PhpMyAdminHandoffError
+      || error instanceof PgAdminHandoffError
       || error instanceof ApplicationOperationsHttpError
       || error instanceof ApplicationEnvironmentRegistryError
       || error instanceof ElFinderHandoffError

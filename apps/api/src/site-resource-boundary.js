@@ -29,6 +29,7 @@ export function needsSiteResourceJson(request) {
   if (/\/files(?:\/|$)/.test(path)) return false;
   return /^\/api\/(?:mailboxes|mail-aliases|mail-domains|domains|websites(?:\/|$)|sites(?:\/|$)|terminal(?:\/|$))/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/phpmyadmin-handoffs$/.test(path)
+    || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/pgadmin-handoffs$/.test(path)
     || /^\/api\/servers\/[^/]+\/websites\/[^/]+\/elfinder-handoffs$/.test(path);
 }
 function replaceCollection(response, accept, project = (value) => value) {
@@ -228,7 +229,7 @@ export function createSiteResourceBoundary(options = {}) {
           if (method === 'DELETE') throw new ScopeError();
           await binding(decodeId(nestedBinding[1]), serverId, websiteId);
         }
-        if (path.endsWith('/phpmyadmin-handoffs')) await credential(request.body?.credentialId, serverId, websiteId);
+        if (path.endsWith('/phpmyadmin-handoffs') || path.endsWith('/pgadmin-handoffs')) await credential(request.body?.credentialId, serverId, websiteId);
         return next();
       }
       if ((match = /^\/api\/servers\/([^/]+)\/database-bindings\/([^/]+)(?:\/|$)/.exec(path))) {

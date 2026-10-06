@@ -38,12 +38,14 @@ test('binding and credential actions are resolved from the registry, not a forge
  assert.equal((await run('/api/servers/server/database-credentials/credential-a/apply',{method:'POST'})).called,1);
 });
 test('handoff requires both assigned site and matching credential',async()=>{
- const path='/api/servers/server/websites/site-a/phpmyadmin-handoffs';
- assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-a'}})).called,1);
- assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
- assert.equal((await run(path,{method:'POST',body:{}})).res.statusCode,403);
- assert.equal((await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs',{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
- assert.equal((await run('/api/servers/server/websites/site-b/phpmyadmin-handoffs',{method:'POST',body:{credentialId:'credential-a'}})).res.statusCode,403);
+ for (const handoffName of ['phpmyadmin-handoffs', 'pgadmin-handoffs']) {
+  const path=`/api/servers/server/websites/site-a/${handoffName}`;
+  assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-a'}})).called,1);
+  assert.equal((await run(path,{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
+  assert.equal((await run(path,{method:'POST',body:{}})).res.statusCode,403);
+  assert.equal((await run(`/api/servers/server/websites/site-b/${handoffName}`,{method:'POST',body:{credentialId:'credential-b'}})).res.statusCode,403);
+  assert.equal((await run(`/api/servers/server/websites/site-b/${handoffName}`,{method:'POST',body:{credentialId:'credential-a'}})).res.statusCode,403);
+ }
 });
 test('unbound and global database inventories, mutations, and database unbinding are unavailable to site managers',async()=>{
  for(const path of ['/api/servers/server/databases','/api/servers/server/databases/unbound/bind','/api/servers/server/database-bindings']){
