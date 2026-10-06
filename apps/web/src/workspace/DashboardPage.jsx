@@ -8,12 +8,15 @@ import { readableItems, usagePercent } from './ui/console-model.js';
 import UsageHistory from './ui/UsageHistory.jsx';
 
 export function UsageRing({ label, value, detail }) {
-  const valid = Number.isFinite(value) && value >= 0 && value <= 100;
+  const isError = value === 'error' || (typeof value === 'object' && value !== null && 'error' in value);
+  const valid = !isError && Number.isFinite(value) && value >= 0 && value <= 100;
   const rounded = valid ? Math.round(value) : null;
   const isCritical = valid && value >= 90;
   const isHigh = valid && value >= 85;
-  const ringState = !valid ? 'is-unknown' : isCritical ? 'is-critical is-high' : isHigh ? 'is-high' : '';
-  const ariaState = !valid
+  const ringState = isError ? 'is-error is-unknown' : !valid ? 'is-unknown' : isCritical ? 'is-critical is-high' : isHigh ? 'is-high' : '';
+  const ariaState = isError
+    ? `${label} kullanım verisinde hata`
+    : !valid
     ? `${label} kullanım verisi bilinmiyor`
     : `%${rounded}${isCritical ? ' (Kritik doluluk)' : isHigh ? ' (Yüksek doluluk)' : ''}`;
 
@@ -49,12 +52,16 @@ export function ServerSummary({ server }) {
   const diskDetail = Number.isFinite(disk.usedBytes) && Number.isFinite(disk.totalBytes)
     ? `${formatBytes(disk.usedBytes)} / ${formatBytes(disk.totalBytes)}`
     : '—';
+  const isServerError = server?.connectivity === 'error';
+  const cpuValue = inventory.cpu?.usagePercent ?? (isServerError ? 'error' : null);
+  const memoryValue = memoryUsage ?? (isServerError ? 'error' : null);
+  const diskValue = diskUsage ?? (isServerError ? 'error' : null);
 
   return <article className="ws-mini-server"><header><div><h3>{server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu'}</h3><small className="ws-muted">{inventory.operatingSystem?.prettyName ?? 'Sistem bilgisi bekleniyor'}</small></div><Badge state={server?.connectivity ?? 'unknown'} /></header>
     <div className="ws-server-metrics">
-      <UsageRing label="CPU" value={inventory.cpu?.usagePercent} detail={cpuDetail} />
-      <UsageRing label="Bellek" value={memoryUsage} detail={memoryDetail} />
-      <UsageRing label="Disk" value={diskUsage} detail={diskDetail} />
+      <UsageRing label="CPU" value={cpuValue} detail={cpuDetail} />
+      <UsageRing label="Bellek" value={memoryValue} detail={memoryDetail} />
+      <UsageRing label="Disk" value={diskValue} detail={diskDetail} />
     </div><p className="ws-muted ws-server-timestamp">Son ölçüm · {formatDate(server?.lastSeenAt)}</p>
   </article>;
 }
@@ -87,7 +94,7 @@ export default function DashboardPage() {
     <CollectionNotice resource={websites} label="Web siteleri" />
     <CollectionNotice resource={applications} label="Uygulamalar" />
     <section className="ws-metrics ws-console-metrics" aria-label="Yönetim özeti">{metrics.map(([label, value, detail, icon, to, linkLabel]) => <article className="ws-metric" key={label}>
-      <div className="ws-metric-label"><span>{label}</span><Icon name={icon} /></div><strong>{value ?? '—'}</strong><small>{detail}</small><br /><Link to={to}>{linkLabel}<Icon name="arrow" size={14} /></Link>
+      <div className="ws-metric-label"><span>{label}</span><Icon name={icon} /></div><strong>{value ?? '—'}</strong><small>{detail}</small><br /><Link to={to} aria-label={`${label}: ${linkLabel}`}>{linkLabel}<Icon name="arrow" size={14} /></Link>
     </article>)}</section>
     {diskUsage !== null && diskUsage >= 90 ? (
       <div className="ws-notice ws-notice-error" role="alert" aria-live="assertive"><Icon name="alert" /><div><strong>Kritik disk doluluğu · %{Math.round(diskUsage)}</strong><p>Disk alanı kritik seviyede (%90 üzeri). Yeni dağıtımlar ve servisler etkilenebilir.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
