@@ -318,7 +318,7 @@ function databaseBackupEvidence(job, { serverId, databaseName }) {
   if (!job || job.serverId !== serverId || job.operation !== OPERATIONS.DATABASE_BACKUP
     || job.status !== 'succeeded' || job.resourceType !== 'database' || job.resourceId !== databaseName) return null;
   if (!result || typeof result !== 'object' || result.version !== 1 || result.backupId !== job.id
-    || result.databaseName !== databaseName || !['mariadb', 'mysql'].includes(result.engine)
+    || result.databaseName !== databaseName || !['mariadb', 'mysql', 'postgresql', 'postgres'].includes(result.engine)
     || typeof result.databaseVersion !== 'string' || result.databaseVersion.length < 1 || result.databaseVersion.length > 120
     || typeof result.dumpSha256 !== 'string' || !SHA256_PATTERN.test(result.dumpSha256)
     || !Number.isSafeInteger(result.dumpBytes) || result.dumpBytes < 1

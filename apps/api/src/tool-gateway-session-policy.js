@@ -1,5 +1,6 @@
 const SITE_SCOPED_GATEWAY_PATHS = Object.freeze({
   phpmyadmin: '/api/phpmyadmin-gateway-access',
+  pgadmin: '/api/pgadmin-gateway-access',
   elfinder: '/api/elfinder-gateway-access',
 });
 
