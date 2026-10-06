@@ -1,10 +1,31 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-ws-theme="dark" data-ws-density="comfortable">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="theme-color" content="#0b1020" />
     <title>YunPanel</title>
+    <script>
+      (function () {
+        try {
+          var raw = localStorage.getItem('yunpanel.ui.preferences.v1');
+          if (raw !== null) {
+            var prefs = JSON.parse(raw);
+            if (prefs && prefs.theme === 'light') {
+              document.documentElement.dataset.wsTheme = 'light';
+            } else if (prefs && prefs.theme === 'system') {
+              var dark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+              document.documentElement.dataset.wsTheme = dark ? 'dark' : 'light';
+            } else if (prefs && prefs.theme === 'dark') {
+              document.documentElement.dataset.wsTheme = 'dark';
+            }
+            if (prefs && (prefs.density === 'comfortable' || prefs.density === 'compact')) {
+              document.documentElement.dataset.wsDensity = prefs.density;
+            }
+          }
+        } catch (_) {}
+      })();
+    </script>
     <link rel="preload" href="/fonts/ember/manrope-75274da585.ttf" as="font" type="font/ttf" crossorigin />
     <link rel="preload" href="/fonts/ember/outfit-466d6245f9.ttf" as="font" type="font/ttf" crossorigin />
   </head>
