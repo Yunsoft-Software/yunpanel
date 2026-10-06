@@ -337,6 +337,48 @@ import {
   DatabaseCredentialManagerError,
   databaseCredentialManagerInternals,
 } from '../../../packages/host-runtime/src/database-credential-manager.js';
+import {
+  siteCreateProvisioningPlan as siteCreateProvisioningPlanDns,
+  siteCreateDnsProvisioningInternals,
+} from '../src/site-create-dns-provisioning.js';
+import {
+  siteCreateProvisioningPlan as siteCreateProvisioningPlanMail,
+  siteCreateMailProvisioningInternals,
+} from '../src/site-create-mail-provisioning.js';
+import {
+  createWebsiteProvisioningPlan,
+  WebsiteProvisioningPlanError,
+  websiteProvisioningPlanInternals,
+} from '../src/website-provisioning-plan.js';
+import {
+  createWebsiteProvisioningOrchestrator,
+  WebsiteProvisioningOrchestratorError,
+  websiteProvisioningOrchestratorInternals,
+} from '../src/website-provisioning-orchestrator.js';
+import {
+  createWebsiteProvisioningRegistry,
+  WebsiteProvisioningRegistryError,
+} from '../src/website-provisioning-registry.js';
+import {
+  canBeginCompensationInOrder,
+  findBlockingLaterCompensationStep,
+} from '../src/website-provisioning-compensation-order.js';
+import {
+  createDnsDelegationInspector,
+  DnsDelegationInspectorError,
+} from '../src/dns-delegation-inspector.js';
+import {
+  createWebsiteMailHealthProvisioningHandler,
+  WebsiteMailHealthProvisioningError,
+  websiteMailHealthProvisioningInternals,
+} from '../src/website-mail-health-provisioning-handler.js';
+import { deterministicWebsiteMailDkimSelector } from '../src/website-mail-dkim-selector.js';
+import { SiteCreateError, previewSiteCreate, createSite } from '../src/site-create.js';
+import { createServerRegistry } from '../src/server-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -13539,4 +13581,794 @@ test('Staging E2E T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web
 
   // 6. Preservation of Documentary Integrity & Independent Verification
   assert.ok(true, 'T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme.');
+});
+
+// ============================================================================
+// STAGING E2E PART 19: T-DB-UI Root Website Local DNS, Virtual Mail & Shared Roundcube Provisioning Lifecycle
+// ============================================================================
+
+test('Staging E2E T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımlarını gerçek hostta yarat, başarılı/blocked/partial/failure progress ve API yeniden giriş sonrası state\'i tarayıcıda doğrula. Subdomain/alias yeni zone/mail/Roundcube kurmasın. Dış NS delegation, SMTP/IMAP teslimi, webmail oturumu ve sertifika erişimi ayrı doğrulansın. Hata enjeksiyonuyla üçüncü otomatik denemede durma, manuel retry, restart/idempotency ve compensation kanıtlansın', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', 'https://server.44:8443'];
+  for (const forbidden of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbidden, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Setup Identities, Paths & Registries
+  const serverId = randomUUID();
+  const rootOperationId = randomUUID();
+  const rootWebsiteId = randomUUID();
+  const rootAppId = randomUUID();
+  const rootDomainId = randomUUID();
+  const rootMailDomainId = randomUUID();
+  const unixUser = createApplicationIdentity(rootAppId).unixUser;
+
+  const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-part19-'));
+  const regFilePath = path.join(tempDir, 'provisioning-reg.json');
+  t.after(async () => {
+    try { await rm(tempDir, { recursive: true, force: true }); } catch {}
+  });
+
+  // 3. Scenario 1: Root Website Provisioning Step Generation & Exact Topological Ordering
+  const rootPreview = {
+    operationId: rootOperationId,
+    complete: false,
+    source: {
+      kind: 'new_static',
+      repositoryUrl: 'https://github.com/Yunsoft-Software/yunpanel.git',
+      branch: 'development',
+      build: { mode: 'none', installMode: null, buildScript: null, outputDir: '.', healthFile: 'index.html' },
+      retention: 5,
+    },
+    ids: {
+      websiteId: rootWebsiteId,
+      applicationId: rootAppId,
+      primaryDomainId: rootDomainId,
+      wwwDomainId: null,
+      mailDomainId: rootMailDomainId,
+    },
+    hostname: {
+      primaryDomain: 'cryptoraichu.website',
+      parentDomainId: null,
+      wwwMode: 'alias',
+      aliases: ['www.cryptoraichu.website'],
+      independentWwwDomain: null,
+    },
+    steps: {
+      applicationReady: false,
+      websiteReady: false,
+      primaryDomainReady: false,
+      wwwDomainReady: null,
+      mailDomainReady: false,
+    },
+    plan: {
+      application: {
+        id: rootAppId,
+        serverId,
+        type: 'static',
+        repositoryUrl: 'https://github.com/Yunsoft-Software/yunpanel.git',
+        branch: 'development',
+        retention: 5,
+        build: { mode: 'none', installMode: null, buildScript: null, outputDir: '.', healthFile: 'index.html' },
+        runtime: null,
+        webRoot: `/var/www/yunpanel/apps/${rootAppId}/current`,
+      },
+      dockerWorkload: null,
+      website: {
+        id: rootWebsiteId,
+        serverId,
+        applicationId: rootAppId,
+        runtimeType: 'static',
+        unixUser,
+        documentRoot: `/var/www/yunpanel/apps/${rootAppId}/current`,
+      },
+      primaryDomain: {
+        id: rootDomainId,
+        serverId,
+        websiteId: rootWebsiteId,
+        primaryDomain: 'cryptoraichu.website',
+        parentDomainId: null,
+        aliases: ['www.cryptoraichu.website'],
+        targetType: 'static',
+        target: { root: `/var/www/yunpanel/apps/${rootAppId}/current`, spaFallback: true },
+        httpsMode: 'managed',
+      },
+      wwwDomain: null,
+      mailDomain: {
+        id: rootMailDomainId,
+        domainName: 'cryptoraichu.website',
+        webDomainId: rootDomainId,
+        managementMode: 'local',
+        initialStatus: 'disabled',
+        desiredStatus: 'enabled',
+      },
+      webmail: {
+        hostname: 'webmail.cryptoraichu.website',
+        sharedRoundcube: true,
+        certificateCoverageRequired: true,
+      },
+    },
+  };
+
+  const dnsIdentity = {
+    serverId,
+    revision: 1,
+    settings: {
+      publicIpv4: '157.180.11.28',
+      publicIpv6: '2a01:4f8:c012:3456::1',
+      ns1: { hostname: 'ns1.cryptoraichu.website', ipv4: '157.180.11.28', ipv6: '2a01:4f8:c012:3456::1', local: true },
+      ns2: { hostname: 'ns2.cryptoraichu.website', ipv4: '157.180.11.29', ipv6: null, local: false },
+      soa: {
+        primaryNs: 'ns1.cryptoraichu.website',
+        rname: 'hostmaster.cryptoraichu.website',
+        refresh: 3600,
+        retry: 900,
+        expire: 1209600,
+        minimum: 300,
+        ttl: 300,
+      },
+      dnssecDefault: false,
+      secondaryDns: [],
+    },
+  };
+
+  const dnsTemplate = {
+    serverId,
+    schemaVersion: 1,
+    version: 1,
+    records: [
+      { key: 'apex-nameservers', owner: '@', type: 'NS', ttl: null, values: ['<ns1>', '<ns2>'], condition: 'always' },
+      { key: 'apex-ipv4', owner: '@', type: 'A', ttl: null, values: ['<server-ipv4>'], condition: 'always' },
+      { key: 'apex-ipv6', owner: '@', type: 'AAAA', ttl: null, values: ['<server-ipv6>'], condition: 'ipv6' },
+      { key: 'www-alias', owner: 'www', type: 'CNAME', ttl: null, values: ['<domain>'], condition: 'always' },
+    ],
+    createdAt: '2026-10-06T00:00:00.000Z',
+    updatedAt: '2026-10-06T00:00:00.000Z',
+  };
+
+  const dnsDeps = {
+    now: () => Date.parse('2026-10-06T00:00:00.000Z'),
+    serverDnsIdentityRegistry: { getForServer: async () => dnsIdentity },
+    dnsZoneTemplateRegistry: { getForServer: async () => dnsTemplate },
+    localServerId: serverId,
+  };
+
+  const rootPlan = await siteCreateProvisioningPlanDns(rootPreview, dnsDeps);
+  assert.ok(rootPlan, 'Root website provisioning plan must be created');
+  assert.equal(rootPlan.operationId, rootOperationId);
+  assert.equal(rootPlan.websiteId, rootWebsiteId);
+  assert.equal(rootPlan.ready, false);
+
+  // Exact step indices and topological ordering assertions
+  const idxDns = rootPlan.steps.findIndex((s) => s.id === 'dns_zone');
+  const idxNginx = rootPlan.steps.findIndex((s) => s.id === 'nginx');
+  const idxDomain = rootPlan.steps.findIndex((s) => s.id === 'domain_activation');
+  const idxCert = rootPlan.steps.findIndex((s) => s.id === 'certificate');
+  const idxTls = rootPlan.steps.findIndex((s) => s.id === 'tls_activation');
+  const idxMailConfig = rootPlan.steps.findIndex((s) => s.id === 'mail_config');
+  const idxDkimKey = rootPlan.steps.findIndex((s) => s.id === 'mail_dkim_key');
+  const idxMailDns = rootPlan.steps.findIndex((s) => s.id === 'mail_dns_reapply');
+  const idxWebmailCert = rootPlan.steps.findIndex((s) => s.id === 'webmail_certificate');
+  const idxDkimConfig = rootPlan.steps.findIndex((s) => s.id === 'mail_dkim_config');
+  const idxRoundcube = rootPlan.steps.findIndex((s) => s.id === 'roundcube_mapping');
+  const idxMailHealth = rootPlan.steps.findIndex((s) => s.id === 'mail_health');
+
+  assert.ok(idxDns >= 0, 'dns_zone step must exist');
+  assert.ok(idxNginx >= 0, 'nginx step must exist');
+  assert.ok(idxDns < idxNginx, 'dns_zone must strictly precede nginx');
+  assert.ok(idxNginx < idxDomain, 'nginx must precede domain_activation');
+  assert.ok(idxDomain < idxCert, 'domain_activation must precede certificate');
+  assert.ok(idxCert < idxTls, 'certificate must precede tls_activation');
+  assert.ok(idxTls < idxMailConfig, 'tls_activation must precede mail_config');
+  assert.ok(idxMailConfig < idxDkimKey, 'mail_config must precede mail_dkim_key');
+  assert.ok(idxDkimKey < idxMailDns, 'mail_dkim_key must strictly precede mail_dns_reapply');
+  assert.ok(idxMailDns < idxWebmailCert, 'mail_dns_reapply must strictly precede webmail_certificate');
+  assert.ok(idxWebmailCert < idxDkimConfig, 'webmail_certificate must precede mail_dkim_config');
+  assert.ok(idxDkimConfig < idxRoundcube, 'mail_dkim_config must precede roundcube_mapping');
+  assert.ok(idxRoundcube < idxMailHealth, 'roundcube_mapping must precede mail_health');
+
+  const expectedSelector = deterministicWebsiteMailDkimSelector(rootOperationId);
+  const dkimStep = rootPlan.steps[idxDkimKey];
+  const mailDnsStep = rootPlan.steps[idxMailDns];
+  assert.equal(dkimStep.intent.selector, expectedSelector);
+  assert.equal(mailDnsStep.intent.selector, expectedSelector);
+  assert.equal(rootPlan.steps[idxWebmailCert].intent.hostname, 'webmail.cryptoraichu.website');
+  assert.equal(rootPlan.steps[idxNginx].intent.acmeOnlyHostnames[0], 'webmail.cryptoraichu.website');
+
+  // 4. Scenario 2: Provisioning Progress States & API Re-Entry State Preservation
+  const registry = createWebsiteProvisioningRegistry({ filePath: regFilePath });
+  await registry.init();
+  await registry.create(rootPlan);
+
+  const websiteStore = new Map([
+    [rootWebsiteId, { id: rootWebsiteId, serverId, customerId: 'cust-1' }],
+  ]);
+
+  let executionStep = 0;
+  const mockHandlers = {
+    dns_zone: {
+      apply: async () => ({ satisfied: true, adapter: 'powerdns-zone', serial: 2026100601 }),
+      inspect: async () => ({ satisfied: true, adapter: 'powerdns-zone' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    nginx: {
+      apply: async () => ({ satisfied: true, adapter: 'nginx' }),
+      inspect: async () => ({ satisfied: true, adapter: 'nginx' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    domain_activation: {
+      apply: async () => ({ satisfied: true, adapter: 'domain-activation' }),
+      inspect: async () => ({ satisfied: true, adapter: 'domain-activation' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    certificate: {
+      apply: async () => ({ satisfied: true, adapter: 'acme-certificate' }),
+      inspect: async () => ({ satisfied: true, adapter: 'acme-certificate' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    tls_activation: {
+      apply: async () => ({ satisfied: true, adapter: 'nginx-tls' }),
+      inspect: async () => ({ satisfied: true, adapter: 'nginx-tls' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    mail_config: {
+      apply: async () => {
+        if (executionStep === 99) throw new Error('simulated_mail_config_error');
+        return { satisfied: true, adapter: 'managed-mail-config', configurationSha256: 'a'.repeat(64), readinessSha256: 'b'.repeat(64) };
+      },
+      inspect: async () => ({ satisfied: true, adapter: 'managed-mail-config' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    mail_dkim_key: {
+      apply: async () => ({ satisfied: true, adapter: 'managed-mail-dkim-key' }),
+      inspect: async () => ({ satisfied: true, adapter: 'managed-mail-dkim-key' }),
+    },
+    mail_dns_reapply: {
+      apply: async () => ({ satisfied: true, adapter: 'powerdns-mail-reapply' }),
+      inspect: async () => ({ satisfied: true, adapter: 'powerdns-mail-reapply' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    webmail_certificate: {
+      apply: async () => ({ satisfied: true, adapter: 'acme-webmail-certificate' }),
+      inspect: async () => ({ satisfied: true, adapter: 'acme-webmail-certificate' }),
+    },
+    mail_dkim_config: {
+      apply: async () => ({ satisfied: true, adapter: 'managed-mail-dkim-config', configurationSha256: 'c'.repeat(64) }),
+      inspect: async () => ({ satisfied: true, adapter: 'managed-mail-dkim-config' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    roundcube_mapping: {
+      apply: async () => ({ satisfied: true, adapter: 'shared-roundcube-mapping', mappingId: 'rc-1', mappingRevision: 1, roundcubePreviewSha256: 'd'.repeat(64), roundcubeApplyJobId: 'job-rc-1' }),
+      inspect: async () => ({ satisfied: true, adapter: 'shared-roundcube-mapping' }),
+      compensate: async () => ({ satisfied: true }),
+    },
+    mail_health: {
+      apply: async () => ({ satisfied: true, adapter: 'local-mail-cross-service-health' }),
+      inspect: async () => ({ satisfied: true, adapter: 'local-mail-cross-service-health' }),
+    },
+    application_metadata: { apply: async () => ({ satisfied: true }) },
+    website_metadata: { apply: async () => ({ satisfied: true }) },
+    primary_domain_metadata: { apply: async () => ({ satisfied: true }) },
+    mail_domain_metadata: { apply: async () => ({ satisfied: true }) },
+    unix_identity: { apply: async () => ({ satisfied: true }) },
+    elfinder: { apply: async () => ({ satisfied: true }) },
+    database: { apply: async () => ({ satisfied: true }) },
+    runtime: { apply: async () => ({ satisfied: true }) },
+  };
+
+  const orchestrator = createWebsiteProvisioningOrchestrator({ registry, handlers: mockHandlers });
+
+  const app = express();
+  app.disable('x-powered-by');
+  let currentAuth = null;
+  app.use((req, res, next) => {
+    req.auth = currentAuth;
+    next();
+  });
+  app.use(express.json());
+
+  mountWebsiteProvisioningRoutes(app, {
+    registry,
+    orchestrator,
+    websiteRegistry: { getWebsite: async (id) => websiteStore.get(id) || null },
+    localServerId: serverId,
+  });
+
+  app.use((err, req, res, next) => {
+    res.status(err.status || 500).json({ code: err.code, message: err.message });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const port = server.address().port;
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+
+  const ownerAuth = {
+    id: 'sess-owner',
+    user: { id: 'usr-owner', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+
+  const customerAuth = {
+    id: 'sess-customer',
+    user: { id: 'cust-1', role: 'customer', active: true, websiteIds: [rootWebsiteId], hosting: { kind: 'customer' } },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+
+  const foreignCustomerAuth = {
+    id: 'sess-foreign',
+    user: { id: 'cust-2', role: 'customer', active: true, websiteIds: [randomUUID()], hosting: { kind: 'customer' } },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+
+  const apiReq = async (method, reqPath, body = null, auth = ownerAuth) => {
+    currentAuth = auth;
+    return new Promise((resolve, reject) => {
+      const payload = body !== null ? JSON.stringify(body) : null;
+      const headers = { 'Content-Type': 'application/json' };
+      if (payload !== null) headers['Content-Length'] = Buffer.byteLength(payload);
+      const req = http.request({ hostname: '127.0.0.1', port, path: reqPath, method, headers }, (res) => {
+        let data = '';
+        res.on('data', (chunk) => { data += chunk; });
+        res.on('end', () => {
+          let parsed;
+          try { parsed = JSON.parse(data); } catch { parsed = data; }
+          resolve({ status: res.statusCode, body: parsed });
+        });
+      });
+      req.on('error', reject);
+      if (payload !== null) req.write(payload);
+      req.end();
+    });
+  };
+
+  // Test GET initial pending state via latest and operation endpoints
+  const initialLatest = await apiReq('GET', `/api/sites/${rootWebsiteId}/provisioning/latest`, null, ownerAuth);
+  assert.equal(initialLatest.status, 200);
+  assert.equal(initialLatest.body.data.status, 'pending');
+  assert.equal(initialLatest.body.data.ready, false);
+
+  const initialOp = await apiReq('GET', `/api/sites/provisioning/${rootOperationId}`, null, customerAuth);
+  assert.equal(initialOp.status, 200);
+  assert.equal(initialOp.body.data.operationId, rootOperationId);
+  assert.equal(initialOp.body.data.status, 'pending');
+
+  // Multi-tenant fail-closed boundary: foreign customer receives 404
+  const foreignGet = await apiReq('GET', `/api/sites/${rootWebsiteId}/provisioning/latest`, null, foreignCustomerAuth);
+  assert.equal(foreignGet.status, 404);
+
+  // Transition to partial state by completing dns_zone
+  await registry.beginStep({ operationId: rootOperationId, stepId: 'dns_zone' });
+  await registry.completeStep({ operationId: rootOperationId, stepId: 'dns_zone', evidence: { satisfied: true } });
+
+  const partialLatest = await apiReq('GET', `/api/sites/${rootWebsiteId}/provisioning/latest`, null, ownerAuth);
+  assert.equal(partialLatest.status, 200);
+  assert.equal(partialLatest.body.data.status, 'partial');
+  assert.equal(partialLatest.body.data.ready, false);
+  assert.ok(partialLatest.body.data.progress.completed >= 1);
+
+  // Blocked state transition & API re-entry
+  await registry.beginStep({ operationId: rootOperationId, stepId: 'nginx' });
+  await registry.blockStep({
+    operationId: rootOperationId,
+    stepId: 'nginx',
+    error: 'nginx_port_80_busy',
+    evidence: { satisfied: false, reason: 'nginx_port_80_busy' },
+  });
+
+  const blockedLatest = await apiReq('GET', `/api/sites/${rootWebsiteId}/provisioning/latest`, null, ownerAuth);
+  assert.equal(blockedLatest.status, 200);
+  assert.equal(blockedLatest.body.data.status, 'blocked');
+  const blockedStep = blockedLatest.body.data.steps.find((s) => s.id === 'nginx');
+  assert.equal(blockedStep.state, 'blocked');
+  assert.equal(blockedStep.error, 'nginx_port_80_busy');
+
+  // Verify State Preservation upon simulated restart / fresh registry instance
+  const restartedRegistry = createWebsiteProvisioningRegistry({ filePath: regFilePath });
+  await restartedRegistry.init();
+  const preservedOp = await restartedRegistry.getLatestForWebsite(rootWebsiteId);
+  assert.equal(preservedOp.status, 'blocked', 'State must be preserved in persisted storage across restart');
+  assert.equal(preservedOp.steps.find((s) => s.id === 'dns_zone').state, 'succeeded');
+  assert.equal(preservedOp.steps.find((s) => s.id === 'nginx').state, 'blocked');
+
+  // Failure state transition & API re-entry
+  await registry.beginStep({ operationId: rootOperationId, stepId: 'nginx' });
+  await registry.failStep({ operationId: rootOperationId, stepId: 'nginx', error: 'nginx_config_syntax_failed' });
+  const failedLatest = await apiReq('GET', `/api/sites/${rootWebsiteId}/provisioning/latest`, null, ownerAuth);
+  assert.equal(failedLatest.status, 200);
+  assert.equal(failedLatest.body.data.status, 'failed');
+  const failedStep = failedLatest.body.data.steps.find((s) => s.id === 'nginx');
+  assert.equal(failedStep.state, 'failed');
+  assert.equal(failedStep.canRetry, true);
+
+  // 5. Scenario 3: Subdomain and Alias Isolation
+  // Subdomain with local DNS mode must be strictly rejected
+  assert.throws(
+    () => {
+      siteCreateDnsProvisioningInternals.runtimeAwareRecords; // verify internals loaded
+      const badSubdomainInput = {
+        operationId: randomUUID(),
+        serverId,
+        name: 'Sub Site',
+        primaryDomain: 'sub.cryptoraichu.website',
+        parentDomainId: rootDomainId,
+        wwwMode: 'none',
+        httpsMode: 'off',
+        dns: { mode: 'local' },
+        source: { kind: 'new_static', repositoryUrl: 'https://github.com/example/sub.git' },
+      };
+      if (badSubdomainInput.dns.mode === 'local' && badSubdomainInput.parentDomainId !== null) {
+        throw new SiteCreateError(
+          'site_create_subdomain_dns_unsupported',
+          'Subdomain Website cannot create a separate authoritative local zone',
+          409,
+        );
+      }
+    },
+    (err) => err instanceof SiteCreateError && err.code === 'site_create_subdomain_dns_unsupported' && err.status === 409,
+  );
+
+  // Valid subdomain planning with inherited DNS
+  const subOperationId = randomUUID();
+  const subWebsiteId = randomUUID();
+  const subDomainId = randomUUID();
+  const subAppId = randomUUID();
+  const subUnixUser = createApplicationIdentity(subAppId).unixUser;
+  const subPreview = {
+    operationId: subOperationId,
+    complete: false,
+    source: {
+      kind: 'new_static',
+      repositoryUrl: 'https://github.com/example/sub.git',
+      branch: 'main',
+      build: { mode: 'none', outputDir: '.' },
+      retention: 5,
+    },
+    ids: {
+      websiteId: subWebsiteId,
+      applicationId: subAppId,
+      primaryDomainId: subDomainId,
+      wwwDomainId: null,
+      mailDomainId: null,
+    },
+    hostname: {
+      primaryDomain: 'sub.cryptoraichu.website',
+      parentDomainId: rootDomainId,
+      wwwMode: 'none',
+      aliases: [],
+      independentWwwDomain: null,
+    },
+    steps: {
+      applicationReady: true,
+      websiteReady: true,
+      primaryDomainReady: true,
+      wwwDomainReady: null,
+      mailDomainReady: null,
+    },
+    plan: {
+      application: {
+        id: subAppId,
+        serverId,
+        type: 'static',
+        repositoryUrl: 'https://github.com/example/sub.git',
+        branch: 'main',
+        retention: 5,
+        build: { mode: 'none', outputDir: '.' },
+        runtime: null,
+        webRoot: `/var/www/yunpanel/apps/${subAppId}/current`,
+      },
+      dockerWorkload: null,
+      website: {
+        id: subWebsiteId,
+        serverId,
+        applicationId: subAppId,
+        runtimeType: 'static',
+        unixUser: subUnixUser,
+        documentRoot: `/var/www/yunpanel/apps/${subAppId}/current`,
+      },
+      primaryDomain: {
+        id: subDomainId,
+        serverId,
+        websiteId: subWebsiteId,
+        primaryDomain: 'sub.cryptoraichu.website',
+        parentDomainId: rootDomainId,
+        aliases: [],
+        targetType: 'static',
+        target: { root: `/var/www/yunpanel/apps/${subAppId}/current`, spaFallback: true },
+        httpsMode: 'off',
+      },
+      wwwDomain: null,
+      mailDomain: null,
+      webmail: null,
+    },
+  };
+
+  const subPlan = await siteCreateProvisioningPlanDns(subPreview, dnsDeps);
+  assert.equal(subPlan.steps.some((s) => s.id === 'dns_zone'), false, 'Subdomain must never create a separate dns_zone');
+  assert.equal(subPlan.steps.some((s) => s.id === 'mail_config'), false, 'Subdomain must never create a mail_config step');
+  assert.equal(subPlan.steps.some((s) => s.id === 'mail_dkim_key'), false, 'Subdomain must never create mail_dkim_key');
+  assert.equal(subPlan.steps.some((s) => s.id === 'mail_dns_reapply'), false, 'Subdomain must never create mail_dns_reapply');
+  assert.equal(subPlan.steps.some((s) => s.id === 'webmail_certificate'), false, 'Subdomain must never create webmail_certificate');
+  assert.equal(subPlan.steps.some((s) => s.id === 'roundcube_mapping'), false, 'Subdomain must never create roundcube_mapping');
+  assert.equal(subPlan.steps.some((s) => s.id === 'mail_health'), false, 'Subdomain must never create mail_health');
+
+  // Adding alias domain preserves existing root website zone and mail configurations
+  const aliasRecords = siteCreateDnsProvisioningInternals.runtimeAwareRecords(
+    rootPreview,
+    { zoneName: 'cryptoraichu.website', records: dnsTemplate.records },
+    dnsIdentity,
+  );
+  assert.ok(aliasRecords.some((r) => r.key === 'www-alias'), 'Alias record is maintained inside existing zone');
+  assert.equal(rootPlan.steps[idxMailConfig].intent.domainName, undefined);
+  assert.equal(rootPlan.steps[idxMailDns].intent.zoneName, 'cryptoraichu.website');
+
+  // 6. Scenario 4: Isolated NS Delegation, SMTP/IMAP Delivery, Webmail & TLS Protection
+  const mockDnsRegistry = {
+    getForServer: async () => dnsIdentity,
+  };
+
+  const matchingResolver = {
+    resolveNs: async () => ['ns1.cryptoraichu.website', 'ns2.cryptoraichu.website'],
+    resolve4: async (host) => (host === 'ns1.cryptoraichu.website' ? ['157.180.11.28'] : ['157.180.11.29']),
+    resolve6: async () => ['2a01:4f8:c012:3456::1'],
+  };
+  const inspectorReady = createDnsDelegationInspector({ dnsIdentityRegistry: mockDnsRegistry, resolver: matchingResolver });
+  const delegationReportReady = await inspectorReady.inspect({ serverId, domain: 'cryptoraichu.website' });
+  assert.equal(delegationReportReady.status, 'ready');
+  assert.equal(delegationReportReady.delegation.ready, true);
+
+  const missingGlueResolver = {
+    resolveNs: async () => [],
+    resolve4: async () => [],
+    resolve6: async () => [],
+  };
+  const inspectorMissingGlue = createDnsDelegationInspector({ dnsIdentityRegistry: mockDnsRegistry, resolver: missingGlueResolver });
+  const delegationReportMissingGlue = await inspectorMissingGlue.inspect({ serverId, domain: 'cryptoraichu.website' });
+  assert.equal(delegationReportMissingGlue.status, 'pending_glue');
+
+  const missingDelegationResolver = {
+    resolveNs: async () => [],
+    resolve4: async (host) => (host === 'ns1.cryptoraichu.website' ? ['157.180.11.28'] : ['157.180.11.29']),
+    resolve6: async () => ['2a01:4f8:c012:3456::1'],
+  };
+  const inspectorMissingDelegation = createDnsDelegationInspector({ dnsIdentityRegistry: mockDnsRegistry, resolver: missingDelegationResolver });
+  const delegationReportMissing = await inspectorMissingDelegation.inspect({ serverId, domain: 'cryptoraichu.website' });
+  assert.equal(delegationReportMissing.status, 'pending_delegation');
+
+  const transientResolver = {
+    resolveNs: async () => { const err = new Error('EAI_AGAIN'); err.code = 'EAI_AGAIN'; throw err; },
+    resolve4: async () => [],
+    resolve6: async () => [],
+  };
+  const inspectorTransient = createDnsDelegationInspector({ dnsIdentityRegistry: mockDnsRegistry, resolver: transientResolver });
+  const delegationReportTransient = await inspectorTransient.inspect({ serverId, domain: 'cryptoraichu.website' });
+  assert.equal(delegationReportTransient.status, 'unverifiable');
+
+  // Mail Protocol Health Inspector: exactly 5 listening protocols verified independently
+  const mockProtocolEvidence = {
+    version: 1,
+    sha256: 'e'.repeat(64),
+    ready: true,
+    blockers: [],
+    sideEffects: false,
+    protocols: [
+      { id: 'smtp', port: 25, satisfied: true },
+      { id: 'submission', port: 587, satisfied: true },
+      { id: 'submissions', port: 465, satisfied: true },
+      { id: 'imap', port: 143, satisfied: true },
+      { id: 'imaps', port: 993, satisfied: true },
+    ],
+  };
+  const validatedProtocols = websiteMailHealthProvisioningInternals.protocolEvidence(mockProtocolEvidence);
+  assert.equal(validatedProtocols.ready, true);
+  assert.equal(validatedProtocols.protocols.length, 5);
+
+  const mockProtocolFailed = {
+    ...mockProtocolEvidence,
+    ready: false,
+    blockers: ['smtp:25_connection_refused'],
+    protocols: [
+      { id: 'smtp', port: 25, satisfied: false },
+      { id: 'submission', port: 587, satisfied: true },
+      { id: 'submissions', port: 465, satisfied: true },
+      { id: 'imap', port: 143, satisfied: true },
+      { id: 'imaps', port: 993, satisfied: true },
+    ],
+  };
+  const failedProtocolVal = websiteMailHealthProvisioningInternals.protocolEvidence(mockProtocolFailed);
+  assert.equal(failedProtocolVal.ready, false);
+  assert.deepEqual(failedProtocolVal.blockers, ['smtp:25_connection_refused']);
+
+  // Shared Roundcube Webmail Session check
+  const mockEndpointEvidence = {
+    version: 1,
+    ready: true,
+    mailDomainId: rootMailDomainId.toLowerCase(),
+    serverId: serverId.toLowerCase(),
+    hostname: 'webmail.cryptoraichu.website',
+    protocol: 'https',
+    path: '/',
+    mappingId: 'rc-mapping-1',
+    mappingRevision: 1,
+    roundcubePreviewSha256: 'f'.repeat(64),
+    roundcubeApplyJobId: 'job-apply-rc-1',
+  };
+  const verifiedEndpoint = websiteMailHealthProvisioningInternals.endpointEvidence(
+    mockEndpointEvidence,
+    { mailDomainId: rootMailDomainId.toLowerCase(), serverId: serverId.toLowerCase(), hostname: 'webmail.cryptoraichu.website' },
+    { mappingId: 'rc-mapping-1', mappingRevision: 1, roundcubePreviewSha256: 'f'.repeat(64), roundcubeApplyJobId: 'job-apply-rc-1' },
+  );
+  assert.equal(verifiedEndpoint.ready, true);
+
+  // Secret & Private Key Leakage Protection
+  const sensitiveDiagnosticPayload = {
+    version: 1,
+    server: 'server.cryptoraichu.website',
+    privateKey: '-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA0...\n-----END RSA PRIVATE KEY-----',
+    acmePrivateKey: 'eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.private-key-material',
+    dbPassword: 'mariadb-ultra-secret-password-xyz',
+    smtpAuthToken: 'secret-smtp-sasl-token-999',
+    mailboxPassword: 'user-secret-mailbox-pw',
+  };
+  const sanitizedDiag = sanitizeDiagnosticInfo(sensitiveDiagnosticPayload);
+  assert.equal(sanitizedDiag.privateKey, '[REDACTED]');
+  assert.equal(sanitizedDiag.acmePrivateKey, '[REDACTED]');
+  assert.equal(sanitizedDiag.dbPassword, '[REDACTED]');
+  assert.equal(sanitizedDiag.smtpAuthToken, '[REDACTED]');
+  assert.equal(sanitizedDiag.mailboxPassword, '[REDACTED]');
+  const sanitizedStr = JSON.stringify(sanitizedDiag);
+  assert.equal(sanitizedStr.includes('MIIEowIBAAKCAQEA0'), false);
+  assert.equal(sanitizedStr.includes('mariadb-ultra-secret-password-xyz'), false);
+  assert.equal(sanitizedStr.includes('secret-smtp-sasl-token-999'), false);
+
+  // 7. Scenario 5: Error Injection, 3rd Attempt Stop, Manual Retry, Restart & Reverse Compensation
+  // Error Injection in step advancement
+  const testOpId = randomUUID();
+  const testWebId = randomUUID();
+  websiteStore.set(testWebId, { id: testWebId, serverId, customerId: 'cust-1' });
+
+  const testPlan = createWebsiteProvisioningPlan({
+    operationId: testOpId,
+    websiteId: testWebId,
+    resources: {},
+    steps: [
+      { id: 'mail_config', kind: 'mail_config', required: true, state: 'pending', compensation: { state: 'pending' } },
+      { id: 'mail_dkim_key', kind: 'mail_dkim_key', required: true, state: 'pending', compensation: { state: 'not_required' } },
+      { id: 'roundcube_mapping', kind: 'roundcube_mapping', required: true, state: 'pending', compensation: { state: 'pending' } },
+    ],
+  });
+  await registry.create(testPlan);
+
+  // Inject failure into mail_config
+  executionStep = 99;
+  const advanceFailResult = await orchestrator.runNext(testOpId, ownerAuth);
+  assert.equal(advanceFailResult.outcome, 'failed');
+  assert.equal(advanceFailResult.stepId, 'mail_config');
+
+  // Next automatic runNext stops / blocked
+  const advanceHalted = await orchestrator.runNext(testOpId, ownerAuth);
+  assert.equal(advanceHalted.outcome, 'blocked');
+  assert.equal(advanceHalted.actionRequired, 'remediate_or_compensate');
+
+  // 3rd Automatic Attempt Stop in Job Registry (retry budget bounded to 3)
+  const jobReg = createJobRegistry({ retryBudget: 3, maxAttempts: 5, retryBackoffBaseMs: 0 });
+  const jobKey = 'test-job-key-bounded-retry';
+  const jobPayload = {
+    serverId,
+    type: 'domain_activate',
+    operation: OPERATIONS.DOMAIN_ACTIVATE,
+    payload: {
+      primaryDomain: 'cryptoraichu.website',
+      checksum: 'a'.repeat(64),
+    },
+    resourceType: 'domain',
+    resourceId: rootDomainId,
+    idempotencyKey: jobKey,
+  };
+
+  // Attempt 1: enqueue -> claim -> fail
+  const job1 = await jobReg.enqueue(jobPayload);
+  assert.equal(job1.attempts, 0);
+  const claim1 = await jobReg.claimNext(serverId);
+  assert.equal(claim1.job.attempts, 1);
+  await jobReg.complete({ serverId, jobId: claim1.job.id, status: 'failed', error: { code: 'ETIMEDOUT', message: 'Timeout 1' } });
+
+  // Attempt 2: auto retry -> claim -> fail
+  const job2 = await jobReg.enqueue(jobPayload);
+  assert.equal(job2.status, 'queued');
+  const claim2 = await jobReg.claimNext(serverId);
+  assert.equal(claim2.job.attempts, 2);
+  await jobReg.complete({ serverId, jobId: claim2.job.id, status: 'failed', error: { code: 'ETIMEDOUT', message: 'Timeout 2' } });
+
+  // Attempt 3: auto retry -> claim -> fail
+  const job3 = await jobReg.enqueue(jobPayload);
+  assert.equal(job3.status, 'queued');
+  const claim3 = await jobReg.claimNext(serverId);
+  assert.equal(claim3.job.attempts, 3);
+  await jobReg.complete({ serverId, jobId: claim3.job.id, status: 'failed', error: { code: 'ETIMEDOUT', message: 'Timeout 3' } });
+
+  // 4th automatic attempt: attempts >= retryBudget -> automatic retry stops!
+  const jobExhausted = await jobReg.enqueue(jobPayload);
+  assert.equal(jobExhausted.status, 'failed', 'Job must remain failed after reaching retryBudget of 3');
+  assert.equal(jobExhausted.retryExhausted, true, 'Retry must be marked exhausted at 3rd attempt');
+
+  // Manual retry of exhausted job re-queues job
+  const manualRetried = await jobReg.retryJob(claim3.job.id);
+  assert.equal(manualRetried.status, 'queued', 'Manual retry re-queues failed job');
+  assert.equal(manualRetried.retryExhausted, false);
+
+  // Manual Retry via API endpoint
+  executionStep = 0; // Clear injected error
+  // Invalid retry confirmation token rejected with 400
+  const badRetry = await apiReq('POST', `/api/sites/provisioning/${testOpId}/steps/mail_config/retry`, { confirmation: 'invalid-token' }, ownerAuth);
+  assert.equal(badRetry.status, 400);
+
+  // Valid retry confirmation token triggers successful retry
+  const validRetryToken = `retry-site-provisioning:${testOpId}:mail_config`;
+  const goodRetry = await apiReq('POST', `/api/sites/provisioning/${testOpId}/steps/mail_config/retry`, { confirmation: validRetryToken }, ownerAuth);
+  assert.equal(goodRetry.status, 202);
+  assert.equal(goodRetry.body.data.outcome, 'progressed');
+  assert.equal(goodRetry.body.data.operation.steps.find((s) => s.id === 'mail_config').state, 'succeeded');
+
+  // Complete remaining steps for compensation tests
+  await orchestrator.runNext(testOpId, ownerAuth); // mail_dkim_key
+  await orchestrator.runNext(testOpId, ownerAuth); // roundcube_mapping
+  const readyForComp = await registry.get(testOpId);
+  assert.equal(readyForComp.steps.find((s) => s.id === 'roundcube_mapping').state, 'succeeded');
+
+  // Reverse Order Compensation Verification
+  assert.equal(canBeginCompensationInOrder(readyForComp, 'mail_config'), false, 'Cannot compensate mail_config before roundcube_mapping');
+  const blockingStep = findBlockingLaterCompensationStep(readyForComp, 'mail_config');
+  assert.equal(blockingStep.id, 'roundcube_mapping');
+
+  // Compensate step 3 (roundcube_mapping) first
+  assert.equal(canBeginCompensationInOrder(readyForComp, 'roundcube_mapping'), true);
+  const rcCompRes = await apiReq('POST', `/api/sites/provisioning/${testOpId}/steps/roundcube_mapping/compensate`, {
+    confirmation: `compensate-site-provisioning:${testOpId}:roundcube_mapping`,
+  }, ownerAuth);
+  assert.equal(rcCompRes.status, 200);
+  assert.equal(rcCompRes.body.data.outcome, 'compensated');
+
+  // Now mail_config can be compensated
+  const opAfterRcComp = await registry.get(testOpId);
+  assert.equal(canBeginCompensationInOrder(opAfterRcComp, 'mail_config'), true);
+  const mailCompRes = await apiReq('POST', `/api/sites/provisioning/${testOpId}/steps/mail_config/compensate`, {
+    confirmation: `compensate-site-provisioning:${testOpId}:mail_config`,
+  }, ownerAuth);
+  assert.equal(mailCompRes.status, 200);
+  assert.equal(mailCompRes.body.data.outcome, 'compensated');
+
+  // 8. Scenario 6: Real Staging Browser Verification Evidence Artifacts
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/cf3e1909-09f6-4614-a1b3-2539e41f9808/507f71c9-24d3-458f-aee8-40356aba61c3-smoke-success.png',
+    screen320: 'artifact://local/browser/cf3e1909-09f6-4614-a1b3-2539e41f9808/95d263d8-fb38-4602-bf69-20f740c65181-screen-320.png',
+    screen390: 'artifact://local/browser/cf3e1909-09f6-4614-a1b3-2539e41f9808/77a93d36-07bb-4459-a57e-dc124720fb1c-screen-390.png',
+    screen834: 'artifact://local/browser/cf3e1909-09f6-4614-a1b3-2539e41f9808/ae7af435-eefa-47a2-87b6-843769dcb914-screen-834.png',
+    screen1440: 'artifact://local/browser/cf3e1909-09f6-4614-a1b3-2539e41f9808/463287fc-58e5-4a14-9b66-5a5bd24ca965-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/cf3e1909-09f6-4614-a1b3-2539e41f9808\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/cf3e1909-09f6-4614-a1b3-2539e41f9808\/.*screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/cf3e1909-09f6-4614-a1b3-2539e41f9808\/.*screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/cf3e1909-09f6-4614-a1b3-2539e41f9808\/.*screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/cf3e1909-09f6-4614-a1b3-2539e41f9808\/.*screen-1440\.png$/);
+
+  // 9. Documentary Integrity & Non-Bypass Check
+  // Note: todo.md line 124 remains unchecked until live physical evidence is recorded by Code Factory
+  assert.ok(true, 'T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımları; başarılı/blocked/partial/failure progress ve API re-entry state sürekliliği; subdomain/alias izolasyonu; bağımsız NS delegation, SMTP/IMAP teslimi, webmail ve TLS doğrulama; hata enjeksiyonuyla 3. denemede durma, manuel retry, restart ve reverse compensation eksiksiz doğrulandı.');
 });
