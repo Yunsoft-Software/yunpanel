@@ -22,7 +22,7 @@ function Shell() {
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
-  const menu = useRef(null); const content = useRef(null);
+  const menu = useRef(null); const content = useRef(null); const appearanceRef = useRef(null);
   const sites = websiteCount(websites);
   const jobCount = canManage ? knownCount(jobs, (job) => ['queued', 'running'].includes(job.status)) : null;
   const groups = navigationGroups(canManage, isOwner, isReseller, isCustomer);
@@ -52,19 +52,72 @@ function Shell() {
     return () => window.removeEventListener('keydown', shortcut);
   }, [menuOpen, isOwner, canManage]);
   useEffect(() => {
+    const details = menu.current?.querySelector('details.ws-appearance') || document.querySelector('details.ws-appearance');
+    if (!details) return undefined;
+    appearanceRef.current = details;
+    const handleKeyDown = (event) => {
+      if (event.key === 'Escape') {
+        if (details.open) {
+          event.preventDefault();
+          event.stopPropagation();
+          details.open = false;
+          details.querySelector('summary')?.focus();
+        }
+        return;
+      }
+      if (event.key === 'Tab' && details.open) {
+        const focusable = Array.from(details.querySelectorAll('summary, select:not(:disabled), button:not(:disabled), input:not(:disabled)'))
+          .filter((element) => !element.disabled && !element.closest('[inert]'));
+        if (focusable.length <= 1) return;
+        const first = focusable[0];
+        const last = focusable[focusable.length - 1];
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    details.addEventListener('keydown', handleKeyDown);
+    return () => details.removeEventListener('keydown', handleKeyDown);
+  }, []);
+  useEffect(() => {
     if (!narrow || !menuOpen) return undefined;
     const previous = document.activeElement; const overflow = document.body.style.overflow;
     document.body.style.overflow = 'hidden'; menu.current.querySelector('button')?.focus();
     const keydown = (event) => {
-      if (event.key === 'Escape') { event.preventDefault(); setMenuOpen(false); }
+      if (event.key === 'Escape') {
+        if (appearanceRef.current?.open && appearanceRef.current.contains(document.activeElement)) {
+          event.preventDefault();
+          appearanceRef.current.open = false;
+          appearanceRef.current.querySelector('summary')?.focus();
+          return;
+        }
+        event.preventDefault();
+        setMenuOpen(false);
+        return;
+      }
       if (event.key !== 'Tab') return;
-      const focusable = [...menu.current.querySelectorAll('a[href],button:not(:disabled),select:not(:disabled),input:not(:disabled),summary')].filter((element) => element.getClientRects().length);
+      const focusable = [...menu.current.querySelectorAll('a[href],button:not(:disabled),select:not(:disabled),input:not(:disabled),summary')].filter((element) => {
+        if (element.disabled || element.closest('[inert]')) return false;
+        const closedDetails = element.closest('details:not([open])');
+        if (closedDetails && !element.matches('summary')) return false;
+        return true;
+      });
+      if (focusable.length === 0) return;
       const first = focusable[0]; const last = focusable.at(-1);
       if (event.shiftKey && (document.activeElement === first || !menu.current.contains(document.activeElement))) { event.preventDefault(); last?.focus(); }
       else if (!event.shiftKey && (document.activeElement === last || !menu.current.contains(document.activeElement))) { event.preventDefault(); first?.focus(); }
     };
     window.addEventListener('keydown', keydown);
-    return () => { window.removeEventListener('keydown', keydown); document.body.style.overflow = overflow; if (previous?.isConnected) previous.focus(); };
+    return () => {
+      window.removeEventListener('keydown', keydown);
+      document.body.style.overflow = overflow;
+      if (previous?.isConnected && typeof previous.focus === 'function') previous.focus();
+      else document.querySelector('.ws-mobile-menu')?.focus();
+    };
   }, [menuOpen, narrow]);
   return <div className="workspace-shell">
     <a href="#workspace-main" className="ws-skip">İçeriğe geç</a>
