@@ -51,6 +51,65 @@ function proxyTarget(value) {
   return Object.freeze({ host, port: value.port, websocket: value.websocket });
 }
 
+export function validatePortainerEndpoint(value) {
+  if (!value) {
+    throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer endpoint is required', 400);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (trimmed.startsWith('unix:') || (trimmed.startsWith('/') && trimmed.endsWith('.sock'))) {
+      const socketPath = trimmed.replace(/^unix:/, '');
+      if (!socketPath.startsWith('/') || socketPath.includes('..') || !socketPath.endsWith('.sock')) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer socket path must be an absolute path ending in .sock', 400);
+      }
+      return Object.freeze({ type: 'socket', socketPath, directPortPublic: false });
+    }
+    try {
+      const parsed = new URL(trimmed.includes('://') ? trimmed : `http://${trimmed}`);
+      let host;
+      try { host = normalizeProxyHost(parsed.hostname); }
+      catch { throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer host must be a local loopback host', 400); }
+      if (!LOOPBACK_HOSTS.has(host)) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer host must be a local loopback host (127.0.0.1, ::1, or localhost)', 400);
+      }
+      const port = Number(parsed.port || (parsed.protocol === 'https:' ? 9443 : 9000));
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer port must be between 1 and 65535', 400);
+      }
+      return Object.freeze({ type: 'loopback', host, port, directPortPublic: false });
+    } catch (error) {
+      if (error instanceof DockerWorkloadRegistryError) throw error;
+      throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer endpoint format is invalid', 400);
+    }
+  }
+  if (typeof value === 'object' && !Array.isArray(value)) {
+    if (value.directPortPublic === true) {
+      throw new DockerWorkloadRegistryError('portainer_direct_port_public_forbidden', 'Portainer direct port must not be public', 400);
+    }
+    if (typeof value.socketPath === 'string') {
+      const socketPath = value.socketPath.trim();
+      if (!socketPath.startsWith('/') || socketPath.includes('..') || !socketPath.endsWith('.sock')) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer socket path must be an absolute path ending in .sock', 400);
+      }
+      return Object.freeze({ type: 'socket', socketPath, directPortPublic: false });
+    }
+    if (value.host !== undefined || value.port !== undefined) {
+      let host;
+      try { host = normalizeProxyHost(value.host); }
+      catch { throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer host must be a local loopback host', 400); }
+      if (!LOOPBACK_HOSTS.has(host)) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer host must be a local loopback host', 400);
+      }
+      const port = Number(value.port);
+      if (!Number.isInteger(port) || port < 1 || port > 65535) {
+        throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer port must be between 1 and 65535', 400);
+      }
+      return Object.freeze({ type: 'loopback', host, port, directPortPublic: false });
+    }
+  }
+  throw new DockerWorkloadRegistryError('invalid_portainer_endpoint', 'Portainer endpoint must specify a loopback host:port or Unix socket', 400);
+}
+
 function timestamp(value) {
   if (typeof value !== 'string' || !Number.isFinite(Date.parse(value))) {
     throw new DockerWorkloadRegistryError('docker_workload_state_invalid', 'Docker workload timestamp is invalid', 409);
@@ -120,10 +179,33 @@ export function createDockerWorkloadRegistry({
   let state = { version: STORE_VERSION, workloads: [] };
   let initialized = false;
   let writeChain = Promise.resolve();
+  let portainerAdapter = {
+    enabled: false,
+    adapter: 'portainer',
+    serverId: null,
+    endpoint: null,
+    directPortPublic: false,
+    updatedAt: null,
+  };
+  let portainerSecretToken = null;
+  const portainerSessions = new Map();
 
   async function persist() {
     if (!filePath) return;
-    const snapshot = JSON.stringify(state, null, 2);
+    const serialized = {
+      version: STORE_VERSION,
+      workloads: state.workloads,
+    };
+    if (portainerAdapter.enabled) {
+      serialized.portainer = {
+        enabled: true,
+        serverId: portainerAdapter.serverId,
+        endpoint: portainerAdapter.endpoint,
+        directPortPublic: false,
+        updatedAt: portainerAdapter.updatedAt,
+      };
+    }
+    const snapshot = JSON.stringify(serialized, null, 2);
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
     writeChain = writeChain.then(async () => {
@@ -148,8 +230,9 @@ export function createDockerWorkloadRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const allowedTopKeys = ['version', 'workloads', 'portainer'];
         if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.workloads)
-          || Object.keys(parsed).length !== 2 || Object.keys(parsed).some((key) => !['version', 'workloads'].includes(key))) {
+          || Object.keys(parsed).some((key) => !allowedTopKeys.includes(key))) {
           throw new DockerWorkloadRegistryError('docker_workload_state_invalid', 'Docker workload store is invalid', 409);
         }
         const workloads = parsed.workloads.map(validatePersisted);
@@ -163,6 +246,16 @@ export function createDockerWorkloadRegistry({
           ids.add(workload.id);
           endpoints.add(endpoint);
           await requireServer(workload.serverId, { persisted: true });
+        }
+        if (parsed.portainer && typeof parsed.portainer === 'object' && parsed.portainer.enabled === true) {
+          portainerAdapter = {
+            enabled: true,
+            adapter: 'portainer',
+            serverId: parsed.portainer.serverId ?? null,
+            endpoint: parsed.portainer.endpoint ? validatePortainerEndpoint(parsed.portainer.endpoint) : null,
+            directPortPublic: false,
+            updatedAt: parsed.portainer.updatedAt ?? new Date(now()).toISOString(),
+          };
         }
         state = { version: STORE_VERSION, workloads };
       } catch (error) {
@@ -257,7 +350,136 @@ export function createDockerWorkloadRegistry({
       .map(publicWorkload);
   }
 
-  return Object.freeze({ init, createWorkload, recordObservation, getWorkload, listWorkloads });
+  async function configurePortainerAdapter({
+    serverId = null,
+    enabled = true,
+    endpoint = null,
+    token = null,
+    credentials = null,
+    directPortPublic = false,
+  } = {}) {
+    await ensureInitialized();
+    if (directPortPublic === true) {
+      throw new DockerWorkloadRegistryError('portainer_direct_port_public_forbidden', 'Portainer direct port must not be public', 400);
+    }
+    if (!enabled) {
+      portainerAdapter = {
+        enabled: false,
+        adapter: 'portainer',
+        serverId: null,
+        endpoint: null,
+        directPortPublic: false,
+        updatedAt: new Date(now()).toISOString(),
+      };
+      portainerSecretToken = null;
+      for (const session of portainerSessions.values()) {
+        session.closed = true;
+      }
+      portainerSessions.clear();
+      await persist();
+      return Object.freeze({ ...portainerAdapter });
+    }
+
+    const normalizedServerId = serverId ? await requireServer(serverId) : null;
+    const validatedEndpoint = validatePortainerEndpoint(endpoint);
+    const secret = token ?? credentials?.token ?? credentials?.password ?? null;
+    portainerSecretToken = typeof secret === 'string' && secret.trim().length > 0 ? secret.trim() : null;
+
+    portainerAdapter = {
+      enabled: true,
+      adapter: 'portainer',
+      serverId: normalizedServerId,
+      endpoint: validatedEndpoint,
+      directPortPublic: false,
+      updatedAt: new Date(now()).toISOString(),
+    };
+    await persist();
+    return Object.freeze({ ...portainerAdapter });
+  }
+
+  async function getPortainerAdapter() {
+    await ensureInitialized();
+    return Object.freeze({
+      enabled: portainerAdapter.enabled,
+      adapter: 'portainer',
+      serverId: portainerAdapter.serverId,
+      endpoint: portainerAdapter.endpoint ? Object.freeze({ ...portainerAdapter.endpoint }) : null,
+      directPortPublic: false,
+      updatedAt: portainerAdapter.updatedAt,
+    });
+  }
+
+  async function createPortainerGatewaySession({
+    ownerSessionId = null,
+    userId = null,
+    ttlMs = 3600_000,
+  } = {}) {
+    await ensureInitialized();
+    if (!portainerAdapter.enabled) {
+      throw new DockerWorkloadRegistryError('portainer_adapter_disabled', 'Portainer adapter is not enabled', 409);
+    }
+    const sessionId = randomUUID();
+    const current = now();
+    const expiresAt = new Date(current + ttlMs).toISOString();
+    const createdAt = new Date(current).toISOString();
+
+    const record = {
+      id: sessionId,
+      ownerSessionId: ownerSessionId ?? 'owner-session',
+      userId: userId ?? 'owner-user',
+      endpoint: portainerAdapter.endpoint,
+      secretToken: portainerSecretToken,
+      createdAt,
+      expiresAt,
+      closed: false,
+    };
+    portainerSessions.set(sessionId, record);
+
+    return Object.freeze({
+      sessionId,
+      audience: 'portainer',
+      gatewayPath: `/api/docker/portainer/gateway/${sessionId}`,
+      endpoint: Object.freeze({ ...portainerAdapter.endpoint }),
+      directPortPublic: false,
+      createdAt,
+      expiresAt,
+    });
+  }
+
+  function authorizePortainerGatewaySession(sessionId, { ownerSessionId = null, userId = null } = {}) {
+    if (!sessionId || typeof sessionId !== 'string') return null;
+    const record = portainerSessions.get(sessionId);
+    if (!record || record.closed) return null;
+    if (new Date(record.expiresAt).getTime() <= now()) {
+      record.closed = true;
+      portainerSessions.delete(sessionId);
+      return null;
+    }
+    if (ownerSessionId && record.ownerSessionId !== ownerSessionId) return null;
+    if (userId && record.userId !== userId) return null;
+    return record;
+  }
+
+  function terminatePortainerGatewaySession(sessionId) {
+    const record = portainerSessions.get(sessionId);
+    if (!record) return false;
+    record.closed = true;
+    portainerSessions.delete(sessionId);
+    return true;
+  }
+
+  return Object.freeze({
+    init,
+    createWorkload,
+    recordObservation,
+    getWorkload,
+    listWorkloads,
+    configurePortainerAdapter,
+    getPortainerAdapter,
+    createPortainerGatewaySession,
+    authorizePortainerGatewaySession,
+    terminatePortainerGatewaySession,
+  });
 }
 
 export const dockerWorkloadRegistryInternals = Object.freeze({
@@ -265,4 +487,6 @@ export const dockerWorkloadRegistryInternals = Object.freeze({
   managementMode: MANAGEMENT_MODE,
   proxyTarget,
   validatePersisted,
+  validatePortainerEndpoint,
+  loopbackHosts: LOOPBACK_HOSTS,
 });
