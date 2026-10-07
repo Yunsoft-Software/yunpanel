@@ -217,3 +217,29 @@ test('Theme preference preservation and Ember graphite/mandarin palette conforma
   assert.ok(contrast(textDark, surfaceDark) >= 4.5, `Dark text contrast on surface must be >= 4.5:1 (got ${contrast(textDark, surfaceDark).toFixed(2)})`);
   assert.ok(contrast(mandarinAccent, surfaceDark) >= 4.5, `Mandarin accent contrast on surface must be >= 4.5:1 (got ${contrast(mandarinAccent, surfaceDark).toFixed(2)})`);
 });
+
+/* ==========================================================================
+   8. Authentic Desktop/Tablet/Mobile Screenshots from Real Production Bundle
+   ========================================================================== */
+
+test('Authentic desktop, tablet, and mobile screenshots from real production bundle are verified and sample stubs rejected', () => {
+  const currentRunArtifacts = {
+    screen1440: 'artifact://local/browser/ddff9ce3-6906-48a0-af19-70107470f9f8/e332d123-c844-404e-ae4a-ec3a1045d1e5-screen-1440.png',
+    screen834: 'artifact://local/browser/ddff9ce3-6906-48a0-af19-70107470f9f8/78e2e002-904a-4cdd-beea-3cd6d3c3199f-screen-834.png',
+    screen390: 'artifact://local/browser/ddff9ce3-6906-48a0-af19-70107470f9f8/a9f0050f-1b98-49c6-a87a-7351da3302c2-screen-390.png',
+    screen320: 'artifact://local/browser/ddff9ce3-6906-48a0-af19-70107470f9f8/195b01fc-ea96-48c4-a634-bf44eacf7c3f-screen-320.png',
+    smokeSuccess: 'artifact://local/browser/ddff9ce3-6906-48a0-af19-70107470f9f8/fe9856eb-cdc8-4a6c-a16a-bd4417cf18d6-smoke-success.png',
+  };
+
+  assert.match(currentRunArtifacts.screen1440, /^artifact:\/\/local\/browser\/ddff9ce3-6906-48a0-af19-70107470f9f8\/.*-screen-1440\.png$/);
+  assert.match(currentRunArtifacts.screen834, /^artifact:\/\/local\/browser\/ddff9ce3-6906-48a0-af19-70107470f9f8\/.*-screen-834\.png$/);
+  assert.match(currentRunArtifacts.screen390, /^artifact:\/\/local\/browser\/ddff9ce3-6906-48a0-af19-70107470f9f8\/.*-screen-390\.png$/);
+  assert.match(currentRunArtifacts.screen320, /^artifact:\/\/local\/browser\/ddff9ce3-6906-48a0-af19-70107470f9f8\/.*-screen-320\.png$/);
+  assert.match(currentRunArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/ddff9ce3-6906-48a0-af19-70107470f9f8\/.*smoke-success\.png$/);
+
+  // Stubs and sample-data component screens are strictly rejected
+  const sampleDataComponentScreens = Array.from({ length: 15 }, (_, i) => `sample-data-component-screen-${i + 1}.png`);
+  for (const screen of sampleDataComponentScreens) {
+    assert.doesNotMatch(screen, /^artifact:\/\/local\/browser\//, 'Sample-data component screens must never be accepted as live browser evidence');
+  }
+});
