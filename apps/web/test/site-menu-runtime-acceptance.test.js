@@ -1,10 +1,71 @@
+import { register } from 'node:module';
+register('./jsx-loader.js', import.meta.url);
+
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
+import React from 'react';
+import { renderToString } from 'react-dom/server';
+import { MemoryRouter, Routes, Route } from 'react-router';
 import { SITE_TABS, normalizeSiteTab, siteHref } from '../src/workspace/site-model.js';
 import { groupSiteTabs, tabKey } from '../src/workspace/ui/ux-model.js';
 
+const { PanelSessionProvider } = await import('../src/panel-session.jsx');
+const { WorkspaceContext } = await import('../src/workspace/WorkspaceContext.jsx');
+const { default: SiteDetailPage } = await import('../src/workspace/SiteDetailPage.jsx');
+const { default: SiteNavigation } = await import('../src/workspace/ui/SiteNavigation.jsx');
+
 const readSource = (relPath) => readFile(new URL(`../src/workspace/${relPath}`, import.meta.url), 'utf8');
+
+const defaultOwnerSession = Object.freeze({
+  user: Object.freeze({ id: 'owner-id', username: 'owner', role: 'owner' }),
+  access: Object.freeze({ mode: 'management', permissions: Object.freeze(['*']) }),
+});
+
+function createMockWorkspace(overrides = {}) {
+  return {
+    domains: { status: 'ready', items: [{ id: 'dom-1', primaryDomain: 'example.com', serverId: 'srv-1', websiteId: 'web-1' }] },
+    websites: { status: 'ready', items: [{ id: 'web-1', domainId: 'dom-1', runtimeType: 'static', state: 'active' }] },
+    applications: { status: 'ready', items: [] },
+    certificates: { status: 'ready', items: [] },
+    servers: { status: 'ready', items: [{ id: 'srv-1', name: 'Server 1' }] },
+    jobs: { status: 'ready', items: [] },
+    refreshAll: () => {},
+    resourceBusy: () => false,
+    runJob: async () => {},
+    observe: () => {},
+    updateJob: () => {},
+    can: () => true,
+    canManage: true,
+    isOwner: true,
+    isSiteManager: false,
+    isReseller: false,
+    isCustomer: false,
+    ...overrides,
+  };
+}
+
+function renderSiteDetailPage(initialEntry, workspace = createMockWorkspace(), session = defaultOwnerSession) {
+  return renderToString(
+    React.createElement(
+      PanelSessionProvider,
+      { session },
+      React.createElement(
+        WorkspaceContext.Provider,
+        { value: workspace },
+        React.createElement(
+          MemoryRouter,
+          { initialEntries: [initialEntry] },
+          React.createElement(
+            Routes,
+            null,
+            React.createElement(Route, { path: '/websites/:websiteId/:tab?', element: React.createElement(SiteDetailPage) })
+          )
+        )
+      )
+    )
+  );
+}
 
 // ----------------------------------------------------------------------------
 // 1. Site ana ve alt menülerinin eski URL ve application query'sini koruması
@@ -181,6 +242,18 @@ test('SiteDetailPage: preserves application query parameter and returnTo across 
   );
 });
 
+test('runtime execution: SiteDetailPage and SiteNavigation render real DOM preserving application query and returnTo', () => {
+  const html = renderSiteDetailPage('/websites/dom-1/overview?application=app-prod&returnTo=%2Fwebsites');
+
+  // Navigation and shortcuts preserve query params
+  assert.ok(html.includes('application=app-prod'), 'Rendered HTML must contain application query');
+  assert.ok(html.includes('returnTo=%2Fwebsites'), 'Rendered HTML must contain returnTo query');
+  assert.ok(html.includes('/websites/dom-1/files?application=app-prod&amp;returnTo=%2Fwebsites'), 'Files link carries preserved queries');
+  assert.ok(html.includes('/websites/dom-1/databases?application=app-prod&amp;returnTo=%2Fwebsites'), 'Databases link carries preserved queries');
+  assert.ok(html.includes('/websites/dom-1/ssl?application=app-prod&amp;returnTo=%2Fwebsites'), 'SSL link carries preserved queries');
+  assert.ok(html.includes('/websites/dom-1/settings?application=app-prod&amp;returnTo=%2Fwebsites'), 'Settings link carries preserved queries');
+});
+
 // ----------------------------------------------------------------------------
 // 2. Runtime türüne göre desteklenmeyen araçların menüde/arayüzde görünmemesi
 // ----------------------------------------------------------------------------
@@ -239,6 +312,60 @@ test('SiteDetailPage: runtime filtering strictly hides unsupported tools', async
   );
 });
 
+test('runtime execution [TDZ check]: navigating to unsupported runtime tab executes without TDZ ReferenceError and renders EmptyState with preserved query', () => {
+  // Static site navigating to unsupported 'php' tab with query params
+  // Prior to fix, accessing `query` on line 105 caused ReferenceError: Cannot access 'query' before initialization
+  let html;
+  assert.doesNotThrow(() => {
+    html = renderSiteDetailPage('/websites/dom-1/php?application=app-legacy&returnTo=%2Fwebsites');
+  }, 'Must not throw ReferenceError / TDZ error when accessing unsupported tab');
+
+  assert.ok(html.includes('Bu hedefte bu araç kullanılamaz'), 'Must render unsupported tab empty state title');
+  assert.ok(html.includes('Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir.'), 'Must render unsupported detail');
+  assert.ok(html.includes('href="/websites/dom-1/overview?application=app-legacy&amp;returnTo=%2Fwebsites"'), 'Fallback button must preserve query parameters');
+  assert.ok(html.includes('Siteye dön'), 'Fallback action button must exist');
+});
+
+test('runtime execution: runtime-based tool availability hides unsupported tools and shows supported ones in DOM', () => {
+  // 1. Static runtime: PHP is unsupported, terminal and files are supported
+  const staticWorkspace = createMockWorkspace({
+    websites: { status: 'ready', items: [{ id: 'web-1', domainId: 'dom-1', runtimeType: 'static', state: 'active' }] },
+  });
+  const staticOverviewHtml = renderSiteDetailPage('/websites/dom-1/overview', staticWorkspace);
+  assert.ok(!staticOverviewHtml.includes('/websites/dom-1/php'), 'PHP tool must NOT appear in menu or shortcuts for static site');
+  assert.ok(staticOverviewHtml.includes('/websites/dom-1/files'), 'Files tool must appear for static site');
+
+  // Terminal tool appears in hosting group and is accessible directly for static site
+  const staticHostingHtml = renderSiteDetailPage('/websites/dom-1/hosting', staticWorkspace);
+  assert.ok(staticHostingHtml.includes('/websites/dom-1/terminal'), 'Terminal tool link must appear in hosting tools for static site');
+  const staticTerminalHtml = renderSiteDetailPage('/websites/dom-1/terminal', staticWorkspace);
+  assert.ok(!staticTerminalHtml.includes('Bu hedefte bu araç kullanılamaz'), 'Accessing /terminal on static site must NOT show EmptyState');
+
+  // Visiting unsupported php tab on static site shows EmptyState
+  const staticPhpHtml = renderSiteDetailPage('/websites/dom-1/php', staticWorkspace);
+  assert.ok(staticPhpHtml.includes('Bu hedefte bu araç kullanılamaz'), 'Accessing /php on static site must show EmptyState');
+
+  // 2. PHP runtime: PHP is supported
+  const phpWorkspace = createMockWorkspace({
+    websites: { status: 'ready', items: [{ id: 'web-1', domainId: 'dom-1', runtimeType: 'php', state: 'active' }] },
+  });
+  const phpOverviewHtml = renderSiteDetailPage('/websites/dom-1/overview', phpWorkspace);
+  assert.ok(phpOverviewHtml.includes('/websites/dom-1/php'), 'PHP tool must appear for php site');
+
+  // Visiting php tab on PHP site renders PHP tools panel without EmptyState
+  const phpHtml = renderSiteDetailPage('/websites/dom-1/php?application=app-php', phpWorkspace);
+  assert.ok(!phpHtml.includes('Bu hedefte bu araç kullanılamaz'), 'Accessing /php on php site must NOT show EmptyState');
+  assert.ok(phpHtml.includes('PHP / WordPress'), 'PHP tools panel must be rendered');
+
+  // 3. Custom runtime (python) without application: terminal and php are unsupported
+  const pythonWorkspace = createMockWorkspace({
+    websites: { status: 'ready', items: [{ id: 'web-1', domainId: 'dom-1', runtimeType: 'python', state: 'active' }] },
+  });
+  const pythonTerminalHtml = renderSiteDetailPage('/websites/dom-1/terminal?application=app-py', pythonWorkspace);
+  assert.ok(pythonTerminalHtml.includes('Bu hedefte bu araç kullanılamaz'), 'Terminal on python site must show EmptyState');
+  assert.ok(pythonTerminalHtml.includes('href="/websites/dom-1/overview?application=app-py"'), 'Terminal fallback button must preserve application query');
+});
+
 // ----------------------------------------------------------------------------
 // 3. Site Ayarları'na taşınan izolasyon audit/migration/rollback akışları
 // ----------------------------------------------------------------------------
@@ -291,6 +418,15 @@ test('WebsiteIsolationPanel: provides audit, migration apply, and receipt rollba
   assert.match(panelSource, /Passenger migration başlat/);
 });
 
+test('runtime execution: tab === settings renders WebsiteIsolationPanel with audit and migration sections in DOM', () => {
+  const settingsHtml = renderSiteDetailPage('/websites/dom-1/settings?application=app-1');
+
+  // WebsiteIsolationPanel rendered in DOM
+  assert.ok(settingsHtml.includes('Website izolasyon denetimi'), 'Settings must render WebsiteIsolationPanel title');
+  assert.ok(settingsHtml.includes('Barındırma bilgileri'), 'Settings must render Barındırma bilgileri section');
+  assert.ok(settingsHtml.includes('Teknik kayıt kimlikleri'), 'Settings must render technical records summary');
+});
+
 // ----------------------------------------------------------------------------
 // 4. Overview ekranında kalan provisioning recovery akışları
 // ----------------------------------------------------------------------------
@@ -341,4 +477,21 @@ test('ProvisioningRecoveryPanel: provides recovery flows with continue, retry, a
   // Session guard
   assert.match(panelSource, /usePanelSession/);
   assert.match(panelSource, /sessionVersion\(\)/);
+});
+
+test('runtime execution: tab === overview renders ProvisioningRecoveryPanel and daily tools in correct order in DOM', () => {
+  const overviewHtml = renderSiteDetailPage('/websites/dom-1/overview?application=app-1');
+
+  // Sections rendered in DOM
+  const toolsPos = overviewHtml.indexOf('Site araçları');
+  const provPos = overviewHtml.indexOf('Site kurulumu');
+  const jobsPos = overviewHtml.indexOf('Bu siteye ait son işlemler');
+
+  assert.ok(toolsPos !== -1, 'Overview DOM must render Site araçları section');
+  assert.ok(provPos !== -1, 'Overview DOM must render Site kurulumu (Provisioning recovery) section');
+  assert.ok(jobsPos !== -1, 'Overview DOM must render Recent jobs section');
+
+  // Order assertion in rendered HTML
+  assert.ok(toolsPos < provPos, 'Daily tools must render before provisioning recovery in DOM');
+  assert.ok(provPos < jobsPos, 'Provisioning recovery must render before recent jobs in DOM');
 });

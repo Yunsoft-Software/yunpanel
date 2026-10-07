@@ -90,6 +90,11 @@ function SiteWorkspace({ websiteId, tab }) {
     ?? (isOwner ? selectedApplication(domain, applications.items, params.get('application')) : null);
   const managedTerminalWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = isOwner && !domain.websiteId && Boolean(application);
+  const queryParts = [];
+  const applicationParam = params.get('application');
+  if (applicationParam) queryParts.push(`application=${encodeURIComponent(applicationParam)}`);
+  if (params.get('returnTo')) queryParts.push(`returnTo=${encodeURIComponent(params.get('returnTo'))}`);
+  const query = queryParts.length ? `?${queryParts.join('&')}` : '';
   const tabs = SITE_TABS.filter(([key]) => {
     if (['node', 'deploy'].includes(key)) return Boolean(application) || website?.runtimeType === 'docker';
     if (key === 'files') return canManage;
@@ -107,11 +112,6 @@ function SiteWorkspace({ websiteId, tab }) {
   const server = servers.items.find((item) => item.id === domain.serverId);
   const url = externalSiteUrl(domain);
   const scopedJobs = siteJobs(domain, application, jobs.items);
-  const queryParts = [];
-  const applicationParam = params.get('application');
-  if (applicationParam) queryParts.push(`application=${encodeURIComponent(applicationParam)}`);
-  if (params.get('returnTo')) queryParts.push(`returnTo=${encodeURIComponent(params.get('returnTo'))}`);
-  const query = queryParts.length ? `?${queryParts.join('&')}` : '';
   const returnTo = safeReturnHref(params.get('returnTo') ?? params.get('from'), '/websites');
   const runtimeType = website?.runtimeType ?? application?.type;
   const isCustomRuntime = ['python', 'docker'].includes(runtimeType);
