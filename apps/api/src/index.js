@@ -94,8 +94,6 @@ import { createMailboxRegistry } from './mailbox-registry.js';
 import { createPowerDnsAuthoritativeService } from './powerdns-authoritative-service.js';
 import { createPhpMyAdminHandoffService } from './phpmyadmin-handoff-service.js';
 import { startPhpMyAdminHandoffSocket } from './phpmyadmin-handoff-socket.js';
-import { createPgAdminHandoffService } from './pgadmin-handoff-service.js';
-import { startPgAdminHandoffSocket } from './pgadmin-handoff-socket.js';
 import { createPowerDnsSecretRegistry } from './powerdns-secret-registry.js';
 import { prepareRootAuthStateOwnership } from './root-auth-state-migration.js';
 import { createRoundcubeConfigurationService } from './roundcube-configuration.js';
@@ -268,11 +266,6 @@ function reportLocalExecutorFault(error) {
 function reportPhpMyAdminHandoffFault(error) {
   const code = typeof error?.code === 'string' ? error.code : 'phpmyadmin_handoff_socket_fault';
   console.error(`[yunpanel-api] phpMyAdmin handoff unavailable code=${code}`);
-}
-
-function reportPgAdminHandoffFault(error) {
-  const code = typeof error?.code === 'string' ? error.code : 'pgadmin_handoff_socket_fault';
-  console.error(`[yunpanel-api] pgAdmin handoff unavailable code=${code}`);
 }
 
 function reportElFinderHandoffFault(error) {
@@ -1004,21 +997,6 @@ if (localServerId) {
     reportPhpMyAdminHandoffFault(error);
   }
 }
-const pgAdminHandoffService = createPgAdminHandoffService({
-  databaseBindingRegistry,
-  databaseCredentialRegistry,
-  databaseCredentialApplyService,
-  jobRegistry,
-  liveSessions,
-});
-let pgAdminHandoffRuntime = null;
-if (localServerId) {
-  try {
-    pgAdminHandoffRuntime = await startPgAdminHandoffSocket({ pgAdminHandoffService });
-  } catch (error) {
-    reportPgAdminHandoffFault(error);
-  }
-}
 const elFinderHandoffService = localServerId
   ? createElFinderHandoffService({
     websiteRegistry,
@@ -1246,7 +1224,6 @@ const listener = createAuthenticatedApi({
       databaseCredentialRegistry,
       databaseCredentialApplyService,
       phpMyAdminHandoffService: phpMyAdminHandoffRuntime ? phpMyAdminHandoffService : null,
-      pgAdminHandoffService: pgAdminHandoffRuntime ? pgAdminHandoffService : null,
       elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
       siteFileManager,
       databaseInventoryProvider: () => databaseManager.inspect(),

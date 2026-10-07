@@ -4,7 +4,6 @@ import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js
 
 const manager = { user: { role: 'site_manager', websiteIds: ['site-a'] } };
 const phpMyAdminGateway = { id: 'phpmyadmin', accessPath: '/api/phpmyadmin-gateway-access' };
-const pgAdminGateway = { id: 'pgadmin', accessPath: '/api/pgadmin-gateway-access' };
 const elFinderGateway = { id: 'elfinder', accessPath: '/api/elfinder-gateway-access' };
 const policy = {
   requireSiteManagement(session) {
@@ -23,7 +22,7 @@ test('site manager, reseller, and customer may reach Website-scoped vendor sessi
   const reseller = { user: { role: 'reseller', websiteIds: ['site-a'] } };
   const customer = { user: { role: 'customer', websiteIds: ['site-a'] } };
   for (const session of [manager, reseller, customer]) {
-    for (const gateway of [phpMyAdminGateway, pgAdminGateway, elFinderGateway]) {
+    for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
       const authorized = requireToolGatewaySession(policy, session, gateway);
       assert.equal(authorized.user.role, session.user.role);
       assert.equal(authorized.access.mode, 'site_management');
@@ -41,7 +40,7 @@ test('other integrated tools and path mismatches retain Owner authorization', ()
       /owner_or_mfa/,
     );
   }
-  for (const gateway of [phpMyAdminGateway, pgAdminGateway, elFinderGateway]) {
+  for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
     assert.throws(
       () => requireToolGatewaySession(policy, manager, {
         ...gateway,
@@ -53,7 +52,7 @@ test('other integrated tools and path mismatches retain Owner authorization', ()
 });
 
 test('Website-scoped gateway policy still rejects non-management roles and preserves Owner MFA', () => {
-  for (const gateway of [phpMyAdminGateway, pgAdminGateway, elFinderGateway]) {
+  for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
     assert.throws(
       () => requireToolGatewaySession(policy, { user: { role: 'read_only' } }, gateway),
       /owner_or_mfa/,
@@ -75,7 +74,7 @@ test('site-management authorization failures cannot fall through to Owner or gat
     ...policy,
     requireSiteManagement: () => { throw new Error('site permission expired'); },
   };
-  for (const gateway of [phpMyAdminGateway, pgAdminGateway, elFinderGateway]) {
+  for (const gateway of [phpMyAdminGateway, elFinderGateway]) {
     assert.throws(
       () => requireToolGatewaySession(blocked, manager, gateway),
       /site permission expired/,
