@@ -141,10 +141,10 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
   };
   return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
 }
-export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, confirmation, error, confirmLabel = 'Onayla' }) {
+export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla' }) {
   const [value, setValue] = useState('');
-  return <Modal title={title} onClose={onCancel} busy={busy}><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && (!confirmation || value === confirmation)) onConfirm(); }}>
+  return <Modal title={title} onClose={onCancel} busy={busy}><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && !disabled && (!confirmation || value === confirmation)) onConfirm(); }}>
     {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input autoFocus value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
-    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant="danger" type="submit" disabled={busy || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
+    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant="danger" type="submit" disabled={busy || disabled || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
   </form></Modal>;
 }
