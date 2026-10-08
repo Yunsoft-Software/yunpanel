@@ -1,7 +1,7 @@
 const MASKED = '[REDACTED]';
 
 const SENSITIVE_KEY_EXCLUSIONS = new Set([
-  'id', 'keyid', 'tokenid', 'operationid', 'jobid', 'websiteid', 'customerid',
+  'id', 'keyid', 'tokenid', 'operationid', 'jobid', 'websiteid', 'customerId',
   'resellerid', 'serverid', 'applicationid', 'domainid', 'certificateid',
   'name', 'username', 'user', 'email', 'status', 'type', 'category', 'code',
   'level', 'severity', 'label', 'mode', 'version', 'domain', 'port', 'unit',
@@ -26,7 +26,8 @@ export function isSensitiveKey(key) {
 const URI_CREDENTIAL_REGEX = /([a-zA-Z][a-zA-Z0-9+.-]*:\/\/)([^:]+):([^@]+)@/g;
 const BEARER_REGEX = /\b(Bearer\s+)[A-Za-z0-9._~+/-]+=*/gi;
 const PEM_PRIVATE_KEY_REGEX = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----/g;
-const KV_SECRET_REGEX = /\b((?:password|passwd|secret|token|api_?key|access_?key|master_?key|credential)\s*(?:[:=]|\s+)\s*)(['"]?)([^'"\s,;&]+)\2/gi;
+const KV_SECRET_REGEX = /((?:["']\b)?(?:password|passwd|pwd|secret(?:_?key)?|token|auth_?token|api_?key|access_?key|master_?key|private_?key|signing_?key|credential(?:s)?)(?:\b["']?)?\s*(?:[:=]|\s+)\s*)(["']?)([^'"\s,;&]+)\2/gi;
+const ENV_SECRET_REGEX = /\b([A-Z0-9_]*(?:PASSWORD|PASSWD|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY|CREDENTIAL)[A-Z0-9_]*\s*=\s*)(["']?)([^'"\s,;&]+)\2/g;
 const QUERY_SECRET_REGEX = /([?&](?:password|passwd|secret|token|key|api_?key)=)[^&#\s]+/gi;
 
 export function maskSecretsInString(text) {
@@ -36,6 +37,7 @@ export function maskSecretsInString(text) {
     .replace(URI_CREDENTIAL_REGEX, '$1$2:[REDACTED]@')
     .replace(BEARER_REGEX, '$1[REDACTED]')
     .replace(KV_SECRET_REGEX, '$1$2[REDACTED]$2')
+    .replace(ENV_SECRET_REGEX, '$1$2[REDACTED]$2')
     .replace(QUERY_SECRET_REGEX, '$1[REDACTED]');
 }
 

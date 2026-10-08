@@ -1,5 +1,6 @@
 import { createAiActionPlan } from './ai-action-plan.js';
 import { evaluateAiToolPolicy } from './ai-policy.js';
+import { maskSecrets, maskSecretsInString } from './secret-masker.js';
 
 const MAX_PROPOSALS = 8;
 
@@ -66,7 +67,7 @@ export function createAiOrchestrator({ provider, registry, policyOverrides = {} 
       return Object.freeze({
         type: 'message',
         provider: provider.id,
-        message: Object.freeze({ role: 'assistant', text: result.text }),
+        message: Object.freeze({ role: 'assistant', text: maskSecretsInString(result.text) }),
       });
     }
 
@@ -92,7 +93,7 @@ export function createAiOrchestrator({ provider, registry, policyOverrides = {} 
       return Object.freeze({
         callId: call.id,
         name: call.name,
-        input: prepared.input,
+        input: maskSecrets(prepared.input),
         plan,
         autoExecutable: plan.decision === 'allow',
       });
