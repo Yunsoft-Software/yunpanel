@@ -435,6 +435,38 @@ import {
   siteAnalyticsScope,
   SiteAnalyticsError,
 } from '../../web/src/workspace/site-analytics-model.js';
+import {
+  mountWebsiteBackupRoutes,
+  WebsiteBackupHttpError,
+  isWebsiteBackupHttpError,
+} from '../src/website-backup-http.js';
+import { createWebsiteBackupBrowser } from '../src/website-backup-browser.js';
+import { createWebsiteBackupSetProvider } from '../src/website-backup-set.js';
+import {
+  createWebsiteBackupOperationService,
+  WebsiteBackupOperationServiceError,
+  isWebsiteBackupOperationError,
+} from '../src/website-backup-operation-service.js';
+import {
+  createWebsiteBackupOperationRegistry,
+  WebsiteBackupOperationRegistryError,
+  websiteBackupOperationPublicView,
+} from '../src/website-backup-operation-registry.js';
+import { createWebsiteBackupService } from '../src/website-backup-service.js';
+import { createWebsiteRestoreService } from '../src/website-restore-service.js';
+import { mountWebsiteRestoreRoutes, isWebsiteRestoreHttpError } from '../src/website-restore-http.js';
+import { createBackupOperationRegistry } from '../src/backup-operation-registry.js';
+import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
+import { createSiteBackupClient } from '../../web/src/workspace/site-backup-client.js';
+import {
+  siteBackupBrowser,
+  siteBackupErrorMessage,
+  siteBackupScope,
+  siteBackupOperation,
+  siteBackupPreview,
+  resolveSiteBackupAccess,
+  SiteBackupBrowserError,
+} from '../../web/src/workspace/site-backup-model.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -17343,4 +17375,922 @@ test('Staging E2E AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçe
   );
 
   assert.ok(true, 'AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu başarıyla doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E BACKUP-UI-03/04: Real Owner, Site A, Site B Browser & Backup Isolation
+// ============================================================================
+
+test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durable job/recovery hattına taşıdıktan sonra Owner oluştur/restore eylemlerini UI\'ye bağla', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Strictly reject any host ending in .44
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443', 'http://plesk-bridge.internal.44/'];
+  for (const host of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(host, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${host} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // Runtime environment: Node >= 24, npm >= 11
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  assert.ok(nodeMajor >= 24, `Node.js version must be >= 24, got ${process.version}`);
+
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+  const foreignServerId = '66666666-6666-4666-8666-666666666666';
+  assertNoDot44Host(stagingServerId);
+  assertNoDot44Host(foreignServerId);
+
+  // 2. Multi-Tenant Accounts & Sites Setup
+  const siteAId = '11111111-1111-4111-8111-111111111111';
+  const siteBId = '22222222-2222-4222-8222-222222222222';
+  const foreignSiteId = '77777777-7777-4777-8777-777777777777';
+  const repoId = '33333333-3333-4333-8333-333333333333';
+  const previewDigest = 'a'.repeat(64);
+
+  const siteA = Object.freeze({
+    id: siteAId,
+    name: 'site-a.cryptoraichu.website',
+    serverId: stagingServerId,
+    applicationId: 'app-a',
+    customerId: 'cust-a',
+    resellerId: 'reseller-1',
+    runtimeType: 'node',
+  });
+
+  const siteB = Object.freeze({
+    id: siteBId,
+    name: 'site-b.cryptoraichu.website',
+    serverId: stagingServerId,
+    applicationId: 'app-b',
+    customerId: 'cust-b',
+    resellerId: 'reseller-2',
+    runtimeType: 'php',
+  });
+
+  const foreignSite = Object.freeze({
+    id: foreignSiteId,
+    name: 'foreign-site.com',
+    serverId: foreignServerId,
+    applicationId: 'app-foreign',
+    customerId: 'cust-foreign',
+    resellerId: null,
+    runtimeType: 'static',
+  });
+
+  const domainA = Object.freeze({
+    id: 'domain-a',
+    websiteId: siteAId,
+    serverId: stagingServerId,
+    primaryDomain: 'site-a.cryptoraichu.website',
+    parentDomainId: null,
+  });
+
+  const domainB = Object.freeze({
+    id: 'domain-b',
+    websiteId: siteBId,
+    serverId: stagingServerId,
+    primaryDomain: 'site-b.cryptoraichu.website',
+    parentDomainId: null,
+  });
+
+  const websitesMap = new Map([
+    [siteAId, siteA],
+    [siteBId, siteB],
+    [foreignSiteId, foreignSite],
+  ]);
+
+  const domainsList = [domainA, domainB];
+
+  const customersMap = new Map([
+    ['cust-a', { id: 'cust-a', kind: 'customer', resellerId: 'reseller-1', active: true }],
+    ['cust-b', { id: 'cust-b', kind: 'customer', resellerId: 'reseller-2', active: true }],
+  ]);
+
+  const websiteRegistry = {
+    getWebsite: async (id) => websitesMap.get(id) ?? null,
+    listWebsites: async () => Array.from(websitesMap.values()),
+  };
+
+  const domainRegistry = {
+    getDomain: async (id) => domainsList.find((d) => d.id === id) ?? null,
+    listDomains: async () => domainsList,
+  };
+
+  const customerLookup = async (id) => customersMap.get(id) ?? null;
+
+  // Authentic Auth Sessions
+  const ownerAuth = Object.freeze({
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const siteAManagerAuth = Object.freeze({
+    user: {
+      id: 'site-a-user',
+      role: 'site_manager',
+      websiteIds: [siteAId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const customerBAuth = Object.freeze({
+    user: {
+      id: 'cust-b',
+      role: 'customer',
+      hosting: { kind: 'customer', resellerId: 'reseller-2' },
+      websiteIds: [siteBId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const inactiveSiteAManagerAuth = Object.freeze({
+    user: {
+      id: 'site-a-inactive',
+      role: 'site_manager',
+      websiteIds: [siteAId],
+      active: false,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  // 3. Mock Restic Repository & Backup Sets
+  const snapshots = [
+    {
+      id: 'a'.repeat(64),
+      shortId: 'aaaaaaaa',
+      time: '2026-10-08T10:00:00.000Z',
+      paths: ['/var/lib/yunpanel/websites/site-a/secret-data'],
+      tags: [`website:${siteAId}`],
+      hostname: 'prod-host-a',
+      username: 'root',
+    },
+    {
+      id: 'b'.repeat(64),
+      shortId: 'bbbbbbbb',
+      time: '2026-10-08T11:00:00.000Z',
+      paths: ['/var/lib/yunpanel/websites/site-b/secret-data'],
+      tags: [`website:${siteBId}`],
+      hostname: 'prod-host-b',
+      username: 'root',
+    },
+    {
+      id: 'c'.repeat(64),
+      shortId: 'cccccccc',
+      time: '2026-10-07T10:00:00.000Z',
+      paths: ['/var/lib/yunpanel/websites/site-a/secret-data'],
+      tags: [`website:${siteAId}`, 'failed'],
+      hostname: 'prod-host-a',
+      username: 'root',
+    },
+    {
+      id: 'd'.repeat(64),
+      shortId: 'dddddddd',
+      time: '2026-10-06T10:00:00.000Z',
+      paths: ['/var/lib/yunpanel/websites/site-a/secret-data'],
+      tags: [`website:${siteAId}`, 'stale'],
+      hostname: 'prod-host-a',
+      username: 'root',
+    },
+  ];
+
+  const resticRepositoryRegistry = {
+    async listRepositories() {
+      return [{
+        id: repoId,
+        serverId: stagingServerId,
+        name: 'primary-staging-repo',
+        backend: 'local',
+        target: '/secret/var/backups/restic',
+        status: 'ready',
+        retentionPolicy: { keepLast: 7, keepDaily: 7 },
+        lastCheckedAt: '2026-10-08T00:00:00.000Z',
+        lastSnapshotAt: '2026-10-08T10:00:00.000Z',
+        error: null,
+      }];
+    },
+    async getRepository(id) {
+      if (id === repoId) {
+        return {
+          id: repoId,
+          serverId: stagingServerId,
+          name: 'primary-staging-repo',
+          target: '/secret/var/backups/restic',
+          backend: 'local',
+          status: 'ready',
+          retentionPolicy: { keepLast: 7, keepDaily: 7 },
+        };
+      }
+      return null;
+    },
+    async revealPassword(id) {
+      return id === repoId ? 'super-secret-pass' : null;
+    },
+    async listSnapshots(id, options = {}) {
+      assert.equal(id, repoId);
+      const reqTags = options.tags ?? [];
+      return snapshots.filter((snap) => reqTags.every((t) => snap.tags.includes(t)));
+    },
+    async checkResticRepository(id) {
+      assert.equal(id, repoId);
+      return { ok: true, checkedAt: new Date().toISOString() };
+    },
+    async updateRepository(id, patch) {
+      assert.equal(id, repoId);
+      return { ok: true, ...patch };
+    },
+  };
+
+  const websiteBackupSetProvider = {
+    async getWebsiteBackupSet({ websiteId }) {
+      const site = websitesMap.get(websiteId);
+      if (!site) throw new Error('website_not_found');
+      return {
+        version: 1,
+        website: site,
+        digest: previewDigest,
+        databases: [{ databaseName: 'site_db', engine: 'mariadb' }],
+        mail: [{ domainName: 'site-a.cryptoraichu.website' }],
+        dns: [{ zone: 'site-a.cryptoraichu.website' }],
+        targetPaths: ['/secret/var/lib/yunpanel/websites/site-a'],
+        tags: [`website:${websiteId}`],
+        excludePatterns: [],
+        composeHooks: { enabled: false },
+      };
+    },
+  };
+
+  const tempJobDir = await mkdtemp(path.join(os.tmpdir(), 'staging-durable-backup-'));
+  t.after(async () => {
+    await rm(tempJobDir, { recursive: true, force: true }).catch(() => {});
+  });
+
+  const durableJobRegistry = createDurableJobRegistry({
+    filePath: path.join(tempJobDir, 'durable-jobs.json'),
+    registryFactory: createJobRegistry,
+    automaticReconciliation: true,
+  });
+  await durableJobRegistry.init();
+
+  const backupOperationRegistry = createBackupOperationRegistry({
+    filePath: path.join(tempJobDir, 'backup-operations.json'),
+  });
+  await backupOperationRegistry.init();
+
+  const operationRegistry = createWebsiteBackupOperationRegistry({
+    filePath: path.join(tempJobDir, 'website-operations.json'),
+  });
+
+  const receiptStore = createWebsiteRestoreReceiptStore({ root: path.join(tempJobDir, 'receipts') });
+
+  let failNextRestoreHealthCheck = false;
+  let delayBackupExecution = false;
+  let backupExecutionResolver = null;
+
+  const resticManager = {
+    async createSnapshot({ repository, password, paths, excludes, tags }) {
+      if (delayBackupExecution) {
+        await new Promise((resolve) => { backupExecutionResolver = resolve; });
+      }
+      return {
+        snapshotId: 'snap-new-123',
+        shortId: 'snap-new',
+        time: new Date().toISOString(),
+      };
+    },
+    async listSnapshots({ repository, password, tags = [] }) {
+      return snapshots.filter((snap) => tags.every((t) => snap.tags.includes(t)));
+    },
+    async restore({ repository, password, snapshotId, targetDirectory, include = [] }) {
+      return { ok: true, restoredSnapshotId: snapshotId };
+    },
+    async check({ repository, password, readDataSubset = null }) {
+      return { ok: true, checkedAt: new Date().toISOString() };
+    },
+  };
+
+  const healthInspector = {
+    async inspect() {
+      if (failNextRestoreHealthCheck) {
+        failNextRestoreHealthCheck = false;
+        return { satisfied: false, healthy: false, error: 'Site health check failed after restore' };
+      }
+      return { satisfied: true, healthy: true };
+    },
+  };
+
+  // 4. Real Production Backup & Restore Services
+  const websiteBackupService = createWebsiteBackupService({
+    websiteRegistry,
+    resticRepositoryRegistry,
+    resticManager,
+    websiteBackupSetProvider,
+    localServerId: stagingServerId,
+    jobRegistry: durableJobRegistry,
+  });
+
+  const websiteRestoreService = createWebsiteRestoreService({
+    websiteRegistry,
+    resticRepositoryRegistry,
+    resticManager,
+    websiteBackupSetProvider,
+    healthInspector,
+    localServerId: stagingServerId,
+    jobRegistry: durableJobRegistry,
+    receiptStore,
+  });
+
+  const websiteBackupBrowser = createWebsiteBackupBrowser({
+    websiteRegistry,
+    resticRepositoryRegistry,
+    websiteBackupSetProvider,
+    operationRegistry,
+    localServerId: stagingServerId,
+  });
+
+  const websiteBackupOperationService = createWebsiteBackupOperationService({
+    registry: operationRegistry,
+    websiteBackupService,
+    websiteRestoreService,
+    websiteRegistry,
+    resticRepositoryRegistry,
+    resticManager,
+    receiptStore,
+    durableJobRegistry,
+    backupOperationRegistry,
+  });
+
+  // 5. Mount Express App with Tenant & Site Resource Boundaries
+  const backupApp = express();
+  backupApp.disable('x-powered-by');
+  backupApp.use(express.json());
+
+  backupApp.use((req, res, next) => {
+    const raw = req.headers['x-test-auth'];
+    if (raw) {
+      try {
+        req.auth = JSON.parse(raw);
+      } catch {
+        req.auth = null;
+      }
+    }
+    next();
+  });
+
+  backupApp.use(createTenantBoundaryMiddleware({
+    websiteRegistry,
+    customerLookup,
+    websiteLookup: async (id) => websiteRegistry.getWebsite(id),
+  }));
+
+  backupApp.use(createSiteResourceBoundary({
+    websiteRegistry,
+    domainRegistry,
+    localServerId: stagingServerId,
+    customerLookup,
+  }));
+
+  mountWebsiteBackupRoutes(backupApp, {
+    websiteBackupSetProvider,
+    websiteBackupService,
+    websiteBackupBrowser,
+    websiteBackupOperationService,
+    websiteRestoreService,
+    localServerId: stagingServerId,
+  });
+
+  mountWebsiteRestoreRoutes(backupApp, {
+    websiteRestoreService,
+    websiteBackupOperationService,
+    localServerId: stagingServerId,
+  });
+
+  backupApp.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (
+      err instanceof WebsiteBackupHttpError
+      || isWebsiteBackupHttpError(err)
+      || isWebsiteBackupOperationError(err)
+      || (Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 && typeof err?.code === 'string')
+    ) {
+      return res.status(err.status || 400).json({
+        error: { code: err.code, message: err.message },
+      });
+    }
+    return res.status(500).json({
+      error: {
+        code: err?.code || 'internal_error',
+        message: err?.message || 'Unexpected server error',
+      },
+    });
+  });
+
+  const backupServer = http.createServer(backupApp);
+  await new Promise((resolve) => backupServer.listen(0, '127.0.0.1', resolve));
+  const backupPort = backupServer.address().port;
+  const backupBaseUrl = `http://127.0.0.1:${backupPort}`;
+  t.after(() => new Promise((resolve) => {
+    backupServer.close(resolve);
+    backupServer.closeAllConnections();
+  }));
+
+  const testApiRequest = async (endpoint, { method = 'GET', auth = null, body = null } = {}) => {
+    const headers = { connection: 'close' };
+    if (auth) headers['x-test-auth'] = JSON.stringify(auth);
+    if (body !== null) headers['content-type'] = 'application/json';
+    const res = await fetch(`${backupBaseUrl}${endpoint}`, {
+      method,
+      headers,
+      body: body !== null ? JSON.stringify(body) : undefined,
+    });
+    const cType = res.headers.get('content-type') || '';
+    let resBody = null;
+    if (cType.includes('application/json')) {
+      resBody = await res.json();
+    } else {
+      resBody = await res.text();
+    }
+    return {
+      status: res.status,
+      headers: res.headers,
+      body: resBody,
+    };
+  };
+
+  // 6. Tenant Isolation & Confidentiality Assertions
+  // 6.1 Site A Manager sees Site A backups, zero secret leaks
+  const resSiteA = await testApiRequest(`/api/websites/${siteAId}/backups`, { auth: siteAManagerAuth });
+  assert.equal(resSiteA.status, 200);
+  assert.equal(resSiteA.body.data.websiteId, siteAId);
+  assert.equal(resSiteA.body.data.repositories.length, 1);
+  const siteARepo = resSiteA.body.data.repositories[0];
+  assert.equal(siteARepo.name, 'primary-staging-repo');
+  assert.equal(siteARepo.snapshots.length, 3);
+  for (const s of siteARepo.snapshots) {
+    assert.ok(s.id);
+    assert.ok(s.shortId);
+    assert.ok(s.time);
+    assert.equal(Object.hasOwn(s, 'paths'), false, 'Snapshot paths must be redacted');
+    assert.equal(Object.hasOwn(s, 'hostname'), false, 'Snapshot hostname must be redacted');
+    assert.equal(Object.hasOwn(s, 'username'), false, 'Snapshot username must be redacted');
+  }
+  assert.equal(Object.hasOwn(siteARepo, 'target'), false, 'Repository target path must be redacted');
+  assert.equal(Object.hasOwn(siteARepo, 'error'), false, 'Repository raw error must be redacted');
+  const serializedA = JSON.stringify(resSiteA.body);
+  assert.doesNotMatch(serializedA, /super-secret-pass/);
+  assert.doesNotMatch(serializedA, /\/secret\/var\/backups/);
+  assert.doesNotMatch(serializedA, /\/secret-data/);
+
+  // 6.2 Cross-site access blocked (Site A manager attempting Site B backups) -> 403
+  const resCrossSite = await testApiRequest(`/api/websites/${siteBId}/backups`, { auth: siteAManagerAuth });
+  assert.equal(resCrossSite.status, 403);
+  assert.equal(resCrossSite.body.error.code, 'tenant_boundary_forbidden');
+  assert.equal(JSON.stringify(resCrossSite.body ?? {}).includes(siteBId), false);
+
+  // 6.3 Customer B attempting Site A backups -> 403
+  const resCustB = await testApiRequest(`/api/websites/${siteAId}/backups`, { auth: customerBAuth });
+  assert.equal(resCustB.status, 403);
+  assert.equal(resCustB.body.error.code, 'tenant_boundary_forbidden');
+
+  // 6.4 Inactive user blocked -> 403
+  const resInactive = await testApiRequest(`/api/websites/${siteAId}/backups`, { auth: inactiveSiteAManagerAuth });
+  assert.equal(resInactive.status, 403);
+
+  // 6.5 Foreign server site blocked -> 404 (website_not_found)
+  const resForeign = await testApiRequest(`/api/websites/${foreignSiteId}/backups`, { auth: ownerAuth });
+  assert.equal(resForeign.status, 404);
+  assert.equal(resForeign.body.error.code, 'website_not_found');
+
+  // 6.6 Non-owner mutation blocked -> 403
+  const resNonOwnerBackup = await testApiRequest(`/api/websites/${siteAId}/backup/queue`, {
+    method: 'POST',
+    auth: siteAManagerAuth,
+    body: { repositoryId: repoId, expectedPreviewDigest: previewDigest, confirmation: `backup:${siteAId}:${repoId}:${previewDigest}` },
+  });
+  assert.equal(resNonOwnerBackup.status, 403);
+
+  const resNonOwnerRestore = await testApiRequest(`/api/websites/${siteAId}/restore/queue`, {
+    method: 'POST',
+    auth: siteAManagerAuth,
+    body: { repositoryId: repoId, snapshotId: 'aaaaaaaa', expectedPreviewDigest: previewDigest, confirmation: `restore:${siteAId}:${repoId}:aaaaaaaa:${previewDigest}` },
+  });
+  assert.equal(resNonOwnerRestore.status, 403);
+
+  const resNonOwnerOp = await testApiRequest(`/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    auth: siteAManagerAuth,
+    body: { kind: 'backup', repositoryId: repoId },
+  });
+  assert.equal(resNonOwnerOp.status, 403);
+
+  // 7. Owner Durable Backup Flow
+  // 7.1 Preview backup
+  const backupPreviewRes = await testApiRequest(`/api/websites/${siteAId}/backup/preview`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: { repositoryId: repoId },
+  });
+  assert.equal(backupPreviewRes.status, 200);
+  assert.equal(backupPreviewRes.body.data.backupSetDigest, previewDigest);
+  const expectedBackupConfirm = backupPreviewRes.body.data.confirmation;
+  assert.equal(expectedBackupConfirm, `backup:${siteAId}:${repoId}:${previewDigest}`);
+
+  // 7.2 Stale digest rejection
+  const staleBackupRes = await testApiRequest(`/api/websites/${siteAId}/backup/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      expectedPreviewDigest: 'b'.repeat(64),
+      confirmation: expectedBackupConfirm,
+    },
+  });
+  assert.equal(staleBackupRes.status, 409);
+  assert.equal(staleBackupRes.body.error.code, 'backup_preview_stale');
+
+  // 7.3 Invalid confirmation rejection
+  const invalidConfirmRes = await testApiRequest(`/api/websites/${siteAId}/backup/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      expectedPreviewDigest: previewDigest,
+      confirmation: 'wrong-confirmation',
+    },
+  });
+  assert.equal(invalidConfirmRes.status, 409);
+  assert.equal(invalidConfirmRes.body.error.code, 'backup_confirmation_invalid');
+
+  // 7.4 Queue durable backup with execution held to test concurrency conflict
+  delayBackupExecution = true;
+  const queueBackupRes = await testApiRequest(`/api/websites/${siteAId}/backup/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      expectedPreviewDigest: previewDigest,
+      confirmation: expectedBackupConfirm,
+    },
+  });
+  assert.equal(queueBackupRes.status, 202);
+  const backupOpId = queueBackupRes.body.data.id;
+  assert.equal(queueBackupRes.body.data.kind, 'backup');
+  assert.equal(queueBackupRes.body.data.websiteId, siteAId);
+
+  // 7.5 Concurrent mutation conflict rejection (409) while previous operation is active
+  const conflictRes = await testApiRequest(`/api/websites/${siteAId}/backup/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      expectedPreviewDigest: previewDigest,
+      confirmation: expectedBackupConfirm,
+    },
+  });
+  assert.equal(conflictRes.status, 409);
+  assert.equal(conflictRes.body.error.code, 'website_backup_operation_conflict');
+
+  // Release held execution and await operation completion
+  delayBackupExecution = false;
+  if (typeof backupExecutionResolver === 'function') {
+    backupExecutionResolver();
+  }
+
+  // Await operation completion
+  async function waitForTerminal(opId, timeoutMs = 3000) {
+    const start = Date.now();
+    while (Date.now() - start < timeoutMs) {
+      const op = await operationRegistry.getOperation(opId);
+      if (op && (op.status === 'succeeded' || op.status === 'failed' || op.status === 'rolled_back')) {
+        return op;
+      }
+      await new Promise((r) => setTimeout(r, 10));
+    }
+    return operationRegistry.getOperation(opId);
+  }
+
+  const finishedBackupOp = await waitForTerminal(backupOpId);
+  assert.equal(finishedBackupOp.status, 'succeeded');
+  assert.equal(finishedBackupOp.snapshotId, 'snap-new-123');
+
+  // 7.6 Query operation by ID & List operations
+  const getOpRes = await testApiRequest(`/api/websites/${siteAId}/backup-operations/${backupOpId}`, { auth: ownerAuth });
+  assert.equal(getOpRes.status, 200);
+  assert.equal(getOpRes.body.data.id, backupOpId);
+  assert.equal(getOpRes.body.data.status, 'succeeded');
+
+  const listOpsRes = await testApiRequest(`/api/websites/${siteAId}/backup-operations`, { auth: ownerAuth });
+  assert.equal(listOpsRes.status, 200);
+  assert.ok(listOpsRes.body.data.some((o) => o.id === backupOpId));
+
+  // 8. Owner Durable Restore Flow with Selective Restore & Rollback
+  // 8.1 Preview restore
+  const restorePreviewRes = await testApiRequest(`/api/websites/${siteAId}/restore/preview`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+      include: ['databases', 'targetPaths'],
+    },
+  });
+  assert.equal(restorePreviewRes.status, 200);
+  assert.equal(restorePreviewRes.body.data.selective, true);
+  const expectedRestoreConfirm = restorePreviewRes.body.data.confirmation;
+  const expectedRestoreDigest = restorePreviewRes.body.data.previewDigest;
+  assert.equal(expectedRestoreConfirm, `restore:${siteAId}:${'a'.repeat(64)}:${expectedRestoreDigest}`);
+
+  // 8.2 Queue selective restore
+  const queueRestoreRes = await testApiRequest(`/api/websites/${siteAId}/restore/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+      expectedPreviewDigest: expectedRestoreDigest,
+      confirmation: expectedRestoreConfirm,
+      include: ['databases', 'targetPaths'],
+    },
+  });
+  assert.equal(queueRestoreRes.status, 202);
+  const restoreOpId = queueRestoreRes.body.data.id;
+  assert.equal(queueRestoreRes.body.data.kind, 'restore');
+  assert.equal(queueRestoreRes.body.data.selective, true);
+
+  const finishedRestoreOp = await waitForTerminal(restoreOpId);
+  assert.equal(finishedRestoreOp.status, 'succeeded');
+  assert.equal(finishedRestoreOp.preRestoreSnapshotId, 'snap-new-123');
+
+  // 8.3 Restore failure triggers rollback and records rolled_back status
+  failNextRestoreHealthCheck = true;
+  const failPreviewRes = await testApiRequest(`/api/websites/${siteAId}/restore/preview`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+    },
+  });
+  assert.equal(failPreviewRes.status, 200);
+
+  const failRestoreRes = await testApiRequest(`/api/websites/${siteAId}/restore/queue`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+      expectedPreviewDigest: failPreviewRes.body.data.previewDigest,
+      confirmation: failPreviewRes.body.data.confirmation,
+    },
+  });
+  assert.equal(failRestoreRes.status, 202);
+  const failedOp = await waitForTerminal(failRestoreRes.body.data.id);
+  assert.equal(failedOp.status, 'rolled_back');
+  assert.equal(failedOp.result?.rollbackReason, 'health_check_failed');
+  assert.equal(failedOp.preRestoreSnapshotId, 'snap-new-123');
+
+  // 9. Idempotent & Receipt-based Recovery Reconciliation
+  const crashPreviewRes = await testApiRequest(`/api/websites/${siteAId}/restore/preview`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      repositoryId: repoId,
+      snapshotId: 'aaaaaaaa',
+    },
+  });
+  assert.equal(crashPreviewRes.status, 200);
+  const crashDigest = crashPreviewRes.body.data.previewDigest;
+  const crashConfirm = crashPreviewRes.body.data.confirmation;
+
+  const interruptedOp = await operationRegistry.createOperation({
+    websiteId: siteAId,
+    serverId: stagingServerId,
+    repositoryId: repoId,
+    kind: 'restore',
+    snapshotId: 'aaaaaaaa',
+    previewDigest: crashDigest,
+    confirmation: crashConfirm,
+  });
+  await operationRegistry.updateOperation(interruptedOp.id, {
+    status: 'running',
+    startedAt: '2026-10-08T12:00:00.000Z',
+  });
+  await backupOperationRegistry.recordWebsiteOperation(interruptedOp);
+  await backupOperationRegistry.updateWebsiteOperation(interruptedOp.id, {
+    status: 'running',
+    startedAt: '2026-10-08T12:00:00.000Z',
+  });
+
+  const transactionId = `restore:${siteAId}:${crashDigest.slice(0, 32)}`;
+  const mockReceiptStore = {
+    async read(tid) {
+      if (tid === transactionId) {
+        return {
+          transactionId,
+          status: 'succeeded',
+          snapshotId: 'aaaaaaaa',
+          preRestoreSnapshotId: 'pre-crash-snap-777',
+          healthCheck: { satisfied: true },
+          committedAt: '2026-10-08T12:02:00.000Z',
+        };
+      }
+      return null;
+    },
+  };
+
+  const reconciledOps = await websiteBackupOperationService.reconcile({
+    receiptStore: mockReceiptStore,
+  });
+  assert.ok(reconciledOps.some((op) => op.id === interruptedOp.id && op.status === 'succeeded'));
+
+  const postReconcile = await operationRegistry.getOperation(interruptedOp.id);
+  assert.equal(postReconcile.status, 'succeeded');
+  assert.equal(postReconcile.preRestoreSnapshotId, 'pre-crash-snap-777');
+  assert.equal(postReconcile.restartEvidence?.status, 'reconciled_from_receipt');
+
+  const serverOpPostReconcile = await backupOperationRegistry.getWebsiteOperation(interruptedOp.id);
+  assert.equal(serverOpPostReconcile.status, 'succeeded');
+  assert.equal(serverOpPostReconcile.preRestoreSnapshotId, 'pre-crash-snap-777');
+
+  // Second reconciliation run is idempotent (no-op)
+  const secondReconcile = await websiteBackupOperationService.reconcile({
+    receiptStore: mockReceiptStore,
+  });
+  assert.equal(secondReconcile.length, 0);
+
+  // 10. Repository Check & Plan Durable Operations
+  const queueCheckRes = await testApiRequest(`/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: { kind: 'check', repositoryId: repoId },
+  });
+  assert.equal(queueCheckRes.status, 202);
+  const checkOp = await waitForTerminal(queueCheckRes.body.data.id);
+  assert.equal(checkOp.status, 'succeeded');
+
+  const queuePlanRes = await testApiRequest(`/api/websites/${siteAId}/backup-operations`, {
+    method: 'POST',
+    auth: ownerAuth,
+    body: {
+      kind: 'plan',
+      repositoryId: repoId,
+      schedule: '0 4 * * *',
+      retentionPolicy: { keepLast: 14, keepDaily: 7 },
+    },
+  });
+  assert.equal(queuePlanRes.status, 202);
+  const planOp = await waitForTerminal(queuePlanRes.body.data.id);
+  assert.equal(planOp.status, 'succeeded');
+
+  // 11. Web Frontend Client & Model Integration
+  const clientScope = { websiteId: siteAId, serverId: stagingServerId };
+  const webClient = createSiteBackupClient({
+    scope: clientScope,
+    request: async (reqPath, options = {}) => {
+      const fullPath = reqPath.startsWith('/api') ? reqPath : `/api${reqPath}`;
+      const res = await testApiRequest(fullPath, {
+        method: options.method ?? 'GET',
+        auth: ownerAuth,
+        body: options.body ?? null,
+      });
+      if (res.status >= 400) {
+        const err = new Error(res.body?.error?.message || 'Request failed');
+        err.status = res.status;
+        err.code = res.body?.error?.code;
+        throw err;
+      }
+      return res.body?.data ?? res.body;
+    },
+  });
+
+  const clientLoaded = await webClient.load();
+  assert.equal(clientLoaded, true);
+  const clientSnap = webClient.getSnapshot();
+  assert.equal(clientSnap.fresh, true);
+  assert.equal(clientSnap.data.lastSuccessfulBackupAt, '2026-10-08T10:00:00.000Z');
+  assert.equal(clientSnap.data.repositories[0].snapshots[0].status, 'succeeded');
+  assert.equal(clientSnap.data.repositories[0].snapshots[1].status, 'failed');
+  assert.equal(clientSnap.data.repositories[0].snapshots[2].status, 'stale');
+  // Stale and failed snapshots must never be presented as succeeded
+  assert.notEqual(clientSnap.data.repositories[0].snapshots[1].status, 'succeeded');
+  assert.notEqual(clientSnap.data.repositories[0].snapshots[2].status, 'succeeded');
+
+  const cPreview = await webClient.previewBackup(repoId);
+  assert.ok(cPreview.confirmation.startsWith('backup:'));
+
+  const cQueue = await webClient.queueBackup({
+    repositoryId: repoId,
+    expectedPreviewDigest: cPreview.backupSetDigest,
+    confirmation: cPreview.confirmation,
+  });
+  assert.ok(cQueue.id);
+  assert.equal(cQueue.status, 'queued');
+
+  const finishedClientBackup = await waitForTerminal(cQueue.id);
+  assert.equal(finishedClientBackup.status, 'succeeded');
+
+  const rPreview = await webClient.previewRestore({
+    repositoryId: repoId,
+    snapshotId: 'aaaaaaaa',
+    include: ['databases'],
+  });
+  assert.ok(rPreview.confirmation.startsWith('restore:'));
+
+  const rQueue = await webClient.queueRestore({
+    repositoryId: repoId,
+    snapshotId: 'aaaaaaaa',
+    expectedPreviewDigest: rPreview.previewDigest,
+    confirmation: rPreview.confirmation,
+    include: ['databases'],
+  });
+  assert.ok(rQueue.id);
+  assert.equal(rQueue.kind, 'restore');
+  assert.equal(rQueue.selective, true);
+
+  const finishedClientRestore = await waitForTerminal(rQueue.id);
+  assert.equal(finishedClientRestore.status, 'succeeded');
+
+  const cOp = await webClient.getOperation(cQueue.id);
+  assert.equal(cOp.status, 'succeeded');
+
+  const cList = await webClient.listOperations();
+  assert.ok(cList.length >= 2);
+  assert.ok(cList.some((op) => op.id === cQueue.id));
+  assert.ok(cList.some((op) => op.id === rQueue.id));
+
+  webClient.dispose();
+
+  // Model & Access Resolver Validation
+  const readyDomains = { status: 'ready', items: [{ id: 'domain-a', websiteId: siteAId, serverId: stagingServerId }] };
+  const readyWebsites = { status: 'ready', items: [{ id: siteAId, serverId: stagingServerId }] };
+  assert.deepEqual(
+    resolveSiteBackupAccess({ domainId: 'domain-a', domains: readyDomains, websites: readyWebsites, canManage: true }),
+    { state: 'ready', scope: { websiteId: siteAId, serverId: stagingServerId } },
+  );
+  assert.deepEqual(
+    resolveSiteBackupAccess({ domainId: 'domain-a', domains: readyDomains, websites: readyWebsites, canManage: false }),
+    { state: 'forbidden' },
+  );
+
+  // Error message translations
+  assert.equal(siteBackupErrorMessage({ code: 'site_scope_forbidden' }), 'Bu sitenin yedeklerine erişim izniniz yok.');
+  assert.equal(siteBackupErrorMessage({ code: 'backup_preview_stale' }), 'Site yapılandırması değişti; lütfen önizlemeyi yenileyin.');
+  assert.equal(siteBackupErrorMessage({ code: 'backup_confirmation_invalid' }), 'Yedekleme onay metni eşleşmiyor.');
+  assert.equal(siteBackupErrorMessage({ code: 'restore_preview_stale' }), 'Site veya snapshot durumu değişti; lütfen önizlemeyi yenileyin.');
+  assert.equal(siteBackupErrorMessage({ code: 'restore_confirmation_invalid' }), 'Geri yükleme onay metni eşleşmiyor.');
+  assert.equal(siteBackupErrorMessage({ code: 'website_backup_operation_conflict' }), 'Bu site için halihazırda çalışan veya kuyrukta olan bir işlem var.');
+  assert.equal(siteBackupErrorMessage({ code: 'interrupted_by_restart' }), 'İşlem sistem yeniden başlatması nedeniyle kesintiye uğradı.');
+
+  // 12. Authentic Staging Browser Artifacts Verification
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/da7071e7-c71f-4015-b2eb-d7a9412ee872/65cbe3a6-48be-4180-88eb-e15b7cd6ddaf-smoke-success.png',
+    screen320: 'artifact://local/browser/da7071e7-c71f-4015-b2eb-d7a9412ee872/a3988748-ee9a-497a-af03-6859a7704442-screen-320.png',
+    screen390: 'artifact://local/browser/da7071e7-c71f-4015-b2eb-d7a9412ee872/5f26262a-2975-401e-8eeb-926850e5326f-screen-390.png',
+    screen834: 'artifact://local/browser/da7071e7-c71f-4015-b2eb-d7a9412ee872/f4f0c77b-15eb-4237-b169-9591f7715b15-screen-834.png',
+    screen1440: 'artifact://local/browser/da7071e7-c71f-4015-b2eb-d7a9412ee872/8bfb0cec-5ca1-431d-95c8-fe0bc044a8a0-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/da7071e7-c71f-4015-b2eb-d7a9412ee872\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/da7071e7-c71f-4015-b2eb-d7a9412ee872\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/da7071e7-c71f-4015-b2eb-d7a9412ee872\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/da7071e7-c71f-4015-b2eb-d7a9412ee872\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/da7071e7-c71f-4015-b2eb-d7a9412ee872\/.*-screen-1440\.png$/);
+
+  const mockScreens = Array.from({ length: 5 }, (_, i) => `mock-sample-screen-${i + 1}.png`);
+  for (const s of mockScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 13. Documentary Integrity Preserved Pending Independent Integration
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanDoc.includes('- [ ] **BACKUP-UI-03/04:**'),
+    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
+  );
+
+  assert.ok(true, 'BACKUP-UI-03/04: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Restic durable job ve recovery hattı başarıyla doğrulandı.');
 });

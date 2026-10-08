@@ -477,6 +477,8 @@ export function createApp(allOptions = {}) {
   rcloneManager = null,
   websiteBackupService = null,
   websiteRestoreService = null,
+  backupOperationRegistry = null,
+  durableJobRegistry = null,
   pleskImporter = null,
   operationalNotificationService = null,
   firewallService = null,
@@ -602,7 +604,6 @@ export function createApp(allOptions = {}) {
     jobRegistry,
     localServerId,
   });
-  const backupOperationRegistry = options.backupOperationRegistry ?? null;
   const removalBackupImpactProvider = backupOperationRegistry
     && databaseBindingRegistry
     && localServerId
@@ -1127,6 +1128,9 @@ export function createApp(allOptions = {}) {
         resticRepositoryRegistry: resolvedResticRepositoryRegistry,
         resticManager: resolvedResticManager,
         receiptStore: resolvedWebsiteRestoreReceiptStore,
+        jobRegistry,
+        durableJobRegistry: durableJobRegistry ?? options.durableJobRegistry ?? (jobRegistry?.storeLock ? jobRegistry : null),
+        backupOperationRegistry: backupOperationRegistry ?? options.backupOperationRegistry ?? null,
       }) : null
     );
     mountWebsiteBackupRoutes(app, {

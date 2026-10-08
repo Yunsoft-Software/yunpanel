@@ -30,6 +30,9 @@ export function createWebsiteBackupOperationService({
   resticRepositoryRegistry = null,
   resticManager = null,
   receiptStore = null,
+  durableJobRegistry = null,
+  jobRegistry = null,
+  backupOperationRegistry = null,
   now = () => new Date().toISOString(),
 } = {}) {
   if (!registry || typeof registry.createOperation !== 'function'
@@ -104,6 +107,12 @@ export function createWebsiteBackupOperationService({
       tags,
     });
 
+    if (backupOperationRegistry && typeof backupOperationRegistry.recordWebsiteOperation === 'function') {
+      try {
+        await backupOperationRegistry.recordWebsiteOperation(operation);
+      } catch {}
+    }
+
     // Dispatch background execution
     setImmediate(async () => {
       const startTime = now();
@@ -118,6 +127,15 @@ export function createWebsiteBackupOperationService({
             { name: 'cleanup', status: 'pending', updatedAt: startTime },
           ],
         });
+
+        if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+          try {
+            await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+              status: 'running',
+              startedAt: startTime,
+            });
+          } catch {}
+        }
 
         const executionResult = await websiteBackupService.executeBackup({
           websiteId,
@@ -147,6 +165,16 @@ export function createWebsiteBackupOperationService({
           ],
           finishedAt: finishTime,
         });
+
+        if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+          try {
+            await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+              status: 'succeeded',
+              snapshotId: executionResult.snapshot?.snapshotId ?? null,
+              finishedAt: finishTime,
+            });
+          } catch {}
+        }
       } catch (error) {
         const errorTime = now();
         await registry.updateOperation(operation.id, {
@@ -158,6 +186,19 @@ export function createWebsiteBackupOperationService({
           progress: { phase: 'failed', percent: 100, message: `Yedekleme başarısız: ${error.message}` },
           finishedAt: errorTime,
         }).catch(() => {});
+
+        if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+          try {
+            await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+              status: 'failed',
+              error: {
+                code: error.code || 'backup_execution_failed',
+                message: error.message || 'Backup execution failed',
+              },
+              finishedAt: errorTime,
+            });
+          } catch {}
+        }
       }
     });
 
@@ -239,6 +280,12 @@ export function createWebsiteBackupOperationService({
       selective: Boolean(preview.selective || (Array.isArray(include) && include.length > 0)),
     });
 
+    if (backupOperationRegistry && typeof backupOperationRegistry.recordWebsiteOperation === 'function') {
+      try {
+        await backupOperationRegistry.recordWebsiteOperation(operation);
+      } catch {}
+    }
+
     // Dispatch background execution
     setImmediate(async () => {
       const startTime = now();
@@ -253,6 +300,15 @@ export function createWebsiteBackupOperationService({
             { name: 'health_check', status: 'pending', updatedAt: startTime },
           ],
         });
+
+        if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+          try {
+            await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+              status: 'running',
+              startedAt: startTime,
+            });
+          } catch {}
+        }
 
         const executionResult = await websiteRestoreService.executeRestore({
           websiteId,
@@ -289,6 +345,16 @@ export function createWebsiteBackupOperationService({
             ],
             finishedAt: finishTime,
           });
+
+          if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+            try {
+              await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+                status: 'succeeded',
+                preRestoreSnapshotId: executionResult.preRestoreSnapshotId ?? null,
+                finishedAt: finishTime,
+              });
+            } catch {}
+          }
         } else if (executionResult.status === 'rolled_back') {
           await registry.updateOperation(operation.id, {
             status: 'rolled_back',
@@ -310,6 +376,16 @@ export function createWebsiteBackupOperationService({
             ],
             finishedAt: finishTime,
           });
+
+          if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+            try {
+              await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+                status: 'rolled_back',
+                preRestoreSnapshotId: executionResult.preRestoreSnapshotId ?? null,
+                finishedAt: finishTime,
+              });
+            } catch {}
+          }
         }
       } catch (error) {
         const errorTime = now();
@@ -322,6 +398,19 @@ export function createWebsiteBackupOperationService({
           progress: { phase: 'failed', percent: 100, message: `Geri yükleme başarısız: ${error.message}` },
           finishedAt: errorTime,
         }).catch(() => {});
+
+        if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function') {
+          try {
+            await backupOperationRegistry.updateWebsiteOperation(operation.id, {
+              status: 'failed',
+              error: {
+                code: error.code || 'restore_execution_failed',
+                message: error.message || 'Restore execution failed',
+              },
+              finishedAt: errorTime,
+            });
+          } catch {}
+        }
       }
     });
 
@@ -487,13 +576,22 @@ export function createWebsiteBackupOperationService({
     return registry.listOperations(filter);
   }
 
-  async function reconcile() {
-    return registry.reconcileInterruptedOperations({
+  async function reconcile({ receiptStore: overrideReceiptStore = null } = {}) {
+    const effectiveReceiptStore = overrideReceiptStore ?? receiptStore;
+    const reconciled = await registry.reconcileInterruptedOperations({
       resticManager,
       resticRepositoryRegistry,
-      receiptStore,
+      receiptStore: effectiveReceiptStore,
       websiteRegistry,
     });
+    if (backupOperationRegistry && typeof backupOperationRegistry.updateWebsiteOperation === 'function' && Array.isArray(reconciled)) {
+      for (const op of reconciled) {
+        try {
+          await backupOperationRegistry.updateWebsiteOperation(op.id, op);
+        } catch {}
+      }
+    }
+    return reconciled;
   }
 
   return Object.freeze({
@@ -505,5 +603,8 @@ export function createWebsiteBackupOperationService({
     listOperations,
     reconcile,
     registry,
+    durableJobRegistry,
+    jobRegistry,
+    backupOperationRegistry,
   });
 }
