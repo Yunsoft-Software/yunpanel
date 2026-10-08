@@ -314,3 +314,28 @@ test('AI Orchestrator: passes abort signal to provider.complete', async () => {
 
   assert.equal(receivedSignal, controller.signal);
 });
+
+test('AI Orchestrator: propagates state and epoch to action plans for drift and restart protection', async () => {
+  const registry = createMockRegistry();
+  const provider = createAiProviderAdapter({
+    id: 'state-provider',
+    invoke: async () => ({
+      type: 'tool_calls',
+      calls: [{ id: 'call-1', name: 'service.restart', input: { serviceId: 'nginx' } }],
+    }),
+  });
+  const orchestrator = createAiOrchestrator({ provider, registry });
+
+  const turn = await orchestrator.proposeTurn({
+    model: 'm',
+    messages: [{ role: 'user', text: 'restart nginx' }],
+    auth: ownerAuth,
+    state: { revision: 1 },
+    epoch: 10,
+  });
+
+  assert.equal(turn.type, 'tool_proposals');
+  assert.equal(turn.proposals[0].plan.epoch, 10);
+  assert.ok(turn.proposals[0].plan.stateFingerprint);
+  assert.match(turn.proposals[0].plan.previewDigest, /^[a-f0-9]{64}$/);
+});

@@ -45,7 +45,15 @@ export function createAiOrchestrator({ provider, registry, policyOverrides = {} 
       .filter(({ policy }) => policy.decision !== 'deny'));
   }
 
-  async function proposeTurn({ model, messages, auth, signal = null } = {}) {
+  async function proposeTurn({
+    model,
+    messages,
+    auth,
+    signal = null,
+    state = null,
+    stateFingerprint = null,
+    epoch = null,
+  } = {}) {
     const allowed = availableTools(auth);
     const byName = new Map(allowed.map((entry) => [entry.tool.name, entry]));
     const result = await provider.complete({
@@ -77,6 +85,9 @@ export function createAiOrchestrator({ provider, registry, policyOverrides = {} 
         input: prepared.input,
         auth,
         overrides: policyOverrides,
+        state,
+        stateFingerprint,
+        epoch,
       });
       return Object.freeze({
         callId: call.id,
