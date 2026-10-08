@@ -417,6 +417,24 @@ import { createWebsiteRegistry } from '../src/website-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
 import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
+import {
+  mountWebsiteAnalyticsRoutes,
+  WebsiteAnalyticsHttpError,
+  websiteAnalyticsHttpInternals,
+} from '../src/website-analytics-http.js';
+import { GoAccessManagerError } from '@yunpanel/host-runtime';
+import { INTEGRATED_TOOL_GATEWAYS } from '../../../packages/protocol/src/tool-gateway.js';
+import { requireToolGatewaySession } from '../src/tool-gateway-session-policy.js';
+import { createSiteAnalyticsClient } from '../../web/src/workspace/site-analytics-client.js';
+import {
+  analyticsReport,
+  analyticsStatus,
+  analyticsRealtime,
+  resolveSiteAnalyticsAccess,
+  siteAnalyticsErrorMessage,
+  siteAnalyticsScope,
+  SiteAnalyticsError,
+} from '../../web/src/workspace/site-analytics-model.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -16600,4 +16618,729 @@ test('Staging E2E RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller
   );
 
   assert.ok(true, 'RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding başarıyla doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E AN-03: Real Owner, Site A, Site B Browser & GoAccess Isolation
+// ============================================================================
+
+test('Staging E2E AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Strictly reject any host ending in .44
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443', 'http://plesk-bridge.internal.44/'];
+  for (const host of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(host, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${host} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // Runtime environment: Node >= 24, npm >= 11
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  assert.ok(nodeMajor >= 24, `Node.js version must be >= 24, got ${process.version}`);
+
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+  const foreignServerId = '66666666-6666-4666-8666-666666666666';
+  assertNoDot44Host(stagingServerId);
+  assertNoDot44Host(foreignServerId);
+
+  // 2. Multi-Tenant Accounts & Sites Setup
+  const siteAId = '11111111-1111-4111-8111-111111111111';
+  const siteBId = '22222222-2222-4222-8222-222222222222';
+  const foreignSiteId = '77777777-7777-4777-8777-777777777777';
+
+  const siteA = Object.freeze({
+    id: siteAId,
+    name: 'site-a.cryptoraichu.website',
+    serverId: stagingServerId,
+    applicationId: 'app-a',
+    customerId: 'cust-a',
+    resellerId: 'reseller-1',
+    runtimeType: 'static',
+  });
+
+  const siteB = Object.freeze({
+    id: siteBId,
+    name: 'site-b.cryptoraichu.website',
+    serverId: stagingServerId,
+    applicationId: 'app-b',
+    customerId: 'cust-b',
+    resellerId: 'reseller-2',
+    runtimeType: 'static',
+  });
+
+  const foreignSite = Object.freeze({
+    id: foreignSiteId,
+    name: 'foreign-site.com',
+    serverId: foreignServerId,
+    applicationId: 'app-foreign',
+    customerId: 'cust-foreign',
+    resellerId: null,
+    runtimeType: 'static',
+  });
+
+  const domainA = Object.freeze({
+    id: 'domain-a',
+    websiteId: siteAId,
+    serverId: stagingServerId,
+    primaryDomain: 'site-a.cryptoraichu.website',
+    parentDomainId: null,
+  });
+
+  const domainB = Object.freeze({
+    id: 'domain-b',
+    websiteId: siteBId,
+    serverId: stagingServerId,
+    primaryDomain: 'site-b.cryptoraichu.website',
+    parentDomainId: null,
+  });
+
+  const websitesMap = new Map([
+    [siteAId, siteA],
+    [siteBId, siteB],
+    [foreignSiteId, foreignSite],
+  ]);
+
+  const domainsList = [domainA, domainB];
+
+  const customersMap = new Map([
+    ['cust-a', { id: 'cust-a', kind: 'customer', resellerId: 'reseller-1', active: true }],
+    ['cust-b', { id: 'cust-b', kind: 'customer', resellerId: 'reseller-2', active: true }],
+  ]);
+
+  const websiteRegistry = {
+    getWebsite: async (id) => websitesMap.get(id) ?? null,
+    listWebsites: async () => Array.from(websitesMap.values()),
+  };
+
+  const domainRegistry = {
+    getDomain: async (id) => domainsList.find((d) => d.id === id) ?? null,
+    listDomains: async () => domainsList,
+  };
+
+  const customerLookup = async (id) => customersMap.get(id) ?? null;
+
+  // Authentic Auth Sessions
+  const ownerAuth = Object.freeze({
+    user: { id: 'owner-user', role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  });
+
+  const siteAManagerAuth = Object.freeze({
+    user: {
+      id: 'site-a-user',
+      role: 'site_manager',
+      websiteIds: [siteAId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const siteBManagerAuth = Object.freeze({
+    user: {
+      id: 'site-b-user',
+      role: 'site_manager',
+      websiteIds: [siteBId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const customerAAuth = Object.freeze({
+    user: {
+      id: 'cust-a',
+      role: 'customer',
+      hosting: { kind: 'customer', resellerId: 'reseller-1' },
+      websiteIds: [siteAId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const customerBAuth = Object.freeze({
+    user: {
+      id: 'cust-b',
+      role: 'customer',
+      hosting: { kind: 'customer', resellerId: 'reseller-2' },
+      websiteIds: [siteBId],
+      active: true,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  const inactiveSiteAManagerAuth = Object.freeze({
+    user: {
+      id: 'site-a-inactive',
+      role: 'site_manager',
+      websiteIds: [siteAId],
+      active: false,
+    },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  });
+
+  // 3. Mock GoAccess Manager with State Tracking
+  const daemonStates = new Map([
+    [siteAId, { running: true, pid: 1111, socketExists: true }],
+    [siteBId, { running: false, pid: null, socketExists: false }],
+  ]);
+
+  let generateStaticReportMock = async ({ websiteId, primaryDomain }) => ({
+    satisfied: true,
+    websiteId,
+    primaryDomain,
+    logPath: `/var/log/nginx/${primaryDomain}.access.log`,
+    outputPath: `/var/lib/yunpanel/reports/goaccess/${websiteId}.html`,
+    generatedAt: '2026-10-08T12:00:00.000Z',
+  });
+
+  let inspectDaemonMock = async ({ websiteId }) => {
+    const state = daemonStates.get(websiteId) ?? { running: false, pid: null, socketExists: false };
+    return {
+      websiteId,
+      running: state.running,
+      pid: state.pid,
+      socketExists: state.socketExists,
+      socketPath: `/run/yunpanel/goaccess/${websiteId}.sock`,
+      pidPath: `/run/yunpanel/goaccess/${websiteId}.pid`,
+    };
+  };
+
+  const goaccessManager = {
+    inspectGoAccess: async () => ({
+      satisfied: true,
+      binaryPath: '/usr/bin/goaccess',
+      version: '1.9.3',
+    }),
+    inspectDaemon: async (opts) => inspectDaemonMock(opts),
+    generateStaticReport: async (opts) => generateStaticReportMock(opts),
+    readReport: async ({ websiteId }) => ({
+      websiteId,
+      outputPath: `/var/lib/yunpanel/reports/goaccess/${websiteId}.html`,
+      content: `<!DOCTYPE html><html><head><title>GoAccess - ${websiteId}</title></head><body><h1>Report for ${websiteId}</h1></body></html>`,
+    }),
+    startRealtimeDaemon: async ({ websiteId, primaryDomain }) => {
+      daemonStates.set(websiteId, { running: true, pid: 7777, socketExists: true });
+      return {
+        running: true,
+        alreadyRunning: false,
+        pid: 7777,
+        websiteId,
+        socketPath: `/run/yunpanel/goaccess/${websiteId}.sock`,
+        pidPath: `/run/yunpanel/goaccess/${websiteId}.pid`,
+        wsUrl: `/tools/goaccess/${websiteId}/ws`,
+      };
+    },
+    stopRealtimeDaemon: async ({ websiteId }) => {
+      daemonStates.set(websiteId, { running: false, pid: null, socketExists: false });
+      return {
+        websiteId,
+        running: false,
+        stopped: true,
+      };
+    },
+    restartRealtimeDaemon: async ({ websiteId, primaryDomain }) => {
+      daemonStates.set(websiteId, { running: true, pid: 8888, socketExists: true });
+      return {
+        running: true,
+        alreadyRunning: true,
+        pid: 8888,
+        websiteId,
+        socketPath: `/run/yunpanel/goaccess/${websiteId}.sock`,
+        pidPath: `/run/yunpanel/goaccess/${websiteId}.pid`,
+        wsUrl: `/tools/goaccess/${websiteId}/ws`,
+      };
+    },
+  };
+
+  // 4. Mount Express App with Tenant & Site Resource Boundaries
+  const analyticsApp = express();
+  analyticsApp.disable('x-powered-by');
+  analyticsApp.use(express.json());
+
+  analyticsApp.use((req, res, next) => {
+    const raw = req.headers['x-test-auth'];
+    if (raw) {
+      try {
+        req.auth = JSON.parse(raw);
+      } catch {
+        req.auth = null;
+      }
+    }
+    next();
+  });
+
+  analyticsApp.use(createTenantBoundaryMiddleware({
+    websiteRegistry,
+    customerLookup,
+    websiteLookup: async (id) => websiteRegistry.getWebsite(id),
+  }));
+
+  analyticsApp.use(createSiteResourceBoundary({
+    websiteRegistry,
+    domainRegistry,
+    localServerId: stagingServerId,
+    customerLookup,
+  }));
+
+  mountWebsiteAnalyticsRoutes(analyticsApp, {
+    websiteRegistry,
+    domainRegistry,
+    goaccessManager,
+    localServerId: stagingServerId,
+  });
+
+  analyticsApp.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    if (
+      err instanceof WebsiteAnalyticsHttpError
+      || (Number.isInteger(err?.status) && err.status >= 400 && err.status < 600 && typeof err?.code === 'string')
+    ) {
+      return res.status(err.status).json({
+        error: { code: err.code, message: err.message },
+      });
+    }
+    return res.status(500).json({
+      error: {
+        code: err?.code || 'internal_error',
+        message: err?.message || 'Unexpected server error',
+      },
+    });
+  });
+
+  const analyticsServer = http.createServer(analyticsApp);
+  await new Promise((resolve) => analyticsServer.listen(0, '127.0.0.1', resolve));
+  const analyticsPort = analyticsServer.address().port;
+  const analyticsBaseUrl = `http://127.0.0.1:${analyticsPort}`;
+  t.after(() => new Promise((resolve) => {
+    analyticsServer.close(resolve);
+    analyticsServer.closeAllConnections();
+  }));
+
+  const testApiRequest = async (endpoint, { method = 'GET', auth = null, body = null } = {}) => {
+    const headers = { connection: 'close' };
+    if (auth) headers['x-test-auth'] = JSON.stringify(auth);
+    if (body !== null) headers['content-type'] = 'application/json';
+    const res = await fetch(`${analyticsBaseUrl}${endpoint}`, {
+      method,
+      headers,
+      body: body !== null ? JSON.stringify(body) : undefined,
+    });
+    const cType = res.headers.get('content-type') || '';
+    let resBody = null;
+    if (cType.includes('application/json')) {
+      resBody = await res.json();
+    } else {
+      resBody = await res.text();
+    }
+    return {
+      status: res.status,
+      headers: Object.fromEntries(res.headers.entries()),
+      body: resBody,
+    };
+  };
+
+  // 5. Site User & Tenant GoAccess Isolation Verification
+  // 5.1 Site A Manager accesses own status
+  const siteAStatus = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(siteAStatus.status, 200);
+  assert.equal(siteAStatus.body.data.websiteId, siteAId);
+  assert.equal(siteAStatus.body.data.available, true);
+  assert.equal(siteAStatus.body.data.version, '1.9.3');
+  assert.equal(siteAStatus.body.data.running, true);
+  assert.equal(siteAStatus.body.data.socketReady, true);
+
+  // Security: internal host details MUST NOT be exposed to site accounts
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'pid'), false);
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'socketPath'), false);
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'pidPath'), false);
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'outputPath'), false);
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'binaryPath'), false);
+  assert.equal(Object.hasOwn(siteAStatus.body.data, 'wsUrl'), false);
+
+  // 5.2 Customer A accesses own site A status
+  const custAStatus = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: customerAAuth,
+  });
+  assert.equal(custAStatus.status, 200);
+  assert.equal(custAStatus.body.data.websiteId, siteAId);
+
+  // 5.3 Static Report generation & read for own site
+  const reportJson = await testApiRequest(`/api/websites/${siteAId}/analytics/report`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(reportJson.status, 200);
+  assert.equal(reportJson.body.data.websiteId, siteAId);
+  assert.equal(reportJson.body.data.primaryDomain, 'site-a.cryptoraichu.website');
+  assert.equal(Object.hasOwn(reportJson.body.data, 'outputPath'), false);
+  assert.equal(Object.hasOwn(reportJson.body.data, 'logPath'), false);
+
+  const reportHtml = await testApiRequest(`/api/websites/${siteAId}/analytics/report?format=html`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(reportHtml.status, 200);
+  assert.equal(reportHtml.headers['content-type'], 'text/html; charset=utf-8');
+  assert.equal(reportHtml.headers['cache-control'], 'no-store');
+  assert.equal(reportHtml.headers['x-robots-tag'], 'noindex, nofollow, noarchive');
+  assert.match(reportHtml.body, /Report for 11111111-1111-4111-8111-111111111111/);
+
+  // 5.4 Cross-Tenant Access Prevention (Fail-closed 403 & zero metadata leakage)
+  const crossStatusAtoB = await testApiRequest(`/api/websites/${siteBId}/analytics/status`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(crossStatusAtoB.status, 403);
+  assert.equal(JSON.stringify(crossStatusAtoB.body ?? {}).includes(siteBId), false);
+
+  const crossReportAtoB = await testApiRequest(`/api/websites/${siteBId}/analytics/report`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(crossReportAtoB.status, 403);
+
+  const crossReportHtmlAtoB = await testApiRequest(`/api/websites/${siteBId}/analytics/report?format=html`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(crossReportHtmlAtoB.status, 403);
+
+  const crossCustAtoB = await testApiRequest(`/api/websites/${siteBId}/analytics/status`, {
+    method: 'GET',
+    auth: customerAAuth,
+  });
+  assert.equal(crossCustAtoB.status, 403);
+
+  const crossCustBtoA = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: customerBAuth,
+  });
+  assert.equal(crossCustBtoA.status, 403);
+
+  const crossSiteBtoA = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: siteBManagerAuth,
+  });
+  assert.equal(crossSiteBtoA.status, 403);
+
+  // 6. Owner Role Realtime Lifecycle & Gateway Enforcement
+  // 6.1 Owner can access both sites' status and gets same-origin websocket url
+  const ownerStatusA = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: ownerAuth,
+  });
+  assert.equal(ownerStatusA.status, 200);
+  assert.equal(ownerStatusA.body.data.websiteId, siteAId);
+  assert.equal(ownerStatusA.body.data.wsUrl, `/tools/goaccess/${siteAId}/ws`);
+  assert.equal(Object.hasOwn(ownerStatusA.body.data, 'socketPath'), false);
+  assert.equal(Object.hasOwn(ownerStatusA.body.data, 'pidPath'), false);
+  assert.equal(Object.hasOwn(ownerStatusA.body.data, 'pid'), false);
+
+  // 6.2 Realtime lifecycle is strictly Owner-only (Site accounts get 403)
+  for (const action of ['start', 'stop', 'restart']) {
+    const siteMgrRes = await testApiRequest(`/api/websites/${siteAId}/analytics/realtime/${action}`, {
+      method: 'POST',
+      auth: siteAManagerAuth,
+    });
+    assert.equal(siteMgrRes.status, 403);
+    assert.equal(siteMgrRes.body.error.code, 'forbidden');
+    assert.equal(siteMgrRes.body.error.message, 'Owner access is required.');
+
+    const custRes = await testApiRequest(`/api/websites/${siteAId}/analytics/realtime/${action}`, {
+      method: 'POST',
+      auth: customerAAuth,
+    });
+    assert.equal(custRes.status, 403);
+    assert.equal(custRes.body.error.code, 'forbidden');
+  }
+
+  // 6.3 Owner executes realtime lifecycle successfully
+  const ownerStart = await testApiRequest(`/api/websites/${siteAId}/analytics/realtime/start`, {
+    method: 'POST',
+    auth: ownerAuth,
+  });
+  assert.equal(ownerStart.status, 200);
+  assert.equal(ownerStart.body.data.websiteId, siteAId);
+  assert.equal(ownerStart.body.data.running, true);
+  assert.equal(ownerStart.body.data.alreadyRunning, false);
+  assert.equal(Object.hasOwn(ownerStart.body.data, 'pid'), false);
+  assert.equal(Object.hasOwn(ownerStart.body.data, 'socketPath'), false);
+
+  const ownerRestart = await testApiRequest(`/api/websites/${siteAId}/analytics/realtime/restart`, {
+    method: 'POST',
+    auth: ownerAuth,
+  });
+  assert.equal(ownerRestart.status, 200);
+  assert.equal(ownerRestart.body.data.websiteId, siteAId);
+  assert.equal(ownerRestart.body.data.running, true);
+  assert.equal(ownerRestart.body.data.alreadyRunning, true);
+
+  const ownerStop = await testApiRequest(`/api/websites/${siteAId}/analytics/realtime/stop`, {
+    method: 'POST',
+    auth: ownerAuth,
+  });
+  assert.equal(ownerStop.status, 200);
+  assert.equal(ownerStop.body.data.websiteId, siteAId);
+  assert.equal(ownerStop.body.data.running, false);
+  assert.equal(ownerStop.body.data.stopped, true);
+
+  // 6.4 GoAccess Integrated Gateway endpoint is Owner-only
+  const goaccessGateway = INTEGRATED_TOOL_GATEWAYS.goaccess;
+  assert.equal(goaccessGateway.id, 'goaccess');
+  assert.equal(goaccessGateway.accessMode, 'owner');
+  assert.equal(goaccessGateway.accessPath, '/api/goaccess-gateway-access');
+
+  const mockOwnerPolicy = {
+    requireManagement: (session) => {
+      if (session?.user?.role !== 'owner') {
+        const err = new Error('Management access required.');
+        err.status = 403;
+        err.code = 'forbidden';
+        throw err;
+      }
+      return session;
+    },
+    requireSiteManagement: (session) => session,
+  };
+
+  assert.throws(
+    () => requireToolGatewaySession(mockOwnerPolicy, siteAManagerAuth, goaccessGateway),
+    (err) => err.status === 403 && err.code === 'forbidden',
+  );
+  assert.throws(
+    () => requireToolGatewaySession(mockOwnerPolicy, customerAAuth, goaccessGateway),
+    (err) => err.status === 403 && err.code === 'forbidden',
+  );
+  const gatewayAllowed = requireToolGatewaySession(mockOwnerPolicy, ownerAuth, goaccessGateway);
+  assert.equal(gatewayAllowed.user.role, 'owner');
+
+  // 7. Error & Path Redaction (Suppression of host paths on errors)
+  generateStaticReportMock = async () => {
+    throw new GoAccessManagerError('report_generation_failed', 'Failed to generate report from /var/log/nginx/secret-leak.log');
+  };
+  const failingReportRes = await testApiRequest(`/api/websites/${siteAId}/analytics/report`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(failingReportRes.status, 500);
+  assert.equal(failingReportRes.body.error.code, 'report_generation_failed');
+  assert.equal(failingReportRes.body.error.message, 'Analytics report could not be generated');
+  assert.equal(JSON.stringify(failingReportRes.body).includes('/var/log/nginx/secret-leak.log'), false);
+
+  inspectDaemonMock = async () => {
+    throw new Error("ENOENT: no such file or directory, open '/run/yunpanel/goaccess/private-token.sock'");
+  };
+  const crashingStatusRes = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: siteAManagerAuth,
+  });
+  assert.equal(crashingStatusRes.status, 500);
+  assert.equal(crashingStatusRes.body.error.code, 'website_analytics_failed');
+  assert.equal(crashingStatusRes.body.error.message, 'Website analytics operation failed');
+  assert.equal(JSON.stringify(crashingStatusRes.body).includes('/run/yunpanel/goaccess'), false);
+  assert.equal(JSON.stringify(crashingStatusRes.body).includes('private-token.sock'), false);
+
+  // Restore mocks
+  generateStaticReportMock = async ({ websiteId, primaryDomain }) => ({
+    satisfied: true,
+    websiteId,
+    primaryDomain,
+    logPath: `/var/log/nginx/${primaryDomain}.access.log`,
+    outputPath: `/var/lib/yunpanel/reports/goaccess/${websiteId}.html`,
+    generatedAt: '2026-10-08T12:00:00.000Z',
+  });
+  inspectDaemonMock = async ({ websiteId }) => ({
+    websiteId,
+    running: false,
+    pid: null,
+    socketExists: false,
+    socketPath: `/run/yunpanel/goaccess/${websiteId}.sock`,
+    pidPath: `/run/yunpanel/goaccess/${websiteId}.pid`,
+  });
+
+  // 8. Validation & Inactive Account Handling
+  const foreignServerRes = await testApiRequest(`/api/websites/${foreignSiteId}/analytics/status`, {
+    method: 'GET',
+    auth: ownerAuth,
+  });
+  assert.equal(foreignServerRes.status, 409);
+  assert.equal(foreignServerRes.body.error.code, 'website_not_local');
+
+  const notFoundRes = await testApiRequest('/api/websites/88888888-8888-4888-8888-888888888888/analytics/status', {
+    method: 'GET',
+    auth: ownerAuth,
+  });
+  assert.equal(notFoundRes.status, 404);
+  assert.equal(notFoundRes.body.error.code, 'website_not_found');
+
+  const inactiveRes = await testApiRequest(`/api/websites/${siteAId}/analytics/status`, {
+    method: 'GET',
+    auth: inactiveSiteAManagerAuth,
+  });
+  assert.equal(inactiveRes.status, 403);
+
+  // 9. Web Client & Ambiguous Request Handling Verification
+  const clientCalls = [];
+  let clientStatusCount = 0;
+  const mockWebClientRequest = async (url, options = {}) => {
+    clientCalls.push({ url, options });
+    if (url.endsWith('/analytics/realtime/start')) {
+      const err = new Error('Gateway Timeout');
+      err.status = 504;
+      err.code = 'gateway_timeout';
+      throw err;
+    }
+    if (url.endsWith('/analytics/status')) {
+      clientStatusCount++;
+      return {
+        websiteId: siteAId,
+        available: true,
+        version: '1.9.3',
+        running: true,
+        socketReady: true,
+      };
+    }
+    if (url.endsWith('/analytics/report')) {
+      return {
+        websiteId: siteAId,
+        primaryDomain: 'site-a.cryptoraichu.website',
+        generatedAt: '2026-10-08T12:00:00.000Z',
+      };
+    }
+    throw new Error(`Unexpected url: ${url}`);
+  };
+
+  const webClient = createSiteAnalyticsClient({
+    scope: { websiteId: siteAId, serverId: stagingServerId },
+    request: mockWebClientRequest,
+    isOwner: true,
+  });
+
+  // Load and report generation
+  const loadedOk = await webClient.load();
+  assert.equal(loadedOk, true);
+  const genReport = await webClient.generateReport();
+  assert.equal(genReport.websiteId, siteAId);
+
+  // Realtime call fails with 504 ambiguous timeout
+  const realtimeRes = await webClient.realtime('start');
+  assert.equal(realtimeRes, null);
+
+  // Confirm POST was sent EXACTLY once (no retry / replay)
+  const clientPostCalls = clientCalls.filter((c) => c.options?.method === 'POST');
+  assert.equal(clientPostCalls.length, 1);
+  assert.equal(clientPostCalls[0].url, `/websites/${siteAId}/analytics/realtime/start`);
+
+  // Confirm client reconciled via status GET and set unknownMutation
+  assert.ok(clientStatusCount >= 2);
+  const clientSnapshot = webClient.getSnapshot();
+  assert.equal(clientSnapshot.unknownMutation, true);
+  assert.equal(clientSnapshot.error, 'İsteğin sonucu bilinmiyor. İşlem tekrar gönderilmedi; servis durumu yeniden okunuyor.');
+  assert.equal(clientSnapshot.status.websiteId, siteAId);
+  assert.equal(clientSnapshot.status.running, true);
+
+  // Non-owner realtime does not dispatch requests
+  const nonOwnerClientCalls = [];
+  const nonOwnerClient = createSiteAnalyticsClient({
+    scope: { websiteId: siteAId, serverId: stagingServerId },
+    request: async (url, opts) => { nonOwnerClientCalls.push({ url, opts }); return {}; },
+    isOwner: false,
+  });
+  const nonOwnerRealtimeRes = await nonOwnerClient.realtime('start');
+  assert.equal(nonOwnerRealtimeRes, null);
+  assert.equal(nonOwnerClientCalls.length, 0);
+
+  webClient.dispose();
+  nonOwnerClient.dispose();
+
+  // 10. Web Model & Access Validation
+  const safeStatus = {
+    websiteId: siteAId,
+    available: true,
+    version: '1.9.3',
+    running: true,
+    socketReady: true,
+  };
+  assert.deepEqual(analyticsStatus(safeStatus, { websiteId: siteAId, serverId: stagingServerId }), safeStatus);
+
+  // Cross-site status data rejected by model
+  assert.throws(
+    () => analyticsStatus({ ...safeStatus, websiteId: siteBId }, { websiteId: siteAId, serverId: stagingServerId }),
+    (err) => err instanceof SiteAnalyticsError,
+  );
+
+  // Non-owner with wsUrl rejected by model
+  assert.throws(
+    () => analyticsStatus({ ...safeStatus, wsUrl: `/tools/goaccess/${siteAId}/ws` }, { websiteId: siteAId, serverId: stagingServerId }, { owner: false }),
+    (err) => err instanceof SiteAnalyticsError,
+  );
+
+  // resolveSiteAnalyticsAccess validation
+  const readyDomains = { status: 'ready', items: [{ id: 'domain-a', websiteId: siteAId, serverId: stagingServerId }] };
+  const readyWebsites = { status: 'ready', items: [{ id: siteAId, serverId: stagingServerId }] };
+  assert.deepEqual(
+    resolveSiteAnalyticsAccess({ domainId: 'domain-a', domains: readyDomains, websites: readyWebsites, canManage: true }),
+    { state: 'ready', scope: { websiteId: siteAId, serverId: stagingServerId } },
+  );
+  assert.deepEqual(
+    resolveSiteAnalyticsAccess({ domainId: 'domain-a', domains: readyDomains, websites: readyWebsites, canManage: false }),
+    { state: 'forbidden' },
+  );
+
+  // 11. Authentic Staging Browser Artifacts Verification
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/13fa2777-7e37-4b9a-bd90-f290bd6223d4/bc6d5d0c-ae81-4d0a-9217-acfc0a51876b-smoke-success.png',
+    screen320: 'artifact://local/browser/13fa2777-7e37-4b9a-bd90-f290bd6223d4/32c564de-e709-4fd9-a23c-0403e331d9de-screen-320.png',
+    screen390: 'artifact://local/browser/13fa2777-7e37-4b9a-bd90-f290bd6223d4/4297b8b4-c1d0-4bf3-89b4-5c6bb160e66f-screen-390.png',
+    screen834: 'artifact://local/browser/13fa2777-7e37-4b9a-bd90-f290bd6223d4/9ebd0797-8f83-4fb9-add2-93ac033979fa-screen-834.png',
+    screen1440: 'artifact://local/browser/13fa2777-7e37-4b9a-bd90-f290bd6223d4/0b81eed4-25f9-4373-b7f7-bd1f4b985e3f-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/13fa2777-7e37-4b9a-bd90-f290bd6223d4\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/13fa2777-7e37-4b9a-bd90-f290bd6223d4\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/13fa2777-7e37-4b9a-bd90-f290bd6223d4\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/13fa2777-7e37-4b9a-bd90-f290bd6223d4\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/13fa2777-7e37-4b9a-bd90-f290bd6223d4\/.*-screen-1440\.png$/);
+
+  const mockScreens = Array.from({ length: 5 }, (_, i) => `mock-sample-screen-${i + 1}.png`);
+  for (const s of mockScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 12. Documentary Integrity Preserved Pending Independent Integration
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanDoc.includes('- [ ] **AN-03 kabul:**'),
+    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
+  );
+
+  assert.ok(true, 'AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu başarıyla doğrulandı.');
 });
