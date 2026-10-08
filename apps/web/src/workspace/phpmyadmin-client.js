@@ -100,6 +100,7 @@ export async function openWebsitePhpMyAdmin({
   issueHandoff,
   fetchImpl = globalThis.fetch,
   locationImpl = globalThis.location,
+  targetWindow = undefined,
   now = () => Date.now(),
 } = {}) {
   const expected = {
@@ -113,6 +114,12 @@ export async function openWebsitePhpMyAdmin({
       'phpMyAdmin handoff istemcisi kullanılamıyor.',
     );
   }
+  if (targetWindow === null || targetWindow?.closed === true || locationImpl?.closed === true) {
+    throw new PhpMyAdminBrowserHandoffError(
+      'phpmyadmin_popup_blocked',
+      'Tarayıcınız açılır pencereyi engelledi. Lütfen açılır pencerelere izin verip yeniden deneyin.',
+    );
+  }
   if (typeof fetchImpl !== 'function'
     || !locationImpl
     || typeof locationImpl.origin !== 'string'
@@ -123,8 +130,64 @@ export async function openWebsitePhpMyAdmin({
     );
   }
 
+  let rawHandoff;
+  try {
+    rawHandoff = await issueHandoff(expected.serverId, expected.websiteId, expected.credentialId);
+  } catch (err) {
+    if (err instanceof PhpMyAdminBrowserHandoffError) throw err;
+    const code = err?.code;
+    const status = err?.status;
+    const message = err?.message;
+
+    if (code === 'managed_service_not_installed' || code === 'phpmyadmin_not_installed'
+      || code === 'phpmyadmin_package_missing' || code === 'phpmyadmin_packages_missing'
+      || code === 'service_not_installed') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_package_missing',
+        'phpMyAdmin paketleri sunucuda kurulu olmadığı için açılamadı. Sunucu yöneticisinden kurulum yapmasını isteyin.',
+      );
+    }
+    if (status === 401 || code === 'phpmyadmin_handoff_expired' || code === 'unauthorized') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_handoff_expired',
+        'phpMyAdmin oturum anahtarının süresi doldu. Yeniden deneyin.',
+      );
+    }
+    if (status === 403 || code === 'phpmyadmin_handoff_authorized_required'
+      || code === 'phpmyadmin_handoff_forbidden' || code === 'phpmyadmin_handoff_session_binding_invalid'
+      || code === 'site_scope_forbidden') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_handoff_forbidden',
+        'phpMyAdmin erişimi bu yönetim oturumu için yetkili değil.',
+      );
+    }
+    if (code === 'popup_blocked' || code === 'phpmyadmin_popup_blocked') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_popup_blocked',
+        'Tarayıcınız açılır pencereyi engelledi. Lütfen açılır pencerelere izin verip yeniden deneyin.',
+      );
+    }
+    if (code === 'phpmyadmin_handoff_binding_drift' || code === 'phpmyadmin_handoff_credential_not_applied'
+      || code === 'phpmyadmin_handoff_credential_not_found') {
+      throw new PhpMyAdminBrowserHandoffError(
+        code,
+        message || 'Veritabanı erişim durumu doğrulanamadı. Yeniden deneyin.',
+      );
+    }
+    if (status === 503 || code === 'phpmyadmin_handoff_unavailable' || code === 'phpmyadmin_handoff_apply_state_unavailable') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_handoff_unavailable',
+        'phpMyAdmin signon servisi şu anda kullanılamıyor.',
+      );
+    }
+    throw new PhpMyAdminBrowserHandoffError(
+      code || 'phpmyadmin_handoff_failed',
+      message || 'phpMyAdmin oturumu başlatılamadı. Yeniden deneyin.',
+    );
+  }
+
   const handoff = validateHandoff(
-    await issueHandoff(expected.serverId, expected.websiteId, expected.credentialId),
+    rawHandoff,
     expected,
     now(),
   );
@@ -152,7 +215,24 @@ export async function openWebsitePhpMyAdmin({
   }
 
   validateNavigationResponse(response, locationImpl.origin);
-  locationImpl.assign(PHP_MYADMIN_GATEWAY_BASE);
+  if (targetWindow === null || targetWindow?.closed === true || locationImpl?.closed === true) {
+    throw new PhpMyAdminBrowserHandoffError(
+      'phpmyadmin_popup_blocked',
+      'Tarayıcınız açılır pencereyi engelledi. Lütfen açılır pencerelere izin verip yeniden deneyin.',
+    );
+  }
+  try {
+    const nav = targetWindow?.location ?? locationImpl;
+    nav.assign(PHP_MYADMIN_GATEWAY_BASE);
+  } catch (error) {
+    if (error?.name === 'SecurityError' || error?.name === 'NotAllowedError') {
+      throw new PhpMyAdminBrowserHandoffError(
+        'phpmyadmin_popup_blocked',
+        'Tarayıcınız açılır pencereyi engelledi. Lütfen açılır pencerelere izin verip yeniden deneyin.',
+      );
+    }
+    throw error;
+  }
 }
 
 export const phpMyAdminBrowserHandoffInternals = Object.freeze({

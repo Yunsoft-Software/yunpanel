@@ -135,15 +135,28 @@ export default function DatabasesPage() {
     if (terminal) setDeleteTarget(null);
   }
   async function openPhpMyAdmin(ownership) {
-    if (!canAct || !ownership?.websiteId || !ownership?.credential?.id || pending.current) return;
+    if (!canAct || pending.current) return;
+    if (!ownership?.websiteId || !ownership?.credential?.id) return;
+    let targetWindow;
+    try {
+      targetWindow = typeof window !== 'undefined' && typeof window['open'] === 'function'
+        ? window['open']('about:blank', '_blank')
+        : undefined;
+    } catch {
+      targetWindow = null;
+    }
     const scope = scopeGeneration.current;
     pending.current = true; setBusy(true); setError(null);
     try {
       await openWebsitePhpMyAdmin({
         serverId: server.id, websiteId: ownership.websiteId,
         credentialId: ownership.credential.id, issueHandoff: createPhpMyAdminHandoff,
+        targetWindow,
       });
     } catch (failure) {
+      if (targetWindow && !targetWindow.closed) {
+        try { targetWindow.close(); } catch { /* Ignore popup close error */ }
+      }
       if (scope === scopeGeneration.current && failure.name !== 'AbortError') setError(failure.message);
     } finally {
       if (scope === scopeGeneration.current) { pending.current = false; setBusy(false); }
@@ -179,7 +192,7 @@ export default function DatabasesPage() {
             return <tr key={database.name} role="row"><td role="cell" data-label="Veritabanı"><div className="ws-db-name"><Icon name="database" size={20} /><div><strong>{database.name}</strong><small>{engineLabel}</small></div></div></td>
               <td role="cell" data-label="Site / Kullanıcı"><strong>{view.siteLabel}</strong><small>{database.ownership?.credential?.username ?? 'Kullanıcı tanımlanmamış'}</small></td>
               <td role="cell" data-label="Boyut">{database.sizeLabel}</td>
-              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : view.siteHref ? <LinkButton to={view.siteHref} icon="settings">Erişimi yapılandır</LinkButton> : <Button icon="settings" onClick={() => setAccessTarget(database)}>Siteye bağla</Button>}{!view.canOpen && <small>{view.detail}</small>}</div></td>
+              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : view.siteHref ? <><LinkButton to={view.siteHref} icon="settings">Erişimi yapılandır</LinkButton><small>{view.detail}</small></> : <><LinkButton to="/websites" icon="globe">Site seç</LinkButton><Button icon="settings" onClick={() => setAccessTarget(database)}>Siteye bağla</Button><small>{view.detail}</small></>}</div></td>
               <td role="cell" className="ws-row-end" data-label="İşlem"><Button icon="trash" disabled={!canAct} aria-label={`${database.name} veritabanını sil`} title="Veritabanını sil" onClick={() => { setError(null); setDeleteTarget(database); }}><span className="ws-sr-only">Sil</span></Button></td></tr>;
           })}</tbody></table></div>
           <footer className="ws-pagination"><span>{page.count} sonuç · {engineLabel} · {formatDatabaseBytes(inventory.totalBytes)}</span><div className="ws-actions"><Button disabled={page.page <= 1} onClick={() => filter('page', String(page.page - 1))}>Önceki</Button><span>{page.page} / {page.pages}</span><Button disabled={page.page >= page.pages} onClick={() => filter('page', String(page.page + 1))}>Sonraki</Button></div></footer>
