@@ -95,4 +95,36 @@ export function mountWebsiteRestoreRoutes(app, {
     const statusCode = result.status === 'succeeded' ? 200 : 422;
     return response.status(statusCode).json({ data: result });
   }));
+
+  if (websiteBackupOperationService) {
+    app.post('/api/websites/:websiteId/restore/queue', requireOwner, asyncRoute(async (request, response) => {
+      const {
+        repositoryId,
+        snapshotId,
+        expectedPreviewDigest,
+        confirmation,
+        healthPath,
+        timeoutSeconds,
+        include,
+      } = request.body ?? {};
+
+      const operation = await websiteBackupOperationService.queueRestore({
+        websiteId: request.params.websiteId,
+        repositoryId,
+        snapshotId,
+        expectedPreviewDigest,
+        confirmation,
+        healthPath,
+        timeoutSeconds,
+        include,
+        actor: {
+          sessionId: request.auth?.id,
+          userId: request.auth?.user?.id,
+          role: request.auth?.user?.role,
+        },
+      });
+
+      return response.status(202).json({ data: operation });
+    }));
+  }
 }

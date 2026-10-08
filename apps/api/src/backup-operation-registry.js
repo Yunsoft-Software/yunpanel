@@ -428,7 +428,56 @@ export function createBackupOperationRegistry({ filePath = null, now = () => Dat
       .map(publicOperation);
   }
 
-  return Object.freeze({ init, create, start, linkStep, succeedStep, failStep, getOperation, listOperations });
+  const websiteOperations = new Map();
+
+  async function recordWebsiteOperation(operation) {
+    if (!operation || typeof operation !== 'object' || typeof operation.id !== 'string') {
+      throw new BackupOperationRegistryError('website_operation_invalid', 'Website operation is invalid');
+    }
+    websiteOperations.set(operation.id.toLowerCase(), Object.freeze({ ...operation }));
+    return Object.freeze({ ...operation });
+  }
+
+  async function updateWebsiteOperation(operationId, patch) {
+    const id = (operationId ?? '').toLowerCase();
+    if (!websiteOperations.has(id)) return null;
+    const current = websiteOperations.get(id);
+    const updated = Object.freeze({ ...current, ...patch });
+    websiteOperations.set(id, updated);
+    return updated;
+  }
+
+  async function getWebsiteOperation(operationId) {
+    const id = (operationId ?? '').toLowerCase();
+    return websiteOperations.get(id) ?? null;
+  }
+
+  async function listWebsiteOperations({ websiteId = null, status = null } = {}) {
+    let list = Array.from(websiteOperations.values());
+    if (websiteId) {
+      const normalizedWebsiteId = websiteId.toLowerCase();
+      list = list.filter((op) => op.websiteId?.toLowerCase() === normalizedWebsiteId);
+    }
+    if (status) {
+      list = list.filter((op) => op.status === status);
+    }
+    return list;
+  }
+
+  return Object.freeze({
+    init,
+    create,
+    start,
+    linkStep,
+    succeedStep,
+    failStep,
+    getOperation,
+    listOperations,
+    recordWebsiteOperation,
+    updateWebsiteOperation,
+    getWebsiteOperation,
+    listWebsiteOperations,
+  });
 }
 
 export const backupOperationRegistryInternals = Object.freeze({

@@ -1206,6 +1206,8 @@ const listener = createAuthenticatedApi({
       dnsZoneRetirementImpactService: dnsZoneRetirementService,
       dnsZoneRetirementRuntime,
       backupOperationRegistry,
+      durableJobRegistry,
+      websiteBackupOperationStorePath: path.join(controlPlaneStateRoot, 'website-backup-operations.json'),
       backupJobStorePath: jobStorePath,
       projectBackupLocked,
       dockerComposeProjectRegistry: dockerComposeRuntime.projectRegistry,

@@ -26,6 +26,7 @@ import {
   resolveLocalMigrationPaths,
 } from './local-migration-cli.js';
 import { createServerRegistry } from './server-registry.js';
+import { createWebsiteBackupOperationRegistry } from './website-backup-operation-registry.js';
 
 const PACKAGED_STATE_ROOT = localMigrationCliInternals.packagedStateRoot;
 
@@ -544,6 +545,23 @@ export async function runRunningDatabaseDeleteRecoveryFromStores({
     inspectDatabaseState: () => databaseManager.inspect(),
   });
   return Object.freeze({ ...result, statePaths: paths });
+}
+
+export async function runWebsiteBackupRecoveryFromStores({
+  websiteBackupOperationRegistryFactory = createWebsiteBackupOperationRegistry,
+  websiteBackupOperationStorePath = null,
+  resticRepositoryRegistry = null,
+  resticManager = null,
+  receiptStore = null,
+  websiteRegistry = null,
+} = {}) {
+  const registry = websiteBackupOperationRegistryFactory({ filePath: websiteBackupOperationStorePath });
+  return await registry.reconcileInterruptedOperations({
+    resticManager,
+    resticRepositoryRegistry,
+    receiptStore,
+    websiteRegistry,
+  });
 }
 
 export const jobRecoveryRuntimeInternals = Object.freeze({
