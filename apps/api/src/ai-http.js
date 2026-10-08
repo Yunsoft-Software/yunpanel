@@ -387,8 +387,15 @@ export function mountAiRoutes(app, {
       });
 
       const sendEvent = (event) => {
+        if (response.destroyed || response.writableEnded || abortController.signal.aborted) {
+          return;
+        }
         ensureHeaders();
-        response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        try {
+          response.write(`event: ${event.type}\ndata: ${JSON.stringify(event)}\n\n`);
+        } catch {
+          // ignore stream write error if socket closed
+        }
       };
 
       try {
@@ -407,13 +414,21 @@ export function mountAiRoutes(app, {
           signal: abortController.signal,
           authorizeActor: request.reauthorize || request.authorizeActor || undefined,
         });
-        if (headersSent) {
-          response.end();
-        } else {
-          ensureHeaders();
-          response.end();
+        if (!response.destroyed && !response.writableEnded) {
+          if (headersSent) {
+            response.end();
+          } else {
+            ensureHeaders();
+            response.end();
+          }
         }
       } catch (err) {
+        if (abortController.signal.aborted || response.destroyed || response.writableEnded) {
+          if (!response.destroyed && !response.writableEnded) {
+            try { response.end(); } catch {}
+          }
+          return;
+        }
         if (!headersSent && !response.headersSent) {
           const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600
             ? err.status
@@ -426,7 +441,13 @@ export function mountAiRoutes(app, {
           });
         }
         sendEvent({ type: 'error', code: err.code || 'chat_error', message: err.message });
-        response.end();
+        if (!response.destroyed && !response.writableEnded) {
+          try {
+            response.end();
+          } catch {
+            // ignore
+          }
+        }
       }
     });
   }

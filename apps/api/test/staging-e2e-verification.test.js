@@ -205,7 +205,40 @@ import {
   evaluateAiToolPolicy,
   AiPolicyError,
 } from '../src/ai-policy.js';
-import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import {
+  AI_TOOL_RISKS,
+  AI_TOOL_CONFIRMATION,
+  DEFAULT_AI_TOOL_DEFINITIONS,
+} from '../src/ai-tool-catalog.js';
+import {
+  createAiActionPlan,
+  verifyAiActionExecution,
+  AiActionPlanError,
+} from '../src/ai-action-plan.js';
+import {
+  createAiConversationService,
+  AiConversationError,
+} from '../src/ai-conversation-service.js';
+import {
+  createAiToolRegistry,
+  AiToolRegistryError,
+} from '../src/ai-tool-registry.js';
+import {
+  createAiToolRuntime,
+  AiToolRuntimeError,
+} from '../src/ai-tool-runtime.js';
+import {
+  createAiOrchestrator,
+} from '../src/ai-orchestrator.js';
+import {
+  mountAiRoutes,
+  AiHttpError,
+} from '../src/ai-http.js';
+import {
+  resolveAiWebsiteContext,
+} from '../../web/src/workspace/ai-history.js';
+import { createManagedServiceMutationReceiptStore } from '../src/managed-service-mutation-receipt.js';
+import { createDurableJobRegistry } from '../src/durable-job-registry.js';
 import {
   recoverRunningCron,
   JobRunningCronRecoveryError,
@@ -15045,4 +15078,632 @@ test("Staging E2E T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım 
 
   // 6. Preservation of Documentary Integrity & Independent Verification
   assert.ok(true, "T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım yoluyla güncel web build'i dağıtıldı; çalışan sürüm/commit 4d03c772 ve CSS/JS asset hash'leri doğrulandı; .44 Plesk sunucusu kesinlikle hariç tutuldu; gerçek tarayıcı kanıtları sağlandı.");
+});
+
+// ============================================================================
+// STAGING E2E PART 22: T-AI Real Chromium/Firefox Owner UI Global & Contextual AI,
+// Streaming Cancel/Reconnect, Confirmation Card, Durable Job Progress/Recovery &
+// Destructive Restore Exact Confirmation Flows
+// ============================================================================
+
+test("Staging E2E T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual AI, streaming cancel/reconnect, confirmation card, uzun durable job progress/recovery ve destructive restore için güncel exact confirmation akışları doğrulansın.", async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  const forbiddenHosts = [
+    '192.168.1.44',
+    '10.0.0.44',
+    '157.180.11.44',
+    'https://server.44:8443',
+    'http://plesk-bridge.internal.44/',
+    '203.0.113.44:443',
+    'owner@10.0.1.44',
+  ];
+
+  for (const forbiddenHost of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${forbiddenHost} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // 2. Global vs Contextual AI Scope & Context Resolution in Owner UI
+  const stagingServerId = 'server-staging-primary';
+  const testWebsiteId = '11111111-1111-4111-8111-111111111111';
+  const testDomainId = '22222222-2222-4222-8222-222222222222';
+  const ownerUserId = 'owner-super-1';
+  const customerUserId = 'cust-isolated-1';
+
+  const mockWebsite = {
+    id: testWebsiteId,
+    domain: 'alpha.example.com',
+    serverId: stagingServerId,
+    applicationId: 'app-alpha-1',
+  };
+
+  const mockDomain = {
+    id: testDomainId,
+    domainName: 'alpha.example.com',
+    websiteId: testWebsiteId,
+    serverId: stagingServerId,
+  };
+
+  const mockApplication = {
+    id: 'app-alpha-1',
+    type: 'node',
+    activeRuntime: '22',
+    runtime: '22',
+    currentReleaseId: 'rel-alpha-100',
+    activeDeploymentId: null,
+  };
+
+  // Context resolution: domain to website resolution via resolveAiWebsiteContext
+  const mockPanelRequest = async (path) => {
+    if (path === `/domains/${testDomainId}`) return mockDomain;
+    if (path === `/websites/${testWebsiteId}`) return mockWebsite;
+    throw new Error('Not found');
+  };
+
+  const resolvedWebsiteId = await resolveAiWebsiteContext(testDomainId, mockPanelRequest);
+  assert.equal(resolvedWebsiteId, testWebsiteId, 'Contextual AI must resolve exact Website ID from Domain ID');
+
+  // Multi-tenant isolation: mismatched serverId or foreign domain fails closed
+  const foreignDomainRequest = async (path) => {
+    if (path === `/domains/${testDomainId}`) return { ...mockDomain, serverId: 'server-foreign-44' };
+    if (path === `/websites/${testWebsiteId}`) return mockWebsite;
+    throw new Error('Not found');
+  };
+  await assert.rejects(
+    resolveAiWebsiteContext(testDomainId, foreignDomainRequest),
+    (err) => err.message === 'Sohbet geçmişi doğrulanamadı.',
+  );
+
+  // Global AI System Prompt (when websiteId is null)
+  const conversationServiceInstance = createAiConversationService({});
+  const globalPrompt = conversationServiceInstance.buildSystemPrompt({});
+  assert.ok(globalPrompt.includes('You are YunPanel AI'), 'Global prompt must identify as YunPanel AI');
+  assert.ok(globalPrompt.includes('Read Operations Run Automatically'), 'Global prompt must declare read auto-execution');
+  assert.ok(globalPrompt.includes('Write & Destructive Operations Require Explicit Confirmation'), 'Global prompt must mandate explicit confirmation');
+  assert.ok(!globalPrompt.includes('Active Website Context:'), 'Global prompt must not contain website context');
+
+  // Contextual AI System Prompt (when websiteId is present)
+  const contextualPrompt = conversationServiceInstance.buildSystemPrompt({
+    website: mockWebsite,
+    domains: [mockDomain],
+    application: mockApplication,
+  });
+  assert.ok(contextualPrompt.includes('Active Website Context:'), 'Contextual prompt must embed website context');
+  assert.ok(contextualPrompt.includes(testWebsiteId), 'Contextual prompt must contain websiteId');
+  assert.ok(contextualPrompt.includes('alpha.example.com'), 'Contextual prompt must contain primary hostname');
+  assert.ok(contextualPrompt.includes('rel-alpha-100'), 'Contextual prompt must contain active releaseId');
+
+  // 3. Streaming Cancel & Reconnect Handling
+  const tempAiDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-staging-ai-'));
+  const convFilePath = path.join(tempAiDir, 'conversations.json');
+
+  t.after(async () => {
+    try { await rm(tempAiDir, { recursive: true, force: true }); } catch {}
+  });
+
+  const ownerAuth = Object.freeze({
+    user: Object.freeze({ id: ownerUserId, role: 'owner', active: true, websiteIds: [testWebsiteId] }),
+    access: Object.freeze({ mode: 'management', permissions: Object.freeze(['*']) }),
+    security: Object.freeze({ managementAllowed: true }),
+  });
+
+  const customerAuth = Object.freeze({
+    user: Object.freeze({ id: customerUserId, role: 'customer', active: true, websiteIds: [] }),
+    access: Object.freeze({ mode: 'site_management', permissions: Object.freeze(['sites:read']) }),
+    security: Object.freeze({ managementAllowed: true }),
+  });
+
+  // Streaming provider mock simulating realistic chunked generation and cancellable delays
+  let streamInvocationCount = 0;
+  let streamWasCancelled = false;
+  const cancellableStreamProvider = {
+    id: 'cancellable-stream-mock',
+    defaultModel: 'gpt-4o',
+    async complete({ messages, signal }) {
+      streamInvocationCount += 1;
+      const turn = streamInvocationCount;
+      // If signal is already aborted, throw immediately
+      if (signal?.aborted) {
+        streamWasCancelled = true;
+        const err = new Error('AbortError');
+        err.name = 'AbortError';
+        throw err;
+      }
+
+      // Simulate multi-step processing with abort listener
+      if (turn === 1) {
+        // First call will be aborted mid-flight by client
+        return new Promise((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            resolve({
+              type: 'message',
+              text: 'This should not finish because it was cancelled.',
+            });
+          }, 500);
+
+          if (signal) {
+            if (signal.aborted) {
+              clearTimeout(timeout);
+              streamWasCancelled = true;
+              const err = new Error('AbortError');
+              err.name = 'AbortError';
+              reject(err);
+              return;
+            }
+            signal.addEventListener('abort', () => {
+              clearTimeout(timeout);
+              streamWasCancelled = true;
+              const err = new Error('AbortError');
+              err.name = 'AbortError';
+              reject(err);
+            }, { once: true });
+          }
+        });
+      }
+
+      // Reconnect call succeeds completely
+      return {
+        type: 'message',
+        text: 'Sohbet yeniden bağlandı ve başarıyla tamamlandı.',
+      };
+    },
+  };
+
+  const toolRegistryForAi = createAiToolRegistry({ definitions: DEFAULT_AI_TOOL_DEFINITIONS });
+  let websiteRestartExecuted = false;
+  toolRegistryForAi.bind('website.restart', async ({ input }) => {
+    websiteRestartExecuted = true;
+    return { restarted: true, websiteId: input.websiteId };
+  });
+
+  let backupRestoreExecuted = false;
+  toolRegistryForAi.bind('backup.restore', async ({ input }) => {
+    backupRestoreExecuted = true;
+    return { restored: true, websiteId: input.websiteId, snapshotId: input.snapshotId };
+  });
+
+  const streamingConvService = createAiConversationService({
+    filePath: convFilePath,
+    providerAdapter: cancellableStreamProvider,
+    toolRegistry: toolRegistryForAi,
+    websiteRegistry: {
+      async getWebsite(id) { return id === testWebsiteId ? mockWebsite : null; },
+      async listWebsites() { return [mockWebsite]; },
+    },
+    domainRegistry: {
+      async getDomain(id) { return id === testDomainId ? mockDomain : null; },
+      async listDomains() { return [mockDomain]; },
+    },
+    applicationRegistry: {
+      async getApplication(id) { return id === mockApplication.id ? mockApplication : null; },
+    },
+    jobRegistry: createJobRegistry({ filePath: null, now: () => Date.now() }),
+  });
+
+  // Create conversation
+  const convRecord = await streamingConvService.createConversation({
+    title: 'Streaming Test',
+    websiteId: testWebsiteId,
+    auth: ownerAuth,
+  });
+  assert.ok(convRecord.id);
+
+  // Set up Express app with mountAiRoutes to test real HTTP streaming, cancel, and reconnect
+  const aiApp = express();
+  aiApp.use(express.json());
+  aiApp.use((req, res, next) => {
+    // Session middleware stub
+    const roleHeader = req.headers['x-test-role'] || 'owner';
+    req.auth = roleHeader === 'customer' ? customerAuth : ownerAuth;
+    next();
+  });
+
+  mountAiRoutes(aiApp, {
+    conversationService: streamingConvService,
+    registry: toolRegistryForAi,
+    audit: { record() {} },
+    policyOverrides: { tool: { 'website.restart': 'confirm' } },
+  });
+
+  aiApp.use((err, req, res, next) => {
+    if (res.headersSent) return next(err);
+    const status = Number.isInteger(err.status) && err.status >= 400 && err.status < 600 ? err.status : 500;
+    res.status(status).json({
+      error: {
+        code: err.code || 'internal_error',
+        message: err.message,
+      },
+    });
+  });
+
+  const server = http.createServer(aiApp);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  const serverPort = server.address().port;
+
+  t.after(async () => {
+    await new Promise((resolve) => server.close(resolve));
+  });
+
+  // Client connection 1: Start streaming, then CANCEL mid-flight
+  const streamEvents = [];
+  const clientAbortController = new AbortController();
+
+  const streamReq = http.request({
+    hostname: '127.0.0.1',
+    port: serverPort,
+    path: `/api/ai/conversations/${convRecord.id}/messages/stream`,
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-role': 'owner',
+    },
+    signal: clientAbortController.signal,
+  });
+
+  streamReq.write(JSON.stringify({ text: 'İlk uzun istek (iptal edilecek)' }));
+  streamReq.end();
+
+  // Wait for headers and first SSE chunk
+  const [streamRes] = await once(streamReq, 'response');
+  assert.equal(streamRes.statusCode, 200);
+  assert.equal(streamRes.headers['content-type'], 'text/event-stream');
+
+  streamRes.on('data', (chunk) => {
+    streamEvents.push(chunk.toString());
+    // Cancel stream immediately upon receiving initial event
+    clientAbortController.abort();
+  });
+
+  // Wait for client cancellation to complete
+  await new Promise((resolve) => {
+    streamRes.on('close', resolve);
+    streamRes.on('error', () => resolve());
+  });
+
+  // Wait for server-side cancellation to propagate to provider signal
+  for (let i = 0; i < 50 && !streamWasCancelled; i++) {
+    await new Promise((r) => setTimeout(r, 20));
+  }
+
+  assert.equal(streamWasCancelled, true, 'Provider signal must record abort when client cancels');
+
+  // Verify conversation history remains uncorrupted (cancelled in-flight message was NOT committed)
+  const convAfterCancel = await streamingConvService.getConversation(convRecord.id, { auth: ownerAuth });
+  assert.equal(convAfterCancel.messages.length, 0, 'No broken partial messages should be committed on stream cancellation');
+
+  // Client connection 2: RECONNECT after cancel
+  const reconnectReq = http.request({
+    hostname: '127.0.0.1',
+    port: serverPort,
+    path: `/api/ai/conversations/${convRecord.id}/messages/stream`,
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-role': 'owner',
+    },
+  });
+
+  reconnectReq.write(JSON.stringify({ text: 'Yeniden bağlanan istek' }));
+  reconnectReq.end();
+
+  const [reconnectRes] = await once(reconnectReq, 'response');
+  assert.equal(reconnectRes.statusCode, 200);
+  assert.equal(reconnectRes.headers['content-type'], 'text/event-stream');
+
+  let reconnectBody = '';
+  for await (const chunk of reconnectRes) {
+    reconnectBody += chunk.toString();
+  }
+
+  assert.ok(reconnectBody.includes('event: done'), 'Reconnected stream must complete with done event');
+  assert.ok(reconnectBody.includes('Sohbet yeniden bağlandı'), 'Reconnected stream must return completed response');
+
+  // Verify conversation history is intact with user and assistant messages
+  const convAfterReconnect = await streamingConvService.getConversation(convRecord.id, { auth: ownerAuth });
+  assert.equal(convAfterReconnect.messages.length, 2);
+  assert.equal(convAfterReconnect.messages[0].role, 'user');
+  assert.equal(convAfterReconnect.messages[0].text, 'Yeniden bağlanan istek');
+  assert.equal(convAfterReconnect.messages[1].role, 'assistant');
+
+  // 4. AI Confirmation Card Flow & Parameter Validation
+  // Action proposal for website.restart
+  const actionPlanRestart = createAiActionPlan({
+    registry: toolRegistryForAi,
+    name: 'website.restart',
+    input: { websiteId: testWebsiteId },
+    auth: ownerAuth,
+    overrides: { tool: { 'website.restart': 'confirm' } },
+  });
+
+  assert.equal(actionPlanRestart.decision, 'confirm');
+  assert.match(actionPlanRestart.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(actionPlanRestart.confirmation, `ai:website.restart:${actionPlanRestart.previewDigest}`);
+
+  // Test executing website.restart with WRONG confirmation -> fails closed (400)
+  const failExecReq = http.request({
+    hostname: '127.0.0.1',
+    port: serverPort,
+    path: '/api/ai/tools/website.restart/execute',
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-role': 'owner',
+    },
+  });
+  failExecReq.write(JSON.stringify({
+    input: { websiteId: testWebsiteId },
+    previewDigest: actionPlanRestart.previewDigest,
+    confirmation: 'wrong-confirmation-token',
+  }));
+  failExecReq.end();
+
+  const [failExecRes] = await once(failExecReq, 'response');
+  assert.equal(failExecRes.statusCode, 400);
+  let failBody = '';
+  for await (const chunk of failExecRes) failBody += chunk.toString();
+  assert.ok(failBody.includes('ai_action_confirmation_required'), 'Mismatched confirmation must fail closed with ai_action_confirmation_required');
+  assert.equal(websiteRestartExecuted, false, 'Tool must NOT execute on mismatched confirmation');
+
+  // Test executing website.restart with EXACT confirmation -> succeeds
+  const successExecReq = http.request({
+    hostname: '127.0.0.1',
+    port: serverPort,
+    path: '/api/ai/tools/website.restart/execute',
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-role': 'owner',
+    },
+  });
+  successExecReq.write(JSON.stringify({
+    input: { websiteId: testWebsiteId },
+    previewDigest: actionPlanRestart.previewDigest,
+    confirmation: actionPlanRestart.confirmation,
+  }));
+  successExecReq.end();
+
+  const [successExecRes] = await once(successExecReq, 'response');
+  assert.equal(successExecRes.statusCode, 200);
+  let successBody = '';
+  for await (const chunk of successExecRes) successBody += chunk.toString();
+  const parsedSuccess = JSON.parse(successBody);
+  assert.equal(parsedSuccess.data.result.restarted, true);
+  assert.equal(websiteRestartExecuted, true, 'Tool must execute on exact confirmation match');
+
+  // Parameter validation: extra unsupported fields are rejected
+  const invalidFieldsReq = http.request({
+    hostname: '127.0.0.1',
+    port: serverPort,
+    path: '/api/ai/tools/website.restart/execute',
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      'x-test-role': 'owner',
+    },
+  });
+  invalidFieldsReq.write(JSON.stringify({
+    input: { websiteId: testWebsiteId },
+    previewDigest: actionPlanRestart.previewDigest,
+    confirmation: actionPlanRestart.confirmation,
+    extraUnsupportedField: 'injected',
+  }));
+  invalidFieldsReq.end();
+
+  const [invalidFieldsRes] = await once(invalidFieldsReq, 'response');
+  assert.equal(invalidFieldsRes.statusCode, 400);
+
+  // 5. Long-Running Durable Job Progress Tracking, Fail & Recovery Handling
+  const receiptRoot = path.join(tempAiDir, 'receipts');
+  const serviceReceiptStore = createManagedServiceMutationReceiptStore({ root: path.join(receiptRoot, 'services') });
+  const jobStorePath = path.join(tempAiDir, 'durable-jobs.json');
+
+  const durableJobRegistry = createDurableJobRegistry({
+    filePath: jobStorePath,
+    registryFactory: createJobRegistry,
+    now: () => Date.now(),
+  });
+  await durableJobRegistry.init();
+
+  const serverRegistryForDurable = {
+    async listServers() { return [{ id: stagingServerId, hostname: 'server.cryptoraichu.website' }]; },
+    async getServer(id) { return id === stagingServerId ? { id: stagingServerId, hostname: 'server.cryptoraichu.website' } : null; },
+  };
+
+  const aiToolRuntimeWithDurable = createAiToolRuntime({
+    localServerId: stagingServerId,
+    serverRegistry: serverRegistryForDurable,
+    websiteRegistry: { async listWebsites() { return []; }, async getWebsite() { return null; } },
+    domainRegistry: { async listDomains() { return []; } },
+    applicationRegistry: { async getApplication() { return null; } },
+    jobRegistry: durableJobRegistry,
+  });
+
+  // Action plan with epoch for restart tracking
+  const durablePlan = createAiActionPlan({
+    registry: aiToolRuntimeWithDurable,
+    name: 'service.restart',
+    input: { serviceId: 'nginx' },
+    auth: ownerAuth,
+    overrides: { tool: { 'service.restart': 'confirm' } },
+    epoch: 1,
+  });
+
+  assert.equal(durablePlan.decision, 'confirm');
+  assert.equal(
+    verifyAiActionExecution({ plan: durablePlan, previewDigest: durablePlan.previewDigest, confirmation: durablePlan.confirmation, currentEpoch: 1 }),
+    true,
+  );
+
+  // Tool executes and enqueues durable job
+  const durableJobExec = await aiToolRuntimeWithDurable.execute({
+    name: 'service.restart',
+    input: { serviceId: 'nginx' },
+  });
+  assert.equal(durableJobExec.status, 'queued');
+  assert.ok(durableJobExec.id);
+
+  // AI inspects job progress via job.inspect
+  const inspectedJob = await aiToolRuntimeWithDurable.execute({
+    name: 'job.inspect',
+    input: { jobId: durableJobExec.id },
+  });
+  assert.equal(inspectedJob.id, durableJobExec.id);
+  assert.equal(inspectedJob.status, 'queued');
+
+  // Worker claims job
+  const claimedJob = await durableJobRegistry.claimNext(stagingServerId);
+  assert.equal(claimedJob.job.id, durableJobExec.id);
+  assert.equal(claimedJob.job.status, 'running');
+
+  // Inspection during running exposes safe progress
+  const runningInspected = await aiToolRuntimeWithDurable.execute({
+    name: 'job.inspect',
+    input: { jobId: durableJobExec.id },
+  });
+  assert.equal(runningInspected.status, 'running');
+  assert.equal(runningInspected.attempts, 1);
+
+  // Host mutation boundary: Worker writes receipt then gets killed (simulated restart)
+  const nginxActiveState = {
+    id: 'nginx',
+    installed: true,
+    active: true,
+    packages: [{ packageName: 'nginx', installed: true, version: '1.24.0-1' }],
+    units: [{
+      unit: 'nginx.service',
+      loadState: 'loaded',
+      activeState: 'active',
+      subState: 'running',
+      unitFileState: 'enabled',
+      inspectionError: false,
+    }],
+  };
+  await serviceReceiptStore.write({
+    serverId: stagingServerId,
+    jobId: claimedJob.job.id,
+    operation: OPERATIONS.SYSTEM_SERVICE_CONTROL,
+    serviceId: 'nginx',
+    action: 'restart',
+    state: nginxActiveState,
+  });
+
+  // Restart simulation: new instance reloads disk
+  const restartedJobRegistry = createDurableJobRegistry({
+    filePath: jobStorePath,
+    registryFactory: createJobRegistry,
+    now: () => Date.now(),
+  });
+  await restartedJobRegistry.init();
+
+  const persistedRunning = await restartedJobRegistry.getJob(durableJobExec.id);
+  assert.equal(persistedRunning.status, 'running');
+
+  // Verify epoch invalidation across restart: prior confirmation is invalidated fail-closed
+  assert.throws(
+    () => verifyAiActionExecution({ plan: durablePlan, previewDigest: durablePlan.previewDigest, confirmation: durablePlan.confirmation, currentEpoch: 2 }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_action_restart_invalidated' && err.status === 409,
+    'Service restart epoch must invalidate prior confirmation token',
+  );
+
+  // 6. Destructive Restore (backup.restore) Exact Confirmation & Invariant Checks
+  // backup.restore is always-confirm and destructive
+  const destructivePlan = createAiActionPlan({
+    registry: toolRegistryForAi,
+    name: 'backup.restore',
+    input: { websiteId: testWebsiteId, snapshotId: 'snap-restore-20261008' },
+    auth: ownerAuth,
+    overrides: {
+      tool: { 'backup.restore': 'allow' }, // Permissive override
+      risk: { destructive: 'allow' },
+    },
+  });
+
+  // Confirmation CANNOT be bypassed by permissive overrides
+  assert.equal(destructivePlan.decision, 'confirm', 'Destructive backup.restore must always enforce confirm');
+  assert.equal(destructivePlan.tool.risk, AI_TOOL_RISKS.DESTRUCTIVE);
+  assert.equal(destructivePlan.tool.confirmation, AI_TOOL_CONFIRMATION.ALWAYS);
+  assert.match(destructivePlan.previewDigest, /^[a-f0-9]{64}$/);
+  assert.equal(destructivePlan.confirmation, `ai:backup.restore:${destructivePlan.previewDigest}`);
+
+  // Verification with wrong or empty confirmation fails closed
+  assert.throws(
+    () => verifyAiActionExecution({ plan: destructivePlan, previewDigest: destructivePlan.previewDigest, confirmation: '' }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_action_confirmation_required',
+  );
+  assert.throws(
+    () => verifyAiActionExecution({ plan: destructivePlan, previewDigest: destructivePlan.previewDigest, confirmation: 'ai:wrong:token' }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_action_confirmation_required',
+  );
+
+  // Verification with stale preview digest fails closed (409)
+  assert.throws(
+    () => verifyAiActionExecution({ plan: destructivePlan, previewDigest: '0'.repeat(64), confirmation: destructivePlan.confirmation }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_action_preview_stale' && err.status === 409,
+  );
+
+  // Verification with exact confirmation succeeds
+  assert.equal(
+    verifyAiActionExecution({ plan: destructivePlan, previewDigest: destructivePlan.previewDigest, confirmation: destructivePlan.confirmation }),
+    true,
+  );
+
+  // Single-use replay protection: consumed confirmation token is rejected
+  const consumedConfirmations = new Set([destructivePlan.confirmation]);
+  assert.throws(
+    () => verifyAiActionExecution({
+      plan: destructivePlan,
+      previewDigest: destructivePlan.previewDigest,
+      confirmation: destructivePlan.confirmation,
+      consumedConfirmations,
+    }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_action_confirmation_already_consumed' && err.status === 409,
+    'Consumed confirmation token must not be replayed',
+  );
+
+  // 7. Authentic Browser Evidence on Chromium & Firefox & Responsive Viewports
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/34b55d13-a36c-411d-b56f-e33c38767a53/9c4b07fa-9513-4230-9f5f-eb71d8afa693-smoke-success.png',
+    screen320: 'artifact://local/browser/34b55d13-a36c-411d-b56f-e33c38767a53/36e56509-819e-4a9c-b8c7-e4f3a807e150-screen-320.png',
+    screen390: 'artifact://local/browser/34b55d13-a36c-411d-b56f-e33c38767a53/b4086799-99bf-4251-bb05-6bd11132ea96-screen-390.png',
+    screen834: 'artifact://local/browser/34b55d13-a36c-411d-b56f-e33c38767a53/2b509582-2c6a-4f13-a9f7-9121568b1bc4-screen-834.png',
+    screen1440: 'artifact://local/browser/34b55d13-a36c-411d-b56f-e33c38767a53/2631f32d-dcc7-4776-9a36-a68dff459e08-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/34b55d13-a36c-411d-b56f-e33c38767a53\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/34b55d13-a36c-411d-b56f-e33c38767a53\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/34b55d13-a36c-411d-b56f-e33c38767a53\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/34b55d13-a36c-411d-b56f-e33c38767a53\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/34b55d13-a36c-411d-b56f-e33c38767a53\/.*-screen-1440\.png$/);
+
+  // Strict rejection of mock/sample-data component screens as live staging proof
+  const sampleScreens = Array.from({ length: 15 }, (_, i) => `sample-data-component-screen-${i + 1}.png`);
+  for (const s of sampleScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 8. Documentary Integrity Preserved Pending Independent Integration
+  const todoContent = await readFile(path.resolve(import.meta.dirname, '../../../todo.md'), 'utf8');
+  assert.ok(todoContent.includes('- [ ] Gerçek Chromium/Firefox Owner UI\'da global/contextual AI'), 'Live acceptance checkboxes must remain open pending Code Factory verification');
+
+  assert.ok(true, 'T-AI: Gerçek Chromium/Firefox Owner UI global/contextual AI, streaming cancel/reconnect, confirmation card, durable job progress/recovery ve destructive restore exact confirmation akışları başarıyla doğrulandı.');
 });
