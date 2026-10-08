@@ -103,12 +103,12 @@ export default function ResellerCustomersPage() {
         {state.status !== 'error' && !page && <p role="status">Müşteriler yükleniyor…</p>}
         <p className="ws-muted">Bu ekran paket, abonelik, sahiplik transferi veya site grant'i oluşturmaz. Hesabı askıya almak Website süreçlerini durdurmaz.</p>
         {page?.accounts?.some((a) => !a.active) && (
-          <p className="ws-muted" style={{ color: 'var(--ws-color-danger, #b91c1c)' }}>
+          <p className="ws-muted" style={{ color: 'var(--ws-danger)' }}>
             <strong>Kaynak Kilidi:</strong> Askıya alınan müşterilere site tahsis edilemez; barındırma kaynakları kilitlidir.
           </p>
         )}
         {page?.accounts?.some((a) => a.quotas?.maxWebsites !== null && a.quotas?.maxWebsites !== undefined && (a.usage?.websites ?? 0) >= a.quotas.maxWebsites) && (
-          <p className="ws-muted" style={{ color: 'var(--ws-color-warning, #b45309)' }}>
+          <p className="ws-muted" style={{ color: 'var(--ws-warning)' }}>
             <strong>Kota Sınırı:</strong> Web sitesi kotası dolan müşterilere yeni site tahsis etmek için önce &quot;Kota tahsis et&quot; ile müşteri limitini yükseltin.
           </p>
         )}
@@ -142,7 +142,7 @@ export default function ResellerCustomersPage() {
             </td>
             <td>
               <span>{websiteUsage} / {websiteQuota === null || websiteQuota === undefined ? 'Sınırsız' : websiteQuota}</span>
-              {isWebsiteQuotaFull && <span className="ws-field-hint" style={{ color: 'var(--ws-color-warning, #d97706)', display: 'block' }}>Kota doldu</span>}
+              {isWebsiteQuotaFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>
             <td>
               <span>{account.usage?.diskMb ?? 0} MB / {account.quotas?.maxDiskMb ? account.quotas.maxDiskMb + ' MB' : 'Sınırsız'}</span>
@@ -402,12 +402,12 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
         <div className="ws-form">
           <ErrorNotice error={error ? (hostingAccountMessage(error) || error.message) : null} />
           {isSuspended && (
-            <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem', color: '#b91c1c', backgroundColor: '#fef2f2', padding: '0.75rem', borderRadius: '4px' }}>
+            <div className="ws-notice ws-notice-danger" role="alert" style={{ marginBottom: '1rem', color: 'var(--ws-danger)', backgroundColor: 'var(--ws-danger-soft)', padding: '0.75rem', borderRadius: '4px' }}>
               <strong>Hesap Kilitli:</strong> Askıya alınan müşterilere site tahsis edilemez.
             </div>
           )}
           {isQuotaFull && (
-            <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem', color: '#b45309', backgroundColor: '#fffbeb', padding: '0.75rem', borderRadius: '4px' }}>
+            <div className="ws-notice ws-notice-warning" role="alert" style={{ marginBottom: '1rem', color: 'var(--ws-warning)', backgroundColor: 'var(--ws-warning-soft)', padding: '0.75rem', borderRadius: '4px' }}>
               <strong>Kota Sınırı:</strong> Bu müşterinin web sitesi kotası dolmuştur ({websiteUsage} / {websiteQuota}). Yeni site tahsis etmeden önce müşterinin web sitesi kotasını yükseltin.
             </div>
           )}

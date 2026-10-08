@@ -11,7 +11,8 @@
 }
 
 .ws-terminal-surface {
-  background: #0b1020;
+  background: var(--ws-terminal-bg, var(--ws-canvas, #0b1020));
+  color: var(--ws-text);
   box-sizing: border-box;
   height: min(60vh, 640px);
   min-height: 320px;
@@ -24,12 +25,11 @@
   font-family: var(--ws-font-code, ui-monospace, 'SFMono-Regular', Consolas, 'Liberation Mono', monospace);
 }
 
-
 .ws-terminal-frame {
   width: 100%;
   min-height: 560px;
   border: 0;
-  background: #0b1020;
+  background: var(--ws-terminal-bg, var(--ws-canvas, #0b1020));
 }
 
 .ws-terminal-surface[hidden] {

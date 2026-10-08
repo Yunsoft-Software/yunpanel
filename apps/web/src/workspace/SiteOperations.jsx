@@ -47,7 +47,7 @@ export function ApplicationOperations({ domain, application, website = null, dep
       <div className="ws-section-body"><p className="ws-muted">Bu web sitesi YunPanel açık ürün uzantısı olan Docker ile çalışmaktadır. Konteyner yaşam döngüsü ve compose tanımları site bağlamı ile ilişkilidir.</p></div>
     </Section>;
   }
-  if (!application) return <Section title="Uygulama bağlantısı"><EmptyState icon="code" title="Bu hedef için uygulama seçilmedi" detail="Aynı sunucu ve portla eşleşen Node.js kaydını yukarıdan seçin. Statik sitelerin kalıcı uygulama bağlantısı henüz uygulanmadı; onları Uygulamalar ekranından yönetin." action={<Link to="/applications">Uygulama yönetimine git</Link>} /></Section>;
+  if (!application) return <Section title="Uygulama bağlantısı"><EmptyState icon="code" title="Bu hedef için uygulama seçilmedi" detail="Bu web sitesi için bağlı bir çalışma zamanı uygulaması seçilmedi. Uygulama ve yayın ayarlarını web sitesi yapılandırmasından yönetin." action={<Link to={siteHref(domain?.id, 'overview')}>Site genel bakışına dön</Link>} /></Section>;
   const locked = disabled || operation.busy || jobs.status !== 'ready' || applications.status !== 'ready' || resourceBusy('application', application.id);
   const id = encodeURIComponent(application.id);
   const websiteId = domain?.websiteId ? encodeURIComponent(domain.websiteId) : null;

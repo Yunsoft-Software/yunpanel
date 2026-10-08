@@ -63,7 +63,10 @@ export default function TerminalPanel({ target, title, description, unavailable 
       fontSize: 14,
       screenReaderMode: true,
       scrollback: 5_000,
-      theme: { background: '#0b1020', foreground: '#e5e7eb' },
+      theme: {
+        background: (typeof window !== 'undefined' && window.getComputedStyle ? window.getComputedStyle(document.documentElement).getPropertyValue('--ws-canvas').trim() : '') || '#0b1020',
+        foreground: (typeof window !== 'undefined' && window.getComputedStyle ? window.getComputedStyle(document.documentElement).getPropertyValue('--ws-text').trim() : '') || '#e5e7eb',
+      },
     });
     const fitAddon = new FitAddon();
     instance.loadAddon(fitAddon);

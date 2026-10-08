@@ -19,8 +19,33 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
   const locked = busy || mfaBusy || sensitive;
 
   useEffect(() => {
-    if (!dialog.current.open) dialog.current.showModal();
-    return () => pending.current?.abort();
+    const el = dialog.current;
+    const previous = document.activeElement;
+    if (el && !el.open) {
+      if (typeof el.showModal === 'function') {
+        try { el.showModal(); } catch {}
+      } else {
+        el.setAttribute('open', '');
+      }
+    }
+    const focusable = el ? Array.from(el.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')) : [];
+    const initial = el?.querySelector('[autofocus]') || focusable[0];
+    if (initial && typeof initial.focus === 'function') {
+      try { initial.focus(); } catch {}
+    }
+    return () => {
+      pending.current?.abort();
+      if (el && el.open) {
+        if (typeof el.close === 'function') {
+          try { el.close(); } catch {}
+        } else {
+          el.removeAttribute('open');
+        }
+      }
+      if (previous && typeof previous.focus === 'function') {
+        try { previous.focus({ preventScroll: true }); } catch {}
+      }
+    };
   }, []);
 
   useEffect(() => {
@@ -93,7 +118,45 @@ export default function AccountDialog({ session, onClose, onSession, onSignedOut
     });
   }
 
-  return <dialog ref={dialog} className="auth-dialog" aria-labelledby="account-heading" onCancel={close} onClose={close}>
+  const handleKeyDown = (event) => {
+    if (event.key === 'Escape') {
+      if (locked) {
+        event.preventDefault();
+        return;
+      }
+      event.preventDefault();
+      close();
+      return;
+    }
+    if (event.key === 'Tab') {
+      const el = dialog.current;
+      if (!el) return;
+      const focusable = Array.from(el.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        return;
+      }
+      if (focusable.length === 1) {
+        event.preventDefault();
+        focusable[0].focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      } else if (!el.contains(document.activeElement)) {
+        event.preventDefault();
+        (event.shiftKey ? last : first).focus();
+      }
+    }
+  };
+
+  return <dialog ref={dialog} className="auth-dialog" aria-modal="true" aria-labelledby="account-heading" onKeyDown={handleKeyDown} onCancel={close} onClose={close}>
     <header><h2 id="account-heading">Hesabım</h2><button type="button" disabled={locked} onClick={close}>Kapat</button></header>
     {error && <p className="auth-error" role="alert">{error}</p>}
     {sensitive && <p className="auth-notice" role="status">Pencereyi kapatmadan önce kurtarma kodlarını aşağıdan kaydedip onaylayın.</p>}
