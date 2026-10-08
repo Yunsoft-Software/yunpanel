@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion } from '../session-client.js';
 import MailboxRemovalPanel from './MailboxRemovalPanel.jsx';

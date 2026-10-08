@@ -198,3 +198,122 @@ test('phpMyAdmin browser handoff protocol constants stay pinned to the protected
   assert.equal(phpMyAdminBrowserHandoffInternals.signonPath, '/tools/phpmyadmin/__yunpanel/signon');
   assert.equal(phpMyAdminBrowserHandoffInternals.gatewayBase, '/tools/phpmyadmin/');
 });
+
+test('phpMyAdmin browser handoff yields visible error for missing packages', async () => {
+  for (const errCode of ['managed_service_not_installed', 'phpmyadmin_not_installed', 'phpmyadmin_package_missing', 'phpmyadmin_packages_missing']) {
+    const locationImpl = browserLocation();
+    await assert.rejects(
+      openWebsitePhpMyAdmin({
+        serverId,
+        websiteId,
+        credentialId,
+        issueHandoff: async () => {
+          const err = new Error('The host service is not installed.');
+          err.code = errCode;
+          throw err;
+        },
+        locationImpl,
+        now: () => 10_000,
+      }),
+      (error) => error instanceof PhpMyAdminBrowserHandoffError
+        && error.code === 'phpmyadmin_package_missing'
+        && error.message.includes('paketleri'),
+    );
+    assert.deepEqual(locationImpl.assigned, []);
+  }
+});
+
+test('phpMyAdmin browser handoff yields visible error for popup blockers', async () => {
+  const locationImpl = browserLocation();
+
+  // Case A: targetWindow is null (popup blocked on window.open)
+  await assert.rejects(
+    openWebsitePhpMyAdmin({
+      serverId,
+      websiteId,
+      credentialId,
+      issueHandoff: async () => handoff(),
+      targetWindow: null,
+      locationImpl,
+      now: () => 10_000,
+    }),
+    (error) => error instanceof PhpMyAdminBrowserHandoffError
+      && error.code === 'phpmyadmin_popup_blocked'
+      && error.message.includes('açılır pencere'),
+  );
+
+  // Case B: targetWindow is closed
+  await assert.rejects(
+    openWebsitePhpMyAdmin({
+      serverId,
+      websiteId,
+      credentialId,
+      issueHandoff: async () => handoff(),
+      targetWindow: { closed: true, location: { assign() {} } },
+      locationImpl,
+      now: () => 10_000,
+    }),
+    (error) => error instanceof PhpMyAdminBrowserHandoffError
+      && error.code === 'phpmyadmin_popup_blocked',
+  );
+
+  // Case C: locationImpl is closed
+  await assert.rejects(
+    openWebsitePhpMyAdmin({
+      serverId,
+      websiteId,
+      credentialId,
+      issueHandoff: async () => handoff(),
+      locationImpl: { origin: 'https://panel.example.test', closed: true, assign() {} },
+      now: () => 10_000,
+    }),
+    (error) => error instanceof PhpMyAdminBrowserHandoffError
+      && error.code === 'phpmyadmin_popup_blocked',
+  );
+  assert.deepEqual(locationImpl.assigned, []);
+
+  // Case D: targetWindow is open and valid, navigates targetWindow
+  const validWindow = { closed: false, location: { assign(url) { validWindow.assigned = url; } }, assigned: null };
+  const fetchImpl = async () => ({
+    ok: true,
+    status: 200,
+    url: 'https://panel.example.test/tools/phpmyadmin/',
+  });
+  await openWebsitePhpMyAdmin({
+    serverId,
+    websiteId,
+    credentialId,
+    issueHandoff: async () => handoff(),
+    targetWindow: validWindow,
+    fetchImpl,
+    locationImpl,
+    now: () => 10_000,
+  });
+  assert.equal(validWindow.assigned, '/tools/phpmyadmin/');
+  assert.deepEqual(locationImpl.assigned, []);
+});
+
+test('phpMyAdmin browser handoff yields visible error for backend rejections', async () => {
+  for (const errCode of ['phpmyadmin_handoff_authorized_required', 'phpmyadmin_handoff_forbidden', 'site_scope_forbidden']) {
+    const locationImpl = browserLocation();
+    await assert.rejects(
+      openWebsitePhpMyAdmin({
+        serverId,
+        websiteId,
+        credentialId,
+        issueHandoff: async () => {
+          const err = new Error('Forbidden');
+          err.code = errCode;
+          err.status = 403;
+          throw err;
+        },
+        locationImpl,
+        now: () => 10_000,
+      }),
+      (error) => error instanceof PhpMyAdminBrowserHandoffError
+        && error.code === 'phpmyadmin_handoff_forbidden'
+        && error.message.includes('yetkili değil'),
+    );
+    assert.deepEqual(locationImpl.assigned, []);
+  }
+});

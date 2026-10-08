@@ -589,6 +589,7 @@ export function createAiToolRuntime({
         'website_not_found',
         'Website not found',
       );
+      await ensureResourceIdle(jobRegistry, 'website', website.id);
       const result = await websiteBackupService.executeBackup({
         websiteId: website.id,
         tags: ['ai-agent'],
@@ -605,6 +606,7 @@ export function createAiToolRuntime({
         'website_not_found',
         'Website not found',
       );
+      await ensureResourceIdle(jobRegistry, 'website', website.id);
       const result = await websiteRestoreService.executeRestore({
         websiteId: website.id,
         snapshotId: input.snapshotId,

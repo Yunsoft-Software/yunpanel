@@ -49,7 +49,7 @@ export default function MailWebmailPanel({ domain, onChanged }) {
         panelRequest('/certificates').catch(() => ({ data: [] })),
       ]);
       setData(webmailData);
-      const certList = Array.isArray(certsResponse?.data) ? certsResponse.data : [];
+      const certList = Array.isArray(certsResponse) ? certsResponse : Array.isArray(certsResponse?.data) ? certsResponse.data : [];
       setCertificates(certList);
       const targetHost = `webmail.${domain.domainName}`;
       const matchingCert = certList.find((c) =>

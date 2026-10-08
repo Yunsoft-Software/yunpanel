@@ -186,7 +186,7 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
             </p>
             {acmeEmailError && <ErrorNotice error={acmeEmailError} />}
             {acmeEmailSuccess && (
-              <p style={{ color: 'var(--ws-color-success, #10b981)', fontSize: '0.875rem', margin: '4px 0' }}>
+              <p style={{ color: 'var(--ws-success)', fontSize: '0.875rem', margin: '4px 0' }}>
                 ACME e-posta adresi başarıyla güncellendi.
               </p>
             )}

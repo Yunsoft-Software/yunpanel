@@ -15,13 +15,19 @@ const SECURITY_REASON_LABELS = Object.freeze({
   database_test_schema_present: 'Test veritabanı mevcut',
 });
 
-async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
+export async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
   const queued = await queue();
   observe(queued);
   refreshJobs();
-  const terminal = await waitForJob(queued.id);
-  updateJob(terminal);
-  return terminal;
+  try {
+    const terminal = await waitForJob(queued.id);
+    updateJob(terminal);
+    return terminal;
+  } catch (error) {
+    refreshJobs();
+    if (error.job) updateJob(error.job);
+    throw error;
+  }
 }
 
 export default function DatabasesPage() {
@@ -41,7 +47,7 @@ export default function DatabasesPage() {
   const [accessTarget, setAccessTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  const canAct = Boolean(server && servers.status === 'ready' && status === 'ready' && !busy);
+  const canAct = Boolean(server && servers.status === 'ready' && status === 'ready' && !busy && !loadError);
   const query = params.get('q') ?? '';
   const access = ['ready', 'attention'].includes(params.get('access')) ? params.get('access') : 'all';
 
@@ -100,7 +106,15 @@ export default function DatabasesPage() {
       await load();
       return scope === scopeGeneration.current ? terminal : null;
     } catch (failure) {
-      if (scope === scopeGeneration.current && failure.name !== 'AbortError') setError(failure.message);
+      if (scope === scopeGeneration.current && failure.name !== 'AbortError') {
+        const isCancelled = failure.code === 'cancelled' || failure.message?.includes('cancelled') || failure.job?.status === 'cancelled';
+        const isFailed = failure.code === 'failed' || failure.message?.includes('failed') || failure.job?.status === 'failed';
+        if (isCancelled || isFailed) {
+          setError(isCancelled ? 'İşlem iptal edildi. Formunuz korunuyor.' : 'İşlem başarısız oldu. İşlem merkezinden ayrıntıları inceleyin.');
+        } else {
+          setError(failure.message);
+        }
+      }
       return null;
     } finally {
       if (scope === scopeGeneration.current) { pending.current = false; setBusy(false); }
@@ -108,27 +122,41 @@ export default function DatabasesPage() {
   }
   async function create(event) {
     event.preventDefault();
+    if (!canAct) return;
     if (!validDatabaseName(name)) { setError('1–64 karakter kullanın: harf, rakam veya alt çizgi. Sistem adları kullanılamaz.'); return; }
     const requestedName = name;
     const terminal = await perform(() => createDatabase(server.id, requestedName));
     if (terminal) { setName(''); setCreateOpen(false); setCreatedName(requestedName); }
   }
   async function remove() {
-    if (!deleteTarget) return;
+    if (!canAct || !deleteTarget) return;
     const target = deleteTarget;
     const terminal = await perform(() => deleteDatabase(server.id, target.name));
     if (terminal) setDeleteTarget(null);
   }
   async function openPhpMyAdmin(ownership) {
-    if (!canAct || !ownership?.websiteId || !ownership?.credential?.id || pending.current) return;
+    if (!canAct || pending.current) return;
+    if (!ownership?.websiteId || !ownership?.credential?.id) return;
+    let targetWindow;
+    try {
+      targetWindow = typeof window !== 'undefined' && typeof window['open'] === 'function'
+        ? window['open']('about:blank', '_blank')
+        : undefined;
+    } catch {
+      targetWindow = null;
+    }
     const scope = scopeGeneration.current;
     pending.current = true; setBusy(true); setError(null);
     try {
       await openWebsitePhpMyAdmin({
         serverId: server.id, websiteId: ownership.websiteId,
         credentialId: ownership.credential.id, issueHandoff: createPhpMyAdminHandoff,
+        targetWindow,
       });
     } catch (failure) {
+      if (targetWindow && !targetWindow.closed) {
+        try { targetWindow.close(); } catch { /* Ignore popup close error */ }
+      }
       if (scope === scopeGeneration.current && failure.name !== 'AbortError') setError(failure.message);
     } finally {
       if (scope === scopeGeneration.current) { pending.current = false; setBusy(false); }
@@ -164,7 +192,7 @@ export default function DatabasesPage() {
             return <tr key={database.name} role="row"><td role="cell" data-label="Veritabanı"><div className="ws-db-name"><Icon name="database" size={20} /><div><strong>{database.name}</strong><small>{engineLabel}</small></div></div></td>
               <td role="cell" data-label="Site / Kullanıcı"><strong>{view.siteLabel}</strong><small>{database.ownership?.credential?.username ?? 'Kullanıcı tanımlanmamış'}</small></td>
               <td role="cell" data-label="Boyut">{database.sizeLabel}</td>
-              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : view.siteHref ? <LinkButton to={view.siteHref} icon="settings">Erişimi yapılandır</LinkButton> : <Button icon="settings" onClick={() => setAccessTarget(database)}>Siteye bağla</Button>}{!view.canOpen && <small>{view.detail}</small>}</div></td>
+              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : view.siteHref ? <><LinkButton to={view.siteHref} icon="settings">Erişimi yapılandır</LinkButton><small>{view.detail}</small></> : <><LinkButton to="/websites" icon="globe">Site seç</LinkButton><Button icon="settings" onClick={() => setAccessTarget(database)}>Siteye bağla</Button><small>{view.detail}</small></>}</div></td>
               <td role="cell" className="ws-row-end" data-label="İşlem"><Button icon="trash" disabled={!canAct} aria-label={`${database.name} veritabanını sil`} title="Veritabanını sil" onClick={() => { setError(null); setDeleteTarget(database); }}><span className="ws-sr-only">Sil</span></Button></td></tr>;
           })}</tbody></table></div>
           <footer className="ws-pagination"><span>{page.count} sonuç · {engineLabel} · {formatDatabaseBytes(inventory.totalBytes)}</span><div className="ws-actions"><Button disabled={page.page <= 1} onClick={() => filter('page', String(page.page - 1))}>Önceki</Button><span>{page.page} / {page.pages}</span><Button disabled={page.page >= page.pages} onClick={() => filter('page', String(page.page + 1))}>Sonraki</Button></div></footer>
@@ -182,6 +210,6 @@ export default function DatabasesPage() {
     </>}
     {createOpen && <Modal title="Veritabanı oluştur" busy={busy} onClose={() => { if (!busy) setCreateOpen(false); }}><ErrorNotice error={error} /><form className="ws-form" onSubmit={create}><label>Veritabanı adı<input value={name} onChange={(event) => setName(event.target.value)} placeholder="ornek_uygulama" maxLength={64} autoComplete="off" autoCapitalize="none" spellCheck={false} required autoFocus /><span className="ws-field-hint">Harf, rakam ve alt çizgi kullanın.</span></label><p className="ws-muted">Site bağlantısı ve veritabanı kullanıcısı, sitenin Kaynaklar bölümünden yönetilir.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => setCreateOpen(false)}>Vazgeç</Button><Button variant="primary" type="submit" disabled={!canAct || !validDatabaseName(name)}>{busy ? 'Oluşturuluyor…' : 'Veritabanı oluştur'}</Button></footer></form></Modal>}
     {accessTarget && <Modal title={`${accessTarget.name} · Erişim kurulumu`} onClose={() => setAccessTarget(null)}><p className="ws-muted">Bu veritabanı için kullanılabilir site bağlantısı bulunamadı. İlgili sitenin Kaynaklar bölümünü açıp veritabanını bağlayın ve kullanıcı oluşturun. phpMyAdmin yalnız o sitenin kullanıcısıyla açılır.</p><footer className="ws-modal-footer"><Button onClick={() => setAccessTarget(null)}>Kapat</Button><LinkButton to="/websites" variant="primary">Site seç</LinkButton></footer></Modal>}
-    {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Veritabanı kalıcı olarak silinir. Website bağı varsa backend işlemi engeller. Devam etmeden önce güncel bir yedeğiniz olduğundan emin olun." confirmation={deleteTarget.name} confirmLabel="Veritabanını sil" busy={busy} error={error} onCancel={() => { if (!busy) setDeleteTarget(null); }} onConfirm={remove} />}
+    {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Veritabanı kalıcı olarak silinir. Website bağı varsa backend işlemi engeller. Devam etmeden önce güncel bir yedeğiniz olduğundan emin olun." confirmation={deleteTarget.name} confirmLabel="Veritabanını sil" busy={busy} disabled={!canAct} error={error} onCancel={() => { if (!busy) setDeleteTarget(null); }} onConfirm={remove} />}
   </>;
 }

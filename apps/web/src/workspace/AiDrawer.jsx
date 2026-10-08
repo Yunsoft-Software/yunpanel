@@ -172,7 +172,7 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
         {detail.error && <div><ErrorNotice error={detail.error} /><Button onClick={() => scope.current?.reader.load(activeConvId)}>Sohbeti yeniden oku</Button></div>}
         <div className="ws-ai-messages" ref={messagesRef} role="log" aria-label="Sohbet mesajları" aria-live="polite">
           {detail.status === 'loading' && <p role="status">Sohbet açılıyor…</p>}
-          {!denied && detail.status !== 'loading' && (!activeConversation || !activeConversation.messages.length) && <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--text-muted, #6b7280)' }}>
+          {!denied && detail.status !== 'loading' && (!activeConversation || !activeConversation.messages.length) && <div style={{ textAlign: 'center', padding: '40px 20px', color: 'var(--ws-muted)' }}>
             <Icon name="terminal" size={32} /><h3 style={{ margin: '12px 0 6px 0', fontSize: '16px', color: 'inherit' }}>Nasıl yardımcı olabilirim?</h3>
             <p style={{ fontSize: '13px', maxWidth: '420px', margin: '0 auto 16px auto' }}>Sunucu sağlığı, Website logları, DNS, sertifika durumu veya yedekleri güvenle kontrol edebilir; onaylayacağınız yönetim işlemlerini başlatabilirsiniz.</p>
             <div className="ws-actions"><Button disabled={sending} onClick={() => handleSend('Sunucu sağlığını kontrol et')}>⚡ Sunucu sağlığı</Button>
@@ -181,10 +181,10 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
           </div>}
           {!denied && activeConversation?.messages.map((msg) => <div key={msg.id} style={{ display: 'flex', flexDirection: 'column', alignSelf: msg.role === 'user' ? 'flex-end' : 'flex-start', maxWidth: '85%', minWidth: 0, boxSizing: 'border-box' }}>
             <div style={{ padding: '10px 14px', borderRadius: '10px', fontSize: '14px', lineHeight: '1.5', whiteSpace: 'pre-wrap', wordBreak: 'break-word', overflowWrap: 'anywhere',
-              background: msg.role === 'user' ? 'var(--ws-accent, var(--primary-color, #2563eb))' : 'var(--ws-surface-subtle, var(--bg-secondary, #f3f4f6))', color: msg.role === 'user' ? 'var(--ws-on-accent, #ffffff)' : 'var(--ws-text, inherit)' }}
+              background: msg.role === 'user' ? 'var(--ws-accent)' : 'var(--ws-surface-subtle)', color: msg.role === 'user' ? 'var(--ws-on-accent)' : 'var(--ws-text)' }}
               aria-label={msg.role === 'user' ? 'Kullanıcı mesajı' : 'AI yanıtı'}>{msg.text}</div>
             {Array.isArray(msg.toolExecutions) && msg.toolExecutions.length > 0 && <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
-              {msg.toolExecutions.map((tool, idx) => <div key={idx} style={{ fontSize: '12px', color: 'var(--text-muted, #6b7280)', display: 'flex', alignItems: 'center', gap: '4px', overflowWrap: 'anywhere', wordBreak: 'break-all' }}><span style={{ color: 'var(--ws-success, #10b981)' }}>✓</span><code style={{ fontFamily: 'var(--ws-font-code, monospace)' }}>{tool.name}</code> çalıştırıldı</div>)}
+              {msg.toolExecutions.map((tool, idx) => <div key={idx} style={{ fontSize: '12px', color: 'var(--ws-muted)', display: 'flex', alignItems: 'center', gap: '4px', overflowWrap: 'anywhere', wordBreak: 'break-all' }}><span style={{ color: 'var(--ws-success)' }}>✓</span><code style={{ fontFamily: 'var(--ws-font-code, monospace)' }}>{tool.name}</code> çalıştırıldı</div>)}
             </div>}
             {Array.isArray(msg.proposals) && msg.proposals.length > 0 && <div style={{ marginTop: '8px', display: 'flex', flexDirection: 'column', gap: '8px', minWidth: 0, maxWidth: '100%' }}>
               {msg.proposals.map((prop) => <ActionProposalCard key={prop.id || prop.callId} proposal={prop} onExecuted={() => scope.current?.reader.load(active.current)} />)}
@@ -238,11 +238,11 @@ function ActionProposalCard({ proposal, onExecuted }) {
   return (
     <div
       style={{
-        border: '1px solid var(--ws-warning, #f59e0b)',
-        background: 'var(--ws-warning-soft, #fffbeb)',
+        border: '1px solid var(--ws-warning)',
+        background: 'var(--ws-warning-soft)',
         borderRadius: '8px',
         padding: '12px 14px',
-        color: 'var(--ws-warning, #92400e)',
+        color: 'var(--ws-warning)',
         minWidth: 0,
         maxWidth: '100%',
         boxSizing: 'border-box',
@@ -257,18 +257,18 @@ function ActionProposalCard({ proposal, onExecuted }) {
         </Badge>
       </div>
 
-      <p style={{ fontSize: '13px', margin: '0 0 8px 0', color: '#78350f' }}>
+      <p style={{ fontSize: '13px', margin: '0 0 8px 0', color: 'var(--ws-warning)' }}>
         AI bu işlemi gerçekleştirmek için yetki istiyor. Lütfen parametreleri kontrol edin.
       </p>
 
-      <div style={{ background: 'var(--ws-surface-subtle, #fef3c7)', padding: '8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--ws-font-code, monospace)', marginBottom: '10px', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
+      <div style={{ background: 'var(--ws-surface-subtle)', padding: '8px', borderRadius: '4px', fontSize: '12px', fontFamily: 'var(--ws-font-code, monospace)', marginBottom: '10px', overflowX: 'auto', whiteSpace: 'pre-wrap', wordBreak: 'break-all', overflowWrap: 'anywhere', maxWidth: '100%', boxSizing: 'border-box' }}>
         {JSON.stringify(proposal.input, null, 2)}
       </div>
 
-      {error && <div style={{ color: 'var(--ws-danger, #b91c1c)', fontSize: '12px', marginBottom: '8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{error}</div>}
+      {error && <div style={{ color: 'var(--ws-danger)', fontSize: '12px', marginBottom: '8px', overflowWrap: 'anywhere', wordBreak: 'break-word' }}>{error}</div>}
 
       {executed ? (
-        <div style={{ color: 'var(--ws-success, #047857)', fontWeight: 600, fontSize: '13px' }}>
+        <div style={{ color: 'var(--ws-success)', fontWeight: 600, fontSize: '13px' }}>
           ✓ İşlem başarıyla kuyruğa alındı.
         </div>
       ) : (
