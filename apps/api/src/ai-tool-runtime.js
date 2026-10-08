@@ -4,6 +4,7 @@ import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { DEFAULT_AI_TOOL_DEFINITIONS } from './ai-tool-catalog.js';
 import { createAiToolRegistry } from './ai-tool-registry.js';
 import { jobPublicView } from './job-registry.js';
+import { maskSecrets } from './secret-masker.js';
 
 export class AiToolRuntimeError extends Error {
   constructor(code, message, status = 400) {
@@ -478,7 +479,7 @@ export function createAiToolRuntime({
         source,
         limit,
         count: entries.length,
-        entries: Object.freeze(entries.slice(0, limit)),
+        entries: Object.freeze(entries.slice(0, limit).map((entry) => maskSecrets(entry))),
       });
     });
   }
