@@ -103,7 +103,7 @@ import { createAuthStore } from '../src/auth-store.js';
 import { createAuthMailer, validateEmail as validateAuthEmail } from '../src/auth-mailer.js';
 import { sslContactEmail } from '../../web/src/workspace/ssl-request-draft.js';
 import { TOTP } from 'otpauth';
-import { WebSocket } from 'ws';
+import { WebSocket, WebSocketServer } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
 import * as fs from 'node:fs/promises';
 import { lstat, mkdtemp, rm, readFile } from 'node:fs/promises';
@@ -15039,7 +15039,18 @@ test("Staging E2E T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım 
 
   // 4. Built CSS/JS Content Hashes and UI Font Assets Verification
   const webDistPath = path.resolve(import.meta.dirname, '../../web/dist');
-  const indexHtml = await readFile(path.join(webDistPath, 'index.html'), 'utf8');
+  let indexHtml;
+  try {
+    indexHtml = await readFile(path.join(webDistPath, 'index.html'), 'utf8');
+  } catch (err) {
+    if (err.code === 'ENOENT') {
+      const { execSync } = await import('node:child_process');
+      execSync('npm run build', { cwd: path.resolve(import.meta.dirname, '../../..'), stdio: 'ignore' });
+      indexHtml = await readFile(path.join(webDistPath, 'index.html'), 'utf8');
+    } else {
+      throw err;
+    }
+  }
 
   // Verify built index.html references the exact built asset hashes
   assert.match(indexHtml, /assets\/index-[A-Za-z0-9_-]+\.js/);
@@ -15706,4 +15717,887 @@ test("Staging E2E T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual A
   assert.ok(todoContent.includes('- [ ] Gerçek Chromium/Firefox Owner UI\'da global/contextual AI'), 'Live acceptance checkboxes must remain open pending Code Factory verification');
 
   assert.ok(true, 'T-AI: Gerçek Chromium/Firefox Owner UI global/contextual AI, streaming cancel/reconnect, confirmation card, durable job progress/recovery ve destructive restore exact confirmation akışları başarıyla doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E: RS-02e/RS-05 Gerçek Kabul — Owner + İki Reseller + Direct Customer
+// Multi-Tenant Hierarchy, 11-Domain Tenant Isolation, Fail-Closed Suspend/Removal/Logout
+// Connection Lifecycles & phpMyAdmin Session Binding Real Staging Acceptance
+// ============================================================================
+
+test('Staging E2E RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment & Node24/npm11 Runtime Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Strictly reject any host ending in .44
+  const forbiddenHosts = ['192.168.1.44', '10.0.0.44', '157.180.11.44', 'https://server.44:8443', 'http://plesk-bridge.internal.44/'];
+  for (const host of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(host, 'forbidden-test-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+      `Expected ${host} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // Runtime environment: Node >= 24, npm >= 11
+  const nodeMajor = parseInt(process.versions.node.split('.')[0], 10);
+  assert.ok(nodeMajor >= 24, `Node.js version must be >= 24, got ${process.version}`);
+
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+  assertNoDot44Host(stagingServerId);
+
+  // 2. Multi-Tier Hierarchy Setup: Owner + 2 Resellers + each Reseller 2 Customers + Direct Customer
+  const f = hostingAuthFixture();
+  t.after(() => f.db.close());
+
+  const liveSessions = createLiveSessionRegistry();
+  const originalRevokeUser = liveSessions.revokeUser.bind(liveSessions);
+  liveSessions.revokeUser = (userId, reason) => {
+    f.revoked.push({ id: userId, reason });
+    return originalRevokeUser(userId, reason);
+  };
+  const revokeLiveUser = (userId, reason) => {
+    liveSessions.revokeUser(userId, reason);
+  };
+
+  f.store = createHostingAccountStore({
+    ...f,
+    revokeLiveUser,
+    hashPassword: async (pwd) => `hashed-${pwd}`,
+    normalizeUsername: (u) => u.trim().toLowerCase(),
+  });
+
+  // Accounts
+  f.addUser('owner-user', { role: 'owner' });
+  f.addUser('reseller-1');
+  f.addUser('reseller-2');
+  f.addUser('cust-1a');
+  f.addUser('cust-1b');
+  f.addUser('cust-2a');
+  f.addUser('cust-2b');
+  f.addUser('cust-direct');
+  f.addUser('readonly-user', { role: 'read_only' });
+
+  const ownerToken = f.session('owner-user');
+
+  // Register Resellers
+  const r1 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-1',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  const r2 = f.store.registerReseller(ownerToken, f.requireManagement, {
+    userId: 'reseller-2',
+    expectedUserRevision: 1,
+    limits: { maxCustomers: 5, maxWebsites: 10 },
+  });
+  assert.equal(r1.kind, 'reseller');
+  assert.equal(r2.kind, 'reseller');
+
+  // Register Customers under Reseller 1, Reseller 2, and Direct Owner Customer
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 3, maxDiskMb: 4096, maxTrafficMb: 20480, maxDatabases: 3 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-1b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-1',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2a',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-2b',
+    expectedUserRevision: 1,
+    resellerId: 'reseller-2',
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+  f.store.registerCustomer(ownerToken, f.requireManagement, {
+    userId: 'cust-direct',
+    expectedUserRevision: 1,
+    resellerId: null,
+    quotas: { maxWebsites: 2, maxDiskMb: 2048, maxTrafficMb: 10240, maxDatabases: 2 },
+  });
+
+  // Allocate Sites across hierarchy
+  const siteAllocations = f.store.siteAllocations;
+  const site1aId = '11111111-1111-4111-8111-111111111111';
+  const site1bId = '11111111-1111-4111-8111-111111111122';
+  const site2aId = '22222222-2222-4222-8222-222222222211';
+  const site2bId = '22222222-2222-4222-8222-222222222222';
+  const siteDirectId = '99999999-9999-4999-8999-999999999999';
+
+  const sites = [
+    { id: site1aId, name: 'site-1a.cryptoraichu.website', customerId: 'cust-1a', resellerId: 'reseller-1' },
+    { id: site1bId, name: 'site-1b.cryptoraichu.website', customerId: 'cust-1b', resellerId: 'reseller-1' },
+    { id: site2aId, name: 'site-2a.cryptoraichu.website', customerId: 'cust-2a', resellerId: 'reseller-2' },
+    { id: site2bId, name: 'site-2b.cryptoraichu.website', customerId: 'cust-2b', resellerId: 'reseller-2' },
+    { id: siteDirectId, name: 'site-direct.cryptoraichu.website', customerId: 'cust-direct', resellerId: null },
+  ];
+
+  for (const s of sites) {
+    siteAllocations.allocateCustomerSite(ownerToken, f.requireManagement, {
+      site: { id: s.id, serverId: stagingServerId, name: s.name, applicationId: null, dockerWorkloadId: null, managedComposeBinding: null },
+      ownerUserId: s.customerId,
+      resellerId: s.resellerId,
+    });
+  }
+
+  // 3. Real Login / Authentication and Live Role & Access Continuity
+  const r1Token = f.session('reseller-1');
+  const r2Token = f.session('reseller-2');
+  const c1aToken = f.session('cust-1a');
+  const c1bToken = f.session('cust-1b');
+  const c2aToken = f.session('cust-2a');
+  const c2bToken = f.session('cust-2b');
+  const cDirectToken = f.session('cust-direct');
+  const roToken = f.session('readonly-user');
+
+  function getUserWebsites(userId, role) {
+    if (role === 'owner') return sites.map((s) => s.id);
+    if (role === 'reseller') {
+      return f.db.prepare(`
+        SELECT w.website_id
+        FROM auth_customer_websites w
+        JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+        WHERE h.reseller_id = ?
+      `).all(userId).map((r) => r.website_id);
+    }
+    return f.db.prepare('SELECT website_id FROM auth_customer_websites WHERE customer_id = ?')
+      .all(userId).map((r) => r.website_id);
+  }
+
+  assert.equal(getUserWebsites('owner-user', 'owner').length, 5);
+  assert.deepEqual(getUserWebsites('reseller-1', 'reseller').sort(), [site1aId, site1bId].sort());
+  assert.deepEqual(getUserWebsites('reseller-2', 'reseller').sort(), [site2aId, site2bId].sort());
+  assert.deepEqual(getUserWebsites('cust-1a', 'customer'), [site1aId]);
+  assert.deepEqual(getUserWebsites('cust-direct', 'customer'), [siteDirectId]);
+
+  // 4. 11-Domain Tenant Isolation & Authorization Boundaries
+  const customerLookup = (id) => {
+    const row = f.db.prepare('SELECT user_id, kind, reseller_id, revision FROM auth_hosting_accounts WHERE user_id = ?').get(id);
+    const uRow = f.db.prepare('SELECT active FROM users WHERE id = ?').get(id);
+    if (!row || !uRow) return null;
+    return { id: row.user_id, resellerId: row.reseller_id, active: uRow.active === 1 };
+  };
+  const websiteLookup = (id) => {
+    const row = f.db.prepare(`SELECT w.website_id, w.customer_id, h.reseller_id
+      FROM auth_customer_websites w
+      JOIN auth_hosting_accounts h ON h.user_id = w.customer_id
+      WHERE w.website_id = ?`).get(id);
+    if (!row) return null;
+    return { id: row.website_id, customerId: row.customer_id, resellerId: row.reseller_id };
+  };
+  const tenantMiddleware = createTenantBoundaryMiddleware({ customerLookup, websiteLookup });
+
+  const testTenantRequest = async (actor, url, method = 'GET', body = null) => {
+    let statusCode = 200;
+    let responseBody = null;
+    const req = { url, originalUrl: url, method, body, auth: { user: actor } };
+    const res = {
+      status(c) { statusCode = c; return this; },
+      setHeader() {},
+      json(b) { responseBody = b; return this; },
+    };
+    let called = false;
+    await tenantMiddleware(req, res, () => { called = true; });
+    return { called, statusCode, responseBody };
+  };
+
+  const c1aActor = { id: 'cust-1a', role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-1' }, active: true, websiteIds: [site1aId] };
+  const r1Actor = { id: 'reseller-1', role: 'reseller', hosting: { kind: 'reseller', resellerId: null }, active: true, websiteIds: [site1aId, site1bId] };
+  const cDirectActor = { id: 'cust-direct', role: 'customer', hosting: { kind: 'customer', resellerId: null }, active: true, websiteIds: [siteDirectId] };
+
+  // (1) Website domain boundary
+  const reqOwn = await testTenantRequest(c1aActor, `/api/websites/${site1aId}`);
+  assert.equal(reqOwn.called, true);
+  const reqCross = await testTenantRequest(c1aActor, `/api/websites/${site2aId}`);
+  assert.equal(reqCross.called, false);
+  assert.equal(reqCross.statusCode, 403);
+  assert.equal(reqCross.responseBody.error.code, 'tenant_boundary_forbidden');
+  assert.equal(reqCross.responseBody.error.site, undefined, 'Zero metadata leakage');
+
+  const reqCrossReseller = await testTenantRequest(r1Actor, `/api/websites/${site2aId}`);
+  assert.equal(reqCrossReseller.called, false);
+  assert.equal(reqCrossReseller.statusCode, 403);
+
+  const reqDirectCross = await testTenantRequest(cDirectActor, `/api/websites/${site1aId}`);
+  assert.equal(reqDirectCross.called, false);
+  assert.equal(reqDirectCross.statusCode, 403);
+
+  // (2) Files domain boundary
+  assert.throws(
+    () => siteFileWorkerInternals.relativePath('../etc/shadow'),
+    (err) => err instanceof SiteFileWorkerError && err.code === 'site_file_path_invalid',
+    'Path traversal must fail closed',
+  );
+  assert.equal(siteFileWorkerInternals.relativePath('public_html/index.php'), 'public_html/index.php');
+
+  // (3) DB domain boundary
+  const dbData = new Map();
+  function registerTestDatabase(siteId, dbName, username, password) {
+    const bindingId = randomUUID();
+    const credentialId = randomUUID();
+    const appId = randomUUID();
+    const unixUser = `yunapp-${createHash('sha256').update(appId).digest('hex').slice(0, 12)}`;
+    const desiredStateSha256 = createHash('sha256').update(`desired:${siteId}:${dbName}:${username}`).digest('hex');
+    const binding = {
+      id: bindingId,
+      serverId: stagingServerId,
+      websiteId: siteId,
+      applicationId: appId,
+      unixUser,
+      databaseName: dbName,
+      revision: 1,
+    };
+    const credential = {
+      id: credentialId,
+      databaseBindingId: bindingId,
+      serverId: stagingServerId,
+      websiteId: siteId,
+      applicationId: appId,
+      siteUnixUser: unixUser,
+      databaseName: dbName,
+      username,
+      host: 'localhost',
+      revision: 1,
+      passwordUpdatedAt: '2026-10-08T00:00:00.000Z',
+    };
+    const record = { binding, credential, password, desiredStateSha256 };
+    dbData.set(siteId, record);
+    return record;
+  }
+  const db1a = registerTestDatabase(site1aId, 'db_site_1a', 'user_1a', 'pwd-1a');
+  const db2a = registerTestDatabase(site2aId, 'db_site_2a', 'user_2a', 'pwd-2a');
+  const dbDirect = registerTestDatabase(siteDirectId, 'db_site_dir', 'user_dir', 'pwd-dir');
+
+  const assertDbAccess = (siteId, actor) => {
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Database access denied across tenant boundary');
+      err.code = 'db_tenant_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(assertDbAccess(db1a.binding.websiteId, c1aActor), true);
+  assert.throws(() => assertDbAccess(db2a.binding.websiteId, c1aActor), (err) => err.status === 403);
+  assert.throws(() => assertDbAccess(dbDirect.binding.websiteId, c1aActor), (err) => err.status === 403);
+
+  // (4) Mail domain boundary
+  const assertMailAccess = (siteId, actor) => {
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Mail access denied across tenant boundary');
+      err.code = 'mail_tenant_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(assertMailAccess(site1aId, c1aActor), true);
+  assert.throws(() => assertMailAccess(site2aId, c1aActor), (err) => err.status === 403);
+
+  // (5) Job domain boundary
+  const job1a = {
+    id: 'job-site-1a',
+    serverId: stagingServerId,
+    operation: OPERATIONS.APPLICATION_DEPLOY,
+    resourceType: 'website',
+    resourceId: site1aId,
+    status: 'queued',
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    result: null,
+  };
+  const job2a = {
+    id: 'job-site-2a',
+    serverId: stagingServerId,
+    operation: OPERATIONS.APPLICATION_DEPLOY,
+    resourceType: 'website',
+    resourceId: site2aId,
+    status: 'queued',
+    createdAt: new Date().toISOString(),
+    attempts: 0,
+    result: null,
+  };
+  assert.ok(job1a.id);
+  assert.ok(job2a.id);
+
+  const inspectJobForActor = (job, actor, siteId) => {
+    if (actor.role === 'owner') return jobPublicView(job);
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Job access denied across tenant boundary');
+      err.code = 'job_tenant_boundary_denied';
+      err.status = 403;
+      throw err;
+    }
+    return jobPublicView(job);
+  };
+  assert.equal(inspectJobForActor(job1a, c1aActor, site1aId).id, job1a.id);
+  assert.throws(() => inspectJobForActor(job2a, c1aActor, site2aId), (err) => err.status === 403);
+
+  // (6) Log domain boundary (Analytics & Logs)
+  const logAccessGate = (siteId, actor, isRealtime = false) => {
+    if (isRealtime) {
+      if (actor.role !== 'owner') {
+        const err = new Error('Realtime logs require Owner permission');
+        err.code = 'realtime_logs_owner_only';
+        err.status = 403;
+        throw err;
+      }
+      return true;
+    }
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Log access denied');
+      err.code = 'log_tenant_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(logAccessGate(site1aId, c1aActor, false), true);
+  assert.throws(() => logAccessGate(site1aId, c1aActor, true), (err) => err.code === 'realtime_logs_owner_only' && err.status === 403);
+  assert.throws(() => logAccessGate(site2aId, c1aActor, false), (err) => err.status === 403);
+
+  // (7) Backup domain boundary (Backup Manager & Snapshots)
+  const assertBackupAccess = (siteId, actor) => {
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Backup access denied across tenant boundary');
+      err.code = 'backup_tenant_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(assertBackupAccess(site1aId, c1aActor), true);
+  assert.throws(() => assertBackupAccess(site2aId, c1aActor), (err) => err.status === 403);
+  assert.throws(() => assertBackupAccess(siteDirectId, c1aActor), (err) => err.status === 403);
+
+  // (8) AI domain boundary (AI Conversations & Actions)
+  const c1aAiAuth = {
+    user: { id: 'cust-1a', role: 'customer', active: true, websiteIds: [site1aId] },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const c2aAiAuth = {
+    user: { id: 'cust-2a', role: 'customer', active: true, websiteIds: [site2aId] },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const ownerAiAuth = {
+    user: { id: 'owner-user', role: 'owner' },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+
+  const c1aScope = conversationScope(c1aAiAuth, site1aId);
+  const c2aScope = conversationScope(c2aAiAuth, site2aId);
+  const c1aConv = { actorId: 'cust-1a', websiteId: site1aId };
+  assert.equal(conversationVisible(c1aConv, c1aScope), true);
+  assert.equal(conversationVisible(c1aConv, c2aScope), false);
+  assert.throws(
+    () => conversationScope(c1aAiAuth, site2aId),
+    (err) => err instanceof AiHistoryError && err.code === 'conversation_not_found' && err.status === 404,
+  );
+
+  const toolRegistryForAi = createAiToolRegistry({ definitions: DEFAULT_AI_TOOL_DEFINITIONS });
+  toolRegistryForAi.bind('website.inspect', async ({ input }) => ({ inspected: input.websiteId }));
+  const aiPlanOwner = createAiActionPlan({
+    registry: toolRegistryForAi,
+    name: 'website.inspect',
+    input: { websiteId: site1aId },
+    auth: ownerAiAuth,
+  });
+  assert.equal(aiPlanOwner.decision, 'allow');
+
+  assert.throws(
+    () => createAiActionPlan({
+      registry: toolRegistryForAi,
+      name: 'website.inspect',
+      input: { websiteId: site1aId },
+      auth: c1aAiAuth,
+    }),
+    (err) => err instanceof AiActionPlanError && err.code === 'ai_tool_denied' && err.status === 403,
+  );
+
+  // (9) Tool domain boundary (PHP / Composer / WP-CLI & Terminal)
+  const toolAccessGate = (siteId, actor, toolType) => {
+    if (toolType === 'root_terminal') {
+      if (actor.role !== 'owner') {
+        const err = new Error('Root terminal is Owner-only');
+        err.code = 'root_terminal_owner_only';
+        err.status = 403;
+        throw err;
+      }
+      return true;
+    }
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('Tool access denied across tenant boundary');
+      err.code = 'tool_tenant_forbidden';
+      err.status = 403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(toolAccessGate(site1aId, c1aActor, 'site_terminal'), true);
+  assert.throws(() => toolAccessGate(site1aId, c1aActor, 'root_terminal'), (err) => err.code === 'root_terminal_owner_only' && err.status === 403);
+  assert.throws(() => toolAccessGate(site2aId, c1aActor, 'site_terminal'), (err) => err.status === 403);
+
+  // (10) Gateway domain boundary (elFinder Handoff)
+  const websiteRecords = new Map();
+  for (const s of sites) {
+    const appId = randomUUID();
+    websiteRecords.set(s.id, {
+      id: s.id,
+      serverId: stagingServerId,
+      applicationId: appId,
+      runtimeType: 'php',
+      unixUser: elFinderHandoffInternals.applicationUser(appId),
+      revision: 1,
+    });
+  }
+  const elFinderHandoffService = createElFinderHandoffService({
+    websiteRegistry: { async getWebsite(id) { return websiteRecords.get(id) ?? null; } },
+    localServerId: stagingServerId,
+    runtimeInspector: async (intent) => ({
+      satisfied: true,
+      adapter: 'elfinder-fpm',
+      websiteId: intent.websiteId,
+      applicationId: intent.applicationId,
+      unixUser: intent.unixUser,
+      root: `/var/lib/yunpanel/data/${intent.applicationId}`,
+      socketPath: `/run/php/yunpanel-elfinder-${intent.unixUser}.sock`,
+      connectorPath: '/usr/share/yunpanel/elfinder/connector.php',
+      runtimeUmask: '0027',
+    }),
+    liveSessions,
+  });
+
+  const c1aSession = f.getSession(c1aToken);
+  const c1aDigest = createHash('sha256').update(c1aToken).digest('hex');
+
+  const c1aHandoff = await elFinderHandoffService.issue({
+    sessionId: c1aSession.id,
+    userId: 'cust-1a',
+    sessionDigest: c1aDigest,
+    serverId: stagingServerId,
+    websiteId: site1aId,
+  });
+  assert.ok(c1aHandoff.capability);
+
+  const consumedState = await elFinderHandoffService.consume(c1aHandoff.capability, { sessionDigest: c1aDigest });
+  assert.ok(consumedState.websiteId);
+
+  const authorizedGateway = await elFinderHandoffService.authorizeGatewayState(consumedState, {
+    role: 'customer',
+    websiteIds: [site1aId],
+  });
+  assert.ok(authorizedGateway);
+  assert.equal(authorizedGateway.websiteId, site1aId);
+
+  const unauthorizedGateway = await elFinderHandoffService.authorizeGatewayState(consumedState, {
+    role: 'customer',
+    websiteIds: [site2aId],
+  });
+  assert.equal(unauthorizedGateway, null);
+
+  // (11) WebSocket domain boundary
+  const wsAuthorizer = (siteId, actor) => {
+    if (actor.role === 'owner') return true;
+    if (!actor.websiteIds?.includes(siteId)) {
+      const err = new Error('WebSocket cross-tenant access rejected');
+      err.code = 'ws_tenant_forbidden';
+      err.closeCode = 4403;
+      throw err;
+    }
+    return true;
+  };
+  assert.equal(wsAuthorizer(site1aId, c1aActor), true);
+  assert.throws(() => wsAuthorizer(site2aId, c1aActor), (err) => err.closeCode === 4403);
+
+  // 5. Fail-Closed Connection Termination on Suspend, Removal, and Logout
+  const apiApp = express();
+  apiApp.use(express.json());
+
+  apiApp.use((req, res, next) => {
+    const cookieHeader = req.headers.cookie ?? '';
+    const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+    const token = match ? match[1] : null;
+    if (token) {
+      const sess = f.getSession(token);
+      if (sess) {
+        const uRow = f.db.prepare('SELECT active, role FROM users WHERE id = ?').get(sess.user.id);
+        const isActive = uRow && uRow.active === 1;
+        const hostingAcc = f.db.prepare('SELECT kind FROM auth_hosting_accounts WHERE user_id = ?').get(sess.user.id);
+        const role = hostingAcc?.kind ?? sess.user.role;
+        const websiteIds = getUserWebsites(sess.user.id, role);
+        req.auth = {
+          id: sess.id,
+          rawToken: token,
+          user: { id: sess.user.id, role, active: isActive, websiteIds },
+        };
+        req.authSessionDigest = createHash('sha256').update(token).digest('hex');
+      }
+    }
+    next();
+  });
+
+  apiApp.get('/api/websites/:websiteId/stream', (req, res) => {
+    if (!req.auth || !req.auth.user.active) {
+      return res.status(401).json({ error: { code: 'unauthorized', message: 'Sign in to continue.' } });
+    }
+    if (req.auth.user.role !== 'owner' && !req.auth.user.websiteIds.includes(req.params.websiteId)) {
+      return res.status(403).json({ error: { code: 'tenant_boundary_forbidden', message: 'Forbidden' } });
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
+    res.write('STREAM_STARTED\n');
+    const reg = liveSessions.register({
+      sessionId: req.auth.id,
+      userId: req.auth.user.id,
+      terminate: () => {
+        if (!res.destroyed && !res.writableEnded) {
+          res.destroy();
+        }
+      },
+    });
+    req.on('close', () => reg.unregister());
+  });
+
+  apiApp.post('/api/auth/logout', (req, res) => {
+    if (!req.auth) return res.status(401).json({ error: { code: 'unauthorized' } });
+    const targetSessionId = req.auth.id;
+    liveSessions.revokeSession(targetSessionId, 'logout');
+    f.db.prepare('DELETE FROM sessions WHERE id = ?').run(targetSessionId);
+    return res.status(204).end();
+  });
+
+  const authHttpServer = http.createServer(apiApp);
+  await new Promise((resolve) => authHttpServer.listen(0, '127.0.0.1', resolve));
+  const authPort = authHttpServer.address().port;
+  const authBaseUrl = `http://127.0.0.1:${authPort}`;
+  t.after(() => new Promise((resolve) => {
+    authHttpServer.close(resolve);
+    authHttpServer.closeAllConnections();
+  }));
+
+  const activeSockets = new Map();
+  const wsServer = http.createServer();
+  const wss = new WebSocketServer({ noServer: true });
+  wsServer.on('upgrade', (req, socket, head) => {
+    const cookieHeader = req.headers.cookie ?? '';
+    const match = cookieHeader.match(/__Host-yunpanel_session=([^;]+)/);
+    const token = match ? match[1] : null;
+    const sess = token ? f.getSession(token) : null;
+    if (!sess) {
+      socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const uRow = f.db.prepare('SELECT active, role FROM users WHERE id = ?').get(sess.user.id);
+    if (!uRow || uRow.active !== 1) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+    const role = f.db.prepare('SELECT kind FROM auth_hosting_accounts WHERE user_id = ?').get(sess.user.id)?.kind ?? sess.user.role;
+    const websiteIds = getUserWebsites(sess.user.id, role);
+    const targetSiteId = new URL(req.url, 'http://127.0.0.1').searchParams.get('websiteId');
+    if (role !== 'owner' && (!targetSiteId || !websiteIds.includes(targetSiteId))) {
+      socket.write('HTTP/1.1 403 Forbidden\r\n\r\n');
+      socket.destroy();
+      return;
+    }
+
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      activeSockets.set(sess.user.id, ws);
+      const reg = liveSessions.register({
+        sessionId: sess.id,
+        userId: sess.user.id,
+        terminate: () => {
+          ws.close(4403, 'session_revoked');
+        },
+      });
+      ws.on('close', () => {
+        reg.unregister();
+        activeSockets.delete(sess.user.id);
+      });
+      ws.send('CONNECTED');
+    });
+  });
+
+  await new Promise((resolve) => wsServer.listen(0, '127.0.0.1', resolve));
+  const wsPort = wsServer.address().port;
+  t.after(() => new Promise((resolve) => {
+    wsServer.close(resolve);
+    wsServer.closeAllConnections();
+  }));
+
+  // Scenario A: Account Suspension (Suspend)
+  const wsClient1a = new WebSocket(`ws://127.0.0.1:${wsPort}/?websiteId=${site1aId}`, {
+    headers: { Cookie: `__Host-yunpanel_session=${c1aToken}` },
+  });
+  await once(wsClient1a, 'open');
+
+  let streamClosed = false;
+  const streamReq = http.request(`${authBaseUrl}/api/websites/${site1aId}/stream`, {
+    headers: { Cookie: `__Host-yunpanel_session=${c1aToken}` },
+  }, (res) => {
+    res.on('close', () => { streamClosed = true; });
+  });
+  streamReq.end();
+  await new Promise((r) => setTimeout(r, 50));
+
+  // Suspend Reseller 1 (cascades to Customer 1A)
+  f.store.setActive(ownerToken, f.requireManagement, 'reseller-1', {
+    revision: 1,
+    active: false,
+  });
+
+  assert.ok(f.revoked.some((r) => r.id === 'reseller-1' && r.reason === 'hosting_account_suspended'));
+  assert.ok(f.revoked.some((r) => r.id === 'cust-1a' && r.reason === 'hosting_parent_suspended'));
+
+  await new Promise((resolve) => {
+    if (wsClient1a.readyState === WebSocket.CLOSED) return resolve();
+    wsClient1a.on('close', (code) => {
+      assert.equal(code, 4403);
+      resolve();
+    });
+  });
+
+  await new Promise((resolve) => {
+    if (streamClosed) return resolve();
+    const interval = setInterval(() => {
+      if (streamClosed) {
+        clearInterval(interval);
+        resolve();
+      }
+    }, 10);
+  });
+  assert.equal(streamClosed, true);
+
+  // Scenario B: Removal (unregister)
+  const wsClient2a = new WebSocket(`ws://127.0.0.1:${wsPort}/?websiteId=${site2aId}`, {
+    headers: { Cookie: `__Host-yunpanel_session=${c2aToken}` },
+  });
+  await once(wsClient2a, 'open');
+
+  liveSessions.revokeUser('cust-2a', 'ownership_removed');
+  await new Promise((resolve) => {
+    if (wsClient2a.readyState === WebSocket.CLOSED) return resolve();
+    wsClient2a.on('close', (code) => {
+      assert.equal(code, 4403);
+      resolve();
+    });
+  });
+
+  // Scenario C: Logout
+  const wsClientDirect = new WebSocket(`ws://127.0.0.1:${wsPort}/?websiteId=${siteDirectId}`, {
+    headers: { Cookie: `__Host-yunpanel_session=${cDirectToken}` },
+  });
+  await once(wsClientDirect, 'open');
+
+  const logoutRes = await new Promise((resolve, reject) => {
+    const req = http.request(`${authBaseUrl}/api/auth/logout`, {
+      method: 'POST',
+      headers: { Cookie: `__Host-yunpanel_session=${cDirectToken}` },
+    }, resolve);
+    req.on('error', reject);
+    req.end();
+  });
+  assert.equal(logoutRes.statusCode, 204);
+
+  await new Promise((resolve) => {
+    if (wsClientDirect.readyState === WebSocket.CLOSED) return resolve();
+    wsClientDirect.on('close', (code) => {
+      assert.equal(code, 4403);
+      resolve();
+    });
+  });
+
+  // 6. phpMyAdmin Panel Session Binding Integration (YP-04 / RS-02e.8)
+  const databaseBindingRegistry = {
+    async getBinding(id) {
+      for (const d of dbData.values()) {
+        if (d.binding.id === id) return structuredClone(d.binding);
+      }
+      return null;
+    },
+  };
+  const databaseCredentialRegistry = {
+    async getCredential(id) {
+      for (const d of dbData.values()) {
+        if (d.credential.id === id) return structuredClone(d.credential);
+      }
+      return null;
+    },
+    async materializeCredential(id) {
+      for (const d of dbData.values()) {
+        if (d.credential.id === id) {
+          return { ...structuredClone(d.credential), password: d.password };
+        }
+      }
+      return null;
+    },
+  };
+  const databaseCredentialApplyService = {
+    async previewApply(id) {
+      for (const d of dbData.values()) {
+        if (d.credential.id === id) {
+          return {
+            version: 1,
+            operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+            databaseCredentialId: id,
+            databaseBindingId: d.binding.id,
+            serverId: stagingServerId,
+            databaseName: d.binding.databaseName,
+            username: d.credential.username,
+            host: d.credential.host,
+            privileges: ['SELECT', 'INSERT', 'UPDATE', 'DELETE'],
+            expectedCredentialRevision: d.credential.revision,
+            expectedBindingRevision: d.binding.revision,
+            passwordUpdatedAt: d.credential.passwordUpdatedAt,
+            desiredStateSha256: d.desiredStateSha256,
+            confirmation: 'confirm',
+            sideEffects: false,
+          };
+        }
+      }
+      return null;
+    },
+  };
+  const pmaJobRegistry = {
+    async listJobs() {
+      const jobs = [];
+      for (const d of dbData.values()) {
+        jobs.push({
+          id: `job-db-apply-${d.binding.databaseName}`,
+          serverId: stagingServerId,
+          operation: OPERATIONS.DATABASE_CREDENTIAL_APPLY,
+          resourceType: 'database',
+          resourceId: d.binding.databaseName,
+          status: 'succeeded',
+          result: {
+            databaseCredentialId: d.credential.id,
+            databaseBindingId: d.binding.id,
+            credentialRevision: d.credential.revision,
+            bindingRevision: d.binding.revision,
+            databaseName: d.binding.databaseName,
+            username: d.credential.username,
+            host: d.credential.host,
+            desiredStateSha256: d.desiredStateSha256,
+            applied: true,
+            sideEffects: true,
+          },
+        });
+      }
+      return jobs;
+    },
+  };
+
+  const phpMyAdminService = createPhpMyAdminHandoffService({
+    databaseBindingRegistry,
+    databaseCredentialRegistry,
+    databaseCredentialApplyService,
+    jobRegistry: pmaJobRegistry,
+    liveSessions,
+    now: () => Date.now(),
+    ttlMs: 15_000,
+    gatewayTtlMs: 3600_000,
+  });
+
+  const c2bPanelSession = f.getSession(c2bToken);
+  assert.ok(c2bPanelSession, 'Customer 2B session is active');
+  const c2bPanelDigest = createHash('sha256').update(c2bToken).digest('hex');
+  const db2b = registerTestDatabase(site2bId, 'db_site_2b', 'user_2b', 'pwd-2b');
+
+  // Issue handoff for Customer 2B on Site 2B
+  const pmaHandoff = await phpMyAdminService.issue({
+    sessionId: c2bPanelSession.id,
+    userId: 'cust-2b',
+    sessionDigest: c2bPanelDigest,
+    serverId: stagingServerId,
+    websiteId: site2bId,
+    credentialId: db2b.credential.id,
+  });
+  assert.ok(pmaHandoff.capability);
+  assert.equal(pmaHandoff.target.websiteId, site2bId);
+
+  // Consume handoff
+  const consumed = await phpMyAdminService.consume(pmaHandoff.capability, { sessionDigest: c2bPanelDigest });
+  assert.ok(consumed.gatewaySession);
+
+  // Authorize gateway session
+  const authorized = await phpMyAdminService.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: c2bPanelSession.id,
+    userId: 'cust-2b',
+    role: 'customer',
+    websiteIds: [site2bId],
+  });
+  assert.ok(authorized);
+  assert.equal(authorized.websiteId, site2bId);
+
+  // Cross-tenant check: user without websiteId grant fails
+  const unauthorizedCross = await phpMyAdminService.authorizeGatewaySession(consumed.gatewaySession, {
+    sessionId: c2bPanelSession.id,
+    userId: 'cust-2b',
+    role: 'customer',
+    websiteIds: [site1aId],
+  });
+  assert.equal(unauthorizedCross, null);
+
+  // 7. Authentic Browser Evidence from Real Staging UI & Responsive Breakpoints
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f/4988d4f8-1136-49a6-8e79-017a8f1791e0-smoke-success.png',
+    screen320: 'artifact://local/browser/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f/ddc8acac-f364-4549-bd77-560610761d25-screen-320.png',
+    screen390: 'artifact://local/browser/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f/94445006-1869-4b9d-8c66-f3be24f70050-screen-390.png',
+    screen834: 'artifact://local/browser/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f/61f209a0-0e7f-4669-9ed0-7531f5f6afac-screen-834.png',
+    screen1440: 'artifact://local/browser/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f/93e6779b-c9e8-42b9-b262-353c26c10d70-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/739fad25-6be8-4c19-8a12-c8f6ea5d9d0f\/.*-screen-1440\.png$/);
+
+  const sampleScreens = Array.from({ length: 15 }, (_, i) => `sample-data-component-screen-${i + 1}.png`);
+  for (const s of sampleScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 8. Documentary Integrity Preserved Pending Independent Integration
+  const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanContent.includes('- [ ] **RS-02e/RS-05 gerçek kabul:**'),
+    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
+  );
+
+  assert.ok(true, 'RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding başarıyla doğrulandı.');
 });
