@@ -1973,3 +1973,1117 @@ test('website-removal-http multi-process store lock recovers crashed process loc
     await rm(rootDir, { recursive: true, force: true }).catch(() => {});
   }
 });
+
+test('website-removal-http executes full removal lifecycle for Static runtime binding and fails closed on partial failure', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-222222222222';
+  const applicationId = '33333333-3333-4333-8333-333333333333';
+  const unixUser = 'yunapp-staticuser';
+
+  let currentWebsite = {
+    id: websiteId,
+    name: 'Static Test Site',
+    serverId: localServerId,
+    applicationId,
+    systemUser: unixUser,
+    unixUser,
+    state: 'active',
+    suspended: false,
+    desiredRevision: 1,
+    stagedRevision: 1,
+    appliedRevision: 1,
+  };
+
+  let currentApplication = {
+    id: applicationId,
+    serverId: localServerId,
+    type: 'static',
+    runtimeAdapter: 'static',
+    desiredRevision: 1,
+    activeDeploymentId: null,
+    currentReleaseId: null,
+  };
+
+  let currentRuntimeBinding = {
+    applicationId,
+    adapter: 'static',
+    revision: 1,
+    sourceOperationId: 'source-op-static',
+  };
+
+  const cleaned = {
+    runtimeBindingRemove: 0,
+    filesCleaned: 0,
+    unixIdentityCleaned: 0,
+    websiteMetadataDeleted: 0,
+    applicationMetadataDeleted: 0,
+    hostingAllocationReleased: 0,
+  };
+
+  const runtimeBindingRegistry = {
+    getBinding: async (appId) => (appId === applicationId ? currentRuntimeBinding : null),
+    removeOwnedStatic: async (appId, options) => {
+      assert.equal(appId, applicationId);
+      assert.equal(options.sourceOperationId, 'source-op-static');
+      assert.equal(options.expectedRevision, 1);
+      cleaned.runtimeBindingRemove += 1;
+      currentRuntimeBinding = null;
+    },
+  };
+
+  const websiteRegistry = {
+    getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
+    deleteMigrationWebsite: async (input) => {
+      assert.equal(input.websiteId, websiteId);
+      cleaned.websiteMetadataDeleted += 1;
+      currentWebsite = null;
+    },
+  };
+
+  const applicationRegistry = {
+    getApplication: async (id) => (id === applicationId ? currentApplication : null),
+    deleteApplication: async (input) => {
+      assert.equal(input.applicationId, applicationId);
+      cleaned.applicationMetadataDeleted += 1;
+      currentApplication = null;
+    },
+  };
+
+  let envState = { applicationId, variableCount: 0, environmentPresent: false };
+  const applicationEnvironmentRegistry = {
+    inspectApplicationState: async (appId) => (appId === applicationId ? envState : { variableCount: 0, environmentPresent: false }),
+    purgeApplication: async (appId) => {
+      envState = { applicationId, variableCount: 0, environmentPresent: false };
+    },
+  };
+
+  const fileCleanupHandler = async (input) => {
+    cleaned.filesCleaned += 1;
+    return {
+      filesCleaned: true,
+      websiteId,
+      applicationId,
+      retainedBackups: [],
+      retainedLogScopes: [],
+    };
+  };
+
+  const unixIdentityCleanupHandler = async (input) => {
+    cleaned.unixIdentityCleaned += 1;
+    return { unixIdentityCleaned: true, systemUser: unixUser, websiteId };
+  };
+
+  const hostingAllocationReleaseHandler = async (proof) => {
+    cleaned.hostingAllocationReleased += 1;
+    return { websiteId, released: true, quotaReleased: true, customerId: 'cust-static' };
+  };
+
+  const impact = {
+    version: 1,
+    resourceType: 'website',
+    operation: 'delete',
+    targetServerId: null,
+    resource: { id: websiteId, serverId: localServerId },
+    application: { id: applicationId, serverId: localServerId, type: 'static', desiredRevision: 1 },
+    dependencies: {
+      domains: [],
+      databases: { status: 'available', items: [] },
+      sftpKeys: { status: 'available', items: [] },
+      runtimeBindings: { status: 'available', items: [{ id: applicationId, state: 'active' }] },
+      unixIdentities: { status: 'available', items: [{ id: unixUser, state: 'active' }] },
+      logScopes: { status: 'available', items: [] },
+      crons: { status: 'available', items: [] },
+      backups: { status: 'available', items: [] },
+      activeJobs: [],
+    },
+    blockers: [],
+    previewDigest: 'e'.repeat(64),
+    confirmation: `delete:website:${websiteId}:${'e'.repeat(64)}`,
+  };
+
+  const preview = createWebsiteRemovalPreview({
+    website: currentWebsite,
+    impact,
+    applicationState: currentApplication,
+  });
+
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+    websiteRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry,
+    runtimeBindingRegistry,
+    fileCleanupHandler,
+    fileCleanupInspector: async () => ({ ready: true }),
+    unixIdentityCleanupHandler,
+    unixIdentityCleanupInspector: async () => ({ ready: true }),
+    hostingAllocationReleaseHandler,
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    req.auth = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    };
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, { runtime, websiteRegistry, localServerId });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Start Static website removal
+    const resStart = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resStart.status, 201);
+    let { operation: currentOp } = await resStart.json();
+
+    // 2. Step through all steps to completion
+    while (currentOp.status === 'running') {
+      const nextStep = currentOp.steps.find((s) => s.status !== 'succeeded');
+      assert.ok(nextStep);
+      const resContinue = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${currentOp.id}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: currentOp.updatedAt,
+          stepId: nextStep.id,
+          confirmation: currentOp.actions.stepContinuationConfirmation,
+        }),
+      });
+      assert.equal(resContinue.status, 200);
+      const continueData = await resContinue.json();
+      currentOp = continueData.operation ?? continueData.data;
+    }
+
+    assert.equal(currentOp.status, 'removed');
+    assert.equal(cleaned.runtimeBindingRemove, 1, 'removeOwnedStatic must be called');
+    assert.equal(cleaned.filesCleaned, 1);
+    assert.equal(cleaned.unixIdentityCleaned, 1);
+    assert.equal(cleaned.websiteMetadataDeleted, 1);
+    assert.equal(cleaned.applicationMetadataDeleted, 1);
+    assert.equal(cleaned.hostingAllocationReleased, 1);
+    assert.equal(currentRuntimeBinding, null);
+    assert.equal(currentWebsite, null);
+    assert.equal(currentApplication, null);
+
+    // 3. Partial failure test: fail-closed on static removal failure
+    const websiteIdFail = '22222222-2222-4222-8222-222222222223';
+    const appIdFail = '33333333-3333-4333-8333-333333333334';
+    let failSite = {
+      id: websiteIdFail,
+      name: 'Static Fail Site',
+      serverId: localServerId,
+      applicationId: appIdFail,
+      systemUser: 'yunapp-staticfail',
+      unixUser: 'yunapp-staticfail',
+      state: 'active',
+      desiredRevision: 1,
+    };
+    let failApp = {
+      id: appIdFail,
+      serverId: localServerId,
+      type: 'static',
+      runtimeAdapter: 'static',
+      desiredRevision: 1,
+      activeDeploymentId: null,
+      currentReleaseId: null,
+    };
+    let failBinding = {
+      applicationId: appIdFail,
+      adapter: 'static',
+      revision: 1,
+      sourceOperationId: 'source-fail',
+    };
+    let failDestructiveExecuted = false;
+
+    const failingRuntimeBindingRegistry = {
+      getBinding: async () => failBinding,
+      removeOwnedStatic: async () => {
+        throw new Error('Static host binding removal failed');
+      },
+    };
+
+    const failImpact = {
+      version: 1,
+      resourceType: 'website',
+      operation: 'delete',
+      targetServerId: null,
+      resource: { id: websiteIdFail, serverId: localServerId },
+      application: { id: appIdFail, serverId: localServerId, type: 'static', desiredRevision: 1 },
+      dependencies: {
+        domains: [],
+        databases: { status: 'available', items: [] },
+        sftpKeys: { status: 'available', items: [] },
+        runtimeBindings: { status: 'available', items: [{ id: appIdFail, state: 'active' }] },
+        unixIdentities: { status: 'available', items: [{ id: 'yunapp-staticfail', state: 'active' }] },
+        logScopes: { status: 'available', items: [] },
+        crons: { status: 'available', items: [] },
+        backups: { status: 'available', items: [] },
+        activeJobs: [],
+      },
+      blockers: [],
+      previewDigest: 'd'.repeat(64),
+      confirmation: `delete:website:${websiteIdFail}:${'d'.repeat(64)}`,
+    };
+
+    const failPreview = createWebsiteRemovalPreview({
+      website: failSite,
+      impact: failImpact,
+      applicationState: failApp,
+    });
+
+    const failingRegistry = createWebsiteRemovalOperationRegistry();
+    await failingRegistry.init();
+
+    const failingRuntime = createWebsiteRemovalRuntime({
+      registry: failingRegistry,
+      previewProvider: async () => failPreview,
+      domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+      websiteRegistry: {
+        getWebsite: async (id) => (id === websiteIdFail ? failSite : null),
+        deleteMigrationWebsite: async () => { failDestructiveExecuted = true; },
+      },
+      applicationRegistry: {
+        getApplication: async () => failApp,
+        deleteApplication: async () => { failDestructiveExecuted = true; },
+      },
+      applicationEnvironmentRegistry: {
+        inspectApplicationState: async () => ({ variableCount: 0, environmentPresent: false }),
+        purgeApplication: async () => {},
+      },
+      runtimeBindingRegistry: failingRuntimeBindingRegistry,
+      fileCleanupHandler: async () => { failDestructiveExecuted = true; return {}; },
+      fileCleanupInspector: async () => ({ ready: true }),
+      unixIdentityCleanupHandler: async () => { failDestructiveExecuted = true; return {}; },
+      unixIdentityCleanupInspector: async () => ({ ready: true }),
+    });
+
+    const failingStart = await failingRuntime.start({
+      websiteId: websiteIdFail,
+      previewDigest: failPreview.previewDigest,
+      confirmation: failPreview.confirmation,
+    });
+    assert.equal(failingStart.status, 'failed');
+    assert.equal(failingStart.steps[0].status, 'failed');
+    assert.equal(failingStart.steps[0].error.code, 'website_removal_step_failed');
+    assert.equal(failDestructiveExecuted, false, 'No subsequent destructive step executed on static failure');
+    assert.notEqual(failSite, null, 'Website metadata must remain intact');
+  } finally {
+    server.close();
+  }
+});
+
+test('website-removal-http executes full removal lifecycle for direct-systemd runtime binding and fails closed on host failure', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-222222222225';
+  const applicationId = '33333333-3333-4333-8333-333333333335';
+  const unixUser = 'yunapp-directuser';
+  const serviceName = 'yunpanel-node-0123456789abcdef.service';
+
+  let currentWebsite = {
+    id: websiteId,
+    name: 'Direct Systemd Site',
+    serverId: localServerId,
+    applicationId,
+    systemUser: unixUser,
+    unixUser,
+    state: 'active',
+    desiredRevision: 1,
+  };
+
+  let currentApplication = {
+    id: applicationId,
+    serverId: localServerId,
+    type: 'node',
+    runtimeAdapter: 'direct-systemd',
+    desiredRevision: 1,
+    activeDeploymentId: null,
+    currentReleaseId: 'rel-direct-1',
+    serviceName,
+    currentCommitSha: 'b'.repeat(40),
+    servicePort: 3456,
+    healthPath: '/healthz',
+  };
+
+  let currentRuntimeBinding = {
+    applicationId,
+    adapter: 'direct-systemd',
+    revision: 1,
+    sourceOperationId: 'source-op-direct',
+  };
+
+  const directSystemdCalls = [];
+  const directSystemdCleanupHandler = async (input) => {
+    directSystemdCalls.push(input);
+    return {
+      directSystemdCleaned: true,
+      websiteId: input.websiteId,
+      applicationId: input.applicationId,
+      serverId: input.serverId,
+      releaseId: input.releaseId,
+      serviceName: input.serviceName,
+    };
+  };
+
+  let directSystemdBindingRemoved = 0;
+  const runtimeBindingRegistry = {
+    getBinding: async (appId) => (appId === applicationId ? currentRuntimeBinding : null),
+    removeOwnedDirectSystemd: async (appId, options) => {
+      assert.equal(appId, applicationId);
+      assert.equal(options.sourceOperationId, 'source-op-direct');
+      assert.equal(options.expectedRevision, 1);
+      directSystemdBindingRemoved += 1;
+      currentRuntimeBinding = null;
+    },
+  };
+
+  let websiteMetadataDeleted = false;
+  let applicationMetadataDeleted = false;
+  const websiteRegistry = {
+    getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
+    deleteMigrationWebsite: async () => {
+      websiteMetadataDeleted = true;
+      currentWebsite = null;
+    },
+  };
+  const applicationRegistry = {
+    getApplication: async (id) => (id === applicationId ? currentApplication : null),
+    deleteApplication: async () => {
+      applicationMetadataDeleted = true;
+      currentApplication = null;
+    },
+  };
+
+  const impact = {
+    version: 1,
+    resourceType: 'website',
+    operation: 'delete',
+    targetServerId: null,
+    resource: { id: websiteId, serverId: localServerId },
+    application: {
+      id: applicationId,
+      serverId: localServerId,
+      type: 'node',
+      desiredRevision: 1,
+      currentReleaseId: 'rel-direct-1',
+    },
+    applicationRuntime: {
+      adapter: 'direct-systemd',
+      serviceName,
+      releaseId: 'rel-direct-1',
+      currentCommitSha: 'b'.repeat(40),
+      servicePort: 3456,
+      healthPath: '/healthz',
+    },
+    dependencies: {
+      domains: [],
+      databases: { status: 'available', items: [] },
+      sftpKeys: { status: 'available', items: [] },
+      runtimeBindings: { status: 'available', items: [{ id: applicationId, state: 'active' }] },
+      unixIdentities: { status: 'available', items: [{ id: unixUser, state: 'active' }] },
+      logScopes: { status: 'available', items: [] },
+      crons: { status: 'available', items: [] },
+      backups: { status: 'available', items: [] },
+      activeJobs: [],
+    },
+    blockers: [],
+    previewDigest: 'c'.repeat(64),
+    confirmation: `delete:website:${websiteId}:${'c'.repeat(64)}`,
+  };
+
+  const preview = createWebsiteRemovalPreview({
+    website: currentWebsite,
+    impact,
+    applicationState: currentApplication,
+  });
+
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+    websiteRegistry,
+    applicationRegistry,
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async () => ({ variableCount: 0, environmentPresent: false }),
+      purgeApplication: async () => {},
+    },
+    runtimeBindingRegistry,
+    directSystemdCleanupHandler,
+    directSystemdCleanupInspector: async () => ({ ready: true }),
+    fileCleanupHandler: async () => ({ filesCleaned: true, websiteId, applicationId, retainedBackups: [], retainedLogScopes: [] }),
+    fileCleanupInspector: async () => ({ ready: true }),
+    unixIdentityCleanupHandler: async () => ({ unixIdentityCleaned: true, systemUser: unixUser, websiteId }),
+    unixIdentityCleanupInspector: async () => ({ ready: true }),
+    hostingAllocationReleaseHandler: async () => ({ websiteId, released: true, quotaReleased: true }),
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    req.auth = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    };
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, { runtime, websiteRegistry, localServerId });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Full removal through HTTP API
+    const resStart = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resStart.status, 201);
+    let { operation: currentOp } = await resStart.json();
+
+    while (currentOp.status === 'running') {
+      const nextStep = currentOp.steps.find((s) => s.status !== 'succeeded');
+      assert.ok(nextStep);
+      const resContinue = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${currentOp.id}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: currentOp.updatedAt,
+          stepId: nextStep.id,
+          confirmation: currentOp.actions.stepContinuationConfirmation,
+        }),
+      });
+      assert.equal(resContinue.status, 200);
+      const continueData = await resContinue.json();
+      currentOp = continueData.operation ?? continueData.data;
+    }
+
+    assert.equal(currentOp.status, 'removed');
+    assert.equal(directSystemdCalls.length, 1);
+    assert.equal(directSystemdCalls[0].serviceName, serviceName);
+    assert.equal(directSystemdCalls[0].releaseId, 'rel-direct-1');
+    assert.equal(directSystemdBindingRemoved, 1);
+    assert.equal(websiteMetadataDeleted, true);
+    assert.equal(applicationMetadataDeleted, true);
+
+    // 2. Fail-closed partial host failure: directSystemdCleanupHandler throws error
+    const failHostSiteId = '22222222-2222-4222-8222-222222222226';
+    const failHostAppId = '33333333-3333-4333-8333-333333333336';
+    let destructiveCalled = false;
+
+    const failHostSite = {
+      id: failHostSiteId,
+      name: 'Host Fail Site',
+      serverId: localServerId,
+      applicationId: failHostAppId,
+      systemUser: unixUser,
+      unixUser,
+      state: 'active',
+      desiredRevision: 1,
+    };
+    const failHostApp = {
+      id: failHostAppId,
+      serverId: localServerId,
+      type: 'node',
+      runtimeAdapter: 'direct-systemd',
+      desiredRevision: 1,
+      activeDeploymentId: null,
+      currentReleaseId: 'rel-fail-1',
+      serviceName: 'yunpanel-node-0123456789abcdef.service',
+      currentCommitSha: 'c'.repeat(40),
+      servicePort: 3456,
+      healthPath: '/healthz',
+    };
+    const failHostImpact = {
+      version: 1,
+      resourceType: 'website',
+      operation: 'delete',
+      targetServerId: null,
+      resource: { id: failHostSiteId, serverId: localServerId },
+      application: {
+        id: failHostAppId,
+        serverId: localServerId,
+        type: 'node',
+        desiredRevision: 1,
+        currentReleaseId: 'rel-fail-1',
+      },
+      applicationRuntime: {
+        adapter: 'direct-systemd',
+        serviceName: 'yunpanel-node-0123456789abcdef.service',
+        releaseId: 'rel-fail-1',
+        currentCommitSha: 'c'.repeat(40),
+        servicePort: 3456,
+        healthPath: '/healthz',
+      },
+      dependencies: {
+        domains: [],
+        databases: { status: 'available', items: [] },
+        sftpKeys: { status: 'available', items: [] },
+        runtimeBindings: { status: 'available', items: [{ id: failHostAppId, state: 'active' }] },
+        unixIdentities: { status: 'available', items: [{ id: unixUser, state: 'active' }] },
+        logScopes: { status: 'available', items: [] },
+        crons: { status: 'available', items: [] },
+        backups: { status: 'available', items: [] },
+        activeJobs: [],
+      },
+      blockers: [],
+      previewDigest: '7'.repeat(64),
+      confirmation: `delete:website:${failHostSiteId}:${'7'.repeat(64)}`,
+    };
+    const failHostPreview = createWebsiteRemovalPreview({
+      website: failHostSite,
+      impact: failHostImpact,
+      applicationState: failHostApp,
+    });
+
+    const failingHostRegistry = createWebsiteRemovalOperationRegistry();
+    await failingHostRegistry.init();
+
+    const failingHostRuntime = createWebsiteRemovalRuntime({
+      registry: failingHostRegistry,
+      previewProvider: async () => failHostPreview,
+      domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+      websiteRegistry: {
+        getWebsite: async () => ({ id: failHostSiteId, serverId: localServerId, applicationId: failHostAppId }),
+        deleteMigrationWebsite: async () => { destructiveCalled = true; },
+      },
+      applicationRegistry: {
+        getApplication: async () => ({ id: failHostAppId, serverId: localServerId, desiredRevision: 1 }),
+        deleteApplication: async () => { destructiveCalled = true; },
+      },
+      applicationEnvironmentRegistry: {
+        inspectApplicationState: async () => ({ variableCount: 0, environmentPresent: false }),
+        purgeApplication: async () => {},
+      },
+      runtimeBindingRegistry: {
+        getBinding: async () => ({ applicationId: failHostAppId, adapter: 'direct-systemd', revision: 1 }),
+        removeOwnedDirectSystemd: async () => { destructiveCalled = true; },
+      },
+      directSystemdCleanupHandler: async () => {
+        throw new Error('Host systemctl stop failed with exit code 1');
+      },
+      directSystemdCleanupInspector: async () => ({ ready: true }),
+      fileCleanupHandler: async () => { destructiveCalled = true; return {}; },
+      fileCleanupInspector: async () => ({ ready: true }),
+      unixIdentityCleanupHandler: async () => { destructiveCalled = true; return {}; },
+      unixIdentityCleanupInspector: async () => ({ ready: true }),
+    });
+
+    const hostFailStart = await failingHostRuntime.start({
+      websiteId: failHostSiteId,
+      previewDigest: failHostPreview.previewDigest,
+      confirmation: failHostPreview.confirmation,
+    });
+    assert.equal(hostFailStart.status, 'failed');
+    assert.equal(hostFailStart.steps[0].status, 'failed');
+    assert.equal(hostFailStart.steps[0].error.code, 'website_removal_step_failed');
+    assert.equal(destructiveCalled, false, 'Destructive operations must fail closed on host direct-systemd failure');
+  } finally {
+    server.close();
+  }
+});
+
+test('website-removal-http releases hosting quota only upon verified final removal and keeps removal journal open on quota release failure', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-222222222227';
+  const applicationId = '33333333-3333-4333-8333-333333333337';
+  const unixUser = 'yunapp-quotauser';
+
+  let currentWebsite = {
+    id: websiteId,
+    name: 'Quota Test Site',
+    serverId: localServerId,
+    applicationId,
+    systemUser: unixUser,
+    unixUser,
+    state: 'active',
+    desiredRevision: 1,
+  };
+
+  let currentApplication = {
+    id: applicationId,
+    serverId: localServerId,
+    type: 'static',
+    runtimeAdapter: 'static',
+    desiredRevision: 1,
+    activeDeploymentId: null,
+  };
+
+  let shouldFailQuota = true;
+  let quotaReleaseCalls = 0;
+
+  const hostingAllocationReleaseHandler = async (proof) => {
+    quotaReleaseCalls += 1;
+    if (shouldFailQuota) {
+      throw new Error('Quota billing service connection timeout');
+    }
+    return {
+      websiteId,
+      released: true,
+      quotaReleased: true,
+      customerId: 'cust-quota-1',
+    };
+  };
+
+  const preview = createWebsiteRemovalPreview({
+    website: currentWebsite,
+    impact: {
+      version: 1,
+      resourceType: 'website',
+      operation: 'delete',
+      targetServerId: null,
+      resource: { id: websiteId, serverId: localServerId },
+      application: { id: applicationId, serverId: localServerId, type: 'static', desiredRevision: 1 },
+      dependencies: {
+        domains: [],
+        databases: { status: 'available', items: [] },
+        sftpKeys: { status: 'available', items: [] },
+        runtimeBindings: { status: 'available', items: [] },
+        unixIdentities: { status: 'available', items: [] },
+        logScopes: { status: 'available', items: [] },
+        crons: { status: 'available', items: [] },
+        backups: { status: 'available', items: [] },
+        activeJobs: [],
+      },
+      blockers: [],
+      previewDigest: '8'.repeat(64),
+      confirmation: `delete:website:${websiteId}:${'8'.repeat(64)}`,
+    },
+    applicationState: currentApplication,
+  });
+
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+
+  const runtime = createWebsiteRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
+    websiteRegistry: {
+      getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
+      deleteMigrationWebsite: async () => { currentWebsite = null; },
+    },
+    applicationRegistry: {
+      getApplication: async (id) => (id === applicationId ? currentApplication : null),
+      deleteApplication: async () => { currentApplication = null; },
+    },
+    applicationEnvironmentRegistry: {
+      inspectApplicationState: async () => ({ variableCount: 0, environmentPresent: false }),
+      purgeApplication: async () => {},
+    },
+    fileCleanupHandler: async () => ({ filesCleaned: true, websiteId, applicationId, retainedBackups: [], retainedLogScopes: [] }),
+    fileCleanupInspector: async () => ({ ready: true }),
+    unixIdentityCleanupHandler: async () => ({ unixIdentityCleaned: true, systemUser: unixUser, websiteId }),
+    unixIdentityCleanupInspector: async () => ({ ready: true }),
+    hostingAllocationReleaseHandler,
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    req.auth = {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    };
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, { runtime, websiteRegistry: { getWebsite: async (id) => (id === websiteId ? currentWebsite : null) }, localServerId });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Start removal
+    const resStart = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        previewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      }),
+    });
+    assert.equal(resStart.status, 201);
+    let { operation: currentOp } = await resStart.json();
+
+    // 2. Step through until metadata is deleted and application_cleanup is reached
+    while (currentOp.status === 'running') {
+      const nextStep = currentOp.steps.find((s) => s.status !== 'succeeded');
+      assert.ok(nextStep);
+      const resContinue = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${currentOp.id}/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: currentOp.updatedAt,
+          stepId: nextStep.id,
+          confirmation: currentOp.actions.stepContinuationConfirmation,
+        }),
+      });
+      assert.equal(resContinue.status, 200);
+      const continueData = await resContinue.json();
+      currentOp = continueData.operation ?? continueData.data;
+    }
+
+    // 3. Operation is BLOCKED because hosting quota release failed
+    assert.equal(currentOp.status, 'blocked');
+    const appCleanupStep = currentOp.steps.find((s) => s.kind === 'application_cleanup');
+    assert.equal(appCleanupStep.status, 'blocked');
+    assert.equal(appCleanupStep.error.code, 'website_removal_allocation_release_failed');
+    assert.equal(quotaReleaseCalls, 1);
+
+    // 4. Removal journal remains open with continuation confirmation
+    assert.ok(currentOp.actions.stepContinuationConfirmation, 'Removal journal must remain open on quota release failure');
+
+    // 5. GET operation endpoint confirms operation is still open and blocked
+    const resGet = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${currentOp.id}`);
+    assert.equal(resGet.status, 200);
+    const opData = (await resGet.json()).operation;
+    assert.equal(opData.status, 'blocked');
+    assert.ok(opData.actions.stepContinuationConfirmation);
+
+    // 6. Quota service recovers -> operator continues the step
+    shouldFailQuota = false;
+    const resRecover = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${currentOp.id}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        expectedUpdatedAt: opData.updatedAt,
+        stepId: appCleanupStep.id,
+        confirmation: opData.actions.stepContinuationConfirmation,
+      }),
+    });
+    assert.equal(resRecover.status, 200);
+    const recoveredOp = (await resRecover.json()).operation;
+
+    // 7. Verified final removal reached, quota released, journal closed
+    assert.equal(recoveredOp.status, 'removed');
+    assert.equal(recoveredOp.actions.stepContinuationConfirmation, null);
+    const finalStep = recoveredOp.steps.find((s) => s.kind === 'application_cleanup');
+    assert.equal(finalStep.status, 'succeeded');
+    assert.equal(finalStep.result.hostingAllocation.quotaReleased, true);
+    assert.equal(quotaReleaseCalls, 2);
+  } finally {
+    server.close();
+  }
+});
+
+test('website-removal-http enforces shared multi-process mutation lock preventing race conditions with site creation, provisioning, and worker mutations', async () => {
+  const rootDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-site-lock-test-'));
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-222222222228';
+  const targetLockFile = path.join(rootDir, `website-${websiteId}.lock`);
+
+  try {
+    const siteMutationLock = createSiteMutationLock({
+      root: rootDir,
+      pid: process.pid,
+      signalProcess: (pid, sig) => {
+        if (pid === 777777) return true; // alive concurrent worker (e.g. site provisioning/cron)
+        if (pid === 888888) {
+          const err = new Error('No such process');
+          err.code = 'ESRCH';
+          throw err; // crashed worker
+        }
+        process.kill(pid, sig);
+      },
+    });
+
+    const runtimeMock = createMockRuntime();
+    const app = express();
+    app.use(express.json());
+    app.use((req, res, next) => {
+      req.auth = {
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+      next();
+    });
+    mountWebsiteRemovalRoutes(app, {
+      runtime: runtimeMock,
+      siteMutationLock: {
+        withSiteLock: ({ websiteId: wsId }, action) => siteMutationLock.withWebsiteLock(wsId, action),
+      },
+      websiteRegistry: { getWebsite: async (id) => (id === websiteId ? { id: websiteId, serverId: localServerId } : null) },
+      localServerId,
+    });
+    app.use((err, req, res, next) => {
+      res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+    });
+
+    const server = app.listen(0);
+    const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+    try {
+      // 1. Simulate active concurrent worker holding the lock (e.g. site creation/provisioning/cron mutation)
+      const liveRecord = {
+        version: 1,
+        resourceType: 'website',
+        resourceId: websiteId,
+        pid: 777777,
+        token: '33333333-3333-4333-8333-333333333333',
+        createdAt: new Date().toISOString(),
+      };
+      await writeFile(targetLockFile, `${JSON.stringify(liveRecord)}\n`, 'utf8');
+
+      // Attempting removal start while active worker holds the lock fails closed with 409 site_mutation_locked
+      const resLockedStart = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          previewDigest: 'a'.repeat(64),
+          confirmation: `start-website-remove:${websiteId}:1:${'a'.repeat(64)}`,
+        }),
+      });
+      assert.equal(resLockedStart.status, 409);
+      const dataLockedStart = await resLockedStart.json();
+      assert.equal(dataLockedStart.error.code, 'site_mutation_locked');
+
+      // Attempting step continuation while active worker holds the lock also fails closed with 409
+      const resLockedContinue = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/ws-rem-1/continue`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          expectedUpdatedAt: '2026-09-19T20:00:00.000Z',
+          stepId: '001:domain_removal:dom-1',
+          confirmation: 'continue-website-remove-step:ws-1:ws-rem-1:001:domain_removal:dom-1:2026-09-19T20:00:00.000Z',
+        }),
+      });
+      assert.equal(resLockedContinue.status, 409);
+      const dataLockedContinue = await resLockedContinue.json();
+      assert.equal(dataLockedContinue.error.code, 'site_mutation_locked');
+
+      // 2. Simulate crashed worker (dead PID 888888): lock eviction
+      const deadRecord = {
+        version: 1,
+        resourceType: 'website',
+        resourceId: websiteId,
+        pid: 888888,
+        token: '44444444-4444-4444-8444-444444444444',
+        createdAt: new Date().toISOString(),
+      };
+      await writeFile(targetLockFile, `${JSON.stringify(deadRecord)}\n`, 'utf8');
+
+      // Attempting removal start evicts stale crash lock and succeeds with 201
+      const resCrashStart = await fetch(`${baseUrl}/api/websites/${websiteId}/removal`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          previewDigest: 'a'.repeat(64),
+          confirmation: `start-website-remove:${websiteId}:1:${'a'.repeat(64)}`,
+        }),
+      });
+      assert.equal(resCrashStart.status, 201);
+      const dataCrashStart = await resCrashStart.json();
+      assert.equal(dataCrashStart.operation.id, 'ws-rem-1');
+    } finally {
+      server.close();
+    }
+  } finally {
+    await rm(rootDir, { recursive: true, force: true }).catch(() => {});
+  }
+});
+
+test('website-removal-http enforces Owner-only recovery journal inspection and safe continuation for interrupted unknown-result operations', async () => {
+  const localServerId = '11111111-1111-4111-8111-111111111111';
+  const websiteId = '22222222-2222-4222-8222-222222222229';
+  const applicationId = '33333333-3333-4333-8333-333333333339';
+
+  let executedSteps = [];
+  const blockedStepId = '002:file_cleanup:files';
+  const confirmationToken = `continue-website-remove-step:${websiteId}:op-rec-1:${blockedStepId}:2026-10-01T12:00:00.000Z`;
+
+  const blockedOp = {
+    id: 'op-rec-1',
+    websiteId,
+    serverId: localServerId,
+    applicationId,
+    status: 'blocked',
+    updatedAt: '2026-10-01T12:00:00.000Z',
+    steps: [
+      { id: '001:domain_removal:dom-1', kind: 'domain_removal', status: 'succeeded' },
+      { id: blockedStepId, kind: 'file_cleanup', status: 'blocked', error: { code: 'unknown_host_state', message: 'Interrupted file cleanup' } },
+      { id: '003:metadata_finalization:meta', kind: 'metadata_finalization', status: 'pending' },
+    ],
+    actions: {
+      stepContinuationConfirmation: confirmationToken,
+    },
+    recoveryJournal: {
+      interruptedAt: '2026-10-01T12:00:00.000Z',
+      reason: 'unknown_result_reconciliation',
+    },
+  };
+
+  const runtimeMock = {
+    get: async (id) => (id === 'op-rec-1' ? blockedOp : null),
+    listForWebsite: async (wsId) => (wsId === websiteId ? [blockedOp] : []),
+    continueStep: async ({ operationId, stepId, confirmation }) => {
+      if (confirmation !== confirmationToken) {
+        throw new WebsiteRemovalRuntimeError('website_removal_confirmation_mismatch', 'Confirmation does not match', 409);
+      }
+      executedSteps.push(stepId);
+      return {
+        ...blockedOp,
+        status: 'removed',
+        steps: blockedOp.steps.map((s) => ({ ...s, status: 'succeeded' })),
+        actions: { stepContinuationConfirmation: null },
+      };
+    },
+    preview: async () => ({ readyToStart: true }),
+    start: async () => blockedOp,
+  };
+
+  const websiteRegistry = {
+    getWebsite: async (id) => (id === websiteId ? { id: websiteId, serverId: localServerId } : null),
+  };
+
+  const actors = {
+    owner: {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001', role: 'owner', active: true },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    },
+    'site-manager-diff': {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000002',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000002', role: 'site_manager', active: true, websiteIds: ['other-site'] },
+      access: { mode: 'site_management', permissions: ['sites.manage'] },
+      security: { managementAllowed: true },
+    },
+    inactive: {
+      id: 'aaaaaaaa-aaaa-4aaa-8aaa-000000000003',
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000003', role: 'owner', active: false },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    },
+    'no-session': {
+      user: { id: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001', role: 'owner', active: true },
+      access: { mode: 'management', permissions: ['*'] },
+      security: { managementAllowed: true },
+    },
+  };
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, res, next) => {
+    const actorKey = req.headers['x-actor'] ?? 'owner';
+    req.auth = actors[actorKey] ?? null;
+    next();
+  });
+  mountWebsiteRemovalRoutes(app, {
+    runtime: runtimeMock,
+    websiteRegistry,
+    localServerId,
+  });
+  app.use((err, req, res, next) => {
+    res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
+  });
+
+  const server = app.listen(0);
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  try {
+    // 1. Unauthenticated -> 401 unauthorized
+    const resNoAuth = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}`, {
+      headers: { 'x-actor': 'none' },
+    });
+    assert.equal(resNoAuth.status, 401);
+    assert.equal((await resNoAuth.json()).error.code, 'unauthorized');
+
+    // Missing live session identity -> 403 website_removal_actor_invalid
+    const resInvalidActor = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}`, {
+      headers: { 'x-actor': 'no-session' },
+    });
+    assert.equal(resInvalidActor.status, 403);
+    assert.equal((await resInvalidActor.json()).error.code, 'website_removal_actor_invalid');
+
+    // 2. Inactive account -> 403 tenant_actor_inactive
+    const resInactive = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}`, {
+      headers: { 'x-actor': 'inactive' },
+    });
+    assert.equal(resInactive.status, 403);
+    assert.equal((await resInactive.json()).error.code, 'tenant_actor_inactive');
+
+    // 3. Cross-tenant tenant actor -> 404 (not found, no leakage)
+    const resCross = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}`, {
+      headers: { 'x-actor': 'site-manager-diff' },
+    });
+    assert.equal(resCross.status, 404);
+
+    // 4. Owner identity -> 200 with full recovery journal data
+    const resOwner = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}`, {
+      headers: { 'x-actor': 'owner' },
+    });
+    assert.equal(resOwner.status, 200);
+    const ownerData = await resOwner.json();
+    assert.equal(ownerData.operation.id, blockedOp.id);
+    assert.equal(ownerData.operation.status, 'blocked');
+    assert.equal(ownerData.operation.recoveryJournal.reason, 'unknown_result_reconciliation');
+    assert.equal(ownerData.operation.actions.stepContinuationConfirmation, confirmationToken);
+
+    // 5. Continuation with invalid token fails closed
+    const resInvalidToken = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-actor': 'owner' },
+      body: JSON.stringify({
+        expectedUpdatedAt: blockedOp.updatedAt,
+        stepId: blockedStepId,
+        confirmation: 'invalid-token',
+      }),
+    });
+    assert.equal(resInvalidToken.status, 409);
+
+    // 6. Valid continuation resumes the blocked step safely
+    const resValidContinue = await fetch(`${baseUrl}/api/websites/${websiteId}/removal-operations/${blockedOp.id}/continue`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-actor': 'owner' },
+      body: JSON.stringify({
+        expectedUpdatedAt: blockedOp.updatedAt,
+        stepId: blockedStepId,
+        confirmation: confirmationToken,
+      }),
+    });
+    assert.equal(resValidContinue.status, 200);
+    const validData = await resValidContinue.json();
+    assert.equal(validData.operation.status, 'removed');
+    assert.deepEqual(executedSteps, [blockedStepId], 'Only the interrupted step was resumed; prior succeeded steps were not replayed');
+  } finally {
+    server.close();
+  }
+});
