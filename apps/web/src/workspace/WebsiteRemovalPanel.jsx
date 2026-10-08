@@ -81,7 +81,7 @@ function Operation({operation,next,busy,onContinue,onDone}){
  {failedStep?.error?.code&&<div className="ws-notice ws-notice-warn"><div><strong>Silme engeli</strong><p>{removalBlockerLabel(failedStep.error.code)}</p></div></div>}
  <ul className="ws-step-list" style={{listStyle:'none',padding:0,margin:'1rem 0'}}>
   {operation.steps.map((step)=>(
-   <li key={step.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.35rem 0',borderBottom:'1px solid var(--border,#eee)'}}>
+   <li key={step.id} style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'0.35rem 0',borderBottom:'1px solid var(--ws-border)'}}>
     <span>{STEP_LABELS[step.kind]??step.kind}</span>
     <Badge state={step.status==='succeeded'?'succeeded':step.status==='running'?'running':['failed','blocked'].includes(step.status)?'warning':'muted'}>
      {step.status==='succeeded'?'Tamamlandı':step.status==='running'?'Yürütülüyor':step.status==='blocked'?'Engellendi':step.status==='failed'?'Başarısız':'Bekliyor'}

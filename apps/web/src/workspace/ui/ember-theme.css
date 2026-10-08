@@ -141,6 +141,7 @@
 .workspace-shell :is(.ws-table, .yf-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) td code { overflow-wrap: anywhere; word-break: break-word; white-space: pre-wrap; }
 .workspace-shell .ws-domain-name, .workspace-shell .ws-domain-name a, .workspace-shell .yf-tree-name, .workspace-shell .yf-name { overflow-wrap: anywhere; word-break: break-word; min-width: 0; }
 .workspace-shell .ws-table-scroll { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
+.workspace-shell .ws-table-wrap, .workspace-shell .dns-table-wrap { width: 100%; overflow-x: auto; overscroll-behavior-x: contain; }
 .workspace-shell .ws-pagination { border-top: 0; color: var(--ws-muted); padding-top: 18px; }
 .workspace-shell .ws-keyvalues > div { border: 0; padding-block: 10px; }
 .workspace-shell .ws-badge { border: 0; border-radius: 8px; font-size: 11px; padding: 5px 9px; font-weight: 550; }
@@ -370,20 +371,24 @@ button::-moz-focus-inner, input::-moz-focus-inner {
   .workspace-shell .ws-pagination button, .workspace-shell .ws-pagination a { min-height: 44px; min-width: 44px; display: inline-flex; align-items: center; justify-content: center; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+  .workspace-shell *, .workspace-shell *::before, .workspace-shell *::after, .ws-modal, .ws-modal *, .auth-dialog, .auth-dialog * { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
   *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
 }
 @media (forced-colors: active) {
-  .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article,.ws-notice), .ws-modal { border: 1px solid CanvasText; }
-  .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea) { border: 1px solid CanvasText; }
+  .workspace-shell :is(.ws-section,.ws-metric,.ws-button,.yf-browser,.yf-grid article,.ws-notice) { border: 1px solid CanvasText; }
+  .ws-modal { border: 1px solid CanvasText; }
+  .auth-dialog { border: 1px solid CanvasText; }
+  .workspace-shell :is(input,select,textarea), .ws-modal :is(input,select,textarea), .auth-dialog :is(input,select,textarea) { border: 1px solid CanvasText; }
   .workspace-shell :is(.ws-nav a.active,.ys-site-primary a[aria-current],.ys-resource-tabs button[aria-current],.ws-tabs a[aria-current]) { outline: 2px solid Highlight; }
   .workspace-shell :is(.ws-table,.yf-table,.ys-resource-table) td { border-bottom: 1px solid CanvasText; }
   .workspace-shell .ws-usage-ring { border: 3px solid CanvasText; }
-  .workspace-shell :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible { outline: 2px solid Highlight !important; outline-offset: 3px; }
+  .workspace-shell :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible, .ws-modal :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible, .auth-dialog :is(button,a,input,select,textarea,summary,[tabindex]):focus-visible { outline: 2px solid Highlight !important; outline-offset: 3px; }
   .workspace-shell .ws-badge { border: 1px solid CanvasText; }
-  .workspace-shell :is(button,input,select,textarea):disabled, .ws-modal :is(button,input,select,textarea):disabled { border-color: GrayText !important; color: GrayText !important; }
+  .workspace-shell :is(button,input,select,textarea):disabled, .ws-modal :is(button,input,select,textarea):disabled, .auth-dialog :is(button,input,select,textarea):disabled { border-color: GrayText !important; color: GrayText !important; }
   .workspace-shell :is(input,select,textarea):is([aria-invalid="true"],.is-error,.ws-input-error) { border: 2px solid Mark !important; outline: 1px solid Mark !important; }
   .workspace-shell :is(.ws-table, .ys-resource-table, .ws-websites-table, .ws-db-table, .ws-mail-table) tbody tr:is(.is-selected, [aria-selected="true"], .ws-context-row) { outline: 2px solid Highlight; }
+  .workspace-shell :is(.dns-table-wrap, .ws-table-wrap) { border: 1px solid CanvasText; }
+  .workspace-shell :is(.ws-terminal-surface, .ws-terminal-frame) { border: 1px solid CanvasText; }
 }
 .workspace-shell .ws-site-create-result:focus { outline: none; }
 .workspace-shell .ws-site-create-result:focus-visible { outline: 2px solid var(--ws-accent); outline-offset: 2px; border-radius: var(--ws-radius); }

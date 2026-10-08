@@ -128,7 +128,7 @@ function normalizeProviderResult(result) {
   throw new AiProviderError('invalid_ai_provider_response', 'AI provider response type is unsupported');
 }
 
-export function createAiProviderAdapter({ id, invoke } = {}) {
+export function createAiProviderAdapter({ id, invoke, stream = null } = {}) {
   if (typeof id !== 'string' || !PROVIDER_ID_PATTERN.test(id)) {
     throw new AiProviderError('invalid_ai_provider_id', 'AI provider id is invalid', 500);
   }
@@ -136,7 +136,7 @@ export function createAiProviderAdapter({ id, invoke } = {}) {
     throw new AiProviderError('invalid_ai_provider_adapter', 'AI provider invoke adapter is required', 500);
   }
 
-  async function complete({ model, messages, tools = [], signal = null } = {}) {
+  async function complete({ model, messages, tools = [], signal = null, timeoutMs = null, onChunk = null, ...rest } = {}) {
     if (typeof model !== 'string' || model.length < 1 || model.length > 128) {
       throw new AiProviderError('invalid_ai_model', 'AI model id is invalid', 400);
     }
@@ -145,6 +145,9 @@ export function createAiProviderAdapter({ id, invoke } = {}) {
       messages: normalizeMessages(messages),
       tools: normalizeTools(tools),
       signal,
+      ...(timeoutMs != null ? { timeoutMs } : {}),
+      ...(onChunk != null ? { onChunk } : {}),
+      ...rest,
     });
     let result;
     try {
@@ -156,7 +159,47 @@ export function createAiProviderAdapter({ id, invoke } = {}) {
     return normalizeProviderResult(result);
   }
 
-  return Object.freeze({ id, complete, invoke: complete });
+  async function* streamMethod({ model, messages, tools = [], signal = null, timeoutMs = null, onChunk = null, ...rest } = {}) {
+    if (typeof model !== 'string' || model.length < 1 || model.length > 128) {
+      throw new AiProviderError('invalid_ai_model', 'AI model id is invalid', 400);
+    }
+    const request = Object.freeze({
+      model,
+      messages: normalizeMessages(messages),
+      tools: normalizeTools(tools),
+      signal,
+      ...(timeoutMs != null ? { timeoutMs } : {}),
+      ...(onChunk != null ? { onChunk } : {}),
+      ...rest,
+    });
+    if (typeof stream === 'function') {
+      try {
+        const iterable = stream(request);
+        for await (const chunk of iterable) {
+          if (onChunk && typeof onChunk === 'function') onChunk(chunk);
+          yield chunk;
+        }
+      } catch (error) {
+        if (error instanceof AiProviderError) throw error;
+        throw new AiProviderError('ai_provider_request_failed', 'AI provider stream request failed');
+      }
+    } else {
+      const res = await complete(request);
+      if (res.type === 'message') {
+        const chunk = { type: 'text', text: res.text };
+        if (onChunk && typeof onChunk === 'function') onChunk(chunk);
+        yield chunk;
+      } else if (res.type === 'tool_calls') {
+        for (const call of res.calls) {
+          const chunk = { type: 'tool_call', call };
+          if (onChunk && typeof onChunk === 'function') onChunk(chunk);
+          yield chunk;
+        }
+      }
+    }
+  }
+
+  return Object.freeze({ id, complete, invoke: complete, stream: streamMethod });
 }
 
 export const aiProviderInternals = Object.freeze({

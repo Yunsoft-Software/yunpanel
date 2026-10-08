@@ -310,6 +310,7 @@ export async function waitForJob(jobId, { attempts = 300, intervalMs = 1000 } = 
       if (job.status === 'failed' || job.status === 'cancelled') {
         const error = new Error(job.error?.message ?? `Job ${job.status}`);
         error.code = job.error?.code ?? job.status;
+        error.job = job;
         throw error;
       }
     } catch (error) {

@@ -151,7 +151,7 @@ function UserDialog({ mode, user, onClose, onSave }) {
           </div>
           {user && form.role === 'site_manager' && <p className="ws-muted">Bayi/müşteri profiline bağlı hesaplarda rol, durum ve site yetkileri bu formdan değiştirilemez. Profil işlemleri için kullanıcı listesindeki Bayi / müşteri düğmesini kullanın.</p>}
           {form.role === 'site_manager' && (
-            <div style={{ marginTop: '12px', padding: '12px', background: '#f8fafc', borderRadius: '8px', border: '1px solid #e2e8f0' }}>
+            <div style={{ marginTop: '12px', padding: '12px', background: 'var(--ws-surface-subtle)', borderRadius: '8px', border: '1px solid var(--ws-border)' }}>
               <p style={{ margin: '0 0 8px', fontWeight: 600, fontSize: '13px' }}>Yönetilecek Web Siteleri</p>
               <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '140px', overflowY: 'auto' }}>
                 {websites.items.length === 0 && <p className="ws-muted">Henüz kayıtlı web sitesi yok.</p>}
