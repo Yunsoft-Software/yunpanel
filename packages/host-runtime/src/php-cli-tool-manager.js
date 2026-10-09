@@ -16,6 +16,18 @@ const SITE_CURRENT_PATTERN = new RegExp(`^(/(?:var/www|var/lib)/yunpanel/apps/($
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024; // 2 MB
 
+function runPhpTool(file, args, options = {}) {
+  const config = { encoding: 'utf8', timeout: options.timeout ?? 60_000, maxBuffer: MAX_OUTPUT_BYTES, cwd: options.cwd, env: options.env };
+  if (options.input == null) return execFileAsync(file, args, config);
+  return new Promise((resolve, reject) => {
+    const child = execFile(file, args, config, (error, stdout, stderr) => {
+      if (error) reject(error); else resolve({ stdout, stderr });
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(options.input);
+  });
+}
+
 export class PhpCliToolError extends Error {
   constructor(code, message, status = 400) {
     super(message);
@@ -137,13 +149,7 @@ function validateCommandArgs(command, rawArgs, allowedCommands, toolName) {
 export function createPhpCliToolManager({
   wpCliPaths = DEFAULT_WP_CLI_PATHS,
   composerPaths = DEFAULT_COMPOSER_PATHS,
-  run = (file, args, options = {}) => execFileAsync(file, args, {
-    encoding: 'utf8',
-    timeout: options.timeout ?? 60_000,
-    maxBuffer: MAX_OUTPUT_BYTES,
-    cwd: options.cwd,
-    env: options.env,
-  }),
+  run = runPhpTool,
   statFn = null,
   lstatFn = lstat,
   realpathFn = realpath,
@@ -247,7 +253,8 @@ export function createPhpCliToolManager({
     });
   }
 
-  async function runWpCli({ unixUser, cwd, command, args = [], timeout = 60_000 } = {}) {
+  async function runWpCli({ unixUser, cwd, command, args = [], timeout = 60_000, input = null } = {}) {
+    if (input != null && (typeof input !== 'string' || Buffer.byteLength(input) > 8192 || input.includes('\0') || !input.endsWith('\n'))) throw new PhpCliToolError('wp_cli_input_invalid', 'Private WP-CLI input is invalid');
     const wpInfo = await inspectWpCli();
     if (!wpInfo.available) {
       throw new PhpCliToolError('wp_cli_not_installed', 'WP-CLI is not installed on the system', 503);
@@ -264,6 +271,7 @@ export function createPhpCliToolManager({
         cwd: target.cwd,
         env: target.env,
         timeout: Math.min(timeout, 300_000),
+        ...(input != null ? { input } : {}),
       });
 
       return Object.freeze({
@@ -338,4 +346,5 @@ export const phpCliToolInternals = Object.freeze({
   parsePasswd,
   toolEnvironment,
   validateCommandArgs,
+  runPhpTool,
 });

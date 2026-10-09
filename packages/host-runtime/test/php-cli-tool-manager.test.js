@@ -18,6 +18,30 @@ const MOCK_PASSWD = [
   `${VALID_USER}:x:1001:1001:YunPanel App User:/var/lib/yunpanel/data/${VALID_APP_ID}:/usr/sbin/nologin`,
 ].join('\n');
 
+test('private WP-CLI prompt input stays off command arguments and is bounded', async () => {
+  const secret = 'FixtureSecret_Input_123!';
+  let observed = null;
+  const manager = createPhpCliToolManager({ wpCliPaths: ['/usr/bin/wp'],
+    lstatFn: async value => value === '/usr/bin/wp' ? { isFile: () => true } : { isDirectory: () => true },
+    realpathFn: async () => VALID_REAL_CWD, readFileFn: async () => MOCK_PASSWD,
+    run: async (file, args, options) => {
+      if (file === '/usr/bin/wp') return { stdout: 'WP-CLI 2.12.0' };
+      observed = { file, args, options }; return { stdout: 'Success' };
+    },
+  });
+  const result = await manager.runWpCli({ unixUser: VALID_USER, cwd: VALID_CWD, command: 'user', args: ['update', 'admin', '--prompt=user_pass'], input: secret + '\n' });
+  assert.equal(result.success, true); assert.equal(observed.file, '/usr/sbin/runuser');
+  assert.equal(observed.args.includes('--allow-root'), false); assert.equal(JSON.stringify(observed.args).includes(secret), false);
+  assert.equal(observed.options.input, secret + '\n');
+  assert.equal(observed.options.env.USER, VALID_USER);
+  await assert.rejects(manager.runWpCli({ unixUser: VALID_USER, cwd: VALID_CWD, command: 'user', input: 'x'.repeat(8193) + '\n' }), error => error.code === 'wp_cli_input_invalid');
+});
+
+test('default bounded PHP process adapter actually passes stdin without argv interpolation', async () => {
+  const result = await phpCliToolInternals.runPhpTool(process.execPath, ['-e', 'let input="";process.stdin.on("data",part=>input+=part);process.stdin.on("end",()=>process.stdout.write(String(input.length)));'], { input: 'FixtureSecret_Input_123!\n', timeout: 5000 });
+  assert.equal(result.stdout, String('FixtureSecret_Input_123!\n'.length));
+});
+
 test('inspectWpCli detects binary and parses version', async () => {
   const manager = createPhpCliToolManager({
     wpCliPaths: ['/usr/local/bin/wp'],
