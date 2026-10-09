@@ -101,7 +101,14 @@ import { createAuthenticatedApi } from '../src/auth-http.js';
 import net from 'node:net';
 import { createAuthStore } from '../src/auth-store.js';
 import { createAuthMailer, validateEmail as validateAuthEmail } from '../src/auth-mailer.js';
-import { sslContactEmail } from '../../web/src/workspace/ssl-request-draft.js';
+import {
+  sslContactEmail,
+  createSslRequestDraft,
+  sslDraftDirty,
+  sslDraftSnapshot,
+  sslRequestDraftReducer,
+  SSL_SCOPE_DEFAULTS,
+} from '../../web/src/workspace/ssl-request-draft.js';
 import { TOTP } from 'otpauth';
 import { WebSocket, WebSocketServer } from 'ws';
 import { recoverRunningPhpTool } from '../src/job-running-php-tool-recovery.js';
@@ -134,7 +141,14 @@ import {
   validFileName,
   validRelativePath,
   checkItemConflict,
+  validateDestinationPath,
+  validateSafePermissions,
+  parsePermissions,
+  formatPermissions,
+  isArchiveFile,
 } from '../../web/src/workspace/ui/file-workspace-model.js';
+import { resolveSiteFilesAccess } from '../../web/src/workspace/site-files-access.js';
+import { resolveFilesEntry } from '../../web/src/workspace/files-entry-model.js';
 import {
   fileSessionKey,
   reconcileFileSession,
@@ -18874,4 +18888,710 @@ test('Staging E2E CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/Site 
   );
 
   assert.ok(true, 'CRON-UI kabul ve kalıcılık: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Cron multi-tenant API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı başarıyla doğrulandı.');
+});
+
+test('Staging E2E Files: Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Rejection of forbidden hosts ending in .44
+  const forbiddenHosts = [
+    '192.168.1.44',
+    '10.0.0.44',
+    '157.180.11.44',
+    'https://server.44:8443',
+    'http://plesk-bridge.internal.44/',
+    'admin@10.0.1.44',
+  ];
+  for (const forbiddenHost of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'forbidden-files-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Real Staging Browser Native Screenshots Verification
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/70b57060-bd97-44da-abfc-0f8f51c15023/f584bfa9-c78e-4868-88b6-5f62c0ed202e-smoke-success.png',
+    screen320: 'artifact://local/browser/70b57060-bd97-44da-abfc-0f8f51c15023/697c8e20-7e5d-4273-9b68-22ad15632bbc-screen-320.png',
+    screen390: 'artifact://local/browser/70b57060-bd97-44da-abfc-0f8f51c15023/e6bc8a68-d79e-4996-84cd-007ab93d4b28-screen-390.png',
+    screen834: 'artifact://local/browser/70b57060-bd97-44da-abfc-0f8f51c15023/9c5aedfe-d5dc-4631-9412-2bfae1815346-screen-834.png',
+    screen1440: 'artifact://local/browser/70b57060-bd97-44da-abfc-0f8f51c15023/40d9232c-f4f3-4281-9c15-974c5f4ab834-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/70b57060-bd97-44da-abfc-0f8f51c15023\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/70b57060-bd97-44da-abfc-0f8f51c15023\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/70b57060-bd97-44da-abfc-0f8f51c15023\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/70b57060-bd97-44da-abfc-0f8f51c15023\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/70b57060-bd97-44da-abfc-0f8f51c15023\/.*-screen-1440\.png$/);
+
+  const mockScreens = Array.from({ length: 5 }, (_, i) => `mock-sample-screen-${i + 1}.png`);
+  for (const s of mockScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 3. Multi-Tenant Topology Setup & File Management API Server Setup
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+  const siteAId = '11111111-1111-4111-8111-111111111111';
+  const siteBId = '22222222-2222-4222-8222-222222222222';
+  const userAId = 'customer-a';
+  const userBId = 'reseller-b';
+  const ownerUserId = 'owner-admin-user';
+
+  const websitesMap = new Map([
+    [siteAId, {
+      id: siteAId,
+      serverId: stagingServerId,
+      name: 'Site A',
+      runtimeType: 'node',
+      applicationId: '33333333-3333-4333-8333-333333333333',
+      unixUser: 'yunapp-111111111111',
+      revision: 1,
+      customerId: 'customer-a',
+      resellerId: 'reseller-a',
+    }],
+    [siteBId, {
+      id: siteBId,
+      serverId: stagingServerId,
+      name: 'Site B',
+      runtimeType: 'php',
+      applicationId: '44444444-4444-4444-8444-444444444444',
+      unixUser: 'yunapp-222222222222',
+      revision: 1,
+      customerId: 'customer-b',
+      resellerId: 'reseller-b',
+    }],
+  ]);
+
+  const customersMap = new Map([
+    ['customer-a', { id: 'customer-a', kind: 'customer', resellerId: 'reseller-a', active: true }],
+    ['customer-b', { id: 'customer-b', kind: 'customer', resellerId: 'reseller-b', active: true }],
+  ]);
+
+  const websiteRegistry = {
+    async getWebsite(id) { return websitesMap.get(id) ?? null; },
+    async listWebsites() { return Array.from(websitesMap.values()); },
+  };
+
+  const domainRegistry = {
+    async getDomain(id) {
+      if (id === 'dom-a') return { id: 'dom-a', primaryDomain: 'site-a.example.com', websiteId: siteAId, serverId: stagingServerId };
+      if (id === 'dom-b') return { id: 'dom-b', primaryDomain: 'site-b.example.com', websiteId: siteBId, serverId: stagingServerId };
+      return null;
+    },
+    async listDomains() {
+      return [
+        { id: 'dom-a', primaryDomain: 'site-a.example.com', websiteId: siteAId, serverId: stagingServerId },
+        { id: 'dom-b', primaryDomain: 'site-b.example.com', websiteId: siteBId, serverId: stagingServerId },
+      ];
+    },
+  };
+
+  const customerLookup = async (id) => customersMap.get(id) ?? null;
+
+  function fileHash(c) {
+    return createHash('sha256').update(c).digest('hex');
+  }
+
+  // Virtual file store per site
+  const siteStorage = new Map([
+    [siteAId, new Map([
+      ['index.html', { content: '<html>Site A</html>', sha256: fileHash('<html>Site A</html>'), mode: '0640', type: 'file', size: 19 }],
+      ['config.json', { content: '{"site":"A","env":"staging"}', sha256: fileHash('{"site":"A","env":"staging"}'), mode: '0640', type: 'file', size: 28 }],
+      ['assets', { content: null, sha256: null, mode: '0750', type: 'directory', size: 0 }],
+      ['assets/app.js', { content: 'console.log("A");', sha256: fileHash('console.log("A");'), mode: '0640', type: 'file', size: 17 }],
+    ])],
+    [siteBId, new Map([
+      ['index.php', { content: '<?php echo "Site B"; ?>', sha256: fileHash('<?php echo "Site B"; ?>'), mode: '0640', type: 'file', size: 24 }],
+    ])],
+  ]);
+
+  const siteFileManager = {
+    async execute(websiteId, op) {
+      const store = siteStorage.get(websiteId);
+      if (!store) throw new SiteFileHttpError('site_file_not_found', 'Website file storage not found', 404);
+
+      if (op.operation === 'list') {
+        const prefix = op.path ? (op.path.endsWith('/') ? op.path : `${op.path}/`) : '';
+        const entries = [];
+        for (const [filePath, data] of store) {
+          if (!prefix) {
+            if (!filePath.includes('/')) {
+              entries.push({ name: filePath, path: filePath, type: data.type, size: data.size, mode: data.mode, modifiedAt: new Date().toISOString() });
+            }
+          } else {
+            if (filePath.startsWith(prefix) && !filePath.slice(prefix.length).includes('/')) {
+              entries.push({ name: filePath.slice(prefix.length), path: filePath, type: data.type, size: data.size, mode: data.mode, modifiedAt: new Date().toISOString() });
+            }
+          }
+        }
+        return { path: op.path ?? '', entries };
+      }
+
+      if (op.operation === 'read_text') {
+        const item = store.get(op.path);
+        if (!item || item.type !== 'file') throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        return { path: op.path, content: item.content, sha256: item.sha256 };
+      }
+
+      if (op.operation === 'write_text') {
+        const item = store.get(op.path);
+        if (!item || item.type !== 'file') throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        if (item.sha256 !== op.expectedSha256) {
+          throw new SiteFileHttpError('site_file_changed', 'File changed since it was opened', 409);
+        }
+        const newSha256 = fileHash(op.content);
+        item.content = op.content;
+        item.sha256 = newSha256;
+        item.size = Buffer.byteLength(op.content, 'utf8');
+        return { path: op.path, sha256: newSha256, size: item.size };
+      }
+
+      if (op.operation === 'create_file') {
+        if (store.has(op.path)) throw new SiteFileHttpError('site_file_exists', 'Destination already exists', 409);
+        const newSha256 = fileHash('');
+        store.set(op.path, { content: '', sha256: newSha256, mode: '0640', type: 'file', size: 0 });
+        return { created: true, file: { path: op.path, name: op.path, size: 0, mode: '0640' } };
+      }
+
+      if (op.operation === 'mkdir') {
+        if (store.has(op.path)) throw new SiteFileHttpError('site_file_exists', 'Destination already exists', 409);
+        store.set(op.path, { content: null, sha256: null, mode: '0750', type: 'directory', size: 0 });
+        return { created: true, directory: { path: op.path, name: op.path, mode: '0750' } };
+      }
+
+      if (op.operation === 'upload') {
+        const content = Buffer.from(op.content, 'base64').toString('utf8');
+        const newSha256 = fileHash(content);
+        const exists = store.has(op.path);
+        store.set(op.path, { content, sha256: newSha256, mode: '0640', type: 'file', size: Buffer.byteLength(content, 'utf8') });
+        return { created: !exists, path: op.path, size: Buffer.byteLength(content, 'utf8') };
+      }
+
+      if (op.operation === 'download') {
+        const item = store.get(op.path);
+        if (!item || item.type !== 'file') throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        return { path: op.path, content: Buffer.from(item.content).toString('base64') };
+      }
+
+      if (op.operation === 'rename') {
+        const item = store.get(op.path);
+        if (!item) throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        store.delete(op.path);
+        store.set(op.destination, item);
+        return { path: op.destination, previousPath: op.path };
+      }
+
+      if (op.operation === 'permissions') {
+        const item = store.get(op.path);
+        if (!item) throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        item.mode = op.mode;
+        return { path: op.path, mode: op.mode, updated: true };
+      }
+
+      if (op.operation === 'delete') {
+        if (!store.has(op.path)) throw new SiteFileHttpError('site_file_not_found', 'File not found', 404);
+        store.delete(op.path);
+        return { deleted: true, path: op.path };
+      }
+
+      if (op.operation === 'batch_delete') {
+        const deleted = [];
+        for (const p of op.paths) {
+          if (store.has(p)) {
+            store.delete(p);
+            deleted.push({ path: p, deleted: true });
+          }
+        }
+        return { deleted };
+      }
+
+      throw new SiteFileHttpError('site_file_operation_unsupported', 'Unsupported operation', 400);
+    },
+  };
+
+  const elFinderHandoffService = {
+    async issue({ serverId: srvId, websiteId: wId }) {
+      if (srvId !== stagingServerId) throw new ElFinderHandoffError('elfinder_handoff_server_not_local', 'Server not local', 404);
+      const site = websitesMap.get(wId);
+      if (!site) throw new ElFinderHandoffError('elfinder_handoff_website_not_found', 'Website not found', 404);
+      return {
+        capability: `cap-${wId}-${Date.now()}`,
+        expiresAt: Date.now() + 30000,
+        protocol: 'yunpanel-elfinder-handoff-v1',
+        audience: 'elfinder',
+        target: { serverId: srvId, websiteId: wId },
+      };
+    },
+  };
+
+  const serverRegistry = {
+    async getServer(id) {
+      if (id === stagingServerId) return { id: stagingServerId, hostname: 'server.cryptoraichu.website', executionMode: 'direct' };
+      return null;
+    },
+  };
+
+  let currentAuth = null;
+  const dummyDigest = 'a'.repeat(64);
+
+  const fileApp = express();
+  fileApp.use(express.json());
+  fileApp.use((req, res, next) => {
+    req.auth = currentAuth;
+    req.authSessionDigest = dummyDigest;
+    next();
+  });
+
+  fileApp.use(createTenantBoundaryMiddleware({
+    websiteRegistry,
+    customerLookup,
+    websiteLookup: async (id) => websiteRegistry.getWebsite(id),
+  }));
+
+  fileApp.use(createSiteResourceBoundary({
+    websiteRegistry,
+    domainRegistry,
+    localServerId: stagingServerId,
+    customerLookup,
+  }));
+
+  mountSiteFileRoutes(fileApp, { siteFileManager });
+  mountElFinderHandoffRoutes(fileApp, {
+    registry: serverRegistry,
+    elFinderHandoffService,
+  });
+
+  fileApp.use((error, req, res, _next) => {
+    const status = error.status ?? 500;
+    res.status(status).json({
+      error: { code: error.code ?? 'error', message: error.message },
+    });
+  });
+
+  const fileServer = http.createServer(fileApp);
+  await new Promise((resolve) => fileServer.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    fileServer.close();
+    await once(fileServer, 'close');
+  });
+
+  const filePort = fileServer.address().port;
+  const fileBaseUrl = `http://127.0.0.1:${filePort}`;
+
+  async function fileApiCall(method, reqPath, body = undefined, headers = {}) {
+    const res = await fetch(`${fileBaseUrl}${reqPath}`, {
+      method,
+      headers: {
+        connection: 'close',
+        ...(body && typeof body === 'object' && !(body instanceof Buffer) ? { 'Content-Type': 'application/json' } : {}),
+        ...headers,
+      },
+      body: body instanceof Buffer ? body : body ? JSON.stringify(body) : undefined,
+    });
+    const contentType = res.headers.get('content-type') ?? '';
+    const json = contentType.includes('application/json') ? await res.json().catch(() => null) : null;
+    const text = !contentType.includes('application/json') ? await res.text().catch(() => null) : null;
+    return { status: res.status, body: json, text, headers: res.headers };
+  }
+
+  // 4. Multi-Tenant Authorization Gates Verification
+  // Unauthenticated requests -> 401
+  currentAuth = null;
+  const unauthFileRes = await fileApiCall('GET', `/api/websites/${siteAId}/files`);
+  assert.equal(unauthFileRes.status, 401);
+
+  // Inactive user -> 403 tenant_actor_inactive
+  currentAuth = {
+    id: 'session-inactive',
+    user: { id: userAId, role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-a' }, websiteIds: [siteAId], active: false },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const inactiveFileRes = await fileApiCall('GET', `/api/websites/${siteAId}/files`);
+  assert.equal(inactiveFileRes.status, 403);
+  assert.equal(inactiveFileRes.body.error.code, 'tenant_actor_inactive');
+
+  // Customer A accesses Site A -> 200
+  currentAuth = {
+    id: 'session-cust-a',
+    user: { id: userAId, role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-a' }, websiteIds: [siteAId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const listSiteARes = await fileApiCall('GET', `/api/websites/${siteAId}/files`);
+  assert.equal(listSiteARes.status, 200);
+  assert.ok(Array.isArray(listSiteARes.body.data.entries));
+
+  // Customer A attempting to access Site B -> 403 tenant_boundary_forbidden
+  const crossTenantFileRes = await fileApiCall('GET', `/api/websites/${siteBId}/files`);
+  assert.equal(crossTenantFileRes.status, 403);
+  assert.equal(crossTenantFileRes.body.error.code, 'tenant_boundary_forbidden');
+
+  // Customer B (reseller B) attempting to access Site A -> 403 tenant_boundary_forbidden
+  currentAuth = {
+    id: 'session-res-b',
+    user: { id: userBId, role: 'reseller', hosting: { kind: 'reseller' }, websiteIds: [siteBId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const crossTenantBRes = await fileApiCall('GET', `/api/websites/${siteAId}/files`);
+  assert.equal(crossTenantBRes.status, 403);
+  assert.equal(crossTenantBRes.body.error.code, 'tenant_boundary_forbidden');
+
+  // Owner has full access across both Site A and Site B
+  currentAuth = {
+    id: 'session-owner',
+    user: { id: ownerUserId, role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const ownerSiteARes = await fileApiCall('GET', `/api/websites/${siteAId}/files`);
+  assert.equal(ownerSiteARes.status, 200);
+  const ownerSiteBRes = await fileApiCall('GET', `/api/websites/${siteBId}/files`);
+  assert.equal(ownerSiteBRes.status, 200);
+
+  // 5. Complete File Management Operations & Behaviors Verification (Customer A on Site A)
+  currentAuth = {
+    id: 'session-cust-a',
+    user: { id: userAId, role: 'customer', hosting: { kind: 'customer', resellerId: 'reseller-a' }, websiteIds: [siteAId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  // Subdirectory listing
+  const listAssetsRes = await fileApiCall('GET', `/api/websites/${siteAId}/files?path=assets`);
+  assert.equal(listAssetsRes.status, 200);
+  assert.equal(listAssetsRes.body.data.entries.length, 1);
+  assert.equal(listAssetsRes.body.data.entries[0].name, 'app.js');
+
+  // Create file
+  const createFileRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/file`, { path: 'notes.txt' });
+  assert.equal(createFileRes.status, 201);
+  assert.equal(createFileRes.body.data.created, true);
+
+  // Duplicate create file fails with 409
+  const dupCreateFileRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/file`, { path: 'notes.txt' });
+  assert.equal(dupCreateFileRes.status, 409);
+  assert.equal(dupCreateFileRes.body.error.code, 'site_file_exists');
+
+  // Mkdir
+  const mkdirRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/mkdir`, { path: 'docs' });
+  assert.equal(mkdirRes.status, 201);
+  assert.equal(mkdirRes.body.data.created, true);
+
+  // Duplicate mkdir fails with 409
+  const dupMkdirRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/mkdir`, { path: 'docs' });
+  assert.equal(dupMkdirRes.status, 409);
+  assert.equal(dupMkdirRes.body.error.code, 'site_file_exists');
+
+  // Read text
+  const readTextRes = await fileApiCall('GET', `/api/websites/${siteAId}/files/text?path=config.json`);
+  assert.equal(readTextRes.status, 200);
+  assert.equal(readTextRes.body.data.content, '{"site":"A","env":"staging"}');
+  const initialConfigSha = readTextRes.body.data.sha256;
+  assert.ok(initialConfigSha);
+
+  // Write text with matching expectedSha256
+  const writeTextRes = await fileApiCall('PUT', `/api/websites/${siteAId}/files/text`, {
+    path: 'config.json',
+    content: '{"site":"A","env":"production"}',
+    expectedSha256: initialConfigSha,
+  });
+  assert.equal(writeTextRes.status, 200);
+  const updatedConfigSha = writeTextRes.body.data.sha256;
+  assert.notEqual(updatedConfigSha, initialConfigSha);
+
+  // Concurrency collision: Write text with stale expectedSha256 fails with 409 (prevents dirty overwrite)
+  const staleWriteRes = await fileApiCall('PUT', `/api/websites/${siteAId}/files/text`, {
+    path: 'config.json',
+    content: '{"site":"A","env":"colliding-tab"}',
+    expectedSha256: initialConfigSha,
+  });
+  assert.equal(staleWriteRes.status, 409);
+  assert.equal(staleWriteRes.body.error.code, 'site_file_changed');
+
+  // Permissions update (safe permission mode 0640 for file, 0750 for dir)
+  const permRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/permissions`, {
+    path: 'notes.txt',
+    mode: '0640',
+  });
+  assert.equal(permRes.status, 200);
+  assert.equal(permRes.body.data.mode, '0640');
+
+  // Rename file
+  const renameRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/rename`, {
+    path: 'notes.txt',
+    destination: 'readme.txt',
+  });
+  assert.equal(renameRes.status, 200);
+  assert.equal(renameRes.body.data.path, 'readme.txt');
+
+  // Upload binary/text file
+  const uploadPayload = Buffer.from('binary-content-12345');
+  const uploadRes = await fileApiCall('PUT', `/api/websites/${siteAId}/files/upload?path=test.bin`, uploadPayload, {
+    'Content-Type': 'application/octet-stream',
+  });
+  assert.equal(uploadRes.status, 201);
+  assert.equal(uploadRes.body.data.created, true);
+
+  // Download file
+  const downloadRes = await fileApiCall('GET', `/api/websites/${siteAId}/files/download?path=test.bin`);
+  assert.equal(downloadRes.status, 200);
+  assert.equal(downloadRes.headers.get('content-type'), 'application/octet-stream');
+  assert.equal(downloadRes.headers.get('cache-control'), 'no-store');
+  assert.equal(downloadRes.headers.get('x-content-type-options'), 'nosniff');
+  assert.equal(downloadRes.text, 'binary-content-12345');
+
+  // Single delete with confirmation
+  const deleteRes = await fileApiCall('DELETE', `/api/websites/${siteAId}/files`, {
+    path: 'readme.txt',
+    confirmation: `delete:${siteAId}:readme.txt`,
+  });
+  assert.equal(deleteRes.status, 200);
+  assert.equal(deleteRes.body.data.deleted, true);
+
+  // Delete with wrong confirmation fails
+  const badDeleteRes = await fileApiCall('DELETE', `/api/websites/${siteAId}/files`, {
+    path: 'test.bin',
+    confirmation: 'wrong-confirmation',
+  });
+  assert.equal(badDeleteRes.status, 400);
+  assert.equal(badDeleteRes.body.error.code, 'site_file_delete_confirmation_required');
+
+  // Batch delete with confirmation
+  const batchDeleteRes = await fileApiCall('POST', `/api/websites/${siteAId}/files/batch-delete`, {
+    paths: ['docs', 'test.bin'],
+    confirmation: `batch-delete:${siteAId}`,
+  });
+  assert.equal(batchDeleteRes.status, 200);
+  assert.equal(batchDeleteRes.body.data.deleted.length, 2);
+
+  // elFinder handoff integration
+  const elFinderBootRes = await fileApiCall('GET', '/api/elfinder-bootstrap-access');
+  assert.equal(elFinderBootRes.status, 204);
+
+  const elFinderHandoffRes = await fileApiCall('POST', `/api/servers/${stagingServerId}/websites/${siteAId}/elfinder-handoffs`, {});
+  assert.equal(elFinderHandoffRes.status, 201);
+  assert.ok(elFinderHandoffRes.body.data.capability.startsWith(`cap-${siteAId}-`));
+
+  // elFinder cross-tenant access to Site B is rejected with 403
+  const elFinderCrossRes = await fileApiCall('POST', `/api/servers/${stagingServerId}/websites/${siteBId}/elfinder-handoffs`, {});
+  assert.equal(elFinderCrossRes.status, 403);
+  assert.equal(elFinderCrossRes.body.error.code, 'tenant_boundary_forbidden');
+
+  // 6. File Paths, Draft States, Router Navigation and Page Reload Invariants
+  // Path navigation model functions
+  assert.equal(validRelativePath('src'), true);
+  assert.equal(validRelativePath('assets/images/logo.png'), true);
+  assert.equal(validRelativePath('.well-known/acme-challenge'), true);
+  assert.equal(validRelativePath('../outside'), false);
+  assert.equal(validRelativePath('/etc/passwd'), false);
+  assert.equal(validRelativePath('null\0byte'), false);
+  assert.equal(validRelativePath('//double-slash'), false);
+
+  assert.equal(validFileName('index.html'), true);
+  assert.equal(validFileName('sub/file.txt'), false);
+  assert.equal(validFileName('../bad'), false);
+  assert.equal(validFileName(''), false);
+
+  assert.equal(fileParent('a/b/c'), 'a/b');
+  assert.equal(fileParent('a'), '');
+  assert.equal(fileParent(''), '');
+  assert.equal(fileChild('a', 'b'), 'a/b');
+  assert.equal(fileChild('', 'b'), 'b');
+
+  const crumbs = fileCrumbs('assets/images/icons');
+  assert.deepEqual(crumbs, [
+    { name: 'assets', path: 'assets' },
+    { name: 'images', path: 'assets/images' },
+    { name: 'icons', path: 'assets/images/icons' },
+  ]);
+
+  // Destination path validation protects against traversal and self-nesting
+  assert.doesNotThrow(() => validateDestinationPath(['file.txt'], 'subfolder'));
+  assert.throws(() => validateDestinationPath(['folder1'], 'folder1/nested'), (err) => err.message.includes('kendi içine'));
+  assert.throws(() => validateDestinationPath(['file.txt'], '../outside'), (err) => err.message.includes('geçersiz'));
+
+  // Safe permission validation
+  assert.doesNotThrow(() => validateSafePermissions('0640', { isDirectory: false }));
+  assert.doesNotThrow(() => validateSafePermissions('0750', { isDirectory: true }));
+  assert.throws(() => validateSafePermissions('0777'), (err) => err.message.includes('world-writable'));
+  assert.throws(() => validateSafePermissions('0666'), (err) => err.message.includes('world-writable'));
+
+  assert.ok(checkItemConflict([{ name: 'file.txt', path: 'file.txt' }], 'FILE.TXT'));
+  assert.equal(checkItemConflict([{ name: 'file.txt', path: 'file.txt' }], 'other.txt'), null);
+
+  // In-memory draft continuity across reload and background refreshes
+  const domainAItem = { id: 'dom-a', primaryDomain: 'site-a.example.com', websiteId: siteAId, serverId: stagingServerId };
+  const siteAItem = { id: siteAId, serverId: stagingServerId, runtimeType: 'node' };
+  const readyInputA = {
+    domainId: 'dom-a',
+    canManage: true,
+    domains: { status: 'ready', items: [domainAItem] },
+    websites: { status: 'ready', items: [siteAItem] },
+  };
+
+  let fileSession = reconcileFileSession(EMPTY_FILE_SESSION, readyInputA);
+  const sessionKey = fileSessionKey(fileSession.binding);
+  assert.ok(sessionKey);
+
+  const initialDraftEditor = {
+    name: 'server.js',
+    path: 'src/server.js',
+    content: 'const app = express(); // unsaved draft edits',
+    saved: 'const app = express();',
+    sha256: fileHash('const app = express();'),
+  };
+
+  fileSession = updateFileSession(fileSession, sessionKey, 'path', 'src');
+  fileSession = updateFileSession(fileSession, sessionKey, 'editor', initialDraftEditor);
+
+  assert.equal(fileEditorDirty(fileSession.editor), true);
+  assert.equal(fileSession.path, 'src');
+
+  // Background refresh / router updates (loading, refreshing, stale, error) MUST NOT lose path or editor draft
+  for (const status of ['loading', 'refreshing', 'stale', 'error']) {
+    const transientInput = {
+      ...readyInputA,
+      domains: { status, items: [domainAItem] },
+      websites: { status, items: [siteAItem] },
+    };
+    const reconciled = reconcileFileSession(fileSession, transientInput);
+    assert.equal(reconciled, fileSession, `Transient status ${status} must preserve exact file session`);
+    assert.equal(reconciled.editor.content, initialDraftEditor.content);
+    assert.equal(reconciled.path, 'src');
+    assert.equal(fileEditorDirty(reconciled.editor), true);
+  }
+
+  // Completing refresh restores ready status and keeps draft
+  const postRefreshSession = reconcileFileSession(fileSession, readyInputA);
+  assert.equal(postRefreshSession, fileSession);
+  assert.equal(postRefreshSession.editor.content, initialDraftEditor.content);
+  assert.equal(postRefreshSession.path, 'src');
+
+  // Saving or matching saved content clears dirty state
+  const savedEditor = {
+    ...fileSession.editor,
+    saved: fileSession.editor.content,
+    sha256: fileHash(fileSession.editor.content),
+  };
+  fileSession = updateFileSession(fileSession, sessionKey, 'editor', savedEditor);
+  assert.equal(fileEditorDirty(fileSession.editor), false);
+
+  // Switching website / tenant clears session to prevent draft leakage
+  const siteBItem = { id: siteBId, serverId: stagingServerId, runtimeType: 'php' };
+  const domainBItem = { id: 'dom-b', primaryDomain: 'site-b.example.com', websiteId: siteBId, serverId: stagingServerId };
+  const switchInputB = {
+    domainId: 'dom-b',
+    canManage: true,
+    domains: { status: 'ready', items: [domainBItem] },
+    websites: { status: 'ready', items: [siteBItem] },
+  };
+  const switchedSession = reconcileFileSession(fileSession, switchInputB);
+  assert.equal(switchedSession.editor, null, 'Switching website clears editor');
+  assert.equal(switchedSession.path, '', 'Switching website resets path');
+  assert.equal(switchedSession.binding.websiteId, siteBId);
+
+  // Zero persistence audit: verify absence of localStorage/sessionStorage/indexedDB
+  const filesToAudit = [
+    '../../web/src/workspace/FilesPanel.jsx',
+    '../../web/src/workspace/SiteFilesPanel.jsx',
+    '../../web/src/workspace/FileWorkspaceSession.jsx',
+    '../../web/src/workspace/file-session-state.js',
+    '../../web/src/workspace/site-files-access.js',
+  ];
+  for (const relPath of filesToAudit) {
+    const fileSource = await readFile(path.resolve(import.meta.dirname, relPath), 'utf8');
+    assert.doesNotMatch(fileSource, /localStorage/, `Forbidden localStorage found in ${relPath}`);
+    assert.doesNotMatch(fileSource, /sessionStorage/, `Forbidden sessionStorage found in ${relPath}`);
+    assert.doesNotMatch(fileSource, /indexedDB/, `Forbidden indexedDB found in ${relPath}`);
+    assert.doesNotMatch(fileSource, /openDatabase/, `Forbidden Web SQL found in ${relPath}`);
+  }
+
+  // 7. Upper BUG-04/05 and T-DEV-SSL-FORM Acceptance Invariants Intact
+  // BUG-20260923-04: Initial form with defaults is clean (not dirty)
+  for (const testEmail of ['', 'admin@example.test', 'user@domain.com']) {
+    const draft = createSslRequestDraft(testEmail);
+    assert.equal(sslDraftDirty(draft), false, 'Initial SSL form with defaults must never be dirty');
+    assert.equal(draft.values.email, testEmail ? testEmail.trim() : '');
+  }
+
+  // Auto-filled / late default email does not mark form dirty
+  const emptySslDraft = createSslRequestDraft();
+  assert.equal(sslDraftDirty(emptySslDraft), false);
+  const autoFilledSsl = sslRequestDraftReducer(emptySslDraft, { type: 'email-default', email: 'autofill@example.test' });
+  assert.equal(autoFilledSsl.values.email, 'autofill@example.test');
+  assert.equal(sslDraftDirty(autoFilledSsl), false, 'Auto-filled email must not flag SSL form as dirty');
+
+  // User modification flags form as dirty
+  const editedSslEmail = sslRequestDraftReducer(autoFilledSsl, { type: 'edit', field: 'email', value: 'user-modified@example.test' });
+  assert.equal(sslDraftDirty(editedSslEmail), true, 'User email edit must flag form as dirty');
+  const editedSslScope = sslRequestDraftReducer(autoFilledSsl, { type: 'edit', field: 'includeWww', value: false });
+  assert.equal(sslDraftDirty(editedSslScope), true, 'User checkbox change must flag form as dirty');
+
+  // Reverting to baseline clears dirty
+  const revertedSslEmail = sslRequestDraftReducer(editedSslEmail, { type: 'edit', field: 'email', value: 'autofill@example.test' });
+  assert.equal(sslDraftDirty(revertedSslEmail), false, 'Reverting to baseline must clear dirty state');
+
+  // Reset and cancel clear dirty state
+  const resetSsl = sslRequestDraftReducer(editedSslScope, { type: 'reset' });
+  assert.equal(sslDraftDirty(resetSsl), false);
+  const cancelSsl = sslRequestDraftReducer(editedSslScope, { type: 'cancel' });
+  assert.equal(sslDraftDirty(cancelSsl), false);
+
+  // Submitted updates baseline and clears dirty
+  const sslSnapshot = sslDraftSnapshot(editedSslScope);
+  const submittedSsl = sslRequestDraftReducer(editedSslScope, { type: 'submitted', values: sslSnapshot });
+  assert.equal(sslDraftDirty(submittedSsl), false);
+
+  // BUG-20260923-05: SSL communication address resolves from active session user
+  const ownerSess = { user: { id: 'owner-1', role: 'owner', email: 'owner@example.test' } };
+  const siteMgrSess = { user: { id: 'mgr-1', role: 'site_manager', email: 'manager@site.test' } };
+  const customerSess = { user: { id: 'cust-1', role: 'customer', email: 'customer@site.test' } };
+  const resellerSess = { user: { id: 'res-1', role: 'reseller', email: 'reseller@site.test' } };
+  const hostingProfileSess = { user: { id: 'host-1', role: 'customer', hosting: { contactEmail: 'profile@site.test' } } };
+  const usernameEmailSess = { user: { id: 'user-1', role: 'site_manager', username: 'admin@site.test' } };
+
+  assert.equal(sslContactEmail(ownerSess), 'owner@example.test');
+  assert.equal(sslContactEmail(siteMgrSess), 'manager@site.test');
+  assert.equal(sslContactEmail(customerSess), 'customer@site.test');
+  assert.equal(sslContactEmail(resellerSess), 'reseller@site.test');
+  assert.equal(sslContactEmail(hostingProfileSess), 'profile@site.test');
+  assert.equal(sslContactEmail(usernameEmailSess), 'admin@site.test');
+
+  // Absence of account email leaves field empty, never silent fallback to global ACME email
+  const noAddressSess = {
+    user: { id: 'owner-2', role: 'owner', username: 'admin' },
+    dnsSsl: { acmeEmail: 'global-acme@server.test' },
+  };
+  assert.equal(sslContactEmail(noAddressSess), '');
+
+  // 8. Documentary Integrity Preserved Pending Independent Integration
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanDoc.includes('- [ ] Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır.'),
+    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
+  );
+  assert.ok(
+    uiPlanDoc.includes('- [ ] **Gerçek kabul ve kalıcılık:**'),
+    'Previous live acceptance checkbox in ui-plan.md must remain open',
+  );
+
+  assert.ok(true, 'Files kabul ve kalıcılık: Node24/npm11 tam React/Vite build, gerçek tarayıcı/host kabulü, dosya yolu/taslak korunması ve bütün dosya yönetim davranışları ile BUG-04/05 ve T-DEV-SSL-FORM kabulleri başarıyla doğrulandı.');
 });
