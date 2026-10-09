@@ -93,6 +93,15 @@ export async function recoverRunningCron({
     throw new JobRunningCronRecoveryError('job_cron_recovery_job_mismatch', 'Running cron job no longer matches durable recovery state');
   }
 
+  let context;
+  try { context = await loadJobContext(identity.jobId); }
+  catch {
+    throw new JobRunningCronRecoveryError('job_cron_recovery_context_failed', 'Running cron context could not be read');
+  }
+  if (context && context.id && context.id !== identity.jobId) {
+    throw new JobRunningCronRecoveryError('job_cron_recovery_job_mismatch', 'Running cron context does not match identity');
+  }
+
   let receipt;
   try { receipt = await readOperationReceipt(identity.serverId, identity.jobId); }
   catch {
@@ -103,6 +112,58 @@ export async function recoverRunningCron({
       'job_cron_recovery_receipt_missing',
       'Cron operation receipt is absent; the running job remains unresolved',
     );
+  }
+
+  if ((receipt.operation && receipt.operation !== job.operation)
+    || (receipt.serverId && receipt.serverId.toLowerCase() !== identity.serverId.toLowerCase())
+    || (receipt.jobId && receipt.jobId !== identity.jobId)
+    || (job.resourceId && receipt.result?.taskId && job.resourceId !== receipt.result.taskId)) {
+    throw new JobRunningCronRecoveryError('job_cron_recovery_job_mismatch', 'Running cron receipt metadata is inconsistent');
+  }
+
+  if (context?.payload && receipt.result) {
+    if ((context.payload.taskId && context.payload.taskId !== receipt.result.taskId)
+      || (context.payload.websiteId && context.payload.websiteId !== receipt.result.websiteId)
+      || (context.payload.applicationId && context.payload.applicationId !== receipt.result.applicationId)
+      || (context.payload.unixUser && context.payload.unixUser !== receipt.result.unixUser)
+      || (context.payload.expectedRevision && context.payload.expectedRevision !== receipt.result.revision)) {
+      throw new JobRunningCronRecoveryError('job_cron_recovery_job_mismatch', 'Running cron receipt evidence does not match job context');
+    }
+  }
+
+  if (typeof websiteCronManager.listManagedFiles === 'function') {
+    let hostInventory;
+    try { hostInventory = await websiteCronManager.listManagedFiles(); }
+    catch {
+      throw new JobRunningCronRecoveryError('job_cron_recovery_host_state_failed', 'Cron host files could not be inspected');
+    }
+    const hostFile = hostInventory?.files?.find((file) => file.taskId === receipt.result.taskId) ?? null;
+    if (job.operation === OPERATIONS.CRON_APPLY) {
+      if (!hostFile || (receipt.result.contentSha256 && hostFile.contentSha256 !== receipt.result.contentSha256)) {
+        throw new JobRunningCronRecoveryError('job_cron_recovery_host_state_mismatch', 'Host cron configuration does not match apply receipt');
+      }
+    } else if (job.operation === OPERATIONS.CRON_REMOVE) {
+      if (hostFile !== null) {
+        throw new JobRunningCronRecoveryError('job_cron_recovery_host_state_mismatch', 'Host cron configuration still present despite remove receipt');
+      }
+    }
+  }
+
+  if (typeof websiteCronRegistry.getTask === 'function') {
+    let task;
+    try { task = await websiteCronRegistry.getTask(receipt.result.taskId); }
+    catch {
+      throw new JobRunningCronRecoveryError('job_cron_recovery_registry_read_failed', 'Cron task registry could not be read');
+    }
+    if (job.operation === OPERATIONS.CRON_APPLY) {
+      if (!task || task.id !== receipt.result.taskId || task.websiteId !== receipt.result.websiteId) {
+        throw new JobRunningCronRecoveryError('job_cron_recovery_registry_mismatch', 'Cron registry state does not match apply receipt');
+      }
+    } else if (job.operation === OPERATIONS.CRON_REMOVE) {
+      if (task !== null) {
+        throw new JobRunningCronRecoveryError('job_cron_recovery_registry_mismatch', 'Cron registry state still present despite remove receipt');
+      }
+    }
   }
 
   const terminalField = job.operation === OPERATIONS.CRON_APPLY ? 'applied' : 'removed';
