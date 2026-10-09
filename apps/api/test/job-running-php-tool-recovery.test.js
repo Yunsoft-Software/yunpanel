@@ -163,7 +163,7 @@ test('multi-process independent API instances safely coordinate enqueue and clai
       serverId,
       jobId: c2.job.id,
       status: 'succeeded',
-      result: { ...result, applicationId: '33333333-3333-4333-8333-333333333333' },
+      result: { ...result, applicationId: c2.job.resourceId },
     });
     assert.equal(completedJob.status, 'succeeded');
 
