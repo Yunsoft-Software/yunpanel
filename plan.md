@@ -34,6 +34,11 @@ Yeni bağımsız dashboard/modül icat edilmez. Mevcut API/adapter kapasitesi ö
 
 ## E — Önceki açık işler: korunur, yeni UX kararıyla uygulanır
 
+- **SSL süre ve fingerprint senkronizasyonu (BUG-20260923-06 / UX-PL-06/07 / SR-01–04):**
+  - **Kaynak ve kabul ayrımı izleme:** SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.
+  - **Kaynak durumu:** `certificate-registry.js` markActive ve `job-reconciliation.js` gerçek validFrom/validTo/fingerprint değerlerini kaydeder; `ssl-renewal.js` job sonucu ile aktif kalıcı sertifika kaydı arasındaki fingerprint ve tarih eşleşmesini doğrular; `ssl-job-refresh.js` terminal iş durumunda koleksiyon yenilemesini tetikler.
+  - **Kabul ayrımı:** Paneldeki kalıcı metadata ile job kanıtı eşitliği, gerçek TLS bağlantısında sunulan sertifikanın veya Nginx/mail reload etkisinin canlı kanıtı değildir. Canlı TLS bağlantısı, dışarıdan sunulan fingerprint ve süre doğrulaması Code Factory staging/host kanıtları kaydedilene kadar açık tutulur.
+
 ## F — Sade reseller uygulaması ve korunmuş Plesk yol haritası
 
 - **PAR-02 / RS-03–05 — Basit Customer/Reseller yönetiminde kalan kabul:**
