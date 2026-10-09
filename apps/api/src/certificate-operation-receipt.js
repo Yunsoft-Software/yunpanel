@@ -148,7 +148,7 @@ function normalize(value) {
       validTo: null,
     });
   }
-  if (value.status !== 'renewed') {
+  if (!['renewed', 'unchanged'].includes(value.status)) {
     throw new CertificateOperationReceiptError('certificate_receipt_variant_invalid', 'Certificate renewal receipt status is invalid');
   }
   return Object.freeze({
@@ -162,7 +162,7 @@ function normalize(value) {
     domains: null,
     staging: null,
     dryRun: false,
-    status: 'renewed',
+    status: value.status,
     ...productionEvidence(value),
   });
 }

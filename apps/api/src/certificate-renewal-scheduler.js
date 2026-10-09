@@ -44,7 +44,7 @@ export function verifyRenewalOutcome({ certificate, before = null, job, liveTls 
     });
   }
 
-  if (job.result.status !== 'renewed') {
+  if (!['renewed', 'unchanged'].includes(job.result.status)) {
     return Object.freeze({
       outcome: 'unverified',
       reason: 'job_status_not_renewed',

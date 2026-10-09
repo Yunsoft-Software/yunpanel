@@ -127,7 +127,7 @@ function assertReceipt(receipt, identity, intent) {
       throw new JobRunningCertificateRecoveryError('job_certificate_recovery_receipt_mismatch', 'Certificate issue receipt is inconsistent');
     }
   } else if (receipt.domains !== null || receipt.staging !== null || receipt.dryRun !== intent.dryRun
-    || receipt.status !== (intent.dryRun ? 'validated' : 'renewed')) {
+    || !(intent.dryRun ? receipt.status === 'validated' : ['renewed', 'unchanged'].includes(receipt.status))) {
     throw new JobRunningCertificateRecoveryError('job_certificate_recovery_receipt_mismatch', 'Certificate renewal receipt is inconsistent');
   }
 
@@ -168,7 +168,7 @@ function completionResult(intent, receipt, live) {
   if (intent.operation === OPERATIONS.SSL_ISSUE) {
     return { ...live, domains: [...intent.domains], staging: false, status: 'issued' };
   }
-  return { ...live, dryRun: false, status: 'renewed' };
+  return { ...live, dryRun: false, status: receipt.status };
 }
 
 export async function recoverRunningCertificateOperation({

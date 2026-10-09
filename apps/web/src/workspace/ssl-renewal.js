@@ -25,7 +25,7 @@ export function renewalOutcome(job, before, certificate, dryRun) {
     requireValue(job.result.status === 'validated');
     return certificate.state === 'active' ? 'tested' : 'syncing';
   }
-  requireValue(job.result.status === 'renewed');
+  requireValue(['renewed', 'unchanged'].includes(job.result.status));
   const result = renewalMetadata(job.result);
   if (certificate.state !== 'active' || !equal(result, renewalMetadata(certificate))) return 'syncing';
   const original = renewalMetadata(before);
@@ -94,7 +94,7 @@ export function createSslRenewal({ target, request, isCurrent = () => true, canM
     const result = value.status === 'succeeded' ? value.result : null;
     if (value.status === 'succeeded') requireValue(record(result) && typeof result.certName === 'string'
       && /^[a-z0-9.-]{1,253}$/.test(result.certName) && typeof result.dryRun === 'boolean'
-      && result.dryRun === state.dryRun && result.status === (state.dryRun ? 'validated' : 'renewed')
+      && result.dryRun === state.dryRun && (state.dryRun ? result.status === 'validated' : ['renewed', 'unchanged'].includes(result.status))
       && (result.staging === undefined || result.staging === false));
     // Never retain raw payloads, paths, API error text or secret material.
     const safeResult = result ? Object.freeze({ certName: result.certName, status: result.status,

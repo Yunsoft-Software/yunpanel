@@ -245,6 +245,7 @@ function renewalOutcome(job, before, certificate, dryRun = false) {
         return 'syncing';
       }
     }
+    if (job.result.status === 'unchanged') return 'unchanged';
     if (before?.fingerprint256) {
       const beforeFp = String(before.fingerprint256).toUpperCase();
       if (beforeFp === jobFp) {
@@ -263,7 +264,7 @@ function renewalOutcome(job, before, certificate, dryRun = false) {
       return 'syncing';
     }
   }
-  return certificate?.state === 'active' ? 'renewed' : 'syncing';
+  return 'unverified';
 }
 
 function verifyTlsPresentation({ domain, certificate, inspected = null }) {

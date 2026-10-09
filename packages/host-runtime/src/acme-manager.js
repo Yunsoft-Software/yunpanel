@@ -260,9 +260,10 @@ export function createAcmeManager({
     };
   }
 
-  async function renewCertificate({ certName, dryRun = false, challenge: requestedChallenge }, { dnsCredential = null } = {}) {
+  async function renewCertificate({ certName, dryRun = false, forceRenewal = false, challenge: requestedChallenge }, { dnsCredential = null } = {}) {
     const normalizedName = normalizeDomainSet(certName, []).primary;
     const challenge = normalizeChallenge(requestedChallenge);
+    const before = dryRun ? null : await inspectCertificateFn(normalizedName);
     await withChallengeCredential(challenge, dnsCredential, async (credentialPath) => {
       const args = ['renew', '--cert-name', normalizedName, '--non-interactive', '--no-random-sleep-on-renew'];
       if (challenge.type === 'dns-01') args.push(
@@ -271,16 +272,24 @@ export function createAcmeManager({
         '--dns-cloudflare-propagation-seconds', String(challenge.propagationSeconds),
       );
       if (dryRun) args.push('--dry-run');
+      else if (forceRenewal) args.push('--force-renewal');
       await runCertbot(args);
     });
     if (dryRun) {
       return { certName: normalizedName, dryRun: true, status: 'validated' };
     }
 
+    const after = await inspectCertificateFn(normalizedName);
+    const unchanged = before?.fingerprint256 === after?.fingerprint256
+      && before?.validFrom === after?.validFrom && before?.validTo === after?.validTo;
+    if (!unchanged && (!before?.fingerprint256 || !after?.fingerprint256
+      || before.fingerprint256 === after.fingerprint256 || !(Date.parse(after.validTo) > Date.parse(before.validTo)))) {
+      throw Object.assign(new Error('Certificate renewal could not be verified'), { code: 'ssl_renewal_unverified' });
+    }
     return {
-      ...(await inspectCertificateFn(normalizedName)),
+      ...after,
       dryRun: false,
-      status: 'renewed',
+      status: unchanged ? 'unchanged' : 'renewed',
     };
   }
 

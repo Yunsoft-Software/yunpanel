@@ -1186,6 +1186,7 @@ export function createApp({
       payload: {
         certName: certificate.certName,
         dryRun,
+        forceRenewal: !dryRun,
         ...(certificate.challenge?.type === 'dns-01' ? { challenge: certificate.challenge } : {}),
       },
       resourceType: 'certificate',

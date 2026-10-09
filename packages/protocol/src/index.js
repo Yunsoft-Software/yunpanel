@@ -449,10 +449,11 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.SSL_RENEW) {
-    rejectUnexpectedKeys(payload, ['certName', 'dryRun', 'challenge'], operation, errors);
+    rejectUnexpectedKeys(payload, ['certName', 'dryRun', 'forceRenewal', 'challenge'], operation, errors);
     validateAcmeChallenge(payload.challenge, operation, errors);
     if (typeof payload.certName !== 'string' || !DOMAIN_PATTERN.test(payload.certName) || payload.certName.includes('*')) errors.push('ssl.renew certName is invalid');
     if (payload.dryRun !== undefined && typeof payload.dryRun !== 'boolean') errors.push('ssl.renew dryRun must be boolean');
+    if (payload.forceRenewal !== undefined && typeof payload.forceRenewal !== 'boolean') errors.push('ssl.renew forceRenewal must be boolean');
   }
 
   if (operation === OPERATIONS.APP_STATIC_DEPLOY) {

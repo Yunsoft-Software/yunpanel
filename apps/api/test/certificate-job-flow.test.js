@@ -225,6 +225,7 @@ test('production certificate attaches to HTTPS desired state and supports renewa
     assert.equal((await certificateRegistry.getCertificate(certificate.id)).state, 'renewing');
 
     const renewedResult = productionCertificateResult(certificate.certName, certificate.domains, {
+      fingerprint256: Array(32).fill('BB').join(':'),
       validFrom: '2026-10-01T00:00:00.000Z',
       validTo: '2026-12-30T00:00:00.000Z',
       dryRun: false,

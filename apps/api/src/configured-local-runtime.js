@@ -271,7 +271,7 @@ export async function startConfiguredLocalRuntime({
       if (resourceType !== 'certificate' || typeof resourceId !== 'string' || !resourceId
         || typeof payload?.certName !== 'string' || !payload.certName
         || typeof payload.dryRun !== 'boolean' || result?.certName !== payload.certName
-        || result.dryRun !== payload.dryRun || result.status !== (payload.dryRun ? 'validated' : 'renewed')) {
+        || result.dryRun !== payload.dryRun || !(payload.dryRun ? result.status === 'validated' : ['renewed', 'unchanged'].includes(result.status))) {
         throw new Error('Certificate renewal result is not safe recovery evidence');
       }
       await certificateOperationReceipts.write({

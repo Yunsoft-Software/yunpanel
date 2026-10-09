@@ -686,11 +686,21 @@ export function createCertificateRegistry({
     if (typeof result.fingerprint256 !== 'string' || !SHA256_FINGERPRINT.test(result.fingerprint256)) {
       throw new CertificateRegistryError('invalid_certificate_metadata', 'Certificate fingerprint is invalid');
     }
+    if (renewal && certificate.fingerprint256) {
+      const sameMaterial = certificate.fingerprint256 === result.fingerprint256.toUpperCase();
+      if ((sameMaterial && (certificate.validFrom !== validFrom || certificate.validTo !== validTo))
+        || (!sameMaterial && !(Date.parse(validTo) > Date.parse(certificate.validTo)))
+        || (result.status === 'unchanged' && !sameMaterial)) {
+        throw new CertificateRegistryError('certificate_renewal_unverified', 'Certificate renewal metadata is contradictory or older than the active certificate', 409);
+      }
+    }
 
     const certificatePath = validateCertificatePath(certificate, result.certificatePath, 'cert.pem', roots);
     const fullchainPath = validateCertificatePath(certificate, result.fullchainPath, 'fullchain.pem', roots);
     const privateKeyPath = validateCertificatePath(certificate, result.privateKeyPath, 'privkey.pem', roots);
     const timestamp = new Date(now()).toISOString();
+    const materialChanged = certificate.fingerprint256 !== result.fingerprint256.toUpperCase()
+      && (certificate.validTo === null || Date.parse(validTo) > Date.parse(certificate.validTo));
     certificate.state = 'active';
     certificate.certificatePath = certificatePath;
     certificate.fullchainPath = fullchainPath;
@@ -703,7 +713,7 @@ export function createCertificateRegistry({
     certificate.fingerprint256 = result.fingerprint256.toUpperCase();
     certificate.lastError = null;
     certificate.updatedAt = timestamp;
-    if (renewal) certificate.lastRenewedAt = timestamp;
+    if (renewal) { if (materialChanged) certificate.lastRenewedAt = timestamp; }
     else certificate.lastIssuedAt = timestamp;
     return toPublic(certificate);
   }
