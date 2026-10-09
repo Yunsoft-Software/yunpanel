@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -41,6 +42,7 @@ import { operationErrorDiagnosis } from './operation-diagnosis.js';
 import { sanitizeWebsiteCronJobResult } from './website-cron-job-result.js';
 import { sanitizeWebsitePhpToolJobResult } from './website-php-tool-job-result.js';
 import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -1198,38 +1200,74 @@ export function createJobRegistry({
   retryBackoffMaxMs = 30000,
   maxAttempts = 5,
   reauthorize = null,
+  storeLock = null,
+  storeLockFactory = createProcessStoreLock,
 } = {}) {
   const defaultReauthorize = typeof reauthorize === 'function' ? reauthorize : null;
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
-  let claimChain = Promise.resolve();
+  let mutationTail = Promise.resolve();
+  const lockStorage = new AsyncLocalStorage();
+
+  const resolvedFilePath = filePath ? path.resolve(filePath) : null;
+  const lock = storeLock !== false && resolvedFilePath && typeof storeLockFactory === 'function'
+    ? (storeLock ?? storeLockFactory({ filePath: resolvedFilePath, now }))
+    : null;
+
+  async function withStoreLock(action) {
+    if (typeof action !== 'function') throw new TypeError('action must be a function');
+    if (!lock) {
+      return action();
+    }
+    if (lockStorage.getStore() === lock) {
+      return action();
+    }
+    const operation = mutationTail.catch(() => {}).then(async () => {
+      return lockStorage.run(lock, async () => {
+        return lock.withLock(action);
+      });
+    });
+    mutationTail = operation.catch(() => {});
+    return operation;
+  }
 
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
-    const temporaryPath = `${filePath}.${process.pid}.tmp`;
+    const temporaryPath = `${filePath}.${process.pid}.${randomUUID()}.tmp`;
     writeChain = writeChain.then(async () => {
-      await mkdir(directory, { recursive: true });
+      await mkdir(directory, { recursive: true, mode: 0o700 });
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
       await rename(temporaryPath, filePath);
     });
     return writeChain;
   }
 
-  async function init() {
-    if (initialized) return;
-    if (filePath) {
-      try {
-        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) throw new Error('unsupported or invalid job registry state');
-        state = parsed;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
+  async function reload() {
+    if (!filePath) return;
+    try {
+      const raw = await readFile(filePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (parsed?.version !== STORE_VERSION || !Array.isArray(parsed.jobs)) throw new Error('unsupported or invalid job registry state');
+      state = parsed;
+      initialized = true;
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw error;
+      if (!initialized) {
+        state = emptyState();
+        initialized = true;
       }
     }
-    initialized = true;
+  }
+
+  async function init() {
+    if (initialized && !filePath) return;
+    await withStoreLock(async () => {
+      await reload();
+      initialized = true;
+    });
   }
 
   async function ensureInitialized() {
@@ -1249,172 +1287,179 @@ export function createJobRegistry({
     manual = false,
     manualRetry = false,
   }) {
-    await ensureInitialized();
-    if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
-    if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
-    if (!ASYNC_OPERATIONS.has(operation)) throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
-    if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new JobRegistryError('invalid_payload', 'Job payload must be an object');
-    if (!RESOURCE_TYPES.has(resourceType)) throw new JobRegistryError('invalid_resource_type', 'Job resource type is invalid');
-    if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
-    if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey))) {
-      throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
-    }
-    const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
-
-    const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
-      serverId, type, operation, payload, resourceType, resourceId,
-    });
-    const existing = idempotencyKey === null ? null : state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
-    if (existing) {
-      if (existing.idempotencyDigest !== requestDigest) {
-        throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      if (typeof serverId !== 'string' || !serverId) throw new JobRegistryError('invalid_server', 'serverId is required');
+      if (typeof type !== 'string' || type.length < 1 || type.length > 80) throw new JobRegistryError('invalid_job_type', 'Job type is invalid');
+      if (!ASYNC_OPERATIONS.has(operation)) throw new JobRegistryError('invalid_operation', 'Agent operation is not supported by the async queue');
+      if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new JobRegistryError('invalid_payload', 'Job payload must be an object');
+      if (!RESOURCE_TYPES.has(resourceType)) throw new JobRegistryError('invalid_resource_type', 'Job resource type is invalid');
+      if (typeof resourceId !== 'string' || !resourceId) throw new JobRegistryError('invalid_resource_id', 'Job resource id is required');
+      if (idempotencyKey !== null && (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey))) {
+        throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
       }
-      const existingAuthorization = normalizeJobAuthorization(
-        existing.authorization,
-        { optional: true },
-      );
-      if (existingAuthorization && privateAuthorization
-        && JSON.stringify(existingAuthorization) !== JSON.stringify(privateAuthorization)) {
-        throw new JobRegistryError(
-          'job_authorization_conflict',
-          'Job idempotency key is already bound to a different private authorization scope',
-          409,
+      const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
+
+      const requestDigest = idempotencyKey === null ? null : idempotencyDigest({
+        serverId, type, operation, payload, resourceType, resourceId,
+      });
+      const existing = idempotencyKey === null ? null : state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+      if (existing) {
+        if (existing.idempotencyDigest !== requestDigest) {
+          throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+        }
+        const existingAuthorization = normalizeJobAuthorization(
+          existing.authorization,
+          { optional: true },
         );
-      }
-      let changed = false;
-      if (!existingAuthorization && privateAuthorization) {
-        existing.authorization = privateAuthorization;
-        changed = true;
-      }
-      if (existing.status === 'failed') {
-        const attempts = Number.isInteger(existing.attempts) ? existing.attempts : 0;
-        const isManual = manual === true || manualRetry === true;
-        const isAuthRetryable = privateAuthorization && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code);
-        const isTransient = isTransientJobError(existing.error?.code);
+        if (existingAuthorization && privateAuthorization
+          && JSON.stringify(existingAuthorization) !== JSON.stringify(privateAuthorization)) {
+          throw new JobRegistryError(
+            'job_authorization_conflict',
+            'Job idempotency key is already bound to a different private authorization scope',
+            409,
+          );
+        }
+        let changed = false;
+        if (!existingAuthorization && privateAuthorization) {
+          existing.authorization = privateAuthorization;
+          changed = true;
+        }
+        if (existing.status === 'failed') {
+          const attempts = Number.isInteger(existing.attempts) ? existing.attempts : 0;
+          const isManual = manual === true || manualRetry === true;
+          const isAuthRetryable = privateAuthorization && RETRYABLE_PREFLIGHT_AUTH_FAILURES.has(existing.error?.code);
+          const isTransient = isTransientJobError(existing.error?.code);
 
-        let canRetry = false;
-        if (isManual) {
-          if (attempts >= maxAttempts) {
-            throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
+          let canRetry = false;
+          if (isManual) {
+            if (attempts >= maxAttempts) {
+              throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
+            }
+            if (existingAuthorization && !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
+              throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
+            }
+            canRetry = true;
+          } else if ((isAuthRetryable || isTransient) && attempts < retryBudget) {
+            canRetry = true;
+          } else if (attempts >= retryBudget) {
+            if (!existing.retryExhausted) {
+              existing.retryExhausted = true;
+              changed = true;
+            }
           }
-          if (existingAuthorization && !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
-            throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
-          }
-          canRetry = true;
-        } else if ((isAuthRetryable || isTransient) && attempts < retryBudget) {
-          canRetry = true;
-        } else if (attempts >= retryBudget) {
-          if (!existing.retryExhausted) {
-            existing.retryExhausted = true;
+
+          if (canRetry) {
+            const conflict = state.jobs.some((candidate) => candidate.id !== existing.id
+              && candidate.resourceType === existing.resourceType
+              && candidate.resourceId === existing.resourceId
+              && ['queued', 'running'].includes(candidate.status));
+            if (conflict) {
+              throw new JobRegistryError(`${existing.resourceType}_job_conflict`, `A ${existing.resourceType} operation is already queued or running`, 409);
+            }
+
+            const failedAt = existing.finishedAt ? Date.parse(existing.finishedAt) : now();
+
+            existing.status = 'queued';
+            existing.startedAt = null;
+            existing.finishedAt = null;
+            existing.result = null;
+            existing.error = null;
+            existing.retryExhausted = false;
+            if (isManual) {
+              existing.manualRetry = true;
+              if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+                const delay = Math.min(backoffMs, retryBackoffMaxMs);
+                existing.availableAt = new Date(now() + delay).toISOString();
+              } else {
+                existing.availableAt = null;
+              }
+            } else {
+              existing.manualRetry = null;
+              if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+                const delay = Math.min(backoffMs, retryBackoffMaxMs);
+                existing.availableAt = new Date(failedAt + delay).toISOString();
+              } else if (retryBackoffBaseMs > 0) {
+                const exp = Math.max(0, attempts - 1);
+                const delay = Math.min(retryBackoffBaseMs * (2 ** exp), retryBackoffMaxMs);
+                existing.availableAt = new Date(failedAt + delay).toISOString();
+              } else {
+                existing.availableAt = null;
+              }
+            }
             changed = true;
           }
         }
-
-        if (canRetry) {
-          const conflict = state.jobs.some((candidate) => candidate.id !== existing.id
-            && candidate.resourceType === existing.resourceType
-            && candidate.resourceId === existing.resourceId
-            && ['queued', 'running'].includes(candidate.status));
-          if (conflict) {
-            throw new JobRegistryError(`${existing.resourceType}_job_conflict`, `A ${existing.resourceType} operation is already queued or running`, 409);
-          }
-
-          const failedAt = existing.finishedAt ? Date.parse(existing.finishedAt) : now();
-
-          existing.status = 'queued';
-          existing.startedAt = null;
-          existing.finishedAt = null;
-          existing.result = null;
-          existing.error = null;
-          existing.retryExhausted = false;
-          if (isManual) {
-            existing.manualRetry = true;
-            if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
-              const delay = Math.min(backoffMs, retryBackoffMaxMs);
-              existing.availableAt = new Date(now() + delay).toISOString();
-            } else {
-              existing.availableAt = null;
-            }
-          } else {
-            existing.manualRetry = null;
-            if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
-              const delay = Math.min(backoffMs, retryBackoffMaxMs);
-              existing.availableAt = new Date(failedAt + delay).toISOString();
-            } else if (retryBackoffBaseMs > 0) {
-              const exp = Math.max(0, attempts - 1);
-              const delay = Math.min(retryBackoffBaseMs * (2 ** exp), retryBackoffMaxMs);
-              existing.availableAt = new Date(failedAt + delay).toISOString();
-            } else {
-              existing.availableAt = null;
-            }
-          }
-          changed = true;
-        }
+        if (changed) await persist();
+        return enqueueResult(existing, false);
       }
-      if (changed) await persist();
-      return enqueueResult(existing, false);
-    }
-    if (state.jobs.some((candidate) => candidate.resourceType === resourceType
-      && candidate.resourceId === resourceId && ['queued', 'running'].includes(candidate.status))) {
-      throw new JobRegistryError(`${resourceType}_job_conflict`, `A ${resourceType} operation is already queued or running`, 409);
-    }
+      if (state.jobs.some((candidate) => candidate.resourceType === resourceType
+        && candidate.resourceId === resourceId && ['queued', 'running'].includes(candidate.status))) {
+        throw new JobRegistryError(`${resourceType}_job_conflict`, `A ${resourceType} operation is already queued or running`, 409);
+      }
 
-    const id = randomUUID();
-    const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY
-      || operation === OPERATIONS.APP_NODE_DEPLOY
-      || operation === OPERATIONS.APP_PYTHON_DEPLOY;
-    const effectivePayload = deploymentOperation ? { ...payload, deploymentId: id } : payload;
-    try {
-      createOperationEnvelope({ id, operation, payload: effectivePayload });
-    } catch (error) {
-      throw new JobRegistryError('invalid_operation_payload', error.message);
-    }
+      const id = randomUUID();
+      const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY
+        || operation === OPERATIONS.APP_NODE_DEPLOY
+        || operation === OPERATIONS.APP_PYTHON_DEPLOY;
+      const effectivePayload = deploymentOperation ? { ...payload, deploymentId: id } : payload;
+      try {
+        createOperationEnvelope({ id, operation, payload: effectivePayload });
+      } catch (error) {
+        throw new JobRegistryError('invalid_operation_payload', error.message);
+      }
 
-    const timestamp = new Date(now()).toISOString();
-    const job = {
-      id,
-      serverId,
-      type,
-      operation,
-      payload: effectivePayload,
-      resourceType,
-      resourceId,
-      status: 'queued',
-      createdAt: timestamp,
-      startedAt: null,
-      finishedAt: null,
-      attempts: 0,
-      result: null,
-      error: null,
-      idempotencyKey,
-      idempotencyDigest: requestDigest,
-      authorization: privateAuthorization,
-    };
-    state.jobs.push(job);
-    await persist();
-    return enqueueResult(job, true);
+      const timestamp = new Date(now()).toISOString();
+      const job = {
+        id,
+        serverId,
+        type,
+        operation,
+        payload: effectivePayload,
+        resourceType,
+        resourceId,
+        status: 'queued',
+        createdAt: timestamp,
+        startedAt: null,
+        finishedAt: null,
+        attempts: 0,
+        result: null,
+        error: null,
+        idempotencyKey,
+        idempotencyDigest: requestDigest,
+        authorization: privateAuthorization,
+      };
+      state.jobs.push(job);
+      await persist();
+      return enqueueResult(job, true);
+    });
   }
 
   async function findIdempotentJob({ serverId, type, operation, payload, resourceType, resourceId, idempotencyKey } = {}) {
-    await ensureInitialized();
-    if (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
-      throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
-    }
-    const existing = state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
-    if (!existing) return null;
-    const requestDigest = idempotencyDigest({
-      serverId, type, operation, payload, resourceType, resourceId,
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      if (typeof idempotencyKey !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(idempotencyKey)) {
+        throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
+      }
+      const existing = state.jobs.find((candidate) => candidate.idempotencyKey === idempotencyKey);
+      if (!existing) return null;
+      const requestDigest = idempotencyDigest({
+        serverId, type, operation, payload, resourceType, resourceId,
+      });
+      if (existing.idempotencyDigest !== requestDigest) {
+        throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
+      }
+      return publicJob(existing);
     });
-    if (existing.idempotencyDigest !== requestDigest) {
-      throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
-    }
-    return publicJob(existing);
   }
 
   async function claimNext(serverId, options = {}) {
-    await ensureInitialized();
-    const reauthorizeFn = options?.reauthorize ?? defaultReauthorize;
-    const claim = claimChain.catch(() => {}).then(async () => {
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      const reauthorizeFn = options?.reauthorize ?? defaultReauthorize;
       const job = state.jobs.find((candidate) => candidate.serverId === serverId
         && candidate.status === 'queued'
         && (!candidate.availableAt || Date.parse(candidate.availableAt) <= now()));
@@ -1465,176 +1510,207 @@ export function createJobRegistry({
         authorization: privateAuthorization,
       };
     });
-    claimChain = claim;
-    return claim;
   }
 
   async function complete({ serverId, jobId, status, result = null, error = null }) {
-    await ensureInitialized();
-    if (!['succeeded', 'failed'].includes(status)) throw new JobRegistryError('invalid_completion_status', 'Agent completion status must be succeeded or failed');
-    const job = state.jobs.find((candidate) => candidate.id === jobId && candidate.serverId === serverId);
-    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-    if (job.status === 'succeeded' || job.status === 'failed') {
-      if (job.status === status) return publicJob(job);
-      throw new JobRegistryError('job_already_completed', 'Job is already completed with a different status', 409);
-    }
-    if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      if (!['succeeded', 'failed'].includes(status)) throw new JobRegistryError('invalid_completion_status', 'Agent completion status must be succeeded or failed');
+      const job = state.jobs.find((candidate) => candidate.id === jobId && candidate.serverId === serverId);
+      if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+      if (job.status === 'succeeded' || job.status === 'failed') {
+        if (job.status === status) return publicJob(job);
+        throw new JobRegistryError('job_already_completed', 'Job is already completed with a different status', 409);
+      }
+      if (job.status !== 'running') throw new JobRegistryError('job_not_running', 'Only running jobs may be completed', 409);
 
-    job.result = status === 'succeeded' ? sanitizeResult(job, result) : null;
-    job.error = status === 'failed' ? validateError(error) : null;
-    job.status = status;
-    job.finishedAt = new Date(now()).toISOString();
-    await persist();
-    return publicJob(job);
+      job.result = status === 'succeeded' ? sanitizeResult(job, result) : null;
+      job.error = status === 'failed' ? validateError(error) : null;
+      job.status = status;
+      job.finishedAt = new Date(now()).toISOString();
+      await persist();
+      return publicJob(job);
+    });
   }
 
   async function cancel(jobId) {
-    await ensureInitialized();
-    const job = state.jobs.find((candidate) => candidate.id === jobId);
-    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-    if (job.status !== 'queued') throw new JobRegistryError('job_not_cancellable', 'Only queued jobs may be cancelled', 409);
-    job.status = 'cancelled';
-    job.finishedAt = new Date(now()).toISOString();
-    await persist();
-    return publicJob(job);
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      const job = state.jobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+      if (job.status !== 'queued') throw new JobRegistryError('job_not_cancellable', 'Only queued jobs may be cancelled', 409);
+      job.status = 'cancelled';
+      job.finishedAt = new Date(now()).toISOString();
+      await persist();
+      return publicJob(job);
+    });
   }
 
   async function getJob(jobId) {
-    await ensureInitialized();
-    const job = state.jobs.find((candidate) => candidate.id === jobId);
-    return job ? publicJob(job) : null;
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      const job = state.jobs.find((candidate) => candidate.id === jobId);
+      return job ? publicJob(job) : null;
+    });
   }
 
   async function listJobs({ serverId = null, resourceType = null, resourceId = null, status = null } = {}) {
-    await ensureInitialized();
-    if (status && !JOB_STATUSES.has(status)) throw new JobRegistryError('invalid_status', 'Job status filter is invalid');
-    return state.jobs
-      .filter((job) => !serverId || job.serverId === serverId)
-      .filter((job) => !resourceType || job.resourceType === resourceType)
-      .filter((job) => !resourceId || job.resourceId === resourceId)
-      .filter((job) => !status || job.status === status)
-      .map(publicJob);
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      if (status && !JOB_STATUSES.has(status)) throw new JobRegistryError('invalid_status', 'Job status filter is invalid');
+      return state.jobs
+        .filter((job) => !serverId || job.serverId === serverId)
+        .filter((job) => !resourceType || job.resourceType === resourceType)
+        .filter((job) => !resourceId || job.resourceId === resourceId)
+        .filter((job) => !status || job.status === status)
+        .map(publicJob);
+    });
   }
 
   async function retryJob(jobIdOrOptions, maybeOptions = {}) {
-    await ensureInitialized();
-    let jobId;
-    let serverId = null;
-    let authorization = null;
-    let backoffMs = null;
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      let jobId;
+      let serverId = null;
+      let authorization = null;
+      let backoffMs = null;
 
-    if (typeof jobIdOrOptions === 'string') {
-      jobId = jobIdOrOptions;
-      if (maybeOptions && typeof maybeOptions === 'object') {
-        serverId = maybeOptions.serverId ?? null;
-        authorization = maybeOptions.authorization ?? null;
-        backoffMs = maybeOptions.backoffMs ?? null;
+      if (typeof jobIdOrOptions === 'string') {
+        jobId = jobIdOrOptions;
+        if (maybeOptions && typeof maybeOptions === 'object') {
+          serverId = maybeOptions.serverId ?? null;
+          authorization = maybeOptions.authorization ?? null;
+          backoffMs = maybeOptions.backoffMs ?? null;
+        }
+      } else if (jobIdOrOptions && typeof jobIdOrOptions === 'object') {
+        jobId = jobIdOrOptions.jobId;
+        serverId = jobIdOrOptions.serverId ?? null;
+        authorization = jobIdOrOptions.authorization ?? null;
+        backoffMs = jobIdOrOptions.backoffMs ?? null;
       }
-    } else if (jobIdOrOptions && typeof jobIdOrOptions === 'object') {
-      jobId = jobIdOrOptions.jobId;
-      serverId = jobIdOrOptions.serverId ?? null;
-      authorization = jobIdOrOptions.authorization ?? null;
-      backoffMs = jobIdOrOptions.backoffMs ?? null;
-    }
 
-    if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
+      if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
 
-    const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
-    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-    if (job.status !== 'failed') {
-      throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);
-    }
-
-    const attempts = Number.isInteger(job.attempts) ? job.attempts : 0;
-    if (attempts >= maxAttempts) {
-      throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
-    }
-
-    const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
-    const existingAuthorization = normalizeJobAuthorization(job.authorization, { optional: true });
-
-    if (existingAuthorization) {
-      if (!privateAuthorization || !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
-        throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
+      const job = state.jobs.find((candidate) => candidate.id === jobId && (!serverId || candidate.serverId === serverId));
+      if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+      if (job.status !== 'failed') {
+        throw new JobRegistryError('job_not_retryable', 'Only failed jobs may be manually retried', 409);
       }
-    } else if (privateAuthorization) {
-      job.authorization = privateAuthorization;
-    }
 
-    const conflict = state.jobs.some((candidate) => candidate.id !== job.id
-      && candidate.resourceType === job.resourceType
-      && candidate.resourceId === job.resourceId
-      && ['queued', 'running'].includes(candidate.status));
-    if (conflict) {
-      throw new JobRegistryError(`${job.resourceType}_job_conflict`, `A ${job.resourceType} operation is already queued or running`, 409);
-    }
+      const attempts = Number.isInteger(job.attempts) ? job.attempts : 0;
+      if (attempts >= maxAttempts) {
+        throw new JobRegistryError('retry_limit_exceeded', 'Maximum system retry limit reached', 409);
+      }
 
-    job.status = 'queued';
-    job.startedAt = null;
-    job.finishedAt = null;
-    job.result = null;
-    job.error = null;
-    job.retryExhausted = false;
-    job.manualRetry = true;
-    if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
-      const delay = Math.min(backoffMs, retryBackoffMaxMs);
-      job.availableAt = new Date(now() + delay).toISOString();
-    } else {
-      job.availableAt = null;
-    }
-    await persist();
-    return publicJob(job);
+      const privateAuthorization = normalizeJobAuthorization(authorization, { optional: true });
+      const existingAuthorization = normalizeJobAuthorization(job.authorization, { optional: true });
+
+      if (existingAuthorization) {
+        if (!privateAuthorization || !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
+          throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
+        }
+      } else if (privateAuthorization) {
+        job.authorization = privateAuthorization;
+      }
+
+      const conflict = state.jobs.some((candidate) => candidate.id !== job.id
+        && candidate.resourceType === job.resourceType
+        && candidate.resourceId === job.resourceId
+        && ['queued', 'running'].includes(candidate.status));
+      if (conflict) {
+        throw new JobRegistryError(`${job.resourceType}_job_conflict`, `A ${job.resourceType} operation is already queued or running`, 409);
+      }
+
+      job.status = 'queued';
+      job.startedAt = null;
+      job.finishedAt = null;
+      job.result = null;
+      job.error = null;
+      job.retryExhausted = false;
+      job.manualRetry = true;
+      if (backoffMs !== null && Number.isFinite(backoffMs) && backoffMs > 0) {
+        const delay = Math.min(backoffMs, retryBackoffMaxMs);
+        job.availableAt = new Date(now() + delay).toISOString();
+      } else {
+        job.availableAt = null;
+      }
+      await persist();
+      return publicJob(job);
+    });
   }
 
   async function reauthorizeJob(jobId, reauthorizeFn = defaultReauthorize) {
-    await ensureInitialized();
-    if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
-    const job = state.jobs.find((candidate) => candidate.id === jobId);
-    if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
-    if (typeof reauthorizeFn !== 'function') throw new JobRegistryError('invalid_reauthorize_handler', 'Reauthorize function is required');
+    return withStoreLock(async () => {
+      await ensureInitialized();
+      await reload();
+      if (typeof jobId !== 'string' || !jobId) throw new JobRegistryError('invalid_job_id', 'jobId is required');
+      const job = state.jobs.find((candidate) => candidate.id === jobId);
+      if (!job) throw new JobRegistryError('job_not_found', 'Job not found', 404);
+      if (typeof reauthorizeFn !== 'function') throw new JobRegistryError('invalid_reauthorize_handler', 'Reauthorize function is required');
 
-    const privateAuthorization = normalizeJobAuthorization(
-      job.authorization,
-      { optional: true },
-    );
-    let authResult = null;
-    let authError = null;
-    try {
-      authResult = await reauthorizeFn(privateAuthorization, job);
-    } catch (err) {
-      authError = err;
-    }
-
-    const isAuthorized = authError === null
-      && authResult !== false
-      && (authResult === true || (authResult && authResult.authorized !== false));
-
-    if (!isAuthorized) {
-      if (['queued', 'running'].includes(job.status)) {
-        job.status = 'cancelled';
-        job.finishedAt = new Date(now()).toISOString();
-        job.error = {
-          code: 'job_tenant_reauthorization_failed',
-          message: authError?.message || authResult?.message || 'Live tenant reauthorization failed',
-        };
-        await persist();
+      const privateAuthorization = normalizeJobAuthorization(
+        job.authorization,
+        { optional: true },
+      );
+      let authResult = null;
+      let authError = null;
+      try {
+        authResult = await reauthorizeFn(privateAuthorization, job);
+      } catch (err) {
+        authError = err;
       }
+
+      const isAuthorized = authError === null
+        && authResult !== false
+        && (authResult === true || (authResult && authResult.authorized !== false));
+
+      if (!isAuthorized) {
+        if (['queued', 'running'].includes(job.status)) {
+          job.status = 'cancelled';
+          job.finishedAt = new Date(now()).toISOString();
+          job.error = {
+            code: 'job_tenant_reauthorization_failed',
+            message: authError?.message || authResult?.message || 'Live tenant reauthorization failed',
+          };
+          await persist();
+        }
+        return {
+          job: publicJob(job),
+          authorized: false,
+          reason: 'job_tenant_reauthorization_failed',
+          error: job.error,
+        };
+      }
+
       return {
         job: publicJob(job),
-        authorized: false,
-        reason: 'job_tenant_reauthorization_failed',
-        error: job.error,
+        authorized: true,
+        context: authResult,
       };
-    }
-
-    return {
-      job: publicJob(job),
-      authorized: true,
-      context: authResult,
-    };
+    });
   }
 
   const manualRetry = retryJob;
 
-  return { init, enqueue, findIdempotentJob, claimNext, complete, cancel, getJob, listJobs, retryJob, manualRetry, reauthorizeJob };
+  return {
+    init,
+    reload: () => withStoreLock(reload),
+    enqueue,
+    findIdempotentJob,
+    claimNext,
+    complete,
+    cancel,
+    getJob,
+    listJobs,
+    retryJob,
+    manualRetry,
+    reauthorizeJob,
+    withLock: (action) => withStoreLock(action),
+    storeLock: lock,
+  };
 }

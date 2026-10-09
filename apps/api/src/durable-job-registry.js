@@ -76,7 +76,7 @@ export function createDurableJobRegistry({
   if (!storeLock || typeof storeLock.withLock !== 'function') {
     throw new DurableJobRegistryError('durable_job_store_lock_invalid', 'Durable job store lock is invalid');
   }
-  let registry = registryFactory({ filePath, now });
+  let registry = registryFactory({ filePath, now, storeLock: false });
   const recoveryStore = recoveryStoreFactory({ filePath: recoveryFilePath, now });
   let initialized = false;
   let initializing = null;
@@ -243,7 +243,7 @@ export function createDurableJobRegistry({
 
   async function reloadDurableState({ inspectRecovery = false } = {}) {
     try {
-      const replacement = registryFactory({ filePath, now });
+      const replacement = registryFactory({ filePath, now, storeLock: false });
       registry = await initialize(replacement);
       initialized = true;
       if (typeof recoveryStore.refresh === 'function') await recoveryStore.refresh();
