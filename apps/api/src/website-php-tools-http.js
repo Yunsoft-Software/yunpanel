@@ -12,6 +12,19 @@ export function mountWebsitePhpToolsRoutes(app, {
   }
 
   const router = express.Router({ mergeParams: true });
+
+  const enforceSiteAccess = (req, res, next) => {
+    if (req.auth?.user?.role !== 'owner') {
+      if (Array.isArray(req.auth?.user?.websiteIds) && !req.auth.user.websiteIds.includes(req.params.websiteId)) {
+        return res.status(403).json({ error: {
+          code: 'forbidden',
+          message: 'Access to this website is not permitted',
+        } });
+      }
+    }
+    next();
+  };
+
   const requireOwnerMutation = (req, res, next) => {
     if (req.auth?.user?.role === 'owner' && req.auth?.access?.mode === 'management'
       && req.auth?.security?.managementAllowed === true) return next();
@@ -21,7 +34,19 @@ export function mountWebsitePhpToolsRoutes(app, {
     } });
   };
 
-  router.post('/actions/preview', requirePanelRouteAccess, async (req, res, next) => {
+  const handleError = (error, res, next) => {
+    if (error instanceof WebsitePhpToolsServiceError) {
+      return res.status(error.status ?? 400).json({
+        error: {
+          code: error.code,
+          message: error.message,
+        },
+      });
+    }
+    return next(error);
+  };
+
+  const handleActionPreview = async (req, res, next) => {
     try {
       const body = req.body;
       if (!body || typeof body !== 'object' || Array.isArray(body)
@@ -33,11 +58,16 @@ export function mountWebsitePhpToolsRoutes(app, {
       }
       const preview = await websitePhpToolsService.getActionPreview(req.params.websiteId, body.actionId);
       return res.json({ data: preview });
-    } catch (error) { return next(error); }
-  });
+    } catch (error) {
+      return handleError(error, res, next);
+    }
+  };
+
+  router.post('/actions/preview', requirePanelRouteAccess, enforceSiteAccess, handleActionPreview);
+  router.post('/php-tools/actions/preview', requirePanelRouteAccess, enforceSiteAccess, handleActionPreview);
 
   if (websitePhpToolActionService) {
-    router.post('/actions/queue', requirePanelRouteAccess, async (req, res, next) => {
+    const handleActionQueue = async (req, res, next) => {
       try {
         const actor = {
           sessionId: req.auth?.id,
@@ -46,21 +76,29 @@ export function mountWebsitePhpToolsRoutes(app, {
         };
         const result = await websitePhpToolActionService.queue(req.params.websiteId, req.body, actor);
         return res.status(202).json({ data: result });
-      } catch (error) { return next(error); }
-    });
+      } catch (error) {
+        return handleError(error, res, next);
+      }
+    };
+
+    router.post('/actions/queue', requirePanelRouteAccess, enforceSiteAccess, handleActionQueue);
+    router.post('/php-tools/actions/queue', requirePanelRouteAccess, enforceSiteAccess, handleActionQueue);
   }
 
-  router.get('/wp-cli/status', requirePanelRouteAccess, async (req, res, next) => {
+  const handleWpCliStatus = async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getWpCliStatus(req.params.websiteId);
       // Preserve legacy top-level fields while supporting the panel JSON client.
       res.json({ ...status, data: status });
     } catch (error) {
-      next(error);
+      return handleError(error, res, next);
     }
-  });
+  };
 
-  router.post('/wp-cli/run', requirePanelRouteAccess, requireOwnerMutation, async (req, res, next) => {
+  router.get('/wp-cli/status', requirePanelRouteAccess, enforceSiteAccess, handleWpCliStatus);
+  router.get('/php-tools/wp-cli/status', requirePanelRouteAccess, enforceSiteAccess, handleWpCliStatus);
+
+  const handleWpCliRun = async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {
@@ -88,21 +126,27 @@ export function mountWebsitePhpToolsRoutes(app, {
 
       res.json(result);
     } catch (error) {
-      next(error);
+      return handleError(error, res, next);
     }
-  });
+  };
 
-  router.get('/composer/status', requirePanelRouteAccess, async (req, res, next) => {
+  router.post('/wp-cli/run', requirePanelRouteAccess, requireOwnerMutation, enforceSiteAccess, handleWpCliRun);
+  router.post('/php-tools/wp-cli/run', requirePanelRouteAccess, requireOwnerMutation, enforceSiteAccess, handleWpCliRun);
+
+  const handleComposerStatus = async (req, res, next) => {
     try {
       const status = await websitePhpToolsService.getComposerStatus(req.params.websiteId);
       // Preserve legacy top-level fields while supporting the panel JSON client.
       res.json({ ...status, data: status });
     } catch (error) {
-      next(error);
+      return handleError(error, res, next);
     }
-  });
+  };
 
-  router.post('/composer/run', requirePanelRouteAccess, requireOwnerMutation, async (req, res, next) => {
+  router.get('/composer/status', requirePanelRouteAccess, enforceSiteAccess, handleComposerStatus);
+  router.get('/php-tools/composer/status', requirePanelRouteAccess, enforceSiteAccess, handleComposerStatus);
+
+  const handleComposerRun = async (req, res, next) => {
     try {
       const { command, args, timeout } = req.body ?? {};
       if (typeof command !== 'string' || !command) {
@@ -130,9 +174,65 @@ export function mountWebsitePhpToolsRoutes(app, {
 
       res.json(result);
     } catch (error) {
-      next(error);
+      return handleError(error, res, next);
     }
-  });
+  };
+
+  router.post('/composer/run', requirePanelRouteAccess, requireOwnerMutation, enforceSiteAccess, handleComposerRun);
+  router.post('/php-tools/composer/run', requirePanelRouteAccess, requireOwnerMutation, enforceSiteAccess, handleComposerRun);
+
+  const handlePhpStatus = async (req, res, next) => {
+    try {
+      const status = typeof websitePhpToolsService.getPhpStatus === 'function'
+        ? await websitePhpToolsService.getPhpStatus(req.params.websiteId)
+        : {
+          wpCli: await websitePhpToolsService.getWpCliStatus(req.params.websiteId),
+          composer: await websitePhpToolsService.getComposerStatus(req.params.websiteId),
+        };
+      return res.json({ status, data: status });
+    } catch (error) {
+      return handleError(error, res, next);
+    }
+  };
+
+  router.get('/status', requirePanelRouteAccess, enforceSiteAccess, handlePhpStatus);
+  router.get('/php-tools/status', requirePanelRouteAccess, enforceSiteAccess, handlePhpStatus);
+
+  const handlePhpConfig = async (req, res, next) => {
+    try {
+      const config = await websitePhpToolsService.getPhpFpmConfig(req.params.websiteId);
+      return res.json({ config, data: config });
+    } catch (error) {
+      return handleError(error, res, next);
+    }
+  };
+
+  router.get('/config', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfig);
+  router.get('/php-tools/config', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfig);
+
+  const handlePhpConfigPreview = async (req, res, next) => {
+    try {
+      const preview = await websitePhpToolsService.previewPhpFpmConfig(req.params.websiteId, req.body ?? {});
+      return res.json({ data: preview });
+    } catch (error) {
+      return handleError(error, res, next);
+    }
+  };
+
+  router.post('/config/preview', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfigPreview);
+  router.post('/php-tools/config/preview', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfigPreview);
+
+  const handlePhpConfigUpdate = async (req, res, next) => {
+    try {
+      const result = await websitePhpToolsService.updatePhpFpmConfig(req.params.websiteId, req.body ?? {});
+      return res.json({ data: result });
+    } catch (error) {
+      return handleError(error, res, next);
+    }
+  };
+
+  router.post('/config', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfigUpdate);
+  router.post('/php-tools/config', requirePanelRouteAccess, enforceSiteAccess, handlePhpConfigUpdate);
 
   app.use('/api/websites/:websiteId', router);
 }

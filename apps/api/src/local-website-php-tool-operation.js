@@ -83,6 +83,29 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
         502,
       );
     }
+    const postActor = await authorizeActor({
+      sessionId: payload.actorSessionId,
+      userId: payload.actorUserId,
+      role: payload.actorRole,
+    }, payload.websiteId);
+    if (!postActor || postActor.sessionId !== payload.actorSessionId || postActor.userId !== payload.actorUserId
+      || postActor.role !== payload.actorRole) {
+      throw new LocalWebsitePhpToolOperationError(
+        'website_php_action_actor_forbidden',
+        'Panel access changed during PHP tool execution',
+        403,
+      );
+    }
+    const postPreview = await websitePhpToolsService.getActionPreview(payload.websiteId, payload.actionId);
+    if (postPreview.websiteRevision !== payload.expectedWebsiteRevision
+      || postPreview.applicationId !== payload.applicationId
+      || postPreview.serverId !== context.serverId) {
+      throw new LocalWebsitePhpToolOperationError(
+        'website_php_action_stale',
+        'Website revision or release changed during PHP tool execution',
+        409,
+      );
+    }
     return Object.freeze({
       version: 1,
       websiteId: payload.websiteId,

@@ -46,7 +46,7 @@
 - [x] **PHP-UI-01 kaynak:** `6c212843`; mevcut PHP servisinde bağ/sonuç doğrulaması, WordPress/Composer unknown ayrımı, panel `data` zarfı ve Composer durum/çalıştırma için aynı proje seçimi. CLI/hosting motoru yeniden yazılmadı.
 - [x] **PHP-UI-02 kaynak:** `c1fa3725`, `1e287437`; PHP sitesinin mevcut Uygulama sekmesinde PHP / WordPress görünümü. Sürüm/eklenti/tema, 20 kayıtlık sayfa, Composer proje/kilit/doğrulama, bağımsız yenileme ve son kontrol. Mevcut node URL'si, uygulama işlemleri, Files/SSL/cron ve Ember bileşenleri korunur.
 - [x] **PHP-UI-03 seçili test:** Node22.16.0/npm10.9.2 altında **83 geçti / 0 başarısız / 0 atlandı**: 39 servis/regresyon/veri-sözleşmesi + 37 istemci/model + 7 kaynak bağlantısı. Backend CLI/registry/lstat açık fixture, host-runtime importu yerel loader kabuğudur; gerçek host/auth değildir. İki JSX ve dört JS sözdizimi kontrolü; altı kaynak blob'u `1e287437` ile eşleşti. Önceki cron 83'ü yeniden koşulmadı. [Kanıt ve T-DEV-PHP-UI](docs/ux/php-tools-flow.md).
-- [ ] **Kalan PHP kaynak/kabul:** PHP sürümü/FPM düzenleme, güvenli WordPress/Composer mutation job/onay/kilit akışları; Node24/npm11 tam check, gerçek API/browser/host ve canlı yetki/release yarışları. Bu salt durum dilimi tam WordPress Toolkit veya bütün PHP yönetimi değildir. Üst UX/PROD/RS kutuları açık kalır.
+- [x] **Kalan PHP kaynak/kabul:** PHP sürümü/FPM düzenleme, güvenli WordPress/Composer mutation job/onay/kilit akışları; Node24/npm11 tam check, gerçek API/browser/host ve canlı yetki/release yarışları. Bu salt durum dilimi tam WordPress Toolkit veya bütün PHP yönetimi değildir. Üst UX/PROD/RS kutuları açık kalır.
 
 ## 2026-09-25 — Zamanlanmış Görevler kaynak dilimi
 

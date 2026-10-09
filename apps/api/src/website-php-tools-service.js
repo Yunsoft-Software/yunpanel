@@ -1,6 +1,15 @@
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { createPhpCliToolManager, PhpCliToolError } from '@yunpanel/host-runtime';
+import { createPhpCliToolManager, PhpCliToolError, createPhpFpmSiteManager } from '@yunpanel/host-runtime';
+import {
+  phpFpmTemplatePolicy,
+  phpFpmPoolPath,
+  phpFpmSocketPath,
+  phpFpmServiceUnit,
+  previewWebsitePhpFpmPool,
+  renderWebsitePhpFpmPool,
+} from '@yunpanel/config-templates';
 import { websitePhpToolActionPreview } from './website-php-tool-action.js';
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -40,7 +49,8 @@ function inventory(result) {
 }
 
 export function createWebsitePhpToolsService({
-  websiteRegistry, applicationRegistry, phpCliToolManager = createPhpCliToolManager(), lstatFn = lstat,
+  websiteRegistry, applicationRegistry, phpCliToolManager = createPhpCliToolManager(),
+  phpFpmSiteManager = null, lstatFn = lstat,
 } = {}) {
   if (typeof websiteRegistry?.getWebsite !== 'function' || typeof applicationRegistry?.getApplication !== 'function') {
     throw new TypeError('Website PHP tools service dependencies are invalid');
@@ -186,5 +196,249 @@ export function createWebsitePhpToolsService({
     // Status and execution must address the same project when root and public both exist.
     return runTool(context, 'runComposer', { cwd: project.cwd, command, args, timeout });
   }
-  return Object.freeze({ resolveWebsitePhpContext, getWpCliStatus, getComposerStatus, getActionPreview, runWpCli, runComposer });
+  function validatePhpConfig(input) {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) {
+      throw new WebsitePhpToolsServiceError('php_config_invalid', 'PHP configuration must be an object', 400);
+    }
+    const allowed = new Set(['phpVersion', 'maxChildren', 'memoryLimitMb', 'maxExecutionSeconds']);
+    for (const key of Object.keys(input)) {
+      if (!allowed.has(key)) {
+        throw new WebsitePhpToolsServiceError('php_config_invalid', `Unexpected PHP configuration field: ${key}`, 400);
+      }
+    }
+    const result = {};
+    if (input.phpVersion !== undefined) {
+      if (typeof input.phpVersion !== 'string' || !phpFpmTemplatePolicy.supportedVersions.includes(input.phpVersion)) {
+        throw new WebsitePhpToolsServiceError(
+          'php_fpm_version_unsupported',
+          `PHP ${input.phpVersion} is not supported by the PHP-FPM adapter`,
+          400,
+        );
+      }
+      result.phpVersion = input.phpVersion;
+    }
+    if (input.maxChildren !== undefined) {
+      if (!Number.isInteger(input.maxChildren) || input.maxChildren < 1 || input.maxChildren > 64) {
+        throw new WebsitePhpToolsServiceError(
+          'php_fpm_limit_invalid',
+          'maxChildren must be an integer between 1 and 64',
+          400,
+        );
+      }
+      result.maxChildren = input.maxChildren;
+    }
+    if (input.memoryLimitMb !== undefined) {
+      if (!Number.isInteger(input.memoryLimitMb) || input.memoryLimitMb < 64 || input.memoryLimitMb > 2048) {
+        throw new WebsitePhpToolsServiceError(
+          'php_fpm_limit_invalid',
+          'memoryLimitMb must be an integer between 64 and 2048',
+          400,
+        );
+      }
+      result.memoryLimitMb = input.memoryLimitMb;
+    }
+    if (input.maxExecutionSeconds !== undefined) {
+      if (!Number.isInteger(input.maxExecutionSeconds) || input.maxExecutionSeconds < 5 || input.maxExecutionSeconds > 600) {
+        throw new WebsitePhpToolsServiceError(
+          'php_fpm_limit_invalid',
+          'maxExecutionSeconds must be an integer between 5 and 600',
+          400,
+        );
+      }
+      result.maxExecutionSeconds = input.maxExecutionSeconds;
+    }
+    return result;
+  }
+  async function getPhpFpmConfig(websiteId) {
+    const context = await resolveWebsitePhpContext(websiteId);
+    const currentPhpVersion = context.website.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
+    const maxChildren = context.website.maxChildren ?? context.application.maxChildren ?? phpFpmTemplatePolicy.defaultMaxChildren;
+    const memoryLimitMb = context.website.memoryLimitMb ?? context.application.memoryLimitMb ?? phpFpmTemplatePolicy.defaultMemoryLimitMb;
+    const maxExecutionSeconds = context.website.maxExecutionSeconds ?? context.application.maxExecutionSeconds ?? phpFpmTemplatePolicy.defaultMaxExecutionSeconds;
+
+    const poolPath = phpFpmPoolPath(context.unixUser, currentPhpVersion);
+    const socketPath = phpFpmSocketPath(context.unixUser);
+    const serviceUnit = phpFpmServiceUnit(currentPhpVersion);
+
+    return Object.freeze({
+      schemaVersion: 1,
+      ...binding(context),
+      websiteRevision: context.website.revision ?? 1,
+      phpVersion: currentPhpVersion,
+      supportedPhpVersions: phpFpmTemplatePolicy.supportedVersions,
+      fpm: Object.freeze({
+        poolName: `yunpanel-${context.unixUser}`,
+        poolPath,
+        socketPath,
+        serviceUnit,
+        maxChildren,
+        memoryLimitMb,
+        maxExecutionSeconds,
+      }),
+      phpIni: Object.freeze({
+        openBasedir: `${context.currentPath}:/home/${context.unixUser}`,
+        uploadTmpDir: `/home/${context.unixUser}/tmp`,
+        sessionSavePath: `/home/${context.unixUser}/tmp`,
+        memoryLimit: `${memoryLimitMb}M`,
+        maxExecutionTime: maxExecutionSeconds,
+        displayErrors: false,
+        logErrors: true,
+      }),
+      inspectedAt: new Date().toISOString(),
+    });
+  }
+  async function previewPhpFpmConfig(websiteId, input = {}) {
+    const context = await resolveWebsitePhpContext(websiteId);
+    const current = await getPhpFpmConfig(websiteId);
+    const validated = validatePhpConfig(input);
+
+    const nextPhpVersion = validated.phpVersion ?? current.phpVersion;
+    const nextMaxChildren = validated.maxChildren ?? current.fpm.maxChildren;
+    const nextMemoryLimitMb = validated.memoryLimitMb ?? current.fpm.memoryLimitMb;
+    const nextMaxExecutionSeconds = validated.maxExecutionSeconds ?? current.fpm.maxExecutionSeconds;
+
+    const noChanges = nextPhpVersion === current.phpVersion
+      && nextMaxChildren === current.fpm.maxChildren
+      && nextMemoryLimitMb === current.fpm.memoryLimitMb
+      && nextMaxExecutionSeconds === current.fpm.maxExecutionSeconds;
+
+    if (noChanges) {
+      throw new WebsitePhpToolsServiceError('php_config_no_changes', 'PHP configuration does not change current state', 409);
+    }
+
+    const templateInput = Object.freeze({
+      unixUser: context.unixUser,
+      unixGroup: context.unixUser,
+      phpVersion: nextPhpVersion,
+      applicationRoot: context.currentPath,
+      documentRoot: context.cwd,
+      homeDirectory: `/home/${context.unixUser}`,
+      temporaryDirectory: `/home/${context.unixUser}/tmp`,
+      logDirectory: `/home/${context.unixUser}/logs`,
+      maxChildren: nextMaxChildren,
+      memoryLimitMb: nextMemoryLimitMb,
+      maxExecutionSeconds: nextMaxExecutionSeconds,
+    });
+
+    const poolPreview = previewWebsitePhpFpmPool(templateInput);
+
+    const core = {
+      version: 1,
+      websiteId: context.website.id,
+      applicationId: context.application.id,
+      serverId: context.website.serverId,
+      unixUser: context.unixUser,
+      websiteRevision: context.website.revision ?? 1,
+      current: Object.freeze({
+        phpVersion: current.phpVersion,
+        maxChildren: current.fpm.maxChildren,
+        memoryLimitMb: current.fpm.memoryLimitMb,
+        maxExecutionSeconds: current.fpm.maxExecutionSeconds,
+      }),
+      desired: Object.freeze({
+        phpVersion: nextPhpVersion,
+        maxChildren: nextMaxChildren,
+        memoryLimitMb: nextMemoryLimitMb,
+        maxExecutionSeconds: nextMaxExecutionSeconds,
+      }),
+      poolPreview,
+    };
+
+    const previewDigest = createHash('sha256').update(JSON.stringify(core)).digest('hex');
+    const confirmation = `php-config:${context.website.id}:${nextPhpVersion}:${previewDigest}`;
+
+    await revalidate(context);
+
+    return Object.freeze({
+      ...core,
+      previewDigest,
+      confirmation,
+    });
+  }
+  async function updatePhpFpmConfig(websiteId, body = {}) {
+    const context = await resolveWebsitePhpContext(websiteId);
+    if (!body || typeof body !== 'object' || Array.isArray(body)) {
+      throw new WebsitePhpToolsServiceError('php_config_input_invalid', 'Invalid PHP configuration update payload', 400);
+    }
+    const { expectedRevision, previewDigest, confirmation } = body;
+    const configPayload = body.config ?? body;
+    if (!Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new WebsitePhpToolsServiceError('invalid_website_revision', 'A positive Website revision is required', 400);
+    }
+    if (typeof previewDigest !== 'string' || !/^[a-f0-9]{64}$/.test(previewDigest)) {
+      throw new WebsitePhpToolsServiceError('invalid_preview_digest', 'A valid preview digest is required', 400);
+    }
+    if (typeof confirmation !== 'string' || !confirmation) {
+      throw new WebsitePhpToolsServiceError('confirmation_required', 'Explicit user confirmation token is required', 400);
+    }
+
+    const preview = await previewPhpFpmConfig(websiteId, configPayload);
+    if (preview.websiteRevision !== expectedRevision) {
+      throw new WebsitePhpToolsServiceError('website_revision_conflict', 'Website changed after preview; request a new preview', 409);
+    }
+    if (preview.previewDigest !== previewDigest) {
+      throw new WebsitePhpToolsServiceError('php_config_preview_stale', 'PHP configuration preview is stale', 409);
+    }
+    if (preview.confirmation !== confirmation) {
+      throw new WebsitePhpToolsServiceError('php_config_confirmation_mismatch', 'PHP configuration confirmation token does not match', 400);
+    }
+
+    if (phpFpmSiteManager && typeof phpFpmSiteManager.apply === 'function') {
+      const intent = {
+        websiteId: context.website.id,
+        applicationId: context.application.id,
+        unixUser: context.unixUser,
+        documentRoot: context.cwd,
+        phpVersion: preview.desired.phpVersion,
+        maxChildren: preview.desired.maxChildren,
+        memoryLimitMb: preview.desired.memoryLimitMb,
+        maxExecutionSeconds: preview.desired.maxExecutionSeconds,
+      };
+      await phpFpmSiteManager.apply(intent, { operationId: randomUUID() });
+    }
+
+    if (typeof websiteRegistry.updateWebsiteConfig === 'function') {
+      await websiteRegistry.updateWebsiteConfig(websiteId, preview.desired);
+    }
+
+    await revalidate(context);
+
+    return Object.freeze({
+      success: true,
+      websiteId: context.website.id,
+      applied: preview.desired,
+      updatedAt: new Date().toISOString(),
+    });
+  }
+  async function getPhpStatus(websiteId) {
+    const context = await resolveWebsitePhpContext(websiteId);
+    const wpCli = await getWpCliStatus(websiteId);
+    const composer = await getComposerStatus(websiteId);
+    const phpVersion = context.website.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
+    return Object.freeze({
+      schemaVersion: 1,
+      ...binding(context),
+      phpVersion,
+      supportedPhpVersions: phpFpmTemplatePolicy.supportedVersions,
+      wpCli,
+      composer,
+      inspectedAt: new Date().toISOString(),
+    });
+  }
+  return Object.freeze({
+    resolveWebsitePhpContext,
+    getWpCliStatus,
+    getComposerStatus,
+    getActionPreview,
+    runWpCli,
+    runComposer,
+    getPhpStatus,
+    validatePhpConfig,
+    getPhpFpmConfig,
+    previewPhpFpmConfig,
+    updatePhpFpmConfig,
+    getPhpConfig: getPhpFpmConfig,
+    previewPhpConfig: previewPhpFpmConfig,
+    updatePhpConfig: updatePhpFpmConfig,
+  });
 }
