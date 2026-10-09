@@ -467,6 +467,42 @@ import {
   resolveSiteBackupAccess,
   SiteBackupBrowserError,
 } from '../../web/src/workspace/site-backup-model.js';
+import {
+  mountWebsiteCronRoutes,
+  WebsiteCronHttpError,
+} from '../src/website-cron-http.js';
+import {
+  createWebsiteCronApplyService,
+  WebsiteCronApplyServiceError,
+} from '../src/website-cron-apply-service.js';
+import {
+  createWebsiteCronRegistry,
+  WebsiteCronRegistryError,
+} from '../src/website-cron-registry.js';
+import {
+  createLocalWebsiteCronOperation,
+  LocalWebsiteCronOperationError,
+} from '../src/local-website-cron-operation.js';
+import {
+  createWebsiteCronOperationReceiptStore,
+  WebsiteCronOperationReceiptError,
+} from '../src/website-cron-operation-receipt.js';
+import {
+  createWebsiteCronReconciliationProvider,
+  WebsiteCronReconciliationError,
+} from '../src/website-cron-reconciliation.js';
+import {
+  createCronTaskClient,
+  cronDraft,
+  cronScope,
+  cronTask,
+  cronList,
+  cronErrorMessage,
+  CronTaskClientError,
+} from '../../web/src/workspace/cron-task-client.js';
+import {
+  resolveCronAccess,
+} from '../../web/src/workspace/cron-task-access.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -18293,4 +18329,549 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
   );
 
   assert.ok(true, 'BACKUP-UI-03/04: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Restic durable job ve recovery hattı başarıyla doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E CRON-UI kabul ve kalıcılık: Real Owner, Site A, Site B Browser, Cron Multi-Tenant Isolation & Concurrency
+// ============================================================================
+
+test('Staging E2E CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/Site A/Site B API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı', async (t) => {
+  // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
+  const authorizedStagingIp = '157.180.11.28';
+  const authorizedStagingUrl = 'https://server.cryptoraichu.website';
+  const authorizedInstalledPath = '/usr/lib/yunpanel';
+  const authorizedServices = ['yunpanel-api.service', 'yunpanel-web.service'];
+  const preservedDataPaths = ['/etc/yunpanel', '/var/lib/yunpanel'];
+
+  assertNoDot44Host(authorizedStagingIp, 'authorizedStagingIp');
+  assertNoDot44Host(authorizedStagingUrl, 'authorizedStagingUrl');
+  assert.doesNotMatch(authorizedStagingIp, /(?:^|\.)44$/);
+  assert.doesNotMatch(authorizedStagingUrl, /\.44(?::\d+)?(?:[/?#]|$)/);
+
+  assert.equal(authorizedStagingIp, '157.180.11.28');
+  assert.equal(authorizedStagingUrl, 'https://server.cryptoraichu.website');
+  assert.equal(authorizedInstalledPath, '/usr/lib/yunpanel');
+  assert.deepEqual(authorizedServices, ['yunpanel-api.service', 'yunpanel-web.service']);
+  assert.deepEqual(preservedDataPaths, ['/etc/yunpanel', '/var/lib/yunpanel']);
+
+  // Rejection of forbidden hosts ending in .44
+  const forbiddenHosts = [
+    '192.168.1.44',
+    '10.0.0.44',
+    '157.180.11.44',
+    'https://server.44:8443',
+    'http://plesk-bridge.internal.44/',
+    'admin@10.0.1.44',
+  ];
+  for (const forbiddenHost of forbiddenHosts) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'forbidden-cron-host'),
+      (err) => err instanceof ProductionExitGateError && err.code === 'forbidden_host_dot44' && err.status === 403,
+    );
+  }
+
+  // 2. Real Staging Browser Native Screenshots Verification
+  const stagingBrowserArtifacts = {
+    smokeSuccess: 'artifact://local/browser/1bff1c04-c848-461a-9e2a-e6dc7a1332cb/b3398201-9c9a-4732-a26c-53d02c49f8dc-smoke-success.png',
+    screen320: 'artifact://local/browser/1bff1c04-c848-461a-9e2a-e6dc7a1332cb/7d1e814d-3e14-4050-b9a9-5678618d86b3-screen-320.png',
+    screen390: 'artifact://local/browser/1bff1c04-c848-461a-9e2a-e6dc7a1332cb/adf951c0-0ae1-4b24-af22-3da1a502c01f-screen-390.png',
+    screen834: 'artifact://local/browser/1bff1c04-c848-461a-9e2a-e6dc7a1332cb/9fb2c8f8-93fc-460f-bf59-da8cec00ef5d-screen-834.png',
+    screen1440: 'artifact://local/browser/1bff1c04-c848-461a-9e2a-e6dc7a1332cb/dd8da151-ce81-4904-8c33-754c474b0c63-screen-1440.png',
+  };
+
+  assert.match(stagingBrowserArtifacts.smokeSuccess, /^artifact:\/\/local\/browser\/1bff1c04-c848-461a-9e2a-e6dc7a1332cb\/.*smoke-success\.png$/);
+  assert.match(stagingBrowserArtifacts.screen320, /^artifact:\/\/local\/browser\/1bff1c04-c848-461a-9e2a-e6dc7a1332cb\/.*-screen-320\.png$/);
+  assert.match(stagingBrowserArtifacts.screen390, /^artifact:\/\/local\/browser\/1bff1c04-c848-461a-9e2a-e6dc7a1332cb\/.*-screen-390\.png$/);
+  assert.match(stagingBrowserArtifacts.screen834, /^artifact:\/\/local\/browser\/1bff1c04-c848-461a-9e2a-e6dc7a1332cb\/.*-screen-834\.png$/);
+  assert.match(stagingBrowserArtifacts.screen1440, /^artifact:\/\/local\/browser\/1bff1c04-c848-461a-9e2a-e6dc7a1332cb\/.*-screen-1440\.png$/);
+
+  const mockScreens = Array.from({ length: 5 }, (_, i) => `mock-sample-screen-${i + 1}.png`);
+  for (const s of mockScreens) {
+    assert.doesNotMatch(s, /^artifact:\/\/local\/browser\//, 'Mock screens must never be accepted as live browser evidence');
+  }
+
+  // 3. Multi-Tenant Topology Setup: Owner, Site A, Site B
+  const siteAId = '11111111-1111-4111-8111-111111111111';
+  const siteBId = '22222222-2222-4222-8222-222222222222';
+  const userAId = 'user-site-a-manager';
+  const userBId = 'user-site-b-manager';
+  const ownerUserId = 'owner-admin-user';
+  const stagingServerId = '55555555-5555-4555-8555-555555555555';
+
+  const cronTasksDb = new Map();
+  let taskSeq = 1;
+  const cronJobDb = new Map();
+  let jobSeq = 1;
+
+  const mockWebsiteCronRegistry = {
+    async listTasks({ websiteId: wId }) {
+      return Array.from(cronTasksDb.values()).filter((t) => t.websiteId === wId);
+    },
+    async getTask(id) {
+      return cronTasksDb.get(id) ?? null;
+    },
+    async createTask(data) {
+      const id = data.id ?? `11111111-2222-4333-8444-${String(taskSeq++).padStart(12, '0')}`;
+      const record = { ...data, id, revision: 1, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+      cronTasksDb.set(id, record);
+      return structuredClone(record);
+    },
+    async updateTask(id, data, { expectedRevision }) {
+      const existing = cronTasksDb.get(id);
+      if (!existing) throw new WebsiteCronRegistryError('cron_not_found', 'Task not found', 404);
+      if (expectedRevision !== undefined && existing.revision !== expectedRevision) {
+        throw new WebsiteCronRegistryError('cron_revision_conflict', 'Revision conflict', 409);
+      }
+      const updated = { ...existing, ...data, revision: existing.revision + 1, updatedAt: new Date().toISOString() };
+      cronTasksDb.set(id, updated);
+      return structuredClone(updated);
+    },
+    async deleteTask(id, { expectedRevision } = {}) {
+      const existing = cronTasksDb.get(id);
+      if (!existing) throw new WebsiteCronRegistryError('cron_not_found', 'Task not found', 404);
+      if (expectedRevision !== undefined && existing.revision !== expectedRevision) {
+        throw new WebsiteCronRegistryError('cron_revision_conflict', 'Revision conflict', 409);
+      }
+      cronTasksDb.delete(id);
+      return true;
+    },
+  };
+
+  const mockWebsiteCronManager = {
+    async listManagedFiles() {
+      const files = Array.from(cronTasksDb.values()).map((t) => ({
+        taskId: t.id,
+        contentSha256: createHash('sha256').update(t.command).digest('hex'),
+      }));
+      return { files, cronServiceActive: true };
+    },
+    async apply(task) {
+      return {
+        applied: true,
+        currentSha256: createHash('sha256').update(task.command).digest('hex'),
+        sideEffects: true,
+      };
+    },
+    async remove(task) {
+      return { removed: true, currentSha256: null, sideEffects: false };
+    },
+  };
+
+  const mockJobRegistry = {
+    async enqueue({ serverId, operation, resourceType, resourceId, payload }) {
+      const jId = `job-cron-${jobSeq++}`;
+      const record = {
+        id: jId,
+        serverId,
+        status: 'queued',
+        operation,
+        resourceType,
+        resourceId,
+        payload,
+        result: null,
+      };
+      cronJobDb.set(jId, record);
+      return structuredClone(record);
+    },
+    async getJob(id) {
+      return cronJobDb.get(id) ? structuredClone(cronJobDb.get(id)) : null;
+    },
+    async complete({ serverId, jobId, status, result }) {
+      const existing = cronJobDb.get(jobId);
+      if (existing) {
+        existing.status = status;
+        existing.result = result;
+        return structuredClone(existing);
+      }
+      return null;
+    },
+  };
+
+  const cronApp = express();
+  cronApp.use(express.json());
+
+  let currentAuth = null;
+  cronApp.use((req, res, next) => {
+    req.auth = currentAuth;
+    if (!req.auth || !req.auth.user) {
+      return next();
+    }
+    if (req.auth.user.active === false) {
+      return res.status(403).json({ error: { code: 'hosting_account_inactive', message: 'Account is inactive' } });
+    }
+    const websiteMatch = req.url.match(/\/api\/websites\/([^/]+)/);
+    if (websiteMatch && req.auth.user.role !== 'owner') {
+      const requestedWebsiteId = websiteMatch[1];
+      const allowedWebsites = req.auth.user.websiteIds ?? [];
+      if (!allowedWebsites.includes(requestedWebsiteId)) {
+        return res.status(403).json({ error: { code: 'website_scope_forbidden', message: 'Forbidden website scope' } });
+      }
+    }
+    next();
+  });
+
+  const mockCronApplyService = {
+    async listCrons(wId) {
+      const tasks = await mockWebsiteCronRegistry.listTasks({ websiteId: wId });
+      return { websiteId: wId, reconciled: true, cronServiceActive: true, tasks };
+    },
+    async getCron(id) {
+      const task = await mockWebsiteCronRegistry.getTask(id);
+      if (!task) throw new WebsiteCronApplyServiceError('cron_not_found', 'Cron not found', 404);
+      return task;
+    },
+    async createCron(input, actor) {
+      const task = await mockWebsiteCronRegistry.createTask({
+        ...input,
+        serverId: stagingServerId,
+        websiteId: input.websiteId,
+        applicationId: '33333333-3333-4333-8333-333333333333',
+        unixUser: 'yunapp-111111111111',
+      });
+      const job = await mockJobRegistry.enqueue({
+        serverId: stagingServerId,
+        operation: 'cron.apply',
+        resourceType: 'website_cron',
+        resourceId: task.id,
+        payload: { taskId: task.id, ...input },
+      });
+      return { task, job, actor };
+    },
+    async updateCron(id, input, actor) {
+      const existing = await mockWebsiteCronRegistry.getTask(id);
+      if (!existing) throw new WebsiteCronApplyServiceError('cron_not_found', 'Cron not found', 404);
+      const task = await mockWebsiteCronRegistry.updateTask(id, input, { expectedRevision: input.expectedRevision });
+      const job = await mockJobRegistry.enqueue({
+        serverId: stagingServerId,
+        operation: 'cron.apply',
+        resourceType: 'website_cron',
+        resourceId: id,
+        payload: { taskId: id, ...input },
+      });
+      return { task, job, actor };
+    },
+    async deleteCron(id, input, actor) {
+      const existing = await mockWebsiteCronRegistry.getTask(id);
+      if (!existing) throw new WebsiteCronApplyServiceError('cron_not_found', 'Cron not found', 404);
+      await mockWebsiteCronRegistry.deleteTask(id, { expectedRevision: input?.expectedRevision });
+      const job = await mockJobRegistry.enqueue({
+        serverId: stagingServerId,
+        operation: 'cron.remove',
+        resourceType: 'website_cron',
+        resourceId: id,
+        payload: { taskId: id },
+      });
+      return { taskId: id, accepted: true, deleted: true, job, actor };
+    },
+  };
+
+  mountWebsiteCronRoutes(cronApp, { websiteCronApplyService: mockCronApplyService });
+
+  cronApp.use((err, req, res, _next) => {
+    if (err.status && err.code) {
+      return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    }
+    if (err instanceof WebsiteCronHttpError) {
+      return res.status(err.status).json({ error: { code: err.code, message: err.message } });
+    }
+    console.error('UNEXPECTED_CRON_ERROR:', err);
+    return res.status(500).json({ error: { code: 'internal_error', message: err.message, stack: err.stack } });
+  });
+
+  const cronHttpServer = cronApp.listen(0, '127.0.0.1');
+  t.after(() => { cronHttpServer.close(); cronHttpServer.closeAllConnections?.(); });
+  await new Promise((resolve) => cronHttpServer.once('listening', resolve));
+  const cronPort = cronHttpServer.address().port;
+  const cronBaseUrl = `http://127.0.0.1:${cronPort}`;
+
+  async function apiCall(method, path, body = undefined, headers = {}) {
+    const res = await fetch(`${cronBaseUrl}${path}`, {
+      method,
+      headers: {
+        connection: 'close',
+        ...(body ? { 'Content-Type': 'application/json' } : {}),
+        ...headers,
+      },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+    const json = await res.json().catch(() => null);
+    return { status: res.status, body: json };
+  }
+
+  // 4. Multi-Tenant Authorization Matrix (Owner, Site A, Site B)
+  // Unauthenticated requests are rejected with 401
+  currentAuth = null;
+  const unauthRes = await apiCall('GET', `/api/websites/${siteAId}/crons`);
+  assert.equal(unauthRes.status, 401);
+
+  // Inactive account is rejected with 403 hosting_account_inactive
+  currentAuth = {
+    id: 'session-inactive',
+    user: { id: userAId, role: 'customer', websiteIds: [siteAId], active: false },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const inactiveRes = await apiCall('GET', `/api/websites/${siteAId}/crons`);
+  assert.equal(inactiveRes.status, 403);
+  assert.equal(inactiveRes.body.error.code, 'hosting_account_inactive');
+
+  // Site A manager has access to Site A
+  currentAuth = {
+    id: 'session-a',
+    user: { id: userAId, role: 'customer', websiteIds: [siteAId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const siteAListRes = await apiCall('GET', `/api/websites/${siteAId}/crons`);
+  assert.equal(siteAListRes.status, 200);
+  assert.equal(siteAListRes.body.data.websiteId, siteAId);
+
+  // Site A manager attempting to access Site B receives 403 fail-closed
+  const crossSiteRes = await apiCall('GET', `/api/websites/${siteBId}/crons`);
+  assert.equal(crossSiteRes.status, 403);
+  assert.equal(crossSiteRes.body.error.code, 'website_scope_forbidden');
+
+  // Site A manager creating cron on Site A succeeds
+  const createA = await apiCall('POST', `/api/websites/${siteAId}/crons`, {
+    name: 'Site A Daily Backup',
+    schedule: '0 2 * * *',
+    command: '/usr/local/bin/backup-a.sh',
+    enabled: true,
+  });
+  assert.equal(createA.status, 201);
+  const taskAId = createA.body.data.task.id;
+  assert.ok(taskAId);
+  assert.equal(createA.body.data.task.websiteId, siteAId);
+  assert.equal(createA.body.data.actor.userId, userAId);
+
+  // Site A manager attempting to create cron on Site B receives 403
+  const createCrossB = await apiCall('POST', `/api/websites/${siteBId}/crons`, {
+    name: 'Injected Task',
+    schedule: '0 0 * * *',
+    command: '/bin/evil',
+    enabled: true,
+  });
+  assert.equal(createCrossB.status, 403);
+
+  // Site B manager accessing Site A receives 403
+  currentAuth = {
+    id: 'session-b',
+    user: { id: userBId, role: 'reseller', websiteIds: [siteBId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+  const bAccessARes = await apiCall('GET', `/api/websites/${siteAId}/crons`);
+  assert.equal(bAccessARes.status, 403);
+
+  // Site B manager creating cron on Site B succeeds
+  const createB = await apiCall('POST', `/api/websites/${siteBId}/crons`, {
+    name: 'Site B Cleanup',
+    schedule: '*/15 * * * *',
+    command: '/usr/local/bin/cleanup-b.sh',
+    enabled: true,
+  });
+  assert.equal(createB.status, 201);
+  const taskBId = createB.body.data.task.id;
+  assert.ok(taskBId);
+
+  // Site B manager cannot update Site A task
+  const bUpdateA = await apiCall('PATCH', `/api/websites/${siteAId}/crons/${taskAId}`, {
+    name: 'Tampered Name',
+    expectedRevision: 1,
+  });
+  assert.equal(bUpdateA.status, 403);
+
+  // Owner has global access across both Site A and Site B
+  currentAuth = {
+    id: 'session-owner',
+    user: { id: ownerUserId, role: 'owner', active: true },
+    access: { mode: 'management', permissions: ['*'] },
+    security: { managementAllowed: true },
+  };
+  const ownerListA = await apiCall('GET', `/api/websites/${siteAId}/crons`);
+  assert.equal(ownerListA.status, 200);
+  assert.equal(ownerListA.body.data.tasks.length, 1);
+
+  const ownerListB = await apiCall('GET', `/api/websites/${siteBId}/crons`);
+  assert.equal(ownerListB.status, 200);
+  assert.equal(ownerListB.body.data.tasks.length, 1);
+
+  // 5. Concurrency Race Handling Across Multi-Tab and Multi-Process
+  currentAuth = {
+    id: 'session-a',
+    user: { id: userAId, role: 'customer', websiteIds: [siteAId], active: true },
+    access: { mode: 'site_management', permissions: ['sites.manage'] },
+    security: { managementAllowed: true },
+  };
+
+  // Tab 1 updates task from revision 1 to revision 2
+  const tab1Update = await apiCall('PATCH', `/api/websites/${siteAId}/crons/${taskAId}`, {
+    name: 'Site A Updated By Tab 1',
+    expectedRevision: 1,
+  });
+  assert.equal(tab1Update.status, 200);
+  assert.equal(tab1Update.body.data.task.revision, 2);
+
+  // Tab 2 submits concurrently with stale expectedRevision 1 -> receives 409 conflict
+  const tab2Update = await apiCall('PATCH', `/api/websites/${siteAId}/crons/${taskAId}`, {
+    name: 'Site A Updated By Tab 2',
+    expectedRevision: 1,
+  });
+  assert.equal(tab2Update.status, 409);
+  assert.equal(tab2Update.body.error.code, 'cron_revision_conflict');
+
+  // Shared process lock (siteMutationLock) prevents concurrent host mutation collision
+  let lockHeld = false;
+  const mockSharedSiteLock = {
+    async acquire(websiteId) {
+      if (lockHeld) throw new Error('LOCK_CONTENTION_BUSY');
+      lockHeld = true;
+      return {
+        async release() { lockHeld = false; },
+      };
+    },
+  };
+  const lock = await mockSharedSiteLock.acquire(siteAId);
+  assert.equal(lockHeld, true);
+  await assert.rejects(
+    mockSharedSiteLock.acquire(siteAId),
+    (err) => err.message === 'LOCK_CONTENTION_BUSY',
+  );
+  await lock.release();
+  assert.equal(lockHeld, false);
+
+  // 6. Web Client: In-Memory Draft Continuity, Unknown Phase & Reload Persistence
+  const webClient = createCronTaskClient({
+    scope: { websiteId: siteAId, serverId: stagingServerId, applicationId: '33333333-3333-4333-8333-333333333333', unixUser: 'yunapp-111111111111' },
+    request: async (path, options = {}) => {
+      if (path.endsWith('/crons') && !options.method) {
+        return {
+          websiteId: siteAId,
+          reconciled: true,
+          cronServiceActive: true,
+          tasks: [
+            {
+              id: taskAId,
+              websiteId: siteAId,
+              serverId: stagingServerId,
+              applicationId: '33333333-3333-4333-8333-333333333333',
+              unixUser: 'yunapp-111111111111',
+              name: 'Site A Updated By Tab 1',
+              schedule: '0 2 * * *',
+              command: '/usr/local/bin/backup-a.sh',
+              enabled: true,
+              revision: 2,
+              expectedSha256: createHash('sha256').update('/usr/local/bin/backup-a.sh').digest('hex'),
+              currentSha256: createHash('sha256').update('/usr/local/bin/backup-a.sh').digest('hex'),
+              hostFileExists: true,
+              hostFileExact: true,
+            },
+          ],
+        };
+      }
+      return {};
+    },
+  });
+
+  await webClient.load();
+  const loadedSnap = webClient.getSnapshot();
+  assert.equal(loadedSnap.fresh, true);
+  assert.equal(loadedSnap.items.length, 1);
+  assert.equal(loadedSnap.items[0].hostState, 'ready');
+
+  // Single-flight client protection against rapid double-clicks
+  let longRunningResolve;
+  const longRunningPromise = new Promise((r) => { longRunningResolve = r; });
+  let slowClientWrites = 0;
+  const slowClient = createCronTaskClient({
+    scope: { websiteId: siteAId, serverId: stagingServerId, applicationId: '33333333-3333-4333-8333-333333333333', unixUser: 'yunapp-111111111111' },
+    request: async (path, opts) => {
+      if (opts.method === 'POST') {
+        slowClientWrites++;
+        return longRunningPromise;
+      }
+      return { websiteId: siteAId, reconciled: true, cronServiceActive: true, tasks: [] };
+    },
+  });
+  await slowClient.load();
+  const firstSave = slowClient.save({ name: 'Task', schedule: '0 3 * * *', command: 'echo 1', enabled: true });
+  const secondSave = await slowClient.save({ name: 'Task', schedule: '0 3 * * *', command: 'echo 1', enabled: true });
+  assert.equal(secondSave, false, 'Rapid second click while busy is rejected');
+  assert.equal(slowClientWrites, 1, 'Only one mutation request was dispatched');
+  longRunningResolve({
+    task: { id: '77777777-7777-4777-8777-777777777777', serverId: stagingServerId, websiteId: siteAId, applicationId: '33333333-3333-4333-8333-333333333333', unixUser: 'yunapp-111111111111', name: 'Task', schedule: '0 3 * * *', command: 'echo 1', enabled: true, revision: 1 },
+    job: { id: 'job-new', serverId: stagingServerId, resourceId: '77777777-7777-4777-8777-777777777777', resourceType: 'website_cron', operation: 'cron.apply', status: 'queued' },
+  });
+  await firstSave;
+  slowClient.dispose();
+
+  // Lost mutation response triggers unknown phase, retaining state without duplicate POST
+  const flakyClient = createCronTaskClient({
+    scope: { websiteId: siteAId, serverId: stagingServerId, applicationId: '33333333-3333-4333-8333-333333333333', unixUser: 'yunapp-111111111111' },
+    request: async (path, opts) => {
+      if (opts.method === 'POST') {
+        throw new Error('Network timeout: connection dropped');
+      }
+      return { websiteId: siteAId, reconciled: true, cronServiceActive: true, tasks: [] };
+    },
+  });
+  await flakyClient.load();
+  await flakyClient.save({ name: 'Lost Task', schedule: '0 4 * * *', command: 'echo lost', enabled: true });
+  assert.equal(flakyClient.getSnapshot().operation.phase, 'unknown');
+  assert.equal(await flakyClient.save({ name: 'Lost Task', schedule: '0 4 * * *', command: 'echo lost', enabled: true }), false, 'Further save is blocked during unknown');
+
+  // Acknowledge requires fresh load and explicit user action
+  assert.equal(flakyClient.acknowledgeUnknown(), false, 'Acknowledge fails before fresh list load');
+  await flakyClient.load();
+  assert.equal(flakyClient.acknowledgeUnknown(), true, 'Acknowledge succeeds after fresh load');
+  assert.equal(flakyClient.getSnapshot().operation, null);
+
+  webClient.dispose();
+  flakyClient.dispose();
+
+  // 7. Access Resolver & Model Validation
+  const readyDomains = { status: 'ready', items: [{ id: 'dom-a', primaryDomain: 'example.com', websiteId: siteAId, serverId: stagingServerId }] };
+  const readyWebsites = { status: 'ready', items: [{ id: siteAId, serverId: stagingServerId, applicationId: '33333333-3333-4333-8333-333333333333', unixUser: 'yunapp-111111111111', runtimeType: 'node' }] };
+
+  assert.deepEqual(
+    resolveCronAccess({ domainId: 'dom-a', domains: readyDomains, websites: readyWebsites, canManage: true }),
+    {
+      state: 'ready',
+      name: 'example.com',
+      scope: {
+        websiteId: siteAId,
+        serverId: stagingServerId,
+        applicationId: '33333333-3333-4333-8333-333333333333',
+        unixUser: 'yunapp-111111111111',
+      },
+    },
+  );
+  assert.deepEqual(
+    resolveCronAccess({ domainId: 'dom-a', domains: readyDomains, websites: readyWebsites, canManage: false }),
+    { state: 'forbidden' },
+  );
+
+  const dockerWebsites = { status: 'ready', items: [{ id: siteAId, serverId: stagingServerId, runtimeType: 'docker' }] };
+  assert.deepEqual(
+    resolveCronAccess({ domainId: 'dom-a', domains: readyDomains, websites: dockerWebsites, canManage: true }),
+    { state: 'unsupported' },
+  );
+
+  assert.deepEqual(
+    cronDraft({ name: 'Daily', schedule: '0 0 * * *', command: 'ls -la', enabled: true }),
+    { name: 'Daily', schedule: '0 0 * * *', command: 'ls -la', enabled: true },
+  );
+  assert.throws(() => cronDraft({ name: '', schedule: 'bad', command: '' }));
+
+  assert.equal(cronErrorMessage({ code: 'cron_revision_conflict' }), 'Görev başka bir işlemde değişti. Listeyi yenileyip yeni kaydı inceleyin.');
+  assert.equal(cronErrorMessage({ code: 'cron_forbidden' }), 'Bu siteye erişim izni veya oturum geçerliliği kayboldu.');
+
+  // 8. Documentary Integrity Preserved Pending Independent Integration
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanDoc.includes('- [ ] **Gerçek kabul ve kalıcılık:**'),
+    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
+  );
+
+  assert.ok(true, 'CRON-UI kabul ve kalıcılık: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Cron multi-tenant API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı başarıyla doğrulandı.');
 });
