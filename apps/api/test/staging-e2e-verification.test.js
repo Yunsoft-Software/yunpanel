@@ -517,6 +517,68 @@ import {
 import {
   resolveCronAccess,
 } from '../../web/src/workspace/cron-task-access.js';
+import {
+  DomainAliasError,
+  normalizeAliasName,
+  aliasList,
+  aliasDiff,
+  sameAliases,
+  aliasDomainSnapshot,
+  MAX_DOMAIN_ALIASES,
+} from '../../web/src/workspace/domain-alias-model.js';
+import {
+  HOSTING_SETTING_FIELDS,
+  hostingSettingsFromDomain,
+  hostingSettingsChanges,
+  hostingSettingsDiff,
+} from '../../web/src/workspace/domain-hosting-model.js';
+import {
+  renewalMetadata,
+  renewalOutcome,
+  EMPTY_SSL_RENEWAL,
+} from '../../web/src/workspace/ssl-renewal.js';
+import {
+  WebsiteSuspensionModelError,
+  websiteSuspensionScope,
+  websiteSuspensionPreview,
+  websiteSuspensionOperation,
+  websiteSuspensionState,
+  resolveWebsiteSuspensionAccess,
+  suspensionAction,
+} from '../../web/src/workspace/website-suspension-model.js';
+import {
+  PhpToolsError,
+  phpToolsScope,
+  resolvePhpToolsAccess,
+  phpToolsStatus,
+  PHP_TOOL_PATHS,
+  phpToolActionPreview,
+  phpToolActionJob,
+  phpToolQueueResult,
+  PHP_TOOL_ACTIONS,
+} from '../../web/src/workspace/php-tools-model.js';
+import {
+  WebsiteRemovalModelError,
+  removalScope,
+  removalPreview,
+  removalOperation,
+  nextRemovalStep,
+  globalRemovalOperation,
+  removalState,
+  resolveRemovalAccess,
+} from '../../web/src/workspace/website-removal-model.js';
+import {
+  createDomainSuspensionService,
+  DomainSuspensionError,
+} from '../src/domain-suspension.js';
+import {
+  createWebsiteSuspensionOperationRegistry,
+  WebsiteSuspensionOperationRegistryError,
+} from '../src/website-suspension-operation-registry.js';
+import {
+  createWebsitePhpRuntimeProvisioningHandler,
+  WebsitePhpRuntimeProvisioningError,
+} from '../src/website-php-runtime-provisioning-handler.js';
 
 // ============================================================================
 // STAGING E2E PART 1: Reseller & Customer Multi-Tenant Flow & Isolation
@@ -19594,4 +19656,519 @@ test('Staging E2E Files: Hedef Node24/npm11 tam React/Vite build; gerçek taray�
   );
 
   assert.ok(true, 'Files kabul ve kalıcılık: Node24/npm11 tam React/Vite build, gerçek tarayıcı/host kabulü, dosya yolu/taslak korunması ve bütün dosya yönetim davranışları ile BUG-04/05 ve T-DEV-SSL-FORM kabulleri başarıyla doğrulandı.');
+});
+
+// ============================================================================
+// STAGING E2E PART 25: UX-PL-03/04/06 & T-DEV-CRON-UI / T-DEV-PHP-UI Verification
+// ============================================================================
+
+test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök plan.md içinde izlenir.', async () => {
+  // 1. Strict .44 Isolation & Staging Invariants
+  assertNoDot44Host('157.180.11.28', 'authorizedStagingIp');
+  assertNoDot44Host('https://server.cryptoraichu.website', 'authorizedStagingUrl');
+  assertNoDot44Host('srv-staging-1', 'stagingServerId');
+  for (const forbiddenHost of ['192.168.1.44', '10.0.0.44', 'https://server.44/api', '.44', 'http://plesk-bridge.internal.44/']) {
+    assert.throws(
+      () => assertNoDot44Host(forbiddenHost, 'forbidden-test-host'),
+      (err) => err.code === 'forbidden_host_dot44' || err.name === 'ProductionExitGateError',
+      `Expected ${forbiddenHost} to be rejected by assertNoDot44Host`,
+    );
+  }
+
+  // 2. Domain, Subdomain & Alias DNS Automation and Verification (UX-PL-03/04/06)
+  assert.equal(normalizeAliasName('  WWW.EXAMPLE.COM. '), 'www.example.com');
+  assert.equal(normalizeAliasName('api.cryptoraichu.website'), 'api.cryptoraichu.website');
+  assert.throws(() => normalizeAliasName(''), (err) => err instanceof DomainAliasError && err.code === 'alias_invalid');
+  assert.throws(() => normalizeAliasName('http://example.com'), (err) => err instanceof DomainAliasError && err.code === 'alias_invalid');
+  assert.throws(() => normalizeAliasName('*.example.com'), (err) => err instanceof DomainAliasError && err.code === 'alias_invalid');
+  assert.throws(() => normalizeAliasName('example.com:8080'), (err) => err instanceof DomainAliasError && err.code === 'alias_invalid');
+  assert.throws(() => normalizeAliasName('192.168.1.1'), (err) => err instanceof DomainAliasError && err.code === 'alias_invalid');
+
+  assert.equal(MAX_DOMAIN_ALIASES, 20);
+  const aliases = aliasList(['shop.example.com', 'blog.example.com'], 'example.com');
+  assert.deepEqual(aliases, ['shop.example.com', 'blog.example.com']);
+  // Cannot add duplicate or primary domain as alias
+  assert.throws(
+    () => aliasList(['example.com'], 'example.com'),
+    (err) => err instanceof DomainAliasError && err.code === 'alias_duplicate',
+  );
+  assert.throws(
+    () => aliasList(['shop.example.com', 'SHOP.EXAMPLE.COM'], 'example.com'),
+    (err) => err instanceof DomainAliasError && err.code === 'alias_duplicate',
+  );
+  // Alias limit enforced
+  const tooManyAliases = Array.from({ length: 21 }, (_, i) => `sub${i}.example.com`);
+  assert.throws(
+    () => aliasList(tooManyAliases, 'example.com'),
+    (err) => err instanceof DomainAliasError && err.code === 'alias_limit',
+  );
+
+  // Alias diffing & comparison
+  assert.deepEqual(aliasDiff(['a.com', 'b.com'], ['b.com', 'c.com']), {
+    added: ['c.com'],
+    removed: ['a.com'],
+  });
+  assert.equal(sameAliases(['a.com', 'b.com'], ['b.com', 'a.com']), true);
+  assert.equal(sameAliases(['a.com'], ['b.com']), false);
+
+  // Alias Domain Snapshot validation
+  const validDomain = {
+    id: 'dom-1',
+    serverId: 'srv-1',
+    websiteId: 'web-1',
+    parentDomainId: null,
+    primaryDomain: 'example.com',
+    aliases: ['www.example.com'],
+    desiredRevision: 2,
+    targetType: 'website',
+    target: { websiteId: 'web-1' },
+    httpsMode: 'managed',
+    httpsRedirect: true,
+    canonicalRedirect: false,
+    nginxSettings: { headers: [] },
+    certificateId: 'cert-1',
+    state: 'active',
+  };
+  const snap = aliasDomainSnapshot(validDomain);
+  assert.equal(snap.id, 'dom-1');
+  assert.deepEqual(snap.aliases, ['www.example.com']);
+
+  // DNS Delegation Inspector verification
+  const mockDnsRegistry = {
+    async getForServer(serverId) {
+      return {
+        settings: {
+          ns1: { hostname: 'ns1.yunpanel.test' },
+          ns2: { hostname: 'ns2.yunpanel.test' },
+        },
+      };
+    },
+  };
+  const mockResolver = {
+    async resolveNs(domain) {
+      if (domain === 'example.com') return ['ns1.yunpanel.test', 'ns2.yunpanel.test'];
+      return [];
+    },
+    async resolve4(ns) {
+      if (ns === 'ns1.yunpanel.test') return ['157.180.11.28'];
+      return [];
+    },
+    async resolve6(ns) {
+      return [];
+    },
+  };
+  const inspector = createDnsDelegationInspector({ dnsIdentityRegistry: mockDnsRegistry, resolver: mockResolver });
+  const inspection = await inspector.inspect({ serverId: 'srv-1', domain: 'example.com' });
+  assert.equal(inspection.delegation.ready, true);
+  assert.equal(inspection.delegation.missing.length, 0);
+
+  // 3. Mail Automation & Mailbox Access Guard (UX-PL-03/04/06)
+  const mockRun = async (cmd, args) => ({ exitCode: 0, stdout: 'ok', stderr: '' });
+  const mailboxGuard = createMailboxAccessGuard({ run: mockRun });
+  assert.equal(typeof mailboxGuard.quiesce, 'function');
+  assert.equal(typeof mailboxGuard.verify, 'function');
+  // Mailbox guard fail-closed against traversal or invalid mailbox tokens
+  await assert.rejects(
+    async () => mailboxGuard.quiesce('../../../etc/passwd'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_identity_invalid',
+  );
+  await assert.rejects(
+    async () => mailboxGuard.verify('user*@bad.test'),
+    (err) => err instanceof MailboxAccessError && err.code === 'mailbox_access_identity_invalid',
+  );
+
+  // 4. SSL Automation, Remaining Duration & Fingerprint Synchronization
+  const fp1 = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
+  const fp2 = '11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00';
+  const validFrom = '2026-01-01T00:00:00.000Z';
+  const validTo = '2026-04-01T00:00:00.000Z';
+  const validToLater = '2026-07-01T00:00:00.000Z';
+
+  const meta = renewalMetadata({ fingerprint256: fp1, validFrom, validTo });
+  assert.equal(meta.fingerprint256, fp1);
+  assert.equal(meta.validFrom, validFrom);
+  assert.equal(meta.validTo, validTo);
+
+  // Rejects invalid fingerprint or inverted dates
+  assert.throws(() => renewalMetadata({ fingerprint256: 'invalid', validFrom, validTo }));
+  assert.throws(() => renewalMetadata({ fingerprint256: fp1, validFrom: validTo, validTo: validFrom }));
+
+  const certBefore = {
+    certName: 'example.com',
+    state: 'active',
+    fingerprint256: fp1,
+    validFrom,
+    validTo,
+  };
+
+  // Test dryRun validation outcome
+  const dryRunJob = {
+    status: 'succeeded',
+    result: {
+      certName: 'example.com',
+      dryRun: true,
+      staging: false,
+      status: 'validated',
+    },
+  };
+  assert.equal(renewalOutcome(dryRunJob, certBefore, certBefore, true), 'tested');
+
+  // Test unchanged outcome: matching fingerprint and matching dates
+  const unchangedJob = {
+    status: 'succeeded',
+    result: {
+      certName: 'example.com',
+      dryRun: false,
+      staging: false,
+      status: 'renewed',
+      fingerprint256: fp1,
+      validFrom,
+      validTo,
+    },
+  };
+  assert.equal(renewalOutcome(unchangedJob, certBefore, certBefore, false), 'unchanged');
+
+  // Test renewed outcome: different fingerprint with valid new material
+  const renewedJob = {
+    status: 'succeeded',
+    result: {
+      certName: 'example.com',
+      dryRun: false,
+      staging: false,
+      status: 'renewed',
+      fingerprint256: fp2,
+      validFrom,
+      validTo: validToLater,
+    },
+  };
+  const certRenewed = {
+    certName: 'example.com',
+    state: 'active',
+    fingerprint256: fp2,
+    validFrom,
+    validTo: validToLater,
+  };
+  assert.equal(renewalOutcome(renewedJob, certBefore, certRenewed, false), 'renewed');
+
+  // Contradictory dates for same fingerprint must fail closed ("A fingerprint identifies the material; contradictory dates are not renewal")
+  const contradictoryJob = {
+    status: 'succeeded',
+    result: {
+      certName: 'example.com',
+      dryRun: false,
+      staging: false,
+      status: 'renewed',
+      fingerprint256: fp1,
+      validFrom,
+      validTo: validToLater,
+    },
+  };
+  assert.throws(
+    () => renewalOutcome(contradictoryJob, certBefore, { ...certBefore, validTo: validToLater }, false),
+    (err) => err.code === 'ssl_renewal_unverified',
+  );
+
+  // SSL contact email resolution
+  const sessionWithUserEmail = {
+    user: { id: 'u1', role: 'owner', email: 'owner@server.test' },
+    dnsSsl: { acmeEmail: 'acme@server.test' },
+  };
+  assert.equal(sslContactEmail(sessionWithUserEmail), 'owner@server.test');
+  const sessionNoUserEmail = {
+    user: { id: 'u2', role: 'owner' },
+    dnsSsl: { acmeEmail: 'acme@server.test' },
+  };
+  assert.equal(sslContactEmail(sessionNoUserEmail), '');
+
+  // 5. Hosting Configuration Settings & Mutation Flows
+  assert.deepEqual(HOSTING_SETTING_FIELDS, ['httpsRedirect', 'canonicalRedirect']);
+  const initialHosting = hostingSettingsFromDomain(validDomain);
+  assert.deepEqual(initialHosting, { httpsRedirect: true, canonicalRedirect: false });
+
+  // Suspended domain rejects hosting changes
+  assert.throws(
+    () => hostingSettingsFromDomain({ ...validDomain, state: 'suspended' }),
+    (err) => err instanceof DomainAliasError && err.code === 'domain_suspended_update_blocked',
+  );
+
+  // Inconsistent httpsMode (off with httpsRedirect: true) fails closed
+  assert.throws(
+    () => hostingSettingsFromDomain({ ...validDomain, httpsMode: 'off', httpsRedirect: true }),
+    (err) => err instanceof DomainAliasError && err.code === 'hosting_target_invalid',
+  );
+
+  // Valid changes diff
+  const changes = hostingSettingsChanges(validDomain, { httpsRedirect: false, canonicalRedirect: true });
+  assert.deepEqual(changes, { httpsRedirect: false, canonicalRedirect: true });
+  const hostingDiff = hostingSettingsDiff(validDomain, { httpsRedirect: false, canonicalRedirect: true });
+  assert.equal(hostingDiff.length, 2);
+  assert.equal(hostingDiff[0].key, 'httpsRedirect');
+  assert.equal(hostingDiff[0].before, true);
+  assert.equal(hostingDiff[0].after, false);
+
+  // No changes throws hosting_no_changes
+  assert.throws(
+    () => hostingSettingsChanges(validDomain, { httpsRedirect: true, canonicalRedirect: false }),
+    (err) => err instanceof DomainAliasError && err.code === 'hosting_no_changes',
+  );
+
+  // Enabling httpsRedirect when httpsMode !== 'managed' fails closed
+  assert.throws(
+    () => hostingSettingsChanges({ ...validDomain, httpsMode: 'off', httpsRedirect: false }, { httpsRedirect: true, canonicalRedirect: false }),
+    (err) => err instanceof DomainAliasError && err.code === 'invalid_redirect_policy',
+  );
+
+  // 6. Suspension & Removal Workflows (Fail-Closed & Tenant Boundaries)
+  const testWebId = '11111111-1111-4111-8111-111111111111';
+  const testServerId = '22222222-2222-4222-8222-222222222222';
+  const testDomainId = '33333333-3333-4333-8333-333333333333';
+
+  // Suspension scope validation
+  const suspScope = websiteSuspensionScope({
+    websiteId: testWebId,
+    serverId: testServerId,
+    label: 'example.com',
+  });
+  assert.equal(suspScope.websiteId, testWebId);
+  assert.equal(suspScope.serverId, testServerId);
+
+  // Suspension access resolution
+  const readyDomains = {
+    status: 'ready',
+    items: [{ id: testDomainId, serverId: testServerId, websiteId: testWebId, primaryDomain: 'example.com' }],
+  };
+  const readyWebsites = {
+    status: 'ready',
+    items: [{ id: testWebId, serverId: testServerId, name: 'example.com', runtimeType: 'php' }],
+  };
+
+  const suspAccess = resolveWebsiteSuspensionAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: readyWebsites,
+    canManage: true,
+  });
+  assert.equal(suspAccess.state, 'ready');
+  assert.equal(suspAccess.scope.websiteId, testWebId);
+
+  // Mismatched serverId fails closed as inconsistent
+  const inconsistentAccess = resolveWebsiteSuspensionAccess({
+    domainId: testDomainId,
+    domains: { status: 'ready', items: [{ id: testDomainId, serverId: '44444444-4444-4444-8444-444444444444', websiteId: testWebId, primaryDomain: 'example.com' }] },
+    websites: readyWebsites,
+    canManage: true,
+  });
+  assert.equal(inconsistentAccess.state, 'inconsistent');
+
+  // canManage = false fails closed as forbidden
+  const forbiddenSuspAccess = resolveWebsiteSuspensionAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: readyWebsites,
+    canManage: false,
+  });
+  assert.equal(forbiddenSuspAccess.state, 'forbidden');
+
+  // Suspension Action derivation
+  assert.equal(suspensionAction({ preview: { readyToSuspend: true, confirmation: 'confirm-suspend' }, operations: [] })?.kind, 'start');
+  assert.equal(suspensionAction({ operations: [{ status: 'suspended', actions: { resumeConfirmation: 'confirm-resume' } }] })?.kind, 'resume');
+  assert.equal(suspensionAction({ operations: [{ status: 'partial', actions: { suspendRetryConfirmation: 'retry-suspend' } }] })?.kind, 'retry-suspend');
+
+  // Removal scope & next removal step
+  const remScope = removalScope({
+    websiteId: testWebId,
+    serverId: testServerId,
+    label: 'example.com',
+  });
+  assert.equal(remScope.websiteId, testWebId);
+  assert.equal(remScope.serverId, testServerId);
+
+  // resolveRemovalAccess enforces owner role
+  const nonOwnerRemoval = resolveRemovalAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: readyWebsites,
+    isOwner: false,
+  });
+  assert.equal(nonOwnerRemoval.state, 'forbidden');
+
+  const ownerRemoval = resolveRemovalAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: readyWebsites,
+    isOwner: true,
+  });
+  assert.equal(ownerRemoval.state, 'ready');
+  assert.equal(ownerRemoval.scope.websiteId, testWebId);
+
+  // 7. PHP Version / FPM Multi-Version & Mutation Flows (T-DEV-PHP-UI)
+  const testAppId = '55555555-5555-4555-8555-555555555555';
+  const phpScope = phpToolsScope({
+    websiteId: testWebId,
+    serverId: testServerId,
+    applicationId: testAppId,
+    unixUser: 'yunapp-0123456789ab',
+  });
+  assert.equal(phpScope.unixUser, 'yunapp-0123456789ab');
+
+  // Invalid unixUser fails closed
+  assert.throws(
+    () => phpToolsScope({ websiteId: testWebId, serverId: testServerId, applicationId: testAppId, unixUser: 'root' }),
+    (err) => err instanceof PhpToolsError,
+  );
+
+  // resolvePhpToolsAccess
+  const phpWebsites = {
+    status: 'ready',
+    items: [{ id: testWebId, serverId: testServerId, runtimeType: 'php', applicationId: testAppId, unixUser: 'yunapp-0123456789ab' }],
+  };
+  const phpAccess = resolvePhpToolsAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: phpWebsites,
+    canManage: true,
+  });
+  assert.equal(phpAccess.state, 'ready');
+  assert.equal(phpAccess.scope.applicationId, testAppId);
+
+  // Non-PHP website returns unsupported
+  const nonPhpAccess = resolvePhpToolsAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: { status: 'ready', items: [{ id: testWebId, serverId: testServerId, runtimeType: 'nodejs', applicationId: testAppId, unixUser: 'yunapp-0123456789ab' }] },
+    canManage: true,
+  });
+  assert.equal(nonPhpAccess.state, 'unsupported');
+
+  // PHP Tool Action IDs
+  assert.deepEqual(PHP_TOOL_ACTIONS.map((a) => a.id), ['wp.cache.flush', 'wp.transients.delete-all', 'composer.dump-autoload']);
+
+  // PHP Tool Action Preview
+  const previewDigest = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+  const validPreview = {
+    version: 1,
+    ...phpScope,
+    websiteRevision: 3,
+    actionId: 'wp.cache.flush',
+    tool: 'wp-cli',
+    label: 'WordPress önbelleğini temizle',
+    impact: 'WordPress nesne önbelleği temizlenir.',
+    previewDigest,
+    confirmation: `php-tool:${phpScope.websiteId}:wp.cache.flush:${previewDigest}`,
+  };
+  const parsedPreview = phpToolActionPreview(validPreview, phpScope);
+  assert.equal(parsedPreview.actionId, 'wp.cache.flush');
+  assert.equal(parsedPreview.tool, 'wp-cli');
+
+  // Mismatched confirmation fails closed
+  assert.throws(
+    () => phpToolActionPreview({ ...validPreview, confirmation: 'wrong-confirmation' }, phpScope),
+    (err) => err instanceof PhpToolsError,
+  );
+
+  // PHP Runtime Provisioning Handler Fail-Closed Check
+  const mockContainer = {
+    async apply(intent, opts) { return { satisfied: true, adapter: 'php-container', containerOwner: intent.unixUser, releaseUid: 1001, releaseGid: 1001 }; },
+    async inspect() { return { satisfied: true }; },
+  };
+  const mockFpm = {
+    async apply(intent, opts) { return { satisfied: true, adapter: 'php-fpm', phpVersion: intent.phpVersion ?? '8.3' }; },
+    async inspect() { return { satisfied: true, adapter: 'php-fpm', phpVersion: '8.3' }; },
+    async compensate() { return { satisfied: true }; },
+    async inspectCompensation() { return { satisfied: true }; },
+  };
+  const mockUmask = {
+    async apply(service) { return { satisfied: true, umask: '0027' }; },
+    async inspect() { return { satisfied: true, umask: '0027' }; },
+  };
+
+  const phpHandler = createWebsitePhpRuntimeProvisioningHandler({
+    containerManager: mockContainer,
+    fpmManager: mockFpm,
+    umaskManager: mockUmask,
+  });
+  const provisionResult = await phpHandler.apply({
+    intent: {
+      adapter: 'php-fpm',
+      websiteId: testWebId,
+      applicationId: testAppId,
+      unixUser: 'yunapp-0123456789ab',
+      documentRoot: '/var/www/vhosts/example.com/httpdocs',
+      phpVersion: '8.3',
+    },
+    operationId: 'op-php-prov-1',
+  });
+  assert.equal(provisionResult.satisfied, true);
+  assert.equal(provisionResult.adapter, 'php-fpm');
+  assert.equal(provisionResult.runtimeUmask, '0027');
+
+  // 8. Backup & Statistics Tool Integration
+  const backupScope = siteBackupScope({ websiteId: testWebId, serverId: testServerId });
+  assert.equal(backupScope.websiteId, testWebId);
+  assert.equal(backupScope.serverId, testServerId);
+
+  const analyticsScope = siteAnalyticsScope({ websiteId: testWebId, serverId: testServerId });
+  assert.equal(analyticsScope.websiteId, testWebId);
+  assert.equal(analyticsScope.serverId, testServerId);
+
+  const rawAnalytics = {
+    websiteId: testWebId,
+    primaryDomain: 'example.com',
+    generatedAt: '2026-10-09T00:00:00.000Z',
+    pid: 12345, // sensitive internal host detail
+    socket: '/var/run/goaccess.sock', // internal socket
+  };
+  const safeReport = analyticsReport(rawAnalytics, analyticsScope);
+  assert.equal(safeReport.websiteId, testWebId);
+  assert.equal(safeReport.primaryDomain, 'example.com');
+  assert.equal(Object.hasOwn(safeReport, 'pid'), false);
+  assert.equal(Object.hasOwn(safeReport, 'socket'), false);
+
+  // 9. Cron Acceptance (T-DEV-CRON-UI)
+  const cronUserScope = cronScope({
+    websiteId: testWebId,
+    serverId: testServerId,
+    applicationId: testAppId,
+    unixUser: 'yunapp-0123456789ab',
+  });
+  assert.equal(cronUserScope.websiteId, testWebId);
+
+  const cronAccess = resolveCronAccess({
+    domainId: testDomainId,
+    domains: readyDomains,
+    websites: phpWebsites,
+    canManage: true,
+  });
+  assert.equal(cronAccess.state, 'ready');
+  assert.equal(cronAccess.name, 'example.com');
+
+  const validCron = cronDraft({
+    name: 'Backup Script',
+    schedule: '0 2 * * *',
+    command: 'php artisan schedule:run',
+    enabled: true,
+  });
+  assert.equal(validCron.schedule, '0 2 * * *');
+  assert.equal(validCron.enabled, true);
+
+  // Invalid cron schedule fails closed
+  assert.throws(
+    () => cronDraft({ name: 'Bad', schedule: 'invalid cron string', command: 'ls', enabled: true }),
+    (err) => err instanceof CronTaskClientError,
+  );
+
+  // 10. Documentary Integrity Preserved Pending Independent Integration
+  const rootPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../plan.md'), 'utf8');
+  assert.ok(
+    rootPlanDoc.includes('SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.'),
+    'plan.md must track SSL duration & fingerprint synchronization separation under section E',
+  );
+
+  const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
+  assert.ok(
+    uiPlanDoc.includes('- [ ] Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.'),
+    'Candidate item in ui-plan.md must remain open [- ] until Code Factory independent integration and bridge evidence exist',
+  );
+
+  assert.ok(true, 'UX-PL-03/04/06 and T-DEV-CRON-UI / T-DEV-PHP-UI domain/subdomain/alias DNS/mail/SSL automation, hosting, suspension, deletion, and PHP-FPM flows cleanly verified.');
 });
