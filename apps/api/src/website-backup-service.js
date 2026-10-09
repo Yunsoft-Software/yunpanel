@@ -206,8 +206,8 @@ export function createWebsiteBackupService({
       }
 
       // 4. Pre-hooks: Nginx vhost configs
-      if (Array.isArray(backupSet.nginxConfig)) {
-        for (const n of backupSet.nginxConfig) {
+      if (Array.isArray(backupSet.nginx)) {
+        for (const n of backupSet.nginx) {
           if (n.stagedConfigPath && n.configPath) {
             await mkdirFn(path.dirname(n.stagedConfigPath), { recursive: true, mode: 0o700 });
             try {
@@ -221,8 +221,8 @@ export function createWebsiteBackupService({
       }
 
       // 5. Pre-hooks: DNS zone snapshots
-      if (Array.isArray(backupSet.dnsRecords)) {
-        for (const d of backupSet.dnsRecords) {
+      if (Array.isArray(backupSet.dns)) {
+        for (const d of backupSet.dns) {
           if (d.stagedZonePath) {
             await mkdirFn(path.dirname(d.stagedZonePath), { recursive: true, mode: 0o700 });
             await writeFileFn(d.stagedZonePath, JSON.stringify(d, null, 2), { mode: 0o640 });

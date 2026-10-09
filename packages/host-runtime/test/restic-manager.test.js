@@ -306,7 +306,7 @@ test('restore extracts snapshot to targetDirectory with includes/excludes', asyn
   assert.deepEqual(calls[0].args, [
     'restore',
     'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-    '--target', '/tmp/restore-target',
+    '--target', '/tmp/restore-target', '--verify',
     '--include', '*.html',
     '--exclude', '*.bak',
   ]);

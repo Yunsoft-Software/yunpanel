@@ -186,8 +186,8 @@ export function createUserAdminStore({ db, now, transaction, getSession, hashPas
         protectOwner(user, nextRole, nextActive);
         if (user.role === 'site_manager') {
           const bound = db.prepare('SELECT count(*) AS count FROM auth_user_websites WHERE user_id = ?').get(id)?.count ?? 0;
-          if (bound > 0 && (!nextActive || nextRole !== 'site_manager')) {
-            throw new AuthError('site_manager_update_blocked', 'Site yöneticisi devre dışı bırakılamaz veya rolü değiştirilemez; önce bağlı web sitesi silinmelidir.', 409);
+          if (bound > 0 && nextRole !== 'site_manager') {
+            throw new AuthError('site_manager_update_blocked', 'Site yöneticisinin rolü değiştirilmeden önce site erişimleri yeniden düzenlenmelidir.', 409);
           }
         }
         if (nextRole === 'site_manager' && Array.isArray(input.websiteIds)) {

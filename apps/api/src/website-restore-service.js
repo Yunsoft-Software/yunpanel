@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { assertUuid } from '@yunpanel/shared';
 import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
+import { resolveWebsiteRestoreSelection, assertWebsiteSnapshotContent } from './website-restore-selection.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
@@ -152,9 +153,17 @@ export function createWebsiteRestoreService({
       timeoutSeconds: Number.isInteger(timeoutSeconds) && timeoutSeconds >= 5 && timeoutSeconds <= 120 ? timeoutSeconds : 30,
     });
 
-    const normalizedIncludes = Array.isArray(include)
-      ? Object.freeze([...new Set(include.filter((i) => typeof i === 'string' && i.trim().length > 0).map((i) => i.trim()))].sort())
-      : Object.freeze([]);
+    const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
+    const nodes = typeof resticManager.listSnapshotFiles === 'function'
+      ? await resticManager.listSnapshotFiles({ repository: repository.target, password, snapshotId: snapshot.id })
+      : null;
+    let normalizedIncludes;
+    try {
+      normalizedIncludes = resolveWebsiteRestoreSelection(backupSet, include, nodes ?? []);
+      if (nodes) assertWebsiteSnapshotContent(nodes, backupSet, normalizedIncludes);
+    } catch (error) {
+      throw new WebsiteRestoreError(error.code ?? 'website_restore_selection_invalid', error.message, 409);
+    }
 
     const previewPayload = {
       websiteId: website.id,

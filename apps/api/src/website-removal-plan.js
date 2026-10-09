@@ -305,7 +305,10 @@ export function createWebsiteRemovalPreview({ website, impact, applicationState 
   }
 
   const blockers = impactBlockers(impact);
-  const plan = dependencyPlan(impact.dependencies, currentWebsite, impact.application ?? null, applicationState);
+  const application = Object.hasOwn(impact.dependencies ?? {}, 'application')
+    ? impact.dependencies.application
+    : impact.application ?? null;
+  const plan = dependencyPlan(impact.dependencies, currentWebsite, application, applicationState);
   const blocking = hardBlockers(blockers, plan);
 
   const previewCore = Object.freeze({

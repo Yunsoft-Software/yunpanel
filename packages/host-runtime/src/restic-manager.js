@@ -455,6 +455,20 @@ export function createResticManager({
     });
   }
 
+  async function listSnapshotFiles({ repository, password, snapshotId }) {
+    const id = normalizeSnapshotId(snapshotId);
+    const result = await execRestic(['ls', '--json', id], { repository, password, context: 'snapshot_files' });
+    return Object.freeze(parseJsonLines(result.stdout)
+      .filter(node => node.struct_type === 'node' || node.message_type === 'node')
+      .map(node => {
+        if (typeof node.path !== 'string' || !path.posix.isAbsolute(node.path) || node.path.includes('\u0000')) {
+          throw new ResticError('restic_snapshot_invalid', 'Snapshot file metadata is invalid');
+        }
+        return Object.freeze({ path: path.posix.normalize(node.path), type: node.type, size: node.size ?? 0,
+          ...(typeof node.linktarget === 'string' ? { linktarget: node.linktarget } : {}) });
+      }));
+  }
+
   async function restore({
     repository,
     password,
@@ -471,7 +485,7 @@ export function createResticManager({
     const normalizedIncludes = normalizeStringArray(include, 'include');
     const normalizedExcludes = normalizeStringArray(exclude, 'exclude');
 
-    const args = ['restore', id, '--target', targetDirectory];
+    const args = ['restore', id, '--target', targetDirectory, '--verify'];
     for (const inc of normalizedIncludes) {
       args.push('--include', inc);
     }
@@ -485,6 +499,7 @@ export function createResticManager({
       snapshotId: id,
       targetDirectory: path.resolve(targetDirectory),
       restoredAt: new Date(now()).toISOString(),
+      verified: true,
     });
   }
 
@@ -573,6 +588,7 @@ export function createResticManager({
     unlock,
     createSnapshot,
     listSnapshots,
+    listSnapshotFiles,
     forget,
     prune,
     restore,

@@ -82,6 +82,20 @@ test('a second Owner may be demoted but remaining Owner is protected', (t) => {
   assert.throws(() => f.store.remove(f.token, f.policy, 'owner', { revision: 1 }), code('last_owner'));
 });
 
+test('deactivating a bound site manager revokes sessions while preserving site access assignments', (t) => {
+  const f = fixture(t); f.seed('site-manager', 'site_manager');
+  f.db.prepare('INSERT INTO auth_user_websites VALUES (?, ?)').run('site-manager', 'website-a');
+  const disabled = f.store.update(f.token, f.policy, 'site-manager', { revision: 1, active: false });
+  assert.equal(disabled.active, false);
+  assert.deepEqual(disabled.websiteIds, ['website-a']);
+  assert.equal(f.getSession('session-site-manager'), null);
+  assert.equal(f.db.prepare('SELECT COUNT(*) AS n FROM auth_user_websites WHERE user_id = ?').get('site-manager').n, 1);
+  assert.throws(() => f.store.update(f.token, f.policy, 'site-manager', { revision: 2, role: 'owner' }), code('site_manager_update_blocked'));
+  const enabled = f.store.update(f.token, f.policy, 'site-manager', { revision: 2, active: true });
+  assert.equal(enabled.active, true);
+  assert.deepEqual(enabled.websiteIds, ['website-a']);
+});
+
 test('edit increments revision, invalidates sessions/challenges but preserves enrolled MFA', (t) => {
   const f = fixture(t); f.seed('second');
   f.db.exec("INSERT INTO auth_mfa_pending VALUES ('second', 'session-second'); INSERT INTO auth_mfa_challenges VALUES ('challenge-second', 'second')");

@@ -67,6 +67,7 @@ export function normalizeWebsiteBackupSet(value) {
     targetPaths: value.targetPaths,
     excludePatterns: value.excludePatterns,
     tags: value.tags,
+    ...(Object.hasOwn(value, 'stagedRoot') ? { stagedRoot: value.stagedRoot } : {}),
   };
 
   const expectedDigest = sha256(payloadForDigest);
@@ -169,7 +170,9 @@ export function createWebsiteBackupSetProvider({
       applicationRoot = pathContract.runtime.applicationRoot;
       releasesDirectory = pathContract.runtime.releasesDirectory;
       currentRelease = pathContract.runtime.currentRelease;
-      fileTargetPaths.push(currentRelease);
+      // Restic preserves symlinks without following them. The application root
+      // contains the release files as well as the current-release pointer.
+      fileTargetPaths.push(applicationRoot);
 
       if (website.runtimeType === 'static') {
         publishRoot = pathContract.static.publishRoot;
@@ -427,6 +430,7 @@ export function createWebsiteBackupSetProvider({
       targetPaths,
       excludePatterns,
       tags,
+      stagedRoot,
     };
 
     const digest = sha256(payloadForDigest);

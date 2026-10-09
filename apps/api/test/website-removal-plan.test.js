@@ -90,6 +90,27 @@ test('creates deterministic website removal preview with ordered domains', () =>
   assert.equal(preview.confirmation, `start-website-remove:ws-1:2:${preview.previewDigest}`);
 });
 
+test('accepts the Application in the actual resource-impact dependencies envelope', () => {
+  const ws = website();
+  const imp = impact(ws);
+  imp.dependencies.application = imp.application;
+  delete imp.application;
+  const preview = createWebsiteRemovalPreview({ website: ws, impact: imp });
+  assert.equal(preview.readyToStart, true);
+  assert.equal(preview.plan.applicationId, ws.applicationId);
+  assert.equal(preview.plan.applicationRevision, 7);
+});
+
+test('a missing or foreign canonical Application cannot be replaced by a legacy field', () => {
+  const ws = website();
+  for (const application of [null, { ...impact(ws).application, id: 'another-application' }]) {
+    const imp = impact(ws);
+    imp.dependencies.application = application;
+    assert.throws(() => createWebsiteRemovalPreview({ website: ws, impact: imp }),
+      (error) => error.code === 'website_removal_application_state_invalid');
+  }
+});
+
 test('fails closed with hardBlocker when an inventory bucket is unavailable', () => {
   const ws = website();
   const imp = impact(ws, {

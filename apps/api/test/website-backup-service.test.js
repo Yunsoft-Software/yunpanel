@@ -80,13 +80,13 @@ function fixture({
       stagedMetadataPath: '/var/lib/yunpanel/tmp/backup-staging-test/env/environment.json',
       variables: { NODE_ENV: 'production' },
     },
-    nginxConfig: [
+    nginx: [
       {
         configPath: '/etc/nginx/sites-available/example.com.conf',
         stagedConfigPath: '/var/lib/yunpanel/tmp/backup-staging-test/nginx/example.com.conf',
       },
     ],
-    dnsRecords: [
+    dns: [
       {
         domain: 'example.com',
         stagedZonePath: '/var/lib/yunpanel/tmp/backup-staging-test/dns/example.com.json',

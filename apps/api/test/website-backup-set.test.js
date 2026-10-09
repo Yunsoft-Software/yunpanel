@@ -205,7 +205,8 @@ test('Website backup set generates complete set for Node.js website with databas
   // Files
   assert.equal(backupSet.files.currentRelease, `/var/lib/yunpanel/apps/${applicationId}/current`);
   assert.equal(backupSet.files.releasesDirectory, `/var/lib/yunpanel/apps/${applicationId}/releases`);
-  assert.ok(backupSet.files.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}/current`));
+  assert.ok(backupSet.files.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}`));
+  assert.ok(!backupSet.files.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}/current`));
   assert.deepEqual(backupSet.files.exclusions, ['.git', 'node_modules/.cache', 'tmp']);
 
   // Data
@@ -256,7 +257,7 @@ test('Website backup set generates complete set for Node.js website with databas
   assert.equal(backupSet.composeHooks.enabled, false);
 
   // Consolidated target paths
-  assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}/current`));
+  assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}`));
   assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/data/${applicationId}`));
   assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/backups/resources/website/${websiteId}`));
   assert.ok(backupSet.targetPaths.includes('/var/vmail/example.com'));
