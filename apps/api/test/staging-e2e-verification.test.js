@@ -19721,12 +19721,12 @@ test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS
     primaryDomain: 'example.com',
     aliases: ['www.example.com'],
     desiredRevision: 2,
-    targetType: 'website',
-    target: { websiteId: 'web-1' },
+    targetType: 'php',
+    target: { applicationId: '99999999-9999-4999-8999-999999999999' },
     httpsMode: 'managed',
     httpsRedirect: true,
     canonicalRedirect: false,
-    nginxSettings: { headers: [] },
+    nginxSettings: { clientMaxBodySizeMb: null, headers: [] },
     certificateId: 'cert-1',
     state: 'active',
   };
@@ -19882,9 +19882,10 @@ test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS
   assert.equal(sslContactEmail(sessionNoUserEmail), '');
 
   // 5. Hosting Configuration Settings & Mutation Flows
-  assert.deepEqual(HOSTING_SETTING_FIELDS, ['httpsRedirect', 'canonicalRedirect']);
+  assert.deepEqual(HOSTING_SETTING_FIELDS, ['httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
   const initialHosting = hostingSettingsFromDomain(validDomain);
-  assert.deepEqual(initialHosting, { httpsRedirect: true, canonicalRedirect: false });
+  assert.deepEqual(initialHosting, { httpsRedirect: true, canonicalRedirect: false,
+    nginxSettings: validDomain.nginxSettings });
 
   // Suspended domain rejects hosting changes
   assert.throws(
@@ -19899,9 +19900,9 @@ test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS
   );
 
   // Valid changes diff
-  const changes = hostingSettingsChanges(validDomain, { httpsRedirect: false, canonicalRedirect: true });
+  const changes = hostingSettingsChanges(validDomain, { ...initialHosting, httpsRedirect: false, canonicalRedirect: true });
   assert.deepEqual(changes, { httpsRedirect: false, canonicalRedirect: true });
-  const hostingDiff = hostingSettingsDiff(validDomain, { httpsRedirect: false, canonicalRedirect: true });
+  const hostingDiff = hostingSettingsDiff(validDomain, { ...initialHosting, httpsRedirect: false, canonicalRedirect: true });
   assert.equal(hostingDiff.length, 2);
   assert.equal(hostingDiff[0].key, 'httpsRedirect');
   assert.equal(hostingDiff[0].before, true);
@@ -19909,13 +19910,13 @@ test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS
 
   // No changes throws hosting_no_changes
   assert.throws(
-    () => hostingSettingsChanges(validDomain, { httpsRedirect: true, canonicalRedirect: false }),
+    () => hostingSettingsChanges(validDomain, initialHosting),
     (err) => err instanceof DomainAliasError && err.code === 'hosting_no_changes',
   );
 
   // Enabling httpsRedirect when httpsMode !== 'managed' fails closed
   assert.throws(
-    () => hostingSettingsChanges({ ...validDomain, httpsMode: 'off', httpsRedirect: false }, { httpsRedirect: true, canonicalRedirect: false }),
+    () => hostingSettingsChanges({ ...validDomain, httpsMode: 'off', httpsRedirect: false }, initialHosting),
     (err) => err instanceof DomainAliasError && err.code === 'invalid_redirect_policy',
   );
 
