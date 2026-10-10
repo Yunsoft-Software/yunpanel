@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { chmod, lstat, open, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, open, readdir, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
@@ -17,8 +17,10 @@ const equal = (left, right) => JSON.stringify(Object.entries(left).sort()) === J
 export function createApplicationEnvironmentBackupManager({
   applicationRoot = '/var/lib/yunpanel/apps', environmentRoot = '/etc/yunpanel/apps',
   passengerRoot = '/etc/yunpanel/passenger-env', ownerUid = 0, ownerGid = 0,
-  run = (file, args) => execute(file, args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 64 * 1024,
-    env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', HOME: '/root' } }),
+  processRoot = '/proc',
+  run = (file, args, options = {}) => execute(file, args, { encoding: 'utf8', timeout: 30_000,
+    maxBuffer: file === '/usr/sbin/nginx' && args[0] === '-T' ? 4 * 1024 * 1024 : 64 * 1024,
+    env: { PATH: '/usr/sbin:/usr/bin:/sbin:/bin', LANG: 'C', HOME: '/root', ...options.env } }),
 } = {}) {
   function context(application) {
     const id = assertUuid(application?.id, 'applicationId');
@@ -89,16 +91,38 @@ export function createApplicationEnvironmentBackupManager({
     }
     return values;
   }
-  async function command(file, args) {
-    try { return await run(file, args); }
-    catch { throw fail('application_environment_restart_failed'); }
+  async function command(file, args, options) {
+    try { return await run(file, args, options); }
+    catch (error) {
+      const code=file==='/usr/sbin/nginx'?'application_environment_nginx_test_failed'
+        :file==='/usr/bin/passenger-config'?'application_environment_passenger_restart_failed'
+        :args[0]==='reload'?'application_environment_nginx_reload_failed':'application_environment_service_restart_failed';
+      throw Object.assign(fail(code),{cause:Object.assign(new Error('Host command did not complete'),{code:Number.isInteger(error?.code)?'host_command_exit_nonzero':error?.code==='ENOENT'?'ENOENT':'host_command_failed'})});
+    }
   }
-  async function restart(c, application) {
+  async function passengerRegistry() {
+    const result = await command('/usr/sbin/nginx', ['-T']);
+    const output = `${result?.stdout ?? ''}\n${result?.stderr ?? ''}`;
+    const directories = [...new Set([...output.matchAll(/^\s*passenger_instance_registry_dir\s+([^;\s]+)\s*;/gm)].map(match => match[1]))];
+    if (directories.length !== 1 || !/^\/[A-Za-z0-9._/-]+$/.test(directories[0])
+      || path.resolve(directories[0]) !== directories[0]) throw fail('application_environment_instance_registry_unavailable');
+    try {
+      const directory = await realpath(directories[0]);
+      await managedParent(directory);
+      return directory;
+    } catch { throw fail('application_environment_instance_registry_unavailable'); }
+  }
+  async function restart(c, application, verifyHealth) {
     if (c.passenger) {
       await command('/usr/sbin/nginx', ['-t']);
       await command('/usr/bin/systemctl', ['reload', 'nginx']);
+      const registry = await passengerRegistry();
+      // A reload returns before Passenger has necessarily started this app.
+      // Wake only this Website through its existing scoped health inspector.
+      if (await verifyHealth() !== true) throw fail('application_environment_restart_unverified');
       // Passenger uses a prefix: the trailing slash confines it to this UUID.
-      await command('/usr/bin/passenger-config', ['restart-app', path.join(applicationRoot, c.id) + '/', '--ignore-app-not-running']);
+      await command('/usr/bin/passenger-config', ['restart-app', path.join(applicationRoot, c.id) + '/'],
+        { env: { PASSENGER_INSTANCE_REGISTRY_DIR: registry } });
     } else {
       const service = application.type === 'python' ? pythonServiceName(c.id) : nodeServiceName(c.id);
       await command('/usr/bin/systemctl', ['restart', service]);
@@ -132,26 +156,71 @@ export function createApplicationEnvironmentBackupManager({
     decoded(c, application, savedRuntime.content);
     await release(c, application);
     await fileState(c);
+    if (c.passenger) await passengerRegistry();
   }
   async function restoreEnvironment({ application, values, savedRuntime, environmentRevision, verifyHealth }) {
     await assertRestoreSupported({ application, savedRuntime });
     if (typeof verifyHealth !== 'function') throw fail('application_environment_health_unavailable');
     const c = context(application), before = await fileState(c);
+    const appliedMatchesSaved = equal(decoded(c, application, savedRuntime.content), values);
+    // Restore advances the catalog revision. Rebase its metadata only when the
+    // captured running values match that catalog; preserve an unapplied draft.
+    const restoredContent = c.passenger && appliedMatchesSaved
+      ? websitePassengerEnvironmentInternals.normalizeSpec({ applicationId: c.id, values, environmentRevision }).content
+      : savedRuntime.content;
     try {
-      await replace(c, savedRuntime.content);
-      await restart(c, application);
-      if (await fileState(c) !== savedRuntime.content || await verifyHealth() !== true) throw fail('application_environment_restore_unverified');
+      await replace(c, restoredContent);
+      await restart(c, application, verifyHealth);
+      if (await fileState(c) !== restoredContent || await verifyHealth() !== true) throw fail('application_environment_restore_unverified');
     } catch (error) {
       try {
         if (before === null) await rm(c.target, { force: true });
         else await replace(c, before);
-        await restart(c, application);
+        await restart(c, application, verifyHealth);
         if (await fileState(c) !== before || await verifyHealth() !== true) throw fail('application_environment_rollback_unverified');
-      } catch { throw fail('application_environment_rollback_failed'); }
+      } catch (rollbackError) { throw Object.assign(fail('application_environment_rollback_failed'),{cause:new AggregateError([error,rollbackError],'Runtime recovery requires inspection')}); }
       throw error;
     }
     return { applicationId: c.id, environmentRevision, verified: true,
-      appliedMatchesSaved: equal(decoded(c, application, savedRuntime.content), values) };
+      appliedMatchesSaved };
   }
-  return Object.freeze({ captureEnvironment, restoreEnvironment, assertRestoreSupported });
+  async function applyEnvironment({application,values,environmentRevision,verifyHealth}){
+    const previous=await captureEnvironment({application}),c=context(application);
+    const content=c.passenger?websitePassengerEnvironmentInternals.normalizeSpec({applicationId:c.id,environmentRevision,values}).content
+      :(application.type==='node'?renderNodeEnvironmentFile:renderPythonEnvironmentFile)({applicationId:c.id,runtime:c.runtime,environment:values});
+    return restoreEnvironment({application,values,environmentRevision,verifyHealth,savedRuntime:{...previous,content}});
+  }
+  async function inspectAppliedPassengerEnvironment({application,unixUser,values,environmentRevision,verifyHealth}) {
+    const c=context(application);
+    if(!c.passenger || !/^yunapp-[a-f0-9]{12}$/.test(unixUser ?? '') || typeof verifyHealth!=='function') throw fail('application_environment_process_scope_invalid');
+    const expected=websitePassengerEnvironmentInternals.normalizeSpec({applicationId:c.id,values,environmentRevision}).content;
+    await release(c,application);
+    if(await fileState(c)!==expected || await verifyHealth()!==true) throw fail('application_environment_process_unverified');
+    const account=await command('/usr/bin/getent',['passwd',unixUser]);
+    const fields=String(account.stdout).trim().split(':');
+    if(fields.length!==7 || fields[0]!==unixUser || !/^[1-9]\d*$/.test(fields[2])) throw fail('application_environment_process_scope_invalid');
+    const uid=Number(fields[2]),releaseRoot=path.join(applicationRoot,c.id,'releases',application.currentReleaseId);
+    let processes=0;
+    for(const id of await readdir(processRoot)) {
+      if(!/^[1-9]\d*$/.test(id)) continue;
+      const directory=path.join(processRoot,id);
+      try {
+        if((await lstat(directory)).uid!==uid || path.basename(await readlink(path.join(directory,'exe')))!=='node') continue;
+        const cwd=await realpath(path.join(directory,'cwd'));
+        if(cwd!==releaseRoot && !cwd.startsWith(releaseRoot+'/')) continue;
+        const entries=(await readFile(path.join(directory,'environ'))).toString('utf8').split('\0');
+        const environment=Object.fromEntries(entries.filter(entry=>entry.includes('=')).map(entry=>[entry.slice(0,entry.indexOf('=')),entry.slice(entry.indexOf('=')+1)]));
+        if(Object.entries(values).some(([key,value])=>environment[key]!==value)) throw fail('application_environment_process_unverified');
+        processes+=1;
+      } catch(error) {
+        if(['ENOENT','ESRCH'].includes(error?.code)) continue;
+        throw error;
+      }
+    }
+    if(processes===0) throw fail('application_environment_process_unverified');
+    await release(c,application);
+    if(await fileState(c)!==expected) throw fail('application_environment_process_unverified');
+    return {applicationId:c.id,releaseId:application.currentReleaseId,environmentRevision,verified:true,processes};
+  }
+  return Object.freeze({ captureEnvironment, restoreEnvironment, assertRestoreSupported, applyEnvironment, inspectAppliedPassengerEnvironment });
 }
