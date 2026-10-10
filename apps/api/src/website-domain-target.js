@@ -128,6 +128,11 @@ async function resolvePassengerRuntimeTarget({
   if (binding.releaseId !== application.currentReleaseId) {
     passengerBindingDrift('Passenger runtime binding release drifted from the active Application release');
   }
+  if (!/^yunapp-[a-f0-9]{12}$/.test(website.unixUser ?? '')
+    || binding.passengerTarget?.user !== website.unixUser
+    || binding.passengerTarget?.group !== website.unixUser) {
+    passengerBindingDrift('Passenger runtime binding Unix identity differs from its Website');
+  }
   if (binding.websiteRevision !== website.revision) {
     passengerBindingDrift('Passenger runtime binding Website revision drifted');
   }
@@ -139,11 +144,7 @@ async function resolvePassengerRuntimeTarget({
   return Object.freeze({
     source: 'passenger',
     targetType: 'passenger',
-    target: Object.freeze({
-      root: binding.passengerTarget.appRoot,
-      startupFile: binding.passengerTarget.startupFile,
-      nodeBinary: binding.passengerTarget.nodeBinary,
-    }),
+    target: Object.freeze({ ...binding.passengerTarget }),
   });
 }
 

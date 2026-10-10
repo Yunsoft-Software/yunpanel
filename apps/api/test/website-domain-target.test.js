@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { DomainRegistryError } from '../src/domain-registry.js';
 import { resolveWebsiteDomainTarget } from '../src/website-domain-target.js';
+import { createNginxManager } from '@yunpanel/host-runtime';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';
@@ -45,6 +46,7 @@ function nodeWebsite(overrides = {}) {
     applicationId,
     managedComposeBinding: null,
     runtimeType: 'node',
+    unixUser: 'yunapp-123456abcdef',
     ...overrides,
   });
 }
@@ -91,8 +93,13 @@ function passengerDependencies({ bindingOverrides = {}, websiteOverrides = {} } 
           domains: [{ domainId: 'domain-1', desiredRevision: 3, nginxChecksum: 'a'.repeat(64) }],
           passengerTarget: {
             appRoot: '/var/www/example/current',
+            documentRoot: '/var/www/example/current/public',
             startupFile: 'server.js',
             nodeBinary: '/usr/bin/node',
+            user: websiteValue.unixUser,
+            group: websiteValue.unixUser,
+            appEnv: 'production',
+            environmentInclude: '/etc/yunpanel/passenger-env/' + applicationId + '.conf',
           },
           ...bindingOverrides,
         };
@@ -200,11 +207,33 @@ test('Passenger runtime binding materializes the canonical Passenger Domain targ
     source: 'passenger',
     targetType: 'passenger',
     target: {
-      root: '/var/www/example/current',
+      appRoot: '/var/www/example/current',
+      documentRoot: '/var/www/example/current/public',
       startupFile: 'server.js',
       nodeBinary: '/usr/bin/node',
+      user: 'yunapp-123456abcdef',
+      group: 'yunapp-123456abcdef',
+      appEnv: 'production',
+      environmentInclude: '/etc/yunpanel/passenger-env/' + applicationId + '.conf',
     },
   });
+  const preview = createNginxManager().previewDomain({ primaryDomain: 'owned.example.test', aliases: [],
+    targetType: result.targetType, target: result.target, tls: null, httpsRedirect: false });
+  assert.match(preview.config, /root \/var\/www\/example\/current\/public;/);
+  assert.match(preview.config, /passenger_app_root \/var\/www\/example\/current;/);
+  assert.match(preview.config, /passenger_user yunapp-123456abcdef;/);
+  assert.match(preview.config, new RegExp('include /etc/yunpanel/passenger-env/' + applicationId + '\\.conf;'));
+});
+
+test('Passenger binding cannot restage traffic with a foreign Unix user or group', async () => {
+  for (const field of ['user', 'group']) {
+    const deps = passengerDependencies();
+    const binding = await deps.runtimeBindingRegistry.getBinding(applicationId);
+    deps.runtimeBindingRegistry.getBinding = async () => ({ ...binding,
+      passengerTarget: { ...binding.passengerTarget, [field]: 'yunapp-abcdef123456' } });
+    await assert.rejects(resolveWebsiteDomainTarget({ domain: domain(), ...deps }),
+      { code: 'passenger_runtime_binding_drift' });
+  }
 });
 
 test('cleanup-required Passenger binding remains authoritative for Domain restage', async () => {
@@ -214,7 +243,7 @@ test('cleanup-required Passenger binding remains authoritative for Domain restag
   });
   assert.equal(result.source, 'passenger');
   assert.equal(result.targetType, 'passenger');
-  assert.equal(result.target.root, '/var/www/example/current');
+  assert.equal(result.target.appRoot, '/var/www/example/current');
 });
 
 test('Passenger runtime binding allows a newer desired Domain revision to be restaged', async () => {

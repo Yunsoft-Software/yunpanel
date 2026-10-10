@@ -71,3 +71,23 @@ test('domain.stage rejects unsafe Passenger runtime paths', () => {
     }));
   }
 });
+
+const completeTarget = {
+  appRoot: payload.target.root, documentRoot: payload.target.root + '/public', startupFile: 'src/server.js',
+  nodeBinary: payload.target.nodeBinary, user: 'yunapp-123456abcdef', group: 'yunapp-123456abcdef', appEnv: 'production',
+  environmentInclude: '/etc/yunpanel/passenger-env/11111111-1111-4111-8111-111111111111.conf',
+};
+test('domain.stage preserves the full Passenger target needed by the host renderer', () => {
+  const envelope = createOperationEnvelope({ id: 'passenger-full-stage', operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { ...payload, target: completeTarget } });
+  assert.deepEqual(envelope.payload.target, completeTarget);
+});
+test('full Passenger targets reject missing or unsafe document roots, identities and environment includes', () => {
+  for (const patch of [{ documentRoot: '/var/lib/foreign/public' }, { documentRoot: completeTarget.appRoot + '/../escape' },
+    { user: 'root', group: 'root' }, { group: 'yunapp-abcdef123456' }, { environmentInclude: '/etc/private.conf' },
+    { environmentInclude: '/etc/yunpanel/passenger-env/not-an-id.conf' }, { startupFile: '../server.js' },
+    { appEnv: 'production; include /etc/private.conf;' }, { root: completeTarget.appRoot }, { documentRoot: undefined }]) {
+    assert.throws(() => createOperationEnvelope({ id: 'passenger-full-reject', operation: OPERATIONS.DOMAIN_STAGE,
+      payload: { ...payload, target: { ...completeTarget, ...patch } } }));
+  }
+});

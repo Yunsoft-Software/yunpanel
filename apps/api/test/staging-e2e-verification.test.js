@@ -7219,6 +7219,7 @@ test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd c
     serverId: stagingServerId,
     applicationId: directApp.id,
     runtimeType: 'node',
+    unixUser: 'yunapp-0123456789ab',
     revision: 1,
   };
 
@@ -7298,7 +7299,7 @@ test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd c
   });
   assert.equal(domainTargetAfterMigration.source, 'passenger');
   assert.equal(domainTargetAfterMigration.targetType, 'passenger');
-  assert.equal(domainTargetAfterMigration.target.root, `/var/lib/yunpanel/apps/${directApp.id}/current`);
+  assert.equal(domainTargetAfterMigration.target.appRoot, `/var/lib/yunpanel/apps/${directApp.id}/current`);
   assert.equal(domainTargetAfterMigration.target.startupFile, 'server.js');
   assert.equal(domainTargetAfterMigration.target.nodeBinary, '/usr/bin/node');
 

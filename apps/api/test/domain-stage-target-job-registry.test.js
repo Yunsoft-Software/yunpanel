@@ -3,6 +3,8 @@ import test from 'node:test';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { DomainRegistryError } from '../src/domain-registry.js';
 import { createDomainStageTargetJobRegistry } from '../src/domain-stage-target-job-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
+import { createNginxManager } from '@yunpanel/host-runtime';
 
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 const websiteId = 'db20d91a-ec70-4d79-bc75-1f70de76d1ea';
@@ -14,9 +16,10 @@ function fixture({
   websiteBinding = true,
   passengerBinding = false,
   applicationJobs = [],
+  baseRegistry = null,
 } = {}) {
   const calls = [];
-  const registry = {
+  const registry = baseRegistry ?? {
     marker: 'base-registry',
     async enqueue(input) { calls.push(input); return { id: 'job-1', ...input }; },
     async listJobs() { return applicationJobs; },
@@ -48,6 +51,7 @@ function fixture({
       protocol: 'tcp',
     } : null,
     runtimeType: passengerBinding ? 'node' : 'docker',
+    unixUser: passengerBinding ? 'yunapp-123456abcdef' : null,
     proxyTarget: null,
   };
   const project = {
@@ -76,8 +80,13 @@ function fixture({
     domains: [{ domainId: domain.id, desiredRevision: domain.desiredRevision, nginxChecksum: 'a'.repeat(64) }],
     passengerTarget: {
       appRoot: '/var/www/example/current',
+      documentRoot: '/var/www/example/current/public',
       startupFile: 'server.js',
       nodeBinary: '/usr/bin/node',
+      user: website.unixUser,
+      group: website.unixUser,
+      appEnv: 'production',
+      environmentInclude: '/etc/yunpanel/passenger-env/' + applicationId + '.conf',
     },
   } : null;
   return {
@@ -177,15 +186,33 @@ test('Passenger runtime binding replaces stale direct-systemd proxy target befor
   assert.equal(fx.calls.length, 1);
   assert.equal(fx.calls[0].payload.targetType, 'passenger');
   assert.deepEqual(fx.calls[0].payload.target, {
-    root: '/var/www/example/current',
+    appRoot: '/var/www/example/current',
+    documentRoot: '/var/www/example/current/public',
     startupFile: 'server.js',
     nodeBinary: '/usr/bin/node',
+    user: 'yunapp-123456abcdef',
+    group: 'yunapp-123456abcdef',
+    appEnv: 'production',
+    environmentInclude: '/etc/yunpanel/passenger-env/' + applicationId + '.conf',
   });
   assert.deepEqual(fx.calls[0].payload.nginxSettings, {
     clientMaxBodySizeMb: 64,
     headers: [{ name: 'X-App', value: 'yunpanel', always: true }],
   });
   assert.deepEqual(input, stageInput());
+});
+
+test('complete Passenger target survives real job enqueue, protocol validation, claim and host rendering', async () => {
+  const registry = createJobRegistry({ serverExists: async id => id === serverId });
+  const fx = fixture({ passengerBinding: true, baseRegistry: registry });
+  const job = await fx.decorated.enqueue(stageInput());
+  const claimed = await registry.claimNext(serverId);
+  assert.equal(claimed.job.id, job.id);
+  assert.equal(claimed.envelope.payload.target.appRoot, '/var/www/example/current');
+  const preview = createNginxManager().previewDomain(claimed.envelope.payload);
+  assert.match(preview.config, /passenger_user yunapp-123456abcdef;/);
+  assert.match(preview.config, /root \/var\/www\/example\/current\/public;/);
+  assert.match(preview.config, new RegExp('include /etc/yunpanel/passenger-env/' + applicationId + '\\.conf;'));
 });
 
 test('Domain stage waits while Passenger migration owns the Application route', async () => {

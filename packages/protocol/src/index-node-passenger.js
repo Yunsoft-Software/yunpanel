@@ -260,13 +260,41 @@ function validatePythonDomainStage(value) {
 }
 
 function validatePassengerDomainStage(value) {
-  const startupFile = value?.payload?.target?.startupFile;
+  const target = value?.payload?.target;
+  const startupFile = target?.startupFile;
   const baseEnvelope = structuredClone(value);
+  const completeTarget = target && typeof target === 'object' && !Array.isArray(target)
+    && Object.hasOwn(target, 'appRoot');
+  if (completeTarget) baseEnvelope.payload.target = {
+    root: target.appRoot, startupFile: 'server.js', nodeBinary: target.nodeBinary,
+  };
   if (baseEnvelope?.payload?.target && typeof baseEnvelope.payload.target === 'object' && !Array.isArray(baseEnvelope.payload.target)) {
     baseEnvelope.payload.target.startupFile = 'server.js';
   }
   const base = validateDockerOperationEnvelope(baseEnvelope);
   const errors = [...base.errors];
+  if (completeTarget) {
+    const fields = ['appRoot', 'documentRoot', 'startupFile', 'nodeBinary', 'user', 'group', 'appEnv', 'environmentInclude'];
+    if (Object.keys(target).length !== fields.length || fields.some(key => !Object.hasOwn(target, key))) {
+      errors.push('domain.stage Passenger target fields are invalid');
+    }
+    for (const field of ['appRoot', 'documentRoot', 'nodeBinary']) validateSafeAbsolutePath(target[field], field, errors);
+    if (typeof target.appRoot === 'string' && typeof target.documentRoot === 'string'
+      && target.documentRoot !== target.appRoot && !target.documentRoot.startsWith(target.appRoot + '/')) {
+      errors.push('domain.stage Passenger documentRoot is outside appRoot');
+    }
+    if (!/^yunapp-[a-f0-9]{12}$/.test(target.user ?? '') || target.group !== target.user
+      || typeof target.appEnv !== 'string' || !/^[A-Za-z0-9_-]{1,32}$/.test(target.appEnv)) {
+      errors.push('domain.stage Passenger Unix identity or environment is invalid');
+    }
+    if (target.environmentInclude !== null) {
+      validateSafeAbsolutePath(target.environmentInclude, 'environmentInclude', errors);
+      if (typeof target.environmentInclude !== 'string'
+        || !/^\/etc\/yunpanel\/passenger-env\/[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}\.conf$/.test(target.environmentInclude)) {
+        errors.push('domain.stage Passenger environment include is unmanaged');
+      }
+    }
+  }
   try {
     if (normalizeRelativeBuildPath(startupFile) !== startupFile) throw new Error('noncanonical');
   } catch {
