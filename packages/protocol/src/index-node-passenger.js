@@ -313,6 +313,13 @@ function validatePhpDomainStage(value) {
       startupFile: 'server.js',
       nodeBinary: '/usr/bin/node',
     };
+    // The inherited validator checks the common routing contract as Passenger.
+    // Validate PHP-only file settings below against the original envelope.
+    const settings = baseEnvelope.payload.nginxSettings;
+    if (settings && typeof settings === 'object' && !Array.isArray(settings)) {
+      delete settings.indexFiles;
+      delete settings.errorPages;
+    }
   }
   const base = validateDockerOperationEnvelope(baseEnvelope);
   const errors = [...base.errors];

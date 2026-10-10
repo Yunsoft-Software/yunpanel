@@ -1,7 +1,7 @@
 import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 import { OPERATIONS } from '@yunpanel/protocol';
-import { normalizeNginxSettings } from '@yunpanel/shared';
+import { domainNginxSettingsForTarget } from './domain-nginx-settings.js';
 import { DomainRegistryError } from './domain-registry.js';
 import { resolveWebsiteDomainTarget } from './website-domain-target.js';
 
@@ -40,10 +40,7 @@ function assertDependencies(
 
 function resolvedNginxSettings(domain, resolved, current) {
   if (!['passenger', 'php'].includes(resolved.targetType)) return current;
-  return normalizeNginxSettings(resolved.targetType, {
-    clientMaxBodySizeMb: domain.nginxSettings?.clientMaxBodySizeMb ?? null,
-    headers: domain.nginxSettings?.headers ?? [],
-  });
+  return domainNginxSettingsForTarget(domain, resolved.targetType);
 }
 
 async function assertPassengerMigrationIdle(registry) {

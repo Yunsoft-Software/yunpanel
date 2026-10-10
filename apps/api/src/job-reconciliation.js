@@ -1,4 +1,5 @@
 import { OPERATIONS } from '@yunpanel/protocol';
+import { domainNginxSettingsForTarget } from './domain-nginx-settings.js';
 import { reconcileApplicationPassengerMigration } from './application-passenger-migration-reconciliation.js';
 import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js';
 
@@ -689,9 +690,7 @@ async function applyReconciliation({
         const pinned = job.payload?.domainRevision;
         const fields = ['primaryDomain', 'aliases', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings'];
         const snapshotComplete = fields.every(field => Object.hasOwn(job.payload ?? {}, field));
-        const routing = { ...current, nginxSettings: ['passenger', 'php'].includes(job.payload?.targetType)
-          ? { clientMaxBodySizeMb: current.nginxSettings?.clientMaxBodySizeMb ?? null, headers: current.nginxSettings?.headers ?? [] }
-          : current.nginxSettings };
+        const routing = { ...current, nginxSettings: domainNginxSettingsForTarget(current, job.payload?.targetType) };
         const snapshotMatches = snapshotComplete && fields.every(field => same(job.payload[field], routing[field]))
           && (current.httpsMode === 'off' || !current.certificateId ? !job.payload.tls : Boolean(job.payload.tls));
         if (pinned !== undefined) {

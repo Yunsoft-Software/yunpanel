@@ -15,8 +15,10 @@ function stable(value) {
 function fail(code, message, needsReload = false) { throw new DomainAliasError(code, message, needsReload); }
 export const hostingValuesEqual = (left, right) => JSON.stringify(stable(left)) === JSON.stringify(stable(right));
 function nginxSettings(domain, value) {
-  try { return normalizeNginxSettings(domain.targetType, value); }
-  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Sayılar belirtilen aralıkta olmalı; başlık adları benzersiz ve değerleri tek satır olmalı.'); }
+  const input = typeof value?.indexFiles === 'string' ? { ...value,
+    indexFiles: value.indexFiles.trim() ? value.indexFiles.trim().split(/[\s,]+/) : null } : value;
+  try { return normalizeNginxSettings(domain.targetType, input); }
+  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı.'); }
 }
 export function hostingDraftValues(domain) {
   return { httpsRedirect: domain.httpsRedirect, canonicalRedirect: domain.canonicalRedirect,

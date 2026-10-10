@@ -139,7 +139,7 @@ function publicDomain(domain) {
     websiteId: domain.websiteId ?? null,
     aliases: [...domain.aliases],
     target: { ...domain.target },
-    nginxSettings: { ...domain.nginxSettings, headers: domain.nginxSettings.headers.map((header) => ({ ...header })) },
+    nginxSettings: structuredClone(domain.nginxSettings),
     parentDomainId: domain.parentDomainId ?? null,
     kind: domain.parentDomainId == null ? 'domain' : 'subdomain',
     diagnosis: diagnosis(domain),

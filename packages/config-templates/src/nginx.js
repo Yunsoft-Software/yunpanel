@@ -217,6 +217,16 @@ function renderServerSet({
   return `${blocks.join('\n\n')}\n`;
 }
 
+function errorPageBody(nginxSettings) {
+  const pages = Object.entries(nginxSettings.errorPages ?? {});
+  if (!pages.length) return '';
+  const directives = pages.map(([code, uri]) => `  error_page ${code} ${uri};`).join('\n');
+  const renderedHeaders = headerLines(nginxSettings.headers);
+  const locations = [...new Set(pages.map(([, uri]) => uri))].map(uri =>
+    `  location = ${uri} {\n    internal;\n    try_files $uri =404;${renderedHeaders ? `\n${renderedHeaders}` : ''}\n  }`).join('\n\n');
+  return `\n\n${directives}\n\n${locations}`;
+}
+
 function staticBody({ root, nginxSettings }) {
   const { spaFallback, staticAssetCacheSeconds, headers } = nginxSettings;
   const fallback = spaFallback ? 'try_files $uri $uri/ /index.html;' : 'try_files $uri $uri/ =404;';
@@ -228,7 +238,7 @@ function staticBody({ root, nginxSettings }) {
     const expiry = staticAssetCacheSeconds === 604_800 ? '7d' : `${staticAssetCacheSeconds}s`;
     cache = `    expires ${expiry};\n    add_header Cache-Control "public, max-age=${staticAssetCacheSeconds}, immutable";\n`;
   }
-  return `  root ${root};\n  index index.html;\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${fallback}\n  }\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }`;
+  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${fallback}\n  }\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }${errorPageBody(nginxSettings)}`;
 }
 
 function proxyBody({ host, port, nginxSettings }) {
@@ -251,7 +261,8 @@ function passengerBody({ target, nginxSettings }) {
 function phpBody({ root, socketPath, nginxSettings }) {
   const renderedHeaders = headerLines(nginxSettings.headers);
   const phpHeaders = headerLines(nginxSettings.headers);
-  return `  root ${root};\n  index index.php index.html;\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }`;
+  const intercept = Object.keys(nginxSettings.errorPages ?? {}).length ? '\n    fastcgi_intercept_errors on;' : '';
+  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.php', 'index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}${intercept}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }${errorPageBody(nginxSettings)}`;
 }
 
 export function renderStaticSiteConfig({

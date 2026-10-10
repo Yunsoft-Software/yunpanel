@@ -51,3 +51,25 @@ test('domain.stage rejects proxy-only Nginx settings for PHP', () => {
     },
   }));
 });
+
+test('PHP stage preserves canonical file settings and rejects unsafe or noncanonical values', () => {
+  const nginxSettings = {
+    clientMaxBodySizeMb: 64,
+    indexFiles: ['home.php', 'index.html'],
+    errorPages: { 404: '/errors/missing.html', 500: '/errors/server.html' },
+    headers: payload.nginxSettings.headers,
+  };
+  const next = { ...payload, nginxSettings };
+  const envelope = createOperationEnvelope({ id: 'php-domain-stage-files', operation: OPERATIONS.DOMAIN_STAGE, payload: next });
+  assert.deepEqual(envelope.payload, next);
+  assert.deepEqual(next.nginxSettings.indexFiles, ['home.php', 'index.html']);
+  for (const patch of [
+    { indexFiles: '../index.php' },
+    { indexFiles: ['../index.php'] },
+    { errorPages: { 404: 'https://other.example/error.html' } },
+    { errorPages: { 404: '/index.html' } },
+    { errorPages: { 200: '/errors/ok.html' } },
+    { rawDirective: 'include /tmp/unsafe;' },
+  ]) assert.throws(() => createOperationEnvelope({ id: 'php-domain-stage-unsafe-files', operation: OPERATIONS.DOMAIN_STAGE,
+    payload: { ...payload, nginxSettings: { ...nginxSettings, ...patch } } }), /nginxSettings/);
+});

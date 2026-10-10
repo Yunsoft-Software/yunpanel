@@ -14,6 +14,28 @@ const review = (form) => ({ base: structuredClone(form.base), changes: hostingSe
 const ready = (overrides = {}) => ({ form: edited(), domain: record(), canManage: true, domainsStatus: 'ready', jobsStatus: 'ready', resourceBusy: false, reloadRequired: false, ...overrides });
 const code = (expected) => (error) => error?.code === expected;
 
+test('reload preserves newly added optional file settings without reverting a concurrent operator field', () => {
+  const clean = createHostingForm(record());
+  const form = editHostingForm(clean, 'nginxSettings', { ...clean.values.nginxSettings,
+    indexFiles: 'home.html index.html ', errorPages: { 404: '/errors/404.html' } });
+  const incoming = record({ desiredRevision: 4, nginxSettings: { ...record().nginxSettings, clientMaxBodySizeMb: 20 } });
+  const next = reloadHostingForm(form, incoming, form.base);
+  assert.equal(next.values.nginxSettings.indexFiles, 'home.html index.html ');
+  assert.deepEqual(next.values.nginxSettings.errorPages, { 404: '/errors/404.html' });
+  assert.equal(next.values.nginxSettings.clientMaxBodySizeMb, 20);
+  assert.deepEqual(hostingSettingsChanges(next.base, next.values).nginxSettings.indexFiles, ['home.html', 'index.html']);
+});
+
+test('file draft keeps typed separators until review and submits only canonical arrays', () => {
+  const form = createHostingForm(record());
+  const values = { ...form.values, nginxSettings: { ...form.values.nginxSettings, indexFiles: 'home.html ' } };
+  assert.equal(values.nginxSettings.indexFiles, 'home.html ');
+  values.nginxSettings.indexFiles += 'index.html';
+  assert.deepEqual(hostingSettingsChanges(form.base, values).nginxSettings.indexFiles, ['home.html', 'index.html']);
+  values.nginxSettings.indexFiles = '';
+  assert.equal(hostingSettingsChanges(form.base, values).nginxSettings.indexFiles, null);
+});
+
 test('form copies a record without mutating it and starts clean', () => {
   const domain = record(); const form = createHostingForm(domain);
   assert.equal(hostingFormDirty(form), false);

@@ -1,10 +1,12 @@
 const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers']);
+const FILE_FIELDS = ['indexFiles', 'errorPages'];
+const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
   proxy: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
   python: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
-  static: new Set([...COMMON_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
+  static: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
   passenger: new Set([...COMMON_FIELDS]),
-  php: new Set([...COMMON_FIELDS]),
+  php: new Set([...COMMON_FIELDS, ...FILE_FIELDS]),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -40,6 +42,30 @@ function boolean(value, field) {
     throw new NginxSettingsValidationError('invalid_nginx_setting', `${field} must be boolean`);
   }
   return value;
+}
+
+function indexFiles(targetType, value) {
+  if (value === null) return null;
+  const extension = targetType === 'php' ? /\.(?:php|html|htm)$/i : /\.(?:html|htm)$/i;
+  if (!Array.isArray(value) || value.length < 1 || value.length > 8
+    || new Set(value).size !== value.length || value.some(file => typeof file !== 'string'
+      || file.length > 64 || !/^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(file)
+      || file.includes('..') || !extension.test(file))) {
+    throw new NginxSettingsValidationError('invalid_nginx_index_files', 'Index files must be up to eight distinct HTML files, or PHP files on a PHP site');
+  }
+  return Object.freeze([...value]);
+}
+
+function errorPages(value) {
+  if (value === null) return null;
+  if (!value || typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).some(code => !ERROR_CODES.has(code))
+    || Object.values(value).some(uri => typeof uri !== 'string' || uri.length > 192
+      || !/^\/(?:[A-Za-z0-9_-]+\/)*[A-Za-z0-9][A-Za-z0-9._-]*\.(?:html|htm)$/.test(uri)
+      || uri.includes('..'))) {
+    throw new NginxSettingsValidationError('invalid_nginx_error_pages', 'Error pages require a supported status and a local HTML path');
+  }
+  return Object.freeze({ ...value });
 }
 
 function headers(value) {
@@ -103,8 +129,18 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   }
   const seed = base === null ? defaults(targetType) : normalizeNginxSettings(targetType, base);
   const merged = { ...seed, ...value };
+  const fileSettings = {
+    ...(Object.hasOwn(merged, 'indexFiles') ? { indexFiles: indexFiles(targetType, merged.indexFiles) } : {}),
+    ...(Object.hasOwn(merged, 'errorPages') ? { errorPages: errorPages(merged.errorPages) } : {}),
+  };
+  const entryFiles = fileSettings.indexFiles ?? (targetType === 'php' ? ['index.php', 'index.html'] : ['index.html']);
+  if (Object.values(fileSettings.errorPages ?? {}).some(uri => entryFiles.some(file => uri === '/' + file))) {
+    throw new NginxSettingsValidationError('nginx_error_page_index_conflict', 'An internal error page cannot also be a public index file');
+  }
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
+    // Optional file settings leave old stored envelopes byte-for-byte canonical.
+    ...fileSettings,
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
