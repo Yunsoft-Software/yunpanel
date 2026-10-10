@@ -51,3 +51,15 @@ test('Node restart receipt refuses unconfirmed or malformed runtime results', as
     (error) => error instanceof NodeRestartReceiptError && error.code === 'node_restart_receipt_invalid',
   );
 });
+
+test('Passenger restart receipts pin the application, release and saved environment without a fictitious service',async t=>{
+ const fx=await fixture(t);
+ const proof={applicationId,releaseId,runtimeAdapter:'passenger',environmentRevision:4,port:null,healthPath:'/health',healthy:true,restarted:true};
+ const receipt=await fx.store.write({serverId,jobId,applicationId,result:{...proof,stdout:'PRIVATE'}});
+ assert.equal(receipt.version,2);assert.equal(receipt.runtimeAdapter,'passenger');assert.equal(receipt.environmentRevision,4);
+ assert.equal(Object.hasOwn(receipt,'serviceName'),false);assert.deepEqual(await fx.store.read(serverId,jobId),receipt);
+ assert.doesNotMatch(await readFile(fx.store.receiptPath(serverId,jobId),'utf8'),/PRIVATE|stdout|serviceName/);
+ for(const bad of [{applicationId:releaseId},{environmentRevision:-1},{port:3100}]){
+  await assert.rejects(fx.store.write({serverId,jobId,applicationId,result:{...proof,...bad}}));
+ }
+});

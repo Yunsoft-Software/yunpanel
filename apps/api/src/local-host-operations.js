@@ -158,6 +158,7 @@ export function createLocalHostOperations({
   nodeDeploymentManager = null,
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
+  passengerRestartOperation = null,
   nodeProcessManager = createNodeProcessManager(),
   nodePassengerMigrationOperation = createLocalNodePassengerMigrationOperation(),
   nodeRuntimeManager = createNodeRuntimeManager(),
@@ -820,7 +821,13 @@ export function createLocalHostOperations({
       gitCredential: await credentialFor(payload.applicationId),
     })));
     handlers.set(OPERATIONS.APP_NODE_ROLLBACK, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRollbackManager.rollbackNode(hydrated)));
-    handlers.set(OPERATIONS.APP_NODE_RESTART, (payload) => withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated)));
+    handlers.set(OPERATIONS.APP_NODE_RESTART, (payload, execution) => {
+      if(payload.runtimeAdapter==='passenger'){
+        if(typeof passengerRestartOperation?.execute!=='function')throw Object.assign(new Error('Passenger restart runtime is unavailable'),{code:'passenger_restart_runtime_unavailable'});
+        return passengerRestartOperation.execute(payload,execution);
+      }
+      return withApplicationEnvironment(payload, (hydrated) => nodeRestartManager.restartNode(hydrated));
+    });
     handlers.set(OPERATIONS.APP_PYTHON_DEPLOY, (payload) => withApplicationEnvironment(payload, async (hydrated) => resolvedPythonDeploymentManager.deployPython(hydrated, {
       gitCredential: await credentialFor(payload.applicationId),
     })));

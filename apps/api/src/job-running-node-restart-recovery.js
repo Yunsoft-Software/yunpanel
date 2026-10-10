@@ -35,16 +35,19 @@ async function requireStoppedConsumers(serviceStatus) {
 
 function assertContext(context, job, candidate, identity) {
   const runtime = context?.payload?.runtime;
+  const passenger=context?.payload?.runtimeAdapter==='passenger';
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
     || context.operation !== OPERATIONS.APP_NODE_RESTART || context.resourceType !== 'application'
     || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId
     || context.payload?.applicationId !== context.resourceId
     || typeof context.payload?.releaseId !== 'string' || !context.payload.releaseId
     || !runtime || typeof runtime !== 'object' || Array.isArray(runtime)
-    || !Number.isInteger(runtime.port) || typeof runtime.healthPath !== 'string') {
+    || (passenger ? runtime.port!==null || !Number.isSafeInteger(context.payload.environmentRevision) || context.payload.environmentRevision<0
+      : !Number.isInteger(runtime.port)) || typeof runtime.healthPath !== 'string') {
     throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_context_mismatch', 'Private Node restart context does not match durable job metadata');
   }
-  return { applicationId: context.payload.applicationId, releaseId: context.payload.releaseId, runtime };
+  return { applicationId: context.payload.applicationId, releaseId: context.payload.releaseId, runtime,
+    ...(passenger?{runtimeAdapter:'passenger',environmentRevision:context.payload.environmentRevision}:{}) };
 }
 
 async function requireApplicationIntent(applicationRegistry, serverId, intent) {
@@ -53,7 +56,9 @@ async function requireApplicationIntent(applicationRegistry, serverId, intent) {
   catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_application_read_failed', 'Node application state could not be read'); }
   if (!application || application.id !== intent.applicationId || application.serverId !== serverId || application.type !== 'node'
     || application.state !== 'active' || application.activeDeploymentId !== null || application.currentReleaseId !== intent.releaseId
-    || application.runtime?.port !== intent.runtime.port || application.runtime?.healthPath !== intent.runtime.healthPath) {
+    || (application.activeRuntime??application.runtime)?.port !== intent.runtime.port
+    || (application.activeRuntime??application.runtime)?.healthPath !== intent.runtime.healthPath
+    || (intent.runtimeAdapter==='passenger'&&application.runtimeAdapter!=='passenger')) {
     throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_application_mismatch', 'Node application state no longer matches the running restart');
   }
 }
@@ -85,6 +90,9 @@ export async function recoverRunningNodeRestart({
   loadJobContext,
   readRestartReceipt,
   inspectNodeStatus,
+  inspectPassengerState = null,
+  writeRestartReceipt = null,
+  allowAppliedStateRecoveryJobId = null,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
 } = {}) {
@@ -128,15 +136,47 @@ export async function recoverRunningNodeRestart({
   let receipt;
   try { receipt = await readRestartReceipt(identity.serverId, identity.jobId); }
   catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_failed', 'Node restart receipt could not be read'); }
-  if (!receipt) throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_missing', 'Node restart receipt is absent; the running job remains unresolved');
-  assertReceipt(receipt, identity, intent);
-
-  let status;
-  try { status = await inspectNodeStatus(intent); }
-  catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_failed', 'Node restart host state could not be inspected'); }
-  assertLiveStatus(status, receipt);
-
-  const result = {
+  let result;
+  if(intent.runtimeAdapter==='passenger'){
+    if(typeof inspectPassengerState!=='function')throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_failed','Passenger inspection is unavailable');
+    if(!receipt && (allowAppliedStateRecoveryJobId!==identity.jobId || typeof writeRestartReceipt!=='function')){
+      throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_missing','Passenger restart receipt is absent; explicit exact-job recovery is required');
+    }
+    let status;
+    try { status=await inspectPassengerState(context.payload,{jobId:identity.jobId,serverId:identity.serverId,resourceType:'application',resourceId:intent.applicationId}); }
+    catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_failed','Passenger process evidence could not be verified'); }
+    if(status?.verified!==true || status.applicationId!==intent.applicationId || status.releaseId!==intent.releaseId
+      || status.runtimeAdapter!=='passenger' || status.environmentRevision!==intent.environmentRevision
+      || status.port!==null || status.healthPath!==intent.runtime.healthPath || status.healthy!==true
+      || !Number.isSafeInteger(status.processes) || status.processes<1){
+      throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_not_satisfied','Passenger process, release and environment evidence do not match');
+    }
+    result={applicationId:intent.applicationId,releaseId:intent.releaseId,runtimeAdapter:'passenger',port:null,
+      healthPath:intent.runtime.healthPath,environmentRevision:intent.environmentRevision,healthy:true,restarted:true};
+    if(!receipt){
+      if(!Number.isFinite(Date.parse(job.startedAt)) || !Number.isFinite(Date.parse(status.appliedAt))
+        || Date.parse(status.appliedAt)<Date.parse(job.startedAt)){
+        throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_not_satisfied','Applied state predates the running job');
+      }
+      try {
+        await writeRestartReceipt({serverId,jobId,applicationId:intent.applicationId,result});
+        receipt=await readRestartReceipt(serverId,jobId);
+      } catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_failed','Verified Passenger recovery receipt could not be persisted'); }
+    }
+    if(receipt?.version!==2 || receipt.serverId!==serverId || receipt.jobId!==jobId
+      || receipt.applicationId!==intent.applicationId || receipt.releaseId!==intent.releaseId
+      || receipt.runtimeAdapter!=='passenger' || receipt.environmentRevision!==intent.environmentRevision
+      || receipt.port!==null || receipt.healthPath!==intent.runtime.healthPath){
+      throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_mismatch','Passenger receipt does not match the exact queued intent');
+    }
+  }else{
+    if (!receipt) throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_receipt_missing', 'Node restart receipt is absent; the running job remains unresolved');
+    assertReceipt(receipt, identity, intent);
+    let status;
+    try { status = await inspectNodeStatus(intent); }
+    catch { throw new JobRunningNodeRestartRecoveryError('job_node_restart_recovery_evidence_failed', 'Node restart host state could not be inspected'); }
+    assertLiveStatus(status, receipt);
+    result = {
     releaseId: receipt.releaseId,
     serviceName: receipt.serviceName,
     port: receipt.port,
@@ -144,6 +184,7 @@ export async function recoverRunningNodeRestart({
     healthy: true,
     restarted: true,
   };
+  }
 
   let begun;
   try { begun = await jobRegistry.beginReconciliation(identity); }

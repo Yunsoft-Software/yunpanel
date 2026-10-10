@@ -518,6 +518,21 @@ function sanitizeNodeRollbackResult(job, result) {
 }
 
 function sanitizeNodeRestartResult(job, result) {
+  if (job.payload?.runtimeAdapter === 'passenger') {
+    const applicationId = normalizeUuid(result.applicationId);
+    const releaseId = normalizeUuid(result.releaseId);
+    if (!applicationId || applicationId !== normalizeUuid(job.payload.applicationId)
+      || applicationId !== job.resourceId || !releaseId || releaseId !== normalizeUuid(job.payload.releaseId)
+      || result.runtimeAdapter !== 'passenger' || result.port !== null || job.payload.runtime?.port !== null
+      || result.healthPath !== job.payload.runtime.healthPath
+      || !Number.isSafeInteger(job.payload.environmentRevision) || job.payload.environmentRevision < 0
+      || result.environmentRevision !== job.payload.environmentRevision
+      || result.healthy !== true || result.restarted !== true) {
+      throw new JobRegistryError('invalid_job_result', 'Passenger restart result does not match the queued application, release and environment');
+    }
+    return { applicationId, releaseId, runtimeAdapter:'passenger', port:null,
+      healthPath:result.healthPath, ...sanitizedEnvironmentRevision(job), healthy:true, restarted:true };
+  }
   const managed = validateManagedNodeResult(job, result, 'restart');
   if (result.healthy !== true || result.restarted !== true) {
     throw new JobRegistryError('invalid_job_result', 'Node restart must confirm a healthy restarted service');

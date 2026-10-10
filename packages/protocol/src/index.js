@@ -498,7 +498,7 @@ function validateMutationPayload(operation, payload, errors) {
   }
 
   if (operation === OPERATIONS.APP_NODE_RESTART) {
-    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'runtime', 'environmentRevision'], operation, errors);
+    rejectUnexpectedKeys(payload, ['applicationId', 'releaseId', 'runtime', 'environmentRevision', 'runtimeAdapter'], operation, errors);
     validateEnvironmentRevision(payload, operation, errors);
     try {
       normalizeNodeRestartSpec(payload);

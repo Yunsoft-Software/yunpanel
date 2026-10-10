@@ -94,3 +94,20 @@ test('Node restart jobs reject forged release results', async () => {
 
   assert.equal((await registry.getJob(job.id)).status, 'running');
 });
+
+test('a real durable Passenger restart result completes without inventing a systemd service or port',async()=>{
+ const registry=createJobRegistry();
+ const job=await registry.enqueue({serverId:'server-1',type:'app.node.restart',operation:OPERATIONS.APP_NODE_RESTART,
+  resourceType:'application',resourceId:APPLICATION_ID,
+  payload:{applicationId:APPLICATION_ID,releaseId:RELEASE_ID,runtimeAdapter:'passenger',environmentRevision:4,runtime:{...runtime(),port:null}}});
+ await registry.claimNext('server-1');
+ const result={applicationId:APPLICATION_ID,releaseId:RELEASE_ID,runtimeAdapter:'passenger',environmentRevision:4,
+  port:null,healthPath:'/health',healthy:true,restarted:true};
+ for(const bad of [{applicationId:'ff830043-9752-4640-83b4-3a1998de78a0'},{releaseId:'ff830043-9752-4640-83b4-3a1998de78a0'},
+  {runtimeAdapter:'direct-systemd'},{environmentRevision:3},{port:3100},{healthPath:'/foreign'},{restarted:false},{healthy:false}]){
+  await assert.rejects(registry.complete({serverId:'server-1',jobId:job.id,status:'succeeded',result:{...result,...bad}}),{code:'invalid_job_result'});
+  assert.equal((await registry.getJob(job.id)).status,'running');
+ }
+ const completed=await registry.complete({serverId:'server-1',jobId:job.id,status:'succeeded',result:{...result,privateValue:'must not persist'}});
+ assert.equal(completed.status,'succeeded');assert.deepEqual(completed.result,result);
+});

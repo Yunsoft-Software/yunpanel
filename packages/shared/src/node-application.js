@@ -122,14 +122,14 @@ export function normalizeNodeRuntimeConfig(value = {}, { requirePort = true } = 
   };
 }
 
-function normalizeManagedNodeSpec(value, code, message) {
+function normalizeManagedNodeSpec(value, code, message, { requirePort = true } = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) {
     throw new ApplicationValidationError(code, message);
   }
   return {
     applicationId: assertUuid(value.applicationId, 'applicationId'),
     releaseId: assertUuid(value.releaseId, 'releaseId'),
-    runtime: normalizeNodeRuntimeConfig(value.runtime),
+    runtime: normalizeNodeRuntimeConfig(value.runtime, { requirePort }),
   };
 }
 
@@ -158,7 +158,13 @@ export function normalizeNodeRollbackSpec(value) {
 }
 
 export function normalizeNodeRestartSpec(value) {
-  return normalizeManagedNodeSpec(value, 'invalid_node_restart', 'Node restart spec must be an object');
+  if (value?.runtimeAdapter !== undefined && !['direct-systemd','passenger'].includes(value.runtimeAdapter)) {
+    throw new ApplicationValidationError('invalid_node_restart_adapter','Node restart adapter is invalid');
+  }
+  return {
+    ...normalizeManagedNodeSpec(value, 'invalid_node_restart', 'Node restart spec must be an object', {requirePort:value?.runtimeAdapter!=='passenger'}),
+    ...(value?.runtimeAdapter === undefined ? {} : {runtimeAdapter:value.runtimeAdapter}),
+  };
 }
 
 export function normalizeNodeStatusSpec(value) {

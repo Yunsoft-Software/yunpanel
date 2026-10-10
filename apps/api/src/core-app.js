@@ -960,6 +960,7 @@ export function createApp({
         releaseId: application.currentReleaseId,
         runtime: application.activeRuntime ?? application.runtime,
         environmentRevision: environment.savedRevision,
+        ...(!isPython && application.runtimeAdapter==='passenger'?{runtimeAdapter:'passenger'}:{}),
       },
       resourceType: 'application',
       resourceId: application.id,

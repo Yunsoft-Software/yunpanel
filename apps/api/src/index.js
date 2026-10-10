@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createLocalPassengerRestartOperation} from './local-passenger-restart-operation.js';
 import os from 'node:os';
 import path from 'node:path';
 import {
@@ -1319,6 +1320,7 @@ const localRuntime = await startConfiguredLocalRuntime({
     databaseCredentialOperation: localDatabaseCredentialOperation,
     websiteCronOperation: localWebsiteCronOperation,
     websitePhpToolOperation: localWebsitePhpToolOperation,
+    passengerRestartOperation:createLocalPassengerRestartOperation({applicationRegistry,websiteRegistry,domainRegistry,applicationEnvironmentRegistry,siteMutationLock}),
     authorizeWebsiteProvisioning: authorizeWebsiteProvisioningChildJob,
     requiresWebsiteProvisioningAuthorization,
   })),

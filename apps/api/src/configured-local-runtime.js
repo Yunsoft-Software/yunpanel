@@ -508,6 +508,10 @@ export async function startConfiguredLocalRuntime({
         || result.healthPath !== payload?.runtime?.healthPath || typeof payload?.applicationId !== 'string') {
         throw new Error('Node restart result is not safe recovery evidence');
       }
+      if (payload.runtimeAdapter === 'passenger' && (result.runtimeAdapter !== 'passenger'
+        || result.applicationId !== payload.applicationId || result.environmentRevision !== payload.environmentRevision)) {
+        throw new Error('Passenger restart scope does not match queued recovery evidence');
+      }
       await nodeRestartReceipts.write({
         serverId,
         jobId,

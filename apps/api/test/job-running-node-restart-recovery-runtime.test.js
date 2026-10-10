@@ -100,3 +100,28 @@ test('wrong host stops Node restart recovery before application, receipt or stat
   assert.equal(receiptFactories, 0);
   assert.equal(statusFactories, 0);
 });
+
+test('Passenger store runtime constructs scoped inspection lazily and passes only the explicit legacy job allowance', async () => {
+  let constructed = 0, inspected = 0, written = 0;
+  const applicationRegistry = { async init() {} };
+  await runRunningNodeRestartRecoveryFromStores({ serverId, jobId, hostname, env: {}, cwd: '/work',
+    serverRegistryFactory: () => ({ async init() {}, async getServer() { return { id: serverId, hostname }; } }),
+    applicationRegistryFactory: () => applicationRegistry, jobRegistryFactory: () => ({}), recoveryStoreFactory: () => ({}),
+    durableRegistryFactory: () => ({}), contextReaderFactory: () => ({ read: async () => ({}) }),
+    receiptStoreFactory: () => ({ read: async () => null, write: async input => { written++; assert.equal(input.jobId, jobId); } }),
+    statusInspectorFactory: () => ({ inspectNodeStatus: async () => { throw new Error('unexpected systemd inspection'); } }),
+    passengerInspectionFactory: async input => {
+      constructed++; assert.equal(input.applicationRegistry, applicationRegistry);
+      assert.equal(input.paths.applicationStore, '/work/.data/application-registry.json');
+      return { inspectRecovery: async (payload, execution) => { inspected++; assert.equal(payload.applicationId, 'owned');
+        assert.equal(execution.jobId, jobId); return { verified: true }; } };
+    },
+    allowAppliedStateRecoveryJobId: jobId, serviceStatus: async () => ({ apiActive: false, agentActive: false }),
+    recoverCommand: async input => {
+      assert.equal(constructed, 0); assert.equal(input.allowAppliedStateRecoveryJobId, jobId);
+      for (let i = 0; i < 2; i++) assert.deepEqual(await input.inspectPassengerState({ applicationId: 'owned' }, { jobId }), { verified: true });
+      await input.writeRestartReceipt({ jobId }); return { status: 'succeeded' };
+    },
+  });
+  assert.equal(constructed, 1); assert.equal(inspected, 2); assert.equal(written, 1);
+});

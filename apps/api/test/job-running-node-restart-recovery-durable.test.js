@@ -13,7 +13,7 @@ import { recoverRunningNodeRestart } from '../src/job-running-node-restart-recov
 import { createNodeRestartReceiptStore } from '../src/node-restart-receipt.js';
 import { createServerRegistry } from '../src/server-registry.js';
 
-async function fixture(t) {
+async function fixture(t, passenger = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-node-restart-recovery-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
@@ -32,10 +32,15 @@ async function fixture(t) {
     name: 'Node Recovery App',
     repositoryUrl: 'https://github.com/Yunsoft-Software/node-recovery-app',
     branch: 'main',
-    runtime: { port: 34123, healthPath: '/health' },
+    runtimeAdapter: passenger ? 'passenger' : 'direct-systemd',
+    runtime: { port: passenger ? null : 34123, healthPath: '/health' },
   });
   const releaseId = '216e4db8-468b-4e2f-a021-3ab31e0f4123';
   const serviceName = nodeServiceName(created.id);
+  if (passenger) await applicationRegistry.activatePassengerRelease(created.id, {
+    operationId: releaseId, releaseId, commitSha: '2'.repeat(40), runtime: created.runtime, healthy: true,
+  });
+  else {
   await applicationRegistry.markDeploying(created.id, releaseId);
   await applicationRegistry.markDeployed(created.id, {
     deploymentId: releaseId,
@@ -46,6 +51,7 @@ async function fixture(t) {
     healthPath: created.runtime.healthPath,
     healthy: true,
   });
+  }
   const application = await applicationRegistry.getApplication(created.id);
 
   const jobStore = path.join(root, 'jobs.json');
@@ -59,6 +65,7 @@ async function fixture(t) {
       applicationId: application.id,
       releaseId: application.currentReleaseId,
       runtime: application.runtime,
+      ...(passenger ? { runtimeAdapter: 'passenger', environmentRevision: 4 } : {}),
     },
     resourceType: 'application',
     resourceId: application.id,
@@ -76,6 +83,7 @@ async function fixture(t) {
     applicationRegistry,
     application,
     jobId: queued.id,
+    jobStore,
     jobRegistry: restarted,
     contextReader: createJobRecoveryContextReader({ filePath: jobStore }),
     receiptStore: createNodeRestartReceiptStore({ root: path.join(root, 'receipts') }),
@@ -101,6 +109,74 @@ function healthyStatus(fx) {
 }
 
 const stoppedConsumers = async () => ({ apiActive: false, agentActive: false });
+
+function passengerRecovery(fx, patch = {}) {
+  return {
+    serverId: fx.server.id, jobId: fx.jobId, jobRegistry: fx.jobRegistry,
+    applicationRegistry: fx.applicationRegistry, serviceStatus: stoppedConsumers,
+    loadJobContext: id => fx.contextReader.read(id),
+    readRestartReceipt: (serverId, jobId) => fx.receiptStore.read(serverId, jobId),
+    writeRestartReceipt: input => fx.receiptStore.write(input),
+    inspectNodeStatus: async () => { throw new Error('Passenger must not inspect a fabricated systemd service'); },
+    inspectPassengerState: async () => ({ verified: true, applicationId: fx.application.id, releaseId: fx.releaseId,
+      runtimeAdapter: 'passenger', environmentRevision: 4, port: null, healthPath: '/health', healthy: true,
+      processes: 1, appliedAt: new Date().toISOString() }),
+    ...patch,
+  };
+}
+
+test('exact Passenger applied-state recovery persists a private v2 receipt and survives a cold job-store reload', async t => {
+  const fx = await fixture(t, true);
+  const result = await recoverRunningNodeRestart(passengerRecovery(fx, { allowAppliedStateRecoveryJobId: fx.jobId }));
+  assert.equal(result.status, 'succeeded');
+  const receipt = await fx.receiptStore.read(fx.server.id, fx.jobId);
+  assert.equal(receipt.version, 2);
+  assert.equal(receipt.environmentRevision, 4);
+  assert.equal(receipt.port, null);
+  const cold = createDurableJobRegistry({ filePath: fx.jobStore, registryFactory: createJobRegistry });
+  await cold.init();
+  assert.equal((await cold.getJob(fx.jobId)).status, 'succeeded');
+  assert.equal(cold.recovery(), null);
+  assert.deepEqual(cold.recoveryRecord().jobs, []);
+});
+
+test('Passenger receipt absence requires the same explicitly allowed job and never inspects or writes otherwise', async t => {
+  for (const allowed of [null, '71581dea-2d46-48ca-909a-e286be9feb60']) {
+    const fx = await fixture(t, true); let inspections = 0, writes = 0;
+    await assert.rejects(recoverRunningNodeRestart(passengerRecovery(fx, {
+      allowAppliedStateRecoveryJobId: allowed,
+      inspectPassengerState: async () => { inspections++; }, writeRestartReceipt: async () => { writes++; },
+    })), { code: 'job_node_restart_recovery_receipt_missing' });
+    assert.equal(inspections, 0); assert.equal(writes, 0);
+    assert.equal((await fx.jobRegistry.getJob(fx.jobId)).status, 'running');
+  }
+});
+
+test('foreign, stale, missing process and unhealthy Passenger proof leave the original durable job unresolved', async t => {
+  for (const patch of [{ applicationId: 'foreign' }, { releaseId: 'foreign' }, { environmentRevision: 5 },
+    { runtimeAdapter: 'direct-systemd' }, { port: 3000 }, { healthPath: '/' }, { verified: false },
+    { healthy: false }, { processes: 0 }, { processes: 1.5 }, { appliedAt: '2000-01-01T00:00:00Z' }]) {
+    const fx = await fixture(t, true), options = passengerRecovery(fx, { allowAppliedStateRecoveryJobId: fx.jobId });
+    const proof = await options.inspectPassengerState();
+    options.inspectPassengerState = async () => ({ ...proof, ...patch });
+    await assert.rejects(recoverRunningNodeRestart(options), { code: 'job_node_restart_recovery_evidence_not_satisfied' });
+    assert.equal((await fx.jobRegistry.getJob(fx.jobId)).status, 'running');
+    assert.equal(await fx.receiptStore.read(fx.server.id, fx.jobId), null);
+  }
+});
+
+test('normal v2 Passenger receipt still requires real current process evidence and stopped consumers', async t => {
+  const fx = await fixture(t, true), options = passengerRecovery(fx);
+  const proof = await options.inspectPassengerState();
+  await fx.receiptStore.write({ serverId: fx.server.id, jobId: fx.jobId, applicationId: fx.application.id,
+    result: { ...proof, restarted: true } });
+  await assert.rejects(recoverRunningNodeRestart({ ...options, serviceStatus: async () => ({ apiActive: true, agentActive: false }) }),
+    { code: 'job_node_restart_recovery_consumers_must_be_stopped' });
+  await assert.rejects(recoverRunningNodeRestart({ ...options, inspectPassengerState: async () => ({ ...proof, processes: 0 }) }),
+    { code: 'job_node_restart_recovery_evidence_not_satisfied' });
+  assert.equal((await fx.jobRegistry.getJob(fx.jobId)).status, 'running');
+  assert.equal((await recoverRunningNodeRestart(options)).status, 'succeeded');
+});
 
 test('verified receipt and healthy live status close the same durable Node restart', async (t) => {
   const fx = await fixture(t);
