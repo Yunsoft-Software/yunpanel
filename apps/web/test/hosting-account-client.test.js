@@ -275,3 +275,22 @@ test('registration cannot accept a stale login revision or different assigned li
     form: { kind: 'reseller', maxCustomers: '5', maxWebsites: null },
   }), { code: 'hosting_result_invalid' });
 });
+
+test('single Owner account creation sends customer purpose and credentials without privileged role fields', async t => {
+  const f = fixture(t, async () => ({ account: { ...customer, resellerId: null }, accessGranted: false, siteAccessGranted: false }));
+  const result = await f.client.createLogin({ kind: 'customer', username: 'customer', password: 'fixture-password', resellerId: '', role: 'owner', websiteIds: ['foreign'] });
+  assert.equal(result.kind, 'customer');
+  assert.deepEqual(f.calls[0][1].body, { kind: 'customer', username: 'customer', password: 'fixture-password', resellerId: null });
+});
+test('lost creation reply blocks a second write until a fresh complete profile list reconciles the username', async t => {
+  let posts = 0;
+  const f = fixture(t, async (_path, options = {}) => {
+    if (options.method === 'POST') { posts++; throw new Error('Fixture reply lost'); }
+    return page([{ ...customer, resellerId: null }]);
+  });
+  const input = { kind: 'customer', username: 'customer', password: 'fixture-password', resellerId: '' };
+  await assert.rejects(f.client.createLogin(input), error => error.reconcile === true);
+  await assert.rejects(f.client.createLogin(input), { code: 'hosting_reconciliation_required' });
+  assert.equal(posts, 1); await f.client.list({ kind: 'customer' });
+  await assert.rejects(f.client.createLogin(input), error => error.reconcile === true); assert.equal(posts, 2);
+});

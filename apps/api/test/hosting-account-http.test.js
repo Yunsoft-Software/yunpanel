@@ -30,7 +30,7 @@ function fixture(options = {}) {
       throw new AuthError('reseller_scope_forbidden', 'Scoped reseller access denied.', 403);
     },
   };
-  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'createCustomerLogin', 'updateCustomerLogin', 'updateLimits', 'setActive', 'unregister', 'deleteCustomerLogin']) {
+  for (const name of ['list', 'get', 'registerCustomer', 'registerReseller', 'createOwnerLogin', 'createCustomerLogin', 'updateCustomerLogin', 'updateLimits', 'setActive', 'unregister', 'deleteCustomerLogin']) {
     accounts[name] = (token, policy, ...args) => {
       accounts.authorizeActor(token, policy);
       calls.push({ name, args });
@@ -201,4 +201,15 @@ test('non-list requests reject query modifiers', async () => {
   const f = fixture(); await assert.rejects(f.run('POST', '/api/users/hosting/accounts?kind=customer'), code('invalid_hosting_account_query'));
   await assert.rejects(f.run('GET', '/api/users/hosting/accounts/a?direct=true'), code('invalid_hosting_account_query'));
   assert.equal(f.calls.length, 0);
+});
+
+test('Owner uses a single native login-and-profile creation endpoint; reseller cannot use it', async () => {
+  const f = fixture();
+  const body = { kind: 'customer', username: 'new-customer', password: 'fixture-password-only' };
+  const result = await f.run('POST', '/api/users/hosting/accounts/create-login', body);
+  assert.equal(result.status, 201); assert.equal(result.data.siteAccessGranted, false);
+  assert.deepEqual(f.calls[0], { name: 'createOwnerLogin', args: [body] });
+  f.setSession({ id: 'reseller-session', user: { id: 'reseller-a', role: 'site_manager' } });
+  await assert.rejects(f.run('POST', '/api/users/hosting/accounts/create-login', body), code('reseller_scope_forbidden'));
+  assert.equal(f.calls.length, 1);
 });

@@ -71,7 +71,7 @@ export function readHostingAccount(value) {
     };
   }
   if (kind === 'customer' && value.usage !== undefined) {
-    if (!object(value.usage) || !['websites', 'diskMb', 'trafficMb', 'databases'].every((key) => integer(value.usage[key]))) {
+    if (!object(value.usage) || !integer(value.usage.websites) || !['diskMb', 'trafficMb', 'databases'].every((key) => value.usage[key] === null || integer(value.usage[key]))) {
       throw problem('hosting_result_invalid');
     }
     result.usage = {
@@ -80,6 +80,10 @@ export function readHostingAccount(value) {
       trafficMb: value.usage.trafficMb,
       databases: value.usage.databases,
     };
+  }
+  if (kind === 'customer' && value.websiteIds !== undefined) {
+    if (!Array.isArray(value.websiteIds) || value.websiteIds.some(id => !identifier(id)) || new Set(value.websiteIds).size !== value.websiteIds.length) throw problem('hosting_result_invalid');
+    result.websiteIds = [...value.websiteIds];
   }
   return result; // Only documented fields; no accidental credentials or server messages.
 }
@@ -189,6 +193,29 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
     } finally { if (readers.get(lane) === controller) readers.delete(lane); }
   }
   return Object.freeze({
+    async createLogin(form) {
+      if (!live()) throw obsolete();
+      if (writer) throw problem('hosting_request_busy');
+      if (blockedTarget) throw problem('hosting_reconciliation_required');
+      const body = { ...hostingCustomerCreateInput(form), kind: form.kind };
+      if (form.kind === 'reseller') body.limits = hostingLimitsInput(form);
+      else if (form.kind === 'customer') body.resellerId = form.resellerId || null;
+      else throw problem('invalid_hosting_parent');
+      const controller = new AbortController(); writer = controller; cancelReads();
+      const version = generation();
+      try {
+        const result = await request(`${ROOT}/create-login`, { method: 'POST', body, signal: controller.signal });
+        if (!live() || version !== generation()) throw obsolete();
+        const account = readHostingAccount(result.account);
+        if (result.accessGranted !== false || result.siteAccessGranted !== false || account.kind !== form.kind || account.username !== body.username
+          || (account.resellerId ?? null) !== (body.resellerId ?? null) || account.revision !== 1) throw problem('hosting_result_invalid');
+        return account;
+      } catch (error) {
+        lost(error);
+        if (!error?.status || error.status >= 500) { error.reconcile = true; blockedTarget = `new-login:${body.kind}:${body.username}`; }
+        throw error;
+      } finally { if (writer === controller) writer = null; }
+    },
     get(id) {
       if (!identifier(id)) return Promise.reject(problem('hosting_result_invalid'));
       return read('profile', `${ROOT}/${encodeURIComponent(id)}`, (value) => {
@@ -208,6 +235,10 @@ export function createHostingAccountClient({ request, generation, onAccessLost }
       return read(lane, `${ROOT}?${query}`, (value) => {
         const page = readHostingPage(value, { kind, offset, limit, resellerId });
         if (blockedTarget && page.accounts.some((account) => account.id === blockedTarget)) blockedTarget = null;
+        if (blockedTarget?.startsWith(`new-login:${kind}:`)) {
+          const name = blockedTarget.slice(`new-login:${kind}:`.length);
+          if (page.accounts.some(account => account.username === name) || offset === 0 && page.total <= limit && resellerId === undefined) blockedTarget = null;
+        }
         return page;
       });
     },

@@ -140,9 +140,9 @@ export function createHostingAccountStore({
     )`).get(id, id);
     return {
       websites: websiteRow?.total ?? 0,
-      diskMb: 0,
-      trafficMb: 0,
-      databases: 0,
+      diskMb: null,
+      trafficMb: null,
+      databases: null,
     };
   }
   function view(row) {
@@ -153,7 +153,11 @@ export function createHostingAccountStore({
       ...projection(row), username: row.username, revision: row.revision, userRevision: row.user_revision,
       createdAt: row.created_at, updatedAt: row.updated_at, stage: 'profile_only',
       ...(row.kind === 'reseller' ? { limits: limits(row.user_id), usage: usage(row), usageScope: hasReservedSites ? 'registered_and_reserved_ownership' : 'registered_ownership' } : {}),
-      ...(row.kind === 'customer' ? { quotas: customerQuotas(row.user_id), usage: customerUsage(row.user_id) } : {}),
+      ...(row.kind === 'customer' ? { quotas: customerQuotas(row.user_id), usage: customerUsage(row.user_id),
+        websiteIds: db.prepare(`SELECT DISTINCT website_id FROM (
+          SELECT website_id FROM auth_customer_websites WHERE customer_id = ?
+          UNION SELECT website_id FROM auth_hosting_site_allocations WHERE customer_id = ? AND state = 'attached'
+        ) ORDER BY website_id`).all(row.user_id, row.user_id).map(value => value.website_id) } : {}),
     };
   }
   function candidate(id, expectedUserRevision) {
@@ -282,6 +286,39 @@ export function createHostingAccountStore({
     },
     allocateCustomerSite(rawToken, requireManagement, input) {
       return siteAllocations.allocateCustomerSite(rawToken, requireManagement, input);
+    },
+    async createOwnerLogin(rawToken, requireManagement, input) {
+      transaction(() => owner(rawToken, requireManagement));
+      fields(input, ['kind', 'username', 'password', 'resellerId', 'limits', 'quotas'], ['kind', 'username', 'password']);
+      if (!['customer', 'reseller'].includes(input.kind)) throw error('invalid_hosting_kind', 'Choose customer or reseller.');
+      if (input.kind === 'reseller' && (Object.hasOwn(input, 'resellerId') || Object.hasOwn(input, 'quotas'))) throw error('invalid_hosting_account_input', 'A reseller cannot have a parent or customer quota.');
+      if (input.kind === 'customer' && Object.hasOwn(input, 'limits')) throw error('invalid_hosting_account_input', 'Customer limits use the quota fields.');
+      const assignedLimits = input.kind === 'reseller' ? validateResellerLimits(input.limits) : null;
+      const assignedQuotas = input.kind === 'customer' && input.quotas ? validateCustomerQuotas(input.quotas) : null;
+      const kind = input.kind, parentId = input.resellerId ?? null;
+      if (parentId !== null && !identifier(parentId)) throw error('invalid_hosting_parent', 'Choose a current reseller.');
+      const credentials = customerCredentialServices(), name = credentials.normalizeUsername(input.username);
+      const passwordHash = await credentials.hashPassword(input.password);
+      return transaction(() => {
+        const actor = owner(rawToken, requireManagement);
+        const parent = kind === 'customer' && parentId !== null ? existing(parentId) : null;
+        if (kind === 'customer') {
+          assertCustomerCreationScope({ actor, reseller: parent ? projection(parent) : null });
+          if (parent) {
+            assertResellerCapacity({ limits: limits(parent.user_id), usage: usage(parent), resource: 'customers' });
+            if (assignedQuotas) assertCustomerQuotaWithinResellerCapacity({ customerQuotas: assignedQuotas, resellerLimits: limits(parent.user_id) });
+          }
+        }
+        uniqueUsername(name);
+        const id = randomUUID(), timestamp = now();
+        db.prepare('INSERT INTO users(id, username, password_hash, role, active, created_at, password_changed_at) VALUES (?, ?, ?, ?, 1, ?, ?)')
+          .run(id, name, passwordHash, 'site_manager', timestamp, timestamp);
+        insert(actor, { id }, kind, parentId, assignedLimits);
+        if (assignedQuotas) db.prepare('INSERT INTO auth_customer_quotas VALUES (?, ?, ?, ?, ?, ?, ?)').run(
+          id, assignedQuotas.maxWebsites, assignedQuotas.maxDiskMb, assignedQuotas.maxTrafficMb, assignedQuotas.maxDatabases, timestamp, timestamp);
+        audit(actor.id, `hosting.${kind}_login_created`, { type: 'user', id });
+        return view(existing(id));
+      });
     },
     registerReseller(rawToken, requireManagement, input) {
       const result = transaction(() => {

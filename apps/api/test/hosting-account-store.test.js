@@ -507,3 +507,37 @@ test('login revision overflow rolls registration back instead of losing optimist
   assert.throws(() => f.store.registerReseller(f.token, f.requireManagement, { userId: 'reseller-a', expectedUserRevision: Number.MAX_SAFE_INTEGER, limits: { maxCustomers: null, maxWebsites: null } }), code('hosting_account_revision_conflict'));
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM auth_hosting_accounts').get().n, 0);
 });
+
+test('Owner creates a customer login and profile in the existing auth transaction with no Owner or site grants', async t => {
+  const f = setup(t, customerCredentials);
+  const account = await f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'customer', username: 'owner-customer', password: 'customer-password' });
+  const user = f.db.prepare('SELECT role, active FROM users WHERE id = ?').get(account.id);
+  assert.equal(user.role, 'site_manager'); assert.equal(user.active, 1); assert.equal(account.kind, 'customer'); assert.equal(account.resellerId, null);
+  assert.deepEqual(account.websiteIds, []); assert.equal(account.usage.diskMb, null); assert.equal(account.usage.trafficMb, null); assert.equal(account.usage.databases, null);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM auth_user_websites WHERE user_id = ?').get(account.id).n, 0);
+  assert.equal(f.store.get(f.token, f.requireManagement, account.id).username, 'owner-customer');
+});
+test('Owner creates a reseller with explicit limits and a customer belonging to that reseller', async t => {
+  const f = setup(t, customerCredentials);
+  const reseller = await f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'reseller', username: 'new-reseller', password: 'customer-password', limits: { maxCustomers: 1, maxWebsites: 3 } });
+  assert.deepEqual(reseller.limits, { maxCustomers: 1, maxWebsites: 3 });
+  const child = await f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'customer', username: 'new-child', password: 'customer-password', resellerId: reseller.id });
+  assert.equal(child.resellerId, reseller.id); assert.equal(f.get(reseller.id).usage.customers, 1);
+  await assert.rejects(f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'customer', username: 'overflow-child', password: 'customer-password', resellerId: reseller.id }), code('reseller_limit_reached'));
+  assert.equal(f.db.prepare("SELECT 1 FROM users WHERE username = 'overflow-child'").get(), undefined);
+});
+test('Owner login creation rechecks the current session after hashing and rejects role mass assignment', async t => {
+  let finish;
+  const f = setup(t, { ...customerCredentials, hashPassword: () => new Promise(resolve => { finish = resolve; }) });
+  const creation = f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'customer', username: 'late-owner-child', password: 'customer-password' });
+  f.db.prepare('DELETE FROM sessions WHERE token_hash = ?').run(f.token); finish('fixture-safe-hash');
+  await assert.rejects(creation, code('unauthorized')); assert.equal(f.db.prepare("SELECT 1 FROM users WHERE username = 'late-owner-child'").get(), undefined);
+  const f2 = setup(t, customerCredentials);
+  await assert.rejects(f2.store.createOwnerLogin(f2.token, f2.requireManagement, { kind: 'customer', username: 'spoof-owner', password: 'customer-password', role: 'owner' }), code('invalid_hosting_account_input'));
+});
+test('a profile write failure rolls back the new login row in the same auth database', async t => {
+  const f = setup(t, customerCredentials);
+  f.db.exec("CREATE TRIGGER fixture_fail_profile BEFORE INSERT ON auth_hosting_accounts BEGIN SELECT RAISE(ABORT, 'fixture profile failure'); END;");
+  await assert.rejects(f.store.createOwnerLogin(f.token, f.requireManagement, { kind: 'customer', username: 'atomic-child', password: 'customer-password' }));
+  assert.equal(f.db.prepare("SELECT 1 FROM users WHERE username = 'atomic-child'").get(), undefined);
+});

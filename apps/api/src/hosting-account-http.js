@@ -3,6 +3,7 @@ import { AuthError } from './auth-error.js';
 const ROOT = '/api/users/hosting/accounts';
 const ID = '[A-Za-z0-9_-]{1,128}';
 const SELF_CUSTOMERS = `${ROOT}/self/customers`;
+const OWNER_LOGIN = `${ROOT}/create-login`;
 const ITEM = new RegExp(`^${ROOT}/(${ID})(?:/(limits|quotas|profile|status|login))?$`);
 const unavailable = () => new AuthError('hosting_accounts_unavailable', 'Hosting account administration is unavailable.', 503);
 const invalidQuery = () => new AuthError('invalid_hosting_account_query', 'Use documented, single-valued account filters.');
@@ -63,8 +64,9 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   const actor = requireHostingActor(accounts, rawToken, requireManagement);
   const collection = pathname === ROOT;
   const selfCustomers = pathname === SELF_CUSTOMERS;
+  const ownerLogin = pathname === OWNER_LOGIN && request.method === 'POST';
   const match = ITEM.exec(pathname);
-  if (!collection && !selfCustomers && !match) throw new AuthError('not_found', 'Hosting account route not found.', 404);
+  if (!collection && !selfCustomers && !ownerLogin && !match) throw new AuthError('not_found', 'Hosting account route not found.', 404);
   const call = (method, ...args) => {
     if (typeof accounts?.[method] !== 'function') throw unavailable();
     return accounts[method](rawToken, requireManagement, ...args);
@@ -74,6 +76,11 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   }
   // Non-list routes accept no query modifiers, even for reads.
   if ([...query.keys()].length) throw invalidQuery();
+  if (ownerLogin) {
+    requireOwnerActor(actor);
+    const account = await call('createOwnerLogin', await readJson(request));
+    return json(response, 201, { data: { account, accessGranted: false, siteAccessGranted: false } });
+  }
   if (selfCustomers && request.method === 'POST') {
     requireResellerActor(actor);
     const body = await readJson(request);
