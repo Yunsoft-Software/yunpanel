@@ -67,11 +67,7 @@ function passengerStageJob(overrides = {}) {
     status: 'succeeded',
     payload: {
       targetType: 'passenger',
-      target: {
-        root: passengerTarget.appRoot,
-        startupFile: passengerTarget.startupFile,
-        nodeBinary: passengerTarget.nodeBinary,
-      },
+      target: { ...passengerTarget },
     },
     result: { checksum: newChecksum, configName: 'example.com.conf', bytes: 512 },
     ...overrides,
@@ -89,7 +85,7 @@ function dependencies({ currentBinding = binding() } = {}) {
     },
     websiteRegistry: {
       async getWebsite(id) {
-        return id === websiteId ? { id: websiteId, serverId, revision: 3, runtimeType: 'node', applicationId } : null;
+        return id === websiteId ? { id: websiteId, serverId, revision: 3, runtimeType: 'node', applicationId, unixUser: passengerTarget.user } : null;
       },
     },
     runtimeBindingRegistry: {
@@ -150,6 +146,36 @@ test('Passenger Domain stage fails closed when queued target no longer matches r
     (error) => error?.code === 'passenger_domain_stage_target_drift',
   );
   assert.equal(deps.activations.length, 0);
+});
+
+for (const [field, value] of [
+  ['appRoot', '/var/lib/yunpanel/apps/foreign/current'],
+  ['documentRoot', '/var/lib/yunpanel/apps/foreign/current/public'],
+  ['startupFile', 'foreign.js'], ['nodeBinary', '/foreign/bin/node'],
+  ['user', 'root'], ['group', 'root'], ['appEnv', 'foreign'],
+  ['environmentInclude', '/etc/yunpanel/passenger-env/foreign.conf'],
+]) {
+  test(`Passenger Domain stage rejects changed ${field} before advancing traffic authority`, async () => {
+    const deps = dependencies();
+    const job = passengerStageJob(); job.payload.target[field] = value;
+    await assert.rejects(jobReconciliationInternals.reconcilePassengerDomainStageBinding({
+      job, domain: stagedDomain(), ...deps }), { code: 'passenger_domain_stage_target_drift' });
+    assert.equal(deps.activations.length, 0);
+  });
+}
+test('Passenger Domain stage rejects a Website Unix identity change even when the whole queued target matches the binding', async () => {
+  const deps = dependencies();
+  const original = deps.websiteRegistry.getWebsite;
+  deps.websiteRegistry.getWebsite = async id => ({ ...await original(id), unixUser: 'yunapp-abcdef123456' });
+  await assert.rejects(jobReconciliationInternals.reconcilePassengerDomainStageBinding({
+    job: passengerStageJob(), domain: stagedDomain(), ...deps }), { code: 'passenger_domain_stage_target_drift' });
+  assert.equal(deps.activations.length, 0);
+});
+test('complete Passenger routing fields compare by value across serialization ordering', async () => {
+  const deps = dependencies(), job = passengerStageJob();
+  job.payload.target = Object.fromEntries(Object.entries(job.payload.target).reverse());
+  await jobReconciliationInternals.reconcilePassengerDomainStageBinding({ job, domain: stagedDomain(), ...deps });
+  assert.equal(deps.activations.length, 1);
 });
 
 test('completed Passenger Domain stage updates Domain state then runtime binding evidence', async () => {

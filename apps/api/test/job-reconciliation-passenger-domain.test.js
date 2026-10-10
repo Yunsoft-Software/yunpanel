@@ -32,6 +32,7 @@ test('Passenger Domain restage advances evidence without replacing authority sou
     id: websiteId,
     serverId,
     runtimeType: 'node',
+    unixUser: passengerTarget.user,
     applicationId,
     revision: 1,
   };
@@ -68,11 +69,7 @@ test('Passenger Domain restage advances evidence without replacing authority sou
     resourceId: domainId,
     payload: {
       targetType: 'passenger',
-      target: {
-        root: passengerTarget.appRoot,
-        startupFile: passengerTarget.startupFile,
-        nodeBinary: passengerTarget.nodeBinary,
-      },
+      target: { ...passengerTarget },
     },
     result: { checksum: 'b'.repeat(64) },
   };

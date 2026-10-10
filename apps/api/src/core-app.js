@@ -1053,6 +1053,7 @@ export function createApp({
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId);
     const payload = {
+      domainRevision: domain.desiredRevision,
       primaryDomain: domain.primaryDomain,
       aliases: domain.aliases,
       targetType: domain.targetType,

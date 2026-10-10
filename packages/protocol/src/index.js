@@ -399,7 +399,8 @@ function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) validateMailConfigRollback(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
-    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect'], operation, errors);
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect', 'domainRevision'], operation, errors);
+    if (payload.domainRevision !== undefined && (!Number.isSafeInteger(payload.domainRevision) || payload.domainRevision < 1)) errors.push('domain.stage domainRevision must be a positive safe integer');
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
     if (!['static', 'proxy', 'passenger'].includes(payload.targetType)) errors.push('domain.stage targetType must be static, proxy or passenger');

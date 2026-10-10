@@ -37,10 +37,14 @@ async function fixture(t) {
     target: { upstreamPort: 3000, websocket: true },
   });
   const payload = {
+    domainRevision: domain.desiredRevision,
     primaryDomain: domain.primaryDomain,
     aliases: domain.aliases,
     targetType: domain.targetType,
     target: domain.target,
+    nginxSettings: domain.nginxSettings,
+    httpsRedirect: domain.httpsRedirect,
+    canonicalRedirect: domain.canonicalRedirect,
   };
 
   const first = createDurableJobRegistry({ filePath: jobStore, registryFactory: createJobRegistry });

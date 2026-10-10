@@ -185,6 +185,7 @@ test('Domain routing update carries redirect policy and the previous canonical c
     const claimStage = await jobRegistry.claimNext(enrolled.server.id);
     assert.ok(claimStage);
     assert.deepEqual(claimStage.envelope.payload, {
+      domainRevision: 2,
       primaryDomain: 'new.example.com', aliases: ['www.new.example.com'], targetType: 'proxy',
       target: { upstreamHost: '127.0.0.1', upstreamPort: 3300, websocket: true },
       nginxSettings: {

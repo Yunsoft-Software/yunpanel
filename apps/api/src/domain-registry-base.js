@@ -1020,9 +1020,12 @@ export function createDomainRegistry({
     return Object.freeze(targets.map(({ domain }) => Object.freeze(publicDomain(domain))));
   }
 
-  async function markStaged(domainId, { checksum, configName }) {
+  async function markStaged(domainId, { checksum, configName, expectedRevision = null }) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
+    if (expectedRevision !== null && domain.desiredRevision !== expectedRevision) {
+      throw new DomainRegistryError('domain_stage_revision_drift', 'Domain changed after this configuration was prepared', 409);
+    }
     if (domain.state === 'suspended') {
       throw new DomainRegistryError(
         'domain_suspended_stage_blocked',

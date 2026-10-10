@@ -106,6 +106,7 @@ export function createDomainStageTargetJobRegistry({
       ...input,
       payload: {
         ...(input.payload ?? {}),
+        domainRevision: domain.desiredRevision,
         targetType: resolved.targetType,
         target: resolved.target,
         nginxSettings: resolvedNginxSettings(domain, resolved, input.payload?.nginxSettings),

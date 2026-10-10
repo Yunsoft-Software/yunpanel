@@ -486,12 +486,15 @@ async function reconcilePassengerDomainStageBinding({
     );
   }
 
-  const expectedTarget = {
-    root: binding.passengerTarget?.appRoot,
-    startupFile: binding.passengerTarget?.startupFile,
-    nodeBinary: binding.passengerTarget?.nodeBinary,
-  };
-  if (!same(job.payload.target, expectedTarget)) {
+  const expectedTarget = binding.passengerTarget;
+  const targetFields = ['appRoot', 'documentRoot', 'startupFile', 'nodeBinary', 'user', 'group', 'appEnv', 'environmentInclude'];
+  const targetMatches = expectedTarget && job.payload.target
+    && Object.keys(expectedTarget).length === targetFields.length && Object.keys(job.payload.target).length === targetFields.length
+    && targetFields.every(field => Object.hasOwn(expectedTarget, field) && Object.hasOwn(job.payload.target, field)
+      && job.payload.target[field] === expectedTarget[field]);
+  if (!/^yunapp-[a-f0-9]{12}$/.test(website.unixUser ?? '')
+    || expectedTarget?.user !== website.unixUser || expectedTarget?.group !== website.unixUser
+    || !targetMatches) {
     passengerDomainStageError(
       'passenger_domain_stage_target_drift',
       'Passenger Domain stage target does not match current runtime authority',
@@ -676,9 +679,44 @@ async function applyReconciliation({
       return { reconciled: true, outcome: 'failed' };
     }
     if (job.operation === OPERATIONS.DOMAIN_STAGE) {
+      let expectedRevision = null;
+      if (typeof domainRegistry.getDomain === 'function') {
+        const current = await domainRegistry.getDomain(job.resourceId);
+        if (!current || current.id !== job.resourceId || current.serverId !== job.serverId) {
+          passengerDomainStageError('domain_stage_identity_drift', 'Completed stage no longer belongs to this Domain');
+        }
+        expectedRevision = current.desiredRevision;
+        const pinned = job.payload?.domainRevision;
+        const fields = ['primaryDomain', 'aliases', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings'];
+        const snapshotComplete = fields.every(field => Object.hasOwn(job.payload ?? {}, field));
+        const routing = { ...current, nginxSettings: ['passenger', 'php'].includes(job.payload?.targetType)
+          ? { clientMaxBodySizeMb: current.nginxSettings?.clientMaxBodySizeMb ?? null, headers: current.nginxSettings?.headers ?? [] }
+          : current.nginxSettings };
+        const snapshotMatches = snapshotComplete && fields.every(field => same(job.payload[field], routing[field]))
+          && (current.httpsMode === 'off' || !current.certificateId ? !job.payload.tls : Boolean(job.payload.tls));
+        if (pinned !== undefined) {
+          if (!Number.isSafeInteger(pinned) || pinned < 1 || pinned > current.desiredRevision) {
+            passengerDomainStageError('domain_stage_revision_drift', 'Completed stage revision is not current');
+          }
+          if (pinned < current.desiredRevision) return { reconciled: true, outcome: 'succeeded', superseded: true };
+          if (!snapshotMatches) passengerDomainStageError('domain_stage_snapshot_drift', 'Prepared routing does not match the pinned Domain settings');
+        } else {
+          // Older durable jobs have no revision pin. A prepared file for a
+          // different routing draft must never be labeled as the new revision.
+          if (!snapshotComplete) {
+            passengerDomainStageError('domain_stage_legacy_snapshot_incomplete', 'Older completed stage requires its full routing snapshot');
+          }
+          if (!snapshotMatches) {
+            return { reconciled: true, outcome: 'succeeded', superseded: true };
+          }
+        }
+      } else if (job.payload?.domainRevision !== undefined) {
+        passengerDomainStageError('domain_stage_reconciliation_unavailable', 'Pinned Domain stage cannot be inspected');
+      }
       const domain = await domainRegistry.markStaged(job.resourceId, {
         checksum: job.result.checksum,
         configName: job.result.configName,
+        ...(expectedRevision !== null ? { expectedRevision } : {}),
       });
       await reconcilePassengerDomainStageBinding({
         job,
