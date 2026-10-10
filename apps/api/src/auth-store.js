@@ -443,51 +443,53 @@ export function createAuthStore({
     websiteLookup: customWebsiteLookup = null,
   } = {}) {
     const activeWebsiteLookup = customWebsiteLookup ?? websiteLookup;
+    const name = username(inputUsername);
+    if (typeof websiteId !== 'string' || !websiteId) {
+      throw new AuthError('invalid_website_ids', 'websiteId is required.');
+    }
+    if (operationId !== null && (typeof operationId !== 'string' || !operationId)) {
+      throw new AuthError('invalid_operation_id', 'operationId must be a non-empty string.');
+    }
+
+    if (operationId) {
+      const reconciled = reconcileOperationUser(operationId, websiteId);
+      if (reconciled) {
+        if (reconciled.username !== name) {
+          throw new AuthError('operation_user_conflict', 'Operation is already associated with a different username.', 409);
+        }
+        return reconciled;
+      }
+    }
+
+    // Pre-hash live actor check
+    if (rawToken) {
+      const session = getSession(rawToken);
+      if (!session) throw invalid();
+      if (typeof requireManagement === 'function') requireManagement(session);
+    } else if (actorId && actorId !== 'system') {
+      const actor = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actorId);
+      if (!actor || actor.active !== 1) {
+        throw new AuthError('forbidden', 'Actor is inactive or not found.', 403);
+      }
+    }
+
+    // Pre-hash live website check
+    if (typeof activeWebsiteLookup === 'function') {
+      const exists = await activeWebsiteLookup(websiteId);
+      if (!exists) {
+        throw new AuthError('website_not_found', 'Target website does not exist.', 404);
+      }
+    }
+
+    if (db.prepare('SELECT id FROM users WHERE username = ?').get(name)) {
+      throw new AuthError('username_taken', 'This username is already taken.', 409);
+    }
+
+    const passwordHash = await hashPassword(inputPassword);
+
+    // Password hashing must not hold the durable mutation lock. Reconcile and
+    // reauthorize under that lock immediately before the atomic database write.
     return storeLock.withLock(async () => {
-      const name = username(inputUsername);
-      if (typeof websiteId !== 'string' || !websiteId) {
-        throw new AuthError('invalid_website_ids', 'websiteId is required.');
-      }
-      if (operationId !== null && (typeof operationId !== 'string' || !operationId)) {
-        throw new AuthError('invalid_operation_id', 'operationId must be a non-empty string.');
-      }
-
-      if (operationId) {
-        const reconciled = reconcileOperationUser(operationId, websiteId);
-        if (reconciled) {
-          if (reconciled.username !== name) {
-            throw new AuthError('operation_user_conflict', 'Operation is already associated with a different username.', 409);
-          }
-          return reconciled;
-        }
-      }
-
-      // Pre-hash live actor check
-      if (rawToken) {
-        const session = getSession(rawToken);
-        if (!session) throw invalid();
-        if (typeof requireManagement === 'function') requireManagement(session);
-      } else if (actorId && actorId !== 'system') {
-        const actor = db.prepare('SELECT id, role, active FROM users WHERE id = ?').get(actorId);
-        if (!actor || actor.active !== 1) {
-          throw new AuthError('forbidden', 'Actor is inactive or not found.', 403);
-        }
-      }
-
-      // Pre-hash live website check
-      if (typeof activeWebsiteLookup === 'function') {
-        const exists = await activeWebsiteLookup(websiteId);
-        if (!exists) {
-          throw new AuthError('website_not_found', 'Target website does not exist.', 404);
-        }
-      }
-
-      if (db.prepare('SELECT id FROM users WHERE username = ?').get(name)) {
-        throw new AuthError('username_taken', 'This username is already taken.', 409);
-      }
-
-      const passwordHash = await hashPassword(inputPassword);
-
       // Post-hash live actor check (fail-closed)
       if (rawToken) {
         const session = getSession(rawToken);
@@ -507,6 +509,16 @@ export function createAuthStore({
         const stillExists = await activeWebsiteLookup(websiteId);
         if (!stillExists) {
           throw new AuthError('website_not_found', 'Target website was removed during password hashing.', 404);
+        }
+      }
+
+      if (operationId) {
+        const reconciled = reconcileOperationUser(operationId, websiteId);
+        if (reconciled) {
+          if (reconciled.username !== name) {
+            throw new AuthError('operation_user_conflict', 'Operation is already associated with a different username.', 409);
+          }
+          return reconciled;
         }
       }
 
