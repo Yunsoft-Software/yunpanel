@@ -369,6 +369,17 @@ test('a bound Website retains its Unix and log resources during Domain removal o
   assert.ok(unavailable.hardBlockers.includes('unixIdentities_inventory_unavailable'));
 });
 
+test('a Domain can retain only its bound Website application runtime while the Website teardown owns final cleanup',()=>{
+ const current=domain(),evidence=impact(current);evidence.dependencies.runtimeBindings={status:'available',items:[{id:'application-1'}]};
+ evidence.blockers.push({code:'runtime_binding_dependencies_present',count:1});
+ const preview=createDomainRemovalPreview({domain:current,impact:evidence});assert.equal(preview.readyToStart,true);
+ assert.deepEqual(preview.plan.additional.runtimeBindings.ids,['application-1']);
+ evidence.dependencies.runtimeBindings={status:'available',items:[{id:'foreign-application'}]};
+ const foreign=createDomainRemovalPreview({domain:current,impact:evidence});assert.equal(foreign.readyToStart,false);assert.ok(foreign.hardBlockers.includes('runtime_binding_dependencies_present'));
+ evidence.dependencies.runtimeBindings={status:'unavailable',items:[]};
+ const unavailable=createDomainRemovalPreview({domain:current,impact:evidence});assert.equal(unavailable.readyToStart,false);assert.ok(unavailable.hardBlockers.includes('runtimeBindings_inventory_unavailable'));
+});
+
 test('non-orchestratable authoritative DNS blocker fails closed', () => {
   const currentDomain = domain();
   const base = impact(currentDomain);
