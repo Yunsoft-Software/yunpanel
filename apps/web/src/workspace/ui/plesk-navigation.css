@@ -3,3 +3,12 @@
 .ws-plesk-site-navigation .ws-tabs { display: flex; flex-wrap: wrap; gap: 0.35rem; overflow: visible; margin: 0; }
 .ws-plesk-site-navigation .ws-tabs a { display: inline-flex; align-items: center; gap: 0.4rem; max-width: 100%; white-space: normal; overflow-wrap: anywhere; }
 .ws-plesk-site-navigation .ws-tabs a svg { flex-shrink: 0; }
+.ws-site-tool-group { display: flex; align-items: start; gap: 1rem; padding: .65rem .8rem; border-bottom: 1px solid var(--ws-border); }
+.ws-site-tool-group-label { width: 8.5rem; flex: 0 0 8.5rem; padding-top: .45rem; color: var(--ws-muted); font-size: .75rem; font-weight: 600; }
+.ws-plesk-site-navigation .ws-tabs a { font-size: .8rem; padding: .4rem .6rem; border: 0; border-radius: var(--ws-radius); }
+.workspace-shell .ws-site-tool-select { display: none; }
+@media (max-width: 600px) {
+  .workspace-shell .ws-site-tool-select { display: grid; gap: .4rem; margin: .8rem 0 1rem; }
+  .ws-site-tool-desktop { display: none; }
+  .ws-website-task-quick { padding: .6rem; }
+}
