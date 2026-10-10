@@ -738,6 +738,12 @@ function dependencyPlan(dependencies, domain) {
 function hardBlockers(blockers, plan) {
   const hard = [];
   for (const blocker of blockers) {
+    // Domain removal detaches its Website binding. It does not remove the
+    // Website's account or logs; full Website teardown owns those later steps.
+    const retainedBucket = blocker.code === 'unix_identity_dependencies_present' ? 'unixIdentities'
+      : blocker.code === 'log_scope_dependencies_present' ? 'logScopes' : null;
+    if (retainedBucket && plan.websiteId !== null && plan.additional[retainedBucket].status === 'available'
+      && blocker.count === plan.additional[retainedBucket].ids.length) continue;
     if (blocker.code === 'active_jobs_present' || blocker.code === 'dependency_inventory_unavailable') {
       hard.push(blocker.code);
       continue;

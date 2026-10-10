@@ -4,6 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
+test('current Domain dependency inventory is retained in durable operations; partial and unknown current buckets are rejected', async () => {
+  const input = preview();
+  for (const key of ['databases', 'sftpKeys', 'runtimeBindings', 'unixIdentities', 'logScopes']) {
+    input.plan.additional[key] = { status: 'available', ids: [key + '-1'] };
+  }
+  const registry = createDomainRemovalOperationRegistry();
+  const operation = await registry.create(input);
+  assert.deepEqual(operation.plan.additional, input.plan.additional);
+  const partial = preview(); partial.plan.additional.databases = { status: 'available', ids: [] };
+  await assert.rejects(createDomainRemovalOperationRegistry().create(partial), error => error.code === 'domain_removal_operation_state_invalid');
+  const unknown = structuredClone(input); unknown.plan.additional.untrusted = { status: 'available', ids: [] };
+  await assert.rejects(createDomainRemovalOperationRegistry().create(unknown), error => error.code === 'domain_removal_operation_state_invalid');
+});
+
 import {
   createDomainRemovalOperationRegistry,
   domainRemovalOperationPublicView,

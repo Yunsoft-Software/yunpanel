@@ -99,6 +99,26 @@ async function fixture(t) {
   return { root, filePath, apps, workloads, projects, registry };
 }
 
+test('normal Website finalization checks its removal identity, preserves siblings and persists without requiring a migration ID', async (t) => {
+  const { registry, filePath, apps } = await fixture(t);
+  const site = await registry.createWebsite({ serverId, name: 'Normal static site', applicationId: staticAppId });
+  const sibling = await registry.createWebsite({ serverId, name: 'Preserved sibling', applicationId: nodeAppId });
+  const input = { websiteId: site.id, serverId, applicationId: staticAppId, expectedRevision: site.revision,
+    operationId: 'ws-rem-c0d2f997-eecd-4e6e-bbf2-430c06940fdc' };
+  for (const changes of [{ serverId: otherServerId }, { applicationId: nodeAppId }, { expectedRevision: site.revision + 1 }]) {
+    await assert.rejects(registry.finalizeWebsiteRemoval({ ...input, ...changes }), error => error.code === 'website_removal_state_mismatch');
+    assert.equal((await registry.getWebsite(site.id)).id, site.id);
+  }
+  await assert.rejects(registry.finalizeWebsiteRemoval({ ...input, operationId: 'unverified-operation' }), error => error.code === 'website_removal_identity_invalid');
+  assert.deepEqual(await registry.finalizeWebsiteRemoval(input), { deleted: true, websiteId: site.id });
+  assert.equal(await registry.getWebsite(site.id), null);
+  assert.equal((await registry.getWebsite(sibling.id)).id, sibling.id);
+  const reopened = createWebsiteRegistry({ filePath, getApplication: async id => apps.get(id) ?? null });
+  await reopened.init();
+  assert.equal(await reopened.getWebsite(site.id), null);
+  assert.equal((await reopened.getWebsite(sibling.id)).id, sibling.id);
+});
+
 test('application-backed Website gets independent identity and canonical runtime binding', async (t) => {
   const { registry } = await fixture(t);
   const website = await registry.createWebsite({
@@ -182,7 +202,7 @@ test('Managed Compose Website persists explicit service identity without transie
   assert.equal(website.proxyTarget, null);
 
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 5);
+  assert.equal(persisted.version, 6);
   assert.deepEqual(persisted.websites[0].managedComposeBinding, managedComposeBinding);
   assert.equal(persisted.websites[0].proxyTarget, null);
   assert.equal(JSON.stringify(persisted).includes('18080'), false);
@@ -367,7 +387,7 @@ test('v1 Website state migrates once to current revisioned state without changin
     managedComposeBinding: null,
   });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 5);
+  assert.equal(migrated.version, 6);
   assert.equal(migrated.websites[0].revision, 1);
   assert.equal(migrated.websites[0].proxyTarget, null);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
@@ -404,7 +424,7 @@ test('v2 Website state migrates through Docker identity and Managed Compose iden
     managedComposeBinding: null,
   });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 5);
+  assert.equal(migrated.version, 6);
   assert.equal(migrated.websites[0].dockerWorkloadId, null);
   assert.equal(migrated.websites[0].managedComposeBinding, null);
 });
@@ -425,7 +445,7 @@ test('v3 Website state adds a null Managed Compose identity without changing ext
   await reopened.init();
   assert.deepEqual(await reopened.getWebsite(created.id), { ...created, managedComposeBinding: null });
   const migrated = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(migrated.version, 5);
+  assert.equal(migrated.version, 6);
   assert.equal(migrated.websites[0].managedComposeBinding, null);
 });
 

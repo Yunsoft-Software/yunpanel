@@ -468,9 +468,12 @@ function normalizedPlan(value) {
   const webmailMappingIntents = normalizedWebmailMappingIntents(value.webmailMappingIntents);
 
   const normalizedAdditional = (additional) => {
-    const additionalFields = new Set(['mailboxes', 'backups', 'crons', 'dockerWorkloads']);
+    const legacyAdditionalFields = new Set(['mailboxes', 'backups', 'crons', 'dockerWorkloads']);
+    const additionalFields = new Set([...legacyAdditionalFields, 'databases', 'sftpKeys', 'runtimeBindings', 'unixIdentities', 'logScopes']);
+    const keys = Object.keys(additional ?? {});
+    const legacy = keys.length === legacyAdditionalFields.size && keys.every(key => legacyAdditionalFields.has(key));
     if (!additional || typeof additional !== 'object' || Array.isArray(additional)
-      || Object.keys(additional).length !== additionalFields.size
+      || (!legacy && keys.length !== additionalFields.size)
       || Object.keys(additional).some((field) => !additionalFields.has(field))) {
       throw invalid('Domain removal additional dependency plan is invalid');
     }
@@ -488,6 +491,9 @@ function normalizedPlan(value) {
       backups: bucket(additional.backups, 'backup'),
       crons: bucket(additional.crons, 'cron'),
       dockerWorkloads: bucket(additional.dockerWorkloads, 'docker'),
+      ...(!legacy ? { databases: bucket(additional.databases, 'database'),
+        sftpKeys: bucket(additional.sftpKeys, 'sftpKey'), runtimeBindings: bucket(additional.runtimeBindings, 'runtimeBinding'),
+        unixIdentities: bucket(additional.unixIdentities, 'unixIdentity'), logScopes: bucket(additional.logScopes, 'logScope') } : {}),
     });
   };
   const authoritativeDns = normalizedAuthoritativeDns(value.authoritativeDns);

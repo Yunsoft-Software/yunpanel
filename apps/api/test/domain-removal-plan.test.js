@@ -354,6 +354,21 @@ test('active jobs block removal start even when all other dependencies are orche
   assert.equal(preview.confirmation, null);
 });
 
+test('a bound Website retains its Unix and log resources during Domain removal only with complete matching inventory', () => {
+  const current = domain(), evidence = impact(current);
+  evidence.dependencies.unixIdentities = { status: 'available', items: [{ id: 'unix-1' }] };
+  evidence.dependencies.logScopes = { status: 'available', items: [{ id: 'log-1' }] };
+  evidence.blockers.push({ code: 'unix_identity_dependencies_present', count: 1 }, { code: 'log_scope_dependencies_present', count: 1 });
+  const preview = createDomainRemovalPreview({ domain: current, impact: evidence });
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.plan.additional.unixIdentities.ids, ['unix-1']);
+  assert.deepEqual(preview.plan.additional.logScopes.ids, ['log-1']);
+  evidence.dependencies.unixIdentities = { status: 'unavailable', items: [] };
+  const unavailable = createDomainRemovalPreview({ domain: current, impact: evidence });
+  assert.equal(unavailable.readyToStart, false);
+  assert.ok(unavailable.hardBlockers.includes('unixIdentities_inventory_unavailable'));
+});
+
 test('non-orchestratable authoritative DNS blocker fails closed', () => {
   const currentDomain = domain();
   const base = impact(currentDomain);

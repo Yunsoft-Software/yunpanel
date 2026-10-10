@@ -2,7 +2,8 @@ import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-op
 import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
 import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
 
-// Real plan, operation registry and runtime. Only host adapters are controlled here.
+// Real plan, operation registry and runtime with fixture resource/host adapters.
+// Physical host and browser acceptance is recorded in e2e/live-audit.
 export function removalPreview(id = 'site-a', buckets = {}, websiteChanges = {}) {
   const website = { id, serverId: 'server-a', applicationId: 'app-a', revision: 1, ...websiteChanges };
   const dependencies = Object.fromEntries(['databases', 'sftpKeys', 'runtimeBindings', 'unixIdentities', 'logScopes', 'crons', 'backups']
@@ -34,7 +35,8 @@ export async function removalFixture(overrides = {}, preview = removalPreview())
     fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
     unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: preview.website.applicationId, systemUser }),
-    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    websiteRegistry: { getWebsite: async () => null, finalizeWebsiteRemoval: async () => {} },
+    domainRegistry: { listDomains: async () => [] },
     applicationRegistry: (() => { let current = preview.website.applicationId ? {
       id: preview.website.applicationId, serverId: preview.website.serverId,
       desiredRevision: preview.plan.applicationRevision, activeDeploymentId: null,

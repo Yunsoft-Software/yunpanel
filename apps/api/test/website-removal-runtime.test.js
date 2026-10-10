@@ -67,8 +67,9 @@ test('website-removal-runtime coordinates domain removal child operation before 
   let childOp = null;
   const domainRemovalRuntime = {
     listForDomain: async () => (childOp ? [childOp] : []),
-    preview: async () => ({ confirmation: 'start-domain-remove:dom-1:1:xyz' }),
-    start: async () => {
+    preview: async () => ({ readyToStart: true, previewDigest: 'b'.repeat(64), confirmation: 'start-domain-remove:dom-1:1:xyz' }),
+    start: async (input) => {
+      assert.deepEqual(input, { domainId: 'dom-1', previewDigest: 'b'.repeat(64), confirmation: 'start-domain-remove:dom-1:1:xyz' });
       childOp = {
         id: 'dom-rem-1',
         domainId: 'dom-1',
@@ -88,10 +89,11 @@ test('website-removal-runtime coordinates domain removal child operation before 
   const actionsCalled = [];
   let runtimeBinding = { revision: 1, adapter: 'passenger', sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa' };
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => mockPreview(),
     domainRemovalRuntime,
-    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    websiteRegistry: { getWebsite: async () => null, finalizeWebsiteRemoval: async () => {} },
     ...applicationCleanupDependencies(actionsCalled),
     databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
     websiteSftpKeyRegistry: {
@@ -170,6 +172,7 @@ test('website-removal-runtime init inspects interrupted running steps and blocks
 
   // Re-init with runtime
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
@@ -194,10 +197,11 @@ test('website-removal-runtime cleans up database credentials and passes retained
 
   const actions = [];
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
-    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    websiteRegistry: { getWebsite: async () => null, finalizeWebsiteRemoval: async () => {} },
     ...applicationCleanupDependencies(),
     websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
     runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
@@ -344,12 +348,13 @@ test('website-removal-runtime verifies direct-systemd host cleanup before droppi
     sourceOperationId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
   };
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
     websiteRegistry: {
       getWebsite: async () => websitePresent ? { id: 'ws-direct', applicationId: 'app-direct', serverId: 'srv-local', desiredRevision: 1 } : null,
-      deleteMigrationWebsite: async () => { websitePresent = false; actions.push('websiteMetadata'); return { websiteId: 'ws-direct', deleted: true }; },
+      finalizeWebsiteRemoval: async () => { websitePresent = false; actions.push('websiteMetadata'); return { websiteId: 'ws-direct', deleted: true }; },
     },
     applicationRegistry: {
       getApplication: async () => application,
@@ -412,6 +417,7 @@ test('direct-systemd preview is blocked before mutation when host evidence inspe
   await registry.init();
   const preview = directSystemdPreview();
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { start: async () => {} },
@@ -427,7 +433,7 @@ test('direct-systemd preview is blocked before mutation when host evidence inspe
     directSystemdCleanupHandler: async (input) => ({ ...input, directSystemdCleaned: true }),
     fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
     fileCleanupHandler: async (input) => ({ ...input, filesCleaned: true }),
-    websiteRegistry: { getWebsite: async () => null, deleteMigrationWebsite: async () => {} },
+    websiteRegistry: { getWebsite: async () => null, finalizeWebsiteRemoval: async () => {} },
     applicationRegistry: { getApplication: async () => ({ id: 'app-direct' }), deleteApplication: async () => {} },
     applicationEnvironmentRegistry: {
       inspectApplicationState: async () => ({ applicationId: 'app-direct', variableCount: 0, environmentPresent: false }),

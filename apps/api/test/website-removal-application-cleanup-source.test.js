@@ -6,11 +6,14 @@ test('Website removal journals Application cleanup after Website metadata finali
   const source=await readFile(new URL('../src/website-removal-operation-registry.js',import.meta.url),'utf8');
   assert.ok(source.indexOf("add('metadata_finalization'") < source.indexOf("add('application_cleanup'"));
 });
-test('Website removal production wiring supplies Application environment cleanup dependency', async () => {
+test('source declaration retains environment cleanup and Domain inventory dependencies in Website removal composition', async () => {
   const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
   const start=source.indexOf('createWebsiteRemovalRuntime({');
-  const block=source.slice(start,start+1600);
+  const end=source.indexOf('\n  })\n  : null;',start);
+  assert.ok(start>=0&&end>start,'The complete Website removal composition must be identifiable');
+  const block=source.slice(start,end);
   assert.match(block,/applicationEnvironmentRegistry/);
+  assert.match(block,/domainRegistry/);
 });
 
 test('Website removal preview journals Application revision separately from Website revision', async () => {

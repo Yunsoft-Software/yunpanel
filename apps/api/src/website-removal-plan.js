@@ -193,8 +193,18 @@ function dependencyPlan(dependencies, currentWebsite, application = null, applic
     );
   }
 
-  const rawDomains = dependencies.domains ?? [];
+  const rawDomains = dependencies.linkedDomains ?? dependencies.domains;
+  if (!Array.isArray(rawDomains) && (!rawDomains || rawDomains.status !== 'available' || !Array.isArray(rawDomains.items))) {
+    throw new WebsiteRemovalPlanError('website_removal_domain_inventory_invalid', 'Verified Website Domain inventory is required', 409);
+  }
   const boundDomains = Array.isArray(rawDomains) ? rawDomains : (rawDomains.items ?? []);
+  if (boundDomains.some(domain => typeof domain === 'object' && ((domain.websiteId !== undefined && domain.websiteId !== currentWebsite.id)
+    || (domain.serverId !== undefined && domain.serverId !== currentWebsite.serverId)))) {
+    throw new WebsiteRemovalPlanError('website_removal_domain_scope_invalid', 'Website Domain inventory contains a foreign resource', 409);
+  }
+  if ((dependencies.childDomains ?? []).some(domain => domain.websiteId !== undefined && domain.websiteId !== currentWebsite.id)) {
+    throw new WebsiteRemovalPlanError('website_removal_child_scope_conflict', 'Another Website depends on this Domain; resolve that relationship before removing it', 409);
+  }
   const orderedBoundDomains = orderDomains(boundDomains.map((d) => ({
     id: safeId(typeof d === 'string' ? d : d.id, 'domainId'),
     primaryDomain: typeof d === 'object' && d.primaryDomain ? d.primaryDomain : (d.name ?? d.id),

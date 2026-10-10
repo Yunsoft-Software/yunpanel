@@ -2,13 +2,14 @@ import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid, normalizeProxyHost } from '@yunpanel/shared';
+import { phpFpmTemplatePolicy } from '@yunpanel/config-templates';
 import {
   ManagedComposeWebsiteBindingError,
   normalizeManagedComposeWebsiteBinding,
   resolveManagedComposeWebsiteBinding,
 } from './managed-compose-website-binding.js';
 
-const STORE_VERSION = 5;
+const STORE_VERSION = 6;
 const RUNTIME_TYPES = new Set(['static', 'node', 'php', 'python', 'docker', 'proxy']);
 const UPDATE_FIELDS = new Set([
   'name', 'applicationId', 'dockerWorkloadId', 'managedComposeBinding', 'runtimeType', 'proxyTarget',
@@ -30,6 +31,20 @@ export class WebsiteRegistryError extends Error {
 
 function emptyState() {
   return { version: STORE_VERSION, websites: [] };
+}
+
+function phpConfig(value) {
+  if (value == null) return null;
+  const fields = ['phpVersion', 'maxChildren', 'memoryLimitMb', 'maxExecutionSeconds'];
+  if (typeof value !== 'object' || Array.isArray(value)
+    || Object.keys(value).length !== fields.length || Object.keys(value).some((key) => !fields.includes(key))
+    || !phpFpmTemplatePolicy.supportedVersions.includes(value.phpVersion)
+    || !Number.isSafeInteger(value.maxChildren) || value.maxChildren < 1 || value.maxChildren > 64
+    || !Number.isSafeInteger(value.memoryLimitMb) || value.memoryLimitMb < 64 || value.memoryLimitMb > 2048
+    || !Number.isSafeInteger(value.maxExecutionSeconds) || value.maxExecutionSeconds < 5 || value.maxExecutionSeconds > 900) {
+    throw new WebsiteRegistryError('website_php_config_invalid', 'PHP ayarları geçersiz');
+  }
+  return { ...value };
 }
 
 function uuid(value, field) {
@@ -161,6 +176,7 @@ function rethrowManagedComposeError(error) {
 function publicWebsite(website) {
   return Object.freeze({
     ...website,
+    ...(website.phpConfig ? { phpConfig: Object.freeze({ ...website.phpConfig }) } : {}),
     managedComposeBinding: website.managedComposeBinding
       ? Object.freeze({ ...website.managedComposeBinding })
       : null,
@@ -177,11 +193,13 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
   }
   if (sourceVersion >= 3) allowed.add('dockerWorkloadId');
   if (sourceVersion >= 4) allowed.add('managedComposeBinding');
+  if (sourceVersion >= 6) allowed.add('phpConfig');
   if (Object.keys(value).some((key) => !allowed.has(key))) throw new Error('invalid website registry entry');
   const id = uuid(value.id, 'websiteId');
   const serverId = uuid(value.serverId, 'serverId');
   const runtimeType = RUNTIME_TYPES.has(value.runtimeType) ? value.runtimeType : null;
   if (!runtimeType) throw new Error('invalid website registry entry');
+  if (runtimeType !== 'php' && value.phpConfig != null) throw new Error('PHP configuration requires a PHP Website');
   const createdAt = typeof value.createdAt === 'string' && Number.isFinite(Date.parse(value.createdAt)) ? value.createdAt : null;
   const updatedAt = typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt)) ? value.updatedAt : null;
   if (!createdAt || !updatedAt) throw new Error('invalid website registry entry');
@@ -242,6 +260,7 @@ function validatePersistedWebsite(value, sourceVersion = STORE_VERSION) {
     documentRoot,
     unixUser,
     proxyTarget: normalizedProxyTarget,
+    ...(sourceVersion >= 6 && value.phpConfig != null ? { phpConfig: phpConfig(value.phpConfig) } : {}),
     revision,
     createdAt,
     updatedAt,
@@ -270,7 +289,7 @@ export function createWebsiteRegistry({
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
+    writeChain = writeChain.catch(() => {}).then(async () => {
       await mkdir(directory, { recursive: true });
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
       await rename(temporaryPath, filePath);
@@ -347,7 +366,7 @@ export function createWebsiteRegistry({
     if (filePath) {
       try {
         const parsed = JSON.parse(await readFile(filePath, 'utf8'));
-        if (![1, 2, 3, 4, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
+        if (![1, 2, 3, 4, 5, STORE_VERSION].includes(parsed?.version) || !Array.isArray(parsed.websites)) throw new Error('unsupported or invalid website registry state');
         const sourceVersion = parsed.version;
         const websites = parsed.websites.map((website) => validatePersistedWebsite(website, sourceVersion));
         const ids = new Set();
@@ -749,6 +768,7 @@ export function createWebsiteRegistry({
       || next.documentRoot !== website.documentRoot
       || next.unixUser !== website.unixUser;
     const proxyTargetChanged = JSON.stringify(next.proxyTarget) !== JSON.stringify(website.proxyTarget);
+    if (bindingChanged) delete next.phpConfig;
     if (!nameChanged && !bindingChanged && !proxyTargetChanged) {
       throw new WebsiteRegistryError('website_update_no_changes', 'Website update does not change current state', 409);
     }
@@ -837,11 +857,45 @@ export function createWebsiteRegistry({
     return Object.freeze({ deleted: true, websiteId: normalizedWebsiteId });
   }
 
+  async function finalizeWebsiteRemoval({ websiteId, serverId, applicationId = null, expectedRevision, operationId } = {}) {
+    await ensureInitialized();
+    const id = uuid(websiteId, 'websiteId'), targetServerId = uuid(serverId, 'serverId');
+    const targetApplicationId = applicationId === null ? null : uuid(applicationId, 'applicationId');
+    if (typeof operationId !== 'string' || !/^ws-rem-[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(operationId)
+      || !Number.isSafeInteger(expectedRevision) || expectedRevision < 1) {
+      throw new WebsiteRegistryError('website_removal_identity_invalid', 'An exact Website removal operation and revision are required', 409);
+    }
+    const index = state.websites.findIndex(website => website.id === id);
+    if (index < 0) return Object.freeze({ deleted: false, websiteId: id });
+    const website = state.websites[index];
+    if (website.serverId !== targetServerId || website.applicationId !== targetApplicationId || website.revision !== expectedRevision) {
+      throw new WebsiteRegistryError('website_removal_state_mismatch', 'Website identity or revision changed during removal', 409);
+    }
+    state.websites.splice(index, 1);
+    try { await persist(); }
+    catch (error) { state.websites.splice(index, 0, website); throw error; }
+    return Object.freeze({ deleted: true, websiteId: id });
+  }
+
   async function getWebsite(websiteId) {
     await ensureInitialized();
     const id = uuid(websiteId, 'websiteId');
     const website = state.websites.find((candidate) => candidate.id === id);
     return website ? publicWebsite(website) : null;
+  }
+
+  async function updateWebsitePhpConfig({ websiteId, expectedRevision, config } = {}) {
+    await ensureInitialized();
+    const website = requireWebsite(uuid(websiteId, 'websiteId'));
+    if (website.runtimeType !== 'php') throw new WebsiteRegistryError('website_runtime_not_php', 'Site PHP kullanmıyor', 409);
+    if (!Number.isSafeInteger(expectedRevision) || website.revision !== expectedRevision) {
+      throw new WebsiteRegistryError('website_revision_conflict', 'Site değişti; ayarları tekrar kontrol edin', 409);
+    }
+    const previous = { ...website };
+    Object.assign(website, { phpConfig: phpConfig(config), revision: expectedRevision + 1, updatedAt: new Date(now()).toISOString() });
+    try { await persist(); }
+    catch (error) { Object.keys(website).forEach((key) => delete website[key]); Object.assign(website, previous); throw error; }
+    return publicWebsite(website);
   }
 
   async function listWebsites({ serverId = null } = {}) {
@@ -857,8 +911,10 @@ export function createWebsiteRegistry({
     createWebsite,
     previewWebsiteUpdate,
     updateWebsite,
+    updateWebsitePhpConfig,
     createMigrationWebsite,
     deleteMigrationWebsite,
+    finalizeWebsiteRemoval,
     getWebsite,
     listWebsites,
   });

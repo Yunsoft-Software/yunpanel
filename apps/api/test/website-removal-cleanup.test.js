@@ -80,15 +80,27 @@ for (const current of [undefined, { id: 'other', serverId: 'server-a', applicati
   { id: 'site-a', serverId: 'other', applicationId: 'app-a' }, { id: 'site-a', serverId: 'server-a', applicationId: 'other' }]) {
   test(`metadata cannot delete an unverified identity: ${JSON.stringify(current)}`, async () => {
     let deletes = 0;
-    const f = await removalFixture({ websiteRegistry: { getWebsite: async () => current, deleteMigrationWebsite: async () => { deletes++; } } });
+    const f = await removalFixture({ websiteRegistry: { getWebsite: async () => current, finalizeWebsiteRemoval: async () => { deletes++; } } });
     let op = await f.runtime.start(removalStart(f.preview)); op = await f.runtime.continueStep(removalContinue(op));
     assert.equal(op.status, 'blocked'); assert.equal(deletes, 0);
   });
 }
+test('a live Domain omitted from the plan stops deletion before any Website files are changed', async () => {
+  let fileDeletes = 0, metadataDeletes = 0;
+  const f = await removalFixture({ domainRegistry: { listDomains: async () => [{ id: 'still-attached', websiteId: 'site-a' }] },
+    fileCleanupHandler: async () => { fileDeletes++; },
+    websiteRegistry: { getWebsite: async () => ({ id: 'site-a' }), finalizeWebsiteRemoval: async () => { metadataDeletes++; } },
+  });
+  const operation = await f.runtime.start(removalStart(f.preview));
+  assert.equal(operation.status, 'failed');
+  assert.equal(operation.error.code, 'website_removal_domains_still_attached');
+  assert.equal(fileDeletes, 0); assert.equal(metadataDeletes, 0);
+});
+
 test('metadata delete that does nothing cannot mark the operation removed', async () => {
   const f = await removalFixture({ websiteRegistry: {
     getWebsite: async () => ({ id: 'site-a', serverId: 'server-a', applicationId: 'app-a' }),
-    deleteMigrationWebsite: async () => ({ deleted: true }),
+    finalizeWebsiteRemoval: async () => ({ deleted: true }),
   } });
   let op = await f.runtime.start(removalStart(f.preview)); op = await f.runtime.continueStep(removalContinue(op));
   assert.equal(op.status, 'blocked'); assert.equal(op.steps.at(-1).result, null);
@@ -96,16 +108,20 @@ test('metadata delete that does nothing cannot mark the operation removed', asyn
 test('delete errors are retained as failure, never swallowed as already absent', async () => {
   const f = await removalFixture({ websiteRegistry: {
     getWebsite: async () => ({ id: 'site-a', serverId: 'server-a', applicationId: 'app-a' }),
-    deleteMigrationWebsite: async () => { throw new Error('private filesystem detail'); },
+    finalizeWebsiteRemoval: async () => { throw new Error('private filesystem detail'); },
   } });
   let op = await f.runtime.start(removalStart(f.preview)); op = await f.runtime.continueStep(removalContinue(op));
   assert.equal(op.status, 'failed'); assert.equal(op.error.code, 'website_removal_step_failed');
   assert.doesNotMatch(JSON.stringify(op), /private filesystem detail/);
 });
 test('only an independent null read after deletion completes metadata', async () => {
-  let current = { id: 'site-a', serverId: 'server-a', applicationId: 'app-a' }, deletes = 0;
+  let current = { id: 'site-a', serverId: 'server-a', applicationId: 'app-a', revision: 1 }, deletes = 0;
   const f = await removalFixture({ websiteRegistry: { getWebsite: async () => current,
-    deleteMigrationWebsite: async (input) => { assert.deepEqual(input, { websiteId: 'site-a', serverId: 'server-a', applicationId: 'app-a' }); deletes++; current = null; },
+    finalizeWebsiteRemoval: async (input) => {
+      assert.equal(input.websiteId, 'site-a'); assert.equal(input.serverId, 'server-a'); assert.equal(input.applicationId, 'app-a');
+      assert.equal(input.expectedRevision, 1); assert.match(input.operationId, /^ws-rem-/);
+      deletes++; current = null;
+    },
   } });
   let op = await f.runtime.start(removalStart(f.preview));
   while (op.status === 'running') op = await f.runtime.continueStep(removalContinue(op));
@@ -117,7 +133,7 @@ for (const stage of ['read-before', 'read-after']) {
     const f = await removalFixture({ websiteRegistry: { getWebsite: async () => {
       reads++; if (reads === (stage === 'read-before' ? 1 : 2)) throw new Error('unavailable');
       return { id: 'site-a', serverId: 'server-a', applicationId: 'app-a' };
-    }, deleteMigrationWebsite: async () => {} } });
+    }, finalizeWebsiteRemoval: async () => {} } });
     let op = await f.runtime.start(removalStart(f.preview)); op = await f.runtime.continueStep(removalContinue(op));
     assert.equal(op.status, 'failed');
   });
@@ -256,7 +272,7 @@ test('non-Application Website releases hosting allocation after Website metadata
   const f = await removalFixture({
     websiteRegistry: {
       getWebsite: async () => websitePresent ? { id: 'site-proxy', serverId: 'server-a', applicationId: null } : null,
-      deleteMigrationWebsite: async () => { websitePresent = false; },
+      finalizeWebsiteRemoval: async () => { websitePresent = false; },
     },
     hostingAllocationReleaseHandler: async (proof) => {
       proofs.push(proof);

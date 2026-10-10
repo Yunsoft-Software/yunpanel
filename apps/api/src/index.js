@@ -133,6 +133,7 @@ import { createWebsiteSuspensionOperationRegistry } from './website-suspension-o
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
 import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
+import { createWebsiteRemovalWorker } from './website-removal-worker.js';
 import { createWebsiteRemovalCleanupAdapters } from './website-removal-cleanup-adapters.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
 import { previewResourceImpact } from './resource-impact.js';
@@ -234,7 +235,9 @@ if (!['true', 'false'].includes(ownerMfaRequiredRaw)) {
 }
 const ownerMfaRequired = ownerMfaRequiredRaw === 'true';
 const localServerId = process.env.YUNPANEL_LOCAL_SERVER_ID?.trim() || null;
-const dnsZoneRetentionDaysRaw = process.env.YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS?.trim() || null;
+// Keep a recoverable zone snapshot for ordinary removal without requiring a
+// separate manual server configuration step. Explicit operator values win.
+const dnsZoneRetentionDaysRaw = process.env.YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS?.trim() || '30';
 const dnsZoneSnapshotRetentionDays = dnsZoneRetentionDaysRaw === null
   ? null
   : Number.parseInt(dnsZoneRetentionDaysRaw, 10);
@@ -908,6 +911,7 @@ const websiteRemovalCleanupAdapters = localServerId
   : null;
 const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
   ? createWebsiteRemovalRuntime({
+    domainRegistry,
     registry: websiteRemovalOperationRegistry,
     previewProvider: async ({ websiteId }) => {
       const ws = await websiteRegistry.getWebsite(websiteId);
@@ -967,9 +971,12 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
       ? (proof) => (authStore.hostingAccounts ?? authStore.users.hostingAccounts).siteAllocations.releaseRemoved(proof)
       : null,
     authorizeActor: authorizeWebsiteRemovalActor,
+    automaticExecution: true,
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
+const websiteRemovalWorker = websiteRemovalRuntime ? createWebsiteRemovalWorker({ registry: websiteRemovalOperationRegistry,
+  runtime: websiteRemovalRuntime, onError: failure => console.error(`[yunpanel-api] removal worker: ${failure.code}`) }) : null;
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -1328,6 +1335,7 @@ const renewalScheduler = startCertificateRenewalScheduler({
   renewBeforeMs: certificateRenewBeforeMs,
 });
 localRuntimeInstance = localRuntime;
+websiteRemovalWorker?.start();
 systemWatchdogService.startPeriodicSweep({ intervalMs: 60_000, serverId: localServerId });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 const terminalAuthenticator = createLiveConnectionAuthenticator({
@@ -1409,6 +1417,7 @@ async function shutdown(signal) {
   console.log(`[yunpanel-api] received ${signal}, shutting down`);
   systemWatchdogService.stop();
   renewalScheduler.stop();
+  if (websiteRemovalWorker) await websiteRemovalWorker.stop();
   if (phpMyAdminHandoffRuntime) {
     try { await phpMyAdminHandoffRuntime.close(); }
     catch { console.error('[yunpanel-api] phpMyAdmin handoff shutdown failed'); }

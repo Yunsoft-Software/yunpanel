@@ -90,6 +90,20 @@ test('creates deterministic website removal preview with ordered domains', () =>
   assert.equal(preview.confirmation, `start-website-remove:ws-1:2:${preview.previewDigest}`);
 });
 
+test('the real resource-impact linkedDomains shape cannot silently become an empty removal plan', () => {
+  const ws = website(), f = { website: ws, impact: impact(ws) };
+  f.impact.dependencies.linkedDomains = f.impact.dependencies.domains.map(domain => ({ ...domain,
+    websiteId: f.website.id, serverId: f.website.serverId }));
+  delete f.impact.dependencies.domains;
+  const preview = createWebsiteRemovalPreview(f);
+  assert.equal(preview.plan.domains.length, 2);
+  assert.equal(preview.plan.domains[0].parentDomainId !== null, true);
+  f.impact.dependencies.linkedDomains[0].websiteId = 'foreign-website';
+  assert.throws(() => createWebsiteRemovalPreview(f), error => error.code === 'website_removal_domain_scope_invalid');
+  delete f.impact.dependencies.linkedDomains;
+  assert.throws(() => createWebsiteRemovalPreview(f), error => error.code === 'website_removal_domain_inventory_invalid');
+});
+
 test('accepts the Application in the actual resource-impact dependencies envelope', () => {
   const ws = website();
   const imp = impact(ws);

@@ -752,7 +752,7 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
 
   const websiteRegistry = {
     getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-    deleteMigrationWebsite: async (input) => {
+    finalizeWebsiteRemoval: async (input) => {
       assert.equal(input.websiteId, websiteId);
       assert.equal(input.applicationId, applicationId);
       cleaned.websiteMetadataDeleted += 1;
@@ -829,6 +829,7 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime,
@@ -1014,12 +1015,13 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: {
       getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-      deleteMigrationWebsite: async () => {
+      finalizeWebsiteRemoval: async () => {
         websiteMetadataDeletedCount += 1;
         currentWebsite = null;
       },
@@ -1208,10 +1210,11 @@ test('website-removal-http reconciles interrupted running step upon restart as b
 
   // Simulate server restart: new runtime initialized on existing registry
   const restartedRuntime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
-    websiteRegistry: { getWebsite: async () => ({ id: websiteId, serverId: localServerId, applicationId: null }), deleteMigrationWebsite: async () => {} },
+    websiteRegistry: { getWebsite: async () => ({ id: websiteId, serverId: localServerId, applicationId: null }), finalizeWebsiteRemoval: async () => {} },
     fileCleanupHandler,
     fileCleanupInspector: async () => ({ ready: true }),
   });
@@ -1307,12 +1310,13 @@ test('website-removal-http enforces idempotency, prevents duplicate operations, 
 
   let websitePresent = true;
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: {
       getWebsite: async () => (websitePresent ? { id: websiteId, serverId: localServerId, applicationId: null } : null),
-      deleteMigrationWebsite: async () => { websitePresent = false; },
+      finalizeWebsiteRemoval: async () => { websitePresent = false; },
     },
     fileCleanupHandler: async () => ({ filesCleaned: true, websiteId, applicationId: null, retainedBackups: [], retainedLogScopes: [websiteId] }),
     fileCleanupInspector: async () => ({ ready: true }),
@@ -1494,12 +1498,13 @@ test('website-removal-http fails closed with 503 on site mutation lock permissio
   };
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: {
       getWebsite: async () => ({ id: websiteId, serverId: localServerId }),
-      deleteMigrationWebsite: async () => {},
+      finalizeWebsiteRemoval: async () => {},
     },
     fileCleanupHandler: async () => ({ filesCleaned: true, websiteId, applicationId: null, retainedBackups: [], retainedLogScopes: [] }),
     fileCleanupInspector: async () => ({ ready: true }),
@@ -1521,7 +1526,7 @@ test('website-removal-http fails closed with 503 on site mutation lock permissio
     siteMutationLock: failingSiteMutationLock,
     websiteRegistry: {
       getWebsite: async () => ({ id: websiteId, serverId: localServerId }),
-      deleteMigrationWebsite: async () => {},
+      finalizeWebsiteRemoval: async () => {},
     },
     localServerId,
   });
@@ -1758,10 +1763,11 @@ test('website-removal-http preserves durable recovery journals across cold-resta
     let websiteDeleted = false;
     const websiteRegistryMock = {
       getWebsite: async () => (websiteDeleted ? null : { id: websiteId, serverId: localServerId, applicationId: null }),
-      deleteMigrationWebsite: async () => { websiteDeleted = true; },
+      finalizeWebsiteRemoval: async () => { websiteDeleted = true; },
     };
 
     const runtime1 = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
       registry: registry1,
       previewProvider: async () => preview,
       domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
@@ -1819,6 +1825,7 @@ test('website-removal-http preserves durable recovery journals across cold-resta
     const registry2 = createWebsiteRemovalOperationRegistry({ filePath });
     await registry2.init();
     const runtime2 = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
       registry: registry2,
       previewProvider: async () => preview,
       domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
@@ -2033,7 +2040,7 @@ test('website-removal-http executes full removal lifecycle for Static runtime bi
 
   const websiteRegistry = {
     getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-    deleteMigrationWebsite: async (input) => {
+    finalizeWebsiteRemoval: async (input) => {
       assert.equal(input.websiteId, websiteId);
       cleaned.websiteMetadataDeleted += 1;
       currentWebsite = null;
@@ -2111,6 +2118,7 @@ test('website-removal-http executes full removal lifecycle for Static runtime bi
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
@@ -2256,12 +2264,13 @@ test('website-removal-http executes full removal lifecycle for Static runtime bi
     await failingRegistry.init();
 
     const failingRuntime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
       registry: failingRegistry,
       previewProvider: async () => failPreview,
       domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
       websiteRegistry: {
         getWebsite: async (id) => (id === websiteIdFail ? failSite : null),
-        deleteMigrationWebsite: async () => { failDestructiveExecuted = true; },
+        finalizeWebsiteRemoval: async () => { failDestructiveExecuted = true; },
       },
       applicationRegistry: {
         getApplication: async () => failApp,
@@ -2361,7 +2370,7 @@ test('website-removal-http executes full removal lifecycle for direct-systemd ru
   let applicationMetadataDeleted = false;
   const websiteRegistry = {
     getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-    deleteMigrationWebsite: async () => {
+    finalizeWebsiteRemoval: async () => {
       websiteMetadataDeleted = true;
       currentWebsite = null;
     },
@@ -2421,6 +2430,7 @@ test('website-removal-http executes full removal lifecycle for direct-systemd ru
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
@@ -2571,12 +2581,13 @@ test('website-removal-http executes full removal lifecycle for direct-systemd ru
     await failingHostRegistry.init();
 
     const failingHostRuntime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
       registry: failingHostRegistry,
       previewProvider: async () => failHostPreview,
       domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
       websiteRegistry: {
         getWebsite: async () => ({ id: failHostSiteId, serverId: localServerId, applicationId: failHostAppId }),
-        deleteMigrationWebsite: async () => { destructiveCalled = true; },
+        finalizeWebsiteRemoval: async () => { destructiveCalled = true; },
       },
       applicationRegistry: {
         getApplication: async () => ({ id: failHostAppId, serverId: localServerId, desiredRevision: 1 }),
@@ -2687,12 +2698,13 @@ test('website-removal-http releases hosting quota only upon verified final remov
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: {
       getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-      deleteMigrationWebsite: async () => { currentWebsite = null; },
+      finalizeWebsiteRemoval: async () => { currentWebsite = null; },
     },
     applicationRegistry: {
       getApplication: async (id) => (id === applicationId ? currentApplication : null),

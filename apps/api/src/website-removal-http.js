@@ -1,5 +1,6 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { WebsiteRemovalRuntimeError } from './website-removal-runtime.js';
+import { WebsiteRemovalOperationRegistryError } from './website-removal-operation-registry.js';
 import { SiteMutationLockError } from './site-mutation-lock.js';
 import { ProcessStoreLockError } from './process-store-lock.js';
 import { extractActorTenant } from './tenant-boundary.js';
@@ -8,6 +9,7 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const START_FIELDS = new Set(['previewDigest', 'confirmation']);
 const CONTINUE_STEP_FIELDS = new Set(['expectedUpdatedAt', 'stepId', 'confirmation']);
+const RUN_FIELDS = new Set(['expectedUpdatedAt', 'confirmation']);
 
 export class WebsiteRemovalHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -139,7 +141,7 @@ function asyncRoute(handler) {
   return async (request, response, next) => {
     try { return await handler(request, response); }
     catch (error) {
-      if (error instanceof WebsiteRemovalRuntimeError || error instanceof SiteMutationLockError || error instanceof ProcessStoreLockError) {
+      if (error instanceof WebsiteRemovalRuntimeError || error instanceof WebsiteRemovalOperationRegistryError || error instanceof SiteMutationLockError || error instanceof ProcessStoreLockError) {
         return next(new WebsiteRemovalHttpError(error.code, error.message, error.status));
       }
       return next(error);
@@ -217,6 +219,23 @@ export function mountWebsiteRemovalRoutes(app, {
     }));
     response.set('Cache-Control', 'no-store');
     response.json({ data: updated });
+  }));
+
+  app.post('/api/website-removal-operations/:operationId/run', requireRemovalOwner, asyncRoute(async (request, response) => {
+    const operation = await runtime.get(request.params.operationId);
+    if (!operation) throw removalNotFound();
+    const actor = await requireWebsiteAccess(request, operation.websiteId, { websiteRegistry, localServerId, allowDeleted: true });
+    const body = exactBody(request.body, RUN_FIELDS, 'website_removal_input_invalid', 'Send current removal state and confirmation');
+    if (typeof body.expectedUpdatedAt !== 'string' || !Number.isFinite(Date.parse(body.expectedUpdatedAt))
+      || new Date(body.expectedUpdatedAt).toISOString() !== body.expectedUpdatedAt
+      || typeof body.confirmation !== 'string' || !body.confirmation) {
+      throw new WebsiteRemovalHttpError('website_removal_input_invalid', 'A current removal state and confirmation are required');
+    }
+    if (typeof runtime.run !== 'function') throw new WebsiteRemovalHttpError('website_removal_execution_unavailable', 'Removal execution is unavailable', 503);
+    const updated = await withOptionalLock(operation.websiteId, () => runtime.run({ websiteId: operation.websiteId,
+      operationId: operation.id, expectedUpdatedAt: body.expectedUpdatedAt, confirmation: body.confirmation, actor }));
+    response.set('Cache-Control', 'no-store');
+    response.status(202).json({ data: updated });
   }));
 
   app.get('/api/websites/:websiteId/removal', requireRemovalOwner, asyncRoute(async (request, response) => {

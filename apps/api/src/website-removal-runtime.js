@@ -55,6 +55,9 @@ function publicOperation(operation) {
       stepContinuationConfirmation: stepContinuable
         ? stepContinuationConfirmation(operation, step)
         : null,
+      runConfirmation: stepContinuable
+        ? `run-website-remove:${operation.websiteId}:${operation.id}:${operation.updatedAt}`
+        : null,
     }),
   });
 }
@@ -64,6 +67,7 @@ export function createWebsiteRemovalRuntime({
   previewProvider,
   domainRemovalRuntime,
   websiteRegistry = null,
+  domainRegistry = null,
   applicationRegistry = null,
   applicationEnvironmentRegistry = null,
   databaseBindingRegistry = null,
@@ -81,7 +85,11 @@ export function createWebsiteRemovalRuntime({
   siteMutationLock = null,
   hostingAllocationReleaseHandler = null,
   authorizeActor = null,
+  automaticExecution = false,
 } = {}) {
+  if (typeof automaticExecution !== 'boolean' || automaticExecution && typeof authorizeActor !== 'function') {
+    throw new WebsiteRemovalRuntimeError('website_removal_runtime_invalid_dependencies', 'Automatic removal requires live actor authorization', 503);
+  }
   if (!registry || typeof registry.create !== 'function' || typeof registry.get !== 'function') {
     throw new WebsiteRemovalRuntimeError(
       'website_removal_runtime_invalid_dependencies',
@@ -257,7 +265,7 @@ export function createWebsiteRemovalRuntime({
     const missing = [];
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
     require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
-    require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.deleteMigrationWebsite);
+    require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.finalizeWebsiteRemoval, domainRegistry?.listDomains);
     if (plan?.applicationId) require('application_cleanup_unavailable',
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
       applicationEnvironmentRegistry?.inspectApplicationState, applicationEnvironmentRegistry?.purgeApplication);
@@ -370,7 +378,8 @@ export function createWebsiteRemovalRuntime({
         throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
       }
       const lockedActor = await requireLiveActor(liveActor, websiteId);
-      const op = await registry.create(currentPreview, { actor: lockedActor });
+      const op = await registry.create(currentPreview, { actor: lockedActor, executionMode: automaticExecution ? 'automatic' : 'manual' });
+      if (automaticExecution) return publicOperation(op);
       return runNextStep(op.id, lockedActor);
     });
   }
@@ -404,6 +413,19 @@ export function createWebsiteRemovalRuntime({
       websiteId: op.websiteId,
       applicationId: op.applicationId ?? null,
     }, () => runNextStep(op.id, liveActor));
+  }
+
+  async function run({ websiteId, operationId, expectedUpdatedAt, confirmation, actor = null } = {}) {
+    const operation = await loadOperation(operationId);
+    if (operation.websiteId !== websiteId) throw new WebsiteRemovalRuntimeError('operation_not_found', 'Operation not found', 404);
+    const liveActor = await requireLiveActor(actor, websiteId, { operationId });
+    if (operation.status === 'removed' || operation.updatedAt !== expectedUpdatedAt
+      || confirmation !== `run-website-remove:${websiteId}:${operationId}:${operation.updatedAt}`) {
+      throw new WebsiteRemovalRuntimeError('website_removal_execution_stale', 'Removal continuation changed; refresh its current state', 409);
+    }
+    requireCleanupMethod(registry.requestAutomaticExecution);
+    return withProcessMutationLock({ websiteId, applicationId: operation.applicationId }, async () => publicOperation(
+      await registry.requestAutomaticExecution(operationId, { expectedUpdatedAt, actor: liveActor })));
   }
 
   async function releaseHostingAllocation(op, applicationAbsent) {
@@ -472,7 +494,7 @@ export function createWebsiteRemovalRuntime({
           message: `Domain removal for ${domainId} is not ready to start`,
         });
       }
-      activeChild = await domainRemovalRuntime.start({ confirmation: domainPreview.confirmation });
+      activeChild = await domainRemovalRuntime.start({ domainId, previewDigest: domainPreview.previewDigest, confirmation: domainPreview.confirmation });
     } else {
       // Advance existing child operation
       if (activeChild.actions?.routingRetryConfirmation) {
@@ -527,6 +549,13 @@ export function createWebsiteRemovalRuntime({
     op = await loadOperation(operationId);
 
     try {
+      if (['file_cleanup', 'unix_identity_cleanup', 'metadata_finalization'].includes(step.kind)) {
+        if (typeof domainRegistry?.listDomains !== 'function') throw new WebsiteRemovalRuntimeError('website_removal_domain_inventory_unavailable', 'Bound Domain inventory is unavailable', 503);
+        const domains = await domainRegistry.listDomains();
+        if (!Array.isArray(domains) || domains.some(domain => domain.websiteId === op.websiteId)) {
+          throw new WebsiteRemovalRuntimeError('website_removal_domains_still_attached', 'Remove the bound Domains before deleting Website files or identity', 409);
+        }
+      }
       switch (step.kind) {
         case 'domain_removal': {
           op = await runDomainRemovalStep(op, step);
@@ -731,15 +760,16 @@ export function createWebsiteRemovalRuntime({
 
         case 'metadata_finalization': {
           requireCleanupMethod(websiteRegistry?.getWebsite);
-          requireCleanupMethod(websiteRegistry?.deleteMigrationWebsite);
+          requireCleanupMethod(websiteRegistry?.finalizeWebsiteRemoval);
           const current = await websiteRegistry.getWebsite(op.websiteId);
           if (current !== null) {
             if (!current || current.id !== op.websiteId || current.serverId !== op.serverId
               || current.applicationId !== op.applicationId) {
               throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Website identity changed during removal.', 409);
             }
-            await websiteRegistry.deleteMigrationWebsite({
+            await websiteRegistry.finalizeWebsiteRemoval({
               websiteId: op.websiteId, applicationId: op.applicationId, serverId: op.serverId,
+              operationId: op.id, expectedRevision: current.revision,
             });
           }
           // A delete response or exception is not evidence that persistence is gone.
@@ -853,6 +883,7 @@ export function createWebsiteRemovalRuntime({
     preview,
     start: (input) => withWebsiteMutation(input, start),
     continueStep: (input) => withWebsiteMutation(input, continueStep),
+    run: (input) => withWebsiteMutation(input, run),
     get,
     list,
     listForWebsite,

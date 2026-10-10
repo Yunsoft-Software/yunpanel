@@ -65,6 +65,7 @@ export function websiteRemovalOperationPublicView(operation) {
     websiteId: operation.websiteId,
     serverId: operation.serverId,
     applicationId: operation.applicationId,
+    label: operation.label ?? operation.plan?.domains?.[0]?.primaryDomain ?? null,
     applicationRevision: operation.applicationRevision ?? null,
     websiteRevision: operation.websiteRevision,
     status: operation.status,
@@ -84,6 +85,7 @@ export function websiteRemovalOperationPublicView(operation) {
     error: operation.error,
     createdAt: operation.createdAt,
     updatedAt: operation.updatedAt,
+    ...(operation.execution?.mode === 'automatic' ? { execution: Object.freeze({ mode: 'automatic' }) } : {}),
   });
 }
 
@@ -234,8 +236,11 @@ export function createWebsiteRemovalOperationRegistry({
     return steps;
   }
 
-  async function create(preview, { actor = null } = {}) {
+  async function create(preview, { actor = null, executionMode = 'manual' } = {}) {
     const normalizedActor = privateActor(actor, { optional: true });
+    if (!['manual', 'automatic'].includes(executionMode) || executionMode === 'automatic' && !normalizedActor) {
+      throw new WebsiteRemovalOperationRegistryError('website_removal_execution_invalid', 'Automatic removal requires recorded Owner authorization', 403);
+    }
     return withMutation(async () => {
     if (!preview || preview.operation !== 'website_remove' || !preview.readyToStart) {
       throw new WebsiteRemovalOperationRegistryError(
@@ -265,6 +270,7 @@ export function createWebsiteRemovalOperationRegistry({
       websiteId: preview.website.id,
       serverId: preview.website.serverId,
       applicationId: preview.website.applicationId,
+      label: preview.website.name ?? preview.plan?.domains?.[0]?.primaryDomain ?? null,
       applicationRevision: preview.plan.applicationRevision ?? null,
       websiteRevision: preview.website.desiredRevision,
       status: 'pending',
@@ -272,6 +278,7 @@ export function createWebsiteRemovalOperationRegistry({
       startConfirmation: preview.confirmation,
       plan: preview.plan,
       actor: normalizedActor,
+      ...(executionMode === 'automatic' ? { execution: { mode: 'automatic', requestedAt: timestamp, userId: normalizedActor.userId } } : {}),
       steps,
       error: null,
       createdAt: timestamp,
@@ -298,6 +305,47 @@ export function createWebsiteRemovalOperationRegistry({
       const op = operations.get(operationId);
       if (!op) return null;
       return privateActor(op.actor, { optional: true });
+    });
+  }
+
+  async function getExecution(operationId) {
+    safeId(operationId, 'operationId');
+    return withRead(() => {
+      const operation = operations.get(operationId);
+      if (!operation?.execution) return null;
+      const value = operation.execution, actor = privateActor(operation.actor);
+      if (value.mode !== 'automatic' || value.userId !== actor.userId
+        || typeof value.requestedAt !== 'string' || !Number.isFinite(Date.parse(value.requestedAt))) {
+        throw new WebsiteRemovalOperationRegistryError('website_removal_execution_invalid', 'Recorded removal authorization is invalid', 409);
+      }
+      return Object.freeze({ mode: 'automatic', requestedAt: value.requestedAt });
+    });
+  }
+
+  async function requestAutomaticExecution(operationId, { expectedUpdatedAt, actor } = {}) {
+    const submitted = privateActor(actor);
+    return withMutation(async () => {
+      safeId(operationId, 'operationId');
+      const operation = operations.get(operationId);
+      if (!operation || operation.status === 'removed' || operation.updatedAt !== expectedUpdatedAt) {
+        throw new WebsiteRemovalOperationRegistryError('website_removal_execution_stale', 'Removal state changed before continuation', 409);
+      }
+      const original = privateActor(operation.actor);
+      if (original.userId !== submitted.userId || original.role !== submitted.role) {
+        throw new WebsiteRemovalOperationRegistryError('website_removal_actor_conflict', 'Removal authorization belongs to another account', 403);
+      }
+      const timestamp = now(), step = operation.steps.find(step => step.status !== 'succeeded');
+      if (!step) throw new WebsiteRemovalOperationRegistryError('website_removal_execution_stale', 'No incomplete removal step remains', 409);
+      operation.actor = submitted;
+      operation.execution = { mode: 'automatic', requestedAt: timestamp, userId: submitted.userId };
+      if (['blocked', 'failed'].includes(step.status)) {
+        step.previousErrors = [...(step.previousErrors ?? []), { code: step.error?.code ?? 'unknown', at: step.updatedAt }].slice(-10);
+        step.status = 'pending'; step.error = null; step.updatedAt = timestamp;
+        operation.status = 'pending'; operation.error = null;
+      }
+      operation.updatedAt = timestamp;
+      await persist();
+      return websiteRemovalOperationPublicView(operation);
     });
   }
 
@@ -373,6 +421,9 @@ export function createWebsiteRemovalOperationRegistry({
       if (step.status === 'succeeded') {
         throw new WebsiteRemovalOperationRegistryError('step_already_succeeded', 'Step has already succeeded', 409);
       }
+      if (step.error) step.previousErrors = [...(step.previousErrors ?? []), { code: step.error.code ?? 'unknown', at: step.updatedAt }].slice(-10);
+      step.error = null;
+      op.error = null;
       step.status = 'running';
       op.status = 'running';
     });
@@ -430,6 +481,8 @@ export function createWebsiteRemovalOperationRegistry({
     create,
     get,
     getActor,
+    getExecution,
+    requestAutomaticExecution,
     refreshActor,
     list,
     listForWebsite,
