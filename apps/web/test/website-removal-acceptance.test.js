@@ -63,10 +63,9 @@ test('BUG-20260923-02: explicit confirmation, retention notice, and safe journal
   assert.match(panelText, /confirmation=\{scope\.label\}/);
   assert.match(panelText, /Yedek kayıtları silinmeyecek/);
   assert.match(panelText, /backup evidence/);
-  assert.match(panelText, /Sonraki silme adımını çalıştır/);
-  assert.match(panelText, /Bu adımı açıkça yeniden dene/);
-  assert.match(panelText, /Silme engeli/);
-  assert.match(panelText, /Tamamlanan adım/);
+  assert.match(panelText, /WebsiteRemovalProgress/);
+  assert.match(panelText, /runAutomatic/);
+  assert.doesNotMatch(panelText, /continueStep/);
 });
 
 test('BUG-20260923-02: blocker labels translate step obstacles clearly', () => {

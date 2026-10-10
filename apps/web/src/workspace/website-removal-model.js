@@ -45,9 +45,14 @@ export function removalOperation(value,scope){
   &&SHA.test(value.previewDigest??'')&&iso(value.updatedAt)&&record(value.actions));
  const confirmation=value.actions.stepContinuationConfirmation;
  need(confirmation===null||text(confirmation,700));
+ const runConfirmation=value.actions.runConfirmation??null;
+ need(runConfirmation===null||text(runConfirmation,700));
+ need(value.execution===undefined||record(value.execution)&&value.execution.mode==='automatic');
+ const label=value.label??null;need(label===null||text(label,253));
  return Object.freeze({id:value.id,websiteId:value.websiteId,serverId:value.serverId,
+  label,execution:value.execution?Object.freeze({mode:'automatic'}):null,
   applicationId:value.applicationId??null,previewDigest:value.previewDigest,status:value.status,updatedAt:value.updatedAt??null,
-  actions:Object.freeze({stepContinuationConfirmation:confirmation}),steps:Object.freeze(value.steps.map((step)=>{
+  actions:Object.freeze({stepContinuationConfirmation:confirmation,runConfirmation}),steps:Object.freeze(value.steps.map((step)=>{
    need(record(step)&&SAFE.test(step.id??'')&&typeof step.kind==='string'&&['pending','running','succeeded','blocked','failed'].includes(step.status));
    return Object.freeze({id:step.id,kind:step.kind,status:step.status,error:step.error&&typeof step.error.code==='string'?Object.freeze({code:step.error.code}):null});
  }))});
@@ -101,6 +106,10 @@ const blockerLabels=Object.freeze({
  website_cleanup_elfinder_unavailable:'Dosya yöneticisinin güvenli kaldırma yolu hazır değil. Site dosyaları ve kullanıcısı silinmedi.',
  website_cleanup_elfinder_evidence_invalid:'Dosya yöneticisinin site bağlantısı doğrulanamadı. Silme durduruldu.',
  website_cleanup_elfinder_unverified:'Dosya yöneticisinin PHP havuzu veya bağlantısı hâlâ mevcut. Site dosyaları ve kullanıcısını silmeden önce bu adım tamamlanmalı.',
+ website_removal_actor_forbidden:'İşlemi başlatan hesabın yetkisi değişti. Silme durduruldu; yetkili aynı hesapla tekrar giriş yapıp devam edin.',
+ website_removal_execution_stale:'İşlemin durumu değişti. Güncel sonucu okuyup tekrar devam edin.',
+ website_removal_execution_invalid:'Silme işleminin kayıtlı onayı doğrulanamadı. İşlem durduruldu.',
+ website_removal_worker_state_unavailable:'Silme işleminin güncel durumu doğrulanamadı. Tamamlanan adımlar korunuyor; durumu yenileyin.',
  website_removal_interrupted:'Silme adımı kesintiye uğradı; açıkça yeniden devam edilmesi gerekiyor.',
  child_domain_removal_blocked:'Bağlı alan adı silme işlemi engellendi veya tamamlanamadı.',
  domain_removal_not_ready:'Bağlı alan adı henüz silmeye hazır değil.',

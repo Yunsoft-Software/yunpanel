@@ -3,12 +3,21 @@ import {
 } from './website-removal-model.js';
 
 const terminalHttp = new Set([400,401,403,409]);
-export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>true,onRemoved=()=>{}}){
+export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>true,onRemoved=()=>{},pollIntervalMs=2000}){
+ if(!Number.isSafeInteger(pollIntervalMs)||pollIntervalMs<100||pollIntervalMs>60000)throw new TypeError('Invalid removal polling interval');
  const scope=removalScope(input),listeners=new Set();let active=true,seq=0,controller=null;
+ let pollTimer=null;
  let state=Object.freeze({data:null,operation:null,loading:false,busy:false,denied:false,error:null,unknownMutation:false});
  const current=()=>active&&isCurrent();
  function publish(patch){if(!current())return;state=Object.freeze({...state,...patch});for(const fn of listeners){try{fn(state);}catch{}}}
  function deny(){publish({data:null,operation:null,denied:true,error:'Owner oturumu veya site erişimi geçerli değil.'});}
+ function pollOperation(){
+  clearTimeout(pollTimer);pollTimer=null;
+  const op=state.operation;
+  const interrupted=op?.status==='blocked'&&op.steps.find(step=>step.status!=='succeeded')?.error?.code==='website_removal_interrupted';
+  if(!current()||state.denied||op?.execution?.mode!=='automatic'||!(['pending','running'].includes(op.status)||interrupted))return;
+  pollTimer=setTimeout(async()=>{pollTimer=null;try{await refreshOperation(op.id);}catch{pollOperation();}},pollIntervalMs);
+ }
  async function requestGlobalList(){
   const value=await request('/website-removal-operations');
   if(!Array.isArray(value))throw new Error('Removal operation list is invalid');
@@ -19,7 +28,7 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
   try{const value=await request('/websites/'+encodeURIComponent(scope.websiteId)+'/removal',{signal:controller.signal});
    if(!current()||currentSeq!==seq)return false;const data=removalState(value,scope);
    const operation=data.operations.find((op)=>op.status!=='removed')??data.operations[0]??null;
-   publish({data,operation});return true;
+   publish({data,operation});pollOperation();return true;
   }catch(error){if(!current()||currentSeq!==seq)return false;
    if([401,403].includes(error?.status)||['unauthorized','forbidden','site_scope_forbidden'].includes(error?.code))deny();
    else publish({error:removalErrorMessage(error)});return false;
@@ -28,17 +37,17 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
  async function reconcileStart(previousIds,previewDigest){
   const operations=await requestGlobalList();
   const candidates=operations.filter((op)=>op.websiteId===scope.websiteId&&op.previewDigest===previewDigest&&!previousIds.has(op.id));
-  if(candidates.length===1){publish({operation:candidates[0],unknownMutation:false});return candidates[0];}
+  if(candidates.length===1){publish({operation:candidates[0],unknownMutation:false});pollOperation();return candidates[0];}
   publish({unknownMutation:true,error:'Silme isteğinin sonucu kesinleştirilemedi. Yeni istek gönderilmedi; Silme kurtarma bölümünü kontrol edin.'});return null;
  }
  async function start(){
   const preview=state.data?.preview;
-  if(!current()||state.denied||state.busy||!preview?.readyToStart||!preview.confirmation)return null;
+  if(!current()||state.denied||state.busy||state.unknownMutation||!preview?.readyToStart||!preview.confirmation)return null;
   if(state.operation&&state.operation.status!=='removed')return state.operation;
   const previousIds=new Set(state.data.operations.map((op)=>op.id));publish({busy:true,error:null,unknownMutation:false});let sent=false;
   try{sent=true;const value=await request('/websites/'+encodeURIComponent(scope.websiteId)+'/removal',{method:'POST',
     body:{previewDigest:preview.previewDigest,confirmation:preview.confirmation}});
-   if(!current())return null;const op=removalOperation(value,scope);publish({operation:op});if(op.status==='removed')onRemoved(op);return op;
+   if(!current())return null;const op=removalOperation(value,scope);publish({operation:op});pollOperation();if(op.status==='removed')onRemoved(op);return op;
   }catch(error){
    if(!current())return null;
    if([401,403].includes(error?.status)||['unauthorized','forbidden'].includes(error?.code)){deny();return null;}
@@ -48,10 +57,29 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
  }
  async function refreshOperation(operationId=state.operation?.id){
   if(!operationId||!current())return null;
-  const value=await request('/website-removal-operations/'+encodeURIComponent(operationId));
-  if(!current())return null;const op=globalRemovalOperation(value);
-  if(op.websiteId!==scope.websiteId||op.serverId!==scope.serverId)throw new Error('Removal operation scope changed');
-  publish({operation:op,unknownMutation:false});if(op.status==='removed')onRemoved(op);return op;
+  try{
+   const value=await request('/website-removal-operations/'+encodeURIComponent(operationId));
+   if(!current())return null;const op=globalRemovalOperation(value);
+   if(op.websiteId!==scope.websiteId||op.serverId!==scope.serverId)throw new Error('Removal operation scope changed');
+   publish({operation:op,unknownMutation:false,error:null});pollOperation();if(op.status==='removed')onRemoved(op);return op;
+  }catch(error){if(current()){if([401,403].includes(error?.status))deny();else publish({error:removalErrorMessage(error)});}throw error;}
+ }
+ async function runAutomatic(){
+  const operation=state.operation;
+  if(!current()||state.denied||state.busy||!operation||!operation.actions.runConfirmation)return null;
+  publish({busy:true,error:null,unknownMutation:false});let sent=false;
+  try{sent=true;const value=await request('/website-removal-operations/'+encodeURIComponent(operation.id)+'/run',{method:'POST',
+    body:{expectedUpdatedAt:operation.updatedAt,confirmation:operation.actions.runConfirmation}});
+   if(!current())return null;const op=globalRemovalOperation(value);
+   if(op.websiteId!==scope.websiteId||op.serverId!==scope.serverId||op.execution?.mode!=='automatic')throw new Error('Removal execution changed');
+   publish({operation:op});pollOperation();return op;
+  }catch(error){
+   if(!current())return null;
+   if([401,403].includes(error?.status)){deny();return null;}
+   if(sent&&!terminalHttp.has(error?.status)){try{const op=await refreshOperation(operation.id);publish({unknownMutation:true,error:'Devam isteğinin cevabı kayboldu; POST tekrar edilmedi ve işlem kaydı yeniden okundu.'});return op;}catch{}}
+   if(error?.status===409){try{return await refreshOperation(operation.id);}catch{}}
+   publish({error:removalErrorMessage(error)});return null;
+  }finally{if(current())publish({busy:false});}
  }
  async function continueStep(){
   const operation=state.operation,step=nextRemovalStep(operation);
@@ -70,6 +98,6 @@ export function createWebsiteRemovalClient({scope:input,request,isCurrent=()=>tr
    publish({error:removalErrorMessage(error)});return null;
   }finally{if(current())publish({busy:false});}
  }
- return Object.freeze({getSnapshot:()=>state,load,start,continueStep,refreshOperation,
-  subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){active=false;++seq;controller?.abort();listeners.clear();}});
+ return Object.freeze({getSnapshot:()=>state,load,start,runAutomatic,continueStep,refreshOperation,
+  subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},dispose(){active=false;++seq;clearTimeout(pollTimer);controller?.abort();listeners.clear();}});
 }

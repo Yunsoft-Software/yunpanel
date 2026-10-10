@@ -10,13 +10,13 @@ test('Owner hosting settings keeps removal preview and enables only reviewed jou
  assert.match(client,/previewDigest:preview\.previewDigest/);
  assert.match(client,/stepId:step\.stepId/);
  assert.match(client,/\/website-removal-operations/);
- assert.doesNotMatch(client,/setInterval|setTimeout/);
+ assert.match(client,/runAutomatic/);
 });
-test('removal UI requires typed domain confirmation and explicit per-step continuation',async()=>{
+test('removal UI requires typed domain confirmation for the whole operation',async()=>{
  const text=await source('WebsiteRemovalPanel.jsx');
  assert.match(text,/confirmation=\{scope.label\}/);
- assert.match(text,/Sonraki silme adımını çalıştır/);
- assert.match(text,/Her çağrı yalnız journal'daki mevcut adımı ilerletir/);
+ assert.match(text,/WebsiteRemovalProgress/);
+ assert.doesNotMatch(text,/continueStep/);
 });
 test('global recovery remains available after Website metadata disappears',async()=>{
  const page=await source('WebsitesPage.jsx');
