@@ -15,7 +15,7 @@ const ALGORITHM = 'aes-256-gcm';
 const GIT_CREDENTIAL_KEY = 'YUNPANEL_GIT_CREDENTIAL';
 const GITHUB_WEBHOOK_SECRET_KEY = 'YUNPANEL_GITHUB_WEBHOOK_SECRET';
 const INTERNAL_KEYS = new Set([GIT_CREDENTIAL_KEY, GITHUB_WEBHOOK_SECRET_KEY]);
-const CHANGE_SOURCES = new Set(['single', 'import_merge', 'import_replace', 'migration']);
+const CHANGE_SOURCES = new Set(['single', 'import_merge', 'import_replace', 'migration', 'restore']);
 
 export class ApplicationEnvironmentRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -244,13 +244,34 @@ export function createApplicationEnvironmentRegistry({
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
+  let mutationChain = Promise.resolve();
+
+  function mutate(operation) {
+    const run = mutationChain.catch(() => {}).then(async () => {
+      await ensureInitialized();
+      const previous = structuredClone(state);
+      try { return await operation(); }
+      catch (error) { state = previous; throw error; }
+    });
+    mutationChain = run.catch(() => {});
+    return run;
+  }
+  function readCommitted(operation) {
+    const run = mutationChain.then(operation);
+    mutationChain = run.catch(() => {});
+    return run;
+  }
+  function mutateInput(operation, input) {
+    const captured = structuredClone(input);
+    return mutate(() => operation(captured));
+  }
 
   async function persist() {
     if (!filePath) return;
     const snapshot = JSON.stringify(state, null, 2);
     const directory = path.dirname(filePath);
     const temporaryPath = `${filePath}.${process.pid}.tmp`;
-    writeChain = writeChain.then(async () => {
+    writeChain = writeChain.catch(() => {}).then(async () => {
       await mkdir(directory, { recursive: true });
       await writeFile(temporaryPath, snapshot, { encoding: 'utf8', mode: 0o600 });
       await rename(temporaryPath, filePath);
@@ -722,25 +743,85 @@ export function createApplicationEnvironmentRegistry({
     return values;
   }
 
+  async function exportApplicationBackup(applicationId) {
+    await ensureInitialized();
+    const id = normalizeApplicationId(applicationId);
+    await ensureApplication(id);
+    return structuredClone({ version: 1, applicationId: id,
+      variables: state.variables.filter(record => record.applicationId === id),
+      environment: environmentState(state, id),
+    });
+  }
+  async function restoreApplicationBackup(applicationId, snapshot) {
+    await ensureInitialized();
+    const id = normalizeApplicationId(applicationId);
+    await ensureApplication(id);
+    const invalid = () => new ApplicationEnvironmentRegistryError('environment_backup_invalid', 'Application environment backup does not match this Application', 409);
+    if (snapshot?.version !== 1 || snapshot.applicationId !== id || !Array.isArray(snapshot.variables)
+      || snapshot.variables.length > 256 || new Set(snapshot.variables.map(record => record?.key)).size !== snapshot.variables.length) throw invalid();
+    const variables = snapshot.variables.map(source => {
+      if (!source || source.applicationId !== id || typeof source.secret !== 'boolean'
+        || Object.keys(source).length !== 9 || !['applicationId', 'key', 'secret', 'value', 'ciphertext', 'iv', 'tag', 'createdAt', 'updatedAt'].every(field => Object.hasOwn(source, field))) throw invalid();
+      try {
+        normalizeEnvironmentKey(source.key);
+        validateTimestamp(source.createdAt, 'createdAt'); validateTimestamp(source.updatedAt, 'updatedAt');
+        if (source.createdAt === null || source.updatedAt === null) throw invalid();
+        if (source.secret) {
+          if (source.value !== null) throw invalid();
+          const value = decryptValue(encryptionKey, source);
+          if (source.key === GIT_CREDENTIAL_KEY) normalizeGitDeploymentCredential(JSON.parse(value));
+          else if (source.key === GITHUB_WEBHOOK_SECRET_KEY) normalizeWebhookSecret(value);
+          else normalizeEnvironmentValue(value);
+        } else {
+          if (INTERNAL_KEYS.has(source.key) || source.ciphertext !== null || source.iv !== null || source.tag !== null) throw invalid();
+          normalizeEnvironmentValue(source.value);
+        }
+      } catch { throw invalid(); }
+      return structuredClone(source);
+    });
+    const savedMetadata = snapshot.environment === null ? null : validateEnvironmentState(snapshot.environment);
+    if (savedMetadata && savedMetadata.applicationId !== id) throw invalid();
+    const currentMetadata = environmentState(state, id);
+    const previous = state.variables.filter(record => record.applicationId === id);
+    // Empty PHP/static application catalogs have no process environment to apply.
+    if (!variables.length && !previous.length && !currentMetadata && !savedMetadata) return publicEnvironmentState(null, id);
+    const timestamp = new Date(now()).toISOString();
+    state.variables = [...state.variables.filter(record => record.applicationId !== id), ...variables];
+    state.environments = state.environments.filter(record => record.applicationId !== id);
+    const metadata = { applicationId: id, revision: Math.max(currentMetadata?.revision ?? 0, savedMetadata?.revision ?? 0, now()) + 1,
+      appliedRevision: null, appliedReleaseId: null, lastChangedAt: timestamp, lastAppliedAt: null,
+      lastChange: { source: 'restore', added: variables.filter(record => !previous.some(before => before.key === record.key)).length,
+        updated: variables.filter(record => previous.some(before => before.key === record.key)).length,
+        deleted: previous.filter(record => !variables.some(after => after.key === record.key)).length } };
+    state.environments.push(validateEnvironmentState(metadata));
+    await persist();
+    return publicEnvironmentState(metadata, id);
+  }
+
   return {
     init,
-    setVariable,
-    importVariables,
-    inspectApplicationState,
-    purgeApplication,
-    environmentStatus,
-    markApplied,
-    setDeploymentCredential,
-    deploymentCredential,
-    materializeDeploymentCredential,
-    deleteDeploymentCredential,
-    setWebhookSecret,
-    webhookSecret,
-    materializeWebhookSecret,
-    deleteWebhookSecret,
-    deleteVariable,
-    listVariables,
-    materialize,
+    setVariable: input => mutateInput(setVariable, input),
+    importVariables: input => mutateInput(importVariables, input),
+    inspectApplicationState: (...args) => readCommitted(() => inspectApplicationState(...args)),
+    purgeApplication: (...args) => mutate(() => purgeApplication(...args)),
+    environmentStatus: (...args) => readCommitted(() => environmentStatus(...args)),
+    markApplied: input => mutateInput(markApplied, input),
+    setDeploymentCredential: input => mutateInput(setDeploymentCredential, input),
+    deploymentCredential: (...args) => readCommitted(() => deploymentCredential(...args)),
+    materializeDeploymentCredential: (...args) => readCommitted(() => materializeDeploymentCredential(...args)),
+    deleteDeploymentCredential: (...args) => mutate(() => deleteDeploymentCredential(...args)),
+    setWebhookSecret: input => mutateInput(setWebhookSecret, input),
+    webhookSecret: (...args) => readCommitted(() => webhookSecret(...args)),
+    materializeWebhookSecret: (...args) => readCommitted(() => materializeWebhookSecret(...args)),
+    deleteWebhookSecret: (...args) => mutate(() => deleteWebhookSecret(...args)),
+    deleteVariable: (...args) => mutate(() => deleteVariable(...args)),
+    listVariables: (...args) => readCommitted(() => listVariables(...args)),
+    materialize: (...args) => readCommitted(() => materialize(...args)),
+    exportApplicationBackup: (...args) => readCommitted(() => exportApplicationBackup(...args)),
+    restoreApplicationBackup: (id, snapshot) => {
+      const captured = structuredClone(snapshot);
+      return mutate(() => restoreApplicationBackup(id, captured));
+    },
     secretStoreConfigured: Boolean(encryptionKey),
   };
 }

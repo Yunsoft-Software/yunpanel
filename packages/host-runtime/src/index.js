@@ -448,3 +448,4 @@ export {
   FirewallStatusInspectorError,
   firewallStatusInspectorInternals,
 } from './firewall-status-inspector.js';
+export { createApplicationEnvironmentBackupManager } from './application-environment-backup-manager.js';
