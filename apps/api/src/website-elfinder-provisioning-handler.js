@@ -149,7 +149,19 @@ export function createWebsiteElFinderProvisioningHandler({
     return fpmManager.inspectCompensation(elFinderIntent(intent), { operationId });
   }
 
-  return Object.freeze({ apply, inspect, compensate, inspectCompensation });
+  async function retire({ intent, operationId } = {}) {
+    if (typeof fpmManager.retire !== 'function') throw new WebsiteElFinderProvisioningError(
+      'website_elfinder_retirement_unavailable', 'Website file manager retirement is unavailable');
+    return fpmManager.retire(elFinderIntent(intent), { operationId });
+  }
+
+  async function inspectRetirement({ intent } = {}) {
+    if (typeof fpmManager.inspectRetirement !== 'function') throw new WebsiteElFinderProvisioningError(
+      'website_elfinder_retirement_unavailable', 'Website file manager retirement inspection is unavailable');
+    return fpmManager.inspectRetirement(elFinderIntent(intent));
+  }
+
+  return Object.freeze({ apply, inspect, compensate, inspectCompensation, retire, inspectRetirement });
 }
 
 export const websiteElFinderProvisioningInternals = Object.freeze({ elFinderIntent });

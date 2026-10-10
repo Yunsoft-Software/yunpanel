@@ -662,7 +662,46 @@ export function createElFinderFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, apply, compensate, inspectCompensation });
+  async function inspectRetirement(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+    const paths = [elFinderFpmPoolPath(spec.unixUser), elFinderFpmSocketPath(spec.unixUser)];
+    for (const target of paths) {
+      try {
+        await lstatFn(target);
+        return Object.freeze({ satisfied: false, reason: 'elfinder_fpm_retirement_pending',
+          websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
+      } catch (error) {
+        if (!missingPath(error)) throw new ElFinderFpmSiteManagerError(
+          'elfinder_fpm_retirement_unavailable', 'The Website file manager pool could not be inspected');
+      }
+    }
+    return Object.freeze({ satisfied: true, poolRemoved: true, socketRemoved: true,
+      websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
+  }
+
+  async function retire(rawIntent, options = {}) {
+    const spec = normalizeIntent(rawIntent);
+    // Compensation verifies the original operation receipt and current hash;
+    // a retained pre-existing pool must never be mistaken for retired state.
+    await compensate(rawIntent, options);
+    if (await readOptional(elFinderFpmPoolPath(spec.unixUser)) !== null) {
+      throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_blocked',
+        'The Website file manager pool is retained or changed and cannot be retired');
+    }
+    // Also reconcile an interruption after unlink but before FPM reload.
+    await configTest();
+    await reloadServiceIfActive();
+    let result = await inspectRetirement(rawIntent);
+    for (let attempt = 0; !result.satisfied && attempt < 40; attempt += 1) {
+      await new Promise(resolve => setTimeout(resolve, 100));
+      result = await inspectRetirement(rawIntent);
+    }
+    if (!result.satisfied) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_unverified',
+      'The Website file manager pool or socket is still present');
+    return result;
+  }
+
+  return Object.freeze({ inspect, apply, compensate, inspectCompensation, retire, inspectRetirement });
 }
 
 export const elFinderFpmSiteManagerInternals = Object.freeze({

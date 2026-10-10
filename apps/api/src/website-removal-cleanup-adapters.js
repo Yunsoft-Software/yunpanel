@@ -88,6 +88,39 @@ export function createWebsiteRemovalCleanupAdapters({
     unavailable('website_cleanup_identity_evidence_unavailable', 'Owned Website Unix identity evidence is unavailable');
   }
 
+  function fileManagerContext(source) {
+    const handler = websiteProvisioningRuntime.handlers?.elfinder;
+    if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
+      unavailable('website_cleanup_elfinder_unavailable', 'Website file manager retirement is unavailable');
+    }
+    const steps = source.operation.steps.filter((step) => step.kind === 'elfinder');
+    if (steps.length > 1) unavailable('website_cleanup_elfinder_evidence_invalid', 'Website file manager journal is ambiguous');
+    const intent = { adapter: 'elfinder-fpm', websiteId: source.website.id,
+      applicationId: source.website.applicationId, unixUser: source.website.unixUser };
+    const step = steps[0];
+    if (step && Object.entries(intent).some(([key, value]) => step.intent?.[key] !== value)) {
+      unavailable('website_cleanup_elfinder_evidence_invalid', 'Website file manager journal scope changed');
+    }
+    return { handler, hasJournal: Boolean(step), context: { intent: step?.intent ?? intent,
+      operationId: source.operation.operationId, evidence: step?.evidence ?? null } };
+  }
+
+  async function retireFileManager(source) {
+    const { handler, hasJournal, context } = fileManagerContext(source);
+    try {
+      if (hasJournal) await handler.retire(context);
+      const result = await handler.inspectRetirement(context);
+      if (!result || result.satisfied !== true || result.poolRemoved !== true || result.socketRemoved !== true
+        || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId
+        || result.unixUser !== source.website.unixUser) {
+        unavailable('website_cleanup_elfinder_unverified', 'Website file manager pool or socket is still present');
+      }
+    } catch (error) {
+      if (error instanceof WebsiteRemovalCleanupAdapterError) throw error;
+      unavailable('website_cleanup_elfinder_unverified', 'Website file manager retirement could not be verified');
+    }
+  }
+
   async function directSystemdSource(input = {}) {
     const {
       websiteId,
@@ -190,6 +223,7 @@ export function createWebsiteRemovalCleanupAdapters({
 
   async function inspectUnixIdentityCleanup(input) {
     const source = await ownedIdentitySource(input);
+    fileManagerContext(source);
     return Object.freeze({
       ready: true,
       websiteId: source.website.id,
@@ -201,6 +235,7 @@ export function createWebsiteRemovalCleanupAdapters({
 
   async function unixIdentityCleanupHandler(input = {}) {
     const source = await ownedIdentitySource(input);
+    await retireFileManager(source);
     const { websiteId, systemUser } = input;
     const context = {
       intent: source.step.intent,
@@ -232,9 +267,10 @@ export function createWebsiteRemovalCleanupAdapters({
   }
 
   async function inspectFileCleanup({ websiteId, applicationId } = {}) {
-    await currentTarget(websiteId, applicationId);
+    const { website } = await currentTarget(websiteId, applicationId);
     const targets = canonicalFileCleanupTargets(websiteId, applicationId);
     for (const target of targets) await absentOrDirectory(target, lstatFn);
+    fileManagerContext(await ownedIdentitySource({ websiteId, systemUser: website.unixUser }));
     return Object.freeze({ ready: true, websiteId, applicationId, targets });
   }
 
@@ -244,6 +280,8 @@ export function createWebsiteRemovalCleanupAdapters({
       || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
     }
+    const { website } = await currentTarget(websiteId, applicationId);
+    await retireFileManager(await ownedIdentitySource({ websiteId, systemUser: website.unixUser }));
     let removed = 0;
     for (const target of inspection.targets) {
       if (await absentOrDirectory(target, lstatFn)) continue;

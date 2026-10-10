@@ -246,3 +246,35 @@ test('elFinder FPM rejects forged Website Unix identity before inspection', asyn
       && error.code === 'elfinder_fpm_identity_mismatch',
   );
 });
+
+test('retirement removes the owned pool and socket and verifies shared FPM config before Unix cleanup', async () => {
+  const fx = fixture();
+  await fx.manager.apply(intent, { operationId });
+  const result = await fx.manager.retire(intent, { operationId });
+  assert.deepEqual(result, { satisfied: true, poolRemoved: true, socketRemoved: true, websiteId, applicationId, unixUser });
+  assert.equal(fx.files.has(configPath), false);
+  assert.deepEqual(await fx.manager.inspectRetirement(intent), result);
+  assert.deepEqual(await fx.manager.retire(intent, { operationId }), result);
+});
+
+test('retirement reconciles a crash between pool unlink and service reload', async () => {
+  const fx = fixture();
+  await fx.manager.apply(intent, { operationId });
+  fx.files.delete(configPath); // The fixture socket remains until systemctl reload.
+  assert.equal((await fx.manager.inspectRetirement(intent)).satisfied, false);
+  const before = fx.calls.filter(call => call[0] === 'run' && call[2][0] === 'reload').length;
+  assert.equal((await fx.manager.retire(intent, { operationId })).satisfied, true);
+  assert.equal(fx.calls.filter(call => call[0] === 'run' && call[2][0] === 'reload').length > before, true);
+});
+
+test('retirement cannot remove an unjournalled or reappearing pool', async () => {
+  const unknown = fixture({ initialConfig: 'operator configuration' });
+  await assert.rejects(unknown.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
+  assert.equal(unknown.files.get(configPath).content, 'operator configuration');
+  const fx = fixture();
+  await fx.manager.apply(intent, { operationId });
+  await fx.manager.retire(intent, { operationId });
+  fx.files.set(configPath, { content: 'operator configuration', mode: 0o600 });
+  await assert.rejects(fx.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
+  assert.equal(fx.files.get(configPath).content, 'operator configuration');
+});
