@@ -3,6 +3,7 @@ const PHP_MYADMIN_GATEWAY_BASE = '/tools/phpmyadmin/';
 const PHP_MYADMIN_SIGNON_PATH = '/tools/phpmyadmin/__yunpanel/signon';
 const CAPABILITY_PATTERN = /^[A-Za-z0-9_-]{43}$/;
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
+const DATABASE_TASKS = new Set(['structure', 'import', 'export', 'operations', 'sql']);
 
 export class PhpMyAdminBrowserHandoffError extends Error {
   constructor(code, message) {
@@ -97,6 +98,7 @@ export async function openWebsitePhpMyAdmin({
   serverId,
   websiteId,
   credentialId,
+  task = 'structure',
   issueHandoff,
   fetchImpl = globalThis.fetch,
   locationImpl = globalThis.location,
@@ -108,6 +110,7 @@ export async function openWebsitePhpMyAdmin({
     websiteId: requiredString(websiteId, 'websiteId'),
     credentialId: requiredString(credentialId, 'credentialId'),
   };
+  if (!DATABASE_TASKS.has(task)) throw new PhpMyAdminBrowserHandoffError('phpmyadmin_task_invalid', 'Veritabanı işlemi geçersiz.');
   if (typeof issueHandoff !== 'function') {
     throw new PhpMyAdminBrowserHandoffError(
       'phpmyadmin_handoff_client_missing',
@@ -202,7 +205,7 @@ export async function openWebsitePhpMyAdmin({
       mode: 'same-origin',
       redirect: 'follow',
       cache: 'no-store',
-      referrerPolicy: 'no-referrer',
+      referrerPolicy: 'same-origin',
       body: form,
     });
   } catch {
@@ -223,7 +226,8 @@ export async function openWebsitePhpMyAdmin({
   }
   try {
     const nav = targetWindow?.location ?? locationImpl;
-    nav.assign(PHP_MYADMIN_GATEWAY_BASE);
+    const query = new URLSearchParams({ route: '/database/' + task, db: handoff.target.databaseName });
+    nav.assign(PHP_MYADMIN_GATEWAY_BASE + 'index.php?' + query);
   } catch (error) {
     if (error?.name === 'SecurityError' || error?.name === 'NotAllowedError') {
       throw new PhpMyAdminBrowserHandoffError(

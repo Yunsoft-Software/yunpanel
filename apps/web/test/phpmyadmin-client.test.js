@@ -34,6 +34,23 @@ function browserLocation() {
   };
 }
 
+test('database import/export tasks navigate only to the credential-bound database after signon', async () => {
+  for (const task of ['import', 'export', 'operations', 'sql']) {
+    const locationImpl = browserLocation();
+    await openWebsitePhpMyAdmin({ serverId, websiteId, credentialId, task, locationImpl, now: () => 10000,
+      issueHandoff: async () => handoff(), fetchImpl: async () => ({ ok: true, status: 200, url: 'https://panel.example.test/tools/phpmyadmin/' }) });
+    const selected = new URL(locationImpl.assigned[0], locationImpl.origin);
+    assert.equal(selected.origin, locationImpl.origin);
+    assert.equal(selected.searchParams.get('db'), 'site_main');
+    assert.equal(selected.searchParams.get('route'), '/database/' + task);
+    assert.equal(selected.href.includes(capability), false);
+  }
+  let issued = false;
+  await assert.rejects(openWebsitePhpMyAdmin({ serverId, websiteId, credentialId, task: '../../server/privileges',
+    issueHandoff: async () => { issued = true; return handoff(); } }), { code: 'phpmyadmin_task_invalid' });
+  assert.equal(issued, false);
+});
+
 test('phpMyAdmin browser handoff posts the capability without putting it in the URL or browser storage', async () => {
   const issueCalls = [];
   const fetchCalls = [];
@@ -76,12 +93,16 @@ test('phpMyAdmin browser handoff posts the capability without putting it in the 
     mode: 'same-origin',
     redirect: 'follow',
     cache: 'no-store',
-    referrerPolicy: 'no-referrer',
+    referrerPolicy: 'same-origin',
     body: `capability=${capability}`,
   }]);
   assert.equal(fetchCalls[0].url.includes(capability), false);
   assert.equal(fetchCalls[0].url.includes('?'), false);
-  assert.deepEqual(locationImpl.assigned, ['/tools/phpmyadmin/']);
+  const target = new URL(locationImpl.assigned[0], locationImpl.origin);
+  assert.equal(target.pathname, '/tools/phpmyadmin/index.php');
+  assert.equal(target.searchParams.get('db'), 'site_main');
+  assert.equal(target.searchParams.get('route'), '/database/structure');
+  assert.equal(target.href.includes(capability), false);
 });
 
 test('phpMyAdmin browser handoff rejects target drift before posting the capability', async () => {
@@ -289,7 +310,7 @@ test('phpMyAdmin browser handoff yields visible error for popup blockers', async
     locationImpl,
     now: () => 10_000,
   });
-  assert.equal(validWindow.assigned, '/tools/phpmyadmin/');
+  assert.equal(new URL(validWindow.assigned, locationImpl.origin).searchParams.get('db'), 'site_main');
   assert.deepEqual(locationImpl.assigned, []);
 });
 

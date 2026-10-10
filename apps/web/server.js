@@ -556,6 +556,15 @@ function scopePhpMyAdminSetCookie(value) {
   return typeof value === 'string' ? rewrite(value) : value;
 }
 
+function phpMyAdminHtmlBody(source) {
+  // phpMyAdmin's no-referrer meta makes native form POSTs use Origin: null.
+  // Preserve strict origin checks and avoid sending referrers outside the panel.
+  return Buffer.from(source.toString('utf8').replace(/<meta\b[^>]{0,2048}>/gi, tag => {
+    if (!/\bname\s*=\s*(["'])referrer\1/i.test(tag)) return tag;
+    return tag.replace(/(\bcontent\s*=\s*)(["'])no-referrer\2/i, '$1$2same-origin$2');
+  }));
+}
+
 function proxyPhpMyAdmin(request, response, {
   phpMyAdminSocketPath, publicOrigin, panelDigest = null,
 }) {
@@ -575,6 +584,7 @@ function proxyPhpMyAdmin(request, response, {
   }
   const publicUrl = new URL(publicOrigin);
   const headers = browserProxyHeaders(request);
+  headers['accept-encoding'] = 'identity';
   const vendorCookie = phpMyAdminVendorCookieHeader(request);
   delete headers.cookie;
   if (vendorCookie) headers.cookie = vendorCookie;
@@ -605,6 +615,33 @@ function proxyPhpMyAdmin(request, response, {
     }
     responseHeaders['cache-control'] = 'no-store';
     responseHeaders['x-robots-tag'] = 'noindex, nofollow, noarchive';
+    responseHeaders['referrer-policy'] = 'same-origin';
+    if (request.method !== 'HEAD' && /^text\/html\b/i.test(String(responseHeaders['content-type'] ?? ''))) {
+      if (responseHeaders['content-encoding'] && responseHeaders['content-encoding'] !== 'identity') {
+        upstreamResponse.resume(); reply(response, 503, 'phpMyAdmin response encoding is unavailable.'); return;
+      }
+      const chunks = []; let bytes = 0;
+      upstreamResponse.on('data', chunk => {
+        bytes += chunk.length;
+        if (bytes > 8 * 1024 * 1024) {
+          upstreamResponse.destroy(); upstream.destroy();
+          if (!response.headersSent) reply(response, 503, 'phpMyAdmin page is too large.');
+          return;
+        }
+        chunks.push(chunk);
+      });
+      upstreamResponse.once('end', () => {
+        if (response.writableEnded) return;
+        const body = phpMyAdminHtmlBody(Buffer.concat(chunks));
+        delete responseHeaders['content-encoding'];
+        responseHeaders['content-length'] = body.length;
+        response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders); response.end(body);
+      });
+      upstreamResponse.once('error', () => {
+        if (!response.headersSent) reply(response, 503, 'phpMyAdmin page is unavailable.');
+      });
+      return;
+    }
     response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
     upstreamResponse.pipe(response);
   });

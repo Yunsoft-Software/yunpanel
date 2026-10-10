@@ -286,6 +286,18 @@ test('phpMyAdmin gateway requires the panel-bound vendor session before proxying
       forwardedPrefix: request.headers['x-forwarded-prefix'],
       forwardedProto: request.headers['x-forwarded-proto'],
     });
+    if (request.url === '/index.php?route=/page') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'referrer-policy': 'no-referrer' });
+      response.write('<!doctype html><meta name="referrer" content="no-');
+      response.end('referrer"><meta name="description" content="unchanged"><p>SQL dışa aktar</p>');
+      return;
+    }
+    if (request.url === '/index.php?route=/export') {
+      response.writeHead(200, { 'content-type': 'application/sql',
+        'content-disposition': 'attachment; filename="owned.sql"' });
+      response.end('SELECT 1; -- <meta name="referrer" content="no-referrer">');
+      return;
+    }
     response.writeHead(302, {
       location: '/index.php?route=/database/structure',
       'set-cookie': 'phpMyAdmin=fixture; Path=/; Secure; HttpOnly',
@@ -370,6 +382,18 @@ test('phpMyAdmin gateway requires the panel-bound vendor session before proxying
     forwardedPrefix: '/tools/phpmyadmin/',
     forwardedProto: 'https',
   }]);
+  const page = await fetch(`http://127.0.0.1:${panelPort}/tools/phpmyadmin/index.php?route=/page`, {
+    headers: { 'x-real-ip': '203.0.113.8', cookie: browserCookie },
+  });
+  assert.equal(page.headers.get('referrer-policy'), 'same-origin');
+  assert.equal(await page.text(), '<!doctype html><meta name="referrer" content="same-origin"><meta name="description" content="unchanged"><p>SQL dışa aktar</p>');
+  const sql = await fetch(`http://127.0.0.1:${panelPort}/tools/phpmyadmin/index.php?route=/export`, {
+    method: 'POST', headers: { 'x-real-ip': '203.0.113.8', cookie: browserCookie,
+      origin: 'https://panel.example.com', 'content-type': 'application/x-www-form-urlencoded' }, body: 'token=fixture',
+  });
+  assert.equal(sql.status, 200);
+  assert.equal(sql.headers.get('content-disposition'), 'attachment; filename="owned.sql"');
+  assert.equal(await sql.text(), 'SELECT 1; -- <meta name="referrer" content="no-referrer">');
 });
 
 test('phpMyAdmin signon derives the handoff digest from the current panel cookie', async (t) => {
@@ -517,6 +541,13 @@ test('phpMyAdmin vendor socket is not reached without a gateway session or on cr
     body: 'token=ignored',
   });
   assert.equal(crossOrigin.status, 403);
+  for (const origin of ['null', undefined]) {
+    const opaque = await fetch(url, { method: 'POST', headers: {
+      'x-real-ip': '203.0.113.8', cookie: `__Host-yunpanel_session=owner; YunPanelPhpMyAdminGateway=${gatewaySession}`,
+      ...(origin ? { origin } : {}), 'content-type': 'application/x-www-form-urlencoded',
+    }, body: 'token=ignored' });
+    assert.equal(opaque.status, 403);
+  }
   assert.equal(vendorRequests, 0);
 });
 
