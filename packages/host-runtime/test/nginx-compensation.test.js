@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import {randomUUID} from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -24,6 +25,31 @@ async function fixture(t) {
 function managerFor({ stagingDir, sitesDir, execFn = async () => '' }) {
   return createNginxManager({ stagingDir, sitesDir, execFn });
 }
+
+test('separate durable activation jobs can reapply an earlier checksum while retries retain their own rollback state',async t=>{
+ const f=await fixture(t),activePath=path.join(f.sitesDir,'yunpanel-example.com.conf');
+ const manager=managerFor(f),a=await manager.stageDomain(spec);
+ await manager.activateDomain({primaryDomain:spec.primaryDomain,checksum:a.checksum});
+ const aBytes=await readFile(activePath,'utf8');
+ const b=await manager.stageDomain({...spec,nginxSettings:{clientMaxBodySizeMb:17}});
+ await manager.activateDomain({primaryDomain:spec.primaryDomain,checksum:b.checksum,activationId:randomUUID()});
+ const bBytes=await readFile(activePath,'utf8');assert.notEqual(aBytes,bBytes);
+ await manager.stageDomain(spec);const activationId=randomUUID(),input={primaryDomain:spec.primaryDomain,checksum:a.checksum,activationId};
+ await manager.activateDomain(input);await manager.activateDomain(input);assert.equal(await readFile(activePath,'utf8'),aBytes);
+ const restarted=managerFor(f);assert.equal((await restarted.compensateDomain(input)).satisfied,true);
+ assert.equal(await readFile(activePath,'utf8'),bBytes);
+ await restarted.activateDomain(input);await writeFile(activePath,'foreign config drift');
+ await assert.rejects(restarted.activateDomain(input),error=>error.code==='nginx_rollback_receipt_conflict');
+ await assert.rejects(restarted.compensateDomain(input),error=>error.code==='nginx_compensation_drift');
+ assert.equal(await readFile(activePath,'utf8'),'foreign config drift');
+});
+
+test('an invalid activation identity cannot write config or run host commands',async t=>{
+ const f=await fixture(t),commands=[],manager=managerFor({...f,execFn:async(...args)=>commands.push(args)});
+ const staged=await manager.stageDomain(spec);
+ await assert.rejects(manager.activateDomain({primaryDomain:spec.primaryDomain,checksum:staged.checksum,activationId:'../../foreign'}),error=>error.code==='nginx_activation_identity_invalid');
+ assert.deepEqual(commands,[]);await assert.rejects(readFile(path.join(f.sitesDir,'yunpanel-example.com.conf')),error=>error.code==='ENOENT');
+});
 
 test('Nginx activation survives manager restart and compensation restores the previous config', async (t) => {
   const { stagingDir, sitesDir } = await fixture(t);

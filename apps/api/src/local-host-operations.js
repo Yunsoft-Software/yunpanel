@@ -795,7 +795,7 @@ export function createLocalHostOperations({
     [OPERATIONS.DATABASE_RESTORE, executeDatabaseRestore],
     [OPERATIONS.DNS_RECORD_APPLY, executeDnsRecord],
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
-    [OPERATIONS.DOMAIN_ACTIVATE, (payload) => nginxManager.activateDomain(payload)],
+    [OPERATIONS.DOMAIN_ACTIVATE, (payload, execution) => nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null })],
     [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],
     [OPERATIONS.SSL_RENEW, (payload) => executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution))],
     [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],

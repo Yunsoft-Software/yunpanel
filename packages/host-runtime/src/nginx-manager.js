@@ -176,12 +176,13 @@ export function createNginxManager({
     }
   }
 
-  function normalizeRollbackReceipt(value, { primaryDomain, configName, checksum } = {}) {
+  function normalizeRollbackReceipt(value, { primaryDomain, configName, checksum, activationId = null } = {}) {
     if (!value || typeof value !== 'object' || Array.isArray(value)
       || value.version !== ROLLBACK_RECEIPT_VERSION
       || value.primaryDomain !== primaryDomain
       || value.configName !== configName
       || value.candidateChecksum !== checksum
+      || (value.activationId ?? null) !== activationId
       || (value.previousPrimaryDomain !== null && typeof value.previousPrimaryDomain !== 'string')) {
       throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
     }
@@ -200,14 +201,23 @@ export function createNginxManager({
       primaryDomain,
       configName,
       candidateChecksum: checksum,
+      ...(activationId === null ? {} : { activationId }),
       previousPrimaryDomain: value.previousPrimaryDomain,
       active,
       previousActive,
     });
   }
 
-  async function loadRollbackReceipt({ primaryDomain, configName, checksum } = {}) {
-    const receiptPath = rollbackReceiptPath(configName, checksum);
+  function activationReceiptPath(configName, checksum, activationId = null) {
+    if (activationId === null) return rollbackReceiptPath(configName, checksum);
+    if (typeof activationId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(activationId)) {
+      throw new NginxManagerError('nginx_activation_identity_invalid', 'A durable activation job identity is required');
+    }
+    return rollbackReceiptPath(configName, sha256(`${checksum}:${activationId}`));
+  }
+
+  async function loadRollbackReceipt({ primaryDomain, configName, checksum, activationId = null } = {}) {
+    const receiptPath = activationReceiptPath(configName, checksum, activationId);
     let raw;
     try { raw = await readFileFn(receiptPath, 'utf8'); }
     catch (error) {
@@ -215,7 +225,7 @@ export function createNginxManager({
       throw new NginxManagerError('nginx_rollback_receipt_unavailable', 'Nginx rollback receipt could not be read');
     }
     try {
-      return normalizeRollbackReceipt(JSON.parse(raw), { primaryDomain, configName, checksum });
+      return normalizeRollbackReceipt(JSON.parse(raw), { primaryDomain, configName, checksum, activationId });
     } catch (error) {
       if (error instanceof NginxManagerError) throw error;
       throw new NginxManagerError('nginx_rollback_receipt_invalid', 'Nginx rollback receipt is invalid');
@@ -226,6 +236,7 @@ export function createNginxManager({
     primaryDomain,
     configName,
     checksum,
+    activationId = null,
     previousPrimaryDomain,
     active,
     previousActive,
@@ -236,16 +247,17 @@ export function createNginxManager({
       primaryDomain,
       configName,
       candidateChecksum: checksum,
+      ...(activationId === null ? {} : { activationId }),
       previousPrimaryDomain,
       active,
       previousActive,
     };
     await atomicWrite(
-      rollbackReceiptPath(configName, checksum),
+      activationReceiptPath(configName, checksum, activationId),
       `${JSON.stringify(receipt)}\n`,
       0o600,
     );
-    return normalizeRollbackReceipt(receipt, { primaryDomain, configName, checksum });
+    return normalizeRollbackReceipt(receipt, { primaryDomain, configName, checksum, activationId });
   }
 
   function deactivationReceiptPath(configName, checksum) {
@@ -406,7 +418,7 @@ export function createNginxManager({
       && (!hasPreviousPath || (state.previousActive !== null && !state.previousActive.exists));
   }
 
-  async function activateNow({ primaryDomain, previousPrimaryDomain = null, checksum }) {
+  async function activateNow({ primaryDomain, previousPrimaryDomain = null, checksum, activationId = null }) {
     if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
       throw new NginxManagerError('invalid_checksum', 'A SHA-256 staging checksum is required');
     }
@@ -424,7 +436,7 @@ export function createNginxManager({
     if (sha256(candidate) !== checksum) throw new NginxManagerError('staged_config_changed', 'Staged Nginx configuration checksum does not match');
 
     const before = await activationState({ activePath, previousActivePath });
-    let receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    let receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum, activationId });
     if (receipt) {
       if (receipt.previousPrimaryDomain !== normalizedPreviousPrimaryDomain
         || (!stateMatchesReceipt(before, receipt)
@@ -436,6 +448,7 @@ export function createNginxManager({
         primaryDomain,
         configName,
         checksum,
+        activationId,
         previousPrimaryDomain: normalizedPreviousPrimaryDomain,
         active: before.active,
         previousActive: before.previousActive,
@@ -494,12 +507,12 @@ export function createNginxManager({
     return run;
   }
 
-  async function inspectDomainCompensation({ primaryDomain, checksum } = {}) {
+  async function inspectDomainCompensation({ primaryDomain, checksum, activationId = null } = {}) {
     if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
       throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
     }
     const configName = configNameForDomain(primaryDomain);
-    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum, activationId });
     if (!receipt) {
       return { satisfied: false, reason: 'nginx_compensation_receipt_missing', configName, checksum };
     }
@@ -523,12 +536,12 @@ export function createNginxManager({
     throw new NginxManagerError('nginx_compensation_drift', 'Nginx compensation refused because active state has drifted');
   }
 
-  async function compensateNow({ primaryDomain, checksum } = {}) {
+  async function compensateNow({ primaryDomain, checksum, activationId = null } = {}) {
     if (typeof checksum !== 'string' || !CHECKSUM_PATTERN.test(checksum)) {
       throw new NginxManagerError('invalid_checksum', 'A SHA-256 active configuration checksum is required');
     }
     const configName = configNameForDomain(primaryDomain);
-    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum });
+    const receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum, activationId });
     if (!receipt) {
       throw new NginxManagerError('nginx_compensation_receipt_missing', 'Nginx compensation rollback receipt is missing');
     }
@@ -537,7 +550,7 @@ export function createNginxManager({
       ? path.join(sitesDir, configNameForDomain(receipt.previousPrimaryDomain))
       : null;
     const before = await activationState({ activePath, previousActivePath });
-    if (stateMatchesReceipt(before, receipt)) return inspectDomainCompensation({ primaryDomain, checksum });
+    if (stateMatchesReceipt(before, receipt)) return inspectDomainCompensation({ primaryDomain, checksum, activationId });
     if (!stateMatchesCandidate(before, checksum, Boolean(previousActivePath))) {
       throw new NginxManagerError('nginx_compensation_drift', 'Nginx compensation refused because active state has drifted');
     }
@@ -563,7 +576,7 @@ export function createNginxManager({
       throw new NginxManagerError('nginx_compensation_failed', 'Nginx compensation failed and the active configuration was restored');
     }
 
-    const inspected = await inspectDomainCompensation({ primaryDomain, checksum });
+    const inspected = await inspectDomainCompensation({ primaryDomain, checksum, activationId });
     if (!inspected.satisfied) {
       throw new NginxManagerError('nginx_compensation_unverified', 'Nginx compensation could not be verified');
     }
@@ -817,6 +830,7 @@ export function createNginxManager({
   }
 
   return {
+    previewDomain: (spec) => Object.freeze(expectedStage(spec)),
     stageDomain,
     inspectStagedDomain,
     inspectActiveDomain,
