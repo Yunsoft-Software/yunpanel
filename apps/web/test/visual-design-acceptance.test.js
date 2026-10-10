@@ -184,6 +184,7 @@ test('Criterion 2: Entry point stylesheet import order and runtime dependencies 
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), [
     '@xterm/addon-fit',
     '@xterm/xterm',
+    '@yunpanel/shared',
     'react',
     'react-dom',
     'react-router',

@@ -1,19 +1,20 @@
 import { DomainAliasError, aliasDomainFingerprint, aliasDomainSnapshot, refreshAliasPublication } from './domain-alias-model.js';
-import { HOSTING_SETTING_FIELDS, hostingSettingsChanges } from './domain-hosting-model.js';
+import { HOSTING_SETTING_FIELDS, hostingSettingsChanges, hostingDraftValues, hostingValuesEqual } from './domain-hosting-model.js';
 
 // State only: no persistence, authorization, HTTP requests or publishing here.
 export function createHostingForm(domain) {
   const base = aliasDomainSnapshot(domain);
-  return { base, values: Object.fromEntries(HOSTING_SETTING_FIELDS.map((key) => [key, base[key]])) };
+  return { base, values: hostingDraftValues(base) };
 }
 export function hostingFormDirty(form) {
-  return Boolean(form?.base) && HOSTING_SETTING_FIELDS.some((key) => form.values[key] !== form.base[key]);
+  return Boolean(form?.base) && !hostingValuesEqual(form.values, hostingDraftValues(form.base));
 }
 export function editHostingForm(form, field, value) {
-  if (!form?.base || !HOSTING_SETTING_FIELDS.includes(field) || typeof value !== 'boolean') {
-    throw new DomainAliasError('hosting_draft_invalid', 'Yalnız yönlendirme tercihlerini değiştirebilirsiniz.');
+  if (!form?.base || !HOSTING_SETTING_FIELDS.includes(field)
+    || (field === 'nginxSettings' ? !value || typeof value !== 'object' || Array.isArray(value) : typeof value !== 'boolean')) {
+    throw new DomainAliasError('hosting_draft_invalid', 'Barındırma ayarı doğrulanamadı.');
   }
-  return { ...form, values: { ...form.values, [field]: value } };
+  return { ...form, values: { ...form.values, [field]: structuredClone(value) } };
 }
 function sameIdentity(left, right) {
   return ['id', 'serverId', 'websiteId', 'parentDomainId'].every((key) => (left?.[key] ?? null) === (right?.[key] ?? null));
@@ -48,8 +49,14 @@ export function reloadHostingForm(form, domain, expected) {
   }
   // Preserve only the user's changed fields. Untouched settings follow the new
   // record, so reloading must not silently revert another operator's changes.
-  for (const key of HOSTING_SETTING_FIELDS) {
-    if (form?.base && form.values[key] !== form.base[key]) next.values[key] = form.values[key];
+  const previous = form?.base ? hostingDraftValues(form.base) : null;
+  for (const key of HOSTING_SETTING_FIELDS.filter(key => key !== 'nginxSettings')) {
+    if (previous && !hostingValuesEqual(form.values[key], previous[key])) next.values[key] = form.values[key];
+  }
+  if (previous) for (const key of Object.keys(next.values.nginxSettings)) {
+    if (!hostingValuesEqual(form.values.nginxSettings[key], previous.nginxSettings[key])) {
+      next.values.nginxSettings[key] = structuredClone(form.values.nginxSettings[key]);
+    }
   }
   return next;
 }
@@ -58,7 +65,7 @@ export function hostingReviewMatches(form, plan) {
     const changes = hostingSettingsChanges(form.base, form.values);
     return aliasDomainFingerprint(form.base) === aliasDomainFingerprint(plan?.base)
       && Object.keys(changes).length === Object.keys(plan.changes).length
-      && Object.keys(changes).every((key) => changes[key] === plan.changes[key]);
+      && Object.keys(changes).every((key) => hostingValuesEqual(changes[key], plan.changes[key]));
   } catch { return false; }
 }
 export function hostingWriteBlock({ form, domain, canManage, domainsStatus, jobsStatus, resourceBusy, reloadRequired }) {

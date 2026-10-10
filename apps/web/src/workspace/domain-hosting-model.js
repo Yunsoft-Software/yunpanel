@@ -1,9 +1,11 @@
 import { DomainAliasError, aliasDomainSnapshot, sameAliases } from './domain-alias-model.js';
+import { normalizeNginxSettings } from '@yunpanel/shared/nginx-settings';
 
-// Deliberately narrow: no hostname, certificate, target, Website or Nginx edits.
-export const HOSTING_SETTING_FIELDS = Object.freeze(['httpsRedirect', 'canonicalRedirect']);
+// Routing identities and certificates remain outside this settings form.
+export const HOSTING_SETTING_FIELDS = Object.freeze(['httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
+const POLICY_FIELDS = ['httpsRedirect', 'canonicalRedirect'];
 const SHA256 = /^[a-f0-9]{64}$/;
-const LABELS = Object.freeze({ httpsRedirect: 'HTTP → HTTPS', canonicalRedirect: 'Ek adları ana alan adına yönlendir' });
+const LABELS = Object.freeze({ httpsRedirect: 'HTTP → HTTPS', canonicalRedirect: 'Ek adları ana alan adına yönlendir', nginxSettings: 'Web sunucusu ayarları' });
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -11,6 +13,21 @@ function stable(value) {
   return value;
 }
 function fail(code, message, needsReload = false) { throw new DomainAliasError(code, message, needsReload); }
+export const hostingValuesEqual = (left, right) => JSON.stringify(stable(left)) === JSON.stringify(stable(right));
+function nginxSettings(domain, value) {
+  try { return normalizeNginxSettings(domain.targetType, value); }
+  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Sayılar belirtilen aralıkta olmalı; başlık adları benzersiz ve değerleri tek satır olmalı.'); }
+}
+export function hostingDraftValues(domain) {
+  return { httpsRedirect: domain.httpsRedirect, canonicalRedirect: domain.canonicalRedirect,
+    nginxSettings: structuredClone(nginxSettings(domain, domain.nginxSettings)) };
+}
+export function hostingExpectedDomain(base, changes, nextRevision) {
+  const next = { ...base, ...changes, desiredRevision: nextRevision, target: { ...base.target } };
+  if (base.targetType === 'static') next.target.spaFallback = next.nginxSettings.spaFallback;
+  if (['proxy', 'python'].includes(base.targetType)) next.target.websocket = next.nginxSettings.websocket;
+  return next;
+}
 function baseRecord(domain) {
   const base = aliasDomainSnapshot(domain);
   if (base.state === 'suspended') fail('domain_suspended_update_blocked', 'Askıdaki alan adı değiştirilemez.');
@@ -20,19 +37,22 @@ function baseRecord(domain) {
 }
 export function hostingSettingsFromDomain(domain) {
   const base = baseRecord(domain);
-  return Object.freeze(Object.fromEntries(HOSTING_SETTING_FIELDS.map((key) => [key, base[key]])));
+  return Object.freeze(hostingDraftValues(base));
 }
 export function hostingSettingsChanges(domain, draft) {
   const base = baseRecord(domain);
   if (!object(draft) || Object.keys(draft).length !== HOSTING_SETTING_FIELDS.length
     || Object.keys(draft).some((key) => !HOSTING_SETTING_FIELDS.includes(key))
-    || HOSTING_SETTING_FIELDS.some((key) => !Object.hasOwn(draft, key) || typeof draft[key] !== 'boolean')) {
-    fail('hosting_draft_invalid', 'Yalnız iki yönlendirme tercihini açıp kapatabilirsiniz.');
+    || HOSTING_SETTING_FIELDS.some((key) => !Object.hasOwn(draft, key))
+    || POLICY_FIELDS.some((key) => typeof draft[key] !== 'boolean')) {
+    fail('hosting_draft_invalid', 'Barındırma formundaki yönlendirme ve web sunucusu ayarlarını kontrol edin.');
   }
   if (draft.httpsRedirect && base.httpsMode !== 'managed') {
     fail('invalid_redirect_policy', 'HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.');
   }
-  const changes = Object.fromEntries(HOSTING_SETTING_FIELDS.filter((key) => draft[key] !== base[key]).map((key) => [key, draft[key]]));
+  const values = { ...draft, nginxSettings: nginxSettings(base, draft.nginxSettings) };
+  const previous = hostingDraftValues(base);
+  const changes = Object.fromEntries(HOSTING_SETTING_FIELDS.filter((key) => !hostingValuesEqual(values[key], previous[key])).map((key) => [key, values[key]]));
   if (!Object.keys(changes).length) fail('hosting_no_changes', 'Kaydedilecek bir değişiklik yok.');
   return Object.freeze(changes);
 }
@@ -58,10 +78,10 @@ export function validateHostingSettingsPreview(domain, draft, preview) {
     || preview.confirmation !== `update-domain:${base.id}:${preview.previewDigest}`
     || !object(preview.next) || preview.next.primaryDomain !== base.primaryDomain
     || !sameAliases(preview.next.aliases, base.aliases) || preview.next.httpsMode !== base.httpsMode
-    || HOSTING_SETTING_FIELDS.some((key) => preview.next[key] !== expected[key])
-    || JSON.stringify(stable(preview.next.nginxSettings)) !== JSON.stringify(stable(base.nginxSettings))
-    || preview.impact?.hostnameChanged !== false || preview.impact?.policyChanged !== true
-    || preview.impact?.settingsChanged !== false || preview.impact?.requiresStageAndActivation !== true
+    || POLICY_FIELDS.some((key) => preview.next[key] !== expected[key])
+    || !hostingValuesEqual(preview.next.nginxSettings, expected.nginxSettings)
+    || preview.impact?.hostnameChanged !== false || preview.impact?.policyChanged !== POLICY_FIELDS.some(key => Object.hasOwn(changes, key))
+    || preview.impact?.settingsChanged !== Object.hasOwn(changes, 'nginxSettings') || preview.impact?.requiresStageAndActivation !== true
     || preview.impact?.certificate?.id !== base.certificateId || preview.impact?.certificate?.detached !== false) {
     fail('hosting_response_invalid', 'Sunucunun önizlemesi seçilen site ve yönlendirme tercihleriyle eşleşmiyor.');
   }

@@ -7,7 +7,7 @@ import { workspaceResources } from '../src/workspace/workspace-resources.js';
 
 const record = (overrides = {}) => ({ id: 'domain-a', websiteId: 'website-a', serverId: 'local-a', parentDomainId: null,
   primaryDomain: 'example.com', aliases: ['www.example.com'], desiredRevision: 3, appliedRevision: 3,
-  targetType: 'static', target: { root: '/srv/website-a/public' }, nginxSettings: { spaFallback: false },
+  targetType: 'static', target: { root: '/srv/website-a/public' }, nginxSettings: { clientMaxBodySizeMb: null, spaFallback: false, staticAssetCacheSeconds: 604800, headers: [] },
   httpsMode: 'managed', httpsRedirect: false, canonicalRedirect: false, certificateId: 'cert-a', state: 'active', ...overrides });
 const edited = () => editHostingForm(createHostingForm(record()), 'httpsRedirect', true);
 const review = (form) => ({ base: structuredClone(form.base), changes: hostingSettingsChanges(form.base, form.values) });
@@ -17,7 +17,7 @@ const code = (expected) => (error) => error?.code === expected;
 test('form copies a record without mutating it and starts clean', () => {
   const domain = record(); const form = createHostingForm(domain);
   assert.equal(hostingFormDirty(form), false);
-  assert.deepEqual(form.values, { httpsRedirect: false, canonicalRedirect: false });
+  assert.deepEqual(form.values, { httpsRedirect: false, canonicalRedirect: false, nginxSettings: record().nginxSettings });
   domain.aliases.push('other.example'); assert.equal(form.base.aliases.length, 1);
   const next = editHostingForm(form, 'httpsRedirect', true);
   assert.equal(hostingFormDirty(next), true); assert.equal(form.values.httpsRedirect, false);
@@ -61,7 +61,7 @@ test('same-revision certificate drift still requires a reload', () => {
 test('explicit reload preserves changed fields and adopts untouched remote fields', () => {
   const form = edited(); const incoming = record({ desiredRevision: 4, canonicalRedirect: true, aliases: ['alias.example.com'] });
   const next = reloadHostingForm(form, incoming, record());
-  assert.deepEqual(next.values, { httpsRedirect: true, canonicalRedirect: true });
+  assert.deepEqual(next.values, { httpsRedirect: true, canonicalRedirect: true, nginxSettings: record().nginxSettings });
   assert.deepEqual(hostingSettingsChanges(next.base, next.values), { httpsRedirect: true });
   assert.deepEqual(next.base.aliases, incoming.aliases);
   assert.equal(form.base.desiredRevision, 3); assert.equal(incoming.httpsRedirect, false);
@@ -74,12 +74,34 @@ test('reload resolves an uncertain save without automatically sending it again',
 test('clean reload adopts both incoming preferences', () => {
   const next = reloadHostingForm(createHostingForm(record()), record({ desiredRevision: 4, httpsRedirect: true, canonicalRedirect: true }), record());
   assert.equal(hostingFormDirty(next), false);
-  assert.deepEqual(next.values, { httpsRedirect: true, canonicalRedirect: true });
+  assert.deepEqual(next.values, { httpsRedirect: true, canonicalRedirect: true, nginxSettings: record().nginxSettings });
 });
 test('reset uses the reviewed baseline, not an unreviewed background record', () => {
   const form = edited(); const reset = createHostingForm(form.base);
   assert.equal(hostingFormDirty(reset), false);
   assert.equal(hostingFormStale(reset, record({ desiredRevision: 4 })), true);
+});
+test('settings drafts use value equality and do not share nested headers with the source record', () => {
+  const domain = record(), form = createHostingForm(domain);
+  const next = editHostingForm(form, 'nginxSettings', { ...form.values.nginxSettings,
+    headers: [{ name: 'X-Draft', value: 'kept', always: true }] });
+  assert.equal(hostingFormDirty(next), true);
+  assert.deepEqual(form.values.nginxSettings.headers, []);
+  assert.deepEqual(domain.nginxSettings.headers, []);
+  assert.equal(hostingFormDirty(editHostingForm(next, 'nginxSettings', structuredClone(domain.nginxSettings))), false);
+});
+test('reload preserves only edited web server settings and adopts another operator\'s unchanged fields', () => {
+  const clean = createHostingForm(record());
+  const form = editHostingForm(clean, 'nginxSettings', { ...clean.values.nginxSettings, clientMaxBodySizeMb: 25 });
+  const headers = [{ name: 'X-Remote', value: 'kept', always: true }];
+  const incoming = record({ desiredRevision: 4, nginxSettings: { ...record().nginxSettings,
+    clientMaxBodySizeMb: 30, staticAssetCacheSeconds: 120, headers } });
+  const next = reloadHostingForm(form, incoming, record());
+  assert.equal(next.values.nginxSettings.clientMaxBodySizeMb, 25);
+  assert.equal(next.values.nginxSettings.staticAssetCacheSeconds, 120);
+  assert.deepEqual(next.values.nginxSettings.headers, headers);
+  assert.equal(hostingFormDirty(next), true);
+  assert.equal(hostingReviewMatches(next, review(next)), true);
 });
 for (const field of ['id', 'websiteId', 'serverId', 'parentDomainId']) {
   test(`reload and stale guard reject changed ${field}`, () => {
@@ -121,36 +143,23 @@ test('settings deep links demand jobs; read-only hosting hub and Files demand is
   for (const path of ['/websites/domain-a/settings', '/websites/domain-a/settings/']) {
     const demand = workspaceResources(path); assert.equal(demand.jobs, true); assert.equal(demand.domains, true);
   }
-  for (const path of ['/websites/domain-a/hosting', '/websites/domain-a/files', '/files']) assert.equal(workspaceResources(path).jobs, false);
+  assert.equal(workspaceResources('/websites/domain-a/hosting').jobs, true);
+  for (const path of ['/websites/domain-a/files', '/files']) assert.equal(workspaceResources(path).jobs, false);
   assert.equal(workspaceResources('/settings').jobs, false);
 });
 
 // These are source-wiring checks, not React rendering or browser acceptance.
 const source = readFileSync(new URL('../src/workspace/DomainHostingPanel.jsx', import.meta.url), 'utf8');
 const site = readFileSync(new URL('../src/workspace/SiteDetailPage.jsx', import.meta.url), 'utf8');
-test('form is mounted at the existing settings route without replacing Files/SSL/alias tools', () => {
+test('form has a single canonical hosting route without replacing Files/SSL/alias tools', () => {
   assert.match(site, /import DomainHostingPanel from '\.\/DomainHostingPanel\.jsx'/);
-  assert.match(site, /tab === 'settings'[\s\S]*<DomainHostingPanel domain=\{domain\} \/>/);
-  for (const component of ['SiteFilesPanel', 'SslOperations', 'DomainOperations', 'WebsiteIsolationPanel']) assert.match(site, new RegExp(`<${component}\\b`));
+  assert.match(site, /tab === 'hosting' && <DomainHostingPanel domain=\{domain\} \/>/);
+  for (const component of ['SiteFilesPanel', 'SslOperations', 'DomainOperations', 'SiteAccessPanel']) assert.match(site, new RegExp(`<${component}\\b`));
 });
 test('session/site identity, component lifetime and abort signal are wired', () => {
   for (const expected of ['session?.user?.id', 'session?.user?.role', 'domain.websiteId', 'domain.serverId', 'key={identity}', 'sessionVersion() === generation', '!sessionTransitionPending()', 'value.controller.abort()', 'signal: runtime.current?.controller.signal']) assert.ok(source.includes(expected), expected);
 });
-test('one stable client rechecks live mutation state; duplicate submissions and uncertain saves are guarded', () => {
-  assert.match(source, /useMemo\(\(\) => createDomainHostingClient/);
-  assert.match(source, /hostingWriteBlock\(\{ \.\.\.live.current, form: formRef.current/);
-  assert.match(source, /if \(pending.current \|\| !current\(\)\) return/);
-  assert.match(source, /failure.needsReload/);
-  assert.match(source, /hostingReviewMatches\(formRef.current, plan\)/);
-});
-test('dirty draft warning, review modal, explicit save and refresh are wired', () => {
-  for (const expected of ['useUnsavedChanges(dirty)', 'reloadHostingForm(formRef.current, value, live.current.domain)', 'createHostingForm(result.domain)', 'client.save(approved)', 'refreshAll()', '<HostingReview', '<Modal', 'onSave={save}']) assert.ok(source.includes(expected), expected);
-  assert.match(source, /setPlan\(null\); setError\(null\); setNotice\(null\)/);
-  assert.match(source, /import \{[^}]*\bBadge\b[^}]*\} from '\.\/PanelKit\.jsx'/);
-});
-test('form links to existing publishing and never creates a second publishing workflow', () => {
-  assert.match(source, /siteHref\(domain.id, 'domains'\)/);
-  assert.match(source, /henüz yayına uygulanmadı/);
-  assert.doesNotMatch(source, /waitForJob|runJob|\/stage|\/activate|localStorage|sessionStorage|dangerouslySetInnerHTML/);
-  assert.match(source, /className="ws-check"/);
+test('hosting form preserves draft and guards a single save-and-apply submission', () => {
+  for (const expected of ['useUnsavedChanges(dirty)', 'reloadHostingForm(formRef.current, value, live.current.domain)', 'hostingWriteBlock', 'pending.current', 'failure.needsReload', 'client.save(preview, { apply: true })', 'client.apply(formRef.current.base)']) assert.ok(source.includes(expected), expected);
+  assert.doesNotMatch(source, /<HostingReview|<Modal|Yayın yönetimine git|localStorage|sessionStorage|dangerouslySetInnerHTML/);
 });

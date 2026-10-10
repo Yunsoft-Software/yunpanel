@@ -32,10 +32,10 @@ test('fonts are self-hosted with swap and monospace editors are not restyled as 
   assert.match(css, /font-family: var\(--ws-font-code\)/);
   assert.match(css, /\.yf-editor textarea/);
 });
-test('build prepares fonts but adds no runtime package dependency', async () => {
+test('build prepares fonts and uses only the supported runtime packages and shared policy', async () => {
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(pkg.scripts.prebuild, 'npm run fonts'); assert.equal(pkg.scripts.predev, 'npm run fonts');
-  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@xterm/addon-fit','@xterm/xterm','react','react-dom','react-router'].sort());
+  assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@xterm/addon-fit','@xterm/xterm','@yunpanel/shared','react','react-dom','react-router'].sort());
 });
 test('normal text, navigation and semantic badges retain 4.5 contrast in both palettes', async () => {
   const css = await source('workspace/ui/ember-theme.css');
