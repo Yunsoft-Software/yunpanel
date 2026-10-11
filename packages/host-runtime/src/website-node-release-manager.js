@@ -105,6 +105,23 @@ function normalizeSpec(value) {
   return Object.freeze({ applicationId, deploymentId, repositoryUrl, branch, gitTarget, runtime, retention });
 }
 
+function normalizeRetainedSpec(value, { switching = false } = {}) {
+  const fields = new Set(['applicationId', 'releaseId', 'commitSha', 'runtime', 'currentReleaseId', 'operationId']);
+  try {
+    if (!value || typeof value !== 'object' || Array.isArray(value)
+      || Object.keys(value).some(key => !fields.has(key)) || !SHA1_PATTERN.test(value.commitSha ?? '')) throw new Error();
+    const runtime = normalizeNodeRuntimeConfig(value.runtime, { requirePort: false });
+    if (runtime.start.mode !== 'node' || !runtime.start.entryFile) throw new Error();
+    return Object.freeze({
+      applicationId: assertUuid(value.applicationId, 'applicationId'),
+      releaseId: assertUuid(value.releaseId, 'releaseId'), commitSha: value.commitSha.toLowerCase(), runtime,
+      ...(switching ? { currentReleaseId: assertUuid(value.currentReleaseId, 'currentReleaseId'), operationId: assertUuid(value.operationId, 'operationId') } : {}),
+    });
+  } catch {
+    throw new WebsiteNodeReleaseError('website_node_retained_release_invalid', 'Retained Passenger release identity or runtime is invalid');
+  }
+}
+
 function specDigest(spec) {
   return sha256(JSON.stringify({
     version: 1,
@@ -325,7 +342,13 @@ export function createWebsiteNodeReleaseManager({
       if (error?.code === 'ENOENT') return null;
       throw new WebsiteNodeReleaseError('website_node_release_receipt_unavailable', 'Passenger Node release receipt could not be read');
     }
-    try { return normalizeReceipt(JSON.parse(raw), spec); }
+    try {
+      const receipt = normalizeReceipt(JSON.parse(raw), spec);
+      if (receipt.deploymentId !== deploymentId.toLowerCase()) {
+        throw new WebsiteNodeReleaseError('website_node_release_receipt_conflict', 'Passenger receipt identity does not match its operation path');
+      }
+      return receipt;
+    }
     catch (error) {
       if (error instanceof WebsiteNodeReleaseError) throw error;
       throw new WebsiteNodeReleaseError('website_node_release_receipt_invalid', 'Passenger Node release receipt is invalid');
@@ -503,12 +526,17 @@ export function createWebsiteNodeReleaseManager({
       return;
     }
     const releases = [];
+    const owner = await inspectIdentity(identity);
     for (const entry of entries) {
       if (!entry.isDirectory() || !UUID_PATTERN.test(entry.name)) continue;
       const releasePath = path.posix.join(identity.paths.runtime.releasesDirectory, entry.name.toLowerCase());
       try {
         const info = await lstatFn(releasePath);
         if (!info.isDirectory() || info.isSymbolicLink()) continue;
+        const receipt = await loadReceipt(entry.name.toLowerCase());
+        if (!receipt || receipt.applicationId !== identity.applicationId || receipt.state !== 'active'
+          || info.uid !== owner.uid || info.gid !== owner.gid || modeOf(info) !== 0o750
+          || await realpathFn(releasePath) !== releasePath) continue;
         releases.push({ id: entry.name.toLowerCase(), path: releasePath, mtimeMs: Number.isFinite(info.mtimeMs) ? info.mtimeMs : 0 });
       } catch { /* Ignore cleanup-only inspection failures. */ }
     }
@@ -531,7 +559,7 @@ export function createWebsiteNodeReleaseManager({
     const runtimeBin = path.posix.dirname(nodeBinary);
     const digest = specDigest(spec);
     let receipt = await loadReceipt(spec.deploymentId, spec);
-    let previousReleaseId = receipt?.previousReleaseId ?? await currentRelease(identity);
+    const previousReleaseId = receipt ? receipt.previousReleaseId : await currentRelease(identity);
     let switched = false;
     let privateKeyPath = null;
     let releaseOwned = false;
@@ -577,6 +605,7 @@ export function createWebsiteNodeReleaseManager({
     }
 
     if (existingRelease && receipt.commitSha && ['prepared', 'active'].includes(receipt.state)) {
+      if (options.activate === false) return inspectPreparedDeployment(spec);
       await atomicSwitchCurrent(identity, spec.deploymentId, 'activate');
       switched = true;
       try {
@@ -587,7 +616,7 @@ export function createWebsiteNodeReleaseManager({
         switched = false;
         throw error;
       }
-      await cleanupOldReleases(identity, { currentReleaseId: spec.deploymentId, previousReleaseId, retention: spec.retention });
+      if (!options.deferCleanup) await cleanupOldReleases(identity, { currentReleaseId: spec.deploymentId, previousReleaseId, retention: spec.retention });
       return inspectDeployment(spec);
     }
 
@@ -676,6 +705,7 @@ export function createWebsiteNodeReleaseManager({
       await rmFn(path.posix.join(releaseDirectory, '.git'), { recursive: true, force: true });
 
       receipt = await persistReceipt({ ...receipt, commitSha, state: 'prepared' }, spec);
+      if (options.activate === false) return inspectPreparedDeployment(spec);
       await atomicSwitchCurrent(identity, spec.deploymentId, 'activate');
       switched = true;
       try {
@@ -687,7 +717,7 @@ export function createWebsiteNodeReleaseManager({
         throw error;
       }
 
-      await cleanupOldReleases(identity, { currentReleaseId: spec.deploymentId, previousReleaseId, retention: spec.retention });
+      if (!options.deferCleanup) await cleanupOldReleases(identity, { currentReleaseId: spec.deploymentId, previousReleaseId, retention: spec.retention });
       const verified = await inspectDeployment(spec);
       if (!verified.satisfied) throw new WebsiteNodeReleaseError('website_node_release_unverified', 'Passenger Node release did not become the verified current release');
       await emitLog(spec, 'complete', 'info', 'Passenger Node release preparation completed.');
@@ -707,16 +737,154 @@ export function createWebsiteNodeReleaseManager({
 
   function prepare(rawSpec, options = {}) {
     let spec;
-    try { spec = normalizeSpec(rawSpec); }
+    try {
+      spec = normalizeSpec(rawSpec);
+      if (!options || typeof options !== 'object' || Array.isArray(options)
+        || ['activate', 'deferCleanup'].some(key => options[key] !== undefined && typeof options[key] !== 'boolean')) {
+        throw new WebsiteNodeReleaseError('website_node_release_options_invalid', 'Passenger release lifecycle options are invalid');
+      }
+    }
     catch (error) { return Promise.reject(error); }
-    const previous = releaseLocks.get(spec.applicationId) ?? Promise.resolve();
-    const operation = previous.catch(() => {}).then(() => prepareUnlocked(spec, options));
+    return withReleaseLock(spec.applicationId, () => prepareUnlocked(spec, options));
+  }
+
+  function withReleaseLock(applicationId, action) {
+    const previous = releaseLocks.get(applicationId) ?? Promise.resolve();
+    const operation = previous.catch(() => {}).then(action);
     let tracked;
     tracked = operation.finally(() => {
-      if (releaseLocks.get(spec.applicationId) === tracked) releaseLocks.delete(spec.applicationId);
+      if (releaseLocks.get(applicationId) === tracked) releaseLocks.delete(applicationId);
     });
-    releaseLocks.set(spec.applicationId, tracked);
+    releaseLocks.set(applicationId, tracked);
     return tracked;
+  }
+
+  async function inspectPreparedDeployment(rawSpec) {
+    const spec = normalizeSpec(rawSpec);
+    const identity = createApplicationIdentity(spec.applicationId);
+    const identityEvidence = await inspectIdentity(identity);
+    const receipt = await loadReceipt(spec.deploymentId, spec);
+    if (!receipt || receipt.state !== 'prepared' || !receipt.commitSha) {
+      return Object.freeze({ satisfied: false, reason: 'website_node_release_not_prepared' });
+    }
+    if (await currentRelease(identity) !== receipt.previousReleaseId) {
+      throw new WebsiteNodeReleaseError('website_node_release_state_drift', 'Current Passenger release changed before publication');
+    }
+    const release = await releaseEvidence(spec, identity, identityEvidence, spec.deploymentId);
+    if (!release) return Object.freeze({ satisfied: false, reason: 'website_node_release_incomplete' });
+    return Object.freeze({
+      satisfied: true, prepared: true, adapter: 'passenger-release',
+      applicationId: spec.applicationId, deploymentId: spec.deploymentId, releaseId: spec.deploymentId,
+      previousReleaseId: receipt.previousReleaseId, commitSha: receipt.commitSha,
+      appRoot: release.documentRoot, documentRoot: release.documentRoot,
+      startupFile: spec.runtime.start.entryFile, nodeBinary: await findNode(spec),
+      unixUser: identity.unixUser, currentRelease: identity.paths.runtime.currentRelease, receiptState: receipt.state,
+    });
+  }
+
+  function publishPrepared(rawSpec, { expectedPreviousReleaseId } = {}) {
+    const spec = normalizeSpec(rawSpec);
+    if (expectedPreviousReleaseId !== null && !UUID_PATTERN.test(expectedPreviousReleaseId ?? '')) {
+      throw new WebsiteNodeReleaseError('website_node_release_previous_required', 'The verified previous Passenger release is required');
+    }
+    return withReleaseLock(spec.applicationId, async () => {
+      const identity = createApplicationIdentity(spec.applicationId);
+      await inspectIdentity(identity);
+      const receipt = await loadReceipt(spec.deploymentId, spec);
+      if (!receipt || receipt.previousReleaseId !== expectedPreviousReleaseId) {
+        throw new WebsiteNodeReleaseError('website_node_release_receipt_conflict', 'Passenger publication receipt does not match the previous release');
+      }
+      if (['prepared', 'active'].includes(receipt.state) && await currentRelease(identity) === spec.deploymentId) {
+        const published = await inspectDeployment(spec);
+        if (!published.satisfied) throw new WebsiteNodeReleaseError('website_node_release_current_incomplete', 'Published Passenger release is incomplete');
+        if (receipt.state === 'prepared') await persistReceipt({ ...receipt, state: 'active' }, spec);
+        return inspectDeployment(spec);
+      }
+      const ready = await inspectPreparedDeployment(spec);
+      if (!ready.satisfied) throw new WebsiteNodeReleaseError('website_node_release_not_prepared', 'Passenger release is not ready for publication');
+      await atomicSwitchCurrent(identity, spec.deploymentId, 'publish');
+      // A failed receipt write remains physically inspectable; do not erase the
+      // prepared release or hide an uncertain pointer transition.
+      await persistReceipt({ ...receipt, state: 'active' }, spec);
+      return inspectDeployment(spec);
+    });
+  }
+
+  function finalizeRetention(rawSpec) {
+    const spec = normalizeSpec(rawSpec);
+    return withReleaseLock(spec.applicationId, async () => {
+      const verified = await inspectDeployment(spec);
+      if (!verified.satisfied || verified.receiptState !== 'active') {
+        throw new WebsiteNodeReleaseError('website_node_release_retention_unverified', 'Only the verified active Passenger release can finalize retention');
+      }
+      await cleanupOldReleases(createApplicationIdentity(spec.applicationId), {
+        currentReleaseId: spec.deploymentId, previousReleaseId: verified.previousReleaseId, retention: spec.retention,
+      });
+      return verified;
+    });
+  }
+
+  async function inspectRetainedRelease(rawSpec) {
+    const spec = normalizeRetainedSpec(rawSpec);
+    const identity = createApplicationIdentity(spec.applicationId);
+    const owner = await inspectIdentity(identity);
+    const receipt = await loadReceipt(spec.releaseId);
+    if (!receipt || receipt.applicationId !== spec.applicationId || receipt.state !== 'active' || receipt.commitSha !== spec.commitSha) {
+      throw new WebsiteNodeReleaseError('website_node_retained_receipt_mismatch', 'Retained Passenger release has no matching published ownership receipt');
+    }
+    const release = await releaseEvidence(spec, identity, owner, spec.releaseId);
+    if (!release) throw new WebsiteNodeReleaseError('website_node_retained_release_missing', 'Retained Passenger release files are incomplete');
+    return Object.freeze({
+      satisfied: true, retained: true, applicationId: spec.applicationId, releaseId: spec.releaseId,
+      currentReleaseId: await currentRelease(identity), commitSha: receipt.commitSha,
+      appRoot: release.documentRoot, documentRoot: release.documentRoot, startupFile: spec.runtime.start.entryFile,
+      nodeBinary: await findNode(spec), unixUser: identity.unixUser,
+    });
+  }
+
+  function switchRetainedRelease(rawSpec) {
+    const spec = normalizeRetainedSpec(rawSpec, { switching: true });
+    if (spec.currentReleaseId === spec.releaseId) {
+      throw new WebsiteNodeReleaseError('website_node_retained_target_current', 'Retained Passenger release is already current');
+    }
+    return withReleaseLock(spec.applicationId, async () => {
+      const verified = await inspectRetainedRelease(spec);
+      if (verified.currentReleaseId !== spec.currentReleaseId) {
+        throw new WebsiteNodeReleaseError('website_node_release_state_drift', 'Passenger current release changed before retained release switch');
+      }
+      await atomicSwitchCurrent(createApplicationIdentity(spec.applicationId), spec.releaseId, `retained-${spec.operationId}`);
+      const after = await inspectRetainedRelease(spec);
+      if (after.currentReleaseId !== spec.releaseId) {
+        throw new WebsiteNodeReleaseError('website_node_retained_switch_unverified', 'Retained Passenger pointer switch could not be verified');
+      }
+      return Object.freeze({ ...after, previousReleaseId: spec.currentReleaseId });
+    });
+  }
+
+  function discardOperationRelease(rawTarget) {
+    const target = normalizeCompensationTarget(rawTarget);
+    return withReleaseLock(target.applicationId, async () => {
+      const identity = createApplicationIdentity(target.applicationId);
+      const owner = await inspectIdentity(identity);
+      const receipt = await loadReceipt(target.deploymentId);
+      if (!receipt || receipt.applicationId !== target.applicationId || receipt.previousReleaseId !== target.previousReleaseId) {
+        throw new WebsiteNodeReleaseError('website_node_release_receipt_conflict', 'Passenger discard receipt does not match the operation');
+      }
+      if (await currentRelease(identity) !== target.previousReleaseId) {
+        throw new WebsiteNodeReleaseError('website_node_release_state_drift', 'Discard requires the verified previous current release');
+      }
+      const releasePath = path.posix.join(identity.paths.runtime.releasesDirectory, target.deploymentId);
+      try {
+        const info = await lstatFn(releasePath);
+        if (!info.isDirectory() || info.isSymbolicLink() || info.uid !== owner.uid || info.gid !== owner.gid
+          || modeOf(info) !== 0o750 || await realpathFn(releasePath) !== releasePath) {
+          throw new WebsiteNodeReleaseError('website_node_release_drift', 'Discarded Passenger release ownership changed');
+        }
+        await rmFn(releasePath, { recursive: true, force: true });
+      } catch (error) { if (error?.code !== 'ENOENT') throw error; }
+      await persistReceipt({ ...receipt, state: 'compensated' });
+      return Object.freeze({ satisfied: true, discarded: true, ...target, currentReleaseId: target.previousReleaseId });
+    });
   }
 
   async function inspectCompensation(rawTarget) {
@@ -805,6 +973,12 @@ export function createWebsiteNodeReleaseManager({
   return Object.freeze({
     prepare,
     inspectDeployment,
+    inspectPreparedDeployment,
+    publishPrepared,
+    finalizeRetention,
+    inspectRetainedRelease,
+    switchRetainedRelease,
+    discardOperationRelease,
     compensate,
     inspectCompensation,
   });

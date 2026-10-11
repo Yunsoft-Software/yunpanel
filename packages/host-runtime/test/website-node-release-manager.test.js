@@ -40,6 +40,7 @@ function createHarness({ previousReleaseId = null } = {}) {
   const symlinks = new Map();
   const calls = [];
   let gitCheckoutCount = 0;
+  let failActiveReceiptWrites = 0;
 
   directories.set(identity.paths.workspace.homeDirectory, fakeStat({ type: 'directory', mode: 0o750 }));
   if (previousReleaseId) {
@@ -91,6 +92,13 @@ function createHarness({ previousReleaseId = null } = {}) {
   }
 
   async function writeFileFn(target, content, options = {}) {
+    if (failActiveReceiptWrites && target.startsWith(websiteNodeReleaseInternals.paths.RECEIPT_ROOT)) {
+      const receipt = JSON.parse(content);
+      if (receipt.state === 'active') {
+        failActiveReceiptWrites -= 1;
+        throw Object.assign(new Error('receipt persistence failed'), { code: 'ENOSPC' });
+      }
+    }
     if (options.flag === 'wx' && files.has(target)) {
       const error = new Error('exists');
       error.code = 'EEXIST';
@@ -219,6 +227,7 @@ function createHarness({ previousReleaseId = null } = {}) {
     files,
     symlinks,
     gitCheckoutCount: () => gitCheckoutCount,
+    failNextActiveReceiptWrite: () => { failActiveReceiptWrites = 1; },
   };
 }
 
@@ -242,6 +251,145 @@ function releaseSpec(deploymentId = DEPLOYMENT_ID) {
     retention: 5,
   };
 }
+
+test('daily release preparation preserves the active pointer until explicit verified publication', async () => {
+  const h = createHarness({ previousReleaseId: PREVIOUS_RELEASE_ID });
+  const spec = releaseSpec();
+  const prepared = await h.manager.prepare(spec, { activate: false });
+  assert.equal(prepared.prepared, true);
+  assert.equal(prepared.receiptState, 'prepared');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${PREVIOUS_RELEASE_ID}`);
+  assert.equal((await h.manager.inspectDeployment(spec)).satisfied, false);
+  await h.manager.prepare(spec, { activate: false });
+  assert.equal(h.gitCheckoutCount(), 1);
+  await assert.rejects(h.manager.publishPrepared(spec, { expectedPreviousReleaseId: null }), error => error.code === 'website_node_release_receipt_conflict');
+  const published = await h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID });
+  assert.equal(published.releaseId, DEPLOYMENT_ID);
+  assert.equal(published.previousReleaseId, PREVIOUS_RELEASE_ID);
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${DEPLOYMENT_ID}`);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, PREVIOUS_RELEASE_ID)), true);
+  assert.deepEqual(await h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID }), published);
+});
+
+test('prepared release publication refuses a changed current pointer or startup file', async () => {
+  const h = createHarness({ previousReleaseId: PREVIOUS_RELEASE_ID });
+  const spec = releaseSpec(); await h.manager.prepare(spec, { activate: false });
+  const other = '12345678-1234-4234-8234-123456789012';
+  h.symlinks.set(h.identity.paths.runtime.currentRelease, `releases/${other}`);
+  await assert.rejects(h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID }), error => error.code === 'website_node_release_state_drift');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${other}`);
+  h.symlinks.set(h.identity.paths.runtime.currentRelease, `releases/${PREVIOUS_RELEASE_ID}`);
+  h.files.delete(path.posix.join(h.identity.paths.runtime.releasesDirectory, DEPLOYMENT_ID, 'server.js'));
+  await assert.rejects(h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID }), error => error.code === 'website_node_release_not_prepared');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${PREVIOUS_RELEASE_ID}`);
+});
+
+test('retention is deferred until explicit finalization and preserves an unowned UUID directory', async () => {
+  const h = createHarness();
+  const old = releaseSpec(PREVIOUS_RELEASE_ID); await h.manager.prepare(old);
+  const middleId = '12345678-1234-4234-8234-123456789012';
+  await h.manager.prepare(releaseSpec(middleId), { activate: false });
+  await h.manager.publishPrepared(releaseSpec(middleId), { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID });
+  const current = { ...releaseSpec(), retention: 2 };
+  await h.manager.prepare(current, { activate: false });
+  await assert.rejects(h.manager.finalizeRetention(current), error => error.code === 'website_node_release_retention_unverified');
+  await h.manager.publishPrepared(current, { expectedPreviousReleaseId: middleId });
+  const root = h.identity.paths.runtime.releasesDirectory;
+  const unknown = path.posix.join(root, '22222222-2222-4222-8222-222222222222');
+  h.directories.set(unknown, fakeStat({ type: 'directory', uid: 0, gid: 0 }));
+  assert.equal(h.directories.has(path.posix.join(root, PREVIOUS_RELEASE_ID)), true);
+  await h.manager.finalizeRetention(current);
+  assert.equal(h.directories.has(path.posix.join(root, PREVIOUS_RELEASE_ID)), false);
+  assert.equal(h.directories.has(path.posix.join(root, middleId)), true);
+  assert.equal(h.directories.has(path.posix.join(root, DEPLOYMENT_ID)), true);
+  assert.equal(h.directories.has(unknown), true);
+});
+
+test('ordinary retained rollback preserves both releases and their published receipts', async () => {
+  const h = createHarness();
+  await h.manager.prepare(releaseSpec(PREVIOUS_RELEASE_ID));
+  await h.manager.prepare(releaseSpec(), { activate: false });
+  await h.manager.publishPrepared(releaseSpec(), { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID });
+  const target = { applicationId: APPLICATION_ID, releaseId: PREVIOUS_RELEASE_ID, commitSha: COMMIT_SHA, runtime: releaseSpec().runtime };
+  const switched = await h.manager.switchRetainedRelease({ ...target, currentReleaseId: DEPLOYMENT_ID, operationId: '12345678-1234-4234-8234-123456789012' });
+  assert.equal(switched.currentReleaseId, PREVIOUS_RELEASE_ID);
+  assert.equal(switched.previousReleaseId, DEPLOYMENT_ID);
+  assert.equal((await h.manager.inspectRetainedRelease({ ...target, releaseId: DEPLOYMENT_ID })).satisfied, true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, DEPLOYMENT_ID)), true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, PREVIOUS_RELEASE_ID)), true);
+  assert.equal(h.gitCheckoutCount(), 2);
+  await assert.rejects(h.manager.switchRetainedRelease({ ...target, currentReleaseId: DEPLOYMENT_ID, operationId: '12345678-1234-4234-8234-123456789012' }), error => error.code === 'website_node_release_state_drift');
+});
+
+test('retained inspection denies foreign application and commit drift before pointer mutation', async () => {
+  const h = createHarness(); await h.manager.prepare(releaseSpec());
+  const target = { applicationId: APPLICATION_ID, releaseId: DEPLOYMENT_ID, commitSha: COMMIT_SHA, runtime: releaseSpec().runtime };
+  await assert.rejects(h.manager.inspectRetainedRelease({ ...target, applicationId: '12345678-1234-4234-8234-123456789012' }), error => error.code === 'website_node_retained_receipt_mismatch');
+  await assert.rejects(h.manager.inspectRetainedRelease({ ...target, commitSha: 'b'.repeat(40) }), error => error.code === 'website_node_retained_receipt_mismatch');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${DEPLOYMENT_ID}`);
+});
+
+test('discard removes only the operation candidate after the previous pointer is restored', async () => {
+  const h = createHarness(); await h.manager.prepare(releaseSpec(PREVIOUS_RELEASE_ID));
+  await h.manager.prepare(releaseSpec(), { activate: false });
+  const target = { applicationId: APPLICATION_ID, deploymentId: DEPLOYMENT_ID, previousReleaseId: PREVIOUS_RELEASE_ID };
+  assert.equal((await h.manager.discardOperationRelease(target)).discarded, true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, PREVIOUS_RELEASE_ID)), true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, DEPLOYMENT_ID)), false);
+  assert.equal((await h.manager.discardOperationRelease(target)).satisfied, true);
+  await assert.rejects(h.manager.prepare(releaseSpec(), { activate: false }), error => error.code === 'website_node_release_operation_compensated');
+});
+
+test('a lost publication receipt write retains inspectable files and repairs only that same publication', async () => {
+  const h = createHarness();
+  await h.manager.prepare(releaseSpec(PREVIOUS_RELEASE_ID));
+  const spec = releaseSpec(); await h.manager.prepare(spec, { activate: false });
+  h.failNextActiveReceiptWrite();
+  await assert.rejects(h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID }), error => error.code === 'ENOSPC');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${DEPLOYMENT_ID}`);
+  assert.equal((await h.manager.inspectDeployment(spec)).receiptState, 'prepared');
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, PREVIOUS_RELEASE_ID)), true);
+  const repaired = await h.manager.publishPrepared(spec, { expectedPreviousReleaseId: PREVIOUS_RELEASE_ID });
+  assert.equal(repaired.receiptState, 'active'); assert.equal(h.gitCheckoutCount(), 2);
+});
+
+test('an originally empty previous pointer remains immutable when another current release appears', async () => {
+  const h = createHarness(); const spec = releaseSpec();
+  await h.manager.prepare(spec, { activate: false });
+  h.symlinks.set(h.identity.paths.runtime.currentRelease, `releases/${PREVIOUS_RELEASE_ID}`);
+  await assert.rejects(h.manager.prepare(spec, { activate: false }), error => error.code === 'website_node_release_state_drift');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${PREVIOUS_RELEASE_ID}`);
+  assert.equal(h.gitCheckoutCount(), 1);
+});
+
+test('a receipt copied from another release cannot authorize retained publication or candidate removal', async () => {
+  const h = createHarness(); await h.manager.prepare(releaseSpec(PREVIOUS_RELEASE_ID));
+  await h.manager.prepare(releaseSpec(), { activate: false });
+  const receiptPath = id => path.posix.join(websiteNodeReleaseInternals.paths.RECEIPT_ROOT, `${id}.json`);
+  h.files.set(receiptPath(DEPLOYMENT_ID), { ...h.files.get(receiptPath(PREVIOUS_RELEASE_ID)) });
+  const target = { applicationId: APPLICATION_ID, releaseId: DEPLOYMENT_ID, commitSha: COMMIT_SHA, runtime: releaseSpec().runtime };
+  await assert.rejects(h.manager.inspectRetainedRelease(target), error => error.code === 'website_node_release_receipt_conflict');
+  await assert.rejects(h.manager.switchRetainedRelease({ ...target, currentReleaseId: PREVIOUS_RELEASE_ID, operationId: '12345678-1234-4234-8234-123456789012' }), error => error.code === 'website_node_release_receipt_conflict');
+  await assert.rejects(h.manager.discardOperationRelease({ applicationId: APPLICATION_ID, deploymentId: DEPLOYMENT_ID, previousReleaseId: PREVIOUS_RELEASE_ID }), error => error.code === 'website_node_release_receipt_conflict');
+  assert.equal(h.symlinks.get(h.identity.paths.runtime.currentRelease), `releases/${PREVIOUS_RELEASE_ID}`);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, DEPLOYMENT_ID)), true);
+});
+
+test('retention leaves a wrongly filed published receipt directory untouched', async () => {
+  const h = createHarness(); await h.manager.prepare(releaseSpec(PREVIOUS_RELEASE_ID));
+  await h.manager.prepare(releaseSpec());
+  const third = '12345678-1234-4234-8234-123456789012';
+  await h.manager.prepare(releaseSpec(third));
+  const fourth = { ...releaseSpec('33333333-3333-4333-8333-333333333333'), retention: 2 };
+  await h.manager.prepare(fourth, { activate: false });
+  await h.manager.publishPrepared(fourth, { expectedPreviousReleaseId: third });
+  const receiptPath = id => path.posix.join(websiteNodeReleaseInternals.paths.RECEIPT_ROOT, `${id}.json`);
+  h.files.set(receiptPath(DEPLOYMENT_ID), { ...h.files.get(receiptPath(PREVIOUS_RELEASE_ID)) });
+  await h.manager.finalizeRetention(fourth);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, DEPLOYMENT_ID)), true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, third)), true);
+  assert.equal(h.directories.has(path.posix.join(h.identity.paths.runtime.releasesDirectory, fourth.deploymentId)), true);
+});
 
 test('prepares a Passenger Node release without creating a systemd service or localhost process', async () => {
   const harness = createHarness();
