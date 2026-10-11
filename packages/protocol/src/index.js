@@ -5,6 +5,8 @@ import {
   normalizeDomainSet,
   normalizeNginxSettings,
   normalizeNodeApplicationSpec,
+  normalizePassengerNodeDeploySpec,
+  normalizePassengerNodeRollbackSpec,
   normalizeNodeProcessSpec,
   MANAGED_NODE_RUNTIME_MAJORS as SHARED_MANAGED_NODE_RUNTIME_MAJORS,
   normalizeNodeRestartSpec,
@@ -63,6 +65,8 @@ export const OPERATIONS = Object.freeze({
   APP_NODE_STATUS: 'app.node.status',
   APP_NODE_PROCESS: 'app.node.process',
   APP_NODE_PASSENGER_MIGRATE: 'app.node.passenger-migrate',
+  APP_NODE_PASSENGER_DEPLOY: 'app.node.passenger-deploy',
+  APP_NODE_PASSENGER_ROLLBACK: 'app.node.passenger-rollback',
   APP_PYTHON_DEPLOY: 'app.python.deploy',
   APP_PYTHON_ROLLBACK: 'app.python.rollback',
   APP_PYTHON_RESTART: 'app.python.restart',
@@ -484,6 +488,15 @@ function validateMutationPayload(operation, payload, errors) {
       normalizeNodeApplicationSpec(payload);
     } catch (error) {
       errors.push(error instanceof ApplicationValidationError ? error.message : 'app.node.deploy payload is invalid');
+    }
+  }
+
+  if (operation === OPERATIONS.APP_NODE_PASSENGER_DEPLOY || operation === OPERATIONS.APP_NODE_PASSENGER_ROLLBACK) {
+    try {
+      if (operation === OPERATIONS.APP_NODE_PASSENGER_DEPLOY) normalizePassengerNodeDeploySpec(payload);
+      else normalizePassengerNodeRollbackSpec(payload);
+    } catch (error) {
+      errors.push(error instanceof ApplicationValidationError ? error.message : 'Passenger release payload is invalid');
     }
   }
 
