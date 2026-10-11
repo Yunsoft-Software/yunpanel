@@ -94,6 +94,7 @@ export function createDockerComposeOperationsService({
       throw new DockerComposeOperationsError('docker_compose_job_conflict', 'Another Docker Compose operation is already queued or running', 409);
     }
     await assertBackupUnlocked(projectId);
+    return jobs;
   }
 
   async function history({ projectId } = {}) {
@@ -105,7 +106,7 @@ export function createDockerComposeOperationsService({
 
   async function preview({ projectId, action: requestedAction } = {}) {
     const action = requireAction(requestedAction);
-    await assertIdle(projectId);
+    const previousJobs = await assertIdle(projectId);
     let project;
     let environment;
     let credentials;
@@ -138,6 +139,9 @@ export function createDockerComposeOperationsService({
       environmentRevision: environment.revision,
       composeSha256: project.composeSha256,
       credentialRevisions: Object.freeze(pins),
+      // Repeated desired state is a new intent after a completed lifecycle
+      // operation. A stopped project must not reuse its old succeeded start.
+      executionRevision: previewDigest(previousJobs.map(job => [job.id, job.operation, job.status]).sort((a, b) => String(a[0]).localeCompare(String(b[0])))),
     });
     const digest = previewDigest(identity);
     return Object.freeze({

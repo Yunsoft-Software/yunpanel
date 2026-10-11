@@ -63,6 +63,23 @@ test('compose lifecycle preview pins server project environment digest and sorte
   assert.equal(preview.sideEffects, false);
 });
 
+test('start stop start with unchanged configuration creates a new intent after completed work', async () => {
+  const jobs = [];
+  const { service, enqueued } = fixture({ jobs });
+  const first = await service.preview({ projectId, action: 'start' });
+  assert.equal((await service.preview({ projectId, action: 'start' })).previewDigest, first.previewDigest);
+  await service.queue({ projectId, action: 'start', expectedPreviewDigest: first.previewDigest, confirmation: first.confirmation });
+  jobs.push({ id: 'first-start', operation: OPERATIONS.DOCKER_COMPOSE_START, status: 'succeeded' });
+  const stopped = await service.preview({ projectId, action: 'stop' });
+  await service.queue({ projectId, action: 'stop', expectedPreviewDigest: stopped.previewDigest, confirmation: stopped.confirmation });
+  jobs.push({ id: 'first-stop', operation: OPERATIONS.DOCKER_COMPOSE_STOP, status: 'succeeded' });
+  const second = await service.preview({ projectId, action: 'start' });
+  assert.notEqual(second.previewDigest, first.previewDigest);
+  await service.queue({ projectId, action: 'start', expectedPreviewDigest: second.previewDigest, confirmation: second.confirmation });
+  assert.notEqual(enqueued[0].idempotencyKey, enqueued[2].idempotencyKey);
+  await assert.rejects(service.queue({ projectId, action: 'start', expectedPreviewDigest: first.previewDigest, confirmation: first.confirmation }), { code: 'docker_compose_preview_stale' });
+});
+
 test('compose lifecycle queue uses pinned secret-free payload and correct server resource lock', async () => {
   const { service, enqueued } = fixture();
   const preview = await service.preview({ projectId, action: 'restart' });
