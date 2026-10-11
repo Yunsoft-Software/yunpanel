@@ -403,7 +403,23 @@ function validateMutationPayload(operation, payload, errors) {
   if (operation === OPERATIONS.MAIL_CONFIG_ROLLBACK) validateMailConfigRollback(payload, operation, errors);
 
   if (operation === OPERATIONS.DOMAIN_STAGE) {
-    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect', 'domainRevision'], operation, errors);
+    rejectUnexpectedKeys(payload, ['primaryDomain', 'aliases', 'targetType', 'target', 'nginxSettings', 'tls', 'canonicalRedirect', 'httpsRedirect', 'domainRevision', 'passengerAttachment'], operation, errors);
+    if (payload.passengerAttachment !== undefined) {
+      const pin = payload.passengerAttachment;
+      const ids = ['serverId', 'domainId', 'applicationId', 'websiteId', 'releaseId'];
+      const revisions = ['websiteRevision', 'bindingRevision', 'domainRevision'];
+      if (payload.targetType !== 'passenger' || !pin || typeof pin !== 'object' || Array.isArray(pin)
+        || Object.keys(pin).length !== ids.length + revisions.length
+        || [...ids, ...revisions].some(key => !Object.hasOwn(pin, key))) {
+        errors.push('domain.stage Passenger attachment fields are invalid');
+      } else {
+        for (const key of ids) {
+          try { assertUuid(pin[key], key); } catch { errors.push('domain.stage Passenger attachment identity is invalid'); }
+        }
+        if (revisions.some(key => !Number.isSafeInteger(pin[key]) || pin[key] < 1)
+          || pin.domainRevision !== payload.domainRevision) errors.push('domain.stage Passenger attachment revision is invalid');
+      }
+    }
     if (payload.domainRevision !== undefined && (!Number.isSafeInteger(payload.domainRevision) || payload.domainRevision < 1)) errors.push('domain.stage domainRevision must be a positive safe integer');
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');

@@ -59,6 +59,8 @@ export async function recoverRunningDomainStage({
   domainRegistry,
   certificateRegistry,
   applicationRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
   serviceStatus,
   loadJobContext,
   inspectStageEvidence,
@@ -114,6 +116,11 @@ export async function recoverRunningDomainStage({
     throw new JobRunningDomainRecoveryError('job_domain_recovery_context_failed', 'Private domain recovery context could not be read');
   }
   assertRecoveryContext(context, job, candidate, identity);
+  if (context.payload.targetType === 'passenger'
+    && (typeof websiteRegistry?.getWebsite !== 'function' || typeof runtimeBindingRegistry?.getBinding !== 'function'
+      || typeof runtimeBindingRegistry?.activate !== 'function')) {
+    throw new JobRunningDomainRecoveryError('job_domain_recovery_dependencies_invalid', 'Passenger Domain recovery requires Website and runtime authority before completing its job');
+  }
 
   let evidence;
   try {
@@ -159,7 +166,7 @@ export async function recoverRunningDomainStage({
   }
 
   try {
-    const reconciliation = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, job: terminal });
+    const reconciliation = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, websiteRegistry, runtimeBindingRegistry, job: terminal });
     if (!reconciliation || reconciliation.reconciled !== true) throw new Error('reconciliation not confirmed');
   } catch {
     throw new JobRunningDomainRecoveryError(

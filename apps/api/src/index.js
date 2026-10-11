@@ -700,6 +700,7 @@ const jobRegistry = createDomainStageTargetJobRegistry({
   dockerComposeProjectRegistry: dockerComposeProjectBootstrap.projectRegistry,
   applicationRegistry,
   runtimeBindingRegistry,
+  siteMutationLock,
 });
 localWebsiteCronOperation = createLocalWebsiteCronOperation({
   websiteCronRegistry,

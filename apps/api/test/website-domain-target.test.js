@@ -225,6 +225,11 @@ test('Passenger runtime binding materializes the canonical Passenger Domain targ
   assert.match(preview.config, new RegExp('include /etc/yunpanel/passenger-env/' + applicationId + '\\.conf;'));
 });
 
+test('normal target resolution still refuses a Domain absent from Passenger binding evidence', async () => {
+  await assert.rejects(resolveWebsiteDomainTarget({ domain: domain({ state: 'draft', stagedRevision: 0, appliedRevision: 0 }),
+    ...passengerDependencies({ bindingOverrides: { domains: [] } }) }), { code: 'passenger_runtime_binding_drift' });
+});
+
 test('Passenger binding cannot restage traffic with a foreign Unix user or group', async () => {
   for (const field of ['user', 'group']) {
     const deps = passengerDependencies();

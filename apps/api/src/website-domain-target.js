@@ -96,6 +96,7 @@ async function resolvePassengerRuntimeTarget({
   website,
   applicationRegistry,
   runtimeBindingRegistry,
+  allowPassengerDomainAttachment = false,
 }) {
   if (website.runtimeType !== 'node' || !website.applicationId) return null;
 
@@ -137,7 +138,25 @@ async function resolvePassengerRuntimeTarget({
     passengerBindingDrift('Passenger runtime binding Website revision drifted');
   }
   const domainEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
-  if (!domainEvidence || domain.desiredRevision < domainEvidence.desiredRevision) {
+  let passengerAttachment = null;
+  if (!domainEvidence && allowPassengerDomainAttachment === true) {
+    if (binding.domains.length >= 32) {
+      throw new DomainRegistryError('passenger_domain_limit_reached', 'Passenger Website supports at most 32 managed Domains', 409);
+    }
+    if (!['draft', 'error'].includes(domain.state) || domain.stagedRevision !== 0 || domain.appliedRevision !== 0
+      || domain.stagedChecksum !== null || domain.stagedConfigName !== null
+      || !Number.isSafeInteger(domain.desiredRevision) || domain.desiredRevision < 1
+      || application.type !== 'node' || application.runtimeAdapter !== 'passenger'
+      || application.state !== 'active' || application.activeDeploymentId !== null
+      || binding.state !== 'active' || !Number.isSafeInteger(binding.revision) || binding.revision < 1) {
+      passengerBindingDrift('New Passenger Domain requires an idle active Application and its first draft revision');
+    }
+    passengerAttachment = Object.freeze({
+      serverId: domain.serverId, domainId: domain.id, applicationId: application.id,
+      websiteId: website.id, releaseId: binding.releaseId, websiteRevision: website.revision,
+      bindingRevision: binding.revision, domainRevision: domain.desiredRevision,
+    });
+  } else if (!domainEvidence || domain.desiredRevision < domainEvidence.desiredRevision) {
     passengerBindingDrift('Passenger runtime binding Domain revision drifted');
   }
 
@@ -145,6 +164,7 @@ async function resolvePassengerRuntimeTarget({
     source: 'passenger',
     targetType: 'passenger',
     target: Object.freeze({ ...binding.passengerTarget }),
+    ...(passengerAttachment ? { passengerAttachment } : {}),
   });
 }
 
@@ -195,6 +215,7 @@ async function resolvePhpRuntimeTarget({
     applicationId: application.id,
     unixUser: website.unixUser,
     documentRoot: website.documentRoot,
+    ...(website.phpConfig ?? {}),
   });
   if (!runtime || runtime.satisfied !== true || runtime.adapter !== 'php-fpm') {
     throw new DomainRegistryError(
@@ -279,6 +300,7 @@ export async function resolveWebsiteDomainTarget({
   runtimeBindingRegistry = null,
   phpFpmSiteManager = null,
   serviceUmaskManager = null,
+  allowPassengerDomainAttachment = false,
 } = {}) {
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)) {
     throw new DomainRegistryError('invalid_domain_target_state', 'Domain target state is invalid', 409);
@@ -327,6 +349,7 @@ export async function resolveWebsiteDomainTarget({
       website,
       applicationRegistry,
       runtimeBindingRegistry,
+      allowPassengerDomainAttachment,
     });
     if (passengerTarget) return passengerTarget;
     const phpTarget = await resolvePhpRuntimeTarget({

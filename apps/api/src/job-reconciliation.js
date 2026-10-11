@@ -502,8 +502,27 @@ async function reconcilePassengerDomainStageBinding({
     );
   }
   const previousEvidence = binding.domains.find((entry) => entry.domainId === domain.id);
-  if (!previousEvidence || previousEvidence.desiredRevision > domain.desiredRevision) {
-    passengerDomainStageError(
+  const pin = job.payload.passengerAttachment;
+  if (pin !== undefined) {
+    const expected = {
+      serverId: domain.serverId, domainId: domain.id, applicationId: application.id,
+      websiteId: website.id, releaseId: binding.releaseId, websiteRevision: website.revision,
+      bindingRevision: pin?.bindingRevision, domainRevision: domain.desiredRevision,
+    };
+    const pinMatches = pin && typeof pin === 'object' && !Array.isArray(pin)
+      && Object.keys(pin).length === Object.keys(expected).length
+      && Object.keys(expected).every(key => Object.hasOwn(pin, key) && pin[key] === expected[key])
+      && Number.isSafeInteger(pin.bindingRevision) && pin.bindingRevision >= 1;
+    const alreadyAttached = previousEvidence && binding.revision === pin?.bindingRevision + 1
+      && previousEvidence.desiredRevision === domain.desiredRevision
+      && previousEvidence.nginxChecksum === job.result.checksum;
+    if (!pinMatches || application.runtimeAdapter !== 'passenger' || application.state !== 'active'
+      || application.activeDeploymentId !== null || binding.state !== 'active'
+      || job.payload.domainRevision !== domain.desiredRevision || domain.appliedRevision !== 0
+      || domain.state !== 'staged' || domain.stagedRevision !== domain.desiredRevision
+      || domain.stagedChecksum !== job.result.checksum || !/^[a-f0-9]{64}$/.test(job.result.checksum ?? '')
+      || (previousEvidence ? !alreadyAttached : binding.revision !== pin.bindingRevision)) {
+      passengerDomainStageError(
       'passenger_domain_stage_revision_drift',
       'Passenger Domain stage revision moved behind runtime binding evidence',
     );
@@ -518,6 +537,8 @@ async function reconcilePassengerDomainStageBinding({
     desiredRevision: entry.desiredRevision,
     nginxChecksum: entry.nginxChecksum,
   });
+
+  if (!previousEvidence) domains.push({ domainId: domain.id, desiredRevision: domain.desiredRevision, nginxChecksum: job.result.checksum });
 
   return runtimeBindingRegistry.activate({
     applicationId: binding.applicationId,

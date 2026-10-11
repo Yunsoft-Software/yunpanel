@@ -25,6 +25,8 @@ test('staged domain recovery runtime binds exact host, private context, guarded 
       YUNPANEL_JOB_STORE: '/work/state/jobs.json',
       YUNPANEL_CERTIFICATE_STORE: '/work/state/certificates.json',
       YUNPANEL_APPLICATION_STORE: '/work/state/applications.json',
+      YUNPANEL_WEBSITE_STORE: '/work/state/websites.json',
+      YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE: '/work/state/bindings.json',
     },
     cwd: '/',
     serverRegistryFactory: ({ filePath }) => ({
@@ -34,6 +36,8 @@ test('staged domain recovery runtime binds exact host, private context, guarded 
     domainRegistryFactory: resourceFactory('domain', calls),
     certificateRegistryFactory: resourceFactory('certificate', calls),
     applicationRegistryFactory: resourceFactory('application', calls),
+    websiteRegistryFactory: resourceFactory('website', calls),
+    runtimeBindingRegistryFactory: resourceFactory('binding', calls),
     jobRegistryFactory: () => ({}),
     recoveryStoreFactory: () => ({}),
     durableRegistryFactory: ({ filePath }) => {
@@ -60,6 +64,7 @@ test('staged domain recovery runtime binds exact host, private context, guarded 
       assert.equal(input.jobRegistry, fakeJobRegistry);
       assert.equal(input.serverId, serverId);
       assert.equal(input.jobId, jobId);
+      assert.ok(input.websiteRegistry); assert.ok(input.runtimeBindingRegistry);
       assert.deepEqual(await input.loadJobContext(jobId), { id: jobId, payload: { primaryDomain: 'example.com' } });
       assert.deepEqual(await input.inspectStageEvidence({ primaryDomain: 'example.com' }), {
         satisfied: true,
@@ -83,9 +88,11 @@ test('staged domain recovery runtime binds exact host, private context, guarded 
     ['server.get', serverId],
     ['durable.create', '/work/state/jobs.json'],
     ['context.create', '/work/state/jobs.json'],
+    ['application.init', '/work/state/applications.json'],
+    ['website.init', '/work/state/websites.json'],
     ['domain.init', '/work/state/domains.json'],
     ['certificate.init', '/work/state/certificates.json'],
-    ['application.init', '/work/state/applications.json'],
+    ['binding.init', '/work/state/bindings.json'],
     ['context.read', jobId],
     ['nginx.evidence', { primaryDomain: 'example.com' }],
   ]);

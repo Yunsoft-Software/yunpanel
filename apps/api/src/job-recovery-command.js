@@ -44,6 +44,8 @@ export async function reconcileTerminalRecovery({
   domainRegistry,
   certificateRegistry,
   applicationRegistry,
+  websiteRegistry,
+  runtimeBindingRegistry,
   serviceStatus,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
@@ -92,7 +94,7 @@ export async function reconcileTerminalRecovery({
     }
 
     try {
-      const result = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, job });
+      const result = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry, websiteRegistry, runtimeBindingRegistry, job });
       if (!result || result.reconciled !== true) {
         throw new Error('reconciliation did not confirm success');
       }

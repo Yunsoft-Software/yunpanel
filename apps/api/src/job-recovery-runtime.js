@@ -27,6 +27,8 @@ import {
 } from './local-migration-cli.js';
 import { createServerRegistry } from './server-registry.js';
 import { createWebsiteBackupOperationRegistry } from './website-backup-operation-registry.js';
+import { createWebsiteRegistry } from './website-registry.js';
+import { createApplicationRuntimeBindingRegistry } from './application-runtime-binding-registry.js';
 
 const PACKAGED_STATE_ROOT = localMigrationCliInternals.packagedStateRoot;
 
@@ -81,6 +83,8 @@ export function resolveJobRecoveryPaths({ env = process.env, packaged = false, c
     recoveryStore: `${base.jobStore}.recovery.json`,
     certificateStore,
     applicationStore,
+    websiteStore: resolveRecoveryStorePath(env.YUNPANEL_WEBSITE_STORE, path.join(defaultRoot, 'website-registry.json'), { packaged, cwd, label: 'website' }),
+    runtimeBindingStore: resolveRecoveryStorePath(env.YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE, path.join(defaultRoot, 'application-runtime-binding-registry.json'), { packaged, cwd, label: 'runtime binding' }),
   });
 }
 
@@ -147,12 +151,24 @@ async function initResourceRegistries({
   domainRegistryFactory,
   certificateRegistryFactory,
   applicationRegistryFactory,
+  websiteRegistryFactory = null,
+  runtimeBindingRegistryFactory = null,
 }) {
   const serverExists = async (id) => Boolean(await serverRegistry.getServer(id));
-  const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists }), 'Domain');
-  const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
+  if (!websiteRegistryFactory && !runtimeBindingRegistryFactory) {
+    const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists }), 'Domain');
+    const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
+    const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
+    return { domainRegistry, certificateRegistry, applicationRegistry };
+  }
   const applicationRegistry = await initRegistry(applicationRegistryFactory({ filePath: paths.applicationStore, serverExists }), 'Application');
-  return { domainRegistry, certificateRegistry, applicationRegistry };
+  const websiteRegistry = await initRegistry(websiteRegistryFactory({ filePath: paths.websiteStore, serverExists,
+    getApplication: id => applicationRegistry.getApplication(id) }), 'Website');
+  const domainRegistry = await initRegistry(domainRegistryFactory({ filePath: paths.domainStore, serverExists,
+    getWebsite: id => websiteRegistry.getWebsite(id) }), 'Domain');
+  const certificateRegistry = await initRegistry(certificateRegistryFactory({ filePath: paths.certificateStore }), 'Certificate');
+  const runtimeBindingRegistry = await initRegistry(runtimeBindingRegistryFactory({ filePath: paths.runtimeBindingStore }), 'Runtime binding');
+  return { domainRegistry, certificateRegistry, applicationRegistry, websiteRegistry, runtimeBindingRegistry };
 }
 
 async function initHostScopedRecovery({
@@ -185,6 +201,8 @@ export async function runTerminalRecoveryFromStores({
   recoveryStoreFactory = createJobRecoveryStore,
   certificateRegistryFactory = createCertificateRegistry,
   applicationRegistryFactory = createApplicationRegistry,
+  websiteRegistryFactory = createWebsiteRegistry,
+  runtimeBindingRegistryFactory = createApplicationRuntimeBindingRegistry,
   serviceStatus = createMigrationServiceStatus(),
   reconcileCommand = reconcileTerminalRecovery,
 } = {}) {
@@ -196,6 +214,8 @@ export async function runTerminalRecoveryFromStores({
     recoveryStoreFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    websiteRegistryFactory,
+    runtimeBindingRegistryFactory,
     serviceStatus,
     reconcileCommand,
   ]) {
@@ -206,12 +226,14 @@ export async function runTerminalRecoveryFromStores({
 
   const paths = resolveJobRecoveryPaths({ env, packaged, cwd });
   const serverRegistry = await initRegistry(serverRegistryFactory({ filePath: paths.serverStore }), 'Server');
-  const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
+  const { domainRegistry, certificateRegistry, applicationRegistry, websiteRegistry, runtimeBindingRegistry } = await initResourceRegistries({
     paths,
     serverRegistry,
     domainRegistryFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    websiteRegistryFactory,
+    runtimeBindingRegistryFactory,
   });
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
 
@@ -222,6 +244,8 @@ export async function runTerminalRecoveryFromStores({
     domainRegistry,
     certificateRegistry,
     applicationRegistry,
+    websiteRegistry,
+    runtimeBindingRegistry,
     serviceStatus,
   });
   return Object.freeze({ ...result, statePaths: paths });
@@ -290,6 +314,8 @@ export async function runRunningDomainStageRecoveryFromStores({
   recoveryStoreFactory = createJobRecoveryStore,
   certificateRegistryFactory = createCertificateRegistry,
   applicationRegistryFactory = createApplicationRegistry,
+  websiteRegistryFactory = createWebsiteRegistry,
+  runtimeBindingRegistryFactory = createApplicationRuntimeBindingRegistry,
   contextReaderFactory = createJobRecoveryContextReader,
   nginxManagerFactory = createNginxManager,
   serviceStatus = createMigrationServiceStatus(),
@@ -303,6 +329,8 @@ export async function runRunningDomainStageRecoveryFromStores({
     recoveryStoreFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    websiteRegistryFactory,
+    runtimeBindingRegistryFactory,
     contextReaderFactory,
     nginxManagerFactory,
     serviceStatus,
@@ -324,12 +352,14 @@ export async function runRunningDomainStageRecoveryFromStores({
     recoveryStoreFactory,
     contextReaderFactory,
   });
-  const { domainRegistry, certificateRegistry, applicationRegistry } = await initResourceRegistries({
+  const { domainRegistry, certificateRegistry, applicationRegistry, websiteRegistry, runtimeBindingRegistry } = await initResourceRegistries({
     paths,
     serverRegistry,
     domainRegistryFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    websiteRegistryFactory,
+    runtimeBindingRegistryFactory,
   });
   const nginxManager = nginxManagerFactory();
   if (!nginxManager || typeof nginxManager.inspectStagedDomain !== 'function') {
@@ -343,6 +373,8 @@ export async function runRunningDomainStageRecoveryFromStores({
     domainRegistry,
     certificateRegistry,
     applicationRegistry,
+    websiteRegistry,
+    runtimeBindingRegistry,
     serviceStatus,
     loadJobContext: (id) => contextReader.read(id),
     inspectStageEvidence: (payload) => nginxManager.inspectStagedDomain(payload),

@@ -26,6 +26,8 @@ test('recovery paths resolve the full development registry set beside the existi
     recoveryStore: '/work/yunpanel/.state/jobs.json.recovery.json',
     certificateStore: '/work/yunpanel/.state/certificates.json',
     applicationStore: '/work/yunpanel/.state/applications.json',
+    websiteStore: '/work/yunpanel/.data/website-registry.json',
+    runtimeBindingStore: '/work/yunpanel/.data/application-runtime-binding-registry.json',
   });
 });
 
@@ -38,12 +40,16 @@ test('packaged recovery keeps domain, certificate and application state inside t
     recoveryStore: '/var/lib/yunpanel/control-plane/job-registry.json.recovery.json',
     certificateStore: '/var/lib/yunpanel/control-plane/certificate-registry.json',
     applicationStore: '/var/lib/yunpanel/control-plane/application-registry.json',
+    websiteStore: '/var/lib/yunpanel/control-plane/website-registry.json',
+    runtimeBindingStore: '/var/lib/yunpanel/control-plane/application-runtime-binding-registry.json',
   });
 
   for (const [key, value] of [
     ['YUNPANEL_DOMAIN_STORE', '/tmp/domains.json'],
     ['YUNPANEL_CERTIFICATE_STORE', '/tmp/certificates.json'],
     ['YUNPANEL_APPLICATION_STORE', '/tmp/applications.json'],
+    ['YUNPANEL_WEBSITE_STORE', '/tmp/websites.json'],
+    ['YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE', '/tmp/bindings.json'],
   ]) {
     assert.throws(
       () => resolveJobRecoveryPaths({ env: { [key]: value }, packaged: true }),
@@ -82,6 +88,8 @@ test('terminal recovery runtime initializes resource stores and passes one durab
     domainRegistryFactory,
     certificateRegistryFactory,
     applicationRegistryFactory,
+    websiteRegistryFactory: () => ({ init: async () => {}, getWebsite: async () => null }),
+    runtimeBindingRegistryFactory: () => ({ init: async () => {}, getBinding: async () => null }),
     jobRegistryFactory,
     recoveryStoreFactory,
     durableRegistryFactory: (options) => {
@@ -99,7 +107,7 @@ test('terminal recovery runtime initializes resource stores and passes one durab
     },
   });
 
-  assert.deepEqual(events.slice(0, 5), ['server.init', 'domain.init', 'certificate.init', 'application.init', 'command']);
+  assert.deepEqual(events.slice(0, 5), ['server.init', 'application.init', 'domain.init', 'certificate.init', 'command']);
   assert.equal(factories.server.filePath, '/work/yunpanel/.data/server-registry.json');
   assert.equal(factories.domain.filePath, '/work/yunpanel/.data/domain-registry.json');
   assert.equal(factories.certificate.filePath, '/work/yunpanel/.data/certificate-registry.json');
