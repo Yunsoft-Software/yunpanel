@@ -10,6 +10,19 @@ import { createWebsiteRegistry } from '../src/website-registry.js';
 
 const CHILD_OPERATION = '531071bb-d40d-4444-94ba-c9545144febc';
 
+test('explicit local subdomain DNS retains the parent relationship and a distinct Unix identity', async () => {
+  const state = await fixture();
+  const parent = await createParent(state);
+  const original = await state.domainRegistry.getDomain(parent.domain.id);
+  const child = await previewSiteCreate({ input: { ...childInput(state, parent.domain.id), dns: { mode: 'local' } }, ...dependencies(state) });
+  assert.equal(child.plan.dns.mode, 'local');
+  assert.equal(child.plan.dns.authoritative, true);
+  assert.equal(child.plan.primaryDomain.parentDomainId, parent.domain.id);
+  assert.notEqual(child.plan.website.id, parent.website.id);
+  assert.notEqual(child.plan.website.unixUser, parent.website.unixUser);
+  assert.deepEqual(await state.domainRegistry.getDomain(parent.domain.id), original);
+});
+
 async function fixture() {
   const registry = createServerRegistry();
   const enrollment = await registry.issueEnrollmentToken({ label: 'independent-subdomain' });

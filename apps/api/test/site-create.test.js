@@ -7,6 +7,7 @@ import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createSite, previewSiteCreate, SiteCreateError, siteCreateInternals } from '../src/site-create.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
+import { siteCreateProvisioningPlan } from '../src/site-create-provisioning.js';
 
 const STATIC_OPERATION = 'ab9b4c03-e744-40d4-ad1d-e9bab966a3e7';
 const NODE_OPERATION = '47bc6cf1-75bc-4cba-a610-aa0cd0522c80';
@@ -85,6 +86,23 @@ function inputFor(serverId, overrides = {}) {
     ...overrides,
   };
 }
+
+test('uploaded static site needs no repository or Git configuration and binds the same canonical Website paths', async () => {
+  const state = await fixture(), input = inputFor(state.serverId, { source: { kind: 'new_static' } });
+  const preview = await previewSiteCreate({ input, ...dependencies(state) });
+  assert.equal(preview.plan.application.repositoryUrl, null);
+  assert.equal(preview.plan.application.branch, null);
+  assert.equal(preview.plan.application.build.mode, 'none');
+  const plan = siteCreateProvisioningPlan(preview);
+  assert.equal(plan.steps.find(step => step.id === 'runtime').intent.mode, 'upload');
+  assert.equal(plan.steps.find(step => step.id === 'static_upload_state').required, true);
+  const created = await apply(input, state, preview);
+  const application = await state.applicationRegistry.getApplication(created.application.id);
+  assert.equal(application.repositoryUrl, null);
+  assert.equal(created.website.documentRoot, application.webRoot);
+  assert.equal(created.website.runtimeType, 'static');
+  await assert.rejects(previewSiteCreate({ input: { ...input, source: { kind: 'new_static', branch: 'main' } }, ...dependencies(state) }), { code: 'site_create_source_invalid' });
+});
 
 async function apply(input, state, preview = null, overrides = {}) {
   const current = preview ?? await previewSiteCreate({ input, ...dependencies(state, overrides) });
@@ -580,7 +598,7 @@ test('DNS mode preflight validates root vs subdomain and yields exact resource p
       }),
       ...dependencies(state),
     }),
-    (error) => error instanceof SiteCreateError && error.code === 'site_create_subdomain_dns_unsupported' && error.status === 409,
+    (error) => error.code === 'parent_domain_not_found',
   );
 });
 

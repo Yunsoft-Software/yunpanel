@@ -136,6 +136,17 @@ function normalizedSource(source) {
       return Object.freeze({ kind: source.kind });
     }
 
+    if (source.kind === 'new_static' && source.repositoryUrl == null) {
+      if (source.repositoryUrl === undefined) exactObject(source, new Set(['kind']), 'site_create_source_invalid', 'Uploaded static source accepts only kind');
+      else {
+        exactObject(source, new Set(['kind', 'repositoryUrl', 'branch', 'build', 'retention']), 'site_create_source_invalid', 'Uploaded static saved source is invalid');
+        if (source.branch !== null || source.build?.mode !== 'none' || source.build?.outputDir !== '.' || source.build?.healthFile !== 'index.html'
+          || Object.keys(source.build).some(key => !['mode', 'outputDir', 'healthFile', 'installMode', 'buildScript'].includes(key))) throw new SiteCreateError('site_create_source_invalid', 'Uploaded static source cannot contain Git or build configuration');
+      }
+      return Object.freeze({ kind: source.kind, repositoryUrl: null, branch: null, retention: retention(source.retention ?? 2),
+        build: Object.freeze(normalizeStaticBuildConfig({ mode: 'none', outputDir: '.', healthFile: 'index.html' })) });
+    }
+
     const allowed = source.kind === 'new_static'
       ? new Set(['kind', 'repositoryUrl', 'branch', 'build', 'retention'])
       : new Set(['kind', 'repositoryUrl', 'branch', 'runtime', 'retention']);
@@ -244,13 +255,6 @@ function normalizedDns(value, parentDomainId) {
     throw new SiteCreateError(
       'site_create_dns_invalid',
       'DNS mode must be local or external',
-    );
-  }
-  if (input.mode === 'local' && parentDomainId !== null) {
-    throw new SiteCreateError(
-      'site_create_subdomain_dns_unsupported',
-      'Subdomain Website cannot create a separate authoritative local zone',
-      409,
     );
   }
   return Object.freeze({ mode: input.mode });
@@ -894,9 +898,9 @@ export async function previewSiteCreate({
   });
 
   const dnsExpected = Object.freeze({
-    mode: normalized.parentDomainId !== null ? 'inherited' : normalized.dns.mode,
+    mode: normalized.parentDomainId !== null && normalized.dns.mode === 'external' ? 'inherited' : normalized.dns.mode,
     zoneName: normalized.primaryDomain,
-    authoritative: normalized.parentDomainId === null && normalized.dns.mode === 'local',
+    authoritative: normalized.dns.mode === 'local',
     serverDnsIdentityConfigured: Boolean(dnsIdentity),
     publicIpv4: dnsIdentity?.settings?.publicIpv4 ?? null,
     publicIpv6: dnsIdentity?.settings?.publicIpv6 ?? null,
@@ -935,7 +939,7 @@ export async function previewSiteCreate({
     : null;
 
   const blockers = [];
-  if (normalized.dns.mode === 'local' && normalized.parentDomainId === null && !dnsIdentity && serverDnsIdentityRegistry) {
+  if (normalized.dns.mode === 'local' && !dnsIdentity && serverDnsIdentityRegistry) {
     blockers.push('dns_identity_required');
   }
   if (normalized.source.kind === 'new_node' && normalized.source.runtime?.start?.mode && normalized.source.runtime.start.mode !== 'node') {

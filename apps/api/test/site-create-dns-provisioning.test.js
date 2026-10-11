@@ -226,6 +226,18 @@ test('subdomain Website does not create a delegated authoritative zone implicitl
   assert.equal(plan.steps.some((step) => step.id === 'dns_zone'), false);
 });
 
+test('explicit local child DNS owns a separate zone without changing the parent zone', async () => {
+  const child = preview({ parentDomainId: '980dd209-c2fc-4621-bb2f-889e05400ab4' });
+  child.plan.primaryDomain.primaryDomain = 'blog.example.com';
+  child.plan.dns = { mode: 'local' };
+  const plan = await siteCreateProvisioningPlan(child, dependencies());
+  const dns = plan.steps.find(step => step.id === 'dns_zone');
+  assert.equal(dns.intent.zoneName, 'blog.example.com');
+  assert.equal(dns.intent.webDomainId, domainId);
+  assert.ok(dns.intent.records.some(record => record.owner === 'blog.example.com' && record.type === 'A'));
+  assert.equal(dns.intent.records.some(record => record.owner === 'example.com'), false);
+});
+
 test('root Website planning requires configured server DNS identity', async () => {
   await assert.rejects(
     siteCreateProvisioningPlan(preview(), dependencies({ identityValue: null })),
