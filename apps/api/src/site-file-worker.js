@@ -19,7 +19,7 @@ const MAX_TRANSFER_BYTES = 16 * 1024 * 1024;
 const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const OPERATIONS = new Set([
-  'list', 'download', 'read_text', 'upload', 'write_text',
+  'list', 'manifest', 'download', 'read_text', 'upload', 'write_text',
   'create_file', 'mkdir', 'rename', 'delete', 'batch_delete', 'permissions',
 ]);
 
@@ -240,6 +240,51 @@ export async function executeSiteFileOperation(request, dependencies = {
   const modes = creationModes();
   try {
     const root = await managedRoot(request.root, dependencies);
+
+    if (request.operation === 'manifest') {
+      if (!exactRequest(request, ['operation', 'root', 'path', 'exclude']) || !Array.isArray(request.exclude)
+        || request.exclude.length > 16) fail('site_file_request_invalid', 'Manifest request fields are invalid');
+      const base = relativePath(request.path, { allowRoot: true });
+      const exclusions = new Set(request.exclude.map(value => relativePath(value)));
+      const entries = []; let bytes = 0;
+      async function scan(directory, depth) {
+        if (depth > 32) fail('site_file_manifest_limit', 'Directory depth exceeds the manifest limit', 413);
+        const prefix = [base, directory].filter(Boolean).join('/');
+        const parent = await walk(root, prefix, dependencies);
+        if (!parent.info.isDirectory()) fail('site_file_not_directory', 'Manifest target must be a directory', 409);
+        const names = (await dependencies.readdir(parent.absolute)).sort();
+        if (names.length > MAX_LIST_ENTRIES) fail('site_file_manifest_limit', 'Directory exceeds the manifest limit', 413);
+        for (const name of names) {
+          const relative = relativePath([directory, name].filter(Boolean).join('/'));
+          if (exclusions.has(relative)) continue;
+          if (entries.length >= 20_000) fail('site_file_manifest_limit', 'Manifest exceeds the file count limit', 413);
+          const entry = await walk(root, [base, relative].filter(Boolean).join('/'), dependencies);
+          if (entry.info.isDirectory()) { entries.push({ path: relative, type: 'directory' }); await scan(relative, depth + 1); }
+          else {
+            regularFile(entry);
+            bytes += entry.info.size;
+            if (bytes > 256 * 1024 * 1024) fail('site_file_manifest_limit', 'Manifest exceeds the byte limit', 413);
+            const handle = await dependencies.open(entry.absolute, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+            try {
+              const actual = await handle.stat();
+              if (!actual.isFile() || actual.ino !== entry.info.ino || actual.dev !== entry.info.dev || actual.size !== entry.info.size
+                || await dependencies.realpath(`/proc/self/fd/${handle.fd}`) !== entry.absolute) fail('site_file_changed', 'Manifest file identity changed', 409);
+              const bounded = Buffer.alloc(actual.size + 1); let length = 0;
+              while (length < bounded.length) {
+                const read = await handle.read(bounded, length, bounded.length - length, length);
+                if (!read.bytesRead) break;
+                length += read.bytesRead;
+              }
+              if (length !== entry.info.size) fail('site_file_changed', 'Manifest file content changed', 409);
+              const content = bounded.subarray(0, length);
+              entries.push({ path: relative, type: 'file', bytes: content.length, sha256: createHash('sha256').update(content).digest('hex') });
+            } finally { await handle.close(); }
+          }
+        }
+      }
+      await scan('', 0);
+      return Object.freeze({ entries });
+    }
 
     if (request.operation === 'permissions') {
       if (!exactRequest(request, ['operation', 'root', 'path', 'mode'])) fail('site_file_request_invalid', 'Permission request fields are invalid');

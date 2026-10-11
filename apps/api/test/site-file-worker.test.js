@@ -26,17 +26,21 @@ async function createFixture(t) {
     return targetPath;
   }
 
+  const openedPaths = new Map();
   const deps = {
     chmod: (p, mode) => fs.chmod(toReal(p), mode),
     lstat: (p) => fs.lstat(toReal(p)),
     mkdir: (p, options) => fs.mkdir(toReal(p), options),
-    open: (p, flags, mode) => fs.open(toReal(p), flags, mode),
+    open: async (p, flags, mode) => {
+      const handle = await fs.open(toReal(p), flags, mode);
+      openedPaths.set(handle.fd, p);
+      return handle;
+    },
     readdir: (p, options) => fs.readdir(toReal(p), options),
     readFile: (p) => fs.readFile(toReal(p)),
     realpath: async (p) => {
       if (p.startsWith('/proc/self/fd/')) {
-        const resolved = await fs.realpath(p);
-        return resolved === tempDir ? FAKE_ROOT : resolved.startsWith(`${tempDir}/`) ? `${FAKE_ROOT}/${resolved.slice(tempDir.length + 1)}` : resolved;
+        return openedPaths.get(Number(p.split('/').at(-1))) ?? '/unknown-descriptor';
       }
       return toReal(p) === tempDir ? FAKE_ROOT : p;
     },
@@ -416,4 +420,24 @@ test('site-file-worker: large text file operations in editor (>1MB)', async (t) 
     expectedSha256: initialSha,
   }, deps);
   assert.equal(writeRes.sha256, createHash('sha256').update(updatedContent).digest('hex'));
+});
+
+test('site-file-worker: one bounded manifest hashes binary content and excludes only the requested local configuration', async t => {
+  const { tempDir, deps } = await createFixture(t);
+  await fs.mkdir(path.join(tempDir, 'wp-content'));
+  await fs.writeFile(path.join(tempDir, 'wp-config.php'), 'private credential');
+  const bytes = Buffer.from([0, 255, 128, 9]); await fs.writeFile(path.join(tempDir, 'wp-content', 'marker.bin'), bytes);
+  const result = await executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: ['wp-config.php'] }, deps);
+  assert.deepEqual(result.entries, [{ path: 'wp-content', type: 'directory' }, { path: 'wp-content/marker.bin', type: 'file', bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }]);
+  assert.doesNotMatch(JSON.stringify(result), /private credential|wp-config/);
+  await fs.symlink(path.join(tempDir, 'wp-config.php'), path.join(tempDir, 'escape'));
+  await assert.rejects(executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: ['wp-config.php'] }, deps), { code: 'site_file_symlink_rejected' });
+});
+
+test('site-file-worker: manifest rejects oversized files and traversal exclusions without reading content', async t => {
+  const { tempDir, deps } = await createFixture(t);
+  const handle = await fs.open(path.join(tempDir, 'large.bin'), 'w');
+  await handle.truncate(siteFileWorkerInternals.maxTransferBytes + 1); await handle.close();
+  await assert.rejects(executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: [] }, deps), { code: 'site_file_too_large' });
+  await assert.rejects(executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: ['../private'] }, deps), { code: 'site_file_path_invalid' });
 });
