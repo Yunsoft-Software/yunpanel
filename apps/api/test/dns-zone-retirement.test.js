@@ -893,3 +893,24 @@ test('parent DS present blocks snapshot capture and destructive deletion even if
       && error.code === 'dns_zone_retirement_parent_ds_present',
   );
 });
+
+test('an explicitly provisioned child zone is retired by its own receipt without inspecting or deleting its parent zone', async () => {
+  const child = domain({ id: childId, primaryDomain: 'api.example.com', parentDomainId: rootId, aliases: [] });
+  const records = [{ key: 'apex-a', type: 'A', name: '@', ttl: 300, values: ['203.0.113.10'], source: 'template' }, { key: 'www-a', type: 'A', name: 'www', ttl: 300, values: ['203.0.113.10'], source: 'template' }];
+  const intent = { adapter: 'powerdns-zone', serverId: localServerId, webDomainId: childId, zoneName: child.primaryDomain,
+    templateVersion: 7, templateSnapshot: records, dnsIdentityRevision: 2, secondaryDns: [], serial: 2026091801, dnssec: false, records };
+  const evidence = websiteDnsZoneProvisioningInternals.publicEvidence(websiteDnsZoneProvisioningInternals.normalizedIntent({ intent }), {
+    kind: 'Primary', serial: intent.serial, dnssec: false, managedRrsetCount: 1, manualRrsetCount: 0, created: true, primaryKindChanged: false, changedRrsetCount: 1,
+  });
+  const operations = [{ operationId: '52345678-1234-4234-8234-123456789012', websiteId, updatedAt: '2026-09-18T16:00:00.000Z',
+    steps: [{ id: 'dns_zone', kind: 'dns_zone', state: 'succeeded', intent, evidence, compensation: { state: 'pending' } }] }];
+  const fx = fixture({ currentDomain: child, domains: [domain(), child],
+    currentZone: { ...zone({ rrsets: [managedRrset({ name: child.primaryDomain + '.' })] }), zoneName: child.primaryDomain, id: child.primaryDomain + '.' },
+    provisioningOperations: operations, retentionPolicy: { snapshotRetentionDays: 7 } });
+  const preview = await fx.service.preview({ domainId: childId });
+  assert.equal(preview.zone.ownership, 'provisioning_created'); assert.equal(preview.zone.exists, true);
+  assert.equal(preview.retirementPlanReady, true);
+  const capture = await fx.service.captureDeletionSnapshot({ domainId: childId, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  assert.equal(capture.zoneName, child.primaryDomain); assert.equal(capture.ownershipEvidenceDigest, preview.zone.ownershipOrigin.evidenceDigest);
+  assert.equal(capture.snapshot.zoneName, child.primaryDomain);
+});

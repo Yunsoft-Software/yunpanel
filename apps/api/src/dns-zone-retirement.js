@@ -141,11 +141,9 @@ function zoneImpact(zone) {
 }
 
 function provisioningOwnership(domain, operations) {
-  if ((domain.parentDomainId ?? null) !== null) {
-    return Object.freeze({ status: 'parent_zone_owned', operationId: null, evidenceDigest: null });
-  }
+  const inherited = (domain.parentDomainId ?? null) !== null;
   if (operations === null) {
-    return Object.freeze({ status: 'unavailable', operationId: null, evidenceDigest: null });
+    return Object.freeze({ status: inherited ? 'parent_zone_owned' : 'unavailable', operationId: null, evidenceDigest: null });
   }
   if (!Array.isArray(operations)) {
     throw new DnsZoneRetirementError(
@@ -210,7 +208,7 @@ function provisioningOwnership(domain, operations) {
     });
   }
   return Object.freeze({
-    status: invalidEvidenceCount > 0 ? 'invalid' : 'not_found',
+    status: invalidEvidenceCount > 0 ? 'invalid' : inherited ? 'parent_zone_owned' : 'not_found',
     operationId: null,
     evidenceDigest: null,
   });
@@ -243,8 +241,8 @@ function previewIdentity(
   parentDs = null,
 ) {
   const children = descendants(relatedDomains, domain.id);
-  const root = (domain.parentDomainId ?? null) === null;
   const ownership = ownershipOrigin ?? provisioningOwnership(domain, null);
+  const root = (domain.parentDomainId ?? null) === null || ownership.status !== 'parent_zone_owned';
   const retention = retentionPolicy(rawRetentionPolicy);
   const dependencies = dependencyImpact ?? Object.freeze({
     mail: Object.freeze({ status: 'unavailable', count: 0, ids: Object.freeze([]) }),
@@ -390,7 +388,7 @@ export function createDnsZoneRetirementService({
     }
 
     let provisioningOperations = null;
-    if ((domain.parentDomainId ?? null) === null && provisioningRegistry !== null) {
+    if (provisioningRegistry !== null) {
       try {
         provisioningOperations = await provisioningRegistry.listForDnsZone({
           serverId: domain.serverId,
@@ -458,7 +456,7 @@ export function createDnsZoneRetirementService({
 
     let authoritativeZone = null;
     let parentDs = null;
-    if ((domain.parentDomainId ?? null) === null) {
+    if ((domain.parentDomainId ?? null) === null || ownershipOrigin.status !== 'parent_zone_owned') {
       const secret = await materializeSecret(domain.serverId);
       try { authoritativeZone = await zoneManager.getZone(domain.primaryDomain, secret.apiKey); }
       catch {
@@ -544,7 +542,7 @@ export function createDnsZoneRetirementService({
     }
 
     const domain = localDomain(await domainRegistry.getDomain(domainId), localServerId);
-    if ((domain.parentDomainId ?? null) === null) {
+    if (current.zone.exists) {
       let parentDs;
       try { parentDs = await parentDsInspector.inspect({ domain: domain.primaryDomain }); }
       catch {
