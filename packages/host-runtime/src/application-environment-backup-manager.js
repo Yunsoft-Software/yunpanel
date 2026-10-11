@@ -3,7 +3,7 @@ import { chmod, lstat, open, readdir, readFile, readlink, realpath, rename, rm, 
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import path from 'node:path';
-import { assertUuid } from '@yunpanel/shared';
+import { assertUuid, normalizeEnvironmentKey } from '@yunpanel/shared';
 import { nodeServiceName, pythonServiceName, renderNodeEnvironmentFile, renderPythonEnvironmentFile } from '@yunpanel/config-templates';
 import { passengerEnvironmentManagerInternals } from './passenger-environment-manager.js';
 import { websitePassengerEnvironmentInternals } from './website-passenger-environment-manager.js';
@@ -131,14 +131,17 @@ export function createApplicationEnvironmentBackupManager({
       if (properties.LoadState !== 'loaded' || properties.ActiveState !== 'active' || !/^[1-9]\d*$/.test(properties.MainPID ?? '')) throw fail('application_environment_restart_unverified');
     }
   }
-  async function replace(c, content) {
+  async function replace(c, content, { expectedContent = undefined } = {}) {
     await managedParent(c.root);
+    if (expectedContent !== undefined && await fileState(c) !== expectedContent) throw fail('application_environment_restore_state_drift');
     const temporary = c.target + `.${process.pid}.restore.tmp`;
+    let created = false;
     try {
-      await writeFile(temporary, content, { flag: 'wx', mode: 0o600 });
+      await writeFile(temporary, content, { flag: 'wx', mode: 0o600 }); created = true;
       await chmod(temporary, 0o600);
+      if (expectedContent !== undefined && await fileState(c) !== expectedContent) throw fail('application_environment_restore_state_drift');
       await rename(temporary, c.target);
-    } finally { await rm(temporary, { force: true }); }
+    } finally { if (created) await rm(temporary, { force: true }); }
   }
   async function captureEnvironment({ application }) {
     const c = context(application);
@@ -147,6 +150,15 @@ export function createApplicationEnvironmentBackupManager({
     decoded(c, application, content);
     return { version: 1, applicationId: c.id, type: application.type, runtimeAdapter: application.runtimeAdapter ?? null,
       runtime: structuredClone(c.runtime), releaseId: application.currentReleaseId, content };
+  }
+  function capturedPassengerEnvironment({ application, savedRuntime }) {
+    const c = context(application);
+    if (!c.passenger || savedRuntime?.applicationId !== c.id || savedRuntime.releaseId !== application.currentReleaseId
+      || !equal(savedRuntime.runtime, c.runtime)) throw fail('application_environment_runtime_drift');
+    const values = decoded(c, application, savedRuntime.content);
+    const match = savedRuntime.content.match(/^# YunPanel Passenger environment [a-f0-9-]{36} revision (\d+)\n/);
+    if (!match) throw fail('application_environment_snapshot_invalid');
+    return { values, environmentRevision: Number(match[1]) };
   }
   async function assertRestoreSupported({ application, savedRuntime }) {
     const c = context(application);
@@ -158,10 +170,11 @@ export function createApplicationEnvironmentBackupManager({
     await fileState(c);
     if (c.passenger) await passengerRegistry();
   }
-  async function restoreEnvironment({ application, values, savedRuntime, environmentRevision, verifyHealth }) {
+  async function restoreEnvironment({ application, values, savedRuntime, environmentRevision, verifyHealth, expectedCurrentContent = undefined }) {
     await assertRestoreSupported({ application, savedRuntime });
     if (typeof verifyHealth !== 'function') throw fail('application_environment_health_unavailable');
     const c = context(application), before = await fileState(c);
+    if (expectedCurrentContent !== undefined && before !== expectedCurrentContent) throw fail('application_environment_restore_state_drift');
     const appliedMatchesSaved = equal(decoded(c, application, savedRuntime.content), values);
     // Restore advances the catalog revision. Rebase its metadata only when the
     // captured running values match that catalog; preserve an unapplied draft.
@@ -169,13 +182,14 @@ export function createApplicationEnvironmentBackupManager({
       ? websitePassengerEnvironmentInternals.normalizeSpec({ applicationId: c.id, values, environmentRevision }).content
       : savedRuntime.content;
     try {
-      await replace(c, restoredContent);
+      await replace(c, restoredContent, { expectedContent: expectedCurrentContent });
       await restart(c, application, verifyHealth);
       if (await fileState(c) !== restoredContent || await verifyHealth() !== true) throw fail('application_environment_restore_unverified');
     } catch (error) {
+      if (error?.code === 'application_environment_restore_state_drift') throw error;
       try {
         if (before === null) await rm(c.target, { force: true });
-        else await replace(c, before);
+        else await replace(c, before, { expectedContent: expectedCurrentContent === undefined ? undefined : restoredContent });
         await restart(c, application, verifyHealth);
         if (await fileState(c) !== before || await verifyHealth() !== true) throw fail('application_environment_rollback_unverified');
       } catch (rollbackError) { throw Object.assign(fail('application_environment_rollback_failed'),{cause:new AggregateError([error,rollbackError],'Runtime recovery requires inspection')}); }
@@ -188,11 +202,13 @@ export function createApplicationEnvironmentBackupManager({
     const previous=await captureEnvironment({application}),c=context(application);
     const content=c.passenger?websitePassengerEnvironmentInternals.normalizeSpec({applicationId:c.id,environmentRevision,values}).content
       :(application.type==='node'?renderNodeEnvironmentFile:renderPythonEnvironmentFile)({applicationId:c.id,runtime:c.runtime,environment:values});
-    return restoreEnvironment({application,values,environmentRevision,verifyHealth,savedRuntime:{...previous,content}});
+    return restoreEnvironment({application,values,environmentRevision,verifyHealth,savedRuntime:{...previous,content},expectedCurrentContent:previous.content});
   }
-  async function inspectAppliedPassengerEnvironment({application,unixUser,values,environmentRevision,verifyHealth}) {
+  async function inspectAppliedPassengerEnvironment({application,unixUser,values,environmentRevision,verifyHealth,absentKeys=[]}) {
     const c=context(application);
     if(!c.passenger || !/^yunapp-[a-f0-9]{12}$/.test(unixUser ?? '') || typeof verifyHealth!=='function') throw fail('application_environment_process_scope_invalid');
+    if(!Array.isArray(absentKeys) || absentKeys.length>100 || new Set(absentKeys).size!==absentKeys.length) throw fail('application_environment_process_scope_invalid');
+    for(const key of absentKeys){try{if(normalizeEnvironmentKey(key)!==key || Object.hasOwn(values,key))throw new Error();}catch{throw fail('application_environment_process_scope_invalid');}}
     const expected=websitePassengerEnvironmentInternals.normalizeSpec({applicationId:c.id,values,environmentRevision}).content;
     await release(c,application);
     if(await fileState(c)!==expected || await verifyHealth()!==true) throw fail('application_environment_process_unverified');
@@ -210,7 +226,7 @@ export function createApplicationEnvironmentBackupManager({
         if(cwd!==releaseRoot && !cwd.startsWith(releaseRoot+'/')) continue;
         const entries=(await readFile(path.join(directory,'environ'))).toString('utf8').split('\0');
         const environment=Object.fromEntries(entries.filter(entry=>entry.includes('=')).map(entry=>[entry.slice(0,entry.indexOf('=')),entry.slice(entry.indexOf('=')+1)]));
-        if(Object.entries(values).some(([key,value])=>environment[key]!==value)) throw fail('application_environment_process_unverified');
+        if(Object.entries(values).some(([key,value])=>environment[key]!==value) || absentKeys.some(key=>Object.hasOwn(environment,key))) throw fail('application_environment_process_unverified');
         processes+=1;
       } catch(error) {
         if(['ENOENT','ESRCH'].includes(error?.code)) continue;
@@ -222,5 +238,5 @@ export function createApplicationEnvironmentBackupManager({
     if(await fileState(c)!==expected) throw fail('application_environment_process_unverified');
     return {applicationId:c.id,releaseId:application.currentReleaseId,environmentRevision,verified:true,processes};
   }
-  return Object.freeze({ captureEnvironment, restoreEnvironment, assertRestoreSupported, applyEnvironment, inspectAppliedPassengerEnvironment });
+  return Object.freeze({ captureEnvironment, capturedPassengerEnvironment, restoreEnvironment, assertRestoreSupported, applyEnvironment, inspectAppliedPassengerEnvironment });
 }

@@ -1,3 +1,4 @@
+import {websitePassengerEnvironmentInternals} from '@yunpanel/host-runtime/website-passenger-environment-manager';
 import {normalizeNodeRestartSpec} from '@yunpanel/shared';
 import {createApplicationEnvironmentBackupManager} from '@yunpanel/host-runtime';
 import {createWebsiteHttpHealthInspector} from '@yunpanel/host-runtime/website-http-health-inspector';
@@ -39,15 +40,17 @@ export function createLocalPassengerRestartOperation({applicationRegistry,websit
     return{...actual,runtimeAdapter:'passenger',port:null,healthPath:spec.runtime.healthPath,healthy:true,appliedAt:status.lastAppliedAt};
    }
    const before=await runtimeManager.captureEnvironment({application});
+   const baseline=runtimeManager.capturedPassengerEnvironment({application,savedRuntime:before});
+   const absentKeys=Object.keys(baseline.values).filter(key=>!Object.hasOwn(values,key));
    const applied=await runtimeManager.applyEnvironment({application,values,environmentRevision:status.savedRevision,verifyHealth});
    if(applied?.verified!==true||applied.appliedMatchesSaved!==true||applied.applicationId!==application.id)throw fail('passenger_restart_unverified');
    try {
    const actual=await runtimeManager.inspectAppliedPassengerEnvironment({application,unixUser:website.unixUser,values,
-    environmentRevision:status.savedRevision,verifyHealth});
+    environmentRevision:status.savedRevision,verifyHealth,absentKeys});
    if(actual?.verified!==true || actual.applicationId!==application.id || actual.releaseId!==application.currentReleaseId
     || actual.environmentRevision!==status.savedRevision)throw fail('passenger_restart_process_unverified');
    await applicationEnvironmentRegistry.markApplied({applicationId:application.id,revision:status.savedRevision,releaseId:application.currentReleaseId});}
-   catch(error){await runtimeManager.restoreEnvironment({application,values,environmentRevision:status.savedRevision,savedRuntime:before,verifyHealth});throw error;}
+   catch(error){await runtimeManager.restoreEnvironment({application,values,environmentRevision:status.savedRevision,savedRuntime:before,verifyHealth,expectedCurrentContent:websitePassengerEnvironmentInternals.normalizeSpec({applicationId:application.id,values,environmentRevision:status.savedRevision}).content});throw error;}
    return{applicationId:application.id,releaseId:application.currentReleaseId,environmentRevision:status.savedRevision,
     runtimeAdapter:'passenger',port:null,healthPath:spec.runtime.healthPath,restarted:true,healthy:true};
   });

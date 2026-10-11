@@ -473,3 +473,12 @@ test('Passenger release specs reject ports and npm-script startup mode', async (
     (error) => error instanceof WebsiteNodeReleaseError && error.code === 'website_node_release_start_mode_unsupported',
   );
 });
+
+test('Passenger builds run under the dedicated site user with saved values while preserving executor PATH and withholding values from Git',async()=>{
+ const h=createHarness(),spec=releaseSpec();await h.manager.prepare(spec,{activate:false,environment:{API_SECRET:'private-source-build-value',PATH:'/untrusted/bin'}});
+ const installs=h.calls.filter(c=>c.file==='/usr/sbin/runuser' && c.args.some(a=>a==='ci'));
+ assert.equal(installs.length,1);assert.equal(installs[0].env.API_SECRET,'private-source-build-value');
+ assert.notEqual(installs[0].env.PATH,'/untrusted/bin');assert.equal(installs[0].args[1],createApplicationIdentity(spec.applicationId).unixUser);
+ const git=h.calls.filter(c=>c.file==='/usr/sbin/runuser' && c.args.includes('/usr/bin/git'));assert.ok(git.length>0);
+ assert.ok(git.every(c=>c.env.API_SECRET===undefined));
+});

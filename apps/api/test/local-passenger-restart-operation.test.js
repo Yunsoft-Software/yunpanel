@@ -10,10 +10,10 @@ function fixture({parentDomainId=null}={}){
  const website={id:randomUUID(),applicationId:app.id,serverId:app.serverId,runtimeType:'node',unixUser:'yunapp-123456abcdef',name:'owned.example.test'};
  let websites=[website],revision=3,applied=0,restored=0,marked=0,markFailure=false;
  let appliedMetadata={appliedRevision:3,appliedReleaseId:app.currentReleaseId,lastAppliedAt:new Date().toISOString()};const calls=[];
- const runtimeManager={captureEnvironment:async()=>({version:1,content:'protected previous contents'}),
+ const runtimeManager={capturedPassengerEnvironment:()=>({values:{REMOVED_SECRET:'previous-private-value'},environmentRevision:2}),captureEnvironment:async()=>({version:1,content:'protected previous contents'}),
   applyEnvironment:async input=>{calls.push(input);applied++;assert.equal(await input.verifyHealth(),true);return{verified:true,appliedMatchesSaved:true,applicationId:app.id};},
-  restoreEnvironment:async()=>{restored++;return{verified:true};},
-  inspectAppliedPassengerEnvironment:async input=>({verified:true,applicationId:app.id,releaseId:app.currentReleaseId,environmentRevision:input.environmentRevision,processes:1})};
+  restoreEnvironment:async input=>{assert.ok(typeof input.expectedCurrentContent==='string' && input.expectedCurrentContent.includes('revision 3'));restored++;return{verified:true};},
+  inspectAppliedPassengerEnvironment:async input=>{if(applied>0)assert.deepEqual(input.absentKeys,['REMOVED_SECRET']);return({verified:true,applicationId:app.id,releaseId:app.currentReleaseId,environmentRevision:input.environmentRevision,processes:1});}};
  const operation=createLocalPassengerRestartOperation({applicationRegistry:{getApplication:async()=>app},websiteRegistry:{listWebsites:async()=>websites},
   domainRegistry:{listDomains:async()=>[{id:randomUUID(),websiteId:website.id,serverId:app.serverId,primaryDomain:website.name,parentDomainId}]},
   applicationEnvironmentRegistry:{environmentStatus:async()=>({savedRevision:revision,...appliedMetadata}),materialize:async(id,options)=>{assert.equal(id,app.id);assert.equal(options.expectedRevision,revision);return{OWNED_PROOF:'controlled-value'};},

@@ -20,6 +20,7 @@ import {
   normalizeGitDeploymentTarget,
   normalizeGithubRepositoryUrl,
   normalizeNodeRuntimeConfig,
+  normalizeEnvironmentKey, normalizeEnvironmentValue,
 } from '@yunpanel/shared';
 import { createApplicationIdentity } from './application-identity.js';
 import { gitAuthenticationPlan, gitFetchArguments, resolvedGitCommit } from './git-deployment.js';
@@ -552,6 +553,15 @@ export function createWebsiteNodeReleaseManager({
   }
 
   async function prepareUnlocked(spec, options = {}) {
+    const buildValues = {};
+    if (options.environment !== undefined) {
+      if (!options.environment || typeof options.environment !== 'object' || Array.isArray(options.environment) || Object.keys(options.environment).length > 100) throw new WebsiteNodeReleaseError('website_node_release_environment_invalid', 'Build environment is invalid');
+      for (const [key,value] of Object.entries(options.environment)) {
+        try { normalizeEnvironmentKey(key); normalizeEnvironmentValue(value); } catch { throw new WebsiteNodeReleaseError('website_node_release_environment_invalid', 'Build environment is invalid'); }
+        if (!['HOME','PATH','CI','LANG','GIT_TERMINAL_PROMPT','NPM_CONFIG_UPDATE_NOTIFIER','NODE_ENV'].includes(key)) buildValues[key] = value;
+      }
+    }
+
     const identity = createApplicationIdentity(spec.applicationId);
     const identityEvidence = await inspectIdentity(identity);
     const nodeBinary = await findNode(spec);
@@ -685,6 +695,7 @@ export function createWebsiteNodeReleaseManager({
 
       await emitLog(spec, 'dependencies', 'info', `Installing dependencies with ${spec.runtime.packageManager}.`);
       await runAsUser(identity, runtimeBin, packageManager, installArguments(spec.runtime), {
+        env: buildValues,
         cwd: documentRoot,
         timeout: 15 * 60 * 1000,
         runtimeMode: spec.runtime.mode,
@@ -692,6 +703,7 @@ export function createWebsiteNodeReleaseManager({
       if (spec.runtime.buildScript) {
         await emitLog(spec, 'build', 'info', `Running configured build script ${spec.runtime.buildScript}.`);
         await runAsUser(identity, runtimeBin, packageManager, ['run', spec.runtime.buildScript], {
+          env: buildValues,
           cwd: documentRoot,
           timeout: 15 * 60 * 1000,
           runtimeMode: spec.runtime.mode,
@@ -887,6 +899,18 @@ export function createWebsiteNodeReleaseManager({
     });
   }
 
+  async function inspectOperationReleaseAbsence(rawTarget) {
+    const target = normalizeCompensationTarget(rawTarget);
+    const identity = createApplicationIdentity(target.applicationId);
+    await inspectIdentity(identity);
+    if (await currentRelease(identity) !== target.previousReleaseId) throw new WebsiteNodeReleaseError('website_node_release_state_drift', 'Candidate absence requires the verified previous release');
+    const receipt = await loadReceipt(target.deploymentId);
+    if (receipt && (receipt.applicationId !== target.applicationId || receipt.previousReleaseId !== target.previousReleaseId)) throw new WebsiteNodeReleaseError('website_node_release_receipt_conflict', 'Candidate absence receipt belongs to different work');
+    try { await lstatFn(path.posix.join(identity.paths.runtime.releasesDirectory, target.deploymentId)); return { satisfied: false }; }
+    catch (error) { if (error?.code !== 'ENOENT') throw error; }
+    return { satisfied: true, absent: true, ...target };
+  }
+
   async function inspectCompensation(rawTarget) {
     const target = normalizeCompensationTarget(rawTarget);
     const identity = createApplicationIdentity(target.applicationId);
@@ -979,6 +1003,7 @@ export function createWebsiteNodeReleaseManager({
     inspectRetainedRelease,
     switchRetainedRelease,
     discardOperationRelease,
+    inspectOperationReleaseAbsence,
     compensate,
     inspectCompensation,
   });

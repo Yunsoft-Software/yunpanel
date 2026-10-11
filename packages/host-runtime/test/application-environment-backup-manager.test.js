@@ -138,3 +138,34 @@ test('foreign identities, file symlinks, permissive modes and current-release dr
   await assert.rejects(f.manager.captureEnvironment({ application: { ...f.application, currentReleaseId: randomUUID() } }), { code: 'application_environment_release_drift' });
   assert.equal(f.calls.length, 0);
 });
+
+test('Captured Passenger baseline exposes private running revision independently of a newer saved draft and refuses a foreign release',async t=>{
+ const f=await fixture(t,'node',true),snapshot=await f.manager.captureEnvironment({application:f.application});
+ const baseline=f.manager.capturedPassengerEnvironment({application:f.application,savedRuntime:snapshot});
+ assert.equal(baseline.environmentRevision,4);assert.equal(baseline.values.SERVICE_SECRET,'actually running saved value');
+ assert.throws(()=>f.manager.capturedPassengerEnvironment({application:f.application,savedRuntime:{...snapshot,releaseId:randomUUID()}}),{code:'application_environment_runtime_drift'});
+ assert.throws(()=>f.manager.capturedPassengerEnvironment({application:f.application,savedRuntime:{...snapshot,content:snapshot.content.replace('revision 4','revision invalid')}}),{code:'application_environment_snapshot_invalid'});
+});
+
+test('Passenger applied proof rejects a removed managed key in the real process environment while allowing unrelated process defaults',async t=>{
+ const f=await fixture(t,'node',true),directory=path.join(f.proc,'1234');await mkdir(directory);
+ if(process.getuid()===0)await chown(directory,1001,1001);
+ await symlink('/managed/runtime/bin/node',path.join(directory,'exe'));await symlink(f.release,path.join(directory,'cwd'));
+ await writeFile(f.target,websitePassengerEnvironmentInternals.normalizeSpec({applicationId:f.application.id,environmentRevision:4,values:{}}).content,{mode:0o600});
+ const file=path.join(directory,'environ');await writeFile(file,'SERVICE_SECRET=obsolete private value\0PATH=/usr/bin\0',{mode:0o600});
+ const input={application:f.application,unixUser:'yunapp-123456abcdef',values:{},environmentRevision:4,absentKeys:['SERVICE_SECRET'],verifyHealth:async()=>true};
+ await assert.rejects(f.manager.inspectAppliedPassengerEnvironment(input),{code:'application_environment_process_unverified'});
+ await writeFile(file,'PATH=/usr/bin\0',{mode:0o600});assert.equal((await f.manager.inspectAppliedPassengerEnvironment(input)).verified,true);
+});
+test('Expected-current environment CAS refuses a foreign private include before restore and preserves an existing temporary artifact',async t=>{
+ const f=await fixture(t,'node',true),snapshot=await f.manager.captureEnvironment({application:f.application}),before=snapshot.content;
+ const foreign=websitePassengerEnvironmentInternals.normalizeSpec({applicationId:f.application.id,environmentRevision:123,values:{FOREIGN_VALUE:'unrelated native change'}}).content;
+ await writeFile(f.target,foreign,{mode:0o600});
+ await assert.rejects(f.manager.restoreEnvironment({application:f.application,values:{SERVICE_SECRET:'actually running saved value'},savedRuntime:snapshot,
+  environmentRevision:4,verifyHealth:async()=>true,expectedCurrentContent:before}),{code:'application_environment_restore_state_drift'});
+ assert.equal(await readFile(f.target,'utf8'),foreign);assert.equal(f.calls.length,1);
+ const temporary=f.target+`.${process.pid}.restore.tmp`;await writeFile(temporary,'requires inspection',{mode:0o600});
+ await assert.rejects(f.manager.restoreEnvironment({application:f.application,values:{},savedRuntime:snapshot,environmentRevision:4,
+  verifyHealth:async()=>true,expectedCurrentContent:foreign}));
+ assert.equal(await readFile(temporary,'utf8'),'requires inspection');
+});
