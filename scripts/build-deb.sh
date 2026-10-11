@@ -35,6 +35,23 @@ if [[ "$node_platform" != linux || "$(dpkg --print-architecture)" != "$architect
 fi
 
 repository_root=$(pwd)
+documentation_files=(
+  .env.example
+  README.md
+  docs/architecture.md
+  docs/security.md
+  docs/operations.md
+  docs/local-executor-safety.md
+  docs/local-migration-backup.md
+  docs/local-runtime-migration.md
+  docs/website-workspace.md
+)
+for file in "${documentation_files[@]}"; do
+  if [[ ! -f "$repository_root/$file" ]]; then
+    printf 'required package documentation is missing: %s\n' "$file" >&2
+    exit 1
+  fi
+done
 elfinder_version=2.1.70
 elfinder_commit=e7ea668fd569fc9903fb1c431d47d58f2daad2f2
 elfinder_vendor_root=${ELFINDER_VENDOR_ROOT:-"$repository_root/.local/vendor/elfinder"}
@@ -100,21 +117,18 @@ install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunp
 install -m 0755 scripts/local-runtime.mjs "$package_root/usr/lib/yunpanel/scripts/local-runtime.mjs"
 install -m 0755 scripts/job-recovery.mjs "$package_root/usr/lib/yunpanel/scripts/job-recovery.mjs"
 install -m 0755 scripts/local-migration-backup.mjs "$package_root/usr/lib/yunpanel/scripts/local-migration-backup.mjs"
-install -m 0644 .env.example README.md \
-  docs/authentication.md \
-  docs/local-migration-backup.md \
-  docs/local-runtime-migration.md \
-  docs/mfa.md \
-  docs/owner-mfa-policy.md \
-  docs/secret-master-key-rotation.md \
-  docs/site-files.md \
-  docs/terminal.md \
+install -m 0644 "${documentation_files[@]}" \
   "$package_root/usr/share/doc/yunpanel/"
 
 cp -a package.json "$package_root/usr/lib/yunpanel/"
 cp -a apps/api apps/web "$package_root/usr/lib/yunpanel/apps/"
 cp -a packages/. "$package_root/usr/lib/yunpanel/packages/"
 cp -a node_modules "$package_root/usr/lib/yunpanel/"
+wp_cli_vendor_root=${WP_CLI_VENDOR_ROOT:-"$repository_root/.local/vendor/wp-cli"}
+bash "$repository_root/scripts/fetch-wp-cli-vendor.sh" "$wp_cli_vendor_root"
+install -d "$package_root/usr/lib/yunpanel/vendor/wp-cli"
+install -m 0755 "$wp_cli_vendor_root/wp-cli.phar" "$package_root/usr/lib/yunpanel/vendor/wp-cli/wp"
+install -m 0644 "$wp_cli_vendor_root/VERSION" "$package_root/usr/lib/yunpanel/vendor/wp-cli/VERSION"
 cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"
 cp -a "$elfinder_vendor_root/." "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/"
 rm -rf -- "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/.git"

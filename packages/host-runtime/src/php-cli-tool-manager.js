@@ -5,19 +5,19 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
-const DEFAULT_WP_CLI_PATHS = Object.freeze(['/usr/local/bin/wp', '/usr/bin/wp']);
+const DEFAULT_WP_CLI_PATHS = Object.freeze(['/usr/local/bin/wp', '/usr/bin/wp', '/usr/lib/yunpanel/vendor/wp-cli/wp']);
 const DEFAULT_COMPOSER_PATHS = Object.freeze(['/usr/local/bin/composer', '/usr/bin/composer']);
 const RUNUSER_PATH = '/usr/sbin/runuser';
 const PASSWD_PATH = '/etc/passwd';
 const APP_USER_PATTERN = /^yunapp-[a-f0-9]{12}$/;
 const APPLICATION_ID = '[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
 const RELEASE_ID = APPLICATION_ID;
-const SITE_CURRENT_PATTERN = new RegExp(`^(/(?:var/www|var/lib)/yunpanel/apps/(${APPLICATION_ID}))/current(?:/public)?$`, 'i');
+const SITE_CURRENT_PATTERN = new RegExp(`^(/(?:var/www|var/lib)/yunpanel/apps/(${APPLICATION_ID}))/current(?:/[A-Za-z0-9_-]+)*$`, 'i');
 
 const MAX_OUTPUT_BYTES = 2 * 1024 * 1024; // 2 MB
 
 function runPhpTool(file, args, options = {}) {
-  const config = { encoding: 'utf8', timeout: options.timeout ?? 60_000, maxBuffer: MAX_OUTPUT_BYTES, cwd: options.cwd, env: options.env };
+  const config = { encoding: 'utf8', timeout: options.timeout ?? 60_000, maxBuffer: options.maxBuffer ?? MAX_OUTPUT_BYTES, cwd: options.cwd, env: options.env };
   if (options.input == null) return execFileAsync(file, args, config);
   return new Promise((resolve, reject) => {
     const child = execFile(file, args, config, (error, stdout, stderr) => {
@@ -88,6 +88,7 @@ const WP_CLI_ALLOWED_COMMANDS = new Set([
   'post',
   'eval',
   'config',
+  'search-replace',
 ]);
 
 // Allowlisted Composer top-level commands
@@ -133,6 +134,9 @@ function validateCommandArgs(command, rawArgs, allowedCommands, toolName) {
         400,
       );
     }
+    if (toolName === 'wp_cli' && /^--(?:dbpass|admin_password|user_pass)(?:=|$)/i.test(arg)) {
+      throw new PhpCliToolError('wp_cli_secret_argument_forbidden', 'Use the private WP-CLI prompt input for password changes', 400);
+    }
     // Explicitly forbid --allow-root
     if (arg === '--allow-root' || arg.startsWith('--allow-root=')) {
       throw new PhpCliToolError(
@@ -157,6 +161,15 @@ export function createPhpCliToolManager({
   passwdPath = PASSWD_PATH,
 } = {}) {
   const inspectDirStat = statFn ?? (lstatFn !== lstat ? lstatFn : stat);
+  async function toolCommand(binary, phpVersion) {
+    if (phpVersion == null) return [binary];
+    if (!['8.1', '8.2', '8.3', '8.4'].includes(phpVersion)) throw new PhpCliToolError('php_cli_version_invalid', 'PHP CLI version is invalid');
+    const php = `/usr/bin/php${phpVersion}`;
+    let metadata;
+    try { metadata = await lstatFn(php); } catch { throw new PhpCliToolError('php_cli_version_unavailable', 'Selected site PHP CLI version is unavailable', 503); }
+    if (!metadata.isFile?.() || metadata.isSymbolicLink?.() || metadata.uid !== 0 || (metadata.mode & 0o022) !== 0 || (metadata.mode & 0o111) === 0) throw new PhpCliToolError('php_cli_version_unavailable', 'Selected site PHP CLI executable could not be verified', 503);
+    return [php, binary];
+  }
   async function findBinary(candidates, toolName) {
     for (const candidate of candidates) {
       try {
@@ -224,7 +237,7 @@ export function createPhpCliToolManager({
 
     const match = SITE_CURRENT_PATTERN.exec(cwd);
     const releasePrefix = match[1];
-    const releasePattern = new RegExp(`^${releasePrefix}/releases/${RELEASE_ID}(?:/public)?$`, 'i');
+    const releasePattern = new RegExp(`^${releasePrefix}/releases/${RELEASE_ID}(?:/[A-Za-z0-9_-]+)*$`, 'i');
     if (!releasePattern.test(resolvedCwd)) {
       throw new PhpCliToolError('php_cli_cwd_escape', 'Website working directory escaped managed storage', 409);
     }
@@ -253,8 +266,9 @@ export function createPhpCliToolManager({
     });
   }
 
-  async function runWpCli({ unixUser, cwd, command, args = [], timeout = 60_000, input = null } = {}) {
-    if (input != null && (typeof input !== 'string' || Buffer.byteLength(input) > 8192 || input.includes('\0') || !input.endsWith('\n'))) throw new PhpCliToolError('wp_cli_input_invalid', 'Private WP-CLI input is invalid');
+  async function runWpCli({ unixUser, cwd, command, args = [], timeout = 60_000, input = null, phpVersion = null } = {}) {
+    const sqlImport = command === 'db' && args[0] === 'import' && args[1] === '-';
+    if (input != null && (typeof input !== 'string' || Buffer.byteLength(input) > (sqlImport ? 16 * 1024 * 1024 : 8192) || input.includes('\0') || !input.endsWith('\n'))) throw new PhpCliToolError('wp_cli_input_invalid', 'Private WP-CLI input is invalid');
     const wpInfo = await inspectWpCli();
     if (!wpInfo.available) {
       throw new PhpCliToolError('wp_cli_not_installed', 'WP-CLI is not installed on the system', 503);
@@ -264,13 +278,14 @@ export function createPhpCliToolManager({
     const validatedArgs = validateCommandArgs(command, args, WP_CLI_ALLOWED_COMMANDS, 'wp_cli');
 
     // Run via runuser -u <user> -- <binary> <args>
-    const runArgs = ['-u', target.account.user, '--', wpInfo.path, ...validatedArgs];
+    const runArgs = ['-u', target.account.user, '--', ...await toolCommand(wpInfo.path, phpVersion), ...validatedArgs];
 
     try {
       const result = await run(RUNUSER_PATH, runArgs, {
         cwd: target.cwd,
         env: target.env,
         timeout: Math.min(timeout, 300_000),
+        ...(command === 'db' && args[0] === 'export' && args[1] === '-' ? { maxBuffer: 16 * 1024 * 1024 } : {}),
         ...(input != null ? { input } : {}),
       });
 
@@ -290,7 +305,7 @@ export function createPhpCliToolManager({
     }
   }
 
-  async function runComposer({ unixUser, cwd, command, args = [], timeout = 120_000 } = {}) {
+  async function runComposer({ unixUser, cwd, command, args = [], timeout = 120_000, phpVersion = null } = {}) {
     const composerInfo = await inspectComposer();
     if (!composerInfo.available) {
       throw new PhpCliToolError('composer_not_installed', 'Composer is not installed on the system', 503);
@@ -300,7 +315,7 @@ export function createPhpCliToolManager({
     const validatedArgs = validateCommandArgs(command, args, COMPOSER_ALLOWED_COMMANDS, 'composer');
 
     // Run via runuser -u <user> -- <binary> <args>
-    const runArgs = ['-u', target.account.user, '--', composerInfo.path, ...validatedArgs];
+    const runArgs = ['-u', target.account.user, '--', ...await toolCommand(composerInfo.path, phpVersion), ...validatedArgs];
 
     try {
       const result = await run(RUNUSER_PATH, runArgs, {

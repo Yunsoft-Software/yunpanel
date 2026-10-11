@@ -12,6 +12,19 @@ const VALID_USER = 'yunapp-0123456789ab';
 const VALID_CWD = `/var/lib/yunpanel/apps/${VALID_APP_ID}/current`;
 const VALID_REAL_CWD = `/var/lib/yunpanel/apps/${VALID_APP_ID}/releases/${VALID_RELEASE_ID}`;
 
+test('a clean host can use the immutable WP-CLI bundled with the panel package', async () => {
+  const bundled = '/usr/lib/yunpanel/vendor/wp-cli/wp';
+  const manager = createPhpCliToolManager({
+    lstatFn: async candidate => {
+      if (candidate !== bundled) throw Object.assign(new Error('missing'), { code: 'ENOENT' });
+      return { isFile: () => true, isSymbolicLink: () => false };
+    },
+    run: async (file, args) => { assert.equal(file, bundled); assert.equal(args[0], '--version'); return { stdout: 'WP-CLI 2.12.0\n', stderr: '' }; },
+  });
+  const inspected = await manager.inspectWpCli();
+  assert.equal(inspected.available, true); assert.equal(inspected.path, bundled); assert.equal(inspected.version, '2.12.0');
+});
+
 const MOCK_PASSWD = [
   'root:x:0:0:root:/root:/bin/bash',
   'www-data:x:33:33:www-data:/var/www:/usr/sbin/nologin',
@@ -40,6 +53,11 @@ test('private WP-CLI prompt input stays off command arguments and is bounded', a
 test('default bounded PHP process adapter actually passes stdin without argv interpolation', async () => {
   const result = await phpCliToolInternals.runPhpTool(process.execPath, ['-e', 'let input="";process.stdin.on("data",part=>input+=part);process.stdin.on("end",()=>process.stdout.write(String(input.length)));'], { input: 'FixtureSecret_Input_123!\n', timeout: 5000 });
   assert.equal(result.stdout, String('FixtureSecret_Input_123!\n'.length));
+});
+test('WP passwords cannot be passed through process arguments, including separate-value forms', () => {
+  for (const argument of ['--dbpass=fixture-secret', '--admin_password=fixture-secret', '--user_pass', '--USER_PASS=fixture-secret']) {
+    assert.throws(() => phpCliToolInternals.validateCommandArgs('user', ['update', 'admin', argument], phpCliToolInternals.WP_CLI_ALLOWED_COMMANDS, 'wp_cli'), error => error.code === 'wp_cli_secret_argument_forbidden');
+  }
 });
 
 test('inspectWpCli detects binary and parses version', async () => {
@@ -252,4 +270,16 @@ test('resolveTargetContext correctly handles symlink cwd resolving to release di
 
   assert.equal(context.cwd, VALID_REAL_CWD);
   assert.equal(context.account.user, VALID_USER);
+});
+
+test('WP-CLI uses the verified selected PHP binary under the dedicated site user', async () => {
+  let observed;
+  const manager = createPhpCliToolManager({ wpCliPaths: ['/usr/bin/wp'],
+    lstatFn: async value => value === '/usr/bin/php8.4' ? { isFile: () => true, isSymbolicLink: () => false, uid: 0, mode: 0o100755 } : value === '/usr/bin/wp' ? { isFile: () => true } : { isDirectory: () => true },
+    realpathFn: async () => VALID_REAL_CWD, readFileFn: async () => MOCK_PASSWD,
+    run: async (file, args) => { if (file === '/usr/bin/wp') return { stdout: 'WP-CLI 2.12.0' }; observed = { file, args }; return { stdout: 'Success' }; },
+  });
+  assert.equal((await manager.runWpCli({ unixUser: VALID_USER, cwd: VALID_CWD, command: 'core', args: ['version'], phpVersion: '8.4' })).success, true);
+  assert.deepEqual(observed.args, ['-u', VALID_USER, '--', '/usr/bin/php8.4', '/usr/bin/wp', 'core', 'version']);
+  await assert.rejects(manager.runWpCli({ unixUser: VALID_USER, cwd: VALID_CWD, command: 'core', phpVersion: '../../private' }), { code: 'php_cli_version_invalid' });
 });
