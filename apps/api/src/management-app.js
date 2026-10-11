@@ -1,4 +1,5 @@
 import { createTenantBoundaryMiddleware } from './tenant-boundary.js';
+import { DurableJobRegistryError } from './durable-job-registry.js';
 import express from 'express';
 import { mountAiRoutes } from './ai-http.js';
 import {
