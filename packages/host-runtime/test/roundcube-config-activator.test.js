@@ -113,7 +113,7 @@ function enoent() {
   return Object.assign(new Error('missing'), { code: 'ENOENT' });
 }
 
-function fixture({ existingDatabase = false, failFirstFpmValidation = false, groups = 'yunpanel-roundcube www-data' } = {}) {
+function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data' } = {}) {
   const calls = [];
   const state = {
     databaseExists: existingDatabase,
@@ -122,6 +122,7 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
     databaseMode: 0o600,
     failFpm: failFirstFpmValidation,
     restored: false,
+    nginxConflict: failFirstNginxConflict,
   };
   const manifest = {
     version: 2,
@@ -171,6 +172,10 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, gro
     if (command === '/usr/sbin/php-fpm8.3' && state.failFpm) {
       state.failFpm = false;
       throw new Error('invalid fpm');
+    }
+    if (command === '/usr/sbin/nginx' && state.nginxConflict) {
+      state.nginxConflict = false;
+      return { stdout: '', stderr: 'nginx: [warn] conflicting server name "mail.example.com" on 0.0.0.0:443, ignored' };
     }
     return { stdout: '' };
   };
@@ -275,4 +280,16 @@ test('missing www-data supplementary membership fails before backup or live muta
       && error.code === 'roundcube_runtime_group_unavailable',
   );
   assert.equal(fx.calls.some((entry) => entry[0] === 'backup'), false);
+});
+
+test('an exit-zero Nginx hostname collision rolls back before Roundcube can shadow another site', async () => {
+  const fx = fixture({ existingDatabase: true, failFirstNginxConflict: true });
+  await assert.rejects(fx.activator.activateConfiguration(preview(), { transactionId: TX }),
+    error => error.code === 'roundcube_nginx_hostname_conflict');
+  assert.equal(fx.state.restored, true);
+  const validation = fx.calls.findIndex(c => c[0] === 'run' && c[1] === '/usr/sbin/nginx');
+  const restore = fx.calls.findIndex(c => c[0] === 'restore');
+  assert.ok(validation >= 0 && restore > validation);
+  assert.equal(fx.calls.slice(0, restore).some(c => c[0] === 'run' && c[1] === '/usr/bin/systemctl' && c[2][0] === 'reload'), false);
+  assert.equal(fx.state.databaseExists, true);
 });

@@ -168,3 +168,13 @@ test('failed compensation restores the candidate config instead of leaving a hal
     checksum: staged.checksum,
   })).reason, 'nginx_compensation_pending');
 });
+
+test('exit-zero hostname conflicts preserve the previous route and never reload a shadowing Domain', async t=>{
+ const f=await fixture(t),active=path.join(f.sitesDir,'yunpanel-example.com.conf'),previous='# known previous route\n';
+ await writeFile(active,previous);const calls=[];
+ const manager=managerFor({...f,execFn:async(file,args)=>{calls.push([file,args]);return {stdout:'',stderr:'nginx: [warn] conflicting server name "example.com" on 0.0.0.0:443, ignored'};}});
+ const staged=await manager.stageDomain(spec);
+ await assert.rejects(manager.activateDomain({primaryDomain:spec.primaryDomain,checksum:staged.checksum}),e=>e.code==='nginx_config_invalid');
+ assert.equal(await readFile(active,'utf8'),previous);
+ assert.equal(calls.some(([,args])=>args[0]==='reload'),false);
+});

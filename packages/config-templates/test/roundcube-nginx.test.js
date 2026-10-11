@@ -17,6 +17,8 @@ test('Roundcube Nginx template exposes HTTPS through the managed PHP-FPM socket'
   const content = renderRoundcubeNginxConfig(input);
   const preview = previewRoundcubeNginxConfig(input);
 
+  assert.match(content, /location \^~ \/\.well-known\/acme-challenge\//);
+  assert.match(content, /root \/var\/lib\/yunpanel\/acme;/);
   assert.match(content, /server_name mail\.example\.com;/);
   assert.match(content, /return 301 https:\/\/mail\.example\.com\$request_uri;/);
   assert.match(content, /ssl_certificate \/etc\/letsencrypt\/live\/mail\.example\.com\/fullchain\.pem;/);

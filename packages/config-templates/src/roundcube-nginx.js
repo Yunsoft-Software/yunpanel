@@ -77,7 +77,12 @@ function serverBlocks({
   listen 80;
   listen [::]:80;
   server_name ${webHostname};
-  return 301 https://${webHostname}$request_uri;
+  location ^~ /.well-known/acme-challenge/ {
+    root /var/lib/yunpanel/acme;
+    default_type text/plain;
+    try_files $uri =404;
+  }
+  location / { return 301 https://${webHostname}$request_uri; }
 }
 
 ` : '';

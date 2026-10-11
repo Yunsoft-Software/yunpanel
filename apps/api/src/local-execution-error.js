@@ -25,6 +25,7 @@ const messages = Object.freeze({
   wordpress_install_existing_directory: 'Bu dizinde mevcut WordPress içeriği var; kurulum üzerine yazılmaz.',
   panel_job_actor_forbidden: 'The panel session or website access changed before the operation started.',
   panel_job_scope_unavailable: 'The Website scope for this operation could not be verified.',
+  roundcube_nginx_hostname_conflict: 'Webmail alan adı başka bir site tarafından kullanılıyor. Ayrı bir posta alan adı seçin; önceki ayarlar geri alındı.',
   mail_host_not_ready: 'Posta hizmetleri hazır değil. Sunucudaki hizmet durumunu kontrol edin.',
   mail_rspamd_config_unreadable: 'Rspamd hizmet kullanıcısı yapılandırma dosyalarını okuyamıyor.',
   mail_rspamd_identity_unavailable: 'Rspamd hizmet hesabı doğrulanamadı.',

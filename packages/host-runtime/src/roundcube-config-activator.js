@@ -287,7 +287,10 @@ export function createRoundcubeConfigActivator({
   }
 
   async function validateNginxConfig() {
-    await runCommand(NGINX, ['-t'], 'roundcube_nginx_config_invalid', 'Roundcube Nginx configuration validation failed');
+    const result = await runCommand(NGINX, ['-t'], 'roundcube_nginx_config_invalid', 'Roundcube Nginx configuration validation failed');
+    if (/conflicting server name/i.test(String(result?.stderr ?? '') + String(result?.stdout ?? ''))) {
+      throw activationError('roundcube_nginx_hostname_conflict', 'Roundcube hostname is already served by another Nginx configuration; use a dedicated mail hostname');
+    }
   }
 
   async function reloadFpm() {

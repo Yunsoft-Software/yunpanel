@@ -31,9 +31,9 @@ function execFileSafe(file, args) {
   return new Promise((resolve, reject) => {
     execFile(file, args, {
       encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024, windowsHide: true,
-    }, (error, stdout) => {
+    }, (error, stdout, stderr) => {
       if (error) return reject(error);
-      return resolve(stdout);
+      return resolve(args.length === 1 && args[0] === '-t' ? { stdout, stderr } : stdout);
     });
   });
 }
@@ -144,6 +144,14 @@ export function createNginxManager({
   let activationChain = Promise.resolve();
   const rollbackDir = path.join(stagingDir, 'rollback');
   const deactivationDir = path.join(stagingDir, 'deactivation');
+
+  async function validateNginxConfig() {
+    const result = await execFn(nginxPath, ['-t']);
+    const output = typeof result === 'string' ? result : String(result?.stdout ?? '') + String(result?.stderr ?? '');
+    if (/conflicting server name/i.test(output)) {
+      throw new NginxManagerError('nginx_hostname_conflict', 'Nginx hostname conflicts with another active configuration');
+    }
+  }
 
   async function atomicWrite(targetPath, content, mode) {
     const temporaryPath = `${targetPath}.${process.pid}.tmp`;
@@ -470,7 +478,7 @@ export function createNginxManager({
       throw new NginxManagerError('nginx_activation_prepare_failed', 'Nginx activation could not replace the active configuration');
     }
     try {
-      await execFn(nginxPath, ['-t']);
+      await validateNginxConfig();
     } catch {
       try { await restoreInvocationState(); }
       catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx rejected the staged configuration and rollback could not be confirmed'); }
@@ -482,7 +490,7 @@ export function createNginxManager({
       try { await restoreInvocationState(); }
       catch { throw new NginxManagerError('nginx_rollback_failed', 'Nginx reload failed and rollback could not be confirmed'); }
       try {
-        await execFn(nginxPath, ['-t']);
+        await validateNginxConfig();
         await execFn(systemctlPath, ['reload', 'nginx']);
       } catch {
         throw new NginxManagerError('nginx_rollback_failed', 'Nginx reload failed and rollback could not be confirmed');
@@ -563,12 +571,12 @@ export function createNginxManager({
     try {
       await restoreFile(activePath, receipt.active);
       if (previousActivePath) await restoreFile(previousActivePath, receipt.previousActive);
-      await execFn(nginxPath, ['-t']);
+      await validateNginxConfig();
       await execFn(systemctlPath, ['reload', 'nginx']);
     } catch {
       try {
         await restoreBeforeCompensation();
-        await execFn(nginxPath, ['-t']);
+        await validateNginxConfig();
         await execFn(systemctlPath, ['reload', 'nginx']);
       } catch {
         throw new NginxManagerError('nginx_compensation_rollback_failed', 'Nginx compensation failed and the active configuration could not be restored');
@@ -686,12 +694,12 @@ export function createNginxManager({
 
     try {
       await rmFn(activePath, { force: true });
-      await execFn(nginxPath, ['-t']);
+      await validateNginxConfig();
       await execFn(systemctlPath, ['reload', 'nginx']);
     } catch {
       try {
         await restoreActive();
-        await execFn(nginxPath, ['-t']);
+        await validateNginxConfig();
         await execFn(systemctlPath, ['reload', 'nginx']);
       } catch {
         throw new NginxManagerError(
@@ -791,12 +799,12 @@ export function createNginxManager({
 
     try {
       await restoreFile(activePath, receipt.active);
-      await execFn(nginxPath, ['-t']);
+      await validateNginxConfig();
       await execFn(systemctlPath, ['reload', 'nginx']);
     } catch {
       try {
         await rmFn(activePath, { force: true });
-        await execFn(nginxPath, ['-t']);
+        await validateNginxConfig();
         await execFn(systemctlPath, ['reload', 'nginx']);
       } catch {
         throw new NginxManagerError(
