@@ -121,6 +121,34 @@ export function createWebsiteRemovalCleanupAdapters({
     }
   }
 
+  async function retirePhpRuntime(source) {
+    const steps = source.operation.steps.filter(step => step.kind === 'php_runtime');
+    const application = await applicationRegistry.getApplication(source.website.applicationId);
+    if (steps.length === 0 && application?.type !== 'php') return;
+    const step = steps[0], handler = websiteProvisioningRuntime.handlers?.php_runtime;
+    if (steps.length !== 1 || !['succeeded', 'compensated'].includes(step?.state)
+      || step.intent?.adapter !== 'php-fpm' || step.intent?.websiteId !== source.website.id
+      || step.intent?.applicationId !== source.website.applicationId || step.intent?.unixUser !== source.website.unixUser) {
+      unavailable('website_cleanup_php_evidence_invalid', 'Owned Website PHP provisioning journal is unavailable or changed');
+    }
+    if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
+      unavailable('website_cleanup_php_unavailable', 'Website PHP retirement is unavailable');
+    }
+    const context = { intent: step.intent, operationId: source.operation.operationId, evidence: step.evidence ?? null };
+    try {
+      await handler.retire(context);
+      const result = await handler.inspectRetirement(context);
+      if (!result?.satisfied || result.poolRemoved !== true || result.socketRemoved !== true
+        || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId
+        || result.unixUser !== source.website.unixUser) {
+        unavailable('website_cleanup_php_unverified', 'Website PHP pool or socket is still present');
+      }
+    } catch (error) {
+      if (error instanceof WebsiteRemovalCleanupAdapterError) throw error;
+      unavailable('website_cleanup_php_unverified', 'Website PHP retirement could not be verified');
+    }
+  }
+
   async function directSystemdSource(input = {}) {
     const {
       websiteId,
@@ -235,6 +263,7 @@ export function createWebsiteRemovalCleanupAdapters({
 
   async function unixIdentityCleanupHandler(input = {}) {
     const source = await ownedIdentitySource(input);
+    await retirePhpRuntime(source);
     await retireFileManager(source);
     const { websiteId, systemUser } = input;
     const context = {
@@ -281,7 +310,9 @@ export function createWebsiteRemovalCleanupAdapters({
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
     }
     const { website } = await currentTarget(websiteId, applicationId);
-    await retireFileManager(await ownedIdentitySource({ websiteId, systemUser: website.unixUser }));
+    const source = await ownedIdentitySource({ websiteId, systemUser: website.unixUser });
+    await retirePhpRuntime(source);
+    await retireFileManager(source);
     let removed = 0;
     for (const target of inspection.targets) {
       if (await absentOrDirectory(target, lstatFn)) continue;

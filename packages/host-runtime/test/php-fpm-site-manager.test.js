@@ -131,6 +131,9 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       }
       return { stdout: '' };
     }
+    if (file === '/usr/bin/ss') {
+      return { stdout: entries.has(configPath) && entries.has(socketPath) ? `u_str LISTEN 0 0 ${socketPath}` : '' };
+    }
     throw new Error(`unexpected command ${file} ${args.join(' ')}`);
   };
 
@@ -162,6 +165,40 @@ function manager(host, options = {}) {
     writeFileFn: host.writeFileFn,
   });
 }
+
+test('PHP retirement removes the owned pool and socket before its document root and is idempotent', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const retired = await siteManager.retire(intent(), { operationId });
+  assert.equal(retired.satisfied, true);
+  assert.equal(retired.poolRemoved, true);
+  assert.equal(retired.socketRemoved, true);
+  assert.equal(host.entries.has(configPath), false);
+  assert.equal(host.entries.has(socketPath), false);
+  assert.equal(host.entries.has(documentRoot), true);
+  assert.deepEqual(await siteManager.retire(intent(), { operationId }), retired);
+});
+
+test('PHP retirement rejects missing ownership and changed pool content without deleting them', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  await assert.rejects(() => siteManager.retire(intent(), { operationId: '8ae512c0-a717-4611-943c-6ce2ab0abf16' }),
+    error => error.code === 'php_fpm_retirement_not_owned');
+  host.entries.get(configPath).content += '\n; externally changed\n';
+  await assert.rejects(() => siteManager.retire(intent(), { operationId }), error => error.code === 'php_fpm_compensation_drift');
+  assert.equal(host.entries.has(configPath), true);
+  assert.equal(host.entries.has(socketPath), true);
+});
+
+test('PHP retirement reconciles the original receipt after an interrupted compensation', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  await siteManager.compensate(intent(), { operationId });
+  host.entries.set(socketPath, { type: 'socket', mode: 0o660, uid: 33, gid: 33 });
+  host.entries.delete(documentRoot);
+  assert.equal((await siteManager.retire(intent(), { operationId })).satisfied, true);
+  assert.equal(host.entries.has(socketPath), false);
+});
 
 test('PHP-FPM site apply installs distro FPM and activates a dedicated Website pool', async () => {
   const host = fakeHost();

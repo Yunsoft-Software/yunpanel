@@ -5,25 +5,29 @@ import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-clea
 const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
 const systemUser='yunapp-123456789abc';
-function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false}={}) {
+function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,php=false,failPhp=false,missingPhpJournal=false}={}) {
   const removed=[]; const removedSet=new Set(); const compensated=[];
-  const retirementCalls=[];
+  const retirementCalls=[]; const order=[];
   const retirement = { satisfied:true,poolRemoved:true,socketRemoved:true,websiteId,applicationId,unixUser:systemUser };
   const adapters=createWebsiteRemovalCleanupAdapters({
     websiteRegistry:{
       getWebsite:async()=>({id:websiteId,serverId:'33333333-3333-4333-8333-333333333333',applicationId,unixUser:systemUser}),
       listWebsites:async()=>[{id:websiteId,applicationId},...(otherWebsite?[{id:'44444444-4444-4444-8444-444444444444',applicationId}]:[])],
     },
-    applicationRegistry:{getApplication:async()=>({id:applicationId,serverId:'33333333-3333-4333-8333-333333333333'})},
+    applicationRegistry:{getApplication:async()=>({id:applicationId,type:php?'php':'static',serverId:'33333333-3333-4333-8333-333333333333'})},
     websiteProvisioningRuntime:{
       registry:{listForWebsite:async()=>[{operationId:'55555555-5555-4555-8555-555555555555',steps:[{
         kind:'unix_identity',state:'succeeded',intent:{websiteId,applicationId,unixUser:systemUser,homeDirectory:'/var/lib/yunpanel/data/'+applicationId},evidence:{owned:true},
-      }, {kind:'elfinder',state:'succeeded',intent:{adapter:'elfinder-fpm',websiteId:foreignPool?'44444444-4444-4444-8444-444444444444':websiteId,applicationId,unixUser:systemUser}}]}]},
+      }, {kind:'elfinder',state:'succeeded',intent:{adapter:'elfinder-fpm',websiteId:foreignPool?'44444444-4444-4444-8444-444444444444':websiteId,applicationId,unixUser:systemUser}},
+      ...(php&&!missingPhpJournal?[{kind:'php_runtime',state:'succeeded',intent:{adapter:'php-fpm',websiteId,applicationId,unixUser:systemUser,documentRoot:'/var/lib/yunpanel/apps/'+applicationId+'/current/public'}}]:[])]}]},
       handlers:{elfinder:{
-        retire:async(ctx)=>{retirementCalls.push(ctx);if(failRetirement)throw new Error('fixture pool retained');return retirement;},
+        retire:async(ctx)=>{order.push('elfinder');retirementCalls.push(ctx);if(failRetirement)throw new Error('fixture pool retained');return retirement;},
+        inspectRetirement:async()=>retirement,
+      },php_runtime:{
+        retire:async()=>{order.push('php');if(failPhp)throw new Error('fixture PHP pool retained');return retirement;},
         inspectRetirement:async()=>retirement,
       },unix_identity:{
-        compensate:async(ctx)=>{compensated.push(ctx);return{satisfied:true,removedUser:true,removedGroup:true};},
+        compensate:async(ctx)=>{order.push('unix');compensated.push(ctx);return{satisfied:true,removedUser:true,removedGroup:true};},
         inspectCompensation:async()=>({satisfied:true,removedUser:true,removedGroup:true}),
       }},
     },
@@ -31,10 +35,33 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
       if(removedSet.has(path)) throw Object.assign(new Error('missing'),{code:'ENOENT'});
       return {isSymbolicLink:()=>symlink,isDirectory:()=>!symlink};
     },
-    rmFn:async(path)=>{removed.push(path);removedSet.add(path);},
+    rmFn:async(path)=>{order.push('files');removed.push(path);removedSet.add(path);},
   });
-  return {adapters,removed,compensated,retirementCalls};
+  return {adapters,removed,compensated,retirementCalls,order};
 }
+
+test('PHP retirement precedes file deletion and repeats before Unix identity cleanup',async()=>{
+ const f=fixture({php:true});
+ await f.adapters.fileCleanupHandler({websiteId,applicationId});
+ assert.deepEqual(f.order.slice(0,3),['php','elfinder','files']);
+ assert.equal(f.removed.length,4);
+ f.order.length=0;
+ await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
+ assert.deepEqual(f.order,['php','elfinder','unix']);
+});
+
+test('unverified PHP retirement preserves files, file manager and Unix identity',async()=>{
+ const f=fixture({php:true,failPhp:true});
+ await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),e=>e.code==='website_cleanup_php_unverified');
+ await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),e=>e.code==='website_cleanup_php_unverified');
+ assert.equal(f.removed.length,0);assert.equal(f.compensated.length,0);assert.equal(f.retirementCalls.length,0);
+});
+
+test('PHP Application without its provisioning journal cannot delete files',async()=>{
+ const f=fixture({php:true,missingPhpJournal:true});
+ await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),e=>e.code==='website_cleanup_php_evidence_invalid');
+ assert.equal(f.removed.length,0);assert.equal(f.retirementCalls.length,0);
+});
 test('file cleanup touches only canonical Application direct-child roots and keeps backups out of scope',async()=>{
  const f=fixture();
  await f.adapters.fileCleanupHandler({websiteId,applicationId,retainedBackups:['backup-a']});

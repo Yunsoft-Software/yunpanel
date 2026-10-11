@@ -5,6 +5,24 @@ import {
   websiteProvisioningIsolationInternals,
 } from '../src/website-provisioning-handlers-isolation.js';
 
+test('the production isolation handler preserves PHP retirement with exact provisioning scope', async () => {
+  const calls = [], result = { satisfied: true, poolRemoved: true, socketRemoved: true };
+  const fpmManager = {
+    apply: async () => result, inspect: async () => result,
+    compensate: async () => result, inspectCompensation: async () => result,
+    retire: async (intent, options) => { calls.push(['retire', intent, options]); return result; },
+    inspectRetirement: async intent => { calls.push(['inspect', intent]); return result; },
+  };
+  const handlers = createWebsiteProvisioningHandlers({ phpFpmSiteManager: fpmManager });
+  const intent = { adapter: 'php-fpm', websiteId: 'f73cc6ac-07e8-4d22-b29a-741154687d20',
+    applicationId: '6dcb8908-3f3e-43da-9452-15fd6b51ac76', unixUser: 'yunapp-4dc352e64a14',
+    documentRoot: '/var/lib/yunpanel/apps/6dcb8908-3f3e-43da-9452-15fd6b51ac76/current/public' };
+  const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16', normalized = { ...intent }; delete normalized.adapter;
+  assert.equal(await handlers.php_runtime.retire({ intent, operationId }), result);
+  assert.equal(await handlers.php_runtime.inspectRetirement({ intent }), result);
+  assert.deepEqual(calls, [['retire', normalized, { operationId }], ['inspect', normalized]]);
+});
+
 function baseRuntime({ satisfied = true } = {}) {
   const calls = [];
   return {

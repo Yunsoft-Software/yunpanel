@@ -385,6 +385,18 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     return fpmManager.inspectCompensation(runtimeIntent(intent), { operationId });
   }
 
+  async function retire({ intent, operationId } = {}) {
+    if (typeof fpmManager.retire !== 'function') throw new WebsitePhpRuntimeProvisioningError(
+      'website_php_retirement_unavailable', 'Website PHP retirement is unavailable');
+    return fpmManager.retire(runtimeIntent(intent), { operationId });
+  }
+
+  async function inspectRetirement({ intent } = {}) {
+    if (typeof fpmManager.inspectRetirement !== 'function') throw new WebsitePhpRuntimeProvisioningError(
+      'website_php_retirement_unavailable', 'Website PHP retirement inspection is unavailable');
+    return fpmManager.inspectRetirement(runtimeIntent(intent));
+  }
+
   return Object.freeze({
     apply,
     inspect,
@@ -399,6 +411,8 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     inspectMigrationCompensation,
     compensate,
     inspectCompensation,
+    retire,
+    inspectRetirement,
   });
 }
 

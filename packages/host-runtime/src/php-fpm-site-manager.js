@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   phpFpmBinaryPath,
   phpFpmPackageName,
@@ -917,6 +918,67 @@ export function createPhpFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
+  async function socketListening(socketPath) {
+    try {
+      const result = await run('/usr/bin/ss', ['-H', '-xl'], { timeout: 10_000 });
+      const output = String(result.stdout ?? '');
+      if (Buffer.byteLength(output) > 1024 * 1024) throw new Error('Socket inventory too large');
+      return output.split('\n').some(line => line.trim().split(/\s+/).includes(socketPath));
+    } catch { throw new PhpFpmSiteManagerError('php_fpm_socket_owner_unverified', 'Website PHP socket listeners could not be verified'); }
+  }
+  async function releaseSocket(spec) {
+    const socket = phpFpmSocketPath(spec.unixUser);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (!await socketListening(socket)) {
+        try {
+          const metadata = await lstatFn(socket);
+          if (!metadata.isSocket?.() || modeOf(metadata) !== 0o660) throw new PhpFpmSiteManagerError('php_fpm_socket_drift', 'Website PHP socket changed during transition');
+          await rmFn(socket, { force: true });
+        } catch (error) { if (!missingPath(error)) throw error; }
+        return;
+      }
+      await delay(100);
+    }
+    throw new PhpFpmSiteManagerError('php_fpm_socket_transition_busy', 'The old PHP pool is still serving requests; its configuration was restored');
+  }
+
+  async function inspectRetirement(rawIntent) {
+    const spec = normalizeIntent(rawIntent);
+    for (const target of [phpFpmPoolPath(spec.unixUser, spec.phpVersion), phpFpmSocketPath(spec.unixUser)]) {
+      try {
+        await lstatFn(target);
+        return Object.freeze({ satisfied: false, reason: 'php_fpm_retirement_pending',
+          websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
+      } catch (error) {
+        if (!missingPath(error)) throw new PhpFpmSiteManagerError('php_fpm_retirement_unavailable',
+          'The Website PHP pool or socket could not be inspected');
+      }
+    }
+    return Object.freeze({ satisfied: true, poolRemoved: true, socketRemoved: true,
+      websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
+  }
+
+  async function retire(rawIntent, options = {}) {
+    const spec = normalizeIntent(rawIntent);
+    const receipt = await loadReceipt(normalizeOperationId(options.operationId), spec);
+    if (!receipt || receipt.mutated !== true || receipt.previousConfig !== null || receipt.previousRuntime) {
+      throw new PhpFpmSiteManagerError('php_fpm_retirement_not_owned',
+        'The provisioning receipt does not prove exclusive ownership of this PHP pool');
+    }
+    await compensate(rawIntent, options);
+    if (await readOptional(phpFpmPoolPath(spec.unixUser, spec.phpVersion)) !== null) {
+      throw new PhpFpmSiteManagerError('php_fpm_retirement_blocked', 'The Website PHP pool is retained or changed');
+    }
+    // Reconcile interruption after unlink and verify that no listener survives.
+    await configTest(spec.phpVersion);
+    await reloadServiceIfActive(spec.phpVersion);
+    await releaseSocket(spec);
+    const result = await inspectRetirement(rawIntent);
+    if (!result.satisfied) throw new PhpFpmSiteManagerError('php_fpm_retirement_unverified',
+      'The Website PHP pool or socket is still present');
+    return result;
+  }
+
   return Object.freeze({
     inspect,
     previewMigration,
@@ -925,6 +987,8 @@ export function createPhpFpmSiteManager({
     apply,
     compensate,
     inspectCompensation,
+    retire,
+    inspectRetirement,
   });
 }
 

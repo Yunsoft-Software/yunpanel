@@ -544,6 +544,14 @@ export function createWebsiteProvisioningHandlers({
     return phpFpmSiteManager.inspectCompensation(phpRuntimeIntent(intent), { operationId });
   }
 
+  async function retirePhpRuntime({ intent, operationId } = {}) {
+    return phpFpmSiteManager.retire(phpRuntimeIntent(intent), { operationId });
+  }
+
+  async function inspectPhpRuntimeRetirement({ intent } = {}) {
+    return phpFpmSiteManager.inspectRetirement(phpRuntimeIntent(intent));
+  }
+
   async function applyNginx(context = {}) {
     const spec = nginxSpec(context);
     const stage = await nginxManager.stageDomain(spec);
@@ -634,6 +642,8 @@ export function createWebsiteProvisioningHandlers({
       inspect: inspectPhpRuntime,
       compensate: compensatePhpRuntime,
       inspectCompensation: inspectPhpRuntimeCompensation,
+      retire: retirePhpRuntime,
+      inspectRetirement: inspectPhpRuntimeRetirement,
     }),
     static_runtime: Object.freeze({
       apply: applyStaticRuntime,
