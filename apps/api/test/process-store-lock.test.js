@@ -171,3 +171,38 @@ test('an async callback inherited from a finished transaction must wait for the 
  await second.withLock(async()=>{launch();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ran,false);});
  await child;assert.equal(ran,true);
 });
+
+test('an outer transaction retains ownership until an unawaited nested writer completes', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yp-nested-writer-lifetime-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const filePath = path.join(root, 'counter.json');
+  await writeFile(filePath, '0');
+  const first = createProcessStoreLock({ filePath, waitMs: 1000 });
+  const second = createProcessStoreLock({ filePath, waitMs: 1000 });
+  let child, release, started;
+  const gate = new Promise(resolve => { release = resolve; });
+  const entered = new Promise(resolve => { started = resolve; });
+  let outerCompleted = false, independentEntered = false;
+  const outer = first.withLock(async () => {
+    child = first.withLock(async () => {
+      const before = Number(await readFile(filePath, 'utf8'));
+      started();
+      await gate;
+      // A nested call is still valid while the outer callback is draining.
+      await first.withLock(() => writeFile(filePath, String(before + 1)));
+    });
+    await entered;
+  }).then(() => { outerCompleted = true; });
+  await entered;
+  const independent = second.withLock(async () => {
+    independentEntered = true;
+    await writeFile(filePath, String(Number(await readFile(filePath, 'utf8')) + 1));
+  });
+  await new Promise(resolve => setTimeout(resolve, 25));
+  assert.equal(outerCompleted, false);
+  assert.equal(independentEntered, false);
+  release();
+  await Promise.all([outer, child, independent]);
+  assert.equal(await readFile(filePath, 'utf8'), '2');
+  await assert.rejects(readFile(first.lockPath), error => error.code === 'ENOENT');
+});

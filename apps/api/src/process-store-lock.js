@@ -62,12 +62,20 @@ export function createProcessStoreLock({
     }
     const inherited = ownedTransactions.getStore()?.get(lockPath);
     if (inherited?.active && inherited.pid === pid) {
-      let existing;
-      try { existing = parseRecord(await readFile(lockPath, 'utf8')); } catch {}
-      if (existing?.token !== inherited.token || existing.pid !== pid) {
-        throw new ProcessStoreLockError('process_store_lock_ownership_changed', 'Durable transaction lock ownership changed');
+      // Register before yielding: an unawaited nested callback still owns its
+      // critical section, so the outer transaction must wait for its lifetime.
+      inherited.borrowers += 1;
+      try {
+        let existing;
+        try { existing = parseRecord(await readFile(lockPath, 'utf8')); } catch {}
+        if (!inherited.active || existing?.token !== inherited.token || existing.pid !== pid) {
+          throw new ProcessStoreLockError('process_store_lock_ownership_changed', 'Durable transaction lock ownership changed');
+        }
+        return await action();
+      } finally {
+        inherited.borrowers -= 1;
+        if (inherited.borrowers === 0) inherited.drain?.();
       }
-      return action();
     }
     try {
       await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
@@ -94,11 +102,15 @@ export function createProcessStoreLock({
         handle = null;
         acquired = true;
         const transaction = new Map(ownedTransactions.getStore() ?? []);
-        const lease = { token, pid, active: true };
+        const lease = { token, pid, active: true, borrowers: 0, drain: null };
         transaction.set(lockPath, lease);
         try {
           return await ownedTransactions.run(transaction, action);
         } finally {
+          while (lease.borrowers > 0) {
+            await new Promise((resolve) => { lease.drain = resolve; });
+            lease.drain = null;
+          }
           lease.active = false;
           let current = null;
           try { current = parseRecord(await readFile(lockPath, 'utf8')); } catch {}
