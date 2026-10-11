@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { MANAGED_NODE_RUNTIME_MAJORS } from '@yunpanel/shared';
@@ -66,10 +66,12 @@ export function createNodeRuntimeManager({
     encoding: 'utf8', timeout: options.timeout ?? 10 * 60 * 1000, maxBuffer: options.maxBuffer ?? 1024 * 1024,
     env: options.env,
   }),
+  chmodFn = chmod,
   lstatFn = lstat,
   mkdirFn = mkdir,
   mkdtempFn = mkdtemp,
   readFileFn = readFile,
+  readdirFn = readdir,
   realpathFn = realpath,
   renameFn = rename,
   rmFn = rm,
@@ -149,6 +151,38 @@ export function createNodeRuntimeManager({
     if (!info.isDirectory() || info.isSymbolicLink() || typeof resolved !== 'string' || !path.isAbsolute(resolved)) {
       throw new NodeRuntimeManagerError('node_runtime_root_invalid', 'Managed Node.js runtime root must be a real fixed directory');
     }
+    const changed = (info.mode & 0o7777) !== 0o755;
+    if (changed) await chmodFn(runtimeRoot, 0o755);
+    return changed;
+  }
+
+  // Runtime files are shared, immutable tools for dedicated site users. The API
+  // runs with umask 0077, which otherwise makes a verified installation root-only.
+  async function exposeVerifiedRuntime(directory) {
+    const resolvedDirectory = await realpathFn(directory);
+    const entries = [];
+    async function inspectEntry(candidate) {
+      const info = await lstatFn(candidate);
+      if (info.isSymbolicLink()) {
+        const resolved = await realpathFn(candidate);
+        if (!resolved.startsWith(`${resolvedDirectory}${path.sep}`)) {
+          throw new NodeRuntimeManagerError('node_runtime_entry_invalid', 'Managed runtime links must remain within the verified runtime');
+        }
+        return;
+      }
+      if (!info.isDirectory() && !info.isFile()) {
+        throw new NodeRuntimeManagerError('node_runtime_entry_invalid', 'Managed runtime contains an unsupported file type');
+      }
+      entries.push({ candidate, mode: info.mode & 0o7777, expected: info.isDirectory() || (info.mode & 0o111) ? 0o755 : 0o644 });
+      if (info.isDirectory()) {
+        for (const name of await readdirFn(candidate)) await inspectEntry(path.join(candidate, name));
+      }
+    }
+    // Validate the entire tree before changing any permissions; never follow links.
+    await inspectEntry(directory);
+    const changes = entries.filter(({ mode, expected }) => mode !== expected);
+    for (const { candidate, expected } of changes) await chmodFn(candidate, expected);
+    return changes.length > 0;
   }
 
   async function requireInstallDependency(executablePath) {
@@ -162,7 +196,9 @@ export function createNodeRuntimeManager({
     if (!panelBefore) throw new NodeRuntimeManagerError('panel_node_runtime_unavailable', 'YunPanel packaged Node.js runtime could not be verified');
     const existing = await safeManagedRuntime(major);
     if (existing && REQUIRED_PACKAGE_MANAGERS.every((name) => existing.packageManagers.includes(name))) {
-      return { changed: false, runtime: existing, inventory: await inspect() };
+      const rootChanged = await requireSafeRoot();
+      const runtimeChanged = await exposeVerifiedRuntime(managedRuntimePath(runtimeRoot, major));
+      return { changed: rootChanged || runtimeChanged, runtime: existing, inventory: await inspect() };
     }
     try {
       await lstatFn(managedRuntimePath(runtimeRoot, major));
@@ -205,6 +241,7 @@ export function createNodeRuntimeManager({
           'enable', '--install-directory', path.join(extractPath, 'bin'), 'pnpm', 'yarn',
         ], { timeout: 30_000, maxBuffer: 64 * 1024 });
       } catch { throw new NodeRuntimeManagerError('node_runtime_corepack_failed', 'Managed pnpm/yarn shims could not be enabled'); }
+      await exposeVerifiedRuntime(extractPath);
       try { await renameFn(extractPath, managedRuntimePath(runtimeRoot, major)); }
       catch { throw new NodeRuntimeManagerError('node_runtime_install_failed', 'Managed Node.js runtime could not be activated atomically'); }
       const installed = await safeManagedRuntime(major);

@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -22,6 +22,8 @@ test('runtime manifest accepts only the requested official Linux architecture ar
 });
 
 test('managed install verifies checksum, activates one major atomically and leaves panel Node untouched', async (t) => {
+  const previousUmask = process.umask(0o077);
+  t.after(() => process.umask(previousUmask));
   const runtimeRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-node-runtimes-'));
   t.after(() => rm(runtimeRoot, { recursive: true, force: true }));
   const calls = [];
@@ -48,16 +50,16 @@ test('managed install verifies checksum, activates one major atomically and leav
         const extractPath = args[args.indexOf('--directory') + 1];
         await mkdir(path.join(extractPath, 'bin'), { recursive: true });
         await mkdir(path.join(extractPath, 'lib', 'node_modules', 'npm', 'bin'), { recursive: true });
-        await writeFile(path.join(extractPath, 'bin', 'node'), 'node');
-        await writeFile(path.join(extractPath, 'bin', 'corepack'), 'corepack');
-        await writeFile(path.join(extractPath, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'npm');
+        await writeFile(path.join(extractPath, 'bin', 'node'), 'node', { mode: 0o755 });
+        await writeFile(path.join(extractPath, 'bin', 'corepack'), 'corepack', { mode: 0o755 });
+        await writeFile(path.join(extractPath, 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), 'npm', { mode: 0o755 });
         await symlink('../lib/node_modules/npm/bin/npm-cli.js', path.join(extractPath, 'bin', 'npm'));
         return { stdout: '' };
       }
       if (file.endsWith('/bin/corepack')) {
         const bin = args[args.indexOf('--install-directory') + 1];
-        await writeFile(path.join(bin, 'pnpm'), 'pnpm');
-        await writeFile(path.join(bin, 'yarn'), 'yarn');
+        await writeFile(path.join(bin, 'pnpm'), 'pnpm', { mode: 0o755 });
+        await writeFile(path.join(bin, 'yarn'), 'yarn', { mode: 0o755 });
         return { stdout: '' };
       }
       if (file.endsWith('/v24/bin/node') || file.includes('.install-v24-') && file.endsWith('/runtime/bin/node')) {
@@ -79,6 +81,18 @@ test('managed install verifies checksum, activates one major atomically and leav
 
   const repeated = await manager.install(24);
   assert.equal(repeated.changed, false);
+  for (const entry of ['', 'v24', 'v24/bin', 'v24/bin/node', 'v24/lib/node_modules/npm/bin/npm-cli.js']) {
+    assert.equal((await lstat(path.join(runtimeRoot, entry))).mode & 0o7777, 0o755, entry);
+  }
+  await chmod(path.join(runtimeRoot, 'v24', 'bin', 'node'), 0o700);
+  assert.equal((await manager.install(24)).changed, true);
+  assert.equal((await lstat(path.join(runtimeRoot, 'v24', 'bin', 'node'))).mode & 0o7777, 0o755);
+
+  const outsideFile = path.join(runtimeRoot, 'outside-private');
+  await writeFile(outsideFile, 'private', { mode: 0o600 });
+  await symlink('../../outside-private', path.join(runtimeRoot, 'v24', 'bin', 'escape'));
+  await assert.rejects(manager.install(24), { code: 'node_runtime_entry_invalid' });
+  assert.equal((await lstat(outsideFile)).mode & 0o7777, 0o600);
 });
 
 test('unsupported major and checksum mismatch never activate a runtime', async (t) => {
