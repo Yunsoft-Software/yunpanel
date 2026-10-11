@@ -152,6 +152,15 @@ function normalizeReceipt(value, { operationId, spec } = {}) {
     || !RECEIPT_STATES.has(value.state)) {
     throw new PhpFpmSiteManagerError('php_fpm_receipt_invalid', 'PHP-FPM Website operation receipt is invalid');
   }
+  if (value.previousRuntime) {
+    const configuration = value.previousRuntime;
+    if (!configuration || typeof configuration !== 'object' || Array.isArray(configuration)
+      || Object.keys(configuration).length !== 4 || !['phpVersion', 'maxChildren', 'memoryLimitMb', 'maxExecutionSeconds'].every(key => Object.hasOwn(configuration, key)) || typeof value.previousPoolConfig !== 'string'
+      || configuration.phpVersion === spec.phpVersion) throw new PhpFpmSiteManagerError('php_fpm_receipt_invalid', 'PHP version checkpoint is invalid');
+    const previous = normalizeIntent({ websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser,
+      documentRoot: spec.templateInput.documentRoot, ...configuration });
+    if (sha256(value.previousPoolConfig) !== previous.preview.sha256) throw new PhpFpmSiteManagerError('php_fpm_receipt_invalid', 'Previous PHP pool checksum does not match the checkpoint');
+  }
   return Object.freeze({
     version: RECEIPT_VERSION,
     operationId,
@@ -163,6 +172,7 @@ function normalizeReceipt(value, { operationId, spec } = {}) {
     configSha256: value.configSha256,
     mutated: value.mutated,
     previousConfig: value.previousConfig,
+    ...(value.previousRuntime ? { previousRuntime: value.previousRuntime, previousPoolConfig: value.previousPoolConfig } : {}),
     state: value.state,
   });
 }
@@ -248,6 +258,7 @@ export function createPhpFpmSiteManager({
       configSha256: spec.preview.sha256,
       mutated: value.mutated,
       previousConfig: value.previousConfig,
+      ...(value.previousRuntime ? { previousRuntime: value.previousRuntime, previousPoolConfig: value.previousPoolConfig } : {}),
       state: value.state,
     };
     await atomicWrite(receiptPath(operationId), `${JSON.stringify(receipt)}\n`, 0o600);
@@ -695,6 +706,7 @@ export function createPhpFpmSiteManager({
   }
 
   async function restoreConfig(spec, receipt) {
+    if (receipt.previousRuntime) return restoreVersion(spec, receipt);
     const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
     if (!receipt.mutated) return;
     if (receipt.previousConfig === null) {
@@ -770,6 +782,153 @@ export function createPhpFpmSiteManager({
       if (error instanceof PhpFpmSiteManagerError) throw error;
       throw new PhpFpmSiteManagerError('php_fpm_apply_failed', 'PHP-FPM Website pool activation failed');
     }
+  }
+
+  async function update(rawIntent, { previousIntent, operationId: rawOperationId } = {}) {
+    const spec = normalizeIntent(rawIntent), previous = normalizeIntent(previousIntent);
+    const operationId = normalizeOperationId(rawOperationId);
+    if (['websiteId', 'applicationId', 'unixUser'].some((key) => spec[key] !== previous[key])
+      || spec.templateInput.documentRoot !== previous.templateInput.documentRoot) {
+      throw new PhpFpmSiteManagerError('php_fpm_update_binding_changed', 'PHP runtime transition requires a separate verified migration');
+    }
+    if (spec.phpVersion !== previous.phpVersion) return updateVersion(rawIntent, previousIntent, operationId, spec, previous);
+    const configPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
+    let receipt = await loadReceipt(operationId, spec);
+    if (receipt?.state === 'compensated') throw new PhpFpmSiteManagerError('php_fpm_operation_compensated', 'PHP configuration was rolled back');
+    if (!receipt) {
+      const before = await inspect(previousIntent);
+      if (!before.satisfied) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'Current PHP configuration could not be verified');
+      const current = await readOptional(configPath);
+      if (current === null || sha256(current) !== previous.preview.sha256) throw new PhpFpmSiteManagerError('php_fpm_pool_drift', 'PHP configuration changed before update');
+      receipt = await persistReceipt(operationId, spec, { mutated: true, previousConfig: current, state: 'prepared' });
+    }
+    if (receipt.state === 'active') return inspect(rawIntent);
+    const current = await readOptional(configPath);
+    if (current !== receipt.previousConfig && (current === null || sha256(current) !== spec.preview.sha256)) {
+      throw new PhpFpmSiteManagerError('php_fpm_pool_drift', 'PHP configuration changed after update checkpoint');
+    }
+    try {
+      await atomicWrite(configPath, renderWebsitePhpFpmPool(spec.templateInput), phpFpmTemplatePolicy.poolMode);
+      await configTest(spec.phpVersion);
+      await reloadServiceIfActive(spec.phpVersion);
+      const after = await inspect(rawIntent);
+      if (!after.satisfied) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'Updated PHP configuration could not be verified');
+      await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
+      return Object.freeze({ ...after, updated: true });
+    } catch (error) {
+      try {
+        await restoreConfig(spec, receipt);
+        await persistReceipt(operationId, spec, { ...receipt, state: 'compensated' });
+      } catch { throw new PhpFpmSiteManagerError('php_fpm_update_rollback_failed', 'PHP update failed and rollback requires reconciliation'); }
+      throw error;
+    }
+  }
+
+  function previousRuntimeIntent(spec, receipt) {
+    return { websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser,
+      documentRoot: spec.templateInput.documentRoot, ...receipt.previousRuntime };
+  }
+  function previousVersionSpec(spec, receipt) { return normalizeIntent(previousRuntimeIntent(spec, receipt)); }
+
+  async function socketListening(socketPath) {
+    try {
+      const result = await run('/usr/bin/ss', ['-H', '-xl'], { timeout: 10_000 });
+      const output = String(result.stdout ?? '');
+      if (Buffer.byteLength(output) > 1024 * 1024) throw new Error('Socket inventory too large');
+      return output.split('\n').some(line => line.trim().split(/\s+/).includes(socketPath));
+    } catch { throw new PhpFpmSiteManagerError('php_fpm_socket_owner_unverified', 'Website PHP socket listeners could not be verified'); }
+  }
+  async function releaseSocket(spec) {
+    const socket = phpFpmSocketPath(spec.unixUser);
+    for (let attempt = 0; attempt < 30; attempt++) {
+      if (!await socketListening(socket)) {
+        try {
+          const metadata = await lstatFn(socket);
+          if (!metadata.isSocket?.() || modeOf(metadata) !== 0o660) throw new PhpFpmSiteManagerError('php_fpm_socket_drift', 'Website PHP socket changed during transition');
+          await rmFn(socket, { force: true });
+        } catch (error) { if (!missingPath(error)) throw error; }
+        return;
+      }
+      await delay(100);
+    }
+    throw new PhpFpmSiteManagerError('php_fpm_socket_transition_busy', 'The old PHP pool is still serving requests; its configuration was restored');
+  }
+  async function validateVersionCandidate(spec, operationId) {
+    await configTest(spec.phpVersion);
+    const candidate = path.posix.join(receiptRoot, `${operationId}.candidate-pool`);
+    const config = path.posix.join(receiptRoot, `${operationId}.candidate-config`);
+    await mkdirFn(receiptRoot, { recursive: true, mode: 0o700 });
+    try {
+      await atomicWrite(candidate, renderWebsitePhpFpmPool(spec.templateInput), phpFpmTemplatePolicy.poolMode);
+      await atomicWrite(config, `[global]\ndaemonize = no\ninclude = ${candidate}\n`, 0o600);
+      await run(phpFpmBinaryPath(spec.phpVersion), ['--test', '--fpm-config', config], { timeout: 30_000 });
+    } catch { throw new PhpFpmSiteManagerError('php_fpm_config_test_failed', 'New PHP version configuration failed validation'); }
+    finally { await rmFn(candidate, { force: true }); await rmFn(config, { force: true }); }
+  }
+  async function updateVersion(rawIntent, previousIntent, operationId, spec, previous) {
+    const oldPath = phpFpmPoolPath(spec.unixUser, previous.phpVersion), newPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion);
+    let receipt = await loadReceipt(operationId, spec);
+    if (receipt?.state === 'compensated') throw new PhpFpmSiteManagerError('php_fpm_operation_compensated', 'PHP version change was rolled back');
+    if (!receipt) {
+      if (!(await inspectPackage(spec.phpVersion)).installed || !await serviceActive(spec.phpVersion)) throw new PhpFpmSiteManagerError('php_fpm_version_unavailable', 'Selected PHP version must already be installed and active');
+      if (!(await inspect(previousIntent)).satisfied || await readOptional(newPath) !== null) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'Current PHP pool or target version ownership could not be verified');
+      await validateVersionCandidate(spec, operationId);
+      receipt = await persistReceipt(operationId, spec, { mutated: true, previousConfig: null, state: 'prepared',
+        previousRuntime: { phpVersion: previous.phpVersion, maxChildren: previous.templateInput.maxChildren ?? phpFpmTemplatePolicy.defaultMaxChildren,
+          memoryLimitMb: previous.templateInput.memoryLimitMb ?? phpFpmTemplatePolicy.defaultMemoryLimitMb,
+          maxExecutionSeconds: previous.templateInput.maxExecutionSeconds ?? phpFpmTemplatePolicy.defaultMaxExecutionSeconds },
+        previousPoolConfig: await readOptional(oldPath) });
+    }
+    if (!receipt.previousRuntime || receipt.previousRuntime.phpVersion !== previous.phpVersion) throw new PhpFpmSiteManagerError('php_fpm_receipt_invalid', 'PHP version change does not match its checkpoint');
+    const oldConfig = await readOptional(oldPath), newConfig = await readOptional(newPath);
+    if (oldConfig !== null && oldConfig !== receipt.previousPoolConfig || newConfig !== null && sha256(newConfig) !== spec.preview.sha256) throw new PhpFpmSiteManagerError('php_fpm_pool_drift', 'PHP pool changed after the transition checkpoint');
+    if (receipt.state === 'active') {
+      if (oldConfig !== null) throw new PhpFpmSiteManagerError('php_fpm_pool_drift', 'Old PHP pool reappeared after transition');
+      const inspected = await inspect(rawIntent);
+      if (!inspected.satisfied) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'Active PHP version could not be verified');
+      return inspected;
+    }
+    try {
+      if (oldConfig !== null) {
+        await rmFn(oldPath, { force: true }); await configTest(previous.phpVersion); await reloadServiceIfActive(previous.phpVersion);
+        await releaseSocket(previous);
+      } else if (newConfig === null) await releaseSocket(previous);
+      if (newConfig === null) await atomicWrite(newPath, renderWebsitePhpFpmPool(spec.templateInput), phpFpmTemplatePolicy.poolMode);
+      await configTest(spec.phpVersion); await reloadServiceIfActive(spec.phpVersion);
+      let inspected;
+      for (let attempt = 0; attempt < 30; attempt++) {
+        inspected = await inspect(rawIntent);
+        if (inspected.satisfied && await socketListening(phpFpmSocketPath(spec.unixUser))) break;
+        await delay(100);
+      }
+      if (!inspected?.satisfied || !await socketListening(phpFpmSocketPath(spec.unixUser))) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'New PHP pool did not become ready');
+      await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
+      return Object.freeze({ ...inspected, updated: true, previousPhpVersion: previous.phpVersion });
+    } catch (error) {
+      try { await restoreVersion(spec, receipt); await persistReceipt(operationId, spec, { ...receipt, state: 'compensated' }); }
+      catch { throw new PhpFpmSiteManagerError('php_fpm_update_rollback_failed', 'PHP version change failed and rollback requires reconciliation'); }
+      throw error;
+    }
+  }
+  async function restoreVersion(spec, receipt) {
+    const previous = previousVersionSpec(spec, receipt);
+    const newPath = phpFpmPoolPath(spec.unixUser, spec.phpVersion), oldPath = phpFpmPoolPath(spec.unixUser, previous.phpVersion);
+    const oldConfig = await readOptional(oldPath), newConfig = await readOptional(newPath);
+    if (newConfig !== null && sha256(newConfig) !== spec.preview.sha256 || oldConfig !== null && oldConfig !== receipt.previousPoolConfig) throw new PhpFpmSiteManagerError('php_fpm_compensation_drift', 'PHP version pool changed before rollback');
+    if (newConfig !== null) {
+      await rmFn(newPath, { force: true }); await configTest(spec.phpVersion); await reloadServiceIfActive(spec.phpVersion); await releaseSocket(spec);
+    }
+    await atomicWrite(oldPath, receipt.previousPoolConfig, phpFpmTemplatePolicy.poolMode);
+    await configTest(previous.phpVersion); await reloadServiceIfActive(previous.phpVersion);
+    let inspected;
+    for (let attempt = 0; attempt < 30; attempt++) {
+      inspected = await inspect(previousRuntimeIntent(spec, receipt)); if (inspected.satisfied) return; await delay(100);
+    }
+    throw new PhpFpmSiteManagerError('php_fpm_compensation_unverified', 'Previous PHP version could not be verified after rollback');
+  }
+  async function availableVersions() {
+    const versions = await Promise.all(phpFpmTemplatePolicy.supportedVersions.map(async version => (await inspectPackage(version)).installed && await serviceActive(version) ? version : null));
+    return Object.freeze(versions.filter(Boolean));
   }
 
   async function inspectMigrationOperation(rawIntent, { operationId: rawOperationId } = {}) {
@@ -871,6 +1030,14 @@ export function createPhpFpmSiteManager({
     if (!receipt || !receipt.mutated) {
       return Object.freeze({ satisfied: true, restoredPrevious: false, preservedExisting: true });
     }
+    if (receipt.previousRuntime) {
+      const previous = previousVersionSpec(spec, receipt);
+      const oldConfig = await readOptional(phpFpmPoolPath(spec.unixUser, previous.phpVersion));
+      const newConfig = await readOptional(phpFpmPoolPath(spec.unixUser, spec.phpVersion));
+      if (oldConfig !== null && oldConfig !== receipt.previousPoolConfig || newConfig !== null && sha256(newConfig) !== spec.preview.sha256) return Object.freeze({ satisfied: false, reason: 'php_fpm_compensation_drift' });
+      const verified = oldConfig === receipt.previousPoolConfig && newConfig === null && (await inspect(previousRuntimeIntent(spec, receipt))).satisfied;
+      return Object.freeze({ satisfied: verified, reason: verified ? null : 'php_fpm_compensation_pending', restoredPrevious: verified, preservedExisting: false });
+    }
     if (receipt.state === 'compensated') {
       return Object.freeze({ satisfied: true, restoredPrevious: receipt.previousConfig !== null, preservedExisting: false });
     }
@@ -918,30 +1085,6 @@ export function createPhpFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  async function socketListening(socketPath) {
-    try {
-      const result = await run('/usr/bin/ss', ['-H', '-xl'], { timeout: 10_000 });
-      const output = String(result.stdout ?? '');
-      if (Buffer.byteLength(output) > 1024 * 1024) throw new Error('Socket inventory too large');
-      return output.split('\n').some(line => line.trim().split(/\s+/).includes(socketPath));
-    } catch { throw new PhpFpmSiteManagerError('php_fpm_socket_owner_unverified', 'Website PHP socket listeners could not be verified'); }
-  }
-  async function releaseSocket(spec) {
-    const socket = phpFpmSocketPath(spec.unixUser);
-    for (let attempt = 0; attempt < 30; attempt++) {
-      if (!await socketListening(socket)) {
-        try {
-          const metadata = await lstatFn(socket);
-          if (!metadata.isSocket?.() || modeOf(metadata) !== 0o660) throw new PhpFpmSiteManagerError('php_fpm_socket_drift', 'Website PHP socket changed during transition');
-          await rmFn(socket, { force: true });
-        } catch (error) { if (!missingPath(error)) throw error; }
-        return;
-      }
-      await delay(100);
-    }
-    throw new PhpFpmSiteManagerError('php_fpm_socket_transition_busy', 'The old PHP pool is still serving requests; its configuration was restored');
-  }
-
   async function inspectRetirement(rawIntent) {
     const spec = normalizeIntent(rawIntent);
     for (const target of [phpFpmPoolPath(spec.unixUser, spec.phpVersion), phpFpmSocketPath(spec.unixUser)]) {
@@ -981,10 +1124,12 @@ export function createPhpFpmSiteManager({
 
   return Object.freeze({
     inspect,
+    availableVersions,
     previewMigration,
     inspectMigrationOperation,
     applyMigration,
     apply,
+    update,
     compensate,
     inspectCompensation,
     retire,

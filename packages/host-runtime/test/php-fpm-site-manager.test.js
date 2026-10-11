@@ -200,6 +200,45 @@ test('PHP retirement reconciles the original receipt after an interrupted compen
   assert.equal(host.entries.has(socketPath), false);
 });
 
+test('PHP settings update verifies current pool, persists receipt, reloads and compensates', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const original = host.entries.get(configPath).content;
+  const nextOperation = '8ae512c0-a717-4611-943c-6ce2ab0abf16';
+  const changed = intent({ maxChildren: 9, memoryLimitMb: 512 });
+  const result = await siteManager.update(changed, { previousIntent: intent(), operationId: nextOperation });
+  assert.equal(result.satisfied, true);
+  assert.match(host.entries.get(configPath).content, /pm.max_children = 9/);
+  assert.match(host.entries.get(configPath).content, /memory_limit\] = 512M/);
+  assert.equal((await siteManager.update(changed, { previousIntent: intent(), operationId: nextOperation })).satisfied, true);
+  await siteManager.compensate(changed, { operationId: nextOperation });
+  assert.equal(host.entries.get(configPath).content, original);
+});
+
+test('PHP settings rollback preserves previous active pool after config validation fails', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const original = host.entries.get(configPath).content;
+  const nativeRun = host.run;
+  host.run = async (file, args, options) => {
+    if (args[0] === '--test' && host.entries.get(configPath).content.includes('pm.max_children = 9')) throw new Error('invalid configuration');
+    return nativeRun(file, args, options);
+  };
+  const updater = manager(host);
+  await assert.rejects(updater.update(intent({ maxChildren: 9 }), { previousIntent: intent(), operationId: '8ae512c0-a717-4611-943c-6ce2ab0abf16' }), { code: 'php_fpm_config_test_failed' });
+  assert.equal(host.entries.get(configPath).content, original);
+  assert.equal((await updater.inspect(intent())).satisfied, true);
+});
+
+test('PHP settings refuse an externally changed pool before any write', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  host.entries.get(configPath).content += '\n; externally changed\n';
+  const before = host.entries.get(configPath).content;
+  await assert.rejects(siteManager.update(intent({ maxChildren: 9 }), { previousIntent: intent(), operationId: '8ae512c0-a717-4611-943c-6ce2ab0abf16' }), { code: 'php_fpm_pool_drift' });
+  assert.equal(host.entries.get(configPath).content, before);
+});
+
 test('PHP-FPM site apply installs distro FPM and activates a dedicated Website pool', async () => {
   const host = fakeHost();
   const siteManager = manager(host);
@@ -536,4 +575,60 @@ test('PHP-FPM site manager rejects unsupported PHP version in intent', async () 
       (error) => error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_site_version_unsupported',
     );
   }
+});
+
+function versionHost({ failNewReload = false, installedNew = true } = {}) {
+  const host = fakeHost({ packageInstalled: true, serviceActive: true });
+  let listenerVersion = null, failed = false;
+  const original = host.run;
+  host.run = async (file, args, options) => {
+    if (file === '/usr/bin/ss') {
+      host.calls.push([file, [...args]]);
+      return { stdout: listenerVersion ? `u_str LISTEN 0 4096 ${socketPath} 99 * 0` : '' };
+    }
+    if (file === '/usr/bin/dpkg-query' && args.at(-1) === 'php8.4-fpm' && !installedNew) throw missing(1);
+    if (file === '/usr/bin/systemctl' && args[0] === 'reload') {
+      host.calls.push([file, [...args]]);
+      const version = args[1].match(/php(\d\.\d)-fpm/)[1];
+      if (version === '8.4' && failNewReload && !failed) { failed = true; throw missing(1); }
+      if (listenerVersion === version) { listenerVersion = null; host.entries.delete(socketPath); }
+      const ownedPath = `/etc/php/${version}/fpm/pool.d/yunpanel-${unixUser}.conf`;
+      if (host.entries.has(ownedPath)) { listenerVersion = version; host.entries.set(socketPath, { type: 'socket', mode: 0o660, uid: 33, gid: 33 }); }
+      return { stdout: '' };
+    }
+    return original(file, args, options);
+  };
+  return { host, getListener: () => listenerVersion };
+}
+test('PHP version transition transfers only the owned pool after candidate validation; replay does not install or stop shared PHP', async () => {
+  const { host, getListener } = versionHost(); const siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const old = host.entries.get(configPath).content;
+  const versionCalls = host.calls.length;
+  const sibling = '/etc/php/8.3/fpm/pool.d/sibling-site.conf'; host.entries.set(sibling, { type: 'file', mode: 0o600, uid: 0, gid: 0, content: 'fixture preserved sibling' });
+  const updateId = '11111111-1111-4111-8111-111111111111', desired = intent({ phpVersion: '8.4', maxChildren: 9 });
+  const changed = await siteManager.update(desired, { operationId: updateId, previousIntent: intent() });
+  assert.equal(changed.satisfied, true); assert.equal(getListener(), '8.4'); assert.equal(host.entries.has(configPath), false);
+  assert.equal(host.entries.get(sibling).content, 'fixture preserved sibling');
+  const calls = host.calls.length;
+  assert.equal((await siteManager.update(desired, { operationId: updateId, previousIntent: intent() })).satisfied, true);
+  assert.equal(host.calls.slice(calls).some(([file, args]) => file === '/usr/bin/systemctl' && args[0] === 'reload'), false);
+  const rollback = await siteManager.compensate(desired, { operationId: updateId });
+  assert.equal(rollback.satisfied, true); assert.equal(getListener(), '8.3'); assert.equal(host.entries.get(configPath).content, old);
+  assert.equal(host.entries.has(`/etc/php/8.4/fpm/pool.d/yunpanel-${unixUser}.conf`), false);
+  assert.equal(host.calls.slice(versionCalls).some(([file, args]) => file === '/usr/bin/apt-get' || file === '/usr/bin/systemctl' && ['stop', 'restart', 'enable'].includes(args[0])), false);
+});
+test('failed PHP version reload restores the previous site pool, socket and settings', async () => {
+  const { host, getListener } = versionHost({ failNewReload: true }); const siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId }); const previous = host.entries.get(configPath).content;
+  await assert.rejects(siteManager.update(intent({ phpVersion: '8.4' }), { operationId: '22222222-2222-4222-8222-222222222222', previousIntent: intent() }), { code: 'php_fpm_service_reload_failed' });
+  assert.equal(getListener(), '8.3'); assert.equal(host.entries.get(configPath).content, previous);
+  assert.equal((await siteManager.inspect(intent())).satisfied, true);
+});
+test('an unavailable PHP version is rejected before touching current pool or installing packages', async () => {
+  const { host, getListener } = versionHost({ installedNew: false }); const siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId }); const previous = host.entries.get(configPath).content;
+  await assert.rejects(siteManager.update(intent({ phpVersion: '8.4' }), { operationId: '33333333-3333-4333-8333-333333333333', previousIntent: intent() }), { code: 'php_fpm_version_unavailable' });
+  assert.equal(host.entries.get(configPath).content, previous); assert.equal(getListener(), '8.3');
+  assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
 });
