@@ -27,6 +27,7 @@ export function removalPreview(value,scope){
    &&typeof value.readyToStart==='boolean'&&SHA.test(value.previewDigest??'')
    &&(value.confirmation===null||text(value.confirmation,500))&&value.sideEffects===false&&record(value.plan));
  const plan=value.plan;
+ need(plan.retainedDockerProjectId===undefined||UUID.test(plan.retainedDockerProjectId));
  need(Array.isArray(plan.domains)&&plan.domains.length<=100&&Array.isArray(plan.activeJobIds)&&plan.activeJobIds.length<=100
    &&record(plan.additional));
  const additional={};
@@ -34,7 +35,7 @@ export function removalPreview(value,scope){
  return Object.freeze({
    version:1,operation:'website_remove',
    website:Object.freeze({id:value.website.id,name:value.website.name,serverId:value.website.serverId,applicationId:value.website.applicationId??null,systemUser:value.website.systemUser??null}),
-   plan:Object.freeze({domains:Object.freeze(plan.domains.map(domain)),activeJobIds:Object.freeze([...plan.activeJobIds]),additional:Object.freeze(additional)}),
+   plan:Object.freeze({domains:Object.freeze(plan.domains.map(domain)),activeJobIds:Object.freeze([...plan.activeJobIds]),additional:Object.freeze(additional),...(plan.retainedDockerProjectId?{retainedDockerProjectId:plan.retainedDockerProjectId}:{})}),
    hardBlockers:Object.freeze([...value.hardBlockers]),readyToStart:value.readyToStart,previewDigest:value.previewDigest,
    confirmation:value.confirmation,sideEffects:false,
  });

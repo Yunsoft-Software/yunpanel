@@ -28,6 +28,7 @@ function RemovalWorkspace({scope,generation,onChanged}){
   ref.current=client;const unsub=client.subscribe(setState);setState(client.getSnapshot());void client.load();
   return()=>{live.current=false;unsub();client.dispose();ref.current=null;};},[scope.websiteId,scope.serverId,generation]);
  const preview=state?.data?.preview,operation=state?.operation;
+ const retainedCompose=Boolean(preview?.plan?.retainedDockerProjectId);
  const subdomains=preview?.plan?.domains?.filter((d)=>Boolean(d.parentDomainId))??[];
  const rootDomains=preview?.plan?.domains?.filter((d)=>!d.parentDomainId)??[];
  const counts=preview?{domains:preview.plan.domains.length,subdomains:subdomains.length,rootDomains:rootDomains.length,databases:preview.plan.additional.databases.ids.length,sftp:preview.plan.additional.sftpKeys.ids.length,
@@ -40,10 +41,10 @@ function RemovalWorkspace({scope,generation,onChanged}){
    {preview&&!operation&&<><KeyValues items={[
     ['Bağlı alan adı',counts.rootDomains],
     ['Alt alan adı (subdomain)',counts.subdomains>0?counts.subdomains:'Yok'],
-    ['Site dosyaları',preview.website.systemUser?`${preview.website.systemUser} kullanıcısına ait dosya kökü temizlenir`:'Site dosya kökleri temizlenir'],
+    ['Site dosyaları',retainedCompose?'Compose projesindeki dosyalar korunur':preview.website.systemUser?`${preview.website.systemUser} kullanıcısına ait dosya kökü temizlenir`:'Site dosya kökleri temizlenir'],
     ['Veritabanı bağlantısı',counts.databases],
     ['E-posta etkisi','Bağlı alan adlarına ait posta kutuları ve yönlendirmeleri kaldırılır'],
-    ['Uygulama çalışma zamanı (runtime)',counts.runtime],
+    ['Uygulama çalışma zamanı (runtime)',retainedCompose?'Docker Compose projesi ve container’lar korunur':counts.runtime],
     ['DNS bölgesi ve kayıtları','Alan adına ait DNS kayıtları ve yönlendirmeleri temizlenir'],
     ['SSL/TLS sertifikası','Bağlı sertifikalar emekliye ayrılır (retire)'],
     ['Zamanlanmış görev',counts.cron],
@@ -54,6 +55,7 @@ function RemovalWorkspace({scope,generation,onChanged}){
     {!preview.readyToStart&&<Blockers blockers={preview.hardBlockers}/>}
    </>}
    {!operation&&preview?.readyToStart&&<><div className="ws-notice ws-notice-warn"><div><strong>Kalıcı silme ve veri saklama (retention)</strong>
+    {retainedCompose&&<p>Bu siteye ait alan adı ve Docker bağlantısı kaldırılır. Compose projesi çalışmaya devam eder; kaldırmak için Docker ekranındaki proje silme işlemini kullanın.</p>}
     <p>Bağlı web alan adları, alt alan adları, zamanlanmış görevler, SFTP anahtarları, veritabanı bağları, runtime, site Unix kullanıcısı, canonical dosya kökleri, Website ve Application metadata kaldırılır. Korunan yedek kayıtları (backup evidence) ve loglar silinmez, güvenle saklanır. Retained backup/log kayıtları korunur.</p></div></div>
     <Button variant="danger" disabled={state?.busy} onClick={()=>setConfirm(true)}>Siteyi sil…</Button></>}
    {operation&&<WebsiteRemovalProgress operation={operation} busy={state?.busy} onResume={()=>setConfirm(true)} onDone={()=>{onChanged?.();navigate('/websites');}}/>}
