@@ -787,6 +787,7 @@ const dnsZoneReapplyRuntime = localServerId && powerDnsAuthoritativeService
     }),
     service: createDnsZoneReapplyService({
       domainRegistry,
+      provisioningRegistry: websiteProvisioningRuntime.registry,
       dnsIdentityRegistry: serverDnsIdentityRegistry,
       dnsZoneTemplateRegistry,
       powerDnsSecretRegistry,
