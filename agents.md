@@ -13,6 +13,10 @@
 5. **Tamamlanma kaydı görev geçmişinde tutulur.** Kök `plan.md` mimari kararları ve açık işleri tutar; tamamlanan maddeler kontroller, bağımsız inceleme, gerekli staging ve Git birleştirmesi sonrasında çıkarılır. Ayrıntılı sonuç ve kabul kanıtları Code Factory görev/run/event kayıtlarında, önceki raporlar Git geçmişinde kalır. `done.md` yalnız kısa bir geçmiş açıklamasıdır; yeni iş raporu eklenmez. İlgili alt planlardaki kaynak işaretlerinin kanıtı ve sınırı belirtilir. Test edilmemiş entegrasyon, migration, tarayıcı veya host kabulü açık bırakılır. Saf politika modülü bütün reseller özelliği değildir; sadece menü gizlemek veya site_manager rolünü yeniden adlandırmak güvenli reseller uygulaması sayılmaz.
 6. **Açık kaynak taban değişimi onaylanmadı.** Başka panel kurma, YunPanel'i onunla değiştirme, PHP/Perl backend'e geçme veya iki paneli aynı config dosyasına yazdırma. Kullanıcı kararı ve migration/rollback tasarımı gereklidir.
 
+### 11 Ekim 2026 — Test/geliştirme sunucusunda yedek kuralı
+
+`.local/test-server.env` ile doğrulanan `.28` YunPanel test/geliştirme sunucusunda kurulum, deploy, migration, ayar değişikliği veya geliştirme öncesinde rutin/tedbir amaçlı yedek, snapshot ya da arşiv alınmaz. Yalnız yedek alma/geri yükleme özelliğini açıkça test etmek için yedek alınabilir; başarılı içerik ve geri yükleme doğrulamasından sonra testin oluşturduğu yedek/snapshot ve geçici arşivler silinir, temizliği doğrulanır. İlgisiz yedekler bu gerekçeyle topluca silinmez. Bu güncel kullanıcı kararı, devralınan belgelerdeki işlem öncesi yedek zorunluluğunu yalnız bu test hedefinde geçersiz kılar. Ürün yedekleme işlevi, işlem içi config rollback/idempotency kayıtları ve diğer sunucuların politikaları korunur.
+
 ### Değişmeyen güvenlik ve veri sınırları
 
 - `.44` ile biten Plesk sunucusuna SSH, salt okunur inceleme, test, deploy veya başka amaçla dokunulmaz. Canlı işlemler yalnız repo dışı `.local/test-server.env` içindeki açık izinli YunPanel test hedefinde ve adres teyidinden sonra yapılır.
