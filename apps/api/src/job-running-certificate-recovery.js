@@ -181,6 +181,7 @@ export async function recoverRunningCertificateOperation({
   loadJobContext,
   readCertificateReceipt,
   inspectCertificate,
+  reloadCertificate = null,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
 } = {}) {
@@ -236,6 +237,12 @@ export async function recoverRunningCertificateOperation({
     verifyLiveCertificate(live, receipt, intent);
   }
   const result = completionResult(intent, receipt, live);
+  if (intent.operation === OPERATIONS.SSL_RENEW && result.dryRun === false) {
+    if (typeof reloadCertificate !== 'function') {
+      throw new JobRunningCertificateRecoveryError('job_certificate_recovery_reload_unavailable', 'Certificate renewal recovery requires a native reload provider');
+    }
+    result.reloadOutcome = await reloadCertificate();
+  }
 
   let begun;
   try { begun = await jobRegistry.beginReconciliation(identity); }

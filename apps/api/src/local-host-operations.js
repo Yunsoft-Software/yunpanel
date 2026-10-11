@@ -28,6 +28,7 @@ import {
   createSystemPackageManager,
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { reloadCertificateNginx } from './certificate-nginx-reload.js';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
 import { createLocalNodePassengerMigrationOperation } from './local-node-passenger-migration-operation.js';
 import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
@@ -798,7 +799,10 @@ export function createLocalHostOperations({
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload, execution) => nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null })],
     [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],
-    [OPERATIONS.SSL_RENEW, (payload) => executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution))],
+    [OPERATIONS.SSL_RENEW, async (payload) => {
+      const result = await executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution));
+      return result?.dryRun === false ? { ...result, reloadOutcome: await reloadCertificateNginx(nginxManager) } : result;
+    }],
     [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
     [OPERATIONS.APP_NODE_STATUS, (payload) => nodeStatusInspector.inspectNodeStatus(payload)],

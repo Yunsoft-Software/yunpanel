@@ -153,6 +153,7 @@ for (const kind of ['staging-issue', 'production-issue', 'dry-run-renew', 'produ
       loadJobContext: (id) => fx.contextReader.read(id),
       readCertificateReceipt: (serverId, jobId) => fx.receiptStore.read(serverId, jobId),
       inspectCertificate: async () => live,
+      reloadCertificate: async () => ({ service: 'nginx', status: 'succeeded', stage: 'reload' }),
     });
 
     assert.equal(recovered.status, 'succeeded');
@@ -196,6 +197,7 @@ test('missing certificate receipt preserves durable running state', async (t) =>
       loadJobContext: (id) => fx.contextReader.read(id),
       readCertificateReceipt: (serverId, jobId) => fx.receiptStore.read(serverId, jobId),
       inspectCertificate: async () => liveCertificate(),
+      reloadCertificate: async () => ({ service: 'nginx', status: 'succeeded', stage: 'reload' }),
     }),
     { code: 'job_certificate_recovery_receipt_missing' },
   );

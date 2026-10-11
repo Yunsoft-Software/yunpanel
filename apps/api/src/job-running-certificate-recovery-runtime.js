@@ -1,5 +1,6 @@
 import os from 'node:os';
-import { createAcmeManager } from '@yunpanel/host-runtime';
+import { createAcmeManager, createNginxManager } from '@yunpanel/host-runtime';
+import { reloadCertificateNginx } from './certificate-nginx-reload.js';
 import { createCertificateOperationReceiptStore } from './certificate-operation-receipt.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -28,6 +29,7 @@ export async function runRunningCertificateRecoveryFromStores({
   contextReaderFactory = createJobRecoveryContextReader,
   receiptStoreFactory = createCertificateOperationReceiptStore,
   acmeManagerFactory = createAcmeManager,
+  nginxManagerFactory = createNginxManager,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningCertificateOperation,
 } = {}) {
@@ -41,6 +43,7 @@ export async function runRunningCertificateRecoveryFromStores({
     contextReaderFactory,
     receiptStoreFactory,
     acmeManagerFactory,
+    nginxManagerFactory,
     serviceStatus,
     recoverCommand,
   ]) {
@@ -90,6 +93,7 @@ export async function runRunningCertificateRecoveryFromStores({
     loadJobContext: (id) => contextReader.read(id),
     readCertificateReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
     inspectCertificate: (certName) => acmeManager.inspectCertificate(certName),
+    reloadCertificate: () => reloadCertificateNginx(nginxManagerFactory()),
   });
   return Object.freeze({ ...result, statePaths: paths });
 }

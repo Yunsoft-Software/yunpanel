@@ -837,6 +837,16 @@ export function createNginxManager({
     return run;
   }
 
+  function reloadConfiguration() {
+    const run = activationChain.catch(() => {}).then(async () => {
+      await validateNginxConfig();
+      await execFn(systemctlPath, ['reload', 'nginx']);
+      return { service: 'nginx', status: 'succeeded', stage: 'reload' };
+    });
+    activationChain = run;
+    return run;
+  }
+
   return {
     previewDomain: (spec) => Object.freeze(expectedStage(spec)),
     stageDomain,
@@ -849,6 +859,7 @@ export function createNginxManager({
     deactivateDomain,
     inspectDomainDeactivationRollback,
     rollbackDomainDeactivation,
+    reloadConfiguration,
   };
 }
 

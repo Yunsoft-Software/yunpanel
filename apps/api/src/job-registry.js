@@ -386,6 +386,17 @@ function sanitizeCertificateMetadata(result) {
   if (typeof result.staging === 'boolean') sanitized.staging = result.staging;
   if (typeof result.status === 'string') sanitized.status = result.status.slice(0, 40);
   if (typeof result.dryRun === 'boolean') sanitized.dryRun = result.dryRun;
+  if (result.reloadOutcome !== undefined) {
+    const outcome = result.reloadOutcome;
+    if (!outcome || outcome.service !== 'nginx' || outcome.stage !== 'reload'
+      || !['succeeded', 'failed'].includes(outcome.status)
+      || Object.keys(outcome).some(key => !['service', 'status', 'stage', 'error'].includes(key))
+      || (outcome.status === 'failed' ? outcome.error !== 'certificate_nginx_reload_failed' : outcome.error !== undefined)) {
+      throw new JobRegistryError('invalid_job_result', 'Certificate reload outcome is invalid');
+    }
+    sanitized.reloadOutcome = { service: 'nginx', status: outcome.status, stage: 'reload',
+      ...(outcome.status === 'failed' ? { error: 'certificate_nginx_reload_failed' } : {}) };
+  }
   return sanitized;
 }
 

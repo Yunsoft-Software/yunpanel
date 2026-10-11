@@ -104,6 +104,7 @@ function fixture(kind, { receiptPresent = true, fingerprintOverride = null } = {
         events.push('live');
         return liveCertificate('example.com', fingerprintOverride);
       },
+      reloadCertificate: async () => { events.push('reload'); return { service: 'nginx', status: 'succeeded', stage: 'reload' }; },
       reconcile: async () => { events.push('reconcile'); return { reconciled: true, error: null }; },
     },
   };
@@ -124,7 +125,7 @@ for (const kind of ['staging-issue', 'production-issue', 'dry-run-renew', 'produ
     assert.equal(result.operation, fx.data.operation);
     assert.equal(result.recoveryMethod, fx.data.live ? 'verified_certificate_receipt_and_live_x509' : 'verified_certificate_operation_receipt');
     const expected = fx.data.live
-      ? ['get', 'context', 'certificate', 'receipt', 'live', 'begin', 'complete', 'reconcile', 'ack']
+      ? ['get', 'context', 'certificate', 'receipt', 'live', ...(kind === 'production-renew' ? ['reload'] : []), 'begin', 'complete', 'reconcile', 'ack']
       : ['get', 'context', 'certificate', 'receipt', 'begin', 'complete', 'reconcile', 'ack'];
     assert.deepEqual(fx.events, expected);
     if (kind === 'staging-issue') assert.equal(fx.completedResult().staging, true);
@@ -137,6 +138,12 @@ test('missing certificate receipt leaves the running job unresolved before live 
   const fx = fixture('production-issue', { receiptPresent: false });
   await assert.rejects(recoverRunningCertificateOperation(fx.options), { code: 'job_certificate_recovery_receipt_missing' });
   assert.deepEqual(fx.events, ['get', 'context', 'certificate', 'receipt']);
+});
+
+test('renewal recovery cannot complete before a native reload provider is available', async () => {
+  const fx = fixture('production-renew'); delete fx.options.reloadCertificate;
+  await assert.rejects(recoverRunningCertificateOperation(fx.options), { code: 'job_certificate_recovery_reload_unavailable' });
+  assert.equal(fx.events.includes('begin'), false); assert.equal(fx.events.includes('complete'), false);
 });
 
 test('production certificate fingerprint drift is rejected before reconciliation', async () => {
