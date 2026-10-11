@@ -11,6 +11,7 @@ const ACTIONS = new Map([
   [OPERATIONS.DOCKER_COMPOSE_START, 'start'],
   [OPERATIONS.DOCKER_COMPOSE_STOP, 'stop'],
   [OPERATIONS.DOCKER_COMPOSE_RESTART, 'restart'],
+  [OPERATIONS.DOCKER_COMPOSE_REMOVE, 'remove'],
 ]);
 
 export class LocalDockerComposeOperationError extends Error {
@@ -54,7 +55,7 @@ function confirmBundle(bundle, payload) {
 }
 
 function confirmResult(result, payload, action) {
-  const expectedState = action === 'start' || action === 'restart' ? 'running' : action === 'stop' ? 'stopped' : null;
+  const expectedState = action === 'start' || action === 'restart' ? 'running' : action === 'stop' ? 'stopped' : action === 'remove' ? 'absent' : null;
   if (!result || typeof result !== 'object' || Array.isArray(result)
     || result.projectId !== payload.projectId
     || result.projectRevision !== payload.expectedProjectRevision
@@ -84,6 +85,8 @@ export function createLocalDockerComposeOperation({
   materialize,
   manager = createDockerComposeManager(),
   receiptStore = createDockerComposeOperationReceiptStore(),
+  authorizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal scope inspector is required'); },
+  finalizeRemoval = async () => { throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal finalizer is required'); },
 } = {}) {
   if (typeof materialize !== 'function'
     || !manager || !['build', 'pull', 'start', 'stop', 'restart'].every((method) => typeof manager[method] === 'function')
@@ -101,6 +104,10 @@ export function createLocalDockerComposeOperation({
     }
     const action = ACTIONS.get(operation);
     const bundle = confirmBundle(await materialize(payload), payload);
+    if (action === 'remove') {
+      if (bundle.projectName !== payload.projectName || typeof manager.remove !== 'function') throw new LocalDockerComposeOperationError('docker_compose_removal_unavailable', 'Removal target is unavailable');
+      await authorizeRemoval(payload, context);
+    }
     const safeResult = confirmResult(await manager[action](bundle), payload, action);
     try {
       await receiptStore.write({
@@ -110,10 +117,12 @@ export function createLocalDockerComposeOperation({
         result: safeResult,
       });
     } catch {
+      if (action === 'remove') throw new LocalDockerComposeOperationError('docker_compose_removal_receipt_failed', 'Resources are removed; project metadata is preserved until durable evidence can be saved');
       // The host mutation already finished. Durable completion still proceeds;
       // missing receipt keeps a later lost-ack recovery unresolved instead of
       // reclassifying successful host work as a failure here.
     }
+    if (action === 'remove') await finalizeRemoval({ ...context, operation, payload, result: safeResult });
     return safeResult;
   }
 

@@ -9,6 +9,7 @@ const ACTIONS = Object.freeze([
   ['start', 'Başlat'],
   ['stop', 'Durdur'],
   ['restart', 'Restart'],
+  ['remove', 'Projeyi kaldır'],
 ]);
 
 export default function DockerLifecyclePanel({ project, onChanged }) {
@@ -49,9 +50,9 @@ export default function DockerLifecyclePanel({ project, onChanged }) {
     }
   }
 
-  return <><Section title="Lifecycle" description="Her işlem önce güncel Compose project/env/credential revizyonlarına bağlanan preview üretir; stale preview çalıştırılmaz."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions">{ACTIONS.map(([action, label]) => <Button key={action} disabled={locked} onClick={() => preview(action)}>{label}</Button>)}</div></div></Section>{pending && <ConfirmDialog
+  return <><Section title="Lifecycle" description="Projeyi başlatın, durdurun veya kaldırın. Kaldırma container ve projeye ait ağları temizler; volume ve image verileri korunur."><div className="ws-section-body"><ErrorNotice error={error} /><div className="ws-actions">{ACTIONS.map(([action, label]) => <Button key={action} disabled={locked} onClick={() => preview(action)}>{label}</Button>)}</div></div></Section>{pending && <ConfirmDialog
     title={`Docker Compose ${pending.action}`}
-    message={`${project.projectName} için ${pending.action} işlemi current desired state ile sıraya alınacak. Preview digest: ${pending.preview.previewDigest}`}
+    message={pending.action === 'remove' ? `${project.projectName} projesinin container ve ağları kaldırılacak, kayıtlı yapılandırma ve erişim sırları silinecek. Volume ve image verileri korunur. Bağlı siteler varken kaldırma engellenir.` : `${project.projectName} için işlem sıraya alınacak.`}
     confirmation={pending.preview.confirmation}
     busy={busy}
     error={error}

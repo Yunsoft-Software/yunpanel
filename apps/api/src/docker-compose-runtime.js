@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { createDockerComposeObserver, createDockerComposeValidator } from '@yunpanel/host-runtime';
 import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
+import { createDockerComposeRemoval } from './docker-compose-removal.js';
 import { createDockerComposeEnvironmentRegistry } from './docker-compose-environment-registry.js';
 import { createDockerComposeMaterializer } from './docker-compose-materializer.js';
 import { createDockerComposeOperationReceiptStore } from './docker-compose-operation-receipt.js';
@@ -92,7 +93,14 @@ function extendLocalOperations(baseOperations, localOperation) {
       return DOCKER_OPERATION_SET.has(operation) || baseOperations.supports(operation);
     },
     async executeOperation(operation, payload = {}, execution = null) {
-      if (DOCKER_OPERATION_SET.has(operation)) return localOperation.execute(operation, payload, execution);
+      if (DOCKER_OPERATION_SET.has(operation)) {
+        if (!['panel', 'website_provisioning'].includes(execution?.authorization?.kind)
+          || typeof baseOperations.authorizeExecution !== 'function') {
+          throw Object.assign(new DockerComposeRuntimeError('docker_compose_job_authorization_required', 'Docker işleminin güncel oturumu ve yetkisi doğrulanamadı'), { status: 403 });
+        }
+        const authorized = await baseOperations.authorizeExecution(operation, execution);
+        return localOperation.execute(operation, payload, { ...authorized, authorize: () => baseOperations.authorizeExecution(operation, execution) });
+      }
       return baseOperations.executeOperation(operation, payload, execution);
     },
   });
@@ -103,6 +111,7 @@ export async function createDockerComposeRuntime({
   serverRegistry,
   jobRegistry,
   projectRegistry: providedProjectRegistry = null,
+  websiteRegistry = null,
   projectBackupLocked = async () => false,
   validateDockerCompose = createDockerComposeValidator(),
   observer = createDockerComposeObserver(),
@@ -148,7 +157,9 @@ export async function createDockerComposeRuntime({
   });
   await credentialRegistry.init();
 
+  const removal = createDockerComposeRemoval({ projectRegistry, environmentRegistry, credentialRegistry, websiteRegistry, observer });
   const operationsService = createDockerComposeOperationsService({
+    inspectRemoval: removal.inspect,
     projectRegistry,
     environmentRegistry,
     credentialRegistry,
@@ -161,11 +172,12 @@ export async function createDockerComposeRuntime({
     credentialRegistry,
     validateDockerCompose,
   });
-  const localOperation = createLocalDockerComposeOperation({ materialize, receiptStore });
+  const localOperation = createLocalDockerComposeOperation({ materialize, receiptStore, authorizeRemoval: removal.authorize, finalizeRemoval: removal.finalize });
   const recoveryService = createDockerComposeRecoveryService({
     jobRegistry,
     receiptStore,
-    reconcileCompletedJob: async () => ({ reconciled: true, error: null }),
+    reconcileCompletedJob: async job => job.status === 'succeeded' ? removal.finalize(job) : ({ reconciled: true, error: null }),
+    reconcileRunningReceipt: removal.finalize,
   });
   const recovery = await recoveryService.recover();
 
@@ -181,6 +193,7 @@ export async function createDockerComposeRuntime({
     receiptStore,
     localOperation,
     recoveryService,
+    removal,
     recovery,
     extendLocalOperations(baseOperations) {
       return extendLocalOperations(baseOperations, localOperation);

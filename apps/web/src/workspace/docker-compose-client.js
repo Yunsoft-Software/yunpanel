@@ -1,6 +1,6 @@
 import { panelRequest } from '../api.js';
 
-const ACTIONS = new Set(['build', 'pull', 'start', 'stop', 'restart']);
+const ACTIONS = new Set(['build', 'pull', 'start', 'stop', 'restart', 'remove']);
 
 function projectPath(projectId) {
   if (typeof projectId !== 'string' || !projectId) throw new Error('dockerProjectId is required');

@@ -127,6 +127,20 @@ test('receipt drift is rejected instead of completing or replaying the mutation'
   assert.deepEqual(fx.calls.map(([name]) => name), ['read']);
 });
 
+test('a receipt with the wrong action cannot complete a running removal', async () => {
+  const fx = fixture({ job: runningJob({ operation: OPERATIONS.DOCKER_COMPOSE_REMOVE }),
+    storedReceipt: receipt({ operation: OPERATIONS.DOCKER_COMPOSE_REMOVE }) });
+  await assert.rejects(fx.service.recover(), { code: 'invalid_job_result' });
+  assert.deepEqual(fx.calls.map(([name]) => name), ['read']);
+});
+
+test('removal recovery cannot succeed without a physical metadata finalizer', async () => {
+  const fx = fixture({ job: runningJob({ operation: OPERATIONS.DOCKER_COMPOSE_REMOVE }),
+    storedReceipt: receipt({ operation: OPERATIONS.DOCKER_COMPOSE_REMOVE, action: 'remove', runtimeState: 'absent' }) });
+  await assert.rejects(fx.service.recover(), { code: 'docker_compose_recovery_reconciliation_failed' });
+  assert.deepEqual(fx.calls.map(([name]) => name), ['read']);
+});
+
 test('terminal compose recovery only reconciles and acknowledges the durable result', async () => {
   const terminal = runningJob({
     status: 'succeeded',

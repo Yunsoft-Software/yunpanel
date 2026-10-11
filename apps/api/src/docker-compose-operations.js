@@ -7,6 +7,7 @@ const ACTION_TO_OPERATION = Object.freeze({
   start: OPERATIONS.DOCKER_COMPOSE_START,
   stop: OPERATIONS.DOCKER_COMPOSE_STOP,
   restart: OPERATIONS.DOCKER_COMPOSE_RESTART,
+  remove: OPERATIONS.DOCKER_COMPOSE_REMOVE,
 });
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 const DOCKER_OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
@@ -51,6 +52,7 @@ export function createDockerComposeOperationsService({
   credentialRegistry,
   jobRegistry,
   projectBackupLocked = async () => false,
+  inspectRemoval = async () => { throw new DockerComposeOperationsError('docker_compose_removal_unavailable', 'Removal scope inspector is required', 503); },
 } = {}) {
   if (!projectRegistry || typeof projectRegistry.getProject !== 'function'
     || !environmentRegistry || typeof environmentRegistry.getEnvironment !== 'function'
@@ -123,6 +125,7 @@ export function createDockerComposeOperationsService({
       || !Number.isSafeInteger(environment.revision) || environment.revision < 0) {
       throw new DockerComposeOperationsError('docker_compose_desired_state_invalid', 'Docker Compose desired state is invalid', 409);
     }
+    if (action === 'remove') await inspectRemoval({ projectId, projectName: project.projectName, serverId: project.serverId });
     const pins = credentialPins(credentials);
     const identity = Object.freeze({
       version: 1,
@@ -163,6 +166,7 @@ export function createDockerComposeOperationsService({
       operation: current.operation,
       payload: {
         projectId,
+        ...(action === 'remove' ? { projectName: current.projectName } : {}),
         expectedProjectRevision: current.projectRevision,
         expectedEnvironmentRevision: current.environmentRevision,
         expectedComposeSha256: current.composeSha256,

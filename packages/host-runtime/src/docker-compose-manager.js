@@ -2,7 +2,9 @@ import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { createDockerComposeObserver } from './docker-compose-observer.js';
 import { createDockerComposeValidator } from './docker-compose-validator.js';
+import { createDockerComposeExecutionEnvironment } from './docker-compose-execution-environment.js';
 
 const DEFAULT_ROOT = '/var/lib/yunpanel/docker/compose-runtime';
 const DOCKER_PATHS = Object.freeze(['/usr/bin/docker', '/usr/local/bin/docker']);
@@ -16,6 +18,7 @@ const ACTIONS = new Map([
   ['start', ['up', '-d', '--no-build', '--remove-orphans']],
   ['stop', ['stop']],
   ['restart', ['restart']],
+  ['remove', ['down', '--remove-orphans']],
 ]);
 
 export class DockerComposeManagerError extends Error {
@@ -125,6 +128,7 @@ export function createDockerComposeManager({
   accessFn = access,
   execFn = execFileSafe,
   validateCompose = createDockerComposeValidator(),
+  observer = createDockerComposeObserver(),
   randomSuffix = () => randomBytes(8).toString('hex'),
 } = {}) {
   if (typeof root !== 'string' || !path.isAbsolute(root) || typeof accessFn !== 'function'
@@ -180,18 +184,16 @@ export function createDockerComposeManager({
         ], {
           cwd: projectDirectory,
           timeout: ['build', 'pull'].includes(action) ? 60 * 60 * 1000 : 10 * 60 * 1000,
-          env: {
-            PATH: '/usr/bin:/bin',
-            HOME: directory,
-            LANG: 'C',
-            LC_ALL: 'C',
-            DOCKER_CONFIG: dockerConfigDir,
-            COMPOSE_PROJECT_NAME: input.projectName,
-            ...input.environment,
-          },
+          env: createDockerComposeExecutionEnvironment(input.environment, {
+            home: directory, projectName: input.projectName, dockerConfig: dockerConfigDir,
+          }),
         });
       } catch {
         throw new DockerComposeManagerError('docker_compose_command_failed', `Docker Compose ${action} command failed`);
+      }
+      if (action === 'remove') {
+        const removed = await observer.inspectRemoved({ projectName: input.projectName });
+        if (removed?.absent !== true) throw new DockerComposeManagerError('docker_compose_removal_unverified', 'Compose containers or networks remain');
       }
       return Object.freeze({
         version: 1,
@@ -200,7 +202,7 @@ export function createDockerComposeManager({
         environmentRevision: input.environmentRevision,
         composeSha256: input.composeSha256,
         action,
-        runtimeState: action === 'start' || action === 'restart' ? 'running' : action === 'stop' ? 'stopped' : null,
+        runtimeState: action === 'start' || action === 'restart' ? 'running' : action === 'stop' ? 'stopped' : action === 'remove' ? 'absent' : null,
         executed: true,
         sideEffects: true,
       });
@@ -215,6 +217,7 @@ export function createDockerComposeManager({
     start: (input) => execute('start', input),
     stop: (input) => execute('stop', input),
     restart: (input) => execute('restart', input),
+    remove: (input) => execute('remove', input),
   });
 }
 

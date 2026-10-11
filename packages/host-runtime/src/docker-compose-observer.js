@@ -194,6 +194,19 @@ export function createDockerComposeObserver({ accessFn = access, execFn = execFi
     });
   }
 
+  async function inspectRemoved({ projectName: requestedName } = {}) {
+    const name = projectName(requestedName);
+    const { executable, containers } = await listContainers(name);
+    let stdout;
+    try {
+      ({ stdout } = await execFn(executable, ['network', 'ls', '--no-trunc', '--filter', `label=com.docker.compose.project=${name}`, '--format', '{{.ID}}'], { timeout: 10_000, maxBuffer: 256 * 1024 }));
+    } catch { throw new DockerComposeObserverError('docker_compose_inspection_failed', 'Compose network inventory could not be inspected', 503); }
+    if (typeof stdout !== 'string') throw new DockerComposeObserverError('docker_compose_network_output_invalid', 'Compose network inventory is invalid');
+    const networks = stdout.split(/\r?\n/).filter(Boolean);
+    if (networks.length > 64 || networks.some(id => !/^[a-f0-9]{12,64}$/.test(id))) throw new DockerComposeObserverError('docker_compose_network_output_invalid', 'Compose network inventory is invalid');
+    return Object.freeze({ projectName: name, absent: containers.length === 0 && networks.length === 0, containerCount: containers.length, networkCount: networks.length, volumesRetained: true, sideEffects: false });
+  }
+
   async function logs({ projectName: requestedProjectName, service: requestedService = null, tail: requestedTail = 200 } = {}) {
     const name = projectName(requestedProjectName);
     const service = serviceName(requestedService);
@@ -237,7 +250,7 @@ export function createDockerComposeObserver({ accessFn = access, execFn = execFi
     });
   }
 
-  return Object.freeze({ inspect, logs });
+  return Object.freeze({ inspect, inspectRemoved, logs });
 }
 
 export const dockerComposeObserverInternals = Object.freeze({

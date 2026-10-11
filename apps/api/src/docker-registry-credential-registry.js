@@ -257,6 +257,18 @@ export function createDockerRegistryCredentialRegistry({
     return publicCredential(record, id, host);
   }
 
+  async function removeForProject(requestedProjectId, { credentialRevisions } = {}) {
+    await ensureInitialized();
+    const id = projectId(requestedProjectId);
+    if (!Array.isArray(credentialRevisions)) throw new DockerRegistryCredentialRegistryError('docker_registry_credential_revision_conflict', 'Credential revisions are required', 409);
+    const pins = new Map(credentialRevisions.map(item => [item.registryHost, item.revision]));
+    if (state.credentials.some(item => item.projectId === id && pins.get(item.registryHost) !== item.revision)) throw new DockerRegistryCredentialRegistryError('docker_registry_credential_revision_conflict', 'Registry credential changed before retirement', 409);
+    const before = state.credentials;
+    state.credentials = state.credentials.filter(item => item.projectId !== id);
+    try { await persist(); } catch (error) { state.credentials = before; throw error; }
+    return { projectId: id, removed: true };
+  }
+
   async function materializeCredential(requestedProjectId, requestedRegistryHost, { expectedRevision = null } = {}) {
     await ensureInitialized();
     const id = projectId(requestedProjectId);
@@ -270,7 +282,7 @@ export function createDockerRegistryCredentialRegistry({
     return Object.freeze({ ...publicCredential(record, id, host), ...decryptCredential(encryptionKey, record) });
   }
 
-  return Object.freeze({ init, getCredential, listCredentials, setCredential, materializeCredential });
+  return Object.freeze({ init, getCredential, listCredentials, setCredential, removeForProject, materializeCredential });
 }
 
 export const dockerRegistryCredentialRegistryInternals = Object.freeze({

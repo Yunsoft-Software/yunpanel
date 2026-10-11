@@ -500,6 +500,18 @@ export function createDockerComposeProjectRegistry({
     return publicProject(project);
   }
 
+  async function removeProject(projectId, { expectedRevision, expectedComposeSha256 } = {}) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const current = state.projects.find(item => item.id === id);
+    if (!current) return { id, removed: true };
+    if (current.revision !== expectedRevision || current.composeSha256 !== expectedComposeSha256) throw new DockerComposeProjectRegistryError('docker_compose_project_revision_conflict', 'Project changed before retirement', 409);
+    const before = state.projects;
+    state.projects = state.projects.filter(item => item.id !== id);
+    try { await persist(); } catch (error) { state.projects = before; throw error; }
+    return { id, removed: true };
+  }
+
   async function getProject(projectId) {
     await ensureInitialized();
     const id = normalizeUuid(projectId, 'dockerProjectId');
@@ -526,7 +538,7 @@ export function createDockerComposeProjectRegistry({
     return Object.freeze({ ...publicProject(project), document: decryptDocument(encryptionKey, project) });
   }
 
-  return Object.freeze({ init, createProject, updateProject, getProject, listProjects, materializeProject });
+  return Object.freeze({ init, createProject, updateProject, removeProject, getProject, listProjects, materializeProject });
 }
 
 export const dockerComposeProjectRegistryInternals = Object.freeze({

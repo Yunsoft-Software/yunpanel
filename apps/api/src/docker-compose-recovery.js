@@ -1,4 +1,5 @@
-import { DOCKER_COMPOSE_OPERATIONS } from '@yunpanel/protocol';
+import { DOCKER_COMPOSE_OPERATIONS, OPERATIONS } from '@yunpanel/protocol';
+import { sanitizeDockerComposeJobResult } from './docker-compose-job-result.js';
 
 const OPERATION_SET = new Set(DOCKER_COMPOSE_OPERATIONS);
 
@@ -25,7 +26,7 @@ function receiptResult(job, receipt) {
       'Docker Compose recovery receipt does not match the persisted running job',
     );
   }
-  return Object.freeze({
+  return sanitizeDockerComposeJobResult(job, {
     version: 1,
     projectId: receipt.projectId,
     projectRevision: receipt.projectRevision,
@@ -42,6 +43,7 @@ export function createDockerComposeRecoveryService({
   jobRegistry,
   receiptStore,
   reconcileCompletedJob,
+  reconcileRunningReceipt = async () => { throw new DockerComposeRecoveryError('docker_compose_recovery_reconciliation_failed', 'Removal metadata finalizer is unavailable'); },
 } = {}) {
   if (!jobRegistry || typeof jobRegistry.recovery !== 'function'
     || typeof jobRegistry.getJob !== 'function' || typeof jobRegistry.complete !== 'function'
@@ -119,6 +121,10 @@ export function createDockerComposeRecoveryService({
         continue;
       }
       const result = receiptResult(job, receipt);
+      if (job.operation === OPERATIONS.DOCKER_COMPOSE_REMOVE) {
+        const finalized = await reconcileRunningReceipt({ ...job, result });
+        if (finalized?.reconciled !== true) throw new DockerComposeRecoveryError('docker_compose_recovery_reconciliation_failed', 'Project retirement remains incomplete');
+      }
       const begun = await jobRegistry.beginReconciliation({ serverId: job.serverId, jobId: job.id });
       if (!begun || begun.jobId !== job.id || begun.serverId !== job.serverId
         || begun.status !== 'running' || begun.pending !== true) {

@@ -14,12 +14,14 @@ const DOCKER_COMPOSE_PULL = 'docker.compose.pull';
 const DOCKER_COMPOSE_START = 'docker.compose.start';
 const DOCKER_COMPOSE_STOP = 'docker.compose.stop';
 const DOCKER_COMPOSE_RESTART = 'docker.compose.restart';
+const DOCKER_COMPOSE_REMOVE = 'docker.compose.remove';
 const DOCKER_OPERATIONS = Object.freeze([
   DOCKER_COMPOSE_BUILD,
   DOCKER_COMPOSE_PULL,
   DOCKER_COMPOSE_START,
   DOCKER_COMPOSE_STOP,
   DOCKER_COMPOSE_RESTART,
+  DOCKER_COMPOSE_REMOVE,
 ]);
 const DOCKER_OPERATION_SET = new Set(DOCKER_OPERATIONS);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -32,6 +34,7 @@ export const OPERATIONS = Object.freeze({
   DOCKER_COMPOSE_START,
   DOCKER_COMPOSE_STOP,
   DOCKER_COMPOSE_RESTART,
+  DOCKER_COMPOSE_REMOVE,
 });
 
 export const DOCKER_COMPOSE_OPERATIONS = DOCKER_OPERATIONS;
@@ -66,6 +69,10 @@ function validateDockerComposeLifecycle(payload, operation, errors) {
     'projectId', 'expectedProjectRevision', 'expectedEnvironmentRevision',
     'expectedComposeSha256', 'credentialRevisions',
   ]);
+  if (operation === DOCKER_COMPOSE_REMOVE) {
+    allowed.add('projectName');
+    if (typeof payload.projectName !== 'string' || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(payload.projectName)) errors.push(`${operation} projectName is invalid`);
+  }
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${operation} contains unsupported arguments`);
   }

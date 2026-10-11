@@ -229,6 +229,18 @@ export function createDockerComposeEnvironmentRegistry({
     return publicEnvironment(record, id);
   }
 
+  async function removeForProject(requestedProjectId, { expectedRevision } = {}) {
+    await ensureInitialized();
+    const id = projectId(requestedProjectId);
+    const current = state.environments.find(item => item.projectId === id);
+    if (!current) return { projectId: id, removed: true };
+    if (current.revision !== expectedRevision) throw new DockerComposeEnvironmentRegistryError('docker_compose_environment_revision_conflict', 'Environment changed before retirement', 409);
+    const before = state.environments;
+    state.environments = state.environments.filter(item => item.projectId !== id);
+    try { await persist(); } catch (error) { state.environments = before; throw error; }
+    return { projectId: id, removed: true };
+  }
+
   async function materializeEnvironment(requestedProjectId, { expectedRevision = null } = {}) {
     await ensureInitialized();
     const id = projectId(requestedProjectId);
@@ -246,7 +258,7 @@ export function createDockerComposeEnvironmentRegistry({
     return Object.freeze({ projectId: id, revision: record.revision, variables: Object.freeze(variables) });
   }
 
-  return Object.freeze({ init, getEnvironment, replaceEnvironment, materializeEnvironment });
+  return Object.freeze({ init, getEnvironment, replaceEnvironment, removeForProject, materializeEnvironment });
 }
 
 export const dockerComposeEnvironmentRegistryInternals = Object.freeze({

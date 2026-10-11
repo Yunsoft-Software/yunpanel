@@ -13,6 +13,7 @@ const OPERATION_POLICY = new Map([
   [OPERATIONS.DOCKER_COMPOSE_START, ['start', 'running']],
   [OPERATIONS.DOCKER_COMPOSE_STOP, ['stop', 'stopped']],
   [OPERATIONS.DOCKER_COMPOSE_RESTART, ['restart', 'running']],
+  [OPERATIONS.DOCKER_COMPOSE_REMOVE, ['remove', 'absent']],
 ]);
 
 export class DockerComposeOperationReceiptError extends Error {
