@@ -18,11 +18,12 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
       {targetType === 'static' && <label>Statik dosya önbelleği (saniye)<input type="number" min="0" max="31536000" step="1"
         value={settings.staticAssetCacheSeconds ?? ''} placeholder="Sunucu varsayılanı"
         onChange={event => change('staticAssetCacheSeconds', number(event))} /></label>}
-      {['php', 'static'].includes(targetType) && <label>Başlangıç dosyaları<input
+      {['php', 'static'].includes(targetType) && <label><span id={`${hint}-index-label`}>Başlangıç dosyaları</span><input
         value={Array.isArray(settings.indexFiles) ? settings.indexFiles.join(' ') : settings.indexFiles ?? ''} maxLength="520" spellCheck={false}
         placeholder={targetType === 'php' ? 'index.php index.html' : 'index.html'}
+        aria-labelledby={`${hint}-index-label`} aria-describedby={`${hint}-index-hint`}
         onChange={event => change('indexFiles', event.target.value)} />
-        <span className="ws-field-hint">Öncelik sırasıyla, boşlukla ayırın. Boş bırakıldığında varsayılan kullanılır.</span></label>}
+        <span id={`${hint}-index-hint`} className="ws-field-hint">Öncelik sırasıyla, boşlukla ayırın. Boş bırakıldığında varsayılan kullanılır.</span></label>}
     </div>
     <p id={hint} className="ws-field-hint">Boş sayısal alanlar sunucunun varsayılanını kullanır. Yükleme boyutu 1–1024 MB; yanıt süresi 1–600 saniyedir.</p>
     {['proxy', 'python'].includes(targetType) && <label className="ws-check"><input type="checkbox" checked={settings.websocket}

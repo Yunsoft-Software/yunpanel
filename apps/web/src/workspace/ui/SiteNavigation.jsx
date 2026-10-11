@@ -13,12 +13,22 @@ export default function SiteNavigation({ tabs, activeTab, domainId, query = '' }
   const groups = groupSiteTabs(tabs);
   // /resources is an old database entry. Its URL and engine remain supported.
   const activeKey = activeTab === 'resources' ? 'databases' : activeTab;
+  const keys = groups.flatMap(group => group.tabs.map(tabKey));
+  function choose(key) {
+    if (keys.includes(key) && key !== activeKey) navigate(`${siteHref(domainId, key)}${query}`);
+  }
+  function keyboard(event) {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const index = keys.indexOf(activeKey);
+    if (index < 0) return;
+    const next = { Home: 0, End: keys.length - 1, ArrowUp: Math.max(0, index - 1), ArrowDown: Math.min(keys.length - 1, index + 1) }[event.key];
+    if (next === undefined) return;
+    event.preventDefault();
+    choose(keys[next]);
+  }
   return <nav className="ws-plesk-site-navigation" aria-label="Site araçları">
     <label className="ws-site-tool-select">Site aracı<select aria-label="Site aracı" value={activeKey}
-      onChange={event => {
-        const key = event.target.value;
-        if (groups.some(group => group.tabs.some(tab => tabKey(tab) === key))) navigate(`${siteHref(domainId, key)}${query}`);
-      }}>
+      onKeyDown={keyboard} onChange={event => choose(event.target.value)}>
       {groups.map(group => <optgroup key={group.id} label={group.label}>{group.tabs.map(tab => <option key={tabKey(tab)} value={tabKey(tab)}>{tabLabel(tab)}</option>)}</optgroup>)}
     </select></label>
     {groups.map((group) => <div key={group.id} className="ws-site-tool-group ws-site-tool-desktop">
