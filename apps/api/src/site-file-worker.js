@@ -145,9 +145,12 @@ function regularFile(entry, { maxBytes = MAX_TRANSFER_BYTES } = {}) {
 }
 
 function decodedContent(value, maxBytes = MAX_TRANSFER_BYTES) {
-  if (typeof value !== 'string' || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(value)) {
+  if (typeof value !== 'string' || value.length % 4 !== 0) {
     fail('site_file_content_invalid', 'File content encoding is invalid');
   }
+  if (value.length > Math.ceil(maxBytes / 3) * 4) fail('site_file_too_large', `File exceeds the ${maxBytes} byte limit`, 413);
+  // Canonical round-trip validation stays bounded without a repeated-group
+  // regular expression, which exhausts V8's stack for valid multi-MB files.
   const content = Buffer.from(value, 'base64');
   if (content.length > maxBytes) fail('site_file_too_large', `File exceeds the ${maxBytes} byte limit`, 413);
   if (content.toString('base64') !== value) fail('site_file_content_invalid', 'File content encoding is invalid');

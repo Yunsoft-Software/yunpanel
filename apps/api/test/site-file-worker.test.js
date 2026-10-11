@@ -441,3 +441,15 @@ test('site-file-worker: manifest rejects oversized files and traversal exclusion
   await assert.rejects(executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: [] }, deps), { code: 'site_file_too_large' });
   await assert.rejects(executeSiteFileOperation({ operation: 'manifest', root: FAKE_ROOT, path: '', exclude: ['../private'] }, deps), { code: 'site_file_path_invalid' });
 });
+
+test('site-file-worker: a valid 13 MB binary upload does not overflow the base64 validator stack', async t => {
+  const { deps } = await createFixture(t);
+  const original = Buffer.alloc(13418072, 0xc7);
+  const upload = await executeSiteFileOperation({ operation: 'upload', root: FAKE_ROOT, path: 'large-binary.bin', content: original.toString('base64') }, deps);
+  assert.equal(upload.file.size, original.length);
+  const downloaded = await executeSiteFileOperation({ operation: 'download', root: FAKE_ROOT, path: 'large-binary.bin' }, deps);
+  assert.equal(createHash('sha256').update(Buffer.from(downloaded.content, 'base64')).digest('hex'), createHash('sha256').update(original).digest('hex'));
+  for (const content of ['YQ=!', 'YQ==\n', 'YQ====', 'YR==']) {
+    await assert.rejects(executeSiteFileOperation({ operation: 'upload', root: FAKE_ROOT, path: 'invalid.bin', content }, deps), { code: 'site_file_content_invalid' });
+  }
+});
