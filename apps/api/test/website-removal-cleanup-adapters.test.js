@@ -5,13 +5,14 @@ import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-clea
 const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
 const systemUser='yunapp-123456789abc';
-function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,php=false,failPhp=false,missingPhpJournal=false,failSftp=false,withSftpJournal=false}={}) {
+function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,php=false,phpConfig,failPhp=false,missingPhpJournal=false,failSftp=false,withSftpJournal=false}={}) {
   const removed=[]; const removedSet=new Set(); const compensated=[];
   const retirementCalls=[]; const order=[];
+  const phpCalls=[];
   const retirement = { satisfied:true,poolRemoved:true,socketRemoved:true,websiteId,applicationId,unixUser:systemUser };
   const adapters=createWebsiteRemovalCleanupAdapters({
     websiteRegistry:{
-      getWebsite:async()=>({id:websiteId,serverId:'33333333-3333-4333-8333-333333333333',applicationId,unixUser:systemUser}),
+      getWebsite:async()=>({id:websiteId,serverId:'33333333-3333-4333-8333-333333333333',applicationId,unixUser:systemUser,phpConfig}),
       listWebsites:async()=>[{id:websiteId,applicationId},...(otherWebsite?[{id:'44444444-4444-4444-8444-444444444444',applicationId}]:[])],
     },
     applicationRegistry:{getApplication:async()=>({id:applicationId,type:php?'php':'static',serverId:'33333333-3333-4333-8333-333333333333'})},
@@ -28,7 +29,7 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
         retire:async()=>{order.push('sftp');if(failSftp)throw new Error('fixture mount retained');},
         inspectRetirement:async()=>({satisfied:!failSftp,sshdConfigRemoved:true,mountUnitRemoved:true,chrootRemoved:true,websiteId,applicationId,unixUser:systemUser}),
       },php_runtime:{
-        retire:async()=>{order.push('php');if(failPhp)throw new Error('fixture PHP pool retained');return retirement;},
+        retire:async(ctx)=>{order.push('php');phpCalls.push(ctx);if(failPhp)throw new Error('fixture PHP pool retained');return retirement;},
         inspectRetirement:async()=>retirement,
       },unix_identity:{
         compensate:async(ctx)=>{order.push('unix');compensated.push(ctx);return{satisfied:true,removedUser:true,removedGroup:true};},
@@ -41,8 +42,21 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
     },
     rmFn:async(path)=>{order.push('files');removed.push(path);removedSet.add(path);},
   });
-  return {adapters,removed,compensated,retirementCalls,order};
+  return {adapters,removed,compensated,retirementCalls,phpCalls,order};
 }
+
+test('PHP removal preserves the original ownership intent and separately passes registered current settings',async()=>{
+ const phpConfig={phpVersion:'8.4',maxChildren:9,memoryLimitMb:512,maxExecutionSeconds:60};
+ const f=fixture({php:true,phpConfig});
+ await f.adapters.fileCleanupHandler({websiteId,applicationId});
+ await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
+ assert.equal(f.phpCalls.length,2);
+ for(const ctx of f.phpCalls){
+   assert.equal(ctx.intent.phpVersion,undefined);
+   assert.equal(ctx.operationId,'55555555-5555-4555-8555-555555555555');
+   assert.deepEqual(ctx.currentIntent,{...ctx.intent,...phpConfig});
+ }
+});
 
 test('PHP retirement precedes file deletion and repeats before Unix identity cleanup',async()=>{
  const f=fixture({php:true});

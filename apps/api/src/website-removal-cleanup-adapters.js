@@ -134,7 +134,9 @@ export function createWebsiteRemovalCleanupAdapters({
     if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
       unavailable('website_cleanup_php_unavailable', 'Website PHP retirement is unavailable');
     }
-    const context = { intent: step.intent, operationId: source.operation.operationId, evidence: step.evidence ?? null };
+    const currentIntent = { ...step.intent, ...(source.website.phpConfig ?? {}) };
+    const context = { intent: step.intent, currentIntent,
+      operationId: source.operation.operationId, evidence: step.evidence ?? null };
     try {
       await handler.retire(context);
       const result = await handler.inspectRetirement(context);

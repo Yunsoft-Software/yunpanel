@@ -1087,7 +1087,9 @@ export function createPhpFpmSiteManager({
 
   async function inspectRetirement(rawIntent) {
     const spec = normalizeIntent(rawIntent);
-    for (const target of [phpFpmPoolPath(spec.unixUser, spec.phpVersion), phpFpmSocketPath(spec.unixUser)]) {
+    const targets = phpFpmTemplatePolicy.supportedVersions.map(version => phpFpmPoolPath(spec.unixUser, version));
+    targets.push(phpFpmSocketPath(spec.unixUser));
+    for (const target of targets) {
       try {
         await lstatFn(target);
         return Object.freeze({ satisfied: false, reason: 'php_fpm_retirement_pending',
@@ -1097,29 +1099,87 @@ export function createPhpFpmSiteManager({
           'The Website PHP pool or socket could not be inspected');
       }
     }
+    if (await socketListening(phpFpmSocketPath(spec.unixUser))) {
+      return Object.freeze({ satisfied: false, reason: 'php_fpm_retirement_listener_pending',
+        websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
+    }
     return Object.freeze({ satisfied: true, poolRemoved: true, socketRemoved: true,
       websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
   }
 
+  async function retireCurrent(rawIntent, currentIntent, operationId, originalReceipt) {
+    const original = normalizeIntent(rawIntent), current = normalizeIntent(currentIntent);
+    if (['websiteId', 'applicationId', 'unixUser'].some(key => current[key] !== original[key])
+      || current.templateInput.documentRoot !== original.templateInput.documentRoot) {
+      throw new PhpFpmSiteManagerError('php_fpm_retirement_binding_changed',
+        'PHP retirement cannot change the provisioning identity or document root');
+    }
+    // This is a deletion checkpoint, not update compensation: restoring an older
+    // pool would leave a shared PHP service pointing at the deleted Website.
+    const checkpointPath = path.posix.join(receiptRoot, `${operationId}.retirement.json`);
+    const expected = { version: 1, operationId, websiteId: current.websiteId,
+      applicationId: current.applicationId, unixUser: current.unixUser,
+      provisioningDigest: specDigest(original), retirementDigest: specDigest(current),
+      phpVersion: current.phpVersion, configSha256: current.preview.sha256 };
+    let checkpoint = null;
+    const stored = await readOptional(checkpointPath);
+    if (stored !== null) {
+      try { checkpoint = JSON.parse(stored); } catch { /* Rejected below. */ }
+      if (!checkpoint || Object.keys(checkpoint).length !== Object.keys(expected).length + 1
+        || Object.entries(expected).some(([key, value]) => checkpoint[key] !== value)
+        || !['prepared', 'retired'].includes(checkpoint.state)) {
+        throw new PhpFpmSiteManagerError('php_fpm_retirement_checkpoint_invalid',
+          'PHP retirement no longer matches its durable deletion checkpoint');
+      }
+    }
+    const configPath = phpFpmPoolPath(current.unixUser, current.phpVersion);
+    let present = false;
+    // A version transition must have removed the old pool. Never guess ownership
+    // of another version or remove a second pool that could serve the same socket.
+    for (const version of phpFpmTemplatePolicy.supportedVersions) {
+      const target = phpFpmPoolPath(current.unixUser, version);
+      let metadata;
+      try { metadata = await lstatFn(target); }
+      catch (error) { if (missingPath(error)) continue; throw error; }
+      if (target !== configPath || !metadata.isFile?.() || metadata.isSymbolicLink?.()
+        || metadata.uid !== 0 || metadata.gid !== 0 || modeOf(metadata) !== phpFpmTemplatePolicy.poolMode
+        || sha256(await readFileFn(target, 'utf8')) !== current.preview.sha256) {
+        throw new PhpFpmSiteManagerError('php_fpm_retirement_pool_drift',
+          'PHP retirement requires the exact registered pool and no other version pool');
+      }
+      present = true;
+    }
+    if (present && (checkpoint?.state === 'retired' || originalReceipt.state === 'compensated')) {
+      throw new PhpFpmSiteManagerError('php_fpm_retirement_pool_drift',
+        'A PHP pool reappeared after its ownership was retired');
+    }
+    if (!checkpoint) {
+      checkpoint = { ...expected, state: 'prepared' };
+      await mkdirFn(receiptRoot, { recursive: true, mode: 0o700 });
+      await atomicWrite(checkpointPath, `${JSON.stringify(checkpoint)}\n`, 0o600);
+    }
+    if (present) await rmFn(configPath, { force: true });
+    await configTest(current.phpVersion);
+    await reloadServiceIfActive(current.phpVersion);
+    await releaseSocket(current);
+    const result = await inspectRetirement(currentIntent);
+    if (!result.satisfied) throw new PhpFpmSiteManagerError('php_fpm_retirement_unverified',
+      'The Website PHP pool or socket is still present');
+    if (checkpoint.state !== 'retired') {
+      await atomicWrite(checkpointPath, `${JSON.stringify({ ...expected, state: 'retired' })}\n`, 0o600);
+    }
+    return result;
+  }
+
   async function retire(rawIntent, options = {}) {
     const spec = normalizeIntent(rawIntent);
-    const receipt = await loadReceipt(normalizeOperationId(options.operationId), spec);
+    const operationId = normalizeOperationId(options.operationId);
+    const receipt = await loadReceipt(operationId, spec);
     if (!receipt || receipt.mutated !== true || receipt.previousConfig !== null || receipt.previousRuntime) {
       throw new PhpFpmSiteManagerError('php_fpm_retirement_not_owned',
         'The provisioning receipt does not prove exclusive ownership of this PHP pool');
     }
-    await compensate(rawIntent, options);
-    if (await readOptional(phpFpmPoolPath(spec.unixUser, spec.phpVersion)) !== null) {
-      throw new PhpFpmSiteManagerError('php_fpm_retirement_blocked', 'The Website PHP pool is retained or changed');
-    }
-    // Reconcile interruption after unlink and verify that no listener survives.
-    await configTest(spec.phpVersion);
-    await reloadServiceIfActive(spec.phpVersion);
-    await releaseSocket(spec);
-    const result = await inspectRetirement(rawIntent);
-    if (!result.satisfied) throw new PhpFpmSiteManagerError('php_fpm_retirement_unverified',
-      'The Website PHP pool or socket is still present');
-    return result;
+    return retireCurrent(rawIntent, options.currentIntent ?? rawIntent, operationId, receipt);
   }
 
   return Object.freeze({

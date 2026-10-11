@@ -385,10 +385,11 @@ export function createWebsitePhpRuntimeProvisioningHandler({
     return fpmManager.inspectCompensation(runtimeIntent(intent), { operationId });
   }
 
-  async function retire({ intent, operationId } = {}) {
+  async function retire({ intent, currentIntent, operationId } = {}) {
     if (typeof fpmManager.retire !== 'function') throw new WebsitePhpRuntimeProvisioningError(
       'website_php_retirement_unavailable', 'Website PHP retirement is unavailable');
-    return fpmManager.retire(runtimeIntent(intent), { operationId });
+    return fpmManager.retire(runtimeIntent(intent), { operationId,
+      ...(currentIntent === undefined ? {} : { currentIntent: runtimeIntent(currentIntent) }) });
   }
 
   async function inspectRetirement({ intent } = {}) {

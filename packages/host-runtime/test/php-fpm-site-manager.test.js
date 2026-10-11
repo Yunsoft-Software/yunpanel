@@ -185,7 +185,7 @@ test('PHP retirement rejects missing ownership and changed pool content without 
   await assert.rejects(() => siteManager.retire(intent(), { operationId: '8ae512c0-a717-4611-943c-6ce2ab0abf16' }),
     error => error.code === 'php_fpm_retirement_not_owned');
   host.entries.get(configPath).content += '\n; externally changed\n';
-  await assert.rejects(() => siteManager.retire(intent(), { operationId }), error => error.code === 'php_fpm_compensation_drift');
+  await assert.rejects(() => siteManager.retire(intent(), { operationId }), error => error.code === 'php_fpm_retirement_pool_drift');
   assert.equal(host.entries.has(configPath), true);
   assert.equal(host.entries.has(socketPath), true);
 });
@@ -631,4 +631,111 @@ test('an unavailable PHP version is rejected before touching current pool or ins
   await assert.rejects(siteManager.update(intent({ phpVersion: '8.4' }), { operationId: '33333333-3333-4333-8333-333333333333', previousIntent: intent() }), { code: 'php_fpm_version_unavailable' });
   assert.equal(host.entries.get(configPath).content, previous); assert.equal(getListener(), '8.3');
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), false);
+});
+
+test('retirement after PHP settings changes removes the current pool without restoring previous settings', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const currentIntent = intent({ maxChildren: 9, memoryLimitMb: 512 });
+  await siteManager.update(currentIntent, { previousIntent: intent(), operationId: '11111111-1111-4111-8111-111111111111' });
+  const result = await siteManager.retire(intent(), { operationId, currentIntent });
+  assert.equal(result.satisfied, true);
+  assert.equal(host.entries.has(configPath), false);
+  assert.equal(host.entries.has(socketPath), false);
+  assert.equal(host.entries.has(documentRoot), true);
+  const restarted = manager(host);
+  assert.deepEqual(await restarted.retire(intent(), { operationId, currentIntent }), result);
+  const checkpoint = host.entries.get(`/var/lib/yunpanel/staging/php-fpm-sites/${operationId}.retirement.json`);
+  assert.equal(checkpoint.mode, 0o600);
+  assert.equal(JSON.parse(checkpoint.content).state, 'retired');
+});
+
+test('retirement after a PHP version transition leaves both version pools absent and siblings intact', async () => {
+  const { host, getListener } = versionHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const sibling = '/etc/php/8.3/fpm/pool.d/sibling-site.conf';
+  host.entries.set(sibling, { type: 'file', content: 'preserved sibling', mode: 0o600, uid: 0, gid: 0 });
+  const currentIntent = intent({ phpVersion: '8.4', maxChildren: 9 });
+  await siteManager.update(currentIntent, { previousIntent: intent(), operationId: '11111111-1111-4111-8111-111111111111' });
+  const start = host.calls.length;
+  assert.equal((await siteManager.retire(intent(), { operationId, currentIntent })).satisfied, true);
+  assert.equal(host.entries.has(configPath), false);
+  assert.equal(host.entries.has(`/etc/php/8.4/fpm/pool.d/yunpanel-${unixUser}.conf`), false);
+  assert.equal(getListener(), null);
+  assert.equal(host.entries.get(sibling).content, 'preserved sibling');
+  assert.equal(host.calls.slice(start).some(([file, args]) => file === '/usr/bin/apt-get'
+    || file === '/usr/bin/systemctl' && ['enable', 'stop', 'restart'].includes(args[0])), false);
+});
+
+test('PHP retirement resumes after pool unlink and failed reload using the frozen deletion checkpoint', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const currentIntent = intent({ maxChildren: 9 });
+  await siteManager.update(currentIntent, { previousIntent: intent(), operationId: '11111111-1111-4111-8111-111111111111' });
+  const run = host.run;
+  host.run = async (file, args, options) => {
+    if (file === '/usr/bin/systemctl' && args[0] === 'reload') throw new Error('interrupted reload');
+    return run(file, args, options);
+  };
+  await assert.rejects(manager(host).retire(intent(), { operationId, currentIntent }), { code: 'php_fpm_service_reload_failed' });
+  assert.equal(host.entries.has(configPath), false);
+  const checkpoint = `/var/lib/yunpanel/staging/php-fpm-sites/${operationId}.retirement.json`;
+  assert.equal(JSON.parse(host.entries.get(checkpoint).content).state, 'prepared');
+  host.run = run;
+  await assert.rejects(manager(host).retire(intent(), { operationId, currentIntent: intent() }), { code: 'php_fpm_retirement_checkpoint_invalid' });
+  assert.equal((await manager(host).retire(intent(), { operationId, currentIntent })).satisfied, true);
+  assert.equal(host.entries.has(socketPath), false);
+});
+
+test('PHP retirement rejects drift, foreign version pools and unsafe file ownership before unlink', async () => {
+  for (const drift of ['content', 'mode', 'uid', 'version']) {
+    const host = fakeHost(), siteManager = manager(host);
+    await siteManager.apply(intent(), { operationId });
+    const original = host.entries.get(configPath).content;
+    if (drift === 'content') host.entries.get(configPath).content += '; drift';
+    if (drift === 'mode') host.entries.get(configPath).mode = 0o666;
+    if (drift === 'uid') host.entries.get(configPath).uid = 1201;
+    if (drift === 'version') host.entries.set(`/etc/php/8.4/fpm/pool.d/yunpanel-${unixUser}.conf`,
+      { type: 'file', content: original, uid: 0, gid: 0, mode: 0o600 });
+    await assert.rejects(siteManager.retire(intent(), { operationId, currentIntent: intent() }), { code: 'php_fpm_retirement_pool_drift' });
+    assert.equal(host.entries.has(configPath), true);
+    assert.equal(host.entries.has(socketPath), true);
+    assert.equal(host.entries.has(`/var/lib/yunpanel/staging/php-fpm-sites/${operationId}.retirement.json`), false);
+  }
+});
+
+test('PHP retirement cannot change Website identity or document root and cannot reuse an update receipt as ownership', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const currentIntent = intent({ maxChildren: 9 });
+  const updateId = '11111111-1111-4111-8111-111111111111';
+  await siteManager.update(currentIntent, { previousIntent: intent(), operationId: updateId });
+  for (const change of [{ websiteId: updateId }, { documentRoot: `${documentRoot}/nested` }]) {
+    await assert.rejects(siteManager.retire(intent(), { operationId, currentIntent: { ...currentIntent, ...change } }),
+      { code: 'php_fpm_retirement_binding_changed' });
+  }
+  await assert.rejects(siteManager.retire(currentIntent, { operationId: updateId, currentIntent }), { code: 'php_fpm_retirement_not_owned' });
+  assert.equal(host.entries.has(configPath), true);
+});
+
+test('retired PHP pools that reappear are rejected even when their content matches', async () => {
+  const host = fakeHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const pool = { ...host.entries.get(configPath) };
+  await siteManager.retire(intent(), { operationId, currentIntent: intent() });
+  host.entries.set(configPath, pool);
+  assert.equal((await siteManager.inspectRetirement(intent())).satisfied, false);
+  await assert.rejects(manager(host).retire(intent(), { operationId, currentIntent: intent() }), { code: 'php_fpm_retirement_pool_drift' });
+  assert.equal(host.entries.has(configPath), true);
+});
+
+test('PHP retirement inspection checks other versions and listeners even without a socket path', async () => {
+  const { host } = versionHost(), siteManager = manager(host);
+  await siteManager.apply(intent(), { operationId });
+  const currentIntent = intent({ phpVersion: '8.4' });
+  await siteManager.update(currentIntent, { previousIntent: intent(), operationId: '11111111-1111-4111-8111-111111111111' });
+  assert.equal((await siteManager.inspectRetirement(intent())).satisfied, false);
+  host.entries.delete(`/etc/php/8.4/fpm/pool.d/yunpanel-${unixUser}.conf`);
+  host.entries.delete(socketPath);
+  assert.equal((await siteManager.inspectRetirement(intent())).reason, 'php_fpm_retirement_listener_pending');
 });

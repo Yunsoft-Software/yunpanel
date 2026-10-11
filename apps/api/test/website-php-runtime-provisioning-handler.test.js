@@ -26,6 +26,23 @@ function umaskManager(calls = null, { satisfied = true } = {}) {
   };
 }
 
+test('production PHP retirement keeps creation ownership and registered current configuration distinct', async () => {
+  const calls = [];
+  const handler = createWebsitePhpRuntimeProvisioningHandler({
+    fpmManager: {
+      apply: async () => {}, inspect: async () => {}, compensate: async () => {}, inspectCompensation: async () => {},
+      retire: async (owned, options) => { calls.push({ owned, options }); return { satisfied: true }; },
+    },
+  });
+  const currentIntent = { ...intent(), phpVersion: '8.4', maxChildren: 9 };
+  assert.equal((await handler.retire({ intent: intent(), currentIntent, operationId })).satisfied, true);
+  assert.deepEqual(calls, [{ owned: { websiteId, applicationId, unixUser, documentRoot },
+    options: { operationId, currentIntent: { websiteId, applicationId, unixUser, documentRoot, phpVersion: '8.4', maxChildren: 9 } } }]);
+  await assert.rejects(handler.retire({ intent: intent(), currentIntent: { ...currentIntent, adapter: 'foreign' }, operationId }),
+    { code: 'website_php_runtime_intent_invalid' });
+  assert.equal(calls.length, 1);
+});
+
 test('PHP runtime locks containers, activates FPM, enforces UMask=0027 and rechecks the pool', async () => {
   const calls = [];
   const handler = createWebsitePhpRuntimeProvisioningHandler({

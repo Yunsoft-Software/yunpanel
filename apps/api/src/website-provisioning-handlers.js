@@ -544,8 +544,9 @@ export function createWebsiteProvisioningHandlers({
     return phpFpmSiteManager.inspectCompensation(phpRuntimeIntent(intent), { operationId });
   }
 
-  async function retirePhpRuntime({ intent, operationId } = {}) {
-    return phpFpmSiteManager.retire(phpRuntimeIntent(intent), { operationId });
+  async function retirePhpRuntime({ intent, currentIntent, operationId } = {}) {
+    return phpFpmSiteManager.retire(phpRuntimeIntent(intent), { operationId,
+      ...(currentIntent === undefined ? {} : { currentIntent: phpRuntimeIntent(currentIntent) }) });
   }
 
   async function inspectPhpRuntimeRetirement({ intent } = {}) {
