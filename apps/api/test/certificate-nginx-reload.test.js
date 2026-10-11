@@ -3,7 +3,7 @@ import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createLocalHostOperations } from '../src/local-host-operations.js';
-import { createJobRegistry } from '../src/job-registry.js';
+import { createJobRegistry, jobPublicView } from '../src/job-registry.js';
 import { reconcileCompletedJob } from '../src/job-reconciliation.js';
 
 const certificate = { certName: 'example.com', certificatePath: '/etc/letsencrypt/live/example.com/cert.pem',
@@ -38,6 +38,9 @@ for (const failedPhase of ['configtest', 'reload']) test(`${failedPhase} failure
     resourceType: 'certificate', resourceId: 'certificate-1', payload: { certName: 'example.com', dryRun: false } });
   await jobs.claimNext('server-1'); const completed = await jobs.complete({ serverId: 'server-1', jobId: job.id, status: 'succeeded', result: native });
   assert.deepEqual(completed.result.reloadOutcome, native.reloadOutcome);
+  const publicResult = jobPublicView(completed).result;
+  assert.deepEqual(publicResult.reloadOutcome, native.reloadOutcome);
+  assert.equal(Object.hasOwn(publicResult, 'privateKeyPath'), false); assert.equal(Object.hasOwn(publicResult, 'fullchainPath'), false);
   let recorded;
   const outcome = await reconcileCompletedJob({ certificateRegistry: {
     markActive: async () => ({ id: 'certificate-1', staging: false, purpose: 'web' }), commitSelection: async () => {},

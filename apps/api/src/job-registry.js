@@ -269,6 +269,11 @@ function publicResult(operation, result) {
     for (const field of ['certName', 'validFrom', 'validTo', 'fingerprint256', 'status']) {
       if (typeof result[field] === 'string') output[field] = sanitizeLogMessage(result[field]).message.slice(0, 253);
     }
+    if (result.reloadOutcome?.service === 'nginx' && result.reloadOutcome.stage === 'reload'
+      && ['succeeded', 'failed'].includes(result.reloadOutcome.status)) {
+      output.reloadOutcome = { service: 'nginx', status: result.reloadOutcome.status, stage: 'reload',
+        ...(result.reloadOutcome.status === 'failed' ? { error: 'certificate_nginx_reload_failed' } : {}) };
+    }
     for (const [field, limit] of [['subject', 500], ['issuer', 500], ['subjectAltName', 2000]]) {
       if (typeof result[field] === 'string') output[field] = sanitizeLogMessage(result[field]).message.slice(0, limit);
       else if (result[field] === null) output[field] = null;
