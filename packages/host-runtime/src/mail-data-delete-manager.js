@@ -151,7 +151,9 @@ export function createMailDataDeleteManager({
         }
         return;
       }
-      if (!metadata.isFile() || (metadata.mode & 0o7777) !== FILE_MODE
+      const readonlyUidValidity = /^dovecot-uidvalidity\.[0-9a-f]{8}$/.test(path.basename(current))
+        && metadata.size === 0 && (metadata.mode & 0o7777) === 0o444;
+      if (!metadata.isFile() || ((metadata.mode & 0o7777) !== FILE_MODE && !readonlyUidValidity)
         || metadata.uid !== vmail.uid || metadata.gid !== vmail.gid) throw new Error('file metadata');
       let handle;
       try {

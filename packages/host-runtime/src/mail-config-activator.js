@@ -889,7 +889,8 @@ export function createMailConfigActivator({
     });
   }
 
-  async function activateNow(preview, { transactionId } = {}) {
+  async function activateNow(preview, { transactionId, verifyAccess = null } = {}) {
+    if (verifyAccess !== null && typeof verifyAccess !== 'function') throw activationError('mail_activation_access_hook_invalid', 'Managed mail access verification hook is invalid');
     const plan = previewManagedMailApplyPlan(preview);
     const readiness = await readinessInspector.inspect(preview, { phase: 'pre' });
     if (!readiness.ready || readiness.previewSha256 !== preview.sha256) {
@@ -936,6 +937,7 @@ export function createMailConfigActivator({
         postfixIdentity.gid,
       );
       await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity, mailAuthGroup);
+      if (verifyAccess) await verifyAccess();
       const finalReadiness = await readinessInspector.inspect(preview, { phase: 'post' });
       if (!finalReadiness.ready || finalReadiness.previewSha256 !== preview.sha256) {
         throw activationError('mail_post_apply_readiness_failed', 'Managed mail host readiness failed after activation');

@@ -12,6 +12,19 @@ const BACKUP_DIGEST = 'e'.repeat(64);
 const COMPENSATION_DIGEST = 'f'.repeat(64);
 const PASSWORD_HASH = '$argon2id$protected';
 
+test('native mail apply quiesces only the server-owned disabled mailbox scope', async () => {
+  const addresses = [];
+  const operations = createLocalHostOperations({
+    loadManagedMailConfiguration: async () => ({ transition: transition(), preview: { sha256: CONFIG_DIGEST }, sensitiveArtifacts: [], disabledMailboxAddresses: ['alpha@example.com'] }),
+    mailboxAccessGuard: { quiesce: async address => { addresses.push(address); return { identity: address, accessDisabled: true, sessionsCleared: true }; } },
+    mailConfigManager: { stageConfiguration: async () => {} },
+    mailConfigBackupManager: { backupConfiguration: async () => ({ previewSha256: CONFIG_DIGEST, planSha256: PLAN_DIGEST, manifestSha256: BACKUP_DIGEST }) },
+    mailConfigActivator: { activateConfiguration: async (input, options) => { await options.verifyAccess(); return { previewSha256: CONFIG_DIGEST, planSha256: PLAN_DIGEST, readinessSha256: READINESS_DIGEST, applied: true, sideEffects: true }; } },
+  });
+  const result = await operations.executeOperation(OPERATIONS.MAIL_CONFIG_APPLY, payload(), execution());
+  assert.equal(result.applied, true); assert.deepEqual(addresses, ['alpha@example.com']); assert.equal(JSON.stringify(result).includes('alpha@example.com'), false);
+});
+
 function payload() {
   return {
     mailDomainId: MAIL_DOMAIN_ID,

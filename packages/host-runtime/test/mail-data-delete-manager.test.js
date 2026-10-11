@@ -226,3 +226,18 @@ test('purge failure restores the original live path when tombstone content is st
   assert.equal((await lstat(sourceRoot)).isDirectory(), true);
   assert.equal(await open(path.join(sourceRoot, 'cur', 'mail-1')).then(async (handle) => { await handle.close(); return true; }), true);
 }));
+
+for (const [name, content, accepted] of [
+  ['dovecot-uidvalidity.6acbe55f', '', true],
+  ['dovecot-uidvalidity.6acbe55f', 'unexpected', false],
+  ['unrelated-readonly-file', '', false],
+]) test(`native readonly marker policy: ${name} ${content ? 'nonempty' : 'empty'}`, async () => withTempDirectory(async root => {
+  const sourceRoot = await sourceFixture(root); await writeFile(path.join(sourceRoot, name), content, { mode: 0o444 });
+  const mapped = mappedFs(sourceRoot), { manager, manifest } = await createVerifiedBackup(root, sourceRoot, mapped);
+  const deletion = createMailDataDeleteManager({ backupManager: manager, mailDataInspector: inspector(),
+    mailboxAccessGuard: mockAccessGuard(), run: vmailRun(), ...mapped });
+  const action = deletion.deleteData({ transactionId: 'mail-readonly-marker-test', backupId: manifest.backupId,
+    scope: 'mailbox', identity: 'owner@example.com', expectedTargetSnapshotSha256: SNAPSHOT });
+  if (accepted) { assert.equal((await action).deleted, true); await assert.rejects(lstat(sourceRoot), { code: 'ENOENT' }); }
+  else { await assert.rejects(action, { code: 'mail_data_delete_backup_stale' }); assert.equal((await lstat(sourceRoot)).isDirectory(), true); }
+}));

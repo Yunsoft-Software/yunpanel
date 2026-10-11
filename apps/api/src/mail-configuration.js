@@ -298,7 +298,12 @@ export function createMailConfigurationService({
 
   async function materializeConfiguration(resolved) {
     const domainSet = new Set(resolved.domains);
-    const publicMailboxes = (await mailboxRegistry.listMailboxes())
+    const allMailboxes = await mailboxRegistry.listMailboxes();
+    const disabledMailboxAddresses = Object.freeze(allMailboxes
+      .filter(mailbox => mailbox.mailDomainId === resolved.candidate.id
+        && (resolved.input.status === 'disabled' || mailbox.enabled === false))
+      .map(mailbox => normalizeMailboxAddress(mailbox.address).address).sort());
+    const publicMailboxes = allMailboxes
       .filter((mailbox) => mailbox.enabled && domainSet.has(normalizeMailboxAddress(mailbox.address).domain))
       .sort((left, right) => left.address.localeCompare(right.address));
     const privateAccounts = (await mailboxRegistry.materializeEnabledAccounts())
@@ -379,6 +384,7 @@ export function createMailConfigurationService({
         accounts: Object.freeze([]),
         aliases: Object.freeze([]),
         srs: null,
+        disabledMailboxAddresses,
       });
     }
     const tlsIdentity = await resolveTlsIdentity(resolved);
@@ -454,6 +460,7 @@ export function createMailConfigurationService({
         accounts,
         aliases: Object.freeze(aliases),
         srs: srs?.private ?? null,
+        disabledMailboxAddresses,
       });
     } catch (error) {
       if (error instanceof MailTemplateError
@@ -564,6 +571,10 @@ export function createMailConfigurationService({
     if (!selected) {
       throw new MailConfigurationError('mail_configuration_preview_stale', 'Managed mail configuration changed after preview', 409);
     }
+    if (selected === materialized.legacyPreview && materialized.disabledMailboxAddresses?.length) {
+      throw new MailConfigurationError('mail_configuration_legacy_revocation_unsupported',
+        'Prepare a current SQL-backed mail configuration preview before revoking mailbox sessions', 409);
+    }
     return Object.freeze({
       transition: Object.freeze({
         mailDomainId: resolved.candidate.id,
@@ -573,6 +584,7 @@ export function createMailConfigurationService({
       }),
       preview: selected,
       sensitiveArtifacts: materializeSensitiveArtifacts(resolved, materialized, selected),
+      disabledMailboxAddresses: materialized.disabledMailboxAddresses,
     });
   }
 

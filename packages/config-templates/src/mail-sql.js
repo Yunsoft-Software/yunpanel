@@ -271,6 +271,7 @@ export function renderDovecotSqlConfig() {
 
 export function renderDovecotSqlAuthConfig() {
   return [
+    'shutdown_clients = no',
     'disable_plaintext_auth = yes',
     'auth_mechanisms = plain login',
     'auth_username_format = %Lu',

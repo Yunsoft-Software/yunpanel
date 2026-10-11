@@ -92,7 +92,7 @@ export function renderDovecotQuotaAuthConfig() {
 }
 
 export function renderDovecotQuotaMailConfig({ domains, postmasterAddress } = {}) {
-  return `${renderDovecotMailConfig({ domains, postmasterAddress })}\nmail_plugins = $mail_plugins quota\n\nprotocol imap {\n  mail_plugins = $mail_plugins imap_quota\n}\n\nplugin {\n  quota = maildir:User quota\n}\n`;
+  return `mail_plugins = $mail_plugins quota\n${renderDovecotMailConfig({ domains, postmasterAddress })}\nprotocol imap {\n  mail_plugins = $mail_plugins imap_quota\n}\n\nplugin {\n  quota = maildir:User quota\n}\n`;
 }
 
 function publicArtifact(path, content) {

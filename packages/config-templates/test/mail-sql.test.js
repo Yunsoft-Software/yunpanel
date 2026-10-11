@@ -19,6 +19,10 @@ import {
 
 const HASH = `$argon2id$v=19$m=65536,t=3,p=1$${Buffer.alloc(16, 31).toString('base64').replace(/=+$/, '')}$${Buffer.alloc(32, 32).toString('base64').replace(/=+$/, '')}`;
 
+test('SQL-backed mail retains sibling IMAP sessions across a configuration reload', () => {
+  assert.match(renderDovecotSqlAuthConfig(), /^shutdown_clients = no$/m);
+});
+
 function input(quotaBytes = 200 * 1024 * 1024) {
   return {
     domains: ['Example.com.'],

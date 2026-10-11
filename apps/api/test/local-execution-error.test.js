@@ -10,6 +10,13 @@ test('known diagnostics preserve the code, never the original message or attache
   assert.ok(!JSON.stringify(result).includes('PRIVATE'));
 });
 
+test('mail deletion and scoped revocation diagnostics retain authored reasons without native error details', () => {
+  for (const code of ['mail_data_delete_backup_stale', 'mail_data_delete_target_stale', 'mail_data_delete_failed', 'mail_data_delete_recovery_required', 'mailbox_access_check_failed', 'mailbox_access_unverified', 'mailbox_access_sessions_remaining']) {
+    const result = safeLocalOperationError({ code, message: 'PRIVATE_PASSWORD', stderr: '/private/path', stdout: 'PRIVATE_HASH' });
+    assert.equal(result.code, code); assert.equal(/PRIVATE|private\/path/.test(JSON.stringify(result)), false);
+  }
+});
+
 test('Node, environment and managed-service diagnostics use authored messages only', () => {
   for (const code of [
     'node_deployment_command_failed',

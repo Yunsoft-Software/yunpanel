@@ -29,6 +29,7 @@ import {
 } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { reloadCertificateNginx } from './certificate-nginx-reload.js';
+import { createMailboxAccessGuard } from '../../../packages/host-runtime/src/mailbox-access-guard.js';
 import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
 import { createLocalNodePassengerMigrationOperation } from './local-node-passenger-migration-operation.js';
 import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
@@ -175,6 +176,7 @@ export function createLocalHostOperations({
   mailDataBackupManager = null,
   mailDataRestoreManager = null,
   mailDataDeleteManager = null,
+  mailboxAccessGuard = createMailboxAccessGuard(),
   roundcubeConfigOperation = null,
   websiteCronOperation = null,
   websitePhpToolOperation = null,
@@ -466,8 +468,21 @@ export function createLocalHostOperations({
       error.code = 'mail_config_backup_unconfirmed';
       throw error;
     }
+    const disabled = bundle.disabledMailboxAddresses ?? [];
+    if (!Array.isArray(disabled) || disabled.some(value => typeof value !== 'string')
+      || new Set(disabled).size !== disabled.length || (disabled.length && typeof mailboxAccessGuard?.quiesce !== 'function')) {
+      throw Object.assign(new Error('Managed mailbox access scope could not be verified'), { code: 'mail_activation_access_hook_invalid' });
+    }
     const activation = await resolvedMailConfigActivator.activateConfiguration(bundle.preview, {
       transactionId: execution.jobId,
+      ...(disabled.length ? { verifyAccess: async () => {
+        for (const address of disabled) {
+          const proof = await mailboxAccessGuard.quiesce(address);
+          if (proof?.identity !== address || proof.accessDisabled !== true || proof.sessionsCleared !== true) {
+            throw Object.assign(new Error('Selected mailbox session revocation was not verified'), { code: 'mailbox_access_unverified' });
+          }
+        }
+      } } : {}),
     });
     if (!activation || activation.applied !== true || activation.sideEffects !== true
       || activation.previewSha256 !== payload.configurationSha256

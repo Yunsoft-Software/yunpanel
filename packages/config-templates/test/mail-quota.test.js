@@ -58,6 +58,7 @@ test('quota mail config loads quota enforcement and IMAP reporting plugins', () 
     postmasterAddress: 'owner@example.com',
   });
   assert.match(config, /^mail_plugins = \$mail_plugins quota$/m);
+  assert.ok(config.indexOf('mail_plugins = $mail_plugins quota') < config.indexOf('protocol lmtp'));
   assert.match(config, /^protocol imap \{$/m);
   assert.match(config, /^  mail_plugins = \$mail_plugins imap_quota$/m);
   assert.match(config, /^  quota = maildir:User quota$/m);

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import {
   enableManagedMailSubmission,
@@ -12,7 +13,7 @@ function phc(saltByte, hashByte) {
   return ['$argon2id', 'v=19', 'm=65536,t=3,p=1', Buffer.alloc(16, saltByte).toString('base64').replace(/=+$/, ''), Buffer.alloc(32, hashByte).toString('base64').replace(/=+$/, '')].join('$');
 }
 
-function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accounts = null, aliases = null } = {}) {
+function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accounts = null, aliases = null, mailboxes = null } = {}) {
   const candidate = { id: 'mail-domain-0001', domainName: 'example.com', managementMode: candidateMode, status: candidateStatus, revision: 1 };
   let privateAccounts = accounts ?? [{ address: 'owner@example.com', passwordHash: phc(1, 2) }];
   let enabledAliases = aliases ?? [];
@@ -22,7 +23,7 @@ function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accoun
       listMailDomains: async () => [candidate],
     },
     mailboxRegistry: {
-      listMailboxes: async () => privateAccounts.map((account, index) => ({ id: `mailbox-${index}`, mailDomainId: candidate.id, address: account.address, enabled: true })),
+      listMailboxes: async () => mailboxes ?? privateAccounts.map((account, index) => ({ id: `mailbox-${index}`, mailDomainId: candidate.id, address: account.address, enabled: true })),
       materializeEnabledAccounts: async () => privateAccounts.map((account) => ({ ...account })),
     },
     mailAliasRegistry: {
@@ -38,6 +39,49 @@ function fixture({ candidateStatus = 'disabled', candidateMode = 'local', accoun
     setAliases: (next) => { enabledAliases = next; },
   };
 }
+
+test('private mail apply revokes only disabled mailboxes in the selected parent domain', async () => {
+  const fx = fixture({ candidateStatus: 'enabled', mailboxes: [
+    { id: 'owner', mailDomainId: 'mail-domain-0001', address: 'owner@example.com', enabled: true },
+    { id: 'alpha', mailDomainId: 'mail-domain-0001', address: 'alpha@example.com', enabled: false },
+    { id: 'foreign', mailDomainId: 'other-domain', address: 'foreign@other.example.com', enabled: false },
+  ] });
+  const input = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'enabled' }, preview = await fx.service.previewTransition(input);
+  const bundle = await fx.service.materializeTransition(input, { expectedPreviewDigest: preview.previewDigest, expectedConfigurationSha256: preview.configuration.sha256 });
+  assert.deepEqual(bundle.disabledMailboxAddresses, ['alpha@example.com']);
+  assert.equal(Object.hasOwn(preview, 'disabledMailboxAddresses'), false);
+});
+
+test('disabling a parent revokes all of its mailboxes while excluding other domains', async () => {
+  const fx = fixture({ candidateStatus: 'enabled', mailboxes: [
+    { id: 'owner', mailDomainId: 'mail-domain-0001', address: 'owner@example.com', enabled: true },
+    { id: 'alpha', mailDomainId: 'mail-domain-0001', address: 'alpha@example.com', enabled: false },
+    { id: 'foreign', mailDomainId: 'other-domain', address: 'foreign@other.example.com', enabled: true },
+  ] });
+  const input = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
+  const preview = await fx.service.previewTransition(input);
+  const bundle = await fx.service.materializeTransition(input, {
+    expectedPreviewDigest: preview.previewDigest,
+    expectedConfigurationSha256: preview.configuration.sha256,
+  });
+  assert.deepEqual(bundle.disabledMailboxAddresses, ['alpha@example.com', 'owner@example.com']);
+});
+
+test('queued legacy disable requires a fresh SQL preview before private materialization', async () => {
+  const fx = fixture({ candidateStatus: 'enabled' });
+  const input = { mailDomainId: 'mail-domain-0001', expectedRevision: 1, status: 'disabled' };
+  const legacy = enableManagedMailSubmission(secureManagedMailPreview(previewManagedMailEmptyConfiguration()), []);
+  const identity = {
+    version: 1, operation: 'mail_configuration_apply', mailDomainId: input.mailDomainId,
+    expectedRevision: 1, currentStatus: 'enabled', desiredStatus: 'disabled',
+    domains: [], configurationSha256: legacy.sha256, blockers: [],
+  };
+  await assert.rejects(fx.service.materializeTransition(input, {
+    expectedPreviewDigest: createHash('sha256').update(JSON.stringify(identity)).digest('hex'),
+    expectedConfigurationSha256: legacy.sha256,
+  }), (error) => error instanceof MailConfigurationError
+    && error.code === 'mail_configuration_legacy_revocation_unsupported' && error.status === 409);
+});
 
 test('managed mail enable preview stays secret-free and does not invent a default mailbox', async () => {
   const enabled = fixture();

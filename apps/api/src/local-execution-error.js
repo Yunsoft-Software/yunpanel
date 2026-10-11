@@ -1,6 +1,14 @@
 // Public diagnostics must be authored here, not copied from child-process,
 // filesystem or application exceptions. Even an error.code may contain a secret.
 const messages = Object.freeze({
+  mail_data_delete_backup_stale: 'Mail data or its safe file metadata no longer matches the selected backup. Prepare a current verified backup before deleting.',
+  mail_data_delete_target_stale: 'Mail data changed after the deletion preview. Review the current mailbox before deleting.',
+  mail_data_delete_failed: 'Mail data deletion could not be confirmed. The verified backup is retained for recovery.',
+  mail_data_delete_recovery_required: 'An interrupted mail data deletion requires explicit recovery.',
+  mailbox_access_check_failed: 'Disabled mailbox access could not be verified. No mailbox data was authorized for deletion.',
+  mailbox_access_unverified: 'Selected mailbox access and session revocation could not be confirmed.',
+  mailbox_access_sessions_remaining: 'The selected mailbox still has an active session. Complete its scoped revocation before deleting.',
+  mail_configuration_legacy_revocation_unsupported: 'Prepare a current SQL-backed mail configuration preview before revoking mailbox sessions. The older queued configuration was not applied.',
   docker_compose_job_authorization_required: 'Docker işlemi için güncel panel veya kurulum yetkisi gerekli.',
   wordpress_download_failed: 'WordPress dosyaları indirilemedi; önceki site durumu korunuyor.',
   wordpress_configuration_failed: 'WordPress veritabanı bağlantısı hazırlanamadı; önceki site durumu korunuyor.',

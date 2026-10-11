@@ -401,6 +401,18 @@ test('activates staged mail config with compiled maps/sieve, guarded submission 
   assert.deepEqual(reloads.map(([, args]) => args[1]), ['rspamd', 'dovecot', 'postfix']);
 }));
 
+test('scoped mailbox revocation runs after native reload and before acceptance; failure restores the prior configuration', async () => withTempDirectory(async root => {
+  const context = await prepare({ root, sqlite: true }); let called = false;
+  await assert.rejects(context.activator.activateConfiguration(context.preview, { transactionId: TRANSACTION_ID,
+    verifyAccess: async () => {
+      called = true; assert.equal(context.calls.some(([file,args]) => file === '/usr/bin/systemctl' && args[0] === 'reload'), true);
+      throw new Error('private scoped guard failure');
+    } }), { code: 'mail_config_activation_failed' });
+  assert.equal(called, true);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMainCfPath)), context.originalMainCf);
+  assert.deepEqual(await readFile(context.mapped.mapPath(mailConfigBackupInternals.postfixMasterCfPath)), context.originalMasterCf);
+}));
+
 test('activates SQLite mail lookup state, verifies isolated ownership and retires legacy password/hash files', async () => withTempDirectory(async (root) => {
   const context = await prepare({ root, sqlite: true });
   const result = await context.activator.activateConfiguration(context.preview, {
