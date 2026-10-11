@@ -216,7 +216,7 @@ export function createWebsiteRemovalOperationRegistry({
     }
 
     // 6. File cleanup (data, apps directory)
-    add('file_cleanup', preview.website.applicationId ?? preview.website.id);
+    if (!preview.plan.managedComposeBinding) add('file_cleanup', preview.website.applicationId ?? preview.website.id);
 
     // 7. Unix identity cleanup
     if (preview.website.systemUser) {

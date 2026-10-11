@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { normalizeManagedComposeWebsiteBinding } from './managed-compose-website-binding.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
@@ -50,6 +51,11 @@ function websiteSnapshot(website) {
       400,
     );
   }
+  const managedComposeBinding = normalizeManagedComposeWebsiteBinding(website.managedComposeBinding ?? null, { persisted: true });
+  if (managedComposeBinding && (website.applicationId || website.unixUser || website.systemUser
+    || website.runtimeType !== 'docker' || !Number.isSafeInteger(website.revision) || website.revision < 1)) {
+    throw new WebsiteRemovalPlanError('website_removal_compose_identity_invalid', 'Managed Compose Website identity is invalid', 409);
+  }
   return Object.freeze({
     id: website.id,
     name: typeof website.name === 'string' ? website.name : website.id,
@@ -62,6 +68,7 @@ function websiteSnapshot(website) {
     desiredRevision: Number.isSafeInteger(website.desiredRevision) ? website.desiredRevision : 1,
     stagedRevision: Number.isSafeInteger(website.stagedRevision) ? website.stagedRevision : 1,
     appliedRevision: Number.isSafeInteger(website.appliedRevision) ? website.appliedRevision : 1,
+    ...(managedComposeBinding ? { managedComposeBinding, revision: website.revision } : {}),
   });
 }
 
@@ -222,6 +229,10 @@ function dependencyPlan(dependencies, currentWebsite, application = null, applic
   });
 
   const activeJobs = normalizedIds(dependencies.activeJobs ?? [], 'job');
+  if (currentWebsite.managedComposeBinding && JSON.stringify(currentWebsite.managedComposeBinding)
+    !== JSON.stringify(normalizeManagedComposeWebsiteBinding(dependencies.managedComposeBinding ?? null, { persisted: true }))) {
+    throw new WebsiteRemovalPlanError('website_removal_compose_identity_invalid', 'Managed Compose removal evidence does not match the Website', 409);
+  }
 
   if (currentWebsite.applicationId !== null) {
     if (!application || typeof application !== 'object' || Array.isArray(application)
@@ -246,6 +257,11 @@ function dependencyPlan(dependencies, currentWebsite, application = null, applic
     systemUser: currentWebsite.systemUser,
     activeJobIds: activeJobs,
     additional,
+    ...(currentWebsite.managedComposeBinding ? {
+      managedComposeBinding: currentWebsite.managedComposeBinding,
+      websiteRevision: currentWebsite.revision,
+      retainedDockerProjectId: currentWebsite.managedComposeBinding.projectId,
+    } : {}),
   });
 }
 
@@ -268,6 +284,8 @@ const ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS = new Set([
 function hardBlockers(blockers, plan) {
   const hard = [];
   for (const blocker of blockers) {
+    // This lifecycle retires the Website reference, never the shared project.
+    if (blocker.code === 'managed_compose_binding_present' && plan.managedComposeBinding) continue;
     if (blocker.code === 'active_jobs_present' || blocker.code === 'dependency_inventory_unavailable') {
       hard.push(blocker.code);
       continue;

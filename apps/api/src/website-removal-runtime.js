@@ -264,7 +264,7 @@ export function createWebsiteRemovalRuntime({
     const plan = current?.plan;
     const missing = [];
     const require = (code, ...methods) => { if (methods.some((method) => typeof method !== 'function')) missing.push(code); };
-    require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
+    if (!plan?.managedComposeBinding) require('file_cleanup_unavailable', fileCleanupHandler, fileCleanupInspector);
     require('metadata_cleanup_unavailable', websiteRegistry?.getWebsite, websiteRegistry?.finalizeWebsiteRemoval, domainRegistry?.listDomains);
     if (plan?.applicationId) require('application_cleanup_unavailable',
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
@@ -549,6 +549,16 @@ export function createWebsiteRemovalRuntime({
     op = await loadOperation(operationId);
 
     try {
+      if (op.plan?.managedComposeBinding) {
+        const current = await websiteRegistry.getWebsite(op.websiteId);
+        // Metadata may already be absent after a successful delete whose receipt
+        // was interrupted. All earlier steps still require the pinned reference.
+        if (current === null ? step.kind !== 'metadata_finalization' : current.serverId !== op.serverId
+          || current.applicationId !== null || current.revision !== op.plan.websiteRevision
+          || JSON.stringify(current.managedComposeBinding) !== JSON.stringify(op.plan.managedComposeBinding)) {
+          throw new WebsiteRemovalRuntimeError('website_removal_state_mismatch', 'Managed Compose Website binding changed during removal', 409);
+        }
+      }
       if (['file_cleanup', 'unix_identity_cleanup', 'metadata_finalization'].includes(step.kind)) {
         if (typeof domainRegistry?.listDomains !== 'function') throw new WebsiteRemovalRuntimeError('website_removal_domain_inventory_unavailable', 'Bound Domain inventory is unavailable', 503);
         const domains = await domainRegistry.listDomains();
@@ -781,6 +791,7 @@ export function createWebsiteRemovalRuntime({
             : null;
           op = await registry.succeedStep(op.id, step.id, {
             finalized: true,
+            ...(op.plan?.retainedDockerProjectId ? { retainedDockerProjectId: op.plan.retainedDockerProjectId } : {}),
             ...(hostingAllocation ? { hostingAllocation } : {}),
           });
           break;
