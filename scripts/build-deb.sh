@@ -139,6 +139,16 @@ chmod 0644 "$package_root/usr/share/yunpanel/elfinder/VERSION"
 rm -rf -- "$package_root/usr/lib/yunpanel/apps/web/dist" "$package_root/usr/lib/yunpanel/apps/web/test"
 find "$package_root/usr/lib/yunpanel" -type d -name test -prune -exec rm -rf -- {} +
 
+# The unprivileged web service needs to read packaged code and static assets.
+# cp -a preserves source modes, including directories and generated files made
+# under umask 077. Normalize only these immutable payloads; private runtime
+# configuration and state remain outside the package and retain their modes.
+for payload in "$package_root/usr/lib/yunpanel" "$package_root/usr/share/yunpanel"; do
+  find "$payload" -type d -exec chmod 0755 {} +
+  find "$payload" -type f -perm /111 -exec chmod 0755 {} +
+  find "$payload" -type f ! -perm /111 -exec chmod 0644 {} +
+done
+
 install -d "$package_directory"
 package_path="$package_directory/yunpanel_${version}_${architecture}.deb"
 dpkg-deb --build --root-owner-group "$package_root" "$package_path" >/dev/null

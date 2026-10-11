@@ -1,6 +1,19 @@
 #!/bin/sh
 set -eu
 
+# dpkg preserves modes of existing directories during upgrades. Repair only
+# directories owned by this package's immutable code/assets payload; generated
+# tool directories and private configuration/state are not in this file list.
+dpkg-query -L yunpanel | while IFS= read -r payload_path; do
+  case "$payload_path" in
+    /usr/lib/yunpanel|/usr/lib/yunpanel/*|/usr/share/yunpanel|/usr/share/yunpanel/*)
+      if [ -d "$payload_path" ] && [ ! -L "$payload_path" ]; then
+        chmod 0755 "$payload_path"
+      fi
+      ;;
+  esac
+done
+
 if ! getent group yunpanel >/dev/null; then
   addgroup --system yunpanel >/dev/null
 fi
