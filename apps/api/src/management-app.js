@@ -1430,6 +1430,9 @@ export function createApp(allOptions = {}) {
     ) {
       return response.status(error.status).json({ error: { code: error.code, message: error.message } });
     }
+    if (error instanceof DurableJobRegistryError) {
+      return response.status(503).json({ error: { code: error.code, message: error.message } });
+    }
     const invalidJson = error instanceof SyntaxError && error.status === 400;
     const bodyTooLarge = error?.type === 'entity.too.large' || error?.status === 413;
     if (!invalidJson && !bodyTooLarge) {

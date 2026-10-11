@@ -66,6 +66,7 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
       const exported = await run(websiteId, 'db', ['export', '-', `--tables=${plan.tables.join(',')}`, '--single-transaction', '--skip-lock-tables', '--skip-add-drop-table', '--skip-triggers', '--quiet']);
       const sql = exported.stdout;
       if (!sql?.trim() || Buffer.byteLength(sql) > 16 * 1024 * 1024 || sql.includes('\0')) throw fail('wordpress_clone_sql_invalid', 'Klon SQL aktarımı doğrulanamadı');
+      let failurePhase = 'wordpress_clone_files_failed';
       try {
         for (const entry of plan.files) {
           await authorize();
@@ -82,6 +83,7 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
         const binding = await databaseBindingRegistry.getBinding(plan.bindingId);
         const credential = await databaseCredentialRegistry.getForBinding(plan.bindingId);
         if (binding?.revision !== plan.bindingRevision || credential?.id !== plan.credentialId || credential?.revision !== plan.credentialRevision) throw fail('wordpress_clone_preview_stale', 'Hedef veritabanı erişimi değişti');
+        failurePhase = 'wordpress_clone_database_failed';
         const secret = await databaseCredentialRegistry.materializeCredential(credential.id, { expectedRevision: credential.revision });
         await run(plan.targetWebsiteId, 'config', ['create', `--dbname=${binding.databaseName}`, `--dbuser=${credential.username}`, '--dbhost=localhost', `--dbprefix=${plan.prefix}`, '--prompt=dbpass'], secret.password + '\n');
         await authorize();
@@ -94,6 +96,7 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
           await run(plan.targetWebsiteId, 'config', ['set', 'WP_ENVIRONMENT_TYPE', 'staging']);
           await run(plan.targetWebsiteId, 'config', ['set', 'DISABLE_WP_CRON', 'true', '--raw']);
         }
+        failurePhase = 'wordpress_clone_verification_failed';
         await run(plan.targetWebsiteId, 'core', ['is-installed']);
         await run(plan.targetWebsiteId, 'db', ['check']);
         const target = await context(plan.targetWebsiteId);
@@ -106,7 +109,7 @@ export function createWordPressCloneService({ context, config, run, actor, siteF
       } catch (error) {
         // Do not destroy partially imported data or replay the import after an
         // ambiguous interruption. The durable job preserves the exact target.
-        throw fail(error.code ?? 'wordpress_clone_partial', 'Klon tamamlanamadı. Kaynak korunuyor; hedefteki kısmi dosya/veri ve aynı işlem kaydı incelenmelidir.', error.status ?? 502);
+        throw fail(error instanceof WebsitePhpToolsServiceError ? error.code : failurePhase, 'Klon tamamlanamadı. Kaynak korunuyor; hedefteki kısmi dosya/veri ve aynı işlem kaydı incelenmelidir.', error.status ?? 502);
       }
     });
   }
