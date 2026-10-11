@@ -316,7 +316,7 @@ test('system watchdog: detects stalled jobs exceeding execution timeout', async 
 
   const report = await service.inspect({ serverId: TEST_SERVER_ID });
 
-  assert.equal(report.status, 'unhealthy');
+  assert.equal(report.status, 'degraded');
   assert.equal(report.summary.queueHealthy, false);
   assert.equal(report.queue.stalledCount, 1);
   assert.equal(report.queue.stalledJobs[0].id, 'job-stalled-99');

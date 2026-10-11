@@ -253,9 +253,9 @@ export function createSystemWatchdogService({
             type: 'job',
             targetId: job.id,
             code: 'job_stalled',
-            critical: true,
+            critical: false,
             job: stalledInfo,
-            message: `Job ${job.id} (${job.operation}) is stalled in running state for ${Math.round(durationMs / 1000)}s`,
+            message: `Job ${job.id} (${job.operation}) has been running for ${Math.round(durationMs / 1000)}s; execution needs inspection`,
           });
         }
       }

@@ -1027,16 +1027,15 @@ test('Staging E2E: System services stability, watchdog failure detection, auto-r
   const report1 = await watchdog.inspect({ serverId: SERVER_ID });
   assert.equal(report1.summary.servicesHealthy, true);
   assert.equal(report1.queue.stalledCount, 1);
-  assert.equal(report1.status, 'unhealthy');
+  assert.equal(report1.status, 'degraded');
 
-  // 2. Check and auto-recovery of stalled job
+  // 2. Long-running work remains active and cannot release its guards on elapsed time.
   const checkResult = await watchdog.check({ serverId: SERVER_ID });
-  assert.equal(checkResult.lastRecoveryResults.recovered.length, 1);
-  assert.equal(checkResult.lastRecoveryResults.recovered[0].targetId, 'stalled-migration-job-1');
-  assert.equal(checkResult.lastRecoveryResults.recovered[0].action, 'fail_stalled');
-  assert.equal(checkResult.lastRecoveryResults.recovered[0].status, 'succeeded');
-
-  assert.equal(jobs[0].status, 'failed');
+  assert.equal(checkResult.lastRecoveryResults.recovered.length, 0);
+  assert.equal(checkResult.lastRecoveryResults.suppressed[0].targetId, 'stalled-migration-job-1');
+  assert.equal(checkResult.lastRecoveryResults.suppressed[0].action, 'inspect_running');
+  assert.equal(checkResult.lastRecoveryResults.suppressed[0].status, 'requires_inspection');
+  assert.equal(jobs[0].status, 'running');
 
   // 3. Service failure simulation: MariaDB crashes
   currentServices[1].active = false;

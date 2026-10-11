@@ -758,7 +758,7 @@ test('Service Monitoring Integration: Multi-subsystem health telemetry aggregate
   assert.ok(report.incidents.some((i) => i.code === 'daemon_unhealthy' && i.targetId === 'renewalDaemon'));
 });
 
-test('Service Auto-Recovery Integration: Remediates inactive service, terminates stalled jobs, and tracks recovery events', async () => {
+test('Service Auto-Recovery Integration: Remediates inactive service and preserves long-running jobs with inspection events', async () => {
   const serviceMock = createMockServices();
   // Start with nginx inactive
   serviceMock.setServices([
@@ -798,8 +798,8 @@ test('Service Auto-Recovery Integration: Remediates inactive service, terminates
   const report = await watchdog.check({ serverId: TEST_SERVER });
 
   // Verified post-recovery status
-  assert.equal(report.status, 'healthy');
-  assert.equal(report.lastRecoveryResults.recovered.length, 2);
+  assert.equal(report.status, 'degraded');
+  assert.equal(report.lastRecoveryResults.recovered.length, 1);
 
   // 1. Service recovered by restart
   const serviceRecovery = report.lastRecoveryResults.recovered.find((r) => r.targetType === 'service');
@@ -808,17 +808,12 @@ test('Service Auto-Recovery Integration: Remediates inactive service, terminates
   assert.equal(serviceRecovery.action, 'restart');
   assert.equal(serviceRecovery.status, 'succeeded');
 
-  // 2. Job recovered by failing stalled job
-  const jobRecovery = report.lastRecoveryResults.recovered.find((r) => r.targetType === 'job');
-  assert.ok(jobRecovery);
-  assert.equal(jobRecovery.targetId, 'stalled-job-2');
-  assert.equal(jobRecovery.action, 'fail_stalled');
-  assert.equal(jobRecovery.status, 'succeeded');
-
-  // Verify completions recorded failure code
-  const completions = jobMock.getCompletions();
-  assert.equal(completions.length, 1);
-  assert.equal(completions[0].error.code, 'job_stalled_timeout');
+  // A timer cannot prove that the underlying host mutation stopped.
+  const jobNotice = report.lastRecoveryResults.suppressed.find(r => r.targetType === 'job');
+  assert.ok(jobNotice);assert.equal(jobNotice.targetId,'stalled-job-2');
+  assert.equal(jobNotice.action,'inspect_running');assert.equal(jobNotice.status,'requires_inspection');
+  assert.equal(jobMock.getCompletions().length,0);
+  assert.equal((await jobMock.listJobs())[0].status,'running');
 });
 
 test('Service Auto-Recovery Integration: Flapping protection suppresses excessive restarts within window', async () => {
