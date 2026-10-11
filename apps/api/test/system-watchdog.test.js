@@ -456,7 +456,7 @@ test('system watchdog auto-recovery: safely restarts inactive service', async ()
   assert.deepEqual(calls[0], { serviceId: 'nginx', action: 'restart' });
 });
 
-test('system watchdog auto-recovery: safely terminates stalled job to release deadlock', async () => {
+test('system watchdog preserves long-running work instead of releasing its guards on a timer', async () => {
   const serviceMock = createMockServiceManager();
   let time = 1_700_000_000_000;
   const startedAt = new Date(time - 400_000).toISOString();
@@ -484,17 +484,14 @@ test('system watchdog auto-recovery: safely terminates stalled job to release de
 
   const report = await service.check({ serverId: TEST_SERVER_ID });
 
-  assert.equal(report.lastRecoveryResults.recovered.length, 1);
-  assert.equal(report.lastRecoveryResults.recovered[0].targetId, 'job-locked-42');
-  assert.equal(report.lastRecoveryResults.recovered[0].action, 'fail_stalled');
-  assert.equal(report.lastRecoveryResults.recovered[0].status, 'succeeded');
-
-  // Verify job was completed with failure
-  const completions = jobMock.getCompletions();
-  assert.equal(completions.length, 1);
-  assert.equal(completions[0].jobId, 'job-locked-42');
-  assert.equal(completions[0].status, 'failed');
-  assert.equal(completions[0].error.code, 'job_stalled_timeout');
+  assert.equal(report.lastRecoveryResults.recovered.length, 0);
+  assert.equal(report.lastRecoveryResults.suppressed[0].targetId, 'job-locked-42');
+  assert.equal(report.lastRecoveryResults.suppressed[0].action, 'inspect_running');
+  assert.equal(report.lastRecoveryResults.suppressed[0].status, 'requires_inspection');
+  assert.equal(jobMock.getCompletions().length, 0);
+  assert.equal(jobMock.getJobs()[0].status, 'running');
+  await service.check({ serverId: TEST_SERVER_ID });
+  assert.equal(jobMock.getCompletions().length, 0);
 });
 
 test('system watchdog auto-recovery: flapping protection suppresses repeated restarts within window', async () => {
@@ -879,4 +876,12 @@ test('watchdog HTTP routes: role authorization restricts check and recover', asy
   } finally {
     customerServer.close();
   }
+});
+
+test('manual watchdog recovery cannot pretend a running host operation was terminated', async () => {
+ const jobs=createMockJobRegistry({initialJobs:[{id:'job-still-active',serverId:TEST_SERVER_ID,status:'running'}]});
+ const service=createSystemWatchdogService({jobRegistry:jobs,inspectServices:createMockServiceManager().inspectServices});
+ await assert.rejects(service.recoverComponent({serverId:TEST_SERVER_ID,targetType:'job',targetId:'job-still-active',confirmation:'recover:job:job-still-active'}),
+  error=>error.code==='watchdog_job_recovery_requires_host_inspection'&&error.status===409);
+ assert.equal(jobs.getCompletions().length,0);assert.equal(jobs.getJobs()[0].status,'running');
 });

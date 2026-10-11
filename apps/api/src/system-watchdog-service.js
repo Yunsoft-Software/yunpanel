@@ -385,7 +385,7 @@ export function createSystemWatchdogService({
       incidents: allIncidents,
       recovery: {
         autoRecoveryEnabled: autoRecoveryActive,
-        totalRecoveries: recoveryLog.length,
+        totalRecoveries: recoveryLog.filter(event => event.status === 'succeeded').length,
         recentEvents: recoveryLog.slice(-20),
       },
     };
@@ -443,54 +443,19 @@ export function createSystemWatchdogService({
         }
       }
 
-      // 2. Stalled Jobs
+      // Elapsed time does not prove that a host mutation stopped. Completing
+      // the job here releases guards while its process can still copy/import.
+      // Keep the durable job running; recovery requires physical investigation.
       if (incident.type === 'job' && incident.code === 'job_stalled') {
         const jobId = incident.targetId;
         const targetKey = `job:${jobId}`;
-
-        if (isFlapping(targetKey, currentTime)) {
-          const evt = logRecoveryEvent({
-            targetType: 'job',
-            targetId: jobId,
-            action: 'fail_stalled',
-            status: 'suppressed_flapping',
-            reason: 'Job recovery attempt already recorded',
-          });
-          suppressed.push(evt);
-          continue;
-        }
-
-        recordRecoveryAttempt(targetKey, currentTime);
-        try {
-          if (jobRegistry && typeof jobRegistry.complete === 'function') {
-            await jobRegistry.complete({
-              serverId: incident.job?.serverId ?? serverId,
-              jobId,
-              status: 'failed',
-              error: {
-                code: 'job_stalled_timeout',
-                message: `Job exceeded execution timeout of ${Math.round((incident.job?.runningDurationMs ?? stalledJobTimeoutMs) / 1000)}s; cancelled by watchdog`,
-              },
-            });
-            const evt = logRecoveryEvent({
-              targetType: 'job',
-              targetId: jobId,
-              action: 'fail_stalled',
-              status: 'succeeded',
-              reason: 'Safely completed stalled job as failed to release queue deadlock',
-            });
-            recovered.push(evt);
-          }
-        } catch (err) {
-          const evt = logRecoveryEvent({
-            targetType: 'job',
-            targetId: jobId,
-            action: 'fail_stalled',
-            status: 'failed',
-            reason: 'Failed to complete stalled job',
-            error: err,
-          });
-          errors.push(evt);
+        if (pruneOldRecoveryAttempts(targetKey, currentTime).length === 0) {
+          recordRecoveryAttempt(targetKey, currentTime);
+          suppressed.push(logRecoveryEvent({
+            targetType: 'job', targetId: jobId, action: 'inspect_running',
+            status: 'requires_inspection',
+            reason: 'Long-running host work is preserved; inspect execution and use durable recovery before changing job state',
+          }));
         }
       }
 
@@ -655,37 +620,8 @@ export function createSystemWatchdogService({
         throw new SystemWatchdogError('service_restart_failed', `Failed to restart service ${targetId}: ${err.message}`, 500);
       }
     } else if (targetType === 'job') {
-      if (!jobRegistry || typeof jobRegistry.complete !== 'function') {
-        throw new SystemWatchdogError('job_registry_unavailable', 'Job registry is not available for recovery', 500);
-      }
-      try {
-        result = await jobRegistry.complete({
-          serverId,
-          jobId: targetId,
-          status: 'failed',
-          error: {
-            code: 'job_manual_recovery_failed',
-            message: 'Job was manually terminated by administrator via watchdog recovery API',
-          },
-        });
-        logRecoveryEvent({
-          targetType: 'job',
-          targetId,
-          action: 'fail_stalled',
-          status: 'succeeded',
-          reason: 'Manual on-demand recovery via API',
-        });
-      } catch (err) {
-        logRecoveryEvent({
-          targetType: 'job',
-          targetId,
-          action: 'fail_stalled',
-          status: 'failed',
-          reason: 'Manual on-demand job recovery failed',
-          error: err,
-        });
-        throw new SystemWatchdogError('job_recovery_failed', `Failed to terminate job ${targetId}: ${err.message}`, 500);
-      }
+      throw new SystemWatchdogError('watchdog_job_recovery_requires_host_inspection',
+        'Çalışan iş zaman aşımıyla sonlandırılamaz. Sunucudaki işlemi inceleyin ve tüketicileri durdurduktan sonra mevcut kalıcı iş kurtarma aracını kullanın.', 409);
     } else if (targetType === 'executor') {
       const executor = (typeof localJobExecutor === 'function' ? localJobExecutor() : localJobExecutor)
         || (typeof localRuntime === 'function' ? localRuntime() : localRuntime);
