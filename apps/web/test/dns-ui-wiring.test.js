@@ -14,7 +14,7 @@ test('site workspace exposes real authoritative DNS management instead of a plac
   assert.match(detail, /import DnsPanel from '\.\/DnsPanel\.jsx'/);
   assert.match(detail, /tab === 'dns'/);
   assert.match(detail, /<DnsPanel key=\{domain\.id\}/);
-  assert.match(panel, /rootDnsDomain\(domain, domains\)/);
+  assert.match(panel, /dnsZoneContextKey\(domain, domains\)/);
   assert.match(panel, /Managed kayıtlar bu yoldan silinemez/);
   assert.match(panel, /previewDnsReapply/);
   assert.match(panel, /previewDnssec/);

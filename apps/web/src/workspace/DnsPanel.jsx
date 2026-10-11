@@ -25,8 +25,8 @@ import {
   dnssecPresentation,
   operationPresentation,
   relativeDnsOwner,
-  rootDnsDomain,
   resolveDnsZoneScope,
+  dnsZoneContextKey,
 } from './dns-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
 import SecondaryDnsStatusPanel from './SecondaryDnsStatusPanel.jsx';
@@ -147,8 +147,11 @@ function OperationsPanel({ reapply, dnssec }) {
 }
 
 export default function DnsPanel({ domain, domains, canManage }) {
-  const parentRoot = rootDnsDomain(domain, domains);
+  const contextKey = dnsZoneContextKey(domain, domains);
+  const context = useRef({ domain, domains });
+  context.current = { domain, domains };
   const [scope, setScope] = useState(null);
+  const scopeRef = useRef(null);
   const refreshGeneration = useRef(0);
   const root = scope?.domainId === domain.id ? scope.root : null;
   const ownChild = scope?.domainId === domain.id && scope.ownChild;
@@ -177,16 +180,19 @@ export default function DnsPanel({ domain, domains, canManage }) {
   const refresh = useCallback(async () => {
     const generation = ++refreshGeneration.current;
     const current = () => refreshGeneration.current === generation;
-    setLoading(true); setError(null); setScope(null); setZone(null);
-    setSecondary(null); setReapply(null); setDnssec(null);
-    setReapplyOperations([]); setDnssecOperations([]);
-    setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
+    setLoading(true); setError(null);
     try {
-      const resolved = await resolveDnsZoneScope(domain, domains, getDnsZone);
-      if (!current() || !resolved) return;
+      const selectedContext = context.current;
+      const resolved = await resolveDnsZoneScope(selectedContext.domain, selectedContext.domains, getDnsZone);
+      if (!current()) return;
+      if (!resolved) { setScope(null); setZone(null); scopeRef.current = null; return; }
       const selected = resolved.root;
-      setScope({ ...resolved, domainId: domain.id });
-      if (selected.id !== domain.id) {
+      if (scopeRef.current && (scopeRef.current.root.id !== selected.id || scopeRef.current.ownChild !== resolved.ownChild)) {
+        setZone(null); setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
+      }
+      scopeRef.current = { ...resolved, domainId: selectedContext.domain.id };
+      setScope(scopeRef.current);
+      if (selected.id !== selectedContext.domain.id) {
         const inheritedZone = await getDnsZone(selected.id);
         if (inheritedZone?.domainId !== selected.id || inheritedZone.zoneName !== selected.primaryDomain) {
           throw new Error('DNS bölgesi üst alan adıyla eşleşmiyor.');
@@ -211,13 +217,21 @@ export default function DnsPanel({ domain, domains, canManage }) {
         if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
       }
     } catch (failure) {
-      if (current() && failure.name !== 'AbortError' && !isZoneMissing(failure)) setError(failure.message);
+      if (current()) {
+        scopeRef.current = null; setScope(null); setZone(null);
+        setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
+        if (failure.name !== 'AbortError' && !isZoneMissing(failure)) setError(failure.message);
+      }
     } finally {
       if (current()) setLoading(false);
     }
-  }, [domain.id, domain.primaryDomain, domain.parentDomainId, parentRoot?.id, domains]);
+  }, [contextKey]);
 
   useEffect(() => {
+    scopeRef.current = null; setScope(null); setZone(null);
+    setSecondary(null); setReapply(null); setDnssec(null);
+    setReapplyOperations([]); setDnssecOperations([]);
+    setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
     void refresh();
     return () => { refreshGeneration.current += 1; };
   }, [refresh]);

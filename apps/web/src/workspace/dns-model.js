@@ -34,6 +34,11 @@ export async function resolveDnsZoneScope(domain, domains, getZone) {
   return root ? { root, ownChild: false, zone: null } : null;
 }
 
+export function dnsZoneContextKey(domain, domains) {
+  const root = rootDnsDomain(domain, domains);
+  return JSON.stringify([domain?.id, domain?.primaryDomain, domain?.parentDomainId ?? null, root?.id, root?.primaryDomain]);
+}
+
 export function relativeDnsOwner(owner, zoneName) {
   const normalizedOwner = String(owner ?? '').replace(/\.$/, '').toLowerCase();
   const normalizedZone = String(zoneName ?? '').replace(/\.$/, '').toLowerCase();

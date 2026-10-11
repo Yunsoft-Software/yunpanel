@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { resolveDnsZoneScope } from '../src/workspace/dns-model.js';
+import { resolveDnsZoneScope, dnsZoneContextKey } from '../src/workspace/dns-model.js';
 import {
   dnsRecordDeletePayload,
   dnsRecordDraft,
@@ -15,6 +15,15 @@ import {
 const root = { id: 'root', primaryDomain: 'example.com', parentDomainId: null };
 const child = { id: 'child', primaryDomain: 'api.example.com', parentDomainId: 'root' };
 const grandchild = { id: 'grandchild', primaryDomain: 'v2.api.example.com', parentDomainId: 'child' };
+
+test('DNS context identity survives background collection copies but changes with actual scope', () => {
+  const original = dnsZoneContextKey(child, [root, child]);
+  assert.equal(dnsZoneContextKey({ ...child }, [{ ...root }, { ...child }]), original);
+  assert.equal(dnsZoneContextKey(child, [{ ...root, desiredRevision: 42 }, child]), original);
+  assert.notEqual(dnsZoneContextKey(child, [child]), original);
+  assert.notEqual(dnsZoneContextKey({ ...child, primaryDomain: 'other.example.com' }, [root, child]), original);
+  assert.notEqual(dnsZoneContextKey(child, [{ ...root, primaryDomain: 'new.example.com' }, child]), original);
+});
 
 test('an owned child DNS zone is selected even when its parent is outside the user dataset', async () => {
   const queried = [];
