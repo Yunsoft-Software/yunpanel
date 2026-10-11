@@ -25,7 +25,7 @@ export function createLocalPassengerRestartOperation({applicationRegistry,websit
    const status=await applicationEnvironmentRegistry.environmentStatus(application.id);
    if(status.savedRevision!==payload.environmentRevision)throw fail('passenger_restart_environment_changed');
    const values=await applicationEnvironmentRegistry.materialize(application.id,{expectedRevision:payload.environmentRevision});
-   const domains=(await domainRegistry.listDomains()).filter(d=>d.websiteId===website.id&&d.serverId===website.serverId&&!d.parentDomainId);
+   const domains=(await domainRegistry.listDomains()).filter(d=>d.websiteId===website.id&&d.serverId===website.serverId);
    const domain=domains.find(d=>d.primaryDomain===website.name)??(domains.length===1?domains[0]:null);
    if(!domain)throw fail('passenger_restart_domain_scope_invalid');
    const verifyHealth=async()=>(await healthInspector.inspect({primaryDomain:domain.primaryDomain,healthPath:spec.runtime.healthPath,timeoutSeconds:spec.runtime.healthTimeoutSeconds})).satisfied===true;

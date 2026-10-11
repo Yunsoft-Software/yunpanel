@@ -4,7 +4,7 @@ import {randomUUID} from 'node:crypto';
 import {normalizeNodeRuntimeConfig} from '@yunpanel/shared';
 import {createLocalPassengerRestartOperation} from '../src/local-passenger-restart-operation.js';
 
-function fixture(){
+function fixture({parentDomainId=null}={}){
  const app={id:randomUUID(),serverId:randomUUID(),type:'node',runtimeAdapter:'passenger',currentReleaseId:randomUUID(),
   activeRuntime:normalizeNodeRuntimeConfig({nodeMajor:24,startMode:'node',entryFile:'index.js',healthPath:'/'},{requirePort:false})};
  const website={id:randomUUID(),applicationId:app.id,serverId:app.serverId,runtimeType:'node',unixUser:'yunapp-123456abcdef',name:'owned.example.test'};
@@ -15,7 +15,7 @@ function fixture(){
   restoreEnvironment:async()=>{restored++;return{verified:true};},
   inspectAppliedPassengerEnvironment:async input=>({verified:true,applicationId:app.id,releaseId:app.currentReleaseId,environmentRevision:input.environmentRevision,processes:1})};
  const operation=createLocalPassengerRestartOperation({applicationRegistry:{getApplication:async()=>app},websiteRegistry:{listWebsites:async()=>websites},
-  domainRegistry:{listDomains:async()=>[{id:randomUUID(),websiteId:website.id,serverId:app.serverId,primaryDomain:website.name,parentDomainId:null}]},
+  domainRegistry:{listDomains:async()=>[{id:randomUUID(),websiteId:website.id,serverId:app.serverId,primaryDomain:website.name,parentDomainId}]},
   applicationEnvironmentRegistry:{environmentStatus:async()=>({savedRevision:revision,...appliedMetadata}),materialize:async(id,options)=>{assert.equal(id,app.id);assert.equal(options.expectedRevision,revision);return{OWNED_PROOF:'controlled-value'};},
    markApplied:async input=>{assert.equal(input.applicationId,app.id);if(markFailure)throw Object.assign(new Error('controlled failure'),{code:'store_write_failed'});marked++;}},
   siteMutationLock:{withSiteLock:async(scope,run)=>{assert.equal(scope.websiteId,website.id);return run();}},runtimeManager,
@@ -54,4 +54,9 @@ test('Passenger recovery rejects unapplied revisions, foreign releases and missi
   await assert.rejects(f.operation.inspectRecovery(f.payload,f.execution),{code:'passenger_restart_applied_state_unverified'});
   assert.equal(f.applied,0);assert.equal(f.restored,0);assert.equal(f.marked,0);
  }
+});
+
+test('a dedicated Node Website on a child domain can restart using its own domain without inheriting the parent runtime',async()=>{
+ const f=fixture({parentDomainId:randomUUID()});const result=await f.operation.execute(f.payload,f.execution);
+ assert.equal(result.restarted,true);assert.equal(f.marked,1);assert.equal(result.applicationId,f.app.id);
 });
