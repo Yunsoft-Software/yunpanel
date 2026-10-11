@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -143,4 +143,31 @@ test('independent API and worker process locks serialize mutations and handle lo
     sharedLog.push('worker-recovered-after-crash');
   });
   assert.deepEqual(sharedLog, ['api-write-1', 'worker-write-1', 'worker-recovered-after-crash']);
+});
+
+test('nested calls share only a live verified async transaction, including another registry lock instance', async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'yp-reentrant-store-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const filePath=path.join(root,'store.json'),first=createProcessStoreLock({filePath,waitMs:100}),second=createProcessStoreLock({filePath,waitMs:100});
+ const result=await first.withLock(()=>second.withLock(async()=> 'nested'));
+ assert.equal(result,'nested');
+ await assert.rejects(readFile(first.lockPath),e=>e.code==='ENOENT');
+});
+
+test('a transaction token altered during nested entry is rejected and the foreign lock is retained',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'yp-lock-token-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const lock=createProcessStoreLock({filePath:path.join(root,'store.json'),waitMs:100});
+ await lock.withLock(async()=>{
+  const original=JSON.parse(await readFile(lock.lockPath,'utf8'));await writeFile(lock.lockPath,JSON.stringify({...original,token:'22222222-2222-4222-8222-222222222222'}));
+  await assert.rejects(lock.withLock(async()=>{throw new Error('must not run');}),e=>e.code==='process_store_lock_ownership_changed');
+ });
+ assert.equal(JSON.parse(await readFile(lock.lockPath,'utf8')).token,'22222222-2222-4222-8222-222222222222');
+});
+
+test('an async callback inherited from a finished transaction must wait for the current independent writer',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'yp-finished-lease-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const filePath=path.join(root,'store.json'),first=createProcessStoreLock({filePath,waitMs:1000}),second=createProcessStoreLock({filePath,waitMs:1000});
+ let launch,child,ran=false;
+ await first.withLock(async()=>{const gate=new Promise(resolve=>{launch=resolve;});child=gate.then(()=>first.withLock(async()=>{ran=true;}));});
+ await second.withLock(async()=>{launch();await new Promise(resolve=>setTimeout(resolve,25));assert.equal(ran,false);});
+ await child;assert.equal(ran,true);
 });

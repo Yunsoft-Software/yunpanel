@@ -7,6 +7,7 @@ import { createJobRegistry } from '../src/job-registry.js';
 import { createDurableJobRegistry } from '../src/durable-job-registry.js';
 import { createLocalJobExecutor } from '../src/local-job-executor.js';
 import { createSystemWatchdogService } from '../src/system-watchdog-service.js';
+import { reconcileTerminalRecovery } from '../src/job-recovery-command.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 
 test('watchdog keeps real durable work running past five minutes and the executor saves its verified success', async t => {
@@ -31,4 +32,16 @@ test('watchdog keeps real durable work running past five minutes and the executo
  assert.equal(terminal.job.status,'succeeded');assert.equal((await registry.getJob(job.id)).status,'succeeded');
  assert.equal(executor.failure(),null);
  assert.equal(registry.recovery(),null);
+});
+
+test('the real terminal recovery transaction can inspect and acknowledge its durable store under one outer lock',async t=>{
+ const root=await mkdtemp(path.join(os.tmpdir(),'yp-terminal-recovery-'));t.after(()=>rm(root,{recursive:true,force:true}));
+ const registry=createDurableJobRegistry({filePath:path.join(root,'jobs.json'),registryFactory:options=>createJobRegistry(options)});
+ const serverId='terminal-recovery-server';const job=await registry.enqueue({serverId,type:'system.packages.inspect',operation:OPERATIONS.SYSTEM_PACKAGES_INSPECT,payload:{},resourceType:'system',resourceId:serverId});
+ await registry.claimNext(serverId);await registry.beginReconciliation({serverId,jobId:job.id});
+ await registry.complete({serverId,jobId:job.id,status:'failed',error:{code:'apt_inspection_failed',message:'private details must stay hidden'}});
+ assert.ok(registry.recovery());
+ const result=await reconcileTerminalRecovery({serverId,jobId:job.id,jobRegistry:registry,domainRegistry:{},certificateRegistry:{},applicationRegistry:{},serviceStatus:async()=>({apiActive:false,agentActive:false})});
+ assert.equal(result.reconciled,true);assert.equal((await registry.getJob(job.id)).status,'failed');
+ assert.equal(registry.recovery(),null);assert.equal(registry.recoveryRecord().jobs.length,0);
 });

@@ -1,6 +1,9 @@
+import { AsyncLocalStorage } from 'node:async_hooks';
 import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+
+const ownedTransactions = new AsyncLocalStorage();
 
 const TOKEN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -57,6 +60,15 @@ export function createProcessStoreLock({
     if (typeof action !== 'function') {
       throw new ProcessStoreLockError('process_store_lock_action_invalid', 'Process store lock action is invalid', 400);
     }
+    const inherited = ownedTransactions.getStore()?.get(lockPath);
+    if (inherited?.active && inherited.pid === pid) {
+      let existing;
+      try { existing = parseRecord(await readFile(lockPath, 'utf8')); } catch {}
+      if (existing?.token !== inherited.token || existing.pid !== pid) {
+        throw new ProcessStoreLockError('process_store_lock_ownership_changed', 'Durable transaction lock ownership changed');
+      }
+      return action();
+    }
     try {
       await mkdir(path.dirname(lockPath), { recursive: true, mode: 0o700 });
     } catch {
@@ -81,9 +93,13 @@ export function createProcessStoreLock({
         await handle.close();
         handle = null;
         acquired = true;
+        const transaction = new Map(ownedTransactions.getStore() ?? []);
+        const lease = { token, pid, active: true };
+        transaction.set(lockPath, lease);
         try {
-          return await action();
+          return await ownedTransactions.run(transaction, action);
         } finally {
+          lease.active = false;
           let current = null;
           try { current = parseRecord(await readFile(lockPath, 'utf8')); } catch {}
           if (current?.token === token && current.pid === pid) {
