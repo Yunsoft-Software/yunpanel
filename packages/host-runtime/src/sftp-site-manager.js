@@ -611,6 +611,34 @@ export function createSftpSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
+  async function inspectRetirement(rawIntent) {
+    const spec = normalizeIntent(rawIntent), unitName = await unitNameFor(spec);
+    const config = await readOptional(spec.paths.sshdConfigPath), mount = await readOptional(unitPath(unitName));
+    const directory = await inspectDirectoryState(spec.paths.chrootDirectory);
+    let mounted;
+    try { await run('/usr/bin/findmnt', ['--mountpoint', spec.paths.mountDirectory, '--noheadings', '--output', 'TARGET'], { timeout: 10_000 }); mounted = true; }
+    catch (error) {
+      if (error.code !== 1) throw new SftpSiteManagerError('sftp_retirement_unavailable', 'The SFTP mount inventory could not be verified');
+      mounted = false;
+    }
+    const satisfied = config === null && mount === null && !directory.present && !mounted && !(await mountActive(unitName));
+    return Object.freeze({ satisfied, reason: satisfied ? null : 'sftp_retirement_pending',
+      websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser,
+      sshdConfigRemoved: config === null, mountUnitRemoved: mount === null, chrootRemoved: !directory.present });
+  }
+
+  async function retire(rawIntent, options = {}) {
+    const spec = normalizeIntent(rawIntent), unitName = await unitNameFor(spec);
+    if (!await loadReceipt(operationId(options.operationId), spec, unitName)) {
+      throw new SftpSiteManagerError('sftp_retirement_not_owned', 'The SFTP provisioning receipt is unavailable');
+    }
+    await compensate(rawIntent, options);
+    const result = await inspectRetirement(rawIntent);
+    if (!result.satisfied) throw new SftpSiteManagerError('sftp_retirement_unverified',
+      'Website SFTP mount, OpenSSH configuration or chroot is still present');
+    return result;
+  }
+
   return Object.freeze({
     inspect,
     previewMigration,
@@ -621,6 +649,8 @@ export function createSftpSiteManager({
     inspectMigrationCompensation,
     compensateMigration,
     compensate,
+    retire,
+    inspectRetirement,
   });
 }
 

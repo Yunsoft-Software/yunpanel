@@ -76,6 +76,10 @@ function fakeHost() {
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/systemd-escape') return { stdout: `${unitName}\n` };
+    if (file === '/usr/bin/findmnt') {
+      if (activeUnits.has(unitName)) return { stdout: mountDirectory };
+      throw Object.assign(new Error('not mounted'), { code: 1 });
+    }
     if (file === '/usr/bin/install') {
       const target = args.at(-1);
       dirs.set(target, { uid: 0, gid: 0, mode: 0o755 });
@@ -136,6 +140,30 @@ function manager(host) {
     lstatFn: host.lstatFn,
   });
 }
+
+test('SFTP retirement disables its persistent mount and removes the chroot before Website data cleanup',async()=>{
+ const host=fakeHost(),value=manager(host);await value.apply(intent(),{operationId});
+ const result=await value.retire(intent(),{operationId});
+ assert.equal(result.satisfied,true);assert.equal(result.mountUnitRemoved,true);assert.equal(result.chrootRemoved,true);
+ assert.equal(host.activeUnits.has(unitName),false);assert.equal(host.files.has(sshdConfigPath),false);
+ assert.equal(host.removals.some(([target])=>target===sourceDirectory),false);
+ assert.deepEqual(await value.retire(intent(),{operationId}),result);
+});
+
+test('SFTP retirement requires its original receipt and preserves changed configuration',async()=>{
+ const host=fakeHost(),value=manager(host);await value.apply(intent(),{operationId});
+ await assert.rejects(()=>value.retire(intent(),{operationId:'8ae512c0-a717-4611-943c-6ce2ab0abf16'}),e=>e.code==='sftp_retirement_not_owned');
+ host.files.get(unitPath).content+='\n# changed\n';
+ await assert.rejects(()=>value.retire(intent(),{operationId}),e=>e.code==='sftp_compensation_drift');
+ assert.equal(host.files.has(unitPath),true);assert.equal(host.activeUnits.has(unitName),true);
+});
+
+test('a compensated SFTP receipt cannot hide a recreated mount unit',async()=>{
+ const host=fakeHost(),value=manager(host);await value.apply(intent(),{operationId});await value.compensate(intent(),{operationId});
+ host.files.set(unitPath,{content:'recreated',mode:0o600});
+ await assert.rejects(()=>value.retire(intent(),{operationId}),e=>e.code==='sftp_retirement_unverified');
+ assert.equal(host.files.has(unitPath),true);
+});
 
 test('SFTP apply creates a root-owned chroot, persistent bind mount and validated OpenSSH Match rule', async () => {
   const host = fakeHost();

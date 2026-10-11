@@ -6,6 +6,15 @@ import {
   WebsiteSftpProvisioningError,
 } from '../src/website-sftp-provisioning-handler.js';
 
+test('the production key-aware SFTP handler preserves retirement and exact operation context',async()=>{
+ const calls=[],result={satisfied:true};
+ const baseHandler={apply:async()=>result,inspect:async()=>result,compensate:async()=>result,inspectCompensation:async()=>result,
+  retire:async ctx=>{calls.push(['retire',ctx]);return result;},inspectRetirement:async ctx=>{calls.push(['inspect',ctx]);return result;}};
+ const handler=createWebsiteSftpKeyAwareProvisioningHandler({baseHandler,sftpKeyService:{reconcile:async()=>{throw new Error('retirement must not reconcile keys');},inspectMaterialization:async()=>result}});
+ const context={intent,operationId};assert.equal(await handler.retire(context),result);assert.equal(await handler.inspectRetirement(context),result);
+ assert.deepEqual(calls,[['retire',context],['inspect',context]]);
+});
+
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const intent = Object.freeze({
   adapter: 'openssh-internal-sftp',

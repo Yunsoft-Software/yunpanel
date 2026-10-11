@@ -125,6 +125,14 @@ export function createWebsiteSftpProvisioningHandler({
     },
     compensate: ({ intent, operationId } = {}) => sftpManager.compensate(sftpIntent(intent), { operationId }),
     inspectCompensation: ({ intent, operationId } = {}) => sftpManager.inspectCompensation(sftpIntent(intent), { operationId }),
+    retire: ({ intent, operationId } = {}) => {
+      if (typeof sftpManager.retire !== 'function') throw new WebsiteSftpProvisioningError('website_sftp_retirement_unavailable', 'Website SFTP retirement is unavailable');
+      return sftpManager.retire(sftpIntent(intent), { operationId });
+    },
+    inspectRetirement: ({ intent } = {}) => {
+      if (typeof sftpManager.inspectRetirement !== 'function') throw new WebsiteSftpProvisioningError('website_sftp_retirement_unavailable', 'Website SFTP retirement inspection is unavailable');
+      return sftpManager.inspectRetirement(sftpIntent(intent));
+    },
     inspectMigrationCompensation: ({ intent, operationId } = {}) => {
       if (typeof sftpManager.inspectMigrationCompensation !== 'function') {
         throw new WebsiteSftpProvisioningError(
@@ -263,6 +271,8 @@ export function createWebsiteSftpKeyAwareProvisioningHandler({ baseHandler, sftp
     },
     compensate: (context = {}) => baseHandler.compensate(context),
     inspectCompensation: (context = {}) => baseHandler.inspectCompensation(context),
+    retire: (context = {}) => baseHandler.retire(context),
+    inspectRetirement: (context = {}) => baseHandler.inspectRetirement(context),
     inspectMigrationCompensation: (context = {}) => {
       if (typeof baseHandler.inspectMigrationCompensation !== 'function') {
         throw new WebsiteSftpProvisioningError(

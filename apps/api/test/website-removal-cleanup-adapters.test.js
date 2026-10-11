@@ -5,7 +5,7 @@ import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-clea
 const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
 const systemUser='yunapp-123456789abc';
-function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,php=false,failPhp=false,missingPhpJournal=false}={}) {
+function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,php=false,failPhp=false,missingPhpJournal=false,failSftp=false,withSftpJournal=false}={}) {
   const removed=[]; const removedSet=new Set(); const compensated=[];
   const retirementCalls=[]; const order=[];
   const retirement = { satisfied:true,poolRemoved:true,socketRemoved:true,websiteId,applicationId,unixUser:systemUser };
@@ -19,10 +19,14 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
       registry:{listForWebsite:async()=>[{operationId:'55555555-5555-4555-8555-555555555555',steps:[{
         kind:'unix_identity',state:'succeeded',intent:{websiteId,applicationId,unixUser:systemUser,homeDirectory:'/var/lib/yunpanel/data/'+applicationId},evidence:{owned:true},
       }, {kind:'elfinder',state:'succeeded',intent:{adapter:'elfinder-fpm',websiteId:foreignPool?'44444444-4444-4444-8444-444444444444':websiteId,applicationId,unixUser:systemUser}},
-      ...(php&&!missingPhpJournal?[{kind:'php_runtime',state:'succeeded',intent:{adapter:'php-fpm',websiteId,applicationId,unixUser:systemUser,documentRoot:'/var/lib/yunpanel/apps/'+applicationId+'/current/public'}}]:[])]}]},
+      ...(php&&!missingPhpJournal?[{kind:'php_runtime',state:'succeeded',intent:{adapter:'php-fpm',websiteId,applicationId,unixUser:systemUser,documentRoot:'/var/lib/yunpanel/apps/'+applicationId+'/current/public'}}]:[]),
+      ...(withSftpJournal?[{kind:'sftp',state:'succeeded',intent:{adapter:'openssh-internal-sftp',websiteId,applicationId,unixUser:systemUser}}]:[])]}]},
       handlers:{elfinder:{
         retire:async(ctx)=>{order.push('elfinder');retirementCalls.push(ctx);if(failRetirement)throw new Error('fixture pool retained');return retirement;},
         inspectRetirement:async()=>retirement,
+      },sftp:{
+        retire:async()=>{order.push('sftp');if(failSftp)throw new Error('fixture mount retained');},
+        inspectRetirement:async()=>({satisfied:!failSftp,sshdConfigRemoved:true,mountUnitRemoved:true,chrootRemoved:true,websiteId,applicationId,unixUser:systemUser}),
       },php_runtime:{
         retire:async()=>{order.push('php');if(failPhp)throw new Error('fixture PHP pool retained');return retirement;},
         inspectRetirement:async()=>retirement,
@@ -48,6 +52,20 @@ test('PHP retirement precedes file deletion and repeats before Unix identity cle
  f.order.length=0;
  await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
  assert.deepEqual(f.order,['php','elfinder','unix']);
+});
+
+test('a surviving SFTP mount prevents canonical file and Unix cleanup even without a retained journal',async()=>{
+ const f=fixture({failSftp:true});
+ await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),e=>e.code==='website_cleanup_sftp_unverified');
+ await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),e=>e.code==='website_cleanup_sftp_unverified');
+ assert.equal(f.removed.length,0);assert.equal(f.compensated.length,0);assert.equal(f.retirementCalls.length,0);
+});
+
+test('receipt-owned SFTP retirement precedes PHP, files and Unix deletion',async()=>{
+ const f=fixture({php:true,withSftpJournal:true});await f.adapters.fileCleanupHandler({websiteId,applicationId});
+ assert.deepEqual(f.order.slice(0,4),['sftp','php','elfinder','files']);
+ f.order.length=0;await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
+ assert.deepEqual(f.order,['sftp','php','elfinder','unix']);
 });
 
 test('unverified PHP retirement preserves files, file manager and Unix identity',async()=>{

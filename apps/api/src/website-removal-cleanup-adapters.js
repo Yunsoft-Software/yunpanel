@@ -149,6 +149,32 @@ export function createWebsiteRemovalCleanupAdapters({
     }
   }
 
+  async function retireSftp(source) {
+    const steps = source.operation.steps.filter(step => step.kind === 'sftp');
+    const handler = websiteProvisioningRuntime.handlers?.sftp;
+    const intent = { adapter: 'openssh-internal-sftp', websiteId: source.website.id,
+      applicationId: source.website.applicationId, unixUser: source.website.unixUser };
+    if (steps.length > 1 || steps[0] && (Object.entries(intent).some(([key, value]) => steps[0].intent?.[key] !== value)
+      || !['succeeded', 'compensated'].includes(steps[0].state))) {
+      unavailable('website_cleanup_sftp_evidence_invalid', 'Website SFTP journal scope changed');
+    }
+    if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
+      unavailable('website_cleanup_sftp_unavailable', 'Website SFTP retirement is unavailable');
+    }
+    const context = { intent: steps[0]?.intent ?? intent, operationId: source.operation.operationId };
+    try {
+      if (steps.length) await handler.retire(context);
+      const result = await handler.inspectRetirement(context);
+      if (result?.satisfied !== true || result.sshdConfigRemoved !== true || result.mountUnitRemoved !== true || result.chrootRemoved !== true
+        || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId || result.unixUser !== source.website.unixUser) {
+        unavailable('website_cleanup_sftp_unverified', 'Website SFTP mount or configuration is still present');
+      }
+    } catch (error) {
+      if (error instanceof WebsiteRemovalCleanupAdapterError) throw error;
+      unavailable('website_cleanup_sftp_unverified', 'Website SFTP retirement could not be verified');
+    }
+  }
+
   async function directSystemdSource(input = {}) {
     const {
       websiteId,
@@ -263,6 +289,7 @@ export function createWebsiteRemovalCleanupAdapters({
 
   async function unixIdentityCleanupHandler(input = {}) {
     const source = await ownedIdentitySource(input);
+    await retireSftp(source);
     await retirePhpRuntime(source);
     await retireFileManager(source);
     const { websiteId, systemUser } = input;
@@ -311,6 +338,7 @@ export function createWebsiteRemovalCleanupAdapters({
     }
     const { website } = await currentTarget(websiteId, applicationId);
     const source = await ownedIdentitySource({ websiteId, systemUser: website.unixUser });
+    await retireSftp(source);
     await retirePhpRuntime(source);
     await retireFileManager(source);
     let removed = 0;
