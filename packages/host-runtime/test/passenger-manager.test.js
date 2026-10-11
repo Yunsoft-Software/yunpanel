@@ -51,7 +51,8 @@ function ubuntuRead(file) {
 function upgradeRun(commands, { candidate = upgradedHealthy.installedVersion, rollbackFails = false } = {}) {
   return async (file, args) => {
     commands.push([file, args]);
-    if (file === '/usr/bin/dpkg-query') return { stdout: 'nginx:amd64: /usr/sbin/nginx\n' };
+    if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
+      if (file === '/usr/bin/dpkg-query') return { stdout: 'nginx:amd64: /usr/sbin/nginx\n' };
     if (file === '/usr/bin/apt-cache') return { stdout: `libnginx-mod-http-passenger:\n  Installed: ${healthy.installedVersion}\n  Candidate: ${candidate}\n` };
     if (rollbackFails && file === '/usr/bin/apt-get' && args.some((arg) => arg.includes(`=${healthy.installedVersion}`))) {
       throw commandFailure(100);
@@ -63,6 +64,7 @@ function upgradeRun(commands, { candidate = upgradedHealthy.installedVersion, ro
 test('Passenger manager is a no-op when inspection is already healthy', async () => {
   const commands = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => healthy },
     run: async (...args) => { commands.push(args); return { stdout: '' }; },
   });
@@ -76,6 +78,7 @@ test('Passenger manager is a no-op when inspection is already healthy', async ()
 test('Passenger manager refuses unsupported operating systems before package mutation', async () => {
   const commands = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => unhealthy },
     run: async (...args) => { commands.push(args); return { stdout: '' }; },
     readFileFn: async (file) => {
@@ -94,6 +97,7 @@ test('Passenger manager refuses unsupported operating systems before package mut
 test('Passenger manager blocks a non-dpkg Nginx binary', async () => {
   const commands = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => unhealthy },
     readFileFn: async (file) => {
       if (file === '/etc/os-release') return 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';
@@ -101,6 +105,7 @@ test('Passenger manager blocks a non-dpkg Nginx binary', async () => {
     },
     run: async (file, args) => {
       commands.push([file, args]);
+      if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
       if (file === '/usr/bin/dpkg-query') throw commandFailure(1);
       return { stdout: '' };
     },
@@ -124,6 +129,7 @@ test('Passenger manager installs from scoped APT source and requires healthy pos
   const symlinks = [];
   let inspections = 0;
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: {
       inspect: async () => {
         inspections += 1;
@@ -132,6 +138,7 @@ test('Passenger manager installs from scoped APT source and requires healthy pos
     },
     run: async (file, args) => {
       commands.push([file, args]);
+      if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
       if (file === '/usr/bin/dpkg-query') return { stdout: 'nginx:amd64: /usr/sbin/nginx\n' };
       return { stdout: '' };
     },
@@ -169,6 +176,7 @@ test('Passenger manager installs from scoped APT source and requires healthy pos
 test('Passenger manager rejects an unexpected regular file at the managed module link path', async () => {
   let inspections = 0;
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => (++inspections === 1 ? unhealthy : healthy) },
     run: async (file, args) => file === '/usr/bin/dpkg-query'
       ? { stdout: 'nginx: /usr/sbin/nginx\n' }
@@ -194,9 +202,10 @@ test('Passenger manager rejects an unexpected regular file at the managed module
 
 test('Passenger manager never reports success when post-install inspection stays unhealthy', async () => {
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => unhealthy },
-    run: async (file) => file === '/usr/bin/dpkg-query'
-      ? { stdout: 'nginx: /usr/sbin/nginx\n' }
+    run: async (file, args) => file === '/usr/bin/dpkg-query'
+      ? { stdout: args[0] === '-W' ? 'ii ' : 'nginx: /usr/sbin/nginx\n' }
       : { stdout: '' },
     readFileFn: async (file) => {
       if (file === '/etc/os-release') return 'ID=ubuntu\nVERSION_ID="24.04"\nVERSION_CODENAME=noble\n';
@@ -220,6 +229,7 @@ test('Passenger manager never reports success when post-install inspection stays
 test('Passenger upgrade is a no-op when the APT candidate equals the healthy installed version', async () => {
   const commands = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => healthy },
     run: upgradeRun(commands, { candidate: healthy.installedVersion }),
     readFileFn: ubuntuRead,
@@ -237,6 +247,7 @@ test('Passenger upgrade installs the candidate and requires exact healthy postco
   const commands = [];
   let inspections = 0;
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => (++inspections === 1 ? healthy : upgradedHealthy) },
     run: upgradeRun(commands),
     readFileFn: ubuntuRead,
@@ -259,6 +270,7 @@ test('Passenger upgrade failure injection after package mutation restores the ex
   let inspections = 0;
   const checkpoints = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => { inspections += 1; return healthy; } },
     run: upgradeRun(commands),
     readFileFn: ubuntuRead,
@@ -284,6 +296,7 @@ test('Passenger unhealthy upgrade postcondition rolls back before returning fail
   let inspections = 0;
   const brokenCandidate = { ...upgradedHealthy, healthy: false, moduleLoaded: false };
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: {
       inspect: async () => {
         inspections += 1;
@@ -308,6 +321,7 @@ test('Passenger unhealthy upgrade postcondition rolls back before returning fail
 test('Passenger rollback failure is explicit and does not report the original upgrade as recovered', async () => {
   const commands = [];
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => healthy },
     run: upgradeRun(commands, { rollbackFails: true }),
     readFileFn: ubuntuRead,

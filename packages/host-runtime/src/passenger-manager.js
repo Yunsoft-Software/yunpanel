@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { createPassengerInspector } from './passenger-inspector.js';
@@ -100,6 +100,7 @@ export function createPassengerManager({
     env: options.env ?? { ...process.env, LC_ALL: 'C', DEBIAN_FRONTEND: 'noninteractive' },
   }),
   lstatFn = lstat,
+  chmodFn = chmod,
   mkdirFn = mkdir,
   readFileFn = readFile,
   readlinkFn = readlink,
@@ -168,12 +169,14 @@ export function createPassengerManager({
   async function atomicWrite(targetPath, content, mode) {
     const temporary = `${targetPath}.${process.pid}.tmp`;
     await writeFileFn(temporary, content, { encoding: 'utf8', mode });
+    await chmodFn(temporary, mode);
     await renameFn(temporary, targetPath);
   }
 
   async function atomicRestore(targetPath, content, mode) {
     const temporary = `${targetPath}.${process.pid}.rollback.tmp`;
     await writeFileFn(temporary, content, { mode });
+    await chmodFn(temporary, mode);
     await renameFn(temporary, targetPath);
   }
 
@@ -238,6 +241,32 @@ export function createPassengerManager({
     await restoreManagedPath(KEY_PATH, snapshot.key);
   }
 
+  async function repairOwnedRepositoryPermissions() {
+    try {
+      const repository = await lstatFn(REPOSITORY_PATH);
+      const key = await lstatFn(KEY_PATH);
+      if (!repository.isFile() || repository.isSymbolicLink?.() || !key.isFile() || key.isSymbolicLink?.()
+        || await readFileFn(REPOSITORY_PATH, 'utf8') !== repositoryContent()) return;
+      await chmodFn(KEY_PATH, 0o644);
+      await chmodFn(REPOSITORY_PATH, 0o644);
+    } catch (error) {
+      if (error?.code !== 'ENOENT') throw new PassengerManagerError('passenger_repository_permissions_failed', 'Managed Passenger repository permissions could not be verified');
+    }
+  }
+
+  async function passengerPackagePresent() {
+    try {
+      const result = await run(DPKG_QUERY, ['-W', '-f=${db:Status-Abbrev}', PACKAGE], { timeout: 5_000 });
+      const status = String(result.stdout ?? '').replace(/\r?\n$/, '');
+      if (/^(?:ii|iU|iF|iH|iW|it|rc)[ R]$/.test(status)) return true;
+      if (/^(?:un|pn|rn) $/.test(status)) return false;
+      throw new Error('unverified package state');
+    } catch (error) {
+      if (error?.code === 1) return false;
+      throw new PassengerManagerError('passenger_install_rollback_failed', 'Passenger package state could not be verified before rollback');
+    }
+  }
+
   async function installRepository() {
     await mkdirFn(STAGING_ROOT, { recursive: true, mode: 0o700 });
     await mkdirFn(path.dirname(KEY_PATH), { recursive: true, mode: 0o755 });
@@ -262,6 +291,7 @@ export function createPassengerManager({
     catch { throw new PassengerManagerError('passenger_repository_key_invalid', 'Passenger repository signing key could not be read'); }
     const keyTemp = `${KEY_PATH}.${process.pid}.tmp`;
     await writeFileFn(keyTemp, key, { mode: 0o644 });
+    await chmodFn(keyTemp, 0o644);
     await renameFn(keyTemp, KEY_PATH);
     await atomicWrite(REPOSITORY_PATH, repositoryContent(), 0o644);
   }
@@ -336,7 +366,7 @@ export function createPassengerManager({
           'passenger_install_rollback_failed',
           'Previous Passenger package could not be restored',
         );
-      } else {
+      } else if (await passengerPackagePresent()) {
         await runSafe(
           APT_GET,
           ['remove', '--yes', '--purge', PACKAGE],
@@ -383,6 +413,7 @@ export function createPassengerManager({
 
     await platform();
     const nginxBefore = await assertCompatibleNginx();
+    await repairOwnedRepositoryPermissions();
     const snapshot = await snapshotManagedState();
     await runSafe(
       APT_GET,

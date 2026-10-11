@@ -53,9 +53,11 @@ test('Passenger install failure restores managed config and removes a newly adde
   const oldRepository = 'deb [signed-by=/old/key.gpg] https://old.example.invalid noble main\n';
 
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => { inspections += 1; return unavailable; } },
     run: async (file, args) => {
       commands.push([file, args]);
+      if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
       if (file === '/usr/bin/dpkg-query') return { stdout: 'nginx:amd64: /usr/sbin/nginx\n' };
       return { stdout: '' };
     },
@@ -114,9 +116,11 @@ test('fresh-host rollback removes only the newly installed Nginx owner and verif
   let inspections = 0;
   let nginxInstalled = false;
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => { inspections += 1; return unavailable; } },
     run: async (file, args) => {
       commands.push([file, args]);
+      if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
       if (file === '/usr/bin/dpkg-query') {
         if (!nginxInstalled) throw commandFailure(1);
         return { stdout: 'nginx-core:amd64: /usr/sbin/nginx\n' };
@@ -167,8 +171,10 @@ test('fresh-host rollback removes only the newly installed Nginx owner and verif
 test('fresh-host rollback fails closed when the new Nginx package owner is not safely identifiable', async () => {
   let nginxInstalled = false;
   const manager = createPassengerManager({
+    chmodFn: async () => {},
     inspector: { inspect: async () => unavailable },
     run: async (file, args) => {
+      if (file === '/usr/bin/dpkg-query' && args[0] === '-W') return { stdout: 'ii ' };
       if (file === '/usr/bin/dpkg-query') {
         if (!nginxInstalled) throw commandFailure(1);
         return { stdout: 'custom-web: /usr/sbin/nginx\n' };
