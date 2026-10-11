@@ -42,6 +42,16 @@ test('Node, environment and managed-service diagnostics use authored messages on
     'certificate_material_unavailable',
     'certificate_metadata_mismatch',
     'mail_rollback_recovery_current',
+    'wordpress_actor_forbidden',
+    'wordpress_clone_partial',
+    'wordpress_clone_copy_unverified',
+    'wordpress_clone_source_changed',
+    'wordpress_download_failed',
+    'wordpress_configuration_failed',
+    'wordpress_database_check_failed',
+    'wordpress_install_failed',
+    'wordpress_core_verification_failed',
+    'wordpress_password_verification_failed',
   ]) {
     const result = safeLocalOperationError({
       code,
