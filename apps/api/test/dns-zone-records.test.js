@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createDnsZoneRecordsService, DnsZoneRecordsError, dnsZoneRecordsInternals } from '../src/dns-zone-records.js';
+import { ownedDnsZoneOperation } from './helpers/owned-dns-zone-fixture.js';
 
 const domainId = '8bc307db-9e2d-4c3f-91ea-49e740d259a9';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
@@ -12,12 +13,13 @@ const domain = Object.freeze({
   parentDomainId: null,
 });
 
-function fixture({ domainState = domain } = {}) {
+function fixture({ domainState = domain, provisioningRegistry = null } = {}) {
   const calls = [];
+  const secrets = [];
   const manager = {
     getZone: async (input) => {
       calls.push(['getZone', input]);
-      return { zoneName: 'example.com', serial: 2026091601, dnssec: false, kind: 'Native', rrsets: [] };
+      return { zoneName: input.zoneName, serial: 2026091601, dnssec: false, kind: 'Native', rrsets: [] };
     },
     apply: async (input) => {
       calls.push(['apply', input]);
@@ -30,12 +32,41 @@ function fixture({ domainState = domain } = {}) {
   };
   const service = createDnsZoneRecordsService({
     domainRegistry: { getDomain: async (id) => id === domainState.id ? domainState : null },
-    powerDnsSecretRegistry: { materializeForServer: async () => ({ serverId, revision: 2, apiKey }) },
+    powerDnsSecretRegistry: { materializeForServer: async () => { secrets.push(serverId); return { serverId, revision: 2, apiKey }; } },
+    provisioningRegistry,
     localServerId: serverId,
     manager,
   });
-  return { calls, service };
+  return { calls, service, secrets };
 }
+
+test('owned child DNS records use only their own zone and exact current Website receipt', async () => {
+  const child = { ...domain, primaryDomain: 'child.example.com', parentDomainId: 'parent-id', websiteId: '2b4a28c2-b7fd-41cb-99a8-28ec7e84449d' };
+  const queries = [];
+  const { service, calls } = fixture({ domainState: child, provisioningRegistry: {
+    listForDnsZone: async query => { queries.push(query); return [ownedDnsZoneOperation(child)]; },
+  } });
+  assert.equal((await service.getZone({ domainId })).zoneName, child.primaryDomain);
+  await service.apply({ domainId, input: { owner: 'proof', type: 'TXT', ttl: 300, values: ['owned'], expectedSerial: 2026091601 } });
+  await service.remove({ domainId, input: { owner: 'proof', type: 'TXT', expectedSerial: 2026091602 } });
+  assert.equal(calls.every(([, input]) => input.zoneName === child.primaryDomain), true);
+  assert.equal(queries.every(query => query.serverId === serverId && query.webDomainId === domainId && query.zoneName === child.primaryDomain), true);
+});
+
+test('unproven or ambiguous child DNS ownership rejects before secrets or provider access', async () => {
+  const child = { ...domain, primaryDomain: 'child.example.com', parentDomainId: 'parent-id', websiteId: '2b4a28c2-b7fd-41cb-99a8-28ec7e84449d' };
+  const good = ownedDnsZoneOperation(child);
+  const compensated = structuredClone(good); compensated.steps[0].compensation = { state: 'succeeded' };
+  const corrupt = structuredClone(good); corrupt.steps[0].evidence.zoneName = 'other.example.com';
+  for (const operations of [[], [{ ...good, websiteId: 'foreign-website' }], [good, good], [compensated], [corrupt], [good, corrupt]]) {
+    const { service, calls, secrets } = fixture({ domainState: child, provisioningRegistry: { listForDnsZone: async () => operations } });
+    await assert.rejects(service.getZone({ domainId }), error => error.code === 'dns_zone_root_domain_required');
+    assert.deepEqual(calls, []); assert.deepEqual(secrets, []);
+  }
+  const { service, calls, secrets } = fixture({ domainState: child, provisioningRegistry: { listForDnsZone: async () => { throw new Error('private history failure'); } } });
+  await assert.rejects(service.getZone({ domainId }), error => error.code === 'dns_zone_ownership_unavailable' && error.status === 503 && !error.message.includes('private'));
+  assert.deepEqual(calls, []); assert.deepEqual(secrets, []);
+});
 
 test('Domain DNS zone read returns provider RRsets without exposing the PowerDNS key', async () => {
   const { calls, service } = fixture();

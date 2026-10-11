@@ -14,6 +14,26 @@ export function rootDnsDomain(domain, domains) {
   return current;
 }
 
+export async function resolveDnsZoneScope(domain, domains, getZone) {
+  if (!domain?.id) return null;
+  if (domain.parentDomainId) {
+    try {
+      const zone = await getZone(domain.id);
+      if (zone?.domainId !== domain.id || zone.zoneName !== domain.primaryDomain) {
+        throw new Error('DNS bölgesi seçili alan adıyla eşleşmiyor.');
+      }
+      return { root: domain, ownChild: true, zone };
+    } catch (failure) {
+      // Only this authored ownership rejection permits inherited-zone display.
+      // Permission, transport and inspection failures must never select a parent.
+      if (failure.code === 'dns_zone_not_found') return { root: domain, ownChild: true, zone: null };
+      if (failure.code !== 'dns_zone_root_domain_required') throw failure;
+    }
+  }
+  const root = rootDnsDomain(domain, domains);
+  return root ? { root, ownChild: false, zone: null } : null;
+}
+
 export function relativeDnsOwner(owner, zoneName) {
   const normalizedOwner = String(owner ?? '').replace(/\.$/, '').toLowerCase();
   const normalizedZone = String(zoneName ?? '').replace(/\.$/, '').toLowerCase();

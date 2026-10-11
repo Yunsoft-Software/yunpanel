@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { powerDnsZoneManagerInternals } from '@yunpanel/host-runtime/powerdns-zone-manager';
 import { renderDnsZoneDesiredState } from '../src/dns-zone-desired-state.js';
+import { ownedDnsZoneOperation } from './helpers/owned-dns-zone-fixture.js';
 import {
   createDnsZoneReapplyService,
   DnsZoneReapplyError,
@@ -91,8 +92,9 @@ function liveZone({ sourceTemplate = template(1), serial = 2026091501, extraRrse
 
 function fixture({ currentTemplate = template(2, [
   Object.freeze({ key: 'verification', owner: '@', type: 'TXT', ttl: 300, values: Object.freeze(['yunpanel=verified']), condition: 'always' }),
-]), zone = null, domainState = domain, mailIntentResolver = null } = {}) {
+]), zone = null, domainState = domain, mailIntentResolver = null, provisioningRegistry = null } = {}) {
   const calls = [];
+  const secrets = [];
   const currentZone = zone ?? liveZone({ domainState });
   const zoneManager = {
     getZone: async (zoneName, key) => {
@@ -137,14 +139,42 @@ function fixture({ currentTemplate = template(2, [
     domainRegistry: { getDomain: async (id) => id === domainState.id ? domainState : null },
     dnsIdentityRegistry: { getForServer: async () => identity },
     dnsZoneTemplateRegistry: { ensureForServer: async () => currentTemplate },
-    powerDnsSecretRegistry: { materializeForServer: async () => ({ serverId, revision: 2, apiKey }) },
+    powerDnsSecretRegistry: { materializeForServer: async () => { secrets.push(serverId); return { serverId, revision: 2, apiKey }; } },
+    provisioningRegistry,
     mailIntentResolver,
     localServerId: serverId,
     zoneManager,
     now,
   });
-  return { calls, service, zone: currentZone };
+  return { calls, service, secrets, zone: currentZone };
 }
+
+test('owned child DNS reapply and rollback stay within the exact child zone and recheck receipt ownership', async () => {
+  const child = { ...domain, primaryDomain: 'child.example.com', parentDomainId: 'parent-id' };
+  let operations = [ownedDnsZoneOperation(child)];
+  const { service, calls, secrets } = fixture({ domainState: child, provisioningRegistry: { listForDnsZone: async () => operations } });
+  const preview = await service.preview({ domainId });
+  assert.equal(preview.zoneName, child.primaryDomain);
+  const snapshot = await service.captureRollbackSnapshot({ domainId, preview });
+  await service.apply({ domainId, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  await service.inspectRollback({ domainId, before: snapshot.sourceZoneSnapshot, after: snapshot.appliedZoneSnapshot });
+  assert.equal(calls.every(([kind, input]) => (kind === 'getZone' ? input : input.zoneName) === child.primaryDomain), true);
+  const callsBefore = calls.length, secretsBefore = secrets.length;
+  operations = [];
+  await assert.rejects(service.inspectRollback({ domainId, before: snapshot.sourceZoneSnapshot, after: snapshot.appliedZoneSnapshot }), error => error.code === 'dns_zone_reapply_root_domain_required');
+  assert.equal(calls.length, callsBefore); assert.equal(secrets.length, secretsBefore);
+});
+
+test('child DNS reapply denies missing, foreign, compensated and ambiguous receipts before provider access', async () => {
+  const child = { ...domain, primaryDomain: 'child.example.com', parentDomainId: 'parent-id' };
+  const good = ownedDnsZoneOperation(child);
+  const compensated = structuredClone(good); compensated.steps[0].compensation = { state: 'succeeded' };
+  for (const operations of [[], [{ ...good, websiteId: 'foreign-website' }], [good, good], [compensated]]) {
+    const { service, calls, secrets } = fixture({ domainState: child, provisioningRegistry: { listForDnsZone: async () => operations } });
+    await assert.rejects(service.preview({ domainId }), error => error.code === 'dns_zone_reapply_root_domain_required');
+    assert.deepEqual(calls, []); assert.deepEqual(secrets, []);
+  }
+});
 
 test('DNS zone reapply previews current template diff with a monotonic SOA serial', async () => {
   const { service } = fixture();

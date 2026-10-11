@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { resolveDnsZoneScope } from '../src/workspace/dns-model.js';
 import {
   dnsRecordDeletePayload,
   dnsRecordDraft,
@@ -14,6 +15,31 @@ import {
 const root = { id: 'root', primaryDomain: 'example.com', parentDomainId: null };
 const child = { id: 'child', primaryDomain: 'api.example.com', parentDomainId: 'root' };
 const grandchild = { id: 'grandchild', primaryDomain: 'v2.api.example.com', parentDomainId: 'child' };
+
+test('an owned child DNS zone is selected even when its parent is outside the user dataset', async () => {
+  const queried = [];
+  const zone = { domainId: child.id, zoneName: child.primaryDomain, serial: 1 };
+  const scope = await resolveDnsZoneScope(child, [], async id => { queried.push(id); return zone; });
+  assert.equal(scope.root, child); assert.equal(scope.ownChild, true); assert.equal(scope.zone, zone);
+  assert.deepEqual(queried, [child.id]);
+});
+
+test('only an explicit inherited-zone rejection selects the parent; failures never redirect authority', async () => {
+  const inherited = Object.assign(new Error('inherited'), { code: 'dns_zone_root_domain_required', status: 409 });
+  const scope = await resolveDnsZoneScope(child, [root, child], async () => { throw inherited; });
+  assert.equal(scope.root, root); assert.equal(scope.ownChild, false);
+  assert.equal(await resolveDnsZoneScope(child, [child], async () => { throw inherited; }), null);
+  for (const code of ['http_403', 'dns_zone_ownership_unavailable', 'http_502', 'domain_not_found']) {
+    const failure = Object.assign(new Error(code), { code });
+    await assert.rejects(resolveDnsZoneScope(child, [root, child], async () => { throw failure; }), error => error === failure);
+  }
+  await assert.rejects(resolveDnsZoneScope(child, [root, child], async () => ({ domainId: root.id, zoneName: root.primaryDomain })), /eşleşmiyor/);
+});
+
+test('an owned but missing child zone never falls back to provisioning or editing the parent', async () => {
+  const scope = await resolveDnsZoneScope(child, [root, child], async () => { throw Object.assign(new Error('missing zone'), { code: 'dns_zone_not_found' }); });
+  assert.equal(scope.root, child); assert.equal(scope.ownChild, true); assert.equal(scope.zone, null);
+});
 
 test('DNS workspace resolves the authoritative root Domain without inventing subdomain zones', () => {
   assert.equal(rootDnsDomain(grandchild, [root, child, grandchild]), root);

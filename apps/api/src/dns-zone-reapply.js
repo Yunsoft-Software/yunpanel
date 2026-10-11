@@ -5,6 +5,7 @@ import {
   powerDnsZoneManagerInternals,
 } from '@yunpanel/host-runtime/powerdns-zone-manager';
 import { renderDnsZoneDesiredState } from './dns-zone-desired-state.js';
+import { hasOwnChildDnsZone } from './dns-zone-child-ownership.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const REAPPLY_MANAGED_SOURCES = new Set(['template', 'runtime']);
@@ -90,7 +91,7 @@ function nextSerial(current, now = Date.now) {
   return next;
 }
 
-function rootDomain(domain, localServerId) {
+function rootDomain(domain, localServerId, ownsChildZone = false) {
   if (!domain) throw new DnsZoneReapplyError('domain_not_found', 'Domain not found', 404);
   if (typeof domain !== 'object' || typeof domain.id !== 'string'
     || typeof domain.serverId !== 'string' || typeof domain.primaryDomain !== 'string'
@@ -100,7 +101,7 @@ function rootDomain(domain, localServerId) {
   if (domain.serverId !== localServerId) {
     throw new DnsZoneReapplyError('dns_zone_reapply_local_server_required', 'Local DNS zone reapply is restricted to this panel host', 404);
   }
-  if ((domain.parentDomainId ?? null) !== null) {
+  if ((domain.parentDomainId ?? null) !== null && !ownsChildZone) {
     throw new DnsZoneReapplyError('dns_zone_reapply_root_domain_required', 'Only root Domains own authoritative zones', 409);
   }
   return domain;
@@ -263,6 +264,7 @@ export function createDnsZoneReapplyService({
   dnsIdentityRegistry,
   dnsZoneTemplateRegistry,
   powerDnsSecretRegistry,
+  provisioningRegistry = null,
   mailIntentResolver = null,
   localServerId,
   zoneManager = createPowerDnsZoneManager(),
@@ -272,6 +274,7 @@ export function createDnsZoneReapplyService({
     || !dnsIdentityRegistry || typeof dnsIdentityRegistry.getForServer !== 'function'
     || !dnsZoneTemplateRegistry || typeof dnsZoneTemplateRegistry.ensureForServer !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
+    || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
     || (mailIntentResolver !== null && typeof mailIntentResolver?.resolve !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function' || typeof zoneManager.apply !== 'function'
     || typeof zoneManager.inspectSnapshotRestore !== 'function' || typeof zoneManager.restoreSnapshot !== 'function'
@@ -279,11 +282,22 @@ export function createDnsZoneReapplyService({
     throw new DnsZoneReapplyError('dns_zone_reapply_dependencies_invalid', 'DNS zone reapply dependencies are unavailable', 503);
   }
 
-  async function buildPreview(domainId, retirePendingDkim = null) {
+  async function requireDomain(domainId) {
     const domain = rootDomain(
       await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
-      localServerId,
+      localServerId, true,
     );
+    if ((domain.parentDomainId ?? null) === null) return domain;
+    let owned;
+    try { owned = await hasOwnChildDnsZone(domain, provisioningRegistry); }
+    catch {
+      throw new DnsZoneReapplyError('dns_zone_reapply_ownership_unavailable', 'DNS zone ownership requires inspection', 503);
+    }
+    return rootDomain(domain, localServerId, owned);
+  }
+
+  async function buildPreview(domainId, retirePendingDkim = null) {
+    const domain = await requireDomain(domainId);
     const [identity, template, secret, mailState] = await Promise.all([
       mapped(
         () => dnsIdentityRegistry.getForServer(domain.serverId),
@@ -419,10 +433,7 @@ export function createDnsZoneReapplyService({
         409,
       );
     }
-    const domain = rootDomain(
-      await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
-      localServerId,
-    );
+    const domain = await requireDomain(domainId);
     if (expectedPreview.serverId !== domain.serverId || expectedPreview.zoneName !== domain.primaryDomain) {
       throw new DnsZoneReapplyError('dns_zone_reapply_preview_stale', 'DNS zone reapply preview no longer matches the Domain', 409);
     }
@@ -460,10 +471,7 @@ export function createDnsZoneReapplyService({
   }
 
   async function rollbackContext(domainId) {
-    const domain = rootDomain(
-      await mapped(() => domainRegistry.getDomain(domainId), 'dns_zone_reapply_domain_unavailable', 'Domain state is unavailable'),
-      localServerId,
-    );
+    const domain = await requireDomain(domainId);
     const secret = await mapped(
       () => powerDnsSecretRegistry.materializeForServer(domain.serverId),
       'dns_zone_reapply_secret_unavailable',

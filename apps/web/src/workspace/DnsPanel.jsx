@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   applyDnsReapply,
   applyDnssec,
@@ -26,6 +26,7 @@ import {
   operationPresentation,
   relativeDnsOwner,
   rootDnsDomain,
+  resolveDnsZoneScope,
 } from './dns-model.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Modal, Section } from './PanelKit.jsx';
 import SecondaryDnsStatusPanel from './SecondaryDnsStatusPanel.jsx';
@@ -146,7 +147,11 @@ function OperationsPanel({ reapply, dnssec }) {
 }
 
 export default function DnsPanel({ domain, domains, canManage }) {
-  const root = rootDnsDomain(domain, domains);
+  const parentRoot = rootDnsDomain(domain, domains);
+  const [scope, setScope] = useState(null);
+  const refreshGeneration = useRef(0);
+  const root = scope?.domainId === domain.id ? scope.root : null;
+  const ownChild = scope?.domainId === domain.id && scope.ownChild;
   const [zone, setZone] = useState(null);
   const [secondary, setSecondary] = useState(null);
   const [reapply, setReapply] = useState(null);
@@ -170,44 +175,54 @@ export default function DnsPanel({ domain, domains, canManage }) {
     || reason?.message?.toLowerCase().includes('bulunamadı');
 
   const refresh = useCallback(async () => {
-    if (!root) return;
-    setLoading(true); setError(null);
-
-    if (root.id !== domain.id) {
-      try {
-        const zoneData = await getDnsZone(root.id);
-        setZone(zoneData);
-      } catch (failure) {
-        setZone(null);
-        if (failure.name !== 'AbortError' && !isZoneMissing(failure)) {
-          setError(failure.message);
+    const generation = ++refreshGeneration.current;
+    const current = () => refreshGeneration.current === generation;
+    setLoading(true); setError(null); setScope(null); setZone(null);
+    setSecondary(null); setReapply(null); setDnssec(null);
+    setReapplyOperations([]); setDnssecOperations([]);
+    setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
+    try {
+      const resolved = await resolveDnsZoneScope(domain, domains, getDnsZone);
+      if (!current() || !resolved) return;
+      const selected = resolved.root;
+      setScope({ ...resolved, domainId: domain.id });
+      if (selected.id !== domain.id) {
+        const inheritedZone = await getDnsZone(selected.id);
+        if (inheritedZone?.domainId !== selected.id || inheritedZone.zoneName !== selected.primaryDomain) {
+          throw new Error('DNS bölgesi üst alan adıyla eşleşmiyor.');
         }
-      } finally {
-        setLoading(false);
+        if (current()) setZone(inheritedZone);
+        return;
       }
-      return;
+      const results = await Promise.allSettled([
+        resolved.ownChild ? Promise.resolve(resolved.zone) : getDnsZone(selected.id),
+        resolved.ownChild ? Promise.resolve(null) : getDnsSecondaryStatus(selected.id),
+        previewDnsReapply(selected.id),
+        resolved.ownChild ? Promise.resolve(null) : getDnssecStatus(selected.id),
+        listDnsReapplyOperations(selected.id),
+        resolved.ownChild ? Promise.resolve([]) : listDnssecOperations(selected.id),
+      ]);
+      if (!current()) return;
+      const setters = [setZone, setSecondary, setReapply, setDnssec, setReapplyOperations, setDnssecOperations];
+      results.forEach((result, index) => setters[index](result.status === 'fulfilled' ? result.value : null));
+      const zoneNotFound = results[0].status === 'rejected' && isZoneMissing(results[0].reason);
+      if (!zoneNotFound) {
+        const critical = results.slice(0, 4).find(result => result.status === 'rejected' && !isZoneMissing(result.reason));
+        if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
+      }
+    } catch (failure) {
+      if (current() && failure.name !== 'AbortError' && !isZoneMissing(failure)) setError(failure.message);
+    } finally {
+      if (current()) setLoading(false);
     }
+  }, [domain.id, domain.primaryDomain, domain.parentDomainId, parentRoot?.id, domains]);
 
-    const results = await Promise.allSettled([
-      getDnsZone(root.id), getDnsSecondaryStatus(root.id), previewDnsReapply(root.id), getDnssecStatus(root.id),
-      listDnsReapplyOperations(root.id), listDnssecOperations(root.id),
-    ]);
-    const setters = [setZone, setSecondary, setReapply, setDnssec, setReapplyOperations, setDnssecOperations];
-    results.forEach((result, index) => {
-      if (result.status === 'fulfilled') setters[index](result.value);
-      else setters[index](null);
-    });
-    const zoneNotFound = results[0].status === 'rejected' && isZoneMissing(results[0].reason);
-    if (!zoneNotFound) {
-      const critical = results.slice(0, 4).find((result) => result.status === 'rejected' && !isZoneMissing(result.reason));
-      if (critical?.reason?.name !== 'AbortError') setError(critical?.reason?.message ?? null);
-    }
-    setLoading(false);
-  }, [domain.id, root?.id]);
+  useEffect(() => {
+    void refresh();
+    return () => { refreshGeneration.current += 1; };
+  }, [refresh]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  if (!root) return <Section title="DNS"><EmptyState title="Authoritative zone bulunamadı" detail="Domain hierarchy eksik veya döngülü. DNS mutation yapılmadı." icon="alert" /></Section>;
+  if (!root) return <Section title="DNS"><ErrorNotice error={error} />{loading ? <div className="ws-loading" role="status">DNS bölgesi doğrulanıyor…</div> : <EmptyState title="Authoritative zone bulunamadı" detail="Alan adının DNS bölgesi doğrulanamadı. Yenileyerek tekrar deneyin." icon="alert" action={<Button icon="refresh" onClick={refresh}>Yenile</Button>} />}</Section>;
 
   async function refreshed(messageText = null) {
     setRecordDialog(null); setDeleteTarget(null); setConfirmation(null); setDnssecPreview(null);
@@ -299,11 +314,8 @@ export default function DnsPanel({ domain, domains, canManage }) {
             </div>
             <ZoneRecords
               zone={subdomainZone}
-              canManage={canManage}
+              canManage={false}
               busy={busy}
-              onAdd={() => setRecordDialog({ rrset: null, defaultOwner: relativeDnsOwner(domain.primaryDomain, zone.zoneName) })}
-              onEdit={(rrset) => setRecordDialog({ rrset })}
-              onDelete={setDeleteTarget}
             />
           </>
         ) : loading ? (
@@ -317,87 +329,7 @@ export default function DnsPanel({ domain, domains, canManage }) {
           />
         )}
       </Section>
-      {recordDialog && zone && (
-        <DnsRecordDialog
-          zone={zone}
-          rrset={recordDialog.rrset}
-          defaultOwner={recordDialog.defaultOwner}
-          onClose={() => setRecordDialog(null)}
-          onSaved={refreshed}
-        />
-      )}
-      {deleteTarget && zone && (
-        <ConfirmDialog
-          title="Manual DNS kaydını sil"
-          message={`${relativeDnsOwner(deleteTarget.owner, zone.zoneName)} ${deleteTarget.type} RRset’i silinecek. Managed kayıtlar bu yoldan silinemez.`}
-          confirmation={`delete-dns:${relativeDnsOwner(deleteTarget.owner, zone.zoneName)}:${deleteTarget.type}`}
-          confirmLabel="Kaydı sil"
-          busy={busy}
-          error={null}
-          onCancel={() => setDeleteTarget(null)}
-          onConfirm={deleteRecord}
-        />
-      )}
     </>;
-  }
-
-  async function provisionZone() {
-    if (!root || busy) return;
-    setBusy(true); setError(null); setMessage(null);
-    try {
-      await provisionDnsZone(root.id);
-      await refreshed('Yerel PowerDNS authoritative zone başarıyla oluşturuldu.');
-    } catch (failure) {
-      if (failure.name !== 'AbortError') setError(failure.message);
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function deleteRecord() {
-    if (!deleteTarget || !zone || busy) return;
-    setBusy(true); setError(null); setMessage(null);
-    try {
-      await deleteManualDnsRecord(root.id, dnsRecordDeletePayload(deleteTarget, zone.zoneName, zone.serial));
-      await refreshed('Manual DNS kaydı silindi.');
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { setBusy(false); }
-  }
-
-  async function runReapply() {
-    if (confirmation?.kind !== 'reapply' || busy) return;
-    setBusy(true); setError(null); setMessage(null);
-    try {
-      const started = await applyDnsReapply(root.id, confirmation.preview);
-      const operation = await waitForDnsOperation({ domainId: root.id, kind: 'reapply', operation: started });
-      if (operation.status === 'failed') throw new Error(operation.error?.message ?? 'Zone Template re-apply başarısız.');
-      await refreshed('Zone Template authoritative zone’a uygulandı.');
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { setBusy(false); }
-  }
-
-  async function prepareDnssec(enabled) {
-    if (busy) return;
-    setBusy(true); setError(null); setMessage(null); setDnssecPreview(null);
-    try {
-      const preview = await previewDnssec(root.id, enabled);
-      setDnssecPreview(preview);
-      if (preview.applyAllowed) setConfirmation({ kind: 'dnssec', preview });
-      else if (preview.noChanges) setMessage('DNSSEC zaten istenen durumda.');
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { setBusy(false); }
-  }
-
-  async function runDnssec() {
-    if (confirmation?.kind !== 'dnssec' || busy) return;
-    setBusy(true); setError(null); setMessage(null);
-    try {
-      const started = await applyDnssec(root.id, confirmation.preview);
-      const operation = await waitForDnsOperation({ domainId: root.id, kind: 'dnssec', operation: started });
-      if (operation.status === 'failed') throw new Error(operation.error?.message ?? 'DNSSEC işlemi başarısız.');
-      await refreshed(confirmation.preview.targetEnabled ? 'DNSSEC signing açıldı. Parent DS durumunu doğrulayın.' : 'DNSSEC signing güvenli sırayla kapatıldı.');
-    } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
-    finally { setBusy(false); }
   }
 
   return <>
@@ -406,11 +338,11 @@ export default function DnsPanel({ domain, domains, canManage }) {
     <Section title="Authoritative DNS zone" description={`${root.primaryDomain} · PowerDNS authoritative`} actions={<Button icon="refresh" disabled={busy || loading} onClick={refresh}>{loading ? 'Yenileniyor…' : 'Yenile'}</Button>}>
       {zone ? <><div className="ws-section-body"><KeyValues items={[
         ['Zone', zone.zoneName], ['SOA serial', zone.serial], ['Zone türü', zone.kind], ['DNSSEC', zone.dnssec ? 'Signing açık' : 'Kapalı'],
-      ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Yerel Authoritative DNS Zone Bulunmuyor" detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS authoritative zone bulunmuyor. Alan adınızın DNS kayıtları alan adı firmanızda veya harici DNS sağlayıcınızda (Cloudflare vb.) barındırılıyor olabilir.`} icon="globe" action={canManage ? <Button variant="primary" icon="plus" disabled={busy} onClick={provisionZone}>{busy ? 'Zone oluşturuluyor…' : 'Yerel DNS Zone Oluştur'}</Button> : null} />}
+      ]} /><p className="ws-muted">Zone Template, mail ve runtime kayıtları YunPanel ownership marker’ı taşır ve burada read-only görünür. Manual kayıtlar ayrı sahiplikte düzenlenebilir.</p></div><ZoneRecords zone={zone} canManage={canManage} busy={busy} onAdd={() => setRecordDialog({ rrset: null })} onEdit={(rrset) => setRecordDialog({ rrset })} onDelete={setDeleteTarget} /></> : loading ? <div className="ws-loading" role="status"><span className="ws-spinner" />Authoritative zone okunuyor…</div> : <EmptyState title="Yerel Authoritative DNS Zone Bulunmuyor" detail={`${root.primaryDomain} için bu sunucuda yerel PowerDNS authoritative zone bulunmuyor. Alan adınızın DNS kayıtları alan adı firmanızda veya harici DNS sağlayıcınızda (Cloudflare vb.) barındırılıyor olabilir.`} icon="globe" action={canManage && !ownChild ? <Button variant="primary" icon="plus" disabled={busy} onClick={provisionZone}>{busy ? 'Zone oluşturuluyor…' : 'Yerel DNS Zone Oluştur'}</Button> : null} />}
     </Section>
     {zone && <>
-      <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />
-      <div className="ws-equal-columns"><ReapplyPanel preview={reapply} loading={loading} canManage={canManage} busy={busy} onRefresh={refresh} onApply={() => setConfirmation({ kind: 'reapply', preview: reapply })} /><DnssecPanel state={dnssec} preview={dnssecPreview} canManage={canManage} busy={busy} onPreview={prepareDnssec} onRefresh={refresh} /></div>
+      {!ownChild && <SecondaryDnsStatusPanel state={secondary} loading={loading} busy={busy} onRefresh={refresh} />}
+      <div className="ws-equal-columns"><ReapplyPanel preview={reapply} loading={loading} canManage={canManage} busy={busy} onRefresh={refresh} onApply={() => setConfirmation({ kind: 'reapply', preview: reapply })} />{!ownChild && <DnssecPanel state={dnssec} preview={dnssecPreview} canManage={canManage} busy={busy} onPreview={prepareDnssec} onRefresh={refresh} />}</div>
       <OperationsPanel reapply={reapplyOperations} dnssec={dnssecOperations} />
     </>}
     {recordDialog && zone && <DnsRecordDialog zone={zone} rrset={recordDialog.rrset} onClose={() => setRecordDialog(null)} onSaved={refreshed} />}

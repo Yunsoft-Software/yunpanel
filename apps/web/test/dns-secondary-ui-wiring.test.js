@@ -10,7 +10,7 @@ test('Domain DNS workspace exposes secondary sync evidence without a mutation pa
     readFile(new URL('../src/workspace/dns-model.js', import.meta.url), 'utf8'),
   ]);
 
-  assert.match(panel, /getDnsSecondaryStatus\(root\.id\)/);
+  assert.match(panel, /getDnsSecondaryStatus\(selected\.id\)/);
   assert.match(panel, /<SecondaryDnsStatusPanel state=\{secondary\}/);
   assert.match(client, /domainDnsPath\(domainId, '\/secondary'\)/);
   assert.match(secondaryPanel, /Primary SOA serial/);

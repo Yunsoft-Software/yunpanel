@@ -3,6 +3,7 @@ import {
   PowerDnsManualRrsetManagerError,
 } from '@yunpanel/host-runtime/powerdns-manual-rrset-manager';
 import { dnsZoneDesiredStateInternals, DnsZoneDesiredStateError } from './dns-zone-desired-state.js';
+import { hasOwnChildDnsZone } from './dns-zone-child-ownership.js';
 
 const SUPPORTED_TYPES = new Set(['SOA', 'NS', 'A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV']);
 
@@ -15,7 +16,7 @@ export class DnsZoneRecordsError extends Error {
   }
 }
 
-function rootDomain(domain, localServerId) {
+function rootDomain(domain, localServerId, ownsChildZone = false) {
   if (!domain) throw new DnsZoneRecordsError('domain_not_found', 'Domain not found', 404);
   if (typeof domain !== 'object' || typeof domain.id !== 'string'
     || typeof domain.serverId !== 'string' || typeof domain.primaryDomain !== 'string') {
@@ -24,7 +25,7 @@ function rootDomain(domain, localServerId) {
   if (domain.serverId !== localServerId) {
     throw new DnsZoneRecordsError('dns_zone_local_server_required', 'Local DNS records can be managed only on this panel host', 404);
   }
-  if ((domain.parentDomainId ?? null) !== null) {
+  if ((domain.parentDomainId ?? null) !== null && !ownsChildZone) {
     throw new DnsZoneRecordsError('dns_zone_root_domain_required', 'Only root Domains own authoritative DNS zones', 409);
   }
   return domain;
@@ -138,12 +139,14 @@ export function createDnsZoneRecordsService({
   domainRegistry,
   powerDnsSecretRegistry,
   dnsIdentityRegistry = null,
+  provisioningRegistry = null,
   localServerId,
   manager = createPowerDnsManualRrsetManager(),
 } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || (dnsIdentityRegistry !== null && typeof dnsIdentityRegistry.getForServer !== 'function')
+    || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
     || typeof localServerId !== 'string' || !localServerId
     || !manager || typeof manager.getZone !== 'function' || typeof manager.apply !== 'function' || typeof manager.remove !== 'function') {
     throw new DnsZoneRecordsError('dns_zone_records_dependencies_invalid', 'DNS zone record dependencies are unavailable', 503);
@@ -151,7 +154,14 @@ export function createDnsZoneRecordsService({
 
   async function requireDomain(domainId) {
     if (typeof domainId !== 'string' || !domainId) throw new DnsZoneRecordsError('dns_zone_domain_id_invalid', 'Domain ID is required');
-    return rootDomain(await mapped(() => domainRegistry.getDomain(domainId)), localServerId);
+    const domain = rootDomain(await mapped(() => domainRegistry.getDomain(domainId)), localServerId, true);
+    if ((domain.parentDomainId ?? null) === null) return domain;
+    let owned;
+    try { owned = await hasOwnChildDnsZone(domain, provisioningRegistry); }
+    catch {
+      throw new DnsZoneRecordsError('dns_zone_ownership_unavailable', 'DNS zone ownership requires inspection', 503);
+    }
+    return rootDomain(domain, localServerId, owned);
   }
 
   async function secretFor(domain) {

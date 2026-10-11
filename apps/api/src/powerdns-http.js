@@ -281,6 +281,7 @@ async function defaultZoneReapplyService({
   authoritativeService,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
+  websiteProvisioningRegistry = null,
   mailDomainRegistry = null,
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
@@ -325,6 +326,7 @@ async function defaultZoneReapplyService({
     dnsIdentityRegistry,
     dnsZoneTemplateRegistry,
     powerDnsSecretRegistry: secretRegistry,
+    provisioningRegistry: websiteProvisioningRegistry,
     ...(hasMailIntent ? {
       mailIntentResolver: createDnsZoneMailIntentResolver({
         mailDomainRegistry,
@@ -347,6 +349,7 @@ async function defaultZoneReapplyRuntime({
   authoritativeService,
   domainRegistry = null,
   powerDnsSecretRegistry = null,
+  websiteProvisioningRegistry = null,
   mailDomainRegistry = null,
   mailDkimRegistry = null,
   mailDkimRetirementRegistry = null,
@@ -361,6 +364,7 @@ async function defaultZoneReapplyRuntime({
     authoritativeService,
     domainRegistry,
     powerDnsSecretRegistry,
+    websiteProvisioningRegistry,
     mailDomainRegistry,
     mailDkimRegistry,
     mailDkimRetirementRegistry,
@@ -438,6 +442,7 @@ async function defaultZoneRecordsService(
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   env = process.env,
+  websiteProvisioningRegistry = null,
 ) {
   if ((domainRegistry === null) !== (powerDnsSecretRegistry === null)) {
     throw new PowerDnsHttpError(
@@ -452,6 +457,7 @@ async function defaultZoneRecordsService(
   return createDnsZoneRecordsService({
     domainRegistry: domainRegistry ?? defaults.domainRegistry,
     powerDnsSecretRegistry: powerDnsSecretRegistry ?? defaults.secretRegistry,
+    provisioningRegistry: websiteProvisioningRegistry,
     localServerId: authoritativeService.localServerId,
   });
 }
@@ -585,6 +591,7 @@ export function mountPowerDnsRoutes(app, {
         authoritativeService,
         domainRegistry,
         powerDnsSecretRegistry,
+        websiteProvisioningRegistry,
         mailDomainRegistry,
         mailDkimRegistry,
         mailDkimRetirementRegistry,
@@ -606,6 +613,8 @@ export function mountPowerDnsRoutes(app, {
         authoritativeService,
         domainRegistry,
         powerDnsSecretRegistry,
+        process.env,
+        websiteProvisioningRegistry,
       );
       defaultRecordsPromise.catch(() => { defaultRecordsPromise = null; });
     }

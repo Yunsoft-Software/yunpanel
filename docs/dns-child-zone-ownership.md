@@ -1,0 +1,7 @@
+# Alt alanın bağımsız yerel DNS bölgesi
+
+Alt alanın DNS kayıt yönetimi ve template yeniden uygulaması, yalnız güncel Website kimliğine bağlı kurulum geçmişindeki tekil `created=true` DNS kanıtıyla kendi bölgesine açılır. Kanıtın Domain, sunucu, zone adı ve doğrulanan sahiplik özeti eşleşir. Eksik, yabancı Website, telafi edilmiş, bozuk veya çelişen kanıt PowerDNS anahtarı okunmadan reddedilir. Yeniden uygulama, snapshot ve rollback aynı sahipliği tekrar kontrol eder.
+
+DNS ekranı önce seçili alt alanın kendi bölgesini sorgular. Yalnız açık `dns_zone_root_domain_required` yanıtı üst bölgenin salt okunur görünümüne geçebilir; yetki, bağlantı ve inceleme hataları üst alanı seçmez. Veri kümesinde üst Domain bulunmasa da kanıtlı bağımsız bölge kullanılabilir. Eski asenkron cevaplar yeni alanın durumuna yazılmaz. Üst bölgeyi değiştirmek için onun kendi ekranına gidilir.
+
+Bu kaynak dilimi DNSSEC, secondary DNS ve DKIM retirement için mevcut root-only sınırını genişletmez; bunların child karşılığı ayrı kabul gerektirir. Kaynak regresyonları ve web build geçti. `.28` üzerinde bağımsız TXT kayıt ekle/sil, mail MX template yeniden uygulaması, ana bölgenin değişmeden kalması ve normal Website silme sonrası child DNS temizliği henüz kabul kapısıdır.
