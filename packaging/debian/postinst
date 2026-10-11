@@ -84,6 +84,8 @@ install -d -o root -g yunpanel-elfinder -m 0750 /run/yunpanel-elfinder
 install -d -o root -g yunpanel-elfinder -m 0750 /usr/lib/yunpanel/elfinder
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
+# Shared immutable Node runtimes must be traversable by dedicated site users.
+install -d -o root -g root -m 0755 /opt/yunpanel /opt/yunpanel/node-runtimes
 
 proxy_env=/etc/yunpanel/control-plane/proxy.env
 proxy_token_count=0
