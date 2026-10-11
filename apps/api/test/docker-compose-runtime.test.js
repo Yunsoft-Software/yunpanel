@@ -9,9 +9,10 @@ import {
 const projectId = '0bb78242-03a6-429f-9d17-7725c521437c';
 const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
 
-function fixture() {
+function fixture({ allowed = true } = {}) {
   const calls = [];
   const baseOperations = {
+    authorizeExecution: async (operation, execution) => { calls.push(['authorize', operation]); if (!allowed) throw Object.assign(new Error('Actor revoked'), {code:'panel_job_actor_forbidden'}); return Object.fromEntries(Object.entries(execution).filter(([key])=>key!=='authorization')); },
     operations: [OPERATIONS.SERVER_INSPECT],
     supports(operation) {
       return operation === OPERATIONS.SERVER_INSPECT;
@@ -79,11 +80,18 @@ test('compose runtime extends rather than replaces existing local operations', a
     serverId,
     resourceType: 'docker_project',
     resourceId: projectId,
+    authorization: { kind:'panel', actorId:'native-user', userId:'native-user', sessionId:'native-session', role:'owner', scope:'server', serverId },
   };
   const payload = { projectId };
   const result = await fx.extended.executeOperation(OPERATIONS.DOCKER_COMPOSE_START, payload, execution);
   assert.deepEqual(result, { source: 'compose', operation: OPERATIONS.DOCKER_COMPOSE_START });
-  assert.deepEqual(fx.calls.at(-1), ['compose', OPERATIONS.DOCKER_COMPOSE_START, payload, execution]);
+  const forwarded = fx.calls.at(-1);
+  assert.deepEqual(forwarded.slice(0, 3), ['compose', OPERATIONS.DOCKER_COMPOSE_START, payload]);
+  const { authorize, ...publicExecution } = forwarded[3];
+  assert.deepEqual(publicExecution, Object.fromEntries(Object.entries(execution).filter(([key]) => key !== 'authorization')));
+  assert.equal(typeof authorize, 'function');
+  await authorize();
+  assert.deepEqual(fx.calls.at(-1), ['authorize', OPERATIONS.DOCKER_COMPOSE_START]);
 });
 
 test('non-compose operations remain delegated to the original local host runtime', async () => {
@@ -93,4 +101,13 @@ test('non-compose operations remain delegated to the original local host runtime
   const result = await fx.extended.executeOperation(OPERATIONS.SERVER_INSPECT, payload, execution);
   assert.deepEqual(result, { source: 'base', operation: OPERATIONS.SERVER_INSPECT });
   assert.deepEqual(fx.calls, [['base', OPERATIONS.SERVER_INSPECT, payload, execution]]);
+});
+
+
+test('revoked Docker authorization fails before materialization or host execution', async () => {
+ const fx=fixture({allowed:false});await assert.rejects(fx.extended.executeOperation(OPERATIONS.DOCKER_COMPOSE_START,{projectId},{jobId:'native-job',serverId,resourceType:'docker_project',resourceId:projectId,authorization:{kind:'panel'}}),e=>e.code==='panel_job_actor_forbidden');
+ assert.deepEqual(fx.calls,[['authorize',OPERATIONS.DOCKER_COMPOSE_START]]);
+});
+test('legacy Docker jobs without private live authorization cannot reach the native engine', async () => {
+ const fx=fixture();await assert.rejects(fx.extended.executeOperation(OPERATIONS.DOCKER_COMPOSE_START,{projectId},{jobId:'legacy-job',serverId,resourceType:'docker_project',resourceId:projectId}),e=>e.code==='docker_compose_job_authorization_required');assert.deepEqual(fx.calls,[]);
 });

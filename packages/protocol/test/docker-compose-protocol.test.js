@@ -27,14 +27,23 @@ test('compose lifecycle operations are known and accept only secret-free pinned 
     OPERATIONS.DOCKER_COMPOSE_START,
     OPERATIONS.DOCKER_COMPOSE_STOP,
     OPERATIONS.DOCKER_COMPOSE_RESTART,
+    OPERATIONS.DOCKER_COMPOSE_REMOVE,
   ]);
   for (const operation of DOCKER_COMPOSE_OPERATIONS) {
     assert.equal(isKnownOperation(operation), true);
-    const envelope = createOperationEnvelope({ id: 'docker-job-0001', operation, payload });
+    const desired = operation === OPERATIONS.DOCKER_COMPOSE_REMOVE ? { ...payload, projectName: 'owned-project' } : payload;
+    const envelope = createOperationEnvelope({ id: 'docker-job-0001', operation, payload: desired });
     assert.equal(validateOperationEnvelope(envelope).ok, true);
-    assert.deepEqual(envelope.payload, payload);
+    assert.deepEqual(envelope.payload, desired);
     assert.equal(JSON.stringify(envelope).includes('password'), false);
     assert.equal(JSON.stringify(envelope).includes('token'), false);
+  }
+});
+
+test('compose removal requires a pinned project name and rejects shell or unrelated target arguments', () => {
+  for (const candidate of [payload, { ...payload, projectName: '../foreign' },
+    { ...payload, projectName: 'owned; down' }, { ...payload, projectName: 'owned', volumes: true }]) {
+    assert.throws(() => createOperationEnvelope({ id: 'docker-remove-0001', operation: OPERATIONS.DOCKER_COMPOSE_REMOVE, payload: candidate }));
   }
 });
 
