@@ -16,7 +16,7 @@ const ACTIVE = new Set(['waiting', 'syncing', 'paused', 'uncertain', 'unverified
 // The parent keys this component by the selected certificate, NOT its changing
 // status or collection freshness, so refreshing metadata does not lose the job.
 export default function SslRenewalPanel({ domain, certificate, disabled = false }) {
-  const { canManage, observe, updateJob, refreshAll } = useWorkspace();
+  const { canManage, observe, updateJob, refreshAll, jobs } = useWorkspace();
   const [state, setState] = useState(EMPTY_SSL_RENEWAL);
   const flow = useRef(null), permissions = useRef(null);
   permissions.current = { canManage, disabled };
