@@ -1,3 +1,4 @@
+import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ApplicationValidationError, normalizeGitDeploymentTarget } from '@yunpanel/shared';
@@ -5,6 +6,7 @@ import { ApplicationRegistryError } from './application-registry.js';
 import { ApplicationEnvironmentRegistryError } from './application-environment-registry.js';
 import { WebsiteRegistryError } from './website-registry.js';
 import { JobRegistryError } from './job-registry.js';
+import { DurableJobRegistryError } from './durable-job-registry.js';
 import { logHttpInternals, normalizeLogQuery, LogHttpError } from './log-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -28,6 +30,9 @@ function asyncRoute(handler) {
     try {
       return await handler(request, response);
     } catch (error) {
+      if (error instanceof DurableJobRegistryError) {
+        return response.status(503).json({ error: { code: error.code, message: error.message } });
+      }
       if (
         error instanceof ApplicationOperationsHttpError
         || error instanceof ApplicationRegistryError
@@ -92,7 +97,8 @@ function environmentImportInput(body) {
   return body;
 }
 
-async function ensureApplicationIdle(jobRegistry, applicationId) {
+async function ensureApplicationIdle(jobRegistry, applicationId, websiteRegistry = null) {
+  await assertApplicationWebsiteIdle({ applicationId, websiteRegistry, jobRegistry });
   if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') return;
   const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
   if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
@@ -100,8 +106,8 @@ async function ensureApplicationIdle(jobRegistry, applicationId) {
   }
 }
 
-async function ensureEnvironmentMutable(application, jobRegistry) {
-  await ensureApplicationIdle(jobRegistry, application.id);
+async function ensureEnvironmentMutable(application, jobRegistry, websiteRegistry = null) {
+  await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
   if (application.activeDeploymentId) {
     throw new ApplicationOperationsHttpError('deployment_in_progress', 'Application already has an active operation', 409);
   }
@@ -122,6 +128,7 @@ function getAvailableActions(application, website) {
     return ['build', 'pull', 'start', 'stop', 'restart', 'logs', 'health'];
   }
   if (type === 'static') {
+    if (application?.repositoryUrl === null) return ['files', 'logs', 'health'];
     return ['deploy', 'rollback', 'health', 'logs'];
   }
   return ['health'];
@@ -361,7 +368,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const variable = await applicationEnvironmentRegistry.setVariable({
       applicationId: application.id,
       key: request.params.key,
@@ -379,7 +386,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
     return response.status(204).end();
   }));
@@ -392,7 +399,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const body = environmentImportInput(request.body);
     return response.json({
       data: await applicationEnvironmentRegistry.importVariables({
@@ -434,7 +441,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!['static', 'node', 'python'].includes(application.type)) {
       throw new ApplicationOperationsHttpError('rollback_not_supported', 'Rollback is not implemented for this application type', 409);
     }
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
     if (application.activeDeploymentId) {
       throw new ApplicationOperationsHttpError('deployment_in_progress', 'Application already has an active operation', 409);
     }
@@ -507,11 +514,13 @@ export function mountApplicationOperationsRoutes(app, {
     if (!application.currentReleaseId) {
       throw new ApplicationOperationsHttpError('application_not_deployed', 'Application has no active release to restart', 409);
     }
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
     if (application.activeDeploymentId) {
       throw new ApplicationOperationsHttpError('deployment_in_progress', 'Application already has an active operation', 409);
     }
 
+    if(typeof applicationEnvironmentRegistry?.environmentStatus!=='function')throw new ApplicationOperationsHttpError('application_environment_unavailable','Uygulama ortamı doğrulanamadı',503);
+    const environment=await applicationEnvironmentRegistry.environmentStatus(application.id);
     const isPython = application.type === 'python';
     const job = await jobRegistry.enqueue({
       serverId: application.serverId,
@@ -521,6 +530,8 @@ export function mountApplicationOperationsRoutes(app, {
         applicationId: application.id,
         releaseId: application.currentReleaseId,
         runtime: application.activeRuntime ?? application.runtime,
+        environmentRevision: environment.savedRevision,
+        ...(!isPython && application.runtimeAdapter==='passenger'?{runtimeAdapter:'passenger'}:{}),
       },
       resourceType: 'application',
       resourceId: application.id,
@@ -543,7 +554,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (application.activeDeploymentId) {
       throw new ApplicationOperationsHttpError('deployment_in_progress', 'Application already has an active operation', 409);
     }
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
 
     const body = exactBody(
       request.body,
@@ -588,7 +599,7 @@ export function mountApplicationOperationsRoutes(app, {
       'node_configuration_input_invalid',
       'Request must contain exactly runtime field',
     );
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
     return response.json({
       data: await applicationRegistry.previewNodeConfiguration(application.id, body.runtime),
     });
@@ -605,7 +616,7 @@ export function mountApplicationOperationsRoutes(app, {
       'node_configuration_input_invalid',
       'Request must contain exactly runtime, expectedRevision, previewDigest, and confirmation',
     );
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
     return response.json({
       data: await applicationRegistry.updateNodeConfiguration({
         applicationId: application.id,
@@ -715,7 +726,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     return response.json({
       data: await applicationEnvironmentRegistry.setDeploymentCredential({
         applicationId: application.id,
@@ -729,7 +740,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const confirmation = `delete-deployment-credential:${application.id}`;
     if (!request.body || request.body.confirmation !== confirmation) {
       throw new ApplicationOperationsHttpError('git_credential_confirmation_required', `Confirm credential deletion with ${confirmation}`);
@@ -754,7 +765,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     if (!request.body || typeof request.body.secret !== 'string') {
       throw new ApplicationOperationsHttpError('invalid_github_webhook_secret', 'GitHub webhook secret request is invalid');
     }
@@ -771,7 +782,7 @@ export function mountApplicationOperationsRoutes(app, {
     if (!applicationEnvironmentRegistry) {
       throw new ApplicationOperationsHttpError('environment_registry_unavailable', 'Application environment registry is unavailable', 503);
     }
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const confirmation = `delete-github-webhook:${application.id}`;
     if (!request.body || request.body.confirmation !== confirmation) {
       throw new ApplicationOperationsHttpError('github_webhook_confirmation_required', `Confirm webhook deletion with ${confirmation}`);

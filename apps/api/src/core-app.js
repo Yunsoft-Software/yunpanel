@@ -1,3 +1,4 @@
+import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ApplicationValidationError, normalizeGitDeploymentTarget } from '@yunpanel/shared';
@@ -10,6 +11,7 @@ import { createApplicationRegistry, ApplicationRegistryError } from './applicati
 import { certificatePublicView, createCertificateRegistry, CertificateRegistryError } from './certificate-registry.js';
 import { createDomainRegistry, DomainRegistryError } from './domain-registry.js';
 import { createJobRegistry, jobPublicView, JobRegistryError } from './job-registry.js';
+import { DurableJobRegistryError } from './durable-job-registry.js';
 import { JobReconciliationError, reconcileCompletedJob } from './job-reconciliation.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
@@ -580,7 +582,8 @@ function environmentImportInput(body) {
   return body;
 }
 
-async function ensureEnvironmentMutable(application, jobRegistry) {
+async function ensureEnvironmentMutable(application, jobRegistry, websiteRegistry = null) {
+  await assertApplicationWebsiteIdle({ applicationId: application.id, websiteRegistry, jobRegistry, serverId: application.serverId });
   await ensureResourceJobIdle(jobRegistry, 'application', application.id);
   if (application.activeDeploymentId) {
     throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
@@ -776,7 +779,7 @@ export function createApp({
   app.post('/api/applications/:applicationId/environment/import', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
     if (application.type !== 'node') throw new ApplicationRegistryError('environment_import_not_supported', 'Environment import is available only for Node applications', 409);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     return response.json({ data: await applicationEnvironmentRegistry.importVariables({
       applicationId: application.id,
       ...environmentImportInput(request.body),
@@ -791,7 +794,7 @@ export function createApp({
   });
   app.put('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     return response.json({ data: await applicationEnvironmentRegistry.setDeploymentCredential({
       applicationId: application.id,
       credential: request.body,
@@ -799,7 +802,7 @@ export function createApp({
   });
   app.delete('/api/applications/:applicationId/deployment-credential', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const confirmation = `delete-deployment-credential:${application.id}`;
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
       || Object.keys(request.body).length !== 1 || request.body.confirmation !== confirmation) {
@@ -817,7 +820,7 @@ export function createApp({
   });
   app.put('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
       || Object.keys(request.body).length !== 1 || typeof request.body.secret !== 'string') {
       throw new ApplicationEnvironmentRegistryError('invalid_github_webhook_secret', 'GitHub webhook secret request is invalid');
@@ -829,7 +832,7 @@ export function createApp({
   });
   app.delete('/api/applications/:applicationId/github-webhook', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const confirmation = `delete-github-webhook:${application.id}`;
     if (!request.body || typeof request.body !== 'object' || Array.isArray(request.body)
       || Object.keys(request.body).length !== 1 || request.body.confirmation !== confirmation) {
@@ -840,7 +843,7 @@ export function createApp({
   });
   app.put('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     const variable = await applicationEnvironmentRegistry.setVariable({
       applicationId: application.id,
       key: request.params.key,
@@ -851,7 +854,7 @@ export function createApp({
   });
   app.delete('/api/applications/:applicationId/environment/:key', requirePanelRouteAccess, async (request, response) => {
     const application = await requireApplication(request.params.applicationId);
-    await ensureEnvironmentMutable(application, jobRegistry);
+    await ensureEnvironmentMutable(application, jobRegistry, websiteRegistry);
     await applicationEnvironmentRegistry.deleteVariable(application.id, request.params.key);
     return response.status(204).end();
   });
@@ -905,6 +908,7 @@ export function createApp({
     const application = await requireApplication(request.params.applicationId);
     if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    await assertApplicationWebsiteIdle({ applicationId: application.id, websiteRegistry, jobRegistry, serverId: application.serverId });
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
     const releaseId = request.body?.releaseId ?? application.previousReleaseId;
@@ -947,6 +951,7 @@ export function createApp({
     if (!['node', 'python'].includes(application.type)) throw new ApplicationRegistryError('restart_not_supported', 'Restart is only supported for Node and Python applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to restart', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    await assertApplicationWebsiteIdle({ applicationId: application.id, websiteRegistry, jobRegistry, serverId: application.serverId });
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
     const environment = await applicationEnvironmentRegistry.environmentStatus(application.id);
@@ -977,6 +982,7 @@ export function createApp({
     if (!['node', 'python'].includes(application.type)) throw new ApplicationRegistryError('status_not_supported', 'Process status is only supported for Node and Python applications', 409);
     if (!application.currentReleaseId) throw new ApplicationRegistryError('application_not_deployed', 'Application has no active release to inspect', 409);
     await ensureResourceJobIdle(jobRegistry, 'application', application.id);
+    await assertApplicationWebsiteIdle({ applicationId: application.id, websiteRegistry, jobRegistry, serverId: application.serverId });
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
 
     const isPython = application.type === 'python';
@@ -1281,6 +1287,9 @@ export function createApp({
   app.use((request, response) => response.status(404).json({ error: { code: 'not_found', message: 'Not found' } }));
   app.use((error, request, response, next) => {
     if (response.headersSent) return next(error);
+    if (error instanceof DurableJobRegistryError) {
+      return response.status(503).json({ error: { code: error.code, message: error.message } });
+    }
     if (
       error instanceof RegistryError
       || error instanceof DomainRegistryError

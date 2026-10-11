@@ -7,6 +7,7 @@ import { OPERATIONS } from '@yunpanel/protocol';
 import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
+import { DurableJobRegistryError } from '../src/durable-job-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
 import { createServerRegistry } from '../src/server-registry.js';
@@ -42,7 +43,7 @@ function nodeRuntime(overrides = {}) {
   };
 }
 
-async function fixture(t) {
+async function fixture(t, { enqueueError = null } = {}) {
   const serverRegistry = createServerRegistry();
   const enrollment = await serverRegistry.issueEnrollmentToken({ label: 'ops-server' });
   const enrolled = await serverRegistry.enrollServer({ token: enrollment.token, hostname: 'ops-host' });
@@ -220,7 +221,7 @@ async function fixture(t) {
     websiteRegistry,
     applicationRegistry,
     applicationEnvironmentRegistry,
-    jobRegistry,
+    jobRegistry: enqueueError ? new Proxy(jobRegistry, { get(target, key) { if (key === 'enqueue') return async () => { throw enqueueError; }; const value = target[key]; return typeof value === 'function' ? value.bind(target) : value; } }) : jobRegistry,
     siteHealthService,
     journalLogReader,
     nginxLogReader,
@@ -491,6 +492,16 @@ test('Releases, deployment and rollback workflows mapped to website context', as
   assert.equal((await phpDeploy.json()).error.code, 'deployment_not_supported');
 });
 
+test('Website restart pins the saved environment revision in the private executable envelope',async t=>{
+ const f=await fixture(t),id=f.nodeSite.applicationId;
+ await f.applicationEnvironmentRegistry.setVariable({applicationId:id,key:'OWNED_TEST',value:'controlled',secret:true});
+ const expected=await f.applicationEnvironmentRegistry.environmentStatus(id);
+ const response=await f.request(`/api/websites/${f.nodeSite.id}/application/restart`,{method:'POST',body:{environmentRevision:9999}});
+ assert.equal(response.status,202);const publicJob=(await response.json()).data;
+ const claim=await f.jobRegistry.claimNext(f.serverId);assert.equal(claim.job.id,publicJob.id);
+ assert.equal(claim.envelope.payload.environmentRevision,expected.savedRevision);assert.notEqual(claim.envelope.payload.environmentRevision,9999);
+});
+
 test('Process control and restart operations under website scope', async (t) => {
   const f = await fixture(t);
 
@@ -661,4 +672,13 @@ test('Fail-closed tenant boundary and read-only role protections', async (t) => 
   });
   assert.equal(roEnv.status, 403);
   assert.equal((await roEnv.json()).error.code, 'forbidden');
+});
+
+
+test('a durable job reconciliation guard returns an actionable 503 for restart without bypassing the guard', async t => {
+  const f = await fixture(t, { enqueueError: new DurableJobRegistryError('durable_job_reconciliation_required', 'Durable job reconciliation is required') });
+  const response = await f.request(`/api/websites/${f.nodeSite.id}/application/restart`, { method: 'POST', body: {} });
+  assert.equal(response.status, 503);
+  assert.equal((await response.json()).error.code, 'durable_job_reconciliation_required');
+  assert.equal((await f.jobRegistry.listJobs()).length, 0);
 });
