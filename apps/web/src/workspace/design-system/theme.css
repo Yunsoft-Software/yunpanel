@@ -510,6 +510,8 @@ html .workspace-shell .ws-filters {
 html .workspace-shell .ws-badge {
   display: inline-flex !important;
   align-items: center !important;
+  align-self: flex-start !important;
+  width: fit-content !important;
   gap: 5px !important;
   height: 22px !important;
   padding: 0 8px !important;
@@ -825,6 +827,10 @@ html .workspace-shell details.ws-disclosure {
   border-radius: 6px !important;
   background: var(--ws-surface-subtle) !important;
   padding: 8px 12px !important;
+}
+
+html .workspace-shell .ws-section > details.ws-disclosure {
+  margin: 0 18px 12px !important;
 }
 
 html .workspace-shell details.ws-disclosure > summary {
