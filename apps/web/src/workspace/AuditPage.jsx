@@ -78,7 +78,7 @@ export default function AuditPage() {
   function reset() { const next = blankFilters(); setDraft(next); setFilters(auditFilterInput()); setNumber(1); setFilterError(null); }
   function refresh() { client.current?.load({ filters, offset: (number - 1) * LIMIT, limit: LIMIT }); }
   return <>
-    <PageHeading title="Denetim kayıtları" description="Owner işlemleri, erişim kararları ve kalıcı iş sonuçları; gizli değerler ve terminal içeriği kaydedilmez." actions={<Button icon="refresh" onClick={refresh} disabled={loading}>Yenile</Button>} />
+    <PageHeading title="Denetim kayıtları" description="Yönetim işlemleri, erişim kararları ve işlem geçmişi kayıtları." actions={<Button icon="refresh" onClick={refresh} disabled={loading}>Yenile</Button>} />
     <Section title="Filtreler" description="Kaynak filtresinde tür ve kimlik birlikte kullanılmalıdır.">
       <form className="ws-form ws-section-body" onSubmit={apply}>
         <ErrorNotice error={filterError} />

@@ -645,13 +645,19 @@ html .workspace-shell .ws-website-task .ws-button {
 }
 
 html .workspace-shell .ws-website-task small {
-  font-size: 10.5px !important;
-  line-height: 1.2 !important;
-  color: var(--ws-muted) !important;
-  max-width: 155px !important;
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  padding: 0 !important;
+  margin: -1px !important;
+  overflow: hidden !important;
+  clip: rect(0, 0, 0, 0) !important;
+  white-space: nowrap !important;
+  border: 0 !important;
 }
 
-html .workspace-shell .ws-website-task-quick > .ws-button {
+html .workspace-shell .ws-website-task-quick > .ws-button,
+html .workspace-shell .ws-website-task-quick .ws-actions .ws-button {
   min-height: 32px !important;
   height: 32px !important;
   padding: 0 10px !important;
@@ -660,8 +666,8 @@ html .workspace-shell .ws-website-task-quick > .ws-button {
 
 html .workspace-shell .ws-website-task-grid {
   display: grid !important;
-  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)) !important;
-  align-items: start !important;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)) !important;
+  align-items: stretch !important;
   gap: 8px !important;
   margin-top: 10px !important;
   padding-top: 10px !important;
@@ -677,13 +683,10 @@ html .workspace-shell .ws-website-task-grid .ws-website-task {
 
 html .workspace-shell .ws-website-task-grid .ws-website-task .ws-button {
   width: 100% !important;
+  min-height: 36px !important;
+  height: 36px !important;
   justify-content: flex-start !important;
   padding: 0 12px !important;
-}
-
-html .workspace-shell .ws-website-task-grid .ws-website-task small {
-  max-width: none !important;
-  padding: 0 2px !important;
 }
 
 html .workspace-shell .ws-website-task-footer {
@@ -1011,3 +1014,97 @@ html .ws-modal h2 {
 html .ws-modal-body {
   padding: 18px !important;
 }
+
+/* Plesk-Style Categorized Website Tools Dashboard on /websites/:id */
+html .workspace-shell .yp-plesk-tool-groups {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 18px !important;
+  padding: 16px 18px !important;
+}
+
+html .workspace-shell .yp-plesk-tool-group {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+html .workspace-shell .yp-plesk-tool-group-title {
+  margin: 0 !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.04em !important;
+  text-transform: uppercase !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-console-quicklinks {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)) !important;
+  align-items: stretch !important;
+  gap: 10px !important;
+  padding: 0 !important;
+}
+
+html .workspace-shell .ws-console-quicklink {
+  display: flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  padding: 11px 14px !important;
+  min-height: 58px !important;
+  height: 100% !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-ink) !important;
+  text-decoration: none !important;
+  transition: border-color 140ms ease, background-color 140ms ease, transform 140ms ease !important;
+}
+
+html .workspace-shell .ws-console-quicklink:hover {
+  border-color: var(--ws-brand) !important;
+  background: var(--ws-surface-raised) !important;
+  transform: translateY(-1px) !important;
+}
+
+html .workspace-shell .yp-plesk-tool-icon {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 8px !important;
+  background: var(--ws-brand-soft) !important;
+  color: var(--ws-brand) !important;
+  flex-shrink: 0 !important;
+}
+
+html .workspace-shell .yp-plesk-tool-copy {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 2px !important;
+  min-width: 0 !important;
+}
+
+html .workspace-shell .yp-plesk-tool-copy strong {
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--ws-ink) !important;
+  line-height: 1.25 !important;
+}
+
+html .workspace-shell .yp-plesk-tool-copy small {
+  font-size: 11.5px !important;
+  color: var(--ws-muted) !important;
+  line-height: 1.25 !important;
+}
+
+/* Horizontal Database Actions Bar on /databases */
+html .workspace-shell .ws-db-access {
+  display: flex !important;
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+

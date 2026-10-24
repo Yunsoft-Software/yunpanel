@@ -66,7 +66,7 @@ export default function UsersPage() {
       <Button icon="plus" variant="primary" disabled={locked} onClick={() => { setNotice(''); setDialog({ type: 'create' }); }}>Kullanıcı ekle</Button>
     </>} />
     {notice && <div className="ws-notice" role="status">{notice}</div>}
-    <Section title="Hesaplar" description="Owner tüm mevcut yönetim işlemlerine erişir. Read Only hesapları şu an yalnız kendi hesap ayarlarına erişebilir; kaynak görüntüleme izinleri henüz uygulanmadı.">
+    <Section title="Hesaplar" description="Panel kullanıcı hesapları, roller ve iki adımlı doğrulama durumları.">
       {(page.status === 'loading' || (page.status === 'ready' && !ready)) && <div className="ws-loading" role="status"><span className="ws-spinner" />Hesaplar doğrulanıyor…</div>}
       {page.status === 'error' && <div className="ws-section-body"><ErrorNotice error={userAdminMessage(page.error)} /><Button disabled={dialog !== null} onClick={refresh}>Listeyi yeniden yükle</Button></div>}
       {ready && (visible.users.length ? <div className="ws-table-scroll"><table className="ws-table">
@@ -174,7 +174,6 @@ function UserDialog({ mode, user, onClose, onSave }) {
             </div>
           )}
           <p className="ws-muted">{user ? 'Kullanıcı adı, rol veya durum değişirse bu hesabın bütün oturumları ve bekleyen giriş doğrulamaları iptal edilir. Kendi hesabınızı değiştirirseniz yeniden giriş gerekir.' : 'Yeni Owner hesabı, ilk HTTPS girişinde iki adımlı doğrulamayı kurmadan yönetim ekranlarına erişemez.'}</p>
-          {form.role === 'read_only' && <p className="ws-muted">Read Only bu sürümde site, sunucu, log veya kullanıcı listesini görüntüleyemez. Kaynak bazlı izinler henüz uygulanmadı.</p>}
         </>}
       </fieldset>
       <footer className="ws-modal-footer"><Button disabled={busy} onClick={close}>{reload ? 'Kapat ve listeyi yenile' : 'Vazgeç'}</Button>

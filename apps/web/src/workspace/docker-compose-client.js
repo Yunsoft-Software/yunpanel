@@ -29,11 +29,20 @@ export function getDockerProjectDocument(projectId) {
   return panelRequest(`${projectPath(projectId)}/document`);
 }
 
-export function getDockerCatalog(query = '') {
-  const cleanQuery = typeof query === 'string' && query.trim()
-    ? `?q=${encodeURIComponent(query.trim())}`
-    : '';
-  return panelRequest(`/docker/catalog${cleanQuery}`);
+export async function getDockerCatalog(query = '', { live = true, signal } = {}) {
+  const params = new URLSearchParams();
+  if (typeof query === 'string' && query.trim()) {
+    params.set('q', query.trim());
+  }
+  if (live) {
+    params.set('live', '1');
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const result = await panelRequest(`/docker/catalog${suffix}`, { signal });
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.items)) return result.items;
+  if (Array.isArray(result?.data)) return result.data;
+  return [];
 }
 
 export function generateDockerComposeFromImage({

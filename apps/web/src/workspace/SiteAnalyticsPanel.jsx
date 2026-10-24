@@ -40,8 +40,7 @@ function AnalyticsWorkspace({scope,generation,isOwner}){
      ['Canlı bağlantı',status.socketReady?'Hazır':'Hazır değil'],
      ['Son statik rapor',state.report?formatDate(state.report.generatedAt):'Bu oturumda oluşturulmadı'],
     ]}/>}
-    <p className="ws-muted">Rapor yalnız bu Website'in erişim günlüğünden üretilir. PID, Unix socket yolu ve sunucu dosya yolları panelde gösterilmez.</p>
-    {status?.available&&<div className="ws-actions">
+     {status?.available&&<div className="ws-actions">
      <Button disabled={state?.busy} onClick={()=>void ref.current?.generateReport()}>Statik raporu yenile</Button>
      <a className="ws-button" href={htmlUrl} target="_blank" rel="noopener noreferrer">Statik raporu aç</a>
      {isOwner&&status.running&&<a className="ws-button" href={'/tools/goaccess/'+encodeURIComponent(scope.websiteId)+'/'} target="_blank" rel="noopener noreferrer">Gerçek zamanlı görünümü aç</a>}

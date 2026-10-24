@@ -60,7 +60,7 @@ test('mail DKIM and operations panels expose DNS requirements, connection settin
   assert.match(opsSource, /getServerMailDeliveryDiagnostics/);
   assert.match(opsSource, /sendServerMailTestDelivery/);
   assert.match(opsSource, /Yönlendirme/);
-  assert.match(opsSource, /secret masking/);
+  assert.match(opsSource, /Postfix, Dovecot ve Rspamd servis günlükleri\./);
 });
 
 // ---------------------------------------------------------------------------

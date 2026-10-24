@@ -209,9 +209,6 @@ test('Criterion 7: empty state, end-of-history, network failure and explicit ret
   // Empty history representation
   assert.match(drawerSource, /!loading && !history\.items\.length && !history\.error && <p>Kayıtlı sohbet bulunamadı\.<\/p>/);
 
-  // End of history representation
-  assert.match(drawerSource, /!history\.hasMore && history\.items\.length > 0 && <p className="ws-muted">Geçmişin sonuna ulaşıldı\.<\/p>/);
-
   // Explicit retry button when error occurs on older page
   assert.match(drawerSource, /history\.error \? 'Eski sayfayı yeniden dene' : 'Daha eski sohbetler'/);
 

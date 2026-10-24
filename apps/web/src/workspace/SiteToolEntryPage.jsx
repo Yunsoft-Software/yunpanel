@@ -38,7 +38,7 @@ export default function SiteToolEntryPage({ tool }) {
     {['forbidden', 'unsupported'].includes(entry.state) && <EmptyState icon="shield" title="Bu araca erişilemiyor" detail="Hesabınızın site yönetimi yetkisini kontrol edin." />}
     {entry.state === 'not_found' && <EmptyState icon={icon} title="İstenen siteye erişilemiyor" detail="Site kaldırılmış veya yetkiniz değişmiş olabilir. Başka bir site otomatik açılmaz." action={<LinkButton to={`/${tool}`}>Site seçimine dön</LinkButton>} />}
     {entry.state === 'empty' && <EmptyState icon={icon} title="Henüz erişilebilir site yok" detail="Bu araç yalnız yetkili olduğunuz siteler için açılır." action={<LinkButton to="/websites">Web sitelerine git</LinkButton>} />}
-    {['choose', 'unbound'].includes(entry.state) && <Section title="Web siteleri ve alan adları"><div className="ws-table-scroll"><table className="ws-table">
+    {['choose', 'unbound'].includes(entry.state) && <Section title="Web Siteleri"><div className="ws-table-scroll"><table className="ws-table">
       <thead><tr><th scope="col">Alan adı</th><th scope="col">{title}</th></tr></thead>
       <tbody>{entry.targets.map((target) => <tr key={target.id}><td><strong>{target.label}</strong></td><td>{target.href
         ? <LinkButton to={`${target.href}${forwardQuery}`} icon={icon}>{title}</LinkButton>

@@ -19,9 +19,11 @@ import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
 import {
   DockerPleskCatalogError,
   generateComposeFromCatalogInput,
+  inferDockerHubPortPreset,
   PLESK_DOCKER_CATALOG,
   resolveDockerProxyRule,
   searchDockerCatalog,
+  searchDockerCatalogLive,
 } from '../src/docker-plesk-catalog.js';
 import {
   buildDomainHierarchyTree,
@@ -459,6 +461,25 @@ test('Plesk Docker catalog search, 1-click Compose YAML generation, and Inner<->
   assert.equal(catalogJson.data[0].id, 'postgres');
   assert.equal(catalogJson.data[0].innerPort, 5432);
   assert.equal(catalogJson.data[0].outerPort, 15432);
+
+  // 1b. Live Docker Hub Registry search via /api/docker/catalog?q=grafana&live=1 and /api/docker/hub/search
+  const grafanaPreset = inferDockerHubPortPreset('grafana/grafana');
+  assert.equal(grafanaPreset.targetPort, 3000);
+  assert.equal(grafanaPreset.publishedPort, 13000);
+  assert.equal(grafanaPreset.category, 'monitoring');
+
+  const liveHubResults = await searchDockerCatalogLive({ q: 'grafana', pageSize: 10 });
+  assert.ok(liveHubResults.length >= 1, 'Live Docker Hub search for grafana must return results');
+  const grafanaItem = liveHubResults.find((item) => item.image.includes('grafana'));
+  assert.ok(grafanaItem, 'grafana image must be present in live Docker Hub search results');
+  assert.equal(grafanaItem.innerPort, 3000);
+  assert.equal(grafanaItem.outerPort, 13000);
+
+  const hubHttpRes = await fetch(`${baseUrl}/api/docker/catalog?q=grafana&live=1`);
+  assert.equal(hubHttpRes.status, 200);
+  const hubHttpJson = await hubHttpRes.json();
+  assert.equal(hubHttpJson.source, 'docker_hub_live');
+  assert.ok(Array.isArray(hubHttpJson.data) && hubHttpJson.data.length >= 1);
 
   // 2. Generate Compose YAML via POST /api/docker/catalog/generate-compose
   const genRes = await fetch(`${baseUrl}/api/docker/catalog/generate-compose`, {

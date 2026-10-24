@@ -12,6 +12,7 @@ import {
   generateComposeFromCatalogInput,
   resolveDockerProxyRule,
   searchDockerCatalog,
+  searchDockerCatalogLive,
 } from './docker-plesk-catalog.js';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -407,12 +408,31 @@ export function mountDockerComposeRoutes(app, {
 
   app.get('/api/docker/catalog', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const query = request.query ?? {};
-    const items = await safeCall(() => searchDockerCatalog({
+    const live = query.live === '1' || query.live === 'true' || query.source === 'hub';
+    const items = await safeCall(() => (
+      live
+        ? searchDockerCatalogLive({
+            q: query.q ?? '',
+            category: query.category ?? null,
+            kind: query.kind ?? null,
+          })
+        : searchDockerCatalog({
+            q: query.q ?? '',
+            category: query.category ?? null,
+            kind: query.kind ?? null,
+          })
+    ));
+    return response.json({ data: items, items, total: items.length, source: live ? 'docker_hub_live' : 'catalog' });
+  }));
+
+  app.get('/api/docker/hub/search', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const query = request.query ?? {};
+    const items = await safeCall(() => searchDockerCatalogLive({
       q: query.q ?? '',
       category: query.category ?? null,
       kind: query.kind ?? null,
     }));
-    return response.json({ data: items, items, total: items.length });
+    return response.json({ data: items, items, total: items.length, source: 'docker_hub_live' });
   }));
 
   app.post('/api/docker/catalog/generate-compose', requirePanelRouteAccess, asyncRoute(async (request, response) => {

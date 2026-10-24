@@ -505,6 +505,188 @@ export function searchDockerCatalog({ q = '', category = null, kind = null } = {
   return Object.freeze(filtered);
 }
 
+const KNOWN_HUB_PORT_PRESETS = [
+  { match: /^(?:library\/)?(?:redis|valkey|dragonfly|keydb)(?:$|\/|-)/i, targetPort: 6379, publishedPort: 16379, category: 'cache' },
+  { match: /^(?:library\/)?(?:postgres|postgis|timescale|pgvector)(?:$|\/|-)/i, targetPort: 5432, publishedPort: 15432, category: 'database' },
+  { match: /^(?:library\/)?(?:mariadb|mysql|percona)(?:$|\/|-)/i, targetPort: 3306, publishedPort: 13306, category: 'database' },
+  { match: /^(?:library\/)?(?:mongo|mongodb)(?:$|\/|-)/i, targetPort: 27017, publishedPort: 27017, category: 'database' },
+  { match: /(?:^|\/)grafana(?:$|-)/i, targetPort: 3000, publishedPort: 13000, category: 'monitoring' },
+  { match: /(?:^|\/)prometheus(?:$|-)/i, targetPort: 9090, publishedPort: 19090, category: 'monitoring' },
+  { match: /(?:^|\/)uptime-kuma(?:$|-)/i, targetPort: 3001, publishedPort: 13001, category: 'monitoring' },
+  { match: /(?:^|\/)portainer(?:$|-)/i, targetPort: 9000, publishedPort: 19000, category: 'management' },
+  { match: /(?:^|\/)ghost(?:$|-)/i, targetPort: 2368, publishedPort: 12368, category: 'cms' },
+  { match: /(?:^|\/)n8n(?:$|-)/i, targetPort: 5678, publishedPort: 15678, category: 'automation' },
+  { match: /(?:^|\/)minio(?:$|-)/i, targetPort: 9000, publishedPort: 19000, category: 'storage' },
+  { match: /(?:^|\/)(?:meilisearch)(?:$|-)/i, targetPort: 7700, publishedPort: 17700, category: 'search' },
+  { match: /(?:^|\/)(?:elasticsearch|opensearch)(?:$|-)/i, targetPort: 9200, publishedPort: 19200, category: 'search' },
+  { match: /(?:^|\/)kibana(?:$|-)/i, targetPort: 5601, publishedPort: 15601, category: 'monitoring' },
+  { match: /(?:^|\/)rabbitmq(?:$|-)/i, targetPort: 15672, publishedPort: 15672, category: 'queue' },
+  { match: /(?:^|\/)(?:keycloak|jenkins|adminer|open-webui|traefik)(?:$|-)/i, targetPort: 8080, publishedPort: 18080, category: 'web' },
+  { match: /(?:^|\/)(?:gitea|metabase|node)(?:$|-)/i, targetPort: 3000, publishedPort: 13000, category: 'runtime' },
+  { match: /(?:^|\/)(?:ollama)(?:$|-)/i, targetPort: 11434, publishedPort: 11434, category: 'ai' },
+  { match: /(?:^|\/)(?:nginx|httpd|apache|caddy|wordpress|nextcloud|phpmyadmin|vaultwarden)(?:$|-)/i, targetPort: 80, publishedPort: 18080, category: 'web' },
+];
+
+export function inferDockerHubPortPreset(repoName = '') {
+  const clean = String(repoName ?? '').trim().toLowerCase();
+  for (const preset of KNOWN_HUB_PORT_PRESETS) {
+    if (preset.match.test(clean)) {
+      return preset;
+    }
+  }
+  let hash = 0;
+  for (let i = 0; i < clean.length; i += 1) {
+    hash = ((hash << 5) - hash + clean.charCodeAt(i)) | 0;
+  }
+  const offset = Math.abs(hash) % 900;
+  return {
+    targetPort: 8080,
+    publishedPort: 18100 + offset,
+    category: 'container',
+  };
+}
+
+export async function searchDockerCatalogLive({
+  q = '',
+  category = null,
+  kind = null,
+  pageSize = 24,
+  fetchImpl = globalThis.fetch,
+} = {}) {
+  const localMatches = searchDockerCatalog({ q, category, kind });
+  const term = String(q ?? '').trim();
+  if (!term || typeof fetchImpl !== 'function') {
+    return Object.freeze(localMatches.map((item) => Object.freeze({
+      ...item,
+      label: item.name,
+      official: !item.image.includes('/'),
+      source: 'curated',
+    })));
+  }
+
+  const normalizedCategory = category ? String(category).trim().toLowerCase() : null;
+  const limit = Math.max(1, Math.min(50, Number(pageSize) || 24));
+  const url = `https://hub.docker.com/v2/search/repositories/?query=${encodeURIComponent(term)}&page_size=${limit}`;
+
+  let hubResults = [];
+  try {
+    const response = await fetchImpl(url, {
+      method: 'GET',
+      headers: {
+        Accept: 'application/json',
+        'User-Agent': 'YunPanel-Docker-Catalog/2.0',
+      },
+      signal: AbortSignal.timeout(6000),
+    });
+    if (response.ok) {
+      const payload = await response.json();
+      if (Array.isArray(payload?.results)) {
+        hubResults = payload.results;
+      }
+    }
+  } catch {
+    // Fall back gracefully to curated catalog if network/Docker Hub is unreachable
+    return Object.freeze(localMatches.map((item) => Object.freeze({
+      ...item,
+      label: item.name,
+      official: !item.image.includes('/'),
+      source: 'curated',
+    })));
+  }
+
+  const lowerTerm = term.toLowerCase();
+  const sortedHub = [...hubResults].sort((a, b) => {
+    const nameA = String(a?.repo_name ?? '').toLowerCase();
+    const nameB = String(b?.repo_name ?? '').toLowerCase();
+    const exactA = nameA === lowerTerm || nameA === `${lowerTerm}/${lowerTerm}` || nameA.endsWith(`/${lowerTerm}`) ? 1 : 0;
+    const exactB = nameB === lowerTerm || nameB === `${lowerTerm}/${lowerTerm}` || nameB.endsWith(`/${lowerTerm}`) ? 1 : 0;
+    if (exactA !== exactB) return exactB - exactA;
+    const offA = a?.is_official ? 1 : 0;
+    const offB = b?.is_official ? 1 : 0;
+    if (offA !== offB) return offB - offA;
+    return Number(b?.star_count ?? 0) - Number(a?.star_count ?? 0);
+  });
+
+  const merged = [];
+  const seenImages = new Set();
+
+  for (const curated of localMatches) {
+    const baseImage = curated.image.split(':')[0].toLowerCase();
+    seenImages.add(baseImage);
+    const matchingHub = sortedHub.find((r) => String(r?.repo_name ?? '').toLowerCase() === baseImage);
+    merged.push(Object.freeze({
+      ...curated,
+      label: curated.name,
+      starCount: Number(matchingHub?.star_count ?? 0),
+      pullCount: Number(matchingHub?.pull_count ?? 0),
+      official: matchingHub ? Boolean(matchingHub.is_official) : !curated.image.includes('/'),
+      source: 'curated',
+    }));
+  }
+
+  for (const repo of sortedHub) {
+    const repoName = String(repo?.repo_name ?? '').trim();
+    if (!repoName || !IMAGE_NAME_PATTERN.test(repoName)) continue;
+    const lowerRepo = repoName.toLowerCase();
+    if (seenImages.has(lowerRepo)) continue;
+
+    const preset = inferDockerHubPortPreset(repoName);
+    if (normalizedCategory && preset.category !== normalizedCategory) continue;
+
+    const shortName = repoName.split('/').pop() || 'app';
+    const cleanService = shortName.toLowerCase().replace(/[^a-z0-9_-]/g, '_').replace(/^[^a-z0-9]+/, '') || 'app';
+    const safeServiceName = SERVICE_NAME_PATTERN.test(cleanService) ? cleanService : 'app';
+    const safeProjectName = PROJECT_NAME_PATTERN.test(`${safeServiceName}_stack`) ? `${safeServiceName}_stack` : 'docker_stack';
+
+    let generatedDoc = `services:\n  ${safeServiceName}:\n    image: ${repoName}:latest\n    restart: unless-stopped\n    ports:\n      - "127.0.0.1:${preset.publishedPort}:${preset.targetPort}/tcp"\n`;
+    try {
+      const generated = generateComposeFromCatalogInput({
+        projectName: safeProjectName,
+        serviceName: safeServiceName,
+        image: repoName,
+        tag: 'latest',
+        innerPort: preset.targetPort,
+        outerPort: preset.publishedPort,
+        bindHost: '127.0.0.1',
+      });
+      generatedDoc = generated.document;
+    } catch {
+      // keep fallback YAML
+    }
+
+    seenImages.add(lowerRepo);
+    merged.push(Object.freeze({
+      id: `hub:${repoName}`,
+      name: repoName,
+      label: repoName,
+      description: String(repo?.short_description ?? '').trim() || 'Docker Hub konteyner imajı',
+      category: preset.category,
+      kind: 'image',
+      image: `${repoName}:latest`,
+      repository: repoName,
+      serviceName: safeServiceName,
+      tags: Object.freeze(['latest', 'alpine', 'stable']),
+      defaultTag: 'latest',
+      innerPort: preset.targetPort,
+      targetPort: preset.targetPort,
+      outerPort: preset.publishedPort,
+      publishedPort: preset.publishedPort,
+      bindHost: '127.0.0.1',
+      protocol: 'tcp',
+      volumes: Object.freeze([]),
+      environment: Object.freeze([]),
+      starCount: Number(repo?.star_count ?? 0),
+      pullCount: Number(repo?.pull_count ?? 0),
+      official: Boolean(repo?.is_official),
+      automated: Boolean(repo?.is_automated),
+      source: 'docker_hub',
+      defaultComposeDocument: generatedDoc,
+    }));
+  }
+
+  return Object.freeze(merged);
+}
+
 function normalizeProxyHostname(raw) {
   if (typeof raw !== 'string' || !raw.trim()) {
     throw new DockerPleskCatalogError('invalid_proxy_hostname', 'A target domain or subdomain hostname is required');

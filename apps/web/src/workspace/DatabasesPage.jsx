@@ -11,9 +11,9 @@ import { databaseAccessView, filterConsoleDatabases, paginateConsoleItems } from
 const SECURITY_REASON_LABELS = Object.freeze({
   database_security_inspection_unavailable: 'Güvenlik durumu okunamadı',
   database_native_socket_admin_auth_required: 'Yerel yönetici bağlantısı yapılandırılmalı',
-  database_anonymous_accounts_present: 'Anonim hesap mevcut',
-  database_remote_root_accounts_present: 'Uzak root hesabı mevcut',
-  database_test_schema_present: 'Test veritabanı mevcut',
+  database_anonymous_accounts_present: 'Anonim DB hesabı kaldırılmalı',
+  database_remote_root_accounts_present: 'Uzak root erişimi kapatılmalı',
+  database_test_schema_present: 'Varsayılan test veritabanı kaldırılmalı',
 });
 
 export async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
@@ -159,9 +159,15 @@ export default function DatabasesPage() {
   const hasInventory = Array.isArray(inventory.databases);
   const page = paginateConsoleItems(filterConsoleDatabases(inventory.databases, { query, access, domains }), params.get('page'));
   const engineLabel = inventory.engine === 'mariadb' ? 'MariaDB' : inventory.engine === 'mysql' ? 'MySQL' : '—';
-  const securityLabel = inventory.health?.ready ? 'Hazır' : inventory.health?.available === false ? 'Doğrulanamadı' : inventory.health ? 'Aksiyon gerekli' : '—';
   const adminAuthLabel = inventory.health?.connection ? `${inventory.health.connection.adminAccount} · ${inventory.health.connection.authPlugin || '—'}` : '—';
   const securityReasonLabel = inventory.health?.reason ? SECURITY_REASON_LABELS[inventory.health.reason] ?? 'Bilinmeyen güvenlik durumu' : '—';
+  const securityLabel = inventory.health?.ready
+    ? 'Hazır'
+    : inventory.health?.available === false
+      ? 'Doğrulanamadı'
+      : inventory.health
+        ? (securityReasonLabel !== '—' ? securityReasonLabel : 'İnceleme gerekli')
+        : '—';
   const startCreate = () => { setError(null); setCreateOpen(true); };
 
   return <>
@@ -192,7 +198,9 @@ export default function DatabasesPage() {
         </> : <EmptyState title={inventory.databases.length ? 'Eşleşen veritabanı yok' : 'Kullanıcı veritabanı yok'} detail={inventory.databases.length ? 'Aramayı veya erişim filtresini değiştirin.' : 'Yeni bir uygulama veritabanı oluşturarak başlayın.'} icon="database" action={inventory.databases.length ? <Button onClick={clearFilters}>Filtreleri temizle</Button> : <Button variant="primary" disabled={!canAct} onClick={startCreate}>Veritabanı oluştur</Button>} />)}
       </Section>
       <details className="ws-section ws-disclosure ws-database-diagnostics"><summary>Sunucu ve güvenlik ayrıntıları <Badge state={inventory.health?.ready ? 'active' : inventory.health ? 'warning' : 'unknown'}>{securityLabel}</Badge></summary>
-        <p className="ws-muted ws-section-body">Yerel sunucunun canlı Unix socket envanteri. Teknik alanlar günlük veritabanı listesinden ayrıdır.</p>
+        {!inventory.health?.ready && securityReasonLabel !== '—' && (
+          <p className="ws-muted ws-section-body">Güvenlik uyarısı: {securityReasonLabel}. Yerel veritabanı sunucusunda ilgili güvenlik sıkılaştırmasını uygulayabilirsiniz.</p>
+        )}
         <KeyValues items={[
           ['Engine', engineLabel], ['Sürüm', inventory.version ?? '—'],
           ['Toplam boyut', hasInventory ? formatDatabaseBytes(inventory.totalBytes) : '—'], ['Veritabanı', hasInventory ? inventory.databases.length : '—'],

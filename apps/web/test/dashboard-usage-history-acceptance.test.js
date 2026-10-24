@@ -219,6 +219,6 @@ test('Criterion 6: DashboardPage properly wires UsageHistory with server ready/s
   // Verify DashboardPage passes server only when ready or stale
   assert.match(dashSrc, /<UsageHistory key=\{server\?\.id \?\? 'unavailable'\} server=\{\['ready', 'stale'\]\.includes\(servers\.status\) \? server : null\} \/>/);
 
-  // Performance section description explicitly states session-scoped history
-  assert.match(dashSrc, /title="Performans" description="Sunucudan alınan ölçümler; yalnız bu açık oturumun geçmişi\."/);
+  // Performance section description provides clean user-facing context
+  assert.match(dashSrc, /title="Performans" description="Canlı sunucu kaynak kullanımı"/);
 });

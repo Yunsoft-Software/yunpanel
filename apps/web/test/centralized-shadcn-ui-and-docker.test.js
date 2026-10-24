@@ -96,7 +96,7 @@ test('Centralized swappable primitives render through PanelKit adapter layer', (
   assert.match(treeMarkup, /└─/);
   assert.match(treeMarkup, /\/var\/www\/vhosts\/example\.com\/subdomains\/api/);
   assert.match(treeMarkup, /\/var\/www\/vhosts\/example\.com\/subdomains\/app/);
-  assert.match(treeMarkup, /ortak kök/);
+  assert.doesNotMatch(treeMarkup, /ortak kök/);
 
   const portTableMarkup = renderToStaticMarkup(
     createElement(PortMappingTable, {

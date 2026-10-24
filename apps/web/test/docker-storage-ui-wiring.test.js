@@ -23,8 +23,7 @@ test('Docker project detail renders backend-derived versioned storage backup pol
   assert.match(page, /Backup dışı/);
   assert.match(page, /Varsayılan reddedilir/);
   assert.match(page, /Policy kullanılamıyor/);
-  assert.match(page, /versioned backup manifest policy/);
-  assert.match(page, /Genel backup executor henüz çalıştırılmaz/);
+  assert.match(page, /Konteyner servislerinin kalıcı disk \(volume\) ve dizin bağlantıları\./);
   assert.doesNotMatch(page, /Backup policy bekliyor/);
   assert.doesNotMatch(page, /backupDocker|restoreDocker|automaticBackup/i);
 });

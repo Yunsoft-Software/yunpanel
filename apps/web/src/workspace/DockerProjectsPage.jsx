@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import {
+  getDockerCatalog,
   getDockerDiagnosis,
   getDockerHistory,
   getDockerLogs,
@@ -98,16 +99,31 @@ function DockerProjectList() {
   const [creating, setCreating] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [catalogQuery, setCatalogQuery] = useState('');
+  const [debouncedQuery, setDebouncedQuery] = useState('');
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedQuery(catalogQuery.trim()), catalogQuery.trim() ? 220 : 0);
+    return () => clearTimeout(timer);
+  }, [catalogQuery]);
+
+  const liveCatalog = useAsyncResource(
+    (signal) => getDockerCatalog(debouncedQuery, { live: true, signal }),
+    [debouncedQuery],
+    { enabled: true },
+  );
+
   const items = Array.isArray(projects.data) ? projects.data : [];
   const filteredCatalog = useMemo(() => {
+    if (Array.isArray(liveCatalog.data) && liveCatalog.data.length > 0) {
+      return liveCatalog.data;
+    }
     const q = catalogQuery.trim().toLowerCase();
     if (!q) return DEFAULT_DOCKER_STACK_TEMPLATES;
     return DEFAULT_DOCKER_STACK_TEMPLATES.filter((item) => (
-      item.label.toLowerCase().includes(q)
+      (item.label ?? item.name ?? '').toLowerCase().includes(q)
       || item.image.toLowerCase().includes(q)
       || (item.category ?? '').toLowerCase().includes(q)
     ));
-  }, [catalogQuery]);
+  }, [liveCatalog.data, catalogQuery]);
 
   function openWithTemplate(tpl = null) {
     setSelectedTemplate(tpl);
@@ -117,7 +133,7 @@ function DockerProjectList() {
   return <>
     <PageHeading
       title="Docker & Compose Stack Yönetimi"
-      description="Docker Hub imajlarından tek tıkla konteyner/stack oluşturun, .yml dosyası yükleyin veya Inner ↔ Outer Port eşlemesiyle Domain/Subdomain'e proxy olarak bağlayın."
+      description="Docker Hub üzerinden dilediğiniz imajı arayın, tek tıkla konteyner veya Compose stack oluşturun, .yml dosyası yükleyin ve alan adlarınıza proxy olarak bağlayın."
       actions={<>
         <Button icon="refresh" onClick={projects.refresh}>Yenile</Button>
         <LinkButton to="/websites/new?mode=subdomain" icon="globe">Subdomain'e Docker Bağla</LinkButton>
@@ -169,47 +185,58 @@ function DockerProjectList() {
       ) : projects.status === 'ready' && (
         <EmptyState
           icon="box"
-          title="Managed Compose projesi yok"
-          detail="Aşağıdaki Docker Hub kataloğundan tek tıkla hazır bir stack başlatabilir veya kendi docker-compose.yml dosyanızı yükleyebilirsiniz."
+          title="Henüz Compose projesi yok"
+          detail="Aşağıdaki canlı Docker Hub aramasından herhangi bir imajı seçip tek tıkla başlatabilir veya kendi docker-compose.yml dosyanızı yükleyebilirsiniz."
           action={<Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose projesi ekle</Button>}
         />
       )}
     </Section>
     <Section
-      title="Docker Hub & Hazır Stack Kataloğu"
-      description="Plesk Docker kataloğu eşdeğeri: İmaj seçin, varsayılan Inner Port (Container) ↔ Outer Port (127.0.0.1) eşlemesiyle tek tıkla Compose Stack oluşturun."
+      title="Docker Hub Canlı İmaj Arama & Hazır Stack Kataloğu"
+      description="Docker Hub üzerindeki tüm resmi ve topluluk imajlarını canlı arayın; Inner Port (Container) ↔ Outer Port (127.0.0.1) eşlemesiyle tek tıkla başlatın."
+      actions={liveCatalog.status === 'loading' ? <Badge state="running">Docker Hub aranıyor…</Badge> : <Badge state="active">{debouncedQuery ? `Docker Hub: ${filteredCatalog.length} sonuç` : 'Docker Hub Bağlı'}</Badge>}
     >
       <div className="ws-filters">
-        <label className="ws-filter-search">
-          İmaj veya servis ara
+        <label className="ws-filter-search" style={{ flex: '1 1 360px' }}>
+          Docker Hub'da imaj veya servis ara
           <input
             type="search"
             value={catalogQuery}
             onChange={(event) => setCatalogQuery(event.target.value)}
-            placeholder="redis, postgres, mariadb, nginx, n8n, minio, wordpress..."
+            placeholder="Docker Hub'da ara: grafana, mongo, portainer, ghost, nextcloud, redis, postgres, traefik..."
           />
         </label>
       </div>
       <div className="ws-section-body">
         <div className="yp-docker-catalog-grid">
-          {filteredCatalog.map((tpl) => (
-            <article key={tpl.id} className="yp-docker-catalog-card">
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                  <strong style={{ fontSize: '14px' }}>{tpl.label}</strong>
-                  <span className="yp-port-mapping-badge">{tpl.image}</span>
+          {filteredCatalog.map((tpl) => {
+            const innerPort = tpl.targetPort ?? tpl.innerPort ?? 80;
+            const outerPort = tpl.publishedPort ?? tpl.outerPort ?? 18080;
+            const title = tpl.label || tpl.name || tpl.image;
+            return (
+              <article key={tpl.id || tpl.image} className="yp-docker-catalog-card">
+                <div>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                    <strong style={{ fontSize: '14px', wordBreak: 'break-word' }}>{title}</strong>
+                    <span className="yp-port-mapping-badge">{tpl.image}</span>
+                  </div>
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {tpl.official && <Badge state="active">Resmi İmaj</Badge>}
+                    {tpl.starCount > 0 && <span className="yp-port-mapping-badge">★ {tpl.starCount.toLocaleString('tr-TR')}</span>}
+                    {tpl.category && <span className="yp-port-mapping-badge">{tpl.category}</span>}
+                  </div>
+                  {tpl.description && <p className="ws-muted" style={{ margin: '0 0 10px 0', fontSize: '12px' }}>{tpl.description}</p>}
+                  <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                    <span className="yp-port-mapping-badge">Inner: {innerPort}/tcp</span>
+                    <span className="yp-port-mapping-badge">Outer: 127.0.0.1:{outerPort}</span>
+                  </div>
                 </div>
-                {tpl.description && <p className="ws-muted" style={{ margin: '0 0 8px 0', fontSize: '12px' }}>{tpl.description}</p>}
-                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-                  <span className="yp-port-mapping-badge">Inner: {tpl.targetPort}/tcp</span>
-                  <span className="yp-port-mapping-badge">Outer: 127.0.0.1:{tpl.publishedPort}</span>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
+                  <Button variant="primary" icon="plus" onClick={() => openWithTemplate({ ...tpl, label: title, targetPort: innerPort, publishedPort: outerPort })}>Bu İmajla Oluştur</Button>
                 </div>
-              </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
-                <Button variant="primary" icon="plus" onClick={() => openWithTemplate(tpl)}>Bu İmajla Oluştur</Button>
-              </div>
-            </article>
-          ))}
+              </article>
+            );
+          })}
         </div>
       </div>
     </Section>
@@ -246,7 +273,7 @@ function StoragePanel({ project, backup }) {
     storageResourceKey(resource.serviceName, resource.storage),
     resource.policy,
   ]));
-  return <Section title="Depolama" description="Compose storage envanteri versioned backup manifest policy'siyle eşleştirilir. Genel backup executor henüz çalıştırılmaz; arbitrary host bind yolları varsayılan olarak reddedilir.">
+  return <Section title="Depolama" description="Konteyner servislerinin kalıcı disk (volume) ve dizin bağlantıları.">
     {currentBackup && <div className="ws-section-body"><KeyValues items={[
       ['Manifest', `v${currentBackup.manifestVersion}`],
       ['Dahil', currentBackup.counts?.included ?? 0],
@@ -298,7 +325,7 @@ function DockerProjectDetail({ projectId }) {
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
   return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? project.projectName : 'Docker projesi'} description="Compose desired state, depolama yedekleme politikası, yayınlanan portlar, runtime ve işlem geçmişi." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Konteyner servislerinin web sitesi ve alan adı yönlendirme durumu."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {

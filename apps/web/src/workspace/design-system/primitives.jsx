@@ -60,10 +60,9 @@ export function FileRootBadge({ path, isSubdomain = false, shared = false, paren
   return (
     <span
       className="yp-file-root-pill"
-      title={showShared && parentDomain ? `${parentDomain} ortak dizini içinde alt alan adı dosya kökü` : 'Site dosya kökü'}
+      title={showShared && parentDomain ? `${parentDomain} dizini altındaki alt alan adı klasörü` : 'Site dosya dizini'}
     >
       <code>{normalizedPath}</code>
-      {showShared && <small className="yp-file-root-tag">ortak kök</small>}
     </span>
   );
 }
@@ -203,27 +202,52 @@ export function DockerHubCatalogPicker({
   selectedImage = 'nginx:latest',
   targetPort = 80,
   publishedPort = 18080,
+  searchQuery = '',
+  searching = false,
+  onSearchQueryChange,
   onSelectImage,
   onChangeTargetPort,
   onChangePublishedPort,
   onApplyTemplate,
   disabled = false,
 }) {
+  const hasSelectedInCatalog = catalog.some((item) => item.image === selectedImage);
   return (
     <div className="yp-docker-quickbar" role="region" aria-label="Docker Hub / Hazır Stack Şablonundan Oluştur">
+      {typeof onSearchQueryChange === 'function' && (
+        <label>
+          Docker Hub Canlı Arama
+          <input
+            type="search"
+            aria-label="Docker Hub Canlı Arama"
+            value={searchQuery}
+            disabled={disabled}
+            placeholder="grafana, mongo, portainer, ghost, traefik..."
+            onChange={(event) => onSearchQueryChange(event.target.value)}
+          />
+        </label>
+      )}
       <label>
-        Docker Hub / Hazır İmaj
+        {searching ? 'Docker Hub aranıyor…' : 'Docker Hub / Hazır İmaj'}
         <select
           aria-label="Docker Hub imajı"
           value={selectedImage}
           disabled={disabled}
           onChange={(event) => onSelectImage?.(event.target.value)}
         >
-          {catalog.map((item) => (
-            <option key={item.image} value={item.image}>
-              {item.label ? `${item.label} (${item.image})` : item.image}
-            </option>
-          ))}
+          {!hasSelectedInCatalog && selectedImage && (
+            <option value={selectedImage}>{selectedImage}</option>
+          )}
+          {catalog.map((item) => {
+            const title = item.label || item.name || item.image;
+            const stars = item.starCount ? ` ★${item.starCount}` : '';
+            const official = item.official ? ' [Resmi]' : '';
+            return (
+              <option key={item.id || item.image} value={item.image}>
+                {`${title} (${item.image})${official}${stars}`}
+              </option>
+            );
+          })}
         </select>
       </label>
       <label>

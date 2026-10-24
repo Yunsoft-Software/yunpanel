@@ -78,7 +78,7 @@ function ApplicationInventory() {
       <div className="ws-notice">
         <div>
           <strong>Site odaklı uygulama işletimi</strong>
-          <p>Uygulama runtime, environment, yayın geçmişi, sağlık kontrolü ve rollback işlemleri doğrudan ilgili web sitesinin yönetim alanından yürütülür. Plesk eşdeğeri olmayan Python ve Docker uzantıları da site bağlamında sunulur.</p>
+          <p>Uygulama runtime, environment, yayın geçmişi, sağlık kontrolü ve rollback işlemleri doğrudan ilgili web sitesinin yönetim alanından yürütülür.</p>
         </div>
         <LinkButton to="/websites">Web Sitelerine Git</LinkButton>
       </div>

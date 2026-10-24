@@ -128,7 +128,51 @@ function SiteWorkspace({ websiteId, tab }) {
     ['access', 'Erişim Hesapları', 'shield'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const hostingTools = ['hosting', 'dns', 'domains', 'access', 'terminal', 'cron'];
-  const toolLinks = (items) => <div className="ws-console-quicklinks" data-hosting-tools={hostingTools.length}>{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={18} /><span>{label}</span></Link>)}</div>;
+  const toolSubtitles = {
+    files: 'Dizinler ve kod editörü',
+    databases: 'MariaDB & phpMyAdmin',
+    ssl: 'Let’s Encrypt & HTTPS',
+    php: 'PHP-FPM sürüm ve limitler',
+    wordpress: 'WP-CLI ve kurulum',
+    node: 'Çalışma zamanı ve port',
+    deploy: 'Git deposu ve yayınlama',
+    logs: 'Nginx erişim ve hata kayıtları',
+    analytics: 'Ziyaretçi ve trafik analizi',
+    dns: 'A, CNAME, MX ve TXT kayıtları',
+    mail: 'E-posta hesapları ve DKIM',
+    cron: 'Periyodik görev zamanlayıcı',
+    backup: 'Site arşivi ve geri yükleme',
+    access: 'SFTP, SSH ve sistem erişimi',
+  };
+  const toolCategories = [
+    ['Dosyalar, Veritabanı ve Uygulama', ['files', 'databases', 'php', 'wordpress', 'node', 'deploy']],
+    ['Alan Adı, Güvenlik ve E-posta', ['ssl', 'dns', 'mail']],
+    ['İzleme, Yedekleme ve Sistem', ['logs', 'analytics', 'backup', 'cron', 'access']],
+  ];
+  const toolLinks = (items) => (
+    <div className="yp-plesk-tool-groups" data-hosting-tools={hostingTools.length}>
+      {toolCategories.map(([groupTitle, groupKeys]) => {
+        const groupItems = items.filter(([key]) => groupKeys.includes(key));
+        if (!groupItems.length) return null;
+        return (
+          <div className="yp-plesk-tool-group" key={groupTitle}>
+            <h3 className="yp-plesk-tool-group-title">{groupTitle}</h3>
+            <div className="ws-console-quicklinks">
+              {groupItems.map(([key, label, icon]) => (
+                <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}>
+                  <span className="yp-plesk-tool-icon"><Icon name={icon} size={18} /></span>
+                  <span className="yp-plesk-tool-copy">
+                    <strong>{label}</strong>
+                    {toolSubtitles[key] && <small>{toolSubtitles[key]}</small>}
+                  </span>
+                </Link>
+              ))}
+            </div>
+          </div>
+        );
+      })}
+    </div>
+  );
   return <>
     <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
     <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
@@ -139,6 +183,7 @@ function SiteWorkspace({ websiteId, tab }) {
     {['node', 'deploy', 'overview', 'resources', 'databases'].includes(tab) && <CollectionNotice resource={applications} label="Uygulama verisi" />}
     {['node', 'deploy'].includes(tab) && !website?.applicationId && matches.length > 0 && <div className="ws-notice"><div><strong>Uygulama bağlantısını kontrol edin</strong><p>İşlemler aşağıda seçilen uygulamayı etkiler. Bu eski kaydın kalıcı site bağlantısı henüz kurulmamıştır.</p></div><label>Uygulama<select value={application?.id ?? ''} onChange={(event) => { setParams((current) => { const next = new URLSearchParams(current); if (event.target.value) next.set('application', event.target.value); else next.delete('application'); return next; }); }}><option value="">{matches.length > 1 ? 'Uygulamayı seçin' : 'Tek hedef eşleşmesi'}</option>{matches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
     {tab === 'overview' && <>
+      <Section title="Site araçları">{toolLinks(shortcuts)}</Section>
       <div className="ws-equal-columns" style={{ marginBottom: '16px' }}>
         <Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'hosting')}>Barındırma ve DNS</Link>}>
           <KeyValues items={[
@@ -151,13 +196,12 @@ function SiteWorkspace({ websiteId, tab }) {
         <Section title="Yayın ve uygulama ayrıntıları" actions={application ? <Link to={siteHref(domain.id, 'node')}>Uygulama yönetimi</Link> : <Link to={siteHref(domain.id, 'ssl')}>SSL yönetimi</Link>}>
           <KeyValues items={[
             ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
-            ['Çalışma türü', website?.runtimeType ?? 'Statik / Yerel kayıt'],
             ['Uygulama', application?.name ?? (matches.length > 1 ? 'Uygulama bölümünden hedef seçin' : 'Bağlı uygulama yok')],
+            ['Sistem kullanıcısı', website?.unixUser ?? '—'],
             ['SSL Durumu', ssl.label],
           ]} />
         </Section>
       </div>
-      <Section title="Site araçları">{toolLinks(shortcuts)}</Section>
       {website && isOwner && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
       <Section title="Bu siteye ait son işlemler" actions={<Link to={siteHref(domain.id, 'logs')}>Tümünü gör</Link>}><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={5} />}</Section>
     </>}
