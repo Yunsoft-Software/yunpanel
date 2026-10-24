@@ -717,54 +717,71 @@ html .workspace-shell .ws-plesk-site-navigation {
   display: flex !important;
   flex-wrap: wrap !important;
   align-items: center !important;
-  gap: 10px 18px !important;
-  padding: 10px 14px !important;
+  gap: 6px 12px !important;
+  padding: 8px 12px !important;
   margin-bottom: 16px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 8px !important;
   background: var(--ws-surface) !important;
 }
 
-html .workspace-shell .ws-plesk-site-group {
-  display: flex !important;
+html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group {
+  display: inline-flex !important;
   flex-wrap: wrap !important;
   align-items: center !important;
-  gap: 6px 8px !important;
+  gap: 4px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group:not(:last-child) {
+  padding-right: 12px !important;
+  border-right: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-plesk-site-navigation .ws-site-tool-group-label {
+  display: none !important;
+}
+
+html .workspace-shell .ws-plesk-site-navigation .ws-tabs {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+  margin: 0 !important;
   padding: 0 !important;
   border: 0 !important;
   background: transparent !important;
 }
 
-html .workspace-shell .ws-plesk-site-group:not(:last-child) {
-  padding-right: 14px !important;
-  border-right: 1px solid var(--ws-border) !important;
-}
-
-html .workspace-shell .ws-plesk-site-group > h2 {
-  margin: 0 4px 0 0 !important;
-  font-size: 10.5px !important;
-  font-weight: 600 !important;
-  text-transform: uppercase !important;
-  letter-spacing: 0.5px !important;
-  color: var(--ws-muted) !important;
-}
-
-html .workspace-shell .ws-plesk-site-tabs {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: center !important;
-  gap: 4px !important;
-}
-
-html .workspace-shell .ws-plesk-site-tabs a {
+html .workspace-shell .ws-plesk-site-navigation .ws-tabs a {
   display: inline-flex !important;
   align-items: center !important;
+  gap: 6px !important;
   min-height: 30px !important;
   height: 30px !important;
   padding: 0 10px !important;
+  border: 1px solid transparent !important;
   border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--ws-muted) !important;
   font-size: 12.5px !important;
   font-weight: 500 !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-plesk-site-navigation .ws-tabs a:hover {
+  background: var(--ws-surface-hover) !important;
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-plesk-site-navigation .ws-tabs a[aria-current='page'] {
+  background: var(--ws-surface-subtle) !important;
+  border-color: var(--ws-border) !important;
+  color: var(--ws-text) !important;
+  font-weight: 600 !important;
 }
 
 html .workspace-shell .ws-console-quicklinks {
@@ -777,12 +794,16 @@ html .workspace-shell .ws-console-quicklinks {
 html .workspace-shell .ws-console-quicklink {
   display: flex !important;
   align-items: center !important;
-  justify-content: space-between !important;
-  min-height: 40px !important;
+  justify-content: flex-start !important;
+  gap: 10px !important;
+  min-height: 38px !important;
   padding: 8px 12px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 6px !important;
   background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
   text-decoration: none !important;
 }
 
@@ -799,12 +820,19 @@ html .workspace-shell :is(.ws-db-access, .ys-resource-actions) {
   gap: 6px !important;
 }
 
+html .workspace-shell details.ws-disclosure {
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  padding: 8px 12px !important;
+}
+
 html .workspace-shell details.ws-disclosure > summary {
   cursor: pointer !important;
   font-size: 13px !important;
   font-weight: 600 !important;
   color: var(--ws-text) !important;
-  padding: 6px 0 !important;
+  padding: 2px 0 !important;
 }
 
 /* Hierarchical Domain -> Subdomain Tree & Shared File Root Pill */
