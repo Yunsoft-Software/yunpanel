@@ -21,6 +21,7 @@ import ReadOnlyServersPage from './ReadOnlyServersPage.jsx';
 import { AdvancedDomainsPage, CapabilityPage, JobsPage, NotFoundPage, ServersPage, SettingsPage } from './OperationsPages.jsx';
 import UsersPage from './UsersPage.jsx';
 import ResellerCustomersPage from './ResellerCustomersPage.jsx';
+import OwnerHostingAccountsPage from './OwnerHostingAccountsPage.jsx';
 import FirewallPage from './FirewallPage.jsx';
 
 function RouteFailure() {
@@ -61,6 +62,10 @@ const reseller = (element) => <ResellerRoute>{element}</ResellerRoute>;
 const customer = (element) => <CustomerRoute>{element}</CustomerRoute>;
 const manage = (element) => <ManagementRoute>{element}</ManagementRoute>;
 const scoped = (management, readOnly) => <ScopedRoute management={management} readOnly={readOnly} />;
+function CustomersRoute() {
+  const { isOwner, isReseller } = usePanelSession();
+  return isOwner ? <OwnerHostingAccountsPage kind="customer" /> : isReseller ? <ResellerCustomersPage /> : <Navigate to="/websites" replace />;
+}
 function createWorkspaceRouter() {
   return createBrowserRouter([{
     element: <WorkspaceLayout />, errorElement: <RouteFailure />,
@@ -68,7 +73,8 @@ function createWorkspaceRouter() {
       { index: true, element: <Navigate to="/websites" replace /> },
       { path: 'dashboard', element: owner(scoped(<DashboardPage />, <ReadOnlyDashboardPage />)) },
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
-      { path: 'customers', element: reseller(<ResellerCustomersPage />) },
+      { path: 'customers', element: <CustomersRoute /> },
+      { path: 'resellers', element: owner(<OwnerHostingAccountsPage kind="reseller" />) },
       { path: 'websites/new', element: owner(<NewWebsitePage />) },
       { path: 'websites/:websiteId/:tab?', element: scoped(<SiteDetailPage />, <ReadOnlySitePage />) },
       { path: 'files', element: manage(<FilesPage />) },
@@ -103,13 +109,14 @@ function createWorkspaceRouter() {
       { path: 'certificate', element: <RedirectWithSearch to="/ssl" /> },
       { path: 'logs', element: manage(<SiteToolEntryPage tool="logs" />) },
       { path: 'php', element: manage(<SiteToolEntryPage tool="php" />) },
+      { path: 'wordpress', element: manage(<SiteToolEntryPage tool="wordpress" />) },
       { path: 'access', element: manage(<SiteToolEntryPage tool="access" />) },
       { path: 'jobs', element: manage(<JobsPage />) },
       { path: 'audit', element: manage(<AuditPage />) },
       { path: 'settings', element: owner(<SettingsPage />) },
       { path: 'settings/users', element: owner(<UsersPage />) },
       { path: 'users', element: owner(<UsersPage />) },
-      { path: 'backups', element: owner(<CapabilityPage name="backups" />) },
+      { path: 'backups', element: manage(<SiteToolEntryPage tool="backup" />) },
       { path: '*', element: <NotFoundPage /> },
     ],
   }]);

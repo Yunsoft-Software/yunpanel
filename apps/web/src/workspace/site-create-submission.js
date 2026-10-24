@@ -12,12 +12,13 @@ export function siteSubmissionBusy(state) {
   return ['previewing', 'creating', 'provisioning'].includes(state.phase);
 }
 
-function expectedResult(preview, input) {
+function expectedResult(preview, input, customerId = null) {
   if (!record(preview) || preview.operationId !== input.operationId
     || !validId(preview.ids?.websiteId) || !validId(preview.ids?.primaryDomainId)
     || preview.hostname?.primaryDomain !== input.primaryDomain
     || typeof preview.previewDigest !== 'string' || !/^[a-f0-9]{64}$/.test(preview.previewDigest)
-    || preview.confirmation !== `create-site:${input.operationId}:${preview.previewDigest}`
+    || preview.confirmation !== `${customerId ? 'create-hosted-site' : 'create-site'}:${input.operationId}:${preview.previewDigest}`
+    || (customerId && preview.customerId !== customerId)
     || !validId(preview.provisioning?.operationId)
     || preview.provisioning.websiteId !== preview.ids.websiteId) throw invalid();
   let initialSteps = [];
@@ -35,6 +36,7 @@ function expectedResult(preview, input) {
     websiteId: preview.ids.websiteId, domainId: preview.ids.primaryDomainId,
     serverId: input.serverId, primaryDomain: input.primaryDomain,
     parentDomainId: input.parentDomainId ?? null,
+    customerId,
     initialSteps: Object.freeze(initialSteps),
   });
 }
@@ -47,6 +49,8 @@ function createdRecord(result, expected) {
     || website.id !== expected.websiteId || website.serverId !== expected.serverId
     || domain.serverId !== expected.serverId || domain.primaryDomain !== expected.primaryDomain
     || (domain.parentDomainId ?? null) !== expected.parentDomainId) throw invalid();
+  if (expected.customerId && (result.ownership?.customerId !== expected.customerId || result.ownership?.websiteId !== website.id
+    || result.ownership?.state !== 'attached' || result.accessGranted !== true)) throw invalid();
   // Never copy a whole response, form, password, runtime intent or error object.
   return Object.freeze({ id: domain.id, websiteId: website.id, primaryDomain: domain.primaryDomain });
 }
@@ -78,13 +82,13 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       onState(state);
     }
   }
-  async function submit(input, { signal } = {}) {
+  async function submit(input, { signal, customerId = null } = {}) {
     // A create POST is single-attempt for this form, even when its reply is lost.
     if (running || sealed || disposed) return state;
     const current = () => !disposed && !signal?.aborted && isCurrent() === true;
     if (!current()) return state;
     if (!record(input) || !validId(input.operationId) || !validId(input.serverId)
-      || typeof input.primaryDomain !== 'string' || !input.primaryDomain) throw new TypeError('Site oluşturma girdisi eksik.');
+      || typeof input.primaryDomain !== 'string' || !input.primaryDomain || customerId !== null && (!/^[A-Za-z0-9_-]{1,128}$/.test(customerId) || input.siteAdmin != null)) throw new TypeError('Site oluşturma girdisi eksik.');
     // Hold one immutable request snapshot; edits cannot change the preview/apply pair.
     const snapshot = structuredClone(input);
     running = true;
@@ -93,15 +97,15 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
     let expected = null;
     try {
       if (!current()) return state;
-      const preview = await request('/sites/create-preview', { method: 'POST', body: { input: snapshot }, signal });
+      const preview = await request(customerId ? '/sites/hosted/create-preview' : '/sites/create-preview', { method: 'POST', body: { input: snapshot, ...(customerId ? { customerId } : {}) }, signal });
       if (!current()) return state;
-      expected = expectedResult(preview, snapshot);
+      expected = expectedResult(preview, snapshot, customerId);
       sealed = true;
       stage = 'create';
       publish({ phase: 'creating' });
       if (!current()) return state;
-      const result = await request('/sites', {
-        method: 'POST', body: { input: snapshot, previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal,
+      const result = await request(customerId ? '/sites/hosted' : '/sites', {
+        method: 'POST', body: { input: snapshot, ...(customerId ? { customerId } : {}), previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal,
       });
       if (!current()) return state;
       const created = createdRecord(result, expected);

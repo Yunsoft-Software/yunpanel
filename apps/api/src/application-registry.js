@@ -55,6 +55,11 @@ function normalizeRuntimeAdapter(value = 'passenger') {
 
 function normalizeStaticConfig({ repositoryUrl, branch, build, retention }) {
   try {
+    if (repositoryUrl === null) {
+      const normalized = normalizeStaticBuildConfig(build);
+      if (branch !== null || normalized.mode !== 'none' || normalized.outputDir !== '.' || normalized.healthFile !== 'index.html') throw new ApplicationRegistryError('static_upload_configuration_invalid', 'Uploaded static sites require the managed file configuration');
+      return { repositoryUrl: null, branch: null, build: normalized, retention: normalizeRetention(retention) };
+    }
     return {
       repositoryUrl: normalizeGithubRepositoryUrl(repositoryUrl),
       branch: normalizeGitBranch(branch ?? 'main'),
@@ -282,7 +287,13 @@ function hydrateApplication(application) {
     application.releases = application.releases.map((release) => ({ ...release, runtime: null, configurationRevision: null }));
   }
 
-  if (application.type !== 'php') {
+  const uploadedStatic = application.type === 'static' && application.repositoryUrl === null;
+  if (uploadedStatic) {
+    normalizeStaticConfig(application);
+    if (application.currentCommitSha !== null || application.currentGitTarget !== null
+      || application.activeDeploymentId !== null || application.pendingRollbackReleaseId !== null
+      || application.releases.some(release => release.commitSha !== null || release.gitTarget !== null)) throw new ApplicationRegistryError('application_state_invalid', 'Uploaded static sites cannot contain Git deployment state', 409);
+  } else if (application.type !== 'php') {
     try {
       application.releases = application.releases.map((release) => ({
         ...release,
@@ -593,13 +604,14 @@ export function createApplicationRegistry({
     throw new ApplicationRegistryError('node_port_exhausted', 'No managed Node application port is available', 409);
   }
 
-  async function markDeploying(applicationId, deploymentId) {
+  async function markDeploying(applicationId, deploymentId, passengerDaily = false) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
+    if (application.type === 'static' && application.repositoryUrl === null) throw new ApplicationRegistryError('deployment_not_supported', 'Bu site dosya yükleyerek yayınlanır; Git deposu yapılandırılmadı', 409);
     if (!['static', 'node', 'python'].includes(application.type)) {
       throw new ApplicationRegistryError('deployment_not_supported', 'Legacy deployment flow is not supported for this application type', 409);
     }
-    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+    if (application.type === 'node' && application.runtimeAdapter !== (passengerDaily ? 'passenger' : 'direct-systemd')) {
       throw new ApplicationRegistryError('node_deploy_adapter_mismatch', 'Passenger Node releases must use Website provisioning instead of the legacy systemd deploy flow', 409);
     }
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
@@ -742,14 +754,14 @@ export function createApplicationRegistry({
     commitSha,
     gitTarget: requestedGitTarget = null,
     runtime: requestedRuntime = null,
-  } = {}) {
+  } = {}, passengerDaily = false) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
     if (application.type !== 'node' || application.runtimeAdapter !== 'passenger') {
       throw new ApplicationRegistryError('passenger_release_adapter_mismatch', 'Passenger release activation requires a Passenger Node Application', 409);
     }
-    if (application.activeDeploymentId) {
-      throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
+    if (passengerDaily ? (application.activeDeploymentId !== operationId && !(application.activeDeploymentId === null && application.currentReleaseId === releaseId && application.lastDeploymentId === operationId)) : Boolean(application.activeDeploymentId)) {
+      throw new ApplicationRegistryError('deployment_in_progress', 'Application active operation does not match release activation', 409);
     }
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
     const normalizedReleaseId = normalizeUuid(releaseId, 'releaseId');
@@ -1030,11 +1042,11 @@ export function createApplicationRegistry({
     return publicApplication(application);
   }
 
-  async function markRollingBack(applicationId, operationId, releaseId) {
+  async function markRollingBack(applicationId, operationId, releaseId, passengerDaily = false) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
     if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
-    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+    if (application.type === 'node' && application.runtimeAdapter !== (passengerDaily ? 'passenger' : 'direct-systemd')) {
       throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
     }
     if (application.activeDeploymentId) throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
@@ -1060,11 +1072,11 @@ export function createApplicationRegistry({
     port = null,
     healthPath = null,
     healthy = null,
-  }) {
+  }, passengerDaily = false) {
     await ensureInitialized();
     const application = hydrateApplication(requireApplication(state, applicationId));
     if (!['static', 'node', 'python'].includes(application.type)) throw new ApplicationRegistryError('rollback_not_supported', 'Rollback is not implemented for this application type yet', 409);
-    if (application.type === 'node' && application.runtimeAdapter !== 'direct-systemd') {
+    if (application.type === 'node' && application.runtimeAdapter !== (passengerDaily ? 'passenger' : 'direct-systemd')) {
       throw new ApplicationRegistryError('node_rollback_adapter_mismatch', 'Passenger Node rollback must use Website provisioning instead of the legacy systemd rollback flow', 409);
     }
     const normalizedOperationId = normalizeUuid(operationId, 'operationId');
@@ -1078,12 +1090,12 @@ export function createApplicationRegistry({
     if (!target) throw new ApplicationRegistryError('rollback_release_unknown', 'Rollback release is not in retained application history', 409);
 
     if (application.type === 'node') {
-      const targetRuntime = normalizeNodeRuntimeConfig(target.runtime);
+      const targetRuntime = normalizeNodeRuntimeConfig(target.runtime, { requirePort: !passengerDaily });
       const expectedService = expectedNodeServiceName(application.id);
-      if (typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
+      if (passengerDaily ? serviceName !== null : typeof serviceName !== 'string' || !NODE_SERVICE_PATTERN.test(serviceName) || serviceName !== expectedService) {
         throw new ApplicationRegistryError('invalid_node_service', 'Node rollback service identity is invalid');
       }
-      if (!Number.isInteger(port) || port !== targetRuntime.port) {
+      if (passengerDaily ? port !== null : !Number.isInteger(port) || port !== targetRuntime.port) {
         throw new ApplicationRegistryError('invalid_node_port', 'Node rollback port does not match application state');
       }
       if (typeof healthPath !== 'string' || healthPath !== targetRuntime.healthPath || healthy !== true) {
@@ -1108,7 +1120,7 @@ export function createApplicationRegistry({
       application.serviceName = serviceName;
       application.servicePort = port;
       application.healthPath = healthPath;
-      application.proxyTarget = { host: '127.0.0.1', port };
+      application.proxyTarget = passengerDaily ? null : { host: '127.0.0.1', port };
     }
     if (application.type === 'python') {
       const targetRuntime = normalizePythonRuntimeConfig(target.runtime);
@@ -1243,6 +1255,26 @@ export function createApplicationRegistry({
     });
   }
 
+  async function markUploadedStaticReady(applicationId, evidence) {
+    await ensureInitialized();
+    const application = hydrateApplication(requireApplication(state, normalizeApplicationId(applicationId)));
+    if (application.type !== 'static' || application.repositoryUrl !== null || evidence?.satisfied !== true
+      || evidence.adapter !== 'static-bootstrap' || evidence.applicationId !== application.id
+      || evidence.documentRoot !== application.webRoot || !Number.isSafeInteger(evidence.unixUid) || evidence.unixUid < 1
+      || !Number.isSafeInteger(evidence.unixGid) || evidence.unixGid < 1) throw new ApplicationRegistryError('static_upload_result_unverified', 'Uploaded static runtime result could not be verified', 409);
+    const releaseId = normalizeApplicationId(evidence.releaseId);
+    if (application.currentReleaseId && application.currentReleaseId !== releaseId) throw new ApplicationRegistryError('static_upload_release_conflict', 'Uploaded site already has another release', 409);
+    if (application.currentReleaseId === releaseId && application.state === 'active') return publicApplication(application);
+    const before = structuredClone(application);
+    const timestamp = new Date(now()).toISOString();
+    application.currentReleaseId = releaseId; application.state = 'active'; application.appliedRevision = application.desiredRevision;
+    application.lastDeploymentId = releaseId; application.lastDeployedAt = timestamp; application.updatedAt = timestamp;
+    application.releases = [{ releaseId, deploymentId: releaseId, commitSha: null, gitTarget: null,
+      artifactFiles: 1, artifactBytes: null, deployedAt: timestamp, runtime: null, configurationRevision: null }];
+    try { await persist(); } catch (error) { Object.assign(application, before); throw error; }
+    return publicApplication(hydrateApplication(application));
+  }
+
   async function getApplication(applicationId) {
     await ensureInitialized();
     const application = state.applications.find((candidate) => candidate.id === applicationId);
@@ -1257,19 +1289,24 @@ export function createApplicationRegistry({
   return {
     init,
     createApplication,
+    markUploadedStaticReady,
     createNodeApplication,
     createPhpApplication,
     createPythonApplication,
     allocateNodePort,
-    markDeploying,
+    markDeploying: (id, jobId) => markDeploying(id, jobId),
+    markPassengerDeploying: (id, jobId) => markDeploying(id, jobId, true),
+    markPassengerDeployed: (id, result) => activatePassengerRelease(id, result, true),
     markDeployed,
-    activatePassengerRelease,
+    activatePassengerRelease: (id, result) => activatePassengerRelease(id, result),
     resetPassengerInitialRelease,
     markPassengerMigrated,
     activatePythonRelease,
     resetPythonInitialRelease,
-    markRollingBack,
-    markRolledBack,
+    markRollingBack: (id, jobId, releaseId) => markRollingBack(id, jobId, releaseId),
+    markPassengerRollingBack: (id, jobId, releaseId) => markRollingBack(id, jobId, releaseId, true),
+    markPassengerRolledBack: (id, result) => markRolledBack(id, result, true),
+    markRolledBack: (id, result) => markRolledBack(id, result),
     markFailed,
     previewNodeConfiguration,
     updateNodeConfiguration,

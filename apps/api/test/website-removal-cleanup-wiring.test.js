@@ -5,7 +5,8 @@ import test from 'node:test';
 test('production Website removal wires receipt-owned cleanup adapters',async()=>{
  const source=await readFile(new URL('../src/index.js',import.meta.url),'utf8');
  assert.match(source,/createWebsiteRemovalCleanupAdapters/);
- const start=source.indexOf('createWebsiteRemovalRuntime({');const block=source.slice(start,start+2200);
+ const start=source.indexOf('createWebsiteRemovalRuntime({');const end=source.indexOf('if (websiteRemovalRuntime)',start);const block=source.slice(start,end);
+ assert.ok(start >= 0 && end > start);
  assert.match(block,/fileCleanupHandler: websiteRemovalCleanupAdapters/);
  assert.match(block,/unixIdentityCleanupHandler: websiteRemovalCleanupAdapters/);
 });

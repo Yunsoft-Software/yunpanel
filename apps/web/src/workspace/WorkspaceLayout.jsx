@@ -135,7 +135,6 @@ function Shell() {
         {canManage && <div className="ws-toolbar-actions">
           {isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
           <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>
-          {isOwner && <LinkButton to="/websites/new" variant="primary" icon="plus" aria-label="Web sitesi ekle" title="Web sitesi ekle"><span className="ws-toolbar-label">Site ekle</span></LinkButton>}
         </div>}
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>

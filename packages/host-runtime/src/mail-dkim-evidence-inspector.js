@@ -143,7 +143,7 @@ export function createMailDkimEvidenceInspector({
     try {
       const configMetadata = await lstatFn(mailDkimTemplatePolicy.configPath);
       if (!configMetadata.isFile() || configMetadata.isSymbolicLink()
-        || configMetadata.uid !== ROOT_UID || configMetadata.gid !== ROOT_GID
+        || configMetadata.uid !== ROOT_UID || configMetadata.gid !== identity.gid
         || (configMetadata.mode & 0o7777) !== mailDkimActivatorInternals.publicConfigMode) {
         return Object.freeze({ satisfied: false, result: null });
       }

@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { currentAuditActorId } from './audit-request-context.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -13,12 +14,14 @@ const APPLY_FIELDS = new Set([
 ]);
 const ROLLBACK_PREVIEW_FIELDS = new Set(['sourceApplyJobId']);
 const ROLLBACK_FIELDS = new Set(['sourceApplyJobId', 'previewDigest', 'confirmation']);
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const JOB_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
 const MANAGED_MAIL_MUTATIONS = new Set([
   OPERATIONS.MAIL_CONFIG_APPLY,
   OPERATIONS.MAIL_CONFIG_ROLLBACK,
   OPERATIONS.MAIL_DKIM_APPLY,
+  OPERATIONS.WEBSITE_BACKUP_ACTION,
 ]);
 
 export class MailConfigurationHttpError extends Error {
@@ -218,9 +221,28 @@ export function mountMailConfigurationRoutes(app, {
     return response.json({ data: rollbackPreview(scoped.mailDomain, sourceJob, jobs) });
   }));
 
+  app.get('/api/mail-domains/:mailDomainId/config-requests/:requestId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    emptyQuery(request.query);
+    const actorId = currentAuditActorId() ?? request.auth?.user?.id;
+    if (!actorId || !UUID_PATTERN.test(request.params.requestId)) throw new MailConfigurationHttpError('mail_configuration_request_invalid', 'Posta işlemi kimliği geçersiz');
+    const scoped = await scopedMailDomain({ mailDomainRegistry, domainRegistry, mailDomainId: request.params.mailDomainId, localServerId });
+    if (typeof jobRegistry.getJobForIdempotencyKey !== 'function') throw new MailConfigurationHttpError('mail_configuration_resume_unavailable', 'Posta işlemi devamı hazır değil', 503);
+    const job = await jobRegistry.getJobForIdempotencyKey(`mail-config:${actorId}:${request.params.requestId}`);
+    if (!job || job.serverId !== scoped.domain.serverId || job.resourceType !== 'mail_domain'
+      || job.resourceId !== scoped.mailDomain.id || job.operation !== OPERATIONS.MAIL_CONFIG_APPLY) {
+      throw new MailConfigurationHttpError('mail_configuration_request_not_found', 'Posta işlemi bulunamadı', 404);
+    }
+    response.set('Cache-Control', 'no-store'); return response.json({ data: job });
+  }));
+
   app.post('/api/mail-domains/:mailDomainId/config-apply', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    const body = exactBody(request.body, APPLY_FIELDS, 'mail_configuration_apply_input_invalid');
+    const fields = request.body?.requestId === undefined ? APPLY_FIELDS : new Set([...APPLY_FIELDS, 'requestId']);
+    const body = exactBody(request.body, fields, 'mail_configuration_apply_input_invalid');
+    const actorId = currentAuditActorId() ?? request.auth?.user?.id;
+    if (body.requestId !== undefined && (!UUID_PATTERN.test(body.requestId) || !actorId)) {
+      throw new MailConfigurationHttpError('mail_configuration_request_invalid', 'Posta işlemi kimliği geçersiz');
+    }
     if (!SHA256_PATTERN.test(body.previewDigest ?? '') || !SHA256_PATTERN.test(body.configurationSha256 ?? '')
       || typeof body.confirmation !== 'string' || body.confirmation.length > 256) {
       throw new MailConfigurationHttpError('mail_configuration_confirmation_invalid', 'Managed mail configuration confirmation is invalid');
@@ -231,6 +253,19 @@ export function mountMailConfigurationRoutes(app, {
       mailDomainId: request.params.mailDomainId,
       localServerId,
     });
+    const identity = {
+      serverId: scoped.domain.serverId,
+      type: OPERATIONS.MAIL_CONFIG_APPLY, operation: OPERATIONS.MAIL_CONFIG_APPLY,
+      payload: { mailDomainId: scoped.mailDomain.id, expectedRevision: body.expectedRevision,
+        desiredStatus: body.status, previewDigest: body.previewDigest, configurationSha256: body.configurationSha256 },
+      resourceType: 'mail_domain', resourceId: scoped.mailDomain.id,
+      ...(body.requestId ? { idempotencyKey: `mail-config:${actorId}:${body.requestId}` } : {}),
+    };
+    if (body.requestId) {
+      if (typeof jobRegistry.findIdempotentJob !== 'function') throw new MailConfigurationHttpError('mail_configuration_resume_unavailable', 'Posta işlemi devamı hazır değil', 503);
+      const previous = await jobRegistry.findIdempotentJob(identity);
+      if (previous) return response.status(202).json({ data: previous });
+    }
     const preview = await mailConfigurationService.previewTransition({
       mailDomainId: request.params.mailDomainId,
       expectedRevision: body.expectedRevision,
@@ -250,20 +285,7 @@ export function mountMailConfigurationRoutes(app, {
       throw new MailConfigurationHttpError('mail_domain_server_unavailable', 'Mail domain server identity is unavailable', 409);
     }
     await ensureMailConfigurationIdle(jobRegistry, serverId);
-    const job = await jobRegistry.enqueue({
-      serverId,
-      type: OPERATIONS.MAIL_CONFIG_APPLY,
-      operation: OPERATIONS.MAIL_CONFIG_APPLY,
-      payload: {
-        mailDomainId: request.params.mailDomainId,
-        expectedRevision: body.expectedRevision,
-        desiredStatus: body.status,
-        previewDigest: preview.previewDigest,
-        configurationSha256: preview.configuration.sha256,
-      },
-      resourceType: 'mail_domain',
-      resourceId: request.params.mailDomainId,
-    });
+    const job = await jobRegistry.enqueue(identity);
     return response.status(202).json({ data: job });
   }));
 

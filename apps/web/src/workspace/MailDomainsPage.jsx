@@ -8,7 +8,7 @@ import MailDkimDiagnosticsPanel from './MailDkimDiagnosticsPanel.jsx';
 import MailDomainCreateDialog from './MailDomainCreateDialog.jsx';
 import MailOperationsPanel from './MailOperationsPanel.jsx';
 import MailWebmailPanel from './MailWebmailPanel.jsx';
-import { Badge, Button, EmptyState, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, ModalScope, EmptyState, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 import { paginateConsoleItems } from './ui/console-model.js';
 import './ui/mail-console.css';
@@ -92,12 +92,12 @@ function MailDomainDetail({ mailDomainId }) {
       {domain.managementMode === 'local' ? <>
         <nav className="ws-tabs" aria-label="Mail yönetimi">{mailSections.map(([key, label]) => <Link key={key} to={href(key)} aria-current={section === key ? 'page' : undefined}>{label}</Link>)}</nav>
         {/* Keep panels mounted when switching sections so edits and durable-job state survive. */}
-        <div className="ws-mail-pane" hidden={section !== 'mailboxes'}><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /></div>
-        <div className="ws-mail-pane" hidden={section !== 'webmail'}><MailWebmailPanel domain={domain} onChanged={detail.refresh} /></div>
-        <div className="ws-mail-pane" hidden={section !== 'aliases'}><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /></div>
-        <div className="ws-mail-pane" hidden={section !== 'security'}><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /></div>
-        <div className="ws-mail-pane" hidden={section !== 'configuration'}><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /></div>
-        <div className="ws-mail-pane" hidden={section !== 'operations'}><MailOperationsPanel /></div>
+        <div className="ws-mail-pane" hidden={section !== 'mailboxes'}><ModalScope active={section === 'mailboxes'}><MailboxesPanel domain={domain} mailboxes={data.mailboxes ?? []} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'webmail'}><ModalScope active={section === 'webmail'}><MailWebmailPanel domain={domain} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'aliases'}><ModalScope active={section === 'aliases'}><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'security'}><ModalScope active={section === 'security'}><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'configuration'}><ModalScope active={section === 'configuration'}><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'operations'}><ModalScope active={section === 'operations'}><MailOperationsPanel /></ModalScope></div>
       </> : <Section title="Harici mail sağlayıcısı"><EmptyState icon="external" title="Posta hesapları harici sağlayıcıda yönetiliyor" detail="Bu alan adı yalnızca takip edilir. Yerel posta kutusu, takma ad ve DKIM işlemleri bu kayda uygulanmaz." /></Section>}
       <details className="ws-section ws-disclosure"><summary>Alan adı kayıt ayrıntıları</summary><KeyValues items={[
         ['Yönetim modu', domain.managementMode], ['Revizyon', domain.revision], ['Web Domain', domain.webDomainId ?? '—'], ['Son gözlem', formatDate(domain.lastObservedAt)],

@@ -53,6 +53,9 @@ export function hostingSettingsChanges(domain, draft) {
     fail('invalid_redirect_policy', 'HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.');
   }
   const values = { ...draft, nginxSettings: nginxSettings(base, draft.nginxSettings) };
+  if (values.nginxSettings.preferredDomain != null && ![base.primaryDomain, ...base.aliases].includes(values.nginxSettings.preferredDomain)) {
+    fail('hosting_draft_invalid', 'Tercih edilen alan adı önce bu siteye bağlanmalıdır.');
+  }
   const previous = hostingDraftValues(base);
   const changes = Object.fromEntries(HOSTING_SETTING_FIELDS.filter((key) => !hostingValuesEqual(values[key], previous[key])).map((key) => [key, values[key]]));
   if (!Object.keys(changes).length) fail('hosting_no_changes', 'Kaydedilecek bir değişiklik yok.');

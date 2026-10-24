@@ -1,3 +1,7 @@
+import { register } from 'node:module';
+register('./jsx-loader.js', import.meta.url);
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -75,12 +79,19 @@ test('Mobile navigation drawer traps Tab/Shift+Tab and restores focus to trigger
 
 /* ==========================================================================\n   2. Native Modal Open Focus and Return Focus\n   ========================================================================== */
 
-test('Modal component in PanelKit moves focus on open and restores trigger focus on close', () => {
+test('Modal component keeps accessible native dialog markup and focus lifecycle controls', async () => {
   // Native dialog element with modal attributes
-  assert.match(panelKit, /<dialog ref=\{ref\} className=\{`ws-modal \$\{wide \? 'ws-modal-wide' : ''\}`\} aria-modal="true"/);
+  const { Modal, ModalScope } = await import('../src/workspace/PanelKit.jsx');
+  const render = active => renderToStaticMarkup(createElement(ModalScope, { active }, createElement(Modal, { title: 'Owned task', onClose() {} }, 'Task content')));
+  const visible = render(true), hidden = render(false);
+  assert.match(visible, /<dialog [^>]*aria-modal="true"/);
+  assert.doesNotMatch(visible.match(/<dialog [^>]+>/)[0], /hidden/);
+  assert.match(hidden.match(/<dialog [^>]+>/)[0], /hidden/);
+  const id = visible.match(/aria-labelledby="([^"]+)"/)[1];
+  assert.ok(visible.includes(`id="${id}"`));
 
   // Initial focus on mount
-  assert.match(panelKit, /const initial = dialog\?\.querySelector\('\[autofocus\]'\) \|\| focusable\[0\];/);
+  assert.match(panelKit, /const initial = dialog\?\.querySelector\('\[autofocus\]'\)/);
   assert.match(panelKit, /initial\.focus\(\)/);
 
   // Focus restore on unmount

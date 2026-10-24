@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { lstat, readFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
+import { parseManagedRspamdIdentity } from './mail-rspamd-identity.js';
 import {
   mailForwardingTemplatePolicy,
   mailSqlTemplatePolicy,
@@ -74,11 +75,11 @@ export function createMailConfigEvidenceInspector({
     }
   }
 
-  async function inspectArtifact(artifact, vmailGid, postfixGid) {
+  async function inspectArtifact(artifact, vmailGid, postfixGid, rspamdGid) {
     try {
       const metadata = await lstatFn(artifact.path);
       const expectedMode = artifact.sensitive ? SENSITIVE_MODE : PUBLIC_MODE;
-      const expectedGid = artifact.path === mailForwardingTemplatePolicy.sievePath
+      const expectedGid = artifact.path.startsWith('/etc/rspamd/local.d/') ? rspamdGid : artifact.path === mailForwardingTemplatePolicy.sievePath
         ? vmailGid
         : artifact.path.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
           ? postfixGid
@@ -235,7 +236,7 @@ export function createMailConfigEvidenceInspector({
 
   async function inspect(preview) {
     const plan = previewManagedMailApplyPlan(preview);
-    const [vmailIdentity, postfixIdentity, mailAuthGroup] = await Promise.all([
+    const [vmailIdentity, postfixIdentity, mailAuthGroup, rspamdIdentity] = await Promise.all([
       resolveSystemIdentity('vmail'),
       resolveSystemIdentity('postfix'),
       plan.sql?.required === true
@@ -249,12 +250,16 @@ export function createMailConfigEvidenceInspector({
           }
         })()
         : Promise.resolve(null),
+      (async () => {
+        try { const result = await run(GETENT, ['passwd', '_rspamd'], { timeout: 10_000, maxBuffer: MAX_OUTPUT }); return parseManagedRspamdIdentity(boundedOutput(result?.stdout ?? result)); }
+        catch { return null; }
+      })(),
     ]);
-    if (!vmailIdentity || !postfixIdentity || (plan.sql?.required === true && !mailAuthGroup)) {
+    if (!vmailIdentity || !postfixIdentity || !rspamdIdentity || (plan.sql?.required === true && !mailAuthGroup)) {
       return { satisfied: false, result: null };
     }
     for (const artifact of plan.artifacts) {
-      if (!(await inspectArtifact(artifact, vmailIdentity.gid, postfixIdentity.gid))) {
+      if (!(await inspectArtifact(artifact, vmailIdentity.gid, postfixIdentity.gid, rspamdIdentity.gid))) {
         return { satisfied: false, result: null };
       }
     }

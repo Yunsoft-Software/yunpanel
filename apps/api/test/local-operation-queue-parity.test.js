@@ -31,12 +31,14 @@ test('every durable async queue operation has a local host execution path', asyn
     ...local,
     ...localDatabaseCredentials,
     ...localWithEnvironment,
+    ...operationNames(localSource, /export const LOCAL_PASSENGER_RELEASE_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/),
     ...localPythonEnvironment,
     ...localMailConfiguration,
     ...localMailData,
     ...localRoundcubeConfiguration,
     ...localCron,
     ...localWebsitePhp,
+    ...operationNames(localSource, /export const LOCAL_WEBSITE_BACKUP_OPERATIONS = Object\.freeze\(\[([\s\S]*?)\]\);/),
   ]);
 
   assert.deepEqual([...executable].sort(), [...queued].sort());

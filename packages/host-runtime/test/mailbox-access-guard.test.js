@@ -42,6 +42,25 @@ test('read verification never flushes or kicks any session', async () => {
   const run = harness(); await run.guard.verify(address);
   assert.equal(run.calls.some(({ args }) => args[0] === 'kick' || args[1] === 'cache'), false);
 });
+
+test('documented Dovecot no-session kick result still requires fresh session, auth and delivery proofs', async () => {
+  const run = harness((file, args, next) => {
+    if (args[0] === 'kick') throw Object.assign(missing(68), { stdout: 'no users kicked\n' });
+    return next(file, args);
+  });
+  assert.equal((await run.guard.quiesce(address)).sessionsCleared, true);
+  assert.ok(run.calls.some(call => call.args.includes('who')));
+  assert.equal(run.calls.filter(call => call.file.endsWith('/postmap')).length, 4);
+});
+for (const patch of [{ stdout: '' }, { stdout: 'unknown' }, { stderr: 'anvil unavailable' }, { killed: true }, { code: 75 }]) {
+  test(`a kick absence with contradictory evidence stays blocked: ${JSON.stringify(patch)}`, async () => {
+    const run = harness((file, args, next) => {
+      if (args[0] === 'kick') throw Object.assign(missing(68), { stdout: 'no users kicked\n' }, patch);
+      return next(file, args);
+    });
+    await assert.rejects(run.guard.quiesce(address));
+  });
+}
 for (const value of ['*@example.test', '?@example.test', '-A', 'A@example.test', 'user@example..test', 'user@-example.test', 'user@example.test\n', 'user/name@example.test', null]) {
   test(`invalid or wildcard identity is rejected before commands: ${JSON.stringify(value)}`, async () => {
     const run = harness(); await assert.rejects(run.guard.quiesce(value), { code: 'mailbox_access_identity_invalid' }); assert.equal(run.calls.length, 0);

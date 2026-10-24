@@ -7,8 +7,8 @@ const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
 
 export class WebsiteRestoreError extends Error {
-  constructor(code, message, status = 400, details = null) {
-    super(message);
+  constructor(code, message, status = 400, details = null, cause = undefined) {
+    super(message, cause ? { cause } : undefined);
     this.name = 'WebsiteRestoreError';
     this.code = code;
     this.status = status;
@@ -22,6 +22,11 @@ function normalizeUuid(value, label) {
   } catch {
     throw new WebsiteRestoreError(`invalid_${label}`, `${label} is invalid`, 400);
   }
+}
+
+export function websiteRestoreTransactionId({ websiteId, previewDigest, operationId = null }) {
+  const identity = operationId ? sha256({ operationId, previewDigest }) : previewDigest;
+  return `restore:${websiteId}:${identity.slice(0, 32)}`;
 }
 
 function normalizeSnapshotId(value) {
@@ -45,6 +50,12 @@ export function createWebsiteRestoreService({
   localServerId = null,
   jobRegistry = null,
   receiptStore = null,
+  websiteBackupService = null,
+  databaseBackupAdapter = null,
+  mailBackupAdapter = null,
+  environmentBackupAdapter = null,
+  dnsBackupAdapter = null,
+  hostingBackupAdapter = null,
 } = {}) {
   if (!websiteRegistry || typeof websiteRegistry.getWebsite !== 'function') {
     throw new WebsiteRestoreError('website_restore_dependencies_invalid', 'Website registry is required', 503);
@@ -54,6 +65,7 @@ export function createWebsiteRestoreService({
     throw new WebsiteRestoreError('website_restore_dependencies_invalid', 'Restic repository registry is required', 503);
   }
   if (!resticManager || typeof resticManager.listSnapshots !== 'function'
+    || typeof resticManager.listSnapshotFiles !== 'function'
     || typeof resticManager.createSnapshot !== 'function'
     || typeof resticManager.restore !== 'function') {
     throw new WebsiteRestoreError('website_restore_dependencies_invalid', 'Restic manager is required', 503);
@@ -67,7 +79,7 @@ export function createWebsiteRestoreService({
 
   const resolvedReceiptStore = receiptStore ?? createWebsiteRestoreReceiptStore();
 
-  async function assertIdle(websiteId, serverId) {
+  async function assertIdle(websiteId, serverId, executionJobId = null) {
     if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') return;
     let jobs;
     try {
@@ -79,7 +91,7 @@ export function createWebsiteRestoreService({
       throw new WebsiteRestoreError('website_job_state_unavailable', 'Website job state is invalid', 503);
     }
     const hasConflict = jobs.some((job) =>
-      ACTIVE_STATUSES.has(job.status) && (
+      job.id !== executionJobId && ACTIVE_STATUSES.has(job.status) && (
         (job.resourceType === 'website' && job.resourceId === websiteId)
         || job.payload?.websiteId === websiteId
       )
@@ -137,33 +149,49 @@ export function createWebsiteRestoreService({
     websiteId,
     repositoryId,
     snapshotId,
-    healthPath = '/health',
+    healthPath = '/',
     timeoutSeconds = 30,
     include = [],
+    executionJobId = null,
   } = {}) {
     const website = await resolveTargetWebsite(websiteId);
-    await assertIdle(website.id, website.serverId);
+    await assertIdle(website.id, website.serverId, executionJobId);
 
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
     const snapshot = await resolveTargetSnapshot(repository.target, password, website.id, snapshotId);
 
-    const healthSpec = Object.freeze({
-      primaryDomain: website.primaryDomain ?? website.name ?? website.id,
-      healthPath: typeof healthPath === 'string' && healthPath.startsWith('/') ? healthPath : '/health',
+    const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
+    const primaryDomain = backupSet.website?.primaryDomain ?? website.primaryDomain;
+    if (typeof primaryDomain !== 'string' || !primaryDomain.includes('.') || /[\s/:]/.test(primaryDomain)) throw new WebsiteRestoreError('website_restore_domain_unavailable', 'Geri yükleme için siteye bağlı alan adı doğrulanamadı', 409);
+    const healthSpec = Object.freeze({ primaryDomain,
+      healthPath: typeof healthPath === 'string' && healthPath.startsWith('/') ? healthPath : '/',
       timeoutSeconds: Number.isInteger(timeoutSeconds) && timeoutSeconds >= 5 && timeoutSeconds <= 120 ? timeoutSeconds : 30,
     });
-
-    const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
-    const nodes = typeof resticManager.listSnapshotFiles === 'function'
-      ? await resticManager.listSnapshotFiles({ repository: repository.target, password, snapshotId: snapshot.id })
-      : null;
+    const nodes = await resticManager.listSnapshotFiles({ repository: repository.target, password, snapshotId: snapshot.id });
     let normalizedIncludes;
     try {
-      normalizedIncludes = resolveWebsiteRestoreSelection(backupSet, include, nodes ?? []);
-      if (nodes) assertWebsiteSnapshotContent(nodes, backupSet, normalizedIncludes);
+      normalizedIncludes = resolveWebsiteRestoreSelection(backupSet, include, nodes);
+      assertWebsiteSnapshotContent(nodes, backupSet, normalizedIncludes);
     } catch (error) {
       throw new WebsiteRestoreError(error.code ?? 'website_restore_selection_invalid', error.message, 409);
     }
+    const unappliedResources = [
+      ...(!mailBackupAdapter ? (backupSet.mail ?? []).flatMap(mail => [mail.storagePath, mail.stagedDataDirectory, mail.virtualMailDbSnapshot]) : []),
+      ...(!dnsBackupAdapter ? (backupSet.dns ?? []).map(dns => dns.stagedZonePath) : []),
+      ...(!hostingBackupAdapter ? (backupSet.nginx ?? []).flatMap(nginx => [nginx.stagedConfigPath,nginx.stagedMetadataPath]) : []),
+      ...(!environmentBackupAdapter ? [backupSet.env?.stagedMetadataPath] : []),
+    ].filter(Boolean);
+    if (unappliedResources.some(target => normalizedIncludes.some(root => target === root || target.startsWith(root + '/') || root.startsWith(target + '/')))) {
+      throw new WebsiteRestoreError('website_restore_resource_adapter_unavailable', 'Posta, DNS ve barındırma ayarlarının geri yüklenmesi henüz doğrulanmadı. Dosyaları veya veritabanını ayrı seçin.', 503);
+    }
+    const selectsDatabase = (backupSet.databases ?? []).some((database) => normalizedIncludes.some((root) => {
+      const directory = database.dumpHook?.stagedBackupDirectory ?? database.dumpHook?.stagedDumpPath;
+      return directory && (directory === root || directory.startsWith(root + '/') || root.startsWith(directory + '/'));
+    }));
+    if (selectsDatabase && typeof databaseBackupAdapter?.restore !== 'function') throw new WebsiteRestoreError('website_database_restore_unavailable', 'Database restore adapter is unavailable', 503);
+    if (environmentBackupAdapter) await environmentBackupAdapter.assertSupported(backupSet, normalizedIncludes);
+    if (dnsBackupAdapter) await dnsBackupAdapter.assertSupported(backupSet, normalizedIncludes);
+    if (hostingBackupAdapter) await hostingBackupAdapter.assertSupported(backupSet, normalizedIncludes);
 
     const previewPayload = {
       websiteId: website.id,
@@ -174,7 +202,8 @@ export function createWebsiteRestoreService({
       snapshotTags: Object.freeze([...(snapshot.tags ?? [])].sort()),
       snapshotPaths: Object.freeze([...(snapshot.paths ?? [])].sort()),
       healthSpec,
-      ...(normalizedIncludes.length > 0 ? { include: normalizedIncludes, selective: true } : {}),
+      include: normalizedIncludes,
+      selective: include.length > 0,
     };
 
     const previewDigest = sha256(previewPayload);
@@ -183,277 +212,90 @@ export function createWebsiteRestoreService({
     return Object.freeze({
       ...previewPayload,
       include: normalizedIncludes,
-      selective: normalizedIncludes.length > 0,
+      selective: include.length > 0,
       previewDigest,
       confirmation,
     });
   }
 
   async function executeRestore({
-    websiteId,
-    repositoryId,
-    snapshotId,
-    expectedPreviewDigest,
-    confirmation,
-    healthPath = '/health',
-    timeoutSeconds = 30,
-    include = [],
+    websiteId, repositoryId, snapshotId, expectedPreviewDigest, confirmation,
+    healthPath = '/', timeoutSeconds = 30, include = [], executionJobId = null, operationId = null,
   } = {}) {
-    if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)) {
-      throw new WebsiteRestoreError('invalid_preview_digest', 'Expected preview digest is invalid', 400);
-    }
-    if (typeof confirmation !== 'string' || !confirmation) {
-      throw new WebsiteRestoreError('invalid_confirmation', 'Restore confirmation string is required', 400);
-    }
-
-    // Step 0: Get fresh preview and verify confirmation
-    const preview = await previewRestore({
-      websiteId,
-      repositoryId,
-      snapshotId,
-      healthPath,
-      timeoutSeconds,
-      include,
-    });
-
-    if (preview.previewDigest !== expectedPreviewDigest) {
-      throw new WebsiteRestoreError('restore_preview_stale', 'Website or snapshot state changed; request a new preview', 409);
-    }
-    if (preview.confirmation !== confirmation) {
-      throw new WebsiteRestoreError('restore_confirmation_invalid', `Confirm restore with ${preview.confirmation}`, 409);
-    }
-
+    if (typeof expectedPreviewDigest !== 'string' || !SHA256_PATTERN.test(expectedPreviewDigest)) throw new WebsiteRestoreError('invalid_preview_digest', 'Expected preview digest is invalid', 400);
+    const preview = await previewRestore({ websiteId, repositoryId, snapshotId, healthPath, timeoutSeconds, include, executionJobId });
+    if (preview.previewDigest !== expectedPreviewDigest) throw new WebsiteRestoreError('restore_preview_stale', 'Website changed; refresh the preview', 409);
+    if (confirmation !== preview.confirmation) throw new WebsiteRestoreError('restore_confirmation_invalid', 'Restore confirmation does not match the preview', 409);
     const website = await resolveTargetWebsite(websiteId);
-    await assertIdle(website.id, website.serverId);
-
-    const transactionId = `restore:${website.id}:${preview.previewDigest.slice(0, 32)}`;
-
-    // Check existing receipt for idempotency
-    if (resolvedReceiptStore && typeof resolvedReceiptStore.read === 'function') {
-      try {
-        const existingReceipt = await resolvedReceiptStore.read(transactionId);
-        if (existingReceipt) {
-          if (existingReceipt.status === 'succeeded') {
-            return Object.freeze({
-              status: 'succeeded',
-              websiteId: website.id,
-              snapshotId: preview.snapshotId,
-              preRestoreSnapshotId: existingReceipt.preRestoreSnapshotId,
-              healthCheck: Object.freeze({ ...existingReceipt.healthCheck }),
-              restoredAt: existingReceipt.committedAt,
-              idempotent: true,
-            });
-          }
-          if (existingReceipt.status === 'rolled_back') {
-            return Object.freeze({
-              status: 'rolled_back',
-              websiteId: website.id,
-              snapshotId: preview.snapshotId,
-              preRestoreSnapshotId: existingReceipt.preRestoreSnapshotId,
-              rollbackReason: existingReceipt.rollbackReason,
-              healthCheck: Object.freeze({ ...existingReceipt.healthCheck }),
-              rolledBackAt: existingReceipt.committedAt,
-              idempotent: true,
-            });
-          }
-        }
-      } catch {
-        // Continue if receipt read fails
-      }
+    await assertIdle(website.id, website.serverId, executionJobId);
+    // A newly authorized restore must run again even when its snapshot and
+    // selection match a previous restore. Only a retry of the same durable
+    // operation may reuse that operation's receipt.
+    const requestIdentity = operationId ?? executionJobId;
+    const transactionId = websiteRestoreTransactionId({ websiteId: website.id,
+      previewDigest: preview.previewDigest, operationId: requestIdentity });
+    // An unreadable journal is a stop condition, never permission to repeat a mutation.
+    const existing = await resolvedReceiptStore.read(transactionId);
+    if (existing) {
+      if (existing.websiteId !== website.id || existing.repositoryId !== repositoryId || existing.previewDigest !== preview.previewDigest) throw new WebsiteRestoreError('restore_receipt_conflict', 'Restore journal does not match this operation', 409);
+      if (['succeeded', 'rolled_back'].includes(existing.status)) return Object.freeze({
+        status: existing.status, websiteId: website.id, snapshotId: existing.snapshotId, preRestoreSnapshotId: existing.preRestoreSnapshotId,
+        healthCheck: existing.healthCheck, rollbackReason: existing.rollbackReason, restoredAt: existing.committedAt, idempotent: true,
+      });
+      throw new WebsiteRestoreError('restore_recovery_required', 'An interrupted restore must be recovered before another restore', 409);
     }
-
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
-
-    // Step 1: Pre-restore snapshot
-    let currentBackupSet;
+    const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
+    const rollbackPaths = [...preview.include];
+    if (!rollbackPaths.length || !preview.include?.length) throw new WebsiteRestoreError('website_restore_selection_empty', 'Verified website restore paths are required', 409);
+    let preRestore;
     try {
-      currentBackupSet = await websiteBackupSetProvider.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
-    } catch (error) {
-      throw new WebsiteRestoreError('pre_restore_snapshot_failed', `Failed to compile current website backup set: ${error.message}`, 500);
+      preRestore = websiteBackupService
+      ? (await websiteBackupService.executeBackup({ websiteId: website.id, repositoryId, expectedPreviewDigest: backupSet.digest,
+        tags: ['pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`], executionJobId, operationId: operationId ? `${operationId}:pre` : null })).snapshot
+      : await resticManager.createSnapshot({ repository: repository.target, password, paths: rollbackPaths,
+        tags: [...backupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`], excludes: backupSet.excludePatterns });
+    } catch {
+      throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot failed; no restore was attempted', 500);
     }
-
-    let preRestoreSnapshotResult;
-    try {
-      preRestoreSnapshotResult = await resticManager.createSnapshot({
-        repository: repository.target,
-        password,
-        paths: currentBackupSet.targetPaths,
-        tags: [...currentBackupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`],
-        excludes: currentBackupSet.excludePatterns,
-      });
-    } catch (error) {
-      throw new WebsiteRestoreError('pre_restore_snapshot_failed', `Pre-restore snapshot creation failed; restore aborted: ${error.message}`, 500);
-    }
-
-    const preRestoreSnapshotId = preRestoreSnapshotResult.snapshotId;
-
-    // Persist intent before filesystem mutation
-    if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
+    if (!preRestore?.snapshotId) throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot was not verified', 502);
+    const journal = { transactionId, websiteId: website.id, websiteRevision: preview.websiteRevision, repositoryId: repository.id,
+      snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId, previewDigest: preview.previewDigest, rollbackPaths };
+    // This write must succeed before any restore changes a file.
+    await resolvedReceiptStore.write({ ...journal, status: 'pre_restore_created' });
+    async function rollback(reason, healthCheck = null, restoreError = null) {
       try {
-        await resolvedReceiptStore.write({
-          transactionId,
-          websiteId: website.id,
-          websiteRevision: preview.websiteRevision,
-          repositoryId: repository.id,
-          snapshotId: preview.snapshotId,
-          preRestoreSnapshotId,
-          status: 'pre_restore_created',
-          previewDigest: preview.previewDigest,
-        });
-      } catch {
-        // Receipt persistence error
-      }
-    }
-
-    // Step 2: Restore from target snapshot
-    try {
-      await resticManager.restore({
-        repository: repository.target,
-        password,
-        snapshotId: preview.snapshotId,
-        targetDirectory: '/',
-        ...(preview.include?.length > 0 ? { include: [...preview.include] } : {}),
-      });
-    } catch (restoreError) {
-      // Automatic rollback on restore execution failure
-      try {
-        await resticManager.restore({
-          repository: repository.target,
-          password,
-          snapshotId: preRestoreSnapshotId,
-          targetDirectory: '/',
-        });
-      } catch {
-        // Rollback attempt recorded
-      }
-      if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
-        try {
-          await resolvedReceiptStore.write({
-            transactionId,
-            websiteId: website.id,
-            websiteRevision: preview.websiteRevision,
-            repositoryId: repository.id,
-            snapshotId: preview.snapshotId,
-            preRestoreSnapshotId,
-            status: 'rolled_back',
-            rollbackReason: 'restore_execution_failed',
-            previewDigest: preview.previewDigest,
-          });
-        } catch {
-          // Ignore
-        }
-      }
-      throw new WebsiteRestoreError(
-        'restore_execution_failed',
-        `Restore execution failed; rolled back to pre-restore snapshot: ${restoreError.message}`,
-        500,
-        { preRestoreSnapshotId },
-      );
-    }
-
-    // Step 3: Health check
-    let healthResult;
-    try {
-      healthResult = await healthInspector.inspect({
-        primaryDomain: preview.healthSpec.primaryDomain,
-        healthPath: preview.healthSpec.healthPath,
-        timeoutSeconds: preview.healthSpec.timeoutSeconds,
-      });
-    } catch (inspectError) {
-      healthResult = {
-        satisfied: false,
-        statusCode: null,
-        attempts: 1,
-        error: inspectError.message,
-      };
-    }
-
-    // Step 4: Health Rollback if unhealthy
-    if (!healthResult || healthResult.satisfied !== true) {
-      try {
-        await resticManager.restore({
-          repository: repository.target,
-          password,
-          snapshotId: preRestoreSnapshotId,
-          targetDirectory: '/',
-        });
+        await resticManager.restore({ repository: repository.target, password, snapshotId: preRestore.snapshotId, targetDirectory: '/', include: rollbackPaths });
+        if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
       } catch (rollbackError) {
-        throw new WebsiteRestoreError(
-          'restore_rollback_failed',
-          `Health check failed and rollback to pre-restore snapshot also failed: ${rollbackError.message}`,
-          500,
-          { preRestoreSnapshotId, healthResult },
-        );
+        throw new WebsiteRestoreError('restore_rollback_failed', 'Restore failed and rollback requires recovery', 500,
+          { preRestoreSnapshotId: preRestore.snapshotId }, new AggregateError([restoreError, rollbackError].filter(Boolean), 'Restore recovery requires inspection'));
       }
-
-      if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
-        try {
-          await resolvedReceiptStore.write({
-            transactionId,
-            websiteId: website.id,
-            websiteRevision: preview.websiteRevision,
-            repositoryId: repository.id,
-            snapshotId: preview.snapshotId,
-            preRestoreSnapshotId,
-            status: 'rolled_back',
-            rollbackReason: 'health_check_failed',
-            healthCheck: healthResult,
-            previewDigest: preview.previewDigest,
-          });
-        } catch {
-          // Ignore
-        }
-      }
-
-      return Object.freeze({
-        status: 'rolled_back',
-        websiteId: website.id,
-        snapshotId: preview.snapshotId,
-        preRestoreSnapshotId,
-        rollbackReason: 'health_check_failed',
-        healthCheck: Object.freeze({
-          satisfied: false,
-          statusCode: healthResult?.statusCode ?? null,
-          attempts: healthResult?.attempts ?? 1,
-          error: healthResult?.error ?? 'Website health check failed after restore',
-        }),
-        rolledBackAt: new Date().toISOString(),
-      });
+      await resolvedReceiptStore.write({ ...journal, status: 'rolled_back', rollbackReason: reason, healthCheck });
+      return Object.freeze({ status: 'rolled_back', websiteId: website.id, snapshotId: preview.snapshotId,
+        preRestoreSnapshotId: preRestore.snapshotId, rollbackReason: reason, healthCheck, rolledBackAt: new Date().toISOString() });
     }
-
-    // Step 5: Success
-    if (resolvedReceiptStore && typeof resolvedReceiptStore.write === 'function') {
-      try {
-        await resolvedReceiptStore.write({
-          transactionId,
-          websiteId: website.id,
-          websiteRevision: preview.websiteRevision,
-          repositoryId: repository.id,
-          snapshotId: preview.snapshotId,
-          preRestoreSnapshotId,
-          status: 'succeeded',
-          healthCheck: healthResult,
-          previewDigest: preview.previewDigest,
-        });
-      } catch {
-        // Ignore
-      }
+    try {
+      await resticManager.restore({ repository: repository.target, password, snapshotId: preview.snapshotId, targetDirectory: '/', include: [...preview.include] });
+      if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+      if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+      if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+      if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+      if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+    } catch (error) {
+      return rollback('restore_execution_failed', null, error);
     }
-
-    return Object.freeze({
-      status: 'succeeded',
-      websiteId: website.id,
-      snapshotId: preview.snapshotId,
-      preRestoreSnapshotId,
-      selective: Boolean(preview.selective),
-      include: preview.include ?? [],
-      healthCheck: Object.freeze({
-        satisfied: true,
-        statusCode: healthResult.statusCode,
-        attempts: healthResult.attempts,
-      }),
-      restoredAt: new Date().toISOString(),
-    });
+    let healthCheck;
+    try { healthCheck = await healthInspector.inspect(preview.healthSpec); }
+    catch { healthCheck = { satisfied: false, statusCode: null, attempts: 1, error: 'Website health check could not complete' }; }
+    if (healthCheck?.satisfied !== true) return rollback('health_check_failed', healthCheck);
+    await resolvedReceiptStore.write({ ...journal, status: 'succeeded', healthCheck });
+    return Object.freeze({ status: 'succeeded', websiteId: website.id, snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId,
+      selective: preview.selective, include: [...preview.include], healthCheck, restoredAt: new Date().toISOString() });
   }
 
   return Object.freeze({

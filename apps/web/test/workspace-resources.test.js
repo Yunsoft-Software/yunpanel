@@ -9,7 +9,7 @@ test('dashboard retains summaries; server/settings request servers; databases ha
   assert.deepEqual(selected('/databases'), ['domains', 'servers', 'websites']);
 });
 test('remaining unimplemented modules and unknown routes do not poll unrelated data', () => {
-  for (const path of ['/backups', '/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
+  for (const path of ['/invalid', '/settings/unknown', null]) assert.deepEqual(selected(path), []);
 });
 test('docker workspace requests server and job dependencies', () => {
   assert.deepEqual(selected('/docker'), ['jobs', 'servers']);
@@ -49,4 +49,8 @@ test('home requests website relations and the tool directory has no global inven
   assert.deepEqual(selected('/'), selected('/websites'));
   assert.deepEqual(selected('/tools-settings'), []);
   assert.deepEqual(selected('/tools-settings', { activeJob: true }), ['jobs']);
+});
+
+test('direct site tools load Website and Domain context', () => {
+  for (const path of ['/ssl','/cron','/backup','/backups','/logs','/php','/wordpress','/access']) assert.deepEqual(selected(path), ['domains','websites']);
 });

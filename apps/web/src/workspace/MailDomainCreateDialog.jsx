@@ -1,5 +1,7 @@
 import { useMemo, useRef, useState } from 'react';
-import { createMailDomain } from './mail-client.js';
+import { createMailDomain, getMailDomain, previewMailConfiguration, applyMailConfiguration, getMailConfigurationRequest } from './mail-client.js';
+import { waitForJob } from '../api.js';
+import { createMailChangeController } from './mail-change-controller.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, ErrorNotice, Modal } from './PanelKit.jsx';
 
@@ -12,7 +14,7 @@ export default function MailDomainCreateDialog({ onCreated, onClose }) {
   const [managementMode, setManagementMode] = useState('local');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
-  const pending = useRef(false);
+  const pending = useRef(false), createdRef = useRef(null), applyRef = useRef(null);
   const selected = candidates.find((domain) => domain.id === webDomainId) ?? null;
 
   async function submit(event) {
@@ -20,17 +22,24 @@ export default function MailDomainCreateDialog({ onCreated, onClose }) {
     if (pending.current || !selected) return;
     pending.current = true; setBusy(true); setError(null);
     try {
-      const created = await createMailDomain({
+      const created = createdRef.current ?? await createMailDomain({
         name: selected.primaryDomain,
         webDomainId: selected.id,
         managementMode,
       });
-      onCreated?.(created);
+      createdRef.current = created;
+      if (created.managementMode === 'local') {
+        applyRef.current ??= createMailChangeController({ domainId: created.id, desiredStatus: 'enabled', requestId: crypto.randomUUID(),
+          getDomain: getMailDomain, preview: previewMailConfiguration, apply: applyMailConfiguration,
+          getRequest: getMailConfigurationRequest, waitForJob });
+        await applyRef.current.run(async () => created);
+      }
+      onCreated?.(await getMailDomain(created.id));
       onClose();
     } catch (failure) {
       if (failure.name !== 'AbortError') setError(failure.message);
     } finally { pending.current = false; setBusy(false); }
   }
 
-  return <Modal title="Mail domain ekle" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} />{candidates.length === 0 ? <div className="ws-notice ws-notice-warn">Mail domain oluşturmak için önce bu yerel sunucuda bir üst seviye web Domain kaydı gerekir.</div> : <fieldset disabled={busy}><label>Web Domain<select value={webDomainId} onChange={(event) => setWebDomainId(event.target.value)}>{candidates.map((domain) => <option key={domain.id} value={domain.id}>{domain.primaryDomain}</option>)}</select></label><label>Yönetim modu<select value={managementMode} onChange={(event) => setManagementMode(event.target.value)}><option value="local">Local — Postfix/Dovecot/Rspamd</option><option value="external">External — yalnız takip</option></select></label><p className="ws-muted">Mail domain adı seçilen web Domain ile birebir aynıdır. Oluşturma tek başına host mail konfigürasyonunu değiştirmez.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy || !selected}>{busy ? 'Kaydediliyor…' : 'Mail domain oluştur'}</Button></footer></fieldset>}</form></Modal>;
+  return <Modal title="Posta alan adı ekle" onClose={onClose} busy={busy}><form className="ws-form" onSubmit={submit}><ErrorNotice error={error} />{candidates.length === 0 ? <div className="ws-notice ws-notice-warn">Posta hizmetini oluşturmak için önce bu yerel sunucuda bir üst seviye web Domain kaydı gerekir.</div> : <fieldset disabled={busy}><label>Alan adı<select disabled={Boolean(createdRef.current)} value={webDomainId} onChange={(event) => setWebDomainId(event.target.value)}>{candidates.map((domain) => <option key={domain.id} value={domain.id}>{domain.primaryDomain}</option>)}</select></label><label>Yönetim modu<select disabled={Boolean(createdRef.current)} value={managementMode} onChange={(event) => setManagementMode(event.target.value)}><option value="local">Bu sunucuda</option><option value="external">Harici posta sağlayıcısı</option></select></label><p className="ws-muted">Yerel posta seçildiğinde hizmet bu alan adı için hazırlanıp etkinleştirilir. Sonuç doğrulanana kadar bu pencere açık kalır.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button variant="primary" type="submit" disabled={busy || !selected}>{busy ? 'Kaydediliyor…' : 'Posta hizmetini oluştur'}</Button></footer></fieldset>}</form></Modal>;
 }

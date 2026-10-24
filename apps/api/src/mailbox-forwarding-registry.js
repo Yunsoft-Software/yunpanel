@@ -1,3 +1,4 @@
+import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-backup.js';
 import { randomBytes } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -372,6 +373,24 @@ export function createMailboxForwardingRegistry({
       })));
   }
 
+  async function exportMailboxBackup(ids) {
+    await ensureInitialized();
+    return exportScopedCatalog(state.forwardings, ids, 'mailboxId');
+  }
+  async function restoreMailboxBackup(ids, snapshot, { removedIds = [] } = {}) {
+    await ensureInitialized();
+    for (const id of ids) await mailbox(uuid(id));
+    for (const id of removedIds) {
+      if (await getMailbox(uuid(id))) throw new MailboxForwardingRegistryError('backup_catalog_scope_invalid', 'A live mailbox forwarding policy cannot be removed by this backup', 409);
+    }
+    return mutate(async next => {
+      next.forwardings = restoreScopedCatalog(next.forwardings.filter(record => !removedIds.includes(record.mailboxId)), snapshot, ids, {
+        scopeField: 'mailboxId', identityField: 'mailboxId', validate: validatePersisted, now,
+      });
+      return next.forwardings.filter(record => ids.includes(record.mailboxId)).map(publicPolicy);
+    });
+  }
+
   return Object.freeze({
     init,
     getForwarding,
@@ -380,6 +399,8 @@ export function createMailboxForwardingRegistry({
     clearForwarding,
     removeOrphan,
     materializeEnabledForwardings,
+    exportMailboxBackup,
+    restoreMailboxBackup,
   });
 }
 

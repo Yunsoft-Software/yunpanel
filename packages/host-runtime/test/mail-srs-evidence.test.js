@@ -123,7 +123,7 @@ function inspectorFor({ preview, files, parameterOverride = null } = {}) {
       return {
         mode: compiledSieve ? 0o640 : artifact?.sensitive ? 0o600 : 0o640,
         uid: 0,
-        gid: compiledSieve || sieveSource ? VMAIL_GID : 0,
+        gid: compiledSieve || sieveSource ? VMAIL_GID : filePath.startsWith('/etc/rspamd/local.d/') ? 5003 : 0,
         isFile: () => true,
         isSocket: () => false,
         isSymbolicLink: () => false,
@@ -132,6 +132,7 @@ function inspectorFor({ preview, files, parameterOverride = null } = {}) {
     readFileFn: async (filePath) => Buffer.from(files.get(filePath)),
     run: async (file, args) => {
       if (file === '/usr/bin/getent') {
+        if (args[0] === 'passwd' && args[1] === '_rspamd') return { stdout: '_rspamd:x:5003:5003::/var/lib/rspamd:/usr/sbin/nologin\n', stderr: '' };
         if (args[1] === 'vmail') {
           return { stdout: `vmail:x:5000:${VMAIL_GID}::/var/lib/yunpanel/mail:/usr/sbin/nologin\n`, stderr: '' };
         }

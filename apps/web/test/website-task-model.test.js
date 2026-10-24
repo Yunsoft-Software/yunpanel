@@ -3,10 +3,10 @@ import assert from 'node:assert/strict';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from '../src/workspace/website-task-model.js';
 const domain = { id: 'domain-a', websiteId: 'website-a', serverId: 'local', primaryDomain: 'example.test' };
 const website = { id: 'website-a', applicationId: 'app-a', serverId: 'local', runtimeType: 'node' };
-const application = { id: 'app-a', serverId: 'local', type: 'node', name: 'Site A runtime' };
+const application = { id: 'app-a', serverId: 'local', type: 'node', name: 'Site A runtime', repositoryUrl: 'https://example.test/site.git' };
 const ready = (items) => ({ status: 'ready', items });
 const resolve = (changes = {}, id = domain.id) => createWebsiteTaskResolver({ domains: ready([domain]), websites: ready([website]), applications: ready([application]), canManage: true, isOwner: true, ...changes })(id);
-const href = (result, key) => [...result.tools, ...result.secondaryTools].find((tool) => tool.key === key)?.href;
+const href = (result, key) => [...result.tools, ...result.secondaryTools].find((tool) => tool.key === key)?.href ?? null;
 
 test('six daily tools are visible and use Domain IDs, not Website or hostnames', () => {
   const result = resolve();
@@ -147,8 +147,8 @@ test('php runtime assigns PHP tool label and python assigns Python', () => {
     websites: ready([{ ...website, runtimeType: 'php' }]),
     applications: ready([{ ...application, type: 'php' }]),
   });
-  assert.equal(phpResult.secondaryTools.find((t) => t.key === 'node')?.label, 'PHP');
-  assert.equal(phpResult.secondaryTools.find((t) => t.key === 'settings')?.label, 'Barındırma ayarları');
+  assert.equal(phpResult.secondaryTools.find((t) => t.key === 'php')?.label, 'PHP Ayarları');
+  assert.equal(phpResult.tools.find((t) => t.key === 'wordpress')?.label, 'WordPress');
 
   const pythonResult = resolve({
     websites: ready([{ ...website, runtimeType: 'python' }]),

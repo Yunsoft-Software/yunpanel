@@ -1,3 +1,4 @@
+import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-backup.js';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -343,6 +344,24 @@ export function createMailAliasRegistry({
       })));
   }
 
+  async function exportDomainBackup(mailDomainId) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId, 'mailDomainId');
+    await requireManagedDomain(id);
+    return exportScopedCatalog(state.aliases, [id], 'mailDomainId');
+  }
+  async function restoreDomainBackup(mailDomainId, snapshot) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId, 'mailDomainId');
+    await requireManagedDomain(id);
+    return mutate(async next => {
+      next.aliases = restoreScopedCatalog(next.aliases, snapshot, [id], {
+        scopeField: 'mailDomainId', identityField: 'id', validate: validatePersisted, now,
+      });
+      return next.aliases.filter(record => record.mailDomainId === id).map(publicAlias);
+    });
+  }
+
   return Object.freeze({
     init,
     createAlias,
@@ -351,6 +370,8 @@ export function createMailAliasRegistry({
     updateAlias,
     deleteAlias,
     materializeEnabledAliases,
+    exportDomainBackup,
+    restoreDomainBackup,
   });
 }
 

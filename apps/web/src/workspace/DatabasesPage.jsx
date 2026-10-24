@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { createDatabase, createPhpMyAdminHandoff, deleteDatabase, getDatabases, waitForJob } from '../api.js';
-import { Badge, Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, Modal, PageHeading, Section } from './PanelKit.jsx';
+import { createPhpMyAdminHandoff, deleteDatabase, getDatabases, waitForJob } from '../api.js';
+import { Badge, Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { databaseInventoryView, formatDatabaseBytes, validDatabaseName } from './database-model.js';
+import DatabaseSetupDialog, { DatabaseConnectionDialog } from './DatabaseSetupDialog.jsx';
+import { databaseInventoryView, formatDatabaseBytes } from './database-model.js';
 import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 import { databaseAccessView, filterConsoleDatabases, paginateConsoleItems } from './ui/console-model.js';
 
@@ -31,7 +32,7 @@ export async function queueAndWait(queue, { observe, refreshJobs, updateJob }) {
 }
 
 export default function DatabasesPage() {
-  const { servers, domains, jobs, observe, updateJob } = useWorkspace();
+  const { servers, domains, websites, jobs, observe, updateJob } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const requestGeneration = useRef(0);
   const scopeGeneration = useRef(0);
@@ -41,9 +42,8 @@ export default function DatabasesPage() {
   const [busy, setBusy] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [error, setError] = useState(null);
-  const [name, setName] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
-  const [createdName, setCreatedName] = useState('');
+  const [connectionTarget, setConnectionTarget] = useState(null);
   const [accessTarget, setAccessTarget] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const server = servers.items.length === 1 ? servers.items[0] : null;
@@ -70,7 +70,7 @@ export default function DatabasesPage() {
 
   useEffect(() => {
     scopeGeneration.current += 1;
-    setName(''); setError(null); setCreatedName(''); setCreateOpen(false);
+    setError(null); setConnectionTarget(null); setCreateOpen(false);
     setDeleteTarget(null); setAccessTarget(null); setBusy(false); pending.current = false;
     setInventory(databaseInventoryView(null));
     void load();
@@ -120,21 +120,13 @@ export default function DatabasesPage() {
       if (scope === scopeGeneration.current) { pending.current = false; setBusy(false); }
     }
   }
-  async function create(event) {
-    event.preventDefault();
-    if (!canAct) return;
-    if (!validDatabaseName(name)) { setError('1–64 karakter kullanın: harf, rakam veya alt çizgi. Sistem adları kullanılamaz.'); return; }
-    const requestedName = name;
-    const terminal = await perform(() => createDatabase(server.id, requestedName));
-    if (terminal) { setName(''); setCreateOpen(false); setCreatedName(requestedName); }
-  }
   async function remove() {
     if (!canAct || !deleteTarget) return;
     const target = deleteTarget;
     const terminal = await perform(() => deleteDatabase(server.id, target.name));
     if (terminal) setDeleteTarget(null);
   }
-  async function openPhpMyAdmin(ownership) {
+  async function openPhpMyAdmin(ownership, task = 'structure') {
     if (!canAct || pending.current) return;
     if (!ownership?.websiteId || !ownership?.credential?.id) return;
     let targetWindow;
@@ -151,6 +143,7 @@ export default function DatabasesPage() {
       await openWebsitePhpMyAdmin({
         serverId: server.id, websiteId: ownership.websiteId,
         credentialId: ownership.credential.id, issueHandoff: createPhpMyAdminHandoff,
+        task,
         targetWindow,
       });
     } catch (failure) {
@@ -178,7 +171,7 @@ export default function DatabasesPage() {
     {server && <CollectionNotice resource={domains} label="Site bağlantıları" />}
     <ErrorNotice error={loadError} />
     {!createOpen && !deleteTarget && <ErrorNotice error={error} />}
-    {createdName && <div className="ws-notice" role="status"><div><strong>{createdName} oluşturuldu.</strong><p>Erişim için sitenin Kaynaklar bölümünden veritabanını bağlayıp kullanıcı oluşturun.</p></div><LinkButton to="/websites">Site seç</LinkButton><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setCreatedName('')} /></div>}
+
     {!server && ['ready', 'stale'].includes(servers.status) && <Section title="Veritabanları"><EmptyState title="Yerel sunucu kullanılamıyor" detail="Yerel sunucu bağlantısı doğrulanamadı." icon="database" /></Section>}
     {server && <>
       <Section title="Veritabanı listesi" className="ws-database-inventory" actions={<span className="ws-muted" role="status">{status === 'refreshing' ? 'Güncelleniyor…' : hasInventory ? `${inventory.databases.length} veritabanı` : 'Bağlantı bekleniyor'}</span>}>
@@ -192,7 +185,7 @@ export default function DatabasesPage() {
             return <tr key={database.name} role="row"><td role="cell" data-label="Veritabanı"><div className="ws-db-name"><Icon name="database" size={20} /><div><strong>{database.name}</strong><small>{engineLabel}</small></div></div></td>
               <td role="cell" data-label="Site / Kullanıcı"><strong>{view.siteLabel}</strong><small>{database.ownership?.credential?.username ?? 'Kullanıcı tanımlanmamış'}</small></td>
               <td role="cell" data-label="Boyut">{database.sizeLabel}</td>
-              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : view.siteHref ? <><LinkButton to={view.siteHref} icon="settings">Erişimi yapılandır</LinkButton><small>{view.detail}</small></> : <><LinkButton to="/websites" icon="globe">Site seç</LinkButton><Button icon="settings" onClick={() => setAccessTarget(database)}>Siteye bağla</Button><small>{view.detail}</small></>}</div></td>
+              <td role="cell" data-label="Erişim"><div className="ws-db-access">{view.canOpen ? <Button icon="external" disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership)} aria-label={`${database.name}: phpMyAdmin aç`}>phpMyAdmin</Button> : null}{view.canOpen ? <><Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'import')}>SQL içe aktar</Button><Button disabled={!canAct} onClick={() => openPhpMyAdmin(database.ownership, 'export')}>SQL dışa aktar</Button></> : view.siteHref ? <><Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>Erişimi hazırla</Button><small>{view.detail}</small></> : <><Button icon="settings" disabled={!canAct} onClick={() => setAccessTarget(database)}>Siteye bağla</Button><small>{view.detail}</small></>}{database.ownership?.credential && websites.items.some((item) => item.id === database.ownership.websiteId) && <Button onClick={() => setConnectionTarget(database)}>Bağlantı bilgileri</Button>}</div></td>
               <td role="cell" className="ws-row-end" data-label="İşlem"><Button icon="trash" disabled={!canAct} aria-label={`${database.name} veritabanını sil`} title="Veritabanını sil" onClick={() => { setError(null); setDeleteTarget(database); }}><span className="ws-sr-only">Sil</span></Button></td></tr>;
           })}</tbody></table></div>
           <footer className="ws-pagination"><span>{page.count} sonuç · {engineLabel} · {formatDatabaseBytes(inventory.totalBytes)}</span><div className="ws-actions"><Button disabled={page.page <= 1} onClick={() => filter('page', String(page.page - 1))}>Önceki</Button><span>{page.page} / {page.pages}</span><Button disabled={page.page >= page.pages} onClick={() => filter('page', String(page.page + 1))}>Sonraki</Button></div></footer>
@@ -208,8 +201,9 @@ export default function DatabasesPage() {
         ]} />
       </details>
     </>}
-    {createOpen && <Modal title="Veritabanı oluştur" busy={busy} onClose={() => { if (!busy) setCreateOpen(false); }}><ErrorNotice error={error} /><form className="ws-form" onSubmit={create}><label>Veritabanı adı<input value={name} onChange={(event) => setName(event.target.value)} placeholder="ornek_uygulama" maxLength={64} autoComplete="off" autoCapitalize="none" spellCheck={false} required autoFocus /><span className="ws-field-hint">Harf, rakam ve alt çizgi kullanın.</span></label><p className="ws-muted">Site bağlantısı ve veritabanı kullanıcısı, sitenin Kaynaklar bölümünden yönetilir.</p><footer className="ws-modal-footer"><Button disabled={busy} onClick={() => setCreateOpen(false)}>Vazgeç</Button><Button variant="primary" type="submit" disabled={!canAct || !validDatabaseName(name)}>{busy ? 'Oluşturuluyor…' : 'Veritabanı oluştur'}</Button></footer></form></Modal>}
-    {accessTarget && <Modal title={`${accessTarget.name} · Erişim kurulumu`} onClose={() => setAccessTarget(null)}><p className="ws-muted">Bu veritabanı için kullanılabilir site bağlantısı bulunamadı. İlgili sitenin Kaynaklar bölümünü açıp veritabanını bağlayın ve kullanıcı oluşturun. phpMyAdmin yalnız o sitenin kullanıcısıyla açılır.</p><footer className="ws-modal-footer"><Button onClick={() => setAccessTarget(null)}>Kapat</Button><LinkButton to="/websites" variant="primary">Site seç</LinkButton></footer></Modal>}
+    {(createOpen || params.has("databaseJob")) && !accessTarget && <DatabaseSetupDialog onClose={() => setCreateOpen(false)} onChanged={load} />}
+    {accessTarget && <DatabaseSetupDialog website={websites.items.find((item) => item.id === accessTarget.ownership?.websiteId)} databaseName={accessTarget.name} onClose={() => setAccessTarget(null)} onChanged={load} />}
+    {connectionTarget && <DatabaseConnectionDialog website={websites.items.find((item) => item.id === connectionTarget.ownership.websiteId)} binding={{ id: connectionTarget.ownership.bindingId, databaseName: connectionTarget.name }} onClose={() => setConnectionTarget(null)} />}
     {deleteTarget && <ConfirmDialog title={`${deleteTarget.name} silinsin mi?`} message="Veritabanı kalıcı olarak silinir. Website bağı varsa backend işlemi engeller. Devam etmeden önce güncel bir yedeğiniz olduğundan emin olun." confirmation={deleteTarget.name} confirmLabel="Veritabanını sil" busy={busy} disabled={!canAct} error={error} onCancel={() => { if (!busy) setDeleteTarget(null); }} onConfirm={remove} />}
   </>;
 }

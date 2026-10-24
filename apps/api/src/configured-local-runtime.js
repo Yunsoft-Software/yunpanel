@@ -1,9 +1,13 @@
+import { createPassengerReleasePhaseStore, passengerReleasePhaseIdentity } from './passenger-release-phase-store.js';
+import { PASSENGER_RELEASE_OPERATIONS, passengerPayload } from './passenger-release-reconciliation.js';
+import { normalizePassengerReleaseResult } from './passenger-release-job-result.js';
 import { inspectHostInventory } from '@yunpanel/host-runtime';
 import { MANAGED_SERVICE_CONTROL_IDS, OPERATIONS } from '@yunpanel/protocol';
 import { createCertificateOperationReceiptStore } from './certificate-operation-receipt.js';
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainActivationReceiptStore } from './domain-activation-receipt.js';
 import { createLocalHostOperations } from './local-host-operations.js';
+import { reloadCertificateMail } from './certificate-mail-reload.js';
 import { createMailConfigOperationReceiptStore } from './mail-config-operation-receipt.js';
 import { createMailConfigRollbackJournal } from './mail-config-rollback-journal.js';
 import { createMailConfigRollbackReceiptStore } from './mail-config-rollback-receipt.js';
@@ -54,6 +58,8 @@ export async function startConfiguredLocalRuntime({
   roundcubeConfigurationService = null,
   dnsProviderCredentialRegistry = null,
   jobLogStore = null,
+  recoverRunningJobs = null,
+  onWebsitePhpToolReceiptRecorded = null,
   createOperations = createLocalHostOperations,
   createCertificateOperationReceipts = createCertificateOperationReceiptStore,
   createDatabaseDeletionReceipts = createDatabaseDeletionReceiptStore,
@@ -173,6 +179,10 @@ export async function startConfiguredLocalRuntime({
     throw new ConfiguredLocalRuntimeError('local_mail_config_rollback_journal_invalid', 'Local runtime managed mail rollback journal is invalid');
   }
   const hostOperations = createOperations({
+    loadCertificateMailReload: mailServiceIdentityRegistry ? (result, execution, reload) => reloadCertificateMail({
+      mailServiceIdentityRegistry, certificateRegistry, domainRegistry, reload,
+      serverId: execution?.serverId, certificateId: execution?.resourceId, result,
+    }) : null,
     loadApplicationEnvironment: (applicationId, expectedRevision) => applicationEnvironmentRegistry.materialize(applicationId, {
       expectedRevision,
     }),
@@ -487,6 +497,15 @@ export async function startConfiguredLocalRuntime({
       return;
     }
 
+    if (PASSENGER_RELEASE_OPERATIONS.has(operation)) {
+      const spec=passengerPayload({operation,payload});
+      const identity=passengerReleasePhaseIdentity(operation,spec,{jobId,serverId,resourceType:'application',resourceId:spec.applicationId});
+      const record=await createPassengerReleasePhaseStore().read(identity);
+      const safe=normalizePassengerReleaseResult(result,{identity,payload:spec});
+      if(record?.phase!=='reconciled' || JSON.stringify(record.result)!==JSON.stringify(safe)) throw new Error('Passenger release result has no completed native phase evidence');
+      return;
+    }
+
     if (operation === OPERATIONS.APP_NODE_DEPLOY) {
       if (!result || result.healthy !== true || result.deploymentId !== jobId || result.releaseId !== jobId
         || result.port !== payload?.runtime?.port || result.healthPath !== payload?.runtime?.healthPath
@@ -550,6 +569,8 @@ export async function startConfiguredLocalRuntime({
         throw new Error('PHP tool action result is not safe recovery evidence');
       }
       await websitePhpToolReceipts.write({ serverId, jobId, payload, result });
+      // Cleanup follows the verified receipt; ciphertext expires if cleanup is unavailable.
+      if (onWebsitePhpToolReceiptRecorded) { try { await onWebsitePhpToolReceiptRecorded(payload); } catch {} }
       return;
     }
 
@@ -629,6 +650,7 @@ export async function startConfiguredLocalRuntime({
     hostOperations,
     snapshotProvider,
     recordExecutionEvidence,
+    recoverRunningJobs,
     onError,
   });
 }

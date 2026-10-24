@@ -109,7 +109,7 @@ for (const kind of ['php', 'static']) test('@mutation source ' + kind + ' index/
     const saved = await domain(liveApi, target), origin = (saved.httpsRedirect ? 'https://' : 'http://') + target.hostname;
     expect(saved.appliedRevision).toBe(saved.desiredRevision); expect(saved.nginxSettings.indexFiles[0]).toBe(names.index);
     const home = await liveApi.api.get(origin + '/', { maxRedirects: 0 }); expect(home.status()).toBe(200); expect(await home.text()).toContain(markers.index);
-    for (const [url, code] of [[origin + '/yp-not-found-' + suffix, 404], [origin + '/' + names.blocked, 403], [origin + '/' + names.error, 404],
+    for (const [url, code] of [[origin + '/yp-not-found-' + suffix + (kind === 'php' ? '.php' : ''), 404], [origin + '/' + names.blocked, 403], [origin + '/' + names.error, 404],
       ...(kind === 'php' ? [403, 404, 500, 502, 503, 504].map(code => [origin + '/' + names.status + '?code=' + code, code]) : [])]) {
       const response = await liveApi.api.get(url, { maxRedirects: 0 }); expect(response.status(), url).toBe(code);
       expect(await response.text()).toContain(markers.error);

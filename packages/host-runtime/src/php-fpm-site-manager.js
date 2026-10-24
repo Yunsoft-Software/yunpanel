@@ -16,6 +16,7 @@ import {
   renderWebsitePhpFpmPool,
 } from '@yunpanel/config-templates';
 import { createApplicationIdentity } from './application-identity.js';
+import { isSupportedPhpRepositoryLine } from './os-platform.js';
 import { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -291,7 +292,7 @@ export function createPhpFpmSiteManager({
       for (const line of lines) {
         const versionLine = line.match(/^\s*(?:\*\*\*\s+)?(\S+)\s+\d+\s*$/);
         if (versionLine) candidateBlock = versionLine[1] === candidate;
-        if (candidateBlock && /^\s+\d+\s+https?:\/\/ppa\.launchpad(?:content)?\.net\/ondrej\/php\/ubuntu\s+\S+\/main\s+\S+\s+Packages\s*$/.test(line)) {
+        if (candidateBlock && isSupportedPhpRepositoryLine(line)) {
           verifiedOrigin = true;
         }
       }

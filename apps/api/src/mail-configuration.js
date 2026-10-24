@@ -488,6 +488,11 @@ export function createMailConfigurationService({
     return transitionPreview(resolved, materialized);
   }
 
+  async function previewCurrent(input) {
+    const resolved = await resolveCurrentState(input);
+    return transitionPreview(resolved, await materializeConfiguration(resolved));
+  }
+
   function materializeSensitiveArtifacts(resolved, materialized, preview = materialized.preview) {
     const sensitiveArtifacts = [];
     if (preview.requirements.includes('mail_sqlite')) {
@@ -622,6 +627,7 @@ export function createMailConfigurationService({
 
   return Object.freeze({
     previewTransition,
+    previewCurrent,
     materializeTransition,
     materializeCurrent,
   });

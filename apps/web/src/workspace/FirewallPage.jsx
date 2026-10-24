@@ -516,10 +516,8 @@ export default function FirewallPage() {
           )}
           <form onSubmit={handleAddPort} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Port Numarası
-              </label>
-              <input
+              <label htmlFor="firewall-new-port" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Port Numarası</label>
+              <input id="firewall-new-port"
                 type="number"
                 min="1"
                 max="65535"
@@ -532,10 +530,8 @@ export default function FirewallPage() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Protokol
-              </label>
-              <select
+              <label htmlFor="firewall-new-protocol" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Protokol</label>
+              <select id="firewall-new-protocol"
                 value={newProto}
                 onChange={(e) => setNewProto(e.target.value)}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px' }}
@@ -547,10 +543,8 @@ export default function FirewallPage() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Kaynak IP / CIDR
-              </label>
-              <input
+              <label htmlFor="firewall-new-source" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Kaynak IP / CIDR</label>
+              <input id="firewall-new-source"
                 type="text"
                 placeholder="0.0.0.0/0"
                 value={newSource}
@@ -560,10 +554,8 @@ export default function FirewallPage() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Açıklama
-              </label>
-              <input
+              <label htmlFor="firewall-new-comment" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Açıklama</label>
+              <input id="firewall-new-comment"
                 type="text"
                 placeholder="Özel servis açıklaması"
                 value={newComment}
@@ -586,10 +578,8 @@ export default function FirewallPage() {
       >
         <form onSubmit={handleRunScan} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end', marginBottom: '1rem' }}>
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-              Hedef Host / IP
-            </label>
-            <input
+            <label htmlFor="firewall-scan-host" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Hedef Host / IP</label>
+              <input id="firewall-scan-host"
               type="text"
               value={scanHost}
               onChange={(e) => setScanHost(e.target.value)}
@@ -600,10 +590,8 @@ export default function FirewallPage() {
           </div>
 
           <div>
-            <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-              Port
-            </label>
-            <input
+            <label htmlFor="firewall-scan-port" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Port</label>
+              <input id="firewall-scan-port"
               type="number"
               min="1"
               max="65535"
@@ -695,10 +683,8 @@ export default function FirewallPage() {
           )}
           <form onSubmit={handleAddBan} style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', alignItems: 'flex-end' }}>
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                IP Adresi
-              </label>
-              <input
+              <label htmlFor="firewall-ban-ip" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>IP Adresi</label>
+              <input id="firewall-ban-ip"
                 type="text"
                 placeholder="Örn. 198.51.100.25"
                 value={banIp}
@@ -709,10 +695,8 @@ export default function FirewallPage() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Engelleme Süresi
-              </label>
-              <select
+              <label htmlFor="firewall-ban-duration" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Engelleme Süresi</label>
+              <select id="firewall-ban-duration"
                 value={banDuration}
                 onChange={(e) => setBanDuration(e.target.value)}
                 style={{ padding: '0.4rem 0.6rem', border: '1px solid var(--ws-control-border)', borderRadius: '4px' }}
@@ -725,10 +709,8 @@ export default function FirewallPage() {
             </div>
 
             <div>
-              <label style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>
-                Sebep
-              </label>
-              <input
+              <label htmlFor="firewall-ban-reason" style={{ display: 'block', fontSize: '0.8rem', color: 'var(--ws-muted)', marginBottom: '0.25rem' }}>Sebep</label>
+              <input id="firewall-ban-reason"
                 type="text"
                 placeholder="Kötü niyetli trafik / brute force"
                 value={banReason}

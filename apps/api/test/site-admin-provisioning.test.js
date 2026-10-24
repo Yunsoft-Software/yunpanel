@@ -1316,6 +1316,7 @@ test("Gereksinim 4: Site-admin kullanicisi baska Website'in DB/phpMyAdmin icerik
   assert.deepEqual(queueApplyArgs?.opts?.authorization, {
     actorId: siteAdminActor.id,
     userId: siteAdminActor.id,
+    sessionId: undefined, role: 'site_manager',
     websiteId: ownWebsiteId,
     resourceId: ownWebsiteId,
   });

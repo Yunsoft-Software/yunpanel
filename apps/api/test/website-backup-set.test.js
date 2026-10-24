@@ -22,6 +22,19 @@ const mailDomainId = 'f15f21e0-3ce8-47cf-93bf-d45c8c723246';
 const databaseBindingId = 'd1432e13-edb5-49f5-8f9b-302c407c784b';
 const projectId = '5bc2c0f4-948a-4f34-826c-5a9703f9cbf0';
 
+test('backup follows the verified shared www configuration but refuses an unrelated or escaping filename', async () => {
+  const { provider, domains } = fixture();
+  domains[0].stagedConfigName = 'yunpanel-example.com.conf';
+  domains.push({ ...domains[0], id: '7acb6a29-bc85-4731-8ab8-8e184b598ac5', primaryDomain: 'www.example.com', aliases: [], parentDomainId: domainId });
+  const shared = await provider.getWebsiteBackupSet({ websiteId });
+  assert.equal(shared.nginx.length, 2);
+  assert.deepEqual([...new Set(shared.nginx.map(config => config.configPath))], ['/etc/nginx/sites-enabled/yunpanel-example.com.conf']);
+  for (const name of ['../private.conf', 'yunpanel-foreign.example.com.conf', '/etc/passwd']) {
+    domains[0].stagedConfigName = name;
+    await assert.rejects(provider.getWebsiteBackupSet({ websiteId }), error => error.code === 'backup_nginx_scope_invalid');
+  }
+});
+
 function fixture() {
   const websites = new Map([
     [websiteId, {
@@ -231,15 +244,16 @@ test('Website backup set generates complete set for Node.js website with databas
   assert.equal(db.engine, 'mariadb');
   assert.equal(db.dumpHook.program, '/usr/bin/mariadb-dump');
   assert.ok(db.dumpHook.args.includes('app_production'));
-  assert.equal(db.dumpHook.stagedDumpPath, `/var/lib/yunpanel/backups/resources/website/${websiteId}/databases/app_production.sql`);
+  assert.equal(db.dumpHook.stagedDumpPath, `/var/lib/yunpanel/backups/resources/website/${websiteId}/databases/website-${databaseBindingId}/dump.sql`);
+  assert.equal(db.dumpHook.stagedBackupDirectory, `/var/lib/yunpanel/backups/resources/website/${websiteId}/databases/website-${databaseBindingId}`);
 
   // Mail
   assert.equal(backupSet.mail.length, 1);
   const mail = backupSet.mail[0];
   assert.equal(mail.domainName, 'example.com');
   assert.equal(mail.managementMode, 'local');
-  assert.equal(mail.storagePath, '/var/vmail/example.com');
-  assert.equal(mail.virtualMailDbSnapshot, `/var/lib/yunpanel/backups/resources/website/${websiteId}/mail/example.com-virtual.sql`);
+  assert.equal(mail.storagePath, '/var/lib/yunpanel/mail/example.com');
+  assert.equal(mail.virtualMailDbSnapshot, `/var/lib/yunpanel/backups/resources/website/${websiteId}/mail/example.com-virtual.json`);
 
   // DNS
   assert.equal(backupSet.dns.length, 1);
@@ -249,7 +263,7 @@ test('Website backup set generates complete set for Node.js website with databas
 
   // Nginx
   assert.equal(backupSet.nginx.length, 1);
-  assert.equal(backupSet.nginx[0].configPath, `/etc/nginx/sites-available/yunpanel-${domainId}.conf`);
+  assert.equal(backupSet.nginx[0].configPath, '/etc/nginx/sites-enabled/yunpanel-example.com.conf');
   assert.equal(backupSet.nginx[0].appliedRevision, 4);
   assert.equal(backupSet.nginx[0].stagedConfigPath, `/var/lib/yunpanel/backups/resources/website/${websiteId}/nginx/${domainId}.conf`);
 
@@ -260,7 +274,11 @@ test('Website backup set generates complete set for Node.js website with databas
   assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/apps/${applicationId}`));
   assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/data/${applicationId}`));
   assert.ok(backupSet.targetPaths.includes(`/var/lib/yunpanel/backups/resources/website/${websiteId}`));
-  assert.ok(backupSet.targetPaths.includes('/var/vmail/example.com'));
+  assert.equal(backupSet.targetPaths.includes('/var/vmail/example.com'), false);
+  assert.equal(backupSet.mail[0].stagedDataDirectory, `/var/lib/yunpanel/backups/resources/website/${websiteId}/mail-data/website-${mailDomainId}`);
+  assert.ok(backupSet.excludePatterns.every(pattern => pattern.startsWith(`/var/lib/yunpanel/apps/${applicationId}/`)
+    || pattern.startsWith(`/var/lib/yunpanel/data/${applicationId}/`)));
+  assert.ok(backupSet.excludePatterns.every(pattern => !pattern.startsWith(backupSet.stagedRoot)));
 
   // Tags & Digest
   assert.deepEqual(backupSet.tags, [
@@ -366,4 +384,11 @@ test('normalizeWebsiteBackupSet validates backup set and detects digest tamperin
     () => normalizeWebsiteBackupSet({ invalid: true }),
     (err) => err instanceof WebsiteBackupSetError && err.code === 'website_backup_set_invalid' && err.status === 409,
   );
+});
+
+
+test('the backup resolves a real bound domain when Website has only a display name and excludes foreign server domains', async () => {
+ const f=fixture();const website=f.websites.get(websiteId);delete website.primaryDomain;website.name='Customer display title';
+ f.domains.push({id:'99999999-9999-4999-8999-999999999999',websiteId,serverId:'88888888-8888-4888-8888-888888888888',primaryDomain:'foreign.example.com'});
+ const backupSet=await f.provider.getWebsiteBackupSet({websiteId,serverId});assert.equal(backupSet.website.primaryDomain,'example.com');assert.equal(backupSet.dns.some(d=>d.primaryDomain==='foreign.example.com'),false);
 });

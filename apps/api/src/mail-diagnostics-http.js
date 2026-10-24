@@ -247,6 +247,7 @@ export function mountMailDiagnosticsRoutes(app, {
   mailboxQuotaRegistry = null,
   transport = null,
   mailDeliveryDiagnosticsService = null,
+  mailServiceIdentityRegistry = null,
 } = {}) {
   if (!app || typeof app.get !== 'function') throw new Error('Express application is required');
   if (!mailDiagnosticsInspector || typeof mailDiagnosticsInspector.inspect !== 'function') {
@@ -274,6 +275,7 @@ export function mountMailDiagnosticsRoutes(app, {
     mailQueueInspector,
     journalLogReader,
     authMailer,
+    mailServiceIdentityRegistry,
     mailboxQuotaRegistry,
     localServerId,
     transport,
@@ -316,12 +318,18 @@ export function mountMailDiagnosticsRoutes(app, {
 
     const withForwarding = appendForwardingDiagnostic(diagnostics, forwardingDeliverability);
     const withAntivirus = appendAntivirusDiagnostic(withForwarding, antivirusHealth);
-    const connectionSettings = await deliveryService.getConnectionSettings({ mailDomain });
+    let connectionSettings = null, connectionSettingsError = null;
+    try { connectionSettings = await deliveryService.getConnectionSettings({ mailDomain }); }
+    catch (error) {
+      if (!(error instanceof MailDeliveryDiagnosticsError) || error.code !== 'mail_service_identity_unavailable') throw error;
+      connectionSettingsError = { code: error.code, message: error.message };
+    }
 
     return response.json({
       data: Object.freeze({
         ...withAntivirus,
         connectionSettings,
+        ...(connectionSettingsError ? { connectionSettingsError, attentionRequired: true } : {}),
       }),
     });
   }));

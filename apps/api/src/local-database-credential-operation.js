@@ -1,4 +1,4 @@
-import { createDatabaseCredentialManager } from '@yunpanel/host-runtime';
+import { createDatabaseCredentialManager, createDatabaseManager } from '@yunpanel/host-runtime';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { createDatabaseCredentialOperationReceiptStore } from './database-credential-operation-receipt.js';
 
@@ -46,6 +46,7 @@ function terminalResult(result, operation) {
 export function createLocalDatabaseCredentialOperation({
   materializer,
   manager = createDatabaseCredentialManager(),
+  databaseManager = createDatabaseManager(),
   receiptStore = createDatabaseCredentialOperationReceiptStore(),
 } = {}) {
   if (!materializer || typeof materializer.materialize !== 'function'
@@ -74,6 +75,12 @@ export function createLocalDatabaseCredentialOperation({
         'database_credential_bundle_mismatch',
         'Database credential private bundle does not match the queued job',
       );
+    }
+    if (payload.createDatabase === true) {
+      if (operation !== OPERATIONS.DATABASE_CREDENTIAL_APPLY) throw new LocalDatabaseCredentialOperationError('database_setup_mode_invalid', 'Database creation is invalid');
+      const inventory = await databaseManager.inspect();
+      if (!Array.isArray(inventory?.databases)) throw new LocalDatabaseCredentialOperationError('database_inventory_unavailable', 'Database inventory could not be verified');
+      if (!inventory.databases.some((database) => database.name === bundle.databaseName)) await databaseManager.createDatabase(bundle.databaseName);
     }
     const result = operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY
       ? await manager.applyCredential(bundle)

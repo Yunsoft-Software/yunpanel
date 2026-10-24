@@ -1,3 +1,4 @@
+import { createDockerComposeExecutionEnvironment } from './docker-compose-execution-environment.js';
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { access, chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
@@ -394,14 +395,7 @@ export function createDockerComposeValidator({
           ...configArgs,
         ], {
           cwd: directory,
-          env: {
-            PATH: '/usr/bin:/bin',
-            HOME: directory,
-            LANG: 'C',
-            LC_ALL: 'C',
-            COMPOSE_PROJECT_NAME: name,
-            ...normalizedEnvironment,
-          },
+          env: createDockerComposeExecutionEnvironment(normalizedEnvironment, { home: directory, projectName: name }),
         });
       } catch {
         throw new DockerComposeValidationError('docker_compose_validation_failed', 'Docker Compose configuration validation failed');

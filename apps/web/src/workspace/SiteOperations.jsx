@@ -5,7 +5,8 @@ import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion } from '../session-client.js';
 import { createSslRequestDraft, sslContactEmail, sslDraftDirty, sslDraftKey, sslDraftSnapshot, sslRequestDraftReducer, validSslContactEmail } from './ssl-request-draft.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkButton, Section } from './PanelKit.jsx';
+import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, FileRootBadge, KeyValues, LinkButton, Section } from './PanelKit.jsx';
+import { resolveSubdomainSharedFileRoot } from './new-website-form.js';
 import { certificateState, formatDate, siteHref } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import SslRenewalPanel from './SslRenewalPanel.jsx';
@@ -124,7 +125,7 @@ export function DomainOperations({ domain }) {
       ['Yayın durumu', !pendingPublication ? 'Yayında (Güncel)' : 'Yapılandırma yayına uygulanmayı bekliyor'],
       ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
     ]} />
-    <div className="ws-section-body"><h3>Alt alan adları</h3>{children.length ? <div className="ws-actions">{children.map((item) => <Link key={item.id} to={siteHref(item.id)}>{item.primaryDomain}</Link>)}</div> : <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>}<p className="ws-muted">Bu işlem DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.</p></div>
+    <div className="ws-section-body"><h3>Alt alan adları</h3>{children.length ? <div className="yp-subdomain-tree" role="tree" aria-label="Alt alan adları">{children.map((item, index) => <div key={item.id} className="yp-subdomain-branch" role="treeitem"><div className="yp-subdomain-branch-main"><span className="yp-tree-connector" aria-hidden="true">{index === children.length - 1 ? '└─' : '├─'}</span><Link to={siteHref(item.id)}>{item.primaryDomain}</Link><FileRootBadge path={resolveSubdomainSharedFileRoot(domain.primaryDomain, item.primaryDomain)} isSubdomain parentDomain={domain.primaryDomain} /></div><div className="ws-actions"><Link to={siteHref(item.id, 'files')}>Dosyalar</Link><Link to={siteHref(item.id, 'databases')}>Veritabanları</Link><Link to={siteHref(item.id, 'runtime')}>Uygulama / Docker</Link></div></div>)}</div> : <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>}<p className="ws-muted">Alt alan adlarının dosya kökleri ana domain dizini altında (<code>/subdomains/&lt;alt-alan&gt;</code>) ortak yönetilir. Bu işlem DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.</p></div>
     <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik ayrıntılar</summary><KeyValues items={[
       ['Hedef revizyon (desired state)', domain.desiredRevision ?? '—'],
       ['Uygulanan revizyon (applied revision)', domain.appliedRevision ?? '—'],

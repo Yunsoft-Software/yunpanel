@@ -145,13 +145,13 @@ export default function ResellerCustomersPage() {
               {isWebsiteQuotaFull && <span className="ws-field-hint" style={{ color: 'var(--ws-warning)', display: 'block' }}>Kota doldu</span>}
             </td>
             <td>
-              <span>{account.usage?.diskMb ?? 0} MB / {account.quotas?.maxDiskMb ? account.quotas.maxDiskMb + ' MB' : 'Sınırsız'}</span>
+              <span>{account.usage?.diskMb == null ? 'Ölçülmedi' : `${account.usage.diskMb} MB`} / {account.quotas?.maxDiskMb != null ? account.quotas.maxDiskMb + ' MB' : 'Sınırsız'}</span>
             </td>
             <td>
-              <span>{account.usage?.trafficMb ?? 0} MB / {account.quotas?.maxTrafficMb ? account.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}</span>
+              <span>{account.usage?.trafficMb == null ? 'Ölçülmedi' : `${account.usage.trafficMb} MB`} / {account.quotas?.maxTrafficMb != null ? account.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}</span>
             </td>
             <td>
-              <span>{account.usage?.databases ?? 0} / {account.quotas?.maxDatabases ? account.quotas.maxDatabases : 'Sınırsız'}</span>
+              <span>{account.usage?.databases ?? 'Ölçülmedi'} / {account.quotas?.maxDatabases != null ? account.quotas.maxDatabases : 'Sınırsız'}</span>
             </td>
             <td><div className="ws-actions">
               <Button

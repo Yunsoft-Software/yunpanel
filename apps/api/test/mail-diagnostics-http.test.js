@@ -69,6 +69,7 @@ async function listen(t, auth, {
   srsInspectionFails = false,
   mailAntivirusHealthInspector = null,
   panelSettingsRegistry = null,
+  serviceIdentityReady = true,
 } = {}) {
   const calls = [];
   const mailDomains = new Map([
@@ -84,6 +85,7 @@ async function listen(t, auth, {
   app.use((request, _response, next) => { request.auth = auth; next(); });
   mountMailDiagnosticsRoutes(app, {
     localServerId,
+    mailServiceIdentityRegistry: { getForServer: async serverId => ({ serverId, hostname: 'mail.example.com', ready: serviceIdentityReady }) },
     mailDomainRegistry: {
       async getMailDomain(id) { return mailDomains.get(id) ?? null; },
       async listMailDomains() {
@@ -329,4 +331,12 @@ test('diagnostics reports antivirus health and warns when clamav is unhealthy', 
   assert.equal(unhealthyBody.data.diagnostics.antivirus.active, false); // health yoksa aktif gösterme!
   assert.equal(unhealthyBody.data.attentionRequired, true);
   assert.ok(unhealthyBody.data.issues.some((i) => i.kind === 'antivirus' && i.reasonCode === 'mail_antivirus_unhealthy'));
+});
+
+
+test('missing mail TLS identity does not invent a client hostname or hide unrelated DKIM diagnostics', async t => {
+ const {base} = await listen(t, owner, {serviceIdentityReady:false});
+ const response=await fetch(`${base}/api/mail-domains/${localMailDomain.id}/diagnostics`);
+ assert.equal(response.status,200);const body=await response.json();
+ assert.equal(body.data.connectionSettings,null);assert.equal(body.data.connectionSettingsError.code,'mail_service_identity_unavailable');assert.equal(body.data.attentionRequired,true);assert.ok(body.data.diagnostics);
 });

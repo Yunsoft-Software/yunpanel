@@ -45,7 +45,7 @@ test('read-only navigation retains only the existing authorized route set', () =
 });
 test('owner navigation keeps jobs and audit accessible through categorized settings', () => {
   const paths = navigationGroups(true).flatMap((group) => group.items.map(([to]) => to));
-  assert.equal(paths.length, 7); assert.equal(new Set(paths).size, 7);
+  assert.equal(paths.length, 8); assert.equal(new Set(paths).size, 8);
   assert.ok(paths.includes('/tools-settings')); assert.ok(!paths.includes('/jobs')); assert.ok(!paths.includes('/audit')); assert.ok(!paths.includes('/logs'));
   assert.ok(!paths.includes('/applications')); assert.ok(!paths.includes('/backups'));
   const tools = TOOLS_SETTINGS_GROUPS.flatMap(group => group.items.map(([to]) => to));

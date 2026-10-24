@@ -150,7 +150,12 @@ export function createMailDataRestoreManager({
         await chmodFn(directoryPath, DIRECTORY_MODE);
       }
       const metadata = await assertDirectory(directoryPath);
-      if ((metadata.mode & 0o7777) !== DIRECTORY_MODE || metadata.uid !== vmail.uid || metadata.gid !== vmail.gid) {
+      // The existing installation uses vmail:vmail 0750 for the shared mail
+      // root. Domain/mailbox directories remain private 0700. Preserve the
+      // root's safe mode instead of changing permissions for sibling Domains.
+      const mode = metadata.mode & 0o7777;
+      const allowedMode = directoryPath === root ? [0o700, 0o750].includes(mode) : mode === DIRECTORY_MODE;
+      if (!allowedMode || metadata.uid !== vmail.uid || metadata.gid !== vmail.gid) {
         throw new MailDataRestoreError('mail_data_restore_parent_unsafe', 'Mail data restore parent ownership or mode is unsafe');
       }
     }

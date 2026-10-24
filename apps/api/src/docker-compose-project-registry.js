@@ -519,6 +519,22 @@ export function createDockerComposeProjectRegistry({
     return project ? publicProject(project) : null;
   }
 
+  async function getProjectDocument(projectId) {
+    await ensureInitialized();
+    const id = normalizeUuid(projectId, 'dockerProjectId');
+    const project = state.projects.find((candidate) => candidate.id === id);
+    if (!project) {
+      throw new DockerComposeProjectRegistryError('docker_compose_project_not_found', 'Docker Compose project was not found', 404);
+    }
+    return Object.freeze({
+      projectId: project.id,
+      projectName: project.projectName,
+      revision: project.revision,
+      composeSha256: project.composeSha256,
+      document: decryptDocument(encryptionKey, project),
+    });
+  }
+
   async function listProjects({ serverId = null } = {}) {
     await ensureInitialized();
     const normalizedServerId = serverId === null ? null : normalizeUuid(serverId, 'serverId');
@@ -538,7 +554,16 @@ export function createDockerComposeProjectRegistry({
     return Object.freeze({ ...publicProject(project), document: decryptDocument(encryptionKey, project) });
   }
 
-  return Object.freeze({ init, createProject, updateProject, removeProject, getProject, listProjects, materializeProject });
+  return Object.freeze({
+    init,
+    createProject,
+    updateProject,
+    removeProject,
+    getProject,
+    getProjectDocument,
+    listProjects,
+    materializeProject,
+  });
 }
 
 export const dockerComposeProjectRegistryInternals = Object.freeze({

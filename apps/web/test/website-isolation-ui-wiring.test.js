@@ -2,15 +2,17 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
-test('site overview binds isolation audit and receipt migration controls to the persistent Website identity', async () => {
-  const [site, panel, client] = await Promise.all([
+test('site access binds isolation audit and receipt migration controls to the persistent Website identity', async () => {
+  const [site, panel, client, access] = await Promise.all([
     readFile(new URL('../src/workspace/SiteDetailPage.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/WebsiteIsolationPanel.jsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/workspace/website-isolation-client.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/workspace/SiteAccessPanel.jsx', import.meta.url), 'utf8'),
   ]);
 
-  assert.match(site, /WebsiteIsolationPanel websiteId=\{website\.id\} onChanged=\{refreshAll\}/);
-  assert.doesNotMatch(site, /WebsiteIsolationPanel websiteId=\{domain\.id\}/);
+  assert.doesNotMatch(site, /<WebsiteIsolationPanel\b/);
+  assert.match(access, /WebsiteIsolationPanel websiteId=\{website\.id\} onChanged=\{onChanged\}/);
+  assert.doesNotMatch(access, /WebsiteIsolationPanel websiteId=\{domain\.id\}/);
   assert.match(client, /\/websites\/\$\{encodeURIComponent\(normalized\)\}\/isolation-audit/);
   assert.match(client, /\/websites\/\$\{encodeURIComponent\(normalized\)\}\/isolation-migrations/);
   assert.match(client, /\/applications\/\$\{encodeURIComponent\(normalized\)\}\/passenger-migration-preview/);

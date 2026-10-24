@@ -443,6 +443,7 @@ export function createDurableJobRegistry({
     acknowledgeReconciliation,
     getReconciliationJob,
     findIdempotentJob: (...args) => read('findIdempotentJob', args),
+    getJobForIdempotencyKey: (...args) => read('getJobForIdempotencyKey', args),
     getJob: (...args) => read('getJob', args),
     listJobs: (...args) => read('listJobs', args),
     withLock: (action) => storeLock.withLock(action),

@@ -1,3 +1,4 @@
+import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import { OPERATIONS } from '@yunpanel/protocol';
 import { ApplicationRegistryError } from './application-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -15,7 +16,8 @@ function exactBody(body) {
   return body;
 }
 
-async function ensureApplicationIdle(jobRegistry, applicationId) {
+async function ensureApplicationIdle(jobRegistry, applicationId, websiteRegistry = null) {
+  await assertApplicationWebsiteIdle({ applicationId, websiteRegistry, jobRegistry });
   const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
   if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
     throw new ApplicationRegistryError('application_job_conflict', 'An Application operation is already queued or running', 409);
@@ -29,7 +31,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId = null } = {}) {
+export function mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry = null, localServerId = null } = {}) {
   if (!app || typeof app.post !== 'function'
     || !applicationRegistry || typeof applicationRegistry.getApplication !== 'function'
     || !jobRegistry || typeof jobRegistry.listJobs !== 'function' || typeof jobRegistry.enqueue !== 'function') {
@@ -49,7 +51,7 @@ export function mountApplicationProcessRoutes(app, { applicationRegistry, jobReg
     if (application.activeDeploymentId) {
       throw new ApplicationRegistryError('deployment_in_progress', 'Application already has an active operation', 409);
     }
-    await ensureApplicationIdle(jobRegistry, application.id);
+    await ensureApplicationIdle(jobRegistry, application.id, websiteRegistry);
     const expectedConfirmation = `node-process:${application.id}:${application.currentReleaseId}:${body.action}`;
     if (body.confirmation !== expectedConfirmation) {
       throw new ApplicationRegistryError('node_process_confirmation_required', 'Exact Node process confirmation is required');

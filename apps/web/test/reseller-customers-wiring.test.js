@@ -30,9 +30,10 @@ test('reseller route and navigation require server-derived reseller context', as
   const app = await read('workspace/WorkspaceApp.jsx');
   const layout = await read('workspace/WorkspaceLayout.jsx');
   const model = await read('workspace/ui/ux-model.js');
-  assert.match(app, /function ResellerRoute/);
-  assert.match(app, /return isReseller \? children : <Navigate to="\/websites" replace/);
-  assert.match(app, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>/);
+  assert.match(app, /function CustomersRoute/);
+  assert.match(app, /isOwner \? <OwnerHostingAccountsPage kind="customer" \/> : isReseller \? <ResellerCustomersPage \/>/);
+  assert.match(app, /isReseller \? <ResellerCustomersPage \/> : <Navigate to="\/websites" replace/);
+  assert.match(app, /path: 'customers', element: <CustomersRoute \/>/);
   assert.match(layout, /navigationGroups\(canManage, isOwner, isReseller(?:, isCustomer)?\)/);
   assert.match(model, /isReseller && !isOwner/);
   assert.match(model, /\['\/customers', 'Müşterilerim', 'user'\]/);

@@ -1,4 +1,18 @@
 export { inspectHostInventory, inventoryInternals } from './inventory.js';
+export {
+  OsPlatformError,
+  detectLinuxPlatform,
+  isSupportedPassengerPlatform,
+  isSupportedPhpRepositoryLine,
+  normalizeLinuxPlatform,
+  osPlatformInternals,
+  parseOsReleaseText,
+  resolvePhpFpmBinaryPath,
+  resolvePhpFpmPackageName,
+  resolvePhpFpmPoolDirectory,
+  resolvePhpFpmServiceUnit,
+  resolvePhpFpmSocketDirectory,
+} from './os-platform.js';
 export { gitDeploymentInternals } from './git-deployment.js';
 export {
   createJournalLogReader,
@@ -449,3 +463,4 @@ export {
   firewallStatusInspectorInternals,
 } from './firewall-status-inspector.js';
 export { createApplicationEnvironmentBackupManager } from './application-environment-backup-manager.js';
+export { createPhpMyAdminConfigurationService } from './phpmyadmin-configuration-service.js';

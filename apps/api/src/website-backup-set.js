@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { createWebsitePathContract } from '@yunpanel/host-runtime';
+import { nginxConfigFileName, mailDomainDataPath } from '@yunpanel/config-templates';
 
 const BACKUP_SET_VERSION = 1;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
@@ -132,8 +133,12 @@ export function createWebsiteBackupSetProvider({
     // 1. Linked Domains
     const allDomains = await domainRegistry.listDomains();
     const linkedDomains = allDomains
-      .filter((domain) => domain.websiteId === website.id || domain.primaryDomain === website.primaryDomain)
+      .filter((domain) => domain.serverId === website.serverId && (domain.websiteId === website.id
+        || domain.websiteId == null && typeof website.primaryDomain === 'string' && domain.primaryDomain === website.primaryDomain))
       .sort((left, right) => left.id.localeCompare(right.id));
+    const preferredDomain = linkedDomains.find(domain => domain.primaryDomain === website.name || domain.primaryDomain === website.primaryDomain);
+    const rootDomains = linkedDomains.filter(domain => domain.parentDomainId == null && domain.type !== 'alias');
+    const primaryDomain = preferredDomain?.primaryDomain ?? (rootDomains.length === 1 ? rootDomains[0].primaryDomain : linkedDomains.length === 1 ? linkedDomains[0].primaryDomain : null);
     const linkedDomainIds = new Set(linkedDomains.map((d) => d.id));
 
     // 2. Application & Path Contract
@@ -167,9 +172,10 @@ export function createWebsiteBackupSetProvider({
     let composeProjectDirectory = null;
 
     if (pathContract) {
-      applicationRoot = pathContract.runtime.applicationRoot;
-      releasesDirectory = pathContract.runtime.releasesDirectory;
-      currentRelease = pathContract.runtime.currentRelease;
+      const staticSite = website.runtimeType === 'static';
+      applicationRoot = staticSite ? pathContract.static.publishRoot : pathContract.runtime.applicationRoot;
+      releasesDirectory = staticSite ? path.posix.join(applicationRoot, 'releases') : pathContract.runtime.releasesDirectory;
+      currentRelease = staticSite ? path.posix.join(applicationRoot, 'current') : pathContract.runtime.currentRelease;
       // Restic preserves symlinks without following them. The application root
       // contains the release files as well as the current-release pointer.
       fileTargetPaths.push(applicationRoot);
@@ -264,7 +270,8 @@ export function createWebsiteBackupSetProvider({
     const databases = databaseBindings
       .sort((left, right) => left.databaseName.localeCompare(right.databaseName))
       .map((binding) => {
-        const stagedDumpPath = path.posix.join(stagedRoot, 'databases', `${binding.databaseName}.sql`);
+        const stagedBackupDirectory = path.posix.join(stagedRoot, 'databases', `website-${binding.id}`);
+        const stagedDumpPath = path.posix.join(stagedBackupDirectory, 'dump.sql');
         return Object.freeze({
           bindingId: binding.id,
           databaseName: binding.databaseName,
@@ -283,6 +290,7 @@ export function createWebsiteBackupSetProvider({
               binding.databaseName,
             ]),
             stagedDumpPath,
+            stagedBackupDirectory,
           }),
         });
       });
@@ -294,9 +302,9 @@ export function createWebsiteBackupSetProvider({
       .sort((left, right) => left.domainName.localeCompare(right.domainName))
       .map((mailDomain) => {
         const isLocal = mailDomain.managementMode === 'local';
-        const storagePath = isLocal ? `/var/vmail/${mailDomain.domainName}` : null;
+        const storagePath = isLocal ? mailDomainDataPath(mailDomain.domainName) : null;
         const virtualMailDbSnapshot = isLocal
-          ? path.posix.join(stagedRoot, 'mail', `${mailDomain.domainName}-virtual.sql`)
+          ? path.posix.join(stagedRoot, 'mail', `${mailDomain.domainName}-virtual.json`)
           : null;
         return Object.freeze({
           mailDomainId: mailDomain.id,
@@ -306,6 +314,7 @@ export function createWebsiteBackupSetProvider({
           status: mailDomain.status,
           storagePath,
           virtualMailDbSnapshot,
+          stagedDataDirectory: isLocal ? path.posix.join(stagedRoot, 'mail-data', `website-${mailDomain.id}`) : null,
         });
       });
 
@@ -325,15 +334,21 @@ export function createWebsiteBackupSetProvider({
     });
 
     // 9. Nginx
+    const managedConfigNames = new Set(linkedDomains.flatMap(domain => [domain.primaryDomain, ...(domain.aliases ?? [])])
+      .map(hostname => `yunpanel-${nginxConfigFileName(hostname)}`));
     const nginx = linkedDomains.map((domain) => {
-      const configPath = `/etc/nginx/sites-available/yunpanel-${domain.id}.conf`;
+      const configName = domain.stagedConfigName ?? `yunpanel-${nginxConfigFileName(domain.primaryDomain)}`;
+      if (!managedConfigNames.has(configName)) throw new WebsiteBackupSetError('backup_nginx_scope_invalid', 'Nginx configuration is outside this Website', 409);
+      const configPath = path.posix.join('/etc/nginx/sites-enabled', configName);
       const stagedConfigPath = path.posix.join(stagedRoot, 'nginx', `${domain.id}.conf`);
+      const stagedMetadataPath = path.posix.join(stagedRoot, 'nginx', `${domain.id}.json`);
       return Object.freeze({
         domainId: domain.id,
         primaryDomain: domain.primaryDomain,
         configPath,
         appliedRevision: domain.appliedRevision ?? 0,
         stagedConfigPath,
+        stagedMetadataPath,
       });
     });
 
@@ -387,20 +402,19 @@ export function createWebsiteBackupSetProvider({
       ...files.targetPaths,
       ...data.targetPaths,
       stagedRoot,
-      ...mailDomains.map((m) => m.storagePath).filter(Boolean),
       ...(composeHooks.enabled ? [composeHooks.projectDirectory] : []),
     ]);
 
     const excludePatterns = uniqueSorted([
-      ...files.exclusions,
-      ...data.exclusions,
+      ...files.targetPaths.flatMap(root => files.exclusions.map(pattern => `${root}/**/${pattern}`)),
+      ...data.targetPaths.flatMap(root => data.exclusions.map(pattern => `${root}/${pattern}`)),
     ]);
 
     // 12. Restic snapshot tags
     const tags = uniqueSorted([
       `website:${website.id}`,
       `server:${website.serverId}`,
-      `domain:${website.primaryDomain}`,
+      `domain:${primaryDomain}`,
       `runtime:${website.runtimeType}`,
     ]);
 
@@ -409,7 +423,7 @@ export function createWebsiteBackupSetProvider({
       id: website.id,
       serverId: website.serverId,
       name: website.name,
-      primaryDomain: website.primaryDomain,
+      primaryDomain,
       runtimeType: website.runtimeType,
       applicationId: website.applicationId ?? null,
       unixUser: website.unixUser ?? null,

@@ -1,5 +1,5 @@
 import { Fragment, useEffect, useState } from 'react';
-import { Link, useLocation, useParams, useSearchParams } from 'react-router';
+import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, safeReturnHref, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
@@ -15,13 +15,13 @@ import LogsPanel from './LogsPanel.jsx';
 import SiteResourcesPanel from './SiteResourcesPanel.jsx';
 import SiteCronPanel from './SiteCronPanel.jsx';
 import SitePhpToolsPanel from './SitePhpToolsPanel.jsx';
+import SitePhpSettingsPanel from './SitePhpSettingsPanel.jsx';
 import SiteBackupPanel from './SiteBackupPanel.jsx';
 import SiteAnalyticsPanel from './SiteAnalyticsPanel.jsx';
 import SiteAccessPanel from './SiteAccessPanel.jsx';
 import WebsiteSuspensionPanel from './WebsiteSuspensionPanel.jsx';
 import WebsiteRemovalPanel from './WebsiteRemovalPanel.jsx';
 import ProvisioningRecoveryPanel from './ProvisioningRecoveryPanel.jsx';
-import WebsiteIsolationPanel from './WebsiteIsolationPanel.jsx';
 import SiteNavigation from './ui/SiteNavigation.jsx';
 import { panelRequest } from '../api.js';
 
@@ -66,6 +66,7 @@ export default function SiteDetailPage() {
   return <SiteWorkspace key={websiteId} websiteId={websiteId} tab={normalizeSiteTab(normalizedTab)} />;
 }
 function SiteWorkspace({ websiteId, tab }) {
+  const navigate = useNavigate();
   const { domains, websites, applications, certificates, servers, jobs, refreshAll, canManage, isOwner, isSiteManager, isReseller } = useWorkspace();
   const [params, setParams] = useSearchParams();
   const location = useLocation();
@@ -78,9 +79,9 @@ function SiteWorkspace({ websiteId, tab }) {
     if (domain && domain.id !== websiteId && typeof window !== 'undefined' && window.history?.replaceState) {
       const canonicalTab = tab === 'overview' ? '' : `/${tab}`;
       const search = location.search || '';
-      window.history.replaceState(null, '', `/websites/${encodeURIComponent(domain.id)}${canonicalTab}${search}`);
+      navigate(`/websites/${encodeURIComponent(domain.id)}${canonicalTab}${search}`, { replace: true });
     }
-  }, [domain, websiteId, tab, location.search]);
+  }, [domain, websiteId, tab, location.search, navigate]);
 
   if (!domain) return <><PageHeading title="Web sitesi" /><CollectionNotice resource={domains} label="Alan adı" />{domains.status === 'ready' && <EmptyState title="Web sitesi bulunamadı" detail="Kayıt kaldırılmış olabilir veya bağlantı yanlış bir kimliğe işaret ediyor." icon="globe" action={<LinkButton to="/websites">Web sitelerine dön</LinkButton>} />}</>;
   const website = websites.items.find((item) => item.id === domain.websiteId);
@@ -91,17 +92,19 @@ function SiteWorkspace({ websiteId, tab }) {
   const managedTerminalWebsite = website && ['static', 'node', 'php'].includes(website.runtimeType);
   const legacyManagedTarget = isOwner && !domain.websiteId && Boolean(application);
   const tabs = SITE_TABS.filter(([key]) => {
-    if (['node', 'deploy'].includes(key)) return Boolean(application) || website?.runtimeType === 'docker';
+    if (key === 'node') return application?.type !== 'php' && (Boolean(application) || website?.runtimeType === 'docker');
+    if (key === 'deploy') return Boolean(application?.repositoryUrl) || website?.runtimeType === 'docker';
     if (key === 'files') return canManage;
     if (key === 'cron') return canManage;
     if (key === 'backup') return canManage && Boolean(website);
     if (key === 'analytics') return canManage && Boolean(website);
     if (key === 'terminal') return canManage && (managedTerminalWebsite || legacyManagedTarget);
-    if (key === 'php') return canManage && (website?.runtimeType === 'php' || application?.type === 'php' || tab === 'php');
+    if (['php', 'wordpress'].includes(key)) return canManage && (website?.runtimeType === 'php' || application?.type === 'php');
     if (key === 'access') return canManage && (Boolean(website) || tab === 'access');
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
   }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : label]);
+  if (tab === 'node' && (website?.runtimeType === 'php' || application?.type === 'php')) return <Navigate replace to={`${siteHref(domain.id, 'php')}${location.search}`} />;
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
@@ -118,17 +121,11 @@ function SiteWorkspace({ websiteId, tab }) {
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
-    ['php', 'PHP / WordPress', 'code'],
+    ['php', 'PHP Ayarları', 'code'], ['wordpress', 'WordPress', 'code'],
     ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
     ['access', 'Erişim Hesapları', 'shield'],
-  ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
-  const hostingTools = [
-    ['settings', 'Barındırma ayarları', 'settings'], ['dns', 'DNS', 'globe'],
-    ['domains', 'Alan adı ve yayın yönetimi', 'globe'], ['terminal', 'Site terminali', 'terminal'],
-    ['access', 'Erişim Hesapları', 'shield'],
-    ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
   const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
   return <>
@@ -152,11 +149,11 @@ function SiteWorkspace({ websiteId, tab }) {
       ]} /></details>
       <Section title="Bu siteye ait son işlemler" actions={<Link to={siteHref(domain.id, 'logs')}>Tümünü gör</Link>}><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={5} />}</Section>
     </>}
-    {tab === 'hosting' && <Section title="Barındırma ve DNS">{toolLinks(hostingTools)}</Section>}
+    {tab === 'hosting' && <DomainHostingPanel domain={domain} />}
     {['resources', 'databases', 'mail'].includes(tab) && <SiteResourcesPanel domain={domain} website={website} application={application} server={server} activeTab={tab} />}
-    {tab === 'php' && <SitePhpToolsPanel domainId={domain.id} />}
+    {tab === 'php' && <SitePhpSettingsPanel domainId={domain.id} />}
+    {tab === 'wordpress' && <SitePhpToolsPanel domainId={domain.id} />}
     {tab === 'access' && <SiteAccessPanel domain={domain} website={website} server={server} isOwner={isOwner} canManage={canManage} onChanged={refreshAll} />}
-    {tab === 'node' && canManage && (website?.runtimeType === 'php' || application?.type === 'php') && <SitePhpToolsPanel domainId={domain.id} />}
     {['node', 'deploy'].includes(tab) && <><ApplicationOperations domain={domain} application={application} website={website} deployOnly={tab === 'deploy'} disabled={domains.status !== 'ready'} />{application && tab === 'node' && ['node', 'python'].includes(application.type) && <EnvironmentPanel key={application.id} application={application} />}</>}
     {tab === 'cron' && <SiteCronPanel domainId={domain.id} />}
     {tab === 'backup' && <SiteBackupPanel domainId={domain.id} />}
@@ -168,7 +165,6 @@ function SiteWorkspace({ websiteId, tab }) {
     {tab === 'terminal' && (domain.websiteId ? <TerminalPanel title="Site terminali" description={`${domain.primaryDomain} · Bu siteye ait kullanıcıyla terminal oturumu.`} target={{ scope: 'site', websiteId: domain.websiteId }} /> : <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} />)}
     {tab === 'files' && <SiteFilesPanel domainId={domain.id} legacyRepair={legacyManagedTarget ? <LegacyWebsiteRepair domain={domain} canManage={isOwner && canManage} onChanged={refreshAll} /> : null} />}
     {tab === 'settings' && <>
-      <DomainHostingPanel domain={domain} />
       {website && <WebsiteSuspensionPanel domainId={domain.id} onChanged={refreshAll} />}
       <Section title="Barındırma bilgileri"><KeyValues items={[
         ['Alan adı', domain.primaryDomain],
@@ -176,7 +172,6 @@ function SiteWorkspace({ websiteId, tab }) {
         ['Sunucu', server?.displayName ?? server?.hostname], ['Uygulama türü', runtimeLabel],
         ['Oluşturulma', formatDate(domain.createdAt)], ['Güncelleme', formatDate(domain.updatedAt)],
       ]} /></Section>
-      {website && isOwner && <WebsiteIsolationPanel websiteId={website.id} onChanged={refreshAll} />}
       {website && isOwner && <WebsiteRemovalPanel domainId={domain.id} onChanged={refreshAll} />}
       <details className="ws-section ws-disclosure"><summary>Teknik kayıt kimlikleri</summary><KeyValues items={[
         ['Alan adı kimliği', domain.id], ['Site kimliği', website?.id ?? 'Bağlı değil'], ['Hedef türü', domain.targetType],

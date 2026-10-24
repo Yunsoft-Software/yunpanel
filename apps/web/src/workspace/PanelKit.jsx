@@ -1,4 +1,4 @@
-import { useEffect, useId, useRef, useState } from 'react';
+import { createContext, useContext, useEffect, useId, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { formatDate } from './site-model.js';
 
@@ -76,11 +76,15 @@ export function KeyValues({ items }) {
     return <div key={label}><dt>{label}</dt><dd>{display ?? '—'}</dd></div>;
   })}</dl>;
 }
+const ModalVisibilityContext = createContext(true);
+export function ModalScope({ active, children }) { return <ModalVisibilityContext.Provider value={active === true}>{children}</ModalVisibilityContext.Provider>; }
 export function Modal({ title, children, onClose, busy = false, wide = false }) {
+  const visible = useContext(ModalVisibilityContext);
   const ref = useRef(null); const titleId = useId();
   const onCloseRef = useRef(onClose); onCloseRef.current = onClose;
   useEffect(() => {
     const dialog = ref.current; const previous = document.activeElement;
+    if (!visible) return;
     if (dialog && !dialog.open) {
       if (typeof dialog.showModal === 'function') {
         try { dialog.showModal(); } catch {}
@@ -89,7 +93,8 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
       }
     }
     const focusable = dialog ? Array.from(dialog.querySelectorAll('button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])')) : [];
-    const initial = dialog?.querySelector('[autofocus]') || focusable[0];
+    const initial = dialog?.querySelector('[autofocus]')
+      || focusable.find(element => ['INPUT', 'SELECT', 'TEXTAREA'].includes(element.tagName)) || focusable[0];
     if (initial && typeof initial.focus === 'function') {
       try { initial.focus(); } catch {}
     }
@@ -105,7 +110,7 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
         try { previous.focus({ preventScroll: true }); } catch {}
       }
     };
-  }, []);
+  }, [visible]);
   const handleKeyDown = (event) => {
     if (event.key === 'Escape') {
       event.preventDefault();
@@ -139,12 +144,26 @@ export function Modal({ title, children, onClose, busy = false, wide = false }) 
       }
     }
   };
-  return <dialog ref={ref} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
+  return <dialog ref={ref} hidden={!visible} className={`ws-modal ${wide ? 'ws-modal-wide' : ''}`} aria-modal="true" aria-labelledby={titleId} onKeyDown={handleKeyDown} onCancel={(event) => { event.preventDefault(); if (!busy) onCloseRef.current(); }}><header><h2 id={titleId}>{title}</h2><Button aria-label="Pencereyi kapat" disabled={busy} onClick={onClose} icon="close" /></header><div className="ws-modal-body">{children}</div></dialog>;
 }
 export function ConfirmDialog({ title, message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla' }) {
-  const [value, setValue] = useState('');
-  return <Modal title={title} onClose={onCancel} busy={busy}><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && !disabled && (!confirmation || value === confirmation)) onConfirm(); }}>
-    {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input autoFocus value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
-    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant="danger" type="submit" disabled={busy || disabled || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
-  </form></Modal>;
+  return <Modal title={title} onClose={onCancel} busy={busy}><ConfirmationForm message={message} onCancel={onCancel} onConfirm={onConfirm}
+    busy={busy} disabled={disabled} confirmation={confirmation} error={error} confirmLabel={confirmLabel} /></Modal>;
 }
+export function ConfirmationForm({ message, onCancel, onConfirm, busy = false, disabled = false, confirmation, error, confirmLabel = 'Onayla', variant = 'danger' }) {
+  const [value, setValue] = useState('');
+  return <><p className="ws-muted">{message}</p><ErrorNotice error={error} /><form onSubmit={(event) => { event.preventDefault(); if (!busy && !disabled && (!confirmation || value === confirmation)) onConfirm(); }}>
+    {confirmation && <label>Onaylamak için <strong>{confirmation}</strong> yazın<input autoFocus value={value} onChange={(event) => setValue(event.target.value)} autoComplete="off" spellCheck={false} required /></label>}
+    <footer className="ws-modal-footer"><Button disabled={busy} onClick={onCancel}>Vazgeç</Button><Button variant={variant} type="submit" disabled={busy || disabled || (confirmation && value !== confirmation)}>{busy ? 'İşleniyor…' : confirmLabel}</Button></footer>
+  </form></>;
+}
+export {
+  DesignSystemConfig,
+  DEFAULT_DOCKER_STACK_TEMPLATES,
+  ThemeRoot,
+  HierarchyTree,
+  SubdomainBranchRow,
+  FileRootBadge,
+  PortMappingTable,
+  DockerHubCatalogPicker,
+} from './design-system/primitives.jsx';

@@ -182,6 +182,8 @@ export async function recoverRunningCertificateOperation({
   readCertificateReceipt,
   inspectCertificate,
   reloadCertificate = null,
+  reloadMailCertificate = null,
+  mailServiceIdentityRegistry = null,
   inspect = inspectDurableJobRecovery,
   reconcile = reconcileCompletedJob,
 } = {}) {
@@ -242,6 +244,15 @@ export async function recoverRunningCertificateOperation({
       throw new JobRunningCertificateRecoveryError('job_certificate_recovery_reload_unavailable', 'Certificate renewal recovery requires a native reload provider');
     }
     result.reloadOutcome = await reloadCertificate();
+    if (reloadMailCertificate) {
+      const mailReloadOutcome = await reloadMailCertificate(result, { serverId: identity.serverId, certificateId: intent.certificateId });
+      if (mailReloadOutcome) result.mailReloadOutcome = mailReloadOutcome;
+    } else if (mailServiceIdentityRegistry) {
+      const binding = await mailServiceIdentityRegistry.getForServer(identity.serverId);
+      if (binding && (binding.hostname === intent.certName || intent.domains?.includes(binding.hostname))) {
+        throw new JobRunningCertificateRecoveryError('job_certificate_recovery_mail_reload_unavailable', 'Mail certificate recovery requires a native mail reload provider');
+      }
+    }
   }
 
   let begun;
@@ -260,7 +271,7 @@ export async function recoverRunningCertificateOperation({
   }
 
   try {
-    const reconciliation = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry: {}, job: terminal });
+    const reconciliation = await reconcile({ domainRegistry, certificateRegistry, applicationRegistry: {}, mailServiceIdentityRegistry, job: terminal });
     if (!reconciliation || reconciliation.reconciled !== true) throw new Error('reconciliation not confirmed');
   } catch {
     throw new JobRunningCertificateRecoveryError('job_certificate_recovery_reconciliation_failed', 'Certificate job is terminal but reconciliation remains pending');

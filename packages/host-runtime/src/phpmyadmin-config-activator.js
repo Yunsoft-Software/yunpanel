@@ -80,7 +80,7 @@ const SIGNON_CONFIG_KEYS = new Set([
 ]);
 const SIGNON_BRIDGE_KEYS = new Set([
   'version', 'sha256', 'artifact', 'handoffSocketPath', 'signonSession',
-  'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
+  'gatewaySessionCookie', 'internalSignonPath', 'internalLogoutPath', 'gatewayBasePath',
 ]);
 const ARTIFACT_KEYS = new Set(['path', 'sha256', 'bytes', 'sensitive', 'mode']);
 
@@ -144,6 +144,7 @@ function validatePreview(preview) {
     || preview.signonBridge.artifact.sha256 !== preview.signonBridge.sha256
     || preview.signonBridge.handoffSocketPath !== phpMyAdminSignonTemplatePolicy.handoffSocketPath
     || preview.signonBridge.signonSession !== phpMyAdminSignonTemplatePolicy.signonSession
+    || preview.signonBridge.gatewaySessionCookie !== phpMyAdminSignonTemplatePolicy.gatewaySessionCookie
     || preview.signonBridge.internalSignonPath !== phpMyAdminSignonTemplatePolicy.internalSignonPath
     || preview.signonBridge.internalLogoutPath !== phpMyAdminSignonTemplatePolicy.internalLogoutPath
     || preview.signonBridge.gatewayBasePath !== phpMyAdminSignonTemplatePolicy.gatewayBasePath) {

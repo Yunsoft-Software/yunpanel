@@ -139,12 +139,12 @@ function HostingForm({ domain, generation }) {
           onChange={(event) => edit('httpsRedirect', event.target.checked)} />HTTP → HTTPS yönlendirmesi</label>
         <label className="ws-check"><input type="checkbox" checked={form.values.canonicalRedirect}
           disabled={busy || !canManage || form.base.state === 'suspended'}
-          onChange={(event) => edit('canonicalRedirect', event.target.checked)} />Ek alan adlarını {form.base.primaryDomain} adresine yönlendir</label>
+          onChange={(event) => edit('canonicalRedirect', event.target.checked)} />Ek alan adlarını {form.values.nginxSettings.preferredDomain ?? form.base.primaryDomain} adresine yönlendir</label>
         <p id={hintId} className="ws-field-hint">Ayarlar yalnız {form.base.primaryDomain} sitesine uygulanır.</p>
         {form.base.httpsMode !== 'managed' && <p className="ws-notice ws-notice-warn">HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.</p>}
         {form.base.httpsMode === 'managed' && form.values.httpsRedirect && !form.base.certificateId
           && <p className="ws-notice ws-notice-warn">SSL sertifikası bağlı değil. Bu tercihin kaydedilmesi HTTPS erişiminin hazır olduğunu göstermez.</p>}
-        <NginxSettingsFields targetType={form.base.targetType} settings={form.values.nginxSettings}
+        <NginxSettingsFields domainNames={[form.base.primaryDomain, ...form.base.aliases]} targetType={form.base.targetType} settings={form.values.nginxSettings}
           disabled={busy || !canManage || form.base.state === 'suspended'} onChange={value => edit('nginxSettings', value)} />
         <div className="ws-actions">
           <Button type="submit" variant="primary" disabled={busy || Boolean(blocked) || (!dirty && !pendingPublication)}>{busy ? 'Ayarlar uygulanıyor…' : 'Kaydet ve uygula'}</Button>

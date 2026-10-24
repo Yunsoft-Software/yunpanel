@@ -404,14 +404,14 @@ export function createResticRepositoryRegistry({
     return manager.listSnapshots({ repository: record.target, password, tags, path });
   }
 
-  async function applyRetention(repositoryId, { policy = null, prune = false } = {}) {
+  async function applyRetention(repositoryId, { policy = null, prune = false, tags = [] } = {}) {
     await ensureInitialized();
     const id = normalizeUuid(repositoryId, 'repositoryId');
     const record = state.repositories.find((r) => r.id === id);
     if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
     const password = decryptPassword(encryptionKey, record);
     const effectivePolicy = policy ?? record.retentionPolicy ?? {};
-    return manager.forget({ repository: record.target, password, policy: effectivePolicy, prune });
+    return manager.forget({ repository: record.target, password, policy: effectivePolicy, prune, tags });
   }
 
   async function pruneResticRepository(repositoryId) {

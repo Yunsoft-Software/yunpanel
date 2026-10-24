@@ -64,7 +64,7 @@ export function createMailboxAccessGuard({
       return true;
     }
     const output = commandOutput(result);
-    if (expectedMissing) throw new MailboxAccessError('mailbox_access_still_enabled');
+    if (expectedMissing && expectedMissing.allowSuccess !== true) throw new MailboxAccessError('mailbox_access_still_enabled');
     if (output.stderr) throw new MailboxAccessError('mailbox_access_check_failed');
     return output.stdout;
   }
@@ -107,7 +107,10 @@ export function createMailboxAccessGuard({
     const flushed = await command(DOVEADM, ['auth', 'cache', 'flush', address]);
     if (!/^\d+ cache entries flushed$/.test(flushed)) throw new MailboxAccessError('mailbox_access_cache_unverified');
     await noAuthentication(address);
-    await command(DOVEADM, ['kick', address]);
+    // Dovecot 2.3 returns DOVEADM_EX_NOTFOUND (68) with this exact output
+    // when there were no sessions to disconnect. Still prove who/auth/maps
+    // after it; every other nonzero result remains a failure.
+    await command(DOVEADM, ['kick', address], { code: 68, stdout: 'no users kicked', stderr: '', allowSuccess: true });
     await noSessions(address);
     // Re-enable/config drift after the first check must not authorize deletion.
     await noDelivery(address);

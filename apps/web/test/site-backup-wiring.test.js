@@ -17,5 +17,6 @@ test('backup client uses only Website-scoped browser endpoint', async () => {
 test('backup panel does not expose raw repository target or execute sync mutation', async () => {
   const panel = await source('SiteBackupPanel.jsx');
   assert.doesNotMatch(panel, /repository\.target|targetPaths/);
-  assert.match(panel, /durable işlem hattına taşınmadan buradan çalıştırılmaz/);
+  assert.match(panel, /ConfirmationForm/);
+  assert.doesNotMatch(panel, /<ConfirmDialog/);
 });

@@ -53,20 +53,66 @@ export const phpMyAdminFpmTemplatePolicy = Object.freeze({
   socketMode: '0660',
 });
 
+export function resolvePhpMyAdminFpmRuntime(options = {}) {
+  const normalizedOptions = typeof options === 'string' ? { phpVersion: options } : (options ?? {});
+  const resolvedPhpVersion = String(
+    normalizedOptions.phpVersion ?? normalizedOptions.osPlatform?.defaultPhpVersion ?? phpMyAdminFpmTemplatePolicy.phpVersion,
+  );
+  const family = normalizedOptions.osPlatform?.family ?? 'debian';
+  const remi = Boolean(normalizedOptions.osPlatform?.remi || normalizedOptions.osPlatform?.multiVersion);
+  const poolPath = family === 'rhel'
+    ? (remi
+      ? `/etc/opt/remi/php${resolvedPhpVersion.replaceAll('.', '')}/php-fpm.d/${phpMyAdminFpmTemplatePolicy.poolName}.conf`
+      : `/etc/php-fpm.d/${phpMyAdminFpmTemplatePolicy.poolName}.conf`)
+    : `/etc/php/${resolvedPhpVersion}/fpm/pool.d/${phpMyAdminFpmTemplatePolicy.poolName}.conf`;
+  const socketPath = family === 'rhel'
+    ? `/run/php-fpm/${phpMyAdminFpmTemplatePolicy.poolName}.sock`
+    : phpMyAdminFpmTemplatePolicy.socketPath;
+  const serviceUnit = family === 'rhel'
+    ? (remi ? `php${resolvedPhpVersion.replaceAll('.', '')}-php-fpm.service` : 'php-fpm.service')
+    : `php${resolvedPhpVersion}-fpm.service`;
+  const webUser = normalizedOptions.osPlatform?.webUser
+    ?? (family === 'rhel' ? 'nginx' : phpMyAdminFpmTemplatePolicy.socketOwner);
+  return Object.freeze({
+    phpVersion: resolvedPhpVersion,
+    family,
+    poolPath,
+    socketPath,
+    serviceUnit,
+    socketOwner: webUser,
+    socketGroup: webUser,
+  });
+}
+
 export function renderPhpMyAdminFpmPool({
   runtimeUser = phpMyAdminFpmTemplatePolicy.runtimeUser,
   runtimeGroup = phpMyAdminFpmTemplatePolicy.runtimeGroup,
-  socketOwner = phpMyAdminFpmTemplatePolicy.socketOwner,
-  socketGroup = phpMyAdminFpmTemplatePolicy.socketGroup,
-  socketPath = phpMyAdminFpmTemplatePolicy.socketPath,
+  socketOwner,
+  socketGroup,
+  socketPath,
   temporaryDirectory = phpMyAdminFpmTemplatePolicy.temporaryDirectory,
   sessionDirectory = phpMyAdminFpmTemplatePolicy.sessionDirectory,
+  phpVersion,
+  osPlatform,
 } = {}) {
+  const runtime = resolvePhpMyAdminFpmRuntime({ phpVersion, osPlatform });
   const user = exactIdentity(runtimeUser, phpMyAdminFpmTemplatePolicy.runtimeUser, 'runtimeUser');
   const group = exactIdentity(runtimeGroup, phpMyAdminFpmTemplatePolicy.runtimeGroup, 'runtimeGroup');
-  const owner = exactIdentity(socketOwner, phpMyAdminFpmTemplatePolicy.socketOwner, 'socketOwner');
-  const socketGroupName = exactIdentity(socketGroup, phpMyAdminFpmTemplatePolicy.socketGroup, 'socketGroup');
-  const socket = exactPath(socketPath, phpMyAdminFpmTemplatePolicy.socketPath, 'socketPath');
+  const owner = exactIdentity(
+    socketOwner ?? runtime.socketOwner,
+    runtime.socketOwner,
+    'socketOwner',
+  );
+  const socketGroupName = exactIdentity(
+    socketGroup ?? runtime.socketGroup,
+    runtime.socketGroup,
+    'socketGroup',
+  );
+  const socket = exactPath(
+    socketPath ?? runtime.socketPath,
+    runtime.socketPath,
+    'socketPath',
+  );
   const temp = exactPath(
     temporaryDirectory,
     phpMyAdminFpmTemplatePolicy.temporaryDirectory,
@@ -82,20 +128,24 @@ export function renderPhpMyAdminFpmPool({
 }
 
 export function previewPhpMyAdminFpmPool(input = {}) {
+  const runtime = resolvePhpMyAdminFpmRuntime({
+    phpVersion: input.phpVersion,
+    osPlatform: input.osPlatform,
+  });
   const content = renderPhpMyAdminFpmPool(input);
   const digest = sha256(content);
   return Object.freeze({
     version: 1,
     sha256: digest,
     artifact: Object.freeze({
-      path: phpMyAdminFpmTemplatePolicy.poolPath,
+      path: runtime.poolPath,
       sha256: digest,
       bytes: Buffer.byteLength(content),
       sensitive: false,
       mode: phpMyAdminFpmTemplatePolicy.poolMode,
     }),
-    socketPath: phpMyAdminFpmTemplatePolicy.socketPath,
-    serviceUnit: phpMyAdminFpmTemplatePolicy.serviceUnit,
+    socketPath: runtime.socketPath,
+    serviceUnit: runtime.serviceUnit,
     runtimeUser: phpMyAdminFpmTemplatePolicy.runtimeUser,
     runtimeGroup: phpMyAdminFpmTemplatePolicy.runtimeGroup,
     temporaryDirectory: phpMyAdminFpmTemplatePolicy.temporaryDirectory,
@@ -103,4 +153,9 @@ export function previewPhpMyAdminFpmPool(input = {}) {
   });
 }
 
-export const phpMyAdminFpmTemplateInternals = Object.freeze({ exactIdentity, exactPath, sha256 });
+export const phpMyAdminFpmTemplateInternals = Object.freeze({
+  exactIdentity,
+  exactPath,
+  resolvePhpMyAdminFpmRuntime,
+  sha256,
+});

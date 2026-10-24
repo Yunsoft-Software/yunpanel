@@ -12,6 +12,19 @@ export function existingApplicationType(sourceMode) {
   return EXISTING_APPLICATION_TYPES[sourceMode] ?? null;
 }
 
+export function resolveSubdomainSharedFileRoot(parentDomain, prefix) {
+  const cleanParent = typeof parentDomain === 'string' && parentDomain.trim()
+    ? parentDomain.trim().toLowerCase()
+    : 'example.com';
+  const rawPrefix = typeof prefix === 'string' && prefix.trim()
+    ? prefix.trim().toLowerCase()
+    : 'sub';
+  const cleanPrefix = rawPrefix.endsWith(`.${cleanParent}`)
+    ? (rawPrefix.slice(0, -(cleanParent.length + 1)) || 'sub')
+    : rawPrefix;
+  return `/var/www/vhosts/${cleanParent}/subdomains/${cleanPrefix}`;
+}
+
 export function availableExistingApplications({ applications = [], websites = [], serverId, sourceMode } = {}) {
   const type = existingApplicationType(sourceMode);
   if (!type || typeof serverId !== 'string' || !serverId) return [];
@@ -119,6 +132,7 @@ function sourceFromForm(form, selectedApplication) {
     };
   }
   if (form.sourceMode === 'new_php') return { kind: 'new_php' };
+  if (form.sourceMode === 'new_static_upload') return { kind: 'new_static' };
   if (existingApplicationType(form.sourceMode)) {
     if (!selectedApplication || selectedApplication.type !== existingApplicationType(form.sourceMode)) {
       throw new Error('Bu Website için kullanılmamış uygun uygulamayı seçin.');
@@ -132,6 +146,27 @@ function sourceFromForm(form, selectedApplication) {
     }
     return { kind: 'external_proxy', target: { host: '127.0.0.1', port, websocket: true } };
   }
+  if (form.sourceMode === 'existing_managed_compose') {
+    const projectId = requiredText(form.dockerProjectId, 'Docker Compose projesini seçin.');
+    const serviceName = requiredText(form.dockerServiceName, 'Docker Compose servisini girin.');
+    const targetPort = Number(form.dockerTargetPort);
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      throw new Error('Docker container iç portu (targetPort) 1–65535 aralığında olmalıdır.');
+    }
+    return {
+      kind: 'existing_managed_compose',
+      projectId,
+      serviceName,
+      targetPort,
+      protocol: 'tcp',
+    };
+  }
+  if (form.sourceMode === 'existing_docker') {
+    return {
+      kind: 'existing_docker',
+      dockerWorkloadId: requiredText(form.dockerWorkloadId, 'Docker iş yükü kimliğini girin.'),
+    };
+  }
   throw new Error('Website yayın kaynağı geçersiz.');
 }
 
@@ -142,7 +177,9 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
     throw new Error('Bağımsız www, üst alan adı seçilmiş ayrı bir Website olarak oluşturulmalıdır.');
   }
   let siteAdmin = null;
-  if (!isSubdomain && form.mode === 'domain') {
+  if (form.ownerMode != null && !['owner', 'customer', 'new_admin'].includes(form.ownerMode)) throw new Error('Site sahibini seçin.');
+  if (form.ownerMode === 'customer' && !form.customerId) throw new Error('Sitenin bağlı olacağı müşteriyi seçin.');
+  if (!isSubdomain && form.mode === 'domain' && (form.ownerMode == null || form.ownerMode === 'new_admin')) {
     if (!form.adminEmail || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.adminEmail.trim())) {
       throw new Error('Site yöneticisi için geçerli bir e-posta adresi girin.');
     }
@@ -169,9 +206,10 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
     source,
     database: { mode: form.initialDatabase === true ? 'create' : 'none' },
     mail: { mode: mailMode },
+    dns: { mode: form.dnsMode ?? (isSubdomain ? 'external' : 'local') },
     ...(siteAdmin ? { siteAdmin } : {}),
   };
 }
 
 
-export const newWebsiteFormInternals = Object.freeze({ applicationForWebsite, sourceFromForm });
+export const newWebsiteFormInternals = Object.freeze({ applicationForWebsite, sourceFromForm, resolveSubdomainSharedFileRoot });

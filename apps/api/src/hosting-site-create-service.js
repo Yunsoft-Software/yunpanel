@@ -143,7 +143,15 @@ export function createHostingSiteCreateService({
         stage = 'provisioning_registration_failed';
       }
     }
+    let primaryDomain = null;
+    if (typeof domainRegistry?.getDomain === 'function') {
+      primaryDomain = await domainRegistry.getDomain(prepared.base.ids.primaryDomainId);
+      if (!primaryDomain || primaryDomain.id !== prepared.base.ids.primaryDomainId || primaryDomain.websiteId !== website.id
+        || primaryDomain.serverId !== website.serverId || primaryDomain.primaryDomain !== (prepared.base.plan.primaryDomain?.primaryDomain ?? prepared.base.hostname?.primaryDomain ?? submitted.input.primaryDomain)) throw fail('hosting_site_persistence_unverified', 'The allocated domain could not be verified in persistent state.', 503);
+    }
     return Object.freeze({
+      operationId: submitted.input.operationId,
+      ...(primaryDomain ? { primaryDomain } : {}),
       website,
       ownership: allocation,
       allocation,

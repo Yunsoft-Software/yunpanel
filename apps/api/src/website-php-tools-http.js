@@ -5,6 +5,7 @@ import { WebsitePhpToolsServiceError } from './website-php-tools-service.js';
 export function mountWebsitePhpToolsRoutes(app, {
   websitePhpToolsService,
   websitePhpToolActionService = null,
+  wordpressToolkitService = null,
 } = {}) {
   if (!app || typeof app.use !== 'function'
     || !websitePhpToolsService) {
@@ -15,7 +16,7 @@ export function mountWebsitePhpToolsRoutes(app, {
 
   const enforceSiteAccess = (req, res, next) => {
     if (req.auth?.user?.role !== 'owner') {
-      if (Array.isArray(req.auth?.user?.websiteIds) && !req.auth.user.websiteIds.includes(req.params.websiteId)) {
+      if (!Array.isArray(req.auth?.user?.websiteIds) || !req.auth.user.websiteIds.includes(req.params.websiteId)) {
         return res.status(403).json({ error: {
           code: 'forbidden',
           message: 'Access to this website is not permitted',
@@ -97,6 +98,24 @@ export function mountWebsitePhpToolsRoutes(app, {
 
   router.get('/wp-cli/status', requirePanelRouteAccess, enforceSiteAccess, handleWpCliStatus);
   router.get('/php-tools/wp-cli/status', requirePanelRouteAccess, enforceSiteAccess, handleWpCliStatus);
+  if (wordpressToolkitService) {
+    router.get('/wordpress/requests/:requestId', requirePanelRouteAccess, enforceSiteAccess, async (req, res, next) => {
+      try { res.set('Cache-Control', 'no-store'); return res.json({ data: await wordpressToolkitService.getRequest(req.params.websiteId, req.params.requestId, { sessionId: req.auth.id, userId: req.auth.user.id, role: req.auth.user.role }) }); }
+      catch (error) { return handleError(error, res, next); }
+    });
+    router.get('/wordpress', requirePanelRouteAccess, enforceSiteAccess, async (req, res, next) => {
+      try { res.set('Cache-Control', 'no-store'); return res.json({ data: await wordpressToolkitService.status(req.params.websiteId) }); }
+      catch (error) { return handleError(error, res, next); }
+    });
+    router.post('/wordpress/preview', requirePanelRouteAccess, enforceSiteAccess, async (req, res, next) => {
+      try { return res.json({ data: await wordpressToolkitService.preview(req.params.websiteId, req.body?.options, { sessionId: req.auth.id, userId: req.auth.user.id, role: req.auth.user.role }) }); }
+      catch (error) { return handleError(error, res, next); }
+    });
+    router.post('/wordpress/actions', requirePanelRouteAccess, enforceSiteAccess, async (req, res, next) => {
+      try { return res.status(202).json({ data: await wordpressToolkitService.queue(req.params.websiteId, req.body, { sessionId: req.auth.id, userId: req.auth.user.id, role: req.auth.user.role }) }); }
+      catch (error) { return handleError(error, res, next); }
+    });
+  }
 
   const handleWpCliRun = async (req, res, next) => {
     try {
@@ -224,8 +243,11 @@ export function mountWebsitePhpToolsRoutes(app, {
 
   const handlePhpConfigUpdate = async (req, res, next) => {
     try {
-      const result = await websitePhpToolsService.updatePhpFpmConfig(req.params.websiteId, req.body ?? {});
-      return res.json({ data: result });
+      if (typeof websitePhpToolActionService?.queueConfig !== 'function') throw new WebsitePhpToolsServiceError('php_config_service_unavailable', 'PHP işlem kuyruğu hazır değil', 503);
+      const result = await websitePhpToolActionService.queueConfig(req.params.websiteId, req.body ?? {}, {
+        sessionId: req.auth.id, userId: req.auth.user.id, role: req.auth.user.role,
+      });
+      return res.status(202).json({ data: result });
     } catch (error) {
       return handleError(error, res, next);
     }

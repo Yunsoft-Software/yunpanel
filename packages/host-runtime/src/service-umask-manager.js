@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { resolvePhpFpmServiceUnit } from './os-platform.js';
 
 const execFileAsync = promisify(execFile);
 const SYSTEMCTL_PATH = '/usr/bin/systemctl';
@@ -21,11 +22,27 @@ export class ServiceUmaskManagerError extends Error {
   }
 }
 
-function normalizeRuntime(value) {
-  if (typeof value !== 'string' || !Object.hasOwn(SERVICES, value)) {
+function normalizeRuntime(value, options = {}) {
+  const runtime = typeof value === 'object' && value !== null ? value.runtime : value;
+  if (typeof runtime !== 'string' || !Object.hasOwn(SERVICES, runtime)) {
     throw new ServiceUmaskManagerError('service_umask_runtime_invalid', 'Managed runtime umask target is invalid');
   }
-  return Object.freeze({ runtime: value, serviceUnit: SERVICES[value] });
+  if (runtime === 'php') {
+    const phpVersion = (typeof value === 'object' && value !== null ? value.phpVersion : undefined)
+      ?? options?.phpVersion
+      ?? (typeof value === 'object' && value !== null ? value.osPlatform?.defaultPhpVersion : undefined)
+      ?? options?.osPlatform?.defaultPhpVersion;
+    const osPlatform = (typeof value === 'object' && value !== null ? value.osPlatform : undefined)
+      ?? options?.osPlatform;
+    if (phpVersion || osPlatform) {
+      const serviceUnit = resolvePhpFpmServiceUnit(phpVersion ?? '8.3', {
+        family: osPlatform?.family ?? 'debian',
+        remi: Boolean(osPlatform?.remi || osPlatform?.multiVersion),
+      });
+      return Object.freeze({ runtime, serviceUnit });
+    }
+  }
+  return Object.freeze({ runtime, serviceUnit: SERVICES[runtime] });
 }
 
 function dropInPath(serviceUnit) {
@@ -51,6 +68,8 @@ function parseUmask(value) {
 }
 
 export function createServiceUmaskManager({
+  phpVersion,
+  osPlatform,
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
     timeout: options.timeout ?? 30_000,
@@ -68,6 +87,13 @@ export function createServiceUmaskManager({
     || typeof readFileFn !== 'function' || typeof renameFn !== 'function' || typeof rmFn !== 'function'
     || typeof writeFileFn !== 'function' || typeof chmodFn !== 'function') {
     throw new ServiceUmaskManagerError('service_umask_dependencies_invalid', 'Managed runtime umask dependencies are invalid');
+  }
+
+  function resolveTarget(runtime, options = {}) {
+    return normalizeRuntime(runtime, {
+      phpVersion: options?.phpVersion ?? phpVersion,
+      osPlatform: options?.osPlatform ?? osPlatform,
+    });
   }
 
   async function readOptional(file) {
@@ -107,8 +133,8 @@ export function createServiceUmaskManager({
     } catch { return false; }
   }
 
-  async function inspect(runtime) {
-    const target = normalizeRuntime(runtime);
+  async function inspect(runtime, options = {}) {
+    const target = resolveTarget(runtime, options);
     const file = dropInPath(target.serviceUnit);
     let info;
     let content;
@@ -170,15 +196,15 @@ export function createServiceUmaskManager({
     }
   }
 
-  async function apply(runtime) {
-    const target = normalizeRuntime(runtime);
+  async function apply(runtime, options = {}) {
+    const target = resolveTarget(runtime, options);
     const file = dropInPath(target.serviceUnit);
     const current = await readOptional(file);
     if (current !== null && current !== desiredConfig()) {
       throw new ServiceUmaskManagerError('service_umask_config_conflict', 'Existing runtime umask drop-in is not managed by YunPanel');
     }
     if (current === desiredConfig()) {
-      const before = await inspect(runtime);
+      const before = await inspect(runtime, options);
       if (before.satisfied) return before;
     }
 
@@ -187,7 +213,7 @@ export function createServiceUmaskManager({
     if (created) await atomicWrite(file, desiredConfig());
     try {
       await reloadAndRestart(target.serviceUnit);
-      const verified = await inspect(runtime);
+      const verified = await inspect(runtime, options);
       if (!verified.satisfied) {
         throw new ServiceUmaskManagerError('service_umask_unverified', 'Managed runtime UMask=0027 could not be verified');
       }

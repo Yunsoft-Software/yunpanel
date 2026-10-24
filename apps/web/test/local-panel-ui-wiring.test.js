@@ -22,11 +22,11 @@ test('management UI has one implicit local server and no server chooser', async 
   assert.match(sources[0], /createSiteSubmission/);
   assert.match(sources[5], /\/sites\/create-preview/);
   assert.match(sources[5], /previewDigest: preview\.previewDigest/);
-  assert.match(sources[0], /Yeni Node\.js 24 \/ Passenger uygulaması/);
-  assert.match(sources[0], /Yeni PHP-FPM uygulaması/);
+  assert.match(sources[0], /<option value="new_node">Node\.js/);
+  assert.match(sources[0], /<option value="new_php">PHP \/ WordPress/);
   assert.match(sources[0], /Mevcut Website’i paylaş \(shared-site\)/);
   assert.match(sources[0], /ConfirmDialog/);
-  assert.match(sources[0], /Bağımsız www için bu Website’i oluşturduktan sonra/);
+  assert.match(sources[0], /<option value="alias">www aynı siteye alias olsun/);
   assert.doesNotMatch(sources[0], /<option value="independent"/);
   assert.doesNotMatch(sources[0], /window\.prompt|window\.confirm|window\.alert/);
 });

@@ -1,3 +1,4 @@
+import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import { ApplicationRegistryError } from './application-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -13,7 +14,8 @@ function exactBody(body, fields) {
   return body;
 }
 
-async function ensureApplicationIdle(jobRegistry, applicationId) {
+async function ensureApplicationIdle(jobRegistry, applicationId, websiteRegistry = null) {
+  await assertApplicationWebsiteIdle({ applicationId, websiteRegistry, jobRegistry });
   const jobs = await jobRegistry.listJobs({ resourceType: 'application', resourceId: applicationId });
   if (jobs.some((job) => job.status === 'queued' || job.status === 'running')) {
     throw new ApplicationRegistryError('application_job_conflict', 'An Application operation is already queued or running', 409);
@@ -27,7 +29,7 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId = null } = {}) {
+export function mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry = null, localServerId = null } = {}) {
   if (!app || typeof app.post !== 'function'
     || !applicationRegistry || typeof applicationRegistry.previewNodeConfiguration !== 'function'
     || typeof applicationRegistry.updateNodeConfiguration !== 'function' || typeof applicationRegistry.getApplication !== 'function'
@@ -41,7 +43,7 @@ export function mountApplicationConfigurationRoutes(app, { applicationRegistry, 
     if (!application || (localServerId && application.serverId !== localServerId)) {
       throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     }
-    await ensureApplicationIdle(jobRegistry, request.params.applicationId);
+    await ensureApplicationIdle(jobRegistry, request.params.applicationId, websiteRegistry);
     return response.json({ data: await applicationRegistry.previewNodeConfiguration(request.params.applicationId, body.runtime) });
   }));
 
@@ -51,7 +53,7 @@ export function mountApplicationConfigurationRoutes(app, { applicationRegistry, 
     if (!application || (localServerId && application.serverId !== localServerId)) {
       throw new ApplicationRegistryError('application_not_found', 'Application not found', 404);
     }
-    await ensureApplicationIdle(jobRegistry, request.params.applicationId);
+    await ensureApplicationIdle(jobRegistry, request.params.applicationId, websiteRegistry);
     return response.json({ data: await applicationRegistry.updateNodeConfiguration({
       applicationId: request.params.applicationId,
       expectedRevision: body.expectedRevision,

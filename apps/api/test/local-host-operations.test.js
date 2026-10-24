@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { OPERATIONS } from '@yunpanel/protocol';
+import {randomUUID} from 'node:crypto';
 import {
   createLocalHostOperations,
   LOCAL_HOST_OPERATIONS,
@@ -8,6 +9,39 @@ import {
   LOCAL_NODE_ENVIRONMENT_OPERATIONS,
   LOCAL_PYTHON_ENVIRONMENT_OPERATIONS,
 } from '../src/local-host-operations.js';
+
+test('Nginx activation uses the authorized durable job identity and never a payload identity',async()=>{
+ const calls=[],jobId=randomUUID(),authorization={actorId:'owner-a',userId:'owner-a',role:'owner',sessionId:'current-session',websiteId:'website-a'};
+ const execution={jobId,serverId:'local-a',resourceType:'domain',resourceId:'domain-a',authorization};
+ const operations=createLocalHostOperations({authorizePanelJob:async actor=>actor.sessionId==='current-session',
+  nginxManager:{activateDomain:async payload=>{calls.push(payload);return{active:true};}}});
+ const payload={primaryDomain:'owned.example.test',checksum:'a'.repeat(64),activationId:randomUUID()};
+ await operations.executeOperation(OPERATIONS.DOMAIN_ACTIVATE,payload,execution);
+ assert.equal(calls[0].activationId,jobId);assert.notEqual(calls[0].activationId,payload.activationId);
+ await assert.rejects(operations.executeOperation(OPERATIONS.DOMAIN_ACTIVATE,payload,{...execution,authorization:{...authorization,sessionId:'revoked'}}),{code:'panel_job_actor_forbidden'});
+ assert.equal(calls.length,1);
+});
+
+test('ordinary panel DB jobs retain live actor authorization without being parsed as provisioning jobs', async () => {
+  const received = [];
+  const authorization = { actorId: 'owner-a', userId: 'owner-a', role: 'owner', sessionId: 'live-session', websiteId: 'website-a' };
+  const execution = { jobId: 'audit-job-id', serverId: 'local-server', resourceType: 'database', resourceId: 'site_db', authorization };
+  const operations = createLocalHostOperations({
+    authorizePanelJob: async (actor) => actor.sessionId === 'live-session' && actor.websiteId === 'website-a',
+    databaseCredentialOperation: { execute: async (operation, payload, context) => { received.push({ operation, payload, context }); return { applied: true }; } },
+  });
+  assert.deepEqual(await operations.executeOperation(OPERATIONS.DATABASE_CREDENTIAL_APPLY, { selected: true }, execution), { applied: true });
+  assert.equal(received.length, 1);
+  assert.equal(received[0].context.jobId, execution.jobId);
+  assert.equal(Object.hasOwn(received[0].context, 'authorization'), false);
+  await assert.rejects(operations.executeOperation(OPERATIONS.DATABASE_CREDENTIAL_DELETE, {}, {
+    ...execution, authorization: { ...authorization, sessionId: 'revoked-session' },
+  }), { code: 'panel_job_actor_forbidden' });
+  await assert.rejects(operations.executeOperation(OPERATIONS.DATABASE_CREDENTIAL_DELETE, {}, {
+    ...execution, authorization: { ...authorization, actorId: 'another-user' },
+  }), { code: 'panel_job_actor_forbidden' });
+  assert.equal(received.length, 1);
+});
 
 function fixture({ withEnvironment = false } = {}) {
   const calls = [];
@@ -322,4 +356,32 @@ test('DNS record mutations materialize a provider credential only for the guarde
     withoutCredentialLoader.executeOperation(OPERATIONS.DNS_RECORD_APPLY, payload),
     { code: 'dns_provider_credential_unavailable' },
   );
+});
+test('global panel jobs require current Owner authority and the exact execution server', async () => {
+  let hostCalls = 0, active = true;
+  const operations = createLocalHostOperations({ authorizePanelJob: async () => active,
+    acmeManager: { renewCertificate: async () => { hostCalls++; return { status: 'unchanged' }; } } });
+  const execution = { jobId: 'server-job', serverId: 'server-a', resourceType: 'certificate', resourceId: 'cert-a',
+    authorization: { kind: 'panel', scope: 'server', serverId: 'server-a', actorId: 'user-a', userId: 'user-a', sessionId: 'session-a', role: 'owner' } };
+  await operations.executeOperation(OPERATIONS.SSL_RENEW, { certName: 'example.test' }, execution);
+  assert.equal(hostCalls, 1);
+  for (const changed of [{ role: 'site_manager' }, { serverId: 'server-b' }]) {
+    await assert.rejects(operations.executeOperation(OPERATIONS.SSL_RENEW, { certName: 'example.test' },
+      { ...execution, authorization: { ...execution.authorization, ...changed } }), { code: 'panel_job_actor_forbidden' });
+  }
+  active = false;
+  await assert.rejects(operations.executeOperation(OPERATIONS.SSL_RENEW, { certName: 'example.test' }, execution), { code: 'panel_job_actor_forbidden' });
+  assert.equal(hostCalls, 1);
+});
+
+test('Passenger release requires its dedicated runtime and rechecks the canonical Website actor after build',async()=>{
+ const operation=OPERATIONS.APP_NODE_PASSENGER_DEPLOY,payload={websiteId:'website-1'},authorization={kind:'panel',scope:'website',websiteId:'website-1',
+  actorId:'owner-1',userId:'owner-1',sessionId:'session-1',role:'owner'};
+ let checks=0,executions=0;
+ const host=createLocalHostOperations({authorizePanelJob:async()=>++checks===1,passengerReleaseOperation:{execute:async(op,p,context,authority)=>{
+  executions++;assert.equal(op,operation);assert.equal(context.authorization,undefined);await authority.reauthorize();return{};}}});
+ await assert.rejects(host.executeOperation(operation,payload,{jobId:'source-job-1',serverId:'server-1',authorization}),{code:'panel_job_actor_forbidden'});
+ assert.equal(checks,2);assert.equal(executions,1);
+ const noRuntime=createLocalHostOperations();assert.equal(noRuntime.supports(operation),false);
+ await assert.rejects(noRuntime.executeOperation(operation,payload,{}),{code:'local_operation_not_migrated'});
 });

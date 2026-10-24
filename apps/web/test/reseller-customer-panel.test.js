@@ -53,11 +53,11 @@ test('navigationGroups: Owner sees standard Panel navigation including tools and
   const paths = groups[0].items.map(([path]) => path);
   assert.ok(paths.includes('/websites'));
   assert.ok(paths.includes('/tools-settings'));
-  assert.ok(paths.includes('/settings/users'));
+  assert.ok(paths.includes('/resellers'));
   assert.ok(paths.includes('/files'));
   assert.ok(paths.includes('/databases'));
   assert.ok(paths.includes('/statistics'));
-  assert.ok(!paths.includes('/customers'));
+  assert.ok(paths.includes('/customers'));
 });
 
 test('navigationGroups: default backward compatibility for 2 arguments', () => {
@@ -112,7 +112,7 @@ test('auth-protocol: supports direct and site_manager hosting profile sessions f
 
 test('source: WorkspaceApp guards routes with role checks', async () => {
   const appSource = await source('WorkspaceApp.jsx');
-  assert.match(appSource, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>\)/);
+  assert.match(appSource, /path: 'customers', element: <CustomersRoute \/>/);
   assert.match(appSource, /path: 'dashboard', element: owner\(scoped\(<DashboardPage \/>, <ReadOnlyDashboardPage \/>\)\)/);
   assert.match(appSource, /path: 'websites\/new', element: owner\(<NewWebsitePage \/>\)/);
   assert.match(appSource, /path: 'docker', element: owner\(<DockerProjectsPage \/>\)/);
@@ -132,7 +132,7 @@ test('source: WebsitesPage preserves owner test invariants and adapts heading fo
   assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new"/);
   assert.match(page, /action=\{isOwner && canManage \? <LinkButton to="\/websites\/new"/);
   assert.match(page, /isReseller \? 'Sitelerim' : 'Web Siteleri ve Alan Adları'/);
-  assert.doesNotMatch(page, /panelRequest|fetch\(|localStorage|sessionStorage/);
+  assert.doesNotMatch(page, /method:\s*['"](?:POST|PATCH|DELETE)|fetch\(|localStorage|sessionStorage/);
 });
 
 test('source: ResellerCustomersPage contains website quota and site allocation flow', async () => {

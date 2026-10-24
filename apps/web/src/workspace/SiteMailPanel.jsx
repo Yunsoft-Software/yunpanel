@@ -9,7 +9,7 @@ import MailDkimDiagnosticsPanel from './MailDkimDiagnosticsPanel.jsx';
 import MailWebmailPanel from './MailWebmailPanel.jsx';
 import SiteWebmailAccess from './SiteWebmailAccess.jsx';
 import SiteMailApplyPanel from './SiteMailApplyPanel.jsx';
-import { Badge, Button, EmptyState, ErrorNotice, Icon, Section } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, Icon, ModalScope, Section } from './PanelKit.jsx';
 import { siteMailDomains, mailSection } from './ui/site-resource-model.js';
 import './ui/site-resource-workspace.css';
 
@@ -77,7 +77,7 @@ function SiteMailDomain({ domain, isOwner }) {
   const choose = (value) => setParams((current) => { const next = new URLSearchParams(current); next.set('mailTab', value); return next; });
   const tabs = [
     ['mailboxes', 'Posta kutuları', 'mail'], ['aliases', 'Yönlendirmeler', 'arrow'], ['webmail', 'Webmail', 'external'],
-    ['configuration', 'Değişiklikleri uygula', 'settings'],
+    ['configuration', 'Gelişmiş hizmet ayarları', 'settings'],
     ...(isOwner ? [['dns', 'DNS / DKIM', 'shield']] : []),
   ];
   if (!local) return <Section title={domain.domainName}><div className="ws-section-body"><Badge state="off">Harici posta sağlayıcısı</Badge><p className="ws-muted">Bu alan adının e-postası başka bir sağlayıcıda yönetiliyor. Yerel posta kutusu veya webmail hazırmış gibi gösterilmez.</p></div></Section>;
@@ -94,6 +94,6 @@ function SiteMailDomain({ domain, isOwner }) {
     <ErrorNotice error={state.error} />
     {state.error && <Button icon="refresh" onClick={load}>Yeniden dene</Button>}
     {state.busy && !state.loaded && <div className="ws-loading" role="status"><span className="ws-spinner" />Posta kutuları yükleniyor…</div>}
-    {state.loaded && tabs.map(([key]) => (visited.has(key) || active === key) && <div key={key} hidden={active !== key}><fieldset disabled={state.busy || Boolean(state.error)}>{surfaces[key]}</fieldset></div>)}
+    {state.loaded && tabs.map(([key]) => (visited.has(key) || active === key) && <div key={key} hidden={active !== key}><fieldset disabled={state.busy || Boolean(state.error)}><ModalScope active={active === key}>{surfaces[key]}</ModalScope></fieldset></div>)}
   </>;
 }

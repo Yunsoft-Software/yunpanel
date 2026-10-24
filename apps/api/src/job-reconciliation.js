@@ -1,4 +1,6 @@
+import { PASSENGER_RELEASE_OPERATIONS, reconcilePassengerReleaseJob } from './passenger-release-reconciliation.js';
 import { OPERATIONS } from '@yunpanel/protocol';
+import { canonicalMailReloadOutcome } from './certificate-mail-reload.js';
 import { domainNginxSettingsForTarget } from './domain-nginx-settings.js';
 import { reconcileApplicationPassengerMigration } from './application-passenger-migration-reconciliation.js';
 import { acknowledgeAutomaticJobReconciliation } from './durable-job-registry.js';
@@ -279,6 +281,7 @@ async function reconcileApplicationJob(
   applicationEnvironmentRegistry,
   job,
   runtimeBindingRegistry = null,
+  passengerReleasePhaseStore = null,
 ) {
   const application = await applicationRegistry.getApplication(job.resourceId);
   if (!application) return;
@@ -522,7 +525,11 @@ async function reconcilePassengerDomainStageBinding({
       || domain.state !== 'staged' || domain.stagedRevision !== domain.desiredRevision
       || domain.stagedChecksum !== job.result.checksum || !/^[a-f0-9]{64}$/.test(job.result.checksum ?? '')
       || (previousEvidence ? !alreadyAttached : binding.revision !== pin.bindingRevision)) {
-      passengerDomainStageError(
+      passengerDomainStageError('passenger_domain_attachment_drift', 'New Passenger Domain attachment authority changed');
+    }
+    if (alreadyAttached) return binding;
+  } else if (!previousEvidence || previousEvidence.desiredRevision > domain.desiredRevision) {
+    passengerDomainStageError(
       'passenger_domain_stage_revision_drift',
       'Passenger Domain stage revision moved behind runtime binding evidence',
     );
@@ -537,7 +544,6 @@ async function reconcilePassengerDomainStageBinding({
     desiredRevision: entry.desiredRevision,
     nginxChecksum: entry.nginxChecksum,
   });
-
   if (!previousEvidence) domains.push({ domainId: domain.id, desiredRevision: domain.desiredRevision, nginxChecksum: job.result.checksum });
 
   return runtimeBindingRegistry.activate({
@@ -668,10 +674,15 @@ async function applyReconciliation({
   applicationEnvironmentRegistry,
   websiteRegistry,
   runtimeBindingRegistry,
+  passengerReleasePhaseStore = null,
   mailDomainRegistry,
   mailServiceIdentityRegistry = null,
   job,
 }) {
+  if (job.resourceType === 'application' && PASSENGER_RELEASE_OPERATIONS.has(job.operation)) {
+    return reconcilePassengerReleaseJob({job,applicationRegistry,applicationEnvironmentRegistry,websiteRegistry,domainRegistry,runtimeBindingRegistry,passengerReleasePhaseStore});
+  }
+
   if (job.resourceType === 'application') {
     if (job.operation === OPERATIONS.APP_NODE_PASSENGER_MIGRATE) {
       if (job.status !== 'failed') {
@@ -789,39 +800,30 @@ async function applyReconciliation({
         reloadOutcome = job.result.reloadOutcome;
       }
 
-      // Handle post-SSL mail identity assignment side-effects without swallowing errors
-      let mailIdentityOutcome = null;
+      let mailIdentityOutcome = canonicalMailReloadOutcome(job.result?.mailReloadOutcome);
       if (mailServiceIdentityRegistry) {
-        try {
-          if (typeof mailServiceIdentityRegistry.getForServer === 'function') {
-            const binding = await mailServiceIdentityRegistry.getForServer(certificate.serverId);
-            const coversHostname = binding && (
-              binding.webDomainId === certificate.domainId
-              || binding.hostname === certificate.certName
-              || certificate.domains?.includes(binding.hostname)
-            );
-            if (binding && coversHostname && typeof mailServiceIdentityRegistry.bind === 'function') {
-              await mailServiceIdentityRegistry.bind({
-                serverId: binding.serverId,
-                webDomainId: binding.webDomainId,
-                expectedRevision: binding.revision,
-              });
-            }
-          }
-        } catch (mailIdentityError) {
-          mailIdentityOutcome = {
-            service: 'mail_identity',
-            status: 'partial',
-            stage: 'identity_assignment',
-            error: mailIdentityError.message ?? 'Mail service identity assignment failed',
-          };
-          if (certificateRegistry && typeof certificateRegistry.recordReloadOutcome === 'function') {
-            await certificateRegistry.recordReloadOutcome(certificate.id, mailIdentityOutcome);
-          }
+        const binding = await mailServiceIdentityRegistry.getForServer(certificate.serverId);
+        const covers = binding && (binding.webDomainId === certificate.domainId
+          || binding.hostname === certificate.certName || certificate.domains?.includes(binding.hostname));
+        if (isRenewal && covers && !mailIdentityOutcome) {
+          await certificateRegistry.recordReloadOutcome?.(certificate.id, { service: 'certificate_services', status: 'partial',
+            stage: 'reload', error: 'certificate_mail_reload_evidence_missing' });
+          throw Object.assign(new Error('Mail certificate reload evidence is required before reconciliation acknowledgement'),
+            { code: 'certificate_mail_reload_evidence_missing' });
+        }
+        if (!isRenewal && covers && !mailIdentityOutcome) {
+          // Issuance has no renewal consumer receipt. Keep the valid certificate
+          // visible while requiring a mail TLS apply instead of rebinding metadata.
+          mailIdentityOutcome = { service: 'mail', status: 'failed', stage: 'reload', error: 'certificate_mail_reload_failed' };
         }
       }
-
-      if (mailIdentityOutcome || (reloadOutcome && reloadOutcome.status !== 'succeeded')) {
+      if (mailIdentityOutcome && typeof certificateRegistry.recordReloadOutcome === 'function') {
+        const partial = mailIdentityOutcome.status !== 'succeeded' || (reloadOutcome && reloadOutcome.status !== 'succeeded');
+        await certificateRegistry.recordReloadOutcome(certificate.id, { service: 'certificate_services',
+          status: partial ? 'partial' : 'succeeded', stage: 'reload',
+          ...(partial ? { error: 'certificate_consumer_reload_failed' } : {}) });
+      }
+      if ((mailIdentityOutcome && mailIdentityOutcome.status !== 'succeeded') || (reloadOutcome && reloadOutcome.status !== 'succeeded')) {
         return {
           reconciled: true,
           outcome: 'partial',
@@ -859,6 +861,7 @@ export async function reconcileCompletedJob({
   applicationEnvironmentRegistry = null,
   websiteRegistry = null,
   runtimeBindingRegistry = null,
+  passengerReleasePhaseStore = null,
   mailDomainRegistry = null,
   mailServiceIdentityRegistry = null,
   job,
@@ -872,6 +875,7 @@ export async function reconcileCompletedJob({
       applicationEnvironmentRegistry,
       websiteRegistry,
       runtimeBindingRegistry,
+      passengerReleasePhaseStore,
       mailDomainRegistry,
       mailServiceIdentityRegistry,
       job,
@@ -881,9 +885,9 @@ export async function reconcileCompletedJob({
     try {
       if (job.resourceType === 'domain') {
         await domainRegistry.markFailed(job.resourceId, code);
-      } else if (job.resourceType === 'certificate') {
+      } else if (job.resourceType === 'certificate' && code !== 'reconcile_certificate_mail_reload_evidence_missing') {
         await certificateRegistry.markFailed(job.resourceId, code);
-      } else if (job.resourceType === 'application') {
+      } else if (job.resourceType === 'application' && !PASSENGER_RELEASE_OPERATIONS.has(job.operation)) {
         const application = await applicationRegistry.getApplication(job.resourceId);
         if (application?.activeDeploymentId === job.id) await applicationRegistry.markFailed(job.resourceId, job.id, code);
       }

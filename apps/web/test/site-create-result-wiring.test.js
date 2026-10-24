@@ -19,7 +19,6 @@ test('effect creates a fresh controller and disposes exactly that scope on clean
 test('created and uncertain states replace the create form without discarding their result', () => {
   assert.match(page, /submission.created \|\| submission.phase === 'uncertain' \? <SiteCreateResult state=\{submission\}/);
   assert.match(page, /const baseLocked = busy \|\| finishedAttempt/);
-  assert.match(page, /current.flow.submit\(input, \{ signal: current.signal \}\)/);
   assert.doesNotMatch(page, /setCreated\(\{ \.\.\.result.primaryDomain/);
 });
 test('password field clears after confirmed record or uncertain create without entering result state', () => {

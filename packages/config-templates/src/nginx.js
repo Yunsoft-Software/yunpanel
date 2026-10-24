@@ -155,7 +155,14 @@ function renderServerSet({
   if (typeof canonicalRedirect !== 'boolean' || typeof httpsRedirect !== 'boolean') {
     throw new NginxTemplateError('invalid_redirect_policy', 'Redirect policies must be boolean values');
   }
-  const names = serverNames(primaryDomain, aliases);
+  let names = serverNames(primaryDomain, aliases);
+  const preferred = nginxSettings.preferredDomain;
+  if (preferred != null) {
+    if (![names.primary, ...names.aliases].includes(preferred)) {
+      throw new NginxTemplateError('nginx_preferred_domain_unbound', 'Preferred Domain must already belong to this Website');
+    }
+    names = serverNames(preferred, [names.primary, ...names.aliases].filter(name => name !== preferred));
+  }
   const accessLog = accessLogPath === null ? null : assertSafeAbsolutePath(accessLogPath ?? `/var/log/nginx/${names.primary}.access.log`, 'accessLogPath');
   const errorLog = errorLogPath === null ? null : assertSafeAbsolutePath(errorLogPath ?? `/var/log/nginx/${names.primary}.error.log`, 'errorLogPath');
   const blocks = [];
@@ -283,7 +290,8 @@ export function renderStaticSiteConfig({
   const safeRoot = assertSafeAbsolutePath(root, 'root');
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('static', nginxSettings ?? { spaFallback });
-  const body = staticBody({ root: safeRoot, nginxSettings: settings });
+  const scopedRoot = settings.documentRoot ? `${safeRoot}/${settings.documentRoot}` : safeRoot;
+  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${staticBody({ root: scopedRoot, nginxSettings: settings })}`;
   return renderServerSet({
     primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });
@@ -359,7 +367,8 @@ export function renderPhpSiteConfig({
   }
   const normalizedTls = normalizeTls(tls);
   const settings = normalizeNginxSettings('php', nginxSettings ?? {});
-  const body = phpBody({ root: safeRoot, socketPath: safeSocket, nginxSettings: settings });
+  const scopedRoot = settings.documentRoot ? `${safeRoot}/${settings.documentRoot}` : safeRoot;
+  const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${phpBody({ root: scopedRoot, socketPath: safeSocket, nginxSettings: settings })}`;
   return renderServerSet({
     primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
   });

@@ -6,6 +6,14 @@
 .ws-site-tool-group { display: flex; align-items: start; gap: 1rem; padding: .65rem .8rem; border-bottom: 1px solid var(--ws-border); }
 .ws-site-tool-group-label { width: 8.5rem; flex: 0 0 8.5rem; padding-top: .45rem; color: var(--ws-muted); font-size: .75rem; font-weight: 600; }
 .ws-plesk-site-navigation .ws-tabs a { font-size: .8rem; padding: .4rem .6rem; border: 0; border-radius: var(--ws-radius); }
+.ws-website-task-quick { display: flex; flex-wrap: wrap; gap: .4rem; padding: .6rem 1rem; }
+.ws-website-task-quick .ws-website-task { width: auto; }
+.ws-website-task-quick .ws-button { font-size: .8rem; }
+.ws-website-task-card [hidden] { display: none; }
+.ws-website-task-children { padding: 0 1rem .6rem; }
+.ws-settings-advanced { margin: 1rem 0; padding: .9rem 1rem; border: 1px solid var(--ws-border); border-radius: var(--ws-radius); }
+.ws-settings-advanced > summary { cursor: pointer; font-weight: 600; }
+.ws-settings-advanced[open] > summary { margin-bottom: 1rem; }
 .workspace-shell .ws-site-tool-select { display: none; }
 @media (max-width: 600px) {
   .workspace-shell .ws-site-tool-select { display: grid; gap: .4rem; margin: .8rem 0 1rem; }

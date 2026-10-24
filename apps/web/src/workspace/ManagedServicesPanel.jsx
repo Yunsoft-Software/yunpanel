@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getManagedServices, waitForJob } from '../api.js';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
+import { usePanelSession } from '../panel-session.jsx';
 import {
   managedServiceActions,
   managedServiceCategoryLabel,
@@ -13,6 +14,11 @@ import { formatDate } from './site-model.js';
 function actionCopy(selection) {
   if (!selection) return null;
   const label = selection.service.label ?? selection.service.id;
+  if (selection.kind === 'install' && selection.service.id === 'phpmyadmin' && selection.service.installed) return {
+    title: 'Veritabanı giriş bağlantısı yeniden hazırlansın mı?',
+    message: 'Giriş bağlantısı ve oturum doğrulaması yeniden hazırlanır. Veritabanlarının içeriği korunur.',
+    confirmLabel: 'Giriş bağlantısını onar',
+  };
   if (selection.kind === 'install') {
     const unitless = Array.isArray(selection.service.units) && selection.service.units.length === 0;
     return {
@@ -45,6 +51,7 @@ function actionCopy(selection) {
 }
 
 export default function ManagedServicesPanel({ server }) {
+  const { canManage } = usePanelSession();
   const { runJob, resourceBusy, updateJob } = useWorkspace();
   const generation = useRef(0);
   const pending = useRef(false);
@@ -119,6 +126,8 @@ export default function ManagedServicesPanel({ server }) {
             confirmation: `control:${current.service.id}:${current.action}`,
           });
       if (!terminal.result || terminal.result.id !== current.service.id) throw new Error('Servis işlemi doğrulanmış bir durum döndürmedi.');
+      if (current.kind === 'install' && current.service.id === 'phpmyadmin'
+        && terminal.result.configurationResult?.applied !== true) throw new Error('Veritabanı giriş bağlantısının sonucu doğrulanamadı. İşlem kaydını kontrol edin.');
       setServices((existing) => Array.isArray(existing)
         ? existing.map((service) => service.id === terminal.result.id ? terminal.result : service)
         : existing);
@@ -150,7 +159,7 @@ export default function ManagedServicesPanel({ server }) {
         const serviceStatus = managedServiceStatus(service);
         const actions = managedServiceActions(service, services);
         const version = managedServiceVersion(service);
-        return <tr key={service.id}><td><strong>{service.label ?? service.id}</strong><small>{service.units?.map((unit) => typeof unit === 'string' ? unit : (unit?.unit || unit?.name || unit?.id || (typeof unit === 'object' ? JSON.stringify(unit) : '—'))).join(', ') ?? '—'}</small>{actions.conflict && <small>{actions.conflict}</small>}</td><td>{managedServiceCategoryLabel(service.category)}</td><td>{service.installed ? (version ?? 'Kurulu') : 'Kurulu değil'}</td><td><Badge state={serviceStatus.state}>{serviceStatus.label}</Badge></td><td className="ws-row-end"><div className="ws-actions" style={{ justifyContent: 'flex-end' }}>{actions.install && <Button variant="primary" disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>Kur</Button>}{actions.start && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'start', service })}>Başlat</Button>}{actions.restart && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'restart', service })}>Yeniden başlat</Button>}{actions.stop && <Button variant="danger" disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'stop', service })}>Durdur</Button>}</div></td></tr>;
+        return <tr key={service.id}><td><strong>{service.label ?? service.id}</strong><small>{service.units?.map((unit) => typeof unit === 'string' ? unit : (unit?.unit || unit?.name || unit?.id || (typeof unit === 'object' ? JSON.stringify(unit) : '—'))).join(', ') ?? '—'}</small>{actions.conflict && <small>{actions.conflict}</small>}</td><td>{managedServiceCategoryLabel(service.category)}</td><td>{service.installed ? (version ?? 'Kurulu') : 'Kurulu değil'}</td><td><Badge state={serviceStatus.state}>{serviceStatus.label}</Badge></td><td className="ws-row-end"><div className="ws-actions" style={{ justifyContent: 'flex-end' }}>{actions.install && <Button variant="primary" disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>Kur</Button>}{canManage && service.id === 'phpmyadmin' && service.installed && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'install', service })}>Giriş bağlantısını onar</Button>}{actions.start && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'start', service })}>Başlat</Button>}{actions.restart && <Button disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'restart', service })}>Yeniden başlat</Button>}{actions.stop && <Button variant="danger" disabled={systemBusy} onClick={() => setSelection({ kind: 'control', action: 'stop', service })}>Durdur</Button>}</div></td></tr>;
       })}</tbody></table></div>}
     </Section>
     {selection && copy && <ConfirmDialog title={copy.title} message={copy.message} busy={busy} error={error} onCancel={() => { if (!busy) setSelection(null); }} onConfirm={performSelection} confirmLabel={copy.confirmLabel} />}

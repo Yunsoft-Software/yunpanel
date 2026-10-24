@@ -57,6 +57,8 @@ function backupSetSummary(value, websiteId) {
     databaseCount: Array.isArray(value.databases) ? value.databases.length : 0,
     mailCount: Array.isArray(value.mail) ? value.mail.length : 0,
     dnsCount: Array.isArray(value.dns) ? value.dns.length : 0,
+    hostingCount: Array.isArray(value.nginx) ? value.nginx.length : 0,
+    environmentIncluded: Boolean(value.env?.stagedMetadataPath),
     pathCount: Array.isArray(value.targetPaths) ? value.targetPaths.length : 0,
     composeHooksEnabled: value.composeHooks?.enabled === true,
   });
@@ -179,8 +181,18 @@ export function createWebsiteBackupBrowser({
       lastCheckedAt: null,
     });
 
-    let nextScheduledRunAt = null;
-    if (typeof backupScheduleProvider?.getNextScheduledRun === 'function') {
+    let nextScheduledRunAt = null, schedule = null;
+    if (typeof backupScheduleProvider?.getByWebsite === 'function') {
+      const record = await backupScheduleProvider.getByWebsite(websiteId);
+      if (record && record.websiteId === websiteId && record.serverId === website.serverId && UUID.test(record.repositoryId)) {
+        schedule = Object.freeze({ repositoryId: record.repositoryId, expression: record.expression, timeZone: record.timeZone,
+          enabled: record.enabled, revision: record.revision, nextRunAt: record.enabled ? record.nextRunAt : null,
+          lastRunAt: record.lastRunAt, error: record.error });
+        nextScheduledRunAt = schedule.nextRunAt;
+        const selected = projected.findIndex(repository => repository.id === record.repositoryId);
+        if (selected >= 0 && record.retentionPolicy) projected[selected] = Object.freeze({ ...projected[selected], retentionPolicy: safeRetention(record.retentionPolicy) });
+      }
+    } else if (typeof backupScheduleProvider?.getNextScheduledRun === 'function') {
       try {
         const next = await backupScheduleProvider.getNextScheduledRun({ websiteId, serverId: website.serverId });
         if (next && Number.isFinite(Date.parse(next))) {
@@ -228,8 +240,9 @@ export function createWebsiteBackupBrowser({
       repositories: Object.freeze(projected),
       lastSuccessfulBackupAt,
       nextScheduledRunAt,
+      schedule,
       scopeSummary,
-      retentionPolicy,
+      retentionPolicy: projected.find(repository => repository.id === schedule?.repositoryId)?.retentionPolicy ?? retentionPolicy,
       remoteRepositoryStatus,
       restoreOutcome,
       inspectedAt: new Date().toISOString(),

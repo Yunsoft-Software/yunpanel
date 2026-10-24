@@ -112,5 +112,25 @@ export function createWebsitePhpToolActionService({
     });
   }
 
-  return Object.freeze({ preview, queue });
+  async function queueConfig(websiteId, input, actor) {
+    const current = await websitePhpToolsService.previewPhpFpmConfig(websiteId, input?.config);
+    if (input.expectedRevision !== current.websiteRevision || input.previewDigest !== current.previewDigest
+      || input.confirmation !== current.confirmation) throw new WebsitePhpToolActionServiceError('php_config_preview_stale', 'PHP ayarları değişti; tekrar kontrol edin', 409);
+    return withApplicationLock(current.applicationId, async () => {
+      const locked = await websitePhpToolsService.previewPhpFpmConfig(websiteId, input.config);
+      const liveActor = await authorizeActor(actor, websiteId);
+      if (!liveActor || liveActor.sessionId !== actor.sessionId || liveActor.userId !== actor.userId || liveActor.role !== actor.role) throw new WebsitePhpToolActionServiceError('website_php_action_actor_forbidden', 'Site erişimi değişti', 403);
+      if (locked.previewDigest !== current.previewDigest) throw new WebsitePhpToolActionServiceError('php_config_preview_stale', 'PHP ayarları değişti', 409);
+      const jobs = await jobRegistry.listJobs({ serverId: locked.serverId, resourceType: 'application', resourceId: locked.applicationId });
+      if (!Array.isArray(jobs) || jobs.some((job) => ['queued','running'].includes(job.status))) throw new WebsitePhpToolActionServiceError('website_php_action_job_conflict', 'Bu sitede devam eden bir işlem var', 409);
+      const payload = { websiteId, applicationId: locked.applicationId, unixUser: locked.unixUser,
+        expectedWebsiteRevision: locked.websiteRevision, actorSessionId: actor.sessionId, actorUserId: actor.userId, actorRole: actor.role,
+        actionId: 'php.fpm.update', config: locked.desired, previewDigest: locked.previewDigest, confirmation: locked.confirmation };
+      const job = await jobRegistry.enqueue({ serverId: locked.serverId, type: OPERATIONS.WEBSITE_PHP_ACTION, operation: OPERATIONS.WEBSITE_PHP_ACTION,
+        resourceType: 'application', resourceId: locked.applicationId, payload,
+        idempotencyKey: `php.config:${locked.applicationId}:${locked.previewDigest}:${actor.sessionId}` });
+      return { job: jobPublicView(job), websiteId };
+    });
+  }
+  return Object.freeze({ preview, queue, queueConfig });
 }

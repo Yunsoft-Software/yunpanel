@@ -42,20 +42,62 @@ export const roundcubeFpmTemplatePolicy = Object.freeze({
   socketMode: '0660',
 });
 
+export function resolveRoundcubeFpmRuntime(options = {}) {
+  const normalizedOptions = typeof options === 'string' ? { phpVersion: options } : (options ?? {});
+  const resolvedPhpVersion = String(
+    normalizedOptions.phpVersion ?? normalizedOptions.osPlatform?.defaultPhpVersion ?? roundcubeFpmTemplatePolicy.phpVersion,
+  );
+  const family = normalizedOptions.osPlatform?.family ?? 'debian';
+  const remi = Boolean(normalizedOptions.osPlatform?.remi || normalizedOptions.osPlatform?.multiVersion);
+  const poolPath = family === 'rhel'
+    ? (remi
+      ? `/etc/opt/remi/php${resolvedPhpVersion.replaceAll('.', '')}/php-fpm.d/${roundcubeFpmTemplatePolicy.poolName}.conf`
+      : `/etc/php-fpm.d/${roundcubeFpmTemplatePolicy.poolName}.conf`)
+    : `/etc/php/${resolvedPhpVersion}/fpm/pool.d/${roundcubeFpmTemplatePolicy.poolName}.conf`;
+  const socketPath = family === 'rhel'
+    ? `/run/php-fpm/${roundcubeFpmTemplatePolicy.poolName}.sock`
+    : roundcubeFpmTemplatePolicy.socketPath;
+  const serviceUnit = family === 'rhel'
+    ? (remi ? `php${resolvedPhpVersion.replaceAll('.', '')}-php-fpm.service` : 'php-fpm.service')
+    : `php${resolvedPhpVersion}-fpm.service`;
+  const webUser = normalizedOptions.osPlatform?.webUser
+    ?? (family === 'rhel' ? 'nginx' : roundcubeFpmTemplatePolicy.socketOwner);
+  return Object.freeze({
+    phpVersion: resolvedPhpVersion,
+    family,
+    poolPath,
+    socketPath,
+    serviceUnit,
+    socketOwner: webUser,
+    socketGroup: webUser,
+  });
+}
+
 export function renderRoundcubeFpmPool({
   runtimeUser = roundcubeFpmTemplatePolicy.runtimeUser,
   runtimeGroup = roundcubeFpmTemplatePolicy.runtimeGroup,
-  socketOwner = roundcubeFpmTemplatePolicy.socketOwner,
-  socketGroup = roundcubeFpmTemplatePolicy.socketGroup,
-  socketPath = roundcubeFpmTemplatePolicy.socketPath,
+  socketOwner,
+  socketGroup,
+  socketPath,
   temporaryDirectory = '/var/lib/yunpanel/roundcube/tmp',
+  phpVersion,
+  osPlatform,
 } = {}) {
+  const runtime = resolveRoundcubeFpmRuntime({ phpVersion, osPlatform });
   const user = exactIdentity(runtimeUser, roundcubeFpmTemplatePolicy.runtimeUser, 'runtimeUser');
   const group = exactIdentity(runtimeGroup, roundcubeFpmTemplatePolicy.runtimeGroup, 'runtimeGroup');
-  const owner = exactIdentity(socketOwner, roundcubeFpmTemplatePolicy.socketOwner, 'socketOwner');
-  const socketGroupName = exactIdentity(socketGroup, roundcubeFpmTemplatePolicy.socketGroup, 'socketGroup');
-  const socket = safePath(socketPath, 'socketPath');
-  if (socket !== roundcubeFpmTemplatePolicy.socketPath) {
+  const owner = exactIdentity(
+    socketOwner ?? runtime.socketOwner,
+    runtime.socketOwner,
+    'socketOwner',
+  );
+  const socketGroupName = exactIdentity(
+    socketGroup ?? runtime.socketGroup,
+    runtime.socketGroup,
+    'socketGroup',
+  );
+  const socket = safePath(socketPath ?? runtime.socketPath, 'socketPath');
+  if (socket !== runtime.socketPath) {
     throw new RoundcubeFpmTemplateError('invalid_roundcube_fpm_path', 'socketPath must use the managed Roundcube socket');
   }
   const temp = safePath(temporaryDirectory, 'temporaryDirectory');
@@ -63,19 +105,23 @@ export function renderRoundcubeFpmPool({
 }
 
 export function previewRoundcubeFpmPool(input = {}) {
+  const runtime = resolveRoundcubeFpmRuntime({
+    phpVersion: input.phpVersion,
+    osPlatform: input.osPlatform,
+  });
   const content = renderRoundcubeFpmPool(input);
   return Object.freeze({
     version: 1,
     sha256: sha256(content),
     artifact: Object.freeze({
-      path: roundcubeFpmTemplatePolicy.poolPath,
+      path: runtime.poolPath,
       sha256: sha256(content),
       bytes: Buffer.byteLength(content),
       sensitive: false,
       mode: roundcubeFpmTemplatePolicy.poolMode,
     }),
-    socketPath: roundcubeFpmTemplatePolicy.socketPath,
-    serviceUnit: roundcubeFpmTemplatePolicy.serviceUnit,
+    socketPath: runtime.socketPath,
+    serviceUnit: runtime.serviceUnit,
     runtimeUser: roundcubeFpmTemplatePolicy.runtimeUser,
     runtimeGroup: roundcubeFpmTemplatePolicy.runtimeGroup,
   });

@@ -34,7 +34,10 @@ const recoverySources = [
   'job-running-cron-recovery.js',
   'job-running-python-recovery.js',
   'job-running-php-tool-recovery.js',
+  'website-backup-operation-service.js',
   'application-passenger-migration-reconciliation.js',
+  'passenger-release-recovery.js',
+  'passenger-release-reconciliation.js',
 ].map(apiSource);
 
 function operationNames(source, pattern = /OPERATIONS\.([A-Z0-9_]+)/g) {
@@ -71,6 +74,8 @@ test('packaged recovery CLI exposes only explicit operation families and no forc
     'recover-static-deploy',
     'recover-static-rollback',
     'recover-node-deploy',
+    'recover-passenger-release',
+    'compensate-passenger-release',
     'recover-node-restart',
     'recover-node-process',
     'recover-node-runtime-install',

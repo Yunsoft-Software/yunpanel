@@ -31,7 +31,7 @@ test('ready and stale are readable; failed inventories are not', () => {
 });
 test('phpMyAdmin uses explicit ownership and Domain route, not Website route guessing', () => {
   const view = databaseAccessView(ready, domains);
-  assert.equal(view.canOpen, true); assert.equal(view.siteHref, '/websites/domain-a/resources');
+  assert.equal(view.canOpen, true); assert.equal(view.siteHref, '/websites/domain-a/databases');
   assert.equal(view.siteLabel, 'yunsoft.test');
 });
 test('missing credential gets a visible repair action', () => {

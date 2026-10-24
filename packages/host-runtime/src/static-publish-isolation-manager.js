@@ -3,6 +3,7 @@ import { execFile } from 'node:child_process';
 import { constants as fsConstants } from 'node:fs';
 import { access, chmod, chown, lstat, mkdir, open, readFile, readdir, readlink, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import {nginxAclHas as aclHas} from './nginx-site-acl.js';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
 import { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
@@ -247,10 +248,6 @@ function normalizeMigrationReceipt(value, { operationId, spec } = {}) {
 
 function missing(error) {
   return error?.code === 'ENOENT';
-}
-
-function aclHas(output, entry) {
-  return String(output ?? '').split(/\r?\n/).map((line) => line.trim()).includes(entry);
 }
 
 function releaseIdFromTarget(value) {

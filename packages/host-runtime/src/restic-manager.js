@@ -386,12 +386,14 @@ export function createResticManager({
     password,
     policy = {},
     prune = false,
+    tags = [],
   }) {
     const context = 'forget';
     if (!policy || typeof policy !== 'object' || Array.isArray(policy)) {
       throw new ResticError('restic_argument_invalid', 'Policy must be an object');
     }
     const args = ['forget', '--json'];
+    for (const tag of normalizeStringArray(tags, 'tags')) args.push('--tag', tag);
     if (Number.isSafeInteger(policy.keepLast) && policy.keepLast > 0) args.push('--keep-last', String(policy.keepLast));
     if (Number.isSafeInteger(policy.keepHourly) && policy.keepHourly > 0) args.push('--keep-hourly', String(policy.keepHourly));
     if (Number.isSafeInteger(policy.keepDaily) && policy.keepDaily > 0) args.push('--keep-daily', String(policy.keepDaily));
@@ -417,9 +419,10 @@ export function createResticManager({
       try {
         forgetResult = JSON.parse(firstLine || '[]');
       } catch {
-        // In older restic or when output is mixed, handle fallback
+        throw new ResticError('restic_retention_result_unverified', 'Snapshot retention result could not be verified');
       }
     }
+    if (!Array.isArray(forgetResult)) throw new ResticError('restic_retention_result_unverified', 'Snapshot retention result is invalid');
 
     const keptSnapshots = [];
     const removedSnapshots = [];

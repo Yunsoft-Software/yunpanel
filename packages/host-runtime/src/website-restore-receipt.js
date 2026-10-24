@@ -24,6 +24,7 @@ const RECEIPT_FIELDS = new Set([
   'previewDigest',
   'committedAt',
 ]);
+const OPTIONAL_RECEIPT_FIELDS = new Set(['rollbackPaths']);
 
 export class WebsiteRestoreReceiptError extends Error {
   constructor(code, message) {
@@ -42,8 +43,8 @@ function transactionId(value) {
 
 function normalizeReceipt(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).length !== RECEIPT_FIELDS.size
-    || Object.keys(value).some((field) => !RECEIPT_FIELDS.has(field))
+    || [...RECEIPT_FIELDS].some((field) => !Object.hasOwn(value, field))
+    || Object.keys(value).some((field) => !RECEIPT_FIELDS.has(field) && !OPTIONAL_RECEIPT_FIELDS.has(field))
     || value.version !== STORE_VERSION
     || transactionId(value.transactionId) !== value.transactionId
     || typeof value.websiteRevision !== 'number' || !Number.isSafeInteger(value.websiteRevision) || value.websiteRevision < 1
@@ -62,6 +63,11 @@ function normalizeReceipt(value) {
   }
   if (value.status === 'rolled_back' && typeof value.rollbackReason !== 'string') {
     throw new WebsiteRestoreReceiptError('website_restore_receipt_invalid', 'Website restore receipt rolled_back status requires rollbackReason');
+  }
+  if (Object.hasOwn(value, 'rollbackPaths') && (!Array.isArray(value.rollbackPaths) || value.rollbackPaths.length > 100
+    || value.rollbackPaths.some((item) => typeof item !== 'string' || item === '/' || !path.posix.isAbsolute(item)
+      || path.posix.normalize(item) !== item || /[*?\[\]{}\u0000]/.test(item)))) {
+    throw new WebsiteRestoreReceiptError('website_restore_receipt_invalid', 'Website restore rollback paths are invalid');
   }
   return Object.freeze({
     ...value,
@@ -87,15 +93,16 @@ function receiptInput(value, committedAt) {
     healthCheck: value.healthCheck ?? null,
     previewDigest: value.previewDigest,
     committedAt,
+    ...(Object.hasOwn(value, 'rollbackPaths') ? { rollbackPaths: [...value.rollbackPaths] } : {}),
   });
 }
 
 function equivalentReceipt(existing, candidate) {
-  return [...RECEIPT_FIELDS]
+  return [...RECEIPT_FIELDS, ...OPTIONAL_RECEIPT_FIELDS]
     .filter((field) => field !== 'committedAt')
     .every((field) => {
-      if (field === 'healthCheck') {
-        return JSON.stringify(existing.healthCheck) === JSON.stringify(candidate.healthCheck);
+      if (field === 'healthCheck' || field === 'rollbackPaths') {
+        return JSON.stringify(existing[field]) === JSON.stringify(candidate[field]);
       }
       return existing[field] === candidate[field];
     });

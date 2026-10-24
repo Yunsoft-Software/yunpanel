@@ -16,7 +16,7 @@ export function databaseAccessView(database, domains) {
   const ownership = database?.ownership;
   const websiteId = ownership?.websiteId;
   const domain = websiteId ? readableItems(domains).find((item) => item.websiteId === websiteId && typeof item.id === 'string' && item.id) : null;
-  const siteHref = domain ? `/websites/${encodeURIComponent(domain.id)}/resources` : null;
+  const siteHref = domain ? `/websites/${encodeURIComponent(domain.id)}/databases` : null;
   const canOpen = Boolean(websiteId && ownership?.credential?.id);
   return {
     canOpen,

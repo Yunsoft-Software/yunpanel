@@ -8,7 +8,7 @@ const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
 const DATABASE_USER_HOST = 'localhost';
 const USERNAME_PATTERN = /^ydb_[a-f0-9]{24}$/;
-const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const PASSWORD_PATTERN = /^[A-Za-z0-9_!@#%^*+=.:,-]{16,128}$/;
 const ALLOWED_PRIVILEGES = Object.freeze([
   'SELECT',
   'INSERT',
@@ -134,7 +134,7 @@ function decryptPassword(key, record) {
     const iv = Buffer.from(record.iv, 'base64');
     const tag = Buffer.from(record.tag, 'base64');
     const ciphertext = Buffer.from(record.ciphertext, 'base64');
-    if (iv.length !== 12 || tag.length !== 16 || ciphertext.length < 24 || ciphertext.length > 128) {
+    if (iv.length !== 12 || tag.length !== 16 || ciphertext.length < 16 || ciphertext.length > 128) {
       throw new Error('invalid envelope');
     }
     const decipher = createDecipheriv(ALGORITHM, key, iv);
@@ -321,7 +321,7 @@ export function createDatabaseCredentialRegistry({
     if (!initialized) await init();
   }
 
-  async function createCredential({ databaseBindingId, privileges: requestedPrivileges = DEFAULT_PRIVILEGES, confirmation } = {}) {
+  async function createCredential({ databaseBindingId, privileges: requestedPrivileges = DEFAULT_PRIVILEGES, confirmation, initialPassword = null } = {}) {
     await ensureInitialized();
     const binding = await requireBinding(databaseBindingId);
     if (state.credentials.some((record) => record.databaseBindingId === binding.id)) {
@@ -333,7 +333,7 @@ export function createDatabaseCredentialRegistry({
     if (confirmation !== expectedConfirmation) {
       throw new DatabaseCredentialRegistryError('database_credential_confirmation_mismatch', 'Database credential creation confirmation does not match', 409);
     }
-    const generated = password(generatePassword());
+    const generated = password(initialPassword ?? generatePassword());
     const current = new Date(now()).toISOString();
     const record = {
       id: randomUUID(),

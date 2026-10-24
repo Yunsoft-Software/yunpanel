@@ -1,3 +1,5 @@
+import { normalizePassengerReleaseResult } from './passenger-release-job-result.js';
+import { canonicalMailReloadOutcome } from './certificate-mail-reload.js';
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
@@ -43,6 +45,7 @@ import { sanitizeWebsiteCronJobResult } from './website-cron-job-result.js';
 import { sanitizeWebsitePhpToolJobResult } from './website-php-tool-job-result.js';
 import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { normalizeWebsiteBackupScheduleAuthorization } from './website-backup-schedule-authorization.js';
 
 const STORE_VERSION = 1;
 const JOB_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'cancelled']);
@@ -56,6 +59,8 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.APP_STATIC_DEPLOY,
   OPERATIONS.APP_STATIC_ROLLBACK,
   OPERATIONS.APP_NODE_DEPLOY,
+  OPERATIONS.APP_NODE_PASSENGER_DEPLOY,
+  OPERATIONS.APP_NODE_PASSENGER_ROLLBACK,
   OPERATIONS.APP_NODE_ROLLBACK,
   OPERATIONS.APP_NODE_RESTART,
   OPERATIONS.APP_NODE_STATUS,
@@ -90,6 +95,7 @@ const ASYNC_OPERATIONS = new Set([
   OPERATIONS.CRON_APPLY,
   OPERATIONS.CRON_REMOVE,
   OPERATIONS.WEBSITE_PHP_ACTION,
+  OPERATIONS.WEBSITE_BACKUP_ACTION,
 ]);
 for (const op of DOCKER_COMPOSE_OPERATIONS) ASYNC_OPERATIONS.add(op);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -195,6 +201,7 @@ export function normalizeJobAuthorization(value, { optional = false } = {}) {
   if (value.kind === 'website_provisioning') {
     return normalizeWebsiteProvisioningJobAuthorization(value, { optional });
   }
+  if (value.kind === 'website_backup_schedule') return normalizeWebsiteBackupScheduleAuthorization(value);
   if (typeof value.actorId === 'string' && value.actorId.trim() && typeof value.role === 'string' && value.role.trim()) {
     const norm = {
       actorId: value.actorId.trim(),
@@ -208,6 +215,9 @@ export function normalizeJobAuthorization(value, { optional = false } = {}) {
     }
     if (typeof value.sessionId === 'string' && value.sessionId.trim()) {
       norm.sessionId = value.sessionId.trim();
+    }
+    if (value.kind === 'panel') {
+      norm.kind = 'panel'; norm.scope = value.scope; norm.serverId = value.serverId;
     }
     return Object.freeze(norm);
   }
@@ -274,6 +284,8 @@ function publicResult(operation, result) {
       output.reloadOutcome = { service: 'nginx', status: result.reloadOutcome.status, stage: 'reload',
         ...(result.reloadOutcome.status === 'failed' ? { error: 'certificate_nginx_reload_failed' } : {}) };
     }
+    const mailReloadOutcome = canonicalMailReloadOutcome(result.mailReloadOutcome);
+    if (mailReloadOutcome) output.mailReloadOutcome = mailReloadOutcome;
     for (const [field, limit] of [['subject', 500], ['issuer', 500], ['subjectAltName', 2000]]) {
       if (typeof result[field] === 'string') output[field] = sanitizeLogMessage(result[field]).message.slice(0, limit);
       else if (result[field] === null) output[field] = null;
@@ -401,6 +413,14 @@ function sanitizeCertificateMetadata(result) {
     }
     sanitized.reloadOutcome = { service: 'nginx', status: outcome.status, stage: 'reload',
       ...(outcome.status === 'failed' ? { error: 'certificate_nginx_reload_failed' } : {}) };
+  }
+  if (result.mailReloadOutcome !== undefined) {
+    const outcome = canonicalMailReloadOutcome(result.mailReloadOutcome);
+    if (!outcome || Object.keys(result.mailReloadOutcome).length !== Object.keys(outcome).length
+      || Object.keys(outcome).some(key => result.mailReloadOutcome[key] !== outcome[key])) {
+      throw new JobRegistryError('invalid_job_result', 'Mail certificate reload outcome is invalid');
+    }
+    sanitized.mailReloadOutcome = outcome;
   }
   return sanitized;
 }
@@ -920,7 +940,18 @@ function sanitizeManagedServiceResult(job, result) {
       || (service.units.length > 0 && !service.active)) {
       throw new JobRegistryError('invalid_job_result', 'Managed service installation result is inconsistent');
     }
-    return { ...service, changed: result.changed };
+    let configurationResult = null;
+    if (result.configurationResult !== undefined) {
+      const value = result.configurationResult;
+      const digests = ['previewSha256', 'fpmSha256', 'nginxSha256', 'signonConfigSha256', 'signonBridgeSha256'];
+      const facts = ['applied', 'sideEffects', 'httpHealthy', 'fpmSocketHealthy', 'gatewaySocketHealthy'];
+      if (service.id !== 'phpmyadmin' || !value || value.version !== 1 || !normalizeUuid(value.transactionId)
+        || digests.some(key => typeof value[key] !== 'string' || !/^[a-f0-9]{64}$/.test(value[key]))
+        || facts.some(key => value[key] !== true)) throw new JobRegistryError('invalid_job_result', 'phpMyAdmin configuration result is unverified');
+      configurationResult = { version: 1, transactionId: normalizeUuid(value.transactionId),
+        ...Object.fromEntries([...digests, ...facts].map(key => [key, value[key]])) };
+    }
+    return { ...service, changed: result.changed, ...(configurationResult ? { configurationResult } : {}) };
   }
   if (job.operation === OPERATIONS.SYSTEM_SERVICE_CONTROL) {
     const action = result.action;
@@ -1144,6 +1175,19 @@ function sanitizeRoundcubeConfigResult(job, result) {
 }
 
 function sanitizeResult(job, result) {
+  if (job.operation === OPERATIONS.WEBSITE_BACKUP_ACTION) {
+    if (!result || result.version !== 1 || result.operationId !== job.payload?.operationId || result.websiteId !== job.payload?.websiteId
+      || !UUID_PATTERN.test(result.repositoryId ?? '') || !['backup', 'restore', 'check', 'plan'].includes(result.kind)
+      || !['succeeded', 'rolled_back'].includes(result.status) || result.verified !== true
+      || result.sideEffects !== (result.kind !== 'check')
+      || (result.kind === 'backup' && !/^[A-Za-z0-9_-]{8,128}$/.test(result.snapshotId ?? ''))
+      || (result.kind === 'restore' && !/^[A-Za-z0-9_-]{8,128}$/.test(result.preRestoreSnapshotId ?? ''))) {
+      throw new JobRegistryError('invalid_job_result', 'Website backup result does not match the queued operation');
+    }
+    return { version: 1, operationId: result.operationId, websiteId: result.websiteId, repositoryId: result.repositoryId,
+      kind: result.kind, status: result.status, snapshotId: result.snapshotId ?? null, preRestoreSnapshotId: result.preRestoreSnapshotId ?? null,
+      verified: true, sideEffects: result.sideEffects };
+  }
   if (DOCKER_COMPOSE_OPERATION_SET.has(job.operation)) return sanitizeDockerComposeResult(job, result);
   if (job.operation === OPERATIONS.SYSTEM_SERVICES_INSPECT) return sanitizeManagedServiceResult(job, result);
   if ([OPERATIONS.DATABASE_INSPECT, OPERATIONS.DATABASE_CREATE, OPERATIONS.DATABASE_DELETE].includes(job.operation)) {
@@ -1203,6 +1247,10 @@ function sanitizeResult(job, result) {
 
   if (job.operation === OPERATIONS.APP_STATIC_DEPLOY) return sanitizeStaticDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_STATIC_ROLLBACK) return sanitizeStaticRollbackResult(job, result);
+  if ([OPERATIONS.APP_NODE_PASSENGER_DEPLOY, OPERATIONS.APP_NODE_PASSENGER_ROLLBACK].includes(job.operation)) {
+    return normalizePassengerReleaseResult(result, { operation: job.operation, payload: job.payload,
+      identity: { jobId: job.id, applicationId: job.resourceId, websiteId: job.payload.websiteId } });
+  }
   if (job.operation === OPERATIONS.APP_NODE_DEPLOY) return sanitizeNodeDeploymentResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_ROLLBACK) return sanitizeNodeRollbackResult(job, result);
   if (job.operation === OPERATIONS.APP_NODE_RESTART) return sanitizeNodeRestartResult(job, result);
@@ -1433,6 +1481,7 @@ export function createJobRegistry({
       const id = randomUUID();
       const deploymentOperation = operation === OPERATIONS.APP_STATIC_DEPLOY
         || operation === OPERATIONS.APP_NODE_DEPLOY
+        || operation === OPERATIONS.APP_NODE_PASSENGER_DEPLOY
         || operation === OPERATIONS.APP_PYTHON_DEPLOY;
       const effectivePayload = deploymentOperation ? { ...payload, deploymentId: id } : payload;
       try {
@@ -1483,6 +1532,15 @@ export function createJobRegistry({
         throw new JobRegistryError('job_idempotency_conflict', 'Job idempotency key was already used for different work', 409);
       }
       return publicJob(existing);
+    });
+  }
+
+  async function getJobForIdempotencyKey(key) {
+    if (typeof key !== 'string' || !IDEMPOTENCY_KEY_PATTERN.test(key)) throw new JobRegistryError('invalid_idempotency_key', 'Job idempotency key is invalid');
+    return withStoreLock(async () => {
+      await ensureInitialized(); await reload();
+      const job = state.jobs.find(candidate => candidate.idempotencyKey === key);
+      return job ? publicJob(job) : null;
     });
   }
 
@@ -1645,6 +1703,8 @@ export function createJobRegistry({
         if (!privateAuthorization || !isAuthorizedActor(existingAuthorization, privateAuthorization)) {
           throw new JobRegistryError('job_authorization_required', 'Manual retry requires valid authorization', 403);
         }
+        // A legitimate manual retry uses the current session, never the expired one.
+        job.authorization = privateAuthorization;
       } else if (privateAuthorization) {
         job.authorization = privateAuthorization;
       }
@@ -1733,6 +1793,7 @@ export function createJobRegistry({
     reload: () => withStoreLock(reload),
     enqueue,
     findIdempotentJob,
+    getJobForIdempotencyKey,
     claimNext,
     complete,
     cancel,

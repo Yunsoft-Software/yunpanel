@@ -1,3 +1,4 @@
+import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-backup.js';
 import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -351,6 +352,31 @@ export function createMailboxRegistry({
     return Object.freeze(accounts);
   }
 
+  async function exportDomainBackup(mailDomainId) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId, 'mailDomainId');
+    await requireManagedDomain(id);
+    return exportScopedCatalog(state.mailboxes, [id], 'mailDomainId');
+  }
+
+  async function restoreDomainBackup(mailDomainId, snapshot) {
+    await ensureInitialized();
+    const id = uuid(mailDomainId, 'mailDomainId');
+    const domain = await requireManagedDomain(id);
+    return mutate(async next => {
+      const records = restoreScopedCatalog(next.mailboxes, snapshot, [id], {
+        scopeField: 'mailDomainId', identityField: 'id', validate: validatePersisted, now,
+      });
+      if (new Set(records.map(record => record.address)).size !== records.length) throw new MailboxRegistryError('mailbox_state_invalid', 'Mailbox backup addresses conflict', 409);
+      for (const record of records.filter(record => record.mailDomainId === id)) {
+        assertAddressDomain(address(record.address), domain);
+        decryptPasswordHash(key, record);
+      }
+      next.mailboxes = records;
+      return records.filter(record => record.mailDomainId === id).map(publicMailbox);
+    });
+  }
+
   return Object.freeze({
     init,
     createMailbox,
@@ -360,6 +386,8 @@ export function createMailboxRegistry({
     setEnabled,
     deleteMailbox,
     materializeEnabledAccounts,
+    exportDomainBackup,
+    restoreDomainBackup,
   });
 }
 

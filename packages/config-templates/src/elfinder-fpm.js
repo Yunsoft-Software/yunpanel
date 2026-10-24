@@ -70,6 +70,33 @@ export const elFinderFpmTemplatePolicy = Object.freeze({
   ]),
 });
 
+export function resolveElFinderFpmRuntime(options = {}) {
+  const normalizedOptions = typeof options === 'string' ? { phpVersion: options } : (options ?? {});
+  const resolvedPhpVersion = String(
+    normalizedOptions.phpVersion ?? normalizedOptions.osPlatform?.defaultPhpVersion ?? PHP_VERSION,
+  );
+  const family = normalizedOptions.osPlatform?.family ?? 'debian';
+  const remi = Boolean(normalizedOptions.osPlatform?.remi || normalizedOptions.osPlatform?.multiVersion);
+  const poolDirectory = family === 'rhel'
+    ? (remi ? `/etc/opt/remi/php${resolvedPhpVersion.replaceAll('.', '')}/php-fpm.d` : '/etc/php-fpm.d')
+    : `/etc/php/${resolvedPhpVersion}/fpm/pool.d`;
+  const socketDirectory = family === 'rhel' ? '/run/php-fpm' : elFinderFpmTemplatePolicy.socketDirectory;
+  const serviceUnit = family === 'rhel'
+    ? (remi ? `php${resolvedPhpVersion.replaceAll('.', '')}-php-fpm.service` : 'php-fpm.service')
+    : `php${resolvedPhpVersion}-fpm.service`;
+  const webUser = normalizedOptions.osPlatform?.webUser
+    ?? (family === 'rhel' ? 'nginx' : elFinderFpmTemplatePolicy.socketOwner);
+  return Object.freeze({
+    phpVersion: resolvedPhpVersion,
+    family,
+    poolDirectory,
+    socketDirectory,
+    serviceUnit,
+    socketOwner: webUser,
+    socketGroup: webUser,
+  });
+}
+
 export function elFinderFpmPoolName(unixUser) {
   if (typeof unixUser !== 'string' || !APP_USER_PATTERN.test(unixUser)) {
     throw new ElFinderFpmTemplateError('elfinder_fpm_site_user_invalid', 'unixUser is invalid');
@@ -77,16 +104,18 @@ export function elFinderFpmPoolName(unixUser) {
   return `yunpanel-elfinder-${unixUser}`;
 }
 
-export function elFinderFpmPoolPath(unixUser) {
+export function elFinderFpmPoolPath(unixUser, options = {}) {
+  const runtime = resolveElFinderFpmRuntime(options);
   return path.posix.join(
-    elFinderFpmTemplatePolicy.poolDirectory,
+    runtime.poolDirectory,
     `${elFinderFpmPoolName(unixUser)}.conf`,
   );
 }
 
-export function elFinderFpmSocketPath(unixUser) {
+export function elFinderFpmSocketPath(unixUser, options = {}) {
+  const runtime = resolveElFinderFpmRuntime(options);
   return path.posix.join(
-    elFinderFpmTemplatePolicy.socketDirectory,
+    runtime.socketDirectory,
     `${elFinderFpmPoolName(unixUser)}.sock`,
   );
 }
@@ -99,6 +128,8 @@ export function renderElFinderFpmPool({
   homeDirectory,
   temporaryDirectory,
   sharedApplicationRoot = elFinderFpmTemplatePolicy.sharedApplicationRoot,
+  phpVersion,
+  osPlatform,
 } = {}) {
   const normalizedWebsiteId = uuid(websiteId, 'websiteId');
   const normalizedApplicationId = uuid(applicationId, 'applicationId');
@@ -134,8 +165,9 @@ export function renderElFinderFpmPool({
     );
   }
 
+  const runtime = resolveElFinderFpmRuntime({ phpVersion, osPlatform });
   const poolName = elFinderFpmPoolName(user);
-  const socketPath = elFinderFpmSocketPath(user);
+  const socketPath = elFinderFpmSocketPath(user, { phpVersion, osPlatform });
   const openBasedir = `${home}:${sharedRoot}`;
   const disabled = elFinderFpmTemplatePolicy.disabledFunctions.join(',');
 
@@ -143,8 +175,8 @@ export function renderElFinderFpmPool({
 user = ${user}
 group = ${group}
 listen = ${socketPath}
-listen.owner = ${elFinderFpmTemplatePolicy.socketOwner}
-listen.group = ${elFinderFpmTemplatePolicy.socketGroup}
+listen.owner = ${runtime.socketOwner}
+listen.group = ${runtime.socketGroup}
 listen.mode = ${elFinderFpmTemplatePolicy.socketMode}
 pm = ondemand
 pm.max_children = 4
@@ -178,23 +210,33 @@ php_admin_value[session.cookie_samesite] = Strict
 }
 
 export function previewElFinderFpmPool(input = {}) {
+  const runtime = resolveElFinderFpmRuntime({
+    phpVersion: input.phpVersion,
+    osPlatform: input.osPlatform,
+  });
   const content = renderElFinderFpmPool(input);
   const normalizedApplicationId = uuid(input.applicationId, 'applicationId');
   const user = exactManagedUser(input.unixUser, normalizedApplicationId, 'unixUser');
   const digest = sha256(content);
   return Object.freeze({
     version: 1,
-    phpVersion: PHP_VERSION,
+    phpVersion: runtime.phpVersion,
     poolName: elFinderFpmPoolName(user),
-    socketPath: elFinderFpmSocketPath(user),
-    serviceUnit: elFinderFpmTemplatePolicy.serviceUnit,
+    socketPath: elFinderFpmSocketPath(user, {
+      phpVersion: input.phpVersion,
+      osPlatform: input.osPlatform,
+    }),
+    serviceUnit: runtime.serviceUnit,
     runtimeUser: user,
     runtimeGroup: user,
     root: expectedHome(normalizedApplicationId),
     connectorPath: elFinderFpmTemplatePolicy.connectorPath,
     sha256: digest,
     artifact: Object.freeze({
-      path: elFinderFpmPoolPath(user),
+      path: elFinderFpmPoolPath(user, {
+        phpVersion: input.phpVersion,
+        osPlatform: input.osPlatform,
+      }),
       sha256: digest,
       bytes: Buffer.byteLength(content),
       sensitive: false,
@@ -206,6 +248,7 @@ export function previewElFinderFpmPool(input = {}) {
 export const elFinderFpmTemplateInternals = Object.freeze({
   applicationUser,
   expectedHome,
+  resolveElFinderFpmRuntime,
   safePath,
   uuid,
   sha256,

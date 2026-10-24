@@ -52,13 +52,20 @@ test('PHP Website binds canonical current/public root and survives registry reop
   assert.equal(website.proxyTarget, null);
 
   const persisted = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(persisted.version, 5);
+  assert.equal(persisted.version, websiteRegistryInternals.storeVersion);
   assert.equal(persisted.websites[0].runtimeType, 'php');
   assert.equal(persisted.websites[0].documentRoot, webRoot);
 
   const reopened = create();
   await reopened.init();
   assert.deepEqual(await reopened.getWebsite(website.id), website);
+  const config = { phpVersion: '8.3', maxChildren: 9, memoryLimitMb: 512, maxExecutionSeconds: 120 };
+  const saved = await reopened.updateWebsitePhpConfig({ websiteId: website.id, expectedRevision: 1, config });
+  assert.equal(saved.revision, 2);
+  const afterRestart = create();
+  await afterRestart.init();
+  assert.deepEqual((await afterRestart.getWebsite(website.id)).phpConfig, config);
+  await assert.rejects(afterRestart.updateWebsitePhpConfig({ websiteId: website.id, expectedRevision: 1, config }), { code: 'website_revision_conflict' });
 });
 
 test('PHP Website binding fails closed on Application webRoot drift', async () => {

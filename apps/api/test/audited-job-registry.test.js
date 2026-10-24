@@ -1,6 +1,32 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAuditedJobRegistry } from '../src/audited-job-registry.js';
+import { withAuditActor } from '../src/audit-request-context.js';
+
+test('HTTP request jobs capture live session and resolved site scope while system jobs keep explicit authorization', async () => {
+  const queued = [];
+  const registry = createAuditedJobRegistry({
+    registry: { enqueue: async (input) => { queued.push(input); return { id: 'job-test', operation: 'ssl.renew' }; }, complete: async () => {}, cancel: async () => {} },
+    audit: { linkJob() {}, recordJobOutcome() {} }, resolveJobWebsite: async () => 'website-a',
+  });
+  const actor = { userId: 'user-a', sessionId: 'session-a', role: 'site_manager' };
+  await withAuditActor('user-a', () => registry.enqueue({ serverId: 'server-a', resourceType: 'certificate', resourceId: 'cert-a', payload: {} }), { actor });
+  assert.deepEqual(queued[0].authorization, { kind: 'panel', actorId: 'user-a', userId: 'user-a', sessionId: 'session-a',
+    role: 'site_manager', serverId: 'server-a', scope: 'website', websiteId: 'website-a' });
+  await registry.enqueue({ serverId: 'server-a', payload: {} });
+  assert.equal(queued[1].authorization, undefined);
+});
+
+test('a tenant job with unresolved scope is denied before enqueue', async () => {
+  let writes = 0;
+  const registry = createAuditedJobRegistry({
+    registry: { enqueue: async () => { writes++; }, complete: async () => {}, cancel: async () => {} },
+    audit: { linkJob() {}, recordJobOutcome() {} }, resolveJobWebsite: async () => null,
+  });
+  await assert.rejects(withAuditActor('user-a', () => registry.enqueue({ serverId: 'server-a', payload: {} }),
+    { actor: { userId: 'user-a', sessionId: 'session-a', role: 'site_manager' } }), { code: 'panel_job_scope_unavailable' });
+  assert.equal(writes, 0);
+});
 
 function fixture({ actorId = 'owner-1', failLink = false, failOutcome = false } = {}) {
   const auditCalls = [];

@@ -443,7 +443,7 @@ export function createMailDkimActivator({
       await atomicReplace(mailDkimTemplatePolicy.configPath, bundle.preview.artifact.content, {
         mode: PUBLIC_CONFIG_MODE,
         uid: ROOT_UID,
-        gid: ROOT_GID,
+        gid: rspamdGid,
       });
     } catch {
       throw activationError('mail_dkim_config_replace_failed', 'Rspamd DKIM signing configuration could not be replaced');
@@ -480,7 +480,7 @@ export function createMailDkimActivator({
       throw activationError('mail_dkim_live_state_invalid', 'Rspamd DKIM key directories do not match desired access policy');
     }
     const config = await lstatFn(mailDkimTemplatePolicy.configPath);
-    if (!config.isFile() || config.isSymbolicLink() || config.uid !== ROOT_UID || config.gid !== ROOT_GID
+    if (!config.isFile() || config.isSymbolicLink() || config.uid !== ROOT_UID || config.gid !== rspamd.gid
       || (config.mode & 0o7777) !== PUBLIC_CONFIG_MODE
       || sha256(await readFileFn(mailDkimTemplatePolicy.configPath)) !== bundle.preview.artifact.sha256) {
       throw activationError('mail_dkim_live_state_invalid', 'Rspamd DKIM signing config does not match desired state');

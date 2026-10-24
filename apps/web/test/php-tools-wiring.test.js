@@ -2,18 +2,18 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 const source = (name) => readFile(new URL(`../src/workspace/${name}`, import.meta.url), 'utf8');
-test('PHP overview uses the existing application route and keeps runtime operations', async () => {
+test('PHP settings and WordPress have distinct routes; legacy Node entry redirects', async () => {
   const text = await source('SiteDetailPage.jsx');
-  assert.match(text, /tab === 'node' && canManage && .*<SitePhpToolsPanel domainId=\{domain.id\}/);
-  assert.match(text, /application\?\.type === 'php' \? 'PHP \/ WordPress'/);
-  assert.match(text, /<ApplicationOperations domain=\{domain\} application=\{application\}/);
-  assert.match(text, /<EnvironmentPanel key=\{application.id\}/);
+  assert.match(text, /tab === 'php' && <SitePhpSettingsPanel/);
+  assert.match(text, /tab === 'wordpress' && <SitePhpToolsPanel/);
+  assert.match(text, /<Navigate replace to=/);
+  assert.match(text, /application\?\.type !== 'php'/);
 });
 test('existing File Manager, cron and SSL mounts are unchanged', async () => {
   const text = await source('SiteDetailPage.jsx');
   assert.match(text, /tab === 'files' && <SiteFilesPanel domainId=\{domain.id\}/);
   assert.match(text, /tab === 'cron' && <SiteCronPanel domainId=\{domain.id\}/);
-  assert.equal((text.match(/\['cron', 'Zamanlanmış Görevler', 'clock'\]/g) ?? []).length, 2);
+  assert.equal((text.match(/\['cron', 'Zamanlanmış Görevler', 'clock'\]/g) ?? []).length, 1);
   assert.match(text, /<SslOperations key=\{domain.id\}/);
 });
 test('PHP panel retains session and binding guard plus cleanup', async () => {

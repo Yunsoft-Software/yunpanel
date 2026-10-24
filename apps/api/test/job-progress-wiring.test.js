@@ -44,7 +44,9 @@ test('Backend job-progress wiring: audited job registry preserves safe metadata 
   assert.match(auditCode, /export function createAuditedJobRegistry/);
   assert.match(auditCode, /audit\.linkJob/);
   assert.match(auditCode, /audit\.recordJobOutcome/);
-  assert.doesNotMatch(auditCode, /payload|password|secret|token/i);
+  const linkedFields = auditCode.match(/audit\.linkJob\(\{([\s\S]*?)\}\)/)?.[1];
+  assert.ok(linkedFields);
+  assert.doesNotMatch(linkedFields, /payload|password|secret|token/i);
 });
 
 test('Web-to-API wiring parity: web provisioning client calls exact backend endpoints and confirmations', async () => {

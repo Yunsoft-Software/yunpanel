@@ -276,7 +276,27 @@ export function createDatabaseManager({
     });
   }
 
-  return { inspect, inspectSecurityBaseline, createDatabase, dropDatabase };
+  async function inspectDatabaseTables(value) {
+    const name = requireDatabaseName(value);
+    const connection = await connect();
+    if (!(await inventory(connection)).databases.some(database => database.name === name)) throw new DatabaseManagerError('database_not_found', 'Database was not found');
+    const result = await runClient(connection.client, `SELECT HEX(TABLE_NAME), TABLE_TYPE FROM information_schema.TABLES WHERE TABLE_SCHEMA='${name}' ORDER BY TABLE_NAME;`);
+    const tables = String(result.stdout ?? '').trim().split('\n').filter(Boolean).map(line => {
+      const [hex, type, ...extra] = line.split('\t');
+      if (extra.length || !/^(?:[a-f0-9]{2}){1,64}$/i.test(hex ?? '') || !['BASE TABLE', 'VIEW'].includes(type)) {
+        throw new DatabaseManagerError('database_table_inventory_invalid', 'Database table inventory could not be verified');
+      }
+      const table = Buffer.from(hex, 'hex').toString('utf8');
+      if (!/^[A-Za-z0-9_]{1,64}$/.test(table)) throw new DatabaseManagerError('database_table_inventory_invalid', 'Database table identity is unsupported');
+      return { name: table, type };
+    });
+    if (tables.length > 2000 || new Set(tables.map(table => table.name)).size !== tables.length) {
+      throw new DatabaseManagerError('database_table_inventory_invalid', 'Database table inventory is too large or inconsistent');
+    }
+    return { databaseName: name, tables };
+  }
+
+  return { inspect, inspectSecurityBaseline, inspectDatabaseTables, createDatabase, dropDatabase };
 }
 
 export const databaseManager = createDatabaseManager();

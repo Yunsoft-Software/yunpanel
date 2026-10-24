@@ -56,6 +56,11 @@ function portLabel(port) {
   return `${host}:${port.publishedPort} → ${port.targetPort}/${port.protocol}`;
 }
 
+function innerOuterPortLabel(port) {
+  const host = port.hostIp ?? '127.0.0.1';
+  return `Inner: ${port.targetPort}/${port.protocol ?? 'tcp'} ↔ Outer: ${host}:${port.publishedPort}`;
+}
+
 function storageKindLabel(mount) {
   if (mount.kind === 'named_volume') return 'Named volume';
   if (mount.kind === 'bind' && mount.sourceScope === 'project') return 'Project bind';
@@ -178,7 +183,7 @@ function DockerProjectDetail({ projectId }) {
   const refresh = () => { detail.refresh(); storageBackup.refresh(); };
   return <><nav className="ws-breadcrumb"><Link to="/docker">Docker</Link><span>/ {project?.projectName ?? projectId}</span></nav><PageHeading title={project?.projectName ? `${project.projectName} (Ürün Uzantısı)` : 'Docker projesi (Ürün Uzantısı)'} description="Compose desired state, storage backup policy, published target, runtime ve işlem geçmişi (Plesk standart eşdeğeri olmayan ürün uzantısı)." actions={<Button icon="refresh" onClick={refresh}>Yenile</Button>} /><LoadNotice resource={detail} label="Docker proje detayı" />{project && <><Section title="Desired state"><div className="ws-section-body"><KeyValues items={[
     ['Revizyon', project.revision], ['Compose SHA-256', project.composeSha256], ['Servis', project.services?.length ?? 0], ['Network', project.networks?.length ?? 0], ['Named volume', project.volumes?.length ?? 0], ['Mount', storageCount], ['Env revizyonu', data.environment?.revision ?? 0], ['Registry credential', data.credentials?.length ?? 0],
-  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Published ports</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
+  ]} /><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Servis</th><th>Kaynak</th><th>Inner Port (Container targetPort)</th><th>Outer Port (Host publishedPort)</th><th>Published ports</th><th>Domain / Subdomain Proxy Hedefi</th></tr></thead><tbody>{project.services?.map((service) => <tr key={service.name}><td><strong>{service.name}</strong></td><td>{service.imageConfigured ? 'image' : service.buildConfigured ? 'build' : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`in:${portLabel(port)}`} className="yp-port-mapping-badge">Inner: {port.targetPort}/{port.protocol ?? 'tcp'}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <span key={`out:${portLabel(port)}`} className="yp-port-mapping-badge">Outer: {(port.hostIp ?? '127.0.0.1')}:{port.publishedPort}</span>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <small key={portLabel(port)}>{portLabel(port)}</small>) : '—'}</td><td>{publishedPorts(service).length ? publishedPorts(service).map((port) => <code key={`proxy:${portLabel(port)}`}>{innerOuterPortLabel(port)}</code>) : '—'}</td></tr>)}</tbody></table></div></div></Section><LoadNotice resource={storageBackup} label="Docker storage backup policy" /><StoragePanel project={project} backup={storageBackup.data} /><DockerConfigPanel data={data} onChanged={detail.refresh} /><DockerLifecyclePanel project={project} onChanged={detail.refresh} /><Section title="Website / Nginx diagnosis" description="Transient host port kalıcı Website veya Domain kaydına yazılmadan güncel Compose state’inden çözülür."><DiagnosisPanel project={project} /></Section><RuntimePanel projectId={project.id} /><LogsPanel project={project} /><HistoryPanel projectId={project.id} /></>}</>;
 }
 
 export default function DockerProjectsPage() {
@@ -190,6 +195,7 @@ export const dockerProjectsPageInternals = Object.freeze({
   publishedPorts,
   storageMounts,
   portLabel,
+  innerOuterPortLabel,
   storageKindLabel,
   storageResourceKey,
   storagePolicyLabel,

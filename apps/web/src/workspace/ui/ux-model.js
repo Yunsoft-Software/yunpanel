@@ -1,10 +1,10 @@
 // Presentation only. Never infer Website identity from a hostname or Domain ID.
 export const PREFERENCE_KEY = 'yunpanel.ui.preferences.v1';
-export const DEFAULT_PREFERENCES = Object.freeze({ theme: 'system', density: 'comfortable' });
+export const DEFAULT_PREFERENCES = Object.freeze({ theme: 'dark', density: 'comfortable' });
 const themes = new Set(['system', 'light', 'dark']);
 const densities = new Set(['comfortable', 'compact']);
 export function normalizePreferences(value) {
-  return { theme: themes.has(value?.theme) ? value.theme : 'system', density: densities.has(value?.density) ? value.density : 'comfortable' };
+  return { theme: themes.has(value?.theme) ? value.theme : 'dark', density: densities.has(value?.density) ? value.density : 'comfortable' };
 }
 export function readPreferences(storage) {
   try { return normalizePreferences(JSON.parse(storage.getItem(PREFERENCE_KEY))); }
@@ -28,7 +28,7 @@ export function navigationGroups(canManage, isOwner = true, isReseller = false, 
       ['/databases', 'Veritabanları', 'database'],
       ['/statistics', 'İstatistikler', 'dashboard'],
     );
-    if (isOwner) items.push(['/tools-settings', 'Araçlar ve Ayarlar', 'settings'], ['/settings/users', 'Kullanıcılar', 'user']);
+    if (isOwner) items.push(['/customers', 'Müşteriler', 'user'], ['/resellers', 'Bayiler', 'user'], ['/tools-settings', 'Araçlar ve Ayarlar', 'settings']);
   } else if (isOwner) items.push(['/dashboard', 'Genel bakış', 'dashboard']);
   const label = isReseller && !isOwner ? 'Bayi Menüsü' : isCustomer && !isOwner ? 'Müşteri Menüsü' : 'Panel';
   return [{ id: 'panel', label, title: label, items }];
@@ -127,8 +127,8 @@ export function commandEntries({ query = '', canManage = false, isOwner = false,
 export const tabKey = (tab) => (Array.isArray(tab) ? tab[0] : (tab?.id ?? tab?.key ?? tab));
 
 const siteGroups = [
-  { id: 'dashboard', label: 'Genel Bakış', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics'] },
-  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup'] },
+  { id: 'dashboard', label: 'Site', icon: 'dashboard', keys: ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup'] },
+  { id: 'hosting', label: 'Barındırma ve DNS', icon: 'globe', keys: ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron'] },
   { id: 'mail', label: 'Posta', icon: 'mail', keys: ['mail'] },
 ];
 export function groupSiteTabs(tabs = []) {

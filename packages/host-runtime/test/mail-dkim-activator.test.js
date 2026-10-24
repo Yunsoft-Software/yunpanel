@@ -164,7 +164,7 @@ test('activates DKIM signing with root:rspamd private access and secret-free res
   );
   assert.deepEqual(await metadata(context.mapped, mailDkimActivatorInternals.liveKeyParent), { mode: 0o750, uid: 0, gid: 119 });
   assert.deepEqual(await metadata(context.mapped, mailDkimTemplatePolicy.keyRoot), { mode: 0o750, uid: 0, gid: 119 });
-  assert.deepEqual(await metadata(context.mapped, mailDkimTemplatePolicy.configPath), { mode: 0o640, uid: 0, gid: 0 });
+  assert.deepEqual(await metadata(context.mapped, mailDkimTemplatePolicy.configPath), { mode: 0o640, uid: 0, gid: 119 });
   assert.deepEqual(
     await metadata(context.mapped, mailDkimTemplatePolicy.keyPath(POLICY.domain, POLICY.selector)),
     { mode: 0o640, uid: 0, gid: 119 },

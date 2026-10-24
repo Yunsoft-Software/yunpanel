@@ -208,8 +208,9 @@ test('Criterion 3: Owner role has full server management context and all task sc
     '/files',
     '/databases',
     '/statistics',
+    '/customers',
+    '/resellers',
     '/tools-settings',
-    '/settings/users',
   ]);
 
   // Owner branding and footer
@@ -219,7 +220,7 @@ test('Criterion 3: Owner role has full server management context and all task sc
   assert.match(layout, /isOwner \? \(canManage \? 'Yerel sunucu çalışma alanı'/);
 
   // Owner actions in toolbar
-  assert.match(layout, /isOwner && <LinkButton to="\/websites\/new" variant="primary"/);
+  assert.doesNotMatch(layout, /<LinkButton to="\/websites\/new"/); // The Websites task page owns the single create action.
   assert.match(layout, /isOwner && <Button icon="terminal" aria-label="AI asistanı aç \(Ürün uzantısı\)"/);
 
   // Owner can access all tools in command palette

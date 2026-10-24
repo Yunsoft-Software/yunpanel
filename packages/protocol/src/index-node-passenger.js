@@ -18,6 +18,7 @@ import {
 
 const APP_NODE_PASSENGER_MIGRATE = 'app.node.passenger-migrate';
 const WEBSITE_PHP_ACTION = 'website.php.action';
+const WEBSITE_BACKUP_ACTION = 'website.backup.action';
 const SAFE_ABSOLUTE_PATH = /^\/[A-Za-z0-9._/-]+$/;
 const PHP_SOCKET_PATTERN = /^\/run\/php\/yunpanel-yunapp-[a-f0-9]{12}\.sock$/;
 const DOMAIN_FIELDS = new Set([
@@ -45,21 +46,24 @@ const PHP_ACTION_IDS = new Set([
   'wp.cache.flush',
   'wp.transients.delete-all',
   'composer.dump-autoload',
+  'php.fpm.update',
+  'wp.toolkit',
 ]);
 const PHP_ACTION_USER = /^yunapp-[a-f0-9]{12}$/;
 const SESSION_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const USER_ID = SESSION_ID;
-const ACTOR_ROLES = new Set(['owner', 'site_manager']);
+const ACTOR_ROLES = new Set(['owner', 'site_manager', 'reseller', 'customer']);
 const SHA256 = /^[a-f0-9]{64}$/;
 
 export const OPERATIONS = Object.freeze({
   ...DOCKER_OPERATIONS,
   APP_NODE_PASSENGER_MIGRATE,
   WEBSITE_PHP_ACTION,
+  WEBSITE_BACKUP_ACTION,
 });
 
 export function isKnownOperation(operation) {
-  return isDockerKnownOperation(operation) || operation === APP_NODE_PASSENGER_MIGRATE || operation === WEBSITE_PHP_ACTION;
+  return isDockerKnownOperation(operation) || [APP_NODE_PASSENGER_MIGRATE, WEBSITE_PHP_ACTION, WEBSITE_BACKUP_ACTION].includes(operation);
 }
 
 function validateSafeAbsolutePath(value, field, errors) {
@@ -169,9 +173,12 @@ function validateNodePassengerMigration(payload, errors) {
 
 
 function validateWebsitePhpAction(payload, errors) {
+  const fields = new Set(PHP_ACTION_FIELDS);
+  if (payload?.actionId === 'php.fpm.update') fields.add('config');
+  if (payload?.actionId === 'wp.toolkit') { fields.add('options'); fields.add('secretRef'); }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)
-    || Object.keys(payload).length !== PHP_ACTION_FIELDS.size
-    || Object.keys(payload).some((field) => !PHP_ACTION_FIELDS.has(field))) {
+    || Object.keys(payload).length !== fields.size
+    || Object.keys(payload).some((field) => !fields.has(field))) {
     errors.push(`${WEBSITE_PHP_ACTION} contains unsupported arguments`);
     return;
   }
@@ -198,7 +205,26 @@ function validateWebsitePhpAction(payload, errors) {
   if (typeof payload.previewDigest !== 'string' || !SHA256.test(payload.previewDigest)) {
     errors.push(`${WEBSITE_PHP_ACTION} previewDigest is invalid`);
   }
-  const confirmation = `php-tool:${payload.websiteId}:${payload.actionId}:${payload.previewDigest}`;
+  if (payload.actionId === 'php.fpm.update') {
+    const c = payload.config;
+    const keys = ['phpVersion', 'maxChildren', 'memoryLimitMb', 'maxExecutionSeconds'];
+    if (!c || typeof c !== 'object' || Array.isArray(c) || Object.keys(c).length !== keys.length
+      || Object.keys(c).some((key) => !keys.includes(key)) || !['8.1','8.2','8.3','8.4'].includes(c.phpVersion)
+      || !Number.isSafeInteger(c.maxChildren) || c.maxChildren < 1 || c.maxChildren > 64
+      || !Number.isSafeInteger(c.memoryLimitMb) || c.memoryLimitMb < 64 || c.memoryLimitMb > 2048
+      || !Number.isSafeInteger(c.maxExecutionSeconds) || c.maxExecutionSeconds < 5 || c.maxExecutionSeconds > 900) errors.push('PHP configuration is invalid');
+  }
+  if (payload.actionId === 'wp.toolkit') {
+    const options = payload.options;
+    const actions = ['install', 'clone', 'staging', 'remove', 'password', 'core.update', 'plugin.install', 'plugin.update', 'plugin.activate', 'plugin.deactivate', 'plugin.remove', 'theme.install', 'theme.update', 'theme.activate', 'theme.remove'];
+    if (!options || typeof options !== 'object' || Array.isArray(options) || !actions.includes(options.action)
+      || JSON.stringify(options).length > 2048 || Object.keys(options).some(key => !['action', 'databaseBindingId', 'title', 'adminUser', 'adminEmail', 'locale', 'scheme', 'username', 'package', 'targetWebsiteId'].includes(key))
+      || (['clone', 'staging'].includes(options.action) && (Object.keys(options).length !== 4 || !SESSION_ID.test(options.targetWebsiteId ?? '') || !SESSION_ID.test(options.databaseBindingId ?? '') || !['http', 'https'].includes(options.scheme)))
+      || (['install', 'password'].includes(options.action) ? !SESSION_ID.test(payload.secretRef ?? '') : payload.secretRef !== null)) errors.push('WordPress Toolkit action is invalid');
+  }
+  const confirmation = payload.actionId === 'php.fpm.update'
+    ? `php-config:${payload.websiteId}:${payload.config?.phpVersion}:${payload.previewDigest}`
+    : `php-tool:${payload.websiteId}:${payload.actionId}:${payload.previewDigest}`;
   if (payload.confirmation !== confirmation) {
     errors.push(`${WEBSITE_PHP_ACTION} confirmation is invalid`);
   }
@@ -345,6 +371,25 @@ function validatePhpDomainStage(value) {
 }
 
 export function validateOperationEnvelope(value) {
+  if (value?.operation === WEBSITE_BACKUP_ACTION) {
+    const errors = [];
+    const scheduled = value.payload?.actorScheduleId != null;
+    const fields = ['operationId', 'websiteId', 'actorSessionId', 'actorUserId', 'actorRole', ...(scheduled ? ['actorScheduleId', 'actorScheduleRevision'] : [])];
+    if (typeof value.id !== 'string' || value.id.length < 8 || value.id.length > 128) errors.push('id is invalid');
+    if (!value.payload || Array.isArray(value.payload) || typeof value.payload !== 'object'
+      || Object.keys(value.payload).length !== fields.length || Object.keys(value.payload).some((field) => !fields.includes(field))) {
+      errors.push('Website backup payload contains unsupported arguments');
+    } else {
+      for (const field of ['operationId', 'websiteId', 'actorUserId']) if (typeof value.payload[field] !== 'string' || !SESSION_ID.test(value.payload[field])) errors.push(`Website backup ${field} is invalid`);
+      if (scheduled) {
+        if (value.payload.actorSessionId !== null || value.payload.actorRole !== 'owner' || !SESSION_ID.test(value.payload.actorScheduleId)
+          || !Number.isSafeInteger(value.payload.actorScheduleRevision) || value.payload.actorScheduleRevision < 1) errors.push('Scheduled backup actor is invalid');
+      } else if (typeof value.payload.actorSessionId !== 'string' || !SESSION_ID.test(value.payload.actorSessionId)) errors.push('Backup session is invalid');
+      if (!ACTOR_ROLES.has(value.payload.actorRole)) errors.push('Website backup actorRole is invalid');
+    }
+    if (value.protocolVersion !== AGENT_PROTOCOL_VERSION) errors.push('protocolVersion is invalid');
+    return { ok: errors.length === 0, errors };
+  }
   if (value?.operation === WEBSITE_PHP_ACTION) {
     const errors = [];
     if (typeof value.id !== 'string' || value.id.length < 8 || value.id.length > 128) {
@@ -379,7 +424,7 @@ export function validateOperationEnvelope(value) {
 export function createOperationEnvelope({ id, operation, payload = {} }) {
   const specialDomainStage = operation === DOCKER_OPERATIONS.DOMAIN_STAGE
     && ['passenger', 'php', 'python'].includes(payload?.targetType);
-  if (operation !== APP_NODE_PASSENGER_MIGRATE && operation !== WEBSITE_PHP_ACTION && !specialDomainStage) {
+  if (![APP_NODE_PASSENGER_MIGRATE, WEBSITE_PHP_ACTION, WEBSITE_BACKUP_ACTION].includes(operation) && !specialDomainStage) {
     return createDockerOperationEnvelope({ id, operation, payload });
   }
   const envelope = { id, operation, payload, protocolVersion: AGENT_PROTOCOL_VERSION };

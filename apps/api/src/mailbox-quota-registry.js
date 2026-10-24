@@ -1,3 +1,4 @@
+import { exportScopedCatalog, restoreScopedCatalog } from './scoped-registry-backup.js';
 import { chmod, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -230,7 +231,24 @@ export function createMailboxQuotaRegistry({
     });
   }
 
-  return Object.freeze({ init, getQuota, listQuotas, setQuota, clearQuota, removeOrphan });
+  async function exportMailboxBackup(ids) {
+    await ensureInitialized();
+    return exportScopedCatalog(state.policies, ids, 'mailboxId');
+  }
+  async function restoreMailboxBackup(ids, snapshot, { removedIds = [] } = {}) {
+    await ensureInitialized();
+    for (const id of ids) await requireMailbox(mailboxId(id));
+    for (const id of removedIds) {
+      if (await getMailbox(mailboxId(id))) throw new MailboxQuotaRegistryError('backup_catalog_scope_invalid', 'A live mailbox quota cannot be removed by this backup', 409);
+    }
+    return mutate(async next => {
+      next.policies = restoreScopedCatalog(next.policies.filter(record => !removedIds.includes(record.mailboxId)), snapshot, ids, {
+        scopeField: 'mailboxId', identityField: 'mailboxId', validate: validatePersisted, now,
+      });
+      return next.policies.filter(record => ids.includes(record.mailboxId)).map(publicPolicy);
+    });
+  }
+  return Object.freeze({ init, getQuota, listQuotas, setQuota, clearQuota, removeOrphan, exportMailboxBackup, restoreMailboxBackup });
 }
 
 export const mailboxQuotaRegistryInternals = Object.freeze({

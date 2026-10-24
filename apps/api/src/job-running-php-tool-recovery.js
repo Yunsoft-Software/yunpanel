@@ -23,7 +23,7 @@ async function stopped(serviceStatus) {
 
 export async function recoverRunningPhpTool({
   serverId, jobId, jobRegistry, readOperationReceipt, loadJobContext,
-  serviceStatus, inspect = inspectDurableJobRecovery,
+  serviceStatus, inspect = inspectDurableJobRecovery, inspectConfiguration = null,
 } = {}) {
   if (typeof serverId !== 'string' || !serverId || typeof jobId !== 'string' || !JOB.test(jobId)
     || !jobRegistry || typeof jobRegistry.getJob !== 'function'
@@ -65,6 +65,14 @@ export async function recoverRunningPhpTool({
       receipt ? 'PHP tool recovery evidence does not match durable job context' : 'PHP tool receipt is absent; the job remains unresolved',
     );
   }
+  if (context.payload.actionId === 'php.fpm.update') {
+    if (JSON.stringify(receipt.payload.config) !== JSON.stringify(context.payload.config)
+      || typeof inspectConfiguration !== 'function' || !await inspectConfiguration(context.payload)) {
+      throw new JobRunningPhpToolRecoveryError('job_php_configuration_recovery_unverified', 'Persistent PHP settings and active FPM pool could not be verified');
+    }
+  }
+  if (context.payload.actionId === 'wp.toolkit' && (JSON.stringify(receipt.payload.options) !== JSON.stringify(context.payload.options)
+    || receipt.payload.secretRef !== context.payload.secretRef)) throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_evidence_mismatch', 'WordPress action receipt does not match the durable job');
   const begun = await jobRegistry.beginReconciliation({ serverId, jobId });
   if (!begun || begun.pending !== true || begun.status !== 'running') {
     throw new JobRunningPhpToolRecoveryError('job_php_tool_recovery_journal_invalid', 'PHP tool recovery journal is inconsistent');

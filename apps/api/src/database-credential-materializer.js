@@ -21,6 +21,10 @@ function validatePayload(payload, operation) {
     'databaseCredentialId', 'databaseBindingId', 'expectedCredentialRevision',
     'expectedBindingRevision', 'desiredStateSha256',
   ];
+  if (Object.hasOwn(payload ?? {}, 'createDatabase')) {
+    if (operation !== OPERATIONS.DATABASE_CREDENTIAL_APPLY || payload.createDatabase !== true) throw new DatabaseCredentialMaterializerError('database_setup_mode_invalid', 'Database creation mode is invalid');
+    fields.push('createDatabase');
+  }
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)
     || Object.keys(payload).length !== fields.length || fields.some((field) => !Object.hasOwn(payload, field))
     || !Number.isSafeInteger(payload.expectedCredentialRevision) || payload.expectedCredentialRevision < 1

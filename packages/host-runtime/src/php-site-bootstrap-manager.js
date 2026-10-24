@@ -4,6 +4,7 @@ import {
   lstat, mkdir, readFile, readdir, readlink, rename, rm, symlink, writeFile,
 } from 'node:fs/promises';
 import path from 'node:path';
+import {nginxAclHas as aclHas} from './nginx-site-acl.js';
 import { promisify } from 'node:util';
 import { createApplicationIdentity } from './application-identity.js';
 import { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
@@ -20,6 +21,7 @@ const ACL_PACKAGE = 'acl';
 const RECEIPT_ROOT = '/var/lib/yunpanel/staging/php-sites';
 const RECEIPT_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const STATIC_INDEX = '<!doctype html><html lang="tr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Web sitesi hazır</title></head><body><h1>Web sitesi hazır</h1></body></html>\n';
 const BOOTSTRAP_INDEX = `<?php\ndeclare(strict_types=1);\n?><!doctype html>\n<html lang="en">\n<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>YunPanel</title></head>\n<body><h1>Website ready</h1></body>\n</html>\n`;
 
 export class PhpSiteBootstrapManagerError extends Error {
@@ -45,7 +47,8 @@ function uuid(value, field) {
   return value.toLowerCase();
 }
 
-function normalizeIntent(value, operationId) {
+function normalizeIntent(value, operationId, runtimeType = 'php') {
+  if (!['php', 'static'].includes(runtimeType)) throw new PhpSiteBootstrapManagerError('website_bootstrap_type_invalid', 'Website bootstrap runtime type is invalid');
   if (!value || typeof value !== 'object' || Array.isArray(value)
     || Object.keys(value).some((key) => !['websiteId', 'applicationId', 'unixUser', 'documentRoot'].includes(key))) {
     throw new PhpSiteBootstrapManagerError('php_site_intent_invalid', 'PHP Website bootstrap intent is invalid');
@@ -58,29 +61,32 @@ function normalizeIntent(value, operationId) {
   if (value.unixUser !== identity.unixUser) {
     throw new PhpSiteBootstrapManagerError('php_site_identity_mismatch', 'PHP Website Unix identity does not match the Application');
   }
-  const expectedDocumentRoot = path.posix.join(identity.paths.runtime.currentRelease, 'public');
+  const upload = runtimeType === 'static';
+  const applicationRoot = upload ? identity.paths.static.publishRoot : identity.paths.runtime.applicationRoot;
+  const releasesDirectory = path.posix.join(applicationRoot, 'releases');
+  const currentRelease = path.posix.join(applicationRoot, 'current');
+  const expectedDocumentRoot = upload ? currentRelease : path.posix.join(currentRelease, 'public');
   if (value.documentRoot !== expectedDocumentRoot) {
     throw new PhpSiteBootstrapManagerError('php_site_document_root_invalid', 'PHP Website document root must use the canonical current/public path');
   }
-  const releaseDirectory = path.posix.join(identity.paths.runtime.releasesDirectory, normalizedOperationId);
+  const releaseDirectory = path.posix.join(releasesDirectory, normalizedOperationId);
   return Object.freeze({
     websiteId,
     operationId: normalizedOperationId,
     applicationId: identity.applicationId,
     unixUser: identity.unixUser,
     identity,
-    applicationRoot: identity.paths.runtime.applicationRoot,
-    releasesDirectory: identity.paths.runtime.releasesDirectory,
+    applicationRoot,
+    releasesDirectory,
+    runtimeType,
+    bootstrapContent: upload ? STATIC_INDEX : BOOTSTRAP_INDEX,
+    currentLinkTarget: upload ? `releases/${normalizedOperationId}` : releaseDirectory,
     releaseDirectory,
-    releaseDocumentRoot: path.posix.join(releaseDirectory, 'public'),
-    currentRelease: identity.paths.runtime.currentRelease,
+    releaseDocumentRoot: upload ? releaseDirectory : path.posix.join(releaseDirectory, 'public'),
+    currentRelease,
     documentRoot: expectedDocumentRoot,
-    indexPath: path.posix.join(releaseDirectory, 'public', 'index.php'),
+    indexPath: upload ? path.posix.join(releaseDirectory, 'index.html') : path.posix.join(releaseDirectory, 'public', 'index.php'),
   });
-}
-
-function aclHas(output, entry) {
-  return String(output ?? '').split(/\r?\n/).map((line) => line.trim()).includes(entry);
 }
 
 function directChildren(entries) {
@@ -96,7 +102,7 @@ function receiptCore(spec, state) {
     unixUser: spec.unixUser,
     releaseDirectory: spec.releaseDirectory,
     currentRelease: spec.currentRelease,
-    indexSha256: sha256(BOOTSTRAP_INDEX),
+    indexSha256: sha256(spec.bootstrapContent),
     state,
   };
 }
@@ -120,6 +126,7 @@ function packageMissing(error) {
 }
 
 export function createPhpSiteBootstrapManager({
+  runtimeType = 'php',
   receiptRoot = RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
   run = (file, args, options = {}) => execFileAsync(file, args, {
@@ -226,7 +233,7 @@ export function createPhpSiteBootstrapManager({
     return after;
   }
 
-  async function statRequired(target, type, identity, expectedMode) {
+  async function statRequired(target, type, identity, expectedMode, control = false) {
     let info;
     try { info = await lstatFn(target); }
     catch (error) {
@@ -236,7 +243,10 @@ export function createPhpSiteBootstrapManager({
     const typeOk = type === 'directory' ? info?.isDirectory?.()
       : type === 'file' ? info?.isFile?.()
         : type === 'symlink' ? info?.isSymbolicLink?.() : false;
-    if (!typeOk || info.uid !== identity.uid || info.gid !== identity.gid || (type !== 'symlink' && modeOf(info) !== expectedMode)) {
+    const siteOwned = info.uid === identity.uid && info.gid === identity.gid && (type === 'symlink' || modeOf(info) === expectedMode);
+    const securedControl = runtimeType === 'static' && control && info.uid === 0 && info.gid === 0
+      && (type === 'symlink' || modeOf(info) === 0o711);
+    if (!typeOk || (!siteOwned && !securedControl)) {
       throw new PhpSiteBootstrapManagerError('php_site_path_drift', 'PHP Website path ownership, type or mode has drifted');
     }
     return Object.freeze({ satisfied: true, info });
@@ -251,8 +261,8 @@ export function createPhpSiteBootstrapManager({
     }
   }
 
-  async function inspect(rawIntent, { operationId } = {}) {
-    const spec = normalizeIntent(rawIntent, operationId);
+  async function inspect(rawIntent, { operationId, allowContentChanges = false } = {}) {
+    const spec = normalizeIntent(rawIntent, operationId, runtimeType);
     const identity = await inspectIdentity(spec);
     if (!identity?.satisfied) {
       return Object.freeze({ satisfied: false, reason: identity?.reason ?? 'php_site_identity_unavailable' });
@@ -266,33 +276,33 @@ export function createPhpSiteBootstrapManager({
     if (!packageState.installed) return Object.freeze({ satisfied: false, reason: 'php_site_acl_package_missing' });
 
     for (const target of [spec.applicationRoot, spec.releasesDirectory, spec.releaseDirectory, spec.releaseDocumentRoot]) {
-      const result = await statRequired(target, 'directory', identity, 0o750);
+      const result = await statRequired(target, 'directory', identity, 0o750, [spec.applicationRoot, spec.releasesDirectory].includes(target));
       if (!result.satisfied) return Object.freeze({ satisfied: false, reason: 'php_site_path_missing', target });
     }
     const index = await statRequired(spec.indexPath, 'file', identity, 0o640);
     if (!index.satisfied) return Object.freeze({ satisfied: false, reason: 'php_site_index_missing' });
-    const link = await statRequired(spec.currentRelease, 'symlink', identity, null);
+    const link = await statRequired(spec.currentRelease, 'symlink', identity, null, true);
     if (!link.satisfied) return Object.freeze({ satisfied: false, reason: 'php_site_current_missing' });
     let linkTarget;
     try { linkTarget = await readlinkFn(spec.currentRelease); }
     catch { throw new PhpSiteBootstrapManagerError('php_site_current_unavailable', 'PHP Website current release could not be read'); }
-    if (linkTarget !== spec.releaseDirectory) {
+    if (linkTarget !== spec.currentLinkTarget) {
       throw new PhpSiteBootstrapManagerError('php_site_current_drift', 'PHP Website current release target has drifted');
     }
     const indexContent = await readFileFn(spec.indexPath, 'utf8');
-    if (sha256(indexContent) !== sha256(BOOTSTRAP_INDEX)) {
+    if (!allowContentChanges && sha256(indexContent) !== sha256(spec.bootstrapContent)) {
       throw new PhpSiteBootstrapManagerError('php_site_bootstrap_content_drift', 'PHP Website bootstrap content has changed');
     }
 
     await inspectAcl(spec.applicationRoot, ['user:www-data:--x']);
     await inspectAcl(spec.releasesDirectory, ['user:www-data:--x']);
-    await inspectAcl(spec.releaseDirectory, ['user:www-data:--x']);
+    await inspectAcl(spec.releaseDirectory, runtimeType === 'static' ? ['user:www-data:r-x', 'default:user:www-data:r-x'] : ['user:www-data:--x']);
     await inspectAcl(spec.releaseDocumentRoot, ['user:www-data:r-x', 'default:user:www-data:r-x']);
     await inspectAcl(spec.indexPath, ['user:www-data:r--']);
 
     return Object.freeze({
       satisfied: true,
-      adapter: 'php-bootstrap',
+      adapter: runtimeType === 'static' ? 'static-bootstrap' : 'php-bootstrap',
       websiteId: spec.websiteId,
       applicationId: spec.applicationId,
       unixUser: spec.unixUser,
@@ -303,7 +313,7 @@ export function createPhpSiteBootstrapManager({
       currentRelease: spec.currentRelease,
       documentRoot: spec.documentRoot,
       aclPackageVersion: packageState.version,
-      indexSha256: sha256(BOOTSTRAP_INDEX),
+      indexSha256: sha256(indexContent),
     });
   }
 
@@ -345,7 +355,7 @@ export function createPhpSiteBootstrapManager({
   }
 
   async function apply(rawIntent, { operationId } = {}) {
-    const spec = normalizeIntent(rawIntent, operationId);
+    const spec = normalizeIntent(rawIntent, operationId, runtimeType);
     const identity = await inspectIdentity(spec);
     if (!identity?.satisfied) {
       throw new PhpSiteBootstrapManagerError('php_site_identity_required', 'Website Unix identity must be ready before PHP bootstrap');
@@ -374,7 +384,7 @@ export function createPhpSiteBootstrapManager({
     try {
       const current = await readFileFn(spec.indexPath, 'utf8');
       indexExists = true;
-      if (sha256(current) !== sha256(BOOTSTRAP_INDEX)) {
+      if (sha256(current) !== sha256(spec.bootstrapContent)) {
         throw new PhpSiteBootstrapManagerError('php_site_bootstrap_content_drift', 'PHP Website bootstrap content conflicts with operation state');
       }
     } catch (error) {
@@ -382,19 +392,19 @@ export function createPhpSiteBootstrapManager({
       if (!missing(error)) throw new PhpSiteBootstrapManagerError('php_site_index_unavailable', 'PHP Website bootstrap file could not be read');
     }
     if (!indexExists) {
-      await writeFileFn(spec.indexPath, BOOTSTRAP_INDEX, { encoding: 'utf8', mode: 0o640, flag: 'wx' });
+      await writeFileFn(spec.indexPath, spec.bootstrapContent, { encoding: 'utf8', mode: 0o640, flag: 'wx' });
       await setOwnerAndMode(spec.indexPath, identity, '0640');
     }
 
     try {
       const currentTarget = await readlinkFn(spec.currentRelease);
-      if (currentTarget !== spec.releaseDirectory) {
+      if (currentTarget !== spec.currentLinkTarget) {
         throw new PhpSiteBootstrapManagerError('php_site_current_drift', 'PHP Website current release conflicts with operation state');
       }
     } catch (error) {
       if (error instanceof PhpSiteBootstrapManagerError) throw error;
       if (!missing(error)) throw new PhpSiteBootstrapManagerError('php_site_current_unavailable', 'PHP Website current release could not be inspected');
-      await symlinkFn(spec.releaseDirectory, spec.currentRelease);
+      await symlinkFn(spec.currentLinkTarget, spec.currentRelease);
       try { await run(CHOWN_PATH, ['-h', `${identity.user}:${identity.user}`, spec.currentRelease], { timeout: 10_000 }); }
       catch { throw new PhpSiteBootstrapManagerError('php_site_current_prepare_failed', 'PHP Website current release ownership could not be prepared'); }
     }
@@ -421,18 +431,18 @@ export function createPhpSiteBootstrapManager({
       throw new PhpSiteBootstrapManagerError('php_site_compensation_inspection_failed', 'PHP Website bootstrap tree could not be inspected');
     }
     if (JSON.stringify(appEntries) !== JSON.stringify(['current', 'releases'])
-      || JSON.stringify(releaseEntries) !== JSON.stringify(['public'])
-      || JSON.stringify(publicEntries) !== JSON.stringify(['index.php'])) return false;
+      || JSON.stringify(releaseEntries) !== JSON.stringify(spec.runtimeType === 'static' ? ['index.html'] : ['public'])
+      || JSON.stringify(publicEntries) !== JSON.stringify(spec.runtimeType === 'static' ? ['index.html'] : ['index.php'])) return false;
     const releases = directChildren(await readdirFn(spec.releasesDirectory));
     if (JSON.stringify(releases) !== JSON.stringify([spec.operationId])) return false;
     const content = await readFileFn(spec.indexPath, 'utf8');
-    if (sha256(content) !== sha256(BOOTSTRAP_INDEX)) return false;
-    try { return (await readlinkFn(spec.currentRelease)) === spec.releaseDirectory; }
+    if (sha256(content) !== sha256(spec.bootstrapContent)) return false;
+    try { return (await readlinkFn(spec.currentRelease)) === spec.currentLinkTarget; }
     catch { return false; }
   }
 
   async function inspectCompensation(rawIntent, { operationId } = {}) {
-    const spec = normalizeIntent(rawIntent, operationId);
+    const spec = normalizeIntent(rawIntent, operationId, runtimeType);
     const receipt = await loadReceipt(spec);
     if (!receipt) return Object.freeze({ satisfied: true, reason: 'php_site_receipt_absent' });
     if (receipt.state === 'compensated') return Object.freeze({ satisfied: true, removed: true });
@@ -450,7 +460,7 @@ export function createPhpSiteBootstrapManager({
   }
 
   async function compensate(rawIntent, { operationId } = {}) {
-    const spec = normalizeIntent(rawIntent, operationId);
+    const spec = normalizeIntent(rawIntent, operationId, runtimeType);
     let receipt = await loadReceipt(spec);
     if (!receipt) return Object.freeze({ satisfied: true, reason: 'php_site_receipt_absent' });
     if (receipt.state === 'compensated') return Object.freeze({ satisfied: true, removed: true });
@@ -474,7 +484,14 @@ export function createPhpSiteBootstrapManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  return Object.freeze({ inspect, apply, inspectCompensation, compensate });
+  // Runtime inspection keeps the identity, directory, file type, symlink and
+  // ACL checks. Editing an uploaded homepage does not change its runtime.
+  const inspectServing = (intent, options = {}) => inspect(intent, { ...options, allowContentChanges: true });
+  return Object.freeze({ inspect, inspectServing, apply, inspectCompensation, compensate });
+}
+
+export function createUploadedStaticBootstrapManager(options = {}) {
+  return createPhpSiteBootstrapManager({ ...options, runtimeType: 'static', receiptRoot: options.receiptRoot ?? '/var/lib/yunpanel/staging/static-upload-sites' });
 }
 
 export const phpSiteBootstrapManagerInternals = Object.freeze({

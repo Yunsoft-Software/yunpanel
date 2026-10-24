@@ -64,6 +64,9 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain Nginx settings are invalid', 409);
   }
   validateTarget(domain.targetType, domain.target);
+  if (domain.nginxSettings.preferredDomain != null && ![domain.primaryDomain, ...domain.aliases].includes(domain.nginxSettings.preferredDomain)) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted preferred Domain is not bound to this Website', 409);
+  }
   if (typeof domain.canonicalRedirect !== 'boolean' || typeof domain.httpsRedirect !== 'boolean'
     || !HTTPS_MODES.has(domain.httpsMode) || (domain.httpsMode === 'off' && domain.httpsRedirect)
     || (domain.appliedPrimaryDomain !== null && typeof domain.appliedPrimaryDomain !== 'string')) {
@@ -346,6 +349,9 @@ function normalizedUpdate(domain, changes) {
   const nginxSettings = Object.hasOwn(changes, 'nginxSettings')
     ? settings(domain.targetType, changes.nginxSettings, domain.nginxSettings)
     : settings(domain.targetType, domain.nginxSettings);
+  if (nginxSettings.preferredDomain != null && ![names.primary, ...names.aliases].includes(nginxSettings.preferredDomain)) {
+    throw new DomainRegistryError('nginx_preferred_domain_unbound', 'Preferred Domain must already belong to this Website', 409);
+  }
   return Object.freeze({
     primaryDomain: names.primary,
     aliases: Object.freeze([...names.aliases]),
@@ -672,6 +678,9 @@ export function createDomainRegistry({
       nginxSettings ?? {},
       settingsFromTarget(targetType, normalizedTarget),
     );
+    if (normalizedNginxSettings.preferredDomain != null && !requestedNames.has(normalizedNginxSettings.preferredDomain)) {
+      throw new DomainRegistryError('nginx_preferred_domain_unbound', 'Preferred Domain must already belong to this Website', 409);
+    }
     const timestamp = new Date(now()).toISOString();
     const domain = {
       id: normalizedDomainId, serverId, websiteId: normalizedWebsiteId, primaryDomain: normalized.primary, parentDomainId,
@@ -870,13 +879,6 @@ export function createDomainRegistry({
   async function attachCertificate(domainId, certificateId, { domains = null } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
-    if (domain.state === 'suspended') {
-      throw new DomainRegistryError(
-        'domain_suspended_update_blocked',
-        'Resume the Domain before changing certificate routing state',
-        409,
-      );
-    }
     if (domain.httpsMode !== 'managed') throw new DomainRegistryError('https_not_managed', 'Certificate can only be attached to a managed HTTPS domain', 409);
     if (typeof certificateId !== 'string' || !certificateId) throw new DomainRegistryError('invalid_certificate', 'certificateId is required');
     if (domains !== null) {
@@ -886,6 +888,13 @@ export function createDomainRegistry({
       }
     }
     if (domain.certificateId === certificateId) return publicDomain(domain);
+    if (domain.state === 'suspended') {
+      throw new DomainRegistryError(
+        'domain_suspended_update_blocked',
+        'Resume the Domain before changing certificate routing state',
+        409,
+      );
+    }
     domain.certificateId = certificateId;
     domain.desiredRevision += 1;
     domain.stagedRevision = 0;

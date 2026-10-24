@@ -4,7 +4,7 @@ import {
   createPhpFpmSiteManager,
   createWebsiteIdentityPathManager,
 } from '@yunpanel/host-runtime';
-import { createPhpSiteBootstrapManager } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
+import { createPhpSiteBootstrapManager, createUploadedStaticBootstrapManager } from '@yunpanel/host-runtime/php-site-bootstrap-manager';
 import { createWebsiteStaticDeploymentManager } from '@yunpanel/host-runtime/website-static-deployment-manager';
 
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
@@ -57,7 +57,7 @@ function runtimeIntent(intent) {
     );
   }
   if (intent.adapter === 'static' && intent.mode !== undefined
-    && !['deploy', 'bind_existing'].includes(intent.mode)) {
+    && !['deploy', 'bind_existing', 'upload'].includes(intent.mode)) {
     throw new WebsiteProvisioningHandlerError(
       'website_static_runtime_intent_invalid',
       'Website static runtime provisioning mode is invalid',
@@ -165,6 +165,14 @@ function staticBindingIdentity({ intent, websiteId } = {}) {
     );
   }
   return Object.freeze({ applicationId: normalized.applicationId });
+}
+
+function staticUploadIntent(context = {}) {
+  const value = runtimeIntent(context.intent), application = context.operation?.resources?.application;
+  if (value.mode !== 'upload' || value.websiteId !== context.websiteId
+    || context.operation?.operationId !== context.operationId || application?.id !== value.applicationId
+    || application.type !== 'static' || application.repositoryUrl !== null) throw new WebsiteProvisioningHandlerError('website_static_upload_scope_invalid', 'Static upload scope does not match its operation', 409);
+  return { websiteId: value.websiteId, applicationId: value.applicationId, unixUser: value.unixUser, documentRoot: value.documentRoot };
 }
 
 function staticCompensationTarget(context = {}) {
@@ -356,6 +364,7 @@ export function createWebsiteProvisioningHandlers({
   identityManager = createWebsiteIdentityPathManager(),
   passengerSiteManager = createPassengerSiteManager(),
   phpSiteBootstrapManager = createPhpSiteBootstrapManager(),
+  staticUploadBootstrapManager = createUploadedStaticBootstrapManager(),
   phpFpmSiteManager = createPhpFpmSiteManager(),
   staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
@@ -442,6 +451,7 @@ export function createWebsiteProvisioningHandlers({
 
   async function applyStaticRuntime(context = {}) {
     const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === 'upload') return staticUploadBootstrapManager.apply(staticUploadIntent(context), { operationId: context.operationId });
     if (normalized.mode === undefined) return legacyStaticPending(normalized);
     if (normalized.mode === 'bind_existing') {
       return staticDeploymentManager.inspectCurrent(staticBindingIdentity(context));
@@ -470,6 +480,11 @@ export function createWebsiteProvisioningHandlers({
 
   async function inspectStaticRuntime(context = {}) {
     const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === 'upload') {
+      if (typeof staticUploadBootstrapManager.inspectServing !== 'function') throw new WebsiteProvisioningHandlerError(
+        'website_static_upload_inspection_unavailable', 'Uploaded Website runtime inspection is unavailable', 503);
+      return staticUploadBootstrapManager.inspectServing(staticUploadIntent(context), { operationId: context.operationId });
+    }
     if (normalized.mode === undefined) return legacyStaticPending(normalized);
     if (normalized.mode === 'bind_existing') {
       return staticDeploymentManager.inspectCurrent(staticBindingIdentity(context));
@@ -479,6 +494,7 @@ export function createWebsiteProvisioningHandlers({
 
   async function compensateStaticRuntime(context = {}) {
     const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === 'upload') return staticUploadBootstrapManager.compensate(staticUploadIntent(context), { operationId: context.operationId });
     if (normalized.mode !== 'deploy') {
       return Object.freeze({
         satisfied: false,
@@ -492,6 +508,7 @@ export function createWebsiteProvisioningHandlers({
 
   async function inspectStaticRuntimeCompensation(context = {}) {
     const normalized = runtimeIntent(context.intent);
+    if (normalized.mode === 'upload') return staticUploadBootstrapManager.inspectCompensation(staticUploadIntent(context), { operationId: context.operationId });
     if (normalized.mode !== 'deploy') {
       return Object.freeze({
         satisfied: false,

@@ -15,6 +15,28 @@ const RESOURCE_LABELS = Object.freeze({
 
 const DEPLOY_LOG_OPERATIONS = new Set(['app.static.deploy', 'app.node.deploy']);
 
+const OPERATION_LABELS = Object.freeze({
+  'app.static.deploy':'Statik siteyi yayınla', 'app.static.rollback':'Önceki statik sürüme dön',
+  'app.node.deploy':'Node.js sürümünü yayınla', 'app.node.restart':'Node.js uygulamasını yeniden başlat',
+  'app.node.rollback':'Önceki Node.js sürümüne dön', 'app.node.status':'Node.js durumunu kontrol et',
+  'app.python.deploy':'Python sürümünü yayınla', 'app.python.restart':'Python uygulamasını yeniden başlat',
+  'app.python.rollback':'Önceki Python sürümüne dön', 'app.python.status':'Python durumunu kontrol et',
+  'ssl.issue':'SSL sertifikası al', 'ssl.renew':'SSL sertifikasını yenile',
+  'domain.stage':'Barındırma ayarlarını kontrol et', 'domain.activate':'Barındırma ayarlarını uygula',
+  'database.create':'Veritabanı oluştur', 'database.delete':'Veritabanını sil',
+  'database.credential.apply':'Veritabanı erişimini uygula', 'database.credential.delete':'Veritabanı kullanıcısını kaldır',
+  'website.php.action':'Site bakım işlemi', 'website.backup.action':'Site yedekleme işlemi',
+  'database.inspect':'Veritabanını kontrol et', 'dns.record.apply':'DNS kaydını uygula',
+  'mail.config.apply':'Posta ayarlarını uygula', 'mail.config.rollback':'Önceki posta ayarlarına dön',
+  'system.upgrade':'Sunucuyu güncelle', 'system.service.control':'Sunucu hizmetini yönet',
+});
+export function jobOperationLabel(job) {
+  const operation = boundedScalar(job?.operation) ?? boundedScalar(job?.type);
+  if (operation === 'website.backup.action' && job?.result?.kind === 'restore') return 'Site yedeğini geri yükle';
+  if (operation === 'website.backup.action' && job?.result?.kind === 'backup') return 'Site yedeği al';
+  return Object.hasOwn(OPERATION_LABELS, operation) ? OPERATION_LABELS[operation] : operation ?? 'İşlem';
+}
+
 const SAFE_RESULT_FIELDS = Object.freeze([
   ['status', 'Sonuç'],
   ['action', 'İşlem'],
@@ -42,10 +64,17 @@ function boundedScalar(value) {
   return null;
 }
 
+function primarySiteDomain(website, domains = []) {
+  if (!website) return null;
+  const linked = domains.filter(item => item.websiteId === website.id);
+  return linked.find(item => item.id === website.primaryDomainId)
+    ?? linked.find(item => !item.parentDomainId && item.primaryDomain === website.name)
+    ?? linked.find(item => !item.parentDomainId) ?? null;
+}
+
 function linkedSiteForApplication(resourceId, { websites = [], domains = [] } = {}) {
   const website = websites.find((item) => item.applicationId === resourceId);
-  if (!website) return null;
-  return domains.find((item) => item.websiteId === website.id) ?? null;
+  return primarySiteDomain(website, domains);
 }
 
 function linkedSiteForCertificate(resourceId, { domains = [] } = {}) {
@@ -58,18 +87,27 @@ export function jobResourceTarget(job, resources = {}) {
   if (!resourceType || !resourceId) return null;
   const label = RESOURCE_LABELS[resourceType] ?? 'Kaynak';
   if (resourceType === 'website') {
-    const domain = (resources?.domains ?? []).find((item) => item.websiteId === resourceId);
-    const targetId = domain ? domain.id : resourceId;
-    return Object.freeze({ label, href: `/websites/${encodeURIComponent(targetId)}/overview` });
+    const website = (resources.websites ?? []).find(item => item.id === resourceId);
+    const domain = primarySiteDomain(website ?? {id:resourceId}, resources.domains);
+    return Object.freeze({ label: boundedScalar(domain?.primaryDomain) ?? boundedScalar(website?.name) ?? label,
+      href: domain ? `/websites/${encodeURIComponent(domain.id)}/overview` : null });
   }
-  if (resourceType === 'domain') return Object.freeze({ label, href: `/websites/${encodeURIComponent(resourceId)}/overview` });
+  if (resourceType === 'domain') {
+    const domain = (resources.domains ?? []).find(item => item.id === resourceId);
+    return Object.freeze({ label: boundedScalar(domain?.primaryDomain) ?? label,
+      href: domain ? `/websites/${encodeURIComponent(domain.id)}/overview` : null });
+  }
   if (resourceType === 'application') {
     const domain = linkedSiteForApplication(resourceId, resources);
-    return Object.freeze({ label, href: domain ? `/websites/${encodeURIComponent(domain.id)}/node` : '/applications' });
+    const website = (resources.websites ?? []).find(item => item.applicationId === resourceId);
+    const tab = website?.runtimeType === 'php' ? 'php' : ['static','docker'].includes(website?.runtimeType) ? 'overview' : 'node';
+    return Object.freeze({ label: boundedScalar(domain?.primaryDomain) ?? boundedScalar(website?.name) ?? label,
+      href: domain ? `/websites/${encodeURIComponent(domain.id)}/${tab}` : '/applications' });
   }
   if (resourceType === 'certificate') {
     const domain = linkedSiteForCertificate(resourceId, resources);
-    return Object.freeze({ label, href: domain ? `/websites/${encodeURIComponent(domain.id)}/ssl` : '/domains' });
+    return Object.freeze({ label: boundedScalar(domain?.primaryDomain) ?? label,
+      href: domain ? `/websites/${encodeURIComponent(domain.id)}/ssl` : '/domains' });
   }
   if (resourceType === 'mail_domain') return Object.freeze({ label, href: `/mail/${encodeURIComponent(resourceId)}` });
   if (resourceType === 'docker_project') return Object.freeze({ label, href: `/docker/${encodeURIComponent(resourceId)}` });
@@ -83,7 +121,16 @@ export function jobResourceTarget(job, resources = {}) {
 
 // Status is not a measured fraction or a retry budget. Keep progress unknown
 // until the API exposes an explicit, validated measurement contract.
+export function jobOutcome(job) {
+  if (job?.status === 'succeeded' && job.result?.kind === 'restore' && job.result?.status === 'rolled_back') {
+    return Object.freeze({state:'warning',label:'Geri alındı',detail:'Geri yükleme tamamlanamadı; işlem öncesindeki durum geri getirildi.'});
+  }
+  return Object.freeze({state:job?.status ?? 'unknown',label:undefined,detail:null});
+}
+
 export function jobLifecycle(job) {
+  const outcome = jobOutcome(job);
+  if (outcome.detail) return Object.freeze({stage:outcome.label,progress:'—',detail:outcome.detail,isSuccessful:false});
   const status = job?.status;
   if (status === 'saving') return Object.freeze({ stage: 'Kaydediliyor', progress: '—', detail: 'Değişiklikler sunucuya kaydediliyor.', isSuccessful: false });
   if (status === 'queued') return Object.freeze({ stage: 'Kuyrukta', progress: '—', detail: 'Sunucu yürütücüsü işi henüz üstlenmedi.', isSuccessful: false });

@@ -47,8 +47,8 @@ test('normalizeSiteTab: normalizes all legacy and variant deep link aliases to c
   assert.equal(normalizeSiteTab('access'), 'access');
 
   // PHP / WordPress
-  assert.equal(normalizeSiteTab('wp'), 'php');
-  assert.equal(normalizeSiteTab('wordpress'), 'php');
+  assert.equal(normalizeSiteTab('wp'), 'wordpress');
+  assert.equal(normalizeSiteTab('wordpress'), 'wordpress');
   assert.equal(normalizeSiteTab('php'), 'php');
 
   // Files
@@ -255,7 +255,7 @@ test('source: WorkspaceApp wires RedirectWithSearch and compatibility routes', a
 test('source: SiteDetailPage handles domain resolution fallback and URL canonicalization', async () => {
   const siteDetailSrc = await source('SiteDetailPage.jsx');
   assert.match(siteDetailSrc, /safeReturnHref/);
-  assert.match(siteDetailSrc, /window\.history\.replaceState/);
+  assert.match(siteDetailSrc, /navigate\(/);
   assert.match(siteDetailSrc, /domains\.items\.find\(\(item\) => item\.websiteId === websiteId/);
   assert.match(siteDetailSrc, /domains\.items\.find\(\(item\) => item\.primaryDomain\?\.toLowerCase\(\) === websiteId\?\.toLowerCase\(\)\)/);
 });

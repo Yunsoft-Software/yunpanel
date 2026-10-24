@@ -838,6 +838,12 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
     applicationEnvironmentRegistry,
     databaseBindingRegistry,
     databaseCredentialRegistry,
+    databaseCleanupInspector: async () => ({ ready: true }),
+    databaseCleanupHandler: async () => {
+      await databaseCredentialRegistry.deleteCredential('cred-1', { expectedRevision: 1 });
+      await databaseBindingRegistry.unbindDatabase('db-1', { expectedRevision: 1 });
+      return { databaseBindingsCleaned: true, unboundBindings: [{ id: 'db-1', unbound: true, physicalVerified: true }] };
+    },
     websiteSftpKeyRegistry,
     runtimeBindingRegistry,
     websiteCronRegistry,

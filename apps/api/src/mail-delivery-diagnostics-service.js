@@ -118,6 +118,7 @@ export function createMailDeliveryDiagnosticsService({
   domainRegistry,
   mailboxRegistry,
   mailDkimRegistry = null,
+  mailServiceIdentityRegistry = null,
   mailDiagnosticsInspector = null,
   mailProtocolHealthInspector = null,
   mailQueueInspector = null,
@@ -144,8 +145,18 @@ export function createMailDeliveryDiagnosticsService({
   }
 
   async function resolveManagedHostname(mailDomain) {
+    if (mailServiceIdentityRegistry) {
+      const webDomain = mailDomain.webDomainId ? await domainRegistry.getDomain(mailDomain.webDomainId) : null;
+      const serverId = webDomain?.serverId ?? localServerId;
+      if (!serverId || (localServerId && serverId !== localServerId)) throw new MailDeliveryDiagnosticsError('mail_service_identity_unavailable', 'Posta bağlantı adresi bu sunucuda doğrulanamadı', 409);
+      const identity = await mailServiceIdentityRegistry.getForServer(serverId);
+      if (!identity?.ready || identity.serverId !== serverId || typeof identity.hostname !== 'string') {
+        throw new MailDeliveryDiagnosticsError('mail_service_identity_unavailable', 'Posta bağlantı adresi ve SSL sertifikası hazır değil', 409);
+      }
+      return identity.hostname;
+    }
     if (mailDomain?.mailHostname) return mailDomain.mailHostname;
-    return `mail.${mailDomain.domainName}`;
+    throw new MailDeliveryDiagnosticsError('mail_service_identity_unavailable', 'Posta bağlantı adresi yapılandırılmamış', 409);
   }
 
   async function getConnectionSettings({ mailDomain, mailbox = null }) {
@@ -488,6 +499,8 @@ export function createMailDeliveryDiagnosticsService({
         success: true,
         delivered: true,
         status: 'sent',
+        acceptedByMta: true,
+        deliveryState: 'queued',
         messageId: sendResult?.messageId ?? `<${randomUUID()}@${mailDomain.domainName}>`,
         accepted: sendResult?.accepted ?? [validatedTo],
         response: sendResult?.response ?? '250 2.0.0 Ok: queued',

@@ -1,7 +1,7 @@
 import { useId } from 'react';
 import { Button } from './PanelKit.jsx';
 
-export default function NginxSettingsFields({ targetType, settings, disabled, onChange }) {
+export default function NginxSettingsFields({ targetType, settings, disabled, onChange, domainNames = [] }) {
   const hint = useId();
   const change = (key, value) => onChange({ ...settings, [key]: value });
   const header = (index, key, value) => change('headers', settings.headers.map((item, at) => at === index ? { ...item, [key]: value } : item));
@@ -9,6 +9,15 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
   return <fieldset disabled={disabled} className="ws-form">
     <legend>Web sunucusu ayarları</legend>
     <div className="ws-form-grid">
+      {['php', 'static'].includes(targetType) && <label>Document root<input
+        value={settings.documentRoot ?? ''} maxLength="192" spellCheck={false} placeholder="Site kökü"
+        onChange={event => change('documentRoot', event.target.value || null)} />
+        <span className="ws-field-hint">Site köküne göre klasör yolu. Örneğin public veya uygulama/public. Klasör önceden oluşturulmalıdır.</span></label>}
+      {domainNames.length > 0 && <label>Tercih edilen alan adı<select value={settings.preferredDomain ?? ''}
+        onChange={event => change('preferredDomain', event.target.value || null)}>
+        <option value="">Ana alan adı</option>{domainNames.map(name => <option value={name} key={name}>{name}</option>)}
+      </select><span className="ws-field-hint">Ek alan adı yönlendirmesi açıkken bu adres kullanılır. www için önce ek alan adını bağlayın.</span></label>}
+
       <label>En büyük yükleme boyutu (MB)<input type="number" min="1" max="1024" step="1"
         value={settings.clientMaxBodySizeMb ?? ''} placeholder="Sunucu varsayılanı" aria-describedby={hint}
         onChange={event => change('clientMaxBodySizeMb', number(event))} /></label>

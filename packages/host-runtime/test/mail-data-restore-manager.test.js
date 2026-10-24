@@ -245,6 +245,33 @@ test('restores selected mail data by private staging, pre-restore backup and ato
   });
 }));
 
+test('existing vmail mail root 0750 is preserved while only the selected private mailbox is replaced', async () => withFixture(async state => {
+  const sharedRoot = state.mapPath('/var/lib/yunpanel/mail');
+  await chmod(sharedRoot, 0o750);
+  const { manager } = dependencies(state);
+  const result = await manager.restore({ transactionId: 'restore-root-0750', backupId: 'mail-backup-selected',
+    scope: 'mailbox', identity: 'owner@example.com', expectedTargetSnapshotSha256: SNAPSHOT });
+  assert.equal(result.applied, true);
+  assert.equal((await lstat(sharedRoot)).mode & 0o777, 0o750);
+  assert.equal((await lstat(state.targetPath)).mode & 0o777, 0o700);
+  assert.equal(await readFile(path.join(state.targetPath, 'Maildir', 'cur', 'new-message'), 'utf8'), 'restored message\n');
+}));
+for (const mode of [0o770, 0o755, 0o777]) {
+  test(`unsafe shared mail root mode ${mode.toString(8)} stops before replacing mailbox content`, async () => withFixture(async state => {
+    await chmod(state.mapPath('/var/lib/yunpanel/mail'), mode);
+    const { manager } = dependencies(state);
+    await assert.rejects(manager.restore({ transactionId: 'restore-unsafe-root', backupId: 'mail-backup-selected',
+      scope: 'mailbox', identity: 'owner@example.com', expectedTargetSnapshotSha256: SNAPSHOT }), { code: 'mail_data_restore_parent_unsafe' });
+    assert.equal(await readFile(path.join(state.targetPath, 'Maildir', 'cur', 'old-message'), 'utf8'), 'old message\n');
+  }));
+}
+test('the shared-root exception does not permit a Domain parent with group-readable mode', async () => withFixture(async state => {
+  await chmod(state.mapPath('/var/lib/yunpanel/mail/example.com'), 0o750);
+  const { manager } = dependencies(state);
+  await assert.rejects(manager.restore({ transactionId: 'restore-unsafe-domain', backupId: 'mail-backup-selected',
+    scope: 'mailbox', identity: 'owner@example.com', expectedTargetSnapshotSha256: SNAPSHOT }), { code: 'mail_data_restore_parent_unsafe' });
+}));
+
 test('verification failure rolls the previous Maildir back after the atomic swap', async () => withFixture(async (state) => {
   const baseRename = state.fs.renameFn;
   const renameFn = async (source, destination) => {

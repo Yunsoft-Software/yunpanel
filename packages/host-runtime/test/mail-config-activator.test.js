@@ -211,6 +211,7 @@ async function prepare({
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/getent') {
+      if (args[0] === 'passwd' && args[1] === '_rspamd') return { stdout: '_rspamd:x:5003:5003::/var/lib/rspamd:/usr/sbin/nologin\n', stderr: '' };
       if (args[0] === 'group' && args[1] === 'yunpanel-mailauth') {
         return {
           stdout: `yunpanel-mailauth:x:${MAIL_AUTH_GID}:postfix,dovecot\n`,
@@ -369,6 +370,11 @@ test('activates staged mail config with compiled maps/sieve, guarded submission 
     assert.equal((await stat(target)).isFile(), true);
     const content = await readFile(target);
     assert.equal(sha256(content), artifact.sha256);
+    if (artifact.path.startsWith('/etc/rspamd/local.d/')) {
+      const info = await context.mapped.lstatFn(artifact.path);
+      assert.equal(info.uid, 0); assert.equal(info.gid, 5003);
+      assert.equal(info.mode & 0o777, 0o640);
+    }
   }
   for (const compiledPath of mailConfigBackupInternals.postfixCompiledPaths) {
     assert.equal((await stat(context.mapped.mapPath(compiledPath))).isFile(), true);

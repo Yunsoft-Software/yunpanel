@@ -54,7 +54,7 @@ export function reloadHostingForm(form, domain, expected) {
     if (previous && !hostingValuesEqual(form.values[key], previous[key])) next.values[key] = form.values[key];
   }
   const optionalFiles = previous && ['php', 'static'].includes(next.base.targetType)
-    ? ['indexFiles', 'errorPages'].filter(key => Object.hasOwn(form.values.nginxSettings, key)) : [];
+    ? ['indexFiles', 'errorPages', 'documentRoot', 'preferredDomain'].filter(key => Object.hasOwn(form.values.nginxSettings, key)) : [];
   if (previous) for (const key of new Set([...Object.keys(next.values.nginxSettings), ...optionalFiles])) {
     if (!hostingValuesEqual(form.values.nginxSettings[key], previous.nginxSettings[key])) {
       next.values.nginxSettings[key] = structuredClone(form.values.nginxSettings[key]);

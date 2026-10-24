@@ -4,6 +4,8 @@ const ACTIONS = new Set([
   'wp.cache.flush',
   'wp.transients.delete-all',
   'composer.dump-autoload',
+  'php.fpm.update',
+  'wp.toolkit',
 ]);
 
 export class WebsitePhpToolJobResultError extends Error {

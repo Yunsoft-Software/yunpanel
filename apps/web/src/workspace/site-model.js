@@ -4,10 +4,10 @@ const CRON = 'cron';
 const BACKUP = 'backup';
 export const SITE_TABS = [
   ['overview', 'Genel Bakış'], ['resources', 'Bağlı kaynaklar'], ['node', 'Uygulama'], ['deploy', 'Git / Yayınlama'],
-  ['hosting', 'Barındırma ve DNS'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
+  ['hosting', 'Barındırma ayarları'], ['domains', 'Alan adları'], ['dns', 'DNS'], ['ssl', 'SSL/TLS Sertifikaları'], ['files', 'Dosyalar'],
   ['databases', 'Veritabanları'], ['mail', 'E-posta'], ['logs', 'Günlükler'], ['analytics', 'İstatistikler'],
   [CRON, 'Zamanlanmış Görevler'], [BACKUP, 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],
-  ['php', 'PHP / WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Barındırma bilgileri'],
+  ['php', 'PHP Ayarları'], ['wordpress', 'WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Site Ayarları'],
 ];
 export function normalizeSiteTab(tab) {
   if (!tab || typeof tab !== 'string') return 'overview';
@@ -17,7 +17,8 @@ export function normalizeSiteTab(tab) {
   if (['backup', 'backups', 'restore', 'restores', 'backup-restore'].includes(lower)) return 'backup';
   if (['git', 'deploy', 'deployment', 'deployments'].includes(lower)) return 'deploy';
   if (['sftp', 'ssh', 'access-accounts', 'security', 'access'].includes(lower)) return 'access';
-  if (['wp', 'wordpress', 'php'].includes(lower)) return 'php';
+  if (['wp', 'wordpress'].includes(lower)) return 'wordpress';
+  if (lower === 'php') return 'php';
   if (['file-manager', 'file', 'files'].includes(lower)) return 'files';
   if (['database', 'databases', 'db'].includes(lower)) return 'databases';
   if (['mail', 'mailbox', 'mailboxes', 'email'].includes(lower)) return 'mail';

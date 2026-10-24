@@ -46,7 +46,7 @@ export function previewMailConfiguration(mailDomainId, { expectedRevision, statu
   });
 }
 
-export function applyMailConfiguration(mailDomainId, { expectedRevision, status, preview } = {}) {
+export function applyMailConfiguration(mailDomainId, { expectedRevision, status, preview, requestId } = {}) {
   positiveRevision(expectedRevision);
   if (!['enabled', 'disabled'].includes(status)) throw new Error('status is invalid');
   if (!preview || typeof preview.previewDigest !== 'string'
@@ -58,6 +58,7 @@ export function applyMailConfiguration(mailDomainId, { expectedRevision, status,
     body: {
       expectedRevision,
       status,
+      ...(requestId ? { requestId } : {}),
       previewDigest: preview.previewDigest,
       configurationSha256: preview.configuration.sha256,
       confirmation: preview.confirmation,
@@ -340,3 +341,7 @@ export function continueMailWebmail(mailDomainId, { operationId, expectedUpdated
 
 export const mailClientInternals = Object.freeze({ requiredId, positiveRevision, mailDomainPath, mailboxPath, aliasPath });
 
+
+export function getMailConfigurationRequest(mailDomainId, requestId) {
+  return panelRequest(`${mailDomainPath(mailDomainId)}/config-requests/${encodeURIComponent(requiredId(requestId, 'requestId'))}`);
+}

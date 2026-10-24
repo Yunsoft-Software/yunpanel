@@ -95,7 +95,7 @@ test('Website phpMyAdmin action uses an ephemeral same-origin POST handoff witho
   assert.match(client, /method: 'POST'/);
   assert.match(client, /credentials: 'same-origin'/);
   assert.match(client, /redirect: 'follow'/);
-  assert.match(client, /referrerPolicy: 'no-referrer'/);
+  assert.match(client, /referrerPolicy: 'same-origin'/);
   assert.match(client, /form\.set\('capability', handoff\.capability\)/);
   assert.match(client, /form\.delete\('capability'\)/);
   assert.doesNotMatch(client, /localStorage|sessionStorage|\?capability|console\.|window\.open/);

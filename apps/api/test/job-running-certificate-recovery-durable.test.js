@@ -12,6 +12,10 @@ import { createJobRecoveryContextReader } from '../src/job-recovery-context.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { recoverRunningCertificateOperation } from '../src/job-running-certificate-recovery.js';
 import { createServerRegistry } from '../src/server-registry.js';
+import { createMailServiceIdentityRegistry } from '../src/mail-service-identity-registry.js';
+import { reloadCertificateMail } from '../src/certificate-mail-reload.js';
+import { reconcileTerminalRecovery } from '../src/job-recovery-command.js';
+import { jobPublicView } from '../src/job-registry.js';
 
 const fingerprint = Array.from({ length: 32 }, (_, index) => index.toString(16).padStart(2, '0')).join(':').toUpperCase();
 const renewedFingerprint = Array.from({ length: 32 }, (_, index) => (31 - index).toString(16).padStart(2, '0')).join(':').toUpperCase();
@@ -203,4 +207,44 @@ test('missing certificate receipt preserves durable running state', async (t) =>
   );
   assert.equal((await fx.jobRegistry.getJob(fx.jobId)).status, 'running');
   assert.equal(fx.jobRegistry.recovery().jobs[0].jobId, fx.jobId);
+});
+
+for (const interruption of [false, true]) test(`cold mail renewal recovery preserves consumer proof${interruption ? ' through a terminal reconciliation interruption' : ''}`, async t => {
+  const fx = await fixture(t, 'production-renew');const filePath = path.join(fx.root, 'mail-identities.json');
+  const options = { filePath, getWebDomain: id => fx.domainRegistry.getDomain(id), getCertificate: id => fx.certificateRegistry.getCertificate(id) };
+  await fx.certificateRegistry.setState(fx.certificate.id, 'active');
+  const first = createMailServiceIdentityRegistry(options);await first.init();
+  await first.bind({ serverId: fx.server.id, webDomainId: fx.domain.id, expectedRevision: 0 });
+  await fx.certificateRegistry.setState(fx.certificate.id, 'renewing');
+  const cold = createMailServiceIdentityRegistry(options);await cold.init();
+  const live = liveCertificate({ fingerprint256: renewedFingerprint, validFrom: '2026-09-11T00:00:00.000Z', validTo: '2026-12-10T00:00:00.000Z' });
+  await fx.receiptStore.write({ serverId: fx.server.id, jobId: fx.jobId, certificateId: fx.certificate.id,
+    operation: fx.operation, result: { ...live, dryRun: false, status: 'renewed' } });
+  let nativeCalls = 0;
+  const args = { serverId: fx.server.id, jobId: fx.jobId, jobRegistry: fx.jobRegistry, domainRegistry: fx.domainRegistry,
+    certificateRegistry: fx.certificateRegistry, mailServiceIdentityRegistry: cold, serviceStatus: stoppedConsumers,
+    loadJobContext: id => fx.contextReader.read(id), readCertificateReceipt: (serverId, jobId) => fx.receiptStore.read(serverId, jobId),
+    inspectCertificate: async () => live, reloadCertificate: async () => ({ service: 'nginx', status: 'succeeded', stage: 'reload' }),
+    reloadMailCertificate: (result, identity) => reloadCertificateMail({ ...identity, result, mailServiceIdentityRegistry: cold,
+      certificateRegistry: fx.certificateRegistry, domainRegistry: fx.domainRegistry, reload: async value => {
+        nativeCalls++;assert.equal(value.fingerprint256, renewedFingerprint);
+        return { service: 'mail', status: 'succeeded', stage: 'reload', smtpFingerprintVerified: true, imapFingerprintVerified: true };
+      } }),
+  };
+  if (interruption) {
+    await assert.rejects(recoverRunningCertificateOperation({ ...args, reconcile: async () => { throw Error('interrupted after durable completion'); } }),
+      { code: 'job_certificate_recovery_reconciliation_failed' });
+    const restarted = createDurableJobRegistry({ filePath: path.join(fx.root, 'jobs.json'), registryFactory: createJobRegistry });await restarted.init();
+    assert.equal((await restarted.getJob(fx.jobId)).status, 'succeeded');
+    assert.equal(restarted.recovery().jobs[0].jobId, fx.jobId);
+    await reconcileTerminalRecovery({ serverId: fx.server.id, jobId: fx.jobId, jobRegistry: restarted,
+      domainRegistry: fx.domainRegistry, certificateRegistry: fx.certificateRegistry, mailServiceIdentityRegistry: cold, serviceStatus: stoppedConsumers });
+    assert.equal(restarted.recovery(), null);
+  } else await recoverRunningCertificateOperation(args);
+  assert.equal(nativeCalls, 1);const persisted = jobPublicView(await fx.jobRegistry.getJob(fx.jobId));
+  assert.equal(persisted.result.mailReloadOutcome.smtpFingerprintVerified, true);
+  assert.equal(/letsencrypt|privkey/.test(JSON.stringify(persisted.result)), false);
+  const certificate = await fx.certificateRegistry.getCertificate(fx.certificate.id);
+  assert.equal(certificate.state, 'active');assert.equal(certificate.fingerprint256, renewedFingerprint);
+  assert.equal(certificate.lastReloadOutcome.status, 'succeeded');assert.equal((await cold.getForServer(fx.server.id)).revision, 1);
 });

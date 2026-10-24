@@ -12,7 +12,7 @@ import {
   createWebsiteRemovalPreview,
 } from '../src/website-removal-plan.js';
 
-function mockPreview({ withDomains = true, backups = [], withCrons = false, withRuntimeBinding = true } = {}) {
+function mockPreview({ withDomains = true, backups = [], withCrons = false, withRuntimeBinding = true, withDatabases = false } = {}) {
   const website = {
     id: 'ws-1',
     name: 'test-site',
@@ -30,7 +30,7 @@ function mockPreview({ withDomains = true, backups = [], withCrons = false, with
     targetServerId: null,
     dependencies: {
       domains: withDomains ? [{ id: 'dom-1', primaryDomain: 'example.com', parentDomainId: null }] : [],
-      databases: { status: 'available', items: [{ id: 'db-1', state: 'mydb' }] },
+      databases: { status: 'available', items: withDatabases ? [{ id: 'db-1', state: 'mydb' }] : [] },
       sftpKeys: { status: 'available', items: [{ id: 'key-1', state: 'active' }] },
       runtimeBindings: { status: 'available', items: withRuntimeBinding ? [{ id: 'app-1', state: 'active' }] : [] },
       unixIdentities: { status: 'available', items: [{ id: 'yunapp-site1', state: 'active' }] },
@@ -91,10 +91,12 @@ test('website-removal-runtime coordinates domain removal child operation before 
   const runtime = createWebsiteRemovalRuntime({
     domainRegistry: { listDomains: async () => [] },
     registry,
-    previewProvider: async () => mockPreview(),
+    previewProvider: async () => mockPreview({ withDatabases: true }),
     domainRemovalRuntime,
     websiteRegistry: { getWebsite: async () => null, finalizeWebsiteRemoval: async () => {} },
     ...applicationCleanupDependencies(actionsCalled),
+    databaseCleanupInspector: async () => ({ ready: true }),
+    databaseCleanupHandler: async () => { actionsCalled.push('removeDb:db-1'); return { databaseBindingsCleaned: true, unboundBindings: [{ id: 'db-1', unbound: true, physicalVerified: true }] }; },
     databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
     websiteSftpKeyRegistry: {
       listKeys: async () => [{ id: 'key-1', revision: 1 }],
@@ -119,7 +121,7 @@ test('website-removal-runtime coordinates domain removal child operation before 
     unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
   });
 
-  const preview = mockPreview();
+  const preview = mockPreview({ withDatabases: true });
   // 1. Start operation -> should execute step 1 (domain_removal) and wait for domain to complete
   let op = await runtime.start({ websiteId: preview.website.id, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
   assert.equal(op.status, 'running');
@@ -191,6 +193,7 @@ test('website-removal-runtime cleans up database credentials and passes retained
 
   const preview = mockPreview({
     withDomains: false,
+    withDatabases: true,
     withRuntimeBinding: false,
     backups: [{ id: 'backup-1' }, { id: 'backup-2' }],
   });
@@ -208,6 +211,12 @@ test('website-removal-runtime cleans up database credentials and passes retained
     unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
     unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
     fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
+    databaseCleanupInspector: async () => ({ ready: true }),
+    databaseCleanupHandler: async () => {
+      actions.push({ type: 'deleteCredential', credId: 'cred-db-1', confirmation: 'delete-database-credential:cred-db-1:2' });
+      actions.push({ type: 'unbindDatabase', bindingId: 'db-1', confirmation: 'unbind-database:db-1:3' });
+      return { databaseBindingsCleaned: true, unboundBindings: [{ id: 'db-1', databaseName: 'mydb', unbound: true, physicalVerified: true }] };
+    },
     databaseCredentialRegistry: {
       getForBinding: async (bindingId) => ({ id: `cred-${bindingId}`, revision: 2 }),
       deleteCredential: async (credId, opts) => {

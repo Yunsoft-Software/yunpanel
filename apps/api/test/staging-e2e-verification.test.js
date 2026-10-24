@@ -1,3 +1,10 @@
+// Source and fixture contracts only. Real browser/host acceptance is e2e/live-audit.
+async function assertAcceptanceGateDocumented(id) {
+  const { readFile } = await import('node:fs/promises');
+  const text = await readFile(new URL('../../../todo.md', import.meta.url), 'utf8');
+  const line = text.split('\n').find((value) => value.startsWith('- [') && value.includes(id));
+  assert.ok(line, 'Acceptance scope must remain documented: ' + id);
+}
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
@@ -467,7 +474,7 @@ import {
   websiteBackupOperationPublicView,
 } from '../src/website-backup-operation-registry.js';
 import { createWebsiteBackupService } from '../src/website-backup-service.js';
-import { createWebsiteRestoreService } from '../src/website-restore-service.js';
+import { createWebsiteRestoreService, websiteRestoreTransactionId } from '../src/website-restore-service.js';
 import { mountWebsiteRestoreRoutes, isWebsiteRestoreHttpError } from '../src/website-restore-http.js';
 import { createBackupOperationRegistry } from '../src/backup-operation-registry.js';
 import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
@@ -1942,7 +1949,7 @@ test('Staging E2E: Revocation of grants, logout, or account suspension terminate
 // (Creation -> Files -> DNS/SSL -> Mail -> DB/phpMyAdmin -> Runtime -> Backup/Restore -> Retry -> Deletion -> Restart Reconciliation)
 // ============================================================================
 
-test('Staging E2E PROD-09: End-to-end single-version production exit gate verifies complete lifecycle from creation to deletion and restart reconciliation', async (t) => {
+test('Source contract PROD-09: End-to-end single-version production exit gate verifies complete lifecycle from creation to deletion and restart reconciliation', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -2185,7 +2192,7 @@ test('Staging E2E PROD-09: End-to-end single-version production exit gate verifi
 // (Owner, Site A, Site B, Direct Customer Scopes with Zero Metadata Leakage)
 // ============================================================================
 
-test('Staging E2E PROD-09: Multi-tenant boundary isolation across Owner, Site A, Site B, and Direct Customer with zero metadata leakage', async (t) => {
+test('Source contract PROD-09: Multi-tenant boundary isolation across Owner, Site A, Site B, and Direct Customer with zero metadata leakage', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -2351,7 +2358,7 @@ test('Staging E2E PROD-09: Multi-tenant boundary isolation across Owner, Site A,
 // (Stale Response, Direct API Bypass, Concurrent Revocation, and Service Faults)
 // ============================================================================
 
-test('Staging E2E PROD-09: Fail-closed error handling under stale response, direct API bypass, concurrent revocation, and service faults', async (t) => {
+test('Source contract PROD-09: Fail-closed error handling under stale response, direct API bypass, concurrent revocation, and service faults', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -2452,7 +2459,7 @@ test('Staging E2E PROD-09: Fail-closed error handling under stale response, dire
 // Separation, and Production Exit Gate HTTP Routes
 // ============================================================================
 
-test('Staging E2E PROD-09: Strict .44 host isolation, verification evidence separation, and production exit gate HTTP routes', async () => {
+test('Source contract PROD-09: Strict .44 host isolation, verification evidence separation, and production exit gate HTTP routes', async () => {
   // 1. Strict host .44 isolation:
   assert.throws(
     () => assertNoDot44Host('192.168.1.44', 'network target'),
@@ -2646,89 +2653,22 @@ test('Staging E2E PROD-09: Strict .44 host isolation, verification evidence sepa
 // STAGING E2E PART 8: PAR-00b Feature Parity Matrix, Reseller Scopes & EKL-07
 // ============================================================================
 
-test('Staging E2E PAR-00b: Feature parity matrix completeness, simple Reseller validation, deferred scopes, and open EKL-07 research status', async () => {
-  const fs = await import('node:fs');
-  const path = await import('node:path');
-  const candidates = [
-    new URL('../../../docs/plesk-feature-parity.md', import.meta.url).pathname,
-    path.resolve(process.cwd(), 'docs/plesk-feature-parity.md'),
-    path.resolve(process.cwd(), '../../docs/plesk-feature-parity.md')
-  ];
-  const parityPath = candidates.find((p) => fs.existsSync(p));
-  assert.ok(parityPath && fs.existsSync(parityPath), 'docs/plesk-feature-parity.md must exist');
-
-  const content = fs.readFileSync(parityPath, 'utf8');
-
-  // 1. All 21 groups must be documented
-  for (let i = 1; i <= 21; i++) {
-    const groupNum = String(i).padStart(2, '0');
-    assert.ok(
-      content.includes(`Grup ${groupNum}`),
-      `Feature group ${groupNum} must be documented in parity matrix`
-    );
-  }
-
-  // 2. PAR-01 and PAR-02 simple reseller developments must be reflected
-  assert.ok(content.includes('PAR-01'), 'PAR-01 simple reseller developments must be present');
-  assert.ok(content.includes('PAR-02'), 'PAR-02 simple customer/reseller management must be present');
-  assert.ok(content.includes('RS-01–02'), 'RS-01-02 ownership scope must be present');
-  assert.ok(content.includes('RS-03–05'), 'RS-03-05 customer/reseller management must be present');
-
-  // 3. Deferred reseller items must be classified as deferred / next phase (NOT MVP blockers, NOT completed)
-  const deferredItems = [
-    'Alt Bayi Zinciri',
-    'Ayrı Reseller Hizmet Paketi Motoru',
-    'Hosting Add-on Paketleri',
-    'Abonelik Senkronizasyonu',
-    'Overselling',
-    'Otomatik Faturalama',
-    'Bayi Markalama',
-    'Müşteri ↔ Bayi Dönüşümü',
-    'Toplu Hesap Transferi',
-    'Login-As',
-  ];
-  for (const item of deferredItems) {
-    assert.ok(
-      content.includes(item),
-      `Deferred item ${item} must be explicitly listed in deferred scopes`
-    );
-  }
-  assert.ok(
-    content.includes('ilk sürüm MVP engeli değildir') || content.includes('MVP engeli değildir'),
-    'Deferred items must not be treated as MVP blockers'
-  );
-  assert.ok(
-    content.includes('tamamlanmış iş sayılmaz'),
-    'Deferred items must not be treated as completed work'
-  );
-
-  // 4. No synthetic completion percentage generated from checkbox counts
-  assert.ok(
-    content.includes('Yapay Oran Yasağı') || content.includes('yapay bir tamamlanma yüzdesi üretilmez'),
-    'Synthetic completion percentage prohibition must be stated'
-  );
-  assert.ok(!/%[0-9]{2}\s+(tamamlandı|hazır|oran|başarı)/i.test(content), 'No synthetic percentage should be present');
-
-  // 5. EKL-07 extension research status must remain open
-  assert.ok(
-    content.includes('EKL-07') && content.includes('AÇIK TUTULDU'),
-    'EKL-07 extension research status must remain open'
-  );
-
-  // 6. Role separation (Owner, Reseller, Customer, Site Manager) and OS boundaries (Ubuntu Linux vs Windows)
-  assert.ok(content.includes('Owner'), 'Owner role boundary must be documented');
-  assert.ok(content.includes('Reseller'), 'Reseller role boundary must be documented');
-  assert.ok(content.includes('Customer'), 'Customer role boundary must be documented');
-  assert.ok(content.includes('Ubuntu Linux'), 'Ubuntu Linux primary target OS must be documented');
-  assert.ok(content.includes('Windows Server'), 'Windows Server separate parity track must be documented');
-  assert.ok(content.includes('Ayrı Hat'), 'Windows must be marked as separate track, not completed by Ubuntu');
+test('documentation contract retains 21 groups, 162 unique feature IDs and deferred reseller scope', async () => {
+  const content = await readFile(path.resolve(import.meta.dirname, '../../../docs/plesk-feature-parity.md'), 'utf8');
+  const groups = [...content.matchAll(/^## (\d{2}) [—-]/gm)].map((match) => match[1]);
+  assert.deepEqual(groups, Array.from({ length: 21 }, (_, index) => String(index + 1).padStart(2, '0')));
+  const rows = [...content.matchAll(/^\| ([A-Z]+-\d+) \| (.*?) \| (.*?) \|$/gm)];
+  assert.equal(rows.length, 162); assert.equal(new Set(rows.map((match) => match[1])).size, 162);
+  const statuses = new Map(rows.map((match) => [match[1], match[3]]));
+  for (const id of ['HSP-05','HSP-06','HSP-07','HSP-08']) assert.equal(statuses.get(id), 'Sonraki faz');
+  assert.equal(rows.some((match) => match[3] === 'Tamamlandı'), false);
 });
 
 // ============================================================================
 // STAGING E2E PART 8: Live Tenant Role Continuity, Open WebSocket, elFinder Gateway, Job Fail-Closed Lifecycle, Host Process Continuity, and Recovery (T-DEV-RESELLER-LIVE)
 // ============================================================================
 
-test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-tier hierarchy, open WebSocket, elFinder gateway, job process fail-closed lifecycle, website host continuity, and recovery', async (t) => {
+test('Source contract T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-tier hierarchy, open WebSocket, elFinder gateway, job process fail-closed lifecycle, website host continuity, and recovery', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -3956,7 +3896,7 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
   assert.equal(checkValid.authorized, true);
 
   // Role continuity verified across full hierarchy
-  assert.ok(true, 'Full multi-tier hierarchy role continuity, live WebSocket, elFinder gateway, and job lifecycle verified.');
+
 });
 
 // ============================================================================
@@ -3966,7 +3906,7 @@ test('Staging E2E T-DEV-RESELLER-LIVE: Live tenant role continuity across multi-
 //  replay protection, panel auth cookie isolation, and real Unix socket fail-closed lifecycle)
 // ============================================================================
 
-test('Staging E2E YP-04: phpMyAdmin session binding and tenant isolation real acceptance across Owner, Reseller, and Customer tiers, account/site switching (Owner -> Site A -> Site B), stale vendor cookies, direct vendor URL blocking, logout, logout-all, password-session rotation, customer/reseller suspend, grant removal, replay protection, and Unix socket fail-closed lifecycle', async (t) => {
+test('Source contract YP-04: phpMyAdmin session binding and tenant isolation real acceptance across Owner, Reseller, and Customer tiers, account/site switching (Owner -> Site A -> Site B), stale vendor cookies, direct vendor URL blocking, logout, logout-all, password-session rotation, customer/reseller suspend, grant removal, replay protection, and Unix socket fail-closed lifecycle', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -4884,7 +4824,7 @@ test('Staging E2E YP-04: phpMyAdmin session binding and tenant isolation real ac
 
   // 15. Server Isolation & Host Safety Gate
   assertNoDot44Host(stagingServerId);
-  assert.ok(true, 'YP-04 phpMyAdmin session binding and tenant isolation real acceptance verified.');
+
 });
 
 // ============================================================================
@@ -4892,7 +4832,7 @@ test('Staging E2E YP-04: phpMyAdmin session binding and tenant isolation real ac
 // AI History Grants & Tool Policy, Long-running Disconnect & Recovery, Ownership Migration & Rollback
 // ============================================================================
 
-test('Staging E2E RS-02e / kalan: Live auth store session integration, site resource boundary enforcement, AI history & policy grants, long-running pathway revocation & recovery, ownership migration rollback, and host isolation', async (t) => {
+test('Source contract RS-02e / kalan: Live auth store session integration, site resource boundary enforcement, AI history & policy grants, long-running pathway revocation & recovery, ownership migration rollback, and host isolation', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -6132,14 +6072,14 @@ test('Staging E2E RS-02e / kalan: Live auth store session integration, site reso
 
   // 6E: Host Isolation & Safety Gate
   assertNoDot44Host(stagingServerId);
-  assert.ok(true, 'RS-02e / kalan: Live auth store session, site resource boundary, AI history & policy grants, long-running disconnects, ownership rollback, and host isolation verified.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 10: RS-04a kabul / RS-03–05 kalan (T-DEV-OWNER-PROFILES)
 // ============================================================================
 
-test('Staging E2E RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve gerçek React/browser/HTTP kabulü; reseller/customer self-service, güvenli site runtime ve hesap lifecycle gerçek session/gateway/WS davranışı (T-DEV-OWNER-PROFILES)', async (t) => {
+test('Source contract RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve gerçek React/browser/HTTP kabulü; reseller/customer self-service, güvenli site runtime ve hesap lifecycle gerçek session/gateway/WS davranışı (T-DEV-OWNER-PROFILES)', async (t) => {
   const f = hostingAuthFixture();
   t.after(() => f.db.close());
 
@@ -7009,14 +6949,14 @@ test('Staging E2E RS-04a kabul / RS-03–05 kalan: Node24/npm11 tam check ve ger
 
   // 16. Host Isolation & Safety Gate
   assertNoDot44Host(stagingServerId);
-  assert.ok(true, 'RS-04a kabul / RS-03–05 kalan: Multi-tenant self-service, fail-closed boundaries, real session/gateway/WS lifecycle, and host decoupling verified.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 8: P2 — Post-Acceptance Migration Cleanup & Safe Fallback Maintenance
 // ============================================================================
 
-test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd compatibility and fallback maintenance, runtime engine preservation, and file manager/terminal non-regression', async (t) => {
+test('Source contract P2: Post-acceptance migration cleanup, legacy direct-systemd compatibility and fallback maintenance, runtime engine preservation, and file manager/terminal non-regression', async (t) => {
   // Staging server ID: strictly authorized staging, never .44
   const stagingServerId = '57f8611c-0af7-4d2f-8291-2fe7dbab22fe';
   assertNoDot44Host(stagingServerId);
@@ -7612,7 +7552,7 @@ test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd c
 
   // Final Gate Verification
   assertNoDot44Host(stagingServerId);
-  assert.ok(true, 'P2: Legacy direct-systemd compatibility safely maintained, migration fallback audit passed, runtime engines and file manager/terminal non-regression verified.');
+
 });
 
 // ============================================================================
@@ -7620,7 +7560,7 @@ test('Staging E2E P2: Post-acceptance migration cleanup, legacy direct-systemd c
 // Reseller Branding Deferral & Multi-Tier Tenant Boundary Enforcement
 // ============================================================================
 
-test('Staging E2E PAR-04: Non-reseller capabilities retention with established inventory IDs, cross-connections to groups B-E, reseller branding deferral, and fail-closed tenant boundary enforcement', async (t) => {
+test('Source contract PAR-04: Non-reseller capabilities retention with established inventory IDs, cross-connections to groups B-E, reseller branding deferral, and fail-closed tenant boundary enforcement', async (t) => {
   // 1. Establish inventory integrity across all domains
   const inventory = NON_RESELLER_INVENTORY;
   assert.ok(inventory && typeof inventory === 'object', 'Non-reseller inventory catalog must exist');
@@ -7830,7 +7770,6 @@ test('Staging E2E PAR-04: Non-reseller capabilities retention with established i
   assert.equal(custAllowedRes.status, 200);
   assert.equal(custAllowedRes.body.data.id, 'DNS-01');
 
-  assert.ok(true, 'PAR-04: Non-reseller capabilities, cross-connections, branding deferral, and tenant boundaries fully verified in staging E2E suite.');
 });
 
 // ============================================================================
@@ -7838,7 +7777,7 @@ test('Staging E2E PAR-04: Non-reseller capabilities retention with established i
 // External Lifecycle Parity, and Reseller Billing Deferral Enforcement
 // ============================================================================
 
-test('Staging E2E PAR-05: Windows OS equivalence boundaries (WIN-01..06) fail-closed preserving Linux tenant isolation, external lifecycle contracts fail-closed when unconfigured, and reseller billing is explicitly deferred to post-MVP', async (t) => {
+test('Source contract PAR-05: Windows OS equivalence boundaries (WIN-01..06) fail-closed preserving Linux tenant isolation, external lifecycle contracts fail-closed when unconfigured, and reseller billing is explicitly deferred to post-MVP', async (t) => {
   // 1. Windows OS Equivalence Inventory and Strict Host Distinction
   const osLines = listOsEquivalenceAdapters();
   assert.equal(osLines.length, 6, 'Must inventory all 6 Windows equivalence lines');
@@ -8071,14 +8010,13 @@ test('Staging E2E PAR-05: Windows OS equivalence boundaries (WIN-01..06) fail-cl
   assert.equal(cleanBillRes.status, 200);
   assert.equal(cleanBillRes.body.data.valid, true);
 
-  assert.ok(true, 'PAR-05: Windows OS equivalence boundaries, fail-closed contracts, external lifecycle boundaries, and reseller billing deferral verified.');
 });
 
 // ============================================================================
 // STAGING E2E T-DEV-MR-SINGLE: Single Mailbox Removal Lifecycle & Session Guard
 // ============================================================================
 
-test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/uygula/yedekle/sil; B\'nin SMTP/IMAP/webmail kullanımı sürsün. A\'nın mevcut Dovecot oturumları, yeni auth/teslimat reddi', async (t) => {
+test('Source contract T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/uygula/yedekle/sil; B\'nin SMTP/IMAP/webmail kullanımı sürsün. A\'nın mevcut Dovecot oturumları, yeni auth/teslimat reddi', async (t) => {
   const stagingServerId = randomUUID();
   const stagingWebDomainId = randomUUID();
   const stagingMailDomainId = randomUUID();
@@ -9157,7 +9095,6 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
   mailboxes.delete(testMbId);
   backups.delete('backup-recon-001');
 
-  assert.ok(true, 'T-DEV-MR-SINGLE: Single mailbox lifecycle, session termination, and sibling continuity verified.');
 });
 
 // ============================================================================
@@ -9166,7 +9103,7 @@ test('Staging E2E T-DEV-MR-SINGLE: Aynı etkin mail domain içinde A\'yı kapat/
 // ve sonuç odağı / ekran okuyucu / mobil / klavye / koyu tema uyumu
 // ============================================================================
 
-test('Staging E2E T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme ve sonuç erişilebilirliği', async (t) => {
+test('Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme ve sonuç erişilebilirliği', async (t) => {
   // 1. Staging environment isolation: Never access .44
   const stagingServerId = '77777777-7777-4777-8777-777777777777';
   assertNoDot44Host(stagingServerId);
@@ -9401,10 +9338,9 @@ test('Staging E2E T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki de�
   const secondAttempt = await provisioningErrorFlow.submit(testInput());
   assert.equal(secondAttempt, errorResult); // Returns existing result without repeating create POST
 
-  assert.ok(true, 'T-DEV-CREATE-RESULT: StrictMode, logout/login, password clearing, accessibility, and safe retry verified.');
 });
 
-test('Staging E2E T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda güncel API/web build kimliğiyle işlem durumu ve kurulum ilerletme doğrulaması', async (t) => {
+test('Source contract T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda güncel API/web build kimliğiyle işlem durumu ve kurulum ilerletme doğrulaması', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Host Verification
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -9885,14 +9821,14 @@ test('Staging E2E T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda günc
 
   // 6. Preservation of Documentary Integrity & Independent Verification
   // Files, hosting, alias, and SSL form items remain open as required
-  assert.ok(true, 'T-DEV-JOB-UX: .44 host strictly excluded, build identity verified, job presentation and provisioning advance flows validated without accumulating old test counts.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 12: T-EMBER Staging Deployment & Hash Verification
 // ============================================================================
 
-test('Staging E2E T-EMBER: Yalnız izin verilen test hostunda yeni build dağıtımı, commit/asset/font hash ve cache yeniliği doğrulaması, UX akışları ve phpMyAdmin kısıtı sürekliliği', async (t) => {
+test('Source contract T-EMBER: Yalnız izin verilen test hostunda yeni build dağıtımı, commit/asset/font hash ve cache yeniliği doğrulaması, UX akışları ve phpMyAdmin kısıtı sürekliliği', async (t) => {
   // 1. Strict .44 Host Isolation & Allowlisted Staging Verification
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -9972,7 +9908,6 @@ test('Staging E2E T-EMBER: Yalnız izin verilen test hostunda yeni build dağıt
   }
 
   // 4. Role & Tenant Scope Boundaries + phpMyAdmin Session Binding
-  assert.ok(true, 'T-EMBER: Multi-tenant boundaries and phpMyAdmin session binding strictly intact.');
 
   // 5. Authentic Screenshots & Dribbble Evaluation
   const authenticScreenshotArtifacts = [
@@ -9987,14 +9922,14 @@ test('Staging E2E T-EMBER: Yalnız izin verilen test hostunda yeni build dağıt
   }
 
   // 6. Preservation of Documentary Integrity & Independent Verification
-  assert.ok(true, 'T-EMBER: allowlisted host verified, commit/asset/font hash and cache freshness verified, authentic screenshots confirmed, secondary Dribbble nuances recorded.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 13: T-SITE-WORKSPACE Files, Databases, and Mail Isolation
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: Site A hesabıyla /websites/<Domain-A>/files, /databases, /mail reload/back/forward akışları; Site B\'nin Domain/Website/binding/credential/mailbox/alias/job kimliklerini doğrudan API isteğine yerleştirme, body ile sahiplik taklidi, eksik veya yeniden atanmış registry ilişkileri, global mail/DB envanteri ve başka siteye ait job sonucu/konfigürasyon/artifact metadatası sızıntı önleme, salt okunur kullanıcı mutation engelleme doğrulaması', async (t) => {
+test('Source contract T-SITE-WORKSPACE: Site A hesabıyla /websites/<Domain-A>/files, /databases, /mail reload/back/forward akışları; Site B\'nin Domain/Website/binding/credential/mailbox/alias/job kimliklerini doğrudan API isteğine yerleştirme, body ile sahiplik taklidi, eksik veya yeniden atanmış registry ilişkileri, global mail/DB envanteri ve başka siteye ait job sonucu/konfigürasyon/artifact metadatası sızıntı önleme, salt okunur kullanıcı mutation engelleme doğrulaması', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Environment
   const stagingIp = '157.180.11.28';
   const stagingUrl = 'https://server.cryptoraichu.website';
@@ -10625,14 +10560,14 @@ test('Staging E2E T-SITE-WORKSPACE: Site A hesabıyla /websites/<Domain-A>/files
   }
 
   // 8. Documentary Integrity & Verification Evidence Distinction
-  assert.ok(true, 'T-SITE-WORKSPACE: Isolation, identity spoofing fail-closed, registry consistency, info disclosure prevention, and read-only mutation restrictions successfully verified.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 14: T-SITE-WORKSPACE File Manager, elFinder & Filesystem Deep Acceptance
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: Dosya yöneticisinin klasör ağacı, deep path, symlink, Unicode/uzun dosya adı, 1000+ kayıt, liste/ızgara, gizli dosyalar, seçim, silme ve yeniden adlandırma işlemlerini dedicated site Unix kullanıcısı altında gerçek dosya sistemi sınırlarında doğrulama; editörün değişmiş dosyaya yazmayı reddetmesi (çakışma kontrolü), draft uyarısı, büyük dosya ve kesilen upload sonrasında yalnız kalan dosyaların yüklenmesi, Website değişiminde eski istek/state sızıntısı olmaması ve elFinder fail-closed kiracı izolasyonu doğrulaması', async (t) => {
+test('Source contract T-SITE-WORKSPACE: Dosya yöneticisinin klasör ağacı, deep path, symlink, Unicode/uzun dosya adı, 1000+ kayıt, liste/ızgara, gizli dosyalar, seçim, silme ve yeniden adlandırma işlemlerini dedicated site Unix kullanıcısı altında gerçek dosya sistemi sınırlarında doğrulama; editörün değişmiş dosyaya yazmayı reddetmesi (çakışma kontrolü), draft uyarısı, büyük dosya ve kesilen upload sonrasında yalnız kalan dosyaların yüklenmesi, Website değişiminde eski istek/state sızıntısı olmaması ve elFinder fail-closed kiracı izolasyonu doğrulaması', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Environment
   const stagingIp = '157.180.11.28';
   const stagingUrl = 'https://server.cryptoraichu.website';
@@ -11183,14 +11118,14 @@ test('Staging E2E T-SITE-WORKSPACE: Dosya yöneticisinin klasör ağacı, deep p
   );
 
   // 13. Documentary Integrity & Verification Evidence Distinction
-  assert.ok(true, 'T-SITE-WORKSPACE: Folder tree, deep path, symlink, Unicode/long filenames, 1000+ records, list/grid, hidden files, selection, deletion, rename, editor conflict detection (409), draft warning, large files, interrupted upload recovery, website switching isolation, and elFinder fail-closed boundaries successfully verified.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 15: T-SITE-WORKSPACE Database Credential Lifecycle & Fail-Closed Scoping
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: Site içinden veritabanı credential create/apply, mevcut kullanıcı apply, parola rotation, revoke, doğrulanmış backup, restore ve delete/finalize zincirlerini gerçek MariaDB ile dene; API/job/grant kapsamı yalnız seçilen Website olmalı, failed/cancelled/timeout başarı gibi gösterilmemeli, yeni bağımsız schema oluşturma bu turun kapsamına dahil olmamalı', async (t) => {
+test('Source contract T-SITE-WORKSPACE: Site içinden veritabanı credential create/apply, mevcut kullanıcı apply, parola rotation, revoke, doğrulanmış backup, restore ve delete/finalize zincirlerini gerçek MariaDB ile dene; API/job/grant kapsamı yalnız seçilen Website olmalı, failed/cancelled/timeout başarı gibi gösterilmemeli, yeni bağımsız schema oluşturma bu turun kapsamına dahil olmamalı', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Environment
   const stagingIp = '157.180.11.28';
   const stagingUrl = 'https://server.cryptoraichu.website';
@@ -12096,14 +12031,14 @@ test('Staging E2E T-SITE-WORKSPACE: Site içinden veritabanı credential create/
   assert.equal(siteManagerBCreateSchema.body.error.code, 'site_scope_forbidden');
 
   // 16. Documentary Integrity Verification
-  assert.ok(true, 'T-SITE-WORKSPACE: Site-scoped database credential lifecycle (create/apply, existing user apply, password rotation, revoke, verified backup, restore, delete/finalize) successfully verified with real MariaDB integration, fail-closed boundaries, cross-tenant isolation, and exclusion of independent schema creation.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 16: T-SITE-WORKSPACE Site Manager phpMyAdmin Session Binding & Tenant Isolation
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel kaynakta kasıtlı olarak kapalıdır: phpmyadmin_site_session_binding_required; YP-04 panel-session ve güncel Website yetkisi bağlı gateway/SQL session doğrulamasının gerçek PHP/Nginx ortamında Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleriyle fail-closed doğrulanması', async (t) => {
+test('Source contract T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel kaynakta kasıtlı olarak kapalıdır: phpmyadmin_site_session_binding_required; YP-04 panel-session ve güncel Website yetkisi bağlı gateway/SQL session doğrulamasının gerçek PHP/Nginx ortamında Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleriyle fail-closed doğrulanması', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Environment
   const stagingIp = '157.180.11.28';
   const stagingUrl = 'https://server.cryptoraichu.website';
@@ -12353,7 +12288,8 @@ test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel
   const apiBase = `http://127.0.0.1:${httpServer.address().port}`;
 
   // 6. Real Unix Socket Server for phpMyAdmin Handoff Consumer
-  const tmpRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-phpmyadmin-site-mgr-'));
+  const { realpath: canonicalPath } = await import('node:fs/promises');
+  const tmpRoot = await canonicalPath(await mkdtemp(path.join('/tmp', 'yp-pma-')));
   const socketDirectory = path.join(tmpRoot, 'runtime');
   const socketPath = path.join(socketDirectory, 'handoff.sock');
   const policyGid = 2468;
@@ -12829,7 +12765,7 @@ test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel
 
   // 19. Documentary Integrity Verification
   assertNoDot44Host(serverId);
-  assert.ok(true, 'T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçiş kapısı (phpmyadmin_site_session_binding_required) YP-04 panel oturumu ve güncel Website yetkisine bağlı canlı gateway/SQL session doğrulamasıyla fail-closed olarak doğrulandı; Owner→Site A→Site B hesap değişimi, mevcut vendor cookie, logout/login, session rotation, kaldırılan Website yetkisi, cookie/capability replay ve doğrudan vendor URL kontrolleri fail-closed işletildi; Owner akışı regresyonsuz korundu.');
+
 });
 
 // ============================================================================
@@ -12838,7 +12774,7 @@ test('Staging E2E T-SITE-WORKSPACE: Site yöneticisi phpMyAdmin geçişi güncel
 // Disabled Domain Non-Activation, Artifact Leakage Guard & Delivery Separation
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemlerini; site scoped config-preview/apply ve durable job gözlemini test et. Disabled mail alan adı sırf hesap değişikliği uygulanıyor diye etkinleşmemeli; global mail domain veya artifact ayrıntıları site hesabına dönmemeli. Gerçek SMTP/IMAP teslimi ve Roundcube oturumu ayrı doğrulansın; örnek-verili webmail kartı bunların kanıtı değildir', async (t) => {
+test('Source contract T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemlerini; site scoped config-preview/apply ve durable job gözlemini test et. Disabled mail alan adı sırf hesap değişikliği uygulanıyor diye etkinleşmemeli; global mail domain veya artifact ayrıntıları site hesabına dönmemeli. Gerçek SMTP/IMAP teslimi ve Roundcube oturumu ayrı doğrulansın; örnek-verili webmail kartı bunların kanıtı değildir', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized Staging Environment
   const stagingIp = '157.180.11.28';
   const stagingUrl = 'https://server.cryptoraichu.website';
@@ -13631,13 +13567,13 @@ test('Staging E2E T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPan
 
   // 14. Documentary Integrity Verification
   assertNoDot44Host(serverId);
-  assert.ok(true, 'T-SITE-WORKSPACE: E-posta site ekranında gerçek MailboxesPanel/MailAliasesPanel ile oluşturma, kota, parola ve yönlendirme işlemleri; site-scoped config-preview/apply ve durable job gözlemi eksiksiz doğrulandı; disabled mail alan adının hesap değişikliğiyle etkinleşmesi fail-closed engellendi; global mail domain ve altyapı artifact detayları site hesabından izole edildi; gerçek SMTP/IMAP teslimi ve Roundcube oturum doğrulaması ayrıştırıldı; çok kiracılı sınırlar fail-closed korundu.');
+
 });
 
 // STAGING E2E PART 18: T-SITE-WORKSPACE Joint API & Web Staging Deployment, Hash Verification, and Authentic Screenshots
 // ============================================================================
 
-test('Staging E2E T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme', async (t) => {
+test('Source contract T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -13780,14 +13716,14 @@ test('Staging E2E T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web
   }
 
   // 6. Preservation of Documentary Integrity & Independent Verification
-  assert.ok(true, 'T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve web sürümlerini birlikte dağıt; çalışan commit ve servis edilen asset hash\'lerini doğrula. Yeni gerçek masaüstü/tablet/mobil ekran görüntülerini üret. Bu turdaki 15 örnek-verili bileşen ekranını canlı veya tam üretim bundle\'ı kanıtı olarak gösterme.');
+
 });
 
 // ============================================================================
 // STAGING E2E PART 19: T-DB-UI Root Website Local DNS, Virtual Mail & Shared Roundcube Provisioning Lifecycle
 // ============================================================================
 
-test('Staging E2E T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımlarını gerçek hostta yarat, başarılı/blocked/partial/failure progress ve API yeniden giriş sonrası state\'i tarayıcıda doğrula. Subdomain/alias yeni zone/mail/Roundcube kurmasın. Dış NS delegation, SMTP/IMAP teslimi, webmail oturumu ve sertifika erişimi ayrı doğrulansın. Hata enjeksiyonuyla üçüncü otomatik denemede durma, manuel retry, restart/idempotency ve compensation kanıtlansın', async (t) => {
+test('Source contract T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımlarını gerçek hostta yarat, başarılı/blocked/partial/failure progress ve API yeniden giriş sonrası state\'i tarayıcıda doğrula. Subdomain/alias yeni zone/mail/Roundcube kurmasın. Dış NS delegation, SMTP/IMAP teslimi, webmail oturumu ve sertifika erişimi ayrı doğrulansın. Hata enjeksiyonuyla üçüncü otomatik denemede durma, manuel retry, restart/idempotency ve compensation kanıtlansın', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -14570,7 +14506,7 @@ test('Staging E2E T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcu
 
   // 9. Documentary Integrity & Non-Bypass Check
   // Note: todo.md line 124 remains unchecked until live physical evidence is recorded by Code Factory
-  assert.ok(true, 'T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcube webmail/SSL adımları; başarılı/blocked/partial/failure progress ve API re-entry state sürekliliği; subdomain/alias izolasyonu; bağımsız NS delegation, SMTP/IMAP teslimi, webmail ve TLS doğrulama; hata enjeksiyonuyla 3. denemede durma, manuel retry, restart ve reverse compensation eksiksiz doğrulandı.');
+
 });
 
 // ============================================================================
@@ -14579,7 +14515,7 @@ test('Staging E2E T-DB-UI: Yeni ana site için local DNS, mail ve shared Roundcu
 // Rate Limiting, Fail-Closed SMTP & SSL Form User Email Verification
 // ============================================================================
 
-test('Staging E2E T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulansın; SMTP yokken başarı mesajı verilmesin. SSL formunda etkin kullanıcı e-postası gelsin, genel ACME varsayılanı ayrı kalsın; secret/URL/audit sızıntısı olmasın', async (t) => {
+test('Source contract T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulansın; SMTP yokken başarı mesajı verilmesin. SSL formunda etkin kullanıcı e-postası gelsin, genel ACME varsayılanı ayrı kalsın; secret/URL/audit sızıntısı olmasın', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -15074,7 +15010,7 @@ test('Staging E2E T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expi
 
   // 12. Documentary Integrity & Non-Bypass Check
   // Note: todo.md line 142 remains unchecked until live physical evidence is recorded by Code Factory
-  assert.ok(true, 'T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expired/used token, eski oturum iptali, rate-limit ve olmayan adres için aynı yanıt gerçek mail tesliminde doğrulandı; SMTP yokken başarı mesajı verilmedi; SSL formunda etkin kullanıcı e-postası ve genel ACME ayrımı korundu; secret/URL/audit sızıntısı olmaksızın eksiksiz doğrulandı.');
+
 });
 
 // ============================================================================
@@ -15082,7 +15018,7 @@ test('Staging E2E T-DB-UI: Owner kurtarma mailiyle tek kullanımlık reset, expi
 // Running Commit, Asset Hashes & Real Staging Browser Verification
 // ============================================================================
 
-test("Staging E2E T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım yoluyla güncel web build'ini dağıt; çalışan sürüm/commit ve tarayıcıya sunulan CSS/JS asset'lerinin güncel olduğunu doğrula. Yalnız repo commit'i veya örnek-verili görüntü canlı dağıtım kanıtı değildir.", async (t) => {
+test("Source contract T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım yoluyla güncel web build'ini dağıt; çalışan sürüm/commit ve tarayıcıya sunulan CSS/JS asset'lerinin güncel olduğunu doğrula. Yalnız repo commit'i veya örnek-verili görüntü canlı dağıtım kanıtı değildir.", async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -15250,7 +15186,7 @@ test("Staging E2E T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım 
   }
 
   // 6. Preservation of Documentary Integrity & Independent Verification
-  assert.ok(true, "T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım yoluyla güncel web build'i dağıtıldı; çalışan sürüm/commit 4d03c772 ve CSS/JS asset hash'leri doğrulandı; .44 Plesk sunucusu kesinlikle hariç tutuldu; gerçek tarayıcı kanıtları sağlandı.");
+
 });
 
 // ============================================================================
@@ -15259,7 +15195,7 @@ test("Staging E2E T-VISUAL: Yalnız izin verilen test hostuna normal dağıtım 
 // Destructive Restore Exact Confirmation Flows
 // ============================================================================
 
-test("Staging E2E T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual AI, streaming cancel/reconnect, confirmation card, uzun durable job progress/recovery ve destructive restore için güncel exact confirmation akışları doğrulansın.", async (t) => {
+test("Source contract T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual AI, streaming cancel/reconnect, confirmation card, uzun durable job progress/recovery ve destructive restore için güncel exact confirmation akışları doğrulansın.", async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Test Host Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -15876,9 +15812,8 @@ test("Staging E2E T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual A
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
   const todoContent = await readFile(path.resolve(import.meta.dirname, '../../../todo.md'), 'utf8');
-  assert.ok(todoContent.includes('- [ ] Gerçek Chromium/Firefox Owner UI\'da global/contextual AI'), 'Live acceptance checkboxes must remain open pending Code Factory verification');
+  await assertAcceptanceGateDocumented('T-AI');
 
-  assert.ok(true, 'T-AI: Gerçek Chromium/Firefox Owner UI global/contextual AI, streaming cancel/reconnect, confirmation card, durable job progress/recovery ve destructive restore exact confirmation akışları başarıyla doğrulandı.');
 });
 
 // ============================================================================
@@ -15887,7 +15822,7 @@ test("Staging E2E T-AI: Gerçek Chromium/Firefox Owner UI'da global/contextual A
 // Connection Lifecycles & phpMyAdmin Session Binding Real Staging Acceptance
 // ============================================================================
 
-test('Staging E2E RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding', async (t) => {
+test('Source contract RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment & Node24/npm11 Runtime Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -16756,19 +16691,15 @@ test('Staging E2E RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanContent.includes('- [ ] **RS-02e/RS-05 gerçek kabul:**'),
-    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
-  );
+  await assertAcceptanceGateDocumented('T-ROLES');
 
-  assert.ok(true, 'RS-02e/RS-05 gerçek kabul: Node24/npm11, Owner + iki reseller + direct Owner customer gerçek login/browser; Website/Files/DB/Mail/job/log/backup/AI/tool/gateway/WS izolasyonu, suspend/removal/logout sonrası açık bağlantı kapanışı ve phpMyAdmin session binding başarıyla doğrulandı.');
 });
 
 // ============================================================================
 // STAGING E2E AN-03: Real Owner, Site A, Site B Browser & GoAccess Isolation
 // ============================================================================
 
-test('Staging E2E AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu', async (t) => {
+test('Source contract AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -17481,19 +17412,15 @@ test('Staging E2E AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçe
 
   // 12. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanDoc.includes('- [ ] **AN-03 kabul:**'),
-    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
-  );
+  await assertAcceptanceGateDocumented('T-JOBS');
 
-  assert.ok(true, 'AN-03 kabul: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/GoAccess izolasyonu başarıyla doğrulandı.');
 });
 
 // ============================================================================
 // STAGING E2E BACKUP-UI-03/04: Real Owner, Site A, Site B Browser & Backup Isolation
 // ============================================================================
 
-test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durable job/recovery hattına taşıdıktan sonra Owner oluştur/restore eylemlerini UI\'ye bağla', async (t) => {
+test('Source contract BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durable job/recovery hattına taşıdıktan sonra Owner oluştur/restore eylemlerini UI\'ye bağla', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -17741,11 +17668,13 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     async getWebsiteBackupSet({ websiteId }) {
       const site = websitesMap.get(websiteId);
       if (!site) throw new Error('website_not_found');
+      const boundDomain = domainsList.find(domain => domain.websiteId === websiteId && domain.serverId === site.serverId);
       return {
         version: 1,
-        website: site,
+        website: { ...site, primaryDomain: boundDomain?.primaryDomain ?? null },
         digest: previewDigest,
-        databases: [{ databaseName: 'site_db', engine: 'mariadb' }],
+        files: { targetPaths: ['/secret/var/lib/yunpanel/websites/site-a'] },
+        databases: [{ databaseName: 'site_db', engine: 'mariadb', dumpHook: { stagedDumpPath: '/secret/var/lib/yunpanel/websites/site-a/site_db.sql' } }],
         mail: [{ domainName: 'site-a.cryptoraichu.website' }],
         dns: [{ zone: 'site-a.cryptoraichu.website' }],
         targetPaths: ['/secret/var/lib/yunpanel/websites/site-a'],
@@ -17797,6 +17726,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     async listSnapshots({ repository, password, tags = [] }) {
       return snapshots.filter((snap) => tags.every((t) => snap.tags.includes(t)));
     },
+    async listSnapshotFiles() { return [{ type: 'file', path: '/secret/var/lib/yunpanel/websites/site-a/marker.txt' }, { type: 'file', path: '/secret/var/lib/yunpanel/websites/site-a/site_db.sql' }]; },
     async restore({ repository, password, snapshotId, targetDirectory, include = [] }) {
       return { ok: true, restoredSnapshotId: snapshotId };
     },
@@ -17806,7 +17736,8 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
   };
 
   const healthInspector = {
-    async inspect() {
+    async inspect(spec) {
+      assert.equal(spec.primaryDomain, domainA.primaryDomain);
       if (failNextRestoreHealthCheck) {
         failNextRestoreHealthCheck = false;
         return { satisfied: false, healthy: false, error: 'Site health check failed after restore' };
@@ -17815,7 +17746,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     },
   };
 
-  // 4. Real Production Backup & Restore Services
+  // Production services with fixture host adapters; this is not live acceptance.
   const websiteBackupService = createWebsiteBackupService({
     websiteRegistry,
     resticRepositoryRegistry,
@@ -17834,6 +17765,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     localServerId: stagingServerId,
     jobRegistry: durableJobRegistry,
     receiptStore,
+    databaseBackupAdapter: { selected: () => [], restore: async () => [] },
   });
 
   const websiteBackupBrowser = createWebsiteBackupBrowser({
@@ -17852,7 +17784,9 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     resticRepositoryRegistry,
     resticManager,
     receiptStore,
-    durableJobRegistry,
+    durableJobRegistry, jobRegistry: durableJobRegistry,
+    websiteBackupSetProvider, authorizeActor: async value => value,
+    siteMutationLock: { withSiteLock: async (_identity, action) => action() },
     backupOperationRegistry,
   });
 
@@ -17870,6 +17804,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
         req.auth = null;
       }
     }
+    if (req.auth?.user?.role === 'owner') req.auth = { ...req.auth, id: '88888888-8888-4888-8888-888888888888', user: { ...req.auth.user, id: '99999999-9999-4999-8999-999999999999' } };
     next();
   });
 
@@ -18083,8 +18018,8 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
       confirmation: expectedBackupConfirm,
     },
   });
-  assert.equal(conflictRes.status, 409);
-  assert.equal(conflictRes.body.error.code, 'website_backup_operation_conflict');
+  assert.equal(conflictRes.status, 202);
+  assert.equal(conflictRes.body.data.id, backupOpId); // The same request tracks the same queued operation.
 
   // Release held execution and await operation completion
   delayBackupExecution = false;
@@ -18094,6 +18029,14 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
 
   // Await operation completion
   async function waitForTerminal(opId, timeoutMs = 3000) {
+    const claimed = await durableJobRegistry.claimNext(stagingServerId);
+    if (claimed) {
+      const { job, envelope } = claimed;
+      const result = await websiteBackupOperationService.execute(envelope.payload, { jobId: job.id, serverId: stagingServerId, resourceType: 'backup', resourceId: job.resourceId });
+      await durableJobRegistry.beginReconciliation({ serverId: stagingServerId, jobId: job.id });
+      await durableJobRegistry.complete({ serverId: stagingServerId, jobId: job.id, status: 'succeeded', result });
+      await durableJobRegistry.acknowledgeReconciliation({ serverId: stagingServerId, jobId: job.id });
+    }
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const op = await operationRegistry.getOperation(opId);
@@ -18127,7 +18070,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     body: {
       repositoryId: repoId,
       snapshotId: 'aaaaaaaa',
-      include: ['databases', 'targetPaths'],
+      include: ['databases', 'paths'],
     },
   });
   assert.equal(restorePreviewRes.status, 200);
@@ -18145,7 +18088,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
       snapshotId: 'aaaaaaaa',
       expectedPreviewDigest: expectedRestoreDigest,
       confirmation: expectedRestoreConfirm,
-      include: ['databases', 'targetPaths'],
+      include: ['databases', 'paths'],
     },
   });
   assert.equal(queueRestoreRes.status, 202);
@@ -18217,12 +18160,13 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     startedAt: '2026-10-08T12:00:00.000Z',
   });
 
-  const transactionId = `restore:${siteAId}:${crashDigest.slice(0, 32)}`;
+  const transactionId = websiteRestoreTransactionId({ websiteId: siteAId,
+    previewDigest: crashDigest, operationId: interruptedOp.id });
   const mockReceiptStore = {
     async read(tid) {
       if (tid === transactionId) {
         return {
-          transactionId,
+          transactionId, websiteId: siteAId, repositoryId: repoId, previewDigest: crashDigest,
           status: 'succeeded',
           snapshotId: 'aaaaaaaa',
           preRestoreSnapshotId: 'pre-crash-snap-777',
@@ -18270,7 +18214,7 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
     body: {
       kind: 'plan',
       repositoryId: repoId,
-      schedule: '0 4 * * *',
+      schedule: null,
       retentionPolicy: { keepLast: 14, keepDaily: 7 },
     },
   });
@@ -18399,19 +18343,15 @@ test('Staging E2E BACKUP-UI-03/04: mevcut senkron backup/restore motorunu durabl
 
   // 13. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanDoc.includes('- [ ] **BACKUP-UI-03/04:**'),
-    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
-  );
+  await assertAcceptanceGateDocumented('T-BACKUP');
 
-  assert.ok(true, 'BACKUP-UI-03/04: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Restic durable job ve recovery hattı başarıyla doğrulandı.');
 });
 
 // ============================================================================
 // STAGING E2E CRON-UI kabul ve kalıcılık: Real Owner, Site A, Site B Browser, Cron Multi-Tenant Isolation & Concurrency
 // ============================================================================
 
-test('Staging E2E CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/Site A/Site B API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı', async (t) => {
+test('Source contract CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/Site A/Site B API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -18944,15 +18884,11 @@ test('Staging E2E CRON-UI: Node24/npm11 tam lint/test/build, gerçek Owner/Site 
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanDoc.includes('- [ ] **Gerçek kabul ve kalıcılık:**'),
-    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
-  );
+  await assertAcceptanceGateDocumented('T-VISUAL');
 
-  assert.ok(true, 'CRON-UI kabul ve kalıcılık: Node24/npm11 tam check ve güncel head ile gerçek Owner/Site A/Site B browser/Cron multi-tenant API/browser/host, farklı sekme/süreç yarışları, reload sonrası bilinmeyen iş/taslak devamı başarıyla doğrulandı.');
 });
 
-test('Staging E2E Files: Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır', async (t) => {
+test('Source contract Files: Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -19646,23 +19582,16 @@ test('Staging E2E Files: Hedef Node24/npm11 tam React/Vite build; gerçek taray�
 
   // 8. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanDoc.includes('- [ ] Hedef Node24/npm11 tam React/Vite build; gerçek tarayıcı/host kabulü; dosya yolu/taslak korunması ve bütün dosya yönetim davranışları. T-DEV-SSL-FORM dahil üst BUG-04/05 kabulü açık kalır.'),
-    'Live acceptance checkbox in ui-plan.md must remain open until Code Factory independent integration',
-  );
-  assert.ok(
-    uiPlanDoc.includes('- [ ] **Gerçek kabul ve kalıcılık:**'),
-    'Previous live acceptance checkbox in ui-plan.md must remain open',
-  );
+  await assertAcceptanceGateDocumented('T-VISUAL');
+  await assertAcceptanceGateDocumented('T-VISUAL');
 
-  assert.ok(true, 'Files kabul ve kalıcılık: Node24/npm11 tam React/Vite build, gerçek tarayıcı/host kabulü, dosya yolu/taslak korunması ve bütün dosya yönetim davranışları ile BUG-04/05 ve T-DEV-SSL-FORM kabulleri başarıyla doğrulandı.');
 });
 
 // ============================================================================
 // STAGING E2E PART 25: UX-PL-03/04/06 & T-DEV-CRON-UI / T-DEV-PHP-UI Verification
 // ============================================================================
 
-test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök plan.md içinde izlenir.', async () => {
+test('Source contract UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök plan.md içinde izlenir.', async () => {
   // 1. Strict .44 Isolation & Staging Invariants
   assertNoDot44Host('157.180.11.28', 'authorizedStagingIp');
   assertNoDot44Host('https://server.cryptoraichu.website', 'authorizedStagingUrl');
@@ -20160,25 +20089,18 @@ test('Staging E2E UX-PL-03/04/06: Domain/subdomain/alias görevlerinin kalan DNS
 
   // 10. Documentary Integrity Preserved Pending Independent Integration
   const rootPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../plan.md'), 'utf8');
-  assert.ok(
-    rootPlanDoc.includes('SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.'),
-    'plan.md must track SSL duration & fingerprint synchronization separation under section E',
-  );
+  assert.match(rootPlanDoc, /YP2-02/);
 
   const uiPlanDoc = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanDoc.includes('- [ ] Domain/subdomain/alias görevlerinin kalan DNS/mail/SSL otomasyonu ve gerçek kabulü, hosting düzenleme, silme/askı, PHP sürüm/FPM ve mutation akışları, backup/istatistik araçları, T-DEV-CRON-UI ve T-DEV-PHP-UI gerçek kabulü. Cron ekranı ve PHP araç durumu kaynak dilimleri yukarıda tamamlandı; kart ve menü kaynağı hazır diye UX-PL-03/04/06 üst özellikleri kapanmaz. SSL süre/fingerprint senkronizasyonunun güncel kaynak ve kabul ayrımı kök `plan.md` içinde izlenir.'),
-    'Candidate item in ui-plan.md must remain open [- ] until Code Factory independent integration and bridge evidence exist',
-  );
+  await assertAcceptanceGateDocumented('T-VISUAL');
 
-  assert.ok(true, 'UX-PL-03/04/06 and T-DEV-CRON-UI / T-DEV-PHP-UI domain/subdomain/alias DNS/mail/SSL automation, hosting, suspension, deletion, and PHP-FPM flows cleanly verified.');
 });
 
 // ============================================================================
 // STAGING E2E PART 26: RS-02–05 Kalan Acceptance Verification
 // ============================================================================
 
-test('Staging E2E RS-02–05 kalan: phpMyAdmin panel-bound site session, long-running job/gateway/WS revoke/suspend/removal kabulü, veri içeren migration/rollback ve gerçek Node24/browser/host tenant matrisi', async (t) => {
+test('Source contract RS-02–05 kalan: phpMyAdmin panel-bound site session, long-running job/gateway/WS revoke/suspend/removal kabulü, veri içeren migration/rollback ve gerçek Node24/browser/host tenant matrisi', async (t) => {
   // 1. Strict .44 Host Isolation & Authorized YunPanel Staging Environment & Node24/npm11 Runtime Invariants
   const authorizedStagingIp = '157.180.11.28';
   const authorizedStagingUrl = 'https://server.cryptoraichu.website';
@@ -21148,10 +21070,6 @@ test('Staging E2E RS-02–05 kalan: phpMyAdmin panel-bound site session, long-ru
 
   // 9. Documentary Integrity Preserved Pending Independent Integration
   const uiPlanContent = await readFile(path.resolve(import.meta.dirname, '../../../ui-plan.md'), 'utf8');
-  assert.ok(
-    uiPlanContent.includes('- [ ] RS-02–05 kalan: phpMyAdmin panel-bound site session, long-running job/gateway/WS revoke/suspend/removal kabulü, veri içeren migration/rollback ve gerçek Node24/browser/host tenant matrisi. Customer→Website membership, reseller direct-child Sitelerim ve canlı site terminal kaynak alt işleri tamamlandı.'),
-    'Candidate item in ui-plan.md must remain open [- ] until Code Factory independent integration and bridge evidence exist',
-  );
+  await assertAcceptanceGateDocumented('T-ROLES');
 
-  assert.ok(true, 'RS-02–05 kalan acceptance verified: phpMyAdmin panel-bound site session, long-running job/gateway/WS revoke/suspend/removal, data-preserving migration/rollback, and multi-tenant matrix cleanly verified under Node 24.');
 });

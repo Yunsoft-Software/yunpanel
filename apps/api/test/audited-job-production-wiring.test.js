@@ -10,6 +10,13 @@ import { createWebsiteRegistry } from '../src/website-registry.js';
 
 const indexUrl = new URL('../src/index.js', import.meta.url);
 
+test('production local certificate execution receives the initialized mail identity registry', async () => {
+  const source = await readFile(indexUrl, 'utf8');
+  const startup = source.slice(source.indexOf('const localRuntime = await startConfiguredLocalRuntime({'));
+  assert.match(startup, /\n  mailServiceIdentityRegistry,/);
+  assert.match(startup, /createLocalHostOperations\(\{\s*\.\.\.options,/);
+});
+
 test('production wraps the durable registry with the common audit store before exposing jobs', async () => {
   const source = await readFile(indexUrl, 'utf8');
   assert.match(source, /const durableJobRegistry = createDurableJobRegistry\(/);

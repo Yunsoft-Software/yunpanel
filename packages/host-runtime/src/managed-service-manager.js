@@ -188,6 +188,7 @@ export function createManagedServiceManager({
     ...options,
   }),
   databaseSecurityInspector = null,
+  configurePhpMyAdmin = null,
 } = {}) {
   if (databaseSecurityInspector !== null && typeof databaseSecurityInspector !== 'function') {
     throw new ManagedServiceError('managed_service_dependencies_invalid', 'Database security inspector is invalid');
@@ -345,7 +346,14 @@ export function createManagedServiceManager({
         }
       }
 
-      const after = await inspectOne(serviceId);
+      let after = await inspectOne(serviceId);
+      let configurationResult = null;
+      if (serviceId === 'phpmyadmin') {
+        if (typeof configurePhpMyAdmin !== 'function') throw new ManagedServiceError('phpmyadmin_configuration_unavailable', 'phpMyAdmin giriş köprüsü yapılandırılamıyor');
+        configurationResult = await configurePhpMyAdmin();
+        if (configurationResult?.applied !== true || configurationResult.httpHealthy !== true) throw new ManagedServiceError('phpmyadmin_configuration_result_unverified', 'phpMyAdmin giriş köprüsü doğrulanamadı');
+        after = await inspectOne(serviceId);
+      }
       if (!after.installed) throw new ManagedServiceError('managed_service_install_incomplete', `${definition.label} package installation could not be confirmed`);
       if (definition.units.length > 0 && !after.active) throw new ManagedServiceError('managed_service_not_active', `${definition.label} is installed but not active`);
       if (definition.category === 'backup_tool' && after.health.configuration !== CONFIGURATION_STATES.VALID) {
@@ -365,7 +373,8 @@ export function createManagedServiceManager({
           throw new ManagedServiceError('managed_database_security_not_ready', `${definition.label} security baseline is not ready`);
         }
       }
-      return { ...after, changed: !before.installed };
+      return { ...after, changed: !before.installed || configurationResult?.sideEffects === true,
+        ...(configurationResult ? { configurationResult } : {}) };
     });
   }
 

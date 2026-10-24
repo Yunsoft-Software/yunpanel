@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { chmod, lstat, mkdir, readFile, readlink, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { isSupportedPassengerPlatform, parseOsReleaseText } from './os-platform.js';
 import { createPassengerInspector } from './passenger-inspector.js';
 
 const execFileAsync = promisify(execFile);
@@ -47,27 +48,11 @@ export class PassengerManagerError extends Error {
 }
 
 function parseOsRelease(content) {
-  const values = new Map();
-  for (const line of String(content ?? '').split('\n')) {
-    const match = line.match(/^([A-Z0-9_]+)=(.*)$/);
-    if (!match) continue;
-    let value = match[2].trim();
-    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
-      value = value.slice(1, -1);
-    }
-    if (!/[\r\n\0]/.test(value)) values.set(match[1], value);
-  }
-  return Object.freeze({
-    id: values.get('ID') ?? null,
-    versionId: values.get('VERSION_ID') ?? null,
-    codename: values.get('VERSION_CODENAME') ?? null,
-  });
+  return parseOsReleaseText(content);
 }
 
 function supportedPlatform(platform) {
-  return platform.id === SUPPORTED.id
-    && platform.versionId === SUPPORTED.versionId
-    && platform.codename === SUPPORTED.codename;
+  return isSupportedPassengerPlatform(platform);
 }
 
 function nginxPackageOwner(stdout) {
@@ -76,8 +61,8 @@ function nginxPackageOwner(stdout) {
   return match?.[1] ?? null;
 }
 
-function repositoryContent() {
-  return `deb [signed-by=${KEY_PATH}] https://oss-binaries.phusionpassenger.com/apt/passenger ${SUPPORTED.codename} main\n`;
+function repositoryContent(codename = SUPPORTED.codename) {
+  return `deb [signed-by=${KEY_PATH}] https://oss-binaries.phusionpassenger.com/apt/passenger ${codename} main\n`;
 }
 
 function parseAptPolicy(output) {
@@ -241,12 +226,12 @@ export function createPassengerManager({
     await restoreManagedPath(KEY_PATH, snapshot.key);
   }
 
-  async function repairOwnedRepositoryPermissions() {
+  async function repairOwnedRepositoryPermissions(codename = SUPPORTED.codename) {
     try {
       const repository = await lstatFn(REPOSITORY_PATH);
       const key = await lstatFn(KEY_PATH);
       if (!repository.isFile() || repository.isSymbolicLink?.() || !key.isFile() || key.isSymbolicLink?.()
-        || await readFileFn(REPOSITORY_PATH, 'utf8') !== repositoryContent()) return;
+        || await readFileFn(REPOSITORY_PATH, 'utf8') !== repositoryContent(codename)) return;
       await chmodFn(KEY_PATH, 0o644);
       await chmodFn(REPOSITORY_PATH, 0o644);
     } catch (error) {
@@ -267,7 +252,7 @@ export function createPassengerManager({
     }
   }
 
-  async function installRepository() {
+  async function installRepository(codename = SUPPORTED.codename) {
     await mkdirFn(STAGING_ROOT, { recursive: true, mode: 0o700 });
     await mkdirFn(path.dirname(KEY_PATH), { recursive: true, mode: 0o755 });
     const source = path.join(STAGING_ROOT, `phusion-key-${process.pid}.asc`);
@@ -293,7 +278,7 @@ export function createPassengerManager({
     await writeFileFn(keyTemp, key, { mode: 0o644 });
     await chmodFn(keyTemp, 0o644);
     await renameFn(keyTemp, KEY_PATH);
-    await atomicWrite(REPOSITORY_PATH, repositoryContent(), 0o644);
+    await atomicWrite(REPOSITORY_PATH, repositoryContent(codename), 0o644);
   }
 
   async function ensureModuleLink() {
@@ -411,9 +396,9 @@ export function createPassengerManager({
     const before = await inspector.inspect();
     if (before.healthy) return Object.freeze({ changed: false, ...before });
 
-    await platform();
+    const detectedPlatform = await platform();
     const nginxBefore = await assertCompatibleNginx();
-    await repairOwnedRepositoryPermissions();
+    await repairOwnedRepositoryPermissions(detectedPlatform.codename);
     const snapshot = await snapshotManagedState();
     await runSafe(
       APT_GET,
@@ -433,7 +418,7 @@ export function createPassengerManager({
     let mutationAttempted = false;
     try {
       mutationAttempted = true;
-      await installRepository();
+      await installRepository(detectedPlatform.codename);
       await mutationCheckpoint('after-repository');
       await runSafe(
         APT_GET,

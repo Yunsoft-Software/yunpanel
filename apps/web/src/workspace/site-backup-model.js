@@ -47,6 +47,8 @@ export function siteBackupBrowser(value, scope) {
     && Number.isSafeInteger(set.mailCount) && set.mailCount >= 0
     && Number.isSafeInteger(set.dnsCount) && set.dnsCount >= 0
     && Number.isSafeInteger(set.pathCount) && set.pathCount >= 0
+    && (set.hostingCount===undefined||Number.isSafeInteger(set.hostingCount)&&set.hostingCount>=0)
+    && (set.environmentIncluded===undefined||typeof set.environmentIncluded==='boolean')
     && typeof set.composeHooksEnabled === 'boolean'
     && (set.digest === null || /^[a-f0-9]{64}$/.test(set.digest))
     && (set.runtimeType === null || text(set.runtimeType, 40)));
@@ -71,6 +73,14 @@ export function siteBackupBrowser(value, scope) {
 
   const lastSuccessfulBackupAt = normalizedDate(value.lastSuccessfulBackupAt);
   const nextScheduledRunAt = normalizedDate(value.nextScheduledRunAt);
+  let schedule = null;
+  if (value.schedule != null) {
+    need(record(value.schedule) && UUID.test(value.schedule.repositoryId ?? '') && text(value.schedule.expression, 120)
+      && text(value.schedule.timeZone, 80) && typeof value.schedule.enabled === 'boolean' && Number.isSafeInteger(value.schedule.revision));
+    schedule = Object.freeze({ repositoryId: value.schedule.repositoryId, expression: value.schedule.expression, timeZone: value.schedule.timeZone,
+      enabled: value.schedule.enabled, revision: value.schedule.revision, nextRunAt: normalizedDate(value.schedule.nextRunAt),
+      lastRunAt: normalizedDate(value.schedule.lastRunAt), error: value.schedule.error ? 'Otomatik yedekleme durduruldu. Erişim ve site ayarlarını kontrol ederek planı yeniden kaydedin.' : null });
+  }
   const scopeSummary = record(value.scopeSummary) ? Object.freeze({
     paths: Number.isSafeInteger(value.scopeSummary.paths) ? value.scopeSummary.paths : set.pathCount,
     databases: Number.isSafeInteger(value.scopeSummary.databases) ? value.scopeSummary.databases : set.databaseCount,
@@ -109,6 +119,8 @@ export function siteBackupBrowser(value, scope) {
       databaseCount: set.databaseCount,
       mailCount: set.mailCount,
       dnsCount: set.dnsCount,
+      hostingCount: set.hostingCount??null,
+      environmentIncluded: set.environmentIncluded??null,
       pathCount: set.pathCount,
       composeHooksEnabled: set.composeHooksEnabled,
     }),
@@ -116,6 +128,7 @@ export function siteBackupBrowser(value, scope) {
     inspectedAt: normalizedDate(value.inspectedAt),
     lastSuccessfulBackupAt,
     nextScheduledRunAt,
+    schedule,
     scopeSummary,
     retentionPolicy,
     remoteRepositoryStatus,
@@ -182,6 +195,13 @@ export function siteBackupErrorMessage(error) {
     backup_confirmation_invalid: 'Yedekleme onay metni eşleşmiyor.',
     restore_preview_stale: 'Site veya snapshot durumu değişti; lütfen önizlemeyi yenileyin.',
     restore_confirmation_invalid: 'Geri yükleme onay metni eşleşmiyor.',
+    website_restore_hosting_content_missing: 'Bu eski yedekte doğrulanmış barındırma ayarları yok. Dosya, veritabanı veya postayı ayrı seçin.',
+    website_hosting_restore_selection_incomplete: 'Barındırma ayarlarını birlikte seçin; yapılandırma ve doğrulama kaydı birlikte geri yüklenmeli.',
+    website_hosting_restore_runtime_changed: 'Uygulamanın çalışma ortamı bu yedekten sonra değişmiş. Barındırma ayarları güvenli biçimde uygulanamadı.',
+    website_dns_restore_scope_unavailable: 'Bu alan adının DNS kayıtları bu sunucuda güvenli biçimde geri yüklenemiyor.',
+    website_dns_backup_shared_zone_unavailable: 'DNS bölgesinde başka bir siteye bağlı kayıtlar var. Ortak bölge için ayrı kapsam gerekiyor.',
+    website_dns_restore_dnssec_unavailable: 'DNSSEC etkin bölgenin anahtarları için ayrı doğrulanmış geri yükleme gerekiyor.',
+    website_dns_backup_zone_missing: 'Siteye ait yönetilen DNS bölgesi sunucuda bulunamadı; yedek tamamlandı sayılmadı.',
     website_backup_operation_conflict: 'Bu site için halihazırda çalışan veya kuyrukta olan bir işlem var.',
     website_backup_operation_not_found: 'Yedekleme işlemi bulunamadı.',
     interrupted_by_restart: 'İşlem sistem yeniden başlatması nedeniyle kesintiye uğradı.',

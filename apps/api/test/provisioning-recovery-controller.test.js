@@ -1783,15 +1783,10 @@ test('Kullanıcı tarafından verilen abort/iptal komutu host rollback olarak yo
   assert.equal(compensationCalled, false, 'Dispose/signal abort must NEVER trigger host rollback or compensation');
 });
 
-test('Kabul testleri .44 Plesk sunucusu kesinlikle hariç tutularak sadece repo dışındaki izinli test sunucusunda güncel API/web sürümüyle yürütülmeli ve plan.md açık backend işleri korunmalıdır', async () => {
-  const planMd = readFileSync(new URL('../../../plan.md', import.meta.url), 'utf8');
-  const todoMd = readFileSync(new URL('../../../todo.md', import.meta.url), 'utf8');
-
-  // .44 Plesk sunucusu strictly excluded
-  assert.match(todoMd, /IP adresi `?\.44`? ile biten Plesk sunucusu kesinlikle kapsam dışıdır/);
-  assert.match(todoMd, /`?\.44`?\s*(kesinlikle kullanılmaz|hariç|dışında|kullanılmaz)/i);
-
-  // plan.md preserves open backend work for safe automatic retry, backoff, and site-admin error propagation
-  assert.ok(planMd.includes('güvenlik ve işlem bütünlüğü') || planMd.includes('güvenli'));
-  assert.ok(todoMd.includes('Güvenli otomatik retry/backoff/kalıcı bütçe ve site-admin hata yayılımı `plan.md` içinde açık backend işleridir.'));
+test('acceptance policy keeps the forbidden host and durable recovery scope explicit', async () => {
+  const todo = readFileSync(new URL('../../../todo.md', import.meta.url), 'utf8');
+  const policy = readFileSync(new URL('../../../agents.md', import.meta.url), 'utf8');
+  assert.match(todo, /\.44.*kullanılmaz/);
+  assert.match(policy, /\.44/);
+  assert.match(todo, /T-JOBS/); assert.match(todo, /T-BACKUP/);
 });

@@ -340,8 +340,8 @@ test('section tab switching preserves user draft inputs and durable job observat
   const aliasesLink = tabLinks.find((link) => link.textContent.includes('Takma adlar'));
 
   // 1. Open MailboxCreateModal in MailboxesPanel and type a draft localPart & password
-  const createMbBtn = panes[0].querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Mailbox oluştur'))[0];
-  assert.ok(createMbBtn, 'Mailbox oluştur button must exist');
+  const createMbBtn = panes[0].querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('E-posta hesabı oluştur'))[0];
+  assert.ok(createMbBtn, 'E-posta hesabı oluştur button must exist');
 
   await act(async () => {
     clickElement(createMbBtn);
@@ -386,7 +386,7 @@ test('section tab switching preserves user draft inputs and durable job observat
   await flush();
 
   const aliasModals = container.querySelectorAll('.ws-modal');
-  assert.ok(aliasModals.length >= 2, 'Both Mailbox and Alias modals exist simultaneously');
+  assert.equal(aliasModals.filter(dialog => dialog.open).length, 1, 'Only the current mail task has an open dialog; hidden drafts remain closed');
 
   const aliasSourceInput = panes[2].querySelector('.ws-modal').querySelector('input');
   await act(async () => {
@@ -485,7 +485,7 @@ test('navigating between mail domains resets component identity and clears previ
   await flush();
 
   // In local-1: Open MailboxCreateModal and enter draft
-  const createMbBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Mailbox oluştur'))[0];
+  const createMbBtn = container.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('E-posta hesabı oluştur'))[0];
   await act(async () => {
     clickElement(createMbBtn);
   });
@@ -517,7 +517,7 @@ test('navigating between mail domains resets component identity and clears previ
   });
 });
 
-test('real session actions: authentic SMTP test delivery, DKIM preview & apply with durable job observation', async () => {
+test('fixture component actions: authentic SMTP test delivery, DKIM preview & apply with durable job observation', async () => {
   const observedJobs = [];
   const { fetchMock, apiCalls } = createMockFetchRouter({
     customHandler: (url, method, body) => {
@@ -708,7 +708,7 @@ test('real session actions: authentic SMTP test delivery, DKIM preview & apply w
   });
 });
 
-test('real session actions: Roundcube webmail preview & bind with durable job observation', async () => {
+test('fixture component actions: Roundcube webmail preview & bind with durable job observation', async () => {
   const observedJobs = [];
   const { fetchMock, apiCalls } = createMockFetchRouter({
     customHandler: (url, method) => {
@@ -856,7 +856,7 @@ test('real session actions: Roundcube webmail preview & bind with durable job ob
   });
 });
 
-test('real session actions: mailbox lifecycle (create, password rotation) and alias lifecycle (create, update, delete)', async () => {
+test('fixture component actions: mailbox lifecycle (create, password rotation) and alias lifecycle (create, update, delete)', async () => {
   const { fetchMock, apiCalls } = createMockFetchRouter({
     customHandler: (url, method, body) => {
       // Mailbox create
@@ -917,7 +917,7 @@ test('real session actions: mailbox lifecycle (create, password rotation) and al
   const mailboxesPane = panes[0];
 
   // 1. Mailbox Create
-  const createMbBtn = mailboxesPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Mailbox oluştur'))[0];
+  const createMbBtn = mailboxesPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('E-posta hesabı oluştur'))[0];
   await act(async () => {
     clickElement(createMbBtn);
   });
@@ -1073,7 +1073,7 @@ test('real session actions: mailbox lifecycle (create, password rotation) and al
   });
 });
 
-test('real session actions: mail configuration preview & apply with durable job observation', async () => {
+test('fixture component actions: mail configuration preview & apply with durable job observation', async () => {
   const observedJobs = [];
   const { fetchMock, apiCalls } = createMockFetchRouter({
     customHandler: (url, method, body) => {

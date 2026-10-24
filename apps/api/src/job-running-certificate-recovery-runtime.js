@@ -1,6 +1,9 @@
 import os from 'node:os';
 import { createAcmeManager, createNginxManager } from '@yunpanel/host-runtime';
 import { reloadCertificateNginx } from './certificate-nginx-reload.js';
+import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
+import { createLocalHostOperations } from './local-host-operations.js';
+import { reloadCertificateMail } from './certificate-mail-reload.js';
 import { createCertificateOperationReceiptStore } from './certificate-operation-receipt.js';
 import { createCertificateRegistry } from './certificate-registry.js';
 import { createDomainRegistry } from './domain-registry.js';
@@ -30,6 +33,8 @@ export async function runRunningCertificateRecoveryFromStores({
   receiptStoreFactory = createCertificateOperationReceiptStore,
   acmeManagerFactory = createAcmeManager,
   nginxManagerFactory = createNginxManager,
+  mailServiceIdentityRegistryFactory = createMailServiceIdentityRegistry,
+  hostOperationsFactory = createLocalHostOperations,
   serviceStatus = createMigrationServiceStatus(),
   recoverCommand = recoverRunningCertificateOperation,
 } = {}) {
@@ -44,6 +49,8 @@ export async function runRunningCertificateRecoveryFromStores({
     receiptStoreFactory,
     acmeManagerFactory,
     nginxManagerFactory,
+    mailServiceIdentityRegistryFactory,
+    hostOperationsFactory,
     serviceStatus,
     recoverCommand,
   ]) {
@@ -75,6 +82,11 @@ export async function runRunningCertificateRecoveryFromStores({
   );
 
   const receiptStore = receiptStoreFactory();
+  const mailServiceIdentityRegistry = await jobRecoveryRuntimeInternals.initRegistry(mailServiceIdentityRegistryFactory({
+    filePath: paths.mailServiceIdentityStore,
+    getWebDomain: id => domainRegistry.getDomain(id), getCertificate: id => certificateRegistry.getCertificate(id),
+  }), 'Mail service identity');
+  const hostOperations = hostOperationsFactory();
   if (!receiptStore || typeof receiptStore.read !== 'function') {
     throw new JobRecoveryRuntimeError('job_recovery_certificate_receipt_invalid', 'Certificate recovery receipt store is invalid');
   }
@@ -94,6 +106,12 @@ export async function runRunningCertificateRecoveryFromStores({
     readCertificateReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
     inspectCertificate: (certName) => acmeManager.inspectCertificate(certName),
     reloadCertificate: () => reloadCertificateNginx(nginxManagerFactory()),
+    mailServiceIdentityRegistry,
+    reloadMailCertificate: (result, identity) => reloadCertificateMail({
+      mailServiceIdentityRegistry, certificateRegistry, domainRegistry, result,
+      reload: value => hostOperations.reloadMailCertificate(value),
+      serverId: identity.serverId, certificateId: identity.certificateId,
+    }),
   });
   return Object.freeze({ ...result, statePaths: paths });
 }

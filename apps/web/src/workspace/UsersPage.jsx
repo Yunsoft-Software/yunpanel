@@ -12,7 +12,7 @@ const LIMIT = 25;
 const initialForm = (user) => ({
   username: user?.username ?? '',
   password: '',
-  role: user?.role ?? 'owner',
+  role: user?.role ?? 'site_manager',
   active: user?.active ?? true,
   websiteIds: user?.websiteIds ?? [],
 });

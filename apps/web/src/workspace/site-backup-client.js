@@ -62,7 +62,7 @@ export function createSiteBackupClient({ scope: input, request, isCurrent = () =
     return siteBackupOperation(response?.data ?? response);
   }
 
-  async function previewRestore({ repositoryId, snapshotId, healthPath = '/health', timeoutSeconds = 30, include = [] }) {
+  async function previewRestore({ repositoryId, snapshotId, healthPath = '/', timeoutSeconds = 30, include = [] }) {
     const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/restore/preview';
     const response = await request(path, {
       method: 'POST',
@@ -71,7 +71,7 @@ export function createSiteBackupClient({ scope: input, request, isCurrent = () =
     return siteBackupPreview(response?.data ?? response);
   }
 
-  async function queueRestore({ repositoryId, snapshotId, expectedPreviewDigest, confirmation, healthPath = '/health', timeoutSeconds = 30, include = [] }) {
+  async function queueRestore({ repositoryId, snapshotId, expectedPreviewDigest, confirmation, healthPath = '/', timeoutSeconds = 30, include = [] }) {
     const path = '/websites/' + encodeURIComponent(scope.websiteId) + '/backup-operations';
     const response = await request(path, {
       method: 'POST',

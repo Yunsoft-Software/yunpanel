@@ -35,6 +35,11 @@ function createMockRegistries({
   return {
     websiteRegistry: {
       getWebsite: async (id) => (id === WEBSITE_ID ? website : null),
+      updateWebsitePhpConfig: async ({ config, expectedRevision }) => {
+        assert.equal(website.revision, expectedRevision);
+        Object.assign(website, { phpConfig: config, revision: expectedRevision + 1 });
+        return { ...website };
+      },
     },
     applicationRegistry: {
       getApplication: async (id) => (id === APP_ID ? application : null),
@@ -170,7 +175,7 @@ test('updatePhpFpmConfig enforces explicit confirmation, revision and preview di
   const { websiteRegistry, applicationRegistry } = createMockRegistries();
   let appliedIntent = null;
   const mockFpmManager = {
-    apply: async (intent) => {
+    update: async (intent) => {
       appliedIntent = intent;
       return { satisfied: true };
     },
@@ -181,6 +186,7 @@ test('updatePhpFpmConfig enforces explicit confirmation, revision and preview di
     applicationRegistry,
     phpCliToolManager: {},
     phpFpmSiteManager: mockFpmManager,
+    withApplicationLock: async (_id, action) => action(),
     lstatFn: async () => ({ isDirectory: () => true, isFile: () => false }),
   });
 
@@ -310,6 +316,8 @@ test('HTTP POST /config/preview and /config endpoints execute preview and mutati
     websiteRegistry,
     applicationRegistry,
     phpCliToolManager: {},
+    phpFpmSiteManager: { update: async () => ({ satisfied: true }) },
+    withApplicationLock: async (_id, action) => action(),
     lstatFn: async () => ({ isDirectory: () => true, isFile: () => false }),
   });
 
@@ -352,10 +360,8 @@ test('HTTP POST /config/preview and /config endpoints execute preview and mutati
       config: { phpVersion: '8.1' },
     }),
   });
-  assert.equal(applyRes.status, 200);
-  const applyData = (await applyRes.json()).data;
-  assert.equal(applyData.success, true);
-  assert.equal(applyData.applied.phpVersion, '8.1');
+  assert.equal(applyRes.status, 503);
+  assert.equal((await applyRes.json()).error.code, 'php_config_service_unavailable');
 });
 
 test('local PHP action fails closed if session is revoked or revision changes during execution', async () => {

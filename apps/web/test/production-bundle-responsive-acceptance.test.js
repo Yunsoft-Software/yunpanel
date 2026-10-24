@@ -1,3 +1,7 @@
+import { register } from 'node:module';
+register('./jsx-loader.js', import.meta.url);
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile, access, stat } from 'node:fs/promises';
@@ -126,8 +130,8 @@ test('Site navigation: task groups and tools navigation wrap gracefully without 
   const pleskNavCss = await readSrc('workspace/ui/plesk-navigation.css');
 
   // Nav landmarks have descriptive aria-labels
-  assert.match(siteNav, /<nav className="ws-tabs ws-plesk-task-groups" aria-label="Site görev grupları">/);
-  assert.match(siteNav, /<nav className="ws-tabs ws-plesk-task-tools"/);
+  assert.match(siteNav, /<nav className="ws-plesk-site-navigation" aria-label="Site araçları">/);
+  assert.match(siteNav, /<div className="ws-tabs ws-plesk-task-tools"/);
 
   // CSS guarantees flexible wrap, max-width 100%, and overflow-wrap anywhere
   assert.match(pleskNavCss, /flex-wrap:\s*wrap;/);
@@ -149,7 +153,12 @@ test('Mail and Database tables have full ARIA semantics and scroll containment',
   const emberTheme = await readSrc('workspace/ui/ember-theme.css');
 
   // Mailboxes table
-  assert.match(mailboxes, /<table className="ws-table" role="table" aria-label="Mailboxlar">/);
+  const { default: MailboxesPanel } = await import('../src/workspace/MailboxesPanel.jsx');
+  const { PanelSessionProvider } = await import('../src/panel-session.jsx');
+  const rendered = renderToStaticMarkup(createElement(PanelSessionProvider, { session: { user: { id: 'fixture-owner', role: 'owner' } } }, createElement(MailboxesPanel, { domain: { id: 'fixture-domain', managementMode: 'local' }, mailboxes: [{ id: 'fixture-box', address: 'owned@example.test', enabled: true, revision: 1 }] })));
+  assert.match(rendered, /<table [^>]*role="table"[^>]*aria-label="E-posta hesapları"/);
+  assert.match(rendered, /<th scope="col">Adres<\/th>/);
+  assert.match(rendered, /<td role="cell"><strong>owned@example.test<\/strong>/);
   assert.match(mailboxes, /<tr role="row"><th scope="col">Adres<\/th>/);
   assert.match(mailboxes, /<tr key=\{mailbox\.id\} role="row"><td role="cell">/);
 

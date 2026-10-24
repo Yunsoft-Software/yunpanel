@@ -1,3 +1,7 @@
+import { register } from 'node:module';
+register('./jsx-loader.js', import.meta.url);
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
@@ -63,12 +67,13 @@ test('/databases: table scroll containment, search/access filters, safe phpMyAdm
 });
 
 test('/websites/new: accessible form fields, password security, site-admin fields', async () => {
-  const newSiteSource = await readSrc('workspace/NewWebsitePage.jsx');
-  assert.match(newSiteSource, /name="adminEmail"/);
-  assert.match(newSiteSource, /name="adminPassword"/);
-  assert.match(newSiteSource, /type="password"/);
-  assert.match(newSiteSource, /aria-describedby="website-admin-email-hint"/);
-  assert.match(newSiteSource, /aria-describedby="website-admin-password-hint"/);
+  const { LoginCredentialsFields } = await import('../src/workspace/LoginCredentialsFields.jsx');
+  const html = renderToStaticMarkup(createElement(LoginCredentialsFields, { email: '', password: '', onEmailChange() {}, onPasswordChange() {} }));
+  const inputs = [...html.matchAll(/<input [^>]+>/g)].map(match => match[0]);
+  assert.equal(inputs.length, 2);
+  assert.ok(inputs.some(input => input.includes('name="adminEmail"') && input.includes('type="email"')));
+  assert.ok(inputs.some(input => input.includes('name="adminPassword"') && input.includes('type="password"')));
+  for (const input of inputs) { const id = input.match(/aria-describedby="([^"]+)"/)[1]; assert.ok(html.includes(`id="${id}"`)); }
 });
 
 test('Chromium and Firefox styling compatibility for all 4 target screens', async () => {

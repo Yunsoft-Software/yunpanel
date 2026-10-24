@@ -9,9 +9,13 @@ import {
   mountWebsiteRestoreRoutes,
 } from '../src/website-restore-http.js';
 import { WebsiteRestoreError } from '../src/website-restore-service.js';
+import { createWebsiteBackupOperationService } from '../src/website-backup-operation-service.js';
+import { createWebsiteBackupOperationRegistry } from '../src/website-backup-operation-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
 
 const ownerAuth = Object.freeze({
-  user: { id: 'owner-1', role: 'owner' },
+  id: '11111111-1111-4111-8111-111111111111',
+  user: { id: '22222222-2222-4222-8222-222222222222', role: 'owner' },
   access: { mode: 'management', permissions: ['*'] },
   security: { managementAllowed: true },
 });
@@ -73,6 +77,10 @@ async function fixture(t) {
 
   mountWebsiteRestoreRoutes(app, {
     websiteRestoreService,
+    websiteBackupOperationService: createWebsiteBackupOperationService({ registry: createWebsiteBackupOperationRegistry(), websiteRestoreService,
+      jobRegistry: createJobRegistry(), websiteRegistry: { getWebsite: async id => ({ id, serverId: repositoryId }) },
+      resticRepositoryRegistry: { getRepository: async id => ({ id, serverId: repositoryId }) }, authorizeActor: async actor => actor,
+      siteMutationLock: { withSiteLock: async (_identity, action) => action() } }),
   });
 
   app.use((error, req, res, next) => {
@@ -121,7 +129,7 @@ test('POST /api/websites/:websiteId/restore/preview returns 200 with preview', a
   assert.equal(typeof body.data.previewDigest, 'string');
 });
 
-test('POST /api/websites/:websiteId/restore returns 200 on successful restore', async (t) => {
+test('POST /api/websites/:websiteId/restore returns 202 without executing synchronously', async (t) => {
   const { baseUrl, websiteId, repositoryId, snapshotId, previewDigest, confirmation } = await fixture(t);
 
   const res = await fetch(`${baseUrl}/api/websites/${websiteId}/restore`, {
@@ -135,11 +143,11 @@ test('POST /api/websites/:websiteId/restore returns 200 on successful restore', 
     }),
   });
 
-  assert.equal(res.status, 200);
+  assert.equal(res.status, 202);
   const body = await res.json();
-  assert.equal(body.data.status, 'succeeded');
+  assert.equal(body.data.status, 'queued');
   assert.equal(body.data.websiteId, websiteId);
-  assert.equal(body.data.healthCheck.satisfied, true);
+  assert.ok(body.data.jobId);
 });
 
 test('POST /api/websites/:websiteId/restore returns 403 when user is not owner', async (t) => {

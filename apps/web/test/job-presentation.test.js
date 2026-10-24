@@ -5,6 +5,8 @@ import {
   jobAttemptCount,
   jobHealthIndicator,
   jobLifecycle,
+  jobOutcome,
+  jobOperationLabel,
   jobResourceTarget,
   jobStageProgress,
   jobSupportsDeployLogs,
@@ -12,6 +14,16 @@ import {
   canTriggerManualRetry,
   safeJobResultMetadata,
 } from '../src/workspace/job-presentation.js';
+
+test('a completed restore job that rolled back is never presented as a successful restore',()=>{
+ const job={status:'succeeded',result:{kind:'restore',status:'rolled_back',verified:true}};
+ assert.equal(jobOutcome(job).label,'Geri alındı');assert.equal(jobOutcome(job).state,'warning');
+ assert.equal(jobLifecycle(job).isSuccessful,false);assert.match(jobLifecycle(job).detail,/işlem öncesindeki/);
+ assert.equal(job.status,'succeeded');
+ for (const other of [{status:'running',result:job.result},{status:'succeeded',result:{kind:'restore',status:'succeeded'}},{status:'succeeded',result:{kind:'backup',status:'rolled_back'}}]) {
+  assert.equal(jobOutcome(other).detail,null);
+ }
+});
 
 test('job resource links prefer exact linked site routes when available', () => {
   const applicationId = '11111111-1111-4111-8111-111111111111';
@@ -40,6 +52,26 @@ test('job resource links prefer exact linked site routes when available', () => 
   assert.deepEqual(jobResourceTarget({ resourceType: 'job', resourceId: '11111111-1111-4111-8111-111111111111' }), {
     label: 'İşlem', href: '/jobs',
   });
+});
+
+test('job links use the primary hostname, correct runtime screen and never substitute a Website ID for a Domain ID',()=>{
+ const website={id:'website-own',applicationId:'app-own',name:'Example site',runtimeType:'php'};
+ const child={id:'child-domain',websiteId:website.id,parentDomainId:'primary-domain',primaryDomain:'sub.example.test'};
+ const primary={id:'primary-domain',websiteId:website.id,parentDomainId:null,primaryDomain:'example.test'};
+ const resources={websites:[website],domains:[child,primary]};
+ assert.deepEqual(jobResourceTarget({resourceType:'website',resourceId:website.id},resources),{label:'example.test',href:'/websites/primary-domain/overview'});
+ assert.deepEqual(jobResourceTarget({resourceType:'application',resourceId:website.applicationId},resources),{label:'example.test',href:'/websites/primary-domain/php'});
+ assert.deepEqual(jobResourceTarget({resourceType:'website',resourceId:website.id},{websites:[website],domains:[]}),{label:'Example site',href:null});
+ assert.deepEqual(jobResourceTarget({resourceType:'website',resourceId:'removed-site'},resources),{label:'Web sitesi',href:null});
+ assert.deepEqual(jobResourceTarget({resourceType:'domain',resourceId:'foreign-domain'},resources),{label:'Alan adı',href:null});
+});
+
+test('operation labels explain familiar tasks while unknown future operations remain readable',()=>{
+ assert.equal(jobOperationLabel({operation:'app.node.restart'}),'Node.js uygulamasını yeniden başlat');
+ assert.equal(jobOperationLabel({type:'ssl.renew'}),'SSL sertifikasını yenile');
+ assert.equal(jobOperationLabel({operation:'future.safe-operation'}),'future.safe-operation');
+ assert.equal(jobOperationLabel({operation:'__proto__'}),'__proto__');
+ assert.equal(jobOperationLabel({operation:'unsafe\noperation'}),'İşlem');
 });
 
 for (const [status, stage] of [

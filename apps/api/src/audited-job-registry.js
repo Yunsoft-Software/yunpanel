@@ -1,4 +1,4 @@
-import { currentAuditActorId } from './audit-request-context.js';
+import { currentAuditActorId, currentAuditContext } from './audit-request-context.js';
 import { isNewlyEnqueuedJob } from './job-registry.js';
 
 function safeAuditFailure(onAuditError, phase, jobId) {
@@ -9,6 +9,7 @@ export function createAuditedJobRegistry({
   registry,
   audit,
   actorProvider = currentAuditActorId,
+  resolveJobWebsite = null,
   onAuditError = () => {},
 } = {}) {
   if (!registry || typeof registry.enqueue !== 'function' || typeof registry.complete !== 'function' || typeof registry.cancel !== 'function') {
@@ -22,8 +23,16 @@ export function createAuditedJobRegistry({
   }
 
   async function enqueue(input) {
-    const actorId = actorProvider() ?? 'system';
-    const job = await registry.enqueue(input);
+    const actorId = actorProvider() ?? (input.authorization?.kind === 'website_backup_schedule' ? input.authorization.userId : 'system');
+    const actor = currentAuditContext()?.actor;
+    let authorization = input.authorization;
+    if (authorization == null && actor?.sessionId && actor?.userId && actor?.role) {
+      const websiteId = input.payload?.websiteId ?? (resolveJobWebsite ? await resolveJobWebsite(input) : null);
+      if (actor.role !== 'owner' && !websiteId) throw Object.assign(new Error('Job Website scope could not be verified'), { code: 'panel_job_scope_unavailable', status: 403 });
+      authorization = { kind: 'panel', actorId: actor.userId, userId: actor.userId, sessionId: actor.sessionId,
+        role: actor.role, serverId: input.serverId, scope: websiteId ? 'website' : 'server', ...(websiteId ? { websiteId } : {}) };
+    }
+    const job = await registry.enqueue(authorization == null ? input : { ...input, authorization });
     if (isNewlyEnqueuedJob(job) === false) return job;
     try {
       audit.linkJob({

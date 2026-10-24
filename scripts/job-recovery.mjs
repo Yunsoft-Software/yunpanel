@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { runPassengerReleaseRecoveryFromStores } from '../apps/api/src/passenger-release-recovery-runtime.js';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createDurableJobRegistry } from '../apps/api/src/durable-job-registry.js';
@@ -39,6 +40,8 @@ const scriptPath = fileURLToPath(import.meta.url);
 const PACKAGED_SCRIPT_ROOT = '/usr/lib/yunpanel/scripts';
 const RECOVERY_ACTIONS = Object.freeze([
   'reconcile',
+  'recover-passenger-release',
+  'compensate-passenger-release',
   'recover-readonly',
   'recover-domain-stage',
   'recover-domain-activate',
@@ -65,7 +68,7 @@ const RECOVERY_ACTIONS = Object.freeze([
   'recover-roundcube-config',
   'recover-php-tool',
 ]);
-const USAGE = 'Usage: job-recovery.mjs status | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-database-backup <server-id> <job-id> --confirm | recover-database-restore <server-id> <job-id> --confirm | recover-database-credential <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm | recover-php-tool <server-id> <job-id> --confirm';
+const USAGE = 'Usage: job-recovery.mjs status | recover-passenger-release <server-id> <job-id> --confirm | compensate-passenger-release <server-id> <job-id> --confirm | reconcile <server-id> <job-id> --confirm | recover-readonly <server-id> <job-id> --confirm | recover-domain-stage <server-id> <job-id> --confirm | recover-domain-activate <server-id> <job-id> --confirm | recover-static-deploy <server-id> <job-id> --confirm | recover-static-rollback <server-id> <job-id> --confirm | recover-node-deploy <server-id> <job-id> --confirm | recover-node-restart <server-id> <job-id> --confirm | recover-node-process <server-id> <job-id> --confirm | recover-node-runtime-install <server-id> <job-id> --confirm | recover-node-rollback <server-id> <job-id> --confirm | recover-system-upgrade <server-id> <job-id> --confirm | recover-certificate <server-id> <job-id> --confirm | recover-database-create <server-id> <job-id> --confirm | recover-database-delete <server-id> <job-id> --confirm | recover-database-backup <server-id> <job-id> --confirm | recover-database-restore <server-id> <job-id> --confirm | recover-database-credential <server-id> <job-id> --confirm | recover-dns-record <server-id> <job-id> --confirm | recover-service-control <server-id> <job-id> --confirm | recover-service-mutation <server-id> <job-id> --confirm | recover-mail-config <server-id> <job-id> --confirm | recover-mail-dkim <server-id> <job-id> --confirm | recover-mail-data <server-id> <job-id> --confirm | recover-roundcube-config <server-id> <job-id> --confirm | recover-php-tool <server-id> <job-id> --confirm';
 
 export function parseJobRecoveryArguments(argv) {
   if (!Array.isArray(argv)) throw new Error(USAGE);
@@ -152,6 +155,7 @@ export async function runJobRecoveryCli({
   recoverStaticDeployment = runRunningStaticDeploymentRecoveryFromStores,
   recoverStaticRollback = runRunningStaticRollbackRecoveryFromStores,
   recoverNodeDeployment = runRunningNodeDeploymentRecoveryFromStores,
+  recoverPassengerRelease = runPassengerReleaseRecoveryFromStores,
   recoverNodeRestart = runRunningNodeRestartRecoveryFromStores,
   recoverNodeProcess = runRunningNodeProcessRecoveryFromStores,
   recoverNodeRuntimeInstall = runRunningNodeRuntimeRecoveryFromStores,
@@ -181,7 +185,8 @@ export async function runJobRecoveryCli({
   if (RECOVERY_ACTIONS.includes(parsed.action)) {
     if (!packaged) throw new Error('Job recovery mutations are available only from the packaged YunPanel installation');
     let handler;
-    if (parsed.action === 'reconcile') handler = recover;
+    if (parsed.action === 'recover-passenger-release' || parsed.action === 'compensate-passenger-release') handler = input => recoverPassengerRelease({ ...input, compensationOnly: parsed.action === 'compensate-passenger-release' });
+    else if (parsed.action === 'reconcile') handler = recover;
     else if (parsed.action === 'recover-readonly') handler = recoverRunning;
     else if (parsed.action === 'recover-domain-stage') handler = recoverDomainStage;
     else if (parsed.action === 'recover-domain-activate') handler = recoverDomainActivate;

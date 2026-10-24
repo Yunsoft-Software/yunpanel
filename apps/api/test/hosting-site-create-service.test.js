@@ -9,7 +9,7 @@ function setup(t, changes = {}) {
   const f = siteFixture(t, changes);
   f.calls = []; f.sites = new Map(); f.applications = new Map(); f.domains = new Map(); f.mailDomains = new Map();
   f.provisioningOperations = new Map(); f.abandonCalls = []; f.lockCalls = []; f.site = website();
-  f.value = { customerId: 'customer-a', input: { operationId: uuid(1001), serverId: uuid(100) } };
+  f.value = { customerId: 'customer-a', input: { operationId: uuid(1001), serverId: uuid(100), primaryDomain: 'fixture.example.test' } };
   f.base = () => ({ operationId: f.value.input.operationId, ids: {
     websiteId: f.site.id,
     applicationId: f.site.applicationId,
@@ -20,8 +20,12 @@ function setup(t, changes = {}) {
     previewDigest: 'b'.repeat(64), confirmation: 'original-confirmation',
     blockers: [], steps: { websiteReady: f.sites.has(f.site.id) }, source: { kind: 'external_proxy' },
     plan: { website: f.site, application: null } });
+  f.persistSite = (site, input = f.value.input) => {
+    f.sites.set(site.id, structuredClone(site));
+    f.domains.set(uuid(2), { id: uuid(2), websiteId: site.id, serverId: site.serverId, primaryDomain: input.primaryDomain });
+  };
   f.previewAdapter = async () => f.base();
-  f.createAdapter = async (args) => { f.calls.push(args); f.sites.set(f.site.id, structuredClone(f.site)); return { created: true, website: f.site }; };
+  f.createAdapter = async (args) => { f.calls.push(args); f.persistSite(f.site); return { created: true, website: f.site }; };
   f.readAdapter = async (id) => f.sites.get(id) ?? null;
   f.siteMutationLock = {
     withSiteLock: async (identity, action) => {
@@ -367,7 +371,7 @@ test('hosted site create propagates siteAdmin and siteAdminError from creation r
   const siteAdminOutcome = { status: 'attention', code: 'site_admin_result_unverified' };
   f.createAdapter = async (args) => {
     f.calls.push(args);
-    f.sites.set(f.site.id, structuredClone(f.site));
+    f.persistSite(f.site);
     return { created: true, website: f.site, siteAdmin: siteAdminOutcome };
   };
 

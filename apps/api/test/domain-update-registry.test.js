@@ -225,3 +225,12 @@ test('Domain Nginx settings reject target mismatch and unsafe response headers b
   assert.equal((await registry.getDomain(proxy.id)).nginxSettings.websocket, true);
   assert.equal((await registry.getDomain(staticDomain.id)).nginxSettings.spaFallback, true);
 });
+
+test('preferred hostname stays within the existing Domain names and cannot be silently unbound', async () => {
+  const registry = createDomainRegistry();
+  const domain = await activeDomain(registry);
+  const preview = await registry.previewDomainUpdate({ domainId: domain.id, changes: { nginxSettings: { preferredDomain: domain.aliases[0] }, canonicalRedirect: true } });
+  await registry.updateDomain({ domainId: domain.id, changes: { nginxSettings: { preferredDomain: domain.aliases[0] }, canonicalRedirect: true }, previewDigest: preview.previewDigest });
+  await assert.rejects(registry.previewDomainUpdate({ domainId: domain.id, changes: { aliases: [] } }), { code: 'nginx_preferred_domain_unbound' });
+  await assert.rejects(registry.previewDomainUpdate({ domainId: domain.id, changes: { nginxSettings: { preferredDomain: 'foreign.example.net' } } }), { code: 'nginx_preferred_domain_unbound' });
+});

@@ -100,6 +100,32 @@ test('Roundcube install accepts package evidence without inventing an active sys
   assert.deepEqual(completed.result.health, { status: 'installed', configuration: 'valid' });
 });
 
+test('phpMyAdmin repair preserves verified configuration evidence and strips private extra fields', async () => {
+  const registry = createJobRegistry();
+  const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'phpmyadmin' });
+  const proof = { version: 1, transactionId: '8edf95c0-72ae-4a31-bd4a-cb95d15a61f1',
+    previewSha256: 'a'.repeat(64), fpmSha256: 'b'.repeat(64), nginxSha256: 'c'.repeat(64),
+    signonConfigSha256: 'd'.repeat(64), signonBridgeSha256: 'e'.repeat(64),
+    applied: true, sideEffects: true, httpHealthy: true, fpmSocketHealthy: true, gatewaySocketHealthy: true };
+  const completed = await registry.complete({ serverId, jobId: job.id, status: 'succeeded',
+    result: { ...serviceState('phpmyadmin', { installed: true }), changed: true,
+      configurationResult: { ...proof, password: 'PRIVATE', stdout: 'PRIVATE' } } });
+  assert.deepEqual(completed.result.configurationResult, proof);
+  assert.equal(JSON.stringify(completed.result).includes('PRIVATE'), false);
+});
+
+test('phpMyAdmin repair rejects successful-looking unverified gateway evidence', async () => {
+  const registry = createJobRegistry();
+  const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICE_INSTALL, { serviceId: 'phpmyadmin' });
+  await assert.rejects(registry.complete({ serverId, jobId: job.id, status: 'succeeded',
+    result: { ...serviceState('phpmyadmin', { installed: true }), changed: true,
+      configurationResult: { version: 1, transactionId: '8edf95c0-72ae-4a31-bd4a-cb95d15a61f1',
+        previewSha256: 'a'.repeat(64), fpmSha256: 'b'.repeat(64), nginxSha256: 'c'.repeat(64),
+        signonConfigSha256: 'd'.repeat(64), signonBridgeSha256: 'e'.repeat(64),
+        applied: true, sideEffects: true, httpHealthy: true, fpmSocketHealthy: true, gatewaySocketHealthy: false } } }),
+  error => error instanceof JobRegistryError && error.code === 'invalid_job_result');
+});
+
 test('single-service inspection must return the queued service identity', async () => {
   const registry = createJobRegistry();
   const job = await enqueueAndClaim(registry, OPERATIONS.SYSTEM_SERVICES_INSPECT, { serviceId: 'docker' });

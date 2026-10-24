@@ -494,3 +494,24 @@ test('Read Only cannot preview or apply managed mail mutations', async (t) => {
   })).status, 403);
   assert.equal(enqueued.length, 0);
 });
+
+test('native durable mail request survives a lost reply, rejects changed input and stays private to its actor', async t => {
+  const { createJobRegistry } = await import('../src/job-registry.js');
+  const registry = createJobRegistry(); await registry.init();
+  const actorId=randomUUID(),requestId=randomUUID();let currentActor=actorId,previewCount=0;
+  const app=express();app.use(express.json());app.use((req,_res,next)=>{req.auth={...owner,user:{...owner.user,id:currentActor}};next();});
+  mountMailConfigurationRoutes(app,{localServerId,jobRegistry:registry,
+    domainRegistry:{getDomain:async id=>id===localWebDomain.id?localWebDomain:null},
+    mailDomainRegistry:{getMailDomain:async id=>id===localMailDomain.id?localMailDomain:null},
+    mailConfigurationService:{previewTransition:async()=>{previewCount++;return managedPreview();}}});
+  app.use((error,_req,res,_next)=>res.status(error.status??500).json({error:{code:error.code}}));
+  const server=app.listen(0,'127.0.0.1');await new Promise(resolve=>server.once('listening',resolve));t.after(()=>new Promise(resolve=>server.close(resolve)));
+  const base=`http://127.0.0.1:${server.address().port}`;
+  const body={expectedRevision:1,status:'enabled',previewDigest,configurationSha256,confirmation,requestId};
+  const first=await request(base,`/api/mail-domains/${localMailDomain.id}/config-apply`,body);assert.equal(first.status,202);const firstJob=(await first.json()).data;
+  const replay=await request(base,`/api/mail-domains/${localMailDomain.id}/config-apply`,body);assert.equal(replay.status,202);assert.equal((await replay.json()).data.id,firstJob.id);assert.equal(previewCount,1);assert.equal((await registry.listJobs()).length,1);
+  const altered=await request(base,`/api/mail-domains/${localMailDomain.id}/config-apply`,{...body,configurationSha256:'f'.repeat(64)});assert.equal(altered.status,409);assert.equal((await altered.json()).error.code,'job_idempotency_conflict');
+  const path=`/api/mail-domains/${localMailDomain.id}/config-requests/${requestId}`;
+  const resumed=await fetch(base+path);assert.equal(resumed.status,200);assert.equal(resumed.headers.get('cache-control'),'no-store');assert.equal((await resumed.json()).data.id,firstJob.id);
+  currentActor=randomUUID();const foreign=await fetch(base+path);assert.equal(foreign.status,404);
+});

@@ -13,7 +13,8 @@ const TOOL_META = {
   backup: { title: 'Yedekleme ve Geri Yükleme', icon: 'archive' },
   backups: { title: 'Yedekleme ve Geri Yükleme', icon: 'archive' },
   logs: { title: 'Günlükler', icon: 'file' },
-  php: { title: 'PHP / WordPress', icon: 'code' },
+  php: { title: 'PHP Ayarları', icon: 'code' },
+  wordpress: { title: 'WordPress', icon: 'code' },
   ssl: { title: 'SSL/TLS Sertifikaları', icon: 'shield' },
   access: { title: 'Erişim Hesapları', icon: 'shield' },
 };

@@ -28,7 +28,7 @@ test('global Files entry remains present for owner and site manager', () => {
 test('site route exposes cron links and preserves the actual File Manager mount', async () => {
   const text = await source('SiteDetailPage.jsx');
   assert.match(text, /tab === 'cron' && <SiteCronPanel domainId=\{domain.id\}/);
-  assert.equal((text.match(/\['cron', 'Zamanlanmış Görevler', 'clock'\]/g) ?? []).length, 2);
+  assert.equal((text.match(/\['cron', 'Zamanlanmış Görevler', 'clock'\]/g) ?? []).length, 1);
   assert.match(text, /tab === 'files' && <SiteFilesPanel domainId=\{domain.id\}/);
   assert.match(text, /if \(key === 'cron'\) return canManage/);
 });

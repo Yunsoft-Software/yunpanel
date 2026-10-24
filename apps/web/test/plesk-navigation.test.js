@@ -7,7 +7,7 @@ const menu = (manage, owner, reseller = false) => navigationGroups(manage, owner
 const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.meta.url), 'utf8');
 
 test('Owner menu puts site tasks first in Plesk order, not runtime inventory', () => {
-  assert.deepEqual(menu(true, true), ['/websites', '/mail', '/files', '/databases', '/statistics', '/tools-settings', '/settings/users']);
+  assert.deepEqual(menu(true, true), ['/websites', '/mail', '/files', '/databases', '/statistics', '/customers', '/resellers', '/tools-settings']);
   assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri ve Alan Adları');
 });
 test('site manager gets the four scoped task entries without Owner tools', () => {
@@ -66,8 +66,8 @@ test('domain navigation uses encoded Domain ID and preserves bounded search', ()
 test('site tools follow three task families and expose DNS, Git and logs', () => {
   const groups = groupSiteTabs(SITE_TABS);
   assert.deepEqual(groups.map((group) => group.id), ['dashboard', 'hosting', 'mail']);
-  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'deploy', 'logs', 'analytics']);
-  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron', 'backup']);
+  assert.deepEqual(groups[0].tabs.map(([key]) => key), ['overview', 'files', 'databases', 'ssl', 'node', 'php', 'wordpress', 'deploy', 'logs', 'analytics', 'backup']);
+  assert.deepEqual(groups[1].tabs.map(([key]) => key), ['hosting', 'dns', 'settings', 'domains', 'access', 'terminal', 'cron']);
   assert.deepEqual(groups[2].tabs.map(([key]) => key), ['mail']);
 });
 test('unsupported runtime tools are not invented; unknown implemented tabs remain reachable', () => {
@@ -91,7 +91,7 @@ test('legacy application matching retains same-server and explicit target safety
 });
 test('appearance preferences and unknown site counts keep their contract', () => {
   assert.deepEqual(normalizePreferences({ theme: 'dark', density: 'compact' }), { theme: 'dark', density: 'compact' });
-  assert.deepEqual(readPreferences({ getItem() { throw Error('blocked'); } }), { theme: 'system', density: 'comfortable' });
+  assert.deepEqual(readPreferences({ getItem() { throw Error('blocked'); } }), { theme: 'dark', density: 'comfortable' });
   assert.equal(writePreferences({ setItem() { throw Error('blocked'); } }, {}), false);
   assert.equal(websiteCount({ status: 'loading', items: [] }), null);
   assert.equal(websiteCount({ status: 'ready', items: [{ id: 'one' }, { id: 'one' }] }), 1);
@@ -101,7 +101,7 @@ test('source: home is websites, legacy URLs and Owner guards stay mounted', asyn
   assert.match(app, /index: true, element: <Navigate to="\/websites" replace/);
   assert.match(app, /path: 'tools-settings', element: owner\(<ToolsSettingsPage \/>\)/);
   for (const path of ['dashboard', 'applications', 'domains', 'servers', 'settings', 'settings/users', 'backups', 'customers', 'mail/:mailDomainId', 'websites/:websiteId/:tab?']) assert.ok(app.includes(`path: '${path}'`), path);
-  assert.match(app, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>\)/);
+  assert.match(app, /path: 'customers', element: <CustomersRoute \/>/);
   assert.match(app, /function ResellerRoute/);
   for (const tool of ['mail', 'databases']) assert.ok(app.includes(`manage(<GlobalSiteTool tool="${tool}"`));
   assert.match(app, /return isOwner \? ownerView : <SiteToolEntryPage tool=\{tool\}/);

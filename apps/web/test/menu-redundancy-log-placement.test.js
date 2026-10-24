@@ -63,8 +63,9 @@ test('navigationGroups: legitimate global entry points for shared resources are 
     '/files',
     '/databases',
     '/statistics',
+    '/customers',
+    '/resellers',
     '/tools-settings',
-    '/settings/users',
   ]);
 
   // Site manager global navigation (site-scoped view of the 4 shared resources)

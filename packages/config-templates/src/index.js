@@ -175,6 +175,7 @@ export {
   RoundcubeFpmTemplateError,
   previewRoundcubeFpmPool,
   renderRoundcubeFpmPool,
+  resolveRoundcubeFpmRuntime,
   roundcubeFpmTemplatePolicy,
 } from './roundcube-fpm.js';
 
@@ -217,6 +218,7 @@ export {
   elFinderFpmTemplatePolicy,
   previewElFinderFpmPool,
   renderElFinderFpmPool,
+  resolveElFinderFpmRuntime,
 } from './elfinder-fpm.js';
 
 export {
@@ -225,6 +227,7 @@ export {
   phpMyAdminFpmTemplatePolicy,
   previewPhpMyAdminFpmPool,
   renderPhpMyAdminFpmPool,
+  resolvePhpMyAdminFpmRuntime,
 } from './phpmyadmin-fpm.js';
 
 export {

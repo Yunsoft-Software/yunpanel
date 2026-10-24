@@ -101,7 +101,8 @@ export function createDatabaseCredentialApplyService({
     });
   }
 
-  async function queue(input, operation, { authorization = null } = {}) {
+  async function queue(input, operation, { authorization = null, createDatabase = false } = {}) {
+    if (typeof createDatabase !== 'boolean' || (createDatabase && operation !== OPERATIONS.DATABASE_CREDENTIAL_APPLY)) throw new DatabaseCredentialApplyError('database_setup_mode_invalid', 'Veritabanı kurulumu geçersiz');
     const credentialRevision = positiveRevision(input.expectedCredentialRevision, 'expectedCredentialRevision');
     const bindingRevision = positiveRevision(input.expectedBindingRevision, 'expectedBindingRevision');
     const sha256 = expectedDigest(input.expectedDesiredStateSha256);
@@ -123,18 +124,42 @@ export function createDatabaseCredentialApplyService({
         expectedCredentialRevision: current.expectedCredentialRevision,
         expectedBindingRevision: current.expectedBindingRevision,
         desiredStateSha256: current.desiredStateSha256,
+        ...(createDatabase ? { createDatabase: true } : {}),
       },
       resourceType: 'database',
       resourceId: current.databaseName,
-      idempotencyKey: `${operation}:${current.databaseCredentialId}:${current.desiredStateSha256}`,
+      idempotencyKey: `${operation}:${current.databaseCredentialId}:${current.desiredStateSha256}${createDatabase ? ':create' : ''}`,
       authorization,
     });
     return Object.freeze({ desiredStateSha256: current.desiredStateSha256, job });
   }
 
+  async function resumeApply(credentialId, { authorization = null, createDatabase = false } = {}) {
+    const { credential, binding } = await stateFor(credentialId);
+    const jobs = await jobRegistry.listJobs({ serverId: binding.serverId, resourceType: 'database', resourceId: binding.databaseName });
+    const matching = jobs.filter((job) => job.operation === OPERATIONS.DATABASE_CREDENTIAL_APPLY
+      && job.payload?.databaseCredentialId === credential.id && job.payload.expectedCredentialRevision === credential.revision
+      && job.payload.databaseBindingId === binding.id && job.payload.expectedBindingRevision === binding.revision)
+      .sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+    const job = matching[0];
+    if (job) {
+      if (ACTIVE_JOB_STATUSES.has(job.status) || job.status === 'succeeded') return Object.freeze({ desiredStateSha256: job.payload.desiredStateSha256, job });
+      if (job.status === 'failed') {
+        if (typeof jobRegistry.retryJob !== 'function') throw new DatabaseCredentialApplyError('database_retry_unavailable', 'Veritabanı işi güvenli biçimde devam ettirilemiyor', 503);
+        const retried = await jobRegistry.retryJob({ jobId: job.id, serverId: binding.serverId, authorization });
+        return Object.freeze({ desiredStateSha256: job.payload.desiredStateSha256, job: retried });
+      }
+      throw new DatabaseCredentialApplyError('database_setup_cancelled', 'İptal edilmiş kurulum için erişim ve işlem kaydı kontrol edilmelidir', 409);
+    }
+    const current = await preview(credentialId, OPERATIONS.DATABASE_CREDENTIAL_APPLY);
+    return queue({ credentialId, expectedCredentialRevision: current.expectedCredentialRevision, expectedBindingRevision: current.expectedBindingRevision,
+      expectedDesiredStateSha256: current.desiredStateSha256, confirmation: current.confirmation }, OPERATIONS.DATABASE_CREDENTIAL_APPLY, { authorization, createDatabase });
+  }
+
   return Object.freeze({
     previewApply: (credentialId) => preview(credentialId, OPERATIONS.DATABASE_CREDENTIAL_APPLY),
     queueApply: (input, options) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_APPLY, options),
+    resumeApply,
     previewDelete: (credentialId) => preview(credentialId, OPERATIONS.DATABASE_CREDENTIAL_DELETE),
     queueDelete: (input, options) => queue(input, OPERATIONS.DATABASE_CREDENTIAL_DELETE, options),
   });

@@ -7,22 +7,24 @@ import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, LinkB
 import { formatDate, siteHref } from './site-model.js';
 import { PHP_TOOL_ACTIONS, resolvePhpToolsAccess } from './php-tools-model.js';
 import { createPhpToolsClient } from './php-tools-client.js';
+import SiteWordPressPanel from './SiteWordPressPanel.jsx';
 
 const ACCESS = { forbidden: 'Bu siteye erişim izniniz yok.', unavailable: 'Güncel site bilgileri bekleniyor.',
   not_found: 'Bu alan adına bağlı tek bir site kaydı bulunamadı.', unbound: 'Alan adı henüz bir siteye bağlanmamış.',
   inconsistent: 'Site, sunucu ve uygulama bağlantısı doğrulanamadı.', unsupported: 'PHP araçları yalnız PHP sitelerinde kullanılabilir.' };
 const toolState = (available) => available === true ? 'Komut aracı tespit edildi' : available === false ? 'Komut aracı bulunamadı' : 'Doğrulanamadı';
-export default function SitePhpToolsPanel({ domainId }) {
+export default function SitePhpToolsPanel({ domainId, tool = 'wordpress' }) {
   const { session } = usePanelSession();
   const { domains, websites, canManage, refreshAll } = useWorkspace();
   const access = resolvePhpToolsAccess({ domainId, domains, websites, canManage });
-  if (access.state !== 'ready') return <Section title="PHP / WordPress"><EmptyState icon="code" title="PHP araçları açılamadı" detail={ACCESS[access.state]}
+  if (access.state !== 'ready') return <Section title={tool === 'wordpress' ? 'WordPress' : 'Composer'}><EmptyState icon="code" title="PHP araçları açılamadı" detail={ACCESS[access.state]}
     action={access.state !== 'forbidden' && <Button onClick={refreshAll} icon="refresh">Site bilgilerini yenile</Button>} /></Section>;
   const generation = sessionVersion();
   const identity = JSON.stringify([domainId, access.scope, session?.user?.id, session?.user?.role, generation, canManage]);
-  return <PhpToolsWorkspace key={identity} domainId={domainId} scope={access.scope} generation={generation} />;
+  if (tool === 'wordpress') return <SiteWordPressPanel key={identity} domainId={domainId} scope={access.scope} />;
+  return <PhpToolsWorkspace key={`${identity}:${tool}`} domainId={domainId} scope={access.scope} generation={generation} tool={tool} />;
 }
-function PhpToolsWorkspace({ domainId, scope, generation }) {
+function PhpToolsWorkspace({ domainId, scope, generation, tool }) {
   const { canManage, jobs, resourceBusy, observe, updateJob } = useWorkspace();
   const ref = useRef(null), live = useRef(canManage); live.current = canManage;
   const [state, setState] = useState(null);
@@ -52,18 +54,18 @@ function PhpToolsWorkspace({ domainId, scope, generation }) {
   const actionsFor = (tool) => PHP_TOOL_ACTIONS.filter((item) => item.tool === tool)
     .map((item) => ({ ...item, ready: actionReady(item) }));
   return <>
-    <Section title="PHP araçları" description="WordPress ve Composer durumunu bu site kapsamında kontrol edin.">
+    <Section title={tool === 'wordpress' ? 'WordPress' : 'Composer'} description={tool === 'wordpress' ? 'Kurulum, sürüm, eklentiler ve temalar.' : 'PHP bağımlılıkları ve autoload dosyaları.'}>
       <div className="ws-section-body"><div className="ws-actions"><LinkButton to={siteHref(domainId, 'files')} icon="folder">Dosya Yöneticisi</LinkButton><LinkButton to={siteHref(domainId, 'terminal')} icon="terminal">Site terminali</LinkButton></div>
-        <p className="ws-muted">Durum kontrolleri mevcut PHP araçlarını site kullanıcısıyla çağırır. Yazma etkili eylemler sabit katalogdan seçilir, açık onaydan sonra güvenli sunucu işlem kuyruğuna alınır; paket/eklenti güncellemesi veya serbest komut çalıştırma sunulmaz.</p></div>
+        </div>
     </Section>
-    <ToolSection title="WordPress" tool="wordpress" status={state?.wordpress} denied={state?.denied} client={ref}
+    {tool === 'wordpress' && <ToolSection title="Kurulum ve sürüm" tool="wordpress" status={state?.wordpress} denied={state?.denied} client={ref}
       actions={actionsFor('wordpress')} actionBusy={actionBusy} onAction={(id) => void ref.current?.prepareAction(id)}>
       {state?.wordpress?.data && <WordPressStatus data={state.wordpress.data} fresh={state.wordpress.fresh} />}
-    </ToolSection>
-    <ToolSection title="Composer" tool="composer" status={state?.composer} denied={state?.denied} client={ref}
+    </ToolSection>}
+    {tool === 'composer' && <ToolSection title="Composer" tool="composer" status={state?.composer} denied={state?.denied} client={ref}
       actions={actionsFor('composer')} actionBusy={actionBusy} onAction={(id) => void ref.current?.prepareAction(id)}>
       {state?.composer?.data && <ComposerStatus data={state.composer.data} />}
-    </ToolSection>
+    </ToolSection>}
     {state?.action?.job && <Section title="Son PHP araç işlemi"><div className="ws-section-body">
       <p><Badge state={state.action.job.status} /> <code>{state.action.job.id}</code></p>
       <p className="ws-muted">{state.action.job.status === 'succeeded'

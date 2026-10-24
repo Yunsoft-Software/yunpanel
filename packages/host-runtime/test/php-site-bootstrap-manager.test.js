@@ -160,7 +160,11 @@ function fakeHost({ aclInstalled = false } = {}) {
     if (file === '/usr/bin/setfacl') {
       const target = args.at(-1);
       const targetAcls = acls.get(target) ?? new Set();
-      for (const raw of args[args.indexOf('-m') + 1].split(',')) targetAcls.add(aclEntry(raw));
+      for (const raw of args[args.indexOf('-m') + 1].split(',')) {
+        const next = aclEntry(raw), identity = next.slice(0,next.lastIndexOf(':')+1);
+        for (const previous of targetAcls) if (previous.startsWith(identity)) targetAcls.delete(previous);
+        targetAcls.add(next);
+      }
       acls.set(target, targetAcls);
       return { stdout: '' };
     }
@@ -191,6 +195,7 @@ function fakeHost({ aclInstalled = false } = {}) {
 
 function manager(host, options = {}) {
   return createPhpSiteBootstrapManager({
+    runtimeType: options.runtimeType ?? 'php',
     receiptRoot: '/var/lib/yunpanel/staging/php-sites',
     identityManager: options.identityManager ?? identityManager(),
     run: host.run,
@@ -231,6 +236,39 @@ test('PHP bootstrap creates a site-owned release and grants only Nginx ACL acces
   assert.equal(host.acls.get(releaseDocumentRoot)?.has('default:user:www-data:r-x'), true);
   assert.equal(host.acls.get(indexPath)?.has('user:www-data:r--'), true);
   assert.equal(host.calls.some(([file]) => file === '/usr/bin/apt-get'), true);
+});
+
+test('the existing bootstrap engine creates uploaded static HTML without Git, tolerates only exact secured control paths and preserves user edits', async () => {
+  const host = fakeHost({ aclInstalled: true });
+  const bootstrap = manager(host, { runtimeType: 'static' });
+  const root = `/var/www/yunpanel/apps/${applicationId}`;
+  const value = intent({ documentRoot: root + '/current' });
+  const first = await bootstrap.apply(value, { operationId });
+  assert.equal(first.adapter, 'static-bootstrap');
+  assert.equal(first.releaseId, operationId);
+  assert.equal(host.entries.get(root + '/current').target, 'releases/' + operationId);
+  const index = root + '/releases/' + operationId + '/index.html';
+  assert.match(host.entries.get(index).content, /^<!doctype html>/);
+  assert.equal(host.calls.some(([file]) => /git|npm|php|composer/.test(file)), false);
+  for (const target of [root, root + '/releases', root + '/current']) {
+    host.entries.get(target).uid = 0; host.entries.get(target).gid = 0;
+    if (!target.endsWith('/current')) host.entries.get(target).mode = 0o711;
+  }
+  assert.equal((await bootstrap.inspect(value, { operationId })).satisfied, true);
+  host.entries.get(index).content = '<h1>Uploaded customer content</h1>';
+  await assert.rejects(bootstrap.inspect(value, { operationId }), { code: 'php_site_bootstrap_content_drift' });
+  assert.equal((await bootstrap.inspectServing(value, { operationId })).satisfied, true);
+  host.acls.set(index,new Set(['user:www-data:r-x\t#effective:r--']));
+  assert.equal((await bootstrap.inspectServing(value, { operationId })).satisfied,true);
+  for (const unsafe of ['user:www-data:r--\t#effective:---','user:www-data:rwx\t#effective:r--','user:www-data:r-x']) {
+    host.acls.set(index,new Set([unsafe]));
+    await assert.rejects(bootstrap.inspectServing(value, { operationId }),{code:'php_site_acl_drift'});
+  }
+  host.acls.set(index,new Set(['user:www-data:r-x\t#effective:r--']));
+  await assert.rejects(bootstrap.compensate(value, { operationId }), { code: 'php_site_compensation_drift' });
+  assert.equal(host.entries.get(index).content, '<h1>Uploaded customer content</h1>');
+  host.entries.get(root + '/current').target = '/var/www/yunpanel/apps/foreign/current';
+  await assert.rejects(bootstrap.inspectServing(value, { operationId }), { code: 'php_site_current_drift' });
 });
 
 test('PHP bootstrap is idempotent for the same durable operation', async () => {

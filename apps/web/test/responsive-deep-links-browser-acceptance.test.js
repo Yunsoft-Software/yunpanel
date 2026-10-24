@@ -355,7 +355,7 @@ test('Criterion 6: Site and DB mobile table rows preserve full screen reader tab
   assert.match(siteResources, /<td role="cell" data-label="İşlemler">/);
 
   // 4. JobsTable for overview and logs
-  assert.match(jobsTable, /<table className="ws-table" role="table" aria-label="İşlem kayıtları">/);
+  assert.match(jobsTable, /<table className="ws-table ws-jobs-table" role="table" aria-label="İşlem kayıtları">/);
   assert.match(jobsTable, /<thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">İşlem<\/th>/);
   assert.match(jobsTable, /<tbody role="rowgroup">/);
   assert.match(jobsTable, /<tr key=\{job\.id\} role="row">/);

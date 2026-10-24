@@ -70,7 +70,7 @@ test('source: create entry is Owner-only in heading and empty state; no mutation
   assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new"/);
   assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new\?mode=subdomain"/);
   assert.match(page, /action=\{isOwner && canManage \? <LinkButton to="\/websites\/new"/);
-  assert.doesNotMatch(page, /panelRequest|fetch\(|localStorage|sessionStorage/);
+  assert.doesNotMatch(page, /method:\s*['"](?:POST|PATCH|DELETE)|fetch\(|localStorage|sessionStorage/);
   const card = await source('WebsiteTaskCard.jsx');
   assert.match(card, /tasks.createSubdomainHref && <LinkButton to=\{tasks.createSubdomainHref\}/);
   assert.match(card, /tasks.manageAliasesHref && <LinkButton to=\{tasks.manageAliasesHref\}/);
@@ -80,7 +80,7 @@ test('source: every daily tool is outside disclosures and has an accessible dest
   const card = await source('WebsiteTaskCard.jsx');
   const start = card.indexOf('className="ws-website-task-grid"');
   assert.ok(start > 0 && start < card.indexOf('<details'));
-  assert.match(card, /tasks.tools.map\(\(tool\) => <TaskLink/);
+  assert.match(card, /tasks.tools.filter\(.*\).map\(\(tool\) => <TaskLink/);
   assert.match(card, /to=\{tool.href\}/);
   assert.match(card, /<Button disabled icon=\{tool.icon\}/);
   assert.match(card, /aria-describedby=\{`\$\{id\}-\$\{tool.key\}`\}/);

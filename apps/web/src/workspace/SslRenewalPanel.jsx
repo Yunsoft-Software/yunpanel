@@ -20,8 +20,8 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
   const [state, setState] = useState(EMPTY_SSL_RENEWAL);
   const flow = useRef(null), permissions = useRef(null);
   permissions.current = { canManage, disabled };
-  const callbacks = useRef({ observe, updateJob, refreshAll });
-  callbacks.current = { observe, updateJob, refreshAll };
+  const callbacks = useRef({ observe, updateJob, refreshAll, refreshJobs: jobs.refresh });
+  callbacks.current = { observe, updateJob, refreshAll, refreshJobs: jobs.refresh };
   const opened = useRef(null), invalidated = useRef('0:0');
   useEffect(() => {
     const version = sessionVersion();
@@ -36,8 +36,8 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
   }, [domain.id, domain.certificateId, domain.serverId, domain.websiteId, domain.primaryDomain]);
   useEffect(() => {
     if (!state.job) return;
-    if (opened.current !== state.job.id) { opened.current = state.job.id; callbacks.current.observe(state.job); }
-    else callbacks.current.updateJob(state.job);
+    callbacks.current.updateJob(state.job);
+    if (opened.current !== state.job.id) { opened.current = state.job.id; callbacks.current.refreshJobs(); }
   }, [state.job]);
   useEffect(() => {
     const key = `${state.terminalVersion}:${state.syncVersion}`;
@@ -76,10 +76,10 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
         <p>Kayıtlı SHA-256: <code>{state.certificate.fingerprint256}</code></p>
       </details>
     </>}
-    <p className="ws-muted">Sonucu yeniden oku yalnız kayıt okur; yenilemeyi tekrar göndermez. Panel kaydıyla eşleşme, yayındaki TLS bağlantısının doğrulandığı anlamına gelmez.</p>
+    <p className="ws-muted">Sonucu yeniden oku yalnız kayıt okur; yenilemeyi tekrar göndermez. Yayındaki sertifika doğrulaması ayrıca gösterilir.</p>
     {approval && <ConfirmDialog title={approval.dryRun ? 'SSL yenilemesini test et' : 'SSL yenilemesini başlat'}
       message={`${domain.primaryDomain}: ${approval.dryRun ? 'Üretim sertifikası değiştirilmeden yenileme testi yapılacak.' : 'Gerçek ACME yenilemesi istenecek. Sağlayıcı limitleri geçerlidir.'} Site veya sertifika değişirse bu onayla işlem yapılmaz.`}
-      confirmation={approval.confirmation} busy={busy} error={state.error} onCancel={() => flow.current?.cancel()}
+      confirmation={null} busy={busy} error={state.error} onCancel={() => flow.current?.cancel()}
       onConfirm={() => flow.current?.confirm(approval, approval.confirmation)} confirmLabel={approval.dryRun ? 'Testi başlat' : 'Yenilemeyi başlat'} />}
   </div>;
 }

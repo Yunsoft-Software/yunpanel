@@ -158,7 +158,7 @@ test('Criterion 2: Production HTTP server serves global deep links and all 11 si
   assert.equal(normalizeSiteTab('statistics'), 'analytics');
   assert.equal(normalizeSiteTab('tasks'), 'cron');
   assert.equal(normalizeSiteTab('sftp'), 'access');
-  assert.equal(normalizeSiteTab('wp'), 'php');
+  assert.equal(normalizeSiteTab('wp'), 'wordpress');
   assert.equal(normalizeSiteTab('database'), 'databases');
   assert.equal(normalizeSiteTab('email'), 'mail');
   assert.equal(normalizeSiteTab('certificate'), 'ssl');

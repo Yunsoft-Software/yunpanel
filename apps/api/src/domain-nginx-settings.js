@@ -8,7 +8,8 @@ export function domainNginxSettingsForTarget(domain, targetType) {
   return normalizeNginxSettings(targetType, {
     clientMaxBodySizeMb: settings.clientMaxBodySizeMb ?? null,
     headers: settings.headers ?? [],
-    ...(targetType === 'php' ? Object.fromEntries(['indexFiles', 'errorPages']
+    ...(Object.hasOwn(settings, 'preferredDomain') ? { preferredDomain: settings.preferredDomain } : {}),
+    ...(targetType === 'php' ? Object.fromEntries(['indexFiles', 'errorPages', 'documentRoot']
       .filter(key => Object.hasOwn(settings, key)).map(key => [key, settings[key]])) : {}),
   });
 }

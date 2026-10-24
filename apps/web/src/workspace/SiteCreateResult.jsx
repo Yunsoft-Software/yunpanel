@@ -12,6 +12,11 @@ const STEP_LABELS = Object.freeze({
   mail_config: 'Posta yapılandırması', mail_dkim_key: 'DKIM anahtarı',
   mail_dns_reapply: 'Posta DNS kayıtları', roundcube_mapping: 'Webmail bağlantısı',
   webmail_certificate: 'Webmail sertifikası',
+  elfinder: 'Dosya yöneticisi', sftp: 'Dosya aktarımı erişimi', runtime: 'Yayın dosyaları',
+  php_bootstrap: 'Site dosyaları', php_runtime: 'PHP hizmeti', node_release: 'Uygulama dosyaları',
+  static_upload_state: 'Yayın sonucunu doğrulama', passenger_environment: 'Ortam değişkenleri',
+  passenger_application_release: 'Uygulama sürümü', passenger_environment_state: 'Uygulama ayarlarını doğrulama',
+  passenger_authority: 'Site erişimi', passenger_health: 'Site yanıtını doğrulama',
 });
 const STATE_LABELS = Object.freeze({
   pending: 'Bekliyor', saving: 'Kaydediliyor', applying: 'İşleniyor', verifying: 'Doğrulanıyor',

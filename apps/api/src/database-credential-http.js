@@ -174,6 +174,8 @@ export function mountDatabaseCredentialRoutes(app, {
     const authorization = request.auth?.user ? {
       actorId: request.auth.user.id,
       userId: request.auth.user.id,
+      sessionId: request.auth.id,
+      role: request.auth.user.role,
       websiteId: state.credential.websiteId,
       resourceId: state.credential.websiteId,
     } : null;
@@ -197,6 +199,8 @@ export function mountDatabaseCredentialRoutes(app, {
     const authorization = request.auth?.user ? {
       actorId: request.auth.user.id,
       userId: request.auth.user.id,
+      sessionId: request.auth.id,
+      role: request.auth.user.role,
       websiteId: state.credential.websiteId,
       resourceId: state.credential.websiteId,
     } : null;

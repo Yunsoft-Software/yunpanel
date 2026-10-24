@@ -366,7 +366,7 @@ export async function downloadSiteFile(websiteId, targetPath) {
 
 export async function getWebsiteConsumption(websiteId) {
   if (typeof websiteId !== 'string' || !websiteId) throw new Error('websiteId is required');
-  const response = await fetch(`/api/websites/${encodeURIComponent(websiteId)}/consumption`, {
+  const response = await fetch(`${MANAGEMENT_ROOT}/websites/${encodeURIComponent(websiteId)}/consumption`, {
     method: 'GET',
     credentials: 'same-origin',
     cache: 'no-store',

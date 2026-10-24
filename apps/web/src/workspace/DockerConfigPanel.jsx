@@ -1,5 +1,6 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+  getDockerProjectDocument,
   replaceDockerEnvironment,
   setDockerCredential,
   updateDockerProject,
@@ -13,7 +14,10 @@ export default function DockerConfigPanel({ data, onChanged }) {
   const project = data.project;
   const environment = data.environment ?? { revision: 0, keys: [], variableCount: 0 };
   const credentials = Array.isArray(data.credentials) ? data.credentials : [];
-  const [document, setDocument] = useState('');
+  const initialDocument = typeof data.document === 'string'
+    ? data.document
+    : (typeof project?.document === 'string' ? project.document : '');
+  const [document, setDocument] = useState(initialDocument);
   const [environmentText, setEnvironmentText] = useState('');
   const [credential, setCredential] = useState({ registryHost: '', username: '', secret: '' });
   const [validation, setValidation] = useState(null);
@@ -22,8 +26,13 @@ export default function DockerConfigPanel({ data, onChanged }) {
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState(null);
   const pending = useRef(false);
+  useEffect(() => {
+    if (!document && initialDocument) {
+      setDocument(initialDocument);
+    }
+  }, [initialDocument, document]);
   const credentialRevision = useMemo(() => credentials.find((item) => item.registryHost === credential.registryHost.trim().toLowerCase())?.revision ?? 0, [credentials, credential.registryHost]);
-  useUnsavedChanges(Boolean(document || environmentText || credential.registryHost || credential.username || credential.secret));
+  useUnsavedChanges(Boolean((document && document !== initialDocument) || environmentText || credential.registryHost || credential.username || credential.secret));
 
   async function mutate(callback, success) {
     if (pending.current) return;
@@ -76,6 +85,19 @@ export default function DockerConfigPanel({ data, onChanged }) {
     await mutate(async () => { setValidation(await validateSavedDockerProject(project.id)); }, 'Kayıtlı Compose state environment ile doğrulandı.');
   }
 
+  async function loadCurrentComposeDocument() {
+    await mutate(async () => {
+      if (initialDocument) {
+        setDocument(initialDocument);
+        return;
+      }
+      const res = await getDockerProjectDocument(project.id);
+      const loaded = typeof res === 'string' ? res : (res?.document ?? '');
+      if (!loaded) throw new Error('Mevcut Compose YAML içeriği alınamadı.');
+      setDocument(loaded);
+    }, 'Mevcut Compose YAML editöre yüklendi.');
+  }
+
   function saveCredential(event) {
     event.preventDefault();
     const input = { ...credential, registryHost: credential.registryHost.trim().toLowerCase(), expectedRevision: credentialRevision };
@@ -85,7 +107,7 @@ export default function DockerConfigPanel({ data, onChanged }) {
     }, `${input.registryHost} registry credential kaydedildi.`);
   }
 
-  return <><Section title="Compose desired state" description="Şifreli Compose document API tarafından geri gösterilmez. Değiştirmek için tam yeni document verin; revision stale ise mutation reddedilir."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}<div className="ws-actions"><Button disabled={busy} onClick={validateSaved}>Kayıtlı state’i validate et</Button></div>{validation && <KeyValues items={[
+  return <><Section title="Compose desired state" description="Mevcut Compose YAML tanımını editöre yükleyip düzenleyebilir veya yeni tam document verebilirsiniz; revision stale ise mutation reddedilir."><div className="ws-section-body"><ErrorNotice error={error} />{notice && <p role="status" className="ws-notice">{notice}</p>}<div className="ws-actions"><Button disabled={busy} onClick={loadCurrentComposeDocument}>Mevcut Compose YAML'ı Editöre Yükle</Button><Button disabled={busy} onClick={validateSaved}>Kayıtlı state’i validate et</Button></div>{validation && <KeyValues items={[
     ['Project revizyonu', validation.projectRevision], ['Environment revizyonu', validation.environmentRevision], ['Servis', validation.validation?.serviceCount], ['Compose SHA-256', validation.validation?.composeSha256],
   ]} />}<form className="ws-form" onSubmit={requestDocumentUpdate}><fieldset disabled={busy}><label>Yeni tam Compose document<textarea rows={14} value={document} onChange={(event) => setDocument(event.target.value)} spellCheck={false} placeholder="services:\n  web:\n    image: nginx:latest" required /></label><p className="ws-muted">Bu yalnız desired state’i değiştirir. Build/pull/restart işlemini Lifecycle bölümünden ayrı başlatın.</p><Button type="submit" variant="primary" disabled={!document || busy}>Desired state’i değiştir</Button></fieldset></form></div></Section>
   <Section title="Compose environment" description="Değerler şifreli tutulur ve geri okunmaz. Replace işlemi için korunacak bütün değerleri yeniden girin."><div className="ws-section-body"><KeyValues items={[

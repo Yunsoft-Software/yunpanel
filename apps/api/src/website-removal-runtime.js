@@ -72,6 +72,8 @@ export function createWebsiteRemovalRuntime({
   applicationEnvironmentRegistry = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
+  databaseCleanupHandler = null,
+  databaseCleanupInspector = null,
   websiteSftpKeyRegistry = null,
   runtimeBindingRegistry = null,
   websiteCronRegistry = null,
@@ -280,9 +282,13 @@ export function createWebsiteRemovalRuntime({
     );
     if (plan?.additional?.sftpKeys?.ids?.length) require('sftp_cleanup_unavailable', websiteSftpKeyRegistry?.listKeys, websiteSftpKeyRegistry?.revokeKey);
     if (plan?.additional?.databases?.ids?.length) {
-      require('database_cleanup_unavailable', databaseBindingRegistry?.listBindings,
+      require('database_cleanup_unavailable', databaseCleanupHandler, databaseCleanupInspector, registry?.checkpointStep, databaseBindingRegistry?.listBindings,
         databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding,
         databaseCredentialRegistry?.getForBinding, databaseCredentialRegistry?.deleteCredential);
+    }
+    if (plan?.additional?.databases?.ids?.length && typeof databaseCleanupInspector === 'function') {
+      try { await databaseCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId, serverId: current.website.serverId, systemUser: plan.systemUser, plan }); }
+      catch { missing.push('database_cleanup_preflight_failed'); }
     }
     if (typeof fileCleanupInspector === 'function' && current?.website?.id && plan?.applicationId) {
       try { await fileCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId }); }
@@ -605,46 +611,18 @@ export function createWebsiteRemovalRuntime({
 
         case 'database_binding_cleanup': {
           requireCleanupMethod(databaseBindingRegistry?.listBindings);
-          requireCleanupMethod(databaseBindingRegistry?.unbindDatabase ?? databaseBindingRegistry?.removeBinding);
-          requireCleanupMethod(databaseCredentialRegistry?.getForBinding);
-          requireCleanupMethod(databaseCredentialRegistry?.deleteCredential);
-          const unboundBindings = [];
-          if (databaseBindingRegistry && typeof databaseBindingRegistry.listBindings === 'function') {
-            const bindings = cleanupInventory(await databaseBindingRegistry.listBindings({ websiteId: op.websiteId }));
-            for (const binding of bindings) {
-              if (databaseCredentialRegistry && typeof databaseCredentialRegistry.getForBinding === 'function') {
-                const credential = await databaseCredentialRegistry.getForBinding(binding.id);
-                if (credential && typeof databaseCredentialRegistry.deleteCredential === 'function') {
-                  await databaseCredentialRegistry.deleteCredential(credential.id, {
-                    expectedRevision: credential.revision,
-                    confirmation: `delete-database-credential:${credential.id}:${credential.revision}`,
-                  });
-                }
-              }
-              if (typeof databaseBindingRegistry.unbindDatabase === 'function') {
-                await databaseBindingRegistry.unbindDatabase(binding.id, {
-                  expectedRevision: binding.revision ?? 1,
-                  confirmation: `unbind-database:${binding.id}:${binding.revision ?? 1}`,
-                });
-                unboundBindings.push({
-                  id: binding.id,
-                  databaseName: binding.databaseName,
-                  revision: binding.revision,
-                  unbound: true,
-                });
-              } else if (typeof databaseBindingRegistry.removeBinding === 'function') {
-                await databaseBindingRegistry.removeBinding(binding.id);
-                unboundBindings.push({
-                  id: binding.id,
-                  unbound: true,
-                });
-              }
+          const bindings = cleanupInventory(await databaseBindingRegistry.listBindings({ websiteId: op.websiteId }));
+          if (bindings.length || op.plan?.additional?.databases?.ids?.length) {
+            requireCleanupMethod(databaseCleanupHandler);
+            const result = await databaseCleanupHandler({ operation: op, stepId: step.id,
+              authorize: () => requireLiveActor(actor, op.websiteId, { operationId: op.id }) });
+            if (result?.databaseBindingsCleaned !== true || !Array.isArray(result.unboundBindings)
+              || result.unboundBindings.some(binding => binding.physicalVerified !== true || binding.unbound !== true)
+              || JSON.stringify(result.unboundBindings.map(binding => binding.id).sort()) !== JSON.stringify([...(op.plan?.additional?.databases?.ids ?? [])].sort())) {
+              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Physical database retirement was not verified', 409);
             }
-          }
-          op = await registry.succeedStep(op.id, step.id, {
-            databaseBindingsCleaned: true,
-            unboundBindings,
-          });
+            op = await registry.succeedStep(op.id, step.id, result);
+          } else op = await registry.succeedStep(op.id, step.id, { databaseBindingsCleaned: true, unboundBindings: [] });
           break;
         }
 

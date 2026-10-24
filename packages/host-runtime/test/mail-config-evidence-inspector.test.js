@@ -162,7 +162,7 @@ function inspectorFor({
         gid: compiledSieve ? compiledSieveGid
           : sieveSource ? sieveSourceGid
             : postfixSql ? POSTFIX_GID
-              : sqlDatabase ? MAIL_AUTH_GID : 0,
+              : sqlDatabase ? MAIL_AUTH_GID : filePath.startsWith('/etc/rspamd/local.d/') ? 5003 : 0,
         isFile: () => true,
         isDirectory: () => false,
         isSocket: () => false,
@@ -172,6 +172,7 @@ function inspectorFor({
     readFileFn: async (filePath) => Buffer.from(files.get(filePath)),
     run: async (file, args) => {
       if (file === '/usr/bin/getent') {
+        if (args[0] === 'passwd' && args[1] === '_rspamd') return { stdout: '_rspamd:x:5003:5003::/var/lib/rspamd:/usr/sbin/nologin\n', stderr: '' };
         if (args[0] === 'group' && args[1] === 'yunpanel-mailauth') {
           return { stdout: 'yunpanel-mailauth:x:' + MAIL_AUTH_GID + ':postfix,dovecot\n', stderr: '' };
         }

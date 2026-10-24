@@ -6,6 +6,8 @@ import { useWorkspace } from './WorkspaceContext.jsx';
 import { openWebsitePhpMyAdmin } from './phpmyadmin-client.js';
 import { siteHref } from './site-model.js';
 import SiteMailPanel from './SiteMailPanel.jsx';
+import DatabaseSetupDialog, { DatabaseConnectionDialog } from './DatabaseSetupDialog.jsx';
+import { useSearchParams } from 'react-router';
 import './ui/site-resource-workspace.css';
 
 const DELETE_BLOCKER_LABELS = Object.freeze({
@@ -139,6 +141,8 @@ function SiteConsumptionWorkspace({ domain, website }) {
   );
 }
 function DatabaseWorkspace({ domain, website, application, server, activeTab }) {
+  const [params] = useSearchParams();
+  const [setupOpen, setSetupOpen] = useState(false), [connectionBinding, setConnectionBinding] = useState(null);
   const { jobs, observe, resourceBusy, updateJob, canManage, isOwner } = useWorkspace();
   const operationPending = useRef(false), alive = useRef(true), generation = useRef(0);
   const [databaseResources, setDatabaseResources] = useState(undefined);
@@ -201,10 +205,10 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
     } catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { operationPending.current = false; setBusy(false); }
   }
-  async function openPhpMyAdmin(credential) {
+  async function openPhpMyAdmin(credential, task = 'structure') {
     if (!server || !website || !credential || operationPending.current || !canManage) return;
     operationPending.current = true; setBusy(true); setError(null); setNotice(null); setPhpMyAdminOpeningCredentialId(credential.id);
-    try { await openWebsitePhpMyAdmin({ serverId: server.id, websiteId: website.id, credentialId: credential.id, issueHandoff: createPhpMyAdminHandoff }); }
+    try { await openWebsitePhpMyAdmin({ serverId: server.id, websiteId: website.id, credentialId: credential.id, task, issueHandoff: createPhpMyAdminHandoff }); }
     catch (failure) { if (failure.name !== 'AbortError') setError(failure.message); }
     finally { operationPending.current = false; setPhpMyAdminOpeningCredentialId(null); setBusy(false); }
   }
@@ -336,14 +340,16 @@ function DatabaseWorkspace({ domain, website, application, server, activeTab }) 
   const hasDialog = rotateTarget || revokeTarget || backupTarget || restoreTarget || dropImpact || deleteTarget || accessTarget || chosen;
   const compose = website?.managedComposeBinding;
   return <div className="ys-resources">
+    {(setupOpen || params.has("databaseJob")) && website && <DatabaseSetupDialog website={website} onClose={() => setSetupOpen(false)} onChanged={load} />}
+    {connectionBinding && <DatabaseConnectionDialog website={website} binding={connectionBinding} onClose={() => setConnectionBinding(null)} />}
     {!hasDialog && <ErrorNotice error={error} />}{notice && <div className="ws-notice" role="status"><Icon name="check" /><span>{notice}</span></div>}
     {showOverview ? <><div className="ys-resource-links"><LinkButton to={siteHref(domain.id,'databases')} icon="database">Veritabanları · {databaseResources === undefined ? '…' : databases.length}</LinkButton><LinkButton to={siteHref(domain.id,'mail')} icon="mail">E-posta yönetimi</LinkButton><LinkButton to={siteHref(domain.id,'files')} icon="folder">Dosya yöneticisi</LinkButton></div><Section title="Site kaynakları"><KeyValues items={[
       ['Site',domain.primaryDomain],['Uygulama',application?.name ?? '—'],['Çalışma türü',website?.runtimeType],['Veritabanı',databaseResources === undefined ? 'Yükleniyor…' : databases.length],
-    ]} />{compose && isOwner && <div className="ws-section-body"><LinkButton to={`/docker/${encodeURIComponent(compose.projectId)}`} icon="box">Compose projesini yönet</LinkButton></div>}</Section></> : <Section title="Veritabanları" description={`${domain.primaryDomain} sitesine bağlı veritabanları ve erişim kullanıcıları.`} actions={<Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button>}>
+    ]} />{compose && isOwner && <div className="ws-section-body"><LinkButton to={`/docker/${encodeURIComponent(compose.projectId)}`} icon="box">Compose projesini yönet</LinkButton></div>}</Section></> : <Section title="Veritabanları" description={`${domain.primaryDomain} sitesine bağlı veritabanları ve erişim kullanıcıları.`} actions={<div className="ws-actions"><Button icon="refresh" disabled={busy} onClick={load}>Yenile</Button><Button variant="primary" icon="plus" disabled={!website || busy || !canManage} onClick={() => setSetupOpen(true)}>Veritabanı oluştur</Button></div>}>
       <div className="ys-resource-summary"><span><strong>{databaseResources === undefined ? '—' : databases.length}</strong> veritabanı</span><span><strong>{databaseResources === undefined ? '—' : databases.filter((entry) => entry.credential).length}</strong> erişim kullanıcısı</span><span><Icon name="shield" size={14} /> Bu siteye özel</span></div>
       <div className="ys-resource-search"><Icon name="search" /><label><span className="ws-sr-only">Site veritabanlarında ara</span><input type="search" placeholder="Veritabanı veya kullanıcı ara…" value={query} onChange={(event) => setQuery(event.target.value)} /></label></div>
       {busy && databaseResources === undefined && <div className="ws-loading" role="status"><span className="ws-spinner" />Veritabanları yükleniyor…</div>}
-      {filtered.length > 0 ? <div className="ws-table-scroll"><table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th><th scope="col" role="columnheader">Kullanıcı</th><th scope="col" role="columnheader">Erişim</th><th scope="col" role="columnheader">İşlemler</th></tr></thead><tbody role="rowgroup">{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell" data-label="Veritabanı"><div className="ys-db-title"><span><Icon name="database" size={21} /></span><div><strong>{binding.databaseName}</strong><small>{domain.primaryDomain}</small></div></div></td><td role="cell" data-label="Kullanıcı"><code>{credential?.username ?? 'Henüz oluşturulmadı'}</code></td><td role="cell" data-label="Erişim"><Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge></td><td role="cell" data-label="İşlemler"><div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button></div></td></tr>)}</tbody></table></div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
+      {filtered.length > 0 ? <div className="ws-table-scroll"><table className="ys-resource-table" role="table" aria-label="Bu sitenin veritabanları"><thead role="rowgroup"><tr role="row"><th scope="col" role="columnheader">Veritabanı</th><th scope="col" role="columnheader">Kullanıcı</th><th scope="col" role="columnheader">Erişim</th><th scope="col" role="columnheader">İşlemler</th></tr></thead><tbody role="rowgroup">{filtered.map(({binding,credential}) => <tr key={binding.id} role="row"><td role="cell" data-label="Veritabanı"><div className="ys-db-title"><span><Icon name="database" size={21} /></span><div><strong>{binding.databaseName}</strong><small>{domain.primaryDomain}</small></div></div></td><td role="cell" data-label="Kullanıcı"><code>{credential?.username ?? 'Henüz oluşturulmadı'}</code></td><td role="cell" data-label="Erişim"><Badge state={credential ? 'staged' : 'warning'}>{credential ? 'Kullanıcı tanımlı' : 'Erişim gerekli'}</Badge></td><td role="cell" data-label="İşlemler"><div className="ys-resource-actions">{credential ? <Button icon="external" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential)}>{phpMyAdminOpeningCredentialId === credential.id ? 'phpMyAdmin açılıyor…' : 'phpMyAdmin aç'}</Button> : <Button icon="user" disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => createAccess(binding)}>Erişimi oluştur</Button>}{credential && <Button disabled={busy} onClick={() => setConnectionBinding(binding)}>Bağlantı bilgileri</Button>}{credential && <><Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'import')}>SQL içe aktar</Button><Button disabled={busy || !canManage || resourceBusy('database', binding.databaseName)} onClick={() => openPhpMyAdmin(credential, 'export')}>SQL dışa aktar</Button></>}<Button icon="settings" disabled={busy} onClick={() => setSelectedBinding(binding.id)}>Yönet</Button></div></td></tr>)}</tbody></table></div> : databaseResources !== undefined && <EmptyState icon="database" title={query ? 'Eşleşen veritabanı yok' : 'Bu siteye bağlı veritabanı yok'} detail={query ? 'Aramanızı değiştirin.' : 'Site kurulumu sırasında oluşturulan veya yönetici tarafından bu siteye bağlanan veritabanları burada görünür.'} />}
     </Section>}
     {chosen && <Modal title={chosen.binding.databaseName} onClose={() => setSelectedBinding(null)} busy={busy}><KeyValues items={[
       ['Site',domain.primaryDomain],['Veritabanı kullanıcısı',chosen.credential?.username ?? 'Yok'],['İzinler',chosen.credential?.privileges.join(', ') ?? 'Yok'],

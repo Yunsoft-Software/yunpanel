@@ -13,6 +13,8 @@ import {
 } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { parseManagedRspamdIdentity } from './mail-rspamd-identity.js';
+import { probeMailCertificate, reloadMailCertificate } from './mail-certificate-reload.js';
 import {
   mailForwardingTemplatePolicy,
   mailSqlTemplatePolicy,
@@ -96,6 +98,7 @@ export function createMailConfigActivator({
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
+  probeCertificate = probeMailCertificate,
   renameFn = rename,
   rmFn = rm,
   rmdirFn = rmdir,
@@ -134,7 +137,7 @@ export function createMailConfigActivator({
     try {
       const result = await run(GETENT, ['passwd', name], { timeout: 10_000, maxBuffer: MAX_OUTPUT });
       const output = boundedOutput(result);
-      const identity = name === 'vmail'
+      const identity = name === '_rspamd' ? parseManagedRspamdIdentity(output) : name === 'vmail'
         ? parseManagedVmailIdentity(output)
         : parseManagedSystemIdentity(output, name);
       if (!identity) throw new Error('invalid system identity');
@@ -154,6 +157,7 @@ export function createMailConfigActivator({
     'mail_postfix_identity_unavailable',
     'Managed postfix identity could not be resolved safely',
   );
+  const resolveRspamdIdentity = () => resolveSystemIdentity('_rspamd', 'mail_rspamd_identity_unavailable', 'Rspamd service identity could not be verified');
 
   async function resolveMailAuthGroup() {
     try {
@@ -319,7 +323,7 @@ export function createMailConfigActivator({
     }
   }
 
-  async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid, postfixGid) {
+  async function replaceManagedArtifacts(stage, planSha256, onMutation, vmailGid, postfixGid, rspamdGid) {
     const stageDirectory = configManager.stageDirectory(planSha256);
     for (const artifact of stage.artifacts) {
       const content = await readStagedArtifact(stageDirectory, artifact);
@@ -348,7 +352,7 @@ export function createMailConfigActivator({
         await atomicReplace(artifact.targetPath, content, {
           mode: artifact.mode,
           uid: ROOT_UID,
-          gid: artifact.targetPath === mailForwardingTemplatePolicy.sievePath
+          gid: artifact.targetPath.startsWith('/etc/rspamd/local.d/') ? rspamdGid : artifact.targetPath === mailForwardingTemplatePolicy.sievePath
             ? vmailGid
             : artifact.targetPath.startsWith(mailSqlTemplatePolicy.postfixSqlDirectory + '/')
               ? postfixGid
@@ -571,6 +575,8 @@ export function createMailConfigActivator({
     for (const command of plan.stages.validate) {
       await runCommand(command, 'mail_config_validation_failed', 'Managed mail configuration validation failed');
     }
+    await runCommand({ file: '/usr/sbin/runuser', args: ['-u', '_rspamd', '--', '/usr/bin/rspamadm', 'configtest'] },
+      'mail_rspamd_config_unreadable', 'Rspamd service cannot read the managed configuration');
     for (const command of plan.stages.reload) {
       await runCommand(command, 'mail_service_reload_failed', 'Managed mail service reload failed');
     }
@@ -911,10 +917,11 @@ export function createMailConfigActivator({
       throw activationError('mail_activation_prerequisite_stale', 'Managed mail staging or backup belongs to a different configuration');
     }
 
-    const [vmailIdentity, postfixIdentity, mailAuthGroup] = await Promise.all([
+    const [vmailIdentity, postfixIdentity, mailAuthGroup, rspamdIdentity] = await Promise.all([
       resolveVmailIdentity(),
       resolvePostfixIdentity(),
       plan.sql?.required === true ? resolveMailAuthGroup() : Promise.resolve(null),
+      resolveRspamdIdentity(),
     ]);
     await assertRequiredDirectoriesSafe(plan);
     await assertLiveMatchesBackup(backup);
@@ -935,6 +942,7 @@ export function createMailConfigActivator({
         markMutation,
         vmailIdentity.gid,
         postfixIdentity.gid,
+        rspamdIdentity.gid,
       );
       await runApplyCommands(plan, vmailIdentity.gid, postfixIdentity, mailAuthGroup);
       if (verifyAccess) await verifyAccess();
@@ -987,6 +995,11 @@ export function createMailConfigActivator({
 
   return Object.freeze({
     activateConfiguration,
+    reloadTlsIdentity(identity) {
+      const reload = activationChain.catch(() => {}).then(() => reloadMailCertificate(identity, { run, readFileFn, probe: probeCertificate }));
+      activationChain = reload;
+      return reload;
+    },
     rollbackConfiguration,
     inspectRollbackConfiguration,
     recoverRollbackConfiguration,

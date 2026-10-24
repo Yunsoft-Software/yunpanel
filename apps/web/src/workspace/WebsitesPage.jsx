@@ -1,9 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
+import { panelRequest } from '../api.js';
+import { readHostingAccount, hostingAccountMessage } from './hosting-account-client.js';
 import { Link, useSearchParams } from 'react-router';
 import { domainTreeRows } from '../domain-tree.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
-import { Button, CollectionNotice, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Button, CollectionNotice, EmptyState, ErrorNotice, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { siteListPage } from './site-list-model.js';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from './website-task-model.js';
 import WebsiteTaskCard from './WebsiteTaskCard.jsx';
@@ -19,14 +21,26 @@ export default function WebsitesPage() {
   const [params, setParams] = useSearchParams();
   const { preferences, change: changePreferences, saved } = useWebsitePreferences();
   const [collapsed, setCollapsed] = useState(() => new Set());
+  const customerId = isOwner ? params.get('customer') : null;
+  const [customer, setCustomer] = useState(null), [customerError, setCustomerError] = useState(null);
+  useEffect(() => {
+    let active = true; const controller = new AbortController(); setCustomer(null); setCustomerError(null);
+    if (customerId) panelRequest(`/users/hosting/accounts/${encodeURIComponent(customerId)}`, { signal: controller.signal }).then(value => {
+      const account = readHostingAccount(value);
+      if (account.id !== customerId || account.kind !== 'customer' || !account.websiteIds) throw Object.assign(new Error('Unknown customer sites'), { code: 'hosting_result_invalid' });
+      if (active) setCustomer(account);
+    }).catch(error => { if (active && error.name !== 'AbortError') setCustomerError(hostingAccountMessage(error)); });
+    return () => { active = false; controller.abort(); };
+  }, [customerId]);
 
   const query = params.get('q') ?? params.get('search') ?? params.get('query') ?? '';
   const type = ['proxy', 'static'].includes(params.get('type')) ? params.get('type') : 'all';
   const statusParam = params.get('status') ?? params.get('state');
   const status = ['active', 'draft', 'staged', 'error'].includes(statusParam) ? statusParam : 'all';
   const sort = params.get('sort') === 'desc' ? 'desc' : 'asc';
-  const filtering = Boolean(query.trim()) || type !== 'all' || status !== 'all';
-  const tree = useMemo(() => domainTreeRows(domains.items, { query, collapsed: filtering ? new Set() : collapsed }), [domains.items, query, filtering, collapsed]);
+  const filtering = Boolean(query.trim()) || Boolean(customerId) || type !== 'all' || status !== 'all';
+  const visibleDomains = useMemo(() => customerId ? domains.items.filter(domain => customer?.websiteIds?.includes(domain.websiteId)) : domains.items, [customerId, customer, domains.items]);
+  const tree = useMemo(() => domainTreeRows(visibleDomains, { query, collapsed: filtering ? new Set() : collapsed }), [visibleDomains, query, filtering, collapsed]);
   const result = siteListPage(tree, { type, status, sort, perPage: preferences.perPage, page: Number(params.get('page') ?? 1) });
   const readable = ['ready', 'stale'].includes(domains.status);
   const resolveTasks = useMemo(() => createWebsiteTaskResolver({ domains, websites, applications, canManage, isOwner }), [domains, websites, applications, canManage, isOwner]);
@@ -36,11 +50,13 @@ export default function WebsitesPage() {
   function toggle(id) {
     setCollapsed((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next; });
   }
-  const websiteCount = domains?.items?.length ?? 0;
+  const websiteCount = websites.status === 'ready' ? new Set(websites.items.map(site => site.id)).size : null;
   const isSuspended = session?.user?.active === false || hostingProfile?.active === false;
   const isQuotaReached = hostingProfile?.quotas?.maxWebsites !== null && hostingProfile?.quotas?.maxWebsites !== undefined && websiteCount >= hostingProfile.quotas.maxWebsites;
 
   return <>
+    {customerId && <p className="ws-notice" role="status">{customer ? `${customer.username} hesabının web siteleri` : customerError ? 'Müşteri siteleri doğrulanamadı.' : 'Müşterinin web siteleri yükleniyor…'} <Link to="/websites">Tüm siteler</Link></p>}
+    <ErrorNotice error={customerError} />
     <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını ilgili sitenin kartından açın.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Dosya, posta, veritabanı ve yayın araçlarını ilgili sitenin kartından açın.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel onChanged={refreshAll} />}
     {isCustomer && (
@@ -52,32 +68,32 @@ export default function WebsitesPage() {
         )}
         {isQuotaReached && (
           <div className="ws-notice ws-notice-warning" role="alert">
-            <strong>Kota Sınırı:</strong> Web sitesi kotanız ({websiteCount} / {hostingProfile.quotas.maxWebsites}) sınırına ulaşmıştır. Yeni site talepleri için bayinizle iletişime geçin.
+            <strong>Kota Sınırı:</strong> Web sitesi kotanız ({websiteCount ?? 'Ölçülmedi'} / {hostingProfile.quotas.maxWebsites}) sınırına ulaşmıştır. Yeni site talepleri için bayinizle iletişime geçin.
           </div>
         )}
         <div className="ws-quota-cards" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 140px), 1fr))', gap: '1rem' }}>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Web Siteleri</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {websiteCount} / {hostingProfile?.quotas?.maxWebsites ?? 'Sınırsız'}
+              {websiteCount ?? 'Ölçülmedi'} / {hostingProfile?.quotas?.maxWebsites ?? 'Sınırsız'}
             </div>
           </div>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Disk Alanı</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.diskMb !== undefined && hostingProfile?.usage?.diskMb !== null ? `${hostingProfile.usage.diskMb} MB` : '—'} / {hostingProfile?.quotas?.maxDiskMb ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
+              {hostingProfile?.usage?.diskMb !== undefined && hostingProfile?.usage?.diskMb !== null ? `${hostingProfile.usage.diskMb} MB` : '—'} / {hostingProfile?.quotas?.maxDiskMb != null ? hostingProfile.quotas.maxDiskMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Aylık Trafik</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.trafficMb !== undefined && hostingProfile?.usage?.trafficMb !== null ? `${hostingProfile.usage.trafficMb} MB` : '—'} / {hostingProfile?.quotas?.maxTrafficMb ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
+              {hostingProfile?.usage?.trafficMb !== undefined && hostingProfile?.usage?.trafficMb !== null ? `${hostingProfile.usage.trafficMb} MB` : '—'} / {hostingProfile?.quotas?.maxTrafficMb != null ? hostingProfile.quotas.maxTrafficMb + ' MB' : 'Sınırsız'}
             </div>
           </div>
           <div style={{ padding: '0.75rem', background: 'var(--ws-surface-subtle)', border: '1px solid var(--ws-border)', borderRadius: 'var(--ws-radius-small, 9px)' }}>
             <span className="ws-muted" style={{ fontSize: '0.85rem' }}>Veritabanları</span>
             <div style={{ fontSize: '1.25rem', fontWeight: 600, marginTop: '0.25rem' }}>
-              {hostingProfile?.usage?.databases !== undefined && hostingProfile?.usage?.databases !== null ? hostingProfile.usage.databases : '—'} / {hostingProfile?.quotas?.maxDatabases ?? 'Sınırsız'}
+              {hostingProfile?.usage?.databases !== undefined && hostingProfile?.usage?.databases !== null ? hostingProfile.usage.databases : '—'} / {hostingProfile?.quotas?.maxDatabases != null ?? 'Sınırsız'}
             </div>
           </div>
         </div>

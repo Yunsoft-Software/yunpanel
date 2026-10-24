@@ -68,7 +68,7 @@ function fixture(input, {
       return {
         mode: isKey ? keyMode : 0o640,
         uid: 0,
-        gid: isKey ? keyGid : 0,
+        gid: isKey ? keyGid : 119,
         isDirectory: () => false,
         isFile: () => true,
         isSymbolicLink: () => false,

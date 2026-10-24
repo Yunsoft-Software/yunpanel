@@ -202,9 +202,11 @@ export async function startLocalRuntime({
   websiteRegistry = null,
   runtimeBindingRegistry = null,
   mailDomainRegistry = null,
+  mailServiceIdentityRegistry = null,
   hostOperations = createLocalHostOperations(),
   snapshotProvider = null,
   recordExecutionEvidence = null,
+  recoverRunningJobs = null,
   executorFactory = createLocalJobExecutor,
   acquireLock = acquireLocalExecutionLock,
   reconcile = reconcileCompletedJob,
@@ -224,6 +226,7 @@ export async function startLocalRuntime({
   if (recordExecutionEvidence !== null && typeof recordExecutionEvidence !== 'function') {
     throw new LocalRuntimeError('local_runtime_evidence_recorder_invalid', 'Local runtime evidence recorder must be a function');
   }
+  if (recoverRunningJobs !== null && typeof recoverRunningJobs !== 'function') throw new LocalRuntimeError('local_runtime_recovery_adapter_invalid', 'Running job recovery adapter is invalid');
   if (typeof executorFactory !== 'function' || typeof acquireLock !== 'function' || typeof reconcile !== 'function' || typeof onError !== 'function') {
     throw new LocalRuntimeError('local_runtime_adapter_invalid', 'Local runtime adapter configuration is invalid');
   }
@@ -320,6 +323,7 @@ export async function startLocalRuntime({
       websiteRegistry,
       runtimeBindingRegistry,
       mailDomainRegistry,
+      mailServiceIdentityRegistry,
       job,
     });
     if (!result || result.reconciled !== true) {
@@ -333,6 +337,7 @@ export async function startLocalRuntime({
   try {
     lock = await acquireLock({ filePath: lockPath, serverId });
     assertBoundServer(await registry.getServer(serverId), serverId, normalizedHostname);
+    if (recoverRunningJobs) await recoverRunningJobs();
     await reconcileStartupRecovery({ jobRegistry, serverId, reconcileJob });
 
     executor = executorFactory({

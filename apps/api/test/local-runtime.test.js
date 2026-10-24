@@ -293,7 +293,7 @@ test('local reconciliation false result is converted into an executor-halting ex
   await runtime.stop();
 });
 
-test('local runtime forwards Website and runtime binding registries into reconciliation', async () => {
+test('local runtime forwards Website, runtime binding and mail identity registries into reconciliation', async () => {
   let reconciliationInput = null;
   const fx = fixture({
     reconcile: async (input) => {
@@ -301,11 +301,13 @@ test('local runtime forwards Website and runtime binding registries into reconci
       return { reconciled: true, error: null };
     },
   });
-  const runtime = await startWith(fx);
+  const mailServiceIdentityRegistry = { getForServer: async () => null };
+  const runtime = await startWith(fx, { mailServiceIdentityRegistry });
   const job = { id: 'job-1' };
   await fx.getExecutorOptions().reconcileCompletedJob(job);
   assert.equal(reconciliationInput.websiteRegistry, fx.websiteRegistry);
   assert.equal(reconciliationInput.runtimeBindingRegistry, fx.runtimeBindingRegistry);
+  assert.equal(reconciliationInput.mailServiceIdentityRegistry, mailServiceIdentityRegistry);
   assert.equal(reconciliationInput.job, job);
   await runtime.stop();
 });

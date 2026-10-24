@@ -386,3 +386,26 @@ test('logout and login session rotation suppresses in-flight submission and prev
   assert.equal(states.length, 1);
   assert.notEqual(flow.getState().phase, 'ready');
 });
+
+test('existing customer site creation uses the native hosted endpoint and waits for provisioning with verified ownership', async () => {
+  const customerId = 'customer-account', calls = [];
+  const run = harness({ request: async (url, options) => {
+    calls.push({ url, body: options.body });
+    if (url.endsWith('create-preview')) return { ...preview(), customerId, confirmation: `create-hosted-site:${operationId}:${'a'.repeat(64)}` };
+    return { ...result(), ownership: { customerId, websiteId, state: 'attached' }, accessGranted: true };
+  } });
+  const outcome = await run.flow.submit({ ...input(), siteAdmin: null }, { customerId });
+  assert.equal(outcome.phase, 'ready'); assert.equal(outcome.siteAdmin.status, 'not_requested');
+  assert.deepEqual(calls.map(call => call.url), ['/sites/hosted/create-preview', '/sites/hosted']);
+  assert.equal(calls[1].body.customerId, customerId); assert.equal(calls[1].body.input.siteAdmin, null);
+});
+test('a hosted reply for another customer is rejected and never advances host provisioning', async () => {
+  let advanced = 0;
+  const run = harness({ request: async url => url.endsWith('create-preview')
+    ? { ...preview(), customerId: 'customer-account', confirmation: `create-hosted-site:${operationId}:${'a'.repeat(64)}` }
+    : { ...result(), ownership: { customerId: 'foreign-customer', websiteId, state: 'attached' }, accessGranted: true },
+    advance: async () => { advanced++; return operation('succeeded'); },
+  });
+  const outcome = await run.flow.submit({ ...input(), siteAdmin: null }, { customerId: 'customer-account' });
+  assert.equal(outcome.phase, 'uncertain'); assert.equal(advanced, 0);
+});

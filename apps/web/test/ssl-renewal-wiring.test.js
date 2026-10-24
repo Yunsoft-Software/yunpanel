@@ -35,7 +35,9 @@ test('status polling and result re-read never dispatch another POST', () => {
 test('session and permission gates plus exact captured confirmation guard the existing endpoint', () => {
   assert.match(panel, /version === sessionVersion\(\) && !sessionTransitionPending\(\)/);
   assert.match(panel, /client.dispose\(\)/);
-  assert.match(panel, /confirmation=\{approval.confirmation\}/);
+  assert.match(panel, /confirmation=\{null\}/);
+  assert.match(panel, /confirm\(approval, approval.confirmation\)/);
+  assert.doesNotMatch(panel, /opened.current = state.job.id; callbacks.current.observe/);
   assert.match(controller, /approval !== state.approval/);
   assert.match(controller, /check\(true\); requireValue\(canStart\(\) === true\)/);
 });

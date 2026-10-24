@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
+import { assertWebsiteSnapshotContent, resolveWebsiteRestoreSelection } from './website-restore-selection.js';
+import { websiteRestoreTransactionId } from './website-restore-service.js';
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -25,6 +27,7 @@ export function websiteBackupOperationPublicView(operation) {
     websiteId: operation.websiteId,
     serverId: operation.serverId,
     repositoryId: operation.repositoryId,
+    jobId: operation.jobId ?? null,
     kind: operation.kind,
     snapshotId: operation.snapshotId ?? null,
     preRestoreSnapshotId: operation.preRestoreSnapshotId ?? null,
@@ -105,16 +108,18 @@ export function createWebsiteBackupOperationRegistry({
       if (parsed && parsed.version === 1 && Array.isArray(parsed.operations)) {
         operations = new Map();
         for (const item of parsed.operations) {
-          if (item && typeof item.id === 'string' && UUID_PATTERN.test(item.id)) {
+          if (item && UUID_PATTERN.test(item.id ?? '') && UUID_PATTERN.test(item.websiteId ?? '') && UUID_PATTERN.test(item.repositoryId ?? '')
+            && OPERATION_STATUSES.has(item.status) && OPERATION_KINDS.has(item.kind) && SHA256_PATTERN.test(item.previewDigest ?? '')
+            && !operations.has(item.id.toLowerCase())) {
             operations.set(item.id.toLowerCase(), item);
-          }
+          } else throw new WebsiteBackupOperationRegistryError('website_backup_operation_store_invalid', 'Website backup operation store contains an invalid record', 500);
         }
-      }
+      } else throw new WebsiteBackupOperationRegistryError('website_backup_operation_store_invalid', 'Website backup operation store is invalid', 500);
     } catch (error) {
       if (error?.code !== 'ENOENT') {
         throw new WebsiteBackupOperationRegistryError(
           'website_backup_operation_store_invalid',
-          `Failed to load website backup operation store: ${error.message}`,
+          'Website backup operation store could not be read',
           500,
         );
       }
@@ -167,6 +172,8 @@ export function createWebsiteBackupOperationRegistry({
     steps = null,
     include = [],
     selective = false,
+    actor = null,
+    options = {},
   }) {
     if (!websiteId || !UUID_PATTERN.test(websiteId)) {
       throw new WebsiteBackupOperationRegistryError('invalid_website_id', 'websiteId must be a valid UUID', 400);
@@ -227,6 +234,9 @@ export function createWebsiteBackupOperationRegistry({
         tags: Array.isArray(tags) ? [...tags] : [],
         include: Array.isArray(include) ? [...include] : [],
         selective: Boolean(selective || (Array.isArray(include) && include.length > 0)),
+        actor: actor ? structuredClone(actor) : null,
+        options: structuredClone(options),
+        jobId: null,
         status: 'queued',
         progress: { phase: 'queued', percent: 0, message: 'İşlem kuyruğa alındı' },
         steps: Array.isArray(steps) && steps.length > 0 ? steps : defaultStepsForKind(kind, currentTime),
@@ -250,6 +260,15 @@ export function createWebsiteBackupOperationRegistry({
     return withStore(() => {
       const op = operations.get(normalizedId);
       return op ? websiteBackupOperationPublicView(op) : null;
+    });
+  }
+
+  // This view is only for the native worker; actor and execution inputs never go to HTTP.
+  async function getExecutionOperation(id) {
+    if (typeof id !== 'string' || !UUID_PATTERN.test(id)) return null;
+    return withStore(() => {
+      const operation = operations.get(id.toLowerCase());
+      return operation ? structuredClone(operation) : null;
     });
   }
 
@@ -300,232 +319,119 @@ export function createWebsiteBackupOperationRegistry({
   }
 
   async function reconcileInterruptedOperations({
-    resticManager = null,
-    resticRepositoryRegistry = null,
-    receiptStore = null,
+    resticManager = null, resticRepositoryRegistry = null, receiptStore = null,
+    websiteRegistry = null, websiteBackupSetProvider = null, jobRegistry = null, siteMutationLock = null, databaseBackupAdapter = null, mailBackupAdapter = null, environmentBackupAdapter = null, dnsBackupAdapter = null, hostingBackupAdapter = null,
   } = {}) {
-    return withStore(async () => {
-      const reconciled = [];
-      const currentTime = now();
-
-      for (const [id, op] of operations.entries()) {
-        if (!ACTIVE_STATUSES.has(op.status)) continue;
-
-        if (op.kind === 'restore') {
-          const transactionId = `restore:${op.websiteId}:${op.previewDigest.slice(0, 32)}`;
-          let receipt = null;
-          if (receiptStore && typeof receiptStore.read === 'function') {
-            try {
-              receipt = await receiptStore.read(transactionId);
-            } catch {
-              // ignore receipt read error
-            }
-          }
-
-          if (receipt) {
-            if (receipt.status === 'succeeded') {
-              op.status = 'succeeded';
-              op.snapshotId = op.snapshotId ?? receipt.snapshotId;
-              op.preRestoreSnapshotId = receipt.preRestoreSnapshotId;
-              op.result = {
-                status: 'succeeded',
-                websiteId: op.websiteId,
-                snapshotId: op.snapshotId,
-                preRestoreSnapshotId: receipt.preRestoreSnapshotId,
-                healthCheck: receipt.healthCheck ?? { satisfied: true },
-                restoredAt: receipt.committedAt ?? currentTime,
-              };
-              op.restartEvidence = {
-                status: 'reconciled_from_receipt',
-                receiptStatus: 'succeeded',
-                reconciledAt: currentTime,
-              };
-              op.finishedAt = op.finishedAt ?? currentTime;
-              op.updatedAt = currentTime;
-              reconciled.push(websiteBackupOperationPublicView(op));
-              continue;
-            }
-
-            if (receipt.status === 'rolled_back') {
-              op.status = 'rolled_back';
-              op.snapshotId = op.snapshotId ?? receipt.snapshotId;
-              op.preRestoreSnapshotId = receipt.preRestoreSnapshotId;
-              op.result = {
-                status: 'rolled_back',
-                websiteId: op.websiteId,
-                snapshotId: op.snapshotId,
-                preRestoreSnapshotId: receipt.preRestoreSnapshotId,
-                rollbackReason: receipt.rollbackReason ?? 'crash_reconciled',
-                healthCheck: receipt.healthCheck ?? null,
-                rolledBackAt: receipt.committedAt ?? currentTime,
-              };
-              op.restartEvidence = {
-                status: 'reconciled_from_receipt',
-                receiptStatus: 'rolled_back',
-                rollbackReason: receipt.rollbackReason,
-                reconciledAt: currentTime,
-              };
-              op.finishedAt = op.finishedAt ?? currentTime;
-              op.updatedAt = currentTime;
-              reconciled.push(websiteBackupOperationPublicView(op));
-              continue;
-            }
-
-            if (receipt.status === 'pre_restore_created') {
-              // Process crashed while restore or health check was running!
-              // Perform recovery rollback to preRestoreSnapshotId
-              let rollbackSucceeded = false;
-              let rollbackError = null;
-              if (resticRepositoryRegistry && resticManager
-                && typeof resticRepositoryRegistry.getRepository === 'function'
-                && typeof resticRepositoryRegistry.revealPassword === 'function'
-                && typeof resticManager.restore === 'function') {
-                try {
-                  const repo = await resticRepositoryRegistry.getRepository(op.repositoryId);
-                  const password = await resticRepositoryRegistry.revealPassword(op.repositoryId);
-                  if (repo?.target && password) {
-                    await resticManager.restore({
-                      repository: repo.target,
-                      password,
-                      snapshotId: receipt.preRestoreSnapshotId,
-                      targetDirectory: '/',
-                    });
-                    rollbackSucceeded = true;
-                  }
-                } catch (err) {
-                  rollbackError = err.message;
-                }
-              }
-
-              if (rollbackSucceeded) {
-                if (receiptStore && typeof receiptStore.write === 'function') {
-                  try {
-                    await receiptStore.write({
-                      ...receipt,
-                      status: 'rolled_back',
-                      rollbackReason: 'interrupted_by_restart_rollback_recovered',
-                    });
-                  } catch {}
-                }
-                op.status = 'rolled_back';
-                op.preRestoreSnapshotId = receipt.preRestoreSnapshotId;
-                op.result = {
-                  status: 'rolled_back',
-                  websiteId: op.websiteId,
-                  snapshotId: op.snapshotId,
-                  preRestoreSnapshotId: receipt.preRestoreSnapshotId,
-                  rollbackReason: 'interrupted_by_restart_rollback_recovered',
-                  rolledBackAt: currentTime,
-                };
-                op.restartEvidence = {
-                  status: 'recovered_via_rollback',
-                  preRestoreSnapshotId: receipt.preRestoreSnapshotId,
-                  reconciledAt: currentTime,
-                };
-              } else {
-                op.status = 'failed';
-                op.preRestoreSnapshotId = receipt.preRestoreSnapshotId;
-                op.error = {
-                  code: 'interrupted_by_restart_rollback_failed',
-                  message: `Restore was interrupted by crash and automatic rollback failed: ${rollbackError ?? 'repository unavailable'}`,
-                };
-                op.restartEvidence = {
-                  status: 'rollback_failed',
-                  preRestoreSnapshotId: receipt.preRestoreSnapshotId,
-                  error: rollbackError,
-                  reconciledAt: currentTime,
-                };
-              }
-              op.finishedAt = op.finishedAt ?? currentTime;
-              op.updatedAt = currentTime;
-              reconciled.push(websiteBackupOperationPublicView(op));
-              continue;
-            }
-          }
-
-          // No receipt found: crashed before pre-restore snapshot was recorded
-          op.status = 'failed';
-          op.error = {
-            code: 'interrupted_by_restart',
-            message: 'Restore operation was interrupted before pre-restore snapshot was recorded',
-          };
-          op.restartEvidence = {
-            status: 'failed_unstarted',
-            reconciledAt: currentTime,
-          };
-          op.finishedAt = op.finishedAt ?? currentTime;
-          op.updatedAt = currentTime;
-          reconciled.push(websiteBackupOperationPublicView(op));
-          continue;
-        }
-
-        if (op.kind === 'backup') {
-          let snapshotFound = null;
-          if (resticRepositoryRegistry && resticManager
-            && typeof resticRepositoryRegistry.getRepository === 'function'
-            && typeof resticRepositoryRegistry.revealPassword === 'function'
-            && typeof resticManager.listSnapshots === 'function') {
-            try {
-              const repo = await resticRepositoryRegistry.getRepository(op.repositoryId);
-              const password = await resticRepositoryRegistry.revealPassword(op.repositoryId);
-              if (repo?.target && password) {
-                const snapshots = await resticManager.listSnapshots({
-                  repository: repo.target,
-                  password,
-                  tags: [`website:${op.websiteId}`],
-                });
-                if (Array.isArray(snapshots) && snapshots.length > 0) {
-                  // Find snapshot created after operation's startedAt (or createdAt)
-                  const opStartMs = Date.parse(op.startedAt ?? op.createdAt);
-                  const matched = snapshots.find((snap) => {
-                    const snapMs = Date.parse(snap.time);
-                    return Number.isFinite(snapMs) && Math.abs(snapMs - opStartMs) <= 300_000;
-                  });
-                  if (matched) snapshotFound = matched;
-                }
-              }
-            } catch {
-              // ignore check error
-            }
-          }
-
-          if (snapshotFound) {
-            op.status = 'succeeded';
-            op.snapshotId = snapshotFound.id;
-            op.result = {
-              status: 'succeeded',
-              websiteId: op.websiteId,
-              snapshot: { snapshotId: snapshotFound.id },
-            };
-            op.restartEvidence = {
-              status: 'reconciled_from_snapshot',
-              snapshotId: snapshotFound.id,
-              reconciledAt: currentTime,
-            };
-          } else {
-            op.status = 'failed';
-            op.error = {
-              code: 'interrupted_by_restart',
-              message: 'Backup operation was interrupted by system restart',
-            };
-            op.restartEvidence = {
-              status: 'failed_interrupted',
-              reconciledAt: currentTime,
-            };
-          }
-          op.finishedAt = op.finishedAt ?? currentTime;
-          op.updatedAt = currentTime;
-          reconciled.push(websiteBackupOperationPublicView(op));
-        }
+    const candidates = await listOperations();
+    const reconciled = [];
+    for (const publicOperation of candidates) {
+      if (!ACTIVE_STATUSES.has(publicOperation.status)) continue;
+      const op = await getExecutionOperation(publicOperation.id);
+      const job = op.jobId && typeof jobRegistry?.getJob === 'function' ? await jobRegistry.getJob(op.jobId) : null;
+      if (op.status === 'queued' && job?.status === 'queued') continue;
+      if (op.jobId && (!job || job.resourceId !== op.id || job.resourceType !== 'backup'
+        || job.serverId !== op.serverId || job.payload?.operationId !== op.id || job.payload?.websiteId !== op.websiteId)) {
+        throw new WebsiteBackupOperationRegistryError('website_backup_recovery_identity_invalid', 'Durable backup job does not match its operation', 409);
       }
-
-      return reconciled;
-    });
+      const website = await websiteRegistry?.getWebsite(op.websiteId);
+      if (!website || website.serverId !== op.serverId || typeof siteMutationLock?.withSiteLock !== 'function') {
+        throw new WebsiteBackupOperationRegistryError('website_backup_recovery_scope_unavailable', 'Interrupted backup scope requires inspection', 503);
+      }
+      const patch = await siteMutationLock.withSiteLock({ websiteId: website.id, applicationId: website.applicationId ?? null }, async () => {
+        const backupSet = await websiteBackupSetProvider?.getWebsiteBackupSet({ websiteId: website.id, serverId: website.serverId });
+        if (!backupSet?.targetPaths?.length) throw new WebsiteBackupOperationRegistryError('website_backup_recovery_scope_unavailable', 'Verified website backup paths are unavailable', 503);
+        const repository = await resticRepositoryRegistry?.getRepository(op.repositoryId);
+        if (!repository || repository.serverId !== website.serverId) throw new WebsiteBackupOperationRegistryError('website_backup_recovery_identity_invalid', 'Backup repository scope changed', 409);
+        const password = await resticRepositoryRegistry.revealPassword(op.repositoryId);
+        if (op.kind === 'restore') {
+          let transactionId = websiteRestoreTransactionId({ websiteId: op.websiteId,
+            previewDigest: op.previewDigest, operationId: op.id });
+          let receipt = await receiptStore?.read(transactionId);
+          if (!receipt) {
+            const legacyId = websiteRestoreTransactionId({ websiteId: op.websiteId, previewDigest: op.previewDigest });
+            const legacy = await receiptStore?.read(legacyId);
+            // Older operations have preview-based receipts. A receipt written
+            // before this request belongs to an earlier restore and cannot
+            // prove that the interrupted request changed any data.
+            if (legacy && Number.isFinite(Date.parse(legacy.committedAt))
+              && Date.parse(legacy.committedAt) >= Date.parse(op.createdAt)) {
+              transactionId = legacyId;
+              receipt = legacy;
+            }
+          }
+          if (receipt) {
+            if (receipt.websiteId !== op.websiteId || receipt.repositoryId !== op.repositoryId || receipt.previewDigest !== op.previewDigest || receipt.snapshotId !== op.snapshotId) {
+              throw new WebsiteBackupOperationRegistryError('website_restore_recovery_receipt_mismatch', 'Restore journal does not match the interrupted operation', 409);
+            }
+            if (receipt.status === 'pre_restore_created') {
+              const paths = receipt.rollbackPaths;
+              if (!Array.isArray(paths) || !paths.length || paths.some((value) => !backupSet.targetPaths.some(root => value === root || value.startsWith(root + '/')))) {
+                throw new WebsiteBackupOperationRegistryError('website_restore_recovery_scope_unverified', 'Legacy restore journal has no verified rollback scope', 409);
+              }
+              const snapshots = await resticManager.listSnapshots({ repository: repository.target, password, tags: [`website:${op.websiteId}`, 'pre-restore'] });
+              if (!snapshots.some((snapshot) => snapshot.id === receipt.preRestoreSnapshotId && snapshot.tags?.includes(`tx:${transactionId}`))) {
+                throw new WebsiteBackupOperationRegistryError('website_restore_recovery_snapshot_unverified', 'Rollback snapshot ownership could not be verified', 409);
+              }
+              const selected = target => target && paths.some(root => target === root || target.startsWith(root + '/') || root.startsWith(target + '/'));
+              if (backupSet.databases?.some(db => selected(db.dumpHook?.stagedBackupDirectory)) && !databaseBackupAdapter) throw new WebsiteBackupOperationRegistryError('website_database_restore_unavailable', 'Database rollback engine is unavailable', 503);
+              if ((backupSet.mail ?? []).some(mail => mail.managementMode === 'local' && [mail.storagePath, mail.stagedDataDirectory, mail.virtualMailDbSnapshot].some(selected)) && !mailBackupAdapter) throw new WebsiteBackupOperationRegistryError('website_mail_restore_unavailable', 'Mail rollback engine is unavailable', 503);
+              if (selected(backupSet.env?.stagedMetadataPath) && !environmentBackupAdapter) throw new WebsiteBackupOperationRegistryError('website_environment_runtime_restore_unavailable', 'Environment rollback engine is unavailable', 503);
+              if (environmentBackupAdapter) await environmentBackupAdapter.assertSupported(backupSet, paths);
+              if (dnsBackupAdapter) await dnsBackupAdapter.assertSupported(backupSet, paths);
+              if (hostingBackupAdapter) await hostingBackupAdapter.assertSupported(backupSet, paths);
+              if ([...(!dnsBackupAdapter ? (backupSet.dns ?? []).map(dns => dns.stagedZonePath) : []), ...(!hostingBackupAdapter ? (backupSet.nginx ?? []).flatMap(nginx => [nginx.stagedConfigPath,nginx.stagedMetadataPath]) : [])].some(selected)) throw new WebsiteBackupOperationRegistryError('website_restore_resource_adapter_unavailable', 'Hosting rollback engine is unavailable', 503);
+              await resticManager.restore({ repository: repository.target, password, snapshotId: receipt.preRestoreSnapshotId, targetDirectory: '/', include: [...paths] });
+              if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              await receiptStore.write({ ...receipt, status: 'rolled_back', rollbackReason: 'interrupted_by_restart_rollback_recovered' });
+              return { status: 'rolled_back', preRestoreSnapshotId: receipt.preRestoreSnapshotId,
+                result: { status: 'rolled_back', websiteId: op.websiteId, snapshotId: op.snapshotId, preRestoreSnapshotId: receipt.preRestoreSnapshotId, rollbackReason: 'interrupted_by_restart_rollback_recovered' },
+                restartEvidence: { status: 'recovered_via_rollback', reconciledAt: now() } };
+            }
+            if (['succeeded', 'rolled_back'].includes(receipt.status) && (receipt.status !== 'succeeded' || receipt.healthCheck?.satisfied === true)) {
+              return { status: receipt.status, preRestoreSnapshotId: receipt.preRestoreSnapshotId,
+                result: { status: receipt.status, websiteId: op.websiteId, snapshotId: op.snapshotId, preRestoreSnapshotId: receipt.preRestoreSnapshotId, healthCheck: receipt.healthCheck, rollbackReason: receipt.rollbackReason },
+                restartEvidence: { status: 'reconciled_from_receipt', reconciledAt: now() } };
+            }
+          }
+        } else if (op.kind === 'backup' && typeof resticManager?.listSnapshots === 'function') {
+          const snapshots = await resticManager.listSnapshots({ repository: repository.target, password,
+            tags: [`website:${op.websiteId}`, `operation:${op.id}`, `backup-set:${op.previewDigest}`] });
+          const matching = snapshots.filter((snapshot) => [`website:${op.websiteId}`, `operation:${op.id}`, `backup-set:${op.previewDigest}`].every((tag) => snapshot.tags?.includes(tag)));
+          if (matching.length > 1) throw new WebsiteBackupOperationRegistryError('website_backup_recovery_snapshot_ambiguous', 'Several snapshots claim the same operation', 409);
+          if (matching.length === 1) {
+            if (typeof resticManager.listSnapshotFiles !== 'function') throw new WebsiteBackupOperationRegistryError('website_backup_recovery_content_unavailable', 'Snapshot files could not be inspected', 503);
+            const snapshot = matching[0];
+            const nodes = await resticManager.listSnapshotFiles({ repository: repository.target, password, snapshotId: snapshot.id });
+            assertWebsiteSnapshotContent(nodes, backupSet, resolveWebsiteRestoreSelection(backupSet, [], nodes));
+            if (!nodes.some((node) => node.type === 'file' && backupSet.targetPaths.some((root) => node.path === root || node.path.startsWith(root + '/')))) {
+              throw new WebsiteBackupOperationRegistryError('website_backup_recovery_content_unverified', 'Snapshot has no files for this website', 409);
+            }
+            if (op.options?.retentionPolicy && op.result?.retention?.status !== 'completed') return { status: 'failed', snapshotId: snapshot.id,
+              result: { status: 'succeeded', websiteId: op.websiteId, snapshot: { snapshotId: snapshot.id } },
+              error: { code: 'backup_retention_interrupted', message: 'Yedek doğrulandı; kesilen saklama işlemi ayrıca kontrol edilmeli' },
+              restartEvidence: { status: 'snapshot_verified_retention_unresolved', snapshotId: snapshot.id, reconciledAt: now() } };
+            return { status: 'succeeded', snapshotId: snapshot.id,
+              result: { status: 'succeeded', websiteId: op.websiteId, snapshot: { snapshotId: snapshot.id }, backupSetDigest: op.previewDigest },
+              restartEvidence: { status: 'reconciled_from_snapshot', snapshotId: snapshot.id, reconciledAt: now() } };
+          }
+        }
+        return { status: 'failed', error: { code: 'interrupted_by_restart', message: 'Kesilen işlemin sonucu doğrulanamadı; işlem tekrar yürütülmedi' },
+          restartEvidence: { status: 'failed_interrupted', reconciledAt: now() } };
+      });
+      const operation = await updateOperation(op.id, { ...patch, finishedAt: now(), progress: { phase: patch.status, percent: null, message: 'Kesinti sonrası kayıt ve depo denetlendi' } });
+      reconciled.push(operation);
+    }
+    return reconciled;
   }
 
   return Object.freeze({
     createOperation,
     getOperation,
+    getExecutionOperation,
     listOperations,
     updateOperation,
     reconcileInterruptedOperations,

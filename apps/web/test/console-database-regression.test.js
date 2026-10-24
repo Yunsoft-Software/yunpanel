@@ -12,6 +12,7 @@ import { waitForJob } from '../src/api.js';
 const { queueAndWait, default: DatabasesPage } = await import('../src/workspace/DatabasesPage.jsx');
 const { WorkspaceContext } = await import('../src/workspace/WorkspaceContext.jsx');
 const source = await readFile(new URL('../src/workspace/DatabasesPage.jsx', import.meta.url), 'utf8');
+const setupSource = await readFile(new URL('../src/workspace/DatabaseSetupDialog.jsx', import.meta.url), 'utf8');
 const panelKitSource = await readFile(new URL('../src/workspace/PanelKit.jsx', import.meta.url), 'utf8');
 const apiSource = await readFile(new URL('../src/api.js', import.meta.url), 'utf8');
 
@@ -28,12 +29,12 @@ test('database console retains search, pagination and explicit access alternativ
   assert.match(source, /paginateConsoleItems/);
   assert.match(source, /view\.canOpen/);
   assert.match(source, /view\.siteHref/);
-  assert.match(source, /Erişimi yapılandır/);
+  assert.match(source, /Erişimi hazırla/);
   assert.match(source, /Siteye bağla/);
 });
 
 test('database create form is opt-in; technical security facts remain available', () => {
-  assert.match(source, /createOpen && <Modal/);
+  assert.match(source, /createOpen.*DatabaseSetupDialog/);
   assert.match(source, /<details className="ws-section ws-disclosure ws-database-diagnostics"/);
   for (const label of ['Engine', 'DB güvenlik baseline', 'Admin socket auth', 'Website bağı', 'Credential', 'Eksik schema bağı']) assert.ok(source.includes(label));
 });
@@ -51,7 +52,7 @@ test('stale, refreshing or error states lock database mutations and phpMyAdmin h
   assert.match(source, /Button variant="primary" icon="plus" disabled=\{!canAct\}/);
   assert.match(source, /Button icon="external" disabled=\{!canAct\} onClick=\{.*?openPhpMyAdmin/);
   assert.match(source, /Button icon="trash" disabled=\{!canAct\}/);
-  assert.match(source, /type="submit" disabled=\{!canAct \|\| !validDatabaseName\(name\)\}/);
+  assert.match(setupSource, /disabled=\{busy \|\| !selected\}/);
   assert.match(source, /disabled=\{!canAct\} error=\{error\}/);
 });
 
@@ -59,7 +60,8 @@ test('database failed and cancelled jobs cannot report successful creation', () 
   assert.match(source, /terminal\?\.status !== 'succeeded'/);
   assert.match(source, /terminal\?\.status === 'cancelled'/);
   assert.match(source, /scope !== scopeGeneration\.current/);
-  assert.match(source, /if \(terminal\) \{ setName\(''\); setCreateOpen\(false\);/);
+  assert.match(setupSource, /terminal.status !== 'succeeded'/);
+  assert.match(setupSource, /setResult\(\{ job: failure.job \}\)/);
 });
 
 test('database mutations and handoff require fresh inventory and explicit identity', () => {
@@ -431,6 +433,7 @@ async function mountDatabasesPage({
 
   const workspaceValue = {
     servers: { items: [{ id: 'srv-local', name: 'local-server' }], status: 'ready' },
+    websites: { status: 'ready', items: [{ id: '20000000-0000-4000-8000-000000000001', serverId: 'srv-local', applicationId: 'app-test', revision: 1, name: 'example.com' }] },
     domains: { items: [{ id: 'dom-1', websiteId: '20000000-0000-4000-8000-000000000001', primaryDomain: 'example.com' }], status: 'ready' },
     jobs: { refresh: () => { refreshJobsCount++; }, items: [] },
     observe: (job) => { observedJobs.push(job); },
@@ -490,7 +493,7 @@ test('perform contract preserves modal and form inputs on failed or cancelled op
     inventory,
     onFetch: async (url, options) => {
       if (url.includes('/databases') && options.method === 'POST') {
-        return ok({ id: 'job-create-test' });
+        return ok({ job: { id: 'job-create-test', status: 'queued', operation: 'database.credential.apply', resourceId: 'app_new_database' } });
       }
       if (url.includes('/databases/') && options.method === 'DELETE') {
         return ok({ id: 'job-delete-test' });
@@ -543,7 +546,7 @@ test('perform contract preserves modal and form inputs on failed or cancelled op
     // Check: modal is still mounted, input is preserved, error is shown
     assert.ok(container.querySelector('dialog'), 'Modal must remain open after failed operation');
     assert.equal(nameInput.value, 'app_new_database', 'Entered database name must be preserved on failure');
-    assert.ok(container.textContent.includes('İşlem başarısız oldu'), 'Failure notice must be shown in modal');
+    assert.ok(container.textContent.includes('Kurulum tamamlanmadı'), 'Failure notice must be shown in modal');
     assert.equal(container.textContent.includes('oluşturuldu'), false, 'Success notice must not be shown');
 
     // 2. Submit form -> Job cancelled: modal and form input preserved
@@ -557,7 +560,7 @@ test('perform contract preserves modal and form inputs on failed or cancelled op
 
     assert.ok(container.querySelector('dialog'), 'Modal must remain open after cancelled operation');
     assert.equal(nameInput.value, 'app_new_database', 'Entered database name must be preserved on cancellation');
-    assert.ok(container.textContent.includes('İşlem iptal edildi'), 'Cancellation notice must be shown in modal');
+    assert.ok(container.textContent.includes('Kurulum tamamlanmadı'), 'Cancellation notice must be shown in modal');
 
     // 3. Submit form -> Job succeeds: modal closes, input cleared, success notice shown
     queuedJobStatus = 'succeeded';
@@ -568,8 +571,9 @@ test('perform contract preserves modal and form inputs on failed or cancelled op
       await new Promise((r) => setTimeout(r, 20));
     });
 
-    assert.equal(container.querySelector('dialog'), null, 'Modal must close on successful operation');
-    assert.ok(container.textContent.includes('app_new_database oluşturuldu'), 'Success notice must be displayed');
+    assert.ok(container.textContent.includes('app_new_database hazır'), 'Success is verified in the same dialog');
+    await act(async () => container.querySelectorAll('button').find((button) => button.textContent === 'Tamam').click());
+    assert.equal(container.querySelector('dialog'), null, 'Done closes the result');
 
     // 4. Test delete modal: failure/cancellation preserves modal, success closes modal
     const deleteBtn = container.querySelectorAll('button').find((b) => b.getAttribute('aria-label')?.includes('sil') || b.getAttribute('title')?.includes('sil'));

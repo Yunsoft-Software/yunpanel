@@ -1,3 +1,4 @@
+import { createPassengerReleaseRollbackQueue } from './passenger-release-rollback-queue.js';
 import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import { createHash } from 'node:crypto';
 import { OPERATIONS } from '@yunpanel/protocol';
@@ -137,6 +138,8 @@ function getAvailableActions(application, website) {
 export function mountApplicationOperationsRoutes(app, {
   websiteRegistry,
   domainRegistry = null,
+  runtimeBindingRegistry = null,
+  siteMutationLock = null,
   applicationRegistry,
   applicationEnvironmentRegistry = null,
   jobRegistry,
@@ -456,6 +459,11 @@ export function mountApplicationOperationsRoutes(app, {
       throw new ApplicationOperationsHttpError('invalid_rollback_release', 'Target release was not found in release history', 409);
     }
 
+    if (application.type === 'node' && application.runtimeAdapter === 'passenger') {
+      const queued = await createPassengerReleaseRollbackQueue({ applicationRegistry, jobRegistry, websiteRegistry, domainRegistry,
+        runtimeBindingRegistry, applicationEnvironmentRegistry, localServerId, siteMutationLock })({ application, releaseId });
+      return response.status(202).json({ data: queued });
+    }
     const nodeRollback = application.type === 'node';
     const pythonRollback = application.type === 'python';
     let envRevision = null;

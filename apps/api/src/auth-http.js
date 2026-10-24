@@ -420,7 +420,7 @@ export function createAuthenticatedApi({
       }
       if (pathname === '/api/audit') return handleAuditRead({ request, response, query: url.searchParams, store, json });
       return handler(request, response);
-    }, { tenant: actorTenant });
+    }, { tenant: actorTenant, actor: Object.freeze({ userId: authorized.user.id, sessionId: authorized.id, role: authorized.user.role }) });
   }
 
   return (request, response) => {

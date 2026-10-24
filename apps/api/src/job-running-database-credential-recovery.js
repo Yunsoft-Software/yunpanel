@@ -53,6 +53,10 @@ function assertContext(context, job, candidate, identity) {
     'databaseCredentialId', 'databaseBindingId', 'expectedCredentialRevision',
     'expectedBindingRevision', 'desiredStateSha256',
   ];
+  if (Object.hasOwn(payload ?? {}, 'createDatabase')) {
+    if (context.operation !== OPERATIONS.DATABASE_CREDENTIAL_APPLY || payload.createDatabase !== true) throw new JobRunningDatabaseCredentialRecoveryError('database_setup_mode_invalid', 'Database creation mode is invalid');
+    payloadFields.push('createDatabase');
+  }
   if (!context || context.id !== identity.jobId || context.serverId !== identity.serverId || context.status !== 'running'
     || context.operation !== candidate.operation || context.operation !== job.operation
     || context.resourceType !== 'database' || context.resourceId !== candidate.resourceId || context.resourceId !== job.resourceId

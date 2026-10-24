@@ -1,4 +1,5 @@
 import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
+import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteCertificateProvisioningHandler } from './website-certificate-provisioning-handler.js';
 import { createWebsiteDatabaseProvisioningHandler } from './website-database-provisioning-handler.js';
@@ -51,6 +52,7 @@ export function createWebsiteProvisioningRuntime({
   passengerHealthInspector,
   staticDeploymentManager,
   staticPublishIsolationManager,
+  staticHealthInspector = createWebsiteHttpHealthInspector(),
   elFinderFpmSiteManager,
   elFinderSharedApplicationManager,
   elFinderGatewayManager,
@@ -203,6 +205,37 @@ export function createWebsiteProvisioningRuntime({
         },
       })
       : nextWebsiteRegistry;
+    if (typeof nextApplicationRegistry.markUploadedStaticReady === 'function') {
+      async function staticUploadContext(context) {
+        const value = context.intent, operation = context.operation;
+        const evidence = operation?.steps?.find(step => step.id === 'runtime' && step.state === 'succeeded')?.evidence;
+        const website = await scopedWebsiteRegistry.getWebsite(context.websiteId);
+        const application = value?.applicationId ? await nextApplicationRegistry.getApplication(value.applicationId) : null;
+        if (!operation || operation.operationId !== context.operationId || operation.websiteId !== context.websiteId
+          || value?.adapter !== 'static-upload-state' || value.websiteId !== context.websiteId
+          || website?.applicationId !== value.applicationId || website.runtimeType !== 'static'
+          || application?.type !== 'static' || application.repositoryUrl !== null || application.serverId !== website.serverId
+          || evidence?.satisfied !== true || evidence.adapter !== 'static-bootstrap' || evidence.releaseId !== context.operationId
+          || evidence.applicationId !== application.id || evidence.documentRoot !== website.documentRoot) throw Object.assign(new Error('Static upload state does not match its verified Website operation'), { code: 'website_static_upload_state_unverified', status: 409 });
+        return { application, evidence };
+      }
+      handlers.static_upload_state = Object.freeze({
+        async inspect(context) {
+          const { application, evidence } = await staticUploadContext(context);
+          return { satisfied: application.state === 'active' && application.currentReleaseId === evidence.releaseId,
+            adapter: 'static-upload-state', applicationId: application.id, releaseId: evidence.releaseId };
+        },
+        async apply(context) {
+          const { application, evidence } = await staticUploadContext(context);
+          const primary = context.operation.resources?.primaryDomain;
+          const active = context.operation.steps?.find(step => step.id === 'nginx' && step.state === 'succeeded');
+          if (!active || primary?.websiteId !== context.websiteId || primary.serverId !== application.serverId
+            || (await staticHealthInspector.inspect({ primaryDomain: primary.primaryDomain, healthPath: '/', timeoutSeconds: 30 })).satisfied !== true) throw Object.assign(new Error('Uploaded static site did not pass its actual HTTP check'), { code: 'website_static_upload_http_unverified', status: 502 });
+          await nextApplicationRegistry.markUploadedStaticReady(application.id, evidence);
+          return { satisfied: true, adapter: 'static-upload-state', applicationId: application.id, releaseId: evidence.releaseId };
+        },
+      });
+    }
     isolationAudit = createWebsiteIsolationAuditService({
       websiteRegistry: scopedWebsiteRegistry,
       applicationRegistry: nextApplicationRegistry,

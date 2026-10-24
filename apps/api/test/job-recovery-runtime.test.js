@@ -25,6 +25,7 @@ test('recovery paths resolve the full development registry set beside the existi
     jobStore: '/work/yunpanel/.state/jobs.json',
     recoveryStore: '/work/yunpanel/.state/jobs.json.recovery.json',
     certificateStore: '/work/yunpanel/.state/certificates.json',
+    mailServiceIdentityStore: '/work/yunpanel/.data/mail-service-identity-registry.json',
     applicationStore: '/work/yunpanel/.state/applications.json',
     websiteStore: '/work/yunpanel/.data/website-registry.json',
     runtimeBindingStore: '/work/yunpanel/.data/application-runtime-binding-registry.json',
@@ -39,6 +40,7 @@ test('packaged recovery keeps domain, certificate and application state inside t
     jobStore: '/var/lib/yunpanel/control-plane/job-registry.json',
     recoveryStore: '/var/lib/yunpanel/control-plane/job-registry.json.recovery.json',
     certificateStore: '/var/lib/yunpanel/control-plane/certificate-registry.json',
+    mailServiceIdentityStore: '/var/lib/yunpanel/control-plane/mail-service-identity-registry.json',
     applicationStore: '/var/lib/yunpanel/control-plane/application-registry.json',
     websiteStore: '/var/lib/yunpanel/control-plane/website-registry.json',
     runtimeBindingStore: '/var/lib/yunpanel/control-plane/application-runtime-binding-registry.json',
@@ -47,6 +49,7 @@ test('packaged recovery keeps domain, certificate and application state inside t
   for (const [key, value] of [
     ['YUNPANEL_DOMAIN_STORE', '/tmp/domains.json'],
     ['YUNPANEL_CERTIFICATE_STORE', '/tmp/certificates.json'],
+    ['YUNPANEL_MAIL_SERVICE_IDENTITY_STORE', '/tmp/mail-identity.json'],
     ['YUNPANEL_APPLICATION_STORE', '/tmp/applications.json'],
     ['YUNPANEL_WEBSITE_STORE', '/tmp/websites.json'],
     ['YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE', '/tmp/bindings.json'],
@@ -90,6 +93,7 @@ test('terminal recovery runtime initializes resource stores and passes one durab
     applicationRegistryFactory,
     websiteRegistryFactory: () => ({ init: async () => {}, getWebsite: async () => null }),
     runtimeBindingRegistryFactory: () => ({ init: async () => {}, getBinding: async () => null }),
+    mailServiceIdentityRegistryFactory: makeRegistry('mail', { getForServer: async () => null }),
     jobRegistryFactory,
     recoveryStoreFactory,
     durableRegistryFactory: (options) => {
@@ -107,7 +111,8 @@ test('terminal recovery runtime initializes resource stores and passes one durab
     },
   });
 
-  assert.deepEqual(events.slice(0, 5), ['server.init', 'application.init', 'domain.init', 'certificate.init', 'command']);
+  assert.deepEqual(events.slice(0, 6), ['server.init', 'application.init', 'domain.init', 'certificate.init', 'mail.init', 'command']);
+  assert.equal(factories.mail.filePath, '/work/yunpanel/.data/mail-service-identity-registry.json');
   assert.equal(factories.server.filePath, '/work/yunpanel/.data/server-registry.json');
   assert.equal(factories.domain.filePath, '/work/yunpanel/.data/domain-registry.json');
   assert.equal(factories.certificate.filePath, '/work/yunpanel/.data/certificate-registry.json');

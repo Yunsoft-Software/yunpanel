@@ -14,11 +14,9 @@ export default function SiteAccessPanel({ domain, website, server, isOwner, canM
     </Section>;
   }
 
-  const serverHost = server?.displayName ?? server?.hostname ?? server?.name ?? '127.0.0.1';
+  const serverHost = server?.hostname ?? server?.displayName ?? server?.name ?? 'Sunucu adresi doğrulanamadı';
   const unixUser = website?.unixUser ?? (domain?.websiteId ? 'Site kullanıcısı hazırlanıyor' : 'Bağlı site yok');
-  const docRoot = domain.targetType === 'static'
-    ? (domain.target?.root || '—')
-    : (website?.applicationId ? `/var/lib/yunpanel/data/${website.applicationId}` : '—');
+  const docRoot = website.documentRoot || domain.target?.root || 'Belge kök dizini doğrulanamadı';
   const isolationLevel = website.unixUser ? 'Dedicated Unix kullanıcısı (İzole)' : 'Standart Unix ortamı';
 
   return <>
@@ -54,7 +52,10 @@ export default function SiteAccessPanel({ domain, website, server, isOwner, canM
     </Section>
 
     {isOwner ? (
-      <WebsiteIsolationPanel websiteId={website.id} onChanged={onChanged} />
+      <details className="ws-section ws-disclosure">
+        <summary>Gelişmiş güvenlik denetimi ve geçiş araçları</summary>
+        <WebsiteIsolationPanel websiteId={website.id} onChanged={onChanged} />
+      </details>
     ) : (
       <Section title="Sistem izolasyonu">
         <div className="ws-section-body">

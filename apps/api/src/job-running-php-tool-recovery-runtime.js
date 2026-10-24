@@ -1,4 +1,7 @@
 import os from 'node:os';
+import path from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createDurableJobRegistry } from './durable-job-registry.js';
 import { createJobRecoveryContextReader } from './job-recovery-context.js';
 import {
@@ -74,6 +77,21 @@ export async function runRunningPhpToolRecoveryFromStores({
     serviceStatus,
     loadJobContext: (id) => contextReader.read(id),
     readOperationReceipt: (receiptServerId, receiptJobId) => receiptStore.read(receiptServerId, receiptJobId),
+    inspectConfiguration: async (payload) => {
+      try {
+        const filePath = env.YUNPANEL_WEBSITE_STORE ?? path.join(path.dirname(paths.applicationStore), 'website-registry.json');
+        const parsed = JSON.parse(await readFile(filePath, 'utf8'));
+        const matches = parsed.websites?.filter((website) => website.id === payload.websiteId) ?? [];
+        if (parsed.version !== 6 || matches.length !== 1) return false;
+        const website = matches[0];
+        if (website.runtimeType !== 'php' || website.serverId !== serverId || website.applicationId !== payload.applicationId
+          || website.unixUser !== payload.unixUser || website.revision !== payload.expectedWebsiteRevision + 1
+          || Object.keys(payload.config).some((key) => website.phpConfig?.[key] !== payload.config[key])) return false;
+        const result = await createPhpFpmSiteManager().inspect({ websiteId: website.id, applicationId: website.applicationId,
+          unixUser: website.unixUser, documentRoot: website.documentRoot, ...payload.config });
+        return result.satisfied === true;
+      } catch { return false; }
+    },
   });
   return Object.freeze({ ...result, statePaths: paths });
 }

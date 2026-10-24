@@ -12,6 +12,7 @@ import {
   createMailDataRestoreManager,
   createMailDkimActivator,
   createManagedServiceManager,
+  createPhpMyAdminConfigurationService,
   createNginxManager,
   createNodeDeploymentManager,
   createNodeRestartManager,
@@ -34,6 +35,7 @@ import { normalizeGitDeploymentCredential } from '@yunpanel/shared';
 import { createLocalNodePassengerMigrationOperation } from './local-node-passenger-migration-operation.js';
 import { createLocalRoundcubeConfigOperation } from './local-roundcube-config-operation.js';
 import { normalizeWebsiteProvisioningJobAuthorization } from './website-provisioning-job-authorization.js';
+import { normalizeWebsiteBackupScheduleAuthorization } from './website-backup-schedule-authorization.js';
 
 export const LOCAL_HOST_OPERATIONS = Object.freeze([
   OPERATIONS.SYSTEM_PACKAGES_INSPECT,
@@ -72,6 +74,11 @@ export const LOCAL_NODE_ENVIRONMENT_OPERATIONS = Object.freeze([
   OPERATIONS.APP_NODE_RESTART,
 ]);
 
+export const LOCAL_PASSENGER_RELEASE_OPERATIONS = Object.freeze([
+  OPERATIONS.APP_NODE_PASSENGER_DEPLOY,
+  OPERATIONS.APP_NODE_PASSENGER_ROLLBACK,
+]);
+
 export const LOCAL_PYTHON_ENVIRONMENT_OPERATIONS = Object.freeze([
   OPERATIONS.APP_PYTHON_DEPLOY,
   OPERATIONS.APP_PYTHON_ROLLBACK,
@@ -101,6 +108,9 @@ export const LOCAL_CRON_OPERATIONS = Object.freeze([
 
 export const LOCAL_WEBSITE_PHP_OPERATIONS = Object.freeze([
   OPERATIONS.WEBSITE_PHP_ACTION,
+]);
+export const LOCAL_WEBSITE_BACKUP_OPERATIONS = Object.freeze([
+  OPERATIONS.WEBSITE_BACKUP_ACTION,
 ]);
 
 const EXECUTION_ID_PATTERN = /^[A-Za-z0-9._:-]{8,128}$/;
@@ -161,6 +171,7 @@ export function createLocalHostOperations({
   nodeRollbackManager = createNodeRollbackManager(),
   nodeRestartManager = createNodeRestartManager(),
   passengerRestartOperation = null,
+  passengerReleaseOperation = null,
   nodeProcessManager = createNodeProcessManager(),
   nodePassengerMigrationOperation = createLocalNodePassengerMigrationOperation(),
   nodeRuntimeManager = createNodeRuntimeManager(),
@@ -180,7 +191,9 @@ export function createLocalHostOperations({
   roundcubeConfigOperation = null,
   websiteCronOperation = null,
   websitePhpToolOperation = null,
+  websiteBackupOperation = null,
   loadManagedMailConfiguration = null,
+  loadCertificateMailReload = null,
   loadManagedMailRollbackConfiguration = null,
   loadManagedDkimConfiguration = null,
   loadRoundcubeConfiguration = null,
@@ -189,6 +202,8 @@ export function createLocalHostOperations({
   loadDnsProviderCredential = null,
   jobLogStore = null,
   authorizeWebsiteProvisioning = null,
+  authorizePanelJob = null,
+  authorizeWebsiteBackupScheduleJob = null,
   requiresWebsiteProvisioningAuthorization = null,
 } = {}) {
   if (loadApplicationEnvironment !== null && typeof loadApplicationEnvironment !== 'function') {
@@ -225,6 +240,7 @@ export function createLocalHostOperations({
   if (websitePhpToolOperation !== null && typeof websitePhpToolOperation?.execute !== 'function') {
     throw new Error('websitePhpToolOperation must provide execute() when configured');
   }
+  if (websiteBackupOperation !== null && typeof websiteBackupOperation?.execute !== 'function') throw new Error('websiteBackupOperation must provide execute()');
   if (!cloudflareDnsManager || typeof cloudflareDnsManager.applyRecord !== 'function') {
     throw new Error('cloudflareDnsManager must provide applyRecord()');
   }
@@ -237,6 +253,9 @@ export function createLocalHostOperations({
   if (authorizeWebsiteProvisioning !== null && typeof authorizeWebsiteProvisioning !== 'function') {
     throw new Error('authorizeWebsiteProvisioning must be a function when configured');
   }
+  if (authorizePanelJob !== null && typeof authorizePanelJob !== 'function') {
+    throw new Error('authorizePanelJob must be a function when configured');
+  }
   if (requiresWebsiteProvisioningAuthorization !== null
     && typeof requiresWebsiteProvisioningAuthorization !== 'function') {
     throw new Error('requiresWebsiteProvisioningAuthorization must be a function when configured');
@@ -247,6 +266,7 @@ export function createLocalHostOperations({
   const deploymentLog = jobLogStore ? (entry) => jobLogStore.record(entry) : null;
   const resolvedManagedServiceManager = managedServiceManager ?? createManagedServiceManager({
     databaseSecurityInspector: () => databaseManager.inspectSecurityBaseline(),
+    configurePhpMyAdmin: () => createPhpMyAdminConfigurationService().configure(),
   });
   const resolvedDatabaseDumpManager = databaseDumpManager ?? createDatabaseDumpManager({ databaseManager });
   const resolvedDatabaseRestoreManager = databaseRestoreManager ?? createDatabaseRestoreManager({
@@ -741,6 +761,30 @@ export function createLocalHostOperations({
   }
 
   async function authorizeExecution(operation, execution) {
+    const requested = execution?.authorization;
+    if (requested?.kind === 'website_backup_schedule') {
+      const authorization = normalizeWebsiteBackupScheduleAuthorization(requested);
+      if (operation !== OPERATIONS.WEBSITE_BACKUP_ACTION || execution.serverId !== authorization.serverId
+        || typeof authorizeWebsiteBackupScheduleJob !== 'function' || await authorizeWebsiteBackupScheduleJob(authorization) !== true) {
+        throw Object.assign(new Error('Scheduled backup permission was revoked'), { code: 'website_backup_schedule_actor_forbidden' });
+      }
+      return Object.freeze(Object.fromEntries(Object.entries(execution).filter(([key]) => key !== 'authorization')));
+    }
+    if (requested != null && requested.kind !== 'website_provisioning') {
+      const valid = requested && typeof requested === 'object' && !Array.isArray(requested)
+        && typeof requested.userId === 'string' && requested.userId === requested.actorId
+        && typeof requested.sessionId === 'string' && requested.sessionId.length > 0
+        && ((typeof requested.websiteId === 'string' && requested.websiteId.length > 0)
+          || (requested.kind === 'panel' && requested.scope === 'server' && requested.role === 'owner'
+            && requested.serverId === execution.serverId))
+        && ['owner', 'site_manager', 'reseller', 'customer'].includes(requested.role);
+      if (!valid || !authorizePanelJob || await authorizePanelJob(requested, { operation, ...execution }) !== true) {
+        const error = new Error('Panel session or website access changed before job execution');
+        error.code = 'panel_job_actor_forbidden';
+        throw error;
+      }
+      return Object.freeze(Object.fromEntries(Object.entries(execution).filter(([key]) => key !== 'authorization')));
+    }
     const authorization = normalizeWebsiteProvisioningJobAuthorization(
       execution?.authorization,
       { optional: true },
@@ -814,9 +858,13 @@ export function createLocalHostOperations({
     [OPERATIONS.DOMAIN_STAGE, (payload) => nginxManager.stageDomain(payload)],
     [OPERATIONS.DOMAIN_ACTIVATE, (payload, execution) => nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null })],
     [OPERATIONS.SSL_ISSUE, (payload) => executeCertificate(payload, (input, execution) => acmeManager.issueCertificate(input, execution))],
-    [OPERATIONS.SSL_RENEW, async (payload) => {
+    [OPERATIONS.SSL_RENEW, async (payload, execution) => {
       const result = await executeCertificate(payload, (input, execution) => acmeManager.renewCertificate(input, execution));
-      return result?.dryRun === false ? { ...result, reloadOutcome: await reloadCertificateNginx(nginxManager) } : result;
+      if (result?.dryRun !== false) return result;
+      const reloadOutcome = await reloadCertificateNginx(nginxManager);
+      const mailReloadOutcome = loadCertificateMailReload ? await loadCertificateMailReload(result, execution,
+        identity => resolvedMailConfigActivator.reloadTlsIdentity(identity)) : null;
+      return { ...result, reloadOutcome, ...(mailReloadOutcome ? { mailReloadOutcome } : {}) };
     }],
     [OPERATIONS.APP_STATIC_DEPLOY, (payload) => deployStaticWithReceipt(payload)],
     [OPERATIONS.APP_STATIC_ROLLBACK, (payload) => staticRollbackManager.rollbackStatic(payload)],
@@ -872,8 +920,17 @@ export function createLocalHostOperations({
   if (websitePhpToolOperation) {
     handlers.set(OPERATIONS.WEBSITE_PHP_ACTION, (payload, execution) => websitePhpToolOperation.execute(payload, execution));
   }
+  if (websiteBackupOperation) handlers.set(OPERATIONS.WEBSITE_BACKUP_ACTION, (payload, execution) => websiteBackupOperation.execute(payload, execution));
 
+  if (passengerReleaseOperation) for (const operation of LOCAL_PASSENGER_RELEASE_OPERATIONS) {
+    handlers.set(operation, (payload, execution, authority) => {
+      if (typeof passengerReleaseOperation?.execute !== 'function') throw Object.assign(new Error('Passenger release runtime is unavailable'), { code: 'passenger_release_runtime_unavailable' });
+      return passengerReleaseOperation.execute(operation, payload, execution, authority);
+    });
+  }
   return {
+    authorizeExecution,
+    reloadMailCertificate: identity => resolvedMailConfigActivator.reloadTlsIdentity(identity),
     operations: [...handlers.keys()],
     supports(operation) {
       return handlers.has(operation);
@@ -891,7 +948,10 @@ export function createLocalHostOperations({
         throw error;
       }
       const authorizedExecution = await authorizeExecution(operation, execution);
-      return handler(payload, authorizedExecution);
+      const passengerRelease = [OPERATIONS.APP_NODE_PASSENGER_DEPLOY, OPERATIONS.APP_NODE_PASSENGER_ROLLBACK].includes(operation);
+      if (passengerRelease && (execution?.authorization?.kind !== 'panel' || execution.authorization.scope !== 'website'
+        || execution.authorization.websiteId !== payload.websiteId)) throw Object.assign(new Error('Passenger release requires an authenticated Website actor'), { code:'panel_job_actor_forbidden' });
+      return handler(payload, authorizedExecution, passengerRelease ? { reauthorize: () => authorizeExecution(operation, execution) } : undefined);
     },
   };
 }

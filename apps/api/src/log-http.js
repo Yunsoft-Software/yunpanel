@@ -19,7 +19,7 @@ const SERVICE_UNITS = Object.freeze({
   'yunpanel-api': 'yunpanel-api.service',
   'yunpanel-web': 'yunpanel-web.service',
 });
-const DEPLOY_OPERATIONS = new Set([OPERATIONS.APP_STATIC_DEPLOY, OPERATIONS.APP_NODE_DEPLOY]);
+const DEPLOY_OPERATIONS = new Set([OPERATIONS.APP_STATIC_DEPLOY, OPERATIONS.APP_NODE_DEPLOY, OPERATIONS.APP_NODE_PASSENGER_DEPLOY]);
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SEARCH_PATTERN = /^[\p{L}\p{N} ._/@+\-]{1,100}$/u;
 const QUEUE_NAME_PATTERN = /^[a-z][a-z0-9_-]{0,31}$/;

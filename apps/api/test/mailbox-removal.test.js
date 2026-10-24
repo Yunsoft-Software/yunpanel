@@ -4,6 +4,9 @@ import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
+import { mkdtemp, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import React, { StrictMode, createElement } from 'react';
 import { renderToString } from 'react-dom/server';
 import { MemoryRouter } from 'react-router';
@@ -5206,7 +5209,9 @@ test('Criterion 17: Güncel MS-01–04 ile tek-kutu silmede alan adı açık kal
   }
 });
 
-test('Criterion 18: Yerel/yabancı alias referansları, kota/forwarding, eşzamanlı yeni mesaj ve çalışan iş engelleri; yabancı alias kimliği sızmasın. İki tarayıcı/proses yarışı, backend mutation anı yetkisi, yedekten gerçek geri dönüş ve kalan hesapların yeniden çalışması doğrulansın. Mobil/klavye/odak/koyu tema; .44 hariç yalnız izinli host. GitHub Actions ve canlı deploy bu tur yapılmadı', async () => {
+test('Criterion 18: Yerel/yabancı alias referansları, kota/forwarding, eşzamanlı yeni mesaj ve çalışan iş engelleri; yabancı alias kimliği sızmasın. İki tarayıcı/proses yarışı, backend mutation anı yetkisi, yedekten gerçek geri dönüş ve kalan hesapların yeniden çalışması doğrulansın. Mobil/klavye/odak/koyu tema; .44 hariç yalnız izinli host. GitHub Actions ve canlı deploy bu tur yapılmadı', async (t) => {
+  const lockDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-mailbox-contract-'));
+  t.after(() => rm(lockDir, { recursive: true, force: true }));
   const sha64 = (val) => createHash('sha256').update(String(val)).digest('hex');
 
   // =========================================================================
@@ -5528,7 +5533,7 @@ test('Criterion 18: Yerel/yabancı alias referansları, kota/forwarding, eşzama
     assert.equal(mbAfterRace.enabled, false);
 
     // 3c. Worker mutation inter-process lock prevents concurrent alias, reactivation, and message delivery races
-    const lockManager = createMailboxInterProcessLockManager();
+    const lockManager = createMailboxInterProcessLockManager({ lockDir });
     const guardResult = await assertWorkerMutationConcurrencyGuard({
       mailboxId: targetId,
       address: targetAddress,

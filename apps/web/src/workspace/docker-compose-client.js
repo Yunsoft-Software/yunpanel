@@ -25,6 +25,99 @@ export function getDockerProject(projectId) {
   return panelRequest(projectPath(projectId));
 }
 
+export function getDockerProjectDocument(projectId) {
+  return panelRequest(`${projectPath(projectId)}/document`);
+}
+
+export function getDockerCatalog(query = '') {
+  const cleanQuery = typeof query === 'string' && query.trim()
+    ? `?q=${encodeURIComponent(query.trim())}`
+    : '';
+  return panelRequest(`/docker/catalog${cleanQuery}`);
+}
+
+export function generateDockerComposeFromImage({
+  image,
+  serviceName = '',
+  targetPort = 80,
+  publishedPort = 18080,
+  hostIp = '127.0.0.1',
+  protocol = 'tcp',
+  environment = {},
+} = {}) {
+  if (typeof image !== 'string' || !image.trim()) {
+    throw new Error('Docker image is required');
+  }
+  const cleanImage = image.trim();
+  const baseImageName = cleanImage.split(':')[0].split('/').pop() || 'app';
+  const rawService = typeof serviceName === 'string' && serviceName.trim()
+    ? serviceName.trim().toLowerCase()
+    : baseImageName.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  const resolvedService = /^[a-z0-9][a-z0-9_-]{0,62}$/.test(rawService) ? rawService : 'app';
+  const innerPort = integer(Number(targetPort), 'targetPort', 1, 65535);
+  const outerPort = integer(Number(publishedPort), 'publishedPort', 1024, 65535);
+  const cleanHost = typeof hostIp === 'string' && hostIp.trim() ? hostIp.trim() : '127.0.0.1';
+  const cleanProtocol = protocol === 'udp' ? 'udp' : 'tcp';
+
+  const envEntries = environment && typeof environment === 'object' && !Array.isArray(environment)
+    ? Object.entries(environment).filter(([k]) => /^[A-Z_][A-Z0-9_]*$/i.test(k))
+    : [];
+  const envBlock = envEntries.length > 0
+    ? `    environment:\n${envEntries.map(([k, v]) => `      ${k}: "${String(v ?? '').replace(/"/g, '\\"')}"`).join('\n')}\n`
+    : '';
+
+  const document = [
+    'services:',
+    `  ${resolvedService}:`,
+    `    image: ${cleanImage}`,
+    '    restart: unless-stopped',
+    '    ports:',
+    `      - "${cleanHost}:${outerPort}:${innerPort}/${cleanProtocol}"`,
+  ].join('\n') + '\n' + envBlock;
+
+  return Object.freeze({
+    serviceName: resolvedService,
+    image: cleanImage,
+    targetPort: innerPort,
+    publishedPort: outerPort,
+    hostIp: cleanHost,
+    protocol: cleanProtocol,
+    document,
+    toString() {
+      return document;
+    },
+  });
+}
+
+export function resolveDockerProxyRule({
+  projectId = null,
+  serviceName = 'web',
+  targetPort = 80,
+  publishedPort = 18080,
+  hostIp = '127.0.0.1',
+  pathPrefix = '/',
+  domainName = null,
+  websocket = true,
+} = {}) {
+  const innerPort = integer(Number(targetPort), 'targetPort', 1, 65535);
+  const outerPort = integer(Number(publishedPort ?? targetPort), 'publishedPort', 1, 65535);
+  const cleanHost = typeof hostIp === 'string' && hostIp.trim() ? hostIp.trim() : '127.0.0.1';
+  const rawPath = typeof pathPrefix === 'string' && pathPrefix.trim() ? pathPrefix.trim() : '/';
+  const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  return Object.freeze({
+    projectId: projectId || null,
+    serviceName: typeof serviceName === 'string' && serviceName.trim() ? serviceName.trim() : 'web',
+    innerPort,
+    outerPort,
+    upstreamHost: cleanHost,
+    upstreamPort: outerPort,
+    upstreamUrl: `http://${cleanHost}:${outerPort}`,
+    pathPrefix: normalizedPath,
+    domainName: domainName || null,
+    websocket: Boolean(websocket),
+  });
+}
+
 export function getDockerStorageBackup(projectId) {
   return panelRequest(`${projectPath(projectId)}/storage-backup`);
 }

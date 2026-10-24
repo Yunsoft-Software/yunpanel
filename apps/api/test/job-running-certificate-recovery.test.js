@@ -155,3 +155,28 @@ test('production certificate fingerprint drift is rejected before reconciliation
   await assert.rejects(recoverRunningCertificateOperation(fx.options), { code: 'job_certificate_recovery_evidence_not_satisfied' });
   assert.deepEqual(fx.events, ['get', 'context', 'certificate', 'receipt', 'live']);
 });
+
+test('mail renewal recovery proves both protocol consumers before opening durable completion', async () => {
+  const fx = fixture('production-renew');
+  const proof = { service: 'mail', status: 'succeeded', stage: 'reload', imapFingerprintVerified: true, smtpFingerprintVerified: true };
+  fx.options.reloadMailCertificate = async (result, identity) => {
+    fx.events.push('mail.reload');assert.equal(result.fingerprint256, fingerprint);assert.equal(identity.certificateId, certificateId);return proof;
+  };
+  fx.options.reconcile = async ({ job }) => { fx.events.push('reconcile');assert.deepEqual(job.result.mailReloadOutcome, proof);return { reconciled: true }; };
+  await recoverRunningCertificateOperation(fx.options);
+  assert.ok(fx.events.indexOf('mail.reload') < fx.events.indexOf('begin'));
+  assert.deepEqual(fx.completedResult().mailReloadOutcome, proof);
+});
+
+test('mail renewal recovery without a provider stops before durable acknowledgement', async () => {
+  const fx = fixture('production-renew');fx.options.mailServiceIdentityRegistry = { getForServer: async () => ({ hostname: 'example.com' }) };
+  await assert.rejects(recoverRunningCertificateOperation(fx.options), { code: 'job_certificate_recovery_mail_reload_unavailable' });
+  assert.equal(fx.events.includes('begin'), false);assert.equal(fx.events.includes('ack'), false);
+});
+
+test('mail protocol failure remains an explicit failed consumer result while the renewed certificate is recoverable', async () => {
+  const fx = fixture('production-renew');
+  fx.options.reloadMailCertificate = async () => ({ service: 'mail', status: 'failed', stage: 'reload', error: 'certificate_mail_reload_failed' });
+  await recoverRunningCertificateOperation(fx.options);assert.equal(fx.completedResult().mailReloadOutcome.status, 'failed');
+  assert.equal(fx.completedResult().fingerprint256, fingerprint);
+});

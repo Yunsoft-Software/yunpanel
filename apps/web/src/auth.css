@@ -30,7 +30,7 @@
 .auth-sessionbar { min-height: 52px; padding: 10px 24px; border-bottom: 1px solid #dde4ee; background: #fff; display: flex; gap: 16px; align-items: center; justify-content: space-between; font-size: 13px; color: #27364e; }
 .auth-sessionbar > div { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
 .auth-sessionbar button, .auth-dialog header button, .auth-sessions button { border: 1px solid #cbd4e0; border-radius: 6px; background: #fff; color: #27364e; font: inherit; padding: 7px 12px; min-height: 34px; cursor: pointer; }
-.auth-role { background: #edf2f9; padding: 3px 7px; border-radius: 5px; font-size: 11px; }
+.auth-role { background: var(--ws-surface-subtle, #edf2f9); color: var(--ws-text, #334155); padding: 3px 7px; border-radius: 5px; font-size: 11px; }
 .auth-separator { color: #8190a6; margin: 0 10px; }
 .authenticated-panel .app-shell { min-height: calc(100vh - 52px); }
 .auth-banner { margin: 12px 24px; }

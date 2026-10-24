@@ -71,6 +71,7 @@ export function mountWebsiteRestoreRoutes(app, {
   }));
 
   app.post('/api/websites/:websiteId/restore', requireOwner, asyncRoute(async (request, response) => {
+    if (typeof request.body?.expectedPreviewDigest !== 'string' || !/^[a-f0-9]{64}$/.test(request.body.expectedPreviewDigest)) throw new WebsiteRestoreHttpError('invalid_preview_digest', 'Expected preview digest is invalid', 400);
     const {
       repositoryId,
       snapshotId,
@@ -81,7 +82,8 @@ export function mountWebsiteRestoreRoutes(app, {
       include,
     } = request.body ?? {};
 
-    const result = await websiteRestoreService.executeRestore({
+    if (!websiteBackupOperationService) throw new WebsiteRestoreHttpError('website_restore_runtime_unavailable', 'Kalıcı geri yükleme kuyruğu kullanılamıyor', 503);
+    const result = await websiteBackupOperationService.queueRestore({
       websiteId: request.params.websiteId,
       repositoryId,
       snapshotId,
@@ -90,10 +92,10 @@ export function mountWebsiteRestoreRoutes(app, {
       healthPath,
       timeoutSeconds,
       include,
+      actor: { sessionId: request.auth?.id, userId: request.auth?.user?.id, role: request.auth?.user?.role },
     });
 
-    const statusCode = result.status === 'succeeded' ? 200 : 422;
-    return response.status(statusCode).json({ data: result });
+    return response.status(202).json({ data: result });
   }));
 
   if (websiteBackupOperationService) {

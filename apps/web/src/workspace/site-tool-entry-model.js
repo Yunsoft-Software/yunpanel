@@ -2,7 +2,7 @@
 const TOOLS = new Set([
   'mail', 'databases', 'statistics', 'analytics',
   'backup', 'backups', 'cron', 'scheduled-tasks',
-  'logs', 'php', 'access', 'ssl',
+  'logs', 'php', 'wordpress', 'access', 'ssl',
 ]);
 const hasId = (value) => typeof value === 'string' && value.length > 0;
 const uniqueIds = (items) => {
@@ -14,7 +14,7 @@ function toolDestinationTab(tool) {
   if (['statistics', 'analytics'].includes(tool)) return 'analytics';
   if (['scheduled-tasks', 'cron'].includes(tool)) return 'cron';
   if (['backups', 'backup'].includes(tool)) return 'backup';
-  if (['wp', 'wordpress', 'php'].includes(tool)) return 'php';
+  if (['wp', 'wordpress'].includes(tool)) return 'wordpress';
   if (['sftp', 'ssh', 'access'].includes(tool)) return 'access';
   if (['certs', 'certificate', 'certificates', 'ssl'].includes(tool)) return 'ssl';
   return tool;

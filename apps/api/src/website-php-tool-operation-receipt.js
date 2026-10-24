@@ -6,7 +6,7 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-
 const JOB = /^[A-Za-z0-9._:-]{8,128}$/;
 const USER = /^yunapp-[a-f0-9]{12}$/;
 const SHA = /^[a-f0-9]{64}$/;
-const ACTIONS = new Set(['wp.cache.flush', 'wp.transients.delete-all', 'composer.dump-autoload']);
+const ACTIONS = new Set(['wp.cache.flush', 'wp.transients.delete-all', 'composer.dump-autoload', 'php.fpm.update', 'wp.toolkit']);
 
 export class WebsitePhpToolOperationReceiptError extends Error {
   constructor(code, message) {
@@ -32,7 +32,7 @@ function normalized(value) {
     || !UUID.test(p.actorSessionId ?? '') || !UUID.test(p.actorUserId ?? '')
     || !['owner', 'site_manager', 'reseller', 'customer'].includes(p.actorRole)
     || !ACTIONS.has(p.actionId) || !SHA.test(p.previewDigest ?? '')
-    || p.confirmation !== `php-tool:${p.websiteId}:${p.actionId}:${p.previewDigest}`
+    || p.confirmation !== (p.actionId === 'php.fpm.update' ? `php-config:${p.websiteId}:${p.config?.phpVersion}:${p.previewDigest}` : `php-tool:${p.websiteId}:${p.actionId}:${p.previewDigest}`)
     || !r || typeof r !== 'object' || Array.isArray(r)
     || r.version !== 1 || r.websiteId !== p.websiteId || r.applicationId !== p.applicationId
     || r.unixUser !== p.unixUser || r.actionId !== p.actionId
@@ -56,6 +56,8 @@ function normalized(value) {
       actionId: p.actionId,
       previewDigest: p.previewDigest,
       confirmation: p.confirmation,
+      ...(p.actionId === 'php.fpm.update' ? { config: Object.freeze({ ...p.config }) } : {}),
+      ...(p.actionId === 'wp.toolkit' ? { options: structuredClone(p.options), secretRef: p.secretRef } : {}),
     }),
     result: Object.freeze({
       version: 1,

@@ -95,6 +95,7 @@ function setupTestEnvironment(t, { maxWebsites = 2, maxCustomers = 5 } = {}) {
   const createAdapter = async (apply) => {
     const plannedSite = siteForOperation(apply.input.operationId);
     sites.set(plannedSite.id, structuredClone(plannedSite));
+    domains.set(basePlan(apply.input.operationId).ids.primaryDomainId, { id: basePlan(apply.input.operationId).ids.primaryDomainId, websiteId: plannedSite.id, serverId, primaryDomain: apply.input.primaryDomain });
     return { created: true, website: plannedSite };
   };
 

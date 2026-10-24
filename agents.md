@@ -2,16 +2,36 @@
 
 ## Güncel kullanıcı kararı — 2026-09-23: development, sade reseller
 
+9–10 Ekim 2026 son talimatı: derin analiz, kısa doküman/plan ve kapsamlı gerçek tarayıcı testleri. Kullanıcı `.28` izole kur/deneyip/kaldır testlerini açıkça onayladı; test kodu yazılabilir. 10 Ekim 2026 kullanıcı UI/UX ve planın tüm kaynak işlerini açıkça onayladı; ürün geliştirme başlayabilir. Deployment için ayrı hedef/scope izni kuralı korunur. Güncel hedef Plesk ekran/akış/özellik eşdeğerliğidir. Eski başarı raporları aktif talimat değildir.
+
 Önce bu dosya, sonra [devralınan teknik kurallar](docs/policies/agents-inherited-1a45ded8.md), `plan.md`, `ui-plan.md`, `docs/plesk-feature-parity.md` ve ilgili kod okunur. Devralınan dosya önceki `agents.md` içeriğinin eksiksiz Git blob kopyasıdır. Aşağıdaki açık değişiklikler dışında bütün güvenlik, veri koruma, teknoloji, test ve operasyon kuralları geçerlidir.
 
 ### Geçerli ürün ve çalışma kararları
 
-1. **Aktif dal `development`.** Başlangıç `main@1a45ded8697d640b87c149143613454fac1fa94d`. Bu işte `main`e commit/merge/deploy yapılmaz. Her yazımdan önce dal başı kontrol edilir; eşzamanlı değişiklikler ezilmez. Küçük commitler; force push, geçmiş silme ve GitHub Actions yok. Commit mesajlarına `[skip ci]` eklenir.
-2. **Plesk görev düzeni korunur; reseller ilk sürümü sadeleşir.** Önceki aynı tarihli “bütün reseller/paket/abonelik özellikleri ilk sürümde zorunlu” kararı kullanıcının son isteğiyle değiştirilmiştir. İlk sürüm Owner → isteğe bağlı tek Reseller → Customer → mevcut Website ilişkisidir. Abonelik ve paket nesnesi site işlemleri için önkoşul değildir. Reseller kendi müşterileri ve onların siteleriyle sınırlıdır. Ayrıntı ve işaretli işler `docs/ux/plesk-full-scope.md` içindedir.
+1. **Aktif dal `24-10-2026` (`development` tabanlı).** Bu işte `main`e commit/merge/deploy yapılmaz. Her yazımdan önce dal başı kontrol edilir; eşzamanlı değişiklikler ezilmez. Küçük commitler; force push, geçmiş silme ve GitHub Actions yok. Commit mesajlarına `[skip ci]` eklenir.
+2. **Plesk görev düzeni korunur; reseller ilk sürümü sadeleşir.** Önceki aynı tarihli “bütün reseller/paket/abonelik özellikleri ilk sürümde zorunlu” kararı kullanıcının son isteğiyle değiştirilmiştir. İlk sürüm Owner → isteğe bağlı tek Reseller → Customer → mevcut Website ilişkisidir. Abonelik ve paket nesnesi site işlemleri için önkoşul değildir. Reseller kendi müşterileri ve onların siteleriyle sınırlıdır. Ayrıntı ve işaretli işler `docs/plesk-feature-parity.md` içindedir.
 3. **Şimdi geliştirilmeyecek reseller işleri:** alt bayi zinciri, ayrı reseller paket motoru, add-on, abonelik sync/lock/customization, overselling, otomatik süre sonu/fatura, bayi markalama, müşteri↔reseller dönüşümü, toplu transfer ve login-as. Bunlar tamamlandı sayılmaz; sonraki fazdır. Basit müşteri/site adet sınırı yeterlidir; disk/CPU/RAM ölçümü veya gerçekten uygulanan site limitleri bu değişiklikle kaldırılmaz. Reseller dışındaki Plesk yol haritası iptal değildir.
-4. **Önce doküman, sonra dar kaynak dilimi.** Mevcut Files iyileştirmeleri ve Plesk UX işleri korunur; UI sadeleştirme gerekçesiyle araç/rota/motor silinmez. Aynı Ember renkleri/fontları/radius ve ortak bileşenlerle devam edilir. Global Dosyalar ve domain File Manager girişleri kalır.
+4. **Önce görsel/UX onayı ve doküman, sonra kaynak dilimi.** UI sadeleştirme gerekçesiyle araç/rota/motor silinmez; Global Dosyalar ve domain File Manager girişleri kalır. Ancak eski Ember (bej/turuncu) renk/radius katmanı yerine, kullanıcı onaylı **Shadcn UI tabanlı, ufak mikro-animasyonlar ve ışık/spotlight efektleriyle modernleştirilmiş, sade ve domain→subdomain hiyerarşisini merkeze alan yeni UI/UX** uygulanır.
 5. **Tamamlanma kaydı görev geçmişinde tutulur.** Kök `plan.md` mimari kararları ve açık işleri tutar; tamamlanan maddeler kontroller, bağımsız inceleme, gerekli staging ve Git birleştirmesi sonrasında çıkarılır. Ayrıntılı sonuç ve kabul kanıtları Code Factory görev/run/event kayıtlarında, önceki raporlar Git geçmişinde kalır. `done.md` yalnız kısa bir geçmiş açıklamasıdır; yeni iş raporu eklenmez. İlgili alt planlardaki kaynak işaretlerinin kanıtı ve sınırı belirtilir. Test edilmemiş entegrasyon, migration, tarayıcı veya host kabulü açık bırakılır. Saf politika modülü bütün reseller özelliği değildir; sadece menü gizlemek veya site_manager rolünü yeniden adlandırmak güvenli reseller uygulaması sayılmaz.
 6. **Açık kaynak taban değişimi onaylanmadı.** Başka panel kurma, YunPanel'i onunla değiştirme, PHP/Perl backend'e geçme veya iki paneli aynı config dosyasına yazdırma. Kullanıcı kararı ve migration/rollback tasarımı gereklidir.
+
+### 24 Ekim 2026 — Test, Domain/Subdomain Dosya Kökü, Çoklu Ubuntu ve Yeni Shadcn UI Kuralları
+
+1. **Paralel Test Yazımı, Sıfır Mock ve Geliştirme Sonrası Koşturma Kuralı:**
+   - Testler geliştirmelere paralel olarak yazılır.
+   - **Mock data, sahte servis, stub HTTP cevabı veya simüle edilmiş veri asla kabul edilmez ve kullanılmaz.** Tüm doğrulamalar gerçek veritabanı (DB), gerçek backend API ve gerçek Playwright tarayıcı testleriyle yapılır.
+   - Testler her ufak kod adımında yapılır yapılmaz anında koşturulmaz; **ilgili geliştirme dilimi tamamlandıktan sonra** topluca koşturulur ve doğrulanır.
+2. **Domain → Subdomain Hiyerarşisi, Ortak Domain İçi File Root ve Tam Subdomain Yetenekleri Kuralı:**
+   - Domain ve subdomain'ler hem kullanıcı arayüzünde (açılır ağaç/hiyerarşi) hem de dosya sisteminde hiyerarşik olarak modellenir.
+   - Subdomain'lerin ana domainden kopuk, tamamen ayrı üst dosya kökleri (separate top-level file roots) olmamalıdır; **subdomain dosya kökleri ana domainin çalışma alanı/dizini içinde** (ör. `<domain-root>/subdomains/<subdomain>` veya ana domain kökünün alt dizini olarak) açılır. Ana domainin Dosya Yöneticisi (File Manager) içinden alt alan adlarının klasörlerine doğrudan erişilebilir.
+   - Buna karşın her subdomain kendi başına **Uygulama (PHP, Node.js, Python, Statik)**, **Veritabanı (DB)** ve **Docker (Container / Compose Stack / Inner↔Outer Port Proxy)** bağlama yeteneklerine tam olarak sahiptir.
+3. **Ubuntu ve Popüler Linux Dağıtımları Desteği (`OsPlatformAdapter`):**
+   - Sistem yalnızca Ubuntu 24.04 LTS ile sınırlı kalmaz; merkezi işletim sistemi soyutlama katmanı (`os-platform.js`) üzerinden **Ubuntu LTS (20.04 Focal, 22.04 Jammy, 24.04 Noble)**, **Debian (11 Bullseye, 12 Bookworm)** ve **RHEL / Enterprise Linux ailesini (AlmaLinux 8/9, Rocky Linux 8/9, RHEL 8/9)** destekleyecek şekilde OS tespiti, paket yöneticisi (`apt` / `dnf`), dinamik PHP-FPM sürüm çözümü, systemd servisleri ve kurulum/adapter katmanı uyumlu tutulur.
+4. **Merkezi Tasarım Sistemi, Tak-Çıkar (Swappable) Ortak Bileşenler ve Shadcn + Mikro-Efektli UI/UX Kuralı:**
+   - Arayüzde **Shadcn UI** tasarım dili (`zinc/slate` yüksek kontrastlı yüzeyler, `1px` keskin kenarlıklar, temiz tipografi) temel alınır; ufak mikro-animasyonlar, yumuşak geçişler, parıltı/spotlight kenarlık efektleri ve canlı durum rozetleriyle modern, cafcaflı ama gözü yormayan, sade ve kullanımı kolay bir UX sunulur.
+   - **Tasarım tek bir merkezi sistemden (`apps/web/src/workspace/design-system/` ve `PanelKit.jsx`) gelmelidir.** Ekranlarda dağınık tema stilleri veya üst üste binen çoklu CSS katmanları kullanılmaz; tüm sayfalar ortak merkezi bileşenleri kullanır. İleride tasarım kütüphanesi veya tema değiştirilmek istendiğinde, sayfa ve iş mantığı kodlarına dokunmadan yalnızca bu merkezi bileşen/tema katmanı değiştirilerek hiçbir şeyi bozmadan geçiş yapılabilmelidir.
+5. **Plesk Eşdeğeri Docker, Stack ve Inner/Outer Port Proxy Kuralı:**
+   - Docker yönetimi; **Docker Hub'dan imaj arama ve tek container çalıştırma**, **Compose/Stack olarak çalıştırma (editöre yapıştırma, site/subdomain dizininden dosya seçme veya `.yml` yükleme; mevcut YAML düzenlenebilir şekilde görünür)** ve **Inner Port (Container) ↔ Outer Port (Host) eşlemesiyle Domain/Subdomain veya alt URL yoluna (`/api`) Proxy olarak bağlama** özelliklerini kapsar.
 
 ### 11 Ekim 2026 — Test/geliştirme sunucusunda yedek kuralı
 
@@ -26,7 +46,7 @@
 - Website/Domain/Application kimlikleri birbirinin yerine kullanılamaz. Mevcut veri/Unix kullanıcı/sertifika ilişkileri açık migration ve geri dönüş olmadan yeniden atanmaz. Müşteri veya reseller altındaki siteler aynı Unix kullanıcısına birleştirilmez.
 - Parola/token/key/cookie/MFA/private config repoya, genel loga veya ekran görüntüsüne yazılmaz. Mevcut test hostundaki isteğe bağlı MFA kararı devralınan dosyada aynen geçerlidir.
 - Uygun mevcut adapter, FilesPanel, ttyd, phpMyAdmin, Roundcube, backup/DNS/mail/runtime motorları yeniden yazılmaz. Fallback ancak gerçek replacement kabulünden sonra kaldırılır. `chmod -R 777`, genel sahiplik değişimi veya güvenlik kapatma çözüm değildir.
-- Çalıştırılmamış test, deployment veya canlı sonuç yapılmış diye yazılmaz. Bu turun ek gerçek ortam işleri `docs/ux/development-todo.md`; kök `todo.md` ve mevcut T-PL/T-SITE-WORKSPACE kapıları da geçerlidir.
+- Çalıştırılmamış test, deployment veya canlı sonuç yapılmış diye yazılmaz. Gerçek ortam işleri kök `todo.md` içinde; T-PL/T-PARITY ve T-SITE-WORKSPACE kapıları geçerlidir.
 
 ## Uygulama sırası
 

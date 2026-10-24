@@ -9,9 +9,13 @@ import {
   mountWebsiteBackupRoutes,
 } from '../src/website-backup-http.js';
 import { WebsiteBackupSetError } from '../src/website-backup-set.js';
+import { createWebsiteBackupOperationService } from '../src/website-backup-operation-service.js';
+import { createWebsiteBackupOperationRegistry } from '../src/website-backup-operation-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
 
 const ownerAuth = Object.freeze({
-  user: { id: 'owner-1', role: 'owner' },
+  id: '11111111-1111-4111-8111-111111111111',
+  user: { id: '22222222-2222-4222-8222-222222222222', role: 'owner' },
   access: { mode: 'management', permissions: ['*'] },
   security: { managementAllowed: true },
 });
@@ -116,6 +120,10 @@ async function fixture(t) {
     websiteBackupSetProvider,
     websiteBackupService,
     localServerId: serverId,
+    websiteBackupOperationService: createWebsiteBackupOperationService({ registry: createWebsiteBackupOperationRegistry(), websiteBackupService,
+      jobRegistry: createJobRegistry(), websiteRegistry: { getWebsite: async id => ({ id, serverId }) },
+      resticRepositoryRegistry: { getRepository: async id => ({ id, serverId }) }, authorizeActor: async actor => actor,
+      siteMutationLock: { withSiteLock: async (_identity, action) => action() } }),
   });
 
   app.use((error, req, res, next) => {
@@ -222,7 +230,7 @@ test('POST /api/websites/:websiteId/backup requires owner role', async (t) => {
   assert.equal(body.error.code, 'forbidden');
 });
 
-test('POST /api/websites/:websiteId/backup returns 201 on success', async (t) => {
+test('POST /api/websites/:websiteId/backup returns 202 with a persisted queued operation', async (t) => {
   const { baseUrl, websiteId } = await fixture(t);
 
   const res = await fetch(`${baseUrl}/api/websites/${websiteId}/backup`, {
@@ -234,10 +242,11 @@ test('POST /api/websites/:websiteId/backup returns 201 on success', async (t) =>
       confirmation: `backup:${websiteId}:91a2b3c4-d5e6-4f7a-8b9c-0d1e2f3a4b5c:${'a'.repeat(64)}`,
     }),
   });
-  assert.equal(res.status, 201);
+  assert.equal(res.status, 202);
   const body = await res.json();
-  assert.equal(body.data.status, 'succeeded');
-  assert.equal(body.data.snapshot.snapshotId, 'snap-abc123');
+  assert.equal(body.data.status, 'queued');
+  assert.equal(body.data.kind, 'backup');
+  assert.ok(body.data.jobId);
 });
 
 test('POST /api/websites/:websiteId/backup returns 409 on stale digest', async (t) => {

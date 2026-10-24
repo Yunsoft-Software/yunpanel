@@ -8,11 +8,12 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   if (path === '/dashboard') enable('domains', 'applications', 'certificates', 'servers', 'jobs');
   else if (path === '/' || path === '/websites') enable('domains', 'websites', 'applications', 'certificates', 'servers');
   else if (path === '/files') enable('domains', 'websites');
+  else if (['/ssl', '/cron', '/scheduled-tasks', '/backup', '/backups', '/logs', '/php', '/wordpress', '/access'].includes(path)) enable('domains', 'websites');
   else if (path === '/websites/new') enable('domains', 'websites', 'applications', 'servers');
   else if (/^\/websites\/[^/]+(?:\/[^/]+)?$/.test(path)) {
     enable('domains', 'websites', 'applications', 'certificates', 'servers');
     const tab = path.split('/')[3] || 'overview';
-    if (['overview', 'node', 'deploy', 'domains', 'ssl', 'logs', 'resources', 'databases', 'mail', 'settings', 'cron', 'backup'].includes(tab)) enable('jobs');
+    if (['overview', 'node', 'php', 'wordpress', 'deploy', 'domains', 'ssl', 'logs', 'resources', 'databases', 'mail', 'hosting', 'settings', 'cron', 'backup'].includes(tab)) enable('jobs');
   } else if (path === '/applications') enable('applications', 'servers', 'jobs');
   else if (path === '/applications/new') enable('applications', 'servers');
   else if (path === '/domains') enable('domains', 'certificates', 'servers');

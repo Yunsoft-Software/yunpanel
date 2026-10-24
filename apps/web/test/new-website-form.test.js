@@ -185,3 +185,12 @@ test('shared-site excludes ambiguous legacy and unmanaged Website routing', () =
     /uygun değil/,
   );
 });
+
+test('self-managed PHP and existing-customer PHP sites require no Git or extra login credentials', () => {
+  for (const ownerMode of ['owner', 'customer']) {
+    const value = siteCreateInputFromForm({ form: form({ sourceMode: 'new_php', ownerMode, customerId: ownerMode === 'customer' ? 'customer-account' : '' }),
+      operationId, serverId, domain: { primaryDomain: 'new.example.test', parentDomainId: null } });
+    assert.deepEqual(value.source, { kind: 'new_php' }); assert.equal(value.siteAdmin, undefined);
+  }
+  assert.throws(() => siteCreateInputFromForm({ form: form({ sourceMode: 'new_php', ownerMode: 'customer', customerId: '' }), operationId, serverId, domain: { primaryDomain: 'new.example.test', parentDomainId: null } }), /müşteriyi/);
+});

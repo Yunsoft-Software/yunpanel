@@ -9,8 +9,10 @@ import {
   elFinderFpmTemplatePolicy,
   previewElFinderFpmPool,
   renderElFinderFpmPool,
+  resolveElFinderFpmRuntime,
 } from '@yunpanel/config-templates';
 import { createApplicationIdentity } from './application-identity.js';
+import { resolvePhpFpmBinaryPath, resolvePhpFpmPackageName } from './os-platform.js';
 import { createWebsiteIdentityPathManager } from './website-identity-path-manager.js';
 
 const execFileAsync = promisify(execFile);
@@ -50,9 +52,9 @@ function normalizeOperationId(value) {
   return value.toLowerCase();
 }
 
-function normalizeIntent(value) {
+function normalizeIntent(value, defaultRuntimeOptions = {}) {
   if (!value || typeof value !== 'object' || Array.isArray(value)
-    || Object.keys(value).some((key) => !['websiteId', 'applicationId', 'unixUser'].includes(key))
+    || Object.keys(value).some((key) => !['websiteId', 'applicationId', 'unixUser', 'phpVersion', 'osPlatform'].includes(key))
     || typeof value.websiteId !== 'string' || !UUID_PATTERN.test(value.websiteId)) {
     throw new ElFinderFpmSiteManagerError(
       'elfinder_fpm_site_intent_invalid',
@@ -75,6 +77,13 @@ function normalizeIntent(value) {
     );
   }
 
+  const effectivePhpVersion = value.phpVersion ?? defaultRuntimeOptions.phpVersion;
+  const effectiveOsPlatform = value.osPlatform ?? defaultRuntimeOptions.osPlatform;
+  const runtime = resolveElFinderFpmRuntime({
+    phpVersion: effectivePhpVersion,
+    osPlatform: effectiveOsPlatform,
+  });
+
   const templateInput = Object.freeze({
     websiteId: value.websiteId.toLowerCase(),
     applicationId: identity.applicationId,
@@ -82,6 +91,8 @@ function normalizeIntent(value) {
     unixGroup: identity.unixUser,
     homeDirectory: identity.paths.workspace.homeDirectory,
     temporaryDirectory: identity.paths.workspace.temporaryDirectory,
+    ...(effectivePhpVersion === undefined ? {} : { phpVersion: effectivePhpVersion }),
+    ...(effectiveOsPlatform === undefined ? {} : { osPlatform: effectiveOsPlatform }),
   });
   let preview;
   try { preview = previewElFinderFpmPool(templateInput); }
@@ -96,6 +107,7 @@ function normalizeIntent(value) {
     applicationId: identity.applicationId,
     unixUser: identity.unixUser,
     identity,
+    runtime,
     templateInput,
     preview,
   });
@@ -154,6 +166,8 @@ function missingPackage(error) {
 export function createElFinderFpmSiteManager({
   receiptRoot = RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
+  phpVersion,
+  osPlatform,
   run = (file, args, options = {}) => execFileAsync(file, args, {
     encoding: 'utf8',
     timeout: options.timeout ?? 60_000,
@@ -177,6 +191,9 @@ export function createElFinderFpmSiteManager({
       'elFinder FPM manager dependencies are invalid',
     );
   }
+
+  const defaultRuntimeOptions = Object.freeze({ phpVersion, osPlatform });
+  const defaultRuntime = resolveElFinderFpmRuntime(defaultRuntimeOptions);
 
   function receiptPath(operationId) {
     return path.posix.join(receiptRoot, `${operationId}.json`);
@@ -242,9 +259,18 @@ export function createElFinderFpmSiteManager({
     return normalizeReceipt(receipt, { operationId, spec });
   }
 
-  async function inspectPackage() {
+  function packageNameFor(runtime = defaultRuntime) {
+    return resolvePhpFpmPackageName(runtime.phpVersion, { family: runtime.family });
+  }
+
+  function binaryPathFor(runtime = defaultRuntime) {
+    return resolvePhpFpmBinaryPath(runtime.phpVersion, { family: runtime.family });
+  }
+
+  async function inspectPackage(runtime = defaultRuntime) {
+    const pkg = packageNameFor(runtime);
     try {
-      const result = await run(DPKG_QUERY_PATH, ['-W', '-f=${Status}\t${Version}', PACKAGE_NAME], {
+      const result = await run(DPKG_QUERY_PATH, ['-W', '-f=${Status}\t${Version}', pkg], {
         timeout: 10_000,
       });
       const output = String(result?.stdout ?? '').trim();
@@ -259,11 +285,12 @@ export function createElFinderFpmSiteManager({
     }
   }
 
-  async function ensurePackage() {
-    const before = await inspectPackage();
+  async function ensurePackage(runtime = defaultRuntime) {
+    const before = await inspectPackage(runtime);
     if (before.installed) return before;
+    const pkg = packageNameFor(runtime);
     try {
-      await run(APT_GET_PATH, ['install', '--yes', '--no-install-recommends', PACKAGE_NAME], {
+      await run(APT_GET_PATH, ['install', '--yes', '--no-install-recommends', pkg], {
         timeout: 10 * 60_000,
         env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
       });
@@ -273,7 +300,7 @@ export function createElFinderFpmSiteManager({
         'elFinder PHP-FPM package could not be installed',
       );
     }
-    const after = await inspectPackage();
+    const after = await inspectPackage(runtime);
     if (!after.installed) {
       throw new ElFinderFpmSiteManagerError(
         'elfinder_fpm_package_install_unverified',
@@ -283,8 +310,8 @@ export function createElFinderFpmSiteManager({
     return after;
   }
 
-  async function configTest() {
-    try { await run(PHP_FPM_BINARY, ['--test'], { timeout: 30_000 }); }
+  async function configTest(runtime = defaultRuntime) {
+    try { await run(binaryPathFor(runtime), ['--test'], { timeout: 30_000 }); }
     catch {
       throw new ElFinderFpmSiteManagerError(
         'elfinder_fpm_config_test_failed',
@@ -293,21 +320,21 @@ export function createElFinderFpmSiteManager({
     }
   }
 
-  async function serviceActive() {
+  async function serviceActive(runtime = defaultRuntime) {
     try {
-      await run(SYSTEMCTL_PATH, ['is-active', '--quiet', elFinderFpmTemplatePolicy.serviceUnit], {
+      await run(SYSTEMCTL_PATH, ['is-active', '--quiet', runtime.serviceUnit], {
         timeout: 10_000,
       });
       return true;
     } catch { return false; }
   }
 
-  async function activateService() {
+  async function activateService(runtime = defaultRuntime) {
     try {
-      await run(SYSTEMCTL_PATH, ['enable', '--now', elFinderFpmTemplatePolicy.serviceUnit], {
+      await run(SYSTEMCTL_PATH, ['enable', '--now', runtime.serviceUnit], {
         timeout: 60_000,
       });
-      await run(SYSTEMCTL_PATH, ['reload', elFinderFpmTemplatePolicy.serviceUnit], {
+      await run(SYSTEMCTL_PATH, ['reload', runtime.serviceUnit], {
         timeout: 30_000,
       });
     } catch {
@@ -318,10 +345,10 @@ export function createElFinderFpmSiteManager({
     }
   }
 
-  async function reloadServiceIfActive() {
-    if (!(await serviceActive())) return;
+  async function reloadServiceIfActive(runtime = defaultRuntime) {
+    if (!(await serviceActive(runtime))) return;
     try {
-      await run(SYSTEMCTL_PATH, ['reload', elFinderFpmTemplatePolicy.serviceUnit], {
+      await run(SYSTEMCTL_PATH, ['reload', runtime.serviceUnit], {
         timeout: 30_000,
       });
     } catch {
@@ -359,7 +386,7 @@ export function createElFinderFpmSiteManager({
   }
 
   async function inspect(rawIntent) {
-    const spec = normalizeIntent(rawIntent);
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const identity = await inspectIdentity(spec);
     if (!identity.satisfied) {
       return Object.freeze({
@@ -372,7 +399,7 @@ export function createElFinderFpmSiteManager({
       });
     }
 
-    const packageState = await inspectPackage();
+    const packageState = await inspectPackage(spec.runtime);
     if (!packageState.installed) {
       return Object.freeze({
         satisfied: false,
@@ -383,7 +410,7 @@ export function createElFinderFpmSiteManager({
       });
     }
 
-    const configPath = elFinderFpmPoolPath(spec.unixUser);
+    const configPath = spec.preview.artifact.path;
     let configInfo;
     let config;
     try {
@@ -422,7 +449,7 @@ export function createElFinderFpmSiteManager({
       );
     }
 
-    try { await configTest(); }
+    try { await configTest(spec.runtime); }
     catch {
       return Object.freeze({
         satisfied: false,
@@ -432,7 +459,7 @@ export function createElFinderFpmSiteManager({
         applicationId: spec.applicationId,
       });
     }
-    if (!(await serviceActive())) {
+    if (!(await serviceActive(spec.runtime))) {
       return Object.freeze({
         satisfied: false,
         reason: 'elfinder_fpm_service_inactive',
@@ -442,7 +469,7 @@ export function createElFinderFpmSiteManager({
       });
     }
 
-    const socketPath = elFinderFpmSocketPath(spec.unixUser);
+    const socketPath = spec.preview.socketPath;
     let socketInfo;
     try { socketInfo = await lstatFn(socketPath); }
     catch (error) {
@@ -473,7 +500,7 @@ export function createElFinderFpmSiteManager({
       adapter: 'elfinder-fpm',
       websiteId: spec.websiteId,
       applicationId: spec.applicationId,
-      phpVersion: elFinderFpmTemplatePolicy.phpVersion,
+      phpVersion: spec.runtime.phpVersion,
       packageVersion: packageState.version,
       unixUser: spec.unixUser,
       unixUid: identity.uid,
@@ -482,25 +509,25 @@ export function createElFinderFpmSiteManager({
       configPath,
       configSha256: spec.preview.sha256,
       socketPath,
-      serviceUnit: elFinderFpmTemplatePolicy.serviceUnit,
+      serviceUnit: spec.runtime.serviceUnit,
       connectorPath: elFinderFpmTemplatePolicy.connectorPath,
     });
   }
 
   async function restoreConfig(spec, receipt) {
     if (!receipt.mutated) return;
-    const configPath = elFinderFpmPoolPath(spec.unixUser);
+    const configPath = spec.preview.artifact.path;
     if (receipt.previousConfig === null) {
       await rmFn(configPath, { force: true });
     } else {
       await atomicWrite(configPath, receipt.previousConfig, elFinderFpmTemplatePolicy.poolMode);
     }
-    await configTest();
-    await reloadServiceIfActive();
+    await configTest(spec.runtime);
+    await reloadServiceIfActive(spec.runtime);
   }
 
   async function apply(rawIntent, { operationId: rawOperationId } = {}) {
-    const spec = normalizeIntent(rawIntent);
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const operationId = normalizeOperationId(rawOperationId);
     const identity = await inspectIdentity(spec);
     if (!identity.satisfied) {
@@ -510,9 +537,9 @@ export function createElFinderFpmSiteManager({
       );
     }
 
-    await ensurePackage();
-    await mkdirFn(elFinderFpmTemplatePolicy.poolDirectory, { recursive: true, mode: 0o755 });
-    const configPath = elFinderFpmPoolPath(spec.unixUser);
+    await ensurePackage(spec.runtime);
+    await mkdirFn(spec.runtime.poolDirectory, { recursive: true, mode: 0o755 });
+    const configPath = spec.preview.artifact.path;
     const desired = renderElFinderFpmPool(spec.templateInput);
     let receipt = await loadReceipt(operationId, spec);
     const current = await readOptional(configPath);
@@ -557,8 +584,8 @@ export function createElFinderFpmSiteManager({
     }
 
     try {
-      await configTest();
-      await activateService();
+      await configTest(spec.runtime);
+      await activateService(spec.runtime);
       const verified = await inspect(rawIntent);
       if (!verified.satisfied) {
         throw new ElFinderFpmSiteManagerError(
@@ -581,7 +608,7 @@ export function createElFinderFpmSiteManager({
   }
 
   async function inspectCompensation(rawIntent, { operationId: rawOperationId } = {}) {
-    const spec = normalizeIntent(rawIntent);
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const operationId = normalizeOperationId(rawOperationId);
     const receipt = await loadReceipt(operationId, spec);
     if (!receipt || !receipt.mutated) {
@@ -598,7 +625,7 @@ export function createElFinderFpmSiteManager({
         preservedExisting: false,
       });
     }
-    const current = await readOptional(elFinderFpmPoolPath(spec.unixUser));
+    const current = await readOptional(spec.preview.artifact.path);
     if (receipt.previousConfig === null && current === null) {
       return Object.freeze({
         satisfied: true,
@@ -624,7 +651,7 @@ export function createElFinderFpmSiteManager({
   }
 
   async function compensate(rawIntent, { operationId: rawOperationId } = {}) {
-    const spec = normalizeIntent(rawIntent);
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const operationId = normalizeOperationId(rawOperationId);
     let receipt = await loadReceipt(operationId, spec);
     if (!receipt || !receipt.mutated) {
@@ -663,8 +690,8 @@ export function createElFinderFpmSiteManager({
   }
 
   async function inspectRetirement(rawIntent) {
-    const spec = normalizeIntent(rawIntent);
-    const paths = [elFinderFpmPoolPath(spec.unixUser), elFinderFpmSocketPath(spec.unixUser)];
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
+    const paths = [spec.preview.artifact.path, spec.preview.socketPath];
     for (const target of paths) {
       try {
         await lstatFn(target);
@@ -680,17 +707,17 @@ export function createElFinderFpmSiteManager({
   }
 
   async function retire(rawIntent, options = {}) {
-    const spec = normalizeIntent(rawIntent);
+    const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     // Compensation verifies the original operation receipt and current hash;
     // a retained pre-existing pool must never be mistaken for retired state.
     await compensate(rawIntent, options);
-    if (await readOptional(elFinderFpmPoolPath(spec.unixUser)) !== null) {
+    if (await readOptional(spec.preview.artifact.path) !== null) {
       throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_blocked',
         'The Website file manager pool is retained or changed and cannot be retired');
     }
     // Also reconcile an interruption after unlink but before FPM reload.
-    await configTest();
-    await reloadServiceIfActive();
+    await configTest(spec.runtime);
+    await reloadServiceIfActive(spec.runtime);
     let result = await inspectRetirement(rawIntent);
     for (let attempt = 0; !result.satisfied && attempt < 40; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 100));

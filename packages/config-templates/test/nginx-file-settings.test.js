@@ -18,3 +18,16 @@ for (const [kind, render] of [['static', renderStaticSiteConfig], ['php', render
     assert.doesNotMatch(rendered, /error_page \d+ =200|return 200/);
   });
 }
+
+for (const [kind, render] of [['static', renderStaticSiteConfig], ['php', renderPhpSiteConfig]]) {
+  test(kind + ' serves a contained child and redirects existing names to www without changing the Domain identity', () => {
+    const target = kind === 'php' ? { ...base, socketPath: '/run/php/yunpanel-yunapp-123456abcdef.sock' } : base;
+    const config = render({ ...target, aliases: ['www.owned.example.com'], canonicalRedirect: true,
+      nginxSettings: { documentRoot: 'app/public', preferredDomain: 'www.owned.example.com' } });
+    assert.match(config, /root \/var\/www\/yunpanel\/apps\/owned\/current\/app\/public;/);
+    assert.match(config, /disable_symlinks on from=\/var\/www\/yunpanel\/apps\/owned\/current;/);
+    assert.match(config, /return 301 http:\/\/www.owned.example.com\$request_uri;/);
+    assert.throws(() => render({ ...target, nginxSettings: { documentRoot: '../foreign' } }), { code: 'invalid_nginx_document_root' });
+    assert.throws(() => render({ ...target, nginxSettings: { preferredDomain: 'foreign.example.com' } }), { code: 'nginx_preferred_domain_unbound' });
+  });
+}

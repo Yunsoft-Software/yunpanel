@@ -38,6 +38,11 @@ export function createWebsiteBackupService({
   websiteBackupSetProvider,
   localServerId = null,
   jobRegistry = null,
+  databaseBackupAdapter = null,
+  mailBackupAdapter = null,
+  environmentBackupAdapter = null,
+  dnsBackupAdapter = null,
+  hostingBackupAdapter = null,
   runCommand = async (cmd, args) => execFileAsync(cmd, args),
   mkdirFn = mkdir,
   writeFileFn = writeFile,
@@ -58,7 +63,7 @@ export function createWebsiteBackupService({
     throw new WebsiteBackupError('website_backup_dependencies_invalid', 'Website backup set provider is required', 503);
   }
 
-  async function assertIdle(websiteId, serverId) {
+  async function assertIdle(websiteId, serverId, executionJobId = null) {
     if (!jobRegistry || typeof jobRegistry.listJobs !== 'function') return;
     let jobs;
     try {
@@ -70,7 +75,7 @@ export function createWebsiteBackupService({
       throw new WebsiteBackupError('website_job_state_unavailable', 'Website job state is invalid', 503);
     }
     const hasConflict = jobs.some((job) =>
-      ACTIVE_STATUSES.has(job.status) && (
+      job.id !== executionJobId && ACTIVE_STATUSES.has(job.status) && (
         (job.resourceType === 'website' && job.resourceId === websiteId)
         || job.payload?.websiteId === websiteId
       )
@@ -105,9 +110,9 @@ export function createWebsiteBackupService({
     return { repository, password };
   }
 
-  async function previewBackup({ websiteId, repositoryId } = {}) {
+  async function previewBackup({ websiteId, repositoryId, executionJobId = null } = {}) {
     const website = await resolveTargetWebsite(websiteId);
-    await assertIdle(website.id, website.serverId);
+    await assertIdle(website.id, website.serverId, executionJobId);
     const { repository } = await resolveTargetRepository(repositoryId, website.serverId);
 
     const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({
@@ -120,7 +125,7 @@ export function createWebsiteBackupService({
     return Object.freeze({
       websiteId: website.id,
       websiteName: website.name,
-      primaryDomain: website.primaryDomain,
+      primaryDomain: backupSet.website?.primaryDomain ?? null,
       repositoryId: repository.id,
       repositoryName: repository.name,
       backupSetDigest: backupSet.digest,
@@ -139,9 +144,11 @@ export function createWebsiteBackupService({
     expectedPreviewDigest = null,
     confirmation = null,
     tags = [],
+    executionJobId = null,
+    operationId = null,
   } = {}) {
     const website = await resolveTargetWebsite(websiteId);
-    await assertIdle(website.id, website.serverId);
+    await assertIdle(website.id, website.serverId, executionJobId);
     const { repository, password } = await resolveTargetRepository(repositoryId, website.serverId);
 
     const backupSet = await websiteBackupSetProvider.getWebsiteBackupSet({
@@ -165,12 +172,20 @@ export function createWebsiteBackupService({
       );
     }
 
+    const userTags = Array.isArray(tags) ? tags.filter((tag) => typeof tag === 'string' && tag.trim().length > 0) : [];
+    if (userTags.some((tag) => /^(website|server|domain|runtime|operation|backup-set):/i.test(tag))) throw new WebsiteBackupError('backup_tag_reserved', 'Backup ownership tags cannot be supplied by the caller', 400);
+    if (operationId != null && !/^[a-f0-9-]{36}(?::pre)?$/.test(operationId)) throw new WebsiteBackupError('backup_operation_invalid', 'Backup operation identity is invalid', 400);
+    const combinedTags = [...new Set([...backupSet.tags, ...userTags,
+      ...(operationId ? [`operation:${operationId}`, `backup-set:${backupSet.digest}`] : [])])].sort();
+
     let stagedCreated = false;
     let composePaused = false;
 
     try {
       // 1. Pre-hooks: staging directory
       if (backupSet.stagedRoot) {
+        // A crashed previous dump must never be reused as today's database backup.
+        await rmFn(backupSet.stagedRoot, { recursive: true, force: true });
         await mkdirFn(backupSet.stagedRoot, { recursive: true, mode: 0o700 });
         stagedCreated = true;
       }
@@ -178,6 +193,11 @@ export function createWebsiteBackupService({
       // 2. Pre-hooks: Database vendor dump
       if (Array.isArray(backupSet.databases)) {
         for (const db of backupSet.databases) {
+          if (db.dumpHook?.stagedBackupDirectory) {
+            if (!databaseBackupAdapter) throw new WebsiteBackupError('backup_database_adapter_unavailable', 'Native database backup adapter is unavailable', 503);
+            await databaseBackupAdapter.backup(backupSet, db);
+            continue;
+          }
           if (db.dumpHook?.program && db.dumpHook?.stagedDumpPath) {
             await mkdirFn(path.dirname(db.dumpHook.stagedDumpPath), { recursive: true, mode: 0o700 });
             try {
@@ -195,26 +215,30 @@ export function createWebsiteBackupService({
         }
       }
 
+      for (const mail of backupSet.mail ?? []) {
+        if (mail.managementMode !== 'local') continue;
+        if (!mailBackupAdapter) throw new WebsiteBackupError('backup_mail_adapter_unavailable', 'Native mail backup adapter is unavailable', 503);
+        await mailBackupAdapter.capture(backupSet, mail);
+      }
+
       // 3. Pre-hooks: Environment metadata
       if (backupSet.env?.stagedMetadataPath) {
-        await mkdirFn(path.dirname(backupSet.env.stagedMetadataPath), { recursive: true, mode: 0o700 });
-        await writeFileFn(
-          backupSet.env.stagedMetadataPath,
-          JSON.stringify(backupSet.env, null, 2),
-          { mode: 0o600 },
-        );
+        if (!environmentBackupAdapter) throw new WebsiteBackupError('backup_environment_adapter_unavailable', 'Ortam değişkenleri yedeği hazırlanamıyor', 503);
+        await environmentBackupAdapter.capture(backupSet);
       }
 
       // 4. Pre-hooks: Nginx vhost configs
       if (Array.isArray(backupSet.nginx)) {
         for (const n of backupSet.nginx) {
           if (n.stagedConfigPath && n.configPath) {
+            if (hostingBackupAdapter) { await hostingBackupAdapter.capture(backupSet, n); continue; }
             await mkdirFn(path.dirname(n.stagedConfigPath), { recursive: true, mode: 0o700 });
             try {
               const cfg = await readFileFn(n.configPath, 'utf8');
+              if (typeof cfg !== 'string' || !cfg.trim()) throw new Error('backup_nginx_config_empty');
               await writeFileFn(n.stagedConfigPath, cfg, { mode: 0o640 });
             } catch {
-              // file might not exist yet; skip
+              throw new WebsiteBackupError('backup_nginx_config_unavailable', 'Site Nginx yapılandırması yedeklenemedi; yedek tamamlandı sayılmadı', 503);
             }
           }
         }
@@ -224,8 +248,10 @@ export function createWebsiteBackupService({
       if (Array.isArray(backupSet.dns)) {
         for (const d of backupSet.dns) {
           if (d.stagedZonePath) {
+            if (dnsBackupAdapter) { await dnsBackupAdapter.capture(backupSet, d); continue; }
             await mkdirFn(path.dirname(d.stagedZonePath), { recursive: true, mode: 0o700 });
-            await writeFileFn(d.stagedZonePath, JSON.stringify(d, null, 2), { mode: 0o640 });
+            await writeFileFn(d.stagedZonePath, JSON.stringify({ version: 1, kind: 'external-reference', captured: false,
+              reference: d, reason: 'authoritative_backup_adapter_unavailable' }, null, 2), { mode: 0o600 });
           }
         }
       }
@@ -245,9 +271,6 @@ export function createWebsiteBackupService({
       }
 
       // 7. Execute restic snapshot
-      const userTags = Array.isArray(tags) ? tags.filter((t) => typeof t === 'string' && t.trim().length > 0) : [];
-      const combinedTags = [...new Set([...backupSet.tags, ...userTags])].sort();
-
       const snapshotReceipt = await resticManager.createSnapshot({
         repository: repository.target,
         password,
@@ -255,6 +278,13 @@ export function createWebsiteBackupService({
         excludes: backupSet.excludePatterns,
         tags: combinedTags,
       });
+      if ((backupSet.mail ?? []).some(mail => mail.managementMode === 'local')) {
+        if (typeof resticManager.listSnapshotFiles !== 'function' || typeof mailBackupAdapter?.verifySnapshot !== 'function') {
+          throw new WebsiteBackupError('backup_mail_snapshot_verification_unavailable', 'Posta snapshot içeriği doğrulanamadı', 503);
+        }
+        const nodes = await resticManager.listSnapshotFiles({ repository: repository.target, password, snapshotId: snapshotReceipt.snapshotId });
+        await mailBackupAdapter.verifySnapshot(backupSet, nodes);
+      }
 
       return Object.freeze({
         status: 'succeeded',

@@ -7,6 +7,8 @@ import {
   jobAttemptCount,
   jobHealthIndicator,
   jobLifecycle,
+  jobOutcome,
+  jobOperationLabel,
   jobResourceTarget,
   jobStageProgress,
   jobSupportsDeployLogs,
@@ -76,6 +78,7 @@ export function JobObservation({ id, close, update, refresh, onRetry, onCancel }
     }
   }, [id, job, cancelling, onCancel, update, refresh]);
   const lifecycle = jobLifecycle(job);
+  const outcome = jobOutcome(job);
   const target = jobResourceTarget(job, { domains: domains.items, websites: websites.items });
   const metadata = safeJobResultMetadata(job);
   const stage = jobStageProgress(job);
@@ -84,7 +87,7 @@ export function JobObservation({ id, close, update, refresh, onRetry, onCancel }
     {!job && !error && <div className="ws-loading" role="status"><span className="ws-spinner" />İşlem kaydı doğrulanıyor…</div>}
     <ErrorNotice error={error ?? (job?.status === 'failed' ? job.error?.message ?? job.error?.code ?? 'İşlem başarısız.' : null)} />
     <ErrorNotice error={cancelError} />
-    {job && <><div className="ws-job-status"><Badge state={job.status} /><h3>{job.type ?? job.operation}</h3><p>{jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : ['partial', 'partial_success'].includes(job.status) ? 'İşlem kısmen tamamlandı. Bazı adımlar tamamlandı; kalanlar için müdahale veya doğrulama gerekebilir.' : 'İşlem sonucunu aşağıdan inceleyin.'}</p></div>
+    {job && <><div className="ws-job-status"><Badge state={outcome.state}>{outcome.label}</Badge><h3>{jobOperationLabel(job)}</h3><p>{outcome.detail ?? (jobActive(job) ? 'İstek kabul edildi; henüz tamamlanmadı. Bu pencereyi kapatsanız da iş sunucuda devam eder.' : job.status === 'succeeded' ? 'Sunucu işlemi başarıyla tamamladı.' : ['partial', 'partial_success'].includes(job.status) ? 'İşlem kısmen tamamlandı. Bazı adımlar tamamlandı; kalanlar için müdahale veya doğrulama gerekebilir.' : 'İşlem sonucunu aşağıdan inceleyin.')}</p></div>
       <KeyValues items={[
         ['İş kimliği', job.id],
         ['Kaynak', target?.href ? <Link key="resource" to={target.href} onClick={close}>{target.label}</Link> : target?.label ?? job.resourceType ?? '—'],

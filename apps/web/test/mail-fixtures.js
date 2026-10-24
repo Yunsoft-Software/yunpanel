@@ -87,7 +87,7 @@ export const mockServerDiagnostics = {
 };
 
 export function createMockFetchRouter({ customHandler } = {}) {
-  const apiCalls = [];
+  const apiCalls = []; let savedMailApply = null;
   const fetchMock = async (url, options = {}) => {
     const u = String(url);
     const method = options.method || 'GET';
@@ -99,6 +99,13 @@ export function createMockFetchRouter({ customHandler } = {}) {
       if (customResponse !== undefined) return customResponse;
     }
 
+    // Native-shaped evidence for the component lane; never counted as host acceptance.
+    if (u.endsWith('/mail-domains/local-1/config-preview')) return new Response(JSON.stringify({data:{readyToApply:true,previewDigest:'a'.repeat(64),configuration:{sha256:'b'.repeat(64)},confirmation:'apply-mail-configuration:local-1:'+ 'a'.repeat(64)}}),{status:200});
+    if (u.endsWith('/mail-domains/local-1/config-apply')) {
+      savedMailApply={id:'fixture-native-mail-apply',status:'succeeded',operation:'mail.config.apply',resourceType:'mail_domain',resourceId:'local-1',result:{version:3,applied:true,sideEffects:true,mailDomainId:'local-1',previousRevision:2,previousStatus:'enabled',desiredStatus:body.status,previewDigest:body.previewDigest,configurationSha256:body.configurationSha256}};
+      return new Response(JSON.stringify({data:savedMailApply}),{status:202});
+    }
+    if (u.endsWith('/jobs/fixture-native-mail-apply')) return new Response(JSON.stringify({data:savedMailApply}),{status:200});
     if (u.includes('/mail-domains/local-1/webmail')) {
       return new Response(JSON.stringify({ data: { mapping: mockWebmailMapping, job: null } }), { status: 200, headers: { 'content-type': 'application/json' } });
     }

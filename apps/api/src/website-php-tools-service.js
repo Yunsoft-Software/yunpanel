@@ -1,7 +1,8 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { createPhpCliToolManager, PhpCliToolError, createPhpFpmSiteManager } from '@yunpanel/host-runtime';
+import { createPhpCliToolManager, PhpCliToolError } from '@yunpanel/host-runtime';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import {
   phpFpmTemplatePolicy,
   phpFpmPoolPath,
@@ -50,7 +51,7 @@ function inventory(result) {
 
 export function createWebsitePhpToolsService({
   websiteRegistry, applicationRegistry, phpCliToolManager = createPhpCliToolManager(),
-  phpFpmSiteManager = null, lstatFn = lstat,
+  phpFpmSiteManager = null, withApplicationLock = null, lstatFn = lstat,
 } = {}) {
   if (typeof websiteRegistry?.getWebsite !== 'function' || typeof applicationRegistry?.getApplication !== 'function') {
     throw new TypeError('Website PHP tools service dependencies are invalid');
@@ -106,23 +107,29 @@ export function createWebsitePhpToolsService({
     await revalidate(context);
     return result;
   }
-  async function getWpCliStatus(websiteId) {
+  function wpDirectory(context, relativeDirectory) {
+    if (relativeDirectory == null) return context.cwd;
+    if (typeof relativeDirectory !== 'string' || relativeDirectory.length > 192 || !/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(relativeDirectory)) throw contextConflict();
+    return path.posix.join(context.cwd, relativeDirectory);
+  }
+  async function getWpCliStatus(websiteId, { relativeDirectory = null } = {}) {
     const context = await resolveWebsitePhpContext(websiteId);
     const tool = await inspectTool('inspectWpCli');
+    const cwd = wpDirectory(context, relativeDirectory);
     const checks = { installation: 'not_checked', coreVersion: 'not_checked', plugins: 'not_checked', themes: 'not_checked' };
     let installed = null, coreVersion = null, plugins = [], themes = [];
     if (tool.available === true) {
-      const check = await inspectCommand(context, 'runWpCli', { command: 'core', args: ['is-installed'], timeout: 10_000 });
+      const check = await inspectCommand(context, 'runWpCli', { cwd, command: 'core', args: ['is-installed'], timeout: 10_000 });
       installed = succeeded(check) ? true : null;
       // The manager maps timeouts and nonzero exits to the same failure shape.
       // Such a failure cannot prove that WordPress is absent.
       checks.installation = installed ? 'ready' : 'unknown';
       if (installed) {
-        const core = await inspectCommand(context, 'runWpCli', { command: 'core', args: ['version'], timeout: 10_000 });
+        const core = await inspectCommand(context, 'runWpCli', { cwd, command: 'core', args: ['version'], timeout: 10_000 });
         coreVersion = succeeded(core) ? version(core.stdout) : null;
         checks.coreVersion = coreVersion ? 'ready' : 'unknown';
         for (const [command, key] of [['plugin', 'plugins'], ['theme', 'themes']]) {
-          const values = inventory(await inspectCommand(context, 'runWpCli', { command, args: ['list', '--format=json'], timeout: 15_000 }));
+          const values = inventory(await inspectCommand(context, 'runWpCli', { cwd, command, args: ['list', '--format=json'], timeout: 15_000 }));
           checks[key] = values === null ? 'unknown' : 'ready';
           if (key === 'plugins') plugins = values ?? []; else themes = values ?? [];
         }
@@ -177,7 +184,8 @@ export function createWebsitePhpToolsService({
   async function runTool(context, method, options) {
     await revalidate(context);
     try {
-      const result = await phpCliToolManager[method]({ unixUser: context.unixUser, cwd: context.cwd, ...options });
+      const result = await phpCliToolManager[method]({ unixUser: context.unixUser, cwd: context.cwd, ...options,
+        phpVersion: context.website.phpConfig?.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion });
       await revalidate(context);
       return result;
     } catch (error) {
@@ -185,9 +193,9 @@ export function createWebsitePhpToolsService({
       throw error;
     }
   }
-  async function runWpCli(websiteId, { command, args = [], timeout = 60_000 } = {}) {
+  async function runWpCli(websiteId, { command, args = [], timeout = 60_000, input = null, relativeDirectory = null } = {}) {
     const context = await resolveWebsitePhpContext(websiteId);
-    return runTool(context, 'runWpCli', { command, args, timeout });
+    return runTool(context, 'runWpCli', { cwd: wpDirectory(context, relativeDirectory), command, args, timeout, input });
   }
   async function runComposer(websiteId, { command, args = [], timeout = 120_000 } = {}) {
     const context = await resolveWebsitePhpContext(websiteId);
@@ -251,10 +259,12 @@ export function createWebsitePhpToolsService({
   }
   async function getPhpFpmConfig(websiteId) {
     const context = await resolveWebsitePhpContext(websiteId);
-    const currentPhpVersion = context.website.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
-    const maxChildren = context.website.maxChildren ?? context.application.maxChildren ?? phpFpmTemplatePolicy.defaultMaxChildren;
-    const memoryLimitMb = context.website.memoryLimitMb ?? context.application.memoryLimitMb ?? phpFpmTemplatePolicy.defaultMemoryLimitMb;
-    const maxExecutionSeconds = context.website.maxExecutionSeconds ?? context.application.maxExecutionSeconds ?? phpFpmTemplatePolicy.defaultMaxExecutionSeconds;
+    const saved = context.website.phpConfig ?? {};
+    const currentPhpVersion = saved.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
+    const maxChildren = saved.maxChildren ?? context.application.maxChildren ?? phpFpmTemplatePolicy.defaultMaxChildren;
+    const memoryLimitMb = saved.memoryLimitMb ?? context.application.memoryLimitMb ?? phpFpmTemplatePolicy.defaultMemoryLimitMb;
+    const maxExecutionSeconds = saved.maxExecutionSeconds ?? context.application.maxExecutionSeconds ?? phpFpmTemplatePolicy.defaultMaxExecutionSeconds;
+    const identity = createApplicationIdentity(context.application.id);
 
     const poolPath = phpFpmPoolPath(context.unixUser, currentPhpVersion);
     const socketPath = phpFpmSocketPath(context.unixUser);
@@ -266,6 +276,7 @@ export function createWebsitePhpToolsService({
       websiteRevision: context.website.revision ?? 1,
       phpVersion: currentPhpVersion,
       supportedPhpVersions: phpFpmTemplatePolicy.supportedVersions,
+      availablePhpVersions: typeof phpFpmSiteManager?.availableVersions === 'function' ? await phpFpmSiteManager.availableVersions() : [currentPhpVersion],
       fpm: Object.freeze({
         poolName: `yunpanel-${context.unixUser}`,
         poolPath,
@@ -276,9 +287,9 @@ export function createWebsitePhpToolsService({
         maxExecutionSeconds,
       }),
       phpIni: Object.freeze({
-        openBasedir: `${context.currentPath}:/home/${context.unixUser}`,
-        uploadTmpDir: `/home/${context.unixUser}/tmp`,
-        sessionSavePath: `/home/${context.unixUser}/tmp`,
+        openBasedir: `${context.currentPath}:${identity.paths.workspace.homeDirectory}`,
+        uploadTmpDir: identity.paths.workspace.temporaryDirectory,
+        sessionSavePath: identity.paths.workspace.temporaryDirectory,
         memoryLimit: `${memoryLimitMb}M`,
         maxExecutionTime: maxExecutionSeconds,
         displayErrors: false,
@@ -306,15 +317,16 @@ export function createWebsitePhpToolsService({
       throw new WebsitePhpToolsServiceError('php_config_no_changes', 'PHP configuration does not change current state', 409);
     }
 
+    const identity = createApplicationIdentity(context.application.id);
     const templateInput = Object.freeze({
       unixUser: context.unixUser,
       unixGroup: context.unixUser,
       phpVersion: nextPhpVersion,
       applicationRoot: context.currentPath,
       documentRoot: context.cwd,
-      homeDirectory: `/home/${context.unixUser}`,
-      temporaryDirectory: `/home/${context.unixUser}/tmp`,
-      logDirectory: `/home/${context.unixUser}/logs`,
+      homeDirectory: identity.paths.workspace.homeDirectory,
+      temporaryDirectory: identity.paths.workspace.temporaryDirectory,
+      logDirectory: identity.paths.workspace.logDirectory,
       maxChildren: nextMaxChildren,
       memoryLimitMb: nextMemoryLimitMb,
       maxExecutionSeconds: nextMaxExecutionSeconds,
@@ -355,7 +367,16 @@ export function createWebsitePhpToolsService({
       confirmation,
     });
   }
-  async function updatePhpFpmConfig(websiteId, body = {}) {
+  async function updatePhpFpmConfig(websiteId, body = {}, { operationId = randomUUID(), lockHeld = false, authorizeBeforeCommit = async () => true } = {}) {
+    if (typeof withApplicationLock !== 'function' || typeof phpFpmSiteManager?.update !== 'function'
+      || typeof websiteRegistry.updateWebsitePhpConfig !== 'function') {
+      throw new WebsitePhpToolsServiceError('php_config_service_unavailable', 'PHP ayarlarını uygulayan servis hazır değil', 503);
+    }
+    const initial = await resolveWebsitePhpContext(websiteId);
+    if (lockHeld) return applyPhpFpmConfig(websiteId, body, operationId, authorizeBeforeCommit);
+    return withApplicationLock(initial.application.id, () => applyPhpFpmConfig(websiteId, body, operationId, authorizeBeforeCommit));
+  }
+  async function applyPhpFpmConfig(websiteId, body, operationId, authorizeBeforeCommit) {
     const context = await resolveWebsitePhpContext(websiteId);
     if (!body || typeof body !== 'object' || Array.isArray(body)) {
       throw new WebsitePhpToolsServiceError('php_config_input_invalid', 'Invalid PHP configuration update payload', 400);
@@ -383,8 +404,7 @@ export function createWebsitePhpToolsService({
       throw new WebsitePhpToolsServiceError('php_config_confirmation_mismatch', 'PHP configuration confirmation token does not match', 400);
     }
 
-    if (phpFpmSiteManager && typeof phpFpmSiteManager.apply === 'function') {
-      const intent = {
+    const intent = {
         websiteId: context.website.id,
         applicationId: context.application.id,
         unixUser: context.unixUser,
@@ -393,20 +413,26 @@ export function createWebsitePhpToolsService({
         maxChildren: preview.desired.maxChildren,
         memoryLimitMb: preview.desired.memoryLimitMb,
         maxExecutionSeconds: preview.desired.maxExecutionSeconds,
-      };
-      await phpFpmSiteManager.apply(intent, { operationId: randomUUID() });
-    }
-
-    if (typeof websiteRegistry.updateWebsiteConfig === 'function') {
-      await websiteRegistry.updateWebsiteConfig(websiteId, preview.desired);
-    }
-
+    };
     await revalidate(context);
+    const verified = await phpFpmSiteManager.update(intent, { operationId, previousIntent: { ...intent, ...preview.current } });
+    if (!verified?.satisfied) throw new WebsitePhpToolsServiceError('php_config_apply_unverified', 'PHP ayarları doğrulanamadı', 503);
+    let saved;
+    try {
+      if (!await authorizeBeforeCommit()) throw new WebsitePhpToolsServiceError('website_php_action_actor_forbidden', 'PHP ayarlarını kaydetme yetkisi değişti', 403);
+      saved = await websiteRegistry.updateWebsitePhpConfig({ websiteId, expectedRevision, config: preview.desired });
+    }
+    catch (error) {
+      try { await phpFpmSiteManager.compensate(intent, { operationId }); }
+      catch { throw new WebsitePhpToolsServiceError('php_config_rollback_failed', 'PHP kayıt hatasından sonra geri alma doğrulanamadı', 503); }
+      throw error;
+    }
 
     return Object.freeze({
       success: true,
       websiteId: context.website.id,
       applied: preview.desired,
+      websiteRevision: saved.revision,
       updatedAt: new Date().toISOString(),
     });
   }
@@ -414,7 +440,7 @@ export function createWebsitePhpToolsService({
     const context = await resolveWebsitePhpContext(websiteId);
     const wpCli = await getWpCliStatus(websiteId);
     const composer = await getComposerStatus(websiteId);
-    const phpVersion = context.website.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
+    const phpVersion = context.website.phpConfig?.phpVersion ?? context.application.phpVersion ?? phpFpmTemplatePolicy.distroVersion;
     return Object.freeze({
       schemaVersion: 1,
       ...binding(context),
@@ -427,6 +453,7 @@ export function createWebsitePhpToolsService({
   }
   return Object.freeze({
     resolveWebsitePhpContext,
+    getWpCliAvailability: () => inspectTool('inspectWpCli'),
     getWpCliStatus,
     getComposerStatus,
     getActionPreview,

@@ -3,6 +3,7 @@ import http from 'node:http';
 import { once } from 'node:events';
 import express from 'express';
 import test from 'node:test';
+import { createJobRegistry } from '../src/job-registry.js';
 import {
   isWebsiteBackupHttpError,
   mountWebsiteBackupRoutes,
@@ -88,10 +89,7 @@ async function setupAcceptanceServer(t, { customSnapshots = null } = {}) {
       assert.equal(id, repoId);
       return { ok: true, checkedAt: new Date().toISOString() };
     },
-    async updateRetentionPolicy(id, policy) {
-      assert.equal(id, repoId);
-      return { ok: true, retentionPolicy: policy };
-    },
+    async updateRepository(id, patch) { assert.equal(id, repoId); return { ...patch }; },
   };
 
   const websiteBackupSetProvider = {
@@ -168,19 +166,28 @@ async function setupAcceptanceServer(t, { customSnapshots = null } = {}) {
     },
   };
 
+  const jobs = createJobRegistry();
   const websiteBackupOperationService = createWebsiteBackupOperationService({
+    jobRegistry: jobs, websiteRegistry, websiteBackupSetProvider,
+    authorizeActor: async value => value, siteMutationLock: { withSiteLock: async (_identity, action) => action() },
     registry: operationRegistry,
     websiteBackupService,
     websiteRestoreService,
     resticRepositoryRegistry,
   });
 
+  async function executeNext() {
+    const claimed = await jobs.claimNext(serverId); if (!claimed) return;
+    const { job, envelope } = claimed;
+    const result = await websiteBackupOperationService.execute(envelope.payload, { jobId: job.id, serverId, resourceType: 'backup', resourceId: job.resourceId });
+    await jobs.complete({ serverId, jobId: job.id, status: 'succeeded', result });
+  }
   let currentAuth = null;
 
   const app = express();
   app.use(express.json());
   app.use((req, res, next) => {
-    req.auth = currentAuth;
+    req.auth = currentAuth?.user?.role === 'owner' ? { ...currentAuth, id: '44444444-4444-4444-8444-444444444444', user: { ...currentAuth.user, id: '55555555-5555-4555-8555-555555555555' } } : currentAuth;
     next();
   });
 
@@ -222,12 +229,12 @@ async function setupAcceptanceServer(t, { customSnapshots = null } = {}) {
   return {
     baseUrl,
     setAuth: (auth) => { currentAuth = auth; },
-    operationRegistry,
+    operationRegistry, executeNext,
   };
 }
 
 test('BACKUP-UI-04: site-scoped isolation ensures site accounts see only their website snapshots without leaks', async (t) => {
-  const { baseUrl, setAuth } = await setupAcceptanceServer(t);
+  const { baseUrl, setAuth, executeNext } = await setupAcceptanceServer(t);
 
   // Authenticate as Site A manager
   setAuth({
@@ -276,7 +283,7 @@ test('BACKUP-UI-04: site-scoped isolation ensures site accounts see only their w
 });
 
 test('BACKUP-UI-04: Owner durable backup/restore flow with durable jobs', async (t) => {
-  const { baseUrl, setAuth, operationRegistry } = await setupAcceptanceServer(t);
+  const { baseUrl, setAuth, operationRegistry, executeNext } = await setupAcceptanceServer(t);
 
   // Authenticate as Owner
   setAuth({
@@ -314,8 +321,9 @@ test('BACKUP-UI-04: Owner durable backup/restore flow with durable jobs', async 
   const getData = await getRes.json();
   assert.equal(getData.data.id, opId);
 
-  // Wait for background execution
+  // Drive the real queue explicitly with fixture host adapters
   async function waitForOperationTerminal(id, timeoutMs = 3000) {
+    await executeNext();
     const start = Date.now();
     while (Date.now() - start < timeoutMs) {
       const op = await operationRegistry.getOperation(id);
@@ -353,7 +361,7 @@ test('BACKUP-UI-04: Owner durable backup/restore flow with durable jobs', async 
   assert.equal(finishedRestore.preRestoreSnapshotId, 'pre-snap-123');
 });
 
-test('PROD-08 Acceptance: Disaster recovery scope covers all 6 domains and masks sensitive secrets', () => {
+test('PROD-08 Fixture contract: Disaster recovery scope covers all 6 domains and masks sensitive secrets', () => {
   const rawScope = {
     scopeId: 'dr-scope-siteA',
     serverId,
@@ -442,7 +450,7 @@ test('PROD-08 Acceptance: Disaster recovery scope covers all 6 domains and masks
   assert.equal(masked.encryptionKeys[0].keyPassword, '[REDACTED]');
 });
 
-test('PROD-08 Acceptance: Disaster recovery verified restore to empty authorized target with operational, integrity, RPO, and RTO validation', () => {
+test('PROD-08 Fixture contract: Disaster recovery verified restore to empty authorized target with operational, integrity, RPO, and RTO validation', () => {
   const disasterTime = '2026-10-03T08:00:00.000Z';
   const snapshotTime = '2026-10-03T07:45:00.000Z'; // 15 mins = 900s RPO
   const recoveryStart = '2026-10-03T08:05:00.000Z';
@@ -517,7 +525,7 @@ test('PROD-08 Acceptance: Disaster recovery verified restore to empty authorized
   assert.equal(sanitized.metrics.recoveryTargetMet, true);
 });
 
-test('PROD-08 Acceptance: Disaster recovery rejects non-empty target or unauthorized target path', () => {
+test('PROD-08 Fixture contract: Disaster recovery rejects non-empty target or unauthorized target path', () => {
   // 1. Non-empty target
   assert.throws(
     () => verifyDisasterRecoveryRestore({
@@ -550,7 +558,7 @@ test('PROD-08 Acceptance: Disaster recovery rejects non-empty target or unauthor
   );
 });
 
-test('PROD-08 Acceptance: Snapshot listing or backup file creation alone is rejected as insufficient evidence', () => {
+test('PROD-08 Fixture contract: Snapshot listing or backup file creation alone is rejected as insufficient evidence', () => {
   // 1. In verifyDisasterRecoveryRestore with snapshotListOnly
   assert.throws(
     () => verifyDisasterRecoveryRestore({
@@ -599,7 +607,7 @@ test('PROD-08 Acceptance: Snapshot listing or backup file creation alone is reje
   );
 });
 
-test('PROD-08 Acceptance: RPO data loss and RTO duration bounds enforcement', () => {
+test('PROD-08 Fixture contract: RPO data loss and RTO duration bounds enforcement', () => {
   // Exceeded RPO (data loss too large)
   assert.throws(
     () => verifyDisasterRecoveryRestore({
@@ -635,7 +643,7 @@ test('PROD-08 Acceptance: RPO data loss and RTO duration bounds enforcement', ()
   );
 });
 
-test('PROD-08 Acceptance: Plaintext private key leak in restore result is rejected', () => {
+test('PROD-08 Fixture contract: Plaintext private key leak in restore result is rejected', () => {
   assert.throws(
     () => sanitizeDisasterRecoveryRestoreResult({ id: 'job-1' }, {
       targetWasEmpty: true,
@@ -653,8 +661,8 @@ test('PROD-08 Acceptance: Plaintext private key leak in restore result is reject
   );
 });
 
-test('PROD-13 Acceptance: Backup Manager browser projects 6 key fields and enforces tenant isolation', async (t) => {
-  const { baseUrl, setAuth, operationRegistry } = await setupAcceptanceServer(t);
+test('PROD-13 Fixture contract: Backup Manager browser projects 6 key fields and enforces tenant isolation', async (t) => {
+  const { baseUrl, setAuth, operationRegistry, executeNext } = await setupAcceptanceServer(t);
 
   // Record a completed restore operation in the durable operation registry
   const restoreOp = await operationRegistry.createOperation({
@@ -722,7 +730,7 @@ test('PROD-13 Acceptance: Backup Manager browser projects 6 key fields and enfor
   assert.doesNotMatch(rawString, /\/secret\/site-a/);
 });
 
-test('PROD-13 Acceptance: Failed and stale snapshots are distinctly marked and never presented as succeeded', async (t) => {
+test('PROD-13 Fixture contract: Failed and stale snapshots are distinctly marked and never presented as succeeded', async (t) => {
   const customSnapshots = [
     { id: '1'.repeat(64), shortId: '11111111', time: '2026-09-25T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`], hostname: 'host-a', username: 'root' },
     { id: '2'.repeat(64), shortId: '22222222', time: '2026-09-24T10:00:00.000Z', paths: ['/secret/site-a'], tags: [`website:${siteAId}`, 'failed'], hostname: 'host-a', username: 'root' },
@@ -755,8 +763,8 @@ test('PROD-13 Acceptance: Failed and stale snapshots are distinctly marked and n
   assert.notEqual(staleSnap.status, 'succeeded');
 });
 
-test('PROD-13 Acceptance: Selective restore preview and execution operate through durable job engine with include paths', async (t) => {
-  const { baseUrl, setAuth, operationRegistry } = await setupAcceptanceServer(t);
+test('PROD-13 Fixture contract: Selective restore preview and execution operate through durable job engine with include paths', async (t) => {
+  const { baseUrl, setAuth, operationRegistry, executeNext } = await setupAcceptanceServer(t);
   setAuth({
     user: { id: 'owner-1', role: 'owner' },
     access: { mode: 'management', permissions: ['*'] },
@@ -803,8 +811,8 @@ test('PROD-13 Acceptance: Selective restore preview and execution operate throug
   assert.deepEqual(opRecord.include, ['paths', 'databases']);
 });
 
-test('PROD-13 Acceptance: Repository health check operates through durable job engine', async (t) => {
-  const { baseUrl, setAuth } = await setupAcceptanceServer(t);
+test('PROD-13 Fixture contract: Repository health check operates through durable job engine', async (t) => {
+  const { baseUrl, setAuth, executeNext } = await setupAcceptanceServer(t);
   setAuth({
     user: { id: 'owner-1', role: 'owner' },
     access: { mode: 'management', permissions: ['*'] },
@@ -824,6 +832,7 @@ test('PROD-13 Acceptance: Repository health check operates through durable job e
   assert.equal(body.data.kind, 'check');
   assert.equal(body.data.repositoryId, repoId);
 
+  await executeNext();
   // Poll for completion
   const opId = body.data.id;
   let status = body.data.status;
@@ -837,8 +846,8 @@ test('PROD-13 Acceptance: Repository health check operates through durable job e
   assert.equal(status, 'succeeded');
 });
 
-test('PROD-13 Acceptance: Backup schedule and retention plan operates through durable job engine', async (t) => {
-  const { baseUrl, setAuth } = await setupAcceptanceServer(t);
+test('PROD-13 Fixture contract: Backup schedule and retention plan operates through durable job engine', async (t) => {
+  const { baseUrl, setAuth, executeNext } = await setupAcceptanceServer(t);
   setAuth({
     user: { id: 'owner-1', role: 'owner' },
     access: { mode: 'management', permissions: ['*'] },
@@ -851,7 +860,6 @@ test('PROD-13 Acceptance: Backup schedule and retention plan operates through du
     body: JSON.stringify({
       kind: 'plan',
       repositoryId: repoId,
-      schedule: '0 3 * * *',
       retentionPolicy: { keepLast: 14, keepDaily: 7 },
     }),
   });
@@ -859,6 +867,7 @@ test('PROD-13 Acceptance: Backup schedule and retention plan operates through du
   const body = await res.json();
   assert.equal(body.data.kind, 'plan');
 
+  await executeNext();
   // Verify operation completes
   const opId = body.data.id;
   let opData = body.data;

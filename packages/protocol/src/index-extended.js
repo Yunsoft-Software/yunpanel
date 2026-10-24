@@ -102,6 +102,10 @@ function validateDatabaseCredentialMutation(payload, operation, errors) {
     'databaseCredentialId', 'databaseBindingId', 'expectedCredentialRevision',
     'expectedBindingRevision', 'desiredStateSha256',
   ]);
+  if (Object.hasOwn(payload, 'createDatabase')) {
+    allowed.add('createDatabase');
+    if (operation !== DATABASE_CREDENTIAL_APPLY || payload.createDatabase !== true) errors.push(`${operation} database creation mode is invalid`);
+  }
   if (Object.keys(payload).length !== allowed.size || Object.keys(payload).some((key) => !allowed.has(key))) {
     errors.push(`${operation} contains unsupported arguments`);
   }

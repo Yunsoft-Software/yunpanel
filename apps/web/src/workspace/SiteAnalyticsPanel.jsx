@@ -27,7 +27,7 @@ function AnalyticsWorkspace({scope,generation,isOwner}){
   isCurrent:()=>live.current&&generation===sessionVersion()&&!sessionTransitionPending()});
   ref.current=client;const unsub=client.subscribe(setState);setState(client.getSnapshot());void client.load();
   return()=>{live.current=false;unsub();client.dispose();ref.current=null;};},[scope.websiteId,scope.serverId,generation,isOwner]);
- const status=state?.status,htmlUrl='/api/websites/'+encodeURIComponent(scope.websiteId)+'/analytics/report?format=html';
+ const status=state?.status,htmlUrl='/api/panel/websites/'+encodeURIComponent(scope.websiteId)+'/analytics/report?format=html';
  return <>
   <Section title="İstatistikler" description="Bu siteye ait Nginx erişim günlüğünden GoAccess raporu oluşturun."
    actions={<Button icon="refresh" disabled={state?.loading||state?.busy||state?.denied} onClick={()=>void ref.current?.load()}>Durumu yenile</Button>}>

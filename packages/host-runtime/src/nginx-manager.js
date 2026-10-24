@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   nginxConfigFileName,
@@ -136,6 +136,8 @@ export function createNginxManager({
   systemctlPath = '/usr/bin/systemctl',
   mkdirFn = mkdir,
   readFileFn = readFile,
+  lstatFn = lstat,
+  realpathFn = realpath,
   writeFileFn = writeFile,
   renameFn = rename,
   rmFn = rm,
@@ -349,8 +351,34 @@ export function createNginxManager({
     await atomicWrite(targetPath, state.content, mode);
   }
 
+  async function verifyDocumentRoots(config) {
+    // The renderer pairs an authorized base and its relative child. Recheck
+    // both before stage and activation; Nginx also refuses child symlinks.
+    for (const match of config.matchAll(/  disable_symlinks on from=([^;\s]+);\n  root ([^;\s]+);/g)) {
+      const [, base, selected] = match;
+      const relative = path.posix.relative(base, selected);
+      if (!relative || relative.startsWith('../') || path.posix.isAbsolute(relative)) {
+        throw new NginxManagerError('nginx_document_root_unsafe', 'Document root escaped the authorized Website');
+      }
+      try {
+        const canonical = await realpathFn(base);
+        let current = base;
+        for (const segment of relative.split('/')) {
+          current = path.posix.join(current, segment);
+          const metadata = await lstatFn(current);
+          if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error('Unsafe directory');
+        }
+        const resolved = await realpathFn(selected);
+        if (resolved !== path.posix.join(canonical, relative)) throw new Error('Directory changed');
+      } catch {
+        throw new NginxManagerError('nginx_document_root_unavailable', 'Document root must be an existing regular directory inside this Website');
+      }
+    }
+  }
+
   async function stageDomain(spec) {
     const expected = expectedStage(spec);
+    await verifyDocumentRoots(expected.config);
     const stagePath = path.join(stagingDir, expected.configName);
     await mkdirFn(stagingDir, { recursive: true, mode: 0o750 });
     await atomicWrite(stagePath, expected.config, 0o640);
@@ -359,6 +387,7 @@ export function createNginxManager({
 
   async function inspectStagedDomain(spec) {
     const expected = expectedStage(spec);
+    await verifyDocumentRoots(expected.config);
     const stagePath = path.join(stagingDir, expected.configName);
     let current;
     try {
@@ -442,6 +471,7 @@ export function createNginxManager({
     try { candidate = await readFileFn(stagePath, 'utf8'); }
     catch { throw new NginxManagerError('staged_config_missing', 'Staged Nginx configuration was not found'); }
     if (sha256(candidate) !== checksum) throw new NginxManagerError('staged_config_changed', 'Staged Nginx configuration checksum does not match');
+    await verifyDocumentRoots(candidate);
 
     const before = await activationState({ activePath, previousActivePath });
     let receipt = await loadRollbackReceipt({ primaryDomain, configName, checksum, activationId });

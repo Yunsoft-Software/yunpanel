@@ -7,6 +7,7 @@ import {
 } from '@yunpanel/host-runtime';
 import { createApplicationRegistry } from './application-registry.js';
 import { createCertificateRegistry } from './certificate-registry.js';
+import { createMailServiceIdentityRegistry } from './mail-service-identity-registry.js';
 import { createDatabaseDeletionReceiptStore } from './database-deletion-receipt.js';
 import { createDomainRegistry } from './domain-registry.js';
 import { createDurableJobRegistry } from './durable-job-registry.js';
@@ -82,6 +83,8 @@ export function resolveJobRecoveryPaths({ env = process.env, packaged = false, c
     jobStore: base.jobStore,
     recoveryStore: `${base.jobStore}.recovery.json`,
     certificateStore,
+    mailServiceIdentityStore: resolveRecoveryStorePath(env.YUNPANEL_MAIL_SERVICE_IDENTITY_STORE,
+      path.join(defaultRoot, 'mail-service-identity-registry.json'), { packaged, cwd, label: 'mail service identity' }),
     applicationStore,
     websiteStore: resolveRecoveryStorePath(env.YUNPANEL_WEBSITE_STORE, path.join(defaultRoot, 'website-registry.json'), { packaged, cwd, label: 'website' }),
     runtimeBindingStore: resolveRecoveryStorePath(env.YUNPANEL_APPLICATION_RUNTIME_BINDING_STORE, path.join(defaultRoot, 'application-runtime-binding-registry.json'), { packaged, cwd, label: 'runtime binding' }),
@@ -203,6 +206,7 @@ export async function runTerminalRecoveryFromStores({
   applicationRegistryFactory = createApplicationRegistry,
   websiteRegistryFactory = createWebsiteRegistry,
   runtimeBindingRegistryFactory = createApplicationRuntimeBindingRegistry,
+  mailServiceIdentityRegistryFactory = createMailServiceIdentityRegistry,
   serviceStatus = createMigrationServiceStatus(),
   reconcileCommand = reconcileTerminalRecovery,
 } = {}) {
@@ -218,6 +222,7 @@ export async function runTerminalRecoveryFromStores({
     runtimeBindingRegistryFactory,
     serviceStatus,
     reconcileCommand,
+    mailServiceIdentityRegistryFactory,
   ]) {
     if (typeof dependency !== 'function') {
       throw new JobRecoveryRuntimeError('job_recovery_runtime_dependencies_invalid', 'Recovery runtime dependencies are invalid');
@@ -237,6 +242,11 @@ export async function runTerminalRecoveryFromStores({
   });
   const jobRegistry = createDurableRecoveryRegistry({ paths, jobRegistryFactory, durableRegistryFactory, recoveryStoreFactory });
 
+  const mailServiceIdentityRegistry = await initRegistry(mailServiceIdentityRegistryFactory({
+    filePath: paths.mailServiceIdentityStore,
+    getWebDomain: id => domainRegistry.getDomain(id), getCertificate: id => certificateRegistry.getCertificate(id),
+  }), 'Mail service identity');
+
   const result = await reconcileCommand({
     serverId,
     jobId,
@@ -246,6 +256,7 @@ export async function runTerminalRecoveryFromStores({
     applicationRegistry,
     websiteRegistry,
     runtimeBindingRegistry,
+    mailServiceIdentityRegistry,
     serviceStatus,
   });
   return Object.freeze({ ...result, statePaths: paths });

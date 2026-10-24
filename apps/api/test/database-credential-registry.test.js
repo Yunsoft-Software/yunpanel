@@ -70,6 +70,18 @@ test('database credential persists encrypted secret and exposes only safe metada
   assert.equal((await stat(path.dirname(state.filePath))).mode & 0o777, 0o700);
 });
 
+test('user-selected password is encrypted, survives reopen and never enters public projection', async (t) => {
+  const state = await fixture(t);
+  const initialPassword = 'SelectedTestPassword_123!';
+  const created = await state.registry.createCredential({ databaseBindingId: bindingId, initialPassword,
+    confirmation: `create-database-credential:${bindingId}:${expectedUsername}` });
+  assert.equal(JSON.stringify(created).includes(initialPassword), false);
+  assert.equal((await readFile(state.filePath, 'utf8')).includes(initialPassword), false);
+  const reopened = createDatabaseCredentialRegistry({ filePath: state.filePath, masterKey, getDatabaseBinding: async () => binding() });
+  await reopened.init();
+  assert.equal((await reopened.materializeCredential(created.id, { expectedRevision: created.revision })).password, initialPassword);
+});
+
 test('grant update and password rotation are revisioned and allowlisted', async (t) => {
   const state = await fixture(t);
   const created = await state.registry.createCredential({

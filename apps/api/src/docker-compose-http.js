@@ -7,6 +7,12 @@ import {
   diagnoseManagedComposeBinding,
   ManagedComposeWebsiteDiagnosisError,
 } from './managed-compose-website-diagnosis.js';
+import {
+  DockerPleskCatalogError,
+  generateComposeFromCatalogInput,
+  resolveDockerProxyRule,
+  searchDockerCatalog,
+} from './docker-plesk-catalog.js';
 import { JobRegistryError } from './job-registry.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 
@@ -27,6 +33,7 @@ const KNOWN_ERRORS = Object.freeze([
   DockerComposeOperationsError,
   DockerRegistryCredentialRegistryError,
   ManagedComposeWebsiteDiagnosisError,
+  DockerPleskCatalogError,
   JobRegistryError,
 ]);
 
@@ -131,6 +138,7 @@ export function mountDockerComposeRoutes(app, {
   dockerComposeOperationsService,
   dockerComposeObserver,
   validateDockerCompose,
+  domainRegistry = null,
   localServerId = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.put !== 'function') {
@@ -369,6 +377,56 @@ export function mountDockerComposeRoutes(app, {
     const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
     const credential = await safeCall(() => dockerRegistryCredentialRegistry.setCredential(project.id, body));
     return response.json({ data: credential, sideEffects: false });
+  }));
+
+  const handleGetProjectDocument = async (request, response) => {
+    if (Object.keys(request.query ?? {}).length !== 0) {
+      throw new DockerComposeHttpError('docker_compose_query_invalid', 'Docker Compose project document does not accept query parameters');
+    }
+    const project = await requireProject(dockerComposeProjectRegistry, request.params.dockerProjectId, localServerId);
+    if (typeof dockerComposeProjectRegistry.getProjectDocument === 'function') {
+      const doc = await safeCall(() => dockerComposeProjectRegistry.getProjectDocument(project.id));
+      return response.json({ data: doc });
+    }
+    const materialized = await safeCall(() => dockerComposeProjectRegistry.materializeProject(project.id, {
+      expectedRevision: project.revision,
+    }));
+    return response.json({
+      data: {
+        projectId: project.id,
+        projectName: project.projectName,
+        revision: project.revision,
+        composeSha256: project.composeSha256,
+        document: materialized.document,
+      },
+    });
+  };
+
+  app.get('/api/docker/compose/projects/:dockerProjectId/document', requirePanelRouteAccess, asyncRoute(handleGetProjectDocument));
+  app.get('/api/docker/projects/:dockerProjectId/document', requirePanelRouteAccess, asyncRoute(handleGetProjectDocument));
+
+  app.get('/api/docker/catalog', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const query = request.query ?? {};
+    const items = await safeCall(() => searchDockerCatalog({
+      q: query.q ?? '',
+      category: query.category ?? null,
+      kind: query.kind ?? null,
+    }));
+    return response.json({ data: items, items, total: items.length });
+  }));
+
+  app.post('/api/docker/catalog/generate-compose', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const generated = await safeCall(() => generateComposeFromCatalogInput(request.body ?? {}));
+    return response.json({ data: generated, sideEffects: false });
+  }));
+
+  app.post('/api/docker/proxy-rules/resolve', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const resolved = await safeCall(() => resolveDockerProxyRule(request.body ?? {}, {
+      dockerComposeProjectRegistry,
+      domainRegistry,
+      localServerId,
+    }));
+    return response.json({ data: resolved, sideEffects: false });
   }));
 }
 

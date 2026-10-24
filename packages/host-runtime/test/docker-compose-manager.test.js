@@ -74,12 +74,24 @@ test('compose manager separates private staging from the persistent project work
   assert.equal(execution[4], projectDirectory);
   assert.equal(execution[3].APP_MODE, 'production');
   assert.equal(execution[3].PATH, '/usr/bin:/bin');
+  assert.equal(execution[3].DOCKER_HOST, 'unix:///var/run/docker.sock');
   assert.equal(result.action, 'start');
   assert.equal(result.runtimeState, 'running');
   assert.equal(result.executed, true);
   assert.equal(JSON.stringify(result).includes('credential-value'), false);
   assert.equal(JSON.stringify(result).includes('compose.yaml'), false);
   assert.deepEqual((await readdir(fx.root)).sort(), ['projects', 'runs']);
+  await assertPrivateStagingClean(fx.root);
+});
+
+test('untrusted Compose variables cannot redirect the root daemon or load host code', async (t) => {
+  const fx = await fixture(t);
+  const { createHash } = await import('node:crypto');
+  const request = input({ composeSha256: createHash('sha256').update(document).digest('hex') });
+  for (const key of ['DOCKER_HOST', 'DOCKER_CONTEXT', 'DOCKER_CONFIG', 'COMPOSE_FILE', 'COMPOSE_PROFILES', 'PATH', 'LD_PRELOAD', 'NODE_OPTIONS', 'BASH_ENV']) {
+    await assert.rejects(fx.manager.start({ ...request, environment: { [key]: 'untrusted' } }));
+  }
+  assert.equal(fx.calls.filter(([kind]) => kind === 'exec').length, 0);
   await assertPrivateStagingClean(fx.root);
 });
 

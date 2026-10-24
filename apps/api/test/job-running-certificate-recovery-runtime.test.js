@@ -29,6 +29,8 @@ test('certificate recovery runtime exposes exact registries, private receipt and
     }),
     domainRegistryFactory: ({ filePath }) => { calls.push(['domain.create', filePath]); return fakeDomainRegistry; },
     certificateRegistryFactory: ({ filePath }) => { calls.push(['certificate.create', filePath]); return fakeCertificateRegistry; },
+    mailServiceIdentityRegistryFactory: () => ({ init: async () => {}, getForServer: async () => null }),
+    hostOperationsFactory: () => ({ reloadMailCertificate: async () => { throw Error('must not reload during issuance fixture'); } }),
     jobRegistryFactory: () => ({}),
     recoveryStoreFactory: () => ({}),
     durableRegistryFactory: ({ filePath }) => { calls.push(['durable.create', filePath]); return fakeJobRegistry; },

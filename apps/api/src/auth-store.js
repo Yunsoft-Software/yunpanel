@@ -571,6 +571,14 @@ export function createAuthStore({
     withLock: (fn) => storeLock.withLock(fn),
     close: () => db.close(),
     configured: () => Boolean(db.prepare('SELECT 1 FROM users LIMIT 1').get()),
+    getAutomationUser(userId) {
+      if (typeof userId !== 'string' || userId.length > 128) return null;
+      const user = db.prepare('SELECT u.id, u.role, u.active, u.password_changed_at, COALESCE(r.revision, 1) AS revision FROM users u LEFT JOIN auth_user_revisions r ON r.user_id = u.id WHERE u.id = ?').get(userId);
+      if (!user?.active || !hostingLoginAllowed(userId) || !['owner', 'site_manager', 'reseller', 'customer'].includes(user.role)) return null;
+      const hosting = user.role === 'owner' ? null : hostingSessionProfile(userId);
+      return Object.freeze({ id: user.id, role: user.role, revision: user.revision, passwordChangedAt: user.password_changed_at,
+        websiteIds: user.role === 'owner' ? null : websiteIdsForSession(userId, hosting) });
+    },
     issueSetupToken() {
       return transaction(() => {
         if (db.prepare('SELECT 1 FROM users LIMIT 1').get()) throw new AuthError('already_configured', 'An owner already exists.', 409);

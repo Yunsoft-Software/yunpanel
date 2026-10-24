@@ -347,6 +347,8 @@ function staticIntent(preview, applicationId, paths = createWebsitePathContract(
   if (preview.source?.kind !== 'new_static') {
     return Object.freeze({ ...base, mode: 'bind_existing' });
   }
+  if (application.repositoryUrl === null) return Object.freeze({ ...base, mode: 'upload',
+    unixUser: preview.plan.website.unixUser, documentRoot: preview.plan.website.documentRoot });
   if (typeof application.repositoryUrl !== 'string' || typeof application.branch !== 'string'
     || !application.build || typeof application.build !== 'object'
     || !Number.isInteger(application.retention)) {
@@ -545,6 +547,9 @@ export function siteCreateProvisioningPlan(preview) {
     targetType: runtimeType === 'node' ? 'passenger' : runtimeType === 'php' ? 'php' : runtimeType === 'python' ? 'python' : preview.plan.primaryDomain?.targetType,
     target: runtimeType === 'node' || runtimeType === 'php' || runtimeType === 'python' ? runtimeIntent : preview.plan.primaryDomain?.target,
   }));
+  if (runtimeIntent?.mode === 'upload') steps.push(hostStep('static_upload_state', 'static_upload_state', {
+    applicationId: preview.plan.website.applicationId, websiteId: preview.ids.websiteId, adapter: 'static-upload-state',
+  }, { compensationState: 'not_required' }));
   steps.push(hostStep(
     'domain_activation',
     'domain_activation',

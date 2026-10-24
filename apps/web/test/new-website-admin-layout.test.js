@@ -1,39 +1,46 @@
+import { register } from 'node:module';
+register('./jsx-loader.js', import.meta.url);
+import { createElement } from 'react';
+import { renderToStaticMarkup } from 'react-dom/server';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 
 // Source regressions only. Real React/CSS/browser layout remains an acceptance task.
 const page = await readFile(new URL('../src/workspace/NewWebsitePage.jsx', import.meta.url), 'utf8');
-const fields = page.slice(page.indexOf('<h3>Site Yöneticisi</h3>'), page.indexOf('<h3>3. HTTPS</h3>'));
 const consoleTheme = await readFile(new URL('../src/workspace/ui/console-theme.css', import.meta.url), 'utf8');
 const emberTheme = await readFile(new URL('../src/workspace/ui/ember-theme.css', import.meta.url), 'utf8');
 
-test('only the admin pair opts into top alignment while shared responsive columns are retained', () => {
-  assert.match(fields, /className="ws-form-grid ws-site-admin-fields" style=\{\{ marginTop: 16, alignItems: 'start' \}\}/);
-  assert.equal((page.match(/ws-site-admin-fields/g) ?? []).length, 1);
-  assert.doesNotMatch(fields, /height:|minHeight:|gridTemplateColumns:|overflow:|position:/);
+const { LoginCredentialsFields } = await import('../src/workspace/LoginCredentialsFields.jsx');
+function renderedFields() {
+  return renderToStaticMarkup(createElement(LoginCredentialsFields, {
+    email: 'fixture@example.com', password: 'fixture password 123!', onEmailChange() {}, onPasswordChange() {},
+  }));
+}
+
+test('rendered credential pair uses the responsive grid and aligned controls', () => {
+  const html = renderedFields();
+  assert.match(html, /class="ws-form-grid ws-site-admin-fields"/);
+  assert.match(html, /align-items:start/);
+  assert.equal((html.match(/<input /g) ?? []).length, 2);
 });
 
-test('both account inputs have distinct accessible descriptions below their controls', () => {
-  for (const kind of ['email', 'password']) {
-    assert.ok(fields.includes(`aria-describedby="website-admin-${kind}-hint"`));
-    assert.ok(fields.includes(`<span id="website-admin-${kind}-hint" className="ws-field-hint">`));
-  }
-  assert.equal((fields.match(/className="ws-field-hint"/g) ?? []).length, 2);
-  assert.match(fields, /Panel girişi için kullanılır; posta kutusu hesabından ayrıdır/);
+test('rendered credential descriptions belong to distinct fields and stay unique across repeated forms', () => {
+  const html = renderToStaticMarkup(createElement('div', null,
+    createElement(LoginCredentialsFields, { email: '', password: '', onEmailChange() {}, onPasswordChange() {} }),
+    createElement(LoginCredentialsFields, { email: '', password: '', onEmailChange() {}, onPasswordChange() {} })));
+  const described = [...html.matchAll(/aria-describedby="([^"]+)"/g)].map(match => match[1]);
+  assert.equal(new Set(described).size, 4);
+  for (const id of described) assert.ok(html.includes(`id="${id}"`));
 });
 
-test('email/password controls keep their constraints, autofill support, and controlled form updates', () => {
-  assert.match(fields, /type="email"[\s\S]*?required/);
-  assert.match(fields, /autoComplete="email"/);
-  assert.match(fields, /type="password"[\s\S]*?required[\s\S]*?minLength=\{12\}/);
-  assert.match(fields, /autoComplete="new-password"/);
-  for (const key of ['adminEmail', 'adminPassword']) {
-    assert.ok(fields.includes(`value={form.${key}}`));
-    assert.ok(fields.includes(`update('${key}', event.target.value)`));
-    assert.ok(fields.includes(`name="${key}"`));
-  }
-  assert.doesNotMatch(fields, /defaultValue=|dangerouslySetInnerHTML/);
+test('rendered email and password retain constraints, autofill and controlled values', () => {
+  const html = renderedFields();
+  const inputs = [...html.matchAll(/<input [^>]+>/g)].map(match => match[0]);
+  assert.ok(inputs.some(input => input.includes('type="email"') && input.includes('required=""')
+    && input.includes('autoComplete="email"') && input.includes('value="fixture@example.com"')));
+  assert.ok(inputs.some(input => input.includes('type="password"') && input.includes('required=""')
+    && input.includes('minLength="12"') && input.includes('autoComplete="new-password"') && input.includes('value="fixture password 123!"')));
 });
 
 test('scope, submission guard and post-result password cleanup remain connected', () => {

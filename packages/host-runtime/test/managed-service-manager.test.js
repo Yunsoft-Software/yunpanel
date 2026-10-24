@@ -190,6 +190,7 @@ test('phpMyAdmin install uses the fixed package and configuration allowlist with
   const calls = [];
   const installed = new Set();
   const manager = createManagedServiceManager({
+    configurePhpMyAdmin: async () => ({ applied: true, httpHealthy: true, sideEffects: true }),
     run: async (file, args) => {
       calls.push([file, args]);
       if (file === '/usr/bin/dpkg-query') {

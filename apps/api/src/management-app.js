@@ -1,5 +1,10 @@
-import { createTenantBoundaryMiddleware } from './tenant-boundary.js';
+import { createWebsiteMailBackupAdapter } from './website-mail-backup-adapter.js';
+import { createWebsiteEnvironmentBackupAdapter } from './website-environment-backup-adapter.js';
+import { createWebsiteDnsBackupAdapter } from './website-dns-backup-adapter.js';
+import { createWebsiteHostingBackupAdapter } from './website-hosting-backup-adapter.js';
 import { DurableJobRegistryError } from './durable-job-registry.js';
+import { createAuthMailer } from './auth-mailer.js';
+import { createTenantBoundaryMiddleware } from './tenant-boundary.js';
 import express from 'express';
 import { mountAiRoutes } from './ai-http.js';
 import {
@@ -16,11 +21,14 @@ import {
   createMailboxQuotaInspector,
   createRcloneManager,
   createResticManager,
+  createApplicationEnvironmentBackupManager,
   createWebsiteRestoreReceiptStore,
   RcloneError,
 } from '@yunpanel/host-runtime';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
+import { createWebsiteDatabaseBackupAdapter } from './website-database-backup-adapter.js';
+import { createWordPressToolkitService } from './wordpress-toolkit-service.js';
 import { ApplicationEnvironmentRegistryError } from './application-environment-registry.js';
 import { mountApplicationOperationsRoutes, ApplicationOperationsHttpError } from './application-operations-http.js';
 import { mountApplicationConfigurationRoutes } from './application-configuration-http.js';
@@ -40,6 +48,7 @@ import { DatabaseBindingHttpError, mountDatabaseBindingRoutes } from './database
 import { DatabaseBindingRegistryError } from './database-binding-registry.js';
 import { createDatabaseCredentialApplyService, DatabaseCredentialApplyError } from './database-credential-apply-service.js';
 import { DatabaseCredentialHttpError, mountDatabaseCredentialRoutes } from './database-credential-http.js';
+import { mountDatabaseSetupRoutes } from './database-setup-http.js';
 import { DatabaseCredentialRegistryError } from './database-credential-registry.js';
 import { DatabaseHttpError, databaseHttpInternals, mountDatabaseRoutes } from './database-http.js';
 import { mountPhpMyAdminHandoffRoutes } from './phpmyadmin-handoff-http.js';
@@ -86,6 +95,7 @@ import { createJobRegistry, JobRegistryError } from './job-registry.js';
 import { mountElFinderHandoffRoutes } from './elfinder-handoff-http.js';
 import { ElFinderHandoffError } from './elfinder-handoff-service.js';
 import { mountMailAliasRoutes } from './mail-alias-http.js';
+import { createWebsiteMailBackupGuard } from './website-mail-backup-guard.js';
 import { createMailAliasRegistry, MailAliasRegistryError } from './mail-alias-registry.js';
 import { createMailConfigurationService, MailConfigurationError } from './mail-configuration.js';
 import { MailConfigurationHttpError, mountMailConfigurationRoutes } from './mail-configuration-http.js';
@@ -908,6 +918,7 @@ export function createApp(allOptions = {}) {
       } : {}),
     });
   }
+  if (localServerId && typeof jobRegistry?.listJobs === 'function') app.use(createWebsiteMailBackupGuard({ jobRegistry, localServerId }));
   mountMailAliasRoutes(app, { mailAliasRegistry, mailDomainRegistry, domainRegistry, localServerId });
   mountMailboxRoutes(app, {
     mailboxRegistry,
@@ -964,6 +975,10 @@ export function createApp(allOptions = {}) {
     panelSettingsRegistry,
     localServerId,
     mailDeliveryDiagnosticsService,
+    mailServiceIdentityRegistry,
+    // Reuse the existing SMTP adapter for the allowlisted local Postfix MTA.
+    // External auth-mailer environment credentials do not select this route.
+    transport: localServerId ? createAuthMailer({ host: '127.0.0.1', port: 25, user: null, pass: null, secure: false }) : null,
   });
   if (mailServiceIdentityRegistry) {
     mountMailServiceIdentityRoutes(app, {
@@ -1001,8 +1016,8 @@ export function createApp(allOptions = {}) {
     });
   }
   mountDockerWorkloadRoutes(app, { dockerWorkloadRegistry, localServerId });
-  mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, localServerId });
-  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, localServerId });
+  mountApplicationConfigurationRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry, localServerId });
+  mountApplicationProcessRoutes(app, { applicationRegistry, jobRegistry, websiteRegistry, localServerId });
   if ((passengerMigrationPreviewService === null) !== (passengerMigrationService === null)) {
     throw new Error('Application Passenger migration services must be configured together');
   }
@@ -1035,9 +1050,10 @@ export function createApp(allOptions = {}) {
   });
   const queueDeploy = options.queueDeploy
     ?? (applicationRegistry && applicationEnvironmentRegistry && jobRegistry
-      ? createApplicationDeployQueue({ applicationRegistry, applicationEnvironmentRegistry, jobRegistry })
+      ? createApplicationDeployQueue({ applicationRegistry, applicationEnvironmentRegistry, jobRegistry, websiteRegistry, domainRegistry, runtimeBindingRegistry, localServerId, siteMutationLock })
       : null);
   mountApplicationOperationsRoutes(app, {
+    runtimeBindingRegistry, siteMutationLock,
     websiteRegistry,
     domainRegistry,
     applicationRegistry,
@@ -1074,7 +1090,23 @@ export function createApp(allOptions = {}) {
   mountNonResellerCapabilitiesRoutes(app);
   mountOsExternalParityRoutes(app);
 
+  let wordpressToolkitService = null;
   if (databaseBindingRegistry) {
+    const databaseBackupAdapter = options.databaseBackupAdapter ?? (options.databaseManager ? createWebsiteDatabaseBackupAdapter({ databaseManager: options.databaseManager }) : null);
+    const mailBackupAdapter = options.mailBackupAdapter ?? (typeof mailboxRegistry?.exportDomainBackup === 'function'
+      && typeof mailAliasRegistry?.exportDomainBackup === 'function' && typeof mailboxQuotaRegistry?.exportMailboxBackup === 'function'
+      && typeof mailboxForwardingRegistry?.exportMailboxBackup === 'function' ? createWebsiteMailBackupAdapter({
+        domainRegistry, mailDomainRegistry, mailboxRegistry, mailAliasRegistry, mailboxQuotaRegistry,
+        mailboxForwardingRegistry, mailConfigurationService: mailConfig,
+      }) : null);
+    const environmentBackupAdapter = options.environmentBackupAdapter ?? (typeof applicationEnvironmentRegistry?.exportApplicationBackup === 'function'
+      ? createWebsiteEnvironmentBackupAdapter({ applicationRegistry, applicationEnvironmentRegistry, domainRegistry,
+        runtimeManager: options.environmentRuntimeRestoreManager ?? createApplicationEnvironmentBackupManager() }) : null);
+    const dnsBackupAdapter = options.dnsBackupAdapter ?? (powerDnsSecretRegistry && dnsRetirementImpact
+      ? createWebsiteDnsBackupAdapter({ websiteRegistry, domainRegistry, powerDnsSecretRegistry, ownershipInspector: dnsRetirementImpact }) : null);
+    const candidateHostingBackupAdapter = options.hostingBackupAdapter ?? createWebsiteHostingBackupAdapter({ websiteRegistry,domainRegistry,applicationRegistry,
+      certificateRegistry,runtimeBindingRegistry,dockerComposeProjectRegistry,provisioningRegistry:websiteProvisioningRuntime?.registry });
+    const hostingBackupAdapter = options.hostingBackupAdapter ?? (candidateHostingBackupAdapter.configured ? candidateHostingBackupAdapter : null);
     const websiteBackupSetProvider = createWebsiteBackupSetProvider({
       websiteRegistry,
       domainRegistry,
@@ -1093,6 +1125,11 @@ export function createApp(allOptions = {}) {
         websiteBackupSetProvider,
         localServerId,
         jobRegistry,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
       }) : null
     );
     const resolvedWebsiteRestoreReceiptStore = options.websiteRestoreReceiptStore ?? createWebsiteRestoreReceiptStore();
@@ -1106,6 +1143,12 @@ export function createApp(allOptions = {}) {
         localServerId,
         jobRegistry,
         receiptStore: resolvedWebsiteRestoreReceiptStore,
+        websiteBackupService: resolvedWebsiteBackupService,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
       }) : null
     );
     const resolvedWebsiteBackupOperationRegistry = options.websiteBackupOperationRegistry ?? createWebsiteBackupOperationRegistry({
@@ -1118,6 +1161,7 @@ export function createApp(allOptions = {}) {
         websiteBackupSetProvider,
         localServerId,
         websiteBackupOperationRegistry: resolvedWebsiteBackupOperationRegistry,
+        backupScheduleProvider: options.backupScheduleRegistry,
       })
       : null;
     const resolvedWebsiteBackupOperationService = options.websiteBackupOperationService ?? (
@@ -1132,8 +1176,27 @@ export function createApp(allOptions = {}) {
         jobRegistry,
         durableJobRegistry: durableJobRegistry ?? options.durableJobRegistry ?? (jobRegistry?.storeLock ? jobRegistry : null),
         backupOperationRegistry: backupOperationRegistry ?? options.backupOperationRegistry ?? null,
+        authorizeActor: options.authorizeWebsiteActor,
+        siteMutationLock,
+        websiteBackupSetProvider,
+        databaseBackupAdapter,
+        mailBackupAdapter,
+        environmentBackupAdapter,
+        backupScheduleRegistry: options.backupScheduleRegistry,
+        dnsBackupAdapter,
+        hostingBackupAdapter,
+        authorizeScheduledActor: options.authorizeWebsiteBackupSchedule,
+        getAutomationUser: options.getAutomationUser,
       }) : null
     );
+    if (typeof options.onWebsiteBackupRuntime === 'function') options.onWebsiteBackupRuntime(resolvedWebsiteBackupOperationService);
+    if (websitePhpToolsService && siteFileManager && options.authorizeWebsiteActor && siteMutationLock && resolvedWebsiteBackupService && resolvedWebsiteRestoreService) {
+      wordpressToolkitService = createWordPressToolkitService({ tools: websitePhpToolsService, jobRegistry, domainRegistry,
+        authorizeActor: options.authorizeWebsiteActor, siteMutationLock, siteFileManager,
+        databaseBindingRegistry, databaseCredentialRegistry, secretStore: options.operationSecretStore, databaseManager: options.databaseManager,
+        resticRepositoryRegistry: resolvedResticRepositoryRegistry, websiteBackupService: resolvedWebsiteBackupService, websiteRestoreService: resolvedWebsiteRestoreService });
+      if (typeof options.onWordPressToolkitRuntime === 'function') options.onWordPressToolkitRuntime(wordpressToolkitService);
+    }
     mountWebsiteBackupRoutes(app, {
       websiteBackupSetProvider,
       websiteBackupService: resolvedWebsiteBackupService,
@@ -1168,6 +1231,7 @@ export function createApp(allOptions = {}) {
     mountWebsitePhpToolsRoutes(app, {
       websitePhpToolsService,
       websitePhpToolActionService,
+      wordpressToolkitService,
     });
   }
   if (websiteCacheService) {
@@ -1230,6 +1294,12 @@ export function createApp(allOptions = {}) {
     });
   }
   if (databaseBindingRegistry && databaseCredentialRegistry && databaseCredentialApply) {
+    if (databaseInventoryProvider) mountDatabaseSetupRoutes(app, {
+      registry: localRegistry, websiteRegistry, databaseBindingRegistry, databaseCredentialRegistry,
+      databaseCredentialApplyService: databaseCredentialApply, databaseInventoryProvider, siteMutationLock,
+      auditStore: options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null,
+      authorizeActor: options.authorizeWebsiteActor ?? null,
+    });
     mountDatabaseCredentialRoutes(app, {
       registry: localRegistry,
       databaseBindingRegistry,
@@ -1291,7 +1361,7 @@ export function createApp(allOptions = {}) {
     notificationService: resolvedOperationalNotificationService,
   });
   const resolvedNftablesManager = nftablesManager ?? createNftablesManager();
-  const resolvedAuditStore = options.auditStore ?? options.authStore?.audit ?? options.aiAudit ?? null;
+  const resolvedAuditStore = options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null;
   const resolvedFirewallService = firewallService ?? createFirewallService({
     nftablesManager: resolvedNftablesManager,
     auditStore: resolvedAuditStore,

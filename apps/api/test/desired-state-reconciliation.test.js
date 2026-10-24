@@ -454,7 +454,7 @@ test('AC3.1 - SSL renewal: post-SSL mail identity assignment error is surfaced a
     purpose: 'web',
   });
 
-  // Mock mail service identity registry that fails on post-SSL bind
+  // Identity binding is metadata; consumer reload has its own native proof.
   let bindCalled = false;
   const mockMailServiceIdentityRegistry = {
     async getForServer(sId) {
@@ -492,6 +492,7 @@ test('AC3.1 - SSL renewal: post-SSL mail identity assignment error is surfaced a
       certificatePath: `/etc/letsencrypt/live/mail.example.com/cert.pem`,
       fullchainPath: `/etc/letsencrypt/live/mail.example.com/fullchain.pem`,
       privateKeyPath: `/etc/letsencrypt/live/mail.example.com/privkey.pem`,
+      mailReloadOutcome: { service: 'mail', status: 'failed', stage: 'reload', error: 'certificate_mail_reload_failed' },
     },
   };
 
@@ -504,24 +505,23 @@ test('AC3.1 - SSL renewal: post-SSL mail identity assignment error is surfaced a
     job: renewJob,
   });
 
-  // 1. Verify mail identity assignment was attempted
-  assert.equal(bindCalled, true, 'Post-SSL mail identity assignment must be attempted');
+  assert.equal(bindCalled, false, 'Renewal must not rebind an unchanged mail identity');
 
   // 2. Verify error was NOT swallowed and NOT reported as complete success
   assert.equal(reconciliation.reconciled, true);
   assert.equal(reconciliation.outcome, 'partial', 'Outcome must be partial rather than fake full success');
   assert.equal(reconciliation.partial, true);
   assert.notEqual(reconciliation.outcome, 'succeeded', 'Must not claim full success when side effect failed');
-  assert.equal(reconciliation.sideEffects.mailIdentity.service, 'mail_identity');
-  assert.equal(reconciliation.sideEffects.mailIdentity.status, 'partial');
-  assert.match(reconciliation.sideEffects.mailIdentity.error, /Dovecot\/Postfix TLS identity/);
+  assert.equal(reconciliation.sideEffects.mailIdentity.service, 'mail');
+  assert.equal(reconciliation.sideEffects.mailIdentity.status, 'failed');
+  assert.equal(reconciliation.sideEffects.mailIdentity.error, 'certificate_mail_reload_failed');
 
   // 3. Verify partial reload outcome was recorded on certificate record
   const updatedCert = await certRegistry.getCertificate(createdCert.id);
   assert.ok(updatedCert.lastReloadOutcome, 'Certificate must record lastReloadOutcome');
-  assert.equal(updatedCert.lastReloadOutcome.service, 'mail_identity');
+  assert.equal(updatedCert.lastReloadOutcome.service, 'certificate_services');
   assert.equal(updatedCert.lastReloadOutcome.status, 'partial');
-  assert.equal(updatedCert.lastReloadOutcome.stage, 'identity_assignment');
+  assert.equal(updatedCert.lastReloadOutcome.stage, 'reload');
 });
 
 test('AC3.2 - verifyRenewalOutcome surfaces partial mail identity assignment failure as partial outcome rather than full success', () => {
@@ -658,7 +658,7 @@ test('AC3.4 - Initial SSL issuance also captures post-SSL mail identity assignme
   assert.equal(res.outcome, 'partial');
   assert.equal(res.partial, true);
   assert.ok(res.sideEffects.mailIdentity);
-  assert.match(res.sideEffects.mailIdentity.error, /Dovecot reload timeout/);
+  assert.equal(res.sideEffects.mailIdentity.error, 'certificate_mail_reload_failed');
 });
 
 // ============================================================================

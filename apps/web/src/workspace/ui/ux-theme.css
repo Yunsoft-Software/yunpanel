@@ -220,3 +220,9 @@
   .ws-button:active:not(:disabled) { transform: none; }
   .ws-skeleton-row span::after { display: none; }
 }
+
+.ws-setup-steps { display: flex; flex-wrap: wrap; gap: 12px 24px; padding: 18px 24px; margin: 0; list-style: none; border-bottom: 1px solid var(--ws-border); }
+.ws-setup-steps li { display: flex; align-items: center; gap: 8px; color: var(--ws-muted); font-size: 13px; }
+.ws-setup-steps li span { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: var(--ws-surface-subtle); border: 1px solid var(--ws-border); }
+.ws-setup-steps li[aria-current="step"] { color: var(--ws-text); font-weight: 600; }
+.ws-setup-steps li[aria-current="step"] span { background: var(--ws-accent); color: var(--ws-accent-ink, #17202e); border-color: var(--ws-accent); }

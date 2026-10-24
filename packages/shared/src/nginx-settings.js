@@ -1,5 +1,5 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers']);
-const FILE_FIELDS = ['indexFiles', 'errorPages'];
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain']);
+const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
   proxy: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
@@ -40,6 +40,23 @@ function optionalInteger(value, field, minimum, maximum) {
 function boolean(value, field) {
   if (typeof value !== 'boolean') {
     throw new NginxSettingsValidationError('invalid_nginx_setting', `${field} must be boolean`);
+  }
+  return value;
+}
+
+function documentRoot(value) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length > 192
+    || !/^[A-Za-z0-9_-]+(?:\/[A-Za-z0-9_-]+)*$/.test(value)) {
+    throw new NginxSettingsValidationError('invalid_nginx_document_root', 'Document root must be a relative directory inside this Website');
+  }
+  return value;
+}
+function preferredDomain(value) {
+  if (value === null) return null;
+  if (typeof value !== 'string' || value.length > 253 || value.split('.').length < 2
+    || value.split('.').some(label => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) {
+    throw new NginxSettingsValidationError('invalid_nginx_preferred_domain', 'Preferred Domain must be an existing canonical hostname');
   }
   return value;
 }
@@ -130,6 +147,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   const seed = base === null ? defaults(targetType) : normalizeNginxSettings(targetType, base);
   const merged = { ...seed, ...value };
   const fileSettings = {
+    ...(Object.hasOwn(merged, 'documentRoot') ? { documentRoot: documentRoot(merged.documentRoot) } : {}),
     ...(Object.hasOwn(merged, 'indexFiles') ? { indexFiles: indexFiles(targetType, merged.indexFiles) } : {}),
     ...(Object.hasOwn(merged, 'errorPages') ? { errorPages: errorPages(merged.errorPages) } : {}),
   };
@@ -139,6 +157,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   }
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
+    ...(Object.hasOwn(merged, 'preferredDomain') ? { preferredDomain: preferredDomain(merged.preferredDomain) } : {}),
     // Optional file settings leave old stored envelopes byte-for-byte canonical.
     ...fileSettings,
   };

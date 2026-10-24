@@ -29,8 +29,9 @@ test('navigationGroups: Owner sees Plesk task hierarchy in exact canonical order
     ['/files', 'Dosyalar', 'folder'],
     ['/databases', 'Veritabanları', 'database'],
     ['/statistics', 'İstatistikler', 'dashboard'],
+    ['/customers', 'Müşteriler', 'user'],
+    ['/resellers', 'Bayiler', 'user'],
     ['/tools-settings', 'Araçlar ve Ayarlar', 'settings'],
-    ['/settings/users', 'Kullanıcılar', 'user'],
   ];
   assert.deepEqual(groups[0].items, expectedItems);
 
@@ -150,7 +151,7 @@ test('navigationGroups: backward compatibility for 2 arguments (canManage, isOwn
   assert.ok(ownerPaths.includes('/databases'));
   assert.ok(ownerPaths.includes('/statistics'));
   assert.ok(ownerPaths.includes('/tools-settings'));
-  assert.ok(ownerPaths.includes('/settings/users'));
+  assert.ok(ownerPaths.includes('/customers')); assert.ok(ownerPaths.includes('/resellers'));
 
   const nonOwner = navigationGroups(true, false);
   assert.equal(nonOwner[0].title, 'Panel');
@@ -362,7 +363,7 @@ test('source: WorkspaceApp wires statistics and users routes with proper role gu
   assert.match(appSource, /path: 'databases', element: manage\(<GlobalSiteTool tool="databases"/);
   assert.match(appSource, /path: 'mail', element: manage\(<GlobalSiteTool tool="mail"/);
   assert.match(appSource, /path: 'applications', element: owner\(<ApplicationsPage \/>\)/);
-  assert.match(appSource, /path: 'customers', element: reseller\(<ResellerCustomersPage \/>\)/);
+  assert.match(appSource, /path: 'customers', element: <CustomersRoute \/>/);
 });
 
 test('source: WorkspaceLayout renders role branding and sidebar navigation groups', async () => {
@@ -408,10 +409,10 @@ test('site-model: normalizeSiteTab and siteHref support all 11 Plesk site tools 
   assert.equal(siteHref('dom-1', 'hosting'), '/websites/dom-1/hosting');
   assert.equal(normalizeSiteTab('php'), 'php');
   assert.equal(siteHref('dom-1', 'php'), '/websites/dom-1/php');
-  assert.equal(normalizeSiteTab('wp'), 'php');
-  assert.equal(siteHref('dom-1', 'wp'), '/websites/dom-1/php');
-  assert.equal(normalizeSiteTab('wordpress'), 'php');
-  assert.equal(siteHref('dom-1', 'wordpress'), '/websites/dom-1/php');
+  assert.equal(normalizeSiteTab('wp'), 'wordpress');
+  assert.equal(siteHref('dom-1', 'wp'), '/websites/dom-1/wordpress');
+  assert.equal(normalizeSiteTab('wordpress'), 'wordpress');
+  assert.equal(siteHref('dom-1', 'wordpress'), '/websites/dom-1/wordpress');
 
   // Node.js
   assert.equal(normalizeSiteTab('node'), 'node');
@@ -479,7 +480,7 @@ test('ux-model: groupSiteTabs places php in dashboard and access in hosting', ()
 
   assert.ok(hostingTabKeys.includes('access'));
   assert.ok(hostingTabKeys.includes('cron'));
-  assert.ok(hostingTabKeys.includes('backup'));
+  assert.ok(dashboardTabKeys.includes('backup'));
   assert.ok(hostingTabKeys.includes('dns'));
   assert.ok(hostingTabKeys.includes('hosting'));
 });
@@ -487,7 +488,7 @@ test('ux-model: groupSiteTabs places php in dashboard and access in hosting', ()
 test('source: SiteDetailPage integrates all 11 Plesk site tool panels and access controls', async () => {
   const siteDetailSource = await source('SiteDetailPage.jsx');
   assert.match(siteDetailSource, /import SiteAccessPanel from '\.\/SiteAccessPanel\.jsx';/);
-  assert.match(siteDetailSource, /tab === 'php' && <SitePhpToolsPanel domainId=\{domain\.id\} \/>/);
+  assert.match(siteDetailSource, /tab === 'php' && <SitePhpSettingsPanel domainId=\{domain\.id\} \/>/);
   assert.match(siteDetailSource, /tab === 'access' && <SiteAccessPanel/);
   assert.match(siteDetailSource, /\['resources', 'databases', 'mail'\]\.includes\(tab\) && <SiteResourcesPanel/);
   assert.match(siteDetailSource, /tab === 'ssl' && <><CollectionNotice resource=\{certificates\} label="Sertifikalar" \/><SslOperations/);

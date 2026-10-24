@@ -1,3 +1,4 @@
+import { createLocalPassengerReleaseOperation } from './local-passenger-release-operation.js';
 import http from 'node:http';
 import {createLocalPassengerRestartOperation} from './local-passenger-restart-operation.js';
 import os from 'node:os';
@@ -12,6 +13,7 @@ import {
   createNginxLogReader,
   createWebsiteCronManager,
   createPhpCliToolManager,
+  createPhpFpmSiteManager,
   createCacheIsolationManager,
   inspectAllowlistedServices,
   inspectDocker,
@@ -115,6 +117,9 @@ import {
 } from './website-provisioning-job-authorization.js';
 import { createWebsiteRegistry } from './website-registry.js';
 import { createSiteFileManager } from './site-file-manager.js';
+import { createOperationSecretStore } from './operation-secret-store.js';
+import { createWebsiteBackupScheduleRegistry } from './website-backup-schedule-registry.js';
+import { createWebsiteBackupScheduler } from './website-backup-scheduler.js';
 import { createWebsiteCronRegistry } from './website-cron-registry.js';
 import { createWebsiteCronImpactProvider } from './website-cron-impact.js';
 import { createWebsiteCronOperationReceiptStore } from './website-cron-operation-receipt.js';
@@ -133,6 +138,7 @@ import { createWebsiteSftpKeyRuntime } from './website-sftp-key-runtime.js';
 import { createWebsiteSuspensionOperationRegistry } from './website-suspension-operation-registry.js';
 import { createWebsiteSuspensionRuntime } from './website-suspension-runtime.js';
 import { createWebsiteRemovalOperationRegistry } from './website-removal-operation-registry.js';
+import { createWebsiteRemovalDatabaseCleanup } from './website-removal-database-cleanup.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
 import { createWebsiteRemovalWorker } from './website-removal-worker.js';
 import { createWebsiteRemovalCleanupAdapters } from './website-removal-cleanup-adapters.js';
@@ -324,7 +330,11 @@ const websiteRegistry = createWebsiteRegistry({
   serverExists: async (serverId) => Boolean(await registry.getServer(serverId)),
   getApplication: async (applicationId) => applicationRegistry.getApplication(applicationId),
   getDockerWorkload: async (workloadId) => dockerWorkloadRegistry.getWorkload(workloadId),
-  getDockerComposeProject: async (projectId) => dockerComposeProjectBootstrap.projectRegistry.getProject(projectId),
+  getDockerComposeProject: async (projectId) => {
+    const jobs = await durableJobRegistry.listJobs({ resourceType: 'docker_project', resourceId: projectId });
+    if (jobs.some(job => job.operation === 'docker.compose.remove' && ['queued', 'running'].includes(job.status))) throw new Error('Compose project retirement is active');
+    return dockerComposeProjectBootstrap.projectRegistry.getProject(projectId);
+  },
 });
 await websiteRegistry.init();
 const siteFileManager = createSiteFileManager({
@@ -361,6 +371,8 @@ const websitePhpToolsService = createWebsitePhpToolsService({
   websiteRegistry,
   applicationRegistry,
   phpCliToolManager,
+  phpFpmSiteManager: createPhpFpmSiteManager(),
+  withApplicationLock: siteMutationLock.withApplicationLock,
 });
 const authorizeWebsitePhpActor = async (actor, websiteId) => {
   if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
@@ -424,6 +436,8 @@ const authorizeWebsiteRemovalSystemCron = async ({
   });
 };
 let websitePhpToolActionService = null;
+let wordpressToolkitService = null;
+const operationSecretStore = createOperationSecretStore({ root: path.join(controlPlaneStateRoot, 'operation-secrets'), masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY });
 let localWebsitePhpToolOperation = null;
 const websiteCachePolicyRegistry = createWebsiteCachePolicyRegistry({
   filePath: websiteCachePolicyStorePath,
@@ -691,6 +705,20 @@ const ttydSessionManager = createTtydSessionManager({ liveSessions });
 const auditedJobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
+  resolveJobWebsite: async (input) => {
+    if (input.resourceType === 'website') return input.resourceId;
+    if (input.resourceType === 'application') {
+      const sites = (await websiteRegistry.listWebsites({ serverId: input.serverId })).filter((site) => site.applicationId === input.resourceId);
+      return sites.length === 1 ? sites[0].id : null;
+    }
+    if (input.resourceType === 'database') return (await databaseBindingRegistry.getByDatabase({ serverId: input.serverId, databaseName: input.resourceId }))?.websiteId ?? null;
+    let domainId = input.resourceType === 'domain' ? input.resourceId : null;
+    if (input.resourceType === 'certificate') domainId = (await certificateRegistry.getCertificate(input.resourceId))?.domainId;
+    if (input.resourceType === 'mail_domain') domainId = (await mailDomainRegistry.getMailDomain(input.resourceId))?.webDomainId;
+    if (!domainId) return null;
+    const domain = await domainRegistry.getDomain(domainId);
+    return domain?.serverId === input.serverId ? domain.websiteId ?? null : null;
+  },
   onAuditError: reportAuditFault,
 });
 const jobRegistry = createDomainStageTargetJobRegistry({
@@ -720,6 +748,10 @@ localWebsitePhpToolOperation = createLocalWebsitePhpToolOperation({
   websitePhpToolsService,
   authorizeActor: authorizeWebsitePhpActor,
   siteMutationLock,
+  wordpressToolkit: { execute: (payload, execution) => {
+    if (!wordpressToolkitService) throw Object.assign(new Error('WordPress Toolkit is unavailable'), { code: 'wordpress_toolkit_unavailable' });
+    return wordpressToolkitService.execute(payload, execution);
+  } },
 });
 
 const aiToolRegistry = createAiToolRuntime({
@@ -912,6 +944,8 @@ const websiteRemovalCleanupAdapters = localServerId
     websiteProvisioningRuntime,
   })
   : null;
+const websiteRemovalDatabaseCleanup = createWebsiteRemovalDatabaseCleanup({ registry: websiteRemovalOperationRegistry, websiteRegistry,
+  databaseBindingRegistry, databaseCredentialRegistry, databaseManager, databaseCredentialOperation: localDatabaseCredentialOperation });
 const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
   ? createWebsiteRemovalRuntime({
     domainRegistry,
@@ -959,6 +993,8 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     applicationEnvironmentRegistry,
     databaseBindingRegistry,
     databaseCredentialRegistry,
+    databaseCleanupHandler: websiteRemovalDatabaseCleanup.run,
+    databaseCleanupInspector: websiteRemovalDatabaseCleanup.inspect,
     websiteSftpKeyRegistry: websiteSftpKeyRuntime?.keyRegistry ?? null,
     runtimeBindingRegistry,
     websiteCronRegistry,
@@ -985,6 +1021,7 @@ const dockerComposeRuntime = await createDockerComposeRuntime({
   serverRegistry: registry,
   jobRegistry,
   projectRegistry: dockerComposeProjectBootstrap.projectRegistry,
+  websiteRegistry,
   projectBackupLocked,
 });
 const databaseCredentialApplyService = createDatabaseCredentialApplyService({
@@ -1089,6 +1126,7 @@ websiteProvisioningRuntime.configureDatabaseControlPlane({
 });
 await websiteProvisioningRuntime.init();
 const applicationDeployQueue = createApplicationDeployQueue({
+  websiteRegistry, domainRegistry, runtimeBindingRegistry, localServerId, siteMutationLock,
   applicationRegistry,
   applicationEnvironmentRegistry,
   jobRegistry,
@@ -1111,6 +1149,19 @@ const pleskImporter = localServerId
   ? createPleskImporter({ localServerId })
   : null;
 let localRuntimeInstance = null;
+let websiteBackupOperationService = null;
+const backupScheduleRegistry = createWebsiteBackupScheduleRegistry({ filePath: path.join(controlPlaneStateRoot, 'website-backup-schedules.json') });
+let backupScheduler = null;
+const authorizeWebsiteBackupSchedule = async grant => {
+  const record = await backupScheduleRegistry.get(grant.scheduleId);
+  const user = authStore.getAutomationUser(grant.userId);
+  const website = await websiteRegistry.getWebsite(grant.websiteId);
+  return Boolean(record?.enabled && record.revision === grant.scheduleRevision && record.websiteId === grant.websiteId
+    && record.serverId === grant.serverId && record.serverId === localServerId && website?.serverId === record.serverId
+    && record.creatorId === grant.userId && record.creatorRole === grant.role && user?.role === grant.role
+    && user.revision === record.creatorRevision && user.passwordChangedAt === record.creatorPasswordChangedAt
+    && (!ownerMfaRequired || authStore.mfa.enabled(user.id)));
+};
 const systemWatchdogService = createSystemWatchdogService({
   serverRegistry: registry,
   jobRegistry,
@@ -1208,6 +1259,7 @@ const listener = createAuthenticatedApi({
       jobRegistry,
       aiToolRegistry,
       aiAudit: authStore.audit,
+      authorizeWebsiteActor: authorizeWebsitePhpActor,
       userAdminStore: authStore.users,
       aiPolicyStore,
       aiProviderRegistry,
@@ -1218,6 +1270,12 @@ const listener = createAuthenticatedApi({
       backupOperationRegistry,
       durableJobRegistry,
       websiteBackupOperationStorePath: path.join(controlPlaneStateRoot, 'website-backup-operations.json'),
+      onWebsiteBackupRuntime: (service) => { websiteBackupOperationService = service; },
+      backupScheduleRegistry,
+      authorizeWebsiteBackupSchedule,
+      getAutomationUser: (userId) => authStore.getAutomationUser(userId),
+      operationSecretStore,
+      onWordPressToolkitRuntime: (service) => { wordpressToolkitService = service; },
       backupJobStorePath: jobStorePath,
       projectBackupLocked,
       dockerComposeProjectRegistry: dockerComposeRuntime.projectRegistry,
@@ -1239,6 +1297,7 @@ const listener = createAuthenticatedApi({
       elFinderHandoffService: elFinderHandoffRuntime ? elFinderHandoffService : null,
       siteFileManager,
       databaseInventoryProvider: () => databaseManager.inspect(),
+      databaseManager,
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
       websiteMigrationPolicy,
       migrationLedger,
@@ -1311,19 +1370,30 @@ const localRuntime = await startConfiguredLocalRuntime({
   websiteRegistry,
   runtimeBindingRegistry,
   mailDomainRegistry,
+  mailServiceIdentityRegistry,
   mailConfigurationService,
   mailDkimConfigurationService,
   roundcubeConfigurationService,
   dnsProviderCredentialRegistry,
   jobLogStore,
+  recoverRunningJobs: async () => { if (websiteBackupOperationService) await websiteBackupOperationService.recoverStartup(); },
+  onWebsitePhpToolReceiptRecorded: async (payload) => { if (payload.actionId === 'wp.toolkit') await wordpressToolkitService?.releaseSecret(payload); },
   createOperations: (options) => dockerComposeRuntime.extendLocalOperations(createLocalHostOperations({
     ...options,
     databaseManager,
     databaseCredentialOperation: localDatabaseCredentialOperation,
     websiteCronOperation: localWebsiteCronOperation,
     websitePhpToolOperation: localWebsitePhpToolOperation,
+    websiteBackupOperation: websiteBackupOperationService,
+    passengerReleaseOperation:createLocalPassengerReleaseOperation({applicationRegistry,websiteRegistry,domainRegistry,certificateRegistry,
+      applicationEnvironmentRegistry,runtimeBindingRegistry,provisioningRegistry:websiteProvisioningRuntime.registry,siteMutationLock,localServerId,
+      loadGitCredential: applicationId => applicationEnvironmentRegistry.materializeDeploymentCredential(applicationId)}),
     passengerRestartOperation:createLocalPassengerRestartOperation({applicationRegistry,websiteRegistry,domainRegistry,applicationEnvironmentRegistry,siteMutationLock}),
     authorizeWebsiteProvisioning: authorizeWebsiteProvisioningChildJob,
+    authorizePanelJob: async (authorization) => Boolean(await authorizeWebsitePhpActor({
+      sessionId: authorization.sessionId, userId: authorization.userId, role: authorization.role,
+    }, authorization.websiteId)),
+    authorizeWebsiteBackupScheduleJob: authorizeWebsiteBackupSchedule,
     requiresWebsiteProvisioningAuthorization,
   })),
   inspectServices: inspectAllowlistedServices,
@@ -1340,6 +1410,12 @@ const renewalScheduler = startCertificateRenewalScheduler({
 });
 localRuntimeInstance = localRuntime;
 websiteRemovalWorker?.start();
+if (websiteBackupOperationService && localRuntime) {
+  backupScheduler = createWebsiteBackupScheduler({ scheduleRegistry: backupScheduleRegistry, operationService: websiteBackupOperationService,
+    authorizeSchedule: authorizeWebsiteBackupSchedule, serverId: localServerId,
+    onError: (failure) => console.error(`[yunpanel-api] backup scheduler: ${failure.code}`) });
+  backupScheduler.start();
+}
 systemWatchdogService.startPeriodicSweep({ intervalMs: 60_000, serverId: localServerId });
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 const terminalAuthenticator = createLiveConnectionAuthenticator({
@@ -1422,6 +1498,10 @@ async function shutdown(signal) {
   systemWatchdogService.stop();
   renewalScheduler.stop();
   if (websiteRemovalWorker) await websiteRemovalWorker.stop();
+  if (backupScheduler) {
+    try { await backupScheduler.stop(); }
+    catch { console.error('[yunpanel-api] backup scheduler shutdown failed'); }
+  }
   if (phpMyAdminHandoffRuntime) {
     try { await phpMyAdminHandoffRuntime.close(); }
     catch { console.error('[yunpanel-api] phpMyAdmin handoff shutdown failed'); }

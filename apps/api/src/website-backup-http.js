@@ -3,12 +3,10 @@ import { WebsiteBackupSetError } from './website-backup-set.js';
 import { isWebsiteBackupError } from './website-backup-service.js';
 import { WebsiteBackupBrowserError } from './website-backup-browser.js';
 import {
-  createWebsiteBackupOperationService,
   isWebsiteBackupOperationError,
   WebsiteBackupOperationServiceError,
 } from './website-backup-operation-service.js';
 import {
-  createWebsiteBackupOperationRegistry,
   WebsiteBackupOperationRegistryError,
 } from './website-backup-operation-registry.js';
 import { WebsiteRestoreError } from './website-restore-service.js';
@@ -102,15 +100,17 @@ export function mountWebsiteBackupRoutes(app, {
         tags,
       } = request.body ?? {};
 
-      const result = await websiteBackupService.executeBackup({
+      if (!websiteBackupOperationService) throw new WebsiteBackupHttpError('website_backup_runtime_unavailable', 'Kalıcı yedekleme kuyruğu kullanılamıyor', 503);
+      const result = await websiteBackupOperationService.queueBackup({
         websiteId: request.params.websiteId,
         repositoryId,
         expectedPreviewDigest,
         confirmation,
         tags,
+        actor: { sessionId: request.auth?.id, userId: request.auth?.user?.id, role: request.auth?.user?.role },
       });
 
-      return response.status(201).json({ data: result });
+      return response.status(202).json({ data: result });
     }));
   }
 
@@ -129,15 +129,7 @@ export function mountWebsiteBackupRoutes(app, {
     }));
   }
 
-  const resolvedOperationService = websiteBackupOperationService ?? (
-    websiteBackupService
-      ? createWebsiteBackupOperationService({
-        registry: createWebsiteBackupOperationRegistry(),
-        websiteBackupService,
-        websiteRestoreService,
-      })
-      : null
-  );
+  const resolvedOperationService = websiteBackupOperationService;
 
   if (resolvedOperationService) {
     app.post('/api/websites/:websiteId/backup-operations', requireOwner, asyncRoute(async (request, response) => {

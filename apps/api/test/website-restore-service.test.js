@@ -97,6 +97,7 @@ function fixture({
         }
         return { snapshotId: preRestoreSnapshotId };
       },
+      async listSnapshotFiles() { return [{ type: 'file', path: '/var/lib/yunpanel/apps/test/current/marker.txt' }, { type: 'file', path: '/var/lib/yunpanel/data/test/marker.txt' }]; },
       async restore(args) {
         calls.restore.push(args);
         if (restoreExecutionFails && args.snapshotId === snapshotId) {
@@ -152,7 +153,7 @@ test('previewRestore generates valid preview, digest, and confirmation for websi
   assert.equal(preview.snapshotId, snapshotId);
   assert.deepEqual(preview.healthSpec, {
     primaryDomain: 'example.com',
-    healthPath: '/health',
+    healthPath: '/',
     timeoutSeconds: 30,
   });
   assert.equal(typeof preview.previewDigest, 'string');
@@ -265,6 +266,25 @@ test('executeRestore takes pre-restore snapshot, restores, checks health, and su
   assert.equal(calls.createSnapshot.length, 1);
 });
 
+test('two new restores of the same snapshot run independently while retries reuse only their own receipt', async () => {
+  const { service, calls, receipts } = fixture();
+  const preview = await service.previewRestore({ websiteId, repositoryId, snapshotId });
+  const input = { websiteId, repositoryId, snapshotId, expectedPreviewDigest: preview.previewDigest,
+    confirmation: preview.confirmation };
+  const firstId = '8edf95c0-72ae-4a31-bd4a-cb95d15a61f1';
+  const secondId = '675f2b94-5d61-4c3b-b870-3a2c7b8491d6';
+  await service.executeRestore({ ...input, operationId: firstId });
+  const second = await service.executeRestore({ ...input, operationId: secondId });
+  assert.equal(second.idempotent, undefined);
+  assert.equal(calls.restore.length, 2);
+  assert.equal(calls.createSnapshot.length, 2);
+  assert.equal(receipts.size, 2);
+  const retry = await service.executeRestore({ ...input, operationId: secondId });
+  assert.equal(retry.idempotent, true);
+  assert.equal(calls.restore.length, 2);
+  assert.equal(calls.createSnapshot.length, 2);
+});
+
 test('executeRestore triggers automatic health rollback when health check fails', async () => {
   const { service, calls, receipts } = fixture({ healthSatisfied: false });
 
@@ -368,4 +388,16 @@ test('executeRestore rejects stale preview digest or wrong confirmation', async 
     }),
     (err) => err instanceof WebsiteRestoreError && err.code === 'restore_preview_stale' && err.status === 409,
   );
+});
+
+
+test('a staged DNS reference cannot be mistaken for a successful live DNS restore', async () => {
+ const f=fixture();const staged='/var/lib/yunpanel/backups/resources/website/metadata';
+ f.backupSet.targetPaths.push(staged);f.backupSet.dns=[{stagedZonePath:staged+'/dns.json'}];
+ await assert.rejects(f.service.previewRestore({websiteId,repositoryId,snapshotId}),e=>e.code==='website_restore_resource_adapter_unavailable');
+ assert.equal(f.calls.restore.length,0);assert.equal(f.calls.createSnapshot.length,0);
+});
+test('restore health uses the resolved bound domain instead of a Website display name', async () => {
+ const f=fixture();delete f.website.primaryDomain;f.website.name='Customer site display title';f.backupSet.website={id:websiteId,primaryDomain:'bound.example.com'};
+ const preview=await f.service.previewRestore({websiteId,repositoryId,snapshotId});assert.equal(preview.healthSpec.primaryDomain,'bound.example.com');
 });

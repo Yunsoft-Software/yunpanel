@@ -51,7 +51,10 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
     // SiteFilesPanel provides its verified setup/unsupported/error explanation.
     const secondaryTools = [
       tool(['hosting', 'Barındırma ve DNS', 'settings']),
-      tool(['settings', 'Barındırma ayarları', 'settings']),
+      tool(['backup', 'Yedekleme', 'archive'], bindingProblem),
+      tool(['analytics', 'İstatistikler', 'dashboard'], bindingProblem),
+      tool(['cron', 'Zamanlanmış Görevler', 'clock'], bindingProblem),
+      tool(['access', 'Erişim Hesapları', 'shield'], bindingProblem),
     ];
     if (application || !website || hasId(website.applicationId)) {
       const runtimeName = application?.type === 'node'
@@ -61,8 +64,11 @@ export function createWebsiteTaskResolver({ domains, websites, applications, can
           : (application?.type === 'python' || website?.runtimeType === 'python')
             ? 'Python'
             : 'Uygulama';
-      secondaryTools.push(tool(['node', runtimeName, 'code'], applicationProblem));
-      secondaryTools.push(tool(['deploy', 'Git / Yayınlama', 'git'], applicationProblem));
+      if (application?.type === 'php' || website?.runtimeType === 'php') {
+        secondaryTools.push(tool(['php', 'PHP Ayarları', 'code'], applicationProblem));
+        tools.push(tool(['wordpress', 'WordPress', 'code'], applicationProblem));
+      } else secondaryTools.push(tool(['node', runtimeName, 'code'], applicationProblem));
+      if (application?.repositoryUrl) secondaryTools.push(tool(['deploy', 'Git / Yayınlama', 'git'], applicationProblem));
     }
     return {
       domainReady: !domainProblem,

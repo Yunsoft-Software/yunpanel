@@ -26,7 +26,7 @@ function executionContext(payload, execution) {
   return execution;
 }
 
-export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, authorizeActor, siteMutationLock = null } = {}) {
+export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, authorizeActor, siteMutationLock = null, wordpressToolkit = null } = {}) {
   if (!websitePhpToolsService
     || typeof websitePhpToolsService.getActionPreview !== 'function'
     || typeof websitePhpToolsService.runWpCli !== 'function'
@@ -53,6 +53,23 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
         'Panel access changed before PHP tool execution',
         403,
       );
+    }
+    if (payload.actionId === 'php.fpm.update') {
+      const preview = await websitePhpToolsService.previewPhpFpmConfig(payload.websiteId, payload.config);
+      if (preview.serverId !== context.serverId || preview.applicationId !== payload.applicationId || preview.unixUser !== payload.unixUser
+        || preview.websiteRevision !== payload.expectedWebsiteRevision || preview.previewDigest !== payload.previewDigest || preview.confirmation !== payload.confirmation) throw new LocalWebsitePhpToolOperationError('website_php_action_stale', 'PHP configuration changed after queueing');
+      const result = await websitePhpToolsService.updatePhpFpmConfig(payload.websiteId, { config: payload.config,
+        expectedRevision: payload.expectedWebsiteRevision, previewDigest: payload.previewDigest, confirmation: payload.confirmation }, {
+        operationId: execution.jobId, lockHeld: true,
+        authorizeBeforeCommit: async () => Boolean(await authorizeActor({ sessionId: payload.actorSessionId, userId: payload.actorUserId, role: payload.actorRole }, payload.websiteId)),
+      });
+      if (!result?.success || result.websiteRevision !== payload.expectedWebsiteRevision + 1) throw new LocalWebsitePhpToolOperationError('php_config_apply_unverified', 'PHP configuration was not persisted');
+      return Object.freeze({ version: 1, websiteId: payload.websiteId, applicationId: payload.applicationId, unixUser: payload.unixUser,
+        actionId: payload.actionId, websiteRevision: payload.expectedWebsiteRevision, previewDigest: payload.previewDigest, completed: true, sideEffects: true });
+    }
+    if (payload.actionId === 'wp.toolkit') {
+      if (typeof wordpressToolkit?.execute !== 'function') throw new LocalWebsitePhpToolOperationError('wordpress_toolkit_unavailable', 'WordPress Toolkit is unavailable', 503);
+      return wordpressToolkit.execute(payload, context);
     }
     const preview = await websitePhpToolsService.getActionPreview(payload.websiteId, payload.actionId);
     if (preview.serverId !== context.serverId
@@ -120,6 +137,7 @@ export function createLocalWebsitePhpToolOperation({ websitePhpToolsService, aut
   }
 
   async function execute(payload, execution) {
+    if (!siteMutationLock && ['php.fpm.update', 'wp.toolkit'].includes(payload?.actionId)) throw new LocalWebsitePhpToolOperationError('website_php_action_dependencies_invalid', 'Site mutation lock is required', 503);
     if (!siteMutationLock) return executeUnlocked(payload, execution);
     if (typeof siteMutationLock.withSiteLock !== 'function') {
       throw new LocalWebsitePhpToolOperationError(

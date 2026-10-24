@@ -44,7 +44,7 @@ test('Modal component implements complete focus trap, keyboard navigation, and a
   assert.match(panelKit, /previous\?\.focus\?\.\(|previous\.focus\(\{ preventScroll: true \}\)/);
 
   // Initial focus on mount to [autofocus] or first focusable
-  assert.match(panelKit, /dialog\?\.querySelector\('\[autofocus\]'\) \|\| focusable\[0\]/);
+  assert.match(panelKit, /dialog\?\.querySelector\('\[autofocus\]'\)/);
 });
 
 test('Modal focus trap and Escape key functional simulation', () => {

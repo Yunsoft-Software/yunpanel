@@ -174,6 +174,7 @@ async function prepare(root, { failFirstDoveconf = false } = {}) {
   const run = async (file, args) => {
     calls.push([file, [...args]]);
     if (file === '/usr/bin/getent') {
+      if (args[0] === 'passwd' && args[1] === '_rspamd') return { stdout: '_rspamd:x:5003:5003::/var/lib/rspamd:/usr/sbin/nologin\n', stderr: '' };
       if (args[1] === 'vmail') {
         return { stdout: `vmail:x:${VMAIL_UID}:${VMAIL_GID}::/var/lib/yunpanel/mail:/usr/sbin/nologin\n`, stderr: '' };
       }

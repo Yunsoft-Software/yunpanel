@@ -2,6 +2,21 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApplicationRegistry, ApplicationRegistryError } from '../src/application-registry.js';
 
+test('uploaded static readiness requires actual runtime evidence, records a real release without an invented commit and denies Git dispatch', async () => {
+  const registry = createApplicationRegistry();
+  const app = await registry.createApplication({ serverId: 'server-1', name: 'Uploaded site', repositoryUrl: null, branch: null, build: { mode: 'none', outputDir: '.', healthFile: 'index.html' } });
+  const evidence = { satisfied: true, adapter: 'static-bootstrap', applicationId: app.id,
+    documentRoot: app.webRoot, unixUid: 1201, unixGid: 1201, releaseId: 'ff830043-9752-4640-83b4-3a1998de78a0' };
+  await assert.rejects(registry.markUploadedStaticReady(app.id, { ...evidence, unixUid: 0 }), { code: 'static_upload_result_unverified' });
+  assert.equal((await registry.getApplication(app.id)).state, 'draft');
+  const result = await registry.markUploadedStaticReady(app.id, evidence);
+  assert.equal(result.state, 'active'); assert.equal(result.currentReleaseId, evidence.releaseId);
+  assert.equal(result.currentCommitSha, null); assert.equal(result.currentGitTarget, null);
+  assert.equal(result.releases[0].commitSha, null);
+  assert.equal((await registry.markUploadedStaticReady(app.id, evidence)).currentReleaseId, evidence.releaseId);
+  await assert.rejects(registry.markDeploying(app.id, evidence.releaseId), { code: 'deployment_not_supported' });
+});
+
 test('static application stores normalized deploy configuration and release lifecycle', async () => {
   let clock = Date.parse('2026-09-08T22:00:00.000Z');
   const registry = createApplicationRegistry({

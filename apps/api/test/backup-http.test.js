@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createJobRegistry } from '../src/job-registry.js';
 import { BackupHttpError, backupHttpInternals, mountBackupRoutes } from '../src/backup-http.js';
 import { requirePanelRouteAccess } from '../src/panel-http-guard.js';
 
@@ -278,6 +279,7 @@ import {
   isWebsiteBackupHttpError,
 } from '../src/website-backup-http.js';
 
+const websiteActor = { sessionId: '11111111-1111-4111-8111-111111111111', userId: '22222222-2222-4222-8222-222222222222', role: 'owner' };
 function websiteFixture() {
   const targetWebsiteId = '550e8400-e29b-41d4-a716-446655440000';
   const targetRepoId = '660e8400-e29b-41d4-a716-446655440001';
@@ -357,8 +359,12 @@ function websiteFixture() {
   };
 
   const registry = createWebsiteBackupOperationRegistry();
+  const jobs = createJobRegistry();
   const operationService = createWebsiteBackupOperationService({
-    registry,
+    registry, jobRegistry: jobs,
+    websiteRegistry: { getWebsite: async id => ({ id, serverId }) },
+    resticRepositoryRegistry: { getRepository: async id => ({ id, serverId }) },
+    authorizeActor: async value => value, siteMutationLock: { withSiteLock: async (_identity, action) => action() },
     websiteBackupService: mockBackupService,
     websiteRestoreService: mockRestoreService,
   });
@@ -387,6 +393,11 @@ function websiteFixture() {
     mockRestoreService,
     registry,
     operationService,
+    executeNext: async () => {
+      const { job, envelope } = await jobs.claimNext(serverId);
+      const result = await operationService.execute(envelope.payload, { jobId: job.id, serverId, resourceType: 'backup', resourceId: job.resourceId });
+      await jobs.complete({ serverId, jobId: job.id, status: 'succeeded', result });
+    },
     routes,
   };
 }
@@ -412,6 +423,7 @@ test('website backup durable queue route enforces owner permission and exact typ
   // Verify typed confirmation mismatch is rejected
   await assert.rejects(
     async () => fixture.operationService.queueBackup({
+      actor: websiteActor,
       websiteId: fixture.targetWebsiteId,
       repositoryId: fixture.targetRepoId,
       expectedPreviewDigest: fixture.backupDigest,
@@ -423,6 +435,7 @@ test('website backup durable queue route enforces owner permission and exact typ
   // Verify stale preview digest is rejected
   await assert.rejects(
     async () => fixture.operationService.queueBackup({
+      actor: websiteActor,
       websiteId: fixture.targetWebsiteId,
       repositoryId: fixture.targetRepoId,
       expectedPreviewDigest: '0'.repeat(64),
@@ -440,7 +453,7 @@ test('website backup durable queue route enforces owner permission and exact typ
     confirmation: fixture.mockBackupPreview.confirmation,
   }, {
     params: { websiteId: fixture.targetWebsiteId },
-    auth: { user: { role: 'owner', id: 'owner-1' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } },
+    auth: { id: websiteActor.sessionId, user: { role: 'owner', id: websiteActor.userId }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } },
   });
 
   assert.equal(forwarded, null);
@@ -464,14 +477,14 @@ test('website backup same-job result flow tracks progress and rejects concurrent
     confirmation: fixture.mockBackupPreview.confirmation,
   }, {
     params: { websiteId: fixture.targetWebsiteId },
-    auth: { user: { role: 'owner', id: 'owner-1' } },
+    auth: { id: websiteActor.sessionId, user: { role: 'owner', id: websiteActor.userId } },
   });
   const operationId = response.body.data.id;
 
   // Poll same job via getRoute
   const pollResult = await invoke(getRoute.handlers[1], {}, {
     params: { websiteId: fixture.targetWebsiteId, operationId },
-    auth: { user: { role: 'owner', id: 'owner-1' } },
+    auth: { id: websiteActor.sessionId, user: { role: 'owner', id: websiteActor.userId } },
   });
   assert.equal(pollResult.forwarded, null);
   assert.equal(pollResult.response.statusCode, 200);
@@ -483,6 +496,7 @@ test('website backup same-job result flow tracks progress and rejects concurrent
   await fixture.registry.updateOperation(operationId, { status: 'running' });
   await assert.rejects(
     async () => fixture.operationService.queueBackup({
+      actor: { ...websiteActor, sessionId: '33333333-3333-4333-8333-333333333333' },
       websiteId: fixture.targetWebsiteId,
       repositoryId: fixture.targetRepoId,
       expectedPreviewDigest: fixture.backupDigest,
@@ -497,6 +511,7 @@ test('website restore durable queue route supports health check rollback', async
   fixture.mockRestoreService.healthSatisfied = false; // Trigger unhealthy rollback
 
   const op = await fixture.operationService.queueRestore({
+    actor: websiteActor,
     websiteId: fixture.targetWebsiteId,
     repositoryId: fixture.targetRepoId,
     snapshotId: fixture.targetSnapshotId,
@@ -508,7 +523,7 @@ test('website restore durable queue route supports health check rollback', async
   assert.equal(op.websiteId, fixture.targetWebsiteId);
   assert.equal(op.snapshotId, fixture.targetSnapshotId);
 
-  // Wait for background execution
+  await fixture.executeNext();
   let completed = await fixture.operationService.getOperation(op.id);
   for (let i = 0; i < 20 && (completed.status === 'queued' || completed.status === 'running'); i++) {
     await new Promise((resolve) => setTimeout(resolve, 25));
@@ -520,127 +535,34 @@ test('website restore durable queue route supports health check rollback', async
   assert.equal(completed.result.healthCheck.satisfied, false);
 });
 
-test('restart recovery reconciles interrupted restore operations using receipt store', async () => {
+test('legacy interrupted restore without a verified Website scope never reaches Restic', async () => {
   const registry = createWebsiteBackupOperationRegistry();
   const websiteId = '550e8400-e29b-41d4-a716-446655440000';
-  const repoId = '660e8400-e29b-41d4-a716-446655440001';
-  const snapId = '770e8400-e29b-41d4-a716-446655440002';
-  const previewDigest = 'c'.repeat(64);
-
-  // 1. Interrupted restore with succeeded receipt
-  const op1 = await registry.createOperation({
-    websiteId,
-    repositoryId: repoId,
-    kind: 'restore',
-    snapshotId: snapId,
-    previewDigest,
-    confirmation: `restore:${websiteId}:${snapId}:${previewDigest}`,
-  });
-  await registry.updateOperation(op1.id, { status: 'running', startedAt: '2026-09-30T00:00:00.000Z' });
-
-  const mockReceiptStore = {
-    async read(txId) {
-      if (txId === `restore:${websiteId}:${previewDigest.slice(0, 32)}`) {
-        return {
-          status: 'succeeded',
-          snapshotId: snapId,
-          preRestoreSnapshotId: 'pre-snap-123',
-          healthCheck: { satisfied: true, statusCode: 200 },
-          committedAt: '2026-09-30T00:01:00.000Z',
-        };
-      }
-      return null;
-    },
-  };
-
-  const reconciled = await registry.reconcileInterruptedOperations({
-    receiptStore: mockReceiptStore,
-  });
-
-  const recoveredOp1 = await registry.getOperation(op1.id);
-  assert.equal(recoveredOp1.status, 'succeeded');
-  assert.equal(recoveredOp1.restartEvidence.status, 'reconciled_from_receipt');
-  assert.equal(recoveredOp1.restartEvidence.receiptStatus, 'succeeded');
-  assert.equal(recoveredOp1.result.preRestoreSnapshotId, 'pre-snap-123');
-
-  // 2. Interrupted restore with in-flight pre_restore_created receipt triggers automatic rollback
-  const op2 = await registry.createOperation({
-    websiteId,
-    repositoryId: repoId,
-    kind: 'restore',
-    snapshotId: snapId,
-    previewDigest: 'd'.repeat(64),
-    confirmation: `restore:${websiteId}:${snapId}:${'d'.repeat(64)}`,
-  });
-  await registry.updateOperation(op2.id, { status: 'running', startedAt: '2026-09-30T00:05:00.000Z' });
-
-  let rollbackRestoredSnapshot = null;
-  const mockResticManager = {
-    async restore({ repository, snapshotId }) {
-      rollbackRestoredSnapshot = snapshotId;
-      return { ok: true };
-    },
-  };
-  const mockRepoRegistry = {
-    async getRepository() { return { id: repoId, target: '/var/lib/restic-repo' }; },
-    async revealPassword() { return 'secret-password'; },
-  };
-  const inFlightReceiptStore = {
-    async read() {
-      return {
-        status: 'pre_restore_created',
-        snapshotId: snapId,
-        preRestoreSnapshotId: 'pre-snap-rollback-target',
-      };
-    },
-    async write() {},
-  };
-
-  await registry.reconcileInterruptedOperations({
-    receiptStore: inFlightReceiptStore,
-    resticManager: mockResticManager,
-    resticRepositoryRegistry: mockRepoRegistry,
-  });
-
-  const recoveredOp2 = await registry.getOperation(op2.id);
-  assert.equal(recoveredOp2.status, 'rolled_back');
-  assert.equal(recoveredOp2.restartEvidence.status, 'recovered_via_rollback');
-  assert.equal(rollbackRestoredSnapshot, 'pre-snap-rollback-target');
+  const repositoryId = '660e8400-e29b-41d4-a716-446655440001';
+  const operation = await registry.createOperation({ websiteId, repositoryId, kind: 'restore', snapshotId: 'snapshot-owned', previewDigest: 'c'.repeat(64), confirmation: 'restore-confirm' });
+  await registry.updateOperation(operation.id, { status: 'running' });
+  let mutations = 0;
+  await assert.rejects(registry.reconcileInterruptedOperations({ resticManager: { restore: async () => { mutations++; } } }), error => error.code === 'website_backup_recovery_scope_unavailable');
+  assert.equal(mutations, 0);
+  assert.equal((await registry.getOperation(operation.id)).status, 'running');
 });
 
-test('restart recovery reconciles interrupted backup operations from restic snapshots', async () => {
+test('an adjacent snapshot without the exact operation tag cannot complete an interrupted backup', async () => {
   const registry = createWebsiteBackupOperationRegistry();
   const websiteId = '550e8400-e29b-41d4-a716-446655440000';
-  const repoId = '660e8400-e29b-41d4-a716-446655440001';
-
-  const op = await registry.createOperation({
-    websiteId,
-    repositoryId: repoId,
-    kind: 'backup',
-    previewDigest: 'e'.repeat(64),
-    confirmation: `backup:${websiteId}:${repoId}:${'e'.repeat(64)}`,
-  });
-  await registry.updateOperation(op.id, { status: 'running', startedAt: '2026-09-30T02:00:00.000Z' });
-
-  const mockResticManager = {
-    async listSnapshots() {
-      return [{ id: 'snap-reconciled-789', time: '2026-09-30T02:00:05.000Z' }];
-    },
-  };
-  const mockRepoRegistry = {
-    async getRepository() { return { id: repoId, target: '/var/lib/restic-repo' }; },
-    async revealPassword() { return 'secret-password'; },
-  };
-
+  const repositoryId = '660e8400-e29b-41d4-a716-446655440001';
+  const operation = await registry.createOperation({ websiteId, serverId, repositoryId, kind: 'backup', previewDigest: 'e'.repeat(64), confirmation: 'backup-confirm' });
+  await registry.updateOperation(operation.id, { status: 'running', startedAt: new Date().toISOString() });
   await registry.reconcileInterruptedOperations({
-    resticManager: mockResticManager,
-    resticRepositoryRegistry: mockRepoRegistry,
+    websiteRegistry: { getWebsite: async () => ({ id: websiteId, serverId }) },
+    websiteBackupSetProvider: { getWebsiteBackupSet: async () => ({ targetPaths: ['/owned/site'] }) },
+    siteMutationLock: { withSiteLock: async (_identity, action) => action() },
+    resticManager: { listSnapshots: async () => [{ id: 'adjacent-snapshot', time: new Date().toISOString(), tags: [`website:${websiteId}`] }] },
+    resticRepositoryRegistry: { getRepository: async () => ({ serverId, target: '/owned/repository' }), revealPassword: async () => 'fixture-private-repository-password' },
   });
-
-  const recovered = await registry.getOperation(op.id);
-  assert.equal(recovered.status, 'succeeded');
-  assert.equal(recovered.snapshotId, 'snap-reconciled-789');
-  assert.equal(recovered.restartEvidence.status, 'reconciled_from_snapshot');
+  const recovered = await registry.getOperation(operation.id);
+  assert.equal(recovered.status, 'failed'); assert.equal(recovered.snapshotId, null);
+  assert.equal(recovered.error.code, 'interrupted_by_restart');
 });
 
 test('operation public view strips repository target and private filesystem paths', () => {

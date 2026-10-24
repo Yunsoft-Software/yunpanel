@@ -8,7 +8,7 @@ import { databaseManagerInternals } from './database-manager.js';
 const CLIENT_PATHS = Object.freeze(['/usr/bin/mariadb', '/usr/bin/mysql']);
 const DATABASE_NAME_PATTERN = /^[A-Za-z0-9_]{1,64}$/;
 const USERNAME_PATTERN = /^ydb_[a-f0-9]{24}$/;
-const PASSWORD_PATTERN = /^[A-Za-z0-9_-]{43}$/;
+const PASSWORD_PATTERN = /^[A-Za-z0-9_!@#%^*+=.:,-]{16,128}$/;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ALLOWED_PRIVILEGES = Object.freeze([

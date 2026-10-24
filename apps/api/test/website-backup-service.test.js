@@ -33,6 +33,7 @@ function fixture({
   dumpFails = false,
   composePauseFails = false,
   snapshotFails = false,
+  nginxReadFails = false,
   overrideBackupSet = {},
 } = {}) {
   const calls = {
@@ -107,6 +108,9 @@ function fixture({
   };
 
   const service = createWebsiteBackupService({
+    environmentBackupAdapter: { capture: async set => {
+      calls.writeFile.push({ filePath: set.env.stagedMetadataPath, content: 'protected fixture catalog' });
+    } },
     websiteRegistry: {
       async getWebsite(id) {
         return id === websiteId ? website : null;
@@ -165,6 +169,7 @@ function fixture({
     },
     readFileFn: async (filePath) => {
       calls.readFile.push(filePath);
+      if (nginxReadFails) throw Object.assign(new Error('Private filesystem detail'), { code: 'ENOENT' });
       return 'server { listen 80; }';
     },
     rmFn: async (targetPath, opts) => {
@@ -174,6 +179,13 @@ function fixture({
 
   return { service, calls, website, repository, backupSet };
 }
+
+test('missing Nginx content fails before creating a successful-looking snapshot and withholds private filesystem details', async () => {
+  const { service, calls } = fixture({ nginxReadFails: true });
+  await assert.rejects(service.executeBackup({ websiteId, repositoryId }), error =>
+    error.code === 'backup_nginx_config_unavailable' && !error.message.includes('Private filesystem detail'));
+  assert.equal(calls.createSnapshot.length, 0);
+});
 
 test('createWebsiteBackupService validation', () => {
   assert.throws(

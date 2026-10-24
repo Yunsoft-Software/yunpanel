@@ -5,13 +5,23 @@ import {
   phpMyAdminFpmTemplatePolicy,
   phpMyAdminNginxTemplatePolicy,
   phpMyAdminSignonTemplatePolicy,
+  previewPhpMyAdminFpmPool, previewPhpMyAdminNginxConfig, previewPhpMyAdminSignonBridge, previewPhpMyAdminSignonConfig,
 } from '@yunpanel/config-templates';
 import {
   createPhpMyAdminConfigActivator,
   PhpMyAdminConfigActivationError,
+  phpMyAdminConfigActivatorInternals,
 } from '../src/phpmyadmin-config-activator.js';
 
 const TX = '12345678-1234-4234-8234-123456789012';
+
+test('the activator accepts actual current template metadata and refuses a foreign gateway-session cookie policy', () => {
+  const preview = { version: 1, fpm: previewPhpMyAdminFpmPool(), nginx: previewPhpMyAdminNginxConfig(),
+    signonConfig: previewPhpMyAdminSignonConfig(), signonBridge: previewPhpMyAdminSignonBridge() };
+  assert.equal(phpMyAdminConfigActivatorInternals.validatePreview(preview), preview);
+  assert.throws(() => phpMyAdminConfigActivatorInternals.validatePreview({ ...preview,
+    signonBridge: { ...preview.signonBridge, gatewaySessionCookie: 'ForeignGatewayCookie' } }), { code: 'phpmyadmin_activation_preview_invalid' });
+});
 const FPM = Buffer.from('[yunpanel-phpmyadmin]\nlisten = /run/php/yunpanel-phpmyadmin.sock\n');
 const NGINX = Buffer.from('server { listen unix:/run/yunpanel/phpmyadmin-http.sock; }\n');
 const SIGNON_CONFIG = Buffer.from("<?php $cfg['Servers'][$i]['auth_type'] = 'signon';\n");
@@ -78,6 +88,7 @@ function preview() {
       gatewayBasePath: phpMyAdminSignonTemplatePolicy.gatewayBasePath,
     },
     signonBridge: {
+      gatewaySessionCookie: phpMyAdminSignonTemplatePolicy.gatewaySessionCookie,
       version: 1,
       sha256: SIGNON_BRIDGE_SHA,
       artifact: {
