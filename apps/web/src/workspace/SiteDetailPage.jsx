@@ -120,6 +120,7 @@ function SiteWorkspace({ websiteId, tab }) {
   const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python', static: 'Statik site', docker: 'Docker / Proxy' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
+    ['hosting', 'Web Sunucusu & Nginx', 'settings'], ['domains', 'Alan Adları & Yönlendirme', 'globe'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
     ['php', 'PHP Ayarları', 'code'], ['wordpress', 'WordPress', 'code'],
     ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : 'Uygulama', 'code'],
@@ -131,6 +132,8 @@ function SiteWorkspace({ websiteId, tab }) {
   const toolSubtitles = {
     files: 'Dizinler ve kod editörü',
     databases: 'MariaDB & phpMyAdmin',
+    hosting: 'Nginx, CORS, önbellek ve proxy kuralları',
+    domains: 'Alt alan adları, alias ve yayına alma',
     ssl: 'Let’s Encrypt & HTTPS',
     php: 'PHP-FPM sürüm ve limitler',
     wordpress: 'WP-CLI ve kurulum',
@@ -146,7 +149,7 @@ function SiteWorkspace({ websiteId, tab }) {
   };
   const toolCategories = [
     ['Dosyalar, Veritabanı ve Uygulama', ['files', 'databases', 'php', 'wordpress', 'node', 'deploy']],
-    ['Alan Adı, Güvenlik ve E-posta', ['ssl', 'dns', 'mail']],
+    ['Alan Adı, Güvenlik ve E-posta', ['hosting', 'domains', 'ssl', 'dns', 'mail']],
     ['İzleme, Yedekleme ve Sistem', ['logs', 'analytics', 'backup', 'cron', 'access']],
   ];
   const toolLinks = (items) => (

@@ -1,6 +1,55 @@
 import { useId } from 'react';
 import { Button } from './PanelKit.jsx';
 
+export const NGINX_HEADER_PRESETS = {
+  cors: [
+    { name: 'Access-Control-Allow-Origin', value: '*', always: true },
+    { name: 'Access-Control-Allow-Methods', value: 'GET, POST, PUT, PATCH, DELETE, OPTIONS', always: true },
+    { name: 'Access-Control-Allow-Headers', value: 'Content-Type, Authorization, X-Requested-With', always: true },
+  ],
+  security: [
+    { name: 'X-Frame-Options', value: 'SAMEORIGIN', always: true },
+    { name: 'X-Content-Type-Options', value: 'nosniff', always: true },
+    { name: 'Referrer-Policy', value: 'strict-origin-when-cross-origin', always: true },
+    { name: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()', always: true },
+  ],
+  no_cache: [
+    { name: 'Cache-Control', value: 'no-store, no-cache, must-revalidate', always: true },
+  ],
+  immutable_cache: [
+    { name: 'Cache-Control', value: 'public, max-age=31536000, immutable', always: true },
+  ],
+};
+
+export const STATIC_CACHE_PRESETS = [
+  ['1 Saat (3600s)', 3600],
+  ['1 Gün (86400s)', 86400],
+  ['30 Gün (2592000s)', 2592000],
+  ['1 Yıl (31536000s)', 31536000],
+];
+
+export function applyNginxHeaderPreset(existingHeaders = [], presetKey) {
+  const base = Array.isArray(existingHeaders)
+    ? existingHeaders.slice(0, 12).map(item => ({
+        name: String(item?.name ?? ''),
+        value: String(item?.value ?? ''),
+        always: item?.always !== false,
+      }))
+    : [];
+  const additions = NGINX_HEADER_PRESETS[presetKey] ?? [];
+  const next = [...base];
+  for (const candidate of additions) {
+    if (next.length >= 12) break;
+    const exists = next.some(
+      item => item.name.trim().toLowerCase() === candidate.name.toLowerCase(),
+    );
+    if (!exists) {
+      next.push({ ...candidate });
+    }
+  }
+  return next;
+}
+
 export default function NginxSettingsFields({ targetType, settings, disabled, onChange, domainNames = [] }) {
   const hint = useId();
   const change = (key, value) => onChange({ ...settings, [key]: value });
@@ -39,7 +88,12 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
       onChange={event => change('websocket', event.target.checked)} />WebSocket bağlantılarına izin ver</label>}
     {targetType === 'static' && <><label className="ws-check"><input type="checkbox" checked={settings.spaFallback}
       onChange={event => change('spaFallback', event.target.checked)} />Bulunamayan sayfalarda index.html kullan</label>
-      <p className="ws-field-hint">Tek sayfa uygulamalarının bağlantıları için açın. Kapalıysa bulunamayan dosyalar 404 döner. Önbellekte 0, tarayıcıda saklamayı kapatır.</p></>}
+      <p className="ws-field-hint">Tek sayfa uygulamalarının bağlantıları için açın. Kapalıysa bulunamayan dosyalar 404 döner. Önbellekte 0, tarayıcıda saklamayı kapatır.</p>
+      <div className="ws-actions" role="group" aria-label="Statik önbellek hızlı seçimleri">
+        {STATIC_CACHE_PRESETS.map(([label, seconds]) => (
+          <Button key={seconds} disabled={disabled} onClick={() => change('staticAssetCacheSeconds', seconds)}>{label}</Button>
+        ))}
+      </div></>}
     {['php', 'static'].includes(targetType) && <details>
       <summary>Özel hata sayfaları</summary>
       <p className="ws-field-hint">HTML dosyasını Dosya Yöneticisi ile siteye yükleyin. Örneğin /hatalar/404.html. Boş alan sunucunun varsayılanını kullanır; hata durum kodu korunur.</p>
@@ -62,6 +116,11 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
           <Button onClick={() => change('headers', settings.headers.filter((_, at) => at !== index))}>Başlık {index + 1} kaldır</Button></div>
       </div>)}
       <Button disabled={disabled || settings.headers.length >= 12} onClick={() => change('headers', [...settings.headers, { name: '', value: '', always: true }])}>Yanıt başlığı ekle</Button>
+      <div className="ws-actions" role="group" aria-label="JAMstack ve güvenlik başlığı ön-ayarları">
+        <Button disabled={disabled || settings.headers.length >= 12} onClick={() => change('headers', applyNginxHeaderPreset(settings.headers, 'cors'))}>CORS Başlıkları Ekle</Button>
+        <Button disabled={disabled || settings.headers.length >= 12} onClick={() => change('headers', applyNginxHeaderPreset(settings.headers, 'security'))}>Güvenlik Başlıkları (HSTS/XSS) Ekle</Button>
+        <Button disabled={disabled || settings.headers.length >= 12} onClick={() => change('headers', applyNginxHeaderPreset(settings.headers, 'immutable_cache'))}>Immutable Cache Başlığı Ekle</Button>
+      </div>
     </fieldset>
   </fieldset>;
 }

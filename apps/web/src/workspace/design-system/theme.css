@@ -1124,3 +1124,93 @@ html .workspace-shell .ws-db-access .ws-button {
   white-space: nowrap !important;
 }
 
+/* aaPanel-Style Notification & Task Center Drawer + JAMstack & Easypanel Presets */
+html .workspace-shell .yp-notification-backdrop {
+  position: fixed !important;
+  inset: 0 !important;
+  z-index: 80 !important;
+  background: rgba(9, 9, 11, 0.58) !important;
+  backdrop-filter: blur(4px) !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+}
+
+html .workspace-shell .yp-notification-drawer {
+  width: min(520px, 94vw) !important;
+  height: 100vh !important;
+  background: var(--ws-surface) !important;
+  border-left: 1px solid var(--ws-border-strong) !important;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.45) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+}
+
+html .workspace-shell .yp-notification-header {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 16px 20px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-raised) !important;
+}
+
+html .workspace-shell .yp-notification-tabs {
+  display: flex !important;
+  gap: 6px !important;
+  padding: 10px 20px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-subtle) !important;
+}
+
+html .workspace-shell .yp-notification-body {
+  flex: 1 1 auto !important;
+  overflow-y: auto !important;
+  padding: 16px 20px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 10px !important;
+}
+
+html .workspace-shell .yp-notification-item {
+  display: flex !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 12px !important;
+  padding: 12px 14px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-surface-raised) !important;
+}
+
+html .workspace-shell .yp-category-pills,
+html .workspace-shell .yp-preset-grid {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  margin-bottom: 12px !important;
+}
+
+html .workspace-shell .yp-preset-card {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 8px !important;
+  padding: 8px 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-ink) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+  transition: border-color 140ms ease, background-color 140ms ease !important;
+}
+
+html .workspace-shell .yp-preset-card:hover,
+html .workspace-shell .yp-preset-card.is-active {
+  border-color: var(--ws-brand) !important;
+  background: var(--ws-brand-soft) !important;
+}
+
+

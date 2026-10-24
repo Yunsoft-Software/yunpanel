@@ -4,10 +4,12 @@ import {
   createDockerProject,
   generateDockerComposeFromImage,
   getDockerCatalog,
+  prepareOneClickApp,
   validateDockerProject,
 } from './docker-compose-client.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import {
+  Badge,
   Button,
   DEFAULT_DOCKER_STACK_TEMPLATES,
   DockerHubCatalogPicker,
@@ -29,7 +31,7 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
       })
     : null;
   const [projectName, setProjectName] = useState(
-    initialGenerated ? `${initialGenerated.serviceName}_stack` : '',
+    initialTemplate?.projectName || (initialGenerated ? `${initialGenerated.serviceName}_stack` : ''),
   );
   const [document, setDocument] = useState(
     initialTemplate?.defaultComposeDocument
@@ -38,6 +40,8 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
   const [selectedImage, setSelectedImage] = useState(startPreset.image);
   const [targetPort, setTargetPort] = useState(startPreset.targetPort ?? startPreset.innerPort ?? 80);
   const [publishedPort, setPublishedPort] = useState(startPreset.publishedPort ?? startPreset.outerPort ?? 18080);
+  const [generatedSecretsCount, setGeneratedSecretsCount] = useState(initialTemplate?.generatedSecretsCount ?? 0);
+  const [proxyPreview, setProxyPreview] = useState(initialTemplate?.proxyPreview ?? null);
   const [hubSearchQuery, setHubSearchQuery] = useState('');
   const [hubCatalog, setHubCatalog] = useState(DEFAULT_DOCKER_STACK_TEMPLATES);
   const [hubSearching, setHubSearching] = useState(false);
@@ -45,6 +49,26 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const pending = useRef(false);
+
+  async function refreshOneClickSecrets() {
+    if (!initialTemplate?.id) return;
+    setError(null);
+    try {
+      const prepared = await prepareOneClickApp({
+        templateId: initialTemplate.id,
+        projectName: projectName || undefined,
+        innerPort: targetPort,
+        outerPort: publishedPort,
+      });
+      if (prepared?.document) setDocument(prepared.document);
+      if (!projectName && prepared?.projectName) setProjectName(prepared.projectName);
+      setGeneratedSecretsCount(prepared?.generatedSecretsCount ?? 0);
+      setProxyPreview(prepared?.proxyPreview ?? null);
+      setValidation(null);
+    } catch (failure) {
+      setError(failure.message);
+    }
+  }
 
   useEffect(() => {
     const controller = new AbortController();
@@ -144,7 +168,7 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
     } finally { pending.current = false; setBusy(false); }
   }
 
-  return <Modal title="Docker Compose projesi ekle" onClose={onClose} busy={busy} wide><form onSubmit={create} className="ws-form"><ErrorNotice error={error} />{!server && <div className="ws-notice ws-notice-warn" role="alert">Yerel sunucu kimliği hazır olmadan Compose projesi oluşturulamaz.</div>}<fieldset disabled={busy || !server}><DockerHubCatalogPicker catalog={hubCatalog} selectedImage={selectedImage} targetPort={targetPort} publishedPort={publishedPort} searchQuery={hubSearchQuery} searching={hubSearching} onSearchQueryChange={setHubSearchQuery} onSelectImage={handleSelectImage} onChangeTargetPort={setTargetPort} onChangePublishedPort={setPublishedPort} onApplyTemplate={applyQuickTemplate} disabled={busy || !server} /><div className="ws-form-grid"><label>Proje adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label><label>.yml Dosyası Seç / Yükle<input type="file" accept=".yml,.yaml" aria-label=".yml Dosyası Seç / Yükle" onChange={handleYamlFileUpload} /></label></div><label>Compose document<textarea rows={18} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>{validation && <KeyValues items={[
+  return <Modal title="Docker Compose projesi ekle" onClose={onClose} busy={busy} wide><form onSubmit={create} className="ws-form"><ErrorNotice error={error} />{!server && <div className="ws-notice ws-notice-warn" role="alert">Yerel sunucu kimliği hazır olmadan Compose projesi oluşturulamaz.</div>}<fieldset disabled={busy || !server}>{initialTemplate?.oneClick && <div className="ws-notice" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px' }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}><Badge state="active">Tek Tıkla Kur (Easypanel)</Badge><span className="yp-port-mapping-badge">Otomatik Secret & Volume ({generatedSecretsCount} secret üretildi)</span>{proxyPreview?.upstreamUrl && <span className="yp-port-mapping-badge">Proxy Hedefi: {proxyPreview.upstreamUrl}</span>}</div><Button onClick={refreshOneClickSecrets} disabled={busy}>Secret'ları Yeniden Üret</Button></div>}<DockerHubCatalogPicker catalog={hubCatalog} selectedImage={selectedImage} targetPort={targetPort} publishedPort={publishedPort} searchQuery={hubSearchQuery} searching={hubSearching} onSearchQueryChange={setHubSearchQuery} onSelectImage={handleSelectImage} onChangeTargetPort={setTargetPort} onChangePublishedPort={setPublishedPort} onApplyTemplate={applyQuickTemplate} disabled={busy || !server} /><div className="ws-form-grid"><label>Proje adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label><label>.yml Dosyası Seç / Yükle<input type="file" accept=".yml,.yaml" aria-label=".yml Dosyası Seç / Yükle" onChange={handleYamlFileUpload} /></label></div><label>Compose document<textarea rows={18} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>{validation && <KeyValues items={[
     ['Servis', validation.serviceCount], ['Network', validation.networks?.length ?? 0], ['Volume', validation.volumes?.length ?? 0], ['Secret', validation.secretCount], ['Config', validation.configCount], ['Yan etki', validation.sideEffects === false ? 'Yok' : 'Bilinmiyor'],
   ]} />}<footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button disabled={busy || !server || !projectName || !document} onClick={validate}>Validate</Button><Button variant="primary" type="submit" disabled={busy || !server || !projectName || !document}>{busy ? 'İşleniyor…' : 'Projeyi kaydet'}</Button></footer></fieldset></form></Modal>;
 }

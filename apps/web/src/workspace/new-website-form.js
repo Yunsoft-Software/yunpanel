@@ -3,6 +3,141 @@ const EXISTING_APPLICATION_TYPES = Object.freeze({
   existing_static: 'static',
 });
 
+export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
+  Object.freeze({
+    id: 'nextjs',
+    label: 'Next.js (App Router / SSR)',
+    category: 'JAMstack / SSR',
+    sourceMode: 'new_node',
+    entryFile: 'server.js',
+    outputDir: '.next',
+    healthPath: '/api/health',
+    defaultPort: 3000,
+    buildCommand: 'npm run build',
+    startCommand: 'npm run start',
+  }),
+  Object.freeze({
+    id: 'astro',
+    label: 'Astro (Static / Hybrid)',
+    category: 'JAMstack / Static',
+    sourceMode: 'new_static',
+    entryFile: 'dist/server/entry.mjs',
+    outputDir: 'dist',
+    healthPath: '/',
+    defaultPort: 4321,
+    buildCommand: 'npm run build',
+    startCommand: 'npm run preview',
+  }),
+  Object.freeze({
+    id: 'vite_spa',
+    label: 'Vite / React / Vue SPA',
+    category: 'JAMstack / Static',
+    sourceMode: 'new_static',
+    entryFile: 'index.html',
+    outputDir: 'dist',
+    healthPath: '/',
+    defaultPort: 5173,
+    buildCommand: 'npm run build',
+    startCommand: '',
+  }),
+  Object.freeze({
+    id: 'nuxt',
+    label: 'Nuxt 3 (SSR / Nitro)',
+    category: 'JAMstack / SSR',
+    sourceMode: 'new_node',
+    entryFile: '.output/server/index.mjs',
+    outputDir: '.output/public',
+    healthPath: '/',
+    defaultPort: 3000,
+    buildCommand: 'npm run build',
+    startCommand: 'node .output/server/index.mjs',
+  }),
+  Object.freeze({
+    id: 'remix',
+    label: 'Remix / React Router v7',
+    category: 'JAMstack / SSR',
+    sourceMode: 'new_node',
+    entryFile: 'build/server/index.js',
+    outputDir: 'build/client',
+    healthPath: '/',
+    defaultPort: 3000,
+    buildCommand: 'npm run build',
+    startCommand: 'npm run start',
+  }),
+  Object.freeze({
+    id: 'node_api',
+    label: 'Node.js API (Express / Fastify / Nest)',
+    category: 'Backend API',
+    sourceMode: 'new_node',
+    entryFile: 'server.js',
+    outputDir: 'dist',
+    healthPath: '/health',
+    defaultPort: 4000,
+    buildCommand: 'npm run build',
+    startCommand: 'node server.js',
+  }),
+  Object.freeze({
+    id: 'python_api',
+    label: 'Python (FastAPI / Django / Flask)',
+    category: 'Backend API',
+    sourceMode: 'new_python',
+    entryFile: 'app.py',
+    outputDir: 'static',
+    healthPath: '/health',
+    defaultPort: 8000,
+    buildCommand: 'pip install -r requirements.txt',
+    startCommand: 'uvicorn app:app',
+  }),
+  Object.freeze({
+    id: 'docker_stack',
+    label: 'Docker / Easypanel Stack Proxy',
+    category: 'Container',
+    sourceMode: 'docker_compose',
+    entryFile: '',
+    outputDir: '',
+    healthPath: '/',
+    defaultPort: 8080,
+    buildCommand: 'docker compose up -d',
+    startCommand: '',
+  }),
+  Object.freeze({
+    id: 'php_wordpress',
+    label: 'PHP-FPM / WordPress / Laravel',
+    category: 'PHP',
+    sourceMode: 'new_php',
+    entryFile: 'index.php',
+    outputDir: 'public',
+    healthPath: '/',
+    defaultPort: 9000,
+    buildCommand: 'composer install',
+    startCommand: '',
+  }),
+]);
+
+export function applyFrameworkPresetToForm(form = {}, presetId) {
+  const base = form && typeof form === 'object' ? form : {};
+  const preset = JAMSTACK_FRAMEWORK_PRESETS.find((item) => item.id === presetId);
+  if (!preset) {
+    throw new Error(`Geçersiz framework şablonu: ${String(presetId ?? '')}`);
+  }
+  return {
+    ...base,
+    frameworkPreset: preset.id,
+    sourceMode: preset.sourceMode,
+    entryFile: preset.entryFile,
+    outputDir: preset.outputDir,
+    healthPath: preset.healthPath,
+    defaultPort: preset.defaultPort,
+    buildCommand: preset.buildCommand,
+    startCommand: preset.startCommand,
+    ...(preset.sourceMode === 'docker_compose'
+      ? { dockerTargetPort: String(preset.defaultPort) }
+      : {}),
+    applicationId: '',
+    websiteId: '',
+  };
+}
+
 function requiredText(value, message) {
   if (typeof value !== 'string' || !value.trim()) throw new Error(message);
   return value.trim();
@@ -131,6 +266,21 @@ function sourceFromForm(form, selectedApplication) {
       },
     };
   }
+  if (form.sourceMode === 'new_python') {
+    return {
+      kind: 'new_python',
+      repositoryUrl: requiredText(form.repositoryUrl, 'GitHub repository adresini girin.'),
+      branch: requiredText(form.branch, 'Git branch bilgisini girin.'),
+      retention: 5,
+      runtime: {
+        pythonVersion: '3.12',
+        entryFile: requiredText(form.entryFile, 'Python başlangıç dosyasını girin.'),
+        healthPath: requiredText(form.healthPath, 'Sağlık kontrolü yolunu girin.'),
+        healthTimeoutSeconds: 30,
+        restartPolicy: 'on-failure',
+      },
+    };
+  }
   if (form.sourceMode === 'new_php') return { kind: 'new_php' };
   if (form.sourceMode === 'new_static_upload') return { kind: 'new_static' };
   if (existingApplicationType(form.sourceMode)) {
@@ -145,6 +295,25 @@ function sourceFromForm(form, selectedApplication) {
       throw new Error('Yerel proxy portu 1024–65535 aralığında olmalıdır.');
     }
     return { kind: 'external_proxy', target: { host: '127.0.0.1', port, websocket: true } };
+  }
+  if (form.sourceMode === 'docker_compose') {
+    const projectId = (typeof form.dockerProjectId === 'string' && form.dockerProjectId.trim())
+      ? form.dockerProjectId.trim()
+      : 'easypanel-stack';
+    const serviceName = (typeof form.dockerServiceName === 'string' && form.dockerServiceName.trim())
+      ? form.dockerServiceName.trim()
+      : 'web';
+    const targetPort = Number(form.dockerTargetPort ?? form.defaultPort ?? 8080);
+    if (!Number.isInteger(targetPort) || targetPort < 1 || targetPort > 65535) {
+      throw new Error('Docker container iç portu (targetPort) 1–65535 aralığında olmalıdır.');
+    }
+    return {
+      kind: 'existing_managed_compose',
+      projectId,
+      serviceName,
+      targetPort,
+      protocol: 'tcp',
+    };
   }
   if (form.sourceMode === 'existing_managed_compose') {
     const projectId = requiredText(form.dockerProjectId, 'Docker Compose projesini seçin.');
@@ -190,7 +359,7 @@ export function siteCreateInputFromForm({ form, operationId, serverId, domain, s
   }
   const source = sourceFromForm(form, selectedApplication);
   if (form.initialDatabase === true && ![
-    'existing_application', 'new_static', 'new_node', 'new_php',
+    'existing_application', 'new_static', 'new_node', 'new_php', 'new_python',
   ].includes(source.kind)) {
     throw new Error('Başlangıç veritabanı yalnız yönetilen Application Website için oluşturulabilir.');
   }

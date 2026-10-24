@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 
 const PROJECT_NAME_PATTERN = /^[a-z0-9][a-z0-9_-]{0,62}$/;
@@ -221,7 +222,10 @@ const RAW_CATALOG = [
 
 function yamlScalar(value) {
   const text = String(value ?? '');
-  if (/^[A-Za-z0-9_./:@-]+$/.test(text) && !/^(?:true|false|null|yes|no|on|off|\d+)$/i.test(text)) {
+  if (
+    /^[A-Za-z0-9_./:@-]+$/.test(text)
+    && !/^(?:true|false|null|yes|no|on|off|\d+|\d+[eE][+-]?\d+)$/i.test(text)
+  ) {
     return text;
   }
   return JSON.stringify(text);
@@ -348,10 +352,12 @@ export function generateComposeFromCatalogInput({
 
   let resolvedImage = catalogMatch ? catalogMatch.image : trimmedImage;
   let resolvedTag = tag;
-  if (resolvedImage.includes(':') && !resolvedTag) {
+  if (resolvedImage.includes(':')) {
     const [imgPart, tagPart] = resolvedImage.split(':', 2);
     resolvedImage = imgPart;
-    resolvedTag = tagPart;
+    if (!resolvedTag) {
+      resolvedTag = tagPart;
+    }
   }
   if (!IMAGE_NAME_PATTERN.test(resolvedImage)) {
     throw new DockerPleskCatalogError('invalid_image', 'Docker image reference is invalid');
@@ -828,5 +834,587 @@ export async function resolveDockerProxyRule(
     upstreamPort: resolvedOuterPort,
     websocket: true,
     protocol: 'tcp',
+  });
+}
+
+const RAW_EASYPANEL_ONE_CLICK_APPS = [
+  {
+    id: 'pocketbase',
+    name: 'PocketBase',
+    description: 'JAMstack Backend-in-a-file: Auth, Realtime DB, File Storage ve REST API.',
+    category: 'jamstack_baas',
+    categoryLabel: 'JAMstack & BaaS',
+    kind: 'stack',
+    image: 'ghcr.io/muchobien/pocketbase:latest',
+    repository: 'ghcr.io/muchobien/pocketbase',
+    serviceName: 'pocketbase',
+    tags: ['latest', '0.22'],
+    defaultTag: 'latest',
+    innerPort: 8090,
+    outerPort: 18090,
+    volumes: [
+      { source: 'pocketbase_data', target: '/pb_data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'PB_ENCRYPTION_KEY', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'n8n',
+    name: 'n8n Workflow Automation',
+    description: 'Self-hosted workflow automation ve AI ajan orkestrasyon platformu.',
+    category: 'automation_ai',
+    categoryLabel: 'Otomasyon & AI',
+    kind: 'stack',
+    image: 'n8nio/n8n:latest',
+    repository: 'n8nio/n8n',
+    serviceName: 'n8n',
+    tags: ['latest', '1.60.0'],
+    defaultTag: 'latest',
+    innerPort: 5678,
+    outerPort: 15678,
+    volumes: [
+      { source: 'n8n_data', target: '/home/node/.n8n', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'N8N_PORT', defaultValue: '5678', secret: false },
+      { key: 'GENERIC_TIMEZONE', defaultValue: 'Europe/Istanbul', secret: false },
+      { key: 'N8N_ENCRYPTION_KEY', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'directus',
+    name: 'Directus Headless CMS',
+    description: 'SQL veritabanları için anında REST + GraphQL API üreten modern Headless CMS.',
+    category: 'headless_cms',
+    categoryLabel: 'Headless CMS',
+    kind: 'stack',
+    image: 'directus/directus:11',
+    repository: 'directus/directus',
+    serviceName: 'directus',
+    tags: ['11', 'latest'],
+    defaultTag: '11',
+    innerPort: 8055,
+    outerPort: 18055,
+    volumes: [
+      { source: 'directus_uploads', target: '/directus/uploads', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'KEY', defaultValue: 'change_me', secret: true },
+      { key: 'SECRET', defaultValue: 'change_me', secret: true },
+      { key: 'ADMIN_EMAIL', defaultValue: 'admin@example.com', secret: false },
+      { key: 'ADMIN_PASSWORD', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'strapi',
+    name: 'Strapi Headless CMS',
+    description: 'JAMstack siteler için açık kaynaklı Node.js Headless CMS ve içerik API motoru.',
+    category: 'headless_cms',
+    categoryLabel: 'Headless CMS',
+    kind: 'stack',
+    image: 'strapi/strapi:latest',
+    repository: 'strapi/strapi',
+    serviceName: 'strapi',
+    tags: ['latest'],
+    defaultTag: 'latest',
+    innerPort: 1337,
+    outerPort: 13370,
+    volumes: [
+      { source: 'strapi_app', target: '/srv/app', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'APP_KEYS', defaultValue: 'change_me', secret: true },
+      { key: 'API_TOKEN_SALT', defaultValue: 'change_me', secret: true },
+      { key: 'ADMIN_JWT_SECRET', defaultValue: 'change_me', secret: true },
+      { key: 'JWT_SECRET', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'umami',
+    name: 'Umami Web Analytics',
+    description: 'Gizlilik odaklı, çerezsiz Google Analytics alternatifi web analitik platformu.',
+    category: 'analytics_monitoring',
+    categoryLabel: 'İzleme & Analitik',
+    kind: 'stack',
+    image: 'ghcr.io/umami-software/umami:postgresql-latest',
+    repository: 'ghcr.io/umami-software/umami',
+    serviceName: 'umami',
+    tags: ['postgresql-latest', 'latest'],
+    defaultTag: 'postgresql-latest',
+    innerPort: 3000,
+    outerPort: 13005,
+    volumes: [
+      { source: 'umami_data', target: '/app/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'APP_SECRET', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'meilisearch',
+    name: 'Meilisearch',
+    description: 'JAMstack ve modern web uygulamaları için milisaniye hızında tam metin arama motoru.',
+    category: 'jamstack_baas',
+    categoryLabel: 'JAMstack & BaaS',
+    kind: 'stack',
+    image: 'getmeili/meilisearch:v1.11',
+    repository: 'getmeili/meilisearch',
+    serviceName: 'meilisearch',
+    tags: ['v1.11', 'latest'],
+    defaultTag: 'v1.11',
+    innerPort: 7700,
+    outerPort: 17700,
+    volumes: [
+      { source: 'meili_data', target: '/meili_data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'MEILI_ENV', defaultValue: 'production', secret: false },
+      { key: 'MEILI_MASTER_KEY', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'ghost',
+    name: 'Ghost Publishing & Newsletter',
+    description: 'Modern içerik yayıncılığı, blog, üyelik ve e-posta bülteni platformu.',
+    category: 'headless_cms',
+    categoryLabel: 'Headless CMS',
+    kind: 'stack',
+    image: 'ghost:5-alpine',
+    repository: 'ghost',
+    serviceName: 'ghost',
+    tags: ['5-alpine', '5', 'latest'],
+    defaultTag: '5-alpine',
+    innerPort: 2368,
+    outerPort: 12368,
+    volumes: [
+      { source: 'ghost_content', target: '/var/lib/ghost/content', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'NODE_ENV', defaultValue: 'production', secret: false },
+      { key: 'url', defaultValue: 'http://localhost:2368', secret: false },
+    ],
+  },
+  {
+    id: 'wordpress-stack',
+    name: 'WordPress + MariaDB Stack',
+    description: 'Alan adı veya alt alan adı reverse proxy için hazır konteyner WordPress yığını.',
+    category: 'headless_cms',
+    categoryLabel: 'Headless CMS',
+    kind: 'stack',
+    image: 'wordpress:6.6-apache',
+    repository: 'wordpress',
+    serviceName: 'wordpress',
+    tags: ['6.6-apache', '6.7-php8.3-apache', 'latest'],
+    defaultTag: '6.6-apache',
+    innerPort: 80,
+    outerPort: 18081,
+    volumes: [
+      { source: 'wp_html', target: '/var/www/html', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'WORDPRESS_DB_HOST', defaultValue: '127.0.0.1:3306', secret: false },
+      { key: 'WORDPRESS_DB_NAME', defaultValue: 'wordpress', secret: false },
+      { key: 'WORDPRESS_DB_USER', defaultValue: 'wp_user', secret: false },
+      { key: 'WORDPRESS_DB_PASSWORD', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'uptime-kuma',
+    name: 'Uptime Kuma',
+    description: 'HTTP, TCP, DNS ve SSL sertifika sürelerini izleyen self-hosted durum sayfası.',
+    category: 'analytics_monitoring',
+    categoryLabel: 'İzleme & Analitik',
+    kind: 'stack',
+    image: 'louislam/uptime-kuma:1',
+    repository: 'louislam/uptime-kuma',
+    serviceName: 'uptime_kuma',
+    tags: ['1', 'latest'],
+    defaultTag: '1',
+    innerPort: 3001,
+    outerPort: 13001,
+    volumes: [
+      { source: 'uptime_kuma_data', target: '/app/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [],
+  },
+  {
+    id: 'minio',
+    name: 'MinIO S3 Storage',
+    description: 'Yüksek performanslı, AWS S3 uyumlu nesne depolama sunucusu.',
+    category: 'storage',
+    categoryLabel: 'Depolama & S3',
+    kind: 'stack',
+    image: 'minio/minio:latest',
+    repository: 'minio/minio',
+    serviceName: 'minio',
+    tags: ['latest'],
+    defaultTag: 'latest',
+    innerPort: 9000,
+    outerPort: 19000,
+    volumes: [
+      { source: 'minio_data', target: '/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'MINIO_ROOT_USER', defaultValue: 'minioadmin', secret: false },
+      { key: 'MINIO_ROOT_PASSWORD', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'grafana',
+    name: 'Grafana Dashboards',
+    description: 'Metrik görselleştirme, sunucu gözlemlenebilirliği ve alarm panoları.',
+    category: 'analytics_monitoring',
+    categoryLabel: 'İzleme & Analitik',
+    kind: 'stack',
+    image: 'grafana/grafana:latest',
+    repository: 'grafana/grafana',
+    serviceName: 'grafana',
+    tags: ['latest'],
+    defaultTag: 'latest',
+    innerPort: 3000,
+    outerPort: 13000,
+    volumes: [
+      { source: 'grafana_data', target: '/var/lib/grafana', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'GF_SECURITY_ADMIN_USER', defaultValue: 'admin', secret: false },
+      { key: 'GF_SECURITY_ADMIN_PASSWORD', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'redis',
+    name: 'Redis 7 Cache',
+    description: 'Yüksek hızlı bellek içi anahtar-değer deposu, önbellek ve mesaj kuyruğu.',
+    category: 'database_cache',
+    categoryLabel: 'Veritabanı & Cache',
+    kind: 'image',
+    image: 'redis:7-alpine',
+    repository: 'redis',
+    serviceName: 'redis',
+    tags: ['7-alpine', '7.4-alpine', 'latest'],
+    defaultTag: '7-alpine',
+    innerPort: 6379,
+    outerPort: 16379,
+    volumes: [
+      { source: 'redis_data', target: '/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [],
+  },
+  {
+    id: 'postgres',
+    name: 'PostgreSQL 16',
+    description: 'Kalıcı disk (named volume) tanımlı kurumsal ilişkisel PostgreSQL veritabanı.',
+    category: 'database_cache',
+    categoryLabel: 'Veritabanı & Cache',
+    kind: 'image',
+    image: 'postgres:16-alpine',
+    repository: 'postgres',
+    serviceName: 'postgres',
+    tags: ['16-alpine', '16', '17-alpine'],
+    defaultTag: '16-alpine',
+    innerPort: 5432,
+    outerPort: 15432,
+    volumes: [
+      { source: 'postgres_data', target: '/var/lib/postgresql/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'POSTGRES_DB', defaultValue: 'app_db', secret: false },
+      { key: 'POSTGRES_USER', defaultValue: 'app_user', secret: false },
+      { key: 'POSTGRES_PASSWORD', defaultValue: 'change_me', secret: true },
+    ],
+  },
+  {
+    id: 'ollama-webui',
+    name: 'Open WebUI (AI Chat)',
+    description: 'Ollama ve OpenAI uyumlu LLM modelleri için kendi kendine barındırılan yapay zeka arayüzü.',
+    category: 'automation_ai',
+    categoryLabel: 'Otomasyon & AI',
+    kind: 'stack',
+    image: 'ghcr.io/open-webui/open-webui:main',
+    repository: 'ghcr.io/open-webui/open-webui',
+    serviceName: 'open_webui',
+    tags: ['main', 'latest'],
+    defaultTag: 'main',
+    innerPort: 8080,
+    outerPort: 18088,
+    volumes: [
+      { source: 'open_webui_data', target: '/app/backend/data', kind: 'named_volume', readOnly: false },
+    ],
+    environment: [
+      { key: 'WEBUI_SECRET_KEY', defaultValue: 'change_me', secret: true },
+    ],
+  },
+];
+
+export const EASYPANEL_ONE_CLICK_APPS = Object.freeze(
+  RAW_EASYPANEL_ONE_CLICK_APPS.map((item) => {
+    const generated = generateComposeFromCatalogInput({
+      projectName: item.id.replace(/[^a-z0-9_-]/g, '_'),
+      serviceName: item.serviceName,
+      image: item.repository,
+      tag: item.defaultTag,
+      innerPort: item.innerPort,
+      outerPort: item.outerPort,
+      bindHost: '127.0.0.1',
+      volumes: item.volumes,
+      environment: item.environment,
+    });
+    const autoSecretKeys = item.environment
+      .filter((env) => env.secret || env.defaultValue === 'change_me')
+      .map((env) => env.key);
+    return Object.freeze({
+      id: item.id,
+      name: item.name,
+      label: item.name,
+      description: item.description,
+      category: item.category,
+      categoryLabel: item.categoryLabel,
+      kind: item.kind,
+      oneClick: true,
+      image: item.image,
+      repository: item.repository,
+      serviceName: item.serviceName,
+      tags: Object.freeze([...item.tags]),
+      defaultTag: item.defaultTag,
+      innerPort: item.innerPort,
+      targetPort: item.innerPort,
+      outerPort: item.outerPort,
+      publishedPort: item.outerPort,
+      bindHost: '127.0.0.1',
+      protocol: 'tcp',
+      volumes: Object.freeze(item.volumes.map((v) => Object.freeze({ ...v }))),
+      environment: Object.freeze(item.environment.map((e) => Object.freeze({ ...e }))),
+      autoSecretKeys: Object.freeze(autoSecretKeys),
+      hasAutoSecrets: autoSecretKeys.length > 0,
+      defaultComposeDocument: generated.document,
+    });
+  }),
+);
+
+export function listEasypanelOneClickApps({ q = '', category = null } = {}) {
+  if (q !== undefined && q !== null && typeof q !== 'string') {
+    throw new DockerPleskCatalogError('invalid_catalog_query', '1-Click app search query must be a string');
+  }
+  const term = String(q ?? '').trim().toLowerCase();
+  const rawCategory = category ? String(category).trim().toLowerCase() : null;
+  const normalizedCategory = rawCategory && rawCategory !== 'all' && rawCategory !== 'tumu'
+    ? rawCategory
+    : null;
+
+  const filtered = EASYPANEL_ONE_CLICK_APPS.filter((item) => {
+    if (normalizedCategory && item.category.toLowerCase() !== normalizedCategory) return false;
+    if (!term) return true;
+    return (
+      item.id.toLowerCase().includes(term)
+      || item.name.toLowerCase().includes(term)
+      || item.description.toLowerCase().includes(term)
+      || item.image.toLowerCase().includes(term)
+      || item.category.toLowerCase().includes(term)
+      || (item.categoryLabel ?? '').toLowerCase().includes(term)
+      || item.tags.some((tag) => tag.toLowerCase().includes(term))
+    );
+  });
+
+  return Object.freeze(filtered);
+}
+
+function generateStrongSecretHex() {
+  const hex = randomBytes(18).toString('hex');
+  if (/^\d+$/.test(hex) || /^\d+[eE]\d+$/.test(hex)) {
+    return `a${hex.slice(1)}`;
+  }
+  return hex;
+}
+
+export function prepareOneClickAppProvision(input = {}) {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) {
+    throw new DockerPleskCatalogError('invalid_one_click_input', '1-Click app payload must be an object');
+  }
+
+  const {
+    templateId,
+    projectName = null,
+    hostname = null,
+    urlPath = '/',
+    innerPort = null,
+    outerPort = null,
+    environmentOverrides = {},
+  } = input;
+
+  if (typeof templateId !== 'string' || !templateId.trim()) {
+    throw new DockerPleskCatalogError('invalid_template_id', 'templateId is required');
+  }
+
+  const normalizedId = templateId.trim().toLowerCase();
+  const template = EASYPANEL_ONE_CLICK_APPS.find((item) => item.id === normalizedId)
+    ?? PLESK_DOCKER_CATALOG.find((item) => item.id === normalizedId)
+    ?? null;
+
+  if (!template) {
+    throw new DockerPleskCatalogError(
+      'one_click_template_not_found',
+      `1-Click app template "${templateId}" was not found`,
+      404,
+    );
+  }
+
+  if (environmentOverrides !== null && (typeof environmentOverrides !== 'object' || Array.isArray(environmentOverrides))) {
+    throw new DockerPleskCatalogError('invalid_environment', 'environmentOverrides must be an object');
+  }
+
+  const resolvedProjectName = projectName !== null && projectName !== undefined && projectName !== ''
+    ? projectName
+    : `${template.id.replace(/[^a-z0-9_-]/g, '_')}_stack`;
+
+  const resolvedEnvMap = {};
+  const generatedSecretKeys = [];
+  let generatedSecretsCount = 0;
+
+  for (const envEntry of template.environment) {
+    const key = envEntry.key;
+    const overrideVal = environmentOverrides?.[key];
+    const hasCustomOverride = overrideVal !== undefined
+      && overrideVal !== null
+      && String(overrideVal).trim() !== ''
+      && String(overrideVal).trim() !== 'change_me'
+      && String(overrideVal).trim() !== 'change_root_me';
+
+    const needsAutoSecret = Boolean(
+      envEntry.secret
+      || envEntry.defaultValue === 'change_me'
+      || envEntry.defaultValue === 'change_root_me',
+    );
+
+    if (hasCustomOverride) {
+      resolvedEnvMap[key] = String(overrideVal);
+    } else if (needsAutoSecret) {
+      resolvedEnvMap[key] = generateStrongSecretHex();
+      generatedSecretKeys.push(key);
+      generatedSecretsCount += 1;
+    } else {
+      resolvedEnvMap[key] = String(envEntry.defaultValue ?? '');
+    }
+  }
+
+  for (const [overrideKey, overrideValue] of Object.entries(environmentOverrides ?? {})) {
+    if (Object.prototype.hasOwnProperty.call(resolvedEnvMap, overrideKey)) continue;
+    if (!ENV_KEY_PATTERN.test(overrideKey) || overrideValue === null || typeof overrideValue === 'object') {
+      throw new DockerPleskCatalogError('invalid_environment_key', `Environment variable "${overrideKey}" is invalid`);
+    }
+    resolvedEnvMap[overrideKey] = String(overrideValue);
+  }
+
+  const resolvedInnerPort = innerPort != null
+    ? normalizePort(innerPort, 'inner_port')
+    : template.innerPort;
+  const resolvedOuterPort = outerPort != null
+    ? normalizePort(outerPort, 'outer_port')
+    : template.outerPort;
+
+  const generated = generateComposeFromCatalogInput({
+    projectName: resolvedProjectName,
+    serviceName: template.serviceName,
+    image: template.repository ?? template.image,
+    tag: template.defaultTag,
+    innerPort: resolvedInnerPort,
+    outerPort: resolvedOuterPort,
+    bindHost: '127.0.0.1',
+    volumes: template.volumes,
+    environment: resolvedEnvMap,
+  });
+
+  const normalizedHostname = hostname !== null && hostname !== undefined && String(hostname).trim() !== ''
+    ? normalizeProxyHostname(hostname)
+    : null;
+  const normalizedUrlPath = normalizeUrlPath(urlPath ?? '/');
+
+  const proxyPreview = Object.freeze({
+    hostname: normalizedHostname,
+    urlPath: normalizedUrlPath,
+    serviceName: generated.serviceName,
+    innerPort: generated.portMapping.innerPort,
+    targetPort: generated.portMapping.innerPort,
+    outerPort: generated.portMapping.outerPort,
+    publishedPort: generated.portMapping.outerPort,
+    upstreamHost: '127.0.0.1',
+    upstreamPort: generated.portMapping.outerPort,
+    upstreamUrl: `http://127.0.0.1:${generated.portMapping.outerPort}`,
+    publicUrl: normalizedHostname
+      ? `https://${normalizedHostname}${normalizedUrlPath === '/' ? '' : normalizedUrlPath}`
+      : null,
+    websocket: true,
+    protocol: 'tcp',
+  });
+
+  return Object.freeze({
+    templateId: template.id,
+    templateName: template.name,
+    category: template.category,
+    projectName: generated.projectName,
+    serviceName: generated.serviceName,
+    image: generated.image,
+    document: generated.document,
+    portMapping: generated.portMapping,
+    volumes: generated.volumes,
+    environment: generated.environment,
+    environmentKeys: Object.freeze(Object.keys(generated.environment)),
+    generatedSecretKeys: Object.freeze(generatedSecretKeys),
+    generatedSecretsCount,
+    proxyPreview,
+  });
+}
+
+export async function provisionOneClickApp(
+  input = {},
+  {
+    dockerComposeProjectRegistry = null,
+    validateDockerCompose = null,
+    domainRegistry = null,
+    localServerId = null,
+  } = {},
+) {
+  const prepared = prepareOneClickAppProvision(input);
+  if (!dockerComposeProjectRegistry || typeof dockerComposeProjectRegistry.createProject !== 'function') {
+    return prepared;
+  }
+  const serverId = input.serverId ?? localServerId ?? 'srv_local';
+  const validation = typeof validateDockerCompose === 'function'
+    ? await validateDockerCompose({
+        projectName: prepared.projectName,
+        document: prepared.document,
+        environment: {},
+        interpolate: false,
+      })
+    : undefined;
+
+  const project = await dockerComposeProjectRegistry.createProject({
+    serverId,
+    projectName: prepared.projectName,
+    document: prepared.document,
+    validation,
+  });
+
+  const proxyRule = prepared.proxyPreview.hostname
+    ? await resolveDockerProxyRule(
+        {
+          projectId: project.id,
+          hostname: prepared.proxyPreview.hostname,
+          urlPath: prepared.proxyPreview.urlPath,
+          serviceName: prepared.serviceName,
+          innerPort: prepared.portMapping.innerPort,
+        },
+        {
+          dockerComposeProjectRegistry,
+          domainRegistry,
+          localServerId: serverId,
+        },
+      )
+    : null;
+
+  return Object.freeze({
+    ...prepared,
+    project,
+    proxyRule,
   });
 }

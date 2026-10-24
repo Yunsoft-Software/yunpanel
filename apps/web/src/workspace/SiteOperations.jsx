@@ -31,9 +31,40 @@ function useOperation() {
   return { busy, error, perform };
 }
 
+export function buildGitWebhookCiCdSummary(application = {}, domain = {}) {
+  const currentHost = (typeof window !== 'undefined' && window.location?.host)
+    ? window.location.host
+    : (domain?.primaryDomain || 'localhost');
+  const webhookEndpoint = `https://${currentHost}/api/webhooks/github`;
+  const branchRef = `refs/heads/${application?.branch || 'main'}`;
+  const contentType = 'application/json';
+  const outputDir = application?.build?.outputDir
+    ?? application?.outputDir
+    ?? (application?.type === 'node' ? '.next' : 'dist');
+  const startEntry = application?.runtime?.startMode === 'npm'
+    ? `npm run ${application?.runtime?.startScript ?? 'start'}`
+    : (application?.runtime?.entryFile
+      ?? application?.entryFile
+      ?? (application?.build?.buildScript ? `npm run ${application.build.buildScript}` : 'index.html'));
+  const healthPath = application?.runtime?.healthPath
+    ?? application?.healthPath
+    ?? application?.build?.healthFile
+    ?? '/';
+  const activeRelease = application?.currentReleaseId ?? 'Henüz yayınlanmadı';
+  return {
+    webhookEndpoint,
+    branchRef,
+    contentType,
+    outputDir,
+    startEntry,
+    healthPath,
+    activeRelease,
+  };
+}
+
 export function ApplicationOperations({ domain, application, website = null, deployOnly = false, disabled = false }) {
   const { applications, jobs, runJob, resourceBusy } = useWorkspace();
-  const operation = useOperation(); const [rollback, setRollback] = useState(null);
+  const operation = useOperation(); const [rollback, setRollback] = useState(null); const [webhookCopied, setWebhookCopied] = useState(false);
   if (!application && website?.runtimeType === 'docker') {
     return <Section title="Docker iş yükü" description={`${domain.primaryDomain} · Docker / Proxy çalışma alanı`}>
       <div className="ws-section-body"><div className="ws-actions">
@@ -70,6 +101,8 @@ export function ApplicationOperations({ domain, application, website = null, dep
       ? (application.runtime?.pythonVersion ? `Python ${application.runtime.pythonVersion}` : 'Python 3')
       : (application.runtime?.nodeMajor ? `Node.js ${application.runtime.nodeMajor}` : '—'),
   ];
+  const showGitWebhook = Boolean(application.repositoryUrl || deployOnly || isNode || isPython || application.type === 'static');
+  const ciCdSummary = buildGitWebhookCiCdSummary(application, domain);
   return <>
     <Section title={sectionTitle} description={`${application.name} · ${domain.primaryDomain} hedefiyle port eşleşmesi`}>
       <div className="ws-section-body"><div className="ws-actions">
@@ -88,6 +121,37 @@ export function ApplicationOperations({ domain, application, website = null, dep
         ['Son deploy', formatDate(application.lastDeployedAt)], ['Aktif release', application.currentReleaseId],
       ]} />
     </Section>
+    {showGitWebhook && <Section
+      title="Git Push Webhook & Otomatik Yayın (CI/CD)"
+      description="GitHub deponuza push yapıldığında otomatik derleme ve sıfır kesintili yayın tetiklenir."
+      actions={<Button
+        type="button"
+        icon="copy"
+        onClick={() => {
+          if (typeof navigator !== 'undefined' && navigator.clipboard?.writeText) {
+            void navigator.clipboard.writeText(ciCdSummary.webhookEndpoint).catch(() => {});
+          }
+          setWebhookCopied(true);
+        }}
+      >
+        {webhookCopied ? 'Webhook URL Kopyalandı' : 'Webhook URL Kopyala'}
+      </Button>}
+    >
+      <KeyValues items={[
+        ['GitHub Webhook Endpoint', ciCdSummary.webhookEndpoint],
+        ['Tetiklenen Dal (Branch)', `refs/heads/${application.branch || 'main'}`],
+        ['İçerik Türü (Content-Type)', 'application/json'],
+      ]} />
+      <div className="ws-section-body">
+        <h3>Build & Çalışma Özeti</h3>
+        <KeyValues items={[
+          ['Çıktı Dizini (outputDir)', ciCdSummary.outputDir],
+          ['Başlangıç (entryFile / startScript)', ciCdSummary.startEntry],
+          ['Sağlık Kontrolü (healthPath)', ciCdSummary.healthPath],
+          ['Aktif Sürüm (Release)', ciCdSummary.activeRelease],
+        ]} />
+      </div>
+    </Section>}
     {deployOnly && <Section title="Release geçmişi"><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Release</th><th>Commit</th><th>Yayın zamanı</th><th>Durum</th></tr></thead><tbody>{(application.releases ?? []).map((release) => <tr key={release.releaseId}><td>{release.releaseId}</td><td>{release.commitSha?.slice(0, 12) ?? '—'}</td><td>{formatDate(release.deployedAt)}</td><td>{release.releaseId === application.currentReleaseId ? <Badge state="active" /> : 'Önceki sürüm'}</td></tr>)}</tbody></table></div>{!application.releases?.length && <EmptyState title="Henüz release yok" detail="İlk başarılı deploy sonrasında yayın geçmişi burada görünecek." icon="git" />}</Section>}
     {rollback && <ConfirmDialog title="Önceki sürüme dön" message={`${application.name} uygulaması ${rollback} release’ine dönecek. Başarılı dönüş uygulamanın yayınını değiştirir.`} confirmation={application.name} busy={operation.busy} error={operation.error} onCancel={() => setRollback(null)} onConfirm={async () => {
       const success = await operation.perform(async () => {

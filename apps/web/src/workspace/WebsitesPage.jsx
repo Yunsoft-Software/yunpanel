@@ -42,6 +42,10 @@ export default function WebsitesPage() {
   const visibleDomains = useMemo(() => customerId ? domains.items.filter(domain => customer?.websiteIds?.includes(domain.websiteId)) : domains.items, [customerId, customer, domains.items]);
   const tree = useMemo(() => domainTreeRows(visibleDomains, { query, collapsed: filtering ? new Set() : collapsed }), [visibleDomains, query, filtering, collapsed]);
   const result = siteListPage(tree, { type, status, sort, perPage: preferences.perPage, page: Number(params.get('page') ?? 1) });
+  const subdomainsCount = useMemo(() => {
+    const fromTree = tree.reduce((sum, row) => sum + ((row.depth ?? 0) > 0 ? 1 : (collapsed.has(row.domain?.id) ? (row.subdomainCount ?? row.childrenCount ?? 0) : 0)), 0);
+    return fromTree > 0 ? fromTree : Math.max(0, visibleDomains.length - result.totalGroups);
+  }, [tree, collapsed, visibleDomains.length, result.totalGroups]);
   const readable = ['ready', 'stale'].includes(domains.status);
   const resolveTasks = useMemo(() => createWebsiteTaskResolver({ domains, websites, applications, canManage, isOwner }), [domains, websites, applications, canManage, isOwner]);
   function filter(name, value) {
@@ -99,7 +103,7 @@ export default function WebsitesPage() {
         </div>
       </Section>
     )}
-    <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu` : 'Site listesi hazırlanıyor.'}>
+    <Section className={`ws-site-table ws-site-table-${preferences.density} ws-site-list`} title="Siteler ve alt alan adları" description={readable ? `${result.totalGroups} alan adı grubu (${result.totalGroups} ana alan adı · ${subdomainsCount} alt alan adı)` : 'Site listesi hazırlanıyor.'}>
       <div className="ws-filters">
         <label className="ws-filter-search">Site ara<input type="search" value={query} onChange={(event) => filter('q', event.target.value)} placeholder="Alan adı veya alias" /></label>
         <label>Durum<select value={status} onChange={(event) => filter('status', event.target.value)}><option value="all">Tüm durumlar</option><option value="active">Aktif</option><option value="draft">Taslak</option><option value="staged">Hazırlandı</option><option value="error">Hata</option></select></label>
@@ -120,7 +124,7 @@ export default function WebsitesPage() {
           {result.rows.map((row) => <li key={row.domain.id}><WebsiteTaskCard row={row} tasks={resolveTasks(row.domain.id)} certificates={certificates} filtering={filtering} onToggle={toggle} /></li>)}
         </ul>}
         {!result.rows.length && domains.items.length > 0 && <EmptyState title="Eşleşen alan adı bulunamadı" detail="Arama terimini veya filtreleri değiştirin." icon="search" action={<Button onClick={() => setParams((current) => clearSiteListFilters(current))}>Filtreleri temizle</Button>} />}
-        {domains.items.length > 0 && <footer className="ws-pagination"><span>Toplam {result.totalGroups} alan adı grubu</span><div className="ws-actions"><Button disabled={result.page <= 1} onClick={() => filter('page', String(result.page - 1))}>Önceki</Button><span>{result.page} / {result.pageCount}</span><Button disabled={result.page >= result.pageCount} onClick={() => filter('page', String(result.page + 1))}>Sonraki</Button></div></footer>}
+        {domains.items.length > 0 && <footer className="ws-pagination"><span>Toplam {result.totalGroups} alan adı grubu ({result.totalGroups} ana alan adı · {subdomainsCount} alt alan adı)</span><div className="ws-actions"><Button disabled={result.page <= 1} onClick={() => filter('page', String(result.page - 1))}>Önceki</Button><span>{result.page} / {result.pageCount}</span><Button disabled={result.page >= result.pageCount} onClick={() => filter('page', String(result.page + 1))}>Sonraki</Button></div></footer>}
       </>}
     </Section>
   </>;

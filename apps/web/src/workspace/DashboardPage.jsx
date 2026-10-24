@@ -66,7 +66,7 @@ export function ServerSummary({ server }) {
   </article>;
 }
 export default function DashboardPage() {
-  const { domains, websites, applications, servers, certificates, jobs, refreshAll, isOwner } = useWorkspace();
+  const { domains, websites, applications, servers, certificates, jobs, refreshAll, isOwner, telemetryIntervalMs = 5000, setTelemetryIntervalMs } = useWorkspace();
   const certsReadable = ['ready', 'stale'].includes(certificates.status) && ['ready', 'stale'].includes(domains.status);
   const certItems = readableItems(certificates);
   const domainItems = readableItems(domains);
@@ -102,7 +102,7 @@ export default function DashboardPage() {
       <div className="ws-notice ws-notice-warn" role="alert" aria-live="polite"><Icon name="alert" /><div><strong>Disk alanı azalıyor · %{Math.round(diskUsage)}</strong><p>Yeni dağıtımlar ve yedekler için kullanılabilir alanı kontrol edin.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
     ) : null}
     <div className="ws-console-grid">
-      <Section title="Performans" description="Canlı sunucu kaynak kullanımı">
+      <Section title="Performans" description="Canlı sunucu kaynak kullanımı" actions={<div className="ws-actions" style={{ alignItems: 'center', gap: '0.5rem' }}><Badge state={telemetryIntervalMs > 0 ? 'active' : 'draft'}>{telemetryIntervalMs > 0 ? 'Canlı · ' + (telemetryIntervalMs / 1000) + ' sn' : 'Duraklatıldı'}</Badge><select aria-label="Yenileme aralığı" value={telemetryIntervalMs} onChange={(event) => setTelemetryIntervalMs?.(Number(event.target.value))}><option value={3000}>3 sn</option><option value={5000}>5 sn</option><option value={15000}>15 sn</option><option value={0}>Duraklat</option></select><Button icon="refresh" onClick={() => servers.refresh?.()}>Şimdi ölç</Button></div>}>
         <CollectionNotice resource={servers} label="Sunucu" />
         <UsageHistory key={server?.id ?? 'unavailable'} server={['ready', 'stale'].includes(servers.status) ? server : null} />
       </Section>

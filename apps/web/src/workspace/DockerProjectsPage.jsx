@@ -9,6 +9,8 @@ import {
   getDockerRuntime,
   getDockerStorageBackup,
   listDockerProjects,
+  listOneClickApps,
+  prepareOneClickApp,
 } from './docker-compose-client.js';
 import DockerConfigPanel from './DockerConfigPanel.jsx';
 import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
@@ -94,10 +96,39 @@ function runtimeBadge(status) {
   return 'unknown';
 }
 
+const EASYPANEL_CATEGORY_FILTERS = [
+  { id: 'all', label: 'Tümü' },
+  { id: 'jamstack_baas', label: 'JAMstack & BaaS' },
+  { id: 'headless_cms', label: 'Headless CMS' },
+  { id: 'automation_ai', label: 'Otomasyon & AI' },
+  { id: 'analytics_monitoring', label: 'İzleme & Analitik' },
+  { id: 'database_cache', label: 'Veritabanı & Cache' },
+  { id: 'docker_hub_live', label: 'Canlı Docker Hub Arama' },
+];
+
+const FALLBACK_EASYPANEL_ONE_CLICK_APPS = [
+  { id: 'pocketbase', name: 'PocketBase', label: 'PocketBase', image: 'ghcr.io/muchobien/pocketbase:latest', innerPort: 8090, targetPort: 8090, outerPort: 18090, publishedPort: 18090, category: 'jamstack_baas', categoryLabel: 'JAMstack & BaaS', oneClick: true, hasAutoSecrets: true, description: 'JAMstack Backend-in-a-file: Auth, Realtime DB, File Storage ve REST API.' },
+  { id: 'n8n', name: 'n8n Workflow Automation', label: 'n8n Workflow Automation', image: 'n8nio/n8n:latest', innerPort: 5678, targetPort: 5678, outerPort: 15678, publishedPort: 15678, category: 'automation_ai', categoryLabel: 'Otomasyon & AI', oneClick: true, hasAutoSecrets: true, description: 'Self-hosted workflow automation ve AI ajan orkestrasyon platformu.' },
+  { id: 'directus', name: 'Directus Headless CMS', label: 'Directus Headless CMS', image: 'directus/directus:11', innerPort: 8055, targetPort: 8055, outerPort: 18055, publishedPort: 18055, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: true, description: 'SQL veritabanları için anında REST + GraphQL API üreten modern Headless CMS.' },
+  { id: 'strapi', name: 'Strapi Headless CMS', label: 'Strapi Headless CMS', image: 'strapi/strapi:latest', innerPort: 1337, targetPort: 1337, outerPort: 13370, publishedPort: 13370, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: true, description: 'JAMstack siteler için açık kaynaklı Node.js Headless CMS ve içerik API motoru.' },
+  { id: 'umami', name: 'Umami Web Analytics', label: 'Umami Web Analytics', image: 'ghcr.io/umami-software/umami:postgresql-latest', innerPort: 3000, targetPort: 3000, outerPort: 13005, publishedPort: 13005, category: 'analytics_monitoring', categoryLabel: 'İzleme & Analitik', oneClick: true, hasAutoSecrets: true, description: 'Gizlilik odaklı, çerezsiz Google Analytics alternatifi web analitik platformu.' },
+  { id: 'meilisearch', name: 'Meilisearch', label: 'Meilisearch', image: 'getmeili/meilisearch:v1.11', innerPort: 7700, targetPort: 7700, outerPort: 17700, publishedPort: 17700, category: 'jamstack_baas', categoryLabel: 'JAMstack & BaaS', oneClick: true, hasAutoSecrets: true, description: 'JAMstack ve modern web uygulamaları için milisaniye hızında tam metin arama motoru.' },
+  { id: 'ghost', name: 'Ghost Publishing & Newsletter', label: 'Ghost Publishing & Newsletter', image: 'ghost:5-alpine', innerPort: 2368, targetPort: 2368, outerPort: 12368, publishedPort: 12368, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: false, description: 'Modern içerik yayıncılığı, blog, üyelik ve e-posta bülteni platformu.' },
+  { id: 'wordpress-stack', name: 'WordPress + MariaDB Stack', label: 'WordPress + MariaDB Stack', image: 'wordpress:6.6-apache', innerPort: 80, targetPort: 80, outerPort: 18081, publishedPort: 18081, category: 'headless_cms', categoryLabel: 'Headless CMS', oneClick: true, hasAutoSecrets: true, description: 'Alan adı veya alt alan adı reverse proxy için hazır konteyner WordPress yığını.' },
+  { id: 'uptime-kuma', name: 'Uptime Kuma', label: 'Uptime Kuma', image: 'louislam/uptime-kuma:1', innerPort: 3001, targetPort: 3001, outerPort: 13001, publishedPort: 13001, category: 'analytics_monitoring', categoryLabel: 'İzleme & Analitik', oneClick: true, hasAutoSecrets: false, description: 'HTTP, TCP, DNS ve SSL sertifika sürelerini izleyen self-hosted durum sayfası.' },
+  { id: 'minio', name: 'MinIO S3 Storage', label: 'MinIO S3 Storage', image: 'minio/minio:latest', innerPort: 9000, targetPort: 9000, outerPort: 19000, publishedPort: 19000, category: 'storage', categoryLabel: 'Depolama & S3', oneClick: true, hasAutoSecrets: true, description: 'Yüksek performanslı, AWS S3 uyumlu nesne depolama sunucusu.' },
+  { id: 'grafana', name: 'Grafana Dashboards', label: 'Grafana Dashboards', image: 'grafana/grafana:latest', innerPort: 3000, targetPort: 3000, outerPort: 13000, publishedPort: 13000, category: 'analytics_monitoring', categoryLabel: 'İzleme & Analitik', oneClick: true, hasAutoSecrets: true, description: 'Metrik görselleştirme, sunucu gözlemlenebilirliği ve alarm panoları.' },
+  { id: 'redis', name: 'Redis 7 Cache', label: 'Redis 7 Cache', image: 'redis:7-alpine', innerPort: 6379, targetPort: 6379, outerPort: 16379, publishedPort: 16379, category: 'database_cache', categoryLabel: 'Veritabanı & Cache', oneClick: true, hasAutoSecrets: false, description: 'Yüksek hızlı bellek içi anahtar-değer deposu, önbellek ve mesaj kuyruğu.' },
+  { id: 'postgres', name: 'PostgreSQL 16', label: 'PostgreSQL 16', image: 'postgres:16-alpine', innerPort: 5432, targetPort: 5432, outerPort: 15432, publishedPort: 15432, category: 'database_cache', categoryLabel: 'Veritabanı & Cache', oneClick: true, hasAutoSecrets: true, description: 'Kalıcı disk (named volume) tanımlı kurumsal ilişkisel PostgreSQL veritabanı.' },
+  { id: 'ollama-webui', name: 'Open WebUI (AI Chat)', label: 'Open WebUI (AI Chat)', image: 'ghcr.io/open-webui/open-webui:main', innerPort: 8080, targetPort: 8080, outerPort: 18088, publishedPort: 18088, category: 'automation_ai', categoryLabel: 'Otomasyon & AI', oneClick: true, hasAutoSecrets: true, description: 'Ollama ve OpenAI uyumlu LLM modelleri için kendi kendine barındırılan yapay zeka arayüzü.' },
+];
+
 function DockerProjectList() {
   const projects = useAsyncResource(() => listDockerProjects(), [], { enabled: true });
   const [creating, setCreating] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [activeCategory, setActiveCategory] = useState('all');
+  const [preparingTemplateId, setPreparingTemplateId] = useState(null);
   const [catalogQuery, setCatalogQuery] = useState('');
   const [debouncedQuery, setDebouncedQuery] = useState('');
   useEffect(() => {
@@ -105,29 +136,108 @@ function DockerProjectList() {
     return () => clearTimeout(timer);
   }, [catalogQuery]);
 
+  const oneClickCatalog = useAsyncResource(
+    (signal) => listOneClickApps({
+      q: debouncedQuery,
+      category: activeCategory !== 'all' && activeCategory !== 'docker_hub_live' ? activeCategory : '',
+      signal,
+    }),
+    [debouncedQuery, activeCategory],
+    { enabled: activeCategory !== 'docker_hub_live' },
+  );
+
   const liveCatalog = useAsyncResource(
     (signal) => getDockerCatalog(debouncedQuery, { live: true, signal }),
     [debouncedQuery],
-    { enabled: true },
+    { enabled: activeCategory === 'docker_hub_live' || Boolean(debouncedQuery) },
   );
 
   const items = Array.isArray(projects.data) ? projects.data : [];
   const filteredCatalog = useMemo(() => {
+    const q = catalogQuery.trim().toLowerCase();
+    const isHubMode = activeCategory === 'docker_hub_live';
+
+    if (!isHubMode && !q) {
+      const sourceOneClick = Array.isArray(oneClickCatalog.data) && oneClickCatalog.data.length > 0
+        ? oneClickCatalog.data
+        : FALLBACK_EASYPANEL_ONE_CLICK_APPS;
+      if (activeCategory === 'all') return sourceOneClick;
+      return sourceOneClick.filter((item) => item.category === activeCategory);
+    }
+
+    if (!isHubMode && q) {
+      const sourceOneClick = Array.isArray(oneClickCatalog.data) && oneClickCatalog.data.length > 0
+        ? oneClickCatalog.data
+        : FALLBACK_EASYPANEL_ONE_CLICK_APPS.filter((item) => (
+            (activeCategory === 'all' || item.category === activeCategory)
+            && (
+              (item.label ?? item.name ?? '').toLowerCase().includes(q)
+              || item.image.toLowerCase().includes(q)
+              || (item.description ?? '').toLowerCase().includes(q)
+            )
+          ));
+      const hubExtras = Array.isArray(liveCatalog.data)
+        ? liveCatalog.data.filter((hubItem) => !sourceOneClick.some((oc) => oc.id === hubItem.id || oc.image === hubItem.image))
+        : [];
+      const combined = [...sourceOneClick, ...hubExtras];
+      if (combined.length > 0) return combined;
+    }
+
     if (Array.isArray(liveCatalog.data) && liveCatalog.data.length > 0) {
       return liveCatalog.data;
     }
-    const q = catalogQuery.trim().toLowerCase();
     if (!q) return DEFAULT_DOCKER_STACK_TEMPLATES;
     return DEFAULT_DOCKER_STACK_TEMPLATES.filter((item) => (
       (item.label ?? item.name ?? '').toLowerCase().includes(q)
       || item.image.toLowerCase().includes(q)
       || (item.category ?? '').toLowerCase().includes(q)
     ));
-  }, [liveCatalog.data, catalogQuery]);
+  }, [oneClickCatalog.data, liveCatalog.data, catalogQuery, activeCategory]);
 
   function openWithTemplate(tpl = null) {
     setSelectedTemplate(tpl);
     setCreating(true);
+  }
+
+  async function handleOneClickInstall(tpl) {
+    const innerPort = tpl.targetPort ?? tpl.innerPort ?? 80;
+    const outerPort = tpl.publishedPort ?? tpl.outerPort ?? 18080;
+    const title = tpl.label || tpl.name || tpl.image;
+    if (!tpl.oneClick && !FALLBACK_EASYPANEL_ONE_CLICK_APPS.some((item) => item.id === tpl.id)) {
+      openWithTemplate({ ...tpl, label: title, targetPort: innerPort, publishedPort: outerPort });
+      return;
+    }
+    setPreparingTemplateId(tpl.id);
+    try {
+      const prepared = await prepareOneClickApp({
+        templateId: tpl.id,
+        innerPort,
+        outerPort,
+      });
+      openWithTemplate({
+        ...tpl,
+        label: title,
+        oneClick: true,
+        projectName: prepared?.projectName || `${tpl.id.replace(/[^a-z0-9_-]/g, '_')}_stack`,
+        defaultComposeDocument: prepared?.document || tpl.defaultComposeDocument,
+        targetPort: prepared?.portMapping?.innerPort ?? innerPort,
+        publishedPort: prepared?.portMapping?.outerPort ?? outerPort,
+        generatedSecretsCount: prepared?.generatedSecretsCount ?? 0,
+        generatedSecretKeys: prepared?.generatedSecretKeys ?? [],
+        proxyPreview: prepared?.proxyPreview ?? null,
+      });
+    } catch {
+      openWithTemplate({
+        ...tpl,
+        label: title,
+        oneClick: true,
+        projectName: `${String(tpl.id || 'app').replace(/[^a-z0-9_-]/g, '_')}_stack`,
+        targetPort: innerPort,
+        publishedPort: outerPort,
+      });
+    } finally {
+      setPreparingTemplateId(null);
+    }
   }
 
   return <>
@@ -192,18 +302,32 @@ function DockerProjectList() {
       )}
     </Section>
     <Section
-      title="Docker Hub Canlı İmaj Arama & Hazır Stack Kataloğu"
-      description="Docker Hub üzerindeki tüm resmi ve topluluk imajlarını canlı arayın; Inner Port (Container) ↔ Outer Port (127.0.0.1) eşlemesiyle tek tıkla başlatın."
-      actions={liveCatalog.status === 'loading' ? <Badge state="running">Docker Hub aranıyor…</Badge> : <Badge state="active">{debouncedQuery ? `Docker Hub: ${filteredCatalog.length} sonuç` : 'Docker Hub Bağlı'}</Badge>}
+      title="Easypanel 1-Click Uygulama Marketi & Docker Hub Canlı İmaj Arama"
+      description="PocketBase, n8n, Directus, Strapi, Umami, Meilisearch gibi 1-Click şablonları otomatik secret üretimiyle tek tıkla kurun veya Docker Hub üzerindeki tüm imajları canlı arayın."
+      actions={(liveCatalog.status === 'loading' || oneClickCatalog.status === 'loading') ? <Badge state="running">Katalog yükleniyor…</Badge> : <Badge state="active">{debouncedQuery ? `Docker Hub: ${filteredCatalog.length} sonuç` : `${filteredCatalog.length} Hazır Şablon · Docker Hub Bağlı`}</Badge>}
     >
-      <div className="ws-filters">
+      <div className="ws-filters" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '10px' }}>
+        <div role="tablist" aria-label="1-Click Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+          {EASYPANEL_CATEGORY_FILTERS.map((cat) => {
+            const isSelected = activeCategory === cat.id;
+            return (
+              <Button
+                key={cat.id}
+                variant={isSelected ? 'primary' : 'default'}
+                onClick={() => setActiveCategory(cat.id)}
+              >
+                {cat.label}
+              </Button>
+            );
+          })}
+        </div>
         <label className="ws-filter-search" style={{ flex: '1 1 360px' }}>
           Docker Hub'da imaj veya servis ara
           <input
             type="search"
             value={catalogQuery}
             onChange={(event) => setCatalogQuery(event.target.value)}
-            placeholder="Docker Hub'da ara: grafana, mongo, portainer, ghost, nextcloud, redis, postgres, traefik..."
+            placeholder="Docker Hub'da ara: pocketbase, directus, strapi, umami, meilisearch, n8n, grafana, redis, postgres..."
           />
         </label>
       </div>
@@ -213,6 +337,8 @@ function DockerProjectList() {
             const innerPort = tpl.targetPort ?? tpl.innerPort ?? 80;
             const outerPort = tpl.publishedPort ?? tpl.outerPort ?? 18080;
             const title = tpl.label || tpl.name || tpl.image;
+            const isOneClick = Boolean(tpl.oneClick || FALLBACK_EASYPANEL_ONE_CLICK_APPS.some((item) => item.id === tpl.id));
+            const isPreparing = preparingTemplateId === tpl.id;
             return (
               <article key={tpl.id || tpl.image} className="yp-docker-catalog-card">
                 <div>
@@ -221,9 +347,11 @@ function DockerProjectList() {
                     <span className="yp-port-mapping-badge" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tpl.image}</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
+                    {isOneClick && <Badge state="active">Tek Tıkla Kur (Easypanel)</Badge>}
+                    {isOneClick && <span className="yp-port-mapping-badge">Otomatik Secret & Volume</span>}
                     {tpl.official && <Badge state="active">Resmi İmaj</Badge>}
                     {tpl.starCount > 0 && <span className="yp-port-mapping-badge">★ {tpl.starCount.toLocaleString('tr-TR')}</span>}
-                    {tpl.category && <span className="yp-port-mapping-badge">{tpl.category}</span>}
+                    {(tpl.categoryLabel || tpl.category) && <span className="yp-port-mapping-badge">{tpl.categoryLabel || tpl.category}</span>}
                   </div>
                   {tpl.description && <p className="ws-muted" style={{ margin: '0 0 10px 0', fontSize: '12px' }}>{tpl.description}</p>}
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
@@ -231,8 +359,25 @@ function DockerProjectList() {
                     <span className="yp-port-mapping-badge">Outer: 127.0.0.1:{outerPort}</span>
                   </div>
                 </div>
-                <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '8px' }}>
-                  <Button variant="primary" icon="plus" onClick={() => openWithTemplate({ ...tpl, label: title, targetPort: innerPort, publishedPort: outerPort })}>Bu İmajla Oluştur</Button>
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '6px', marginTop: '8px' }}>
+                  {isOneClick ? (
+                    <Button
+                      variant="primary"
+                      icon="plus"
+                      disabled={isPreparing}
+                      onClick={() => handleOneClickInstall(tpl)}
+                    >
+                      {isPreparing ? 'Hazırlanıyor…' : 'Tek Tıkla Kur'}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="primary"
+                      icon="plus"
+                      onClick={() => openWithTemplate({ ...tpl, label: title, targetPort: innerPort, publishedPort: outerPort })}
+                    >
+                      Bu İmajla Oluştur
+                    </Button>
+                  )}
                 </div>
               </article>
             );

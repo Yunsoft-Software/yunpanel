@@ -10,6 +10,8 @@ import {
 import {
   DockerPleskCatalogError,
   generateComposeFromCatalogInput,
+  listEasypanelOneClickApps,
+  prepareOneClickAppProvision,
   resolveDockerProxyRule,
   searchDockerCatalog,
   searchDockerCatalogLive,
@@ -447,6 +449,20 @@ export function mountDockerComposeRoutes(app, {
       localServerId,
     }));
     return response.json({ data: resolved, sideEffects: false });
+  }));
+
+  app.get('/api/docker/one-click-apps', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const query = request.query ?? {};
+    const items = await safeCall(() => listEasypanelOneClickApps({
+      q: query.q ?? '',
+      category: query.category ?? null,
+    }));
+    return response.json({ data: items, items, total: items.length });
+  }));
+
+  app.post('/api/docker/one-click-apps/prepare', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const result = await safeCall(() => prepareOneClickAppProvision(request.body ?? {}));
+    return response.json({ data: result, sideEffects: false });
   }));
 }
 

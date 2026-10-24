@@ -11,6 +11,137 @@ import { createDomainHostingClient } from './domain-hosting-client.js';
 import { createHostingForm, editHostingForm, hostingFormDirty, hostingWriteBlock, refreshHostingForm, reloadHostingForm } from './domain-hosting-form.js';
 import NginxSettingsFields from './NginxSettingsFields.jsx';
 
+export const JAMSTACK_FRAMEWORK_PRESETS = [
+  { id: 'nextjs', label: 'Next.js', path: '/api', innerPort: '3000', outerPort: '127.0.0.1:13000', websocket: true },
+  { id: 'astro', label: 'Astro', path: '/api', innerPort: '4321', outerPort: '127.0.0.1:14321', websocket: false },
+  { id: 'vite', label: 'Vite', path: '/api', innerPort: '8080', outerPort: '127.0.0.1:18080', websocket: true },
+  { id: 'nuxt', label: 'Nuxt', path: '/api', innerPort: '3000', outerPort: '127.0.0.1:13001', websocket: true },
+  { id: 'remix', label: 'Remix', path: '/ws', innerPort: '3000', outerPort: '127.0.0.1:13002', websocket: true },
+  { id: 'node', label: 'Node.js', path: '/api', innerPort: '4000', outerPort: '127.0.0.1:14000', websocket: true },
+  { id: 'python', label: 'Python', path: '/api', innerPort: '8000', outerPort: '127.0.0.1:18000', websocket: true },
+];
+
+export function buildNginxSubPathLocationBlock({
+  path = '/api',
+  innerPort = '3000',
+  outerPort = '127.0.0.1:13000',
+  websocket = true,
+} = {}) {
+  const rawPath = String(path || '/api').trim();
+  const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
+  const rawOuter = String(outerPort || '127.0.0.1:13000').trim();
+  const upstreamHost = rawOuter.includes(':') ? rawOuter : `127.0.0.1:${rawOuter}`;
+  const cleanInner = String(innerPort || '3000').trim();
+  const lines = [
+    `# Alt yol yönlendirmesi: ${normalizedPath} -> Konteyner :${cleanInner} (Host ${upstreamHost})`,
+    `location ${normalizedPath} {`,
+    `    proxy_pass http://${upstreamHost};`,
+    `    proxy_http_version 1.1;`,
+    `    proxy_set_header Host $host;`,
+    `    proxy_set_header X-Real-IP $remote_addr;`,
+    `    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;`,
+    `    proxy_set_header X-Forwarded-Proto $scheme;`,
+  ];
+  if (websocket) {
+    lines.push(
+      `    proxy_set_header Upgrade $http_upgrade;`,
+      `    proxy_set_header Connection "upgrade";`,
+    );
+  }
+  lines.push('}');
+  return lines.join('\n');
+}
+
+export function NginxSubPathProxyBuilder({ domain }) {
+  const [proxyPath, setProxyPath] = useState('/api');
+  const [innerPort, setInnerPort] = useState('3000');
+  const [outerPort, setOuterPort] = useState(
+    domain?.target?.upstreamPort ? `127.0.0.1:${domain.target.upstreamPort}` : '127.0.0.1:13000',
+  );
+  const [websocket, setWebsocket] = useState(true);
+  const [activeFramework, setActiveFramework] = useState('nextjs');
+
+  function applyFrameworkPreset(preset) {
+    setActiveFramework(preset.id);
+    setProxyPath(preset.path);
+    setInnerPort(preset.innerPort);
+    setOuterPort(preset.outerPort);
+    setWebsocket(preset.websocket);
+  }
+
+  const locationPreview = buildNginxSubPathLocationBlock({
+    path: proxyPath,
+    innerPort,
+    outerPort,
+    websocket,
+  });
+
+  return (
+    <Section
+      title="Nginx Reverse Proxy & Alt Yol (Location) Kuralları"
+      description="Aynı alan adı altında /api, /ws veya alt yolları yerel Docker konteynerlerine veya mikroservis portlarına yönlendirin."
+      actions={<LinkButton to="/docker" icon="layers">Docker Stack Bağla</LinkButton>}
+    >
+      <div className="ws-section-body">
+        <div className="ws-actions" role="group" aria-label="JAMstack ve Framework Ön-Ayarları">
+          {JAMSTACK_FRAMEWORK_PRESETS.map(preset => (
+            <Button
+              key={preset.id}
+              variant={activeFramework === preset.id ? 'primary' : 'default'}
+              onClick={() => applyFrameworkPreset(preset)}
+            >
+              {preset.label}
+            </Button>
+          ))}
+        </div>
+        <div className="ws-form-grid">
+          <label>
+            URL Yolu
+            <input
+              value={proxyPath}
+              maxLength="96"
+              placeholder="/api"
+              spellCheck={false}
+              onChange={event => setProxyPath(event.target.value)}
+            />
+          </label>
+          <label>
+            Inner / Konteyner Portu
+            <input
+              value={innerPort}
+              maxLength="16"
+              placeholder="3000"
+              spellCheck={false}
+              onChange={event => setInnerPort(event.target.value)}
+            />
+          </label>
+          <label>
+            Outer / Yerel Host Portu
+            <input
+              value={outerPort}
+              maxLength="64"
+              placeholder="127.0.0.1:13000"
+              spellCheck={false}
+              onChange={event => setOuterPort(event.target.value)}
+            />
+          </label>
+        </div>
+        <label className="ws-check">
+          <input
+            type="checkbox"
+            checked={websocket}
+            onChange={event => setWebsocket(event.target.checked)}
+          />
+          WebSocket (Upgrade)
+        </label>
+        <pre className="ws-code-block" aria-label="Nginx location bloğu önizlemesi">
+          <code>{locationPreview}</code>
+        </pre>
+      </div>
+    </Section>
+  );
+}
+
 export default function DomainHostingPanel({ domain }) {
   const { session } = usePanelSession();
   const { canManage } = useWorkspace();
@@ -126,44 +257,47 @@ function HostingForm({ domain, generation }) {
       setNotice('Barındırma ayarları uygulandı.'); refreshAll();
     });
   }
-  return <Section title="Barındırma ayarları" description="Sitenin yönlendirme, yükleme ve web sunucusu tercihlerini tek seferde kaydedip uygulayın."
-    actions={<Button icon="refresh" disabled={busy || !canManage} onClick={reload}>Güncel kaydı yükle</Button>}>
-    <div className="ws-section-body">
-      <CollectionNotice resource={jobs} label="Site işlemleri" />
-      <ErrorNotice error={error} />
-      {notice && <div className="ws-notice" role="status">{notice}</div>}
-      {blocked && <p className="ws-notice ws-notice-warn" role="status">{blocked}</p>}
-      {form && <form className="ws-form" onSubmit={save} aria-describedby={hintId}>
-        <label className="ws-check"><input type="checkbox" checked={form.values.httpsRedirect}
-          disabled={busy || !canManage || form.base.state === 'suspended' || (form.base.httpsMode !== 'managed' && !form.values.httpsRedirect)}
-          onChange={(event) => edit('httpsRedirect', event.target.checked)} />HTTP → HTTPS yönlendirmesi</label>
-        <label className="ws-check"><input type="checkbox" checked={form.values.canonicalRedirect}
-          disabled={busy || !canManage || form.base.state === 'suspended'}
-          onChange={(event) => edit('canonicalRedirect', event.target.checked)} />Ek alan adlarını {form.values.nginxSettings.preferredDomain ?? form.base.primaryDomain} adresine yönlendir</label>
-        <p id={hintId} className="ws-field-hint">Ayarlar yalnız {form.base.primaryDomain} sitesine uygulanır.</p>
-        {form.base.httpsMode !== 'managed' && <p className="ws-notice ws-notice-warn">HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.</p>}
-        {form.base.httpsMode === 'managed' && form.values.httpsRedirect && !form.base.certificateId
-          && <p className="ws-notice ws-notice-warn">SSL sertifikası bağlı değil. Bu tercihin kaydedilmesi HTTPS erişiminin hazır olduğunu göstermez.</p>}
-        <NginxSettingsFields domainNames={[form.base.primaryDomain, ...form.base.aliases]} targetType={form.base.targetType} settings={form.values.nginxSettings}
-          disabled={busy || !canManage || form.base.state === 'suspended'} onChange={value => edit('nginxSettings', value)} />
+  return <>
+    <Section title="Barındırma ayarları" description="Sitenin yönlendirme, yükleme ve web sunucusu tercihlerini tek seferde kaydedip uygulayın."
+      actions={<Button icon="refresh" disabled={busy || !canManage} onClick={reload}>Güncel kaydı yükle</Button>}>
+      <div className="ws-section-body">
+        <CollectionNotice resource={jobs} label="Site işlemleri" />
+        <ErrorNotice error={error} />
+        {notice && <div className="ws-notice" role="status">{notice}</div>}
+        {blocked && <p className="ws-notice ws-notice-warn" role="status">{blocked}</p>}
+        {form && <form className="ws-form" onSubmit={save} aria-describedby={hintId}>
+          <label className="ws-check"><input type="checkbox" checked={form.values.httpsRedirect}
+            disabled={busy || !canManage || form.base.state === 'suspended' || (form.base.httpsMode !== 'managed' && !form.values.httpsRedirect)}
+            onChange={(event) => edit('httpsRedirect', event.target.checked)} />HTTP → HTTPS yönlendirmesi</label>
+          <label className="ws-check"><input type="checkbox" checked={form.values.canonicalRedirect}
+            disabled={busy || !canManage || form.base.state === 'suspended'}
+            onChange={(event) => edit('canonicalRedirect', event.target.checked)} />Ek alan adlarını {form.values.nginxSettings.preferredDomain ?? form.base.primaryDomain} adresine yönlendir</label>
+          <p id={hintId} className="ws-field-hint">Ayarlar yalnız {form.base.primaryDomain} sitesine uygulanır.</p>
+          {form.base.httpsMode !== 'managed' && <p className="ws-notice ws-notice-warn">HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.</p>}
+          {form.base.httpsMode === 'managed' && form.values.httpsRedirect && !form.base.certificateId
+            && <p className="ws-notice ws-notice-warn">SSL sertifikası bağlı değil. Bu tercihin kaydedilmesi HTTPS erişiminin hazır olduğunu göstermez.</p>}
+          <NginxSettingsFields domainNames={[form.base.primaryDomain, ...form.base.aliases]} targetType={form.base.targetType} settings={form.values.nginxSettings}
+            disabled={busy || !canManage || form.base.state === 'suspended'} onChange={value => edit('nginxSettings', value)} />
+          <div className="ws-actions">
+            <Button type="submit" variant="primary" disabled={busy || Boolean(blocked) || (!dirty && !pendingPublication)}>{busy ? 'Ayarlar uygulanıyor…' : 'Kaydet ve uygula'}</Button>
+            <Button disabled={busy || !canManage || !dirty} onClick={reset}>Değişiklikleri iptal et</Button>
+          </div>
+        </form>}
+        {busy && <p role="status">{progress?.phase === 'stage' ? 'Yapılandırma kontrol ediliyor…' : progress?.phase === 'activate' ? 'Ayarlar siteye uygulanıyor…' : 'Ayarlar kaydediliyor…'}</p>}
+        <div className="ws-actions"><Badge state={pendingPublication ? 'staged' : 'active'}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında (Güncel)'}</Badge></div>
+        <p className="ws-muted">{!form ? 'Yayın durumu doğrulanamadı.' : pendingPublication
+          ? 'Önceki ayar değişikliği tamamlanmamış. Kaydet ve uygula ile devam edebilirsiniz.' : 'Site güncel barındırma ayarlarını kullanıyor.'}</p>
         <div className="ws-actions">
-          <Button type="submit" variant="primary" disabled={busy || Boolean(blocked) || (!dirty && !pendingPublication)}>{busy ? 'Ayarlar uygulanıyor…' : 'Kaydet ve uygula'}</Button>
-          <Button disabled={busy || !canManage || !dirty} onClick={reset}>Değişiklikleri iptal et</Button>
+          <LinkButton to={siteHref(domain.id, 'ssl')}>SSL/TLS Sertifikaları</LinkButton>
         </div>
-      </form>}
-      {busy && <p role="status">{progress?.phase === 'stage' ? 'Yapılandırma kontrol ediliyor…' : progress?.phase === 'activate' ? 'Ayarlar siteye uygulanıyor…' : 'Ayarlar kaydediliyor…'}</p>}
-      <div className="ws-actions"><Badge state={pendingPublication ? 'staged' : 'active'}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında (Güncel)'}</Badge></div>
-      <p className="ws-muted">{!form ? 'Yayın durumu doğrulanamadı.' : pendingPublication
-        ? 'Önceki ayar değişikliği tamamlanmamış. Kaydet ve uygula ile devam edebilirsiniz.' : 'Site güncel barındırma ayarlarını kullanıyor.'}</p>
-      <div className="ws-actions">
-        <LinkButton to={siteHref(domain.id, 'ssl')}>SSL/TLS Sertifikaları</LinkButton>
+        {dirty && <p className="ws-muted">Sayfadan ayrılmadan önce taslağı kaydedin veya değişiklikleri iptal edin.</p>}
+        <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik yayın bilgileri</summary><KeyValues items={[
+          ['Alan adı kimliği', domain.id],
+          ['Hedef revizyon (desired revision)', form?.base?.desiredRevision ?? '—'],
+          ['Uygulanan revizyon (applied revision)', form?.base?.appliedRevision ?? '—'],
+        ]}/></details>
       </div>
-      {dirty && <p className="ws-muted">Sayfadan ayrılmadan önce taslağı kaydedin veya değişiklikleri iptal edin.</p>}
-      <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik yayın bilgileri</summary><KeyValues items={[
-        ['Alan adı kimliği', domain.id],
-        ['Hedef revizyon (desired revision)', form?.base?.desiredRevision ?? '—'],
-        ['Uygulanan revizyon (applied revision)', form?.base?.appliedRevision ?? '—'],
-      ]}/></details>
-    </div>
-  </Section>;
+    </Section>
+    <NginxSubPathProxyBuilder domain={domain} />
+  </>;
 }

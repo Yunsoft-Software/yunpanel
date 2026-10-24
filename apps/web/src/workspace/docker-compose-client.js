@@ -45,6 +45,44 @@ export async function getDockerCatalog(query = '', { live = true, signal } = {})
   return [];
 }
 
+export async function listOneClickApps({ q = '', category = '', signal } = {}) {
+  const params = new URLSearchParams();
+  if (typeof q === 'string' && q.trim()) {
+    params.set('q', q.trim());
+  }
+  if (typeof category === 'string' && category.trim() && category.trim() !== 'all') {
+    params.set('category', category.trim());
+  }
+  const suffix = params.toString() ? `?${params.toString()}` : '';
+  const result = await panelRequest(`/docker/one-click-apps${suffix}`, { signal });
+  if (Array.isArray(result)) return result;
+  if (Array.isArray(result?.items)) return result.items;
+  if (Array.isArray(result?.data)) return result.data;
+  return [];
+}
+
+export async function prepareOneClickApp(input = {}) {
+  if (!input || typeof input !== 'object' || typeof input.templateId !== 'string' || !input.templateId.trim()) {
+    throw new Error('templateId is required');
+  }
+  const payload = {
+    templateId: input.templateId.trim(),
+    ...(input.projectName ? { projectName: String(input.projectName).trim() } : {}),
+    ...(input.hostname ? { hostname: String(input.hostname).trim() } : {}),
+    ...(input.urlPath ? { urlPath: String(input.urlPath).trim() } : {}),
+    ...(input.innerPort != null ? { innerPort: Number(input.innerPort) } : {}),
+    ...(input.outerPort != null ? { outerPort: Number(input.outerPort) } : {}),
+    ...(input.environmentOverrides && typeof input.environmentOverrides === 'object'
+      ? { environmentOverrides: input.environmentOverrides }
+      : {}),
+  };
+  const result = await panelRequest('/docker/one-click-apps/prepare', {
+    method: 'POST',
+    body: payload,
+  });
+  return result?.data ?? result;
+}
+
 export function generateDockerComposeFromImage({
   image,
   serviceName = '',

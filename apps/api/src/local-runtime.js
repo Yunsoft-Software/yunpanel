@@ -3,7 +3,7 @@ import { createLocalHostOperations } from './local-host-operations.js';
 import { createLocalJobExecutor } from './local-job-executor.js';
 import { reconcileCompletedJob } from './job-reconciliation.js';
 
-const DEFAULT_SNAPSHOT_INTERVAL_MS = 30_000;
+const DEFAULT_SNAPSHOT_INTERVAL_MS = 5_000;
 const EXECUTOR_FAULT_CODES = new Set([
   'local_claim_unconfirmed',
   'local_claim_invalid',
