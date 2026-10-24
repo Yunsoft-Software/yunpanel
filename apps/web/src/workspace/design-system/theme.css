@@ -1125,28 +1125,28 @@ html .workspace-shell .ws-db-access .ws-button {
 }
 
 /* aaPanel-Style Notification & Task Center Drawer + JAMstack & Easypanel Presets */
-html .workspace-shell .yp-notification-backdrop {
+html .workspace-shell :is(.yp-notification-backdrop, .ws-drawer-backdrop) {
   position: fixed !important;
   inset: 0 !important;
-  z-index: 80 !important;
-  background: rgba(9, 9, 11, 0.58) !important;
-  backdrop-filter: blur(4px) !important;
+  z-index: 200 !important;
+  background: rgba(9, 9, 11, 0.65) !important;
+  backdrop-filter: blur(5px) !important;
   display: flex !important;
   justify-content: flex-end !important;
 }
 
-html .workspace-shell .yp-notification-drawer {
+html .workspace-shell :is(.yp-notification-drawer, .ws-notification-drawer) {
   width: min(520px, 94vw) !important;
   height: 100vh !important;
   background: var(--ws-surface) !important;
   border-left: 1px solid var(--ws-border-strong) !important;
-  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.45) !important;
+  box-shadow: -16px 0 40px rgba(0, 0, 0, 0.55) !important;
   display: flex !important;
   flex-direction: column !important;
   overflow: hidden !important;
 }
 
-html .workspace-shell .yp-notification-header {
+html .workspace-shell :is(.yp-notification-header, .ws-drawer-header) {
   display: flex !important;
   align-items: center !important;
   justify-content: space-between !important;
@@ -1160,11 +1160,33 @@ html .workspace-shell .yp-notification-tabs {
   display: flex !important;
   gap: 6px !important;
   padding: 10px 20px !important;
+  margin: 0 !important;
   border-bottom: 1px solid var(--ws-border) !important;
   background: var(--ws-surface-subtle) !important;
 }
 
-html .workspace-shell .yp-notification-body {
+html .workspace-shell .yp-notification-tabs .ws-tab {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  padding: 6px 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-muted) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  cursor: pointer !important;
+}
+
+html .workspace-shell .yp-notification-tabs .ws-tab.is-active {
+  background: var(--ws-brand-soft) !important;
+  border-color: var(--ws-brand) !important;
+  color: var(--ws-text) !important;
+  font-weight: 600 !important;
+}
+
+html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) {
   flex: 1 1 auto !important;
   overflow-y: auto !important;
   padding: 16px 20px !important;
@@ -1173,15 +1195,29 @@ html .workspace-shell .yp-notification-body {
   gap: 10px !important;
 }
 
-html .workspace-shell .yp-notification-item {
+html .workspace-shell .yp-notification-item,
+html .workspace-shell :is(.yp-notification-body, .ws-drawer-body) .ws-alert-item {
   display: flex !important;
-  align-items: flex-start !important;
+  align-items: center !important;
   justify-content: space-between !important;
   gap: 12px !important;
   padding: 12px 14px !important;
   border: 1px solid var(--ws-border) !important;
   border-radius: 8px !important;
   background: var(--ws-surface-raised) !important;
+}
+
+html .workspace-shell pre.ws-code-block {
+  margin: 4px 0 0 !important;
+  padding: 12px 14px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-canvas) !important;
+  color: var(--ws-text) !important;
+  font-family: var(--ws-mono, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace) !important;
+  font-size: 12.5px !important;
+  line-height: 1.55 !important;
+  overflow-x: auto !important;
 }
 
 html .workspace-shell .yp-category-pills,
@@ -1211,6 +1247,19 @@ html .workspace-shell .yp-preset-card:hover,
 html .workspace-shell .yp-preset-card.is-active {
   border-color: var(--ws-brand) !important;
   background: var(--ws-brand-soft) !important;
+}
+
+html .workspace-shell .ws-button.yp-framework-preset-card {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  justify-content: space-between !important;
+  gap: 4px !important;
+  height: 100% !important;
+  min-height: 60px !important;
+  padding: 10px 12px !important;
+  white-space: normal !important;
+  text-align: left !important;
 }
 
 

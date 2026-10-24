@@ -218,14 +218,14 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
   }
 
   return (
-    <div className="ws-drawer-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
+    <div className="ws-drawer-backdrop yp-notification-backdrop" onClick={(event) => { if (event.target === event.currentTarget) onClose?.(); }}>
       <aside
-        className="ws-drawer ws-notification-drawer"
+        className="ws-drawer ws-notification-drawer yp-notification-drawer"
         role="dialog"
         aria-modal="true"
         aria-label="Bildirim ve Görev Merkezi"
       >
-        <header className="ws-drawer-header" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '0.75rem', paddingBottom: '0.75rem', borderBottom: '1px solid var(--ws-border)' }}>
+        <header className="ws-drawer-header yp-notification-header">
           <div>
             <h2 style={{ margin: 0, fontSize: '1.05rem' }}>Bildirim ve Görev Merkezi</h2>
             <small className="ws-muted">{activeJobs.length} aktif görev · {alerts.length} sistem uyarısı</small>
@@ -233,7 +233,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
           <Button icon="close" aria-label="Bildirim merkezini kapat" onClick={() => onClose?.()} />
         </header>
 
-        <div className="ws-tabs" role="tablist" aria-label="Merkez sekmeleri" style={{ display: 'flex', gap: '0.4rem', margin: '0.85rem 0' }}>
+        <div className="ws-tabs yp-notification-tabs" role="tablist" aria-label="Merkez sekmeleri">
           <button
             type="button"
             role="tab"
@@ -266,7 +266,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
           </button>
         </div>
 
-        <div className="ws-drawer-body" style={{ display: 'flex', flexDirection: 'column', gap: '0.85rem', overflowY: 'auto' }}>
+        <div className="ws-drawer-body yp-notification-body">
           {activeTab === 'tasks' && (
             <section aria-label="Görev Kuyruğu" style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem' }}>
               {activeJobs.length > 0 && (

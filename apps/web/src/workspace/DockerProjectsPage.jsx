@@ -306,22 +306,22 @@ function DockerProjectList() {
       description="PocketBase, n8n, Directus, Strapi, Umami, Meilisearch gibi 1-Click şablonları otomatik secret üretimiyle tek tıkla kurun veya Docker Hub üzerindeki tüm imajları canlı arayın."
       actions={(liveCatalog.status === 'loading' || oneClickCatalog.status === 'loading') ? <Badge state="running">Katalog yükleniyor…</Badge> : <Badge state="active">{debouncedQuery ? `Docker Hub: ${filteredCatalog.length} sonuç` : `${filteredCatalog.length} Hazır Şablon · Docker Hub Bağlı`}</Badge>}
     >
-      <div className="ws-filters" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '10px' }}>
-        <div role="tablist" aria-label="1-Click Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          {EASYPANEL_CATEGORY_FILTERS.map((cat) => {
-            const isSelected = activeCategory === cat.id;
-            return (
-              <Button
-                key={cat.id}
-                variant={isSelected ? 'primary' : 'default'}
-                onClick={() => setActiveCategory(cat.id)}
-              >
-                {cat.label}
-              </Button>
-            );
-          })}
-        </div>
-        <label className="ws-filter-search" style={{ flex: '1 1 360px' }}>
+      <div className="yp-category-pills" role="tablist" aria-label="1-Click Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '14px 18px 0 18px' }}>
+        {EASYPANEL_CATEGORY_FILTERS.map((cat) => {
+          const isSelected = activeCategory === cat.id;
+          return (
+            <Button
+              key={cat.id}
+              variant={isSelected ? 'primary' : 'default'}
+              onClick={() => setActiveCategory(cat.id)}
+            >
+              {cat.label}
+            </Button>
+          );
+        })}
+      </div>
+      <div className="ws-filters">
+        <label className="ws-filter-search" style={{ flex: '1 1 320px', width: '100%' }}>
           Docker Hub'da imaj veya servis ara
           <input
             type="search"
