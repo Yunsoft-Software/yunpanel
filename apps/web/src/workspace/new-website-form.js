@@ -148,15 +148,17 @@ export function existingApplicationType(sourceMode) {
 }
 
 export function resolveSubdomainSharedFileRoot(parentDomain, prefix) {
-  const cleanParent = typeof parentDomain === 'string' && parentDomain.trim()
+  const rawParent = typeof parentDomain === 'string' && parentDomain.trim()
     ? parentDomain.trim().toLowerCase()
     : 'example.com';
+  const cleanParent = rawParent.replace(/[^a-z0-9.-]/g, '').replace(/\.{2,}/g, '.') || 'example.com';
   const rawPrefix = typeof prefix === 'string' && prefix.trim()
     ? prefix.trim().toLowerCase()
     : 'sub';
-  const cleanPrefix = rawPrefix.endsWith(`.${cleanParent}`)
+  const strippedPrefix = rawPrefix.endsWith(`.${cleanParent}`)
     ? (rawPrefix.slice(0, -(cleanParent.length + 1)) || 'sub')
     : rawPrefix;
+  const cleanPrefix = strippedPrefix.replace(/[^a-z0-9.-]/g, '').replace(/\.{2,}/g, '.').replace(/^\.+|\.+$/g, '') || 'sub';
   return `/var/www/vhosts/${cleanParent}/subdomains/${cleanPrefix}`;
 }
 

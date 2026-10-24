@@ -30,22 +30,27 @@ export const STATIC_CACHE_PRESETS = [
 
 export function applyNginxHeaderPreset(existingHeaders = [], presetKey) {
   const base = Array.isArray(existingHeaders)
-    ? existingHeaders.slice(0, 12).map(item => ({
-        name: String(item?.name ?? ''),
-        value: String(item?.value ?? ''),
-        always: item?.always !== false,
-      }))
+    ? existingHeaders
+        .filter(item => String(item?.name ?? '').trim() !== '' || String(item?.value ?? '').trim() !== '')
+        .slice(0, 12)
+        .map(item => ({
+          name: String(item?.name ?? ''),
+          value: String(item?.value ?? ''),
+          always: item?.always !== false,
+        }))
     : [];
   const additions = NGINX_HEADER_PRESETS[presetKey] ?? [];
   const next = [...base];
   for (const candidate of additions) {
-    if (next.length >= 12) break;
-    const exists = next.some(
+    const existingIndex = next.findIndex(
       item => item.name.trim().toLowerCase() === candidate.name.toLowerCase(),
     );
-    if (!exists) {
-      next.push({ ...candidate });
+    if (existingIndex !== -1) {
+      next[existingIndex] = { ...candidate };
+      continue;
     }
+    if (next.length >= 12) break;
+    next.push({ ...candidate });
   }
   return next;
 }

@@ -27,15 +27,36 @@ export function buildNginxSubPathLocationBlock({
   outerPort = '127.0.0.1:13000',
   websocket = true,
 } = {}) {
-  const rawPath = String(path || '/api').trim();
+  const rawPath = String(path ?? '/api').trim();
+  if (!rawPath || /[\s;{}'"\\$\r\n\0]/.test(rawPath) || rawPath.includes('..')) {
+    throw new Error('Geçersiz Nginx alt yol (location) ifadesi.');
+  }
   const normalizedPath = rawPath.startsWith('/') ? rawPath : `/${rawPath}`;
-  const rawOuter = String(outerPort || '127.0.0.1:13000').trim();
+
+  const cleanInnerNum = Number(String(innerPort ?? '3000').trim());
+  if (!Number.isInteger(cleanInnerNum) || cleanInnerNum < 1 || cleanInnerNum > 65535) {
+    throw new Error('Inner (Konteyner) portu 1–65535 aralığında olmalıdır.');
+  }
+
+  const rawOuter = String(outerPort ?? '127.0.0.1:13000').trim();
   const upstreamHost = rawOuter.includes(':') ? rawOuter : `127.0.0.1:${rawOuter}`;
-  const cleanInner = String(innerPort || '3000').trim();
+  const [hostPart, portPart, ...extraParts] = upstreamHost.split(':');
+  const outerPortNum = Number(portPart);
+  if (
+    extraParts.length > 0
+    || !hostPart
+    || !/^[a-zA-Z0-9._-]+$/.test(hostPart)
+    || !Number.isInteger(outerPortNum)
+    || outerPortNum < 1
+    || outerPortNum > 65535
+  ) {
+    throw new Error('Outer (Yerel Host) adresi geçerli bir host:port (1–65535) olmalıdır.');
+  }
+
   const lines = [
-    `# Alt yol yönlendirmesi: ${normalizedPath} -> Konteyner :${cleanInner} (Host ${upstreamHost})`,
+    `# Alt yol yönlendirmesi: ${normalizedPath} -> Konteyner :${cleanInnerNum} (Host ${hostPart}:${outerPortNum})`,
     `location ${normalizedPath} {`,
-    `    proxy_pass http://${upstreamHost};`,
+    `    proxy_pass http://${hostPart}:${outerPortNum};`,
     `    proxy_http_version 1.1;`,
     `    proxy_set_header Host $host;`,
     `    proxy_set_header X-Real-IP $remote_addr;`,
@@ -69,12 +90,18 @@ export function NginxSubPathProxyBuilder({ domain }) {
     setWebsocket(preset.websocket);
   }
 
-  const locationPreview = buildNginxSubPathLocationBlock({
-    path: proxyPath,
-    innerPort,
-    outerPort,
-    websocket,
-  });
+  let locationPreview = '';
+  let previewError = null;
+  try {
+    locationPreview = buildNginxSubPathLocationBlock({
+      path: proxyPath,
+      innerPort,
+      outerPort,
+      websocket,
+    });
+  } catch (err) {
+    previewError = err.message;
+  }
 
   return (
     <Section
@@ -134,8 +161,9 @@ export function NginxSubPathProxyBuilder({ domain }) {
           />
           WebSocket (Upgrade)
         </label>
+        <ErrorNotice error={previewError} />
         <pre className="ws-code-block" aria-label="Nginx location bloğu önizlemesi">
-          <code>{locationPreview}</code>
+          <code>{previewError ? `# Hata: ${previewError}` : locationPreview}</code>
         </pre>
       </div>
     </Section>
