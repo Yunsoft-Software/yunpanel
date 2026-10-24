@@ -464,7 +464,7 @@ html .workspace-shell .ws-website-task-card:hover {
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
   margin-inline-start: calc(var(--ws-card-depth, 1) * 24px) !important;
   border: 1px solid var(--ws-border) !important;
-  border-left: 3px solid var(--ws-brand) !important;
+  border-left: 2px solid var(--ws-control-border) !important;
   border-radius: 6px !important;
   background: var(--ws-surface-subtle) !important;
   padding: 12px 14px !important;
@@ -534,6 +534,7 @@ html .workspace-shell .ws-website-task {
   flex-direction: column !important;
   align-items: flex-start !important;
   width: auto !important;
+  min-width: 0 !important;
   flex: 0 0 auto !important;
   gap: 3px !important;
 }
@@ -548,10 +549,10 @@ html .workspace-shell .ws-website-task .ws-button {
 }
 
 html .workspace-shell .ws-website-task small {
-  font-size: 11px !important;
-  line-height: 1.25 !important;
+  font-size: 10.5px !important;
+  line-height: 1.2 !important;
   color: var(--ws-muted) !important;
-  max-width: 220px !important;
+  max-width: 155px !important;
 }
 
 html .workspace-shell .ws-website-task-quick > .ws-button {
@@ -659,6 +660,10 @@ html .workspace-shell .ws-website-task-children .ws-button {
   color: var(--ws-text);
   font-family: var(--ws-font-code, ui-monospace, monospace);
   font-size: 11px;
+  max-width: 280px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .yp-file-root-tag {
@@ -717,6 +722,8 @@ html .workspace-shell .ws-website-task-children .ws-button {
   background: var(--ws-surface-subtle);
   font-family: var(--ws-font-code, ui-monospace, monospace);
   font-size: 11.5px;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
 /* Tables & Modals */
