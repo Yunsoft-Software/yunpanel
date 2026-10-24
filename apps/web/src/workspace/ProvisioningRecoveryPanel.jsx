@@ -83,7 +83,7 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
   if (state.status === 'ready' && !operation) return null;
 
   return <>
-    <Section title="Site kurulumu" description="Kurulum adımlarını inceleyin; sorun giderildikten sonra devam edin veya ilgili adımı tekrar deneyin."
+    <Section title="Site kurulumu" description={operation?.ready ? 'Site kurulum adımları tamamlandı ve yayın ortamı hazır.' : 'Kurulum adımlarını inceleyin; sorun giderildikten sonra devam edin veya ilgili adımı tekrar deneyin.'}
       actions={<div className="ws-actions">
         {operation && <Badge state={state.status === 'ready' ? operationBadgeState(operation) : 'unknown'}>{state.status === 'ready' ? provisioningOperationLabel(operation) : 'Güncel durum doğrulanmalı'}</Badge>}
         <Button icon="refresh" disabled={busy} onClick={() => client.current?.load()}>Durumu yenile</Button>
@@ -93,13 +93,13 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
       <div className="ws-section-body">
         <ErrorNotice error={error} />
         {notice && <p role="status">{notice}</p>}
-        {busy && <p role="status"><span className="ws-spinner" />{state.status === 'checking' ? 'Onayladığınız kayıt yeniden kontrol ediliyor…' : state.status === 'mutating' ? 'İşlem sonucu bekleniyor…' : 'Kurulum kaydı yenileniyor…'}</p>}
+        {busy && <p role="status" className="ws-loading"><span className="ws-spinner" />{state.status === 'checking' ? 'Onayladığınız kayıt yeniden kontrol ediliyor…' : state.status === 'mutating' ? 'İşlem sonucu bekleniyor…' : 'Kurulum kaydı yenileniyor…'}</p>}
         {operation && <p className="ws-muted">
           {state.status !== 'ready' ? 'Son doğrulanmış kayıt: ' : ''}{operation.progress.completed}/{operation.progress.required} zorunlu adım tamamlandı.
-          {' '}Bu sayı deneme sınırı değildir. {operation.ready ? 'Yayın, SSL ve posta durumunu ilgili araçlardan ayrıca doğrulayın.' : 'Kalan adımlar tamamlanmadan kurulum hazır sayılmaz.'}
+          {!operation.ready && ' Kalan adımlar tamamlanmadan kurulum hazır sayılmaz.'}
         </p>}
       </div>
-      {operation && <div className="ws-table-scroll"><table className="ws-table">
+      {operation && <details className="ws-disclosure" open={!operation.ready}><summary>Kurulum adımları ({operation.progress.completed}/{operation.progress.required})</summary><div className="ws-table-scroll"><table className="ws-table">
         <thead><tr><th>Görev adımı</th><th>Durum</th><th>Tanılama / çözüm</th><th>İşlem</th></tr></thead>
         <tbody>{operation.steps.map((step) => {
           const item = step;
@@ -117,10 +117,9 @@ function RecoveryPanel({ websiteId, canManage, onChanged }) {
             </div></td>
           </tr>;
         })}</tbody>
-      </table></div>}
+      </table></div></details>}
       <div className="ws-section-body">
-        <p className="ws-muted">Durumu yenile yalnızca kayıt okur; işlemi tekrar başlatmaz. Sayfadan ayrılmak sunucuda başlamış bir işi geri almaz.</p>
-        {operation && <details><summary>Teknik bilgiler ve tanılama</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Web sitesi kimliği: <code>{operation.websiteId}</code></p><p>Hazır olma durumu (ready): <code>{operation.ready ? 'true' : 'false'}</code></p><p>Tekrar deneme ve geri alma onayı bu işlem ve seçilen adımla sınırlıdır.</p></details>}
+        {operation && <details><summary>Teknik bilgiler ve tanılama</summary><p>İşlem kimliği: <code>{operation.operationId}</code></p><p>Web sitesi kimliği: <code>{operation.websiteId}</code></p><p>Hazır olma durumu (ready): <code>{operation.ready ? 'true' : 'false'}</code></p></details>}
       </div>
     </Section>
     {approval && copy && <ConfirmDialog key={`${approval.confirmation}:${approval.snapshot}`}

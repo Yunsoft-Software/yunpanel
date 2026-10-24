@@ -411,7 +411,92 @@ html .workspace-shell .ws-section-heading p {
 
 html .workspace-shell .ws-section-body,
 html .workspace-shell .ws-form {
-  padding: 18px !important;
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 12px !important;
+  padding: 16px 18px !important;
+}
+
+html .workspace-shell .ws-section-body > :is(p, div, dl, details, .ws-actions, .ws-notice, .ws-loading) {
+  margin: 0 !important;
+}
+
+/* Equal-Height Desktop Cards & Grids (Symmetric Multi-Column Layout) */
+html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom, .ws-metrics, .ws-quota-cards, .yp-docker-catalog-grid) {
+  align-items: stretch !important;
+}
+
+html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom, .ws-metrics, .ws-quota-cards) > :is(.ws-section, .panel, .ws-metric, article) {
+  height: 100% !important;
+  display: flex !important;
+  flex-direction: column !important;
+  margin-bottom: 0 !important;
+}
+
+html .workspace-shell :is(.ws-equal-columns, .ws-two-columns, .ws-console-grid, .ws-console-bottom) > :is(.ws-section, .panel) > .ws-section-body:last-child {
+  flex: 1 1 auto !important;
+}
+
+/* Spinners, Worker Status & Loading Blocks — Proper Gap & Breathing Room */
+html .workspace-shell .ws-spinner,
+html .ws-modal .ws-spinner {
+  display: inline-block !important;
+  width: 15px !important;
+  height: 15px !important;
+  margin-right: 8px !important;
+  vertical-align: -2px !important;
+  flex-shrink: 0 !important;
+  border-width: 2px !important;
+}
+
+html .workspace-shell .ws-loading,
+html .workspace-shell .ws-section-body > p[role='status'],
+html .ws-modal .ws-loading {
+  display: flex !important;
+  align-items: center !important;
+  gap: 10px !important;
+  padding: 10px 14px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  line-height: 1.4 !important;
+}
+
+html .workspace-shell .ws-loading .ws-spinner,
+html .workspace-shell p[role='status'] .ws-spinner,
+html .ws-modal .ws-loading .ws-spinner {
+  margin-right: 2px !important;
+}
+
+/* Desktop & Mobile Sidebar Collapse / Toggle Controls */
+html .workspace-shell .ws-nav-close,
+html .workspace-shell .ws-mobile-menu {
+  display: inline-flex !important;
+  min-width: 32px !important;
+  width: 32px !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 !important;
+}
+
+@media (min-width: 901px) {
+  html .workspace-shell.is-sidebar-collapsed {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+
+  html .workspace-shell.is-sidebar-collapsed .ws-sidebar {
+    display: none !important;
+  }
+
+  html .workspace-shell.is-sidebar-collapsed .ws-main {
+    margin-left: 0 !important;
+  }
+
+  html .authenticated-panel:has(.workspace-shell.is-sidebar-collapsed) .auth-sessionbar {
+    padding-left: 24px !important;
+  }
 }
 
 html .workspace-shell .ws-filters {
@@ -519,14 +604,23 @@ html .workspace-shell .ws-website-task-status {
   gap: 6px !important;
 }
 
-/* Fix Crooked Quick-Action Buttons in WebsiteTaskCard */
+/* Symmetrical Quick-Action Bar & Accordion Grid in WebsiteTaskCard */
 html .workspace-shell .ws-website-task-quick {
   display: flex !important;
   flex-wrap: wrap !important;
   align-items: flex-start !important;
-  gap: 6px !important;
+  justify-content: space-between !important;
+  gap: 8px 12px !important;
   padding: 0 !important;
   margin: 0 !important;
+}
+
+html .workspace-shell .ws-website-task-quick-primary {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  flex: 1 1 auto !important;
 }
 
 html .workspace-shell .ws-website-task {
@@ -563,13 +657,31 @@ html .workspace-shell .ws-website-task-quick > .ws-button {
 }
 
 html .workspace-shell .ws-website-task-grid {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  align-items: flex-start !important;
-  gap: 6px !important;
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)) !important;
+  align-items: start !important;
+  gap: 8px !important;
   margin-top: 10px !important;
   padding-top: 10px !important;
   border-top: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-website-task-grid .ws-website-task {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  width: 100% !important;
+}
+
+html .workspace-shell .ws-website-task-grid .ws-website-task .ws-button {
+  width: 100% !important;
+  justify-content: flex-start !important;
+  padding: 0 12px !important;
+}
+
+html .workspace-shell .ws-website-task-grid .ws-website-task small {
+  max-width: none !important;
+  padding: 0 2px !important;
 }
 
 html .workspace-shell .ws-website-task-footer {
@@ -598,6 +710,101 @@ html .workspace-shell .ws-website-task-children .ws-button {
   height: 30px !important;
   padding: 0 10px !important;
   font-size: 12px !important;
+}
+
+/* Compact Horizontal Tab Bar (SiteNavigation) & 4-Column Quicklinks (SiteDetailPage) */
+html .workspace-shell .ws-plesk-site-navigation {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 10px 18px !important;
+  padding: 10px 14px !important;
+  margin-bottom: 16px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-surface) !important;
+}
+
+html .workspace-shell .ws-plesk-site-group {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px 8px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  background: transparent !important;
+}
+
+html .workspace-shell .ws-plesk-site-group:not(:last-child) {
+  padding-right: 14px !important;
+  border-right: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-plesk-site-group > h2 {
+  margin: 0 4px 0 0 !important;
+  font-size: 10.5px !important;
+  font-weight: 600 !important;
+  text-transform: uppercase !important;
+  letter-spacing: 0.5px !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-plesk-site-tabs {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 4px !important;
+}
+
+html .workspace-shell .ws-plesk-site-tabs a {
+  display: inline-flex !important;
+  align-items: center !important;
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 10px !important;
+  border-radius: 6px !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+}
+
+html .workspace-shell .ws-console-quicklinks {
+  display: grid !important;
+  grid-template-columns: repeat(auto-fill, minmax(185px, 1fr)) !important;
+  gap: 8px !important;
+  padding: 14px 18px !important;
+}
+
+html .workspace-shell .ws-console-quicklink {
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  min-height: 40px !important;
+  padding: 8px 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  text-decoration: none !important;
+}
+
+html .workspace-shell .ws-console-quicklink:hover {
+  border-color: var(--ws-control-border) !important;
+  background: var(--ws-surface-hover) !important;
+}
+
+/* Horizontal Action Buttons in Tables (.ws-db-access, .ys-resource-actions) */
+html .workspace-shell :is(.ws-db-access, .ys-resource-actions) {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+html .workspace-shell details.ws-disclosure > summary {
+  cursor: pointer !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+  padding: 6px 0 !important;
 }
 
 /* Hierarchical Domain -> Subdomain Tree & Shared File Root Pill */

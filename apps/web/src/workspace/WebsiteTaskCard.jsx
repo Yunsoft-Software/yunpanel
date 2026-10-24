@@ -55,34 +55,35 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
       <div className="ws-website-task-status" aria-label="Kayıt ve sertifika durumu">
         <Badge state={tasks.domainReady ? domain.state : 'unknown'} />
         <Badge state={ssl.state}>{ssl.label}</Badge>
-        {childCount > 0 && !toolsOpen && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
+        {childCount > 0 && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} aria-label={`${domain.primaryDomain} alt alan adlarını ${expanded ? 'daralt' : 'genişlet'}`} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
         {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
+        <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Yönet</LinkButton>
       </div>
     </header>
     {warning && <p className="ws-website-task-warning"><Icon name="alert" />Üst alan adı bağlantısını kontrol edin.</p>}
     <nav className="ws-website-task-quick" aria-label={`${domain.primaryDomain} hızlı araçlar`}>
-      {tasks.tools.filter((tool) => ['files', 'databases', 'ssl', 'wordpress'].includes(tool.key)).map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}
-      <Button icon="chevron" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} onClick={() => setToolsOpen(!toolsOpen)}>{toolsOpen ? 'Araçları daralt' : 'Tüm araçlar'}</Button>
+      <div className="ws-website-task-quick-primary">
+        {tasks.tools.filter((tool) => ['files', 'databases', 'ssl', 'wordpress'].includes(tool.key)).map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}
+      </div>
+      <Button className="ws-website-task-toggle" icon="chevron" aria-expanded={toolsOpen} aria-controls={`${id}-tools`} onClick={() => setToolsOpen(!toolsOpen)}>{toolsOpen ? 'Araçları daralt' : 'Tüm araçlar'}</Button>
     </nav>
     <div id={`${id}-tools`} hidden={!toolsOpen}>
       <nav className="ws-website-task-grid" aria-label={`${domain.primaryDomain} site araçları`}>
         {tasks.tools.filter((tool) => !['files', 'databases', 'ssl', 'wordpress'].includes(tool.key)).map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}
         {tasks.secondaryTools.map((tool) => <TaskLink key={tool.key} tool={tool} domainName={domain.primaryDomain} id={id} />)}
       </nav>
-    <footer className="ws-website-task-footer">
-      <div className="ws-actions">
-        <LinkButton to={siteHref(domain.id)} icon="arrow" aria-label={`${domain.primaryDomain} site genel bakışını aç`}>Site genel bakışı</LinkButton>
-        {tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`}>Alt alan adı ekle</LinkButton>}
-        {tasks.manageAliasesHref && <LinkButton to={tasks.manageAliasesHref} icon="plus" aria-label={`${domain.primaryDomain} için alias ekle veya yönet`}>Alias ekle</LinkButton>}
-        {tasks.removeHref && <LinkButton to={tasks.removeHref} icon="trash" aria-label={`${domain.primaryDomain} sitesini sil`}>Siteyi sil</LinkButton>}
-        {childCount > 0 && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} aria-label={`${domain.primaryDomain} alt alan adlarını ${expanded ? 'daralt' : 'genişlet'}`} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
-      </div>
-      <details className="ws-website-task-details"><summary>Alan adı bilgileri</summary>
-        <dl><div><dt>Aliaslar</dt><dd>{domain.aliases?.length ? domain.aliases.join(', ') : 'Yok'}{tasks.manageAliasesHref && <> · <Link to={tasks.manageAliasesHref}>Alias yönetimi</Link></>}</dd></div>
-          {tasks.applicationName && <div><dt>Bağlı uygulama</dt><dd>{tasks.applicationName}</dd></div>}
-        </dl>
-      </details>
-    </footer>
+      <footer className="ws-website-task-footer">
+        <div className="ws-actions">
+          {tasks.createSubdomainHref && <LinkButton to={tasks.createSubdomainHref} icon="plus" aria-label={`${domain.primaryDomain} altında alan adı ekle`}>Alt alan adı ekle</LinkButton>}
+          {tasks.manageAliasesHref && <LinkButton to={tasks.manageAliasesHref} icon="plus" aria-label={`${domain.primaryDomain} için alias ekle veya yönet`}>Alias ekle</LinkButton>}
+          {tasks.removeHref && <LinkButton to={tasks.removeHref} icon="trash" aria-label={`${domain.primaryDomain} sitesini sil`}>Siteyi sil</LinkButton>}
+        </div>
+        <details className="ws-website-task-details"><summary>Alan adı bilgileri</summary>
+          <dl><div><dt>Aliaslar</dt><dd>{domain.aliases?.length ? domain.aliases.join(', ') : 'Yok'}{tasks.manageAliasesHref && <> · <Link to={tasks.manageAliasesHref}>Alias yönetimi</Link></>}</dd></div>
+            {tasks.applicationName && <div><dt>Bağlı uygulama</dt><dd>{tasks.applicationName}</dd></div>}
+          </dl>
+        </details>
+      </footer>
     </div>
   </article>;
 }

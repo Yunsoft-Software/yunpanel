@@ -221,7 +221,7 @@ test('Criterion 3: Owner role has full server management context and all task sc
 
   // Owner actions in toolbar
   assert.doesNotMatch(layout, /<LinkButton to="\/websites\/new"/); // The Websites task page owns the single create action.
-  assert.match(layout, /isOwner && <Button icon="terminal" aria-label="AI asistanı aç \(Ürün uzantısı\)"/);
+  assert.match(layout, /isOwner && <Button icon="terminal" aria-label="AI asistanı aç"/);
 
   // Owner can access all tools in command palette
   const ownerCommands = commandEntries({ canManage: true, isOwner: true }).map((c) => c.to);
@@ -231,7 +231,7 @@ test('Criterion 3: Owner role has full server management context and all task sc
 
   // Websites page heading for Owner
   const websitesPage = await source('workspace/WebsitesPage.jsx');
-  assert.match(websitesPage, /isReseller \? 'Sitelerim' : 'Web Siteleri ve Alan Adları'/);
+  assert.match(websitesPage, /isReseller \? 'Sitelerim' : 'Web Siteleri'/);
   assert.match(websitesPage, /isOwner && canManage && <LinkButton to="\/websites\/new" icon="plus" variant="primary">Web sitesi ekle<\/LinkButton>/);
   assert.match(websitesPage, /isOwner && canManage && <WebsiteRemovalRecoveryPanel(?:\s+[^>]*?)?\s*\/>/);
 });
@@ -283,7 +283,7 @@ test('Criterion 3: Site User Role 2 (Customer) has isolated Müşteri Menüsü, 
     '/databases',
     '/statistics',
   ]);
-  assert.equal(customerNav[0].items.find(([p]) => p === '/websites')[1], 'Web Siteleri ve Alan Adları');
+  assert.equal(customerNav[0].items.find(([p]) => p === '/websites')[1], 'Web Siteleri');
 
   // Customer forbidden paths
   assert.ok(!paths.includes('/customers'));

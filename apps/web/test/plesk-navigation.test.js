@@ -8,7 +8,7 @@ const source = (path) => readFile(new URL(`../src/workspace/${path}`, import.met
 
 test('Owner menu puts site tasks first in Plesk order, not runtime inventory', () => {
   assert.deepEqual(menu(true, true), ['/websites', '/mail', '/files', '/databases', '/statistics', '/customers', '/resellers', '/tools-settings']);
-  assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri ve Alan Adları');
+  assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri');
 });
 test('site manager gets the four scoped task entries without Owner tools', () => {
   assert.deepEqual(menu(true, false), ['/websites', '/mail', '/files', '/databases', '/statistics']);
@@ -24,7 +24,7 @@ test('read-only states do not receive management or file handoff links', () => {
 });
 test('mutating a returned menu does not change subsequent navigation', () => {
   navigationGroups(true, true)[0].items[0][1] = 'changed';
-  assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri ve Alan Adları');
+  assert.equal(navigationGroups(true, true)[0].items[0][1], 'Web Siteleri');
 });
 test('old Owner tools remain discoverable without promoting placeholders', () => {
   const links = TOOLS_SETTINGS_GROUPS.flatMap((group) => group.items).map(([to]) => to);

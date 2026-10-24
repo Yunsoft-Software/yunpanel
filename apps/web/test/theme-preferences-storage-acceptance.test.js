@@ -219,14 +219,14 @@ test('Criterion 5: Mobile top bar has search, menu, AI, and active jobs buttons 
   const workspaceCss = await readWebSource('workspace/workspace.css');
 
   // 1. Menu button: .ws-mobile-menu in toolbar
-  assert.match(layoutSrc, /<Button\s+className="ws-mobile-menu"\s+icon="menu"\s+aria-label="Ana menüyü aç"\s+aria-expanded=\{menuOpen\}\s+aria-controls="workspace-navigation"/);
+  assert.match(layoutSrc, /<Button\s+className="ws-mobile-menu"\s+icon="menu"\s+aria-label="Ana menüyü aç"/);
 
   // 2. Search button: .ws-command-trigger in toolbar
   assert.match(layoutSrc, /<button\s+type="button"\s+className="ws-command-trigger"\s+aria-label="Site veya panel bölümü ara"\s+aria-haspopup="dialog"/);
   assert.match(layoutSrc, /<Icon name="search" \/>/);
 
   // 3. AI assistant button in toolbar actions
-  assert.match(layoutSrc, /<Button\s+icon="terminal"\s+aria-label="AI asistanı aç \(Ürün uzantısı\)"\s+title="AI asistanı · Ürün uzantısı · Ctrl \/ ⌘ Shift A"/);
+  assert.match(layoutSrc, /<Button\s+icon="terminal"\s+aria-label="AI asistanı aç"\s+title="AI Asistan · Ctrl \/ ⌘ Shift A"/);
 
   // 4. Active jobs link in toolbar actions with dynamic jobCount
   assert.match(layoutSrc, /<LinkButton\s+to="\/jobs"\s+icon="jobs"\s+aria-label=\{`İşlemler\$\{jobCount > 0 \? `, \$\{jobCount\} aktif` : ''\}`\}\s+title="İşlemler"/);

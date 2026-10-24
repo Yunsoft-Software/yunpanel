@@ -19,10 +19,25 @@ function Shell() {
   const { domains, websites, jobs, notice, setNotice, canManage, isOwner, isReseller, isCustomer } = useWorkspace();
   const location = useLocation();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
   const [themeMode, setThemeMode] = useState(() => (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark'));
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
+  function toggleSidebar() {
+    if (narrow) {
+      setMenuOpen((prev) => !prev);
+    } else {
+      setSidebarCollapsed((prev) => !prev);
+    }
+  }
+  function closeSidebar() {
+    if (narrow) {
+      setMenuOpen(false);
+    } else {
+      setSidebarCollapsed(true);
+    }
+  }
   function toggleThemeMode() {
     const nextTheme = (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light') ? 'dark' : 'light';
     setThemeMode(nextTheme);
@@ -142,25 +157,25 @@ function Shell() {
       else document.querySelector('.ws-mobile-menu')?.focus();
     };
   }, [menuOpen, narrow]);
-  return <div className="workspace-shell" data-ws-design-system="shadcn-zinc-indigo">
+  return <div className={`workspace-shell ${!narrow && sidebarCollapsed ? 'is-sidebar-collapsed' : ''}`} data-ws-design-system="shadcn-zinc-indigo">
     <a href="#workspace-main" className="ws-skip">İçeriğe geç</a>
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
-    <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
-      <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>{isOwner ? 'SUNUCU YÖNETİMİ' : isReseller ? 'BAYİ PANELİ' : isCustomer ? 'MÜŞTERİ PANELİ' : 'SİTE YÖNETİMİ'}</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} /></div>
+    <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''} ${!narrow && sidebarCollapsed ? 'is-collapsed' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
+      <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>{isOwner ? 'SUNUCU YÖNETİMİ' : isReseller ? 'BAYİ PANELİ' : isCustomer ? 'MÜŞTERİ PANELİ' : 'SİTE YÖNETİMİ'}</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" title="Yan menüyü daralt / kapat" onClick={closeSidebar} /></div>
       <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Link key={to} to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/websites' && sites !== null && <span className="ws-nav-count" aria-label={`${sites} bağımsız Website`}>{sites}</span>}{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>)}</div></div>)}</nav>
       <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
       <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : isReseller ? 'Bayi yönetimi' : isCustomer ? 'Müşteri paneli' : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : isReseller ? 'Müşterileriniz ve izinli site araçları' : isCustomer ? 'Web siteleriniz ve barındırma araçları' : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
     <div className="ws-main" inert={narrow && menuOpen}>
       <div className="ws-toolbar">
-        <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
+        <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" title={sidebarCollapsed ? 'Yan menüyü göster' : 'Yan menüyü gizle'} aria-expanded={narrow ? menuOpen : !sidebarCollapsed} aria-controls="workspace-navigation" onClick={toggleSidebar} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         <div className="ws-toolbar-actions">
           <Button onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
             <span className="ws-toolbar-label">{themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}</span>
           </Button>
           {canManage && isOwner && <LinkButton to="/docker" icon="box" aria-label="Docker ve Stack Yönetimi" title="Docker & Stack Kataloğu"><span className="ws-toolbar-label">Docker</span></LinkButton>}
-          {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
+          {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç" title="AI Asistan · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span></Button>}
           {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}
         </div>
       </div>

@@ -32,6 +32,12 @@
    - **Tasarım tek bir merkezi sistemden (`apps/web/src/workspace/design-system/` ve `PanelKit.jsx`) gelmelidir.** Ekranlarda dağınık tema stilleri veya üst üste binen çoklu CSS katmanları kullanılmaz; tüm sayfalar ortak merkezi bileşenleri kullanır. İleride tasarım kütüphanesi veya tema değiştirilmek istendiğinde, sayfa ve iş mantığı kodlarına dokunmadan yalnızca bu merkezi bileşen/tema katmanı değiştirilerek hiçbir şeyi bozmadan geçiş yapılabilmelidir.
 5. **Plesk Eşdeğeri Docker, Stack ve Inner/Outer Port Proxy Kuralı:**
    - Docker yönetimi; **Docker Hub'dan imaj arama ve tek container çalıştırma**, **Compose/Stack olarak çalıştırma (editöre yapıştırma, site/subdomain dizininden dosya seçme veya `.yml` yükleme; mevcut YAML düzenlenebilir şekilde görünür)** ve **Inner Port (Container) ↔ Outer Port (Host) eşlemesiyle Domain/Subdomain veya alt URL yoluna (`/api`) Proxy olarak bağlama** özelliklerini kapsar.
+6. **Sıfır "AI Slop" / Gereksiz Geliştirici Notu Yasağı Kuralı:**
+   - Kullanıcı arayüzünde (UI) geliştiriciye veya testlere yönelik iç mimari açıklamaları, savunmacı sorumluluk reddi metinleri veya anlamsız geliştirme notları (ör. *"En yeni oluşturulanlar önce"*, *"(Ürün Uzantısı)"*, *"Durumu yenile yalnızca kayıt okur; işlemi tekrar başlatmaz"*, *"Bu sayı deneme sınırı değildir"*, *"canlı servis sağlık testi değildir"*, *"fail-closed olarak yürütülür"*) **kesinlikle yazılmaz ve mevcut olanlar temizlenir.** Arayüzde yalnızca son kullanıcının işine yarayan sade, doğrudan ve önemli bilgilendirmeler yer alır.
+7. **Simetrik Masaüstü Kart Düzeni, Ortak Durum Bileşenleri ve Sade Bilgi Mimarisi Kuralı:**
+   - Yan yana duran kartlar (`.ws-equal-columns`, `.ws-two-columns`, `.ws-metrics`, `.yp-docker-catalog-grid`) masaüstünde her zaman **eşit yükseklikte (`align-items: stretch`, `height: 100%`)** hizalanır; içeriğe göre biri uzun biri kısa asimetrik kart görüntüsü oluşturulmaz.
+   - Çalışan worker/işlem/SSL animasyonları ve durum metinleri (`StatusBanner`, `.ws-loading`, `p[role="status"]`) ortak merkezi bileşen ve boşluk (`gap`) kurallarıyla render edilir; ikon/spinner ve metinler asla birbirine altlı-üstlü veya yan yana yapışık kalmaz.
+   - Ana menüde ve sayfa başlıklarında "Web Siteleri ve Alan Adları" yerine sade **"Web Siteleri"** kullanılır; site kartlarındaki araç akordiyonu ve site detay ekranı tekrar eden karmaşık buton yığınları yerine simetrik grid kartlar ve sekmeli (tab) yapıyla sadeleştirilir.
 
 ### 11 Ekim 2026 — Test/geliştirme sunucusunda yedek kuralı
 

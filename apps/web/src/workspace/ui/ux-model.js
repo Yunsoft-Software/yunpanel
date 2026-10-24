@@ -20,7 +20,7 @@ export const resolveTheme = (theme, darkSystem = false) => themes.has(theme) && 
 export function navigationGroups(canManage, isOwner = true, isReseller = false, isCustomer = false) {
   const items = isReseller && !isOwner
     ? [['/customers', 'Müşterilerim', 'user'], ['/websites', 'Sitelerim', 'globe']]
-    : [['/websites', 'Web Siteleri ve Alan Adları', 'globe']];
+    : [['/websites', 'Web Siteleri', 'globe']];
   if (canManage) {
     items.push(
       ['/mail', 'Posta', 'mail'],
@@ -42,12 +42,12 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
     ['/dashboard', 'Sunucu genel bakışı', 'dashboard'],
     ['/settings?section=dns', 'Sunucu DNS ve SSL ayarları', 'globe'],
     ['/settings?section=updates', 'YunPanel güncellemeleri', 'refresh'],
-    ['/docker', 'Docker projeleri (Ürün uzantısı)', 'box'],
+    ['/docker', 'Docker ve Stack Yönetimi', 'box'],
   ] },
   { id: 'panel', label: 'Panel ve erişim', items: [
     ['/settings/users', 'Kullanıcılar, bayiler ve müşteriler', 'user'],
     ['/settings?section=account', 'Hesap ve erişim ayarları', 'shield'],
-    ['/settings?section=ai', 'AI sağlayıcıları (Ürün uzantısı)', 'code'],
+    ['/settings?section=ai', 'AI sağlayıcıları', 'code'],
   ] },
   { id: 'diagnostics', label: 'Tanılama ve kayıtlar', items: [
     ['/jobs', 'İşlem geçmişi', 'jobs'], ['/audit', 'Denetim kayıtları', 'shield'],
@@ -142,6 +142,6 @@ export function groupSiteTabs(tabs = []) {
     tabs: group.keys.map((key) => tabs.find((tab) => tabKey(tab) === key)).filter(Boolean),
   })).filter((group) => group.tabs.length);
   const extra = tabs.filter((tab) => !known.has(tabKey(tab)));
-  if (extra.length) groups.push({ id: 'extensions', label: 'Ürün uzantıları', icon: 'box', keys: extra.map((tab) => tabKey(tab)), tabs: extra });
+  if (extra.length) groups.push({ id: 'extensions', label: 'Ek Araçlar', icon: 'box', keys: extra.map((tab) => tabKey(tab)), tabs: extra });
   return groups;
 }

@@ -24,7 +24,7 @@ test('navigationGroups: Owner sees Plesk task hierarchy in exact canonical order
   assert.equal(groups[0].label, 'Panel');
 
   const expectedItems = [
-    ['/websites', 'Web Siteleri ve Alan Adları', 'globe'],
+    ['/websites', 'Web Siteleri', 'globe'],
     ['/mail', 'Posta', 'mail'],
     ['/files', 'Dosyalar', 'folder'],
     ['/databases', 'Veritabanları', 'database'],
@@ -42,7 +42,7 @@ test('navigationGroups: Owner sees Plesk task hierarchy in exact canonical order
   assert.ok(!paths.includes('/docker'), 'Docker project inventory must not be in primary navigation');
   assert.ok(!paths.includes('/audit'), 'Audit log must not be in primary navigation');
   assert.ok(!paths.includes('/jobs'), 'Jobs inventory must not be in primary navigation');
-  assert.ok(!paths.includes('/domains'), 'Advanced domains must not replace Web Siteleri ve Alan Adları');
+  assert.ok(!paths.includes('/domains'), 'Advanced domains must not replace Web Siteleri');
 });
 
 test('navigationGroups: Reseller sees Bayi Menüsü with Müşterilerim, Sitelerim and isolated site tools', () => {
@@ -72,14 +72,14 @@ test('navigationGroups: Reseller sees Bayi Menüsü with Müşterilerim, Siteler
   assert.ok(!paths.includes('/servers'));
 });
 
-test('navigationGroups: Customer sees Müşteri Menüsü with Web Siteleri ve Alan Adları and self-service tools', () => {
+test('navigationGroups: Customer sees Müşteri Menüsü with Web Siteleri and self-service tools', () => {
   const groups = navigationGroups(true, false, false, true);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].title, 'Müşteri Menüsü');
   assert.equal(groups[0].label, 'Müşteri Menüsü');
 
   const expectedItems = [
-    ['/websites', 'Web Siteleri ve Alan Adları', 'globe'],
+    ['/websites', 'Web Siteleri', 'globe'],
     ['/mail', 'Posta', 'mail'],
     ['/files', 'Dosyalar', 'folder'],
     ['/databases', 'Veritabanları', 'database'],
@@ -106,7 +106,7 @@ test('navigationGroups: Site Manager / limited non-owner sees site-scoped tools 
   assert.equal(groups[0].label, 'Panel');
 
   const expectedItems = [
-    ['/websites', 'Web Siteleri ve Alan Adları', 'globe'],
+    ['/websites', 'Web Siteleri', 'globe'],
     ['/mail', 'Posta', 'mail'],
     ['/files', 'Dosyalar', 'folder'],
     ['/databases', 'Veritabanları', 'database'],

@@ -28,14 +28,14 @@ test('navigationGroups: Reseller sees Bayi Menüsü with Sitelerim, Müşteriler
   assert.ok(!paths.includes('/dashboard'));
 });
 
-test('navigationGroups: Customer sees Müşteri Menüsü with Web Siteleri ve Alan Adları and self-service tools', () => {
+test('navigationGroups: Customer sees Müşteri Menüsü with Web Siteleri and self-service tools', () => {
   const groups = navigationGroups(true, false, false, true);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].title, 'Müşteri Menüsü');
   assert.equal(groups[0].label, 'Müşteri Menüsü');
   const paths = groups[0].items.map(([path]) => path);
   assert.deepEqual(paths, ['/websites', '/mail', '/files', '/databases', '/statistics']);
-  assert.equal(groups[0].items.find(([path]) => path === '/websites')[1], 'Web Siteleri ve Alan Adları');
+  assert.equal(groups[0].items.find(([path]) => path === '/websites')[1], 'Web Siteleri');
 
   // Forbidden items for Customer
   assert.ok(!paths.includes('/customers'));
@@ -131,7 +131,7 @@ test('source: WebsitesPage preserves owner test invariants and adapts heading fo
   const page = await source('WebsitesPage.jsx');
   assert.match(page, /isOwner && canManage && <LinkButton to="\/websites\/new"/);
   assert.match(page, /action=\{isOwner && canManage \? <LinkButton to="\/websites\/new"/);
-  assert.match(page, /isReseller \? 'Sitelerim' : 'Web Siteleri ve Alan Adları'/);
+  assert.match(page, /isReseller \? 'Sitelerim' : 'Web Siteleri'/);
   assert.doesNotMatch(page, /method:\s*['"](?:POST|PATCH|DELETE)|fetch\(|localStorage|sessionStorage/);
 });
 
@@ -271,42 +271,38 @@ test('navigationGroups: strict role isolation ensures non-overlapping permission
   assert.ok(!resCmds.includes('/tools-settings'));
 });
 
-test('product extensions: AI and custom runtimes (Docker, Python) are explicitly marked as product extensions', async () => {
+test('product extensions: AI and custom runtimes (Docker, Python) remain accessible with clean labels', async () => {
   // Check TOOLS_SETTINGS_GROUPS
   const serverGroup = TOOLS_SETTINGS_GROUPS.find((g) => g.id === 'server');
   const dockerItem = serverGroup.items.find(([path]) => path === '/docker');
-  assert.ok(dockerItem[1].includes('(Ürün uzantısı)'));
+  assert.ok(dockerItem[1].includes('Docker'));
 
   const panelGroup = TOOLS_SETTINGS_GROUPS.find((g) => g.id === 'panel');
   const aiItem = panelGroup.items.find(([path]) => path === '/settings?section=ai');
-  assert.ok(aiItem[1].includes('(Ürün uzantısı)'));
+  assert.ok(aiItem[1].includes('AI sağlayıcıları'));
 
   // Check groupSiteTabs label
   const extraTabs = groupSiteTabs([
     { id: 'logs', label: 'Günlükler' },
     { id: 'custom-ext', label: 'Özel Eklenti' },
   ]);
-  const extGroup = extraTabs.find((g) => g.label === 'Ürün uzantıları');
-  assert.ok(extGroup, 'Extra tabs should be grouped under Ürün uzantıları');
+  const extGroup = extraTabs.find((g) => g.label === 'Ek Araçlar');
+  assert.ok(extGroup, 'Extra tabs should be grouped under Ek Araçlar');
 
   // Check WorkspaceLayout source
   const layout = await source('WorkspaceLayout.jsx');
-  assert.match(layout, /AI asistanı · Ürün uzantısı/);
-  assert.match(layout, /<span className="ws-badge"[\s\S]*?>Uzantı<\/span>/);
+  assert.match(layout, /AI Asistan · Ctrl \/ ⌘ Shift A/);
 
   // Check AiDrawer source
   const aiDrawer = await source('AiDrawer.jsx');
-  assert.match(aiDrawer, /YunPanel AI Yönetim Asistanı \(Ürün Uzantısı\)/);
-  assert.match(aiDrawer, /Ürün uzantısı · /);
+  assert.match(aiDrawer, /YunPanel AI Yönetim Asistanı/);
 
   // Check DockerProjectsPage source
   const dockerPage = await source('DockerProjectsPage.jsx');
-  assert.match(dockerPage, /Docker \(Ürün Uzantısı\)/);
+  assert.match(dockerPage, /Docker & Compose Stack Yönetimi/);
 
   // Check SiteDetailPage source
   const siteDetailPage = await source('SiteDetailPage.jsx');
-  assert.match(siteDetailPage, /isCustomRuntime/);
-  assert.match(siteDetailPage, /Python \(Ürün uzantısı\)/);
-  assert.match(siteDetailPage, /Docker \/ proxy \(Ürün uzantısı\)/);
-  assert.match(siteDetailPage, /Ürün Uzantısı<\/Badge>/);
+  assert.match(siteDetailPage, /Python/);
+  assert.match(siteDetailPage, /Docker \/ Proxy/i);
 });

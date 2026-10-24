@@ -62,7 +62,7 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
     </div>
     {certificate?.source === 'custom' && <p>Bu sertifika elle yönetiliyor; ACME yenilemesi başlatılamaz.</p>}
     <ErrorNotice error={state.error} />
-    {(busy || state.status === 'waiting') && <p role="status"><span className="ws-spinner" />{state.status === 'waiting' ? 'Yenileme işi sunucuda devam ediyor…' : 'İşlem ve sertifika kaydı kontrol ediliyor…'}</p>}
+    {(busy || state.status === 'waiting') && <div className="ws-loading" role="status"><span className="ws-spinner" /><span>{state.status === 'waiting' ? 'Yenileme işi sunucuda devam ediyor…' : 'İşlem ve sertifika kaydı kontrol ediliyor…'}</span></div>}
     {state.status === 'paused' && <p role="status">Otomatik takip sınırına ulaşıldı. İş sunucuda devam ediyor olabilir; sonucu yeniden okuyun.</p>}
     {state.status === 'complete' && OUTCOMES[state.outcome] && <p role="status">{OUTCOMES[state.outcome]}</p>}
     {state.before && state.certificate && <>
@@ -76,7 +76,6 @@ export default function SslRenewalPanel({ domain, certificate, disabled = false 
         <p>Kayıtlı SHA-256: <code>{state.certificate.fingerprint256}</code></p>
       </details>
     </>}
-    <p className="ws-muted">Sonucu yeniden oku yalnız kayıt okur; yenilemeyi tekrar göndermez. Yayındaki sertifika doğrulaması ayrıca gösterilir.</p>
     {approval && <ConfirmDialog title={approval.dryRun ? 'SSL yenilemesini test et' : 'SSL yenilemesini başlat'}
       message={`${domain.primaryDomain}: ${approval.dryRun ? 'Üretim sertifikası değiştirilmeden yenileme testi yapılacak.' : 'Gerçek ACME yenilemesi istenecek. Sağlayıcı limitleri geçerlidir.'} Site veya sertifika değişirse bu onayla işlem yapılmaz.`}
       confirmation={null} busy={busy} error={state.error} onCancel={() => flow.current?.cancel()}

@@ -33,7 +33,7 @@ function AiScope({ domainId, actorId, onClose }) {
     });
     return () => controller.abort();
   }, [domainId, attempt]);
-  if (!context.ready) return <Modal title="YunPanel AI Yönetim Asistanı (Ürün Uzantısı)" onClose={onClose} wide>
+  if (!context.ready) return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
     {context.error ? <><ErrorNotice error={context.error} /><Button onClick={() => setAttempt((n) => n + 1)}>Yeniden kontrol et</Button></>
       : <p role="status">Site bağlamı doğrulanıyor…</p>}
   </Modal>;
@@ -132,11 +132,11 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
   const loading = ['loading', 'loadingMore'].includes(history.status);
   const denied = history.status === 'forbidden' || detail.status === 'forbidden';
   const loadMore = () => scope.current?.list.more();
-  return <Modal title="YunPanel AI Yönetim Asistanı (Ürün Uzantısı)" onClose={onClose} wide>
+  return <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
     <div className="ws-ai-layout ws-ai-history-layout">
       <aside className="ws-ai-sidebar" aria-label="Sohbet geçmişi">
         <div className="ws-actions"><strong>SOHBETLER</strong><Button variant="primary" icon="plus" disabled={sending || denied} onClick={handleNewChat}>Yeni</Button><Button disabled={loading || denied} icon="refresh" aria-label="Geçmişi yenile" title="Geçmişi yenile" onClick={() => scope.current?.list.load()} /></div>
-        <small>{websiteId ? 'Site bağlamı · ' : ''}Ürün uzantısı · En yeni oluşturulanlar önce</small>
+        {websiteId && <small className="ws-muted">Seçili site bağlamı</small>}
         <div className="ws-ai-history-list" tabIndex={0} aria-label="Kaydırılabilir sohbet listesi" aria-busy={loading}
           onKeyDown={(event) => {
             if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
@@ -163,8 +163,6 @@ function ConversationPanel({ actorId, websiteId, onClose }) {
           {!loading && !history.items.length && !history.error && <p>Kayıtlı sohbet bulunamadı.</p>}
           {history.error && <ErrorNotice error={history.error} />}
           {history.hasMore && !history.reloadRequired && <Button disabled={loading || denied} onClick={loadMore}>{history.error ? 'Eski sayfayı yeniden dene' : 'Daha eski sohbetler'}</Button>}
-          {!history.hasMore && history.items.length > 0 && <p className="ws-muted">Geçmişin sonuna ulaşıldı.</p>}
-          {history.legacyUnassigned && <p className="ws-muted">Eski sohbetler dosyada korundu. Sahiplik bilgisi olmayan kayıtlar güvenli eşleştirme yapılana kadar burada gösterilmez.</p>}
         </div>
       </aside>
       <div className="ws-ai-chat">

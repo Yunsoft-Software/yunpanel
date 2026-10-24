@@ -35,17 +35,16 @@ export function ApplicationOperations({ domain, application, website = null, dep
   const { applications, jobs, runJob, resourceBusy } = useWorkspace();
   const operation = useOperation(); const [rollback, setRollback] = useState(null);
   if (!application && website?.runtimeType === 'docker') {
-    return <Section title="Docker iş yükü (Ürün uzantısı)" description={`${domain.primaryDomain} · YunPanel Docker / proxy çalışma alanı`}>
+    return <Section title="Docker iş yükü" description={`${domain.primaryDomain} · Docker / Proxy çalışma alanı`}>
       <div className="ws-section-body"><div className="ws-actions">
         <Badge state="active" />
         <LinkButton to="/docker" icon="external">Docker iş yüklerini yönet</LinkButton>
       </div></div>
       <KeyValues items={[
-        ['Çalışma türü', 'Docker (Ürün uzantısı)'],
+        ['Çalışma türü', 'Docker'],
         ['İş yükü kimliği', website.dockerWorkloadId ?? 'Yönetilen Docker'],
         ['Yayın hedefi', domain.targetType === 'proxy' ? `127.0.0.1:${domain.target?.upstreamPort ?? '—'}` : 'Yerel proxy'],
       ]} />
-      <div className="ws-section-body"><p className="ws-muted">Bu web sitesi YunPanel açık ürün uzantısı olan Docker ile çalışmaktadır. Konteyner yaşam döngüsü ve compose tanımları site bağlamı ile ilişkilidir.</p></div>
     </Section>;
   }
   if (!application) return <Section title="Uygulama bağlantısı"><EmptyState icon="code" title="Bu hedef için uygulama seçilmedi" detail="Bu web sitesi için bağlı bir çalışma zamanı uygulaması seçilmedi. Uygulama ve yayın ayarlarını web sitesi yapılandırmasından yönetin." action={<Link to={siteHref(domain?.id, 'overview')}>Site genel bakışına dön</Link>} /></Section>;
@@ -63,19 +62,18 @@ export function ApplicationOperations({ domain, application, website = null, dep
   const sectionTitle = deployOnly
     ? 'Git ve yayın yönetimi'
     : (isPython
-      ? 'Python uygulaması (Ürün uzantısı)'
+      ? 'Python uygulaması'
       : (isNode ? 'Node.js uygulaması' : `${application.type} uygulaması`));
   const runtimeItem = [
     isPython ? 'Python' : (isNode ? 'Node.js' : 'Runtime'),
     isPython
-      ? (application.runtime?.pythonVersion ? `Python ${application.runtime.pythonVersion}` : 'Python 3 (Ürün uzantısı)')
+      ? (application.runtime?.pythonVersion ? `Python ${application.runtime.pythonVersion}` : 'Python 3')
       : (application.runtime?.nodeMajor ? `Node.js ${application.runtime.nodeMajor}` : '—'),
   ];
   return <>
     <Section title={sectionTitle} description={`${application.name} · ${domain.primaryDomain} hedefiyle port eşleşmesi`}>
       <div className="ws-section-body"><div className="ws-actions">
         <Badge state={application.state} />
-        {isPython && <Badge state="neutral">Ürün Uzantısı</Badge>}
         <Button icon="git" variant="primary" disabled={locked || Boolean(application.activeDeploymentId)} onClick={() => run('deploy')}>Deploy başlat</Button>
         {!deployOnly && <Button icon="refresh" disabled={locked || !application.currentReleaseId || Boolean(application.activeDeploymentId)} onClick={() => run('restart')}>Yeniden başlat</Button>}
         {!deployOnly && <Button disabled={locked || !application.currentReleaseId} onClick={() => run('status')}>Durumu kontrol et</Button>}
@@ -89,7 +87,6 @@ export function ApplicationOperations({ domain, application, website = null, dep
         ['Repository', application.repositoryUrl], ['Branch', application.branch], ['Commit', application.currentCommitSha],
         ['Son deploy', formatDate(application.lastDeployedAt)], ['Aktif release', application.currentReleaseId],
       ]} />
-      <div className="ws-section-body"><p className="ws-muted">{isPython ? 'Python çalışma ortamı açık YunPanel ürün uzantısı olarak site bağlamında işletilir. Yayın, rollback, ortam değişkenleri ve servis kontrolleri bu ekrandan yürütülür.' : 'İşlemler yetkili web sitesi sınırlarında fail-closed olarak yürütülür.'}</p></div>
     </Section>
     {deployOnly && <Section title="Release geçmişi"><div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Release</th><th>Commit</th><th>Yayın zamanı</th><th>Durum</th></tr></thead><tbody>{(application.releases ?? []).map((release) => <tr key={release.releaseId}><td>{release.releaseId}</td><td>{release.commitSha?.slice(0, 12) ?? '—'}</td><td>{formatDate(release.deployedAt)}</td><td>{release.releaseId === application.currentReleaseId ? <Badge state="active" /> : 'Önceki sürüm'}</td></tr>)}</tbody></table></div>{!application.releases?.length && <EmptyState title="Henüz release yok" detail="İlk başarılı deploy sonrasında yayın geçmişi burada görünecek." icon="git" />}</Section>}
     {rollback && <ConfirmDialog title="Önceki sürüme dön" message={`${application.name} uygulaması ${rollback} release’ine dönecek. Başarılı dönüş uygulamanın yayınını değiştirir.`} confirmation={application.name} busy={operation.busy} error={operation.error} onCancel={() => setRollback(null)} onConfirm={async () => {

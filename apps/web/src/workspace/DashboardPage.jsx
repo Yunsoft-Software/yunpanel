@@ -102,7 +102,7 @@ export default function DashboardPage() {
       <div className="ws-notice ws-notice-warn" role="alert" aria-live="polite"><Icon name="alert" /><div><strong>Disk alanı azalıyor · %{Math.round(diskUsage)}</strong><p>Yeni dağıtımlar ve yedekler için kullanılabilir alanı kontrol edin.</p></div>{isOwner && <LinkButton to="/servers">Sunucuyu incele</LinkButton>}</div>
     ) : null}
     <div className="ws-console-grid">
-      <Section title="Performans" description="Sunucudan alınan ölçümler; yalnız bu açık oturumun geçmişi.">
+      <Section title="Performans" description="Canlı sunucu kaynak kullanımı">
         <CollectionNotice resource={servers} label="Sunucu" />
         <UsageHistory key={server?.id ?? 'unavailable'} server={['ready', 'stale'].includes(servers.status) ? server : null} />
       </Section>
@@ -115,13 +115,13 @@ export default function DashboardPage() {
       <Section title="İşlem merkezi" actions={<Link to="/jobs">Geçmişi aç</Link>}>
         <CollectionNotice resource={jobs} label="İşlemler" />
         <div className="ws-section-body"><div className="ws-job-summary"><Badge state={activeJobs === null ? 'unknown' : activeJobs > 0 ? 'running' : 'succeeded'}>{activeJobs ?? '—'} devam eden</Badge><Badge state={failedJobs === null ? 'unknown' : failedJobs > 0 ? 'failed' : 'succeeded'}>{failedJobs ?? '—'} başarısız</Badge></div>
-          <p className="ws-muted">Dağıtım, SSL ve servis işlemlerinin durumunu takip edin. Sayfadan ayrılmak sunucudaki işi durdurmaz.</p><div className="ws-actions"><LinkButton to="/jobs">İşlemleri takip et</LinkButton>{failedJobs > 0 && <LinkButton to="/jobs?status=failed">Hataları incele</LinkButton>}</div>
+          <p className="ws-muted">Dağıtım, SSL ve servis işlemlerinin durumunu takip edin.</p><div className="ws-actions"><LinkButton to="/jobs">İşlemleri takip et</LinkButton>{failedJobs > 0 && <LinkButton to="/jobs?status=failed">Hataları incele</LinkButton>}</div>
         </div>
       </Section>
     </div>
     <Section title="Sertifika kontrolleri" actions={<Link to="/websites">Web siteleri</Link>}>
       <CollectionNotice resource={domains} label="Alan adları" /><CollectionNotice resource={certificates} label="Sertifikalar" />
-      {warnings.length ? <div className="ws-alert-list" aria-label="SSL sertifika uyarıları">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts && <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span><small>Bu, dış erişim testi değildir.</small></div>}
+      {warnings.length ? <div className="ws-alert-list" aria-label="SSL sertifika uyarıları">{warnings.slice(0, 5).map(({ domain, ssl }) => <div className="ws-alert-item" key={domain.id}><Icon name="shield" /><div><strong>{domain.primaryDomain}</strong><p>{ssl.label}</p></div><Link to={siteHref(domain.id, 'ssl')}>SSL’i incele</Link></div>)}</div> : hasCerts && <div className="ws-section-body ws-health-clear"><Icon name="check" /><span>Sertifika kayıtlarında uyarı yok.</span></div>}
     </Section>
   </>;
 }

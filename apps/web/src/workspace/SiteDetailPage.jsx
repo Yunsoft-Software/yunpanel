@@ -103,7 +103,7 @@ function SiteWorkspace({ websiteId, tab }) {
     if (key === 'access') return canManage && (Boolean(website) || tab === 'access');
     if (['databases', 'mail'].includes(key)) return canManage && Boolean(website);
     return true;
-  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python (Ürün uzantısı)' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : label]);
+  }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : label]);
   if (tab === 'node' && (website?.runtimeType === 'php' || application?.type === 'php')) return <Navigate replace to={`${siteHref(domain.id, 'php')}${location.search}`} />;
   if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
@@ -117,36 +117,48 @@ function SiteWorkspace({ websiteId, tab }) {
   const returnTo = safeReturnHref(params.get('returnTo') ?? params.get('from'), '/websites');
   const runtimeType = website?.runtimeType ?? application?.type;
   const isCustomRuntime = ['python', 'docker'].includes(runtimeType);
-  const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python (Ürün uzantısı)', static: 'Statik site', docker: 'Docker / proxy (Ürün uzantısı)' }[runtimeType] ?? 'Yerel proxy');
+  const runtimeLabel = runtimeType === 'node' ? `Node.js ${application?.runtime?.nodeMajor ?? ''}` : ({ php: 'PHP-FPM', python: 'Python', static: 'Statik site', docker: 'Docker / Proxy' }[runtimeType] ?? 'Yerel proxy');
   const shortcuts = [
     ['files', 'Dosya Yöneticisi', 'folder'], ['databases', 'Veritabanları', 'database'],
     ['ssl', 'SSL/TLS Sertifikaları', 'shield'],
     ['php', 'PHP Ayarları', 'code'], ['wordpress', 'WordPress', 'code'],
-    ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python (Ürün uzantısı)' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker (Ürün uzantısı)' : 'Uygulama', 'code'],
+    ['node', application?.type === 'node' ? 'Node.js' : application?.type === 'php' ? 'PHP / WordPress' : application?.type === 'python' ? 'Python' : (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : 'Uygulama', 'code'],
     ['deploy', 'Git / Yayınlama', 'git'], ['logs', 'Günlükler', 'file'], ['analytics', 'İstatistikler', 'dashboard'],
     ['dns', 'DNS', 'globe'], ['mail', 'Posta', 'mail'], ['cron', 'Zamanlanmış Görevler', 'clock'], ['backup', 'Yedekleme ve Geri Yükleme', 'archive'],
     ['access', 'Erişim Hesapları', 'shield'],
   ].filter(([key]) => tabs.some(([tabKey]) => key === tabKey));
-  const toolLinks = (items) => <div className="ws-console-quicklinks">{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={22} /><span>{label}</span></Link>)}</div>;
+  const hostingTools = ['hosting', 'dns', 'domains', 'access', 'terminal', 'cron'];
+  const toolLinks = (items) => <div className="ws-console-quicklinks" data-hosting-tools={hostingTools.length}>{items.map(([key, label, icon]) => <Link className="ws-console-quicklink" key={key} to={`${siteHref(domain.id, key)}${query}`}><Icon name={icon} size={18} /><span>{label}</span></Link>)}</div>;
   return <>
-    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri ve Alan Adları'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
-    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
-    <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span>{isCustomRuntime && <Badge state="neutral">Ürün Uzantısı</Badge>}</div>
+    <nav className="ws-breadcrumb" aria-label="Site konumu"><Link to={returnTo}>{isReseller ? 'Sitelerim' : 'Web Siteleri'}</Link>{parentTrail(domain, domains.items).map((parent) => <Fragment key={parent.id}><span aria-hidden="true">/</span><Link to={siteHref(parent.id)}>{parent.primaryDomain}</Link></Fragment>)}<span aria-hidden="true">/</span><span>{domain.primaryDomain}</span></nav>
+    <PageHeading title={domain.primaryDomain} description={`${domain.parentDomainId ? 'Alt alan adı' : 'Web sitesi'} · ${server?.displayName ?? server?.name ?? server?.hostname ?? 'Sunucu bilgisi bekleniyor'}`} actions={<>{url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button"><Icon name="external" />Siteyi aç</a>}{isOwner && <LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>}<Button onClick={refreshAll} icon="refresh">Yenile</Button>{website && isOwner && canManage && tab !== 'settings' && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil</LinkButton>}</>} />
+    <div className="ws-site-meta"><Badge state={domain.state} /><Badge state={ssl.state}>{ssl.label}</Badge><span>{runtimeLabel}</span></div>
     <SiteNavigation tabs={tabs} activeTab={tab} domainId={domain.id} query={query} />
     <CollectionNotice resource={domains} label="Alan adı verisi" />
     <CollectionNotice resource={websites} label="Site kaydı" />
     {['node', 'deploy', 'overview', 'resources', 'databases'].includes(tab) && <CollectionNotice resource={applications} label="Uygulama verisi" />}
     {['node', 'deploy'].includes(tab) && !website?.applicationId && matches.length > 0 && <div className="ws-notice"><div><strong>Uygulama bağlantısını kontrol edin</strong><p>İşlemler aşağıda seçilen uygulamayı etkiler. Bu eski kaydın kalıcı site bağlantısı henüz kurulmamıştır.</p></div><label>Uygulama<select value={application?.id ?? ''} onChange={(event) => { setParams((current) => { const next = new URLSearchParams(current); if (event.target.value) next.set('application', event.target.value); else next.delete('application'); return next; }); }}><option value="">{matches.length > 1 ? 'Uygulamayı seçin' : 'Tek hedef eşleşmesi'}</option>{matches.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}</select></label></div>}
     {tab === 'overview' && <>
+      <div className="ws-equal-columns" style={{ marginBottom: '16px' }}>
+        <Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'hosting')}>Barındırma ve DNS</Link>}>
+          <KeyValues items={[
+            ['Alan adı', domain.primaryDomain],
+            ['Uygulama türü', runtimeLabel],
+            ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
+            ['Son yayın', formatDate(domain.lastAppliedAt)],
+          ]} />
+        </Section>
+        <Section title="Yayın ve uygulama ayrıntıları" actions={application ? <Link to={siteHref(domain.id, 'node')}>Uygulama yönetimi</Link> : <Link to={siteHref(domain.id, 'ssl')}>SSL yönetimi</Link>}>
+          <KeyValues items={[
+            ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
+            ['Çalışma türü', website?.runtimeType ?? 'Statik / Yerel kayıt'],
+            ['Uygulama', application?.name ?? (matches.length > 1 ? 'Uygulama bölümünden hedef seçin' : 'Bağlı uygulama yok')],
+            ['SSL Durumu', ssl.label],
+          ]} />
+        </Section>
+      </div>
       <Section title="Site araçları">{toolLinks(shortcuts)}</Section>
-      <Section title="Yayın bilgileri" actions={<Link to={siteHref(domain.id, 'hosting')}>Barındırma ve DNS</Link>}><KeyValues items={[
-        ['Alan adı', domain.primaryDomain], ['Uygulama türü', runtimeLabel], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'], ['Son yayın', formatDate(domain.lastAppliedAt)],
-      ]} />{isOwner && <div className="ws-section-body"><LinkButton to={`/websites/new?parent=${encodeURIComponent(domain.id)}`} icon="plus">Alt alan adı ekle</LinkButton>{website && canManage && <LinkButton to={siteHref(domain.id, 'settings')} icon="trash">Siteyi sil…</LinkButton>}</div>}</Section>
       {website && isOwner && <ProvisioningRecoveryPanel websiteId={website.id} canManage={canManage} onChanged={refreshAll} />}
-      <details className="ws-section ws-disclosure"><summary>Yayın ve uygulama ayrıntıları</summary><KeyValues items={[
-        ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
-        ['Çalışma türü', website?.runtimeType ?? 'Eski / ilişkisiz kayıt'], ['Uygulama', application?.name ?? (matches.length > 1 ? 'Uygulama bölümünden hedef seçin' : 'Bağlı uygulama yok')],
-      ]} /></details>
       <Section title="Bu siteye ait son işlemler" actions={<Link to={siteHref(domain.id, 'logs')}>Tümünü gör</Link>}><CollectionNotice resource={jobs} label="İşlemler" />{['ready', 'stale'].includes(jobs.status) && <JobsTable jobs={scopedJobs} limit={5} />}</Section>
     </>}
     {tab === 'hosting' && <DomainHostingPanel domain={domain} />}
