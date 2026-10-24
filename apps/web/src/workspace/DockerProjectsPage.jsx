@@ -216,9 +216,9 @@ function DockerProjectList() {
             return (
               <article key={tpl.id || tpl.image} className="yp-docker-catalog-card">
                 <div>
-                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
-                    <strong style={{ fontSize: '14px', wordBreak: 'break-word' }}>{title}</strong>
-                    <span className="yp-port-mapping-badge">{tpl.image}</span>
+                  <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-start', gap: '4px', marginBottom: '8px' }}>
+                    <strong style={{ fontSize: '14px', lineHeight: 1.35, wordBreak: 'break-word', width: '100%' }}>{title}</strong>
+                    <span className="yp-port-mapping-badge" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tpl.image}</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
                     {tpl.official && <Badge state="active">Resmi İmaj</Badge>}
