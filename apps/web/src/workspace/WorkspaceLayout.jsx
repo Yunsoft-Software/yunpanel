@@ -4,8 +4,8 @@ import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx';
 import { UnsavedChangesProvider } from './UnsavedChanges.jsx';
 import { Button, Icon, LinkButton } from './PanelKit.jsx';
 import { knownCount } from './resource-model.js';
-import { navigationGroups, navigationItemActive, websiteCount } from './ui/ux-model.js';
-import Preferences from './ui/Preferences.jsx';
+import { navigationGroups, navigationItemActive, PREFERENCE_KEY, readPreferences, writePreferences, websiteCount } from './ui/ux-model.js';
+import Preferences, { apply as applyThemePreferences, readStored as readStoredTheme } from './ui/Preferences.jsx';
 import CommandPalette from './ui/CommandPalette.jsx';
 import JobDrawer from './JobDrawer.jsx';
 import AiDrawer from './AiDrawer.jsx';
@@ -21,7 +21,30 @@ function Shell() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [aiOpen, setAiOpen] = useState(false);
+  const [themeMode, setThemeMode] = useState(() => (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark'));
   const [narrow, setNarrow] = useState(() => window.matchMedia('(max-width: 900px)').matches);
+  function toggleThemeMode() {
+    const nextTheme = (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light') ? 'dark' : 'light';
+    setThemeMode(nextTheme);
+    try {
+      const current = readStoredTheme();
+      const updated = { ...current, theme: nextTheme };
+      applyThemePreferences(updated);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        writePreferences(window.localStorage, updated);
+        window.dispatchEvent(new StorageEvent('storage', { key: PREFERENCE_KEY, newValue: JSON.stringify(updated) }));
+      }
+    } catch {
+      if (typeof document !== 'undefined') document.documentElement.dataset.wsTheme = nextTheme;
+    }
+  }
+  function handleShellMouseMove(event) {
+    const card = event.target?.closest?.('.ws-website-task-card, .ws-section, .ws-metric, .yp-spotlight-card');
+    if (!card) return;
+    const rect = card.getBoundingClientRect();
+    card.style.setProperty('--yp-mouse-x', `${Math.round(event.clientX - rect.left)}px`);
+    card.style.setProperty('--yp-mouse-y', `${Math.round(event.clientY - rect.top)}px`);
+  }
   const menu = useRef(null); const content = useRef(null); const appearanceRef = useRef(null);
   const sites = websiteCount(websites);
   const jobCount = canManage ? knownCount(jobs, (job) => ['queued', 'running'].includes(job.status)) : null;
@@ -119,7 +142,7 @@ function Shell() {
       else document.querySelector('.ws-mobile-menu')?.focus();
     };
   }, [menuOpen, narrow]);
-  return <div className="workspace-shell">
+  return <div className="workspace-shell" data-ws-design-system="shadcn-zinc-indigo" onMouseMove={handleShellMouseMove}>
     <a href="#workspace-main" className="ws-skip">İçeriğe geç</a>
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
@@ -132,10 +155,13 @@ function Shell() {
       <div className="ws-toolbar">
         <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" aria-expanded={menuOpen} aria-controls="workspace-navigation" onClick={() => setMenuOpen(true)} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
-        {canManage && <div className="ws-toolbar-actions">
-          {isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
-          <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>
-        </div>}
+        <div className="ws-toolbar-actions">
+          <Button onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
+            <span className="ws-toolbar-label">{themeMode === 'light' ? '🌙 Gece Modu' : '☀️ Açık Mod'}</span>
+          </Button>
+          {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
+          {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}
+        </div>
       </div>
       <main id="workspace-main" ref={content} className="ws-content" tabIndex={-1}>{notice && <div className="ws-notice" role="status"><div>{notice}</div><Button icon="close" aria-label="Bildirimi kapat" onClick={() => setNotice(null)} /></div>}<Outlet /></main>
     </div>

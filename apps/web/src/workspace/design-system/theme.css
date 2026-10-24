@@ -164,65 +164,133 @@ html .ws-modal .ws-button-primary:hover:not(:disabled) {
   transform: translateY(-1px);
 }
 
-/* Sidebar crisp border in Shadcn Zinc */
+/* Sidebar crisp border in Shadcn Zinc + Ambient Canvas Spotlight */
+html body,
+html .authenticated-panel,
+html .workspace-shell {
+  background-color: var(--ws-canvas) !important;
+  color: var(--ws-text) !important;
+}
+
+html[data-ws-theme='dark'] .workspace-shell .ws-main {
+  background-color: var(--ws-canvas);
+  background-image:
+    radial-gradient(900px 380px at 50% -80px, rgba(99, 102, 241, 0.16), transparent 65%),
+    radial-gradient(650px 300px at 88% 40px, rgba(16, 185, 129, 0.09), transparent 60%);
+  background-attachment: local;
+}
+
+html[data-ws-theme='light'] .workspace-shell .ws-main {
+  background-color: var(--ws-canvas);
+  background-image:
+    radial-gradient(900px 380px at 50% -80px, rgba(79, 70, 229, 0.08), transparent 65%),
+    radial-gradient(650px 300px at 88% 40px, rgba(5, 150, 105, 0.05), transparent 60%);
+  background-attachment: local;
+}
+
 html .workspace-shell .ws-sidebar {
-  background: var(--ws-nav);
-  border-right: 1px solid var(--ws-border);
+  background: var(--ws-nav) !important;
+  border-right: 1px solid var(--ws-border) !important;
+  box-shadow: inset -1px 0 0 0 rgba(255, 255, 255, 0.03);
 }
 
 html .workspace-shell .ws-brand-mark {
-  border-radius: 10px;
-  background: linear-gradient(135deg, var(--ws-brand) 0%, #10b981 100%);
-  color: #ffffff;
-  box-shadow: 0 4px 14px -2px rgba(99, 102, 241, 0.45);
+  border-radius: 10px !important;
+  background: linear-gradient(135deg, var(--ws-brand) 0%, #10b981 100%) !important;
+  color: #ffffff !important;
+  box-shadow: 0 4px 16px -2px rgba(99, 102, 241, 0.55) !important;
 }
 
 html .workspace-shell .ws-nav a {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease;
+  position: relative;
+  border-radius: 8px !important;
+  border: 1px solid transparent !important;
+  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+}
+
+html .workspace-shell .ws-nav a:hover {
+  background: var(--ws-nav-hover) !important;
+  border-color: var(--ws-border) !important;
 }
 
 html .workspace-shell .ws-nav a.active {
-  background: var(--ws-nav-active);
-  color: var(--ws-nav-on-active);
-  border-color: var(--ws-border);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06);
+  background: linear-gradient(90deg, rgba(99, 102, 241, 0.18) 0%, var(--ws-nav-active) 100%) !important;
+  color: var(--ws-nav-on-active) !important;
+  border-color: rgba(99, 102, 241, 0.45) !important;
+  box-shadow: inset 3px 0 0 0 var(--ws-brand), inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 4px 14px -4px rgba(99, 102, 241, 0.28) !important;
+}
+
+html .workspace-shell .ws-nav a.active > svg {
+  color: var(--ws-brand-hover) !important;
 }
 
 html .workspace-shell .ws-toolbar {
-  background: var(--ws-canvas);
-  border-bottom: 1px solid var(--ws-border);
+  position: sticky;
+  top: 0;
+  z-index: 20;
+  background: color-mix(in srgb, var(--ws-canvas) 82%, transparent) !important;
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--ws-border) !important;
 }
 
 html .workspace-shell .ws-command-trigger {
-  border: 1px solid var(--ws-border);
-  border-radius: 8px;
-  background: var(--ws-surface);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 8px !important;
+  background: var(--ws-surface) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), var(--ws-shadow) !important;
+  transition: border-color 150ms ease, box-shadow 150ms ease;
 }
 
 html .workspace-shell .ws-command-trigger:hover {
-  border-color: var(--ws-brand);
+  border-color: var(--ws-brand) !important;
+  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
+}
+
+html .workspace-shell .ws-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid rgba(255, 255, 255, 0.08) !important;
+  border-radius: 999px !important;
+  padding: 4px 10px !important;
+  font-weight: 600 !important;
+  letter-spacing: 0.2px;
+}
+
+html .workspace-shell .ws-badge-success::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  box-shadow: 0 0 8px currentColor;
 }
 
 html .workspace-shell .ws-website-task-card {
-  border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius);
-  background-color: var(--ws-surface);
-  background-image: var(--yp-spotlight-glow);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), var(--ws-shadow);
+  border: 1px solid var(--ws-border) !important;
+  border-radius: var(--ws-radius) !important;
+  background-color: var(--ws-surface) !important;
+  background-image: var(--yp-spotlight-glow) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), var(--ws-shadow) !important;
   transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease, box-shadow 180ms ease;
 }
 
+html .workspace-shell .ws-website-task-card:hover {
+  transform: translateY(-1px);
+  border-color: rgba(99, 102, 241, 0.5) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 12px 28px -8px rgba(99, 102, 241, 0.22) !important;
+}
+
 html .workspace-shell .ws-website-task-card.yp-domain-tree-card {
-  border-color: rgba(99, 102, 241, 0.55);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.1), 0 0 0 1px rgba(99, 102, 241, 0.18), 0 10px 30px -10px rgba(99, 102, 241, 0.22);
+  border-color: rgba(99, 102, 241, 0.6) !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 0 0 1px rgba(99, 102, 241, 0.22), 0 12px 32px -10px rgba(16, 185, 129, 0.22) !important;
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
-  border-left: 3px solid var(--ws-brand);
-  background-color: var(--ws-surface-subtle);
+  border-left: 3px solid var(--ws-brand) !important;
+  background-color: var(--ws-surface-subtle) !important;
 }
 
 /* Hierarchical Domain -> Subdomain tree connectors & shared file-root pill */
