@@ -1,14 +1,14 @@
 /* ==========================================================================
-   YUNPANEL CENTRALIZED DESIGN SYSTEM — SHADCN ZINC/SLATE + INDIGO + SPOTLIGHT
+   YUNPANEL CENTRALIZED DESIGN SYSTEM — SHADCN ZINC/SLATE (FLAT, CRISP, CLEAN)
    Single swappable design layer (apps/web/src/workspace/design-system/theme.css).
-   All pages consume PanelKit / design-system primitives so theme swaps never
-   require touching page or business-logic components.
+   Zero gradients, zero neon glows, uniform 34px controls, 1px crisp borders.
    ========================================================================== */
 
 :root,
 :root[data-ws-theme='light'],
 html:root,
 html:root[data-ws-theme='light'] {
+  color-scheme: light;
   --ws-brand: #4f46e5;
   --ws-brand-hover: #4338ca;
   --ws-on-brand: #ffffff;
@@ -16,11 +16,11 @@ html:root[data-ws-theme='light'] {
   --ws-surface: #ffffff;
   --ws-surface-raised: #ffffff;
   --ws-surface-subtle: #f4f4f5;
-  --ws-surface-hover: #e4e4e7;
+  --ws-surface-hover: #f4f4f5;
   --ws-text: #09090b;
   --ws-muted: #52525b;
   --ws-border: #e4e4e7;
-  --ws-control-border: #71717a;
+  --ws-control-border: #d4d4d8;
   --ws-accent: #4f46e5;
   --ws-accent-soft: #eef2ff;
   --ws-accent-hover: #3730a3;
@@ -36,12 +36,12 @@ html:root[data-ws-theme='light'] {
   --ws-info-soft: #f0f9ff;
   --ws-unknown: #52525b;
   --ws-unknown-soft: #f4f4f5;
-  --ws-nav: #f4f4f5;
-  --ws-nav-text: #18181b;
-  --ws-nav-muted: #52525b;
-  --ws-nav-hover: #e4e4e7;
-  --ws-nav-active: #18181b;
-  --ws-nav-on-active: #fafafa;
+  --ws-nav: #fafafa;
+  --ws-nav-text: #3f3f46;
+  --ws-nav-muted: #71717a;
+  --ws-nav-hover: #f4f4f5;
+  --ws-nav-active: #e4e4e7;
+  --ws-nav-on-active: #09090b;
   --ws-pill: #18181b;
   --ws-on-pill: #fafafa;
   --ws-chart-cpu: #4f46e5;
@@ -52,32 +52,33 @@ html:root[data-ws-theme='light'] {
   --ws-radius: 12px;
   --ws-radius-control: 8px;
   --ws-radius-small: 6px;
-  --ws-shadow: 0 1px 3px 0 rgba(9, 9, 11, 0.06), 0 1px 2px -1px rgba(9, 9, 11, 0.06);
-  --ws-overlay-shadow: 0 20px 50px -12px rgba(9, 9, 11, 0.22);
-  --yp-spotlight-glow: radial-gradient(520px circle at var(--yp-mouse-x, 50%) var(--yp-mouse-y, 0%), rgba(99, 102, 241, 0.08), transparent 45%);
-  --yp-border-beam: linear-gradient(135deg, rgba(79, 70, 229, 0.45), rgba(5, 150, 105, 0.35));
+  --ws-control-height: 36px;
+  --ws-section-pad: 18px;
+  --ws-row-pad: 11px;
+  --ws-shadow: 0 1px 2px 0 rgba(9, 9, 11, 0.04);
+  --ws-overlay-shadow: 0 16px 40px -8px rgba(9, 9, 11, 0.16);
 }
 
 :root[data-ws-theme='dark'],
 html:root[data-ws-theme='dark'] {
   color-scheme: dark;
   --ws-brand: #6366f1;
-  --ws-brand-hover: #818cf8;
+  --ws-brand-hover: #4f46e5;
   --ws-on-brand: #ffffff;
   --ws-canvas: #09090b;
   --ws-surface: #141418;
   --ws-surface-raised: #18181b;
-  --ws-surface-subtle: #111115;
-  --ws-surface-hover: #27272a;
+  --ws-surface-subtle: #0e0e11;
+  --ws-surface-hover: #1f1f23;
   --ws-text: #fafafa;
   --ws-muted: #a1a1aa;
   --ws-border: #27272a;
-  --ws-control-border: #52525b;
+  --ws-control-border: #3f3f46;
   --ws-accent: #818cf8;
   --ws-accent-soft: #1e1b4b;
   --ws-accent-hover: #a5b4fc;
   --ws-on-accent: #09090b;
-  --ws-focus: #818cf8;
+  --ws-focus: #6366f1;
   --ws-success: #10b981;
   --ws-success-soft: #064e3b;
   --ws-warning: #fbbf24;
@@ -89,13 +90,13 @@ html:root[data-ws-theme='dark'] {
   --ws-unknown: #a1a1aa;
   --ws-unknown-soft: #27272a;
   --ws-nav: #09090b;
-  --ws-nav-text: #e4e4e7;
-  --ws-nav-muted: #a1a1aa;
-  --ws-nav-hover: #18181b;
-  --ws-nav-active: #27272a;
+  --ws-nav-text: #a1a1aa;
+  --ws-nav-muted: #71717a;
+  --ws-nav-hover: #141418;
+  --ws-nav-active: #1f1f23;
   --ws-nav-on-active: #fafafa;
-  --ws-pill: #6366f1;
-  --ws-on-pill: #ffffff;
+  --ws-pill: #27272a;
+  --ws-on-pill: #fafafa;
   --ws-chart-cpu: #818cf8;
   --ws-chart-memory: #10b981;
   --ws-chart-disk: #fbbf24;
@@ -104,201 +105,506 @@ html:root[data-ws-theme='dark'] {
   --ws-radius: 12px;
   --ws-radius-control: 8px;
   --ws-radius-small: 6px;
-  --ws-shadow: 0 2px 10px -2px rgba(0, 0, 0, 0.45);
-  --ws-overlay-shadow: 0 24px 64px -12px rgba(0, 0, 0, 0.72);
-  --yp-spotlight-glow: radial-gradient(520px circle at var(--yp-mouse-x, 50%) var(--yp-mouse-y, 0%), rgba(99, 102, 241, 0.14), transparent 45%);
-  --yp-border-beam: linear-gradient(135deg, rgba(99, 102, 241, 0.65), rgba(16, 185, 129, 0.45));
+  --ws-control-height: 36px;
+  --ws-section-pad: 18px;
+  --ws-row-pad: 11px;
+  --ws-shadow: none;
+  --ws-overlay-shadow: 0 20px 50px -12px rgba(0, 0, 0, 0.7);
 }
 
-/* Shadcn crisp 1px surfaces + top-edge specular hairline highlight + spotlight hover */
+/* Base Canvas & Shell (Flat, Zero Gradients) */
+html body,
+html .authenticated-panel,
+html .workspace-shell,
+html .workspace-shell .ws-main {
+  background-color: var(--ws-canvas) !important;
+  background-image: none !important;
+  color: var(--ws-text) !important;
+}
+
+/* Top Session Bar & Toolbar — Compact, Flat, Unified */
+html .authenticated-panel .auth-sessionbar {
+  min-height: 38px !important;
+  height: 38px !important;
+  padding: 0 24px 0 calc(var(--ws-sidebar-width, 236px) + 24px) !important;
+  background: var(--ws-canvas) !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  font-size: 12px !important;
+}
+
+html .authenticated-panel .auth-sessionbar button {
+  min-height: 28px !important;
+  height: 28px !important;
+  padding: 0 10px !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+
+html .authenticated-panel .auth-sessionbar button:hover {
+  background: var(--ws-surface-hover) !important;
+}
+
+html .workspace-shell .ws-toolbar {
+  min-height: 52px !important;
+  padding: 8px 24px !important;
+  background: var(--ws-canvas) !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  backdrop-filter: none !important;
+}
+
+html .workspace-shell .ws-command-trigger {
+  height: 34px !important;
+  min-height: 34px !important;
+  max-width: 380px !important;
+  padding: 0 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface) !important;
+  color: var(--ws-muted) !important;
+  font-size: 13px !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-command-trigger:hover {
+  border-color: var(--ws-control-border) !important;
+  background: var(--ws-surface-raised) !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-command-trigger kbd {
+  padding: 1px 5px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 4px !important;
+  background: var(--ws-surface-subtle) !important;
+  font-size: 11px !important;
+}
+
+/* Sidebar — Clean Shadcn Zinc Navigation */
+html .workspace-shell .ws-sidebar {
+  width: var(--ws-sidebar-width, 236px) !important;
+  padding: 16px 12px !important;
+  background: var(--ws-nav) !important;
+  border-right: 1px solid var(--ws-border) !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-brand {
+  gap: 10px !important;
+  padding: 2px 8px 16px !important;
+  margin-bottom: 8px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-brand-mark {
+  width: 30px !important;
+  height: 30px !important;
+  border-radius: 6px !important;
+  background: var(--ws-text) !important;
+  color: var(--ws-canvas) !important;
+  font-size: 15px !important;
+  font-weight: 700 !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-brand strong {
+  font-size: 16px !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.3px !important;
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-brand small {
+  font-size: 10px !important;
+  letter-spacing: 0.8px !important;
+  color: var(--ws-nav-muted) !important;
+}
+
+html .workspace-shell .ws-nav {
+  gap: 2px !important;
+}
+
+html .workspace-shell .ws-nav a {
+  min-height: 36px !important;
+  height: 36px !important;
+  padding: 0 10px !important;
+  border: 1px solid transparent !important;
+  border-radius: 6px !important;
+  background: transparent !important;
+  color: var(--ws-nav-text) !important;
+  font-size: 13px !important;
+  font-weight: 500 !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-nav a:hover {
+  background: var(--ws-nav-hover) !important;
+  color: var(--ws-text) !important;
+  border-color: transparent !important;
+}
+
+html .workspace-shell .ws-nav a.active {
+  background: var(--ws-nav-active) !important;
+  color: var(--ws-nav-on-active) !important;
+  border-color: var(--ws-border) !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-nav a > svg {
+  width: 16px !important;
+  height: 16px !important;
+  color: var(--ws-nav-muted) !important;
+}
+
+html .workspace-shell .ws-nav a.active > svg {
+  color: var(--ws-text) !important;
+}
+
+html .workspace-shell .ws-nav-count {
+  padding: 1px 6px !important;
+  border-radius: 4px !important;
+  background: var(--ws-surface-raised) !important;
+  border: 1px solid var(--ws-border) !important;
+  color: var(--ws-text) !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+}
+
+/* Content Area & Page Headings */
+html .workspace-shell .ws-content {
+  max-width: 1480px !important;
+  padding: 24px 28px 48px !important;
+}
+
+html .workspace-shell .ws-page-heading {
+  margin-bottom: 20px !important;
+  gap: 16px !important;
+}
+
+html .workspace-shell .ws-page-heading h1 {
+  font-size: 22px !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.4px !important;
+  line-height: 1.25 !important;
+}
+
+html .workspace-shell .ws-page-heading p {
+  margin-top: 4px !important;
+  font-size: 13px !important;
+  line-height: 1.5 !important;
+  color: var(--ws-muted) !important;
+}
+
+/* Uniform Shadcn Buttons — Every Button Identical 34px Height, Zero Crooked Stretching */
+html .workspace-shell .ws-button,
+html .ws-modal .ws-button {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  gap: 6px !important;
+  min-height: 34px !important;
+  height: 34px !important;
+  padding: 0 12px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
+  font-size: 12.5px !important;
+  font-weight: 500 !important;
+  line-height: 1 !important;
+  white-space: nowrap !important;
+  box-shadow: none !important;
+  transform: none !important;
+  transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease !important;
+}
+
+html .workspace-shell .ws-button:hover:not(:disabled),
+html .ws-modal .ws-button:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+  border-color: var(--ws-control-border) !important;
+  transform: none !important;
+}
+
+html .workspace-shell .ws-button-primary,
+html .ws-modal .ws-button-primary {
+  background: var(--ws-brand) !important;
+  color: var(--ws-on-brand) !important;
+  border-color: var(--ws-brand) !important;
+  font-weight: 600 !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell .ws-button-primary:hover:not(:disabled),
+html .ws-modal .ws-button-primary:hover:not(:disabled) {
+  background: var(--ws-brand-hover) !important;
+  border-color: var(--ws-brand-hover) !important;
+  color: var(--ws-on-brand) !important;
+  box-shadow: none !important;
+  transform: none !important;
+}
+
+html .workspace-shell .ws-button-danger,
+html .ws-modal .ws-button-danger {
+  background: var(--ws-danger-soft) !important;
+  color: var(--ws-danger) !important;
+  border-color: color-mix(in srgb, var(--ws-danger) 40%, transparent) !important;
+}
+
+html .workspace-shell .ws-button svg,
+html .ws-modal .ws-button svg {
+  width: 14px !important;
+  height: 14px !important;
+  flex-shrink: 0 !important;
+}
+
+/* Inputs, Selects, Textareas — Clean 36px Shadcn Controls */
+html .workspace-shell :is(input:not([type='checkbox']):not([type='radio']), select, textarea),
+html .ws-modal :is(input:not([type='checkbox']):not([type='radio']), select, textarea) {
+  min-height: 36px !important;
+  padding: 6px 10px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  font-size: 13px !important;
+  box-shadow: none !important;
+}
+
+html .workspace-shell :is(input:not([type='checkbox']):not([type='radio']), select, textarea):focus,
+html .ws-modal :is(input:not([type='checkbox']):not([type='radio']), select, textarea):focus {
+  border-color: var(--ws-brand) !important;
+  outline: 1px solid var(--ws-brand) !important;
+  outline-offset: 0 !important;
+}
+
+/* Sections, Cards, Metrics, File Browser — Crisp 1px Borders, 8px Radius */
 html .workspace-shell .ws-section,
 html .workspace-shell .panel,
 html .workspace-shell .ws-metric,
 html .workspace-shell .yf-browser,
 .yp-spotlight-card {
-  border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius);
-  background-color: var(--ws-surface);
-  background-image: var(--yp-spotlight-glow);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), var(--ws-shadow);
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease, box-shadow 180ms ease;
-}
-
-html .workspace-shell .ws-metric:hover,
-html .workspace-shell .ws-site-shortcuts a:hover,
-.yp-spotlight-card:hover {
-  transform: translateY(-1px);
-  border-color: var(--ws-brand);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 8px 24px -6px rgba(99, 102, 241, 0.18);
-}
-
-/* Active / expanded Domain card border-beam & indigo-emerald glow */
-.yp-domain-tree-card,
-html .workspace-shell .ws-websites-table tbody tr.is-selected,
-html .workspace-shell .ws-section.yp-domain-tree-card {
-  position: relative;
-  border: 1px solid var(--ws-brand);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(99, 102, 241, 0.25), 0 8px 28px -8px rgba(16, 185, 129, 0.2);
-}
-
-/* Primary action button luminous shimmer & crisp control border */
-html .workspace-shell .ws-button,
-html .ws-modal .ws-button {
-  border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius-control);
-  transition: transform 140ms ease, background-color 140ms ease, border-color 140ms ease, box-shadow 140ms ease;
-}
-
-html .workspace-shell .ws-button-primary,
-html .ws-modal .ws-button-primary {
-  background: linear-gradient(180deg, var(--ws-brand-hover) 0%, var(--ws-brand) 100%);
-  color: var(--ws-on-brand) !important;
-  border-color: rgba(255, 255, 255, 0.16);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.22), 0 1px 3px 0 rgba(79, 70, 229, 0.35);
-}
-
-html .workspace-shell .ws-button-primary:hover:not(:disabled),
-html .ws-modal .ws-button-primary:hover:not(:disabled) {
-  background: linear-gradient(180deg, #818cf8 0%, var(--ws-brand-hover) 100%);
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.3), 0 4px 14px 0 rgba(99, 102, 241, 0.42);
-  transform: translateY(-1px);
-}
-
-/* Sidebar crisp border in Shadcn Zinc + Ambient Canvas Spotlight */
-html body,
-html .authenticated-panel,
-html .workspace-shell {
-  background-color: var(--ws-canvas) !important;
-  color: var(--ws-text) !important;
-}
-
-html[data-ws-theme='dark'] .workspace-shell .ws-main {
-  background-color: var(--ws-canvas);
-  background-image:
-    radial-gradient(900px 380px at 50% -80px, rgba(99, 102, 241, 0.16), transparent 65%),
-    radial-gradient(650px 300px at 88% 40px, rgba(16, 185, 129, 0.09), transparent 60%);
-  background-attachment: local;
-}
-
-html[data-ws-theme='light'] .workspace-shell .ws-main {
-  background-color: var(--ws-canvas);
-  background-image:
-    radial-gradient(900px 380px at 50% -80px, rgba(79, 70, 229, 0.08), transparent 65%),
-    radial-gradient(650px 300px at 88% 40px, rgba(5, 150, 105, 0.05), transparent 60%);
-  background-attachment: local;
-}
-
-html .workspace-shell .ws-sidebar {
-  background: var(--ws-nav) !important;
-  border-right: 1px solid var(--ws-border) !important;
-  box-shadow: inset -1px 0 0 0 rgba(255, 255, 255, 0.03);
-}
-
-html .workspace-shell .ws-brand-mark {
-  border-radius: 10px !important;
-  background: linear-gradient(135deg, var(--ws-brand) 0%, #10b981 100%) !important;
-  color: #ffffff !important;
-  box-shadow: 0 4px 16px -2px rgba(99, 102, 241, 0.55) !important;
-}
-
-html .workspace-shell .ws-nav a {
-  position: relative;
+  border: 1px solid var(--ws-border) !important;
   border-radius: 8px !important;
-  border: 1px solid transparent !important;
-  transition: background-color 140ms ease, border-color 140ms ease, color 140ms ease, transform 140ms ease;
+  background-color: var(--ws-surface) !important;
+  background-image: none !important;
+  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08) !important;
 }
 
-html .workspace-shell .ws-nav a:hover {
-  background: var(--ws-nav-hover) !important;
-  border-color: var(--ws-border) !important;
-}
-
-html .workspace-shell .ws-nav a.active {
-  background: linear-gradient(90deg, rgba(99, 102, 241, 0.18) 0%, var(--ws-nav-active) 100%) !important;
-  color: var(--ws-nav-on-active) !important;
-  border-color: rgba(99, 102, 241, 0.45) !important;
-  box-shadow: inset 3px 0 0 0 var(--ws-brand), inset 0 1px 0 0 rgba(255, 255, 255, 0.08), 0 4px 14px -4px rgba(99, 102, 241, 0.28) !important;
-}
-
-html .workspace-shell .ws-nav a.active > svg {
-  color: var(--ws-brand-hover) !important;
-}
-
-html .workspace-shell .ws-toolbar {
-  position: sticky;
-  top: 0;
-  z-index: 20;
-  background: color-mix(in srgb, var(--ws-canvas) 82%, transparent) !important;
-  backdrop-filter: blur(14px);
-  -webkit-backdrop-filter: blur(14px);
+html .workspace-shell .ws-section-heading {
+  padding: 14px 18px !important;
   border-bottom: 1px solid var(--ws-border) !important;
 }
 
-html .workspace-shell .ws-command-trigger {
+html .workspace-shell .ws-section-heading h2 {
+  font-size: 15px !important;
+  font-weight: 600 !important;
+}
+
+html .workspace-shell .ws-section-heading p {
+  margin-top: 2px !important;
+  font-size: 12px !important;
+}
+
+html .workspace-shell .ws-section-body,
+html .workspace-shell .ws-form {
+  padding: 18px !important;
+}
+
+html .workspace-shell .ws-filters {
+  padding: 12px 18px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  gap: 12px !important;
+  align-items: flex-end !important;
+}
+
+/* Badges — Crisp Pill/Tag Badges */
+html .workspace-shell .ws-badge {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 5px !important;
+  height: 22px !important;
+  padding: 0 8px !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 999px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  line-height: 1 !important;
+}
+
+/* Website & Subdomain Hierarchy Cards on /websites — Clean, Compact, Aligned */
+html .workspace-shell .ws-website-task-list {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+  padding: 16px 18px !important;
+  margin: 0 !important;
+}
+
+html .workspace-shell .ws-website-task-card,
+.yp-domain-tree-card {
   border: 1px solid var(--ws-border) !important;
   border-radius: 8px !important;
-  background: var(--ws-surface) !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.06), var(--ws-shadow) !important;
-  transition: border-color 150ms ease, box-shadow 150ms ease;
-}
-
-html .workspace-shell .ws-command-trigger:hover {
-  border-color: var(--ws-brand) !important;
-  box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15) !important;
-}
-
-html .workspace-shell .ws-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  border: 1px solid rgba(255, 255, 255, 0.08) !important;
-  border-radius: 999px !important;
-  padding: 4px 10px !important;
-  font-weight: 600 !important;
-  letter-spacing: 0.2px;
-}
-
-html .workspace-shell .ws-badge-success::before {
-  content: '';
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 999px;
-  background: currentColor;
-  box-shadow: 0 0 8px currentColor;
-}
-
-html .workspace-shell .ws-website-task-card {
-  border: 1px solid var(--ws-border) !important;
-  border-radius: var(--ws-radius) !important;
-  background-color: var(--ws-surface) !important;
-  background-image: var(--yp-spotlight-glow) !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.08), var(--ws-shadow) !important;
-  transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1), border-color 180ms ease, box-shadow 180ms ease;
+  background: var(--ws-surface-raised) !important;
+  background-image: none !important;
+  padding: 14px 16px !important;
+  box-shadow: none !important;
+  transition: border-color 120ms ease !important;
 }
 
 html .workspace-shell .ws-website-task-card:hover {
-  transform: translateY(-1px);
-  border-color: rgba(99, 102, 241, 0.5) !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 12px 28px -8px rgba(99, 102, 241, 0.22) !important;
-}
-
-html .workspace-shell .ws-website-task-card.yp-domain-tree-card {
-  border-color: rgba(99, 102, 241, 0.6) !important;
-  box-shadow: inset 0 1px 0 0 rgba(255, 255, 255, 0.12), 0 0 0 1px rgba(99, 102, 241, 0.22), 0 12px 32px -10px rgba(16, 185, 129, 0.22) !important;
+  border-color: var(--ws-control-border) !important;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
+  margin-inline-start: calc(var(--ws-card-depth, 1) * 24px) !important;
+  border: 1px solid var(--ws-border) !important;
   border-left: 3px solid var(--ws-brand) !important;
-  background-color: var(--ws-surface-subtle) !important;
+  border-radius: 6px !important;
+  background: var(--ws-surface-subtle) !important;
+  padding: 12px 14px !important;
 }
 
-/* Hierarchical Domain -> Subdomain tree connectors & shared file-root pill */
+html .workspace-shell .ws-website-task-header {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 10px 16px !important;
+  margin-bottom: 10px !important;
+  padding-bottom: 10px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-website-task-title {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px 10px !important;
+  flex: 1 1 260px !important;
+  min-width: 0 !important;
+}
+
+html .workspace-shell .ws-website-task-title h3 {
+  margin: 0 !important;
+  font-size: 14.5px !important;
+  font-weight: 600 !important;
+  line-height: 1.3 !important;
+}
+
+html .workspace-shell .ws-website-task-title h3 a {
+  color: var(--ws-text) !important;
+  text-decoration: none !important;
+}
+
+html .workspace-shell .ws-website-task-title h3 a:hover {
+  color: var(--ws-brand) !important;
+}
+
+html .workspace-shell .ws-website-task-title p {
+  margin: 0 !important;
+  font-size: 12px !important;
+  color: var(--ws-muted) !important;
+}
+
+html .workspace-shell .ws-website-task-status {
+  display: inline-flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  gap: 6px !important;
+}
+
+/* Fix Crooked Quick-Action Buttons in WebsiteTaskCard */
+html .workspace-shell .ws-website-task-quick {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  padding: 0 !important;
+  margin: 0 !important;
+}
+
+html .workspace-shell .ws-website-task {
+  display: inline-flex !important;
+  flex-direction: column !important;
+  align-items: flex-start !important;
+  width: auto !important;
+  flex: 0 0 auto !important;
+  gap: 3px !important;
+}
+
+html .workspace-shell .ws-website-task .ws-button {
+  width: auto !important;
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+  white-space: nowrap !important;
+}
+
+html .workspace-shell .ws-website-task small {
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  color: var(--ws-muted) !important;
+  max-width: 220px !important;
+}
+
+html .workspace-shell .ws-website-task-quick > .ws-button {
+  min-height: 32px !important;
+  height: 32px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+}
+
+html .workspace-shell .ws-website-task-grid {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: flex-start !important;
+  gap: 6px !important;
+  margin-top: 10px !important;
+  padding-top: 10px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-website-task-footer {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  gap: 8px !important;
+  margin-top: 10px !important;
+  padding-top: 10px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html .workspace-shell .ws-website-task-footer .ws-button {
+  min-height: 32px !important;
+  height: 32px !important;
+  font-size: 12px !important;
+}
+
+html .workspace-shell .ws-website-task-children {
+  padding: 8px 0 0 0 !important;
+}
+
+html .workspace-shell .ws-website-task-children .ws-button {
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 10px !important;
+  font-size: 12px !important;
+}
+
+/* Hierarchical Domain -> Subdomain Tree & Shared File Root Pill */
 .yp-subdomain-tree {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  margin-top: 10px;
+  gap: 6px;
+  margin-top: 8px;
   padding-left: 12px;
   border-left: 2px solid var(--ws-border);
 }
@@ -308,31 +614,29 @@ html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
   flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 10px 14px;
-  padding: 10px 14px;
+  gap: 8px 12px;
+  padding: 8px 12px;
   border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius-control);
+  border-radius: 6px;
   background: var(--ws-surface-subtle);
-  transition: border-color 150ms ease, background-color 150ms ease;
 }
 
 .yp-subdomain-branch:hover {
-  border-color: var(--ws-brand);
-  background: var(--ws-surface-raised);
+  border-color: var(--ws-control-border);
 }
 
 .yp-subdomain-branch-main {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px 10px;
+  gap: 8px;
   min-width: 0;
 }
 
 .yp-tree-connector {
-  font-family: var(--ws-font-code, monospace);
-  color: var(--ws-brand);
-  font-weight: 700;
+  font-family: var(--ws-font-code, ui-monospace, monospace);
+  color: var(--ws-muted);
+  font-weight: 600;
   user-select: none;
 }
 
@@ -340,41 +644,65 @@ html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 3px 8px;
+  height: 22px;
+  padding: 0 8px;
   border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius-small);
-  background: var(--ws-surface);
+  border-radius: 4px;
+  background: var(--ws-surface-subtle);
   color: var(--ws-muted);
-  font-size: 12px;
-  line-height: 1.4;
+  font-size: 11.5px;
+  line-height: 1;
   max-width: 100%;
 }
 
 .yp-file-root-pill code {
   color: var(--ws-text);
-  font-family: var(--ws-font-code, monospace);
-  font-size: 11.5px;
+  font-family: var(--ws-font-code, ui-monospace, monospace);
+  font-size: 11px;
 }
 
 .yp-file-root-tag {
-  padding: 1px 5px;
-  border-radius: 4px;
-  background: var(--ws-accent-soft);
-  color: var(--ws-accent);
-  font-size: 10px;
+  padding: 2px 5px;
+  border-radius: 3px;
+  background: var(--ws-surface-raised);
+  border: 1px solid var(--ws-border);
+  color: var(--ws-muted);
+  font-size: 9.5px;
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.4px;
+  letter-spacing: 0.3px;
+}
+
+/* Docker Catalog Grid & Quickbar */
+.yp-docker-catalog-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 10px;
+}
+
+.yp-docker-catalog-card {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 14px;
+  border: 1px solid var(--ws-border);
+  border-radius: 8px;
+  background: var(--ws-surface-subtle);
+}
+
+.yp-docker-catalog-card:hover {
+  border-color: var(--ws-control-border);
 }
 
 .yp-docker-quickbar {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-  padding: 14px;
-  margin-bottom: 14px;
+  gap: 10px;
+  padding: 12px;
+  margin-bottom: 12px;
   border: 1px solid var(--ws-border);
-  border-radius: var(--ws-radius-control);
+  border-radius: 6px;
   background: var(--ws-surface-subtle);
   align-items: end;
 }
@@ -382,11 +710,56 @@ html .workspace-shell .ws-website-task-card.yp-subdomain-task-card {
 .yp-port-mapping-badge {
   display: inline-flex;
   align-items: center;
-  gap: 6px;
-  padding: 3px 8px;
-  border-radius: var(--ws-radius-small);
+  gap: 5px;
+  padding: 2px 7px;
+  border-radius: 4px;
   border: 1px solid var(--ws-border);
   background: var(--ws-surface-subtle);
-  font-family: var(--ws-font-code, monospace);
-  font-size: 12px;
+  font-family: var(--ws-font-code, ui-monospace, monospace);
+  font-size: 11.5px;
+}
+
+/* Tables & Modals */
+html .workspace-shell .ws-table {
+  border-collapse: collapse !important;
+  border-spacing: 0 !important;
+  padding: 0 !important;
+}
+
+html .workspace-shell .ws-table th {
+  padding: 10px 16px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-muted) !important;
+  font-size: 11.5px !important;
+  font-weight: 600 !important;
+}
+
+html .workspace-shell .ws-table td {
+  padding: 11px 16px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  border-radius: 0 !important;
+  font-size: 13px !important;
+}
+
+html .ws-modal {
+  border: 1px solid var(--ws-border) !important;
+  border-radius: 10px !important;
+  background: var(--ws-surface) !important;
+  box-shadow: var(--ws-overlay-shadow) !important;
+}
+
+html .ws-modal > header {
+  padding: 14px 18px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+  background: var(--ws-surface) !important;
+}
+
+html .ws-modal h2 {
+  font-size: 16px !important;
+  font-weight: 600 !important;
+}
+
+html .ws-modal-body {
+  padding: 18px !important;
 }

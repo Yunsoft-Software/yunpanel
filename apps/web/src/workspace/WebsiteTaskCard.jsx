@@ -48,15 +48,16 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
           {isSubdomain && <span className="yp-tree-connector" aria-hidden="true">├─ </span>}
           <Link to={siteHref(domain.id)}>{domain.primaryDomain}</Link>
         </h3>
-        <p>{isSubdomain ? 'Alt alan adı (Subdomain)' : 'Ana alan adı (Root Domain)'} · {tasks.runtimeLabel}</p>
-        {fileRootPath && <div style={{ marginTop: '6px' }}><FileRootBadge path={fileRootPath} shared={isSubdomain} /></div>}
+        <p>{isSubdomain ? 'Alt alan adı' : 'Ana alan adı'} · {tasks.runtimeLabel}</p>
+        {fileRootPath && <FileRootBadge path={fileRootPath} shared={isSubdomain} />}
         {contextOnly && <small>Filtrelenen alt alan adının üst kaydı</small>}
       </div>
       <div className="ws-website-task-status" aria-label="Kayıt ve sertifika durumu">
         <Badge state={tasks.domainReady ? domain.state : 'unknown'} />
         <Badge state={ssl.state}>{ssl.label}</Badge>
+        {childCount > 0 && !toolsOpen && <Button disabled={filtering} icon="chevron" aria-expanded={expanded} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button>}
+        {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
       </div>
-      {url && <a href={url} target="_blank" rel="noopener noreferrer" className="ws-button" aria-label={`${domain.primaryDomain} sitesini yeni sekmede aç`}><Icon name="external" />Siteyi aç</a>}
     </header>
     {warning && <p className="ws-website-task-warning"><Icon name="alert" />Üst alan adı bağlantısını kontrol edin.</p>}
     <nav className="ws-website-task-quick" aria-label={`${domain.primaryDomain} hızlı araçlar`}>
@@ -83,6 +84,5 @@ export default function WebsiteTaskCard({ row, tasks, certificates, filtering, o
       </details>
     </footer>
     </div>
-    {childCount > 0 && !toolsOpen && <div className="ws-website-task-children"><Button disabled={filtering} icon="chevron" aria-expanded={expanded} onClick={() => onToggle(domain.id)}>{childCount} alt alan adı · {expanded ? 'Daralt' : 'Göster'}</Button></div>}
   </article>;
 }

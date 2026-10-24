@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmod, chown, lstat, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   roundcubeFpmTemplatePolicy,
@@ -396,7 +397,7 @@ export function createRoundcubeConfigActivator({
         uid: runtimeIdentity.uid, gid: runtimeIdentity.gid, mode: PRIVATE_DIRECTORY_MODE,
       }),
       assertParentDirectory('/etc/roundcube'),
-      assertParentDirectory('/etc/php/8.3/fpm/pool.d'),
+      assertParentDirectory(path.posix.dirname(expected.fpm?.artifact?.path ?? '/etc/php/8.3/fpm/pool.d')),
       assertParentDirectory('/etc/nginx/sites-enabled'),
     ]);
 

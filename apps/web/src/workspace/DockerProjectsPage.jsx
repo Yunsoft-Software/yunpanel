@@ -12,7 +12,7 @@ import {
 import DockerConfigPanel from './DockerConfigPanel.jsx';
 import DockerLifecyclePanel from './DockerLifecyclePanel.jsx';
 import DockerProjectCreateDialog from './DockerProjectCreateDialog.jsx';
-import { Badge, Button, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
+import { Badge, Button, DEFAULT_DOCKER_STACK_TEMPLATES, EmptyState, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
 
 function useAsyncResource(loader, dependencies = [], { enabled = true } = {}) {
@@ -96,10 +96,125 @@ function runtimeBadge(status) {
 function DockerProjectList() {
   const projects = useAsyncResource(() => listDockerProjects(), [], { enabled: true });
   const [creating, setCreating] = useState(false);
+  const [selectedTemplate, setSelectedTemplate] = useState(null);
+  const [catalogQuery, setCatalogQuery] = useState('');
   const items = Array.isArray(projects.data) ? projects.data : [];
-  return <><PageHeading title="Docker (Ürün Uzantısı)" description="Bu sunucuda YunPanel tarafından yönetilen Docker Compose projeleri (Plesk standart eşdeğeri olmayan ürün uzantısı)." actions={<><Button icon="refresh" onClick={projects.refresh}>Yenile</Button><Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Compose projesi ekle</Button></>} /><LoadNotice resource={projects} label="Docker projeleri" /><Section title="Compose projeleri" description="Compose desired state ve runtime birbirinden ayrı izlenir; container veya port tahmini yapılmaz.">
-    {items.length > 0 ? <div className="ws-table-scroll"><table className="ws-table"><thead><tr><th>Proje</th><th>Servis</th><th>Network</th><th>Volume</th><th>Revizyon</th><th /></tr></thead><tbody>{items.map((project) => <tr key={project.id}><td><strong>{project.projectName}</strong><small>{project.id}</small></td><td>{project.services?.length ?? 0}</td><td>{project.networks?.length ?? 0}</td><td>{project.volumes?.length ?? 0}</td><td>{project.revision}</td><td><LinkButton to={`/docker/${encodeURIComponent(project.id)}`}>Yönet</LinkButton></td></tr>)}</tbody></table></div> : projects.status === 'ready' && <EmptyState icon="box" title="Managed Compose projesi yok" detail="İlk Compose projesini ekleyin. Mevcut external Docker workload kayıtları Managed Compose projesi olarak gösterilmez." action={<Button variant="primary" icon="plus" onClick={() => setCreating(true)}>Compose projesi ekle</Button>} />}
-  </Section>{creating && <DockerProjectCreateDialog onClose={() => setCreating(false)} />}</>;
+  const filteredCatalog = useMemo(() => {
+    const q = catalogQuery.trim().toLowerCase();
+    if (!q) return DEFAULT_DOCKER_STACK_TEMPLATES;
+    return DEFAULT_DOCKER_STACK_TEMPLATES.filter((item) => (
+      item.label.toLowerCase().includes(q)
+      || item.image.toLowerCase().includes(q)
+      || (item.category ?? '').toLowerCase().includes(q)
+    ));
+  }, [catalogQuery]);
+
+  function openWithTemplate(tpl = null) {
+    setSelectedTemplate(tpl);
+    setCreating(true);
+  }
+
+  return <>
+    <PageHeading
+      title="Docker & Compose Stack Yönetimi"
+      description="Docker Hub imajlarından tek tıkla konteyner/stack oluşturun, .yml dosyası yükleyin veya Inner ↔ Outer Port eşlemesiyle Domain/Subdomain'e proxy olarak bağlayın."
+      actions={<>
+        <Button icon="refresh" onClick={projects.refresh}>Yenile</Button>
+        <LinkButton to="/websites/new?mode=subdomain" icon="globe">Subdomain'e Docker Bağla</LinkButton>
+        <Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose / Stack Ekle</Button>
+      </>}
+    />
+    <LoadNotice resource={projects} label="Docker projeleri" />
+    <Section title="Compose projeleri" description="Çalışan ve tanımlı Compose stack'leri, Inner ↔ Outer port eşlemeleri ve Domain/Subdomain proxy bağlantıları.">
+      {items.length > 0 ? (
+        <div className="ws-table-scroll">
+          <table className="ws-table">
+            <thead>
+              <tr>
+                <th>Proje</th>
+                <th>Servis</th>
+                <th>Inner ↔ Outer Port Eşlemesi</th>
+                <th>Network</th>
+                <th>Volume</th>
+                <th>Revizyon</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {items.map((project) => {
+                const allPorts = (project.services ?? []).flatMap((svc) => publishedPorts(svc).map((p) => ({ service: svc.name, ...p })));
+                return (
+                  <tr key={project.id}>
+                    <td><strong>{project.projectName}</strong><small>{project.id}</small></td>
+                    <td>{project.services?.length ?? 0}</td>
+                    <td>
+                      {allPorts.length > 0
+                        ? allPorts.map((p) => (
+                            <span key={`${p.service}:${p.publishedPort}:${p.targetPort}`} className="yp-port-mapping-badge" style={{ marginRight: '6px' }}>
+                              {p.service}: Inner {p.targetPort}/{p.protocol ?? 'tcp'} ↔ Outer {p.hostIp ?? '127.0.0.1'}:{p.publishedPort}
+                            </span>
+                          ))
+                        : <span className="ws-muted">Port yayımlanmadı</span>}
+                    </td>
+                    <td>{project.networks?.length ?? 0}</td>
+                    <td>{project.volumes?.length ?? 0}</td>
+                    <td>{project.revision}</td>
+                    <td><LinkButton to={`/docker/${encodeURIComponent(project.id)}`}>Yönet</LinkButton></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      ) : projects.status === 'ready' && (
+        <EmptyState
+          icon="box"
+          title="Managed Compose projesi yok"
+          detail="Aşağıdaki Docker Hub kataloğundan tek tıkla hazır bir stack başlatabilir veya kendi docker-compose.yml dosyanızı yükleyebilirsiniz."
+          action={<Button variant="primary" icon="plus" onClick={() => openWithTemplate(null)}>Compose projesi ekle</Button>}
+        />
+      )}
+    </Section>
+    <Section
+      title="Docker Hub & Hazır Stack Kataloğu"
+      description="Plesk Docker kataloğu eşdeğeri: İmaj seçin, varsayılan Inner Port (Container) ↔ Outer Port (127.0.0.1) eşlemesiyle tek tıkla Compose Stack oluşturun."
+    >
+      <div className="ws-filters">
+        <label className="ws-filter-search">
+          İmaj veya servis ara
+          <input
+            type="search"
+            value={catalogQuery}
+            onChange={(event) => setCatalogQuery(event.target.value)}
+            placeholder="redis, postgres, mariadb, nginx, n8n, minio, wordpress..."
+          />
+        </label>
+      </div>
+      <div className="ws-section-body">
+        <div className="yp-docker-catalog-grid">
+          {filteredCatalog.map((tpl) => (
+            <article key={tpl.id} className="yp-docker-catalog-card">
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '6px' }}>
+                  <strong style={{ fontSize: '14px' }}>{tpl.label}</strong>
+                  <span className="yp-port-mapping-badge">{tpl.image}</span>
+                </div>
+                {tpl.description && <p className="ws-muted" style={{ margin: '0 0 8px 0', fontSize: '12px' }}>{tpl.description}</p>}
+                <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+                  <span className="yp-port-mapping-badge">Inner: {tpl.targetPort}/tcp</span>
+                  <span className="yp-port-mapping-badge">Outer: 127.0.0.1:{tpl.publishedPort}</span>
+                </div>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: '4px' }}>
+                <Button variant="primary" icon="plus" onClick={() => openWithTemplate(tpl)}>Bu İmajla Oluştur</Button>
+              </div>
+            </article>
+          ))}
+        </div>
+      </div>
+    </Section>
+    {creating && <DockerProjectCreateDialog initialTemplate={selectedTemplate} onClose={() => { setCreating(false); setSelectedTemplate(null); }} />}
+  </>;
 }
 
 function DiagnosisPanel({ project }) {

@@ -3,6 +3,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import {
   chmod, chown, lstat, mkdir, readFile, rename, rm, writeFile,
 } from 'node:fs/promises';
+import path from 'node:path';
 import { promisify } from 'node:util';
 import {
   phpMyAdminFpmTemplatePolicy,
@@ -618,7 +619,7 @@ export function createPhpMyAdminConfigActivator({
         gid: runtimeIdentity.gid,
         mode: PRIVATE_DIRECTORY_MODE,
       }),
-      assertParentDirectory('/etc/php/8.3/fpm/pool.d'),
+      assertParentDirectory(path.posix.dirname(expected.fpm?.artifact?.path ?? '/etc/php/8.3/fpm/pool.d')),
       assertParentDirectory('/etc/nginx/sites-enabled'),
       assertParentDirectory('/etc/phpmyadmin/conf.d'),
       assertParentDirectory(phpMyAdminNginxTemplatePolicy.documentRoot),

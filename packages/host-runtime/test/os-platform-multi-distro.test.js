@@ -10,6 +10,7 @@ import {
   previewRoundcubeFpmPool,
 } from '@yunpanel/config-templates';
 import {
+  createManagedServiceManager,
   createPassengerManager,
   detectLinuxPlatform,
   isSupportedPassengerPlatform,
@@ -19,6 +20,9 @@ import {
   parseOsReleaseText,
   PassengerManagerError,
   passengerManagerInternals,
+  resolveDistroPackageName,
+  resolveDistroUnitName,
+  resolvePackageManagerCommands,
   resolvePhpFpmBinaryPath,
   resolvePhpFpmPackageName,
   resolvePhpFpmPoolDirectory,
@@ -407,3 +411,46 @@ test('PHP-FPM service units, paths, repositories, and config templates resolve c
     await rm(umaskTempDir, { recursive: true, force: true });
   }
 });
+
+test('ManagedServiceManager and package manager adapters resolve Debian/Ubuntu (apt/dpkg-query) vs RHEL/AlmaLinux (dnf/rpm) packages and systemd units', async () => {
+  assert.equal(resolveDistroPackageName('redis-server', { family: 'debian' }), 'redis-server');
+  assert.equal(resolveDistroPackageName('redis-server', { family: 'rhel' }), 'redis');
+  assert.equal(resolveDistroPackageName('cron', { family: 'rhel' }), 'cronie');
+  assert.equal(resolveDistroPackageName('docker.io', { family: 'rhel' }), 'docker-ce');
+  assert.equal(resolveDistroUnitName('cron.service', { family: 'rhel' }), 'crond.service');
+  assert.equal(resolveDistroUnitName('redis-server.service', { family: 'rhel' }), 'redis.service');
+
+  const debianCmds = resolvePackageManagerCommands({ family: 'debian' });
+  assert.equal(debianCmds.queryBinary, '/usr/bin/dpkg-query');
+  assert.equal(debianCmds.installBinary, '/usr/bin/apt-get');
+
+  const rhelCmds = resolvePackageManagerCommands({ family: 'rhel' });
+  assert.equal(rhelCmds.queryBinary, '/usr/bin/rpm');
+  assert.equal(rhelCmds.installBinary, '/usr/bin/dnf');
+
+  const almaPlatform = normalizeLinuxPlatform('ID="almalinux"\nVERSION_ID="9.4"\n');
+  const calls = [];
+  const rhelServiceManager = createManagedServiceManager({
+    platform: almaPlatform,
+    run: async (file, args) => {
+      calls.push({ file, args });
+      if (file === '/usr/bin/rpm') {
+        return { stdout: 'install ok installed\t7.2.4-1.el9\n' };
+      }
+      if (file === '/usr/bin/systemctl') {
+        return {
+          stdout: 'LoadState=loaded\nActiveState=active\nSubState=running\nUnitFileState=enabled\n',
+        };
+      }
+      return { stdout: '' };
+    },
+  });
+
+  const redisStatus = await rhelServiceManager.inspect('redis');
+  assert.equal(redisStatus.installed, true);
+  assert.equal(redisStatus.active, true);
+  assert.equal(redisStatus.packages[0].packageName, 'redis');
+  assert.equal(redisStatus.units[0].unit, 'redis.service');
+  assert.ok(calls.some((call) => call.file === '/usr/bin/rpm' && call.args.includes('redis')));
+});
+

@@ -15,15 +15,23 @@ import {
   Modal,
 } from './PanelKit.jsx';
 
-export default function DockerProjectCreateDialog({ onClose }) {
+export default function DockerProjectCreateDialog({ onClose, initialTemplate = null }) {
   const { servers, setNotice } = useWorkspace();
   const navigate = useNavigate();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  const [projectName, setProjectName] = useState('');
-  const [document, setDocument] = useState('services:\n  web:\n    image: nginx:latest\n');
-  const [selectedImage, setSelectedImage] = useState(DEFAULT_DOCKER_STACK_TEMPLATES[0].image);
-  const [targetPort, setTargetPort] = useState(DEFAULT_DOCKER_STACK_TEMPLATES[0].targetPort);
-  const [publishedPort, setPublishedPort] = useState(DEFAULT_DOCKER_STACK_TEMPLATES[0].publishedPort);
+  const startPreset = initialTemplate || DEFAULT_DOCKER_STACK_TEMPLATES[0];
+  const initialGenerated = initialTemplate
+    ? generateDockerComposeFromImage({
+        image: initialTemplate.image,
+        targetPort: initialTemplate.targetPort,
+        publishedPort: initialTemplate.publishedPort,
+      })
+    : null;
+  const [projectName, setProjectName] = useState(initialGenerated ? `${initialGenerated.serviceName}_stack` : '');
+  const [document, setDocument] = useState(initialGenerated ? initialGenerated.document : 'services:\n  web:\n    image: nginx:latest\n');
+  const [selectedImage, setSelectedImage] = useState(startPreset.image);
+  const [targetPort, setTargetPort] = useState(startPreset.targetPort);
+  const [publishedPort, setPublishedPort] = useState(startPreset.publishedPort);
   const [validation, setValidation] = useState(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);

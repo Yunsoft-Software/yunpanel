@@ -9,7 +9,6 @@ import App from './App.jsx';
 import './workspace/ui/console-theme.css';
 // Visual language overrides only: keep existing UX, routes and security boundaries.
 import './workspace/ui/ember-theme.css';
-import './workspace/design-system/theme.css';
 
 createRoot(document.getElementById('root')).render(
   <StrictMode>

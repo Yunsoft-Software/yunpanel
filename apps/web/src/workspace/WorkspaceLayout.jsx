@@ -142,7 +142,7 @@ function Shell() {
       else document.querySelector('.ws-mobile-menu')?.focus();
     };
   }, [menuOpen, narrow]);
-  return <div className="workspace-shell" data-ws-design-system="shadcn-zinc-indigo" onMouseMove={handleShellMouseMove}>
+  return <div className="workspace-shell" data-ws-design-system="shadcn-zinc-indigo">
     <a href="#workspace-main" className="ws-skip">İçeriğe geç</a>
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
@@ -157,8 +157,9 @@ function Shell() {
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         <div className="ws-toolbar-actions">
           <Button onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
-            <span className="ws-toolbar-label">{themeMode === 'light' ? '🌙 Gece Modu' : '☀️ Açık Mod'}</span>
+            <span className="ws-toolbar-label">{themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}</span>
           </Button>
+          {canManage && isOwner && <LinkButton to="/docker" icon="box" aria-label="Docker ve Stack Yönetimi" title="Docker & Stack Kataloğu"><span className="ws-toolbar-label">Docker</span></LinkButton>}
           {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç (Ürün uzantısı)" title="AI asistanı · Ürün uzantısı · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span><span className="ws-badge" style={{ fontSize: '10px', padding: '1px 4px', marginLeft: '4px', opacity: 0.85 }}>Uzantı</span></Button>}
           {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}
         </div>

@@ -31,11 +31,14 @@ export const DesignSystemConfig = Object.freeze({
 });
 
 export const DEFAULT_DOCKER_STACK_TEMPLATES = Object.freeze([
-  Object.freeze({ id: 'nginx', label: 'Nginx Web / Reverse Proxy', image: 'nginx:latest', serviceName: 'web', targetPort: 80, publishedPort: 18080 }),
-  Object.freeze({ id: 'redis', label: 'Redis 7 Cache (Alpine)', image: 'redis:7-alpine', serviceName: 'redis', targetPort: 6379, publishedPort: 16379 }),
-  Object.freeze({ id: 'postgres', label: 'PostgreSQL 16 Database', image: 'postgres:16', serviceName: 'postgres', targetPort: 5432, publishedPort: 15432 }),
-  Object.freeze({ id: 'n8n', label: 'n8n Workflow Automation', image: 'n8n:latest', serviceName: 'n8n', targetPort: 5678, publishedPort: 15678 }),
-  Object.freeze({ id: 'node', label: 'Node.js 24 Runtime', image: 'node:24-alpine', serviceName: 'app', targetPort: 3000, publishedPort: 13000 }),
+  Object.freeze({ id: 'nginx', category: 'web', label: 'Nginx Web / Reverse Proxy', image: 'nginx:latest', serviceName: 'web', targetPort: 80, publishedPort: 18080, description: 'Yüksek performanslı HTTP sunucusu ve reverse proxy' }),
+  Object.freeze({ id: 'redis', category: 'cache', label: 'Redis 7 Cache (Alpine)', image: 'redis:7-alpine', serviceName: 'redis', targetPort: 6379, publishedPort: 16379, description: 'Bellek içi anahtar-değer önbelleği ve mesaj kuyruğu' }),
+  Object.freeze({ id: 'postgres', category: 'database', label: 'PostgreSQL 16 Database', image: 'postgres:16', serviceName: 'postgres', targetPort: 5432, publishedPort: 15432, description: 'Kurumsal ilişkisel SQL veritabanı motoru' }),
+  Object.freeze({ id: 'mariadb', category: 'database', label: 'MariaDB 11 Database', image: 'mariadb:11', serviceName: 'mariadb', targetPort: 3306, publishedPort: 13306, description: 'MySQL uyumlu ilişkisel veritabanı sunucusu' }),
+  Object.freeze({ id: 'n8n', category: 'automation', label: 'n8n Workflow Automation', image: 'n8n:latest', serviceName: 'n8n', targetPort: 5678, publishedPort: 15678, description: 'Görsel iş akışı ve API otomasyon platformu' }),
+  Object.freeze({ id: 'minio', category: 'storage', label: 'MinIO S3 Object Storage', image: 'minio/minio:latest', serviceName: 'minio', targetPort: 9000, publishedPort: 19000, description: 'S3 uyumlu yüksek hızlı nesne depolama servisi' }),
+  Object.freeze({ id: 'wordpress', category: 'cms', label: 'WordPress PHP/Apache', image: 'wordpress:latest', serviceName: 'wordpress', targetPort: 80, publishedPort: 18081, description: 'Hazır konteyner tabanlı WordPress yayın yığını' }),
+  Object.freeze({ id: 'node', category: 'runtime', label: 'Node.js 24 Runtime', image: 'node:24-alpine', serviceName: 'app', targetPort: 3000, publishedPort: 13000, description: 'İzole Node.js uygulama konteyneri' }),
 ]);
 
 export function ThemeRoot({ theme = 'dark', density = 'comfortable', className = '', children }) {
@@ -51,15 +54,16 @@ export function ThemeRoot({ theme = 'dark', density = 'comfortable', className =
   );
 }
 
-export function FileRootBadge({ path, isSubdomain = false, parentDomain = null }) {
+export function FileRootBadge({ path, isSubdomain = false, shared = false, parentDomain = null }) {
+  const showShared = Boolean(isSubdomain || shared);
   const normalizedPath = path || (parentDomain ? `/var/www/vhosts/${parentDomain}/httpdocs` : '/var/www/vhosts/default/httpdocs');
   return (
     <span
       className="yp-file-root-pill"
-      title={isSubdomain && parentDomain ? `${parentDomain} ortak dizini içinde alt alan adı dosya kökü` : 'Site dosya kökü'}
+      title={showShared && parentDomain ? `${parentDomain} ortak dizini içinde alt alan adı dosya kökü` : 'Site dosya kökü'}
     >
       <code>{normalizedPath}</code>
-      {isSubdomain && <small className="yp-file-root-tag">ortak kök</small>}
+      {showShared && <small className="yp-file-root-tag">ortak kök</small>}
     </span>
   );
 }

@@ -240,6 +240,66 @@ export function isSupportedPhpRepositoryLine(line) {
   return SUPPORTED_PHP_REPO_PATTERN.test(line);
 }
 
+const RHEL_PACKAGE_OVERRIDES = Object.freeze({
+  'docker.io': 'docker-ce',
+  'docker-compose-v2': 'docker-compose-plugin',
+  cron: 'cronie',
+  'redis-server': 'redis',
+  'apache2-utils': 'httpd-tools',
+  sqlite3: 'sqlite',
+  'dovecot-imapd': 'dovecot',
+  'dovecot-lmtpd': 'dovecot-pigeonhole',
+  'dovecot-sieve': 'dovecot-pigeonhole',
+  'dovecot-sqlite': 'dovecot',
+  'php-mysql': 'php-mysqlnd',
+});
+
+const RHEL_UNIT_OVERRIDES = Object.freeze({
+  'cron.service': 'crond.service',
+  'redis-server.service': 'redis.service',
+});
+
+export function resolveDistroPackageName(packageName, { family = 'debian' } = {}) {
+  const pkg = String(packageName ?? '').trim();
+  if (family === 'rhel') {
+    return RHEL_PACKAGE_OVERRIDES[pkg] ?? pkg;
+  }
+  return pkg;
+}
+
+export function resolveDistroUnitName(unitName, { family = 'debian' } = {}) {
+  const unit = String(unitName ?? '').trim();
+  if (family === 'rhel') {
+    return RHEL_UNIT_OVERRIDES[unit] ?? unit;
+  }
+  return unit;
+}
+
+export function resolvePackageManagerCommands({ family = 'debian' } = {}) {
+  if (family === 'rhel') {
+    return Object.freeze({
+      family: 'rhel',
+      queryBinary: '/usr/bin/rpm',
+      installBinary: '/usr/bin/dnf',
+      groupAddBinary: '/usr/sbin/usermod',
+      buildQueryArgs: (packageName) => ['-q', '--qf', 'install ok installed\\t%{VERSION}-%{RELEASE}\\n', packageName],
+      buildUpdateArgs: () => ['makecache', '--timer'],
+      buildInstallArgs: (packages) => ['install', '-y', ...packages],
+      buildGroupAddArgs: (user, group) => ['-aG', group, user],
+    });
+  }
+  return Object.freeze({
+    family: 'debian',
+    queryBinary: '/usr/bin/dpkg-query',
+    installBinary: '/usr/bin/apt-get',
+    groupAddBinary: '/usr/sbin/adduser',
+    buildQueryArgs: (packageName) => ['-W', '-f=${Status}\t${Version}', packageName],
+    buildUpdateArgs: () => ['update'],
+    buildInstallArgs: (packages) => ['install', '--yes', '--no-install-recommends', ...packages],
+    buildGroupAddArgs: (user, group) => [user, group],
+  });
+}
+
 export const osPlatformInternals = Object.freeze({
   DEFAULT_OS_RELEASE_PATH,
   DEFAULT_PHP_VERSION,
@@ -247,6 +307,8 @@ export const osPlatformInternals = Object.freeze({
   DEBIAN_RELEASES,
   RHEL_RELEASES,
   RHEL_IDS: Object.freeze([...RHEL_IDS]),
+  RHEL_PACKAGE_OVERRIDES,
+  RHEL_UNIT_OVERRIDES,
   extractMajorVersion,
   matchesMajorVersion,
 });

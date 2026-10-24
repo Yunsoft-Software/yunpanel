@@ -1,6 +1,12 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { databaseManager } from './database-manager.js';
+import {
+  normalizeLinuxPlatform,
+  resolveDistroPackageName,
+  resolveDistroUnitName,
+  resolvePackageManagerCommands,
+} from './os-platform.js';
 import { parseSystemdProperties } from './systemd-inspector.js';
 
 const execFileAsync = promisify(execFile);
@@ -189,15 +195,34 @@ export function createManagedServiceManager({
   }),
   databaseSecurityInspector = null,
   configurePhpMyAdmin = null,
+  platform = null,
 } = {}) {
   if (databaseSecurityInspector !== null && typeof databaseSecurityInspector !== 'function') {
     throw new ManagedServiceError('managed_service_dependencies_invalid', 'Database security inspector is invalid');
   }
+  const normalizedPlatform = platform
+    ? (typeof platform.family === 'string' ? platform : normalizeLinuxPlatform(platform))
+    : { family: 'debian' };
+  const pkgCommands = resolvePackageManagerCommands({ family: normalizedPlatform.family });
   let activeMutation = null;
+
+  function resolveServiceDefinition(serviceId) {
+    const base = requireService(serviceId);
+    if (normalizedPlatform.family !== 'rhel') {
+      return base;
+    }
+    const packages = [...new Set(base.packages.map((pkg) => resolveDistroPackageName(pkg, normalizedPlatform)))];
+    const units = [...new Set(base.units.map((unit) => resolveDistroUnitName(unit, normalizedPlatform)))];
+    return Object.freeze({
+      ...base,
+      packages: Object.freeze(packages),
+      units: Object.freeze(units),
+    });
+  }
 
   async function inspectPackage(packageName) {
     try {
-      const { stdout } = await run(DPKG_QUERY, ['-W', '-f=${Status}\t${Version}', packageName], {
+      const { stdout } = await run(pkgCommands.queryBinary, pkgCommands.buildQueryArgs(packageName), {
         env: { ...process.env, LC_ALL: 'C' },
       });
       return parsePackageStatus(packageName, stdout);
@@ -251,7 +276,7 @@ export function createManagedServiceManager({
   }
 
   async function inspectOne(serviceId) {
-    const definition = requireService(serviceId);
+    const definition = resolveServiceDefinition(serviceId);
     const [packages, units] = await Promise.all([
       Promise.all(definition.packages.map(inspectPackage)),
       Promise.all(definition.units.map(inspectUnit)),
@@ -299,20 +324,20 @@ export function createManagedServiceManager({
   }
 
   async function install(serviceId) {
-    const definition = requireService(serviceId);
+    const definition = resolveServiceDefinition(serviceId);
     return withMutation(async () => {
       const before = await inspectOne(serviceId);
       if (!before.installed) {
         await assertNoConflict(definition);
         try {
-          await run(APT_GET, ['update'], {
+          await run(pkgCommands.installBinary, pkgCommands.buildUpdateArgs(), {
             env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
           });
         } catch {
           throw new ManagedServiceError('managed_service_apt_update_failed', 'APT package indexes could not be refreshed');
         }
         try {
-          await run(APT_GET, ['install', '--yes', '--no-install-recommends', ...definition.packages], {
+          await run(pkgCommands.installBinary, pkgCommands.buildInstallArgs(definition.packages), {
             env: { ...process.env, DEBIAN_FRONTEND: 'noninteractive', LC_ALL: 'C' },
           });
         } catch {
@@ -323,7 +348,7 @@ export function createManagedServiceManager({
       if (definition.supplementaryGroups.length > 0) {
         try {
           for (const membership of definition.supplementaryGroups) {
-            await run(ADDUSER, [membership.user, membership.group], {
+            await run(pkgCommands.groupAddBinary, pkgCommands.buildGroupAddArgs(membership.user, membership.group), {
               env: { ...process.env, LC_ALL: 'C' },
             });
           }
@@ -379,7 +404,7 @@ export function createManagedServiceManager({
   }
 
   async function control(serviceId, action) {
-    const definition = requireService(serviceId);
+    const definition = resolveServiceDefinition(serviceId);
     const safeAction = requireAction(action);
     if (definition.units.length === 0) {
       throw new ManagedServiceError('managed_service_not_controllable', 'Managed application does not expose a systemd service control');
