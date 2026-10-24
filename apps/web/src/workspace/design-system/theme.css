@@ -1100,10 +1100,18 @@ html .workspace-shell .yp-plesk-tool-copy small {
 }
 
 /* Horizontal Database Actions Bar on /databases */
+@media (min-width: 1101px) {
+  html .workspace-shell .ws-db-table th:nth-child(1) { width: 22% !important; }
+  html .workspace-shell .ws-db-table th:nth-child(2) { width: 22% !important; }
+  html .workspace-shell .ws-db-table th:nth-child(3) { width: 9% !important; }
+  html .workspace-shell .ws-db-table th:nth-child(4) { width: 40% !important; }
+  html .workspace-shell .ws-db-table th:nth-child(5) { width: 7% !important; }
+}
+
 html .workspace-shell .ws-db-access {
   display: flex !important;
   flex-direction: row !important;
-  flex-wrap: nowrap !important;
+  flex-wrap: wrap !important;
   align-items: center !important;
   gap: 6px !important;
 }
@@ -1111,14 +1119,8 @@ html .workspace-shell .ws-db-access {
 html .workspace-shell .ws-db-access .ws-button {
   min-height: 30px !important;
   height: 30px !important;
-  padding: 0 10px !important;
+  padding: 0 9px !important;
   font-size: 12px !important;
   white-space: nowrap !important;
-}
-
-@media (max-width: 1100px) {
-  html .workspace-shell .ws-db-access {
-    flex-wrap: wrap !important;
-  }
 }
 
