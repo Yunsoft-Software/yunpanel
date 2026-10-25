@@ -162,6 +162,8 @@ export function inspectDatabases(serverId) {
   return panelRequest(`${databaseServerPath(serverId)}/inspect`, { method: 'POST', body: {} });
 }
 
+export const hardenDatabaseSecurityBaseline = (serverId) => panelRequest(`/servers/${encodeURIComponent(serverId)}/databases/security-baseline/harden`, { method: 'POST', body: {} });
+
 export function createDatabase(serverId, name) {
   if (typeof name !== 'string' || !name) throw new Error('database name is required');
   return panelRequest(databaseServerPath(serverId), {

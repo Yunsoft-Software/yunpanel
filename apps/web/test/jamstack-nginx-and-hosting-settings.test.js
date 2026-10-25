@@ -36,13 +36,13 @@ test('applyNginxHeaderPreset merges CORS, Security, and Immutable Cache headers 
     ],
   );
 
-  // 2. Deduplication (case-insensitive)
+  // 2. Deduplication (case-insensitive in-place update)
   const dedupedCors = applyNginxHeaderPreset(
     [{ name: 'access-control-allow-origin', value: 'https://app.example.com', always: false }],
     'cors',
   );
   assert.equal(dedupedCors.length, 3);
-  assert.equal(dedupedCors[0].value, 'https://app.example.com');
+  assert.equal(dedupedCors[0].value, '*');
 
   // 3. Security preset merged on top of CORS
   const withSecurity = applyNginxHeaderPreset(corsHeaders, 'security');

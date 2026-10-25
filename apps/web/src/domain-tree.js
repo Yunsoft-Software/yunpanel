@@ -3,7 +3,7 @@ const compare = (left, right) => left.domain.primaryDomain.localeCompare(right.d
 
 // Return a flat view model for accessible disclosure buttons, not a recursive
 // component tree. Invalid/orphaned records stay visible for diagnosis.
-export function domainTreeRows(domains, { query = '', collapsed = new Set() } = {}) {
+export function domainTreeRows(domains, { query = '', collapsed = new Set(), flattenSubdomains = false } = {}) {
   const nodes = domains.map((domain) => ({ domain, children: [], warning: null }));
   const byId = new Map(nodes.map((node) => [node.domain.id, node]));
   const roots = [];
@@ -19,6 +19,28 @@ export function domainTreeRows(domains, { query = '', collapsed = new Set() } = 
   roots.sort(compare);
   for (const node of nodes) node.children.sort(compare);
 
+  const parentLookup = new Map(nodes.map((node) => [node.domain.id, byId.get(node.domain.parentDomainId)]));
+  if (flattenSubdomains) {
+    for (const root of roots) {
+      const allDescendants = [];
+      const seen = new Set([root.domain.id]);
+      const queue = [...root.children];
+      while (queue.length) {
+        const current = queue.shift();
+        if (!current || seen.has(current.domain.id)) continue;
+        seen.add(current.domain.id);
+        allDescendants.push(current);
+        queue.push(...current.children);
+      }
+      allDescendants.sort(compare);
+      for (const descendant of allDescendants) {
+        descendant.children = [];
+        parentLookup.set(descendant.domain.id, root);
+      }
+      root.children = allDescendants;
+    }
+  }
+
   const search = query.trim().toLowerCase();
   const included = new Set();
   if (search) {
@@ -29,7 +51,7 @@ export function domainTreeRows(domains, { query = '', collapsed = new Set() } = 
       while (cursor && !ancestors.has(cursor.domain.id)) {
         ancestors.add(cursor.domain.id);
         included.add(cursor.domain.id);
-        cursor = byId.get(cursor.domain.parentDomainId);
+        cursor = parentLookup.get(cursor.domain.id);
       }
     }
   }

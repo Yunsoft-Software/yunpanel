@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import { Link, Outlet, useLocation } from 'react-router';
 import { WorkspaceProvider, useWorkspace } from './WorkspaceContext.jsx';
 import { UnsavedChangesProvider } from './UnsavedChanges.jsx';
@@ -66,7 +66,7 @@ function Shell() {
   const sites = websiteCount(websites);
   const jobCount = canManage ? knownCount(jobs, (job) => ['queued', 'running'].includes(job.status)) : null;
   const activeJobCount = jobCount ?? 0;
-  const alertCount = computeWorkspaceAlerts({ domains, websites, certificates, servers, jobs }).length;
+  const alertCount = computeWorkspaceAlerts({ domains, websites, certificates, servers }).length;
   const groups = navigationGroups(canManage, isOwner, isReseller, isCustomer);
   useEffect(() => {
     const media = window.matchMedia('(max-width: 900px)');
@@ -166,7 +166,7 @@ function Shell() {
     {narrow && menuOpen && <button type="button" tabIndex={-1} className="ws-nav-backdrop" aria-label="Menüyü kapat" onClick={() => setMenuOpen(false)} />}
     <aside ref={menu} id="workspace-navigation" className={`ws-sidebar ${menuOpen ? 'is-open' : ''} ${!narrow && sidebarCollapsed ? 'is-collapsed' : ''}`} inert={narrow && !menuOpen} aria-label="Ana menü" role={narrow && menuOpen ? 'dialog' : undefined} aria-modal={narrow && menuOpen ? true : undefined}>
       <div className="ws-brand"><span className="ws-brand-mark" aria-hidden="true">Y</span><div><strong>YunPanel</strong><small>{isOwner ? 'SUNUCU YÖNETİMİ' : isReseller ? 'BAYİ PANELİ' : isCustomer ? 'MÜŞTERİ PANELİ' : 'SİTE YÖNETİMİ'}</small></div><Button className="ws-nav-close" icon="close" aria-label="Menüyü kapat" title="Yan menüyü daralt / kapat" onClick={closeSidebar} /></div>
-      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Link key={to} to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>)}</div></div>)}</nav>
+      <nav aria-label="Panel bölümleri">{groups.map((group) => <div className="ws-nav-group" key={group.id}><p className="ws-nav-label" id={`ws-nav-${group.id}`}>{group.label}</p><div className="ws-nav" role="group" aria-labelledby={`ws-nav-${group.id}`}>{group.items.map(([to, label, icon]) => <Fragment key={to}><Link to={to} className={navigationItemActive(to, location.pathname) ? 'active' : undefined} aria-current={navigationItemActive(to, location.pathname) ? (to === location.pathname ? 'page' : 'location') : undefined}><Icon name={icon} /><span>{label}</span>{to === '/jobs' && jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</Link>{to === '/websites' && canManage && isOwner && <Link key="/docker" to="/docker" className={navigationItemActive('/docker', location.pathname) ? 'active' : undefined} aria-current={navigationItemActive('/docker', location.pathname) ? (location.pathname === '/docker' ? 'page' : 'location') : undefined}><Icon name="box" /><span>Uygulama Marketi (1-Click)</span></Link>}</Fragment>)}</div></div>)}</nav>
       <details className="ws-appearance"><summary>Görünüm tercihleri</summary><Preferences /></details>
       <div className="ws-sidebar-footer"><strong>{isOwner ? (canManage ? 'Sunucu yönetimi' : 'Salt okunur görünüm') : isReseller ? 'Bayi yönetimi' : isCustomer ? 'Müşteri paneli' : 'Site yönetimi'}</strong><span>{isOwner ? (canManage ? 'Yerel sunucu çalışma alanı' : 'Yalnız izin verilen kaynaklar') : isReseller ? 'Müşterileriniz ve izinli site araçları' : isCustomer ? 'Web siteleriniz ve barındırma araçları' : 'Yetkili olduğunuz web siteleri'}</span></div>
     </aside>
@@ -178,7 +178,7 @@ function Shell() {
           <Button onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
             <span className="ws-toolbar-label">{themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}</span>
           </Button>
-          {canManage && isOwner && <LinkButton to="/docker" icon="box" aria-label="Docker ve Stack Yönetimi" title="Docker & Stack Kataloğu"><span className="ws-toolbar-label">Docker</span></LinkButton>}
+          {canManage && isOwner && <LinkButton to="/docker" icon="box" aria-label="Docker ve Stack Yönetimi" title="Docker & Stack Kataloğu"><span className="ws-toolbar-label">1-Click Market</span></LinkButton>}
           {canManage && isOwner && <Button icon="terminal" aria-label="AI asistanı aç" title="AI Asistan · Ctrl / ⌘ Shift A" onClick={() => setAiOpen(true)}><span className="ws-toolbar-label">AI Asistan</span></Button>}
           <Button icon="bell" aria-label="Bildirim ve Görev Merkezi" title="Bildirim ve Görev Merkezi" onClick={() => setNotificationsOpen(true)}><span className="ws-toolbar-label">Bildirimler</span>{(activeJobCount + alertCount) > 0 && <span className="ws-nav-count">{activeJobCount + alertCount}</span>}</Button>
           {canManage && <LinkButton to="/jobs" icon="jobs" aria-label={`İşlemler${jobCount > 0 ? `, ${jobCount} aktif` : ''}`} title="İşlemler"><span className="ws-toolbar-label">İşlemler</span>{jobCount > 0 && <span className="ws-nav-count">{jobCount}</span>}</LinkButton>}

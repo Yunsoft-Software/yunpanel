@@ -185,3 +185,76 @@ test('database mutations are serialized within the host manager', async () => {
   release();
   await first;
 });
+
+test('security baseline normalizes MariaDB mysql_native_password+unix_socket dual-plugin auth to unix_socket', () => {
+  const baseline = databaseManagerInternals.parseSecurityBaseline(
+    `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('mysql_native_password+unix_socket')}\t0\t0\t0\n`,
+    { engine: 'mariadb', version: '10.11.13-MariaDB' },
+  );
+  assert.equal(baseline.ready, true);
+  assert.equal(baseline.reason, null);
+  assert.equal(baseline.connection.nativeSocketAuth, true);
+  assert.equal(baseline.connection.authPlugin, 'unix_socket');
+});
+
+test('hardenSecurityBaseline executes MariaDB and MySQL hardening SQL and returns verified ready baseline', async () => {
+  let hardenedMariaDb = false;
+  const mariaCalls = [];
+  const mariaManager = createDatabaseManager({
+    run: async (file, args) => {
+      const sql = args.find((arg) => arg.startsWith('--execute='))?.slice('--execute='.length) ?? '';
+      mariaCalls.push({ file, sql });
+      if (sql === databaseManagerInternals.connectionQuery) {
+        return { stdout: '10.11.13-MariaDB-0ubuntu0.24.04.1\tUbuntu 24.04\n' };
+      }
+      if (sql === databaseManagerInternals.hardenMariaDbSql) {
+        hardenedMariaDb = true;
+        return { stdout: '' };
+      }
+      if (sql === databaseManagerInternals.securityQuery) {
+        return hardenedMariaDb
+          ? { stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('unix_socket')}\t0\t0\t0\n` }
+          : { stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('mysql_native_password')}\t1\t1\t1\n` };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  });
+
+  const beforeMaria = await mariaManager.inspectSecurityBaseline();
+  assert.equal(beforeMaria.ready, false);
+  assert.equal(beforeMaria.reason, 'database_native_socket_admin_auth_required');
+
+  const afterMaria = await mariaManager.hardenSecurityBaseline();
+  assert.equal(hardenedMariaDb, true);
+  assert.equal(afterMaria.ready, true);
+  assert.equal(afterMaria.reason, null);
+  assert.equal(afterMaria.connection.authPlugin, 'unix_socket');
+  assert.ok(mariaCalls.some((call) => call.sql === databaseManagerInternals.hardenMariaDbSql));
+
+  // Verify MySQL engine uses auth_socket hardening SQL
+  let hardenedMysql = false;
+  const mysqlManager = createDatabaseManager({
+    run: async (file, args) => {
+      const sql = args.find((arg) => arg.startsWith('--execute='))?.slice('--execute='.length) ?? '';
+      if (sql === databaseManagerInternals.connectionQuery) {
+        if (file === '/usr/bin/mariadb') throw new Error('missing mariadb');
+        return { stdout: '8.0.43\tMySQL Community Server - GPL\n' };
+      }
+      if (sql === databaseManagerInternals.hardenMysqlSql) {
+        hardenedMysql = true;
+        return { stdout: '' };
+      }
+      if (sql === databaseManagerInternals.securityQuery) {
+        return { stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('auth_socket')}\t0\t0\t0\n` };
+      }
+      throw new Error(`unexpected query: ${sql}`);
+    },
+  });
+
+  const afterMysql = await mysqlManager.hardenSecurityBaseline();
+  assert.equal(hardenedMysql, true);
+  assert.equal(afterMysql.engine, 'mysql');
+  assert.equal(afterMysql.ready, true);
+  assert.equal(afterMysql.connection.authPlugin, 'auth_socket');
+});
+

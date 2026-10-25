@@ -67,7 +67,7 @@ export function resolveWebsiteSuspensionAccess({domainId,domains,websites,canMan
  if(!canManage||[domains?.status,websites?.status].some((s)=>['unauthorized','forbidden'].includes(s)))return{state:'forbidden'};
  if(domains?.status!=='ready'||websites?.status!=='ready'||!Array.isArray(domains.items)||!Array.isArray(websites.items))return{state:'unavailable'};
  const matches=domains.items.filter((v)=>v?.id===domainId);if(matches.length!==1)return{state:'not_found'};
- const domain=matches[0];if(!domain.websiteId)return{state:'unbound'};
+ const domain=matches[0];if(!domain.websiteId)return{state:'unbound',domain};
  const sites=websites.items.filter((v)=>v?.id===domain.websiteId);if(sites.length!==1)return{state:'not_found'};
  const website=sites[0];if(website.serverId!==domain.serverId)return{state:'inconsistent'};
  try{return{state:'ready',scope:websiteSuspensionScope({websiteId:website.id,serverId:website.serverId,label:domain.primaryDomain})};}
@@ -81,8 +81,16 @@ export function suspensionAction(state){
  if(state?.preview?.readyToSuspend&&state.preview.confirmation)return{kind:'start',operation:null};
  return null;
 }
+export function domainSuspensionAction(operations=[]){
+ const latest=Array.isArray(operations)?(operations[0]??null):null;
+ if(!latest)return null;
+ if(latest.status==='suspended'&&latest.actions?.resumeConfirmation)return{kind:'resume',operation:latest};
+ if(['resuming','resume_partial','resume_failed'].includes(latest.status)&&latest.actions?.resumeRetryConfirmation)return{kind:'retry-resume',operation:latest};
+ return null;
+}
 export function websiteSuspensionErrorMessage(error){
  return ({website_suspension_blocked:'Site şu anda askıya alınmaya hazır değil.',website_suspension_confirmation_mismatch:'Site durumu değişti. Yeniden inceleyin.',
   website_suspension_retry_invalid:'Askıya alma işlemi artık tekrar edilemez.',website_resume_invalid:'Site askıda değil veya işlem durumu değişti.',
-  website_resume_retry_invalid:'Yeniden açma işlemi artık tekrar edilemez.',site_scope_forbidden:'Bu siteyi yönetme izniniz yok.'})[error?.code]??'Site erişim işlemi tamamlanmadı.';
+  website_resume_retry_invalid:'Yeniden açma işlemi artık tekrar edilemez.',domain_resume_invalid:'Alan adı askıda değil veya işlem durumu değişti.',
+  domain_resume_retry_invalid:'Alan adı yeniden açma işlemi artık tekrar edilemez.',site_scope_forbidden:'Bu siteyi yönetme izniniz yok.'})[error?.code]??'Site erişim işlemi tamamlanmadı.';
 }

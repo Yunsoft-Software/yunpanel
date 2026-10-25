@@ -452,6 +452,7 @@ export function mountDatabaseRoutes(app, {
   databaseCredentialRegistry = null,
   databaseInventoryProvider = null,
   databaseHealthProvider = null,
+  databaseSecurityHardener = null,
 }) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function' || typeof app.delete !== 'function') {
     throw new Error('Express application is required');
@@ -471,6 +472,9 @@ export function mountDatabaseRoutes(app, {
   }
   if (databaseHealthProvider !== null && typeof databaseHealthProvider !== 'function') {
     throw new Error('Database health provider is invalid');
+  }
+  if (databaseSecurityHardener !== null && typeof databaseSecurityHardener !== 'function') {
+    throw new Error('Database security hardener is invalid');
   }
 
   app.get('/api/servers/:serverId/databases', requirePanelRouteAccess, asyncRoute(async (request, response) => {
@@ -510,6 +514,28 @@ export function mountDatabaseRoutes(app, {
       resourceId: server.id,
     });
     return response.status(202).json({ data: job });
+  }));
+
+  app.post('/api/servers/:serverId/databases/security-baseline/harden', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const server = await requireServer(registry, request.params.serverId);
+    const hardener = databaseSecurityHardener
+      ?? (typeof registry?.databaseSecurityHardener === 'function' ? registry.databaseSecurityHardener : null);
+    if (!hardener) {
+      throw new DatabaseHttpError('database_security_harden_unavailable', 'Database security hardening is unavailable', 503);
+    }
+    let raw;
+    try {
+      raw = await hardener(server.id);
+    } catch (error) {
+      if (error instanceof DatabaseHttpError) throw error;
+      throw new DatabaseHttpError(
+        typeof error?.code === 'string' ? error.code : 'database_security_harden_failed',
+        error?.message || 'Database security baseline could not be hardened',
+        503,
+      );
+    }
+    const health = sanitizeDatabaseHealth(raw, { engine: raw?.engine, version: raw?.version });
+    return response.json({ data: { health } });
   }));
 
   app.post('/api/servers/:serverId/databases', requirePanelRouteAccess, asyncRoute(async (request, response) => {

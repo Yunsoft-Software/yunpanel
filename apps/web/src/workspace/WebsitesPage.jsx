@@ -6,7 +6,7 @@ import { domainTreeRows } from '../domain-tree.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, EmptyState, ErrorNotice, LinkButton, PageHeading, Section } from './PanelKit.jsx';
-import { siteListPage } from './site-list-model.js';
+import { filterWebsiteListDomains, siteListPage } from './site-list-model.js';
 import { createWebsiteTaskResolver, siteListFilterParams, clearSiteListFilters } from './website-task-model.js';
 import WebsiteTaskCard from './WebsiteTaskCard.jsx';
 import WebsiteRemovalRecoveryPanel from './WebsiteRemovalRecoveryPanel.jsx';
@@ -39,11 +39,14 @@ export default function WebsitesPage() {
   const status = ['active', 'draft', 'staged', 'error'].includes(statusParam) ? statusParam : 'all';
   const sort = params.get('sort') === 'desc' ? 'desc' : 'asc';
   const filtering = Boolean(query.trim()) || Boolean(customerId) || type !== 'all' || status !== 'all';
-  const visibleDomains = useMemo(() => customerId ? domains.items.filter(domain => customer?.websiteIds?.includes(domain.websiteId)) : domains.items, [customerId, customer, domains.items]);
-  const tree = useMemo(() => domainTreeRows(visibleDomains, { query, collapsed: filtering ? new Set() : collapsed }), [visibleDomains, query, filtering, collapsed]);
+  const visibleDomains = useMemo(() => {
+    const filtered = filterWebsiteListDomains(domains.items);
+    return customerId ? filtered.filter(domain => customer?.websiteIds?.includes(domain.websiteId)) : filtered;
+  }, [customerId, customer, domains.items]);
+  const tree = useMemo(() => domainTreeRows(visibleDomains, { query, collapsed: filtering ? new Set() : collapsed, flattenSubdomains: true }), [visibleDomains, query, filtering, collapsed]);
   const result = siteListPage(tree, { type, status, sort, perPage: preferences.perPage, page: Number(params.get('page') ?? 1) });
   const subdomainsCount = useMemo(() => {
-    const fromTree = tree.reduce((sum, row) => sum + ((row.depth ?? 0) > 0 ? 1 : (collapsed.has(row.domain?.id) ? (row.subdomainCount ?? row.childrenCount ?? 0) : 0)), 0);
+    const fromTree = tree.reduce((sum, row) => sum + ((row.depth ?? 0) > 0 ? 1 : (collapsed.has(row.domain?.id) ? (row.childCount ?? row.subdomainCount ?? row.childrenCount ?? 0) : 0)), 0);
     return fromTree > 0 ? fromTree : Math.max(0, visibleDomains.length - result.totalGroups);
   }, [tree, collapsed, visibleDomains.length, result.totalGroups]);
   const readable = ['ready', 'stale'].includes(domains.status);
@@ -61,7 +64,7 @@ export default function WebsitesPage() {
   return <>
     {customerId && <p className="ws-notice" role="status">{customer ? `${customer.username} hesabının web siteleri` : customerError ? 'Müşteri siteleri doğrulanamadı.' : 'Müşterinin web siteleri yükleniyor…'} <Link to="/websites">Tüm siteler</Link></p>}
     <ErrorNotice error={customerError} />
-    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
+    <PageHeading title={isReseller ? 'Sitelerim' : 'Web Siteleri'} description={isReseller ? 'Müşterilerinize ait web sitelerini ve yayın araçlarını yönetin.' : isCustomer ? 'Web sitenizin dosya, e-posta ve veritabanı araçlarını buradan yönetin.' : 'Barındırılan web siteleri, alt alan adları ve yayın araçları.'} actions={<><Button icon="refresh" onClick={refreshAll}>Yenile</Button>{isOwner && canManage && <LinkButton to="/docker" icon="box">Uygulama Marketi (1-Click)</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new" icon="plus" variant="primary">Web sitesi ekle</LinkButton>}{isOwner && canManage && <LinkButton to="/websites/new?mode=subdomain" icon="plus">Alt alan adı ekle</LinkButton>}{isReseller && <LinkButton to="/customers" icon="user" variant="primary">Müşterilerim</LinkButton>}</>} />
     {isOwner && canManage && <WebsiteRemovalRecoveryPanel onChanged={refreshAll} />}
     {isCustomer && (
       <Section title="Barındırma Kaynakları ve Kotalar" description="Hesabınıza tahsis edilen kaynak kullanım durumu">

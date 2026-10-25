@@ -53,12 +53,15 @@ test('local-runtime sets DEFAULT_SNAPSHOT_INTERVAL_MS to 5_000 for 5-second live
   assert.match(runtimeSource, /const DEFAULT_SNAPSHOT_INTERVAL_MS = 5_000;/);
 });
 
-test('WorkspaceLayout removes confusing /websites sidebar badge and mounts NotificationCenterDrawer', () => {
+test('WorkspaceLayout removes confusing /websites sidebar badge, renders Uygulama Marketi (1-Click), and mounts NotificationCenterDrawer with route-stable alert count', () => {
   const layoutSource = fs.readFileSync(path.resolve(workspaceDir, 'WorkspaceLayout.jsx'), 'utf8');
   assert.equal(layoutSource.includes("to === '/websites' && sites !== null"), false);
   assert.match(layoutSource, /NotificationCenterDrawer/);
   assert.match(layoutSource, /aria-label="Bildirim ve Görev Merkezi"/);
   assert.match(layoutSource, /<span className="ws-toolbar-label">İşlemler<\/span>/);
+  assert.match(layoutSource, /Uygulama Marketi \(1-Click\)/);
+  assert.match(layoutSource, /1-Click Market/);
+  assert.match(layoutSource, /const alertCount = computeWorkspaceAlerts\(\{ domains, websites, certificates, servers \}\)\.length;/);
 });
 
 test('DashboardPage and WebsitesPage expose live telemetry interval selector and root/subdomain breakdown', () => {
@@ -199,6 +202,10 @@ test('NotificationCenterDrawer renders and switches between Görev Kuyruğu, Sis
   assert.match(alertsHtml, /Yüksek CPU kullanımı/);
   assert.match(alertsHtml, /Yüksek Disk doluluğu/);
   assert.match(alertsHtml, /Askıya alınmış alan adı/);
+  assert.match(alertsHtml, /Uyarıları Temizle/);
+  assert.match(alertsHtml, /Kapat/);
+  assert.match(alertsHtml, /▶ Yayını Etkinleştir/);
+  assert.match(alertsHtml, /quickResume=1/);
 
   const noticesTree = React.createElement(
     MemoryRouter,

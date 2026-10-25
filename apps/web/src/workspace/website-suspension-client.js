@@ -38,3 +38,62 @@ export function createWebsiteSuspensionClient({scope:input,request,isCurrent=()=
  return Object.freeze({getSnapshot:()=>state,load,mutate,subscribe(fn){listeners.add(fn);return()=>listeners.delete(fn);},
   dispose(){active=false;++sequence;controller?.abort();listeners.clear();}});
 }
+
+export async function resumeDomainOrWebsite({ domain, websiteId = domain?.websiteId ?? null, request } = {}) {
+ if (typeof request !== 'function') {
+  throw Object.assign(new Error('Request function is required'), { code: 'website_suspension_response_invalid' });
+ }
+ if (websiteId) {
+  const value = await request(`/websites/${encodeURIComponent(websiteId)}/suspension`);
+  const data = value?.data ?? value;
+  const operations = Array.isArray(data?.operations) ? data.operations : [];
+  const op = operations.find(
+   (item) => item && (item.status === 'suspended' || ['resuming', 'resume_partial', 'resume_failed'].includes(item.status)),
+  );
+  if (!op) {
+   throw Object.assign(new Error('Site askıda değil veya işlem durumu değişti.'), { code: 'website_resume_invalid' });
+  }
+  const isFirstResume = op.status === 'suspended';
+  const endpoint = isFirstResume ? 'resume' : 'resume-retry';
+  const confirmation = isFirstResume ? op.actions?.resumeConfirmation : op.actions?.resumeRetryConfirmation;
+  if (!confirmation) {
+   throw Object.assign(new Error('Yeniden açma onayı üretilemedi.'), { code: 'website_resume_invalid' });
+  }
+  return request(`/websites/${encodeURIComponent(websiteId)}/suspension/${endpoint}`, {
+   method: 'POST',
+   body: {
+    operationId: op.id,
+    expectedUpdatedAt: op.updatedAt,
+    confirmation,
+   },
+  });
+ }
+ if (domain?.id) {
+  const value = await request(`/domains/${encodeURIComponent(domain.id)}/suspension-operations`);
+  const unwrapped = value?.data ?? value;
+  const operations = Array.isArray(unwrapped) ? unwrapped : (Array.isArray(unwrapped?.operations) ? unwrapped.operations : []);
+  const op = operations.find(
+   (item) => item && (item.status === 'suspended' || ['resuming', 'resume_partial', 'resume_failed'].includes(item.status)),
+  );
+  if (!op) {
+   throw Object.assign(new Error('Alan adı askıda değil veya işlem durumu değişti.'), { code: 'domain_resume_invalid' });
+  }
+  const isFirstResume = op.status === 'suspended';
+  const endpoint = isFirstResume ? 'resume' : 'resume-retry';
+  const confirmation = isFirstResume ? op.actions?.resumeConfirmation : op.actions?.resumeRetryConfirmation;
+  if (!confirmation) {
+   throw Object.assign(new Error('Alan adı yeniden açma onayı üretilemedi.'), { code: 'domain_resume_invalid' });
+  }
+  return request(`/domains/${encodeURIComponent(domain.id)}/suspension-operations/${encodeURIComponent(op.id)}/${endpoint}`, {
+   method: 'POST',
+   body: {
+    expectedUpdatedAt: op.updatedAt,
+    checksum: op.checksum,
+    confirmation,
+   },
+  });
+ }
+ throw Object.assign(new Error('Geçerli bir site veya alan adı seçilmedi.'), { code: 'website_suspension_response_invalid' });
+}
+
+export { resumeDomainOrWebsite as resumeWebsiteOrDomain };

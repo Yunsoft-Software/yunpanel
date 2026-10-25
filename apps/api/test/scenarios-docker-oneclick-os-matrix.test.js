@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import http from 'node:http';
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,7 +9,9 @@ import express from 'express';
 import {
   DockerComposeValidationError,
   OsPlatformError,
+  createDatabaseManager,
   createDockerComposeObserver,
+  databaseManagerInternals,
   detectLinuxPlatform,
   dockerComposeValidatorInternals,
   isSupportedPassengerPlatform,
@@ -26,12 +28,14 @@ import {
   resolvePhpFpmSocketDirectory,
   summarizeDockerComposeConfig,
 } from '@yunpanel/host-runtime';
+import { DatabaseHttpError, mountDatabaseRoutes } from '../src/database-http.js';
 import { createDockerComposeProjectRegistry } from '../src/docker-compose-project-registry.js';
 import { createDockerComposeEnvironmentRegistry } from '../src/docker-compose-environment-registry.js';
 import { createDockerRegistryCredentialRegistry } from '../src/docker-registry-credential-registry.js';
 import { createDockerComposeOperationsService } from '../src/docker-compose-operations.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { mountDockerComposeRoutes } from '../src/docker-compose-http.js';
+import { RegistryError } from '../src/server-registry.js';
 import {
    EASYPANEL_ONE_CLICK_APPS,
   PLESK_DOCKER_CATALOG,
@@ -1472,3 +1476,204 @@ test('SCN-DCK-05.unknown_distro_and_errors: graceful fallback on unknown/non-LTS
     (error) => error instanceof OsPlatformError && error.code === 'os_platform_unavailable',
   );
 });
+
+// ============================================================================
+// SCN-V3-05 & SCN-V3-06: Easypanel 1-Click Wizard Modal & 1-Click DB Security Hardening
+// ============================================================================
+
+test('SCN-V3-05: Easypanel 1-Click Wizard modal flow (domain/subdomain target, SSL & reverse proxy preview, collapsible advanced YAML)', async (t) => {
+  const { baseUrl } = await createRealScenarioDockerServer(t);
+
+  // 1. Prepare 1-Click template as the Wizard does when opened or when "Secret'ları Yeniden Üret" is clicked
+  const prepRes = await fetch(`${baseUrl}/api/docker/one-click-apps/prepare`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      templateId: 'n8n',
+      projectName: 'n8n_stack',
+      hostname: 'n8n.webrich.news',
+      innerPort: 5678,
+      outerPort: 15678,
+    }),
+  });
+  assert.equal(prepRes.status, 200);
+  const prepared = (await prepRes.json()).data;
+  assert.equal(prepared.generatedSecretsCount, 1);
+  assert.equal(prepared.proxyPreview.upstreamUrl, 'http://127.0.0.1:15678');
+  assert.equal(prepared.proxyPreview.publicUrl, 'https://n8n.webrich.news');
+
+  // 2. Create project via Wizard submit ("⚡ Uygulamayı Kur ve Yayınla")
+  const createRes = await fetch(`${baseUrl}/api/docker/projects`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({
+      serverId: LOCAL_SERVER_ID,
+      projectName: prepared.projectName,
+      document: prepared.document,
+    }),
+  });
+  assert.equal(createRes.status, 201);
+  const createdProject = (await createRes.json()).data.project;
+
+  // 3. Verify Wizard UI component structure in DockerProjectCreateDialog.jsx
+  const dialogPath = new URL('../../web/src/workspace/DockerProjectCreateDialog.jsx', import.meta.url);
+  const dialogSource = await readFile(dialogPath, 'utf8');
+  assert.match(dialogSource, /Tek Tıkla Kurulum/);
+  assert.match(dialogSource, /Proje \/ Servis Adı/);
+  assert.match(dialogSource, /Yayınlanacak Alan Adı \/ Alt Alan Adı/);
+  assert.match(dialogSource, /Otomatik Let's Encrypt SSL & Nginx Reverse Proxy/);
+  assert.match(dialogSource, /Gelişmiş Port, İmaj ve Compose YAML Ayarları/);
+  assert.match(dialogSource, /⚡ Uygulamayı Kur ve Yayınla/);
+  assert.ok(createdProject.id);
+});
+
+test('SCN-V3-06: 1-Click Database Security Baseline Auto-Configuration (MariaDB unix_socket & POST /api/servers/:serverId/databases/security-baseline/harden)', async (t) => {
+  const hex = (value) => Buffer.from(value, 'utf8').toString('hex').toUpperCase();
+  let hardened = false;
+  const executedSql = [];
+
+  const dbManager = createDatabaseManager({
+    run: async (_file, args) => {
+      const sql = args.find((arg) => arg.startsWith('--execute='))?.slice('--execute='.length) ?? '';
+      executedSql.push(sql);
+      if (sql === databaseManagerInternals.connectionQuery) {
+        return { stdout: '10.11.13-MariaDB-0ubuntu0.24.04.1\tUbuntu 24.04\n' };
+      }
+      if (sql === databaseManagerInternals.inventoryQuery) {
+        return { stdout: `${hex('webrich_prod')}\t8192\n` };
+      }
+      if (sql === databaseManagerInternals.hardenMariaDbSql) {
+        hardened = true;
+        return { stdout: '' };
+      }
+      if (sql === databaseManagerInternals.securityQuery) {
+        if (!hardened) {
+          return {
+            stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('mysql_native_password')}\t1\t1\t1\n`,
+          };
+        }
+        return {
+          stdout: `${hex('root@localhost')}\t${hex('root@localhost')}\t${hex('mysql_native_password+unix_socket')}\t0\t0\t0\n`,
+        };
+      }
+      throw new Error(`Unexpected SQL: ${sql}`);
+    },
+  });
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    const mode = req.headers['x-test-auth-mode'];
+    if (mode === 'unauthenticated') {
+      req.auth = null;
+    } else if (mode === 'customer') {
+      req.auth = {
+        user: { id: 'cust-1', username: 'cust1', role: 'customer' },
+        access: { mode: 'none', permissions: [] },
+        security: { managementAllowed: false },
+      };
+    } else {
+      req.auth = {
+        user: { id: 'owner-1', username: 'admin', role: 'owner' },
+        access: { mode: 'management', permissions: ['*'] },
+        security: { managementAllowed: true },
+      };
+    }
+    next();
+  });
+
+  const registry = {
+    getServer: async (id) => (id === LOCAL_SERVER_ID ? { id: LOCAL_SERVER_ID, name: 'local-server' } : null),
+  };
+  const jobRegistry = createJobRegistry();
+
+  mountDatabaseRoutes(app, {
+    registry,
+    jobRegistry,
+    databaseInventoryProvider: () => dbManager.inspect(),
+    databaseHealthProvider: () => dbManager.inspectSecurityBaseline(),
+    databaseSecurityHardener: () => dbManager.hardenSecurityBaseline(),
+  });
+
+  app.use((error, _req, res, _next) => {
+    if (error instanceof DatabaseHttpError || error instanceof RegistryError || error?.status) {
+      return res.status(error.status || 400).json({ error: { code: error.code || 'error', message: error.message } });
+    }
+    return res.status(500).json({ error: { code: 'internal_error', message: error?.message || 'Internal error' } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise((resolve) => server.close(resolve)));
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+
+  // 1. Before hardening: GET /api/servers/:serverId/databases reports unready security baseline
+  const beforeRes = await fetch(`${baseUrl}/api/servers/${LOCAL_SERVER_ID}/databases`);
+  assert.equal(beforeRes.status, 200);
+  const beforeData = (await beforeRes.json()).data;
+  assert.equal(beforeData.health.available, true);
+  assert.equal(beforeData.health.ready, false);
+  assert.equal(beforeData.health.reason, 'database_native_socket_admin_auth_required');
+  assert.equal(beforeData.health.connection.nativeSocketAuth, false);
+
+  // 2. Unauthorized / forbidden requests to harden endpoint are rejected
+  const unauthRes = await fetch(`${baseUrl}/api/servers/${LOCAL_SERVER_ID}/databases/security-baseline/harden`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-test-auth-mode': 'unauthenticated' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(unauthRes.status, 401);
+
+  const custRes = await fetch(`${baseUrl}/api/servers/${LOCAL_SERVER_ID}/databases/security-baseline/harden`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-test-auth-mode': 'customer' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(custRes.status, 403);
+
+  // 3. Unknown server returns 404
+  const notFoundRes = await fetch(`${baseUrl}/api/servers/${FOREIGN_SERVER_ID}/databases/security-baseline/harden`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(notFoundRes.status, 404);
+
+  // 4. Owner executes 1-Click Database Security Hardening
+  const hardenRes = await fetch(`${baseUrl}/api/servers/${LOCAL_SERVER_ID}/databases/security-baseline/harden`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({}),
+  });
+  assert.equal(hardenRes.status, 200);
+  const hardenBody = await hardenRes.json();
+  assert.equal(hardenBody.data.health.available, true);
+  assert.equal(hardenBody.data.health.ready, true);
+  assert.equal(hardenBody.data.health.reason, null);
+  assert.equal(hardenBody.data.health.connection.authPlugin, 'unix_socket');
+  assert.equal(hardenBody.data.health.connection.nativeSocketAuth, true);
+  assert.deepEqual(hardenBody.data.health.hygiene, {
+    anonymousAccountsAbsent: true,
+    remoteRootAccountsAbsent: true,
+    testSchemaAbsent: true,
+  });
+  assert.ok(executedSql.includes(databaseManagerInternals.hardenMariaDbSql));
+
+  // 5. Subsequent GET /api/servers/:serverId/databases reflects ready state
+  const afterRes = await fetch(`${baseUrl}/api/servers/${LOCAL_SERVER_ID}/databases`);
+  assert.equal(afterRes.status, 200);
+  const afterData = (await afterRes.json()).data;
+  assert.equal(afterData.health.ready, true);
+  assert.equal(afterData.health.reason, null);
+
+  // 6. Verify UI button & API client wiring in DatabasesPage.jsx and api.js
+  const [dbPageSource, webApiSource] = await Promise.all([
+    readFile(new URL('../../web/src/workspace/DatabasesPage.jsx', import.meta.url), 'utf8'),
+    readFile(new URL('../../web/src/api.js', import.meta.url), 'utf8'),
+  ]);
+  assert.match(webApiSource, /hardenDatabaseSecurityBaseline/);
+  assert.match(webApiSource, /\/databases\/security-baseline\/harden/);
+  assert.match(dbPageSource, /⚡ Yerel Yönetici Bağlantısını Otomatik Yapılandır/);
+  assert.match(dbPageSource, /handleHardenSecurity/);
+});
+

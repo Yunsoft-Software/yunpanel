@@ -58,6 +58,10 @@ test('SCN-E2E-01: Authenticated session initialization & shell verification (top
   const websitesNavBadgeCount = await page.locator('.ws-sidebar a[href="/websites"] .ws-nav-count').count();
   assert.equal(websitesNavBadgeCount, 0, 'Sidebar Web Siteleri link must not display raw count badge');
 
+  // Verify direct link to Uygulama Marketi (1-Click) (/docker) in left sidebar
+  const sidebarMarketplaceLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi (1-Click)' });
+  assert.equal(await sidebarMarketplaceLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (1-Click) (/docker)');
+
   // Verify global command palette search bar in topbar
   const searchBtn = page.locator('button.ws-command-trigger[aria-label="Site veya panel bölümü ara"]');
   assert.equal(await searchBtn.isVisible(), true, 'Global search bar trigger must be visible in topbar');
@@ -108,7 +112,7 @@ test('SCN-E2E-02: Dashboard (/dashboard) live telemetry interval selector & gaug
   assertZeroErrors('SCN-E2E-02');
 });
 
-test('SCN-E2E-03: aaPanel Notification & Task Center drawer tabs and Escape key close', async () => {
+test('SCN-E2E-03 & SCN-V3-01: aaPanel Notification & Task Center drawer tabs, Escape key close & Zero Notification Badge Jumping across routes', async () => {
   const bellBtn = page.locator('button[aria-label="Bildirim ve Görev Merkezi"]');
   assert.equal(await bellBtn.isVisible(), true, 'Notification & Task Center button must be visible in top bar');
   await bellBtn.click();
@@ -137,21 +141,78 @@ test('SCN-E2E-03: aaPanel Notification & Task Center drawer tabs and Escape key 
   await drawer.waitFor({ state: 'hidden', timeout: 5000 });
   assert.equal(await drawer.isVisible(), false, 'NotificationCenterDrawer must close on Escape');
 
-  assertZeroErrors('SCN-E2E-03');
+  // SCN-V3-01: Zero Notification Badge Jumping across /files, /mail, and /websites
+  async function readNotificationBadgeCount() {
+    const badge = bellBtn.locator('.ws-nav-count');
+    if ((await badge.count()) === 0) return 0;
+    const raw = (await badge.innerText()).trim();
+    return Number.parseInt(raw, 10) || 0;
+  }
+
+  await page.goto(`${baseUrl}/files`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+  const badgeOnFiles = await readNotificationBadgeCount();
+
+  await page.goto(`${baseUrl}/mail`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+  const badgeOnMail = await readNotificationBadgeCount();
+
+  await page.goto(`${baseUrl}/websites`, { waitUntil: 'networkidle' });
+  await page.waitForTimeout(400);
+  const badgeOnWebsites = await readNotificationBadgeCount();
+
+  assert.equal(
+    badgeOnMail,
+    badgeOnFiles,
+    `Top-bar notification badge count must stay identical between /files (${badgeOnFiles}) and /mail (${badgeOnMail})`,
+  );
+  assert.equal(
+    badgeOnWebsites,
+    badgeOnFiles,
+    `Top-bar notification badge count must stay identical between /files (${badgeOnFiles}) and /websites (${badgeOnWebsites})`,
+  );
+
+  assertZeroErrors('SCN-E2E-03/SCN-V3-01');
 });
 
-test('SCN-E2E-04: /websites Domain -> Subdomain Hierarchy, Shared File Root badges & Search filtering', async () => {
+test('SCN-E2E-04, SCN-V3-02 & SCN-V3-03: /websites Flat 1-Level Subdomain List, No FileRootBadge / ├─, No Unbound mail.* & Search filtering', async () => {
   await page.goto(`${baseUrl}/websites`, { waitUntil: 'networkidle' });
   await page.locator('.ws-website-task-card').first().waitFor({ state: 'visible', timeout: 15000 });
 
   const bodyText = await page.locator('main').innerText();
   assert.match(bodyText, /\d+\s+ana alan adı\s*·\s*\d+\s+alt alan adı/, 'WebsitesPage must show explicit root and subdomain counts');
 
-  // Verify subdomain tree connector and shared file root badges (.yp-file-root-pill)
+  // SCN-V3-02: Assert Yayın klasörü:, Ortak Kök:, and ├─ do NOT appear on any domain/subdomain card
   const fileRootBadgesCount = await page.locator('.yp-file-root-pill').count();
-  assert.ok(fileRootBadgesCount > 0, 'Domain and subdomain cards must render file root badges (.yp-file-root-pill)');
-  assert.match(bodyText, /├─|\└─/, 'Subdomain cards must display tree branch connectors');
-  assert.match(bodyText, /\/var\/www\/vhosts\/.*\/subdomains\//, 'Subdomain cards must display shared file root under parent vhost');
+  assert.equal(fileRootBadgesCount, 0, 'Domain and subdomain cards must not render noisy .yp-file-root-pill badges');
+  assert.doesNotMatch(bodyText, /Yayın klasörü:|Ortak Kök:|├─/, 'Domain and subdomain cards must not display Yayın klasörü:, Ortak Kök:, or ├─');
+
+  // SCN-V3-03: Assert unbound mail.webrich.news does NOT appear as a website card on /websites
+  const cardHeadings = await page.locator('.ws-website-task-card h3').allInnerTexts();
+  const normalizedHeadings = cardHeadings.map((text) => text.trim());
+  assert.equal(
+    normalizedHeadings.includes('mail.webrich.news'),
+    false,
+    'Unbound system mail domain mail.webrich.news must not appear as a website card on /websites',
+  );
+
+  // SCN-V3-02: Assert only the root domain (webrich.news) has an expand/collapse subdomain button,
+  // and none of its subdomains (yp-node.webrich.news, git-route.yp-node.webrich.news) have a nested accordion button
+  const rootCard = page.locator('.ws-website-task-card', { has: page.locator('h3', { hasText: /^webrich\.news$/ }) });
+  assert.equal(await rootCard.count(), 1, 'Root domain card webrich.news must be rendered');
+  const rootToggleBtn = rootCard.locator('button', { hasText: /alt alan adı\s*·\s*(Daralt|Göster)/ });
+  assert.equal(await rootToggleBtn.count(), 1, 'Root domain card webrich.news must have the expand/collapse subdomain button');
+
+  const subdomainToggleCount = await page.locator('.yp-subdomain-task-card button', { hasText: /alt alan adı\s*·\s*(Daralt|Göster)/ }).count();
+  assert.equal(subdomainToggleCount, 0, 'No subdomain card (.yp-subdomain-task-card) may have a nested expand/collapse subdomain button');
+
+  for (const subHost of ['yp-node.webrich.news', 'git-route.yp-node.webrich.news']) {
+    const subCard = page.locator('.ws-website-task-card', { has: page.locator('h3', { hasText: new RegExp(`^${subHost.replace(/\./g, '\\.')}$`) }) });
+    if ((await subCard.count()) > 0) {
+      const nestedBtnCount = await subCard.locator('button', { hasText: /alt alan adı\s*·\s*(Daralt|Göster)/ }).count();
+      assert.equal(nestedBtnCount, 0, `Subdomain card ${subHost} must not have a nested expand/collapse subdomain button`);
+    }
+  }
 
   // Type a filter query in the search input, verify filtering works, then clear
   const searchInput = page.locator('input[type="search"][placeholder="Alan adı veya alias"]');
@@ -168,7 +229,74 @@ test('SCN-E2E-04: /websites Domain -> Subdomain Hierarchy, Shared File Root badg
   const restoredCardCount = await page.locator('.ws-website-task-card').count();
   assert.equal(restoredCardCount, initialCardCount, 'Clearing search input must restore website cards');
 
-  assertZeroErrors('SCN-E2E-04');
+  assertZeroErrors('SCN-E2E-04/SCN-V3-02/SCN-V3-03');
+});
+
+test('SCN-V3-04: Unbound / Suspended domain mail.webrich.news 1-Click Unsuspend on /websites/a7408833-d4d8-48ba-9545-0d58377ddb6a/settings', async () => {
+  const mailDomainId = 'a7408833-d4d8-48ba-9545-0d58377ddb6a';
+  await page.goto(`${baseUrl}/websites/${mailDomainId}/settings`, { waitUntil: 'networkidle' });
+  const settingsSection = page.locator('main section').first();
+  await settingsSection.waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(400);
+
+  const mainText = await page.locator('main').innerText();
+  assert.doesNotMatch(
+    mainText,
+    /Alan adı henüz bir Website kaydına bağlı değil/,
+    'Unbound domain settings must not render the old dead-end unbound error',
+  );
+  assert.match(mainText, /mail\.webrich\.news/, 'Settings page must display mail.webrich.news');
+
+  const unsuspendBtn = page.locator('button:has-text("Yayını Etkinleştir (Askıdan Çıkar)")');
+  if (await unsuspendBtn.isVisible()) {
+    await unsuspendBtn.click();
+    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
+  } else {
+    // Also verify/trigger 1-click domain suspension resume API if mail.webrich.news has an active suspension operation
+    const resumeStatus = await page.evaluate(async (domainId) => {
+      const opsRes = await fetch(`/api/panel/domains/${encodeURIComponent(domainId)}/suspension-operations`, {
+        credentials: 'same-origin',
+      });
+      if (!opsRes.ok) return { opsStatus: opsRes.status };
+      const body = await opsRes.json();
+      const list = Array.isArray(body?.data) ? body.data : Array.isArray(body?.data?.operations) ? body.data.operations : [];
+      const latest = list[0] ?? null;
+      if (!latest || !['suspended', 'partial', 'failed', 'resume_partial', 'resume_failed'].includes(latest.status)) {
+        return { opsStatus: opsRes.status, latestStatus: latest?.status ?? 'none' };
+      }
+      const sessionRes = await fetch('/api/auth/session', { credentials: 'same-origin' });
+      const sessionBody = await sessionRes.json();
+      const csrfToken = sessionBody?.data?.csrfToken ?? sessionBody?.csrfToken ?? '';
+      const isFirstResume = latest.status === 'suspended';
+      const endpoint = isFirstResume ? 'resume' : 'resume-retry';
+      const confirmation = isFirstResume ? latest.actions?.resumeConfirmation : latest.actions?.resumeRetryConfirmation;
+      const resumeRes = await fetch(
+        `/api/panel/domains/${encodeURIComponent(domainId)}/suspension-operations/${encodeURIComponent(latest.id)}/${endpoint}`,
+        {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'content-type': 'application/json',
+            'x-csrf-token': csrfToken,
+          },
+          body: JSON.stringify({
+            expectedUpdatedAt: latest.updatedAt,
+            checksum: latest.checksum,
+            confirmation,
+          }),
+        },
+      );
+      return { opsStatus: opsRes.status, resumedHttpStatus: resumeRes.status };
+    }, mailDomainId);
+    assert.equal(resumeStatus.opsStatus, 200, 'GET /api/panel/domains/:id/suspension-operations must succeed with 200');
+  }
+
+  // Verify Barındırma bilgileri & Teknik kayıt kimlikleri on mail.webrich.news settings
+  assert.match(mainText, /Barındırma bilgileri/, 'Settings page must render Barındırma bilgileri section');
+  assert.match(mainText, /Teknik kayıt kimlikleri/, 'Settings page must render Teknik kayıt kimlikleri disclosure');
+
+  assertZeroErrors('SCN-V3-04');
 });
 
 test('SCN-E2E-05: /websites/new Wizard (Domain mode, Subdomain mode & all JAMstack Framework Presets)', async () => {
@@ -285,8 +413,12 @@ test('SCN-E2E-06: /websites/:id Overview & /websites/:id/hosting Interactive Ngi
   assertZeroErrors('SCN-E2E-06');
 });
 
-test('SCN-E2E-07: /docker Easypanel 1-Click Marketplace category filters & Live Secret Generation', async () => {
-  await page.goto(`${baseUrl}/docker`, { waitUntil: 'networkidle' });
+test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi (1-Click) navigation, category filters & Clean Easypanel 1-Click Wizard Modal', async () => {
+  // SCN-V3-05: Verify and click direct sidebar link Uygulama Marketi (1-Click) (/docker)
+  const sidebarMarketLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi (1-Click)' });
+  assert.equal(await sidebarMarketLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (1-Click) (/docker)');
+  await sidebarMarketLink.click();
+
   const categoryTabs = page.locator('[role="tablist"][aria-label="1-Click Uygulama Kategorileri"]');
   await categoryTabs.waitFor({ state: 'visible', timeout: 15000 });
 
@@ -306,20 +438,44 @@ test('SCN-E2E-07: /docker Easypanel 1-Click Marketplace category filters & Live 
     assert.match(gridText, expectedPattern, `Category tab "${label}" must filter and display matching marketplace cards`);
   }
 
-  // Click Tek Tıkla Kur on n8n Workflow Automation
-  const n8nCard = page.locator('.yp-docker-catalog-card', { hasText: 'n8n Workflow Automation' });
-  await n8nCard.locator('button:has-text("Tek Tıkla Kur")').click();
+  // Click + Tek Tıkla Kur on PocketBase
+  const pocketbaseCard = page.locator('.yp-docker-catalog-card', { hasText: 'PocketBase' });
+  await pocketbaseCard.locator('button:has-text("Tek Tıkla Kur")').click();
 
-  const dialog = page.locator('dialog[open], [role="dialog"]', { hasText: 'Docker Compose projesi ekle' });
+  const dialog = page.locator('dialog[open], [role="dialog"]', { hasText: 'Tek Tıkla Kurulum' });
   await dialog.waitFor({ state: 'visible', timeout: 15000 });
 
   const dialogText = await dialog.innerText();
+  assert.match(dialogText, /Tek Tıkla Kurulum/, 'Modal heading must contain Tek Tıkla Kurulum');
   assert.match(dialogText, /Tek Tıkla Kur \(Easypanel\)/, 'Modal must show Tek Tıkla Kur (Easypanel) badge');
   assert.match(dialogText, /Otomatik Secret & Volume/, 'Modal must show Otomatik Secret & Volume badge');
 
+  // Verify Proje / Servis Adı and Yayınlanacak Alan Adı / Alt Alan Adı inputs are immediately visible
+  const projectNameInput = dialog.locator('label:has-text("Proje / Servis Adı") input');
+  const targetDomainInput = dialog.locator('label:has-text("Yayınlanacak Alan Adı / Alt Alan Adı") input');
+  assert.equal(await projectNameInput.isVisible(), true, 'Proje / Servis Adı input must be immediately visible');
+  assert.equal(await targetDomainInput.isVisible(), true, 'Yayınlanacak Alan Adı / Alt Alan Adı input must be immediately visible');
+
+  // Verify Otomatik Let's Encrypt SSL & Nginx Reverse Proxy checkbox is visible
+  const autoSslCheckbox = dialog.locator('label:has-text("Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy") input[type="checkbox"]');
+  assert.equal(await autoSslCheckbox.isVisible(), true, 'Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy checkbox must be visible');
+  assert.equal(await autoSslCheckbox.isChecked(), true, 'Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy checkbox must default to checked');
+
+  // Verify Gelişmiş Port, İmaj ve Compose YAML Ayarları <details> is collapsed initially
+  const advancedDetails = dialog.locator('details', { hasText: 'Gelişmiş Port, İmaj ve Compose YAML Ayarları' });
+  assert.equal(await advancedDetails.isVisible(), true, 'Gelişmiş Port, İmaj ve Compose YAML Ayarları disclosure must be visible');
+  const initiallyOpen = await advancedDetails.evaluate((el) => Boolean(el.open));
+  assert.equal(initiallyOpen, false, 'Gelişmiş Port, İmaj ve Compose YAML Ayarları must be collapsed by default');
+
+  // Click summary to open advanced disclosure and reveal Compose YAML textarea
+  await advancedDetails.locator('summary').click();
+  const openedState = await advancedDetails.evaluate((el) => Boolean(el.open));
+  assert.equal(openedState, true, 'Clicking summary must expand Gelişmiş Port, İmaj ve Compose YAML Ayarları');
+
   const yamlTextarea = dialog.locator('label:has-text("Compose document") textarea');
+  assert.equal(await yamlTextarea.isVisible(), true, 'Compose document textarea must be visible after expanding disclosure');
   const firstYaml = await yamlTextarea.inputValue();
-  assert.match(firstYaml, /N8N_ENCRYPTION_KEY:/, 'Prepared n8n YAML must contain N8N_ENCRYPTION_KEY');
+  assert.match(firstYaml, /PB_ENCRYPTION_KEY:/, 'Prepared PocketBase YAML must contain PB_ENCRYPTION_KEY');
 
   // Click Secret'ları Yeniden Üret and verify the generated secret changes
   await dialog.locator('button:has-text("Secret\'ları Yeniden Üret")').click();
@@ -327,11 +483,51 @@ test('SCN-E2E-07: /docker Easypanel 1-Click Marketplace category filters & Live 
   const secondYaml = await yamlTextarea.inputValue();
   assert.notEqual(secondYaml, firstYaml, 'Clicking Secret\'ları Yeniden Üret must regenerate fresh random secrets in Compose YAML');
 
+  // Verify submit button ⚡ Uygulamayı Kur ve Yayınla
+  const publishBtn = dialog.locator('button[type="submit"]:has-text("⚡ Uygulamayı Kur ve Yayınla")');
+  assert.equal(await publishBtn.isVisible(), true, 'Submit button ⚡ Uygulamayı Kur ve Yayınla must be visible');
+
   // Close the modal
   await dialog.locator('button:has-text("Vazgeç")').click();
   await dialog.waitFor({ state: 'hidden', timeout: 5000 });
 
-  assertZeroErrors('SCN-E2E-07');
+  assertZeroErrors('SCN-E2E-07/SCN-V3-05');
+});
+
+test('SCN-V3-06: /databases MariaDB unix_socket Auto-Configuration Action & Ready Security Baseline', async () => {
+  await page.goto(`${baseUrl}/databases`, { waitUntil: 'networkidle' });
+  const diagnosticsDetails = page.locator('details.ws-database-diagnostics');
+  await diagnosticsDetails.waitFor({ state: 'visible', timeout: 15000 });
+  await page.waitForTimeout(500);
+
+  // If ⚡ Yerel Yönetici Bağlantısını Otomatik Yapılandır is visible, click it to harden root@localhost unix_socket
+  const hardenBtn = page.locator('button:has-text("Yerel Yönetici Bağlantısını Otomatik Yapılandır")').first();
+  if (await hardenBtn.isVisible()) {
+    await hardenBtn.click();
+    await page.waitForTimeout(1000);
+    await page.waitForLoadState('networkidle');
+  }
+
+  // Ensure Sunucu ve güvenlik ayrıntıları disclosure is open
+  const isDiagnosticsOpen = await diagnosticsDetails.evaluate((el) => Boolean(el.open));
+  if (!isDiagnosticsOpen) {
+    await diagnosticsDetails.locator('summary').click();
+  }
+
+  // Wait for badge inside summary to show Hazır
+  await page.waitForFunction(
+    () => {
+      const el = document.querySelector('details.ws-database-diagnostics');
+      return Boolean(el && el.innerText.includes('Hazır') && el.innerText.includes('root@localhost · unix_socket'));
+    },
+    { timeout: 15000 },
+  );
+
+  const diagnosticsText = await diagnosticsDetails.innerText();
+  assert.match(diagnosticsText, /Hazır/, 'DatabasesPage security baseline must display Hazır');
+  assert.match(diagnosticsText, /root@localhost\s*·\s*unix_socket/, 'DatabasesPage must display root@localhost · unix_socket');
+
+  assertZeroErrors('SCN-V3-06');
 });
 
 test('SCN-E2E-08: Full-Panel Route Sweep (Zero Crash / Zero 500 Guarantee)', async () => {

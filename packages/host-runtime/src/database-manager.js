@@ -14,6 +14,8 @@ SELECT HEX(CURRENT_USER()), HEX(USER()),
   (SELECT COUNT(*) FROM mysql.user WHERE User = 'root' AND Host <> 'localhost'),
   (SELECT COUNT(*) FROM information_schema.SCHEMATA WHERE SCHEMA_NAME = 'test');
 `.trim();
+const HARDEN_MARIADB_SQL = "ALTER USER 'root'@'localhost' IDENTIFIED VIA unix_socket; DELETE FROM mysql.user WHERE User = ''; DELETE FROM mysql.user WHERE User = 'root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); DROP DATABASE IF EXISTS `test`; FLUSH PRIVILEGES;";
+const HARDEN_MYSQL_SQL = "ALTER USER 'root'@'localhost' IDENTIFIED WITH auth_socket; DELETE FROM mysql.user WHERE User = ''; DELETE FROM mysql.user WHERE User = 'root' AND Host NOT IN ('localhost', '127.0.0.1', '::1'); DROP DATABASE IF EXISTS `test`; FLUSH PRIVILEGES;";
 const INHERITED_CREDENTIAL_ENV = Object.freeze([
   'MYSQL_PWD', 'MARIADB_PWD', 'MYSQL_HOST', 'MYSQL_TCP_PORT', 'MYSQL_UNIX_PORT',
 ]);
@@ -110,14 +112,18 @@ function parseSecurityBaseline(output, connection) {
   }
   const effectiveAccount = parseHexText(fields[0]);
   const loginAccount = parseHexText(fields[1]);
-  const authPlugin = parseHexText(fields[2], { allowEmpty: true, maxLength: 64 });
+  const rawAuthPlugin = parseHexText(fields[2], { allowEmpty: true, maxLength: 64 });
+  const normalizedPluginLower = rawAuthPlugin.toLowerCase();
+  const authPlugin = normalizedPluginLower === 'mysql_native_password+unix_socket'
+    ? 'unix_socket'
+    : rawAuthPlugin;
   const counts = fields.slice(3).map(Number);
   if (counts.some((value) => !Number.isSafeInteger(value) || value < 0 || value > 100_000)) {
     throw new DatabaseManagerError('database_security_evidence_invalid', 'Database security evidence is invalid');
   }
   const nativeSocketAuth = effectiveAccount === 'root@localhost'
     && loginAccount === 'root@localhost'
-    && ['unix_socket', 'auth_socket'].includes(authPlugin.toLowerCase());
+    && ['unix_socket', 'auth_socket', 'mysql_native_password+unix_socket'].includes(normalizedPluginLower);
   const hygiene = Object.freeze({
     anonymousAccountsAbsent: counts[0] === 0,
     remoteRootAccountsAbsent: counts[1] === 0,
@@ -296,7 +302,20 @@ export function createDatabaseManager({
     return { databaseName: name, tables };
   }
 
-  return { inspect, inspectSecurityBaseline, inspectDatabaseTables, createDatabase, dropDatabase };
+  async function hardenSecurityBaseline() {
+    return withMutation(async () => {
+      const connection = await connect();
+      const sql = connection.engine === 'mariadb' ? HARDEN_MARIADB_SQL : HARDEN_MYSQL_SQL;
+      try {
+        await runClient(connection.client, sql, { timeout: 15_000 });
+      } catch {
+        throw new DatabaseManagerError('database_security_harden_failed', 'Database security baseline could not be hardened');
+      }
+      return inspectSecurityBaseline();
+    });
+  }
+
+  return { inspect, inspectSecurityBaseline, hardenSecurityBaseline, inspectDatabaseTables, createDatabase, dropDatabase };
 }
 
 export const databaseManager = createDatabaseManager();
@@ -317,4 +336,6 @@ export const databaseManagerInternals = Object.freeze({
   inventoryQuery: INVENTORY_QUERY,
   connectionQuery: CONNECTION_QUERY,
   securityQuery: SECURITY_QUERY,
+  hardenMariaDbSql: HARDEN_MARIADB_SQL,
+  hardenMysqlSql: HARDEN_MYSQL_SQL,
 });

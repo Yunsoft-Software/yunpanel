@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router';
-import { createPhpMyAdminHandoff, deleteDatabase, getDatabases, waitForJob } from '../api.js';
+import { createPhpMyAdminHandoff, deleteDatabase, getDatabases, hardenDatabaseSecurityBaseline, waitForJob } from '../api.js';
 import { Badge, Button, CollectionNotice, ConfirmDialog, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import DatabaseSetupDialog, { DatabaseConnectionDialog } from './DatabaseSetupDialog.jsx';
@@ -40,6 +40,7 @@ export default function DatabasesPage() {
   const [status, setStatus] = useState('idle');
   const [inventory, setInventory] = useState(() => databaseInventoryView(null));
   const [busy, setBusy] = useState(false);
+  const [hardeningBusy, setHardeningBusy] = useState(false);
   const [loadError, setLoadError] = useState(null);
   const [error, setError] = useState(null);
   const [createOpen, setCreateOpen] = useState(false);
@@ -71,7 +72,7 @@ export default function DatabasesPage() {
   useEffect(() => {
     scopeGeneration.current += 1;
     setError(null); setConnectionTarget(null); setCreateOpen(false);
-    setDeleteTarget(null); setAccessTarget(null); setBusy(false); pending.current = false;
+    setDeleteTarget(null); setAccessTarget(null); setBusy(false); setHardeningBusy(false); pending.current = false;
     setInventory(databaseInventoryView(null));
     void load();
     return () => { requestGeneration.current += 1; scopeGeneration.current += 1; };
@@ -125,6 +126,29 @@ export default function DatabasesPage() {
     const target = deleteTarget;
     const terminal = await perform(() => deleteDatabase(server.id, target.name));
     if (terminal) setDeleteTarget(null);
+  }
+  async function handleHardenSecurity() {
+    if (!canAct || hardeningBusy || pending.current) return;
+    const scope = scopeGeneration.current;
+    pending.current = true;
+    setHardeningBusy(true);
+    setBusy(true);
+    setError(null);
+    try {
+      await hardenDatabaseSecurityBaseline(server.id);
+      if (scope !== scopeGeneration.current) return;
+      await load();
+    } catch (failure) {
+      if (scope === scopeGeneration.current && failure.name !== 'AbortError') {
+        setError(failure.message);
+      }
+    } finally {
+      if (scope === scopeGeneration.current) {
+        pending.current = false;
+        setHardeningBusy(false);
+        setBusy(false);
+      }
+    }
   }
   async function openPhpMyAdmin(ownership, task = 'structure') {
     if (!canAct || pending.current) return;
@@ -197,9 +221,23 @@ export default function DatabasesPage() {
           <footer className="ws-pagination"><span>{page.count} sonuç · {engineLabel} · {formatDatabaseBytes(inventory.totalBytes)}</span><div className="ws-actions"><Button disabled={page.page <= 1} onClick={() => filter('page', String(page.page - 1))}>Önceki</Button><span>{page.page} / {page.pages}</span><Button disabled={page.page >= page.pages} onClick={() => filter('page', String(page.page + 1))}>Sonraki</Button></div></footer>
         </> : <EmptyState title={inventory.databases.length ? 'Eşleşen veritabanı yok' : 'Kullanıcı veritabanı yok'} detail={inventory.databases.length ? 'Aramayı veya erişim filtresini değiştirin.' : 'Yeni bir uygulama veritabanı oluşturarak başlayın.'} icon="database" action={inventory.databases.length ? <Button onClick={clearFilters}>Filtreleri temizle</Button> : <Button variant="primary" disabled={!canAct} onClick={startCreate}>Veritabanı oluştur</Button>} />)}
       </Section>
+      {!inventory.health?.ready && inventory.health?.available !== false && securityReasonLabel !== '—' && (
+        <div className="ws-notice ws-notice-warn" role="region" aria-label="Veritabanı güvenlik yapılandırması">
+          <div>
+            <strong>Güvenlik uyarısı: {securityReasonLabel}</strong>
+            <div className="ws-muted">Yerel veritabanı sunucusunda root@localhost unix_socket bağlantısını ve güvenlik temel ayarlarını tek tıkla yapılandırabilirsiniz.</div>
+          </div>
+          <Button variant="primary" icon="shield" disabled={!canAct || hardeningBusy} onClick={handleHardenSecurity}>{hardeningBusy ? 'Yapılandırılıyor…' : '⚡ Yerel Yönetici Bağlantısını Otomatik Yapılandır'}</Button>
+        </div>
+      )}
       <details className="ws-section ws-disclosure ws-database-diagnostics"><summary>Sunucu ve güvenlik ayrıntıları <Badge state={inventory.health?.ready ? 'active' : inventory.health ? 'warning' : 'unknown'}>{securityLabel}</Badge></summary>
         {!inventory.health?.ready && securityReasonLabel !== '—' && (
-          <p className="ws-muted ws-section-body">Güvenlik uyarısı: {securityReasonLabel}. Yerel veritabanı sunucusunda ilgili güvenlik sıkılaştırmasını uygulayabilirsiniz.</p>
+          <div className="ws-section-body" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <p className="ws-muted" style={{ margin: 0 }}>Güvenlik uyarısı: {securityReasonLabel}. Yerel veritabanı sunucusunda ilgili güvenlik sıkılaştırmasını uygulayabilirsiniz.</p>
+            {inventory.health?.available !== false && (
+              <Button variant="primary" icon="shield" disabled={!canAct || hardeningBusy} onClick={handleHardenSecurity}>{hardeningBusy ? 'Yapılandırılıyor…' : '⚡ Yerel Yönetici Bağlantısını Otomatik Yapılandır'}</Button>
+            )}
+          </div>
         )}
         <KeyValues items={[
           ['Engine', engineLabel], ['Sürüm', inventory.version ?? '—'],

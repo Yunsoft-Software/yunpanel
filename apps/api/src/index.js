@@ -696,6 +696,7 @@ await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
 const nginxLogReader = createNginxLogReader();
 const databaseManager = createDatabaseManager();
+registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
 const liveSessions = createLiveSessionRegistry();
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
@@ -1299,6 +1300,7 @@ const listener = createAuthenticatedApi({
       databaseInventoryProvider: () => databaseManager.inspect(),
       databaseManager,
       databaseHealthProvider: () => databaseManager.inspectSecurityBaseline(),
+      databaseSecurityHardener: () => databaseManager.hardenSecurityBaseline(),
       websiteMigrationPolicy,
       migrationLedger,
       dnsHostingRegistry,

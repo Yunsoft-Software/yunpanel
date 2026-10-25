@@ -1,3 +1,13 @@
+export function isSystemMailServiceDomain(domain) {
+  if (!domain || typeof domain !== 'object') return false;
+  if (domain.websiteId) return false;
+  return /^(mail|webmail)\.[^.]+/i.test(String(domain.primaryDomain ?? '').trim());
+}
+
+export function filterWebsiteListDomains(domains = []) {
+  return (Array.isArray(domains) ? domains : []).filter((d) => !isSystemMailServiceDomain(d));
+}
+
 /** Filter groups rather than splitting a parent's children across pages. */
 export function siteListPage(rows, { type = 'all', status = 'all', sort = 'asc', page = 1, perPage = 10 } = {}) {
   const groups = [];

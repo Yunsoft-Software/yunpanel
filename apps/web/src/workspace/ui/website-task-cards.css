@@ -27,6 +27,11 @@
 .ws-site-table-compact .ws-website-task-list { gap: 0.6rem; }
 .ws-site-table-compact .ws-website-task-card { padding: 0.75rem; }
 .ws-site-table-compact .ws-website-task-header { margin-bottom: 0.6rem; }
+.yp-domain-tree-card { border-color: var(--ws-border-strong, var(--ws-border)); }
+.yp-subdomain-task-card { margin-inline-start: 1.25rem; padding: 0.75rem 1rem; border-inline-start: 3px solid var(--ws-accent); border-radius: var(--ws-radius-small, var(--ws-radius)); background: var(--ws-surface-subtle, var(--ws-surface)); }
+.yp-subdomain-task-card .ws-website-task-header { margin-bottom: 0.5rem; }
+.yp-subdomain-task-card .ws-website-task-title { display: flex; flex-wrap: wrap; align-items: baseline; gap: 0.35rem 0.75rem; }
+.yp-subdomain-task-card .ws-website-task-title p { margin: 0; }
 @media (max-width: 720px) {
   .ws-website-task-list { padding: 0.75rem; }
   .ws-website-task-card { margin-inline-start: calc(var(--ws-card-depth, 0) * 0.35rem); }

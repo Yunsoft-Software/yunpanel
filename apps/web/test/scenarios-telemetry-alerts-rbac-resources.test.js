@@ -114,6 +114,7 @@ import {
 register(new URL('./jsx-loader.js', import.meta.url));
 
 const {
+  isSystemMailHostname,
   computeWorkspaceAlerts,
   NotificationCenterDrawer,
 } = await import('../src/workspace/NotificationCenterDrawer.jsx');
@@ -1803,4 +1804,159 @@ test('SCN-RES-01 [33]: database-model validates schema names, rejects reserved/R
   });
   assert.equal(choices.length, 1);
   assert.equal(choices[0].id, 'backup-job-0001');
+});
+
+// ============================================================================
+// SCN-V3-01, SCN-V3-03, SCN-V3-05: Route-Stable Top-Bar Notification Badge,
+// Historical Failed Job Filtering, System Mail Hostname Exclusion & 1-Click Sidebar
+// ============================================================================
+
+test('SCN-V3-01 & SCN-V3-03 [34]: isSystemMailHostname and computeWorkspaceAlerts exclude unbound mail/webmail hostnames and historical failed jobs older than 24h', () => {
+  // 1. isSystemMailHostname unit checks
+  assert.equal(isSystemMailHostname({ id: 'dom-mail', websiteId: null, primaryDomain: 'mail.webrich.news' }), true);
+  assert.equal(isSystemMailHostname({ id: 'dom-webmail', websiteId: null, domain: 'WEBMAIL.webrich.news' }), true);
+  // Bound to a real Website -> NOT filtered as system-only mail hostname
+  assert.equal(isSystemMailHostname({ id: 'dom-bound-mail', websiteId: 'site-1', primaryDomain: 'mail.webrich.news' }), false);
+  // Regular unbound domain -> NOT a mail/webmail system hostname
+  assert.equal(isSystemMailHostname({ id: 'dom-regular', websiteId: null, primaryDomain: 'webrich.news' }), false);
+  assert.equal(isSystemMailHostname(null), false);
+
+  const now = Date.now();
+  const future60d = new Date(now + 60 * 86_400_000).toISOString();
+  const oldFailedTs = new Date(now - 14 * 86_400_000).toISOString(); // 14 days ago (2026-10-11 on .28)
+  const boundary25hAgo = new Date(now - 25 * 3_600_000).toISOString(); // 25 hours ago -> ignored
+  const recent2hAgo = new Date(now - 2 * 3_600_000).toISOString(); // 2 hours ago -> alerted
+
+  const domains = [
+    // Unbound system mail hostname (suspended + no SSL) -> must be skipped in BOTH SSL and domain-suspended loops
+    { id: 'dom-sys-mail', websiteId: null, primaryDomain: 'mail.webrich.news', state: 'suspended', httpsMode: 'off' },
+    { id: 'dom-sys-webmail', websiteId: null, primaryDomain: 'webmail.webrich.news', status: 'suspended', httpsMode: 'off' },
+    // Real suspended website domain -> must be alerted once
+    { id: 'dom-real-susp', websiteId: 'site-real', primaryDomain: 'paused.webrich.news', state: 'suspended', certificateId: 'cert-valid', httpsMode: 'managed' },
+  ];
+  const certificates = [
+    { id: 'cert-valid', state: 'active', validTo: future60d },
+  ];
+
+  // Simulate 13 historical failed jobs from 2 weeks ago on .28
+  const historicalFailedJobs = Array.from({ length: 13 }, (_, idx) => ({
+    id: `hist-fail-${idx + 1}`,
+    operation: 'site.provision',
+    status: 'failed',
+    completedAt: idx === 0 ? boundary25hAgo : oldFailedTs,
+    error: { message: 'Historical failure from 2 weeks ago' },
+  }));
+
+  // Simulate route navigation between /files (jobs not polled -> []) and /mail (jobs polled -> 13 historical failed jobs)
+  assert.equal(workspaceResources('/files').jobs, false);
+  assert.equal(workspaceResources('/mail').jobs, true);
+
+  const alertsOnFilesRoute = computeWorkspaceAlerts({
+    domains,
+    websites: [],
+    certificates,
+    servers: [],
+    jobs: [],
+  });
+  const alertsOnMailRoute = computeWorkspaceAlerts({
+    domains,
+    websites: [],
+    certificates,
+    servers: [],
+    jobs: historicalFailedJobs,
+  });
+
+  // Neither SSL nor suspended domain alert is emitted for mail.webrich.news / webmail.webrich.news
+  assert.equal(alertsOnMailRoute.some((a) => a.id.includes('dom-sys-mail') || a.id.includes('dom-sys-webmail')), false);
+  // Historical failed jobs (>24h) do not inflate alerts on /mail, keeping badge count identical (1 === 1, never 1 <-> 14!)
+  assert.equal(alertsOnFilesRoute.length, 1);
+  assert.equal(alertsOnMailRoute.length, 1);
+  assert.equal(alertsOnMailRoute[0].id, 'domain-suspended-dom-real-susp');
+
+  // Recent failed job (<24h) and timeless failed job ARE still included in computeWorkspaceAlerts when jobs are passed
+  const alertsWithRecentFail = computeWorkspaceAlerts({
+    domains,
+    websites: [],
+    certificates,
+    servers: [],
+    jobs: [
+      ...historicalFailedJobs,
+      { id: 'recent-fail-1', operation: 'ssl.renew', status: 'failed', completedAt: recent2hAgo },
+      { id: 'timeless-fail-1', operation: 'backup.create', status: 'failed' },
+    ],
+  });
+  assert.equal(alertsWithRecentFail.length, 3);
+  assert.ok(alertsWithRecentFail.some((a) => a.id === 'job-failed-recent-fail-1'));
+  assert.ok(alertsWithRecentFail.some((a) => a.id === 'job-failed-timeless-fail-1'));
+
+  // Dismissed alert IDs (Set or Array) filter out matching alerts
+  const afterDismissSet = computeWorkspaceAlerts({
+    domains,
+    websites: [],
+    certificates,
+    servers: [],
+    jobs: [{ id: 'recent-fail-1', operation: 'ssl.renew', status: 'failed', completedAt: recent2hAgo }],
+    dismissedAlertIds: new Set(['domain-suspended-dom-real-susp']),
+  });
+  assert.deepEqual(afterDismissSet.map((a) => a.id), ['job-failed-recent-fail-1']);
+
+  const afterDismissArray = computeWorkspaceAlerts({
+    domains,
+    websites: [],
+    certificates,
+    servers: [],
+    jobs: [{ id: 'recent-fail-1', operation: 'ssl.renew', status: 'failed', completedAt: recent2hAgo }],
+    dismissedAlertIds: ['domain-suspended-dom-real-susp', 'job-failed-recent-fail-1'],
+  });
+  assert.equal(afterDismissArray.length, 0);
+});
+
+test('SCN-V3-01, SCN-V3-04 & SCN-V3-05 [35]: NotificationCenterDrawer renders quickResume action & dismiss controls, and WorkspaceLayout renders Uygulama Marketi (1-Click)', async () => {
+  const fs = await import('node:fs');
+  const layoutSource = fs.readFileSync(new URL('../src/workspace/WorkspaceLayout.jsx', import.meta.url), 'utf8');
+
+  // Top-bar badge count in WorkspaceLayout is computed without jobs so it never jumps across routes
+  assert.match(layoutSource, /const alertCount = computeWorkspaceAlerts\(\{ domains, websites, certificates, servers \}\)\.length;/);
+  // Sidebar renders Uygulama Marketi (1-Click) right after /websites for Owner, without altering navigationGroups()
+  assert.match(layoutSource, /Uygulama Marketi \(1-Click\)/);
+  assert.match(layoutSource, /1-Click Market/);
+  assert.equal(navigationGroups(true, true, false, false)[0].items.length, 8);
+
+  const workspaceValue = {
+    domains: {
+      status: 'ready',
+      items: [
+        { id: 'dom-mail', websiteId: null, primaryDomain: 'mail.webrich.news', state: 'suspended' },
+        { id: 'dom-susp', websiteId: 'site-susp', primaryDomain: 'askida.webrich.news', state: 'suspended' },
+      ],
+    },
+    websites: { status: 'ready', items: [] },
+    certificates: { status: 'ready', items: [] },
+    servers: { status: 'ready', items: [] },
+    jobs: { status: 'ready', items: [] },
+    notice: null,
+    setNotice: () => {},
+    observe: () => {},
+  };
+
+  const alertsHtml = renderToStaticMarkup(
+    React.createElement(
+      MemoryRouter,
+      null,
+      React.createElement(
+        WorkspaceContext.Provider,
+        { value: workspaceValue },
+        React.createElement(NotificationCenterDrawer, { open: true, initialTab: 'alerts', onClose: () => {} }),
+      ),
+    ),
+  );
+
+  // mail.webrich.news must not appear in Sistem Uyarıları
+  assert.doesNotMatch(alertsHtml, /mail\.webrich\.news/);
+  // Real suspended domain appears with quickResume action, Uyarıları Temizle, and Kapat
+  assert.match(alertsHtml, /askida\.webrich\.news/);
+  assert.match(alertsHtml, /\/websites\/dom-susp\/settings\?quickResume=1/);
+  assert.match(alertsHtml, /▶ Yayını Etkinleştir/);
+  assert.match(alertsHtml, /Uyarıları Temizle/);
+  assert.match(alertsHtml, /Kapat/);
 });

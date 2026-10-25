@@ -2075,3 +2075,413 @@ test('SCN-WEB-07f: createDomainHostingClient rejects reused plans, concurrent ex
   );
   assert.match(aliasErrorMessage({ code: 'domain_suspended_update_blocked' }), /Askıdaki alan adı/);
 });
+
+// ============================================================================
+// SCN-V3-02: 1-Level Flattened Subdomain Hierarchy, FileRootBadge Removal &
+//            Subdomain Table Card Rendering
+// ============================================================================
+
+const { domainTreeRows } = await import('../src/domain-tree.js');
+const {
+  isSystemMailServiceDomain,
+  filterWebsiteListDomains,
+  siteListPage,
+} = await import('../src/workspace/site-list-model.js');
+const { createWebsiteTaskResolver } = await import('../src/workspace/website-task-model.js');
+const { default: WebsiteTaskCard } = await import('../src/workspace/WebsiteTaskCard.jsx');
+const {
+  resumeDomainOrWebsite,
+  resumeWebsiteOrDomain,
+} = await import('../src/workspace/website-suspension-client.js');
+const {
+  domainSuspensionAction,
+  resolveWebsiteSuspensionAccess,
+  websiteSuspensionErrorMessage,
+} = await import('../src/workspace/website-suspension-model.js');
+
+test('SCN-V3-02a: domainTreeRows with flattenSubdomains=true flattens multi-level subdomains to depth 1 under root domain with childCount=0 on all subdomains', () => {
+  const hierarchy = [
+    { id: 'd-root', primaryDomain: 'webrich.news', parentDomainId: null, websiteId: 'ws-root', state: 'active', targetType: 'static' },
+    { id: 'd-yp-node', primaryDomain: 'yp-node.webrich.news', parentDomainId: 'd-root', websiteId: 'ws-yp', state: 'active', targetType: 'proxy' },
+    { id: 'd-git-route', primaryDomain: 'git-route.yp-node.webrich.news', parentDomainId: 'd-yp-node', websiteId: 'ws-git', state: 'active', targetType: 'proxy' },
+    { id: 'd-canary', primaryDomain: 'canary.git-route.yp-node.webrich.news', parentDomainId: 'd-git-route', websiteId: 'ws-canary', state: 'active', targetType: 'proxy' },
+    { id: 'd-api', primaryDomain: 'api.webrich.news', parentDomainId: 'd-root', websiteId: 'ws-api', state: 'active', targetType: 'proxy' },
+    { id: 'd-other', primaryDomain: 'other.org', parentDomainId: null, websiteId: 'ws-other', state: 'active', targetType: 'static' },
+  ];
+
+  // Default behavior (flattenSubdomains = false) preserves multi-level depths
+  const unflattened = domainTreeRows(hierarchy);
+  assert.deepEqual(
+    unflattened.map((r) => [r.domain.id, r.depth, r.childCount]),
+    [
+      ['d-other', 0, 0],
+      ['d-root', 0, 2],
+      ['d-api', 1, 0],
+      ['d-yp-node', 1, 1],
+      ['d-git-route', 2, 1],
+      ['d-canary', 3, 0],
+    ],
+  );
+
+  // Flattened behavior (flattenSubdomains = true) places all descendants at depth 1 under root
+  const flattened = domainTreeRows(hierarchy, { flattenSubdomains: true });
+  assert.deepEqual(
+    flattened.map((r) => [r.domain.id, r.depth, r.childCount]),
+    [
+      ['d-other', 0, 0],
+      ['d-root', 0, 4],
+      ['d-api', 1, 0],
+      ['d-canary', 1, 0],
+      ['d-git-route', 1, 0],
+      ['d-yp-node', 1, 0],
+    ],
+  );
+
+  // Collapsing root domain hides all flattened descendants when search is empty
+  const collapsedRoot = domainTreeRows(hierarchy, {
+    collapsed: new Set(['d-root']),
+    flattenSubdomains: true,
+  });
+  assert.deepEqual(
+    collapsedRoot.map((r) => [r.domain.id, r.depth, r.childCount, r.expanded]),
+    [
+      ['d-other', 0, 0, true],
+      ['d-root', 0, 4, false],
+    ],
+  );
+
+  // Searching a deep descendant expands root and includes matching descendants at depth 1
+  const searched = domainTreeRows(hierarchy, {
+    query: 'canary',
+    collapsed: new Set(['d-root']),
+    flattenSubdomains: true,
+  });
+  assert.deepEqual(
+    searched.map((r) => [r.domain.id, r.depth, r.childCount]),
+    [
+      ['d-root', 0, 4],
+      ['d-canary', 1, 0],
+    ],
+  );
+
+  // Works seamlessly with siteListPage pagination and status/type filtering
+  const paged = siteListPage(flattened, { perPage: 10, page: 1 });
+  assert.equal(paged.totalGroups, 2);
+  assert.equal(paged.rows.length, 6);
+});
+
+test('SCN-V3-02b: WebsiteTaskCard renders clean 1-level subdomain cards without FileRootBadge or ASCII tree connectors and exposes 1-click Yayını Etkinleştir link when suspended', () => {
+  const domains = [
+    { id: 'd-root', serverId: SERVER_ID, websiteId: 'ws-root', primaryDomain: 'webrich.news', parentDomainId: null, aliases: ['www.webrich.news'], state: 'active', targetType: 'static' },
+    { id: 'd-sub', serverId: SERVER_ID, websiteId: 'ws-sub', primaryDomain: 'git-route.yp-node.webrich.news', parentDomainId: 'd-root', aliases: [], state: 'active', targetType: 'proxy' },
+    { id: 'd-susp', serverId: SERVER_ID, websiteId: null, primaryDomain: 'paused.webrich.news', parentDomainId: 'd-root', aliases: [], state: 'suspended', targetType: 'static' },
+  ];
+  const websites = [
+    { id: 'ws-root', serverId: SERVER_ID, runtimeType: 'static', applicationId: null },
+    { id: 'ws-sub', serverId: SERVER_ID, runtimeType: 'node', applicationId: 'app-sub' },
+  ];
+  const resolveTasks = createWebsiteTaskResolver({
+    domains: { status: 'ready', items: domains },
+    websites: { status: 'ready', items: websites },
+    applications: { status: 'ready', items: [{ id: 'app-sub', name: 'yp-node-app', type: 'node', serverId: SERVER_ID }] },
+    canManage: true,
+    isOwner: true,
+  });
+
+  const rows = domainTreeRows(domains, { flattenSubdomains: true });
+  const html = renderToStaticMarkup(
+    createElement(
+      MemoryRouter,
+      null,
+      createElement(
+        'ul',
+        null,
+        rows.map((row) =>
+          createElement(WebsiteTaskCard, {
+            key: row.domain.id,
+            row,
+            tasks: resolveTasks(row.domain.id),
+            certificates: { status: 'ready', items: [] },
+            filtering: false,
+            onToggle: () => {},
+          }),
+        ),
+      ),
+    ),
+  );
+
+  // No FileRootBadge or ASCII connectors
+  assert.doesNotMatch(html, /Yayın klasörü:|Ortak Kök:|\/var\/www\/vhosts|├─|yp-tree-connector/);
+  // Root domain has disclosure button for its 2 subdomains
+  assert.match(html, /2 alt alan adı · Daralt/);
+  // Subdomain card has yp-subdomain-task-card class
+  assert.match(html, /yp-subdomain-task-card/);
+  // Suspended domain card has prominent Yayını Etkinleştir link to quickResume=1
+  assert.match(html, /href="\/websites\/d-susp\/settings\?quickResume=1"/);
+  assert.match(html, /Yayını Etkinleştir/);
+});
+
+// ============================================================================
+// SCN-V3-03: System Mail Service Domain Filtering (mail.*, webmail.*)
+// ============================================================================
+
+test('SCN-V3-03: isSystemMailServiceDomain and filterWebsiteListDomains exclude unbound mail.* and webmail.* service domains while preserving bound websites', () => {
+  const unboundMail = { id: 'd-mail', primaryDomain: 'mail.webrich.news', websiteId: null, state: 'suspended' };
+  const unboundWebmail = { id: 'd-webmail', primaryDomain: '  WEBMAIL.WebRich.News ', websiteId: undefined, state: 'active' };
+  const boundMailWebsite = { id: 'd-bound-mail', primaryDomain: 'mail.customer-portal.com', websiteId: 'ws-mail-app', state: 'active' };
+  const normalUnbound = { id: 'd-unbound-site', primaryDomain: 'standalone.webrich.news', websiteId: null, state: 'suspended' };
+  const normalSubdomain = { id: 'd-api', primaryDomain: 'api.webrich.news', parentDomainId: 'd-root', websiteId: 'ws-api', state: 'active' };
+  const mailerPrefixed = { id: 'd-mailer', primaryDomain: 'mailer.webrich.news', websiteId: null, state: 'active' };
+
+  assert.equal(isSystemMailServiceDomain(unboundMail), true);
+  assert.equal(isSystemMailServiceDomain(unboundWebmail), true);
+  assert.equal(isSystemMailServiceDomain(boundMailWebsite), false);
+  assert.equal(isSystemMailServiceDomain(normalUnbound), false);
+  assert.equal(isSystemMailServiceDomain(normalSubdomain), false);
+  assert.equal(isSystemMailServiceDomain(mailerPrefixed), false);
+  assert.equal(isSystemMailServiceDomain(null), false);
+  assert.equal(isSystemMailServiceDomain(undefined), false);
+  assert.equal(isSystemMailServiceDomain('mail.webrich.news'), false);
+
+  const filtered = filterWebsiteListDomains([
+    unboundMail,
+    unboundWebmail,
+    boundMailWebsite,
+    normalUnbound,
+    normalSubdomain,
+    mailerPrefixed,
+  ]);
+  assert.deepEqual(
+    filtered.map((d) => d.id),
+    ['d-bound-mail', 'd-unbound-site', 'd-api', 'd-mailer'],
+  );
+  assert.deepEqual(filterWebsiteListDomains(null), []);
+});
+
+// ============================================================================
+// SCN-V3-04: 1-Click Unsuspend (resumeDomainOrWebsite) for Bound Websites and
+//            Unbound Domains
+// ============================================================================
+
+test('SCN-V3-04a: resumeDomainOrWebsite resumes and retries resume for bound Websites via /websites/:id/suspension', async () => {
+  assert.equal(resumeDomainOrWebsite, resumeWebsiteOrDomain);
+
+  const calls = [];
+  const websiteId = '11111111-2222-4333-8444-555555555555';
+  const domain = { id: 'd-bound', primaryDomain: 'webrich.news', websiteId, state: 'suspended' };
+
+  // 1. First-time resume when status === 'suspended'
+  const resumeResult = await resumeDomainOrWebsite({
+    domain,
+    request: async (path, options) => {
+      calls.push({ path, options });
+      if (path === `/websites/${websiteId}/suspension` && !options) {
+        return {
+          operations: [
+            {
+              id: 'op-web-1',
+              status: 'suspended',
+              updatedAt: '2026-10-25T00:00:00.000Z',
+              actions: {
+                resumeConfirmation: 'resume-website:token-1',
+                resumeRetryConfirmation: null,
+              },
+            },
+          ],
+        };
+      }
+      if (path === `/websites/${websiteId}/suspension/resume` && options?.method === 'POST') {
+        return { id: 'op-web-1', status: 'resumed' };
+      }
+      throw new Error(`Unexpected call: ${path}`);
+    },
+  });
+
+  assert.equal(resumeResult.status, 'resumed');
+  assert.equal(calls.length, 2);
+  assert.deepEqual(calls[1], {
+    path: `/websites/${websiteId}/suspension/resume`,
+    options: {
+      method: 'POST',
+      body: {
+        operationId: 'op-web-1',
+        expectedUpdatedAt: '2026-10-25T00:00:00.000Z',
+        confirmation: 'resume-website:token-1',
+      },
+    },
+  });
+
+  // 2. Retry resume when status === 'resume_failed'
+  const retryCalls = [];
+  await resumeDomainOrWebsite({
+    domain,
+    request: async (path, options) => {
+      retryCalls.push({ path, options });
+      if (path === `/websites/${websiteId}/suspension`) {
+        return {
+          data: {
+            operations: [
+              {
+                id: 'op-web-2',
+                status: 'resume_failed',
+                updatedAt: '2026-10-25T01:00:00.000Z',
+                actions: {
+                  resumeConfirmation: null,
+                  resumeRetryConfirmation: 'retry-website-resume:token-2',
+                },
+              },
+            ],
+          },
+        };
+      }
+      return { id: 'op-web-2', status: 'resumed' };
+    },
+  });
+  assert.deepEqual(retryCalls[1], {
+    path: `/websites/${websiteId}/suspension/resume-retry`,
+    options: {
+      method: 'POST',
+      body: {
+        operationId: 'op-web-2',
+        expectedUpdatedAt: '2026-10-25T01:00:00.000Z',
+        confirmation: 'retry-website-resume:token-2',
+      },
+    },
+  });
+});
+
+test('SCN-V3-04b: resumeDomainOrWebsite resumes and retries resume for unbound Domains via /domains/:id/suspension-operations', async () => {
+  const domain = { id: 'd-unbound-1', primaryDomain: 'standalone.webrich.news', websiteId: null, state: 'suspended' };
+  const calls = [];
+
+  // 1. First-time resume on unbound domain
+  const res = await resumeDomainOrWebsite({
+    domain,
+    request: async (path, options) => {
+      calls.push({ path, options });
+      if (path === `/domains/${domain.id}/suspension-operations` && !options) {
+        return {
+          data: [
+            {
+              id: 'dom-op-1',
+              domainId: domain.id,
+              status: 'suspended',
+              updatedAt: '2026-10-25T02:00:00.000Z',
+              checksum: DIGEST_A,
+              actions: {
+                resumeConfirmation: 'resume-domain:dom-op-1',
+                resumeRetryConfirmation: null,
+              },
+            },
+          ],
+        };
+      }
+      if (path === `/domains/${domain.id}/suspension-operations/dom-op-1/resume`) {
+        return { data: { id: 'dom-op-1', status: 'resumed' } };
+      }
+      throw new Error(`Unexpected call: ${path}`);
+    },
+  });
+
+  assert.equal(res.data.status, 'resumed');
+  assert.deepEqual(calls[1], {
+    path: `/domains/${domain.id}/suspension-operations/dom-op-1/resume`,
+    options: {
+      method: 'POST',
+      body: {
+        expectedUpdatedAt: '2026-10-25T02:00:00.000Z',
+        checksum: DIGEST_A,
+        confirmation: 'resume-domain:dom-op-1',
+      },
+    },
+  });
+
+  // 2. Retry resume on unbound domain when status === 'resume_failed'
+  const retryCalls = [];
+  await resumeDomainOrWebsite({
+    domain,
+    request: async (path, options) => {
+      retryCalls.push({ path, options });
+      if (path === `/domains/${domain.id}/suspension-operations`) {
+        return [
+          {
+            id: 'dom-op-2',
+            domainId: domain.id,
+            status: 'resume_failed',
+            updatedAt: '2026-10-25T02:30:00.000Z',
+            checksum: DIGEST_B,
+            actions: {
+              resumeConfirmation: null,
+              resumeRetryConfirmation: 'retry-domain-resume:dom-op-2',
+            },
+          },
+        ];
+      }
+      return { id: 'dom-op-2', status: 'resumed' };
+    },
+  });
+  assert.deepEqual(retryCalls[1], {
+    path: `/domains/${domain.id}/suspension-operations/dom-op-2/resume-retry`,
+    options: {
+      method: 'POST',
+      body: {
+        expectedUpdatedAt: '2026-10-25T02:30:00.000Z',
+        checksum: DIGEST_B,
+        confirmation: 'retry-domain-resume:dom-op-2',
+      },
+    },
+  });
+});
+
+test('SCN-V3-04c: resumeDomainOrWebsite, resolveWebsiteSuspensionAccess, and domainSuspensionAction handle unbound domains and invalid states safely', async () => {
+  const unboundDomain = { id: 'd-unbound', serverId: SERVER_ID, websiteId: null, primaryDomain: 'unbound.webrich.news', state: 'suspended' };
+  const access = resolveWebsiteSuspensionAccess({
+    domainId: 'd-unbound',
+    domains: { status: 'ready', items: [unboundDomain] },
+    websites: { status: 'ready', items: [] },
+    canManage: true,
+  });
+  assert.equal(access.state, 'unbound');
+  assert.equal(access.domain.id, 'd-unbound');
+
+  assert.equal(domainSuspensionAction([]), null);
+  assert.equal(
+    domainSuspensionAction([{ id: 'op-1', status: 'suspended', actions: { resumeConfirmation: 'tok-1' } }])?.kind,
+    'resume',
+  );
+  assert.equal(
+    domainSuspensionAction([{ id: 'op-2', status: 'resume_failed', actions: { resumeRetryConfirmation: 'tok-2' } }])?.kind,
+    'retry-resume',
+  );
+
+  // Rejects missing request function
+  await assert.rejects(
+    () => resumeDomainOrWebsite({ domain: unboundDomain }),
+    (err) => err.code === 'website_suspension_response_invalid',
+  );
+
+  // Rejects missing domain and websiteId
+  await assert.rejects(
+    () => resumeDomainOrWebsite({ domain: null, request: async () => ({}) }),
+    (err) => err.code === 'website_suspension_response_invalid',
+  );
+
+  // Rejects when no resumable operation exists on website
+  await assert.rejects(
+    () => resumeDomainOrWebsite({
+      domain: { id: 'd-1', websiteId: 'ws-1' },
+      request: async () => ({ operations: [] }),
+    }),
+    (err) => err.code === 'website_resume_invalid' && websiteSuspensionErrorMessage(err).includes('Site askıda değil'),
+  );
+
+  // Rejects when no resumable operation exists on unbound domain
+  await assert.rejects(
+    () => resumeDomainOrWebsite({
+      domain: unboundDomain,
+      request: async () => ({ data: [] }),
+    }),
+    (err) => err.code === 'domain_resume_invalid' && websiteSuspensionErrorMessage(err).includes('Alan adı askıda değil'),
+  );
+});
+

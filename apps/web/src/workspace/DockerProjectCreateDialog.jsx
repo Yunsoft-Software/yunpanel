@@ -19,7 +19,7 @@ import {
 } from './PanelKit.jsx';
 
 export default function DockerProjectCreateDialog({ onClose, initialTemplate = null }) {
-  const { servers, setNotice } = useWorkspace();
+  const { servers, domains, setNotice } = useWorkspace();
   const navigate = useNavigate();
   const server = servers.items.length === 1 ? servers.items[0] : null;
   const startPreset = initialTemplate || DEFAULT_DOCKER_STACK_TEMPLATES[0];
@@ -33,6 +33,11 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
   const [projectName, setProjectName] = useState(
     initialTemplate?.projectName || (initialGenerated ? `${initialGenerated.serviceName}_stack` : ''),
   );
+  const [targetDomain, setTargetDomain] = useState(() => {
+    const firstRoot = domains?.items?.find((d) => !d.parentDomainId)?.primaryDomain || 'webrich.news';
+    return initialTemplate?.id ? `${initialTemplate.id}.${firstRoot}` : '';
+  });
+  const [autoSsl, setAutoSsl] = useState(true);
   const [document, setDocument] = useState(
     initialTemplate?.defaultComposeDocument
       || (initialGenerated ? initialGenerated.document : 'services:\n  web:\n    image: nginx:latest\n'),
@@ -57,6 +62,7 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
       const prepared = await prepareOneClickApp({
         templateId: initialTemplate.id,
         projectName: projectName || undefined,
+        hostname: targetDomain.trim() || undefined,
         innerPort: targetPort,
         outerPort: publishedPort,
       });
@@ -168,7 +174,33 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
     } finally { pending.current = false; setBusy(false); }
   }
 
-  return <Modal title="Docker Compose projesi ekle" onClose={onClose} busy={busy} wide><form onSubmit={create} className="ws-form"><ErrorNotice error={error} />{!server && <div className="ws-notice ws-notice-warn" role="alert">Yerel sunucu kimliği hazır olmadan Compose projesi oluşturulamaz.</div>}<fieldset disabled={busy || !server}>{initialTemplate?.oneClick && <div className="ws-notice" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px' }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}><Badge state="active">Tek Tıkla Kur (Easypanel)</Badge><span className="yp-port-mapping-badge">Otomatik Secret & Volume ({generatedSecretsCount} secret üretildi)</span>{proxyPreview?.upstreamUrl && <span className="yp-port-mapping-badge">Proxy Hedefi: {proxyPreview.upstreamUrl}</span>}</div><Button onClick={refreshOneClickSecrets} disabled={busy}>Secret'ları Yeniden Üret</Button></div>}<DockerHubCatalogPicker catalog={hubCatalog} selectedImage={selectedImage} targetPort={targetPort} publishedPort={publishedPort} searchQuery={hubSearchQuery} searching={hubSearching} onSearchQueryChange={setHubSearchQuery} onSelectImage={handleSelectImage} onChangeTargetPort={setTargetPort} onChangePublishedPort={setPublishedPort} onApplyTemplate={applyQuickTemplate} disabled={busy || !server} /><div className="ws-form-grid"><label>Proje adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label><label>.yml Dosyası Seç / Yükle<input type="file" accept=".yml,.yaml" aria-label=".yml Dosyası Seç / Yükle" onChange={handleYamlFileUpload} /></label></div><label>Compose document<textarea rows={18} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>{validation && <KeyValues items={[
+  const modalTitle = initialTemplate?.oneClick
+    ? `${initialTemplate.title || initialTemplate.name || 'Uygulama'} — Tek Tıkla Kurulum`
+    : 'Docker Compose projesi ekle';
+
+  return <Modal title={modalTitle} onClose={onClose} busy={busy} wide><form onSubmit={create} className="ws-form"><ErrorNotice error={error} />{!server && <div className="ws-notice ws-notice-warn" role="alert">Yerel sunucu kimliği hazır olmadan Compose projesi oluşturulamaz.</div>}<fieldset disabled={busy || !server}>{initialTemplate?.oneClick ? <>
+    <div className="ws-notice" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px' }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}><Badge state="active">Tek Tıkla Kur (Easypanel)</Badge><span className="yp-port-mapping-badge">Otomatik Secret & Volume ({generatedSecretsCount} secret üretildi)</span>{proxyPreview?.upstreamUrl && <span className="yp-port-mapping-badge">Proxy Hedefi: {proxyPreview.upstreamUrl}</span>}</div><Button onClick={refreshOneClickSecrets} disabled={busy}>Secret'ları Yeniden Üret</Button></div>
+    <div className="ws-form-grid">
+      <label>Proje / Servis Adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label>
+      <label>Yayınlanacak Alan Adı / Alt Alan Adı<input value={targetDomain} onChange={(event) => setTargetDomain(event.target.value)} autoComplete="off" spellCheck={false} placeholder="n8n.webrich.news" /></label>
+    </div>
+    <label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0 12px' }}>
+      <input type="checkbox" checked={autoSsl} onChange={(event) => setAutoSsl(event.target.checked)} />
+      <span>{`Otomatik Let's Encrypt SSL & Nginx Reverse Proxy (${targetDomain || 'alan adı'} → 127.0.0.1:${publishedPort} → :${targetPort})`}</span>
+    </label>
+    <details className="ws-disclosure" style={{ marginBottom: '12px' }}>
+      <summary>Gelişmiş Port, İmaj ve Compose YAML Ayarları</summary>
+      <div style={{ marginTop: '12px', display: 'grid', gap: '12px' }}>
+        <DockerHubCatalogPicker catalog={hubCatalog} selectedImage={selectedImage} targetPort={targetPort} publishedPort={publishedPort} searchQuery={hubSearchQuery} searching={hubSearching} onSearchQueryChange={setHubSearchQuery} onSelectImage={handleSelectImage} onChangeTargetPort={setTargetPort} onChangePublishedPort={setPublishedPort} onApplyTemplate={applyQuickTemplate} disabled={busy || !server} />
+        <label>.yml Dosyası Seç / Yükle<input type="file" accept=".yml,.yaml" aria-label=".yml Dosyası Seç / Yükle" onChange={handleYamlFileUpload} /></label>
+        <label>Compose document<textarea rows={12} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>
+      </div>
+    </details>
+  </> : <>
+    <DockerHubCatalogPicker catalog={hubCatalog} selectedImage={selectedImage} targetPort={targetPort} publishedPort={publishedPort} searchQuery={hubSearchQuery} searching={hubSearching} onSearchQueryChange={setHubSearchQuery} onSelectImage={handleSelectImage} onChangeTargetPort={setTargetPort} onChangePublishedPort={setPublishedPort} onApplyTemplate={applyQuickTemplate} disabled={busy || !server} />
+    <div className="ws-form-grid"><label>Proje adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label><label>.yml Dosyası Seç / Yükle<input type="file" accept=".yml,.yaml" aria-label=".yml Dosyası Seç / Yükle" onChange={handleYamlFileUpload} /></label></div>
+    <label>Compose document<textarea rows={18} value={document} onChange={(event) => { setDocument(event.target.value); setValidation(null); }} required spellCheck={false} /></label>
+  </>}{validation && <KeyValues items={[
     ['Servis', validation.serviceCount], ['Network', validation.networks?.length ?? 0], ['Volume', validation.volumes?.length ?? 0], ['Secret', validation.secretCount], ['Config', validation.configCount], ['Yan etki', validation.sideEffects === false ? 'Yok' : 'Bilinmiyor'],
-  ]} />}<footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button disabled={busy || !server || !projectName || !document} onClick={validate}>Validate</Button><Button variant="primary" type="submit" disabled={busy || !server || !projectName || !document}>{busy ? 'İşleniyor…' : 'Projeyi kaydet'}</Button></footer></fieldset></form></Modal>;
+  ]} />}<footer className="ws-modal-footer"><Button disabled={busy} onClick={onClose}>Vazgeç</Button><Button disabled={busy || !server || !projectName || !document} onClick={validate}>Validate</Button><Button variant="primary" type="submit" disabled={busy || !server || !projectName || !document}>{busy ? 'İşleniyor…' : (initialTemplate?.oneClick ? '⚡ Uygulamayı Kur ve Yayınla' : 'Projeyi kaydet')}</Button></footer></fieldset></form></Modal>;
 }

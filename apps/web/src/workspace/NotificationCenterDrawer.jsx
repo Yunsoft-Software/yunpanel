@@ -10,7 +10,24 @@ function collectionItems(resource) {
   return [];
 }
 
-export function computeWorkspaceAlerts({ domains, websites, certificates, servers, jobs } = {}) {
+export function isSystemMailHostname(domain) {
+  return Boolean(
+    domain
+      && !domain.websiteId
+      && /^(mail|webmail)\.[^.]+/i.test(String(domain.primaryDomain ?? domain.domain ?? '').trim()),
+  );
+}
+
+const ACTIVE_FAILED_JOB_ALERT_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+export function computeWorkspaceAlerts({
+  domains,
+  websites,
+  certificates,
+  servers,
+  jobs,
+  dismissedAlertIds = null,
+} = {}) {
   const alerts = [];
   const domainItems = collectionItems(domains);
   const websiteItems = collectionItems(websites);
@@ -19,7 +36,7 @@ export function computeWorkspaceAlerts({ domains, websites, certificates, server
   const jobItems = collectionItems(jobs);
 
   for (const domain of domainItems) {
-    if (!domain) continue;
+    if (!domain || isSystemMailHostname(domain)) continue;
     const linkedCert = !domain.certificateId
       ? certItems.find((item) => item?.domainId === domain.id || (domain.primaryDomain && item?.primaryDomain === domain.primaryDomain))
       : null;
@@ -113,6 +130,10 @@ export function computeWorkspaceAlerts({ domains, websites, certificates, server
 
   for (const job of jobItems) {
     if (job?.status !== 'failed') continue;
+    const ts = job.completedAt ?? job.finishedAt ?? job.updatedAt ?? job.createdAt;
+    if (ts && Number.isFinite(Date.parse(ts)) && (Date.now() - Date.parse(ts)) > ACTIVE_FAILED_JOB_ALERT_WINDOW_MS) {
+      continue;
+    }
     alerts.push({
       id: `job-failed-${job.id}`,
       category: 'job',
@@ -129,7 +150,7 @@ export function computeWorkspaceAlerts({ domains, websites, certificates, server
 
   const seenSuspendedDomains = new Set();
   for (const domain of domainItems) {
-    if (!domain || (domain.state !== 'suspended' && domain.status !== 'suspended')) continue;
+    if (!domain || isSystemMailHostname(domain) || (domain.state !== 'suspended' && domain.status !== 'suspended')) continue;
     seenSuspendedDomains.add(domain.id);
     alerts.push({
       id: `domain-suspended-${domain.id}`,
@@ -161,13 +182,22 @@ export function computeWorkspaceAlerts({ domains, websites, certificates, server
     });
   }
 
-  return alerts;
+  const dismissedSet = dismissedAlertIds instanceof Set
+    ? dismissedAlertIds
+    : Array.isArray(dismissedAlertIds)
+      ? new Set(dismissedAlertIds)
+      : null;
+
+  return dismissedSet && dismissedSet.size > 0
+    ? alerts.filter((alert) => !dismissedSet.has(alert.id))
+    : alerts;
 }
 
 export function NotificationCenterDrawer({ open = true, onClose, initialTab = 'tasks' }) {
   const { domains, websites, certificates, servers, jobs, notice, setNotice, observe } = useWorkspace();
   const [activeTab, setActiveTab] = useState(initialTab);
   const [noticeHistory, setNoticeHistory] = useState([]);
+  const [dismissedIds, setDismissedIds] = useState(() => new Set());
 
   useEffect(() => {
     if (!notice) return;
@@ -200,8 +230,8 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
     [jobItems],
   );
   const alerts = useMemo(
-    () => computeWorkspaceAlerts({ domains, websites, certificates, servers, jobs }),
-    [domains, websites, certificates, servers, jobs],
+    () => computeWorkspaceAlerts({ domains, websites, certificates, servers, jobs, dismissedAlertIds: dismissedIds }),
+    [domains, websites, certificates, servers, jobs, dismissedIds],
   );
   const notices = useMemo(() => {
     if (!notice) return noticeHistory;
@@ -211,6 +241,25 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
   }, [notice, noticeHistory]);
 
   if (!open) return null;
+
+  function dismissAlert(alertId) {
+    if (!alertId) return;
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      next.add(alertId);
+      return next;
+    });
+  }
+
+  function clearAlerts() {
+    setDismissedIds((prev) => {
+      const next = new Set(prev);
+      for (const alert of alerts) {
+        if (alert?.id) next.add(alert.id);
+      }
+      return next;
+    });
+  }
 
   function clearNotices() {
     setNotice?.(null);
@@ -321,26 +370,38 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
 
           {activeTab === 'alerts' && (
             <section aria-label="Sistem Uyarıları" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
-              {alerts.length > 0 ? alerts.map((alert) => (
-                <article key={alert.id} className="ws-alert-item" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
-                  <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
-                    <Icon name={alert.category === 'ssl' ? 'shield' : alert.category === 'server' ? 'server' : 'alert'} />
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
-                        <strong>{alert.title}</strong>
-                        <Badge state={alert.badgeState}>{alert.severityLabel}</Badge>
+              {alerts.length > 0 ? (
+                <>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <span className="ws-muted">{alerts.length} sistem uyarısı</span>
+                    <Button onClick={clearAlerts}>Uyarıları Temizle</Button>
+                  </div>
+                  {alerts.map((alert) => (
+                    <article key={alert.id} className="ws-alert-item" style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '0.75rem' }}>
+                      <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.6rem' }}>
+                        <Icon name={alert.category === 'ssl' ? 'shield' : alert.category === 'server' ? 'server' : 'alert'} />
+                        <div>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '0.45rem', flexWrap: 'wrap' }}>
+                            <strong>{alert.title}</strong>
+                            <Badge state={alert.badgeState}>{alert.severityLabel}</Badge>
+                          </div>
+                          <p className="ws-muted" style={{ margin: '0.2rem 0 0' }}>{alert.detail}</p>
+                        </div>
                       </div>
-                      <p className="ws-muted" style={{ margin: '0.2rem 0 0' }}>{alert.detail}</p>
-                    </div>
-                  </div>
-                  <div className="ws-actions" style={{ alignItems: 'center', gap: '0.4rem' }}>
-                    {alert.job ? (
-                      <Button onClick={() => { observe?.(alert.job); onClose?.(); }}>İncele</Button>
-                    ) : null}
-                    <LinkButton to={alert.href} onClick={() => onClose?.()}>{alert.actionLabel}</LinkButton>
-                  </div>
-                </article>
-              )) : (
+                      <div className="ws-actions" style={{ alignItems: 'center', gap: '0.4rem' }}>
+                        {alert.job ? (
+                          <Button onClick={() => { observe?.(alert.job); onClose?.(); }}>İncele</Button>
+                        ) : null}
+                        {alert.category === 'domain' ? (
+                          <LinkButton to={`${alert.href}?quickResume=1`} variant="primary" onClick={() => onClose?.()}>▶ Yayını Etkinleştir</LinkButton>
+                        ) : null}
+                        <LinkButton to={alert.href} onClick={() => onClose?.()}>{alert.actionLabel}</LinkButton>
+                        <Button onClick={() => dismissAlert(alert.id)}>Kapat</Button>
+                      </div>
+                    </article>
+                  ))}
+                </>
+              ) : (
                 <EmptyState
                   title="Sistem uyarısı yok"
                   detail="SSL sertifikaları, sunucu kaynakları ve görev kuyruğunda dikkat gerektiren bir sorun tespit edilmedi."
