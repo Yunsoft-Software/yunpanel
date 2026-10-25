@@ -133,3 +133,30 @@ test('SCN-MOB-08: Zero AI-slop, zero feature bragging pills, and zero parentheti
   assert.doesNotMatch(filesSrc, /Plesk uyumlu|Root kilitli/);
   assert.doesNotMatch(firewallSrc, /Plesk yerleşiminde/);
 });
+
+test('SCN-MOB-09: Session expiry warning (.auth-expiry) and .auth-banner clear the fixed left sidebar on desktop and reset on mobile/collapsed', async () => {
+  const themeCss = await readSrc('workspace/design-system/theme.css');
+
+  // Desktop: .auth-expiry and .authenticated-panel .auth-banner offset by calc(var(--ws-sidebar-width, 236px) + 24px)
+  assert.match(
+    themeCss,
+    /html\s+\.auth-expiry\s*\{[\s\S]*?margin:\s*12px\s+24px\s+12px\s+calc\(var\(--ws-sidebar-width,\s*236px\)\s*\+\s*24px\)\s*!important/,
+  );
+  assert.match(
+    themeCss,
+    /html\s+\.authenticated-panel\s+\.auth-banner\s*\{[\s\S]*?margin:\s*12px\s+24px\s+12px\s+calc\(var\(--ws-sidebar-width,\s*236px\)\s*\+\s*24px\)\s*!important/,
+  );
+
+  // Collapsed sidebar on desktop resets margin-left to 24px
+  assert.match(
+    themeCss,
+    /html\s+\.authenticated-panel:has\(\.workspace-shell\.is-sidebar-collapsed\)\s+:is\(\.auth-expiry,\s*\.auth-banner\)\s*\{[\s\S]*?margin-left:\s*24px\s*!important/,
+  );
+
+  // Mobile/Tablet <= 900px resets margin so it spans cleanly across the viewport
+  assert.match(
+    themeCss,
+    /@media\s*\(max-width:\s*900px\)\s*\{[\s\S]*?html\s+\.authenticated-panel\s+:is\(\.auth-expiry,\s*\.auth-banner\)\s*\{[\s\S]*?margin:\s*10px\s+14px\s*!important/,
+  );
+});
+

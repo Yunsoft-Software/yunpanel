@@ -497,6 +497,10 @@ html .workspace-shell .ws-mobile-menu {
   html .authenticated-panel:has(.workspace-shell.is-sidebar-collapsed) .auth-sessionbar {
     padding-left: 24px !important;
   }
+
+  html .authenticated-panel:has(.workspace-shell.is-sidebar-collapsed) :is(.auth-expiry, .auth-banner) {
+    margin-left: 24px !important;
+  }
 }
 
 html .workspace-shell .ws-filters {
@@ -2227,13 +2231,35 @@ html .auth-notice {
 }
 
 html .auth-expiry {
-  margin: 12px 24px !important;
+  margin: 12px 24px 12px calc(var(--ws-sidebar-width, 236px) + 24px) !important;
   padding: 10px 14px !important;
   border-radius: var(--ws-radius, 6px) !important;
   border: 1px solid rgba(245, 158, 11, 0.35) !important;
   background: var(--ws-warning-soft) !important;
   color: var(--ws-warning) !important;
   font-size: 13px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: space-between !important;
+  flex-wrap: wrap !important;
+  gap: 10px 14px !important;
+  position: relative !important;
+  z-index: 20 !important;
+}
+
+html .authenticated-panel .auth-banner {
+  margin: 12px 24px 12px calc(var(--ws-sidebar-width, 236px) + 24px) !important;
+  position: relative !important;
+  z-index: 20 !important;
+}
+
+html .auth-expiry button.auth-secondary {
+  min-height: 30px !important;
+  height: 30px !important;
+  padding: 0 12px !important;
+  font-size: 12px !important;
+  border-radius: 6px !important;
+  flex-shrink: 0 !important;
 }
 
 html .auth-loading {
@@ -2371,9 +2397,18 @@ html .owner-enrollment-footer {
   html .auth-form {
     padding: 24px 20px !important;
   }
+
+  html .authenticated-panel :is(.auth-expiry, .auth-banner) {
+    margin: 10px 14px !important;
+  }
 }
 
 @media (max-width: 640px) {
+  html .authenticated-panel :is(.auth-expiry, .auth-banner) {
+    margin: 8px 10px !important;
+    padding: 8px 12px !important;
+  }
+
   html .auth-dialog {
     width: calc(100vw - 16px) !important;
     padding: 18px 16px !important;

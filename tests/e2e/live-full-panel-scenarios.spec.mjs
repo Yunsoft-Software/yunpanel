@@ -89,6 +89,33 @@ test('SCN-E2E-01: Authenticated session initialization & shell verification (top
   assert.notEqual(toggledTheme, initialTheme, 'Clicking theme toggle must switch dataset.wsTheme');
   await themeBtn.click();
 
+  // Verify session expiry warning (.auth-expiry) and .auth-banner clear the fixed left sidebar (.ws-sidebar) on desktop
+  const expiryClearance = await page.evaluate(() => {
+    const panel = document.querySelector('.authenticated-panel');
+    const sidebar = document.querySelector('.ws-sidebar');
+    if (!panel || !sidebar) return null;
+    const probe = document.createElement('div');
+    probe.className = 'auth-expiry';
+    probe.setAttribute('role', 'status');
+    probe.innerHTML = '<span>Oturumunuz hareketsizlik nedeniyle kapanmak üzere. (45 sn)</span><button type="button" class="auth-secondary">Oturumu uzat</button>';
+    const sessionBar = panel.querySelector('.auth-sessionbar');
+    panel.insertBefore(probe, sessionBar ? sessionBar.nextSibling : panel.firstChild);
+    const sidebarRect = sidebar.getBoundingClientRect();
+    const probeRect = probe.getBoundingClientRect();
+    probe.remove();
+    return {
+      sidebarRight: Math.round(sidebarRect.right),
+      expiryLeft: Math.round(probeRect.left),
+      expiryRight: Math.round(probeRect.right),
+      viewportWidth: window.innerWidth,
+    };
+  });
+  assert.ok(expiryClearance, 'Must be able to measure .auth-expiry clearance inside .authenticated-panel');
+  assert.ok(
+    expiryClearance.expiryLeft >= expiryClearance.sidebarRight + 16,
+    `Session expiry banner (.auth-expiry) left (${expiryClearance.expiryLeft}px) must clear .ws-sidebar right (${expiryClearance.sidebarRight}px)`,
+  );
+
   assertZeroErrors('SCN-E2E-01');
 });
 
