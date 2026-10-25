@@ -555,3 +555,135 @@ test('SCN-E2E-08: Full-Panel Route Sweep (Zero Crash / Zero 500 Guarantee)', asy
     assertZeroErrors(`SCN-E2E-08:${route}`);
   }
 });
+
+test('SCN-MOB-01 .. SCN-MOB-06: Mobile Viewport (375x812) Responsiveness Across All Routes', async () => {
+  await page.setViewportSize({ width: 375, height: 812 });
+  try {
+    // 1. Dashboard & Top Session Bar / Toolbar / Notification Drawer / Sidebar Drawer
+    await page.goto(`${baseUrl}/dashboard`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(300);
+
+    const shellAudit = await page.evaluate(() => {
+      const sessionBar = document.querySelector('.auth-sessionbar');
+      const sessionRect = sessionBar?.getBoundingClientRect();
+      const sessionPadLeft = sessionBar ? parseFloat(getComputedStyle(sessionBar).paddingLeft) : 999;
+      const toolbar = document.querySelector('.ws-toolbar');
+      const toolbarRect = toolbar?.getBoundingClientRect();
+      const themeBtn = document.querySelector('button[aria-label="Gece ve Açık tema arasında geçiş yap"]');
+      const hasThemeSvg = Boolean(themeBtn?.querySelector('svg'));
+      return {
+        sessionPadLeft,
+        sessionHeight: sessionRect ? Math.round(sessionRect.height) : 0,
+        sessionBottom: sessionRect ? Math.round(sessionRect.bottom) : 0,
+        toolbarTop: toolbarRect ? Math.round(toolbarRect.top) : 0,
+        toolbarHeight: toolbarRect ? Math.round(toolbarRect.height) : 0,
+        hasThemeSvg,
+      };
+    });
+
+    assert.ok(shellAudit.sessionPadLeft <= 20, `Mobile .auth-sessionbar paddingLeft must be <= 20px, got ${shellAudit.sessionPadLeft}px`);
+    assert.ok(shellAudit.sessionHeight <= 48, `Mobile .auth-sessionbar height must not wrap into multi-row block, got ${shellAudit.sessionHeight}px`);
+    assert.ok(shellAudit.hasThemeSvg, 'Mobile theme toggle button must render a visible SVG icon');
+
+    // Notification Center Bell must be directly clickable on mobile (not covered by .auth-sessionbar)
+    const bellBtn = page.locator('button[aria-label="Bildirim ve Görev Merkezi"]');
+    await bellBtn.click();
+    const drawer = page.locator('.yp-notification-drawer, .ws-notification-drawer');
+    await drawer.waitFor({ state: 'visible', timeout: 5000 });
+    const drawerWidth = await drawer.evaluate((el) => Math.round(el.getBoundingClientRect().width));
+    assert.equal(drawerWidth, 375, 'Notification drawer must span full 375px width on mobile');
+    await page.locator('button[aria-label="Bildirim merkezini kapat"]').click();
+
+    // Mobile Hamburger Menu opens slide-over sidebar drawer
+    await page.locator('button.ws-mobile-menu').click();
+    await page.locator('.ws-sidebar.is-open').waitFor({ state: 'visible', timeout: 5000 });
+    await page.locator('button.ws-nav-close').click();
+
+    // 2. Site Detail Navigation & Hosting Code Block on Mobile
+    await page.goto(`${baseUrl}/websites/webrich.news/hosting`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(300);
+
+    const hostingAudit = await page.evaluate(() => {
+      const nav = document.querySelector('.ws-plesk-site-navigation');
+      const navRect = nav?.getBoundingClientRect();
+      const codeBlock = document.querySelector('pre.ws-code-block');
+      const codeRect = codeBlock?.getBoundingClientRect();
+      return {
+        navHeight: navRect ? Math.round(navRect.height) : 999,
+        codeRight: codeRect ? Math.round(codeRect.right) : 0,
+      };
+    });
+
+    assert.ok(hostingAudit.navHeight <= 68, `Mobile .ws-plesk-site-navigation must be a single horizontal scrollable row (<= 68px), got ${hostingAudit.navHeight}px`);
+    assert.ok(hostingAudit.codeRight <= 377, `Mobile pre.ws-code-block must not overflow 375px viewport, got right=${hostingAudit.codeRight}px`);
+
+    // 3. File Manager (.yf-browser) on Mobile: 2x2 buttons fit inside viewport & size/perm cells do not overlap
+    await page.goto(`${baseUrl}/websites/webrich.news/files`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(400);
+
+    const filesAudit = await page.evaluate(() => {
+      const actionBtns = [...document.querySelectorAll('.yf-main-actions .ws-button')];
+      const maxActionRight = actionBtns.reduce((max, btn) => Math.max(max, Math.round(btn.getBoundingClientRect().right)), 0);
+      const firstRow = document.querySelector('.yf-table tbody tr');
+      const sizeCell = firstRow?.querySelector('td:nth-child(3).yf-size');
+      const permCell = firstRow?.querySelector('td.yf-perm-cell');
+      const sizePadLeft = sizeCell ? parseFloat(getComputedStyle(sizeCell).paddingLeft) : 0;
+      const permPadLeft = permCell ? parseFloat(getComputedStyle(permCell).paddingLeft) : 0;
+      return {
+        maxActionRight,
+        sizePadLeft,
+        permPadLeft,
+      };
+    });
+
+    assert.ok(filesAudit.maxActionRight <= 375, `Mobile .yf-main-actions buttons must fit inside 375px viewport, got right=${filesAudit.maxActionRight}px`);
+    if (filesAudit.sizePadLeft > 0 && filesAudit.permPadLeft > 0) {
+      assert.ok(filesAudit.permPadLeft >= filesAudit.sizePadLeft + 50, `Mobile .yf-size (${filesAudit.sizePadLeft}px) and .yf-perm-cell (${filesAudit.permPadLeft}px) must not overlap`);
+    }
+
+    // 4. Sweep Mobile Routes for Zero Horizontal Overflow
+    const mobileRoutes = [
+      '/websites',
+      '/docker?mode=catalog',
+      '/databases',
+      '/mail',
+      '/firewall',
+      '/settings',
+      '/jobs',
+      '/audit',
+    ];
+
+    for (const route of mobileRoutes) {
+      await page.goto(`${baseUrl}${route}`, { waitUntil: 'networkidle' });
+      await page.waitForTimeout(250);
+      const overflowCheck = await page.evaluate(() => {
+        const vw = document.documentElement.clientWidth;
+        const offenders = [];
+        for (const el of document.querySelectorAll('*')) {
+          const style = getComputedStyle(el);
+          if (style.display === 'none' || style.visibility === 'hidden') continue;
+          const rect = el.getBoundingClientRect();
+          if (rect.width === 0 && rect.height === 0) continue;
+          if (rect.right > vw + 2 || rect.left < -2) {
+            if (el.closest('.ws-sidebar:not(.is-open)')) continue;
+            if (el.closest('.ws-table-scroll, .ws-table-wrap, .dns-table-wrap, .yf-results, .yf-location nav, .ws-plesk-site-navigation, .yp-category-pills, .ws-tabs')) continue;
+            offenders.push({
+              tag: el.tagName.toLowerCase(),
+              cls: typeof el.className === 'string' ? el.className.slice(0, 40) : '',
+              right: Math.round(rect.right),
+            });
+          }
+        }
+        return { vw, offenders };
+      });
+      assert.equal(
+        overflowCheck.offenders.length,
+        0,
+        `Mobile route ${route} at ${overflowCheck.vw}px must have 0 horizontal overflow offenders, found: ${JSON.stringify(overflowCheck.offenders.slice(0, 5))}`,
+      );
+      assertZeroErrors(`SCN-MOB:${route}`);
+    }
+  } finally {
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+});

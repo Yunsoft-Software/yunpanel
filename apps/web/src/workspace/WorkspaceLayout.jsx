@@ -175,7 +175,7 @@ function Shell() {
         <Button className="ws-mobile-menu" icon="menu" aria-label="Ana menüyü aç" title={sidebarCollapsed ? 'Yan menüyü göster' : 'Yan menüyü gizle'} aria-expanded={narrow ? menuOpen : !sidebarCollapsed} aria-controls="workspace-navigation" onClick={toggleSidebar} />
         <button type="button" className="ws-command-trigger" aria-label="Site veya panel bölümü ara" aria-haspopup="dialog" onClick={() => setPaletteOpen(true)}><Icon name="search" /><span>Site veya araç ara…</span><kbd>⌘ / Ctrl K</kbd></button>
         <div className="ws-toolbar-actions">
-          <Button onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
+          <Button icon={themeMode === 'light' ? 'moon' : 'sun'} onClick={toggleThemeMode} aria-label="Gece ve Açık tema arasında geçiş yap" title="Tema Değiştir (Dark / Light)">
             <span className="ws-toolbar-label">{themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}</span>
           </Button>
           {canManage && isOwner && <LinkButton to="/docker" icon="box" aria-label="Docker ve Stack Yönetimi" title="Docker & Stack Kataloğu"><span className="ws-toolbar-label">1-Click Market</span></LinkButton>}

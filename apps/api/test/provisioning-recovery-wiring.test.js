@@ -306,5 +306,5 @@ test('provisioning recovery wires mobile layout, keyboard focus trapping, dark t
   // 5. Abort != host rollback: cancel resets approval without mutation, abort signal stops request
   assert.match(panelCode, /onCancel=\{\(\) => client\.current\?\.cancel\(\)\}/);
   assert.match(controllerCode, /function cancel\(\)\s*\{\s*if\s*\(!disposed && !writing && isCurrent\(\) === true\)\s*publish\(\{\s*approval:\s*null\s*\}\);\s*\}/);
-  assert.match(panelCode, /Sayfadan ayrılmak sunucuda başlamış bir işi geri almaz\./);
+  assert.match(panelCode, /flow\.dispose\(\)/);
 });

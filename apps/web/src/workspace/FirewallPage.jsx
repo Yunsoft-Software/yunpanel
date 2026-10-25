@@ -393,7 +393,7 @@ export default function FirewallPage() {
         title="Port ve Güvenlik Duvarı Kuralları"
         description="Dinleyen soketler, firewall izinleri ve dış erişilebilirlik ayrımı."
         actions={
-          <div style={{ display: 'flex', gap: '0.5rem' }}>
+          <div className="ws-actions" style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem' }}>
             <Button
               variant={filterMode === 'all' ? 'primary' : 'secondary'}
               onClick={() => setFilterMode('all')}
