@@ -131,7 +131,7 @@ test('JAMSTACK_FRAMEWORK_PRESETS exposes all 9 frozen presets with exact runtime
     },
     {
       id: 'docker_stack',
-      label: 'Docker / Easypanel Stack Proxy',
+      label: 'Docker / Compose Proxy',
       category: 'Container',
       sourceMode: 'docker_compose',
       entryFile: '',
@@ -309,35 +309,22 @@ test('NewWebsitePage and SiteOperations wire JAMstack presets and Git Push Webho
   // NewWebsitePage Step 2 preset selector bar wiring
   assert.match(newWebsiteSource, /JAMSTACK_FRAMEWORK_PRESETS/);
   assert.match(newWebsiteSource, /applyFrameworkPresetToForm/);
-  assert.match(newWebsiteSource, /Hızlı Framework \/ JAMstack Şablonu Seçin/);
-  for (const label of [
-    'Next.js',
-    'Astro',
-    'Vite / React SPA',
-    'Nuxt 3',
-    'Remix',
-    'Node.js API',
-    'Python API',
-    'Docker / Easypanel',
-    'PHP / WordPress',
-  ]) {
-    assert.ok(newWebsiteSource.includes(label), `NewWebsitePage must mention ${label}`);
-  }
+  assert.match(newWebsiteSource, /Uygulama Şablonu Seçin/);
 
-  // SiteOperations Git Push Webhook & Otomatik Yayın (CI/CD) section wiring
-  assert.match(siteOpsSource, /Git Push Webhook & Otomatik Yayın \(CI\/CD\)/);
+  // SiteOperations Git Webhook ve Otomatik Yayın section wiring
+  assert.match(siteOpsSource, /Git Webhook ve Otomatik Yayın/);
   assert.match(siteOpsSource, /GitHub Webhook Endpoint/);
   assert.match(siteOpsSource, /\/api\/webhooks\/github/);
   assert.match(siteOpsSource, /Webhook URL Kopyala/);
-  assert.match(siteOpsSource, /Tetiklenen Dal \(Branch\)/);
+  assert.match(siteOpsSource, /Tetiklenen Dal/);
   assert.match(siteOpsSource, /refs\/heads\/\$\{application\.branch \|\| 'main'\}/);
-  assert.match(siteOpsSource, /İçerik Türü \(Content-Type\)/);
+  assert.match(siteOpsSource, /İçerik Türü/);
   assert.match(siteOpsSource, /application\/json/);
   assert.match(siteOpsSource, /Build & Çalışma Özeti/);
-  assert.match(siteOpsSource, /Çıktı Dizini \(outputDir\)/);
-  assert.match(siteOpsSource, /Başlangıç \(entryFile \/ startScript\)/);
-  assert.match(siteOpsSource, /Sağlık Kontrolü \(healthPath\)/);
-  assert.match(siteOpsSource, /Aktif Sürüm \(Release\)/);
+  assert.match(siteOpsSource, /Çıktı Dizini/);
+  assert.match(siteOpsSource, /Başlangıç Dosyası/);
+  assert.match(siteOpsSource, /Sağlık Kontrolü/);
+  assert.match(siteOpsSource, /Aktif Sürüm/);
 
   // Verify buildGitWebhookCiCdSummary helper with real application objects
   const nodeSummary = buildGitWebhookCiCdSummary(

@@ -380,10 +380,9 @@ test('Easypanel 1-Click Marketplace UI wiring in DockerProjectsPage, DockerProje
   assert.match(pageSource, /İzleme & Analitik/);
   assert.match(pageSource, /Veritabanı & Cache/);
   assert.match(pageSource, /Canlı Docker Hub Arama/);
-  assert.match(pageSource, /Tek Tıkla Kur \(Easypanel\)/);
-  assert.match(pageSource, /Otomatik Secret & Volume/);
+  assert.match(pageSource, /Hazır Uygulama/);
   assert.match(pageSource, /Tek Tıkla Kur/);
 
   assert.match(dialogSource, /prepareOneClickApp/);
-  assert.match(dialogSource, /Tek Tıkla Kur \(Easypanel\)/);
+  assert.match(dialogSource, /Hazır Uygulama/);
 });

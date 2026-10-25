@@ -231,7 +231,7 @@ export default function FirewallPage() {
     <div className="ws-firewall-page">
       <PageHeading
         title="Güvenlik Duvarı ve Port Yönetimi"
-        description="Plesk yerleşiminde gerçek nftables firewall durumu, servis profilleri, dinleyen portlar ve CrowdSec ban yönetimi."
+        description="Güvenlik duvarı kuralları, servis profilleri, dinleyen portlar ve IP engellemeleri."
         actions={
           <Button icon="refresh" onClick={loadAll} disabled={loading || actionBusy}>
             Yenile

@@ -104,12 +104,32 @@ test('SCN-MOB-07: Login screen (.auth-page), AccountDialog (.auth-dialog), Owner
   // 1. /login and /signin redirect cleanly to /websites when authenticated
   assert.match(appSrc, /\{\s*path:\s*'login',\s*element:\s*<RedirectWithSearch\s+to="\/websites"\s*\/>\s*\}/);
 
-  // 2. LoginForm exposes theme toggle and Shadcn feature pills
+  // 2. LoginForm exposes theme toggle and zero AI-slop feature bragging pills
   assert.match(loginSrc, /className="auth-theme-toggle"/);
-  assert.match(loginSrc, /className="auth-intro-features"/);
+  assert.doesNotMatch(loginSrc, /auth-intro-features|Canlı Telemetri|1-Click Uygulama Marketi/);
 
   // 3. Centralized design system styles .auth-page, .auth-form, and .auth-dialog with --ws-* tokens
   assert.match(themeCss, /html\s+\.auth-page\s*\{[\s\S]*?background-color:\s*var\(--ws-bg\)\s*!important/);
   assert.match(themeCss, /html\s+\.auth-form\s*\{[\s\S]*?background:\s*var\(--ws-surface\)\s*!important/);
   assert.match(themeCss, /html\s+\.auth-dialog\s*\{[\s\S]*?background:\s*var\(--ws-surface\)\s*!important/);
+});
+
+test('SCN-MOB-08: Zero AI-slop, zero feature bragging pills, and zero parenthetical buzzword labels across UI', async () => {
+  const [loginSrc, layoutSrc, websitesSrc, dockerPageSrc, dockerDialogSrc, filesSrc, firewallSrc] = await Promise.all([
+    readSrc('LoginForm.jsx'),
+    readSrc('workspace/WorkspaceLayout.jsx'),
+    readSrc('workspace/WebsitesPage.jsx'),
+    readSrc('workspace/DockerProjectsPage.jsx'),
+    readSrc('workspace/DockerProjectCreateDialog.jsx'),
+    readSrc('workspace/FilesPanel.jsx'),
+    readSrc('workspace/FirewallPage.jsx'),
+  ]);
+
+  assert.doesNotMatch(loginSrc, /Canlı Telemetri|auth-intro-features/);
+  assert.doesNotMatch(layoutSrc, /Uygulama Marketi \(1-Click\)|1-Click Market/);
+  assert.doesNotMatch(websitesSrc, /Uygulama Marketi \(1-Click\)|alan adı grubu \(/);
+  assert.doesNotMatch(dockerPageSrc, /Tek Tıkla Kur \(Easypanel\)|Otomatik Secret & Volume|Easypanel 1-Click/);
+  assert.doesNotMatch(dockerDialogSrc, /Tek Tıkla Kur \(Easypanel\)|Otomatik Secret & Volume/);
+  assert.doesNotMatch(filesSrc, /Plesk uyumlu|Root kilitli/);
+  assert.doesNotMatch(firewallSrc, /Plesk yerleşiminde/);
 });

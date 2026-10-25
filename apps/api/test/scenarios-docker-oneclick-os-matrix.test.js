@@ -1521,7 +1521,7 @@ test('SCN-V3-05: Easypanel 1-Click Wizard modal flow (domain/subdomain target, S
   assert.match(dialogSource, /Tek Tıkla Kurulum/);
   assert.match(dialogSource, /Proje \/ Servis Adı/);
   assert.match(dialogSource, /Yayınlanacak Alan Adı \/ Alt Alan Adı/);
-  assert.match(dialogSource, /Otomatik Let's Encrypt SSL & Nginx Reverse Proxy/);
+  assert.match(dialogSource, /SSL ve alan adı yönlendirmesi/);
   assert.match(dialogSource, /Gelişmiş Port, İmaj ve Compose YAML Ayarları/);
   assert.match(dialogSource, /⚡ Uygulamayı Kur ve Yayınla/);
   assert.ok(createdProject.id);

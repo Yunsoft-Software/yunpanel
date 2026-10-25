@@ -179,14 +179,14 @@ export default function DockerProjectCreateDialog({ onClose, initialTemplate = n
     : 'Docker Compose projesi ekle';
 
   return <Modal title={modalTitle} onClose={onClose} busy={busy} wide><form onSubmit={create} className="ws-form"><ErrorNotice error={error} />{!server && <div className="ws-notice ws-notice-warn" role="alert">Yerel sunucu kimliği hazır olmadan Compose projesi oluşturulamaz.</div>}<fieldset disabled={busy || !server}>{initialTemplate?.oneClick ? <>
-    <div className="ws-notice" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px' }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}><Badge state="active">Tek Tıkla Kur (Easypanel)</Badge><span className="yp-port-mapping-badge">Otomatik Secret & Volume ({generatedSecretsCount} secret üretildi)</span>{proxyPreview?.upstreamUrl && <span className="yp-port-mapping-badge">Proxy Hedefi: {proxyPreview.upstreamUrl}</span>}</div><Button onClick={refreshOneClickSecrets} disabled={busy}>Secret'ları Yeniden Üret</Button></div>
+    <div className="ws-notice" style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', gap: '8px', marginBottom: '12px' }}><div style={{ display: 'flex', flexWrap: 'wrap', alignItems: 'center', gap: '8px' }}><Badge state="active">Hazır Uygulama</Badge>{generatedSecretsCount > 0 && <span className="yp-port-mapping-badge">{generatedSecretsCount} anahtar hazır</span>}{proxyPreview?.upstreamUrl && <span className="yp-port-mapping-badge">Hedef: {proxyPreview.upstreamUrl}</span>}</div><Button onClick={refreshOneClickSecrets} disabled={busy}>Anahtarları Yenile</Button></div>
     <div className="ws-form-grid">
       <label>Proje / Servis Adı<input value={projectName} onChange={(event) => { setProjectName(event.target.value); setValidation(null); }} pattern="[a-z0-9][a-z0-9_-]{0,62}" required autoComplete="off" spellCheck={false} placeholder="shop_app" /></label>
       <label>Yayınlanacak Alan Adı / Alt Alan Adı<input value={targetDomain} onChange={(event) => setTargetDomain(event.target.value)} autoComplete="off" spellCheck={false} placeholder="n8n.webrich.news" /></label>
     </div>
     <label style={{ display: 'flex', alignItems: 'center', gap: '8px', margin: '8px 0 12px' }}>
       <input type="checkbox" checked={autoSsl} onChange={(event) => setAutoSsl(event.target.checked)} />
-      <span>{`Otomatik Let's Encrypt SSL & Nginx Reverse Proxy (${targetDomain || 'alan adı'} → 127.0.0.1:${publishedPort} → :${targetPort})`}</span>
+      <span>{`SSL ve alan adı yönlendirmesi (${targetDomain || 'alan adı'})`}</span>
     </label>
     <details className="ws-disclosure" style={{ marginBottom: '12px' }}>
       <summary>Gelişmiş Port, İmaj ve Compose YAML Ayarları</summary>

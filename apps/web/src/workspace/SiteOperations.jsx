@@ -122,8 +122,8 @@ export function ApplicationOperations({ domain, application, website = null, dep
       ]} />
     </Section>
     {showGitWebhook && <Section
-      title="Git Push Webhook & Otomatik Yayın (CI/CD)"
-      description="GitHub deponuza push yapıldığında otomatik derleme ve sıfır kesintili yayın tetiklenir."
+      title="Git Webhook ve Otomatik Yayın"
+      description="GitHub deponuza push yapıldığında otomatik derleme ve yayın tetiklenir."
       actions={<Button
         type="button"
         icon="copy"
@@ -139,16 +139,16 @@ export function ApplicationOperations({ domain, application, website = null, dep
     >
       <KeyValues items={[
         ['GitHub Webhook Endpoint', ciCdSummary.webhookEndpoint],
-        ['Tetiklenen Dal (Branch)', `refs/heads/${application.branch || 'main'}`],
-        ['İçerik Türü (Content-Type)', 'application/json'],
+        ['Tetiklenen Dal', `refs/heads/${application.branch || 'main'}`],
+        ['İçerik Türü', 'application/json'],
       ]} />
       <div className="ws-section-body">
         <h3>Build & Çalışma Özeti</h3>
         <KeyValues items={[
-          ['Çıktı Dizini (outputDir)', ciCdSummary.outputDir],
-          ['Başlangıç (entryFile / startScript)', ciCdSummary.startEntry],
-          ['Sağlık Kontrolü (healthPath)', ciCdSummary.healthPath],
-          ['Aktif Sürüm (Release)', ciCdSummary.activeRelease],
+          ['Çıktı Dizini', ciCdSummary.outputDir],
+          ['Başlangıç Dosyası', ciCdSummary.startEntry],
+          ['Sağlık Kontrolü', ciCdSummary.healthPath],
+          ['Aktif Sürüm', ciCdSummary.activeRelease],
         ]} />
       </div>
     </Section>}
@@ -188,10 +188,10 @@ export function DomainOperations({ domain }) {
     ]} />
     <div className="ws-section-body"><h3>Alt alan adları</h3>{children.length ? <div className="yp-subdomain-tree" role="tree" aria-label="Alt alan adları">{children.map((item, index) => <div key={item.id} className="yp-subdomain-branch" role="treeitem"><div className="yp-subdomain-branch-main"><span className="yp-tree-connector" aria-hidden="true">{index === children.length - 1 ? '└─' : '├─'}</span><Link to={siteHref(item.id)}>{item.primaryDomain}</Link><FileRootBadge path={resolveSubdomainSharedFileRoot(domain.primaryDomain, item.primaryDomain)} isSubdomain parentDomain={domain.primaryDomain} /></div><div className="ws-actions"><Link to={siteHref(item.id, 'files')}>Dosyalar</Link><Link to={siteHref(item.id, 'databases')}>Veritabanları</Link><Link to={siteHref(item.id, 'runtime')}>Uygulama / Docker</Link></div></div>)}</div> : <p className="ws-muted">Bu kayda bağlı alt alan adı bulunmuyor.</p>}<p className="ws-muted">Alt alan adlarının dosya kökleri ana domain dizini altında (<code>/subdomains/&lt;alt-alan&gt;</code>) ortak yönetilir. Bu işlem DNS sağlayıcınızda kayıt oluşturmaz. A/AAAA/CNAME kayıtları ayrı yönetilir.</p></div>
     <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik ayrıntılar</summary><KeyValues items={[
-      ['Hedef revizyon (desired state)', domain.desiredRevision ?? '—'],
-      ['Uygulanan revizyon (applied revision)', domain.appliedRevision ?? '—'],
-      ['Hazırlanan revizyon (staged revision)', domain.stagedRevision ?? '—'],
-      ['Yapılandırma sağlama toplamı (checksum)', domain.stagedChecksum ?? '—'],
+      ['Hedef revizyon', domain.desiredRevision ?? '—'],
+      ['Uygulanan revizyon', domain.appliedRevision ?? '—'],
+      ['Hazırlanan revizyon', domain.stagedRevision ?? '—'],
+      ['Yapılandırma özeti', domain.stagedChecksum ?? '—'],
     ]} />
     <div className="ws-actions" style={{ marginTop: '0.5rem' }}>
       <Button disabled={locked} onClick={() => operation.perform(() => runJob(`/domains/${encodeURIComponent(domain.id)}/stage`))}>Ayrı hazırla (stage)</Button>

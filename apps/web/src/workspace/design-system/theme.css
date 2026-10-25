@@ -2036,26 +2036,6 @@ html .auth-intro p:not(.auth-eyebrow) {
   margin: 0 !important;
 }
 
-html .auth-intro-features {
-  display: flex !important;
-  flex-wrap: wrap !important;
-  gap: 8px !important;
-  margin-top: 24px !important;
-  max-width: 460px !important;
-}
-
-html .auth-intro-features > span {
-  display: inline-flex !important;
-  align-items: center !important;
-  padding: 5px 11px !important;
-  border-radius: 999px !important;
-  font-size: 12px !important;
-  font-weight: 600 !important;
-  background: var(--ws-surface-raised) !important;
-  border: 1px solid var(--ws-border) !important;
-  color: var(--ws-text-secondary) !important;
-}
-
 html .auth-intro small {
   color: var(--ws-muted) !important;
   font-size: 12.5px !important;

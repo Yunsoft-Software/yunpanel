@@ -321,8 +321,8 @@ function HostingForm({ domain, generation }) {
         {dirty && <p className="ws-muted">Sayfadan ayrılmadan önce taslağı kaydedin veya değişiklikleri iptal edin.</p>}
         <details className="ws-section ws-disclosure"><summary>Tanılama ve teknik yayın bilgileri</summary><KeyValues items={[
           ['Alan adı kimliği', domain.id],
-          ['Hedef revizyon (desired revision)', form?.base?.desiredRevision ?? '—'],
-          ['Uygulanan revizyon (applied revision)', form?.base?.appliedRevision ?? '—'],
+          ['Hedef revizyon', form?.base?.desiredRevision ?? '—'],
+          ['Uygulanan revizyon', form?.base?.appliedRevision ?? '—'],
         ]}/></details>
       </div>
     </Section>

@@ -90,7 +90,7 @@ export const JAMSTACK_FRAMEWORK_PRESETS = Object.freeze([
   }),
   Object.freeze({
     id: 'docker_stack',
-    label: 'Docker / Easypanel Stack Proxy',
+    label: 'Docker / Compose Proxy',
     category: 'Container',
     sourceMode: 'docker_compose',
     entryFile: '',

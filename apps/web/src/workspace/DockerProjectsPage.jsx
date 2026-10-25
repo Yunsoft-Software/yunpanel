@@ -302,11 +302,11 @@ function DockerProjectList() {
       )}
     </Section>
     <Section
-      title="Easypanel 1-Click Uygulama Marketi & Docker Hub Canlı İmaj Arama"
-      description="PocketBase, n8n, Directus, Strapi, Umami, Meilisearch gibi 1-Click şablonları otomatik secret üretimiyle tek tıkla kurun veya Docker Hub üzerindeki tüm imajları canlı arayın."
-      actions={(liveCatalog.status === 'loading' || oneClickCatalog.status === 'loading') ? <Badge state="running">Katalog yükleniyor…</Badge> : <Badge state="active">{debouncedQuery ? `Docker Hub: ${filteredCatalog.length} sonuç` : `${filteredCatalog.length} Hazır Şablon · Docker Hub Bağlı`}</Badge>}
+      title="Uygulama Marketi"
+      description="Hazır uygulamaları kurun veya Docker Hub üzerinden imaj arayın."
+      actions={(liveCatalog.status === 'loading' || oneClickCatalog.status === 'loading') ? <Badge state="running">Katalog yükleniyor…</Badge> : <Badge state="active">{debouncedQuery ? `${filteredCatalog.length} sonuç` : `${filteredCatalog.length} uygulama`}</Badge>}
     >
-      <div className="yp-category-pills" role="tablist" aria-label="1-Click Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '14px 18px 0 18px' }}>
+      <div className="yp-category-pills" role="tablist" aria-label="Uygulama Kategorileri" style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '14px 18px 0 18px' }}>
         {EASYPANEL_CATEGORY_FILTERS.map((cat) => {
           const isSelected = activeCategory === cat.id;
           return (
@@ -347,8 +347,7 @@ function DockerProjectList() {
                     <span className="yp-port-mapping-badge" style={{ maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>{tpl.image}</span>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '8px' }}>
-                    {isOneClick && <Badge state="active">Tek Tıkla Kur (Easypanel)</Badge>}
-                    {isOneClick && <span className="yp-port-mapping-badge">Otomatik Secret & Volume</span>}
+                    {isOneClick && <Badge state="active">Hazır Uygulama</Badge>}
                     {tpl.official && <Badge state="active">Resmi İmaj</Badge>}
                     {tpl.starCount > 0 && <span className="yp-port-mapping-badge">★ {tpl.starCount.toLocaleString('tr-TR')}</span>}
                     {(tpl.categoryLabel || tpl.category) && <span className="yp-port-mapping-badge">{tpl.categoryLabel || tpl.category}</span>}

@@ -184,13 +184,7 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
       <div>
         <p className="auth-eyebrow">YUNSOFT · SUNUCU YÖNETİMİ</p>
         <h1>Kontrol sizde.</h1>
-        <p>Web sitelerinizi, alt alan adlarınızı, Docker stack’lerinizi ve sunucu telemetrinizi tek merkezden yönetin.</p>
-        <div className="auth-intro-features" aria-hidden="true">
-          <span>Canlı Telemetri · 5 sn</span>
-          <span>1-Click Uygulama Marketi</span>
-          <span>JAMstack &amp; Nginx Proxy</span>
-          <span>Domain &amp; Docker İzolasyonu</span>
-        </div>
+        <p>Web sitelerinizi ve sunucu servislerinizi tek panelden yönetin.</p>
       </div>
       <small>Yalnızca yetkilendirilmiş kullanıcılar içindir.</small>
     </section>

@@ -72,9 +72,9 @@ test('SCN-E2E-01: Authenticated session initialization & shell verification (top
   const websitesNavBadgeCount = await page.locator('.ws-sidebar a[href="/websites"] .ws-nav-count').count();
   assert.equal(websitesNavBadgeCount, 0, 'Sidebar Web Siteleri link must not display raw count badge');
 
-  // Verify direct link to Uygulama Marketi (1-Click) (/docker) in left sidebar
-  const sidebarMarketplaceLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi (1-Click)' });
-  assert.equal(await sidebarMarketplaceLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (1-Click) (/docker)');
+  // Verify direct link to Uygulama Marketi (/docker) in left sidebar
+  const sidebarMarketplaceLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi' });
+  assert.equal(await sidebarMarketplaceLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (/docker)');
 
   // Verify global command palette search bar in topbar
   const searchBtn = page.locator('button.ws-command-trigger[aria-label="Site veya panel bölümü ara"]');
@@ -97,20 +97,20 @@ test('SCN-E2E-02: Dashboard (/dashboard) live telemetry interval selector & gaug
   const intervalSelect = page.locator('select[aria-label="Yenileme aralığı"]');
   await intervalSelect.waitFor({ state: 'visible', timeout: 15000 });
 
-  // Verify default Canlı · 5 sn badge
-  assert.equal(await page.locator('text=Canlı · 5 sn').isVisible(), true, 'Default badge must be Canlı · 5 sn');
+  // Verify default Canlı badge
+  assert.equal(await page.locator('.ws-badge:has-text("Canlı")').first().isVisible(), true, 'Default badge must be Canlı');
 
-  // Change to 3000 (3 sn) -> verify Canlı · 3 sn
+  // Change to 3000 (3 sn) -> verify Canlı
   await intervalSelect.selectOption('3000');
-  assert.equal(await page.locator('text=Canlı · 3 sn').isVisible(), true, 'Badge must update to Canlı · 3 sn');
+  assert.equal(await page.locator('.ws-badge:has-text("Canlı")').first().isVisible(), true, 'Badge must remain Canlı');
 
   // Change to 0 (Duraklat) -> verify Duraklatıldı
   await intervalSelect.selectOption('0');
   assert.equal(await page.locator('text=Duraklatıldı').isVisible(), true, 'Badge must update to Duraklatıldı');
 
-  // Change back to 5000 (5 sn) -> verify Canlı · 5 sn
+  // Change back to 5000 (5 sn) -> verify Canlı
   await intervalSelect.selectOption('5000');
-  assert.equal(await page.locator('text=Canlı · 5 sn').isVisible(), true, 'Badge must return to Canlı · 5 sn');
+  assert.equal(await page.locator('.ws-badge:has-text("Canlı")').first().isVisible(), true, 'Badge must return to Canlı');
 
   // Click Şimdi ölç button and verify CPU/RAM/Disk gauges & Bu oturum chart remain healthy
   const measureNowBtn = page.locator('button:has-text("Şimdi ölç")');
@@ -349,8 +349,8 @@ test('SCN-E2E-05: /websites/new Wizard (Domain mode, Subdomain mode & all JAMsta
   assert.equal(await siteTypeSelect.inputValue(), 'new_python', 'Python preset must set Site türü to new_python');
   assert.equal(await page.locator('label:has-text("Başlangıç dosyası") input').inputValue(), 'app.py', 'Python preset must populate app.py entry file');
 
-  // 4. Click Docker / Easypanel Stack Proxy
-  await page.locator('button:has-text("Docker / Easypanel Stack Proxy")').click();
+  // 4. Click Docker / Compose Proxy
+  await page.locator('button:has-text("Docker / Compose Proxy")').click();
   assert.equal(await siteTypeSelect.inputValue(), 'docker_compose', 'Docker preset must set Site türü to docker_compose');
   assert.equal(await page.locator('label:has-text("Inner Port (Container targetPort)") input').inputValue(), '8080', 'Docker preset must populate Inner Port 8080');
 
@@ -427,13 +427,13 @@ test('SCN-E2E-06: /websites/:id Overview & /websites/:id/hosting Interactive Ngi
   assertZeroErrors('SCN-E2E-06');
 });
 
-test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi (1-Click) navigation, category filters & Clean Easypanel 1-Click Wizard Modal', async () => {
-  // SCN-V3-05: Verify and click direct sidebar link Uygulama Marketi (1-Click) (/docker)
-  const sidebarMarketLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi (1-Click)' });
-  assert.equal(await sidebarMarketLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (1-Click) (/docker)');
+test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi navigation, category filters & Clean 1-Click Wizard Modal', async () => {
+  // SCN-V3-05: Verify and click direct sidebar link Uygulama Marketi (/docker)
+  const sidebarMarketLink = page.locator('.ws-sidebar a[href="/docker"]', { hasText: 'Uygulama Marketi' });
+  assert.equal(await sidebarMarketLink.isVisible(), true, 'Sidebar must contain direct link Uygulama Marketi (/docker)');
   await sidebarMarketLink.click();
 
-  const categoryTabs = page.locator('[role="tablist"][aria-label="1-Click Uygulama Kategorileri"]');
+  const categoryTabs = page.locator('[role="tablist"][aria-label="Uygulama Kategorileri"]');
   await categoryTabs.waitFor({ state: 'visible', timeout: 15000 });
 
   const categoriesToVerify = [
@@ -461,8 +461,7 @@ test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi (1-Click) navigation, cat
 
   const dialogText = await dialog.innerText();
   assert.match(dialogText, /Tek Tıkla Kurulum/, 'Modal heading must contain Tek Tıkla Kurulum');
-  assert.match(dialogText, /Tek Tıkla Kur \(Easypanel\)/, 'Modal must show Tek Tıkla Kur (Easypanel) badge');
-  assert.match(dialogText, /Otomatik Secret & Volume/, 'Modal must show Otomatik Secret & Volume badge');
+  assert.match(dialogText, /Hazır Uygulama/, 'Modal must show Hazır Uygulama badge');
 
   // Verify Proje / Servis Adı and Yayınlanacak Alan Adı / Alt Alan Adı inputs are immediately visible
   const projectNameInput = dialog.locator('label:has-text("Proje / Servis Adı") input');
@@ -470,10 +469,10 @@ test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi (1-Click) navigation, cat
   assert.equal(await projectNameInput.isVisible(), true, 'Proje / Servis Adı input must be immediately visible');
   assert.equal(await targetDomainInput.isVisible(), true, 'Yayınlanacak Alan Adı / Alt Alan Adı input must be immediately visible');
 
-  // Verify Otomatik Let's Encrypt SSL & Nginx Reverse Proxy checkbox is visible
-  const autoSslCheckbox = dialog.locator('label:has-text("Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy") input[type="checkbox"]');
-  assert.equal(await autoSslCheckbox.isVisible(), true, 'Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy checkbox must be visible');
-  assert.equal(await autoSslCheckbox.isChecked(), true, 'Otomatik Let\'s Encrypt SSL & Nginx Reverse Proxy checkbox must default to checked');
+  // Verify SSL ve alan adı yönlendirmesi checkbox is visible
+  const autoSslCheckbox = dialog.locator('label:has-text("SSL ve alan adı yönlendirmesi") input[type="checkbox"]');
+  assert.equal(await autoSslCheckbox.isVisible(), true, 'SSL ve alan adı yönlendirmesi checkbox must be visible');
+  assert.equal(await autoSslCheckbox.isChecked(), true, 'SSL ve alan adı yönlendirmesi checkbox must default to checked');
 
   // Verify Gelişmiş Port, İmaj ve Compose YAML Ayarları <details> is collapsed initially
   const advancedDetails = dialog.locator('details', { hasText: 'Gelişmiş Port, İmaj ve Compose YAML Ayarları' });
@@ -491,11 +490,11 @@ test('SCN-E2E-07 & SCN-V3-05: Sidebar Uygulama Marketi (1-Click) navigation, cat
   const firstYaml = await yamlTextarea.inputValue();
   assert.match(firstYaml, /PB_ENCRYPTION_KEY:/, 'Prepared PocketBase YAML must contain PB_ENCRYPTION_KEY');
 
-  // Click Secret'ları Yeniden Üret and verify the generated secret changes
-  await dialog.locator('button:has-text("Secret\'ları Yeniden Üret")').click();
+  // Click Anahtarları Yenile and verify the generated secret changes
+  await dialog.locator('button:has-text("Anahtarları Yenile")').click();
   await page.waitForTimeout(500);
   const secondYaml = await yamlTextarea.inputValue();
-  assert.notEqual(secondYaml, firstYaml, 'Clicking Secret\'ları Yeniden Üret must regenerate fresh random secrets in Compose YAML');
+  assert.notEqual(secondYaml, firstYaml, 'Clicking Anahtarları Yenile must regenerate fresh random secrets in Compose YAML');
 
   // Verify submit button ⚡ Uygulamayı Kur ve Yayınla
   const publishBtn = dialog.locator('button[type="submit"]:has-text("⚡ Uygulamayı Kur ve Yayınla")');

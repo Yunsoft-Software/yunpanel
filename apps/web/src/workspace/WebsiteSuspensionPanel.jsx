@@ -89,7 +89,7 @@ function DomainSuspensionWorkspace({domain,generation,refreshAll,onChanged}){
    ]}/>
    <p className="ws-muted">Askıya alma bağlı alan adlarının web yayınını durdurur; posta kutularını, veritabanlarını veya site dosyalarını silmez.</p>
    {isSuspended&&<div className="ws-actions">
-    <Button variant="primary" icon="check" disabled={busy} onClick={()=>void handleQuickResume()}>▶ Yayını Etkinleştir (Askıdan Çıkar)</Button>
+    <Button variant="primary" icon="check" disabled={busy} onClick={()=>void handleQuickResume()}>▶ Yayını Etkinleştir</Button>
    </div>}
   </div>
  </Section>;
@@ -120,7 +120,7 @@ function SuspensionWorkspace({scope,generation,onChanged}){
     <p className="ws-muted">Askıya alma bağlı alan adlarının web yayınını durdurur; posta kutularını, veritabanlarını veya site dosyalarını silmez. Her işlem sunucu görev adımları üzerinden güvenle yürütülür ve izlenir.</p>
     {data&&!data.preview.readyToSuspend&&!data.preview.readyToResume&&!action&&<Blockers domains={data.preview.domains}/>}
     {action&&(action.kind==='resume'||action.kind==='retry-resume'
-     ? <div className="ws-actions"><Button variant="primary" icon="check" disabled={state?.busy} onClick={()=>void quickResume()}>▶ Yayını Etkinleştir (Askıdan Çıkar)</Button></div>
+     ? <div className="ws-actions"><Button variant="primary" icon="check" disabled={state?.busy} onClick={()=>void quickResume()}>▶ Yayını Etkinleştir</Button></div>
      : <Button variant="danger" disabled={state?.busy} onClick={()=>setConfirm(action.kind)}>{actionLabels[action.kind]}…</Button>)}
     {state?.unknownMutation&&<p className="ws-muted">Önceki isteğin sonucu bilinmediği için işlem tekrar gönderilmedi; yukarıdaki durum sunucudan yeniden okundu.</p>}
    </div>
@@ -130,7 +130,7 @@ function SuspensionWorkspace({scope,generation,onChanged}){
    <p className="ws-muted">{latest.domainOperations.length} alan adı bu işlem kapsamına bağlıdır. Teknik alt işlem ayrıntıları tanılama detaylarında saklanır.</p>
    <details className="ws-disclosure" style={{marginTop:'0.75rem'}}><summary>Tanılama ve teknik işlem ayrıntıları</summary><KeyValues items={[
     ['İşlem kimliği', latest.id],
-    ['Ham durum (raw status)', latest.status],
+    ['Durum kodu', latest.status],
     ['Bağlı domain işlem sayısı', latest.domainOperations?.length ?? 0],
    ]} /></details>
   </div></Section>}

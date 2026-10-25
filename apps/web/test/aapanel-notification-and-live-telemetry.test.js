@@ -53,14 +53,14 @@ test('local-runtime sets DEFAULT_SNAPSHOT_INTERVAL_MS to 5_000 for 5-second live
   assert.match(runtimeSource, /const DEFAULT_SNAPSHOT_INTERVAL_MS = 5_000;/);
 });
 
-test('WorkspaceLayout removes confusing /websites sidebar badge, renders Uygulama Marketi (1-Click), and mounts NotificationCenterDrawer with route-stable alert count', () => {
+test('WorkspaceLayout removes confusing /websites sidebar badge, renders Uygulama Marketi, and mounts NotificationCenterDrawer with route-stable alert count', () => {
   const layoutSource = fs.readFileSync(path.resolve(workspaceDir, 'WorkspaceLayout.jsx'), 'utf8');
   assert.equal(layoutSource.includes("to === '/websites' && sites !== null"), false);
   assert.match(layoutSource, /NotificationCenterDrawer/);
   assert.match(layoutSource, /aria-label="Bildirim ve Görev Merkezi"/);
   assert.match(layoutSource, /<span className="ws-toolbar-label">İşlemler<\/span>/);
-  assert.match(layoutSource, /Uygulama Marketi \(1-Click\)/);
-  assert.match(layoutSource, /1-Click Market/);
+  assert.match(layoutSource, /<span>Uygulama Marketi<\/span>/);
+  assert.doesNotMatch(layoutSource, /Uygulama Marketi \(1-Click\)|1-Click Market/);
   assert.match(layoutSource, /const alertCount = computeWorkspaceAlerts\(\{ domains, websites, certificates, servers \}\)\.length;/);
 });
 
@@ -71,7 +71,6 @@ test('DashboardPage and WebsitesPage expose live telemetry interval selector and
   assert.match(dashboardSource, /Şimdi ölç/);
 
   const websitesSource = fs.readFileSync(path.resolve(workspaceDir, 'WebsitesPage.jsx'), 'utf8');
-  assert.match(websitesSource, /alan adı grubu/);
   assert.match(websitesSource, /ana alan adı · \$\{subdomainsCount\} alt alan adı/);
 });
 

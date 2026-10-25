@@ -502,12 +502,12 @@ test('SCN-MON-02 [08]: DashboardPage renders live interval states (3s, 5s, 15s, 
   );
 
   const html84 = renderDash(makeWorkspace(84, 3000));
-  assert.match(html84, /Canlı · 3 sn/);
+  assert.match(html84, />Canlı</);
   assert.doesNotMatch(html84, /Disk alanı azalıyor/);
   assert.doesNotMatch(html84, /Kritik disk doluluğu/);
 
   const html85 = renderDash(makeWorkspace(85, 15000));
-  assert.match(html85, /Canlı · 15 sn/);
+  assert.match(html85, />Canlı</);
   assert.match(html85, /Disk alanı azalıyor · %85/);
   assert.doesNotMatch(html85, /Kritik disk doluluğu/);
 
@@ -1917,9 +1917,9 @@ test('SCN-V3-01, SCN-V3-04 & SCN-V3-05 [35]: NotificationCenterDrawer renders qu
 
   // Top-bar badge count in WorkspaceLayout is computed without jobs so it never jumps across routes
   assert.match(layoutSource, /const alertCount = computeWorkspaceAlerts\(\{ domains, websites, certificates, servers \}\)\.length;/);
-  // Sidebar renders Uygulama Marketi (1-Click) right after /websites for Owner, without altering navigationGroups()
-  assert.match(layoutSource, /Uygulama Marketi \(1-Click\)/);
-  assert.match(layoutSource, /1-Click Market/);
+  // Sidebar renders Uygulama Marketi right after /websites for Owner, without altering navigationGroups()
+  assert.match(layoutSource, /<span>Uygulama Marketi<\/span>/);
+  assert.doesNotMatch(layoutSource, /Uygulama Marketi \(1-Click\)|1-Click Market/);
   assert.equal(navigationGroups(true, true, false, false)[0].items.length, 8);
 
   const workspaceValue = {
