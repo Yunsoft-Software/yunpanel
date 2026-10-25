@@ -44,6 +44,20 @@ test('SCN-E2E-01: Authenticated session initialization & shell verification (top
   await page.goto(`${baseUrl}/`, { waitUntil: 'networkidle' });
   const userField = page.locator('input[autocomplete="username"], input[name="username"], input[type="text"]').first();
   if ((await userField.count()) > 0) {
+    const authPageAudit = await page.evaluate(() => {
+      const authPage = document.querySelector('.auth-page');
+      const authForm = document.querySelector('.auth-form');
+      const hasThemeToggle = Boolean(document.querySelector('button.auth-theme-toggle'));
+      return {
+        pageBg: authPage ? getComputedStyle(authPage).backgroundColor : '',
+        formBg: authForm ? getComputedStyle(authForm).backgroundColor : '',
+        hasThemeToggle,
+      };
+    });
+    assert.notEqual(authPageAudit.pageBg, 'rgb(247, 249, 252)', 'Login .auth-page must use Shadcn dark canvas, not legacy light-blue #f7f9fc');
+    assert.notEqual(authPageAudit.formBg, 'rgb(255, 255, 255)', 'Login .auth-form must use Shadcn dark surface in dark mode');
+    assert.equal(authPageAudit.hasThemeToggle, true, 'Login screen must render .auth-theme-toggle button');
+
     await userField.fill(creds.username);
     await page.locator('input[type="password"]').first().fill(creds.password);
     await page.locator('button[type="submit"]').first().click();
@@ -598,6 +612,24 @@ test('SCN-MOB-01 .. SCN-MOB-06: Mobile Viewport (375x812) Responsiveness Across 
     await page.locator('button.ws-mobile-menu').click();
     await page.locator('.ws-sidebar.is-open').waitFor({ state: 'visible', timeout: 5000 });
     await page.locator('button.ws-nav-close').click();
+
+    // SCN-MOB-07: AccountDialog ("Hesabım") uses Shadcn dark surface and fits mobile viewport
+    await page.locator('.auth-sessionbar button', { hasText: 'Hesabım' }).click();
+    const accountDialog = page.locator('dialog.auth-dialog');
+    await accountDialog.waitFor({ state: 'visible', timeout: 5000 });
+    const dialogAudit = await accountDialog.evaluate((el) => {
+      const rect = el.getBoundingClientRect();
+      const bg = getComputedStyle(el).backgroundColor;
+      return { width: Math.round(rect.width), right: Math.round(rect.right), bg };
+    });
+    assert.ok(dialogAudit.right <= 375, `Mobile AccountDialog must fit inside 375px viewport, got right=${dialogAudit.right}px`);
+    assert.notEqual(dialogAudit.bg, 'rgb(255, 255, 255)', 'AccountDialog in dark mode must use Shadcn dark surface, not legacy white');
+    await accountDialog.locator('header button', { hasText: 'Kapat' }).click();
+
+    // Visiting /login when authenticated redirects to /websites instead of NotFoundPage
+    await page.goto(`${baseUrl}/login`, { waitUntil: 'networkidle' });
+    await page.waitForTimeout(250);
+    assert.ok(page.url().includes('/websites'), `Authenticated /login must redirect to /websites, got ${page.url()}`);
 
     // 2. Site Detail Navigation & Hosting Code Block on Mobile
     await page.goto(`${baseUrl}/websites/webrich.news/hosting`, { waitUntil: 'networkidle' });

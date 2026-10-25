@@ -93,3 +93,23 @@ test('SCN-MOB-05 & SCN-MOB-06: Databases, Firewall, Settings, 1-Click Marketplac
   assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?\.yp-notification-drawer,\s*\.ws-notification-drawer\)\s*\{[\s\S]*?width:\s*100vw\s*!important/);
   assert.match(themeCss, /@media\s*\(max-width:\s*640px\)\s*\{[\s\S]*?html\s+\.ws-modal\s*\{[\s\S]*?width:\s*calc\(100vw\s*-\s*16px\)\s*!important/);
 });
+
+test('SCN-MOB-07: Login screen (.auth-page), AccountDialog (.auth-dialog), OwnerEnrollment, and /login route redirect use centralized Shadcn UI design system', async () => {
+  const [themeCss, loginSrc, appSrc] = await Promise.all([
+    readSrc('workspace/design-system/theme.css'),
+    readSrc('LoginForm.jsx'),
+    readSrc('workspace/WorkspaceApp.jsx'),
+  ]);
+
+  // 1. /login and /signin redirect cleanly to /websites when authenticated
+  assert.match(appSrc, /\{\s*path:\s*'login',\s*element:\s*<RedirectWithSearch\s+to="\/websites"\s*\/>\s*\}/);
+
+  // 2. LoginForm exposes theme toggle and Shadcn feature pills
+  assert.match(loginSrc, /className="auth-theme-toggle"/);
+  assert.match(loginSrc, /className="auth-intro-features"/);
+
+  // 3. Centralized design system styles .auth-page, .auth-form, and .auth-dialog with --ws-* tokens
+  assert.match(themeCss, /html\s+\.auth-page\s*\{[\s\S]*?background-color:\s*var\(--ws-bg\)\s*!important/);
+  assert.match(themeCss, /html\s+\.auth-form\s*\{[\s\S]*?background:\s*var\(--ws-surface\)\s*!important/);
+  assert.match(themeCss, /html\s+\.auth-dialog\s*\{[\s\S]*?background:\s*var\(--ws-surface\)\s*!important/);
+});

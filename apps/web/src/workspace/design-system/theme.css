@@ -1919,6 +1919,31 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
   html .ws-modal-body {
     padding: 14px !important;
   }
+
+  /* Symmetrical 2-column Siteyi aç / Yönet actions & odd-item span on /websites mobile */
+  html .workspace-shell .ws-website-task-status > button.ws-button {
+    flex: 1 1 100% !important;
+    justify-content: center !important;
+  }
+
+  html .workspace-shell .ws-website-task-status > a.ws-button {
+    flex: 1 1 calc(50% - 6px) !important;
+    justify-content: center !important;
+  }
+
+  html .workspace-shell .ws-website-task-quick-primary > :last-child:nth-child(odd) {
+    grid-column: 1 / -1 !important;
+  }
+}
+
+@media (max-width: 900px) {
+  html .workspace-shell .ws-sidebar-backdrop {
+    position: fixed !important;
+    inset: 0 !important;
+    z-index: 155 !important;
+    background: rgba(0, 0, 0, 0.65) !important;
+    backdrop-filter: blur(3px) !important;
+  }
 }
 
 @media (max-width: 360px) {
@@ -1932,6 +1957,454 @@ html .workspace-shell > .ws-main > .ws-content > .ws-tabs a[aria-current='page']
     grid-template-columns: 1fr !important;
   }
 }
+
+/* ==========================================================================
+   21. SHADCN UI AUTHENTICATION, LOGIN, ACCOUNT DIALOG & OWNER ENROLLMENT
+   ========================================================================== */
+
+html .auth-page {
+  min-height: 100dvh !important;
+  display: grid !important;
+  grid-template-columns: minmax(360px, 0.95fr) minmax(420px, 1.05fr) !important;
+  background-color: var(--ws-bg) !important;
+  background-image: none !important;
+  color: var(--ws-text) !important;
+  font-family: var(--ws-font-body) !important;
+}
+
+html .auth-intro {
+  position: relative !important;
+  padding: clamp(32px, 5vw, 72px) !important;
+  background: var(--ws-surface) !important;
+  border-right: 1px solid var(--ws-border) !important;
+  color: var(--ws-text) !important;
+  display: flex !important;
+  flex-direction: column !important;
+  justify-content: space-between !important;
+  gap: 48px !important;
+}
+
+html .auth-brand {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 12px !important;
+  font-family: var(--ws-font-display) !important;
+  font-size: 20px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.03em !important;
+  color: var(--ws-text) !important;
+}
+
+html .auth-brand > span {
+  width: 36px !important;
+  height: 36px !important;
+  border-radius: 9px !important;
+  background: var(--ws-primary, #6366f1) !important;
+  color: #ffffff !important;
+  border: 1px solid rgba(255, 255, 255, 0.2) !important;
+  box-shadow: 0 2px 12px rgba(99, 102, 241, 0.4) !important;
+  font-weight: 800 !important;
+  font-size: 15px !important;
+  display: grid !important;
+  place-items: center !important;
+}
+
+html .auth-eyebrow {
+  font-size: 11px !important;
+  font-weight: 700 !important;
+  letter-spacing: 0.12em !important;
+  text-transform: uppercase !important;
+  color: var(--ws-primary-hover, #818cf8) !important;
+  margin: 0 0 12px 0 !important;
+}
+
+html .auth-intro h1 {
+  font-family: var(--ws-font-display) !important;
+  font-size: clamp(32px, 3.6vw, 48px) !important;
+  font-weight: 700 !important;
+  line-height: 1.12 !important;
+  letter-spacing: -0.035em !important;
+  color: var(--ws-text) !important;
+  margin: 0 0 16px 0 !important;
+}
+
+html .auth-intro p:not(.auth-eyebrow) {
+  max-width: 440px !important;
+  font-size: 15px !important;
+  line-height: 1.65 !important;
+  color: var(--ws-muted) !important;
+  margin: 0 !important;
+}
+
+html .auth-intro-features {
+  display: flex !important;
+  flex-wrap: wrap !important;
+  gap: 8px !important;
+  margin-top: 24px !important;
+  max-width: 460px !important;
+}
+
+html .auth-intro-features > span {
+  display: inline-flex !important;
+  align-items: center !important;
+  padding: 5px 11px !important;
+  border-radius: 999px !important;
+  font-size: 12px !important;
+  font-weight: 600 !important;
+  background: var(--ws-surface-raised) !important;
+  border: 1px solid var(--ws-border) !important;
+  color: var(--ws-text-secondary) !important;
+}
+
+html .auth-intro small {
+  color: var(--ws-muted) !important;
+  font-size: 12.5px !important;
+}
+
+html .auth-form-panel {
+  position: relative !important;
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: center !important;
+  justify-content: center !important;
+  padding: 48px 32px !important;
+  background: transparent !important;
+}
+
+html .auth-form-topbar {
+  width: 100% !important;
+  max-width: 430px !important;
+  display: flex !important;
+  justify-content: flex-end !important;
+  margin-bottom: 12px !important;
+}
+
+html .auth-theme-toggle {
+  display: inline-flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid var(--ws-control-border) !important;
+  background: var(--ws-surface) !important;
+  color: var(--ws-text-secondary) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: var(--ws-transition) !important;
+}
+
+html .auth-theme-toggle:hover {
+  background: var(--ws-surface-hover) !important;
+  color: var(--ws-text) !important;
+}
+
+html .auth-form {
+  width: 100% !important;
+  max-width: 430px !important;
+  padding: 32px !important;
+  background: var(--ws-surface) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: var(--ws-radius-lg, 12px) !important;
+  box-shadow: var(--ws-overlay-shadow), inset 0 1px 0 rgba(255, 255, 255, 0.05) !important;
+}
+
+html .auth-form h2 {
+  font-family: var(--ws-font-display) !important;
+  font-size: 24px !important;
+  font-weight: 700 !important;
+  letter-spacing: -0.025em !important;
+  color: var(--ws-text) !important;
+  margin: 0 0 8px 0 !important;
+}
+
+html .auth-muted {
+  color: var(--ws-muted) !important;
+  font-size: 13.5px !important;
+  line-height: 1.6 !important;
+}
+
+html .auth-form > .auth-muted {
+  margin-bottom: 24px !important;
+}
+
+html :is(.auth-form, .auth-dialog, .owner-enrollment-card) label {
+  display: grid !important;
+  gap: 6px !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  color: var(--ws-text) !important;
+}
+
+html :is(.auth-form, .auth-dialog, .owner-enrollment-card) :is(input, select),
+html .mfa-recovery textarea {
+  width: 100% !important;
+  min-width: 0 !important;
+  height: 40px !important;
+  min-height: 40px !important;
+  padding: 8px 12px !important;
+  background: var(--ws-surface-subtle) !important;
+  color: var(--ws-text) !important;
+  border: 1px solid var(--ws-control-border) !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  font-size: 13.5px !important;
+  transition: var(--ws-transition) !important;
+}
+
+html .mfa-recovery textarea {
+  height: auto !important;
+  min-height: 200px !important;
+}
+
+html :is(.auth-form, .auth-dialog, .owner-enrollment-card) :is(input, select):focus-visible,
+html .mfa-recovery textarea:focus-visible {
+  outline: none !important;
+  border-color: var(--ws-primary) !important;
+  box-shadow: 0 0 0 2px var(--ws-ring) !important;
+}
+
+html .auth-primary {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 40px !important;
+  padding: 10px 18px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid rgba(255, 255, 255, 0.14) !important;
+  background: var(--ws-primary, #6366f1) !important;
+  color: #ffffff !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25), 0 0 14px rgba(99, 102, 241, 0.25) !important;
+  cursor: pointer !important;
+  transition: var(--ws-transition) !important;
+}
+
+html .auth-primary:hover:not(:disabled) {
+  background: var(--ws-primary-hover, #818cf8) !important;
+  box-shadow: 0 2px 8px rgba(99, 102, 241, 0.4) !important;
+}
+
+html .auth-secondary {
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  min-height: 40px !important;
+  padding: 10px 16px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid var(--ws-control-border) !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
+  font-size: 13.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+  transition: var(--ws-transition) !important;
+}
+
+html .auth-secondary:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+}
+
+html .auth-link {
+  color: var(--ws-primary-hover, #818cf8) !important;
+  font-size: 13px !important;
+  font-weight: 600 !important;
+  text-decoration: none !important;
+}
+
+html .auth-link:hover {
+  text-decoration: underline !important;
+}
+
+html .auth-help {
+  font-size: 12px !important;
+  line-height: 1.6 !important;
+  color: var(--ws-muted) !important;
+  margin-top: 20px !important;
+  padding-top: 16px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html :is(.auth-error, .auth-banner) {
+  padding: 10px 14px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid rgba(239, 68, 68, 0.35) !important;
+  background: var(--ws-danger-soft) !important;
+  color: var(--ws-danger) !important;
+  font-size: 13px !important;
+  margin-bottom: 16px !important;
+}
+
+html .auth-notice {
+  padding: 10px 14px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid rgba(59, 130, 246, 0.35) !important;
+  background: var(--ws-info-soft) !important;
+  color: var(--ws-info) !important;
+  font-size: 13px !important;
+  margin-bottom: 16px !important;
+}
+
+html .auth-expiry {
+  margin: 12px 24px !important;
+  padding: 10px 14px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid rgba(245, 158, 11, 0.35) !important;
+  background: var(--ws-warning-soft) !important;
+  color: var(--ws-warning) !important;
+  font-size: 13px !important;
+}
+
+html .auth-loading {
+  min-height: 100dvh !important;
+  background: var(--ws-bg) !important;
+  color: var(--ws-text) !important;
+  font-family: var(--ws-font-body) !important;
+}
+
+/* AccountDialog ("Hesabım") & OwnerEnrollment Shadcn Modal Styling */
+html .auth-dialog {
+  width: min(520px, calc(100vw - 24px)) !important;
+  max-height: calc(100dvh - 32px) !important;
+  padding: 24px !important;
+  background: var(--ws-surface) !important;
+  color: var(--ws-text) !important;
+  border-color: var(--ws-border);
+  border-radius: var(--ws-radius-lg, 12px) !important;
+  box-shadow: var(--ws-overlay-shadow) !important;
+  font-family: var(--ws-font-body) !important;
+}
+
+html .auth-dialog::backdrop {
+  background: rgba(0, 0, 0, 0.72) !important;
+  backdrop-filter: blur(4px) !important;
+}
+
+html .auth-dialog header {
+  padding-bottom: 16px !important;
+  margin-bottom: 20px !important;
+  border-bottom: 1px solid var(--ws-border) !important;
+}
+
+html .auth-dialog h2 {
+  font-family: var(--ws-font-display) !important;
+  font-size: 18px !important;
+  font-weight: 700 !important;
+  color: var(--ws-text) !important;
+}
+
+html .auth-dialog h3 {
+  font-size: 14.5px !important;
+  font-weight: 700 !important;
+  color: var(--ws-text) !important;
+  margin: 0 0 6px 0 !important;
+}
+
+html .auth-dialog form + form {
+  margin-top: 24px !important;
+  padding-top: 20px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html .auth-dialog header button,
+html .auth-sessions button {
+  height: 32px !important;
+  min-height: 32px !important;
+  padding: 0 12px !important;
+  border-radius: var(--ws-radius, 6px) !important;
+  border: 1px solid var(--ws-control-border) !important;
+  background: var(--ws-surface-raised) !important;
+  color: var(--ws-text) !important;
+  font-size: 12.5px !important;
+  font-weight: 600 !important;
+  cursor: pointer !important;
+}
+
+html .auth-dialog header button:hover:not(:disabled),
+html .auth-sessions button:hover:not(:disabled) {
+  background: var(--ws-surface-hover) !important;
+}
+
+html .mfa-settings,
+html .auth-sessions {
+  margin-top: 24px !important;
+  padding-top: 20px !important;
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+html .auth-sessions > div {
+  border-bottom: 1px solid var(--ws-border) !important;
+  padding: 12px 0 !important;
+  font-size: 13px !important;
+}
+
+html .auth-sessions small {
+  color: var(--ws-muted) !important;
+}
+
+html .owner-enrollment {
+  min-height: calc(100dvh - 38px) !important;
+  background: var(--ws-bg) !important;
+  color: var(--ws-text) !important;
+  padding: 36px 20px !important;
+}
+
+html .owner-enrollment-card {
+  background: var(--ws-surface) !important;
+  color: var(--ws-text) !important;
+  border: 1px solid var(--ws-border) !important;
+  border-radius: var(--ws-radius-lg, 12px) !important;
+  box-shadow: var(--ws-overlay-shadow) !important;
+}
+
+html .owner-enrollment-footer {
+  border-top: 1px solid var(--ws-border) !important;
+}
+
+@media (max-width: 900px) {
+  html .auth-page {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-rows: auto 1fr !important;
+  }
+
+  html .auth-intro {
+    padding: 16px 20px !important;
+    gap: 12px !important;
+    border-right: 0 !important;
+    border-bottom: 1px solid var(--ws-border) !important;
+    flex-direction: row !important;
+    align-items: center !important;
+    justify-content: space-between !important;
+  }
+
+  html .auth-intro > div:nth-child(2),
+  html .auth-intro > small {
+    display: none !important;
+  }
+
+  html .auth-form-panel {
+    padding: 24px 16px 40px !important;
+    justify-content: flex-start !important;
+  }
+
+  html .auth-form {
+    padding: 24px 20px !important;
+  }
+}
+
+@media (max-width: 640px) {
+  html .auth-dialog {
+    width: calc(100vw - 16px) !important;
+    padding: 18px 16px !important;
+  }
+
+  html .auth-sessions > div {
+    flex-wrap: wrap !important;
+    gap: 8px !important;
+  }
+}
+
 
 
 

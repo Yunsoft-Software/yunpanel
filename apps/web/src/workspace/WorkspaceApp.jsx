@@ -71,6 +71,8 @@ function createWorkspaceRouter() {
     element: <WorkspaceLayout />, errorElement: <RouteFailure />,
     children: [
       { index: true, element: <Navigate to="/websites" replace /> },
+      { path: 'login', element: <RedirectWithSearch to="/websites" /> },
+      { path: 'signin', element: <RedirectWithSearch to="/websites" /> },
       { path: 'dashboard', element: owner(scoped(<DashboardPage />, <ReadOnlyDashboardPage />)) },
       { path: 'websites', element: scoped(<WebsitesPage />, <ReadOnlyWebsitesPage />) },
       { path: 'customers', element: <CustomersRoute /> },

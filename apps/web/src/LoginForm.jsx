@@ -2,6 +2,8 @@ import { useEffect, useRef, useState } from 'react';
 import { authRequest } from './session-client.js';
 import { passwordLogin, requestPasswordReset, resetPasswordWithToken, verifyMfa } from './auth-protocol.js';
 import { authMessage } from './auth-message.js';
+import { PREFERENCE_KEY, writePreferences } from './workspace/ui/ux-model.js';
+import { apply as applyThemePreferences, readStored as readStoredTheme } from './workspace/ui/Preferences.jsx';
 
 export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
   const [view, setView] = useState('login'); // 'login' | 'forgot' | 'reset'
@@ -156,16 +158,53 @@ export default function LoginForm({ setupRequired, notice, onLogin, onSetup }) {
     finally { if (pending.current === controller) pending.current = null; if (!controller.signal.aborted) setBusy(false); }
   }
 
+  const [themeMode, setThemeMode] = useState(() => (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light' ? 'light' : 'dark'));
   const expired = challenge && challenge.expiresAt <= now;
   const activeNotice = localNotice || notice;
+
+  function toggleTheme() {
+    const nextTheme = (typeof document !== 'undefined' && document.documentElement.dataset.wsTheme === 'light') ? 'dark' : 'light';
+    setThemeMode(nextTheme);
+    try {
+      const current = readStoredTheme();
+      const updated = { ...current, theme: nextTheme };
+      applyThemePreferences(updated);
+      if (typeof window !== 'undefined' && window.localStorage) {
+        writePreferences(window.localStorage, updated);
+        window.dispatchEvent(new StorageEvent('storage', { key: PREFERENCE_KEY, newValue: JSON.stringify(updated) }));
+      }
+    } catch {
+      if (typeof document !== 'undefined') document.documentElement.dataset.wsTheme = nextTheme;
+    }
+  }
 
   return <main className="auth-page">
     <section className="auth-intro" aria-label="YunPanel">
       <div className="auth-brand"><span>Y</span> YunPanel</div>
-      <div><p className="auth-eyebrow">YUNSOFT · SUNUCU YÖNETİMİ</p><h1>Kontrol sizde.</h1><p>Web sitelerinizi ve sunucu işlemlerinizi kendi yönetim panelinizden takip edin.</p></div>
+      <div>
+        <p className="auth-eyebrow">YUNSOFT · SUNUCU YÖNETİMİ</p>
+        <h1>Kontrol sizde.</h1>
+        <p>Web sitelerinizi, alt alan adlarınızı, Docker stack’lerinizi ve sunucu telemetrinizi tek merkezden yönetin.</p>
+        <div className="auth-intro-features" aria-hidden="true">
+          <span>Canlı Telemetri · 5 sn</span>
+          <span>1-Click Uygulama Marketi</span>
+          <span>JAMstack &amp; Nginx Proxy</span>
+          <span>Domain &amp; Docker İzolasyonu</span>
+        </div>
+      </div>
       <small>Yalnızca yetkilendirilmiş kullanıcılar içindir.</small>
     </section>
     <section className="auth-form-panel">
+      <div className="auth-form-topbar">
+        <button
+          type="button"
+          className="auth-theme-toggle"
+          aria-label="Gece ve Açık tema arasında geçiş yap"
+          onClick={toggleTheme}
+        >
+          {themeMode === 'light' ? 'Gece Modu' : 'Açık Mod'}
+        </button>
+      </div>
       <form className="auth-form" onSubmit={submit} aria-labelledby="auth-heading">
         <p className="auth-eyebrow">
           {view === 'forgot' ? 'PAROLA KURTARMA' : view === 'reset' ? 'YENİ PAROLA' : challenge ? 'İKİ ADIMLI DOĞRULAMA' : setupRequired ? 'İLK KURULUM' : 'GÜVENLİ ERİŞİM'}
