@@ -2,3 +2,10 @@
 - 2026-10-26 16:31 orchestrator: verify f00e6b89..b014893c: ok, yeniden açılan -, bulgu -
 - 2026-10-26 16:31 orchestrator: tick: 6/6 yuva işte, geri alınan 0
 - 2026-10-26 18:53 orchestrator: verify b014893c..8a4d0eed: ok, yeniden açılan -, bulgu -
+- 2026-10-26 19:04 orchestrator: tick: 1/6 yuva işte, geri alınan 0
+- 2026-10-26 19:21 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 19:32 orchestrator: recover: geri alınan [], kilit ['sunucu-28-1', 'sunucu-28-3'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-10-26 19:32 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 19:45 orchestrator: recover: geri alınan [], kilit ['sunucu-28-1', 'sunucu-28-2'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-10-26 19:45 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 20:06 orchestrator: verify 8a4d0eed..0daff7c8: ok, yeniden açılan -, bulgu -
