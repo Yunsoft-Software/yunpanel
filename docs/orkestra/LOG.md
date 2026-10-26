@@ -9,3 +9,12 @@
 - 2026-10-26 19:45 orchestrator: recover: geri alınan [], kilit ['sunucu-28-1', 'sunucu-28-2'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
 - 2026-10-26 19:45 orchestrator: tick: 6/6 yuva işte, geri alınan 0
 - 2026-10-26 20:06 orchestrator: verify 8a4d0eed..0daff7c8: ok, yeniden açılan -, bulgu -
+- 2026-10-26 20:17 orchestrator: recover: geri alınan [], kilit ['sunucu-28-2', 'sunucu-28-3'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-10-26 20:17 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 20:27 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 20:54 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-26 21:05 orchestrator: recover: geri alınan [], kilit ['sunucu-28-1', 'sunucu-28-2'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 1
+- 2026-10-26 21:05 orchestrator: tick: 6/6 yuva işte, geri alınan 0
+- 2026-10-27 01:17 orchestrator: recover: geri alınan ['T107@review', 'T111', 'T112', 'T113', 'T114', 'T115'], kilit ['sunucu-28-2'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 1
+- 2026-10-27 01:17 orchestrator: branch switched to 27-10-2026 from 26-10-2026
+- 2026-10-27 01:18 orchestrator: verify 0daff7c8..dc4d88d6: ok, yeniden açılan -, bulgu -
