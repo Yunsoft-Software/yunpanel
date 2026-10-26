@@ -18,6 +18,7 @@ import fnmatch
 import importlib.util
 import os
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -157,9 +158,18 @@ def recover(dry_run=False):
 
 
 def run_cmd(cmd):
+    """A check that can never block forever: on timeout the whole process group (npm, node…) is killed."""
     def run():
-        res = subprocess.run(cmd, cwd=root(), shell=True, capture_output=True, text=True)
-        return res.returncode, (res.stdout + res.stderr)[-6000:]
+        limit = tasks.CFG["check_timeout_minutes"] * 60
+        proc = subprocess.Popen(cmd, cwd=root(), shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                text=True, start_new_session=True)
+        try:
+            output, _ = proc.communicate(timeout=limit)
+            return proc.returncode, output[-6000:]
+        except subprocess.TimeoutExpired:
+            os.killpg(proc.pid, signal.SIGKILL)
+            output, _ = proc.communicate()
+            return 124, f"{output[-5000:]}\n\nTIMEOUT: `{cmd}` {tasks.CFG['check_timeout_minutes']} dakikada bitmedi; süreç grubu durduruldu."
     return run
 
 

@@ -48,6 +48,7 @@ DEFAULTS = {
     "qa_jobs": {},
     "commit_suffix": "",
     "protected_branches": ["main", "master", "development"],
+    "check_timeout_minutes": 20,
 }
 REVIEW_SUFFIX = "@review"
 FIELD_RE = re.compile(r"^- \*\*([^*]+):\*\*(.*)$")
