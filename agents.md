@@ -8,11 +8,11 @@
 
 ### Geçerli ürün ve çalışma kararları
 
-1. **Aktif dal `25-10-2026` (`24-10-2026` / `development` tabanlı).** Bu işte `main`e commit/merge/deploy yapılmaz. Her yazımdan önce dal başı kontrol edilir; eşzamanlı değişiklikler ezilmez. Küçük commitler; force push, geçmiş silme ve GitHub Actions yok. Commit mesajlarına `[skip ci]` eklenir.
+1. **Aktif dal günün tarihidir (`DD-MM-YYYY`, Europe/Istanbul); yoksa bir önceki aktif daldan açılır** (26 Ekim 2026 kullanıcı kararı; kural `docs/orkestra/PROJE.md` §Ön kontrol). `26-10-2026` dalı `25-10-2026`'dan (`24-10-2026` / `development` tabanlı) açıldı. Bu işte `main`e commit/merge/deploy yapılmaz. Her yazımdan önce dal başı kontrol edilir; eşzamanlı değişiklikler ezilmez. Küçük commitler; force push, geçmiş silme ve GitHub Actions yok. Commit mesajlarına `[skip ci]` eklenir.
 2. **Plesk görev düzeni korunur; reseller ilk sürümü sadeleşir.** Önceki aynı tarihli “bütün reseller/paket/abonelik özellikleri ilk sürümde zorunlu” kararı kullanıcının son isteğiyle değiştirilmiştir. İlk sürüm Owner → isteğe bağlı tek Reseller → Customer → mevcut Website ilişkisidir. Abonelik ve paket nesnesi site işlemleri için önkoşul değildir. Reseller kendi müşterileri ve onların siteleriyle sınırlıdır. Ayrıntı ve işaretli işler `docs/plesk-feature-parity.md` içindedir.
 3. **Şimdi geliştirilmeyecek reseller işleri:** alt bayi zinciri, ayrı reseller paket motoru, add-on, abonelik sync/lock/customization, overselling, otomatik süre sonu/fatura, bayi markalama, müşteri↔reseller dönüşümü, toplu transfer ve login-as. Bunlar tamamlandı sayılmaz; sonraki fazdır. Basit müşteri/site adet sınırı yeterlidir; disk/CPU/RAM ölçümü veya gerçekten uygulanan site limitleri bu değişiklikle kaldırılmaz. Reseller dışındaki Plesk yol haritası iptal değildir.
 4. **Önce görsel/UX onayı ve doküman, sonra kaynak dilimi.** UI sadeleştirme gerekçesiyle araç/rota/motor silinmez; Global Dosyalar ve domain File Manager girişleri kalır. Ancak eski Ember (bej/turuncu) renk/radius katmanı yerine, kullanıcı onaylı **Shadcn UI tabanlı, ufak mikro-animasyonlar ve ışık/spotlight efektleriyle modernleştirilmiş, sade ve domain→subdomain hiyerarşisini merkeze alan yeni UI/UX** uygulanır.
-5. **Tamamlanma kaydı görev geçmişinde tutulur.** Kök `plan.md` mimari kararları ve açık işleri tutar; tamamlanan maddeler kontroller, bağımsız inceleme, gerekli staging ve Git birleştirmesi sonrasında çıkarılır. Ayrıntılı sonuç ve kabul kanıtları Code Factory görev/run/event kayıtlarında, önceki raporlar Git geçmişinde kalır. `done.md` yalnız kısa bir geçmiş açıklamasıdır; yeni iş raporu eklenmez. İlgili alt planlardaki kaynak işaretlerinin kanıtı ve sınırı belirtilir. Test edilmemiş entegrasyon, migration, tarayıcı veya host kabulü açık bırakılır. Saf politika modülü bütün reseller özelliği değildir; sadece menü gizlemek veya site_manager rolünü yeniden adlandırmak güvenli reseller uygulaması sayılmaz.
+5. **Tamamlanma kaydı görev geçmişinde tutulur.** Kök `plan.md` mimari kararları ve açık işleri tutar; tamamlanan maddeler kontroller, bağımsız inceleme, gerekli staging ve Git birleştirmesi sonrasında çıkarılır. 26 Ekim 2026'dan itibaren görevler, ayrıntılı sonuç ve kabul kanıtları orkestra kayıtlarında (`docs/gorevler/`, `tasks/done/` raporları ve inceleme notları) tutulur; eski Code Factory görev/run/event kayıtları ve önceki raporlar geçmiş kaynak olarak kalır. `done.md` yalnız kısa bir geçmiş açıklamasıdır; yeni iş raporu eklenmez. İlgili alt planlardaki kaynak işaretlerinin kanıtı ve sınırı belirtilir. Test edilmemiş entegrasyon, migration, tarayıcı veya host kabulü açık bırakılır. Saf politika modülü bütün reseller özelliği değildir; sadece menü gizlemek veya site_manager rolünü yeniden adlandırmak güvenli reseller uygulaması sayılmaz.
 6. **Açık kaynak taban değişimi onaylanmadı.** Başka panel kurma, YunPanel'i onunla değiştirme, PHP/Perl backend'e geçme veya iki paneli aynı config dosyasına yazdırma. Kullanıcı kararı ve migration/rollback tasarımı gereklidir.
 
 ### 24 Ekim 2026 — Test, Domain/Subdomain Dosya Kökü, Çoklu Ubuntu ve Yeni Shadcn UI Kuralları
@@ -69,3 +69,11 @@
 ## Uygulama sırası
 
 Güncel dal/kod/kurallar → sade kapsam dokümanı → küçük kaynak dilimi → çalıştırılabilen test → `plan.md` ve ilgili alt planda kaynak işareti / açık kabul → küçük commit. Reseller erişimi bütün hedef API/job/tool/gateway yollarında güvenli kapsam uygulanmadan etkinleştirilmez. Tarihsel tam-parity reseller satırları yeni MVP'nin yayın engeli değildir; ertelenmiş kalır.
+
+<!-- orkestra:start -->
+## Orkestra (senior/junior çalışma düzeni)
+Bu projede iş `docs/orkestra/` ve `docs/gorevler/` üzerinden yürür. Durum diskte: `python3 orkestra/tasks.py status`.
+- Senior isen: `orkestra-senior` becerisini uygula (`.agents/skills/orkestra-senior/SKILL.md`).
+- Junior/orkestratör isen: `orkestra-devam` becerisini uygula (`.agents/skills/orkestra-devam/SKILL.md`).
+- Bağlayıcı kurallar: `docs/orkestra/KURALLAR.md` + `docs/orkestra/PROJE.md`.
+<!-- orkestra:end -->
