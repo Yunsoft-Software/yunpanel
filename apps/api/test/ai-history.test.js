@@ -301,7 +301,9 @@ test('live authorization revocation during long provider call terminates fail-cl
     messagePromise.catch((err) => { messageErr = err; });
 
     // Wait until provider starts, then revoke session immediately
+    const providerDeadline = Date.now() + 10_000;
     while (!providerInvocationStarted && !messageErr) {
+      assert.ok(Date.now() < providerDeadline, 'timed out waiting for the provider call to start');
       await new Promise((r) => setTimeout(r, 5));
     }
     if (messageErr) {

@@ -65,7 +65,11 @@ test('a reader awaiting Application scope sees one committed revision and queued
   await registry.setVariable({ applicationId: id, key: 'VALUE', value: 'first committed value', secret: false });
   block = true;
   const reading = registry.materialize(id);
-  while (!release) await new Promise(resolve => setImmediate(resolve));
+  const releaseDeadline = Date.now() + 10_000;
+  while (!release) {
+    assert.ok(Date.now() < releaseDeadline, 'timed out waiting for materialize to reach applicationExists');
+    await new Promise(resolve => setImmediate(resolve));
+  }
   const input = { applicationId: id, key: 'VALUE', value: 'captured second value', secret: false };
   const writing = registry.setVariable(input); input.value = 'must not replace captured input';
   release();

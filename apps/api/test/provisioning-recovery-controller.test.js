@@ -689,7 +689,12 @@ test('Two browsers or processes racing on shared resource are serialized and pro
   });
 
   // Wait until Browser 1 has acquired the atomic lock and entered the orchestrator
+  let browser1Settled = false;
+  browser1Promise.then(() => { browser1Settled = true; }, () => { browser1Settled = true; });
+  const browser1Deadline = Date.now() + 10_000;
   while (!mutationInFlight) {
+    assert.ok(!browser1Settled, 'Browser 1 request finished before entering the orchestrator');
+    assert.ok(Date.now() < browser1Deadline, 'timed out waiting for Browser 1 to acquire the site lock');
     await new Promise((r) => setTimeout(r, 10));
   }
 
@@ -771,7 +776,12 @@ test('Two separate OS processes contending on siteMutationLock enforce atomic ex
     return 'proc_a_done';
   });
 
+  let procASettled = false;
+  procAPromise.then(() => { procASettled = true; }, () => { procASettled = true; });
+  const procADeadline = Date.now() + 10_000;
   while (!procAInLock) {
+    assert.ok(!procASettled, 'Process A finished before entering the site lock');
+    assert.ok(Date.now() < procADeadline, 'timed out waiting for Process A to acquire the site lock');
     await new Promise((r) => setTimeout(r, 5));
   }
 

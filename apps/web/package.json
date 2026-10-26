@@ -13,7 +13,7 @@
     "preview": "vite preview --host 0.0.0.0 --port 4173",
     "start": "node server.js",
     "pretest": "node -e 'import(\"node:fs\").then(fs => { if (!fs.existsSync(\"dist/index.html\")) { import(\"node:child_process\").then(cp => cp.execSync(\"npm run build\", { stdio: \"inherit\" })); } })'",
-    "test": "node --test"
+    "test": "node --test --test-timeout=120000"
   },
   "dependencies": {
     "@yunpanel/shared": "0.3.0",
