@@ -54,7 +54,7 @@ Bütünü `orkestra/orchestrator.py verify` ayrıca doğrular. Kırılan kabul e
 ## 6. Push (saniyeler sürer)
 İNSAN "push at" dediğinde **tek iş** `python3 orkestra/orchestrator.py push` çalıştırmaktır. Öncesinde diff okuma, kod inceleme, testleri elle tekrar koşma veya rapor yazma yapılmaz; doğrulama zaten `verify` kaydında (`tasks/verified`) durur.
 - Komut korumalı dalı (`protected_branches`) ve commit edilmemiş değişikliği reddeder.
-- Son doğrulamadan beri kod değiştiyse kendisi `verify --quick` çalıştırır, değişmediyse testi tekrarlamaz.
+- **Test çalıştırmaz.** Push, iş dalını ekip arkadaşına ulaştırmaktır, kabul değildir. Komut, son `verify`'dan beri doğrulanmamış commit sayısını yazar; bunu İNSAN'a aynen ilet.
 - Reddederse sebebini aynen İNSAN'a söyle ve dur; kendiliğinden düzeltmeye girişme.
 Junior ajanlar push etmez (PROJE.md izin vermedikçe).
 
