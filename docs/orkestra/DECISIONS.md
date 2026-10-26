@@ -37,3 +37,8 @@
 - **Karar:** Bir özellik için test varsa önce incelenir ve çalıştırılır. Doğru ve yeterliyse (GEÇERLİ) yeniden yazılmaz, korunur ve yalnız çalıştırılır. YÜZEYSEL, MOCK, YANLIŞ veya KIRMIZI olan düzeltilir; testi olmayan senaryo (EKSİK) yazılır. 1. dalgada her manuel test görevi o özelliğin test envanterini ve sınıflarını rapora yazar ama test dosyasını değiştirmez; 2. dalga bu envanterden üretilir.
 - **Gerekçe:** ~1000 test dosyası zaten var; aynı işi tekrar yazmak zaman kaybı. Ama 82 dosyada mock/stub izi var ve audit yüzeysel testler tespit etti; "test var" demek doğru olduğu anlamına gelmez.
 - **Onaylayan:** İNSAN
+
+## 2026-10-27 · 1. dalga hız ve token ayarı
+- **Karar:** Yuva sayısı 6 → 4 (3 canlı test + 1 inceleme/kritik düzeltme). İnceleme hafif: rapor kontrolü + tek fiziksel kontrol (`curl`/`dig`/SSH okuma); tarayıcıda tekrar yalnız ÇALIŞIYOR raporlarında. Rapor en fazla 80 satır, ekran görüntüsü yalnız hata için. KRİTİK bulgular her zaman sıranın başında (`priority_patterns`).
+- **Gerekçe:** İlk gecede 17 görev ~3,5 saat aktif çalışmada bitti, kota bitti (21:05–01:17 boşluk); `.28` 3 kilitle sınırlı olduğu için 6 ajanın ikisi bekleyerek token harcıyordu; raporlar ortalama 33 KB idi; kritik bulgular T800/T801 dosya sırası yüzünden 6 saat bekledi.
+- **Onaylayan:** İNSAN

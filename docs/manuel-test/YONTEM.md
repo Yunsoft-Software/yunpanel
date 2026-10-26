@@ -31,7 +31,7 @@ Ayrıca hiç testi olmayan senaryoları **EKSİK** olarak listele. Bu dalgada te
    - Fiziksel sonuç: Ekran "başarılı" demesi yetmez. Gerçek sonucu doğrula: HTTP cevabı (`curl -sk https://<alan>/`), indirilebilen dosya, oluşan DB'ye bağlantı, DNS kaydı (`dig @<ns>`), gelen e-posta. SSH ile sunucuda dosya, servis veya kullanıcı kontrolü yalnız okumak içindir.
    - Geri alma: Silme, askıya alma ve ayar geri dönüşünü dene; kardeş kaynağın etkilenmediğini kontrol et.
 5. **Temizlik:** Oluşturduğun her şeyi panelin normal akışıyla sil. Silinmediyse raporda "temizlenemedi" olarak listele.
-6. **Kanıt:** Ekran görüntüleri `.local/manuel-test/<ID>/` altına (gitignore'da). Raporda yalnız dosya adını, komut çıktısının özetini ve HTTP kodunu yaz.
+6. **Kanıt:** Ekran görüntüsü yalnız hata için, `.local/manuel-test/<ID>/` altına (gitignore.da). Raporda yalnız dosya adını, komut çıktısının özetini ve HTTP kodunu yaz.
 
 ## Hata sınıfı
 - **KRİTİK:** Testi tamamen engelleyen, veri kaybeden veya bozan, başka kullanıcının/sitenin verisini gösteren veya değiştiren, servisi çökerten ya da paneli açılmaz hale getiren hata.
@@ -41,6 +41,7 @@ Ayrıca hiç testi olmayan senaryoları **EKSİK** olarak listele. Bu dalgada te
 - **NORMAL:** Diğer her şey (yanlış metin, eksik doğrulama, kötü UX, yavaşlık, kısmen çalışan akış). Bunlar yalnız rapora yazılır.
 
 ## Rapor: `docs/manuel-test/<ID>.md`
+**Kısa tut: en fazla 80 satır.** Yalnız aşağıdaki tablolar; hücreler kısa (adım en fazla bir cümle). Uzun açıklama, kod alıntısı, log dökümü ve tekrar yok. Ayrıntılı log gerekiyorsa `.local/manuel-test/<ID>/` altına yaz ve raporda yalnız dosya adını ver. Ekran görüntüsünü yalnız hata ya da beklenmeyen davranış için al; başarılı adımları metinle kaydet.
 ```markdown
 # <ID> — <özellik>
 Sonuç: ÇALIŞIYOR | KISMİ | ÇALIŞMIYOR | TEST EDİLEMEDİ
@@ -76,4 +77,8 @@ Plesk'teki karşılığı olup YunPanel'de hiç bulunamayan alt işlevler (3. da
 Manuel test görevleri yalnız rapor yazar ve kaynak kodu değiştirmez. Bu yüzden teslimde `npm test` gerekmez; `python3 orkestra/tasks.py lint` yeterlidir. Kilidi bırakmadan teslim etme. Bulgu (KRİTİK) düzeltme görevleri ise normal kurala tabidir: PROJE.md §Doğrulama ve gerçek tekrar üretme.
 
 ## İnceleme (başka ajan)
-İnceleyen ajan raporun eksiksiz olduğunu kontrol eder ve **en az bir senaryoyu** (tercihen sonucu ÇALIŞIYOR olanlardan birini) aynı kilit kurallarıyla tarayıcıda kendisi tekrar eder. Sonuç tutmuyorsa `reject` eder.
+Hafif inceleme (2026-10-27 kararı; bu dalgada KURALLAR §4.2'nin yerine geçer). Hedef: 10 dakikanın altında bitirmek.
+1. Raporu şablona ve Kabul satırına göre kontrol et: Sonuç dolu mu, her senaryoda beklenen/gerçek/kanıt var mı, KRİTİK hatanın bulgu görevi var mı, kaynaklar temizlenmiş mi.
+2. Tarayıcı açmadan **tek bir fiziksel kontrolü** kendin yap: raporda yazan bir `curl -sk` HTTP cevabı, `dig` DNS kaydı ya da SSH ile salt okunur bir dosya/servis kontrolü. Rapordakiyle tutmalı.
+3. Tarayıcıda senaryo tekrarı **yalnız** rapor Sonuç'u **ÇALIŞIYOR** ise yapılır: o raporun en riskli tek senaryosu, `sunucu-28-n` kilidiyle.
+4. Tutmayan veya eksik bir şey varsa `reject`, tutuyorsa `accept`. Kısa not yaz: hangi kontrolü yaptın, ne gördün (1–3 satır).

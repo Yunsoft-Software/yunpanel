@@ -49,6 +49,7 @@ DEFAULTS = {
     "commit_suffix": "",
     "protected_branches": ["main", "master", "development"],
     "check_timeout_minutes": 20,
+    "priority_patterns": ["KRİTİK"],
 }
 REVIEW_SUFFIX = "@review"
 FIELD_RE = re.compile(r"^- \*\*([^*]+):\*\*(.*)$")
@@ -246,7 +247,11 @@ def get_task(tasks, tid):
 
 
 def ready_tasks(tasks, order, agent=None):
-    """Open tasks whose dependencies are accepted; owned tasks only for their owner."""
+    """Open tasks whose dependencies are accepted; owned tasks only for their owner.
+    Titles containing a `priority_patterns` entry (e.g. KRİTİK) come first, otherwise file order."""
+    patterns = CFG["priority_patterns"]
+    if patterns:
+        order = sorted(order, key=lambda tid: not any(p in tasks[tid].title for p in patterns))
     result = []
     for tid in order:
         t = tasks[tid]

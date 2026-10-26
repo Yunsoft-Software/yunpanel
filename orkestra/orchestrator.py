@@ -115,12 +115,14 @@ def recover(dry_run=False):
     stamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     report = {"recovered": [], "kept": [], "orphans": [], "locks_broken": []}
     claimed_paths = set()
+    live_owners = set()  # an agent may hold a lock for a whole long task: its locks live as long as its claims
     for key, tid, review, owner in claims():
         task = all_tasks.get(tid)
         paths = [] if review else [p for p in changes if task and owns(task, p)]
         claimed_paths.update(paths)
         if tasks.is_protected(owner) or now - alive_at(key, paths) < tasks.stale_seconds():
             report["kept"].append(key)
+            live_owners.add(tasks.norm(owner))
             continue
         report["recovered"].append(key)
         if dry_run:
@@ -146,7 +148,7 @@ def recover(dry_run=False):
                     owner = fh.read().split("|")[0].strip()
             except OSError:
                 owner = "?"
-            if tasks.is_protected(owner) or now - os.path.getmtime(d) < STALE_LOCK_SECONDS:
+            if tasks.is_protected(owner) or tasks.norm(owner) in live_owners or now - os.path.getmtime(d) < STALE_LOCK_SECONDS:
                 continue
             report["locks_broken"].append(name)
             if not dry_run:

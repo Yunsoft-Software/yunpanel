@@ -1,5 +1,5 @@
 {
-  "slots": 6,
+  "slots": 4,
   "task_dir": "docs/gorevler",
   "review": true,
   "protected_owners": [
@@ -42,5 +42,8 @@
     "qa-guvenlik": "Son 20 commit'in diff'ini oku; RBAC/CSRF atlaması, tenant sızıntısı, secret'ın loga/yanıta yazılması, root yetkisinin frontend'e taşınması, mock kullanımı. Sadece kanıtla bulgu yaz.",
     "qa-kapsam": "`docs/test-scenarios-matrix.md` ile `apps/*/test`, `e2e/` dosyalarını karşılaştır; testi olmayan özellik, sekme, form veya uç noktayı bulgu olarak yaz."
   },
-  "qa_jobs": {}
+  "qa_jobs": {},
+  "priority_patterns": [
+    "KRİTİK"
+  ]
 }
