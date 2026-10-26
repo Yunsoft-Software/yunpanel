@@ -32,3 +32,8 @@
 - **Hatalar:** Kritik hata (testi engelleyen, veri kaybı/bozulması, güvenlik/tenant sızıntısı, servis çökmesi) bulunduğu an bulgu görevi olur ve düzeltilir. Kritik olmayan hatalar yalnız rapora yazılır; 1. dalga sonunda İNSAN önceliklendirir.
 - **Canlı test eşzamanlılığı:** "Canlı test tek kilitle" kararının yerine geçer. `.28`'de aynı anda en fazla 3 ajan (`sunucu-28-1/2/3` kilitleri), her ajan kendi önekli kaynaklarında; sunucu geneli işlemler `sunucu-28-genel` kilidiyle tek ajan.
 - **Onaylayan:** İNSAN
+
+## 2026-10-26 · Mevcut testler önce incelenir
+- **Karar:** Bir özellik için test varsa önce incelenir ve çalıştırılır. Doğru ve yeterliyse (GEÇERLİ) yeniden yazılmaz, korunur ve yalnız çalıştırılır. YÜZEYSEL, MOCK, YANLIŞ veya KIRMIZI olan düzeltilir; testi olmayan senaryo (EKSİK) yazılır. 1. dalgada her manuel test görevi o özelliğin test envanterini ve sınıflarını rapora yazar ama test dosyasını değiştirmez; 2. dalga bu envanterden üretilir.
+- **Gerekçe:** ~1000 test dosyası zaten var; aynı işi tekrar yazmak zaman kaybı. Ama 82 dosyada mock/stub izi var ve audit yüzeysel testler tespit etti; "test var" demek doğru olduğu anlamına gelmez.
+- **Onaylayan:** İNSAN

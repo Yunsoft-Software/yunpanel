@@ -5,6 +5,20 @@
 ## Amaç
 `docs/plesk-feature-parity.md` içindeki özelliğin **bugün `.28` üzerinde gerçek bir kullanıcı için çalışıp çalışmadığını** ölçmek. Kod okuyup "çalışmalı" demek, API'yi doğrudan çağırmak ya da birim testine bakmak test sayılmaz. Bu dalgada test **kodu yazılmaz** (2. dalganın işi) ve kritik olmayan hata **düzeltilmez**.
 
+## Önce mevcut testler (kilit gerekmez)
+Bu özelliğe ait testleri bul: `apps/api/test`, `apps/web/test`, `packages/*/test` ve `e2e/`. Özelliğin rotası, API yolu, servis ve bileşen adıyla `grep -rl` ile ara. Bulduğun her dosyayı oku ve çalıştır:
+- Birim/API testleri: `node --test --test-timeout=120000 <dosya>`.
+- `e2e/` Playwright: yalnız manuel test sırasında, aldığın `sunucu-28-n` kilidiyle `npx playwright test <dosya>`. Mutasyon yapan dosyalar kendi verisini oluşturur; mevcut veriye dokunuyorsa çalıştırma ve rapora yaz.
+
+Her dosyayı tek bir sınıfa koy:
+- **GEÇERLİ:** Gerçek davranışı gerçek bileşenlerle ölçüyor, doğru şeyi doğruluyor ve manuel testte gördüğün davranışla tutarlı.
+- **YÜZEYSEL:** Kaynak dosyasını okuyup metin/regex arıyor, yalnız "200 döndü" diyor ya da fiziksel sonucu kontrol etmiyor.
+- **MOCK:** Sahte servis, stub HTTP cevabı, hazır sahte veri veya `mock*` nesnesi kullanıyor (agents.md 24 Ekim §1'e aykırı).
+- **YANLIŞ:** Yanlış davranışı doğru diye kabul ediyor. Örnek: manuel testte bozuk çıkan bir akış için test yeşil geçiyor.
+- **KIRMIZI:** Çalıştırınca düşüyor ya da takılıyor.
+
+Ayrıca hiç testi olmayan senaryoları **EKSİK** olarak listele. Bu dalgada test dosyasını değiştirme. Sonuç 2. dalganın girdisidir: GEÇERLİ olan korunur ve yalnız çalıştırılır; diğerleri düzeltilir ya da eksik olan yazılır.
+
 ## Nasıl test edilir
 1. **Kilit:** `sunucu-28-1/2/3` kilitlerinden birini al (PROJE.md §İzinli test hedefleri). Sunucu geneli bir ayar değiştireceksen ayrıca `sunucu-28-genel`.
 2. **Giriş:** Tarayıcıda panel adresini aç ve `.local/yunpanel-owner-password-only.json` bilgileriyle giriş yap. Hiçbir gizli bilgiyi rapora yazma.
@@ -43,6 +57,11 @@ Ajan: AGENT_n · Tarih: YYYY-MM-DD HH:MM · Panel sürümü: <ayarlar/footer'dak
 | Sınıf | Başlık | Tekrar üretme | Bulgu görevi |
 |---|---|---|---|
 (KRİTİK satırlarda bulgu görevi kimliği, ör. T812; NORMAL satırlarda —)
+
+## Mevcut testler
+| Dosya | Ne ölçüyor | Çalıştırma sonucu | Sınıf | Not |
+|---|---|---|---|---|
+Testi olmayan senaryolar (EKSİK): …
 
 ## Panelde olmayan / bulunamayan
 Plesk'teki karşılığı olup YunPanel'de hiç bulunamayan alt işlevler (3. dalga için girdi).
