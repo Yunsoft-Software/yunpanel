@@ -36,22 +36,25 @@ def git(*args, check=True):
     return subprocess.run(["git", *args], cwd=root(), check=check, capture_output=True, text=True).stdout
 
 
+LOG_PATH = "docs/orkestra/LOG.md"
+
+
 def log(line):
-    path = os.path.join(root(), "docs", "orkestra", "LOG.md")
+    path = os.path.join(root(), LOG_PATH)
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a", encoding="utf-8") as fh:
         fh.write(f"- {datetime.now():%Y-%m-%d %H:%M} orchestrator: {line}\n")
 
 
 def changed_paths():
-    """{path: 'tracked'|'untracked'} for every uncommitted change outside tasks/ state."""
+    """{path: 'tracked'|'untracked'} for every uncommitted change outside tasks/ state and the orchestrator log."""
     result = {}
     for raw in git("status", "--porcelain=v1", "-uall").splitlines():
         code, path = raw[:2], raw[3:]
         if " -> " in path:
             path = path.split(" -> ", 1)[1]
         path = path.strip('"')
-        if path.startswith("tasks/"):
+        if path.startswith("tasks/") or path == LOG_PATH:
             continue
         result[path] = "untracked" if code == "??" else "tracked"
     return result
@@ -304,7 +307,7 @@ def main(argv):
         print(f"doğrulama: {r['status']}; yeniden açılan: {' '.join(r['reopened']) or '-'}; bulgu: {' '.join(r['findings']) or '-'}")
         commit(["tasks/verified", "tasks/done", "tasks/history", "tasks/reopen",
                 os.path.relpath(os.path.join(tasks.TASK_DIR, tasks.CFG["finding_file"]), root()),
-                "docs/orkestra/LOG.md"],
+                LOG_PATH],
                f"orchestrator verify: {r['status']}")
         sys.exit(0 if r["status"] in ("ok", "initialized") else 1)
     elif cmd == "slots":
