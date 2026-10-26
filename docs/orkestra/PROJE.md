@@ -18,7 +18,9 @@
 
 ## İzinli test hedefleri
 - **Yalnız** `.local/test-server.env` ile doğrulanan `.28` YunPanel test sunucusu; adres her oturumda bu dosyadan teyit edilir. Dosyanın içeriği (adres, kullanıcı, parola) rapora, loga, commit'e yazılmaz.
-- `.28`'e dokunan her iş (SSH, Playwright, canlı API, kurulum/silme) **`sunucu-28` kilidi** altında yapılır: `bash orkestra/lock.sh acquire sunucu-28 AGENT_n` … `release`. Aynı anda tek ajan. Kilit 120 sn içinde alınamazsa kaynak işine devam et ve sonra tekrar dene; kilidi bekleyerek yuva boşa tutulmaz.
+- **Panel girişi (tarayıcıdan manuel test):** adres, Owner kullanıcı adı ve parola `.local/yunpanel-owner-password-only.json` içinde (`url`, `username`, `password`; gitignore'da, izin 600). Ajan tarayıcıda bu bilgilerle giriş yapar ve oturum düşerse yeniden girer. Parola, cookie ve token sohbete, rapora, loga, ekran görüntüsüne veya commit'e yazılmaz. Reseller/Customer testleri için gereken hesapları Owner olarak panelden, ajan önekiyle oluşturur ve test sonunda siler; o hesapların parolaları yalnız `.local/manuel-test/` altında tutulur.
+- `.28`'de **aynı anda en fazla 3 ajan** çalışır. Canlı işe başlamadan `sunucu-28-1`, `sunucu-28-2`, `sunucu-28-3` kilitlerinden boş olanı al (`bash orkestra/lock.sh acquire sunucu-28-1 AGENT_n`; 120 sn'de alınamazsa sıradakini dene), iş bitince bırak. Üçü de doluysa canlı gerektirmeyen hazırlığı yap (kodu ve akışı oku, senaryoları yaz) ve sonra tekrar dene.
+- **Sunucu geneli işlemler** (firewall, sunucu ayarları, PHP sürümü kurma/kaldırma, servis veya paket restart, Nginx ana yapılandırması, DNS sunucu ayarı, kullanıcıları etkileyen genel ayar) ayrıca **`sunucu-28-genel`** kilidiyle, tek ajan tarafından yapılır ve aynı oturumda eski haline döndürülür.
 - Her ajan oluşturduğu test kaynaklarını kendi öneğiyle adlandırır (ör. `agent3-t512-*.webrich.news`), raporuna listeler ve normal panel akışıyla temizler. Başkasının veya kullanıcının verisine dokunulmaz.
 - `.28`'de rutin yedek/snapshot alınmaz (agents.md 11 Ekim kuralı).
 

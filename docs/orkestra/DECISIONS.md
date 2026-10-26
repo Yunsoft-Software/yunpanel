@@ -21,3 +21,14 @@
 - **Karar:** Junior ajanlar push etmez. Senior değerlendirmeden sonra İNSAN'ın açık onayıyla yalnız aktif dalı push eder; `main`'e asla. Aktif dal günün tarihidir (`DD-MM-YYYY`); yeni günde bir önceki aktif daldan açılır, aktif claim varken değiştirilmez.
 - **Gerekçe:** Ekip arkadaşı GitHub'dan devam edebilsin; günlük dal düzeni korunsun.
 - **Onaylayan:** İNSAN
+
+## 2026-10-26 · YunPanel iş sırası
+- **Karar:** (1) Mevcut özelliklerin hepsi gerçek tarayıcıda, gerçek kullanıcı gibi manuel test edilir ve raporlanır. (2) Mevcut özelliklere mock/sahte API olmadan gerçek senaryo testleri yazılır. (3) Plesk'te sık kullanılıp YunPanel'de olmayan özellikler eklenir; listeyi İNSAN verir.
+- **Gerekçe:** 162 Plesk özelliğinden hiçbiri doğrulanmış değil (9 kritik açık, 31 kısmi, 84 incelenmedi); önce gerçek durum ölçülmeli.
+- **Onaylayan:** İNSAN
+
+## 2026-10-26 · 1. dalga: manuel test
+- **Karar:** "Sonraki faz" ve "Ayrı hat" dışındaki 124 özellik ID'sinin her biri ayrı görevdir; Antigravity kesintisiz yürütür, senior ertesi gün raporları inceler.
+- **Hatalar:** Kritik hata (testi engelleyen, veri kaybı/bozulması, güvenlik/tenant sızıntısı, servis çökmesi) bulunduğu an bulgu görevi olur ve düzeltilir. Kritik olmayan hatalar yalnız rapora yazılır; 1. dalga sonunda İNSAN önceliklendirir.
+- **Canlı test eşzamanlılığı:** "Canlı test tek kilitle" kararının yerine geçer. `.28`'de aynı anda en fazla 3 ajan (`sunucu-28-1/2/3` kilitleri), her ajan kendi önekli kaynaklarında; sunucu geneli işlemler `sunucu-28-genel` kilidiyle tek ajan.
+- **Onaylayan:** İNSAN

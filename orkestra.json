@@ -31,13 +31,13 @@
       },
       {
         "name": "e2e-28",
-        "cmd": "bash orkestra/lock.sh acquire sunucu-28 VERIFY && { npx playwright test; rc=$?; bash orkestra/lock.sh release sunucu-28 VERIFY; exit $rc; }"
+        "cmd": "bash orkestra/lock.sh acquire sunucu-28-genel VERIFY && { npx playwright test; rc=$?; bash orkestra/lock.sh release sunucu-28-genel VERIFY; exit $rc; }"
       }
     ]
   },
   "qa_jobs": {
     "qa-birim": "`npm run lint` ve `npm test`; kırmızı testleri, atlanan (skip) testleri ve mock/stub kullanan testleri bulgu olarak yaz.",
-    "qa-arayuz": "`sunucu-28` kilidiyle gerçek .28 panelinde 360/768/1280 px Playwright ekran görüntüsü al; taşma, üst üste binme, eşit olmayan yan yana kartlar ve agents.md 24 Ekim §6 yasaklı metinleri (geliştirici notu, parantez içi jargon, rakip panel adı) bul.",
+    "qa-arayuz": "`sunucu-28-1/2/3` kilitlerinden biriyle gerçek .28 panelinde 360/768/1280 px Playwright ekran görüntüsü al; taşma, üst üste binme, eşit olmayan yan yana kartlar ve agents.md 24 Ekim §6 yasaklı metinleri (geliştirici notu, parantez içi jargon, rakip panel adı) bul.",
     "qa-guvenlik": "Son 20 commit'in diff'ini oku; RBAC/CSRF atlaması, tenant sızıntısı, secret'ın loga/yanıta yazılması, root yetkisinin frontend'e taşınması, mock kullanımı. Sadece kanıtla bulgu yaz.",
     "qa-kapsam": "`docs/test-scenarios-matrix.md` ile `apps/*/test`, `e2e/` dosyalarını karşılaştır; testi olmayan özellik, sekme, form veya uç noktayı bulgu olarak yaz."
   },

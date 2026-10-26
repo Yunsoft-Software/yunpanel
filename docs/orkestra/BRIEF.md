@@ -21,4 +21,5 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 ## Güncel durum
 - 26-10-2026: orkestra kuruldu; aktif dal `26-10-2026` (`25-10-2026`'dan).
 - Açık ana işler: `plan.md` YP2-19…YP2-23 (merkezi Shadcn UI ve domain ağacı, subdomain file root, çoklu Linux, sıfır mock test hattı, Docker/Compose proxy) ve `todo.md` T-* gerçek kabul kapıları.
-- Henüz orkestra görevi açılmadı. Sıradaki senior adımı: kullanıcıyla ilk dalganın kapsamını seçip `docs/gorevler/` altına görevleri yazmak.
+- 1. dalga hazır (`docs/gorevler/G1-manuel-test.md`): T100 hazırlık → T101–T224 124 özelliğin gerçek tarayıcıda manuel testi → T299 özet. Yöntem `docs/manuel-test/YONTEM.md`, raporlar `docs/manuel-test/<ID>.md`. Kritik hatalar bulgu görevi (T800+) olup düzeltilir.
+- Sıradaki: junior `/orkestra-devam` ile 1. dalgayı yürütür; senior ertesi gün `OZET.md` ve raporları inceler. 3. dalga için Plesk'te sık kullanılan özellik listesini İNSAN verecek.
