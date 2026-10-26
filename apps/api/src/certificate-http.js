@@ -109,9 +109,89 @@ function customPreview({ domain, inspected }) {
   });
 }
 
+async function isWebsiteAllowedForRequest(websiteId, request, { websiteRegistry = null, customerLookup = null } = {}) {
+  if (!websiteId) return false;
+  const user = request?.auth?.user;
+  if (!user) return false;
+  const role = user.role;
+  if (role === 'owner' || role === 'read_only') return true;
+  const isReseller = role === 'reseller' || user.hosting?.kind === 'reseller';
+  const isCustomer = role === 'customer' || user.hosting?.kind === 'customer';
+  const allowed = new Set(Array.isArray(user.websiteIds) ? user.websiteIds : []);
+
+  let site = null;
+  if (websiteRegistry && typeof websiteRegistry.getWebsite === 'function') {
+    try {
+      site = await websiteRegistry.getWebsite(websiteId);
+    } catch {
+      site = null;
+    }
+  }
+
+  if (isCustomer) {
+    if (!allowed.has(websiteId)) return false;
+    if (site && site.customerId && site.customerId !== user.id) {
+      return false;
+    }
+    return true;
+  }
+
+  if (isReseller) {
+    if (site) {
+      if (site.resellerId !== undefined) {
+        return site.resellerId !== null && site.resellerId === user.id;
+      }
+      if (site.customerId) {
+        if (typeof customerLookup === 'function') {
+          try {
+            const cust = await Promise.resolve(customerLookup(site.customerId));
+            return Boolean(cust && cust.resellerId !== null && cust.resellerId === user.id);
+          } catch {
+            return false;
+          }
+        }
+        return false;
+      }
+    }
+    return allowed.has(websiteId);
+  }
+
+  return allowed.has(websiteId);
+}
+
+function isScopedTenantRequest(request) {
+  const user = request?.auth?.user;
+  const role = user?.role;
+  return Boolean(
+    (role && !['owner', 'read_only'].includes(role))
+    || user?.hosting?.kind === 'reseller'
+    || user?.hosting?.kind === 'customer'
+  );
+}
+
+async function assertDomainTenantAccess(domain, request, dependencies = {}) {
+  if (!isScopedTenantRequest(request)) return;
+  if (!domain || !domain.websiteId) {
+    throw new CertificateRegistryError('forbidden', 'Access denied to this certificate', 403);
+  }
+  const allowed = await isWebsiteAllowedForRequest(domain.websiteId, request, dependencies);
+  if (!allowed) {
+    throw new CertificateRegistryError('forbidden', 'Access denied to this certificate', 403);
+  }
+}
+
+async function assertCertificateTenantAccess(certificate, request, dependencies = {}) {
+  if (!isScopedTenantRequest(request)) return;
+  const domain = certificate?.domainId && dependencies.domainRegistry
+    ? await dependencies.domainRegistry.getDomain(certificate.domainId).catch(() => null)
+    : null;
+  await assertDomainTenantAccess(domain, request, dependencies);
+}
+
 async function buildCustomPreview({ request, dependencies, requireIdle = false }) {
   const { domainRegistry, certificateRegistry, certificateMaterialManager, jobRegistry, localServerId } = dependencies;
   const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+  await assertDomainTenantAccess(domain, request, dependencies);
   const input = customInput(request.body, requireIdle ? CUSTOM_APPLY_FIELDS : CUSTOM_PREVIEW_FIELDS);
   const certificates = requireIdle
     ? await assertCertificateIdle({ domain, jobRegistry, certificateRegistry })
@@ -159,6 +239,7 @@ function selectionPreview({ domain, certificate, inspected }) {
 async function buildSelectionPreview({ request, dependencies, requireIdle = false }) {
   const { domainRegistry, certificateRegistry, certificateMaterialManager, jobRegistry, localServerId } = dependencies;
   const domain = await requireLocalDomain(domainRegistry, request.params.domainId, localServerId);
+  await assertDomainTenantAccess(domain, request, dependencies);
   if (domain.certificateId === request.params.certificateId) {
     throw new CertificateRegistryError('certificate_already_selected', 'Certificate is already selected for this Domain', 409);
   }
@@ -461,6 +542,11 @@ export function mountCertificateRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function' || required.some((key) => !dependencies[key])) {
     throw new Error('Certificate routes require registries, material manager and job registry');
   }
+  const accessDependencies = {
+    ...dependencies,
+    websiteRegistry: dependencies.websiteRegistry ?? app?.boundaryOptions?.websiteRegistry ?? null,
+    customerLookup: dependencies.customerLookup ?? app?.boundaryOptions?.customerLookup ?? null,
+  };
   const domainLocks = new Map();
 
   async function withDomainLock(domainId, operation) {
@@ -479,7 +565,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
   app.post('/api/domains/:domainId/certificates/custom-preview', requirePanelRouteAccess, async (request, response, next) => {
     try {
-      const { preview } = await buildCustomPreview({ request, dependencies });
+      const { preview } = await buildCustomPreview({ request, dependencies: accessDependencies });
       return response.json({ data: preview });
     } catch (error) { return next(error); }
   });
@@ -493,7 +579,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
         'Custom certificate apply fields are invalid',
       );
       const result = await withDomainLock(request.params.domainId, async () => {
-        const { domain, input, inspected, preview } = await buildCustomPreview({ request, dependencies, requireIdle: true });
+        const { domain, input, inspected, preview } = await buildCustomPreview({ request, dependencies: accessDependencies, requireIdle: true });
         if (apply.previewDigest !== preview.previewDigest) {
           throw new CertificateRegistryError('certificate_preview_stale', 'Certificate state changed after preview; request a new preview', 409);
         }
@@ -541,7 +627,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
   app.post('/api/domains/:domainId/certificates/:certificateId/select-preview', requirePanelRouteAccess, async (request, response, next) => {
     try {
       exactBody(request.body, new Set(), 'invalid_certificate_selection', 'Certificate selection preview body must be empty');
-      const { preview } = await buildSelectionPreview({ request, dependencies });
+      const { preview } = await buildSelectionPreview({ request, dependencies: accessDependencies });
       return response.json({ data: preview });
     } catch (error) { return next(error); }
   });
@@ -555,7 +641,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
         'Certificate selection apply fields are invalid',
       );
       const result = await withDomainLock(request.params.domainId, async () => {
-        const { domain, certificate, preview } = await buildSelectionPreview({ request, dependencies, requireIdle: true });
+        const { domain, certificate, preview } = await buildSelectionPreview({ request, dependencies: accessDependencies, requireIdle: true });
         if (apply.previewDigest !== preview.previewDigest) {
           throw new CertificateRegistryError('certificate_preview_stale', 'Certificate state changed after preview; request a new preview', 409);
         }
@@ -579,6 +665,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
       if (!certificate) {
         throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
       }
+      await assertCertificateTenantAccess(certificate, request, accessDependencies);
       const liveTls = request.body?.liveTls ?? request.body;
       const result = await dependencies.certificateRegistry.verifyLiveTls(certificate.id, liveTls);
       return response.json({
@@ -596,6 +683,7 @@ export function mountCertificateRoutes(app, dependencies = {}) {
       if (!domain) {
         throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
       }
+      await assertDomainTenantAccess(domain, request, accessDependencies);
       const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
       if (!certificate || certificate.domainId !== domain.id) {
         throw new CertificateRegistryError('certificate_not_found', 'Certificate not found for this Domain', 404);
@@ -614,6 +702,11 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
   app.post('/api/certificates/:certificateId/renewal-outcome', requirePanelRouteAccess, async (request, response, next) => {
     try {
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      await assertCertificateTenantAccess(certificate, request, accessDependencies);
       const { jobId, before = null, liveTls = null, dryRun = false } = request.body ?? {};
       if (typeof jobId !== 'string' || !jobId) {
         throw new CertificateRegistryError('job_id_required', 'Renewal job ID is required');
@@ -633,6 +726,11 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
   app.post('/api/certificates/:certificateId/reload-outcome', requirePanelRouteAccess, async (request, response, next) => {
     try {
+      const certificate = await dependencies.certificateRegistry.getCertificate(request.params.certificateId);
+      if (!certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      await assertCertificateTenantAccess(certificate, request, accessDependencies);
       const { service, status, error = null, stage = 'reload' } = request.body ?? {};
       if (typeof service !== 'string' || !service) {
         throw new CertificateRegistryError('invalid_reload_outcome_service', 'Reload outcome service is required');
@@ -653,6 +751,9 @@ export function mountCertificateRoutes(app, dependencies = {}) {
   if (dependencies.certificateMaterialGc) {
     app.get('/api/certificates/gc/preview', requirePanelRouteAccess, async (request, response, next) => {
       try {
+        if (isScopedTenantRequest(request)) {
+          throw new CertificateRegistryError('forbidden', 'Access denied to global certificate garbage collection', 403);
+        }
         const retentionDaysRaw = request.query?.retentionDays;
         const retentionDays = retentionDaysRaw !== undefined && /^\d+$/.test(retentionDaysRaw)
           ? Number.parseInt(retentionDaysRaw, 10)
@@ -664,6 +765,9 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
     app.post('/api/certificates/gc/sweep', requirePanelRouteAccess, async (request, response, next) => {
       try {
+        if (isScopedTenantRequest(request)) {
+          throw new CertificateRegistryError('forbidden', 'Access denied to global certificate garbage collection', 403);
+        }
         const retentionDays = typeof request.body?.retentionDays === 'number' ? request.body.retentionDays : undefined;
         const dryRun = Boolean(request.body?.dryRun);
         const result = await dependencies.certificateMaterialGc.sweep({ retentionDays, dryRun });
@@ -683,6 +787,9 @@ export function mountCertificateRoutes(app, dependencies = {}) {
         if (!domain && !certificateId) {
           throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
         }
+        if (domain) {
+          await assertDomainTenantAccess(domain, request, accessDependencies);
+        }
       }
       if (!certificateId && domain?.certificateId) {
         certificateId = domain.certificateId;
@@ -698,9 +805,15 @@ export function mountCertificateRoutes(app, dependencies = {}) {
           error: { code: 'certificate_not_found', message: 'Certificate not found' },
         });
       }
+      if (domain && certificate.domainId && certificate.domainId !== domain.id) {
+        return response.status(404).json({
+          error: { code: 'certificate_not_found', message: 'Certificate not found for this Domain' },
+        });
+      }
       if (!domain && certificate.domainId) {
         domain = await domainRegistry.getDomain(certificate.domainId).catch(() => null);
       }
+      await assertDomainTenantAccess(domain, request, accessDependencies);
 
       let inspected = null;
       if (certificateMaterialManager && typeof certificateMaterialManager.inspectStored === 'function' && certificate.certificatePath) {
@@ -760,17 +873,31 @@ export function mountCertificateRoutes(app, dependencies = {}) {
       let domain = null;
       if (domainId) {
         domain = await domainRegistry.getDomain(domainId).catch(() => null);
+        if (!domain) {
+          throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+        }
+        await assertDomainTenantAccess(domain, request, accessDependencies);
       }
       let certId = certificateId ?? domain?.certificateId;
       let certificate = certId ? await certificateRegistry.getCertificate(certId).catch(() => null) : null;
+      if (certificateId && !certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      if (domain && certificate && certificate.domainId && certificate.domainId !== domain.id) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found for this Domain', 404);
+      }
       if (!domain && certificate?.domainId) {
         domain = await domainRegistry.getDomain(certificate.domainId).catch(() => null);
       }
+      await assertDomainTenantAccess(domain, request, accessDependencies);
 
       const queryJobId = request.query?.jobId ?? request.body?.jobId;
       let job = null;
       if (queryJobId) {
         job = await jobRegistry.getJob(queryJobId).catch(() => null);
+        if (job && certId && job.resourceId && job.resourceId !== certId) {
+          job = null;
+        }
       } else if (certId) {
         const jobs = await jobRegistry.listJobs({ resourceType: 'certificate', resourceId: certId }).catch(() => []);
         job = jobs.filter((j) => j.operation === 'ssl.renew').pop() ?? jobs.pop() ?? null;
@@ -821,6 +948,28 @@ export function mountCertificateRoutes(app, dependencies = {}) {
 
   async function handleReloadOutcome(request, response, next) {
     try {
+      const { domainRegistry, certificateRegistry } = dependencies;
+      const domainId = request.params.domainId;
+      const certificateId = request.params.certificateId;
+      let domain = null;
+      if (domainId) {
+        domain = await domainRegistry.getDomain(domainId).catch(() => null);
+        if (!domain) {
+          throw new DomainRegistryError('domain_not_found', 'Domain not found', 404);
+        }
+        await assertDomainTenantAccess(domain, request, accessDependencies);
+      }
+      let certificate = certificateId ? await certificateRegistry.getCertificate(certificateId).catch(() => null) : null;
+      if (certificateId && !certificate) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+      }
+      if (domain && certificate && certificate.domainId && certificate.domainId !== domain.id) {
+        throw new CertificateRegistryError('certificate_not_found', 'Certificate not found for this Domain', 404);
+      }
+      if (!domain && certificate?.domainId) {
+        domain = await domainRegistry.getDomain(certificate.domainId).catch(() => null);
+      }
+      await assertDomainTenantAccess(domain, request, accessDependencies);
       const body = request.body ?? {};
       const result = checkReloadOutcome(body);
       return response.status(200).json({ data: result });

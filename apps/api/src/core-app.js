@@ -647,13 +647,17 @@ export function createApp({
     const role = user.role;
     if (role === 'owner' || role === 'read_only') return true;
     const isReseller = role === 'reseller' || user.hosting?.kind === 'reseller';
+    const isCustomer = role === 'customer' || user.hosting?.kind === 'customer';
     const allowed = new Set(user.websiteIds ?? []);
 
     if (allowed.has(websiteId)) {
-      if (isReseller && websiteRegistry) {
+      if (websiteRegistry) {
         try {
           const site = await websiteRegistry.getWebsite(websiteId);
-          if (site && site.resellerId !== undefined && site.resellerId !== user.id) {
+          if (isReseller && site && site.resellerId !== undefined && site.resellerId !== user.id) {
+            return false;
+          }
+          if (isCustomer && site && site.customerId && site.customerId !== user.id) {
             return false;
           }
         } catch {}
@@ -696,9 +700,24 @@ export function createApp({
     }
     return domain;
   };
-  const requireCertificate = async (certificateId) => {
+  const requireCertificate = async (certificateId, request = null) => {
     const certificate = await certificateRegistry.getCertificate(certificateId);
     if (!inLocalScope(certificate)) throw new CertificateRegistryError('certificate_not_found', 'Certificate not found', 404);
+    const user = request?.auth?.user;
+    const role = user?.role;
+    const isScoped = (role && !['owner', 'read_only'].includes(role))
+      || user?.hosting?.kind === 'reseller'
+      || user?.hosting?.kind === 'customer';
+    if (isScoped) {
+      const domain = certificate.domainId ? await domainRegistry.getDomain(certificate.domainId).catch(() => null) : null;
+      if (!inLocalScope(domain) || !domain.websiteId) {
+        throw new CertificateRegistryError('forbidden', 'Access denied to this certificate', 403);
+      }
+      const allowed = await isWebsiteIdAllowedForRequest(domain.websiteId, request);
+      if (!allowed) {
+        throw new CertificateRegistryError('forbidden', 'Access denied to this certificate', 403);
+      }
+    }
     return certificate;
   };
   const requireJob = async (jobId) => {
@@ -1157,15 +1176,30 @@ export function createApp({
   });
 
   app.get('/api/certificates', requirePanelRouteAccess, async (request, response) => {
-    const certificates = localOnly(await certificateRegistry.listCertificates());
+    let certificates = localOnly(await certificateRegistry.listCertificates());
+    const user = request.auth?.user;
+    const role = user?.role;
+    const isScoped = (role && !['owner', 'read_only'].includes(role))
+      || user?.hosting?.kind === 'reseller'
+      || user?.hosting?.kind === 'customer';
+    if (isScoped) {
+      const domains = localOnly(await domainRegistry.listDomains());
+      const allowedDomainIds = new Set();
+      for (const domain of domains) {
+        if (domain.websiteId && (await isWebsiteIdAllowedForRequest(domain.websiteId, request))) {
+          allowedDomainIds.add(domain.id);
+        }
+      }
+      certificates = certificates.filter((certificate) => certificate.domainId && allowedDomainIds.has(certificate.domainId));
+    }
     return response.json({ data: certificates.map((certificate) => certificatePublicView(certificate)) });
   });
   app.get('/api/certificates/:certificateId', requirePanelRouteAccess, async (request, response) => {
-    const certificate = await requireCertificate(request.params.certificateId);
+    const certificate = await requireCertificate(request.params.certificateId, request);
     return response.json({ data: certificatePublicView(certificate) });
   });
   app.post('/api/certificates/:certificateId/renew', requirePanelRouteAccess, async (request, response) => {
-    const certificate = await requireCertificate(request.params.certificateId);
+    const certificate = await requireCertificate(request.params.certificateId, request);
     if (certificate.source !== 'acme' || certificate.renewalMode !== 'automatic') {
       throw new CertificateRegistryError('certificate_not_renewable', 'Only managed ACME certificates can be renewed', 409);
     }
