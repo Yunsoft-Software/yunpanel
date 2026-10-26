@@ -47,6 +47,7 @@ DEFAULTS = {
     "verify": {"quick": [], "full": []},
     "qa_jobs": {},
     "commit_suffix": "",
+    "protected_branches": ["main", "master", "development"],
 }
 REVIEW_SUFFIX = "@review"
 FIELD_RE = re.compile(r"^- \*\*([^*]+):\*\*(.*)$")

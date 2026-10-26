@@ -51,5 +51,12 @@ Bütünü `orkestra/orchestrator.py verify` ayrıca doğrular. Kırılan kabul e
 - `BRIEF.md`, `DECISIONS.md` ve `PROJE.md`'yi değiştirmek (senior'ın işi). Karar gerekiyorsa görevi engelle ve soruyu yaz.
 - Sistem ayarı veya global araç zinciri değiştirmek. Uydurma API kullanmak: kullandığın her kütüphane fonksiyonunu kurulu kaynakta veya resmi belgede doğrula.
 
-## 6. Ekip ve makine değişimi
+## 6. Push (saniyeler sürer)
+İNSAN "push at" dediğinde **tek iş** `python3 orkestra/orchestrator.py push` çalıştırmaktır. Öncesinde diff okuma, kod inceleme, testleri elle tekrar koşma veya rapor yazma yapılmaz; doğrulama zaten `verify` kaydında (`tasks/verified`) durur.
+- Komut korumalı dalı (`protected_branches`) ve commit edilmemiş değişikliği reddeder.
+- Son doğrulamadan beri kod değiştiyse kendisi `verify --quick` çalıştırır, değişmediyse testi tekrarlamaz.
+- Reddederse sebebini aynen İNSAN'a söyle ve dur; kendiliğinden düzeltmeye girişme.
+Junior ajanlar push etmez (PROJE.md izin vermedikçe).
+
+## 7. Ekip ve makine değişimi
 Görevler, raporlar ve kararlar git'tedir. Claim'ler ve kilitler makineye özeldir. Başka bir makinede `/orkestra-devam` çalıştığında yerel claim yoktur: o makinede yarım kalan ve commit edilmeyen iş oraya taşınamaz. Bu yüzden her görev küçük tutulur ve bittiği anda commit edilir.

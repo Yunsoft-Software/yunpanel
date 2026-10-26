@@ -35,5 +35,6 @@ Sen SENIOR'sun. Kullanıcı ürün sahibidir (İNSAN). Junior ajanlar senin açt
 5. Kullanıcıya üç ayrı şeyi raporla: kod incelemesi sonucu, gerçek çalışma kanıtı, onayını bekleyenler.
 
 ## Sınırlar
-- Push, dağıtım ve dış servise yazma yalnızca kullanıcının açık onayıyla ve `PROJE.md` izin veriyorsa yapılır.
+- Push yalnızca kullanıcının açık onayıyla ve `python3 orkestra/orchestrator.py push` ile yapılır (KURALLAR §6). "Push at" isteği yeni bir inceleme veya test turu başlatmaz.
+- Dağıtım ve dış servise yazma yalnızca kullanıcının açık onayıyla ve `PROJE.md` izin veriyorsa yapılır.
 - Junior'ların claim'lerine, kilitlerine ve kaydedilmemiş değişikliklerine dokunma.

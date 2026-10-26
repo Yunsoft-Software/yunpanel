@@ -11,6 +11,8 @@ Run by the /orkestra-devam skill after every start, quota stop or network drop:
                                         failing tasks are reopened, unattributable failures become findings.
   orchestrator.py slots                 the work for each agent slot: continue / review / new task / QA / idle.
   orchestrator.py finding "title" "detail" [file ...]   add a finding task to the findings file.
+  orchestrator.py push                  push the current branch: refuses protected branches and a dirty tree,
+                                        runs verify --quick only if code changed since the last verification.
 """
 import fnmatch
 import importlib.util
@@ -275,6 +277,47 @@ def commit(paths, message):
         git("commit", "-q", "-m", f"{message} {suffix}" if suffix else message)
 
 
+def code_changed_since(base):
+    """True if anything other than task state and docs changed in base..HEAD (or nothing was ever verified)."""
+    if not base:
+        return True
+    names = git("diff", "--name-only", f"{base}..HEAD", check=False).split()
+    return any(not (p.startswith(("tasks/", "docs/")) or p.endswith(".md")) for p in names)
+
+
+def push():
+    """Push the current branch in seconds: guard branch and tree, re-test only unverified code, then push."""
+    branch = git("branch", "--show-current").strip()
+    if not branch or branch in tasks.CFG["protected_branches"]:
+        sys.exit(f"push refused: '{branch or 'detached HEAD'}' is protected ({', '.join(tasks.CFG['protected_branches'])})")
+    dirty = [p for p in git("status", "--porcelain=v1").splitlines() if p[3:].strip('"') != LOG_PATH]
+    if dirty:
+        sys.exit("push refused: uncommitted changes (commit or release them first):\n" + "\n".join("  " + p for p in dirty))
+    commit([LOG_PATH], "orkestra: log")
+    marker = os.path.join(root(), "tasks", "verified")
+    base = open(marker).read().strip() if os.path.exists(marker) else ""
+    if code_changed_since(base):
+        print("doğrulanmamış kod var; hızlı doğrulama çalışıyor…")
+        if base:
+            r = verify(quick=True)
+            commit(["tasks/verified", "tasks/history", "tasks/reopen", "tasks/done",
+                    os.path.relpath(os.path.join(tasks.TASK_DIR, tasks.CFG["finding_file"]), root()), LOG_PATH],
+                   f"orchestrator verify: {r['status']}")
+            if r["status"] != "ok":
+                sys.exit(f"push refused: verify {r['status']} (reopened {r['reopened'] or '-'}, findings {r['findings'] or '-'})")
+        else:
+            for name, run in configured_checks(quick=True):
+                code, output = run()
+                if code != 0:
+                    sys.exit(f"push refused: {name} failed\n{output[-2000:]}")
+    else:
+        print("kod son doğrulamadan beri değişmedi; test tekrarlanmıyor")
+    out = subprocess.run(["git", "push", "-u", "origin", branch], cwd=root(), capture_output=True, text=True)
+    if out.returncode != 0:
+        sys.exit(f"push failed:\n{out.stderr[-2000:]}")
+    print(f"pushed {branch} @ {git('rev-parse', '--short', 'HEAD').strip()}")
+
+
 def print_recover(r, dry_run):
     print(f"geri alınan: {' '.join(r['recovered']) or '-'}")
     print(f"devam eden (canlı veya korumalı): {' '.join(r['kept']) or '-'}")
@@ -310,6 +353,8 @@ def main(argv):
                 LOG_PATH],
                f"orchestrator verify: {r['status']}")
         sys.exit(0 if r["status"] in ("ok", "initialized") else 1)
+    elif cmd == "push":
+        push()
     elif cmd == "slots":
         for agent, kind, what in slots():
             note = tasks.CFG["qa_jobs"].get(what, "") if kind == "QA" else ""
