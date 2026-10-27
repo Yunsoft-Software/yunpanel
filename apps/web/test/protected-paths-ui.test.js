@@ -24,3 +24,7 @@ test('protected directories are listed in the web server settings with add and r
 test('the users section stays hidden while no directory is saved', () => {
   assert.equal(renderToStaticMarkup(createElement(ProtectedPathUsers, { domainId: 'd1', savedPaths: [], disabled: false })), '');
 });
+
+test('maintenance mode is offered in the web server settings', () => {
+  assert.ok(render({ serviceOverride: { mode: 'unavailable' } }).includes('Bakım modu'));
+});

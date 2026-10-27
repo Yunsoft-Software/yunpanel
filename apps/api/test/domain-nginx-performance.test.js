@@ -17,3 +17,8 @@ test('PHP and Passenger projections keep password-protected directories', () => 
   const domain = { nginxSettings: { clientMaxBodySizeMb: null, headers: [], protectedPaths: [{ path: '/admin/', key: '0123456789abcdef' }] } };
   for (const targetType of ['php', 'passenger']) assert.deepEqual(domainNginxSettingsForTarget(domain, targetType).protectedPaths, [{ path: '/admin/', key: '0123456789abcdef' }]);
 });
+
+test('a maintenance override survives the PHP/Passenger projection', () => {
+  const domain = { nginxSettings: { clientMaxBodySizeMb: null, headers: [], serviceOverride: { mode: 'unavailable' } } };
+  for (const targetType of ['php', 'passenger']) assert.deepEqual(domainNginxSettingsForTarget(domain, targetType).serviceOverride, { mode: 'unavailable' });
+});
