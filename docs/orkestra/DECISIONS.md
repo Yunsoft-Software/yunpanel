@@ -42,3 +42,12 @@
 - **Karar:** Yuva sayısı 6 → 4 (3 canlı test + 1 inceleme/kritik düzeltme). İnceleme hafif: rapor kontrolü + tek fiziksel kontrol (`curl`/`dig`/SSH okuma); tarayıcıda tekrar yalnız ÇALIŞIYOR raporlarında. Rapor en fazla 80 satır, ekran görüntüsü yalnız hata için. KRİTİK bulgular her zaman sıranın başında (`priority_patterns`).
 - **Gerekçe:** İlk gecede 17 görev ~3,5 saat aktif çalışmada bitti, kota bitti (21:05–01:17 boşluk); `.28` 3 kilitle sınırlı olduğu için 6 ajanın ikisi bekleyerek token harcıyordu; raporlar ortalama 33 KB idi; kritik bulgular T800/T801 dosya sırası yüzünden 6 saat bekledi.
 - **Onaylayan:** İNSAN
+
+## 2026-10-27 · 1. ve 2. dalga birleşti: Playwright senaryosu ve çekirdek öncelik
+- **Karar:** Kalan özellik testleri elle tarayıcı gezintisiyle değil, gerçek panele karşı çalışan Playwright senaryosu (`e2e/ozellik/<id>.spec.js`) yazılıp koşturularak yapılır. Gerçek tarayıcı, panel, API ve host kullanılır; mock yoktur. Bulunan gerçek hata `test.fail` ile işaretlenir. Bu dosyalar 2. dalganın gerçek testleridir. Günlük kullanılan 33 özellik öne alındı (`G1-manuel-test.md` "Öncelikli çekirdek"); diğer 71 özellik sonra gelir. Rapor en fazla 40 satır. İnceleme: senaryoyu oku ve bir kez koştur.
+- **Gerekçe:** 14 saatte ~4 saat aktif çalışmayla 20 görev bitti; yapay zekanın tarayıcıyı ekran görüntüsüyle yönetmesi görev başına 30–45 dakika ve yüksek token harcıyordu. Senaryo dosyası hem daha hızlı hem tekrar koşturulabilir.
+- **Onaylayan:** İNSAN
+
+## 2026-10-27 · Repodaki Owner parolası
+- **Bulgu:** Owner parolası 21-09-2026'dan beri `e2e/helpers.js` ve `e2e/panel.spec.js` içinde açık metindi ve GitHub'a gönderilmişti. Dosyalar artık parolayı ortam değişkeninden ya da `.local/yunpanel-owner-password-only.json`'dan okuyor.
+- **Açık:** Parola git geçmişinde kaldığı için `.28` Owner parolası değiştirilmeli ve yeni parola yalnız `.local` dosyasına yazılmalı (İNSAN).
