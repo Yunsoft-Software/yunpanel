@@ -591,11 +591,12 @@ test('Health inspection and log access in JSON, stream and download formats', as
   const downloadText = await downloadLogsRes.text();
   assert.ok(downloadText.includes('Node app running'));
 
-  // 5. PHP site logs use Nginx log reader
+  // 5. PHP site logs read the site's own nginx file, resolved from its Domain. A site
+  // without a Domain gets an empty page, never the server-wide log
+  // (27 Ekim 2026 kiracı sızıntısı; real file behaviour: website-site-logs.test.js).
   const phpLogsRes = await f.request(`/api/websites/${f.phpSite.id}/application/logs`);
   assert.equal(phpLogsRes.status, 200);
-  const phpLogs = (await phpLogsRes.json()).data;
-  assert.ok(phpLogs.entries[0].message.includes('GET / 200 OK'));
+  assert.deepEqual((await phpLogsRes.json()).data.entries, []);
 });
 
 test('Fail-closed tenant boundary and read-only role protections', async (t) => {

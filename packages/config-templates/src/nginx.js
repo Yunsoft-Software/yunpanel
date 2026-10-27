@@ -116,6 +116,33 @@ function redirectBody(destination, headers) {
   return `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    return 301 ${destination}$request_uri;\n  }`;
 }
 
+// The distribution default compresses only text/html and never proxied responses.
+// text/html is implicit in gzip_types, so listing it again would be a duplicate.
+const GZIP_DIRECTIVES = [
+  '  gzip on;', '  gzip_vary on;', '  gzip_proxied any;', '  gzip_comp_level 5;', '  gzip_min_length 1024;',
+  '  gzip_types text/plain text/css text/xml text/javascript application/javascript application/json application/xml application/rss+xml application/manifest+json image/svg+xml font/woff font/woff2;',
+].join('\n');
+
+function assetCacheLines(seconds) {
+  if (seconds === 0) return '    expires -1;\n    add_header Cache-Control "no-store" always;\n';
+  if (seconds === null || seconds === undefined) return '';
+  const expiry = seconds === 604_800 ? '7d' : `${seconds}s`;
+  return `    expires ${expiry};\n    add_header Cache-Control "public, max-age=${seconds}, immutable";\n`;
+}
+
+// Rules are validated by normalizeNginxSettings to a closed character set, so they
+// are safe to interpolate. `=` and `^~` locations win over the regex locations below.
+function redirectLocations(rules = []) {
+  return rules.map(({ source, target, status, match }) => {
+    if (match === 'exact') {
+      const query = target.includes('?') ? '' : '$is_args$args';
+      return `  location = ${source} {\n    return ${status} ${target}${query};\n  }`;
+    }
+    const pattern = source.replace(/[.]/g, '\\.');
+    return `  location ^~ ${source} {\n    rewrite ^${pattern}(.*)$ ${target}$1 ${status === 301 ? 'permanent' : 'redirect'};\n  }`;
+  }).join('\n\n');
+}
+
 function serverBlock({
   names,
   body,
@@ -169,6 +196,9 @@ function renderServerSet({
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
   const discoveryLocations = mailDiscoveryLocations(discoverySocket);
+  const rules = redirectLocations(nginxSettings.redirectRules ?? []);
+  if (rules) body = `${rules}\n\n${body}`;
+  if (nginxSettings.gzip === true) body = `${GZIP_DIRECTIVES}\n\n${body}`;
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
@@ -238,13 +268,7 @@ function staticBody({ root, nginxSettings }) {
   const { spaFallback, staticAssetCacheSeconds, headers } = nginxSettings;
   const fallback = spaFallback ? 'try_files $uri $uri/ /index.html;' : 'try_files $uri $uri/ =404;';
   const renderedHeaders = headerLines(headers);
-  let cache = '';
-  if (staticAssetCacheSeconds === 0) {
-    cache = '    expires -1;\n    add_header Cache-Control "no-store" always;\n';
-  } else if (staticAssetCacheSeconds !== null) {
-    const expiry = staticAssetCacheSeconds === 604_800 ? '7d' : `${staticAssetCacheSeconds}s`;
-    cache = `    expires ${expiry};\n    add_header Cache-Control "public, max-age=${staticAssetCacheSeconds}, immutable";\n`;
-  }
+  const cache = assetCacheLines(staticAssetCacheSeconds);
   return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${fallback}\n  }\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }${errorPageBody(nginxSettings)}`;
 }
 
@@ -269,7 +293,9 @@ function phpBody({ root, socketPath, nginxSettings }) {
   const renderedHeaders = headerLines(nginxSettings.headers);
   const phpHeaders = headerLines(nginxSettings.headers);
   const intercept = Object.keys(nginxSettings.errorPages ?? {}).length ? '\n    fastcgi_intercept_errors on;' : '';
-  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.php', 'index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}${intercept}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }${errorPageBody(nginxSettings)}`;
+  const cache = assetCacheLines(nginxSettings.staticAssetCacheSeconds);
+  const assets = cache ? `\n\n  location ~* \\.(?:css|js|mjs|jpg|jpeg|png|gif|svg|webp|ico|woff|woff2)$ {\n${cache}${renderedHeaders ? `${renderedHeaders}\n` : ''}    try_files $uri =404;\n    access_log off;\n  }` : '';
+  return `  root ${root};\n  index ${(nginxSettings.indexFiles ?? ['index.php', 'index.html']).join(' ')};\n\n  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    try_files $uri $uri/ /index.php?$query_string;\n  }${assets}\n\n  location ~ \\.php$ {${phpHeaders ? `\n${phpHeaders}` : ''}${intercept}\n    try_files $uri =404;\n    include fastcgi_params;\n    fastcgi_param SCRIPT_FILENAME $document_root$fastcgi_script_name;\n    fastcgi_param DOCUMENT_ROOT $document_root;\n    fastcgi_param HTTPS $https if_not_empty;\n    fastcgi_pass unix:${socketPath};\n  }\n\n  location ~ /\\.(?!well-known/) {\n    deny all;\n    access_log off;\n    log_not_found off;\n  }${errorPageBody(nginxSettings)}`;
 }
 
 export function renderStaticSiteConfig({

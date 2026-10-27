@@ -18,7 +18,7 @@ function nginxSettings(domain, value) {
   const input = typeof value?.indexFiles === 'string' ? { ...value,
     indexFiles: value.indexFiles.trim() ? value.indexFiles.trim().split(/[\s,]+/) : null } : value;
   try { return normalizeNginxSettings(domain.targetType, input); }
-  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı.'); }
+  catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı. Yönlendirmede kaynak / ile başlamalı, hedef site içi yol veya http(s) adresi olmalı.'); }
 }
 export function hostingDraftValues(domain) {
   return { httpsRedirect: domain.httpsRedirect, canonicalRedirect: domain.canonicalRedirect,
