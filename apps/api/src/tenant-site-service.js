@@ -7,6 +7,8 @@ const SLUG = /^[a-z][a-z0-9-]{1,28}[a-z0-9]$/;
 const RESERVED = new Set(['www', 'api', 'admin', 'app', 'mail', 'webmail', 'smtp', 'imap', 'pop', 'ftp', 'ns1', 'ns2', 'status',
   'control', 'panel', 'billing', 'support', 'autodiscover', 'autoconfig', 'cpanel', 'st']);
 const FIELDS = new Set(['upstreamPort', 'https']);
+const STATE_FIELDS = new Set(['state', 'redirectUrl']);
+const MODES = new Set(['active', 'stopped', 'archived']);
 const ADVANCE_LIMIT = 20;
 
 export class TenantSiteError extends Error {
@@ -32,7 +34,7 @@ function slugOf(value) {
   return value;
 }
 
-export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId }) {
+export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId, publication = null, jobRegistry = null }) {
   if (!siteCreator || !provisioning?.get || !provisioning?.runNext || !domainRegistry || !store || !localServerId) {
     throw new Error('Tenant sites require the site creator, provisioning engine, Domain registry and tenant store');
   }
@@ -58,9 +60,12 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
   }
 
   function view(record, operation) {
+    const failed = operation?.steps?.some((step) => ['failed', 'blocked', 'compensated'].includes(step.state)) || Boolean(record.publication?.error);
     return Object.freeze({
       hostname: record.hostname, slug: record.slug, upstreamPort: record.upstreamPort, websiteId: record.websiteId,
-      state: operation?.ready ? 'active' : operation?.steps?.some((step) => ['failed', 'blocked', 'compensated'].includes(step.state)) ? 'attention' : 'provisioning',
+      state: failed ? 'attention' : !operation?.ready ? 'provisioning' : record.publication ? 'publishing' : 'active',
+      mode: record.mode ?? 'active',
+      ...(record.publication?.error ? { error: record.publication.error } : {}),
       steps: (operation?.steps ?? []).map((step) => Object.freeze({ id: step.id, state: step.state })),
     });
   }
@@ -119,10 +124,58 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     return record;
   }
 
-  async function status(key, rawSlug) {
-    const record = await owned(key, rawSlug);
-    return view(record, await advance(record, key, 1));
+  // Mode changes are published like a panel save: stage job, then activate job. Each
+  // status read moves the publication one step, so the caller polls until 'active'.
+  async function advancePublication(record) {
+    const pending = record.publication;
+    if (!pending || pending.error) return record;
+    const job = await jobRegistry.getJob(pending.activateJobId ?? pending.stageJobId);
+    if (job?.status === 'failed' || job?.status === 'cancelled') {
+      return store.put({ ...record, publication: { ...pending, error: job.error?.code ?? 'tenant_publication_failed' } });
+    }
+    if (job?.status !== 'succeeded') return record;
+    const domain = await domainRegistry.getDomain(record.domainId);
+    if (!pending.activateJobId && domain?.stagedRevision === pending.revision) {
+      const activate = await publication.activate(domain);
+      return store.put({ ...record, publication: { ...pending, activateJobId: activate.id } });
+    }
+    if (pending.activateJobId && domain?.appliedRevision === pending.revision) {
+      const { publication: _done, ...rest } = record;
+      return store.put(rest);
+    }
+    return record;
   }
 
-  return Object.freeze({ ensure, status, owned, internals: Object.freeze({ operationIdFor }) });
+  async function setMode(key, rawSlug, body) {
+    if (!publication || !jobRegistry) throw new TenantSiteError('tenant_publication_unavailable', 'Publishing is not available on this panel', 503);
+    let record = await owned(key, rawSlug);
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => !STATE_FIELDS.has(field))
+      || !MODES.has(body.state) || (body.state === 'archived') !== (typeof body.redirectUrl === 'string')) {
+      throw new TenantSiteError('invalid_tenant_state', 'Send state active, stopped or archived; archived needs redirectUrl');
+    }
+    record = await advancePublication(record);
+    if (record.publication && !record.publication.error) throw new TenantSiteError('tenant_site_busy', 'A previous change is still being published', 409);
+    const override = body.state === 'stopped' ? { mode: 'unavailable' }
+      : body.state === 'archived' ? { mode: 'redirect', url: body.redirectUrl, status: 302, preservePath: false } : null;
+    const domain = await domainRegistry.getDomain(record.domainId);
+    if (JSON.stringify(domain.nginxSettings.serviceOverride ?? null) === JSON.stringify(override)
+      && domain.appliedRevision === domain.desiredRevision && !record.publication) {
+      return view(record, await provisioning.get(record.operationId));
+    }
+    const changes = { nginxSettings: { serviceOverride: override } };
+    const preview = await domainRegistry.previewDomainUpdate({ domainId: domain.id, changes });
+    const { domain: updated } = await domainRegistry.updateDomain({ domainId: domain.id, changes, previewDigest: preview.previewDigest });
+    const stage = await publication.stage(updated);
+    record = await store.put({ ...record, mode: body.state, publication: { revision: updated.desiredRevision, stageJobId: stage.id, activateJobId: null } });
+    return view(record, await provisioning.get(record.operationId));
+  }
+
+  async function status(key, rawSlug) {
+    let record = await owned(key, rawSlug);
+    const operation = await advance(record, key, 1);
+    if (operation?.ready && publication && jobRegistry) record = await advancePublication(record);
+    return view(record, operation);
+  }
+
+  return Object.freeze({ ensure, status, setMode, owned, internals: Object.freeze({ operationIdFor }) });
 }

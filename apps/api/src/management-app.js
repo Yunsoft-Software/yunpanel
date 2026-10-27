@@ -799,7 +799,7 @@ export function createApp(allOptions = {}) {
   if (options.apiKeyStore && options.tenantSiteStore && websiteProvisioningRuntime && localServerId) {
     mountTenantSiteRoutes(app, { service: createTenantSiteService({
       siteCreator: createLocalSiteCreator(siteCreateDependencies), provisioning: websiteProvisioningRuntime,
-      domainRegistry, store: options.tenantSiteStore, localServerId,
+      domainRegistry, store: options.tenantSiteStore, localServerId, publication: core.domainPublication, jobRegistry,
     }) });
   }
   if (websiteProvisioningRuntime) {

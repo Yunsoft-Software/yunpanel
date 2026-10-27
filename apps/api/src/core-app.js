@@ -1074,8 +1074,8 @@ export function createApp({
     });
     return response.status(201).json({ data: domain });
   });
-  app.post('/api/domains/:domainId/stage', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId, request);
+  // Shared by the stage/activate routes and the automation API, so both publish identically.
+  async function enqueueDomainStage(domain) {
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
     const tls = await resolveDomainTls(domain, certificateRegistry, certificateMaterialManager, localServerId);
     const payload = {
@@ -1089,14 +1089,12 @@ export function createApp({
       httpsRedirect: domain.httpsRedirect,
     };
     if (tls) payload.tls = tls;
-    const job = await jobRegistry.enqueue({ serverId: domain.serverId, type: 'domain.stage', operation: OPERATIONS.DOMAIN_STAGE, payload, resourceType: 'domain', resourceId: domain.id });
-    return response.status(202).json({ data: job });
-  });
-  app.post('/api/domains/:domainId/activate', requirePanelRouteAccess, async (request, response) => {
-    const domain = await requireDomain(request.params.domainId, request);
+    return jobRegistry.enqueue({ serverId: domain.serverId, type: 'domain.stage', operation: OPERATIONS.DOMAIN_STAGE, payload, resourceType: 'domain', resourceId: domain.id });
+  }
+  async function enqueueDomainActivate(domain) {
     if (domain.stagedRevision !== domain.desiredRevision || !domain.stagedChecksum) throw new DomainRegistryError('staged_revision_required', 'Current desired domain revision must be staged before activation', 409);
     await ensureResourceJobIdle(jobRegistry, 'domain', domain.id);
-    const job = await jobRegistry.enqueue({
+    return jobRegistry.enqueue({
       serverId: domain.serverId,
       type: 'domain.activate',
       operation: OPERATIONS.DOMAIN_ACTIVATE,
@@ -1108,7 +1106,15 @@ export function createApp({
       resourceType: 'domain',
       resourceId: domain.id,
     });
-    return response.status(202).json({ data: job });
+  }
+  app.domainPublication = Object.freeze({ stage: enqueueDomainStage, activate: enqueueDomainActivate });
+  app.post('/api/domains/:domainId/stage', requirePanelRouteAccess, async (request, response) => {
+    const domain = await requireDomain(request.params.domainId, request);
+    return response.status(202).json({ data: await enqueueDomainStage(domain) });
+  });
+  app.post('/api/domains/:domainId/activate', requirePanelRouteAccess, async (request, response) => {
+    const domain = await requireDomain(request.params.domainId, request);
+    return response.status(202).json({ data: await enqueueDomainActivate(domain) });
   });
   app.post('/api/domains/:domainId/certificates/issue', requirePanelRouteAccess, async (request, response) => {
     let domain = await requireDomain(request.params.domainId, request);

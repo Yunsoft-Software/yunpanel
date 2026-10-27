@@ -13,6 +13,10 @@ export function mountTenantSiteRoutes(app, { service } = {}) {
     const { created, site } = await service.ensure(automationKey(request), request.params.slug, request.body);
     return response.status(created || site.state !== 'active' ? 202 : 200).json({ data: site });
   }));
+  app.post('/api/automation/tenant-sites/:slug/state', requireAutomationKey, asyncRoute(async (request, response) => {
+    const site = await service.setMode(automationKey(request), request.params.slug, request.body);
+    return response.status(site.state === 'active' ? 200 : 202).json({ data: site });
+  }));
   app.get('/api/automation/tenant-sites/:slug', requireAutomationKey, asyncRoute(async (request, response) => {
     return response.json({ data: await service.status(automationKey(request), request.params.slug) });
   }));

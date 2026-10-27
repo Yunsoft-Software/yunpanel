@@ -15,6 +15,10 @@ import { createDnsHostingRegistry } from '../src/dns-hosting-registry.js';
 import { createDockerWorkloadRegistry } from '../src/docker-workload-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
 import { createMailDomainRegistry } from '../src/mail-domain-registry.js';
+import { createJobRegistry } from '../src/job-registry.js';
+import { reconcileCompletedJob } from '../src/job-reconciliation.js';
+import { createLocalJobExecutor } from '../src/local-job-executor.js';
+import { OPERATIONS } from '@yunpanel/protocol';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createTenantSiteStore } from '../src/tenant-site-store.js';
 import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
@@ -40,12 +44,22 @@ async function fixture(t) {
   const dnsHostingRegistry = createDnsHostingRegistry({ getWebDomain });
   const mailDomainRegistry = createMailDomainRegistry({ getWebDomain });
   const sitesDir = path.join(directory, 'enabled');
+  const nginxManager = createNginxManager({ stagingDir: path.join(directory, 'staging'), sitesDir, execFn: async () => '' });
+  const jobRegistry = createJobRegistry();
+  // The real local executor publishes mode changes through domain.stage/activate jobs.
+  const executor = createLocalJobExecutor({ serverId, jobRegistry, pollMs: 50,
+    // Same as local-host-operations: each activation job is its own rollback receipt.
+    executeOperation: (operation, payload, execution) => operation === OPERATIONS.DOMAIN_STAGE ? nginxManager.stageDomain(payload)
+      : nginxManager.activateDomain({ ...payload, activationId: execution?.jobId ?? null }),
+    reconcileCompletedJob: (job) => reconcileCompletedJob({ domainRegistry, applicationRegistry, websiteRegistry, job }) });
+  executor.start();
+  t.after(() => executor.stop());
   const websiteProvisioningRuntime = createWebsiteProvisioningRuntime({
     identityManager: {
       apply: async () => ({ satisfied: true, uid: 1201, gid: 1201 }), inspect: async () => ({ satisfied: true, uid: 1201, gid: 1201 }),
       compensate: async () => ({ satisfied: true }), inspectCompensation: async () => ({ satisfied: true }),
     },
-    nginxManager: createNginxManager({ stagingDir: path.join(directory, 'staging'), sitesDir, execFn: async () => '' }),
+    nginxManager,
   });
   await Promise.all([applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
     dnsHostingRegistry.init(), mailDomainRegistry.init(), websiteProvisioningRuntime.init()]);
@@ -56,7 +70,7 @@ async function fixture(t) {
   const listener = createAuthenticatedApi({
     store: { configured: () => true, mfa: { enabled: () => true }, getSession: () => null },
     publicOrigin: 'https://panel.example.test',
-    createHandler: () => createApp({ environment: 'production', registry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
+    createHandler: () => createApp({ environment: 'production', registry, jobRegistry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
       dnsHostingRegistry, mailDomainRegistry, websiteProvisioningRuntime, localServerId: serverId, apiKeyStore, tenantSiteStore: createTenantSiteStore() }),
     automationHandler: createAutomationHandler({ apiKeyStore }),
   });
@@ -71,11 +85,16 @@ async function fixture(t) {
   return { call, otherKey: other.token, sitesDir, domainRegistry, serverId };
 }
 
+async function config(f, slug) {
+  return readFile(path.join(f.sitesDir, (await readdir(f.sitesDir)).find(name => name.includes(slug))), 'utf8');
+}
+
 async function untilActive(f, slug) {
   let result;
-  for (let attempt = 0; attempt < 15; attempt += 1) {
+  for (let attempt = 0; attempt < 60; attempt += 1) {
     result = await f.call('GET', `/api/automation/tenant-sites/${slug}`);
-    if (result.body?.data?.state === 'active') break;
+    if (['active', 'attention'].includes(result.body?.data?.state)) break;
+    await new Promise(resolve => setTimeout(resolve, 50));
   }
   return result;
 }
@@ -117,4 +136,30 @@ test('scope, reserved names, ports and foreign hostnames are protected', async (
   await f.call('PUT', '/api/automation/tenant-sites/acme', { upstreamPort: 32010, https: false });
   assert.equal((await f.call('GET', '/api/automation/tenant-sites/acme', null, f.otherKey)).status, 404, 'another scope cannot see it');
   assert.equal((await f.call('PUT', '/api/automation/tenant-sites/acme', { upstreamPort: 32020, https: false })).body.error.code, 'tenant_port_change_unsupported');
+});
+
+test('stop answers 503, archive forwards to billing, and active serves the application again', async (t) => {
+  const f = await fixture(t);
+  await f.call('PUT', '/api/automation/tenant-sites/acme', { upstreamPort: 32010, https: false });
+  await untilActive(f, 'acme');
+  const stopped = await f.call('POST', '/api/automation/tenant-sites/acme/state', { state: 'stopped' });
+  assert.equal(stopped.status, 202, JSON.stringify(stopped.body));
+  assert.equal((await f.call('POST', '/api/automation/tenant-sites/acme/state', { state: 'active' })).body.error.code, 'tenant_site_busy');
+  let result = await untilActive(f, 'acme');
+  assert.deepEqual([result.body.data.state, result.body.data.mode], ['active', 'stopped'], JSON.stringify(result.body));
+  assert.match(await config(f, 'acme'), /location \/ \{\n {4}return 503;/);
+  assert.equal((await config(f, 'acme')).includes('proxy_pass'), false);
+  await f.call('POST', '/api/automation/tenant-sites/acme/state', { state: 'archived', redirectUrl: 'https://control.example.test/billing' });
+  result = await untilActive(f, 'acme');
+  assert.deepEqual([result.body.data.state, result.body.data.mode], ['active', 'archived']);
+  assert.match(await config(f, 'acme'), /return 302 https:\/\/control\.example\.test\/billing;/);
+  const reactivated = await f.call('POST', '/api/automation/tenant-sites/acme/state', { state: 'active' });
+  assert.equal(reactivated.status, 202, JSON.stringify(reactivated.body));
+  result = await untilActive(f, 'acme');
+  assert.deepEqual([result.body.data.state, result.body.data.mode], ['active', 'active'], JSON.stringify(result.body));
+  assert.match(await config(f, 'acme'), /proxy_pass http:\/\/127\.0\.0\.1:32010;/);
+  for (const body of [{ state: 'archived' }, { state: 'paused' }, { state: 'archived', redirectUrl: 'https://x.com/;deny all' }]) {
+    const refused = await f.call('POST', '/api/automation/tenant-sites/acme/state', body);
+    assert.equal(refused.status, 400, JSON.stringify(body));
+  }
 });
