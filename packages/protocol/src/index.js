@@ -16,6 +16,7 @@ import {
   normalizePythonRestartSpec,
   normalizePythonRollbackSpec,
   normalizePythonStatusSpec,
+  normalizeRedirectTarget,
   normalizeStaticApplicationSpec,
 } from '@yunpanel/shared';
 import { isIP, SocketAddress } from 'node:net';
@@ -423,10 +424,15 @@ function validateMutationPayload(operation, payload, errors) {
     if (payload.domainRevision !== undefined && (!Number.isSafeInteger(payload.domainRevision) || payload.domainRevision < 1)) errors.push('domain.stage domainRevision must be a positive safe integer');
     if (typeof payload.primaryDomain !== 'string' || payload.primaryDomain.length < 3 || payload.primaryDomain.length > 253) errors.push('domain.stage primaryDomain is invalid');
     if (payload.aliases !== undefined && (!Array.isArray(payload.aliases) || payload.aliases.length > 20)) errors.push('domain.stage aliases must be an array with at most 20 entries');
-    if (!['static', 'proxy', 'passenger'].includes(payload.targetType)) errors.push('domain.stage targetType must be static, proxy or passenger');
+    if (!['static', 'proxy', 'passenger', 'redirect'].includes(payload.targetType)) errors.push('domain.stage targetType must be static, proxy, passenger or redirect');
     if (!payload.target || typeof payload.target !== 'object' || Array.isArray(payload.target)) errors.push('domain.stage target must be an object');
     if (payload.targetType === 'passenger') validatePassengerTarget(payload.target, 'domain.stage', errors);
-    if (payload.nginxSettings !== undefined && ['static', 'proxy', 'passenger'].includes(payload.targetType)) {
+    if (payload.targetType === 'redirect') {
+      try {
+        if (JSON.stringify(normalizeRedirectTarget(payload.target)) !== JSON.stringify(payload.target)) errors.push('domain.stage redirect target must be canonical');
+      } catch { errors.push('domain.stage redirect target is invalid'); }
+    }
+    if (payload.nginxSettings !== undefined && ['static', 'proxy', 'passenger', 'redirect'].includes(payload.targetType)) {
       try {
         const normalized = normalizeNginxSettings(payload.targetType, payload.nginxSettings);
         if (JSON.stringify(normalized) !== JSON.stringify(payload.nginxSettings)
