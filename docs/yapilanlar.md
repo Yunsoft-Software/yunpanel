@@ -3,8 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
-- **Güvenlik** — KRİTİK: müşteri/bayi/site yöneticisi sunucu loglarını, tüm posta kuyruğunu ve başka sitelerin uygulama/dağıtım loglarını okuyabiliyordu; kapatıldı. *(dal: 27-10-2026-ozellik-3a)*
-- **Özellik** — Smarthost: giden posta başka SMTP üzerinden (yalnız Owner, TLS zorunlu, parola şifreli); .28'de gerçek Postfix ile doğrulandı. *(dal: 27-10-2026-ozellik-3a)*
+- **Güvenlik** — KRİTİK: müşteri/bayi/site yöneticisi sunucu loglarını, tüm posta kuyruğunu ve başka sitelerin uygulama/dağıtım loglarını okuyabiliyordu; kapatıldı.
+- **Özellik** — Smarthost: giden posta başka SMTP üzerinden (yalnız Owner, TLS zorunlu, parola şifreli); .28'de gerçek Postfix ile doğrulandı.
 - **Güvenlik** — KRİTİK: site log sayfası müşterilere sunucunun genel nginx logunu (başka sitelerin kayıtları) gösteriyordu; artık yalnız sitenin kendi dosyası.
 - **Hata** — Site log sayfasında hata logu hiç açılamıyordu (`kind` parametresi reddediliyordu).
 - **Hata** — Müşteriler kendi site loglarını göremiyordu; panel Owner'a özel sunucu ucunu çağırıyordu.
