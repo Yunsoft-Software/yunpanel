@@ -20,7 +20,8 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
   let mailDomainId = '';
 
   function runSsh(command) {
-    return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
+    return execSync('ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test bash', {
+      input: command,
       encoding: 'utf8',
       timeout: 30000,
     });
@@ -38,21 +39,22 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
 
   test.beforeAll(async () => {
     try {
-      runSsh(`node -e "
-        const fs = require('fs');
-        const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
-        if (fs.existsSync(fwdPath)) {
-          const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
-          fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.includes('example.org') || d.includes('example.com') || d.startsWith('teml02')));
-          fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + '\\n');
-        }
-        const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
-        if (fs.existsSync(alPath)) {
-          const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
-          alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith('teml02'));
-          fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + '\\n');
-        }
-      " 2>/dev/null || true`);
+      runSsh(`node <<'EOF'
+const fs = require('fs');
+const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
+if (fs.existsSync(fwdPath)) {
+  const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
+  fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.includes('example.org') || d.includes('example.com') || d.startsWith('teml02')));
+  fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + String.fromCharCode(10));
+}
+const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
+if (fs.existsSync(alPath)) {
+  const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
+  alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith('teml02'));
+  fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + String.fromCharCode(10));
+}
+EOF
+`);
     } catch {}
   });
 
@@ -75,49 +77,54 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
   test.afterAll(async () => {
     // Test kaynaklarını SSH ile temizle
     try {
-      runSsh(`node -e "
-        const fs = require('fs');
-        const { execSync } = require('child_process');
-        try {
-          execSync(\\"sqlite3 /var/lib/yunpanel/mail-auth/virtual-mail.sqlite3 \\\\\\"DELETE FROM virtual_aliases WHERE source LIKE '${prefix}%'; DELETE FROM virtual_mailboxes WHERE address LIKE '${prefix}%';\\\\\\"\\");
-        } catch {}
-        let dirty = false;
-        try {
-          const mbPath = '/var/lib/yunpanel/control-plane/mailbox-registry.json';
-          if (fs.existsSync(mbPath)) {
-            const data = JSON.parse(fs.readFileSync(mbPath, 'utf8'));
-            const initialLen = (data.mailboxes || []).length;
-            data.mailboxes = (data.mailboxes || []).filter(m => !m.address.startsWith('${prefix}'));
-            if (data.mailboxes.length !== initialLen) {
-              fs.writeFileSync(mbPath, JSON.stringify(data, null, 2) + '\\n');
-              dirty = true;
-            }
-          }
-          const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
-          if (fs.existsSync(fwdPath)) {
-            const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
-            const initialLen = (fwdData.forwardings || []).length;
-            fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.startsWith('${prefix}') || d.includes('example.org')));
-            if (fwdData.forwardings.length !== initialLen) {
-              fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + '\\n');
-              dirty = true;
-            }
-          }
-          const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
-          if (fs.existsSync(alPath)) {
-            const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
-            const initialLen = (alData.aliases || []).length;
-            alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith('${prefix}'));
-            if (alData.aliases.length !== initialLen) {
-              fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + '\\n');
-              dirty = true;
-            }
-          }
-          if (dirty) {
-            execSync('systemctl restart yunpanel-api');
-          }
-        } catch {}
-      " 2>/dev/null || true`);
+      runSsh(`
+sqlite3 /var/lib/yunpanel/mail-auth/virtual-mail.sqlite3 "DELETE FROM virtual_aliases WHERE source LIKE '${prefix}%'; DELETE FROM virtual_mailboxes WHERE address LIKE '${prefix}%';" 2>/dev/null || true
+node - "${prefix}" <<'EOF'
+const fs = require('fs');
+const prefix = process.argv[2];
+let dirty = false;
+try {
+  const mbPath = '/var/lib/yunpanel/control-plane/mailbox-registry.json';
+  if (fs.existsSync(mbPath)) {
+    const data = JSON.parse(fs.readFileSync(mbPath, 'utf8'));
+    const initialLen = (data.mailboxes || []).length;
+    data.mailboxes = (data.mailboxes || []).filter(m => !m.address.startsWith(prefix));
+    if (data.mailboxes.length !== initialLen) {
+      fs.writeFileSync(mbPath, JSON.stringify(data, null, 2) + String.fromCharCode(10));
+      dirty = true;
+    }
+  }
+  const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
+  if (fs.existsSync(fwdPath)) {
+    const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
+    const initialLen = (fwdData.forwardings || []).length;
+    fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.startsWith(prefix) || d.includes('example.org')));
+    if (fwdData.forwardings.length !== initialLen) {
+      fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + String.fromCharCode(10));
+      dirty = true;
+    }
+  }
+  const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
+  if (fs.existsSync(alPath)) {
+    const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
+    const initialLen = (alData.aliases || []).length;
+    alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith(prefix));
+    if (alData.aliases.length !== initialLen) {
+      fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + String.fromCharCode(10));
+      dirty = true;
+    }
+  }
+  if (dirty) {
+    process.exit(10);
+  }
+} catch (e) {
+  console.error(e);
+}
+EOF
+if [ $? -eq 10 ]; then
+  systemctl restart yunpanel-api 2>/dev/null || true
+fi
+`);
     } catch {
       // Temizlik hatası yok sayılabilir
     }
@@ -271,12 +278,27 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
     await expect(fwdDestInput).toHaveValue(fullDstMailboxAddress);
 
     const saveForwardingBtn = fwdForm.locator('button:has-text("Yönlendirmeyi kaydet")');
-    await expect(saveForwardingBtn).toBeEnabled({ timeout: 10000 });
-    await saveForwardingBtn.click();
 
-    // Revizyon 1 beklenir
-    await expect(policySection.locator('p.ws-muted:has-text("rev 1")')).toBeVisible({ timeout: 45000 });
-    await expect(saveForwardingBtn).toBeEnabled({ timeout: 45000 });
+    async function saveForwardingAndVerify(expectedRevText) {
+      for (let attempt = 0; attempt < 10; attempt++) {
+        await expect(saveForwardingBtn).toBeEnabled({ timeout: 15000 });
+        await saveForwardingBtn.click();
+        const conflictAlert = policySection.locator('.ws-notice.ws-notice-error, div[role="alert"]').filter({ hasText: 'Site yedekleme' });
+        if (await conflictAlert.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await expect(conflictAlert).not.toBeVisible({ timeout: 60000 });
+          continue;
+        }
+        try {
+          await expect(policySection.locator(`p.ws-muted:has-text("${expectedRevText}")`)).toBeVisible({ timeout: 15000 });
+          await expect(saveForwardingBtn).toBeEnabled({ timeout: 15000 });
+          return;
+        } catch (e) {
+          if (attempt === 9) throw e;
+        }
+      }
+    }
+
+    await saveForwardingAndVerify('rev 1');
 
     // Fiziksel Doğrulama 4: Dovecot Sieve dosyasında redirect :copy ve keep kontrolü
     const sieveAfterCopy = runSsh('cat /etc/dovecot/yunpanel-forwarding.sieve');
@@ -286,12 +308,7 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
 
     // Mode 2: Yalnızca yönlendir / yerel kopya saklamadan iletme ("Yalnız yönlendir" - redirect)
     await modeSelect.selectOption('redirect');
-    await expect(saveForwardingBtn).toBeEnabled({ timeout: 10000 });
-    await saveForwardingBtn.click();
-
-    // Revizyon 2 beklenir
-    await expect(policySection.locator('p.ws-muted:has-text("rev 2")')).toBeVisible({ timeout: 45000 });
-    await expect(saveForwardingBtn).toBeEnabled({ timeout: 45000 });
+    await saveForwardingAndVerify('rev 2');
 
     // Fiziksel Doğrulama 5: Dovecot Sieve dosyasında :copy OLMADAN doğrudan redirect kontrolü
     const sieveAfterRedirect = runSsh('cat /etc/dovecot/yunpanel-forwarding.sieve');
@@ -301,13 +318,22 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
 
     // Forwarding kaldırma
     const clearFwdBtn = fwdForm.locator('button:has-text("Yönlendirmeyi kaldır")');
-    await expect(clearFwdBtn).toBeVisible({ timeout: 10000 });
-    await clearFwdBtn.click();
+    for (let attempt = 0; attempt < 5; attempt++) {
+      await expect(clearFwdBtn).toBeVisible({ timeout: 10000 });
+      await clearFwdBtn.click();
 
-    const clearFwdModal = page.locator('.ws-modal', { hasText: 'Mailbox forwarding policy kaldır' });
-    await expect(clearFwdModal).toBeVisible({ timeout: 5000 });
-    await fillAndConfirm(clearFwdModal, 'Forwarding policy kaldır');
-    await expect(clearFwdModal).not.toBeVisible({ timeout: 45000 });
+      const clearFwdModal = page.locator('.ws-modal', { hasText: 'Mailbox forwarding policy kaldır' });
+      await expect(clearFwdModal).toBeVisible({ timeout: 5000 });
+      await fillAndConfirm(clearFwdModal, 'Forwarding policy kaldır');
+      await expect(clearFwdModal).not.toBeVisible({ timeout: 45000 });
+
+      const conflictAlert = policySection.locator('.ws-notice.ws-notice-error, div[role="alert"]').filter({ hasText: 'Site yedekleme' });
+      if (await conflictAlert.isVisible({ timeout: 3000 }).catch(() => false)) {
+        await expect(conflictAlert).not.toBeVisible({ timeout: 60000 });
+        continue;
+      }
+      break;
+    }
 
     await expect(fwdForm.locator('p:has-text("Mevcut: Yapılandırılmadı")')).toBeVisible({ timeout: 35000 });
 
