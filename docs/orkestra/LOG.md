@@ -63,3 +63,5 @@
 - 2026-10-27 12:53 orchestrator: verify 746166b0..498bdff7: ok, yeniden açılan -, bulgu -
 - 2026-10-27 12:53 orchestrator: verify 746166b0..498bdff7: ok, yeniden açılan -, bulgu -
 - 2026-10-27 12:59 orchestrator: verify 498bdff7..5ef3d202: ok, yeniden açılan -, bulgu -
+- 2026-10-27 12:59 orchestrator: recover: geri alınan ['T136'], kilit ['sunucu-28-3'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-10-27 12:59 orchestrator: tick: 4/4 yuva işte, geri alınan 1
