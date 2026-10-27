@@ -3,6 +3,7 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
+- **Özellik** — Şifre korumalı dizinler: site başına en çok 20 dizin, dizin başına kullanıcılar (parola yalnız hash olarak sunucuda); .28'de nginx ile atlatma denemelerine karşı doğrulandı.
 - **Özellik** — Posta teslimat takibi: ileti başına gönderen/alıcı/durum/sebep (Teslimat sekmesi); .28 journal'ında doğrulandı.
 - **Hata** — Teslimat log ucu hiç çalışmıyordu: journal okuyucusuna zaman aralığı verilmiyordu ve yanlış Postfix birimi (postfix.service) okunuyordu.
 - **Güvenlik** — Teslimat logu alan adını alt metinle süzüyordu (a.com, data.com'u görürdü); artık tam adres alan adı eşleşmesi.
