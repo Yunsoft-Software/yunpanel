@@ -1364,7 +1364,9 @@ test('SCN-WEB-05d: NginxSettingsFields renders target-specific controls for stat
   assert.ok(phpHtml.includes('Document root'));
   assert.ok(phpHtml.includes('Başlangıç dosyaları'));
   assert.ok(phpHtml.includes('Özel hata sayfaları'));
-  assert.equal(phpHtml.includes('Statik dosya önbelleği (saniye)'), false);
+  // 27 Ekim 2026: PHP siteleri statik dosya önbelleğini ve sıkıştırmayı seçebilir.
+  assert.ok(phpHtml.includes('Statik dosya önbelleği (saniye)'));
+  assert.ok(phpHtml.includes('Sıkıştırma (gzip)'));
   assert.equal(phpHtml.includes('WebSocket bağlantılarına izin ver'), false);
 
   // 3. Proxy & Python targets

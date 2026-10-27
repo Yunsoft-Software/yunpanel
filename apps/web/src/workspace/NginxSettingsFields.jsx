@@ -80,7 +80,7 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
       {['proxy', 'python'].includes(targetType) && <label>Uygulama yanıt süresi (saniye)<input type="number" min="1" max="600" step="1"
         value={settings.proxyTimeoutSeconds ?? ''} placeholder="Sunucu varsayılanı" aria-describedby={hint}
         onChange={event => change('proxyTimeoutSeconds', number(event))} /></label>}
-      {targetType === 'static' && <label>Statik dosya önbelleği (saniye)<input type="number" min="0" max="31536000" step="1"
+      {['php', 'static'].includes(targetType) && <label>Statik dosya önbelleği (saniye)<input type="number" min="0" max="31536000" step="1"
         value={settings.staticAssetCacheSeconds ?? ''} placeholder="Sunucu varsayılanı"
         onChange={event => change('staticAssetCacheSeconds', number(event))} /></label>}
       {['php', 'static'].includes(targetType) && <label><span id={`${hint}-index-label`}>Başlangıç dosyaları</span><input
@@ -91,6 +91,13 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
         <span id={`${hint}-index-hint`} className="ws-field-hint">Öncelik sırasıyla, boşlukla ayırın. Boş bırakıldığında varsayılan kullanılır.</span></label>}
     </div>
     <p id={hint} className="ws-field-hint">Boş sayısal alanlar sunucunun varsayılanını kullanır. Yükleme boyutu 1–1024 MB; yanıt süresi 1–600 saniyedir.</p>
+    <label className="ws-check"><input type="checkbox" checked={settings.gzip === true}
+      onChange={event => change('gzip', event.target.checked)} />Sıkıştırma (gzip)</label>
+    {targetType === 'php' && <div className="ws-actions" role="group" aria-label="Statik önbellek hızlı seçimleri">
+      {STATIC_CACHE_PRESETS.map(([label, seconds]) => (
+        <Button key={seconds} disabled={disabled} onClick={() => change('staticAssetCacheSeconds', seconds)}>{label}</Button>
+      ))}
+    </div>}
     {['proxy', 'python'].includes(targetType) && <label className="ws-check"><input type="checkbox" checked={settings.websocket}
       onChange={event => change('websocket', event.target.checked)} />WebSocket bağlantılarına izin ver</label>}
     {targetType === 'static' && <><label className="ws-check"><input type="checkbox" checked={settings.spaFallback}

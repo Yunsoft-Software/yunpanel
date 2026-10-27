@@ -1,4 +1,4 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules']);
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -6,7 +6,7 @@ const TARGET_FIELDS = Object.freeze({
   python: new Set([...COMMON_FIELDS, 'proxyTimeoutSeconds', 'websocket']),
   static: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
   passenger: new Set([...COMMON_FIELDS]),
-  php: new Set([...COMMON_FIELDS, ...FILE_FIELDS]),
+  php: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'staticAssetCacheSeconds']),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -218,6 +218,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     // Optional file settings leave old stored envelopes byte-for-byte canonical.
     ...fileSettings,
     ...(rules !== undefined ? { redirectRules: rules } : {}),
+    ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
@@ -237,6 +238,9 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   }
   return Object.freeze({
     ...common,
+    // PHP serves files from disk, so it may opt in to the static browser cache; absent keeps legacy bytes.
+    ...(targetType === 'php' && Object.hasOwn(merged, 'staticAssetCacheSeconds')
+      ? { staticAssetCacheSeconds: optionalInteger(merged.staticAssetCacheSeconds, 'staticAssetCacheSeconds', 0, 31_536_000) } : {}),
     headers: headers(merged.headers),
   });
 }

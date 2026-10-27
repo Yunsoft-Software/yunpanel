@@ -54,8 +54,9 @@ export function reloadHostingForm(form, domain, expected) {
     if (previous && !hostingValuesEqual(form.values[key], previous[key])) next.values[key] = form.values[key];
   }
   // Optional fields absent from the reloaded record must not drop the user's draft of them.
-  const optionalFields = ['redirectRules', ...(['php', 'static'].includes(next.base.targetType)
-    ? ['indexFiles', 'errorPages', 'documentRoot', 'preferredDomain'] : [])];
+  const optionalFields = ['redirectRules', 'gzip', ...(['php', 'static'].includes(next.base.targetType)
+    ? ['indexFiles', 'errorPages', 'documentRoot', 'preferredDomain'] : []),
+  ...(next.base.targetType === 'php' ? ['staticAssetCacheSeconds'] : [])];
   const optionalFiles = previous ? optionalFields.filter(key => Object.hasOwn(form.values.nginxSettings, key)) : [];
   if (previous) for (const key of new Set([...Object.keys(next.values.nginxSettings), ...optionalFiles])) {
     if (!hostingValuesEqual(form.values.nginxSettings[key], previous.nginxSettings[key])) {
