@@ -3,6 +3,7 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
+- **Özellik** — Yönlendirme amaçlı (hosting'siz) domain: 301/302, yolu koruma, hedef sonradan değiştirilebilir; kendine yönlendirme engellendi. .28'de gerçek nginx ile doğrulandı.
 - **Hata** — E2E testleri kurulu Google Chrome'u görünmez açıyordu; testler sürerken kullanıcının Chrome'u açılmıyordu. Artık Playwright'ın kendi Chromium'u (`npm run e2e:install`).
 - **Özellik** — Şifre korumalı dizinler: site başına en çok 20 dizin, dizin başına kullanıcılar (parola yalnız hash olarak sunucuda); .28'de nginx ile atlatma denemelerine karşı doğrulandı.
 - **Özellik** — Posta teslimat takibi: ileti başına gönderen/alıcı/durum/sebep (Teslimat sekmesi); .28 journal'ında doğrulandı.
