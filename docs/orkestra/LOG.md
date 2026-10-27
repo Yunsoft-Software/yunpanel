@@ -53,3 +53,4 @@
 - 2026-10-27 11:24 orchestrator: verify 530cec51..d28dc352: ok, yeniden açılan -, bulgu -
 - 2026-10-27 11:25 orchestrator: verify 530cec51..975022d9: ok, yeniden açılan -, bulgu -
 - 2026-10-27 11:37 orchestrator: verify 975022d9..d96a1071: failed, yeniden açılan -, bulgu ['T805']
+- 2026-10-27 11:41 orchestrator: tick: 4/4 yuva işte, geri alınan 0
