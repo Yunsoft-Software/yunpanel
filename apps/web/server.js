@@ -1073,6 +1073,40 @@ function proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToke
   request.pipe(upstream);
 }
 
+// Machine clients of /api/automation: only the API key and body headers pass, never a
+// cookie or browser origin, so a panel session cannot ride on this path. The API
+// authenticates the key; the client IP allow list still applies before this point.
+const AUTOMATION_HEADERS = ['authorization', 'content-type', 'content-length', 'accept', 'user-agent'];
+
+function proxyAutomationRequest(request, response, { apiHost, apiPort, clientIp, proxyToken }) {
+  if (request.headers.cookie || request.headers.origin) {
+    reply(response, 403, 'The automation API does not accept browser requests.');
+    return;
+  }
+  const requestUrl = new URL(request.url ?? '/', 'http://panel.local');
+  const headers = Object.fromEntries(AUTOMATION_HEADERS.filter((name) => typeof request.headers[name] === 'string')
+    .map((name) => [name, request.headers[name]]));
+  headers.host = `${apiHost}:${apiPort}`;
+  headers['x-yunpanel-client-ip'] = clientIp;
+  headers['x-yunpanel-proxy-token'] = proxyToken;
+  const upstream = http.request({ host: apiHost, port: apiPort, method: request.method, path: `${requestUrl.pathname}${requestUrl.search}`, headers }, (upstreamResponse) => {
+    const responseHeaders = {};
+    for (const [name, value] of Object.entries(upstreamResponse.headers)) {
+      if (!HOP_BY_HOP_HEADERS.has(name) && name !== 'set-cookie' && value !== undefined) responseHeaders[name] = value;
+    }
+    responseHeaders['cache-control'] = 'no-store';
+    response.writeHead(upstreamResponse.statusCode ?? 502, responseHeaders);
+    upstreamResponse.pipe(response);
+  });
+  upstream.setTimeout(30_000, () => upstream.destroy(new Error('Upstream timeout')));
+  upstream.on('error', () => {
+    if (!response.headersSent) reply(response, 502, 'Panel API is unavailable.');
+    else response.destroy();
+  });
+  request.on('aborted', () => upstream.destroy());
+  request.pipe(upstream);
+}
+
 function proxyWebSocket(request, socket, head, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }) {
   const fetchSite = request.headers['sec-fetch-site'];
   if (request.method !== 'GET' || request.headers.origin !== publicOrigin
@@ -1629,6 +1663,9 @@ export function createPanelServer(options = {}) {
         publicOrigin,
       });
       return;
+    }
+    if (requestUrl.pathname.startsWith('/api/automation/')) {
+      proxyAutomationRequest(request, response, { apiHost, apiPort, clientIp, proxyToken }); return;
     }
     if (requestUrl.pathname === '/api/health' || requestUrl.pathname.startsWith('/api/panel/') || requestUrl.pathname.startsWith('/api/auth/') || requestUrl.pathname.startsWith('/api/ai/')) {
       proxyRequest(request, response, { apiHost, apiPort, clientIp, proxyToken, publicOrigin }); return;
