@@ -6,15 +6,21 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, openFirstWebsiteWorkspace } fr
 test.use({ trace: 'off' });
 
 function runSsh(command) {
-  try {
-    return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
-      encoding: 'utf8',
-      timeout: 20000,
-    }).trim();
-  } catch (err) {
-    console.warn(`SSH command failed: ${command} -> ${err.message}`);
-    return '';
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
+        encoding: 'utf8',
+        timeout: 20000,
+      }).trim();
+    } catch (err) {
+      if (attempt === 3) {
+        console.warn(`SSH command failed: ${command} -> ${err.message}`);
+        return '';
+      }
+      try { execSync('sleep 1'); } catch {}
+    }
   }
+  return '';
 }
 
 function generateEd25519Key() {
