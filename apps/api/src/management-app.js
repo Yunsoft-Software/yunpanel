@@ -800,6 +800,7 @@ export function createApp(allOptions = {}) {
     mountTenantSiteRoutes(app, { service: createTenantSiteService({
       siteCreator: createLocalSiteCreator(siteCreateDependencies), provisioning: websiteProvisioningRuntime,
       domainRegistry, store: options.tenantSiteStore, localServerId, publication: core.domainPublication, jobRegistry,
+      removal: websiteRemovalRuntime,
     }) });
   }
   if (websiteProvisioningRuntime) {

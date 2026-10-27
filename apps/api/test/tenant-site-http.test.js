@@ -6,7 +6,15 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createNginxManager } from '@yunpanel/host-runtime';
+import { randomBytes } from 'node:crypto';
+import { createApiKeyActorAuthorizer } from '../src/api-key-actor.js';
 import { createApiKeyStore } from '../src/api-key-store.js';
+import { createAuthStore } from '../src/auth-store.js';
+import { previewResourceImpact } from '../src/resource-impact.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import { createWebsiteRemovalPreview } from '../src/website-removal-plan.js';
+import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
+import { createWebsiteRemovalWorker } from '../src/website-removal-worker.js';
 import { createApp } from '../src/app.js';
 import { createApplicationRegistry } from '../src/application-registry.js';
 import { createAuthenticatedApi } from '../src/auth-http.js';
@@ -27,7 +35,6 @@ import { createWebsiteRegistry } from '../src/website-registry.js';
 // Real auth entry, app, registries, provisioning engine and nginx manager (temporary
 // directories; `nginx -t` runs on a real host separately). Creating a Unix account
 // needs root, so only that host step is a stand-in.
-const OWNER_ID = '0b6f4b4e-6f7a-4d55-9d3c-6c1c0f6a9e11';
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-tenant-'));
@@ -64,14 +71,54 @@ async function fixture(t) {
   await Promise.all([applicationRegistry.init(), dockerWorkloadRegistry.init(), websiteRegistry.init(), domainRegistry.init(),
     dnsHostingRegistry.init(), mailDomainRegistry.init(), websiteProvisioningRuntime.init()]);
   await domainRegistry.createDomain({ serverId, primaryDomain: 'st.example.test', targetType: 'redirect', target: { url: 'https://example.test' } });
+  // A real Owner: removal re-authorizes the key actor against the live account.
+  const authStore = createAuthStore({ filePath: ':memory:', masterKey: randomBytes(32) });
+  t.after(() => authStore.close());
+  const password = randomBytes(24).toString('base64url');
+  await authStore.completeSetup({ setupToken: authStore.issueSetupToken().token, username: 'owner', password });
+  const ownerId = authStore.getSession((await authStore.login({ username: 'owner', password })).token).user.id;
   const apiKeyStore = createApiKeyStore();
-  const { token } = await apiKeyStore.create({ name: 'Provisioner', parentDomain: 'st.example.test', portMin: 32000, portMax: 32999, createdBy: OWNER_ID });
-  const other = await apiKeyStore.create({ name: 'Other', parentDomain: 'other.example.test', portMin: 32000, portMax: 32999, createdBy: OWNER_ID });
+  const tenantSiteStore = createTenantSiteStore();
+  const { token } = await apiKeyStore.create({ name: 'Provisioner', parentDomain: 'st.example.test', portMin: 32000, portMax: 32999, createdBy: ownerId });
+  const other = await apiKeyStore.create({ name: 'Other', parentDomain: 'other.example.test', portMin: 32000, portMax: 32999, createdBy: ownerId });
+  // Real website removal engine, journal, worker and resource impact. Host cleanup and the
+  // nested Domain removal engine (tested on their own) are stand-ins here, as in the removal tests.
+  const removalRegistry = createWebsiteRemovalOperationRegistry();
+  await removalRegistry.init();
+  const removedDomains = new Set();
+  const websiteRemovalRuntime = createWebsiteRemovalRuntime({
+    registry: removalRegistry, domainRegistry, websiteRegistry, applicationRegistry, automaticExecution: true,
+    authorizeActor: createApiKeyActorAuthorizer({ apiKeyStore, tenantSiteStore, getAutomationUser: (id) => authStore.getAutomationUser(id), ownerMfaRequired: false }),
+    previewProvider: async ({ websiteId }) => {
+      const website = await websiteRegistry.getWebsite(websiteId);
+      const impact = await previewResourceImpact({ resourceType: 'website', resourceId: websiteId, operation: 'delete', targetServerId: null,
+        registry, applicationRegistry, websiteRegistry, domainRegistry, certificateRegistry: { async listCertificates() { return []; } },
+        jobRegistry, dnsHostingRegistry, mailDomainRegistry,
+        additionalProviders: { databases: async () => [], sftpKeys: async () => [], runtimeBindings: async () => [],
+          unixIdentities: async () => website.unixUser ? [{ id: website.unixUser, state: 'active' }] : [], logScopes: async () => [{ id: website.id, state: 'managed' }],
+          crons: async () => [], backups: async () => [], dockerWorkloads: async () => [], webmailMappings: async () => [], mailboxes: async () => [] } });
+      return createWebsiteRemovalPreview({ website, impact, applicationState: null });
+    },
+    domainRemovalRuntime: {
+      async listForDomain(id) { return removedDomains.has(id) ? [{ id: `op-${id}`, domainId: id, status: 'routing' }] : []; },
+      async preview({ domainId }) { return { readyToStart: true, previewDigest: 'a'.repeat(64), confirmation: `start-domain-remove:${domainId}:1:${'a'.repeat(64)}` }; },
+      // The nested Domain removal keeps running here; its own engine is verified on a real host.
+      async start({ domainId }) { removedDomains.add(domainId); return { id: `op-${domainId}`, domainId, status: 'routing' }; },
+    },
+    fileCleanupInspector: async () => ({ ready: true }),
+    fileCleanupHandler: async (input) => ({ ...input, filesCleaned: true, retainedBackups: input.retainedBackups, retainedLogScopes: input.retainedLogScopes }),
+    unixIdentityCleanupInspector: async () => ({ ready: true }),
+    unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
+  });
+  await websiteRemovalRuntime.init?.();
+  const worker = createWebsiteRemovalWorker({ registry: removalRegistry, runtime: websiteRemovalRuntime, intervalMs: 100 });
+  worker.start();
+  t.after(() => worker.stop());
   const listener = createAuthenticatedApi({
     store: { configured: () => true, mfa: { enabled: () => true }, getSession: () => null },
     publicOrigin: 'https://panel.example.test',
     createHandler: () => createApp({ environment: 'production', registry, jobRegistry, applicationRegistry, dockerWorkloadRegistry, websiteRegistry, domainRegistry,
-      dnsHostingRegistry, mailDomainRegistry, websiteProvisioningRuntime, localServerId: serverId, apiKeyStore, tenantSiteStore: createTenantSiteStore() }),
+      dnsHostingRegistry, mailDomainRegistry, websiteProvisioningRuntime, websiteRemovalRuntime, localServerId: serverId, apiKeyStore, tenantSiteStore }),
     automationHandler: createAutomationHandler({ apiKeyStore }),
   });
   const server = http.createServer(listener).listen(0, '127.0.0.1');
@@ -82,7 +129,7 @@ async function fixture(t) {
       headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' }, body: body ? JSON.stringify(body) : undefined });
     return { status: response.status, body: await response.json().catch(() => null) };
   };
-  return { call, otherKey: other.token, sitesDir, domainRegistry, serverId };
+  return { call, otherKey: other.token, sitesDir, domainRegistry, websiteRegistry, serverId, removalRegistry, apiKeyStore };
 }
 
 async function config(f, slug) {
@@ -162,4 +209,23 @@ test('stop answers 503, archive forwards to billing, and active serves the appli
     const refused = await f.call('POST', '/api/automation/tenant-sites/acme/state', body);
     assert.equal(refused.status, 400, JSON.stringify(body));
   }
+});
+
+test('delete starts the real removal engine as the key actor and locks the tenant site', async (t) => {
+  const f = await fixture(t);
+  const created = await f.call('PUT', '/api/automation/tenant-sites/acme', { upstreamPort: 32010, https: false });
+  await untilActive(f, 'acme');
+  const removing = await f.call('DELETE', '/api/automation/tenant-sites/acme');
+  assert.equal(removing.status, 202, JSON.stringify(removing.body));
+  assert.equal((await f.call('POST', '/api/automation/tenant-sites/acme/state', { state: 'stopped' })).body.error.code, 'tenant_site_removing');
+  assert.equal((await f.call('PUT', '/api/automation/tenant-sites/acme', { upstreamPort: 32010 })).body.error.code, 'tenant_site_removing');
+  // Let the worker run a few rounds: it re-authorizes the stored key actor at every step.
+  await new Promise(resolve => setTimeout(resolve, 600));
+  const status = await f.call('GET', '/api/automation/tenant-sites/acme');
+  assert.equal(status.body.data.state, 'removing', JSON.stringify(status.body));
+  const [operation] = await f.removalRegistry.listForWebsite(created.body.data.websiteId);
+  const [key] = await f.apiKeyStore.list();
+  assert.equal((await f.removalRegistry.getActor(operation.id)).userId, key.createdBy);
+  assert.equal((await f.call('DELETE', '/api/automation/tenant-sites/acme', null, f.otherKey)).status, 404);
+  assert.equal((await f.call('DELETE', '/api/automation/tenant-sites/acme')).status, 202, 'repeating is harmless');
 });

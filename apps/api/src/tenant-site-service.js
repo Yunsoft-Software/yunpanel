@@ -35,7 +35,7 @@ function slugOf(value) {
   return value;
 }
 
-export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId, publication = null, jobRegistry = null }) {
+export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId, publication = null, jobRegistry = null, removal = null }) {
   if (!siteCreator || !provisioning?.get || !provisioning?.runNext || !domainRegistry || !store || !localServerId) {
     throw new Error('Tenant sites require the site creator, provisioning engine, Domain registry and tenant store');
   }
@@ -84,6 +84,7 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     const parent = await parentOf(key);
     const hostname = `${slug}.${parent.primaryDomain}`;
     let record = await store.get(hostname);
+    if (record?.removal) throw new TenantSiteError('tenant_site_removing', 'This tenant site is being removed', 409);
     if (record) {
       if (record.upstreamPort !== upstreamPort) throw new TenantSiteError('tenant_port_change_unsupported', 'A tenant site keeps its port', 409);
       return { created: false, site: view(record, await advance(record, key, ADVANCE_LIMIT)) };
@@ -150,6 +151,7 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
   async function setMode(key, rawSlug, body) {
     if (!publication || !jobRegistry) throw new TenantSiteError('tenant_publication_unavailable', 'Publishing is not available on this panel', 503);
     let record = await owned(key, rawSlug);
+    if (record.removal) throw new TenantSiteError('tenant_site_removing', 'This tenant site is being removed', 409);
     if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some((field) => !STATE_FIELDS.has(field))
       || !MODES.has(body.state) || (body.state === 'archived') !== (typeof body.redirectUrl === 'string')) {
       throw new TenantSiteError('invalid_tenant_state', 'Send state active, stopped or archived; archived needs redirectUrl');
@@ -171,12 +173,47 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     return view(record, await provisioning.get(record.operationId));
   }
 
+  // Removal uses the panel's website removal engine and its background worker. The tenant
+  // record stays until the engine reports 'removed', because the worker re-authorizes the
+  // key actor against it at every step.
+  async function removalView(record) {
+    const operation = await removal.get(record.removal.operationId);
+    if (operation?.status === 'removed') {
+      await store.remove(record.hostname);
+      return Object.freeze({ hostname: record.hostname, slug: record.slug, state: 'removed' });
+    }
+    const failedStep = operation?.steps?.find((step) => ['failed', 'blocked'].includes(step.state));
+    const error = failedStep?.error?.code ?? operation?.error?.code ?? null;
+    return Object.freeze({ hostname: record.hostname, slug: record.slug,
+      state: ['failed', 'blocked'].includes(operation?.status) || failedStep ? 'attention' : 'removing',
+      ...(operation?.status ? { removalStatus: operation.status } : {}), ...(error ? { error } : {}),
+      ...(failedStep ? { failedStep: failedStep.id } : {}) });
+  }
+
+  async function remove(key, rawSlug) {
+    if (!removal) throw new TenantSiteError('tenant_removal_unavailable', 'Site removal is not available on this panel', 503);
+    const record = await owned(key, rawSlug);
+    if (record.removal) return removalView(record);
+    const actor = apiKeyActor(key);
+    const preview = await removal.preview({ websiteId: record.websiteId });
+    if (preview.readyToStart !== true || typeof preview.confirmation !== 'string') {
+      const blockers = (preview.hardBlockers ?? []).map((blocker) => blocker.code ?? blocker).join(', ');
+      throw new TenantSiteError('tenant_removal_blocked', `Site cannot be removed yet${blockers ? `: ${blockers}` : ''}`, 409);
+    }
+    const started = await removal.start({ websiteId: record.websiteId, previewDigest: preview.previewDigest, confirmation: preview.confirmation, actor });
+    await store.put({ ...record, removal: { operationId: started.id } });
+    await removal.run({ websiteId: record.websiteId, operationId: started.id, expectedUpdatedAt: started.updatedAt,
+      confirmation: `run-website-remove:${record.websiteId}:${started.id}:${started.updatedAt}`, actor });
+    return removalView({ ...record, removal: { operationId: started.id } });
+  }
+
   async function status(key, rawSlug) {
     let record = await owned(key, rawSlug);
+    if (record.removal) return removalView(record);
     const operation = await advance(record, key, 1);
     if (operation?.ready && publication && jobRegistry) record = await advancePublication(record);
     return view(record, operation);
   }
 
-  return Object.freeze({ ensure, status, setMode, owned, internals: Object.freeze({ operationIdFor }) });
+  return Object.freeze({ ensure, status, setMode, remove, owned, internals: Object.freeze({ operationIdFor }) });
 }

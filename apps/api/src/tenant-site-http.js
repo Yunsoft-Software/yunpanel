@@ -17,6 +17,10 @@ export function mountTenantSiteRoutes(app, { service } = {}) {
     const site = await service.setMode(automationKey(request), request.params.slug, request.body);
     return response.status(site.state === 'active' ? 200 : 202).json({ data: site });
   }));
+  app.delete('/api/automation/tenant-sites/:slug', requireAutomationKey, asyncRoute(async (request, response) => {
+    const site = await service.remove(automationKey(request), request.params.slug);
+    return response.status(site.state === 'removed' ? 200 : 202).json({ data: site });
+  }));
   app.get('/api/automation/tenant-sites/:slug', requireAutomationKey, asyncRoute(async (request, response) => {
     return response.json({ data: await service.status(automationKey(request), request.params.slug) });
   }));
