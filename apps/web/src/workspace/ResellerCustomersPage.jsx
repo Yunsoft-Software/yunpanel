@@ -332,15 +332,15 @@ function AllocateSiteDialog({ account, reseller, servers, onClose, onSaved }) {
       const input = {
         operationId: crypto.randomUUID(),
         serverId,
-        displayName: cleanDomain,
+        name: cleanDomain,
         primaryDomain: cleanDomain,
         parentDomainId: null,
         wwwMode: form.wwwMode,
-        aliases: [],
         httpsMode: 'managed',
-        dnsMode: 'local',
-        mailMode: 'local',
         source: { kind: form.runtime },
+        database: { mode: 'none' },
+        mail: { mode: 'local' },
+        dns: { mode: 'local' },
       };
       const result = await requestJson('/api/sites/hosted/create-preview', {
         method: 'POST',

@@ -54,3 +54,8 @@ test('home requests website relations and the tool directory has no global inven
 test('direct site tools load Website and Domain context', () => {
   for (const path of ['/ssl','/cron','/backup','/backups','/logs','/php','/wordpress','/access']) assert.deepEqual(selected(path), ['domains','websites']);
 });
+
+test('customers and resellers routes request domains, websites and servers for site allocation and quotas', () => {
+  assert.deepEqual(selected('/customers'), ['domains', 'servers', 'websites']);
+  assert.deepEqual(selected('/resellers'), ['domains', 'servers', 'websites']);
+});

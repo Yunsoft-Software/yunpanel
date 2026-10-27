@@ -20,6 +20,7 @@ export function workspaceResources(pathname, { observingJob = false, activeJob =
   else if (path === '/jobs') enable('jobs');
   else if (path === '/mail') enable('domains', 'websites', 'servers', 'jobs');
   else if (/^\/mail\/[^/]+$/.test(path)) enable('domains', 'servers', 'jobs');
+  else if (path === '/customers' || path === '/resellers') enable('domains', 'websites', 'servers');
   else if (path === '/databases') enable('domains', 'websites', 'servers');
   else if (path === '/statistics') enable('domains', 'websites');
   else if (path === '/servers' || path === '/settings') enable('servers');

@@ -369,6 +369,25 @@ test('a bound Website retains its Unix and log resources during Domain removal o
   assert.ok(unavailable.hardBlockers.includes('unixIdentities_inventory_unavailable'));
 });
 
+test('a bound Website retains its database bindings during Domain removal without hard-blocking removal start', () => {
+  const current = domain(), evidence = impact(current);
+  evidence.dependencies.databases = { status: 'available', items: [{ id: 'db-1' }] };
+  evidence.blockers.push({ code: 'database_binding_dependencies_present', count: 1 });
+  const preview = createDomainRemovalPreview({ domain: current, impact: evidence });
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.plan.additional.databases.ids, ['db-1']);
+  assert.equal(preview.hardBlockers.includes('database_binding_dependencies_present'), false);
+});
+
+test('dns_zone_parent_ds_unverifiable is treated as orchestratable DNS blocker and does not hard-block domain removal start', () => {
+  const current = domain(), evidence = impact(current);
+  evidence.dependencies.authoritativeDns.items[0].state = 'blocked';
+  evidence.dependencies.authoritativeDns.items[0].blockers = ['dns_zone_parent_ds_unverifiable'];
+  const preview = createDomainRemovalPreview({ domain: current, impact: evidence });
+  assert.equal(preview.readyToStart, true);
+  assert.equal(preview.hardBlockers.includes('dns_zone_parent_ds_unverifiable'), false);
+});
+
 test('a Domain can retain only its bound Website application runtime while the Website teardown owns final cleanup',()=>{
  const current=domain(),evidence=impact(current);evidence.dependencies.runtimeBindings={status:'available',items:[{id:'application-1'}]};
  evidence.blockers.push({code:'runtime_binding_dependencies_present',count:1});

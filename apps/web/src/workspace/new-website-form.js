@@ -147,10 +147,12 @@ export function existingApplicationType(sourceMode) {
   return EXISTING_APPLICATION_TYPES[sourceMode] ?? null;
 }
 
-export function resolveSubdomainSharedFileRoot(parentDomain, prefix) {
+export function resolveSubdomainSharedFileRoot(parentDomain, prefix, parentWebsite = null) {
   const rawParent = typeof parentDomain === 'string' && parentDomain.trim()
     ? parentDomain.trim().toLowerCase()
-    : 'example.com';
+    : (parentDomain && typeof parentDomain === 'object' && typeof parentDomain.primaryDomain === 'string'
+      ? parentDomain.primaryDomain.trim().toLowerCase()
+      : 'example.com');
   const cleanParent = rawParent.replace(/[^a-z0-9.-]/g, '').replace(/\.{2,}/g, '.') || 'example.com';
   const rawPrefix = typeof prefix === 'string' && prefix.trim()
     ? prefix.trim().toLowerCase()
@@ -159,6 +161,19 @@ export function resolveSubdomainSharedFileRoot(parentDomain, prefix) {
     ? (rawPrefix.slice(0, -(cleanParent.length + 1)) || 'sub')
     : rawPrefix;
   const cleanPrefix = strippedPrefix.replace(/[^a-z0-9.-]/g, '').replace(/\.{2,}/g, '.').replace(/^\.+|\.+$/g, '') || 'sub';
+
+  const candidateRoot = parentWebsite?.documentRoot
+    ?? (parentDomain && typeof parentDomain === 'object'
+      ? (parentDomain.documentRoot ?? parentDomain.target?.root ?? parentDomain.workspaceRoot ?? null)
+      : null);
+  if (candidateRoot && typeof candidateRoot === 'string') {
+    const trimmed = candidateRoot.replace(/\/+$/, '');
+    const base = trimmed.split('/').pop();
+    const parentDir = trimmed.split('/').slice(0, -1).join('/');
+    const LEAF_DIRS = new Set(['httpdocs', 'public', 'public_html', 'html', 'www', 'current', 'htdocs']);
+    const parentBase = LEAF_DIRS.has(base) && parentDir ? parentDir : trimmed;
+    return `${parentBase}/subdomains/${cleanPrefix}`;
+  }
   return `/var/www/vhosts/${cleanParent}/subdomains/${cleanPrefix}`;
 }
 

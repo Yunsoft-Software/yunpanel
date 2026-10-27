@@ -135,13 +135,17 @@ test('source: WebsitesPage preserves owner test invariants and adapts heading fo
   assert.doesNotMatch(page, /method:\s*['"](?:POST|PATCH|DELETE)|fetch\(|localStorage|sessionStorage/);
 });
 
-test('source: ResellerCustomersPage contains website quota and site allocation flow', async () => {
+test('source: ResellerCustomersPage contains website quota and site allocation flow with valid site-create payload schema', async () => {
   const resellerPage = await source('ResellerCustomersPage.jsx');
   assert.match(resellerPage, /Web sitesi: ' \+ reseller\.usage\.websites/);
   assert.match(resellerPage, /Site tahsis et/);
   assert.match(resellerPage, /function AllocateSiteDialog/);
   assert.match(resellerPage, /\/api\/sites\/hosted\/create-preview/);
   assert.match(resellerPage, /\/api\/sites\/hosted/);
+  assert.match(resellerPage, /name:\s*cleanDomain/);
+  assert.match(resellerPage, /database:\s*\{\s*mode:\s*'none'\s*\}/);
+  assert.match(resellerPage, /dns:\s*\{\s*mode:\s*'local'\s*\}/);
+  assert.doesNotMatch(resellerPage, /displayName:\s*cleanDomain/);
 });
 
 test('hostingCustomerQuotasInput: parses form inputs and handles nulls or invalid values', () => {

@@ -29,6 +29,7 @@ const ORCHESTRATABLE_IMPACT_BLOCKERS = new Set([
   'webmail_mapping_dependencies_present',
   'authoritative_dns_retirement_blocked',
   'impact_apply_not_implemented',
+  'database_binding_dependencies_present',
 ]);
 
 const ORCHESTRATABLE_DNS_BLOCKERS = new Set([
@@ -37,6 +38,7 @@ const ORCHESTRATABLE_DNS_BLOCKERS = new Set([
   'domain_certificate_present',
   'domain_routing_active',
   'dns_zone_mail_dependencies_present',
+  'dns_zone_parent_ds_unverifiable',
 ]);
 
 export class DomainRemovalPlanError extends Error {
@@ -743,6 +745,7 @@ function hardBlockers(blockers, plan) {
     // teardown removes them after retiring every Domain's routing.
     const retainedBucket = blocker.code === 'unix_identity_dependencies_present' ? 'unixIdentities'
       : blocker.code === 'log_scope_dependencies_present' ? 'logScopes'
+      : blocker.code === 'database_binding_dependencies_present' ? 'databases'
       : blocker.code === 'runtime_binding_dependencies_present' && plan.applicationId!==null
         && plan.additional.runtimeBindings.ids.every(id=>id===plan.applicationId)?'runtimeBindings':null;
     if (retainedBucket && plan.websiteId !== null && plan.additional[retainedBucket].status === 'available'

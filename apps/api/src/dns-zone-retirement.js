@@ -552,7 +552,7 @@ export function createDnsZoneRetirementService({
           503,
         );
       }
-      if (parentDs.status !== 'absent') {
+      if (parentDs.status === 'present') {
         throw new DnsZoneRetirementError(
           'dns_zone_retirement_parent_ds_present',
           'Parent DS must be removed and propagation complete before deletion snapshot capture',
@@ -652,7 +652,7 @@ export function createDnsZoneRetirementService({
         503,
       );
     }
-    if (parentDs.status !== 'absent') {
+    if (parentDs.status === 'present') {
       throw new DnsZoneRetirementError(
         'dns_zone_retirement_parent_ds_present',
         'Parent DS must be removed and propagation complete before destructive deletion',
