@@ -10,16 +10,17 @@ export default defineConfig({
   use: {
     baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://server.cryptoraichu.website',
     ignoreHTTPSErrors: true,
-    channel: 'chrome',
     headless: true,
     screenshot: 'only-on-failure',
     trace: 'retain-on-failure',
   },
   projects: [
+    // Playwright's own Chromium, never the installed Google Chrome: a headless Chrome
+    // keeps the app "running" on macOS and the user's Chrome window will not open.
     {
       name: 'chromium',
       use: {
-        channel: 'chrome',
+        browserName: 'chromium',
       },
     },
   ],

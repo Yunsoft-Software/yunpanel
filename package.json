@@ -23,7 +23,8 @@
     "build": "npm run build --workspaces --if-present",
     "test": "npm run test --workspaces --if-present",
     "lint": "node scripts/validate-repository.mjs",
-    "check": "npm run lint && npm test && npm run build"
+    "check": "npm run lint && npm test && npm run build",
+    "e2e:install": "playwright install chromium"
   },
   "devDependencies": {
     "@playwright/test": "^1.63.0"
