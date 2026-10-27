@@ -9,6 +9,7 @@ export function domainNginxSettingsForTarget(domain, targetType) {
     clientMaxBodySizeMb: settings.clientMaxBodySizeMb ?? null,
     headers: settings.headers ?? [],
     ...(Object.hasOwn(settings, 'preferredDomain') ? { preferredDomain: settings.preferredDomain } : {}),
+    ...(Object.hasOwn(settings, 'redirectRules') ? { redirectRules: settings.redirectRules } : {}),
     ...(targetType === 'php' ? Object.fromEntries(['indexFiles', 'errorPages', 'documentRoot']
       .filter(key => Object.hasOwn(settings, key)).map(key => [key, settings[key]])) : {}),
   });

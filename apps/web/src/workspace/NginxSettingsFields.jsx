@@ -60,6 +60,8 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
   const change = (key, value) => onChange({ ...settings, [key]: value });
   const header = (index, key, value) => change('headers', settings.headers.map((item, at) => at === index ? { ...item, [key]: value } : item));
   const number = event => event.target.value === '' ? null : Number(event.target.value);
+  const rules = settings.redirectRules ?? [];
+  const rule = (index, key, value) => change('redirectRules', rules.map((item, at) => at === index ? { ...item, [key]: value } : item));
   return <fieldset disabled={disabled} className="ws-form">
     <legend>Web sunucusu ayarları</legend>
     <div className="ws-form-grid">
@@ -106,6 +108,22 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
         value={settings.errorPages?.[code] ?? ''} maxLength="192" placeholder={'/hatalar/' + code + '.html'} spellCheck={false}
         onChange={event => { const pages = { ...settings.errorPages }; if (event.target.value) pages[code] = event.target.value; else delete pages[code]; change('errorPages', pages); }} /></label>)}</div>
     </details>}
+    <details open={rules.length > 0}>
+      <summary>Yönlendirmeler</summary>
+      <p className="ws-field-hint">Örnek: /eski → https://alan.com/yeni. Klasör eşleşmesinde iki taraf da / ile biter ve alt yollar korunur.</p>
+      {rules.map((item, index) => <div className="ws-form-grid" key={index}>
+        <label>Kaynak {index + 1}<input value={item.source} required maxLength="192" placeholder="/eski" spellCheck={false}
+          onChange={event => rule(index, 'source', event.target.value)} /></label>
+        <label>Hedef {index + 1}<input value={item.target} required maxLength="512" placeholder="https://alan.com/yeni" spellCheck={false}
+          onChange={event => rule(index, 'target', event.target.value)} /></label>
+        <label>Eşleşme {index + 1}<select value={item.match} onChange={event => rule(index, 'match', event.target.value)}>
+          <option value="exact">Tam yol</option><option value="prefix">Klasör ve altı</option></select></label>
+        <label>Tür {index + 1}<select value={item.status} onChange={event => rule(index, 'status', Number(event.target.value))}>
+          <option value={301}>Kalıcı (301)</option><option value={302}>Geçici (302)</option></select></label>
+        <div className="ws-actions"><Button onClick={() => change('redirectRules', rules.filter((_, at) => at !== index))}>Yönlendirme {index + 1} kaldır</Button></div>
+      </div>)}
+      <Button disabled={disabled || rules.length >= 50} onClick={() => change('redirectRules', [...rules, { source: '', target: '', status: 301, match: 'exact' }])}>Yönlendirme ekle</Button>
+    </details>
     <fieldset>
       <legend>Özel yanıt başlıkları</legend>
       <p className="ws-field-hint">Site yanıtına en fazla 12 başlık ekleyebilirsiniz. Başlık adları benzersiz, değerleri tek satır olmalıdır.</p>

@@ -116,6 +116,19 @@ function redirectBody(destination, headers) {
   return `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    return 301 ${destination}$request_uri;\n  }`;
 }
 
+// Rules are validated by normalizeNginxSettings to a closed character set, so they
+// are safe to interpolate. `=` and `^~` locations win over the regex locations below.
+function redirectLocations(rules = []) {
+  return rules.map(({ source, target, status, match }) => {
+    if (match === 'exact') {
+      const query = target.includes('?') ? '' : '$is_args$args';
+      return `  location = ${source} {\n    return ${status} ${target}${query};\n  }`;
+    }
+    const pattern = source.replace(/[.]/g, '\\.');
+    return `  location ^~ ${source} {\n    rewrite ^${pattern}(.*)$ ${target}$1 ${status === 301 ? 'permanent' : 'redirect'};\n  }`;
+  }).join('\n\n');
+}
+
 function serverBlock({
   names,
   body,
@@ -169,6 +182,8 @@ function renderServerSet({
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
   const discoveryLocations = mailDiscoveryLocations(discoverySocket);
+  const rules = redirectLocations(nginxSettings.redirectRules ?? []);
+  if (rules) body = `${rules}\n\n${body}`;
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;

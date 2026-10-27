@@ -1,4 +1,4 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain']);
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -111,6 +111,58 @@ function headers(value) {
   }));
 }
 
+// Redirect paths and targets are written into nginx verbatim, so only a closed
+// character set is accepted: no whitespace, quotes, `;`, braces, `$` or backslash.
+const REDIRECT_PATH = /^\/(?:[A-Za-z0-9._~%-]+\/)*[A-Za-z0-9._~%-]*$/;
+const REDIRECT_QUERY = /^[A-Za-z0-9._~%&=+-]*$/;
+const RESERVED_REDIRECT_SOURCES = ['/.well-known', '/autodiscover/', '/mail/config-v1.1.xml'];
+const REDIRECT_FIELDS = ['source', 'target', 'status', 'match'];
+
+function redirectPath(value) {
+  return typeof value === 'string' && value.length <= 192 && REDIRECT_PATH.test(value)
+    && !value.includes('//') && !value.split('/').includes('..') && !value.split('/').includes('.');
+}
+
+function redirectTarget(value) {
+  if (typeof value !== 'string' || value.length < 1 || value.length > 512) return null;
+  const [location, query = '', ...extra] = value.split('?');
+  if (extra.length || !REDIRECT_QUERY.test(query)) return null;
+  if (location.startsWith('/')) return redirectPath(location) ? { local: true, path: location, query } : null;
+  const match = /^https?:\/\/([a-z0-9.-]+)(?::(\d{1,5}))?(\/.*)?$/i.exec(location);
+  if (!match || (match[2] && (Number(match[2]) < 1 || Number(match[2]) > 65535))) return null;
+  const labels = match[1].toLowerCase().split('.');
+  if (labels.length < 2 || labels.some(label => !/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))) return null;
+  const path = match[3] ?? '/';
+  return redirectPath(path) ? { local: false, path, query } : null;
+}
+
+function redirectRules(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > 50) {
+    throw new NginxSettingsValidationError('invalid_nginx_redirect_rules', 'Redirect rules must be a list with at most 50 entries');
+  }
+  const seen = new Set();
+  return Object.freeze(value.map((entry) => {
+    const target = entry && typeof entry === 'object' && !Array.isArray(entry) ? redirectTarget(entry.target) : null;
+    const valid = target && Object.keys(entry).length === REDIRECT_FIELDS.length
+      && Object.keys(entry).every(field => REDIRECT_FIELDS.includes(field))
+      && redirectPath(entry.source) && [301, 302].includes(entry.status) && ['exact', 'prefix'].includes(entry.match)
+      && !RESERVED_REDIRECT_SOURCES.some(reserved => entry.source === reserved || entry.source.startsWith(reserved.endsWith('/') ? reserved : `${reserved}/`))
+      && !(target.local && target.path === entry.source && !target.query)
+      // A prefix keeps the rest of the path, so both ends must be directories and the target cannot carry a query.
+      && (entry.match === 'exact' || (entry.source !== '/' && entry.source.endsWith('/') && target.path.endsWith('/') && !target.query));
+    if (!valid) {
+      throw new NginxSettingsValidationError('invalid_nginx_redirect_rule', 'Redirect rule needs a safe local source, a local or http(s) target, status 301 or 302 and exact or prefix matching');
+    }
+    const identity = `${entry.match}:${entry.source}`;
+    if (seen.has(identity)) {
+      throw new NginxSettingsValidationError('duplicate_nginx_redirect_rule', 'Each source path can have only one redirect rule');
+    }
+    seen.add(identity);
+    return Object.freeze({ source: entry.source, target: entry.target, status: entry.status, match: entry.match });
+  }));
+}
+
 function defaults(targetType) {
   if (targetType === 'proxy' || targetType === 'python') {
     return {
@@ -155,11 +207,17 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
   if (Object.values(fileSettings.errorPages ?? {}).some(uri => entryFiles.some(file => uri === '/' + file))) {
     throw new NginxSettingsValidationError('nginx_error_page_index_conflict', 'An internal error page cannot also be a public index file');
   }
+  const rules = Object.hasOwn(merged, 'redirectRules') ? redirectRules(merged.redirectRules) : undefined;
+  // An exact rule on an internal error page would render a duplicate nginx location.
+  if (rules?.some(rule => rule.match === 'exact' && Object.values(fileSettings.errorPages ?? {}).includes(rule.source))) {
+    throw new NginxSettingsValidationError('nginx_redirect_error_page_conflict', 'A redirect source cannot also be an internal error page');
+  }
   const common = {
     clientMaxBodySizeMb: optionalInteger(merged.clientMaxBodySizeMb, 'clientMaxBodySizeMb', 1, 1024),
     ...(Object.hasOwn(merged, 'preferredDomain') ? { preferredDomain: preferredDomain(merged.preferredDomain) } : {}),
     // Optional file settings leave old stored envelopes byte-for-byte canonical.
     ...fileSettings,
+    ...(rules !== undefined ? { redirectRules: rules } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
