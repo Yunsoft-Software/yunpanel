@@ -10,6 +10,7 @@ import { DomainAliasError, aliasErrorMessage } from './domain-alias-model.js';
 import { createDomainHostingClient } from './domain-hosting-client.js';
 import { createHostingForm, editHostingForm, hostingFormDirty, hostingWriteBlock, refreshHostingForm, reloadHostingForm } from './domain-hosting-form.js';
 import NginxSettingsFields from './NginxSettingsFields.jsx';
+import ProtectedPathUsers from './ProtectedPathUsers.jsx';
 
 export const JAMSTACK_FRAMEWORK_PRESETS = [
   { id: 'nextjs', label: 'Next.js', path: '/api', innerPort: '3000', outerPort: '127.0.0.1:13000', websocket: true },
@@ -311,6 +312,8 @@ function HostingForm({ domain, generation }) {
             <Button disabled={busy || !canManage || !dirty} onClick={reset}>Değişiklikleri iptal et</Button>
           </div>
         </form>}
+        {form && <ProtectedPathUsers domainId={domain.id} savedPaths={form.base.nginxSettings.protectedPaths}
+          disabled={busy || !canManage || form.base.state === 'suspended'} />}
         {busy && <p role="status">{progress?.phase === 'stage' ? 'Yapılandırma kontrol ediliyor…' : progress?.phase === 'activate' ? 'Ayarlar siteye uygulanıyor…' : 'Ayarlar kaydediliyor…'}</p>}
         <div className="ws-actions"><Badge state={pendingPublication ? 'staged' : 'active'}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında (Güncel)'}</Badge></div>
         <p className="ws-muted">{!form ? 'Yayın durumu doğrulanamadı.' : pendingPublication

@@ -1,4 +1,5 @@
 import { useId } from 'react';
+import { newProtectedPathKey } from '@yunpanel/shared/nginx-settings';
 import { Button } from './PanelKit.jsx';
 
 export const NGINX_HEADER_PRESETS = {
@@ -62,6 +63,7 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
   const number = event => event.target.value === '' ? null : Number(event.target.value);
   const rules = settings.redirectRules ?? [];
   const rule = (index, key, value) => change('redirectRules', rules.map((item, at) => at === index ? { ...item, [key]: value } : item));
+  const protectedPaths = settings.protectedPaths ?? [];
   return <fieldset disabled={disabled} className="ws-form">
     <legend>Web sunucusu ayarları</legend>
     <div className="ws-form-grid">
@@ -130,6 +132,16 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
         <div className="ws-actions"><Button onClick={() => change('redirectRules', rules.filter((_, at) => at !== index))}>Yönlendirme {index + 1} kaldır</Button></div>
       </div>)}
       <Button disabled={disabled || rules.length >= 50} onClick={() => change('redirectRules', [...rules, { source: '', target: '', status: 301, match: 'exact' }])}>Yönlendirme ekle</Button>
+    </details>
+    <details open={protectedPaths.length > 0}>
+      <summary>Şifre korumalı dizinler</summary>
+      <p className="ws-field-hint">Örnek: /yonetim/. Kaydettikten sonra aşağıdan kullanıcı ekleyin; kullanıcı yoksa kimse giremez.</p>
+      {protectedPaths.map((item, index) => <div className="ws-form-grid" key={item.key}>
+        <label>Dizin {index + 1}<input value={item.path} required maxLength="192" placeholder="/yonetim/" spellCheck={false}
+          onChange={event => change('protectedPaths', protectedPaths.map((entry, at) => at === index ? { ...entry, path: event.target.value } : entry))} /></label>
+        <div className="ws-actions"><Button onClick={() => change('protectedPaths', protectedPaths.filter((_, at) => at !== index))}>Dizin {index + 1} kaldır</Button></div>
+      </div>)}
+      <Button disabled={disabled || protectedPaths.length >= 20} onClick={() => change('protectedPaths', [...protectedPaths, { path: '', key: newProtectedPathKey() }])}>Dizin ekle</Button>
     </details>
     <fieldset>
       <legend>Özel yanıt başlıkları</legend>
