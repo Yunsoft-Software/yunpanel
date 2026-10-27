@@ -468,3 +468,4 @@ export {
 export { createApplicationEnvironmentBackupManager } from './application-environment-backup-manager.js';
 export { createPhpMyAdminConfigurationService } from './phpmyadmin-configuration-service.js';
 export { createMailSmarthostManager, MailSmarthostError, mailSmarthostManagerInternals } from './mail-smarthost-manager.js';
+export { createProtectedPathAuthManager, ProtectedPathAuthError } from './protected-path-auth-manager.js';

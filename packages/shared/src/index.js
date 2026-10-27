@@ -51,6 +51,8 @@ export {
   NginxSettingsValidationError,
   normalizeNginxSettings,
   nginxSettingsPolicy,
+  newProtectedPathKey,
+  stableHexKey,
 } from './nginx-settings.js';
 
 export {

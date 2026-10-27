@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings } from '@yunpanel/shared';
+import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, stableHexKey } from '@yunpanel/shared';
 import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
@@ -143,6 +143,23 @@ function redirectLocations(rules = []) {
   }).join('\n\n');
 }
 
+export const PROTECTED_PATH_AUTH_DIRECTORY = '/etc/nginx/yunpanel-auth';
+
+// Password-protected directories for every target type without duplicating the
+// serving locations: http-level maps pick the realm and htpasswd file from the
+// normalized $uri, and "off" disables auth everywhere else. The access phase
+// runs before try_files, so an internal redirect to index.php cannot skip it.
+function protectedPathAuth(primaryDomain, paths = []) {
+  if (!paths.length) return null;
+  const id = stableHexKey(primaryDomain).slice(0, 12);
+  const pattern = (path) => `"~^${path.replace(/[.]/g, '\\.')}"`;
+  const realm = `$yp_auth_realm_${id}`;
+  const file = `$yp_auth_file_${id}`;
+  const maps = `map $uri ${realm} {\n  default off;\n${paths.map(({ path }) => `  ${pattern(path)} "Restricted";`).join('\n')}\n}\n\n`
+    + `map $uri ${file} {\n  default /dev/null;\n${paths.map(({ path, key }) => `  ${pattern(path)} ${PROTECTED_PATH_AUTH_DIRECTORY}/${primaryDomain}/${key}.htpasswd;`).join('\n')}\n}`;
+  return { maps, directives: `  auth_basic ${realm};\n  auth_basic_user_file ${file};` };
+}
+
 function serverBlock({
   names,
   body,
@@ -199,6 +216,9 @@ function renderServerSet({
   const rules = redirectLocations(nginxSettings.redirectRules ?? []);
   if (rules) body = `${rules}\n\n${body}`;
   if (nginxSettings.gzip === true) body = `${GZIP_DIRECTIVES}\n\n${body}`;
+  const auth = protectedPathAuth(primaryDomain, nginxSettings.protectedPaths ?? []);
+  if (auth) body = `${auth.directives}\n\n${body}`;
+  const prelude = auth ? `${auth.maps}\n\n` : '';
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;
   if (!canonicalRedirect) {
     const httpBody = tls && httpsRedirect ? redirectBody('https://$host', nginxSettings.headers) : body;
@@ -213,7 +233,7 @@ function renderServerSet({
         errorLog,
       }));
     }
-    return `${blocks.join('\n\n')}\n`;
+    return `${prelude}${blocks.join('\n\n')}\n`;
   }
 
   const primaryHttpBody = tls && httpsRedirect ? redirectBody(`https://${names.primary}`, nginxSettings.headers) : body;
@@ -251,7 +271,7 @@ function renderServerSet({
       errorLog,
     }));
   }
-  return `${blocks.join('\n\n')}\n`;
+  return `${prelude}${blocks.join('\n\n')}\n`;
 }
 
 function errorPageBody(nginxSettings) {

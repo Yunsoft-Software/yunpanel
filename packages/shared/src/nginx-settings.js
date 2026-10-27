@@ -1,4 +1,4 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip']);
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -163,6 +163,40 @@ function redirectRules(value) {
   }));
 }
 
+// Password-protected directories: { path: "/admin/", key }. The random key names
+// the htpasswd file, so a Domain or path that is removed and created again (maybe
+// by another tenant) never inherits old users from a leftover file.
+const PROTECTED_PATH_KEY = /^[a-f0-9]{16}$/;
+function protectedPaths(value) {
+  if (value === null) return null;
+  const validEntry = (entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+    && Object.keys(entry).length === 2 && typeof entry.key === 'string' && PROTECTED_PATH_KEY.test(entry.key)
+    && redirectPath(entry.path) && entry.path !== '/' && entry.path.endsWith('/')
+    && !RESERVED_REDIRECT_SOURCES.some(reserved => entry.path.startsWith(reserved.endsWith('/') ? reserved : `${reserved}/`));
+  if (!Array.isArray(value) || value.length > 20 || !value.every(validEntry)) {
+    throw new NginxSettingsValidationError('invalid_nginx_protected_paths', 'Protected paths must be up to 20 site directories such as /admin/ with a key');
+  }
+  // Nested or repeated paths would make one rule silently win over another.
+  if (value.some((entry, index) => value.some((other, at) => at !== index && (entry.path.startsWith(other.path) || entry.key === other.key)))) {
+    throw new NginxSettingsValidationError('overlapping_nginx_protected_paths', 'Protected paths and their keys must be unique and must not contain each other');
+  }
+  return Object.freeze(value.map(entry => Object.freeze({ path: entry.path, key: entry.key })));
+}
+
+export function newProtectedPathKey() {
+  return [...globalThis.crypto.getRandomValues(new Uint8Array(8))].map(byte => byte.toString(16).padStart(2, '0')).join('');
+}
+
+// FNV-1a 64-bit: stable, file-name safe and available in the browser bundle too.
+export function stableHexKey(path) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(path)) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
 function defaults(targetType) {
   if (targetType === 'proxy' || targetType === 'python') {
     return {
@@ -219,6 +253,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     ...fileSettings,
     ...(rules !== undefined ? { redirectRules: rules } : {}),
     ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
+    ...(Object.hasOwn(merged, 'protectedPaths') ? { protectedPaths: protectedPaths(merged.protectedPaths) } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({

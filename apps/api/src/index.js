@@ -12,6 +12,7 @@ import {
   createMailReadinessInspector,
   createNginxLogReader,
   createMailSmarthostManager,
+  createProtectedPathAuthManager,
   createWebsiteCronManager,
   createPhpCliToolManager,
   createPhpFpmSiteManager,
@@ -701,6 +702,7 @@ const mailSmarthostRegistry = createMailSmarthostRegistry({
   filePath: process.env.YUNPANEL_MAIL_SMARTHOST_STORE ?? path.join(controlPlaneStateRoot, 'mail-smarthost.json'),
 });
 const mailSmarthostManager = createMailSmarthostManager();
+const protectedPathAuthManager = createProtectedPathAuthManager();
 const databaseManager = createDatabaseManager();
 registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
@@ -1344,6 +1346,7 @@ const listener = createAuthenticatedApi({
       nginxLogReader,
       mailSmarthostRegistry,
       mailSmarthostManager,
+      protectedPathAuthManager,
       jobLogStore,
       websiteSuspensionRuntime,
       domainRemovalRuntime,

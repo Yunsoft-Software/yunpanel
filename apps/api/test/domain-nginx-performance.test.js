@@ -12,3 +12,8 @@ test('PHP and Passenger projections keep gzip, and PHP keeps its static browser 
   const legacy = domainNginxSettingsForTarget({ nginxSettings: { clientMaxBodySizeMb: null, headers: [] } }, 'php');
   assert.deepEqual(legacy, { clientMaxBodySizeMb: null, headers: [] });
 });
+
+test('PHP and Passenger projections keep password-protected directories', () => {
+  const domain = { nginxSettings: { clientMaxBodySizeMb: null, headers: [], protectedPaths: [{ path: '/admin/', key: '0123456789abcdef' }] } };
+  for (const targetType of ['php', 'passenger']) assert.deepEqual(domainNginxSettingsForTarget(domain, targetType).protectedPaths, [{ path: '/admin/', key: '0123456789abcdef' }]);
+});
