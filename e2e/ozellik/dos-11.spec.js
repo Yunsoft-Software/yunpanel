@@ -147,8 +147,8 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     await expect(dl.locator('div:has(dt:has-text("İzolasyon durumu")) dd')).toHaveText('Dedicated Unix kullanıcısı (İzole)');
 
     // 6. Hızlı erişim linkleri (Site terminali & Dosya yöneticisi)
-    await expect(page.locator(`a[href*="/websites/${resolvedDomainId}/terminal"]`)).toBeVisible();
-    await expect(page.locator(`a[href*="/websites/${resolvedDomainId}/files"]`)).toBeVisible();
+    await expect(page.locator(`a.ws-button[href*="/websites/${resolvedDomainId}/terminal"]`)).toBeVisible();
+    await expect(page.locator(`a.ws-button[href*="/websites/${resolvedDomainId}/files"]`)).toBeVisible();
 
     // 7. Gelişmiş güvenlik denetimi ve geçiş araçları akordiyonu
     await expect(page.locator('summary:has-text("Gelişmiş güvenlik denetimi ve geçiş araçları")')).toBeVisible();
