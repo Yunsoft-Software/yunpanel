@@ -289,8 +289,12 @@ def slots():
     ready = tasks.ready_tasks(all_tasks, order)
     qa_jobs = list(tasks.CFG["qa_jobs"])
     qa = 0
+    reason = tasks.paused()
     for agent in agents:
         if agent in assignment:
+            continue
+        if reason:
+            assignment[agent] = ("DUR", reason)
             continue
         mine = next((tid for tid in reviews if tasks.norm(tasks.maker(tid)) != tasks.norm(agent)), None)
         if mine:
@@ -408,7 +412,7 @@ def main(argv):
         print("yuvalar:")
         for agent, kind, what in rows:
             print(f"  {agent}  {kind:6} {what}")
-        busy = sum(1 for _, kind, _ in rows if kind != "BOŞ")
+        busy = sum(1 for _, kind, _ in rows if kind not in ("BOŞ", "DUR"))
         log(f"tick: {busy}/{len(rows)} yuva işte, geri alınan {len(r['recovered'])}")
     elif cmd == "recover":
         dry = "--dry-run" in argv

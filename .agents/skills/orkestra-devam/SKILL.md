@@ -25,8 +25,9 @@ Sen ORKESTRATÖRSÜN. Görev yapmazsın; ajanları yönetirsin. Her adımı sır
 
 ## 3. Yuvaları doldur
 1. `python3 orkestra/orchestrator.py slots` → yuva başına bir satır: `AGENT_n  DEVAM|İNCELE|GÖREV|QA|BOŞ  <iş>`.
-2. BOŞ olmayan her satır için aynı anda bir alt ajan başlat. Alt ajana §5'teki İŞÇİ talimatını, kendi AGENT_n adını ve yuvasındaki işi ver.
-3. Bir alt ajan bitince hemen `slots` çalıştır ve boşalan yuvaya yeni ajan başlat. Tek bir yuvanın bitmesi için diğerlerini bekleme.
+2. `DUR` satırı: proje duraklatıldı (`tasks.py pause`). O yuvaya ajan başlatma; çalışan ajanlar elindeki işi bitirip çıksın. Bütün yuvalar `DUR` olunca kullanıcıya "duraklatıldı: <gerekçe>" de ve dur. `tasks.py resume` sonrası `/orkestra-devam` ile devam edilir.
+3. BOŞ ve DUR olmayan her satır için aynı anda bir alt ajan başlat. Alt ajana §5'teki İŞÇİ talimatını, kendi AGENT_n adını ve yuvasındaki işi ver.
+4. Bir alt ajan bitince hemen `slots` çalıştır ve boşalan yuvaya yeni ajan başlat. Tek bir yuvanın bitmesi için diğerlerini bekleme.
 
 ## 4. Döngü (bütün görevler bitene kadar)
 - **Her 10 dk:** `python3 orkestra/orchestrator.py tick`. Kurtarma, durum ve yuvaları tek komutta verir, LOG'a satır yazar. BOŞ olmayan ama ajanı çalışmayan yuvayı doldur.
@@ -44,7 +45,7 @@ Sen AGENT_n'sin. Proje kökü: <bu deponun yolu>
 Önce oku: docs/orkestra/KURALLAR.md ve docs/orkestra/PROJE.md (bağlayıcı). Yuvandaki iş: <DEVAM Txxx | İNCELE Txxx | GÖREV Txxx | QA <iş>>
 
 GÖREV veya DEVAM ise (KURALLAR §3):
- 1. GÖREV: `python3 orkestra/tasks.py claim <ID> AGENT_n`. Başarısızsa `next AGENT_n` ile başka görev al; NONE ise orkestratöre bildir ve çık.
+ 1. GÖREV: `python3 orkestra/tasks.py claim <ID> AGENT_n`. Başarısızsa `next AGENT_n` ile başka görev al; NONE veya PAUSED ise orkestratöre bildir ve çık.
     DEVAM: claim zaten sende. `tasks/recovery/<ID>-*` varsa incele; işe yarıyorsa kullan ve kabul ölçütüne göre baştan doğrula.
  2. `python3 orkestra/tasks.py show <ID>`. Bağımlı görevlerin raporlarını oku. Sadece görevin işaret ettiği belge bölümlerini oku.
  3. En az 5 dakikada bir ve her uzun komuttan önce `python3 orkestra/tasks.py heartbeat <ID> AGENT_n`.

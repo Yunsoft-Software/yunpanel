@@ -13,7 +13,7 @@ claims/, locks/ and recovery/ are machine-local (gitignored); everything else is
 
 Usage:
   tasks.py ready                         tasks whose dependencies are accepted
-  tasks.py next AGENT                    claim the first ready task and print its id (NONE if none)
+  tasks.py next AGENT                    claim the first ready task and print its id (NONE if none, PAUSED if paused)
   tasks.py claim ID AGENT                claim a task
   tasks.py heartbeat ID AGENT            refresh the claim (task or review) every 5 minutes
   tasks.py release ID AGENT              drop a claim without finishing
@@ -26,6 +26,8 @@ Usage:
   tasks.py unblock ID                    remove the blocked marker
   tasks.py show ID                       task block (+ reopen note)
   tasks.py status                        summary
+  tasks.py pause "reason"                no new claims or reviews; agents finish their current work and stop
+  tasks.py resume                        allow claims again
   tasks.py lint                          ids, dependencies, cycles, file ownership
 """
 import json
@@ -73,7 +75,7 @@ def load_config(root):
 
 def configure(root):
     """Point the module at a project root (tests use a temporary one)."""
-    global ROOT, CFG, TASK_DIR, CLAIMS, REVIEW, APPROVAL, DONE, BLOCKED, HISTORY, REOPEN, ID_RE, HEADER_RE
+    global ROOT, CFG, TASK_DIR, CLAIMS, REVIEW, APPROVAL, DONE, BLOCKED, HISTORY, REOPEN, PAUSE_FILE, ID_RE, HEADER_RE
     ROOT = root
     CFG = load_config(root)
     TASK_DIR = os.path.join(root, CFG["task_dir"])
@@ -85,6 +87,7 @@ def configure(root):
     BLOCKED = os.path.join(state_dir, "blocked")
     HISTORY = os.path.join(state_dir, "history")
     REOPEN = os.path.join(state_dir, "reopen")
+    PAUSE_FILE = os.path.join(state_dir, "PAUSED")  # committed, so every machine sees it
     ID_RE = re.compile(CFG["id_pattern"])
     HEADER_RE = re.compile(rf"^### ({CFG['id_pattern']}) · (.+)$")
 
@@ -264,6 +267,15 @@ def ready_tasks(tasks, order, agent=None):
     return result
 
 
+def paused():
+    """The pause reason, or None. While paused nobody starts new work; current claims may finish."""
+    try:
+        with open(PAUSE_FILE, encoding="utf-8") as fh:
+            return fh.read().strip() or "duraklatıldı"
+    except FileNotFoundError:
+        return None
+
+
 def cmd_claim(tasks, tid, agent):
     t = get_task(tasks, tid)
     if t.owner and norm(t.owner) != norm(agent):
@@ -417,6 +429,8 @@ def first_reason(path):
 
 
 def cmd_status(tasks, order):
+    if paused():
+        print(f"DURAKLATILDI: {paused()} — yeni görev/inceleme alınmaz (tasks.py resume)")
     counts = {}
     for tid in order:
         counts[state(tid)] = counts.get(state(tid), 0) + 1
@@ -530,6 +544,23 @@ def main(argv):
         return
     tasks, order = load_tasks()
     cmd, args = argv[1], argv[2:]
+    reason = paused()
+    if reason and cmd in ("next", "claim", "review"):
+        if cmd == "next":
+            print(f"PAUSED: {reason}")
+            return
+        sys.exit(f"paused: {reason} (tasks.py resume)")
+    if cmd == "pause" and len(args) == 1:
+        os.makedirs(os.path.dirname(PAUSE_FILE), exist_ok=True)
+        with open(PAUSE_FILE, "w", encoding="utf-8") as fh:
+            fh.write(args[0].strip() + "\n")
+        print(f"paused: {args[0].strip()}")
+        return
+    if cmd == "resume" and not args:
+        if os.path.exists(PAUSE_FILE):
+            os.remove(PAUSE_FILE)
+        print("resumed")
+        return
     if cmd == "ready":
         for tid in ready_tasks(tasks, order):
             print(f"{tid}  {tasks[tid].title}")
