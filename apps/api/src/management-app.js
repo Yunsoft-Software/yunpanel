@@ -135,6 +135,7 @@ import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { mountMailSmarthostRoutes } from './mail-smarthost-http.js';
 import { mountProtectedPathRoutes } from './protected-path-http.js';
 import { mountApiKeyRoutes } from './api-key-http.js';
+import { mountAutomationRoutes } from './automation-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -1341,6 +1342,7 @@ export function createApp(allOptions = {}) {
     registry, applicationRegistry, jobRegistry, websiteRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
   if (options.apiKeyStore) {
+    mountAutomationRoutes(app);
     mountApiKeyRoutes(app, { apiKeyStore: options.apiKeyStore, audit: options.auditStore ?? options.authStore?.audit ?? null });
   }
   if (options.protectedPathAuthManager) {

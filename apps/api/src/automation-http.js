@@ -1,30 +1,36 @@
-import express from 'express';
+// Key-only machine API under /api/automation. The auth entry sends only these paths
+// here, after refusing cookies and browser origins, so a key never reaches panel
+// routes and a panel session never reaches automation routes.
+const API_KEY = Symbol('yunpanel.apiKey');
 
-// Key-only machine API under /api/automation. It never sees a panel session: the
-// auth entry refuses cookies and browser origins before routing here.
-export function createAutomationHandler({ apiKeyStore, mountRoutes = () => {} } = {}) {
+export function automationKey(request) {
+  return request?.[API_KEY] ?? null;
+}
+
+export function createAutomationHandler({ apiKeyStore } = {}) {
   if (!apiKeyStore || typeof apiKeyStore.authenticate !== 'function') throw new Error('Automation API requires the API key store');
-  const app = express();
-  app.disable('x-powered-by');
-  app.use(async (request, response, next) => {
-    try {
-      const header = request.headers.authorization;
-      const key = typeof header === 'string' && header.startsWith('Bearer ') ? await apiKeyStore.authenticate(header.slice(7)) : null;
-      if (!key) return response.status(401).json({ error: { code: 'unauthorized', message: 'A valid API key is required.' } });
-      request.apiKey = key;
-      return next();
-    } catch (error) { return next(error); }
+  return async function authenticateAutomation(request, response, handler) {
+    const header = request.headers.authorization;
+    const key = typeof header === 'string' && header.startsWith('Bearer ') ? await apiKeyStore.authenticate(header.slice(7)) : null;
+    if (!key) {
+      response.writeHead(401, { 'content-type': 'application/json' });
+      response.end(JSON.stringify({ error: { code: 'unauthorized', message: 'A valid API key is required.' } }));
+      return;
+    }
+    Object.defineProperty(request, API_KEY, { value: key, enumerable: false, configurable: false, writable: false });
+    return handler(request, response);
+  };
+}
+
+// Routes mounted inside the management app. They accept only key-authenticated requests.
+export function requireAutomationKey(request, response, next) {
+  if (automationKey(request) && !request.auth) return next();
+  return response.status(401).json({ error: { code: 'unauthorized', message: 'A valid API key is required.' } });
+}
+
+export function mountAutomationRoutes(app) {
+  app.get('/api/automation/whoami', requireAutomationKey, (request, response) => {
+    const key = automationKey(request);
+    return response.json({ data: { id: key.id, name: key.name, scope: key.scope } });
   });
-  app.use(express.json({ limit: '16kb' }));
-  app.get('/api/automation/whoami', (request, response) => response.json({ data: { id: request.apiKey.id, name: request.apiKey.name, scope: request.apiKey.scope } }));
-  mountRoutes(app);
-  app.use((request, response) => response.status(404).json({ error: { code: 'not_found', message: 'Not found.' } }));
-  app.use((error, request, response, next) => {
-    if (response.headersSent) return next(error);
-    const status = typeof error?.status === 'number' && error.status >= 400 && error.status < 600 ? error.status
-      : error instanceof SyntaxError ? 400 : 500;
-    const code = status === 500 ? 'automation_failed' : (typeof error?.code === 'string' ? error.code : 'invalid_request');
-    return response.status(status).json({ error: { code, message: status === 500 ? 'The operation failed.' : error.message } });
-  });
-  return app;
 }

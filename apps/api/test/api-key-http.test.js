@@ -51,3 +51,8 @@ test('site roles cannot see or create keys', async (t) => {
     assert.equal((await f.call(method, '/api/api-keys', body)).status, 403, method);
   }
 });
+
+test('a panel session never reaches the automation routes', async (t) => {
+  const f = await fixture(t);
+  assert.equal((await f.call('GET', '/api/automation/whoami')).status, 401);
+});

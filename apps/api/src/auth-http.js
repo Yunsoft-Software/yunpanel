@@ -243,7 +243,7 @@ export function createAuthenticatedApi({
       if (!automationHandler) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
       if (request.headers.origin || request.headers.cookie) throw new AuthError('automation_channel_only', 'The automation API does not accept browser requests.', 403);
       boundary.peer(request);
-      return automationHandler(request, response);
+      return automationHandler(request, response, handler);
     }
 
     if (isAgentRoute(request.method, pathname)) {
