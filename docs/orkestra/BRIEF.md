@@ -1,7 +1,7 @@
 # BRIEF — YunPanel
 
-**Şu anki senior:** Claude Code (Opus 5.5) · 2026-10-26
-**Junior:** Antigravity (6 yuva, `/orkestra-devam`)
+**Şu anki senior:** Claude Code (Opus 5.5) · 2026-10-27
+**Junior:** Antigravity (4 yuva, `/orkestra-devam`) — şu an duraklatıldı
 
 ## Amaç
 Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran düzeni, görev akışları ve özelliklerinin mevcut Node/React altyapısında işlevsel eşdeğeri. Renk değişikliği ya da katalog eklemek kabul sayılmaz; kabul, gerçek host üzerinde fiziksel sonuçtur.
@@ -19,6 +19,11 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - Belge sırası: `agents.md` → `plan.md` (açık işler) → `ui-plan.md` → `todo.md` (gerçek kabul kapıları) → `docs/plesk-feature-parity.md` (162 özellik).
 
 ## Güncel durum
+- **27-10-2026 — kaldığımız yer (önce bunu oku):**
+  - Juniorlar **duraklatıldı** (`tasks/PAUSED`). Devam: `python3 orkestra/tasks.py resume`, sonra `/orkestra-devam`. 1. dalga: 83 görev bitti, 44 açık.
+  - Senior 3a/3b işleri bitti ve `docs/yapilanlar.md`'de: yönlendirme kuralları, Performance Booster, canlı log, Smarthost, teslimat takibi, şifreli dizinler, yönlendirme amaçlı domain, bakım modu, **otomasyon API'si** (API anahtarları + tenant siteleri).
+  - Yarım iş: otomasyon API'sinin `.28` uçtan uca denemesi. `.28`'de paket `0.3.0-2026102702`; sertifika adımı `YUNPANEL_ACME_EMAIL` tanımlı olmadığı için durdu. Sıradaki adımlar: `docs/otomasyon-api.md` → "Kalan işler".
+  - Bilinen kit hatası: `lock.sh break` SENIOR/İNSAN kilitlerini de kırıyor (aynı listede).
 - 26-10-2026: orkestra kuruldu; aktif dal `26-10-2026` (`25-10-2026`'dan).
 - Açık ana işler: `plan.md` YP2-19…YP2-23 (merkezi Shadcn UI ve domain ağacı, subdomain file root, çoklu Linux, sıfır mock test hattı, Docker/Compose proxy) ve `todo.md` T-* gerçek kabul kapıları.
 - 1. dalga hazır (`docs/gorevler/G1-manuel-test.md`): T100 hazırlık → T101–T224 124 özelliğin gerçek tarayıcıda manuel testi → T299 özet. Yöntem `docs/manuel-test/YONTEM.md`, raporlar `docs/manuel-test/<ID>.md`. Kritik hatalar bulgu görevi (T800+) olup düzeltilir.
