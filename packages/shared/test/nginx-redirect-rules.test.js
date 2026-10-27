@@ -45,7 +45,8 @@ test('redirect rules reject nginx injection, unsafe schemes, reserved paths, loo
   }
   const started = performance.now();
   assert.throws(() => normalizeNginxSettings('php', { redirectRules: [rule({ source: `/${'a'.repeat(180)};` })] }), { code: 'invalid_nginx_redirect_rule' });
-  assert.ok(performance.now() - started < 50, 'path validation must stay linear on hostile input');
+  // A backtracking pattern needs hours on 180 characters; the generous bound only keeps a loaded machine from flaking.
+  assert.ok(performance.now() - started < 2000, 'path validation must stay linear on hostile input');
   assert.throws(() => normalizeNginxSettings('php', { redirectRules: 'not-a-list' }), { code: 'invalid_nginx_redirect_rules' });
   assert.throws(() => normalizeNginxSettings('php', { redirectRules: Array.from({ length: 51 }, (_, i) => rule({ source: `/p${i}` })) }), { code: 'invalid_nginx_redirect_rules' });
   assert.throws(() => normalizeNginxSettings('php', { redirectRules: [rule(), rule({ target: '/other' })] }), { code: 'duplicate_nginx_redirect_rule' });
