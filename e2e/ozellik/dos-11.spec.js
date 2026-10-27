@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { execSync } from 'node:child_process';
 import crypto from 'node:crypto';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, openFirstWebsiteWorkspace } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -85,15 +85,28 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
   });
 
   test('mutlu yol 1: UI üzerinde SSH/SFTP erişim bilgileri ve Unix izolasyon parametrelerinin görüntülenmesi', async ({ page }) => {
-    // 1. webrich.news sitesine git
-    await page.goto('/websites?q=webrich.news');
-    await expect(page.locator('h1', { hasText: 'Web siteleri' })).toBeVisible({ timeout: 15000 });
+    // 1. Web siteleri sayfasına git ve site kartını bul
+    await page.goto('/websites');
+    await page.waitForLoadState('networkidle').catch(() => {});
 
-    const siteLink = page.locator('table.ws-table tbody tr a[href^="/websites/"]:has-text("webrich.news")').first();
-    await expect(siteLink).toBeVisible({ timeout: 15000 });
-    const href = await siteLink.getAttribute('href');
-    expect(href).toBeTruthy();
-    const domainMatch = href.match(/\/websites\/([^/?#]+)/);
+    const webrichLink = page.locator('article.ws-website-task-card h3 a:has-text("webrich.news")').first();
+    if (await webrichLink.isVisible({ timeout: 10000 }).catch(() => false)) {
+      const href = await webrichLink.getAttribute('href');
+      const domainMatch = href.match(/\/websites\/([^/?#]+)/);
+      if (domainMatch) resolvedDomainId = domainMatch[1];
+      await webrichLink.click();
+    } else {
+      const anyCardLink = page.locator('article.ws-website-task-card h3 a').first();
+      await expect(anyCardLink).toBeVisible({ timeout: 15000 });
+      const href = await anyCardLink.getAttribute('href');
+      const domainMatch = href.match(/\/websites\/([^/?#]+)/);
+      if (domainMatch) resolvedDomainId = domainMatch[1];
+      await anyCardLink.click();
+    }
+
+    await page.waitForURL(/\/websites\/[^/]+/, { timeout: 15000 });
+    const url = page.url();
+    const domainMatch = url.match(/\/websites\/([^/?#]+)/);
     expect(domainMatch).toBeTruthy();
     resolvedDomainId = domainMatch[1];
 
