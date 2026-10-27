@@ -3,6 +3,10 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
+- **Özellik** — Posta teslimat takibi: ileti başına gönderen/alıcı/durum/sebep (Teslimat sekmesi); .28 journal'ında doğrulandı.
+- **Hata** — Teslimat log ucu hiç çalışmıyordu: journal okuyucusuna zaman aralığı verilmiyordu ve yanlış Postfix birimi (postfix.service) okunuyordu.
+- **Güvenlik** — Teslimat logu alan adını alt metinle süzüyordu (a.com, data.com'u görürdü); artık tam adres alan adı eşleşmesi.
+- **Hata** — Posta kuyruğu ve teslimat logunda arama hiç çalışmıyordu (istemci `search`, sunucu `q`).
 - **Güvenlik** — KRİTİK: site rolleri başka kiracıların DNS bölgelerini ve DNS sağlayıcı kimlik bilgisini görüp değiştirebiliyordu; kapatıldı.
 - **Güvenlik** — KRİTİK: site rolleri Owner bildirim geçmişini okuyup tercihlerini değiştirebiliyor, test e-postası gönderttirebiliyordu; kapatıldı.
 - **Güvenlik** — Parity adaptörü çalıştırma (istemci adlı metot) yalnız Owner'a açıldı.
