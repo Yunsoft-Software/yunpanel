@@ -9,6 +9,11 @@ export const SITE_TABS = [
   [CRON, 'Zamanlanmış Görevler'], [BACKUP, 'Yedekleme ve Geri Yükleme'], ['terminal', 'Terminal'],
   ['php', 'PHP Ayarları'], ['wordpress', 'WordPress'], ['access', 'Erişim Hesapları'], ['settings', 'Site Ayarları'],
 ];
+export function domainTargetLabel(domain) {
+  if (domain.targetType === 'redirect') return `Yönlendirme → ${domain.target?.url ?? '—'}`;
+  return domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`;
+}
+
 export function normalizeSiteTab(tab) {
   if (!tab || typeof tab !== 'string') return 'overview';
   const lower = tab.toLowerCase().trim();

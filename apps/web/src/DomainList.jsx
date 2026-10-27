@@ -10,6 +10,7 @@ function shortServerId(serverId) {
 function targetDescription(domain) {
   if (domain.targetType === 'static') return domain.target?.spaFallback === false ? 'Static files' : 'Static SPA';
   if (domain.targetType === 'proxy') return `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`;
+  if (domain.targetType === 'redirect') return `→ ${domain.target?.url ?? '—'}`;
   return 'Unknown target';
 }
 

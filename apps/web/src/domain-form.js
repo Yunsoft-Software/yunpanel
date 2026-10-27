@@ -20,7 +20,9 @@ export function domainCreatePayload(form, domains, servers) {
   if (!primaryDomain || primaryDomain.length > 253) throw new Error('Enter a domain containing at most 253 characters.');
   const target = form.targetType === 'proxy'
     ? { upstreamHost: '127.0.0.1', upstreamPort: Number(form.targetValue), websocket: true }
-    : { root: form.targetValue.trim(), spaFallback: true };
+    : form.targetType === 'redirect'
+      ? { url: form.targetValue.trim(), status: Number(form.redirectStatus ?? 301), preservePath: form.preservePath !== false }
+      : { root: form.targetValue.trim(), spaFallback: true };
   if (form.targetType === 'proxy' && (!Number.isInteger(target.upstreamPort) || target.upstreamPort < 1024 || target.upstreamPort > 65535)) {
     throw new Error('Upstream port must be between 1024 and 65535.');
   }

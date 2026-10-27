@@ -2,7 +2,7 @@ import { Fragment } from 'react';
 import { Link, Navigate, useParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, CollectionNotice, EmptyState, Icon, KeyValues, PageHeading, Section } from './PanelKit.jsx';
-import { certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, formatDate } from './site-model.js';
+import { certificateState, externalSiteUrl, matchingApplications, parentTrail, selectedApplication, siteHref, formatDate, domainTargetLabel } from './site-model.js';
 
 export default function ReadOnlySitePage() {
   const { websiteId, tab } = useParams();
@@ -23,7 +23,7 @@ export default function ReadOnlySitePage() {
     <div className="ws-equal-columns">
       <Section title="Yayın bilgileri"><KeyValues items={[
         ['Alan adı', domain.primaryDomain], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
-        ['Hedef', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
+        ['Hedef', domainTargetLabel(domain)],
         ['Uygulama', application?.name ?? (matches.length > 1 ? `${matches.length} olası uygulama eşleşmesi` : 'Bağlı uygulama bulunamadı')],
         ['Sunucu', server?.displayName ?? server?.name ?? server?.hostname ?? '—'], ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],
       ]} /></Section>
