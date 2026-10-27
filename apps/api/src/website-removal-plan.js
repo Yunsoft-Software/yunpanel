@@ -278,6 +278,7 @@ const ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS = new Set([
   'log_scope_dependencies_present',
   'cron_dependencies_present',
   'backup_dependencies_present',
+  'certificates_present',
   'impact_apply_not_implemented',
 ]);
 

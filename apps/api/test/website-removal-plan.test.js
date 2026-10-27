@@ -186,6 +186,40 @@ test('orchestratable website impact blockers do not prevent removal preview from
       { code: 'log_scope_dependencies_present', resourceType: 'log_scope', count: 1 },
       { code: 'cron_dependencies_present', resourceType: 'cron', count: 1 },
       { code: 'backup_dependencies_present', resourceType: 'backup', count: 1 },
+      { code: 'certificates_present', resourceType: 'certificate', count: 1 },
+      { code: 'impact_apply_not_implemented', resourceType: 'website' },
+    ],
+  });
+
+  const preview = createWebsiteRemovalPreview({ website: ws, impact: imp });
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.hardBlockers, []);
+  assert.ok(preview.confirmation.startsWith('start-website-remove:ws-1:2:'));
+});
+
+test('allows website removal preview when website domains have SSL certificates present (T801)', () => {
+  const ws = website();
+  const imp = impact(ws, {
+    dependencies: {
+      certificates: [
+        {
+          id: 'cert-1',
+          domainId: 'dom-1',
+          serverId: 'srv-1',
+          state: 'active',
+          source: 'acme',
+          renewalMode: 'automatic',
+          staging: false,
+          validTo: new Date(Date.now() + 86400000 * 90).toISOString(),
+          updatedAt: new Date().toISOString(),
+          retirementOperationId: null,
+          retiredAt: null,
+          retiredFromState: null,
+        },
+      ],
+    },
+    blockers: [
+      { code: 'certificates_present', resourceType: 'certificate', count: 1 },
       { code: 'impact_apply_not_implemented', resourceType: 'website' },
     ],
   });
