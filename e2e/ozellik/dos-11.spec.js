@@ -31,6 +31,17 @@ function generateEd25519Key() {
   return `ssh-ed25519 ${sshPubWire.toString('base64')}`;
 }
 
+async function getApiHeaders(page) {
+  const origin = 'https://server.cryptoraichu.website';
+  const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
+  const sessionJson = sessionRes ? await sessionRes.json().catch(() => ({})) : {};
+  const csrf = sessionJson?.data?.csrfToken || sessionJson?.csrfToken || '';
+  return {
+    Origin: origin,
+    'x-csrf-token': csrf,
+  };
+}
+
 test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasyonu', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(120000);
@@ -68,7 +79,9 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-        await page.request.post(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys/${encodeURIComponent(createdKeyId)}/revoke`, {
+        const headers = await getApiHeaders(page);
+        await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys/${encodeURIComponent(createdKeyId)}/revoke`, {
+          headers,
           data: { expectedRevision },
         }).catch(() => {});
 
@@ -140,9 +153,11 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     expect(resolvedUnixUser).toBeTruthy();
 
     const validKey = generateEd25519Key();
+    const headers = await getApiHeaders(page);
 
     // 1. API üzerinden SFTP/SSH public key ekle
-    const addRes = await page.request.post(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+    const addRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+      headers,
       data: {
         label: keyLabel,
         publicKey: validKey,
@@ -161,7 +176,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     expectedRevision = addJson.data.key.revision;
 
     // 2. Anahtarları listele ve doğrula
-    const listRes = await page.request.get(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`);
+    const listRes = await page.request.get(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`);
     expect(listRes.status()).toBe(200);
     const listJson = await listRes.json();
     expect(Array.isArray(listJson.data?.keys)).toBe(true);
@@ -190,9 +205,11 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
 
   test('hatalı girdi: Geçersiz anahtar formatı ve eksik/fazla alanlar reddedilir', async ({ page }) => {
     expect(resolvedWebsiteId).toBeTruthy();
+    const headers = await getApiHeaders(page);
 
     // 1. Bozuk / geçersiz anahtar formatı
-    const invalidKeyRes = await page.request.post(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+    const invalidKeyRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+      headers,
       data: {
         label: `${keyLabel}-bad`,
         publicKey: 'invalid-ssh-key-not-openssh-format',
@@ -203,7 +220,8 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     expect(invalidKeyJson.error?.code).toBe('sftp_authorized_key_invalid');
 
     // 2. Eksik alanlar (publicKey olmadan)
-    const missingFieldRes = await page.request.post(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+    const missingFieldRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+      headers,
       data: {
         label: `${keyLabel}-missing`,
       },
@@ -213,7 +231,8 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     expect(missingFieldJson.error?.code).toBe('sftp_key_add_input_invalid');
 
     // 3. Fazla/izinsiz alanlar (strict exactBody guard)
-    const extraFieldRes = await page.request.post(`/api/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+    const extraFieldRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
+      headers,
       data: {
         label: `${keyLabel}-extra`,
         publicKey: generateEd25519Key(),
