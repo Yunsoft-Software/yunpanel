@@ -29,3 +29,4 @@
 - 2026-10-27 02:46 orchestrator: tick: 4/4 yuva işte, geri alınan 0
 - 2026-10-27 02:50 orchestrator: verify dc4d88d6..fe296f8f: ok, yeniden açılan -, bulgu -
 - 2026-10-27 09:52 orchestrator: recover: geri alınan ['T120', 'T121', 'T122', 'T123', 'T801'], kilit ['sunucu-28-1'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-10-27 10:01 orchestrator: verify fe296f8f..712611fc: ok, yeniden açılan -, bulgu -
