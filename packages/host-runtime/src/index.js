@@ -467,3 +467,4 @@ export {
 } from './firewall-status-inspector.js';
 export { createApplicationEnvironmentBackupManager } from './application-environment-backup-manager.js';
 export { createPhpMyAdminConfigurationService } from './phpmyadmin-configuration-service.js';
+export { createMailSmarthostManager, MailSmarthostError, mailSmarthostManagerInternals } from './mail-smarthost-manager.js';

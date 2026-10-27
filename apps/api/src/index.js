@@ -11,6 +11,7 @@ import {
   createMailProtocolHealthInspector,
   createMailReadinessInspector,
   createNginxLogReader,
+  createMailSmarthostManager,
   createWebsiteCronManager,
   createPhpCliToolManager,
   createPhpFpmSiteManager,
@@ -25,6 +26,7 @@ import { createAiPolicyStore } from './ai-policy-store.js';
 import { createAiProviderRegistry } from './ai-provider-registry.js';
 import { createAiToolRuntime } from './ai-tool-runtime.js';
 import { createAuditedJobRegistry } from './audited-job-registry.js';
+import { createMailSmarthostRegistry } from './mail-smarthost-registry.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './auth-http.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
@@ -695,6 +697,10 @@ const jobLogStore = createJobLogStore({ directoryPath: jobLogStorePath });
 await jobLogStore.init();
 const journalLogReader = createJournalLogReader();
 const nginxLogReader = createNginxLogReader();
+const mailSmarthostRegistry = createMailSmarthostRegistry({
+  filePath: process.env.YUNPANEL_MAIL_SMARTHOST_STORE ?? path.join(controlPlaneStateRoot, 'mail-smarthost.json'),
+});
+const mailSmarthostManager = createMailSmarthostManager();
 const databaseManager = createDatabaseManager();
 registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
@@ -1336,6 +1342,8 @@ const listener = createAuthenticatedApi({
       applicationDeployQueue,
       journalLogReader,
       nginxLogReader,
+      mailSmarthostRegistry,
+      mailSmarthostManager,
       jobLogStore,
       websiteSuspensionRuntime,
       domainRemovalRuntime,
