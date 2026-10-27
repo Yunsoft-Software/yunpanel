@@ -880,3 +880,40 @@ test('YP-04: site-admin and owner DB/phpMyAdmin role boundaries, session binding
   assert.equal(restrictedRotate.called, 0);
   assert.equal(restrictedRotate.res.statusCode, 403);
 });
+
+test('0-site reseller can list local servers for site allocation while customer without sites gets empty list', async () => {
+  const zeroSiteResellerSession = {
+    user: { id: 'reseller-zero', role: 'reseller', websiteIds: [], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const zeroSiteCustomerSession = {
+    user: { id: 'cust-zero', role: 'customer', websiteIds: [], active: true },
+    access: { mode: 'site_management' },
+    security: { managementAllowed: true },
+  };
+  const serverPayload = {
+    data: [
+      { id: 'server', hostname: 'local', displayName: 'Local Server', executionMode: 'local', connectivity: 'online', internalSecret: 'private' },
+      { id: 'remote-1', hostname: 'remote', displayName: 'Remote Server', executionMode: 'remote', connectivity: 'online' },
+    ],
+  };
+
+  // 0-site reseller receives the local server with stripped secret fields
+  const resReseller = await run('/api/servers', {
+    session: zeroSiteResellerSession,
+    output: serverPayload,
+  });
+  assert.equal(resReseller.called, 1);
+  assert.deepEqual(resReseller.res.body.data, [
+    { id: 'server', hostname: 'local', displayName: 'Local Server', executionMode: 'local', connectivity: 'online' },
+  ]);
+
+  // Customer with no sites receives empty server list
+  const resCustomer = await run('/api/servers', {
+    session: zeroSiteCustomerSession,
+    output: serverPayload,
+  });
+  assert.equal(resCustomer.called, 1);
+  assert.deepEqual(resCustomer.res.body.data, []);
+});

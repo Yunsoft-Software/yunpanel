@@ -211,7 +211,17 @@ export function createSiteResourceBoundary(options = {}) {
         if (path === '/api/domains') { const ids = new Set((await domains()).map((v) => v.id)); replaceCollection(response, (v) => ids.has(v.id)); }
         if (path === '/api/applications') { const ids = new Set((await sites()).map((v) => v.applicationId)); replaceCollection(response, (v) => ids.has(v.id)); }
         if (path === '/api/certificates') { const ids = new Set((await domains()).map((v) => v.certificateId)); replaceCollection(response, (v) => ids.has(v.id)); }
-        if (path === '/api/servers') { const ids = new Set((await sites()).map((v) => v.serverId)); replaceCollection(response, (v) => ids.has(v.id), (v) => ({ id:v.id, hostname:v.hostname, displayName:v.displayName, executionMode:v.executionMode, connectivity:v.connectivity })); }
+        if (path === '/api/servers') {
+          const ids = new Set((await sites()).map((v) => v.serverId));
+          if (actorTenant.isReseller && localServerId) {
+            ids.add(localServerId);
+          }
+          replaceCollection(
+            response,
+            (v) => (actorTenant.isReseller && ids.size === 0) ? true : ids.has(v.id),
+            (v) => ({ id:v.id, hostname:v.hostname, displayName:v.displayName, executionMode:v.executionMode, connectivity:v.connectivity })
+          );
+        }
         return next();
       }
       let match;

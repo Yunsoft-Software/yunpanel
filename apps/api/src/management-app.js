@@ -496,9 +496,9 @@ export function createApp(allOptions = {}) {
   nftablesManager = null,
   ...options
 } = allOptions;
-  const hostingAccounts = options.hostingAccountStore ?? options.userAdminStore?.hostingAccounts ?? null;
-  const customerLookup = typeof options.customerLookup === 'function'
-    ? options.customerLookup
+  const hostingAccounts = allOptions.hostingAccountStore ?? userAdminStore?.hostingAccounts ?? options.hostingAccountStore ?? null;
+  const customerLookup = typeof allOptions.customerLookup === 'function'
+    ? allOptions.customerLookup
     : hostingAccounts && typeof hostingAccounts.getCustomer === 'function'
       ? (id) => hostingAccounts.getCustomer(id)
       : null;

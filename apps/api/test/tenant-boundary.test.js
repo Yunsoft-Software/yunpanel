@@ -17,6 +17,7 @@ import { classifyManagementMutation, attachManagementAudit } from '../src/manage
 import { withAuditActor, currentAuditTenant } from '../src/audit-request-context.js';
 import { mountWebsiteRoutes } from '../src/website-http.js';
 import { createApp } from '../src/core-app.js';
+import { createApp as createManagementApp } from '../src/management-app.js';
 
 const owner = Object.freeze({ id: 'owner-user', role: 'owner', active: true });
 const readOnly = Object.freeze({ id: 'readonly-user', role: 'read_only', active: true });
@@ -2615,4 +2616,22 @@ test('multi-tenant topology (Owner, 2 Resellers, 4 Customers, 1 Direct Owner Cus
   assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-1b' } })).statusCode, 403);
   assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-2a' } })).statusCode, 403);
   assert.equal((await invokeHandler(getSingleWebsiteHandler, { auth: { user: customerDirectActorObj }, params: { websiteId: 'site-2b' } })).statusCode, 403);
+});
+
+test('management-app correctly binds customerLookup from userAdminStore and options without leaving options.userAdminStore undefined', async () => {
+  const fakeCustomers = {
+    'c-1': { id: 'c-1', resellerId: 'reseller-1', kind: 'customer', active: true },
+  };
+  const fakeUserAdminStore = {
+    hostingAccounts: {
+      getCustomer: async (id) => fakeCustomers[id] ?? null,
+    },
+  };
+  const app = createManagementApp({
+    userAdminStore: fakeUserAdminStore,
+  });
+
+  assert.equal(typeof app.boundaryOptions?.customerLookup, 'function', 'app.boundaryOptions.customerLookup must be a function');
+  const resolved = await app.boundaryOptions.customerLookup('c-1');
+  assert.deepEqual(resolved, fakeCustomers['c-1']);
 });
