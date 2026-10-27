@@ -162,8 +162,21 @@ function mountFormats(app, basePath, handler) {
   app.get(`${basePath}/download`, requirePanelRouteAccess, asyncRoute((request, response) => handler(request, response, 'download')));
 }
 
+// requirePanelRouteAccess lets site-scoped roles (customer, reseller, site manager)
+// through, so every route here enforces its own scope: server-wide logs are for
+// management roles only, application and deploy logs only for the user's Websites.
+function siteScoped(request) {
+  const user = request.auth?.user;
+  return ['site_manager', 'reseller', 'customer'].includes(user?.role)
+    || ['reseller', 'customer'].includes(user?.hosting?.kind);
+}
+
+function requireManagement(request) {
+  if (siteScoped(request)) throw new LogHttpError('forbidden', 'Server logs are available to server management only', 403);
+}
+
 export function mountLogRoutes(app, {
-  registry, applicationRegistry, jobRegistry, journalLogReader = null, nginxLogReader = null,
+  registry, applicationRegistry, jobRegistry, websiteRegistry = null, journalLogReader = null, nginxLogReader = null,
   jobLogStore = null, mailQueueInspector = createMailQueueInspector(), localServerId = null, now = () => Date.now(),
 } = {}) {
   if (!app || typeof app.get !== 'function' || !registry || typeof registry.getServer !== 'function'
@@ -173,10 +186,20 @@ export function mountLogRoutes(app, {
     throw new Error('Log HTTP dependencies are required');
   }
 
+  // A foreign Application answers exactly like a missing one, so ids cannot be probed.
+  async function requireOwnApplication(request, applicationId, notFound) {
+    if (!siteScoped(request)) return;
+    if (!websiteRegistry || typeof websiteRegistry.listWebsites !== 'function') throw notFound;
+    const websiteIds = new Set(request.auth.user.websiteIds ?? []);
+    const owned = (await websiteRegistry.listWebsites()).some((website) => websiteIds.has(website.id) && website.applicationId === applicationId);
+    if (!owned) throw notFound;
+  }
+
   mountFormats(app, '/api/applications/:applicationId/logs/node', async (request, response, format) => {
     if (!journalLogReader || typeof journalLogReader.query !== 'function') throw new LogHttpError('journal_logs_unavailable', 'System journal log reader is unavailable', 503);
     const application = await applicationRegistry.getApplication(request.params.applicationId);
     if (!application) throw new LogHttpError('application_not_found', 'Application not found', 404);
+    await requireOwnApplication(request, application.id, new LogHttpError('application_not_found', 'Application not found', 404));
     if (application.type !== 'node') throw new LogHttpError('node_logs_not_supported', 'Node logs require a Node application', 409);
     requireLocalServer(await registry.getServer(application.serverId), localServerId);
     const query = normalizeLogQuery(request.query, { now: now(), allowedLevels: JOURNAL_LEVELS, maxLimit: 200 });
@@ -189,6 +212,7 @@ export function mountLogRoutes(app, {
   });
 
   app.get('/api/servers/:serverId/mail/queue', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    requireManagement(request);
     requireLocalServer(await registry.getServer(request.params.serverId), localServerId);
     const query = normalizeMailQueueQuery(request.query);
     const result = await mailQueueInspector.query(query);
@@ -203,6 +227,7 @@ export function mountLogRoutes(app, {
         : null;
     const unit = SERVICE_UNITS[request.params.serviceId];
     if (!unit && !nginxKind) throw new LogHttpError('unsupported_log_service', 'Log service is not managed by YunPanel', 404);
+    requireManagement(request);
     requireLocalServer(await registry.getServer(request.params.serverId), localServerId);
     const query = normalizeLogQuery(request.query, { now: now(), allowedLevels: JOURNAL_LEVELS, maxLimit: 200 });
     let result;
@@ -227,6 +252,7 @@ export function mountLogRoutes(app, {
     if (!jobLogStore || typeof jobLogStore.query !== 'function') throw new LogHttpError('deploy_logs_unavailable', 'Deploy log store is unavailable', 503);
     const job = await jobRegistry.getJob(request.params.jobId);
     if (!job) throw new LogHttpError('job_not_found', 'Job not found', 404);
+    await requireOwnApplication(request, job.payload?.applicationId ?? null, new LogHttpError('job_not_found', 'Job not found', 404));
     if (!DEPLOY_OPERATIONS.has(job.operation)) throw new LogHttpError('deploy_logs_not_supported', 'Job is not a deployment', 409);
     requireLocalServer(await registry.getServer(job.serverId), localServerId);
     const query = normalizeLogQuery(request.query, { now: now(), allowedLevels: JOB_LEVELS, maxLimit: format === 'download' ? 1_000 : 200 });
