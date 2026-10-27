@@ -132,6 +132,7 @@ import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.
 import { mountMailboxRoutes } from './mailbox-http.js';
 import { MailboxPasswordError } from './mailbox-password.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
+import { mountMailSmarthostRoutes } from './mail-smarthost-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -1335,8 +1336,14 @@ export function createApp(allOptions = {}) {
     databaseHealthProvider,
   });
   mountLogRoutes(app, {
-    registry, applicationRegistry, jobRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
+    registry, applicationRegistry, jobRegistry, websiteRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
+  if (options.mailSmarthostRegistry && options.mailSmarthostManager) {
+    mountMailSmarthostRoutes(app, {
+      registry, localServerId, smarthostRegistry: options.mailSmarthostRegistry, smarthostManager: options.mailSmarthostManager,
+      audit: options.auditStore ?? options.authStore?.audit ?? null,
+    });
+  }
   mountTerminalCapabilityRoutes(app, {
     terminalCapabilityRegistry, serverRegistry: registry, websiteRegistry, localServerId,
   });

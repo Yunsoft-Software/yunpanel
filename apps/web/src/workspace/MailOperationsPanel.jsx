@@ -4,6 +4,7 @@ import { getServerMailDeliveryDiagnostics, sendServerMailTestDelivery } from './
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { formatDate } from './site-model.js';
+import SmarthostPanel from './SmarthostPanel.jsx';
 
 function bytesLabel(value) {
   if (!Number.isFinite(value)) return '—';
@@ -206,7 +207,7 @@ function LogsPanel({ serverId }) {
 export default function MailOperationsPanel() {
   const { servers, isOwner } = useWorkspace();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  return <><RoundcubePanel />{server ? <>{isOwner && <ServiceConnectionDiagnosticsPanel serverId={server.id} />}<QueuePanel serverId={server.id} /><LogsPanel serverId={server.id} />{isOwner && <ServiceTestDeliveryPanel serverId={server.id} />}</> : <Section title="Mail runtime"><EmptyState icon="server" title="Yerel sunucu kimliği bulunamadı" detail="Yerel sunucu bağlantısı hazır olduğunda posta kuyruğu ve servis günlükleri burada görüntülenir." /></Section>}</>;
+  return <><RoundcubePanel />{server ? <>{isOwner && <ServiceConnectionDiagnosticsPanel serverId={server.id} />}{isOwner && <><QueuePanel serverId={server.id} /><LogsPanel serverId={server.id} /></>}{isOwner && <ServiceTestDeliveryPanel serverId={server.id} />}{isOwner && <SmarthostPanel serverId={server.id} />}</> : <Section title="Mail runtime"><EmptyState icon="server" title="Yerel sunucu kimliği bulunamadı" detail="Yerel sunucu bağlantısı hazır olduğunda posta kuyruğu ve servis günlükleri burada görüntülenir." /></Section>}</>;
 }
 
 export const mailOperationsPanelInternals = Object.freeze({ bytesLabel });

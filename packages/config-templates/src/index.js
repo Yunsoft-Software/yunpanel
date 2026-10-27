@@ -273,4 +273,4 @@ export {
   previewNftablesConfiguration,
   renderNftablesConfig,
 } from './nftables.js';
-
+export { normalizeSmarthost, renderSmarthost, smarthostPolicy, SMARTHOST_DIRECTORY, SMARTHOST_SASL_PASSWD_PATH } from './mail-smarthost.js';
