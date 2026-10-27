@@ -17,6 +17,7 @@ Run by the /orkestra-devam skill after every start, quota stop or network drop:
 import fnmatch
 import importlib.util
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -167,11 +168,11 @@ def run_cmd(cmd):
                                 text=True, start_new_session=True)
         try:
             output, _ = proc.communicate(timeout=limit)
-            return proc.returncode, output[-6000:]
+            return proc.returncode, output
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             output, _ = proc.communicate()
-            return 124, f"{output[-5000:]}\n\nTIMEOUT: `{cmd}` {tasks.CFG['check_timeout_minutes']} dakikada bitmedi; süreç grubu durduruldu."
+            return 124, f"{output}\n\nTIMEOUT: `{cmd}` {tasks.CFG['check_timeout_minutes']} dakikada bitmedi; süreç grubu durduruldu."
     return run
 
 
@@ -184,7 +185,55 @@ def configured_checks(quick):
     return checks
 
 
+# Failing-test lines of common runners (node --test, TAP, pytest, jest, go). The full output is scanned,
+# because with several workspaces the failing one is often far above the tail.
+FAILURE_LINE = re.compile(r"^\s*(?:✖ (?!failing tests:)(.+?)(?: \([\d.]+m?s\))?$|not ok \d+ - (.+)$|FAILED (.+)$|● (.+)$|--- FAIL: (.+)$)")
+
+
+def failing_tests(output):
+    names = []
+    for line in output.splitlines():
+        m = FAILURE_LINE.match(line)
+        name = m and next(g for g in m.groups() if g).strip()
+        if name and name not in names:
+            names.append(name)
+    return names[:10]
+
+
+def acquire_verify_lock():
+    """One verify at a time: a second run would test a tree the first one is also reading. A dead holder's lock is taken over."""
+    path = os.path.join(root(), "tasks", "locks", "verify.pid")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    for _ in range(2):
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+            with os.fdopen(fd, "w") as fh:
+                fh.write(f"{os.getpid()}\n")
+            return path, None
+        except FileExistsError:
+            try:
+                holder = int(open(path).read().strip() or 0)
+                os.kill(holder, 0)
+                return None, holder
+            except (ValueError, ProcessLookupError):
+                os.remove(path)
+            except PermissionError:
+                return None, holder
+    return None, "?"
+
+
 def verify(checks=None, quick=False):
+    lock, holder = acquire_verify_lock()
+    if lock is None:
+        return {"status": "busy", "holder": holder, "reopened": [], "findings": []}
+    try:
+        return run_verify(checks, quick)
+    finally:
+        if os.path.exists(lock):
+            os.remove(lock)
+
+
+def run_verify(checks, quick):
     marker = os.path.join(root(), "tasks", "verified")
     head = git("rev-parse", "HEAD").strip()
     if not os.path.exists(marker):
@@ -207,11 +256,16 @@ def verify(checks=None, quick=False):
         owners = [tid for tid in recent if tid in all_tasks and tasks.state(tid) == "done"
                   and any(f in output for f in all_tasks[tid].files)]
         for tid in owners:
-            tasks.cmd_reopen(all_tasks, tid, f"orchestrator verify: {name} başarısız\n\n```\n{output[-3000:]}\n```")
+            failed = "".join(f"- {n}\n" for n in failing_tests(output))
+            tasks.cmd_reopen(all_tasks, tid, f"orchestrator verify: {name} başarısız\n{failed}\n```\n{output[-3000:]}\n```")
             result["reopened"].append(tid)
         if not owners:
-            first = next((l.strip() for l in output.splitlines() if l.strip()), "çıktı yok")
-            fid = finding(f"Doğrulama: {name} — {first}"[:100], output[-3000:], [])
+            failed = failing_tests(output)
+            first = failed[0] if failed else next((l.strip() for l in output.splitlines() if l.strip()), "çıktı yok")
+            summary = ("Başarısız testler:\n" + "\n".join(f"- {n}" for n in failed) + "\n\n") if failed else ""
+            # finding() keeps the last 60 lines; a short tail keeps the summary of failing tests in the record.
+            tail = "\n".join(output[-3000:].splitlines()[-45:])
+            fid = finding(f"Doğrulama: {name} — {first}"[:100], summary + tail, [])
             if fid:
                 result["findings"].append(fid)
     if result["status"] == "ok":
@@ -361,6 +415,9 @@ def main(argv):
         print_recover(recover(dry_run=dry), dry)
     elif cmd == "verify":
         r = verify(quick="--quick" in argv)
+        if r["status"] == "busy":
+            print(f"doğrulama: zaten çalışıyor (pid {r['holder']}); bu çalıştırma atlandı")
+            sys.exit(0)
         print(f"doğrulama: {r['status']}; yeniden açılan: {' '.join(r['reopened']) or '-'}; bulgu: {' '.join(r['findings']) or '-'}")
         commit(["tasks/verified", "tasks/done", "tasks/history", "tasks/reopen",
                 os.path.relpath(os.path.join(tasks.TASK_DIR, tasks.CFG["finding_file"]), root()),
