@@ -1,6 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 
+test.use({ trace: 'off' });
+
 test.describe('DB-05 Veritabanı dump import/export, kopyalama ve backup/restore', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(180000);
@@ -10,6 +12,7 @@ test.describe('DB-05 Veritabanı dump import/export, kopyalama ve backup/restore
   const testDatabaseName = prefix;
   let savedDomainId = null;
   let savedServerId = null;
+  let savedWebsiteId = null;
 
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -24,6 +27,223 @@ test.describe('DB-05 Veritabanı dump import/export, kopyalama ve backup/restore
           await retryBtn.click();
         }
       }
+    }
+  });
+
+  test.afterAll(async ({ browser }) => {
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
+    try {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+
+      let serverId = savedServerId;
+      let websiteId = savedWebsiteId;
+
+      if (!serverId || !websiteId) {
+        const domainsRes = await page.request.get('/api/panel/domains');
+        if (domainsRes.status() === 200) {
+          const domainsJson = await domainsRes.json();
+          const domainList = domainsJson.data?.domains || domainsJson.data || [];
+          const mainDomain = domainList.find((d) => d.id === savedDomainId)
+            || domainList.find((d) => d.primaryDomain === 'webrich.news' && !d.parentDomainId)
+            || domainList.find((d) => !d.parentDomainId)
+            || domainList[0];
+          if (mainDomain) {
+            serverId = serverId || mainDomain.serverId;
+            websiteId = websiteId || mainDomain.websiteId;
+          }
+        }
+      }
+
+      if (serverId && websiteId) {
+        const resourcesRes = await page.request.get(
+          `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`
+        );
+        if (resourcesRes.status() === 200) {
+          const resourcesJson = await resourcesRes.json();
+          const databases = resourcesJson.data?.databases || [];
+          const targets = databases.filter((d) => d.binding?.databaseName === testDatabaseName || d.binding?.databaseName?.startsWith('tdb05_'));
+
+          for (const matched of targets) {
+            const binding = matched.binding;
+            const credential = matched.credential;
+
+            if (credential) {
+              await page.evaluate(async ({ serverId, credentialId, credentialRevision }) => {
+                const sessionRes = await fetch('/api/auth/session');
+                const session = await sessionRes.json();
+                const csrf = session.data?.csrfToken;
+                const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
+
+                const prevRes = await fetch(
+                  `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}/delete-preview`,
+                  { headers }
+                );
+                if (prevRes.status !== 200) return;
+                const prevJson = await prevRes.json();
+                const preview = prevJson.data;
+
+                if (preview) {
+                  const qRes = await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}/delete`,
+                    {
+                      method: 'POST',
+                      headers,
+                      body: JSON.stringify({
+                        expectedCredentialRevision: preview.expectedCredentialRevision,
+                        expectedBindingRevision: preview.expectedBindingRevision,
+                        expectedDesiredStateSha256: preview.desiredStateSha256,
+                        confirmation: preview.confirmation,
+                      }),
+                    }
+                  );
+                  if (qRes.status !== 202) return;
+                  const qJson = await qRes.json();
+                  const jobId = qJson.data?.job?.id;
+
+                  if (jobId) {
+                    for (let i = 0; i < 30; i++) {
+                      await new Promise((r) => setTimeout(r, 1000));
+                      const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(jobId)}`);
+                      if (jRes.status === 200) {
+                        const jJson = await jRes.json();
+                        if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                      }
+                    }
+
+                    await fetch(
+                      `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}`,
+                      {
+                        method: 'DELETE',
+                        headers,
+                        body: JSON.stringify({
+                          expectedRevision: credentialRevision,
+                          deleteJobId: jobId,
+                          confirmation: `finalize-database-credential-delete:${credentialId}:${credentialRevision}:${jobId}`,
+                        }),
+                      }
+                    );
+                  }
+                }
+              }, { serverId, credentialId: credential.id, credentialRevision: credential.revision }).catch((err) => {
+                console.warn('DB-05 afterAll credential cleanup warning:', err.message);
+              });
+            }
+
+            await page.evaluate(async ({ serverId, websiteId, bindingId, bindingRevision }) => {
+              const sessionRes = await fetch('/api/auth/session');
+              const session = await sessionRes.json();
+              const csrf = session.data?.csrfToken;
+              const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
+
+              let prevRes = await fetch(
+                `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
+                { headers }
+              );
+              if (prevRes.status !== 200) return;
+              let prevJson = await prevRes.json();
+              let preview = prevJson.data;
+
+              if (preview && !preview.backup && preview.exists) {
+                const bRes = await fetch(
+                  `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/backup`,
+                  {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      expectedBindingRevision: bindingRevision,
+                      confirmation: `backup-website-database:${bindingId}:${bindingRevision}`,
+                    }),
+                  }
+                );
+                if (bRes.status === 202) {
+                  const bJson = await bRes.json();
+                  const bJobId = bJson.data?.job?.id;
+                  if (bJobId) {
+                    for (let i = 0; i < 30; i++) {
+                      await new Promise((r) => setTimeout(r, 1000));
+                      const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(bJobId)}`);
+                      if (jRes.status === 200) {
+                        const jJson = await jRes.json();
+                        if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                      }
+                    }
+                  }
+                }
+                prevRes = await fetch(
+                  `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
+                  { headers }
+                );
+                if (prevRes.status !== 200) return;
+                prevJson = await prevRes.json();
+                preview = prevJson.data;
+              }
+
+              if (preview?.readyToDelete && preview.backup) {
+                const delRes = await fetch(
+                  `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete`,
+                  {
+                    method: 'POST',
+                    headers,
+                    body: JSON.stringify({
+                      expectedBindingRevision: preview.scope.bindingRevision,
+                      expectedPreviewDigest: preview.previewDigest,
+                      expectedBackupId: preview.backup.backupId,
+                      expectedBackupSha256: preview.backup.dumpSha256,
+                      confirmation: preview.confirmation,
+                    }),
+                  }
+                );
+                if (delRes.status !== 202) return;
+                const delJson = await delRes.json();
+                const delJobId = delJson.data?.job?.id;
+                if (delJobId) {
+                  for (let i = 0; i < 30; i++) {
+                    await new Promise((r) => setTimeout(r, 1000));
+                    const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(delJobId)}`);
+                    if (jRes.status === 200) {
+                      const jJson = await jRes.json();
+                      if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                    }
+                  }
+
+                  await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-finalize`,
+                    {
+                      method: 'POST',
+                      headers,
+                      body: JSON.stringify({
+                        expectedBindingRevision: preview.scope.bindingRevision,
+                        deleteJobId: delJobId,
+                        confirmation: `finalize-website-database-delete:${bindingId}:${preview.scope.bindingRevision}:${delJobId}`,
+                      }),
+                    }
+                  );
+                }
+              }
+            }, { serverId, websiteId, bindingId: binding.id, bindingRevision: binding.revision }).catch((err) => {
+              console.warn('DB-05 afterAll database cleanup warning:', err.message);
+            });
+          }
+        }
+      }
+
+      if (serverId) {
+        await page.evaluate(async ({ serverId, testDatabaseName }) => {
+          const sessionRes = await fetch('/api/auth/session');
+          const session = await sessionRes.json();
+          const csrf = session.data?.csrfToken;
+          await fetch(`/api/panel/servers/${encodeURIComponent(serverId)}/databases/${encodeURIComponent(testDatabaseName)}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
+            body: JSON.stringify({ confirmation: `delete:${testDatabaseName}` }),
+          }).catch(() => {});
+        }, { serverId, testDatabaseName }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('DB-05 afterAll cleanup failed:', err.message);
+    } finally {
+      await context.close().catch(() => {});
     }
   });
 
@@ -42,6 +262,7 @@ test.describe('DB-05 Veritabanı dump import/export, kopyalama ve backup/restore
     const domainId = mainDomain.id;
     savedDomainId = domainId;
     savedServerId = mainDomain.serverId;
+    savedWebsiteId = mainDomain.websiteId;
 
     // 2. Sitenin veritabanları çalışma alanına doğrudan git
     await page.goto(`/websites/${encodeURIComponent(domainId)}/databases`);
