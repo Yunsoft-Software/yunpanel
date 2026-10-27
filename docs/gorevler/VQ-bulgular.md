@@ -102,3 +102,54 @@
     ℹ duration_ms 758.403583
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T806 · Doğrulama: test — > node --test
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-10-27 13:26
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    jection-capable and protocol-owned header settings (0.749875ms)
+    ✔ normalizes structured Node runtime profiles without arbitrary commands (9.568625ms)
+    ✔ normalized Node runtime profiles can be normalized again without losing startup state (0.505417ms)
+    ✔ normalizes Passenger Node runtime profiles without allocating a localhost port (0.95325ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.563541ms)
+    ✔ normalizes complete Node deployment specs (1.720833ms)
+    ✔ normalizes fixed Node process actions against a managed release (1.04325ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (6.124333ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.893917ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (5.200208ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (25.006583ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (1.406625ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (2.257458ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.944458ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (2.90525ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.59025ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.252917ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (1.589333ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.197042ms)
+    ✔ normalizes python rollback, restart, and status specs (0.583791ms)
+    ✔ tenant constants and role classification predicates (3.141334ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (1.245ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (1.423333ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (2.85475ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.726542ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.448834ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.579084ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.63575ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (1.97925ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.688458ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (1.39875ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (1.069041ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (2.679166ms)
+    ✔ tenant context creation and account normalization security edge cases (0.993708ms)
+    ℹ tests 67
+    ℹ suites 0
+    ℹ pass 67
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 783.80775
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
