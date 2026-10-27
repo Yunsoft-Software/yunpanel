@@ -251,9 +251,32 @@ export function mountExternalLifecycleRoutes(app, {
     });
   }
 
+  // Site-scoped roles pass requirePanelRouteAccess and the site resource boundary
+  // here, so DNS zones are scoped to the Domains of the user's own Websites. A
+  // foreign zone answers exactly like a missing one.
+  const siteScoped = (request) => ['site_manager', 'reseller', 'customer'].includes(request.auth?.user?.role)
+    || ['reseller', 'customer'].includes(request.auth?.user?.hosting?.kind);
+  async function ownsWebDomain(request, webDomainId) {
+    if (!webDomainId) return false;
+    const domain = await domainRegistry.getDomain(webDomainId);
+    return Boolean(domain?.websiteId) && (request.auth.user.websiteIds ?? []).includes(domain.websiteId);
+  }
+  const zoneNotFound = () => new ExternalLifecycleRegistryError('dns_zone_not_found', 'DNS zone was not found', 404);
+  app.use('/api/dns-zones/:dnsZoneId', requirePanelRouteAccess, async (request, response, next) => {
+    try {
+      if (!siteScoped(request)) return next();
+      const zone = await dnsHostingRegistry.getZone(request.params.dnsZoneId);
+      if (!zone || !await ownsWebDomain(request, zone.webDomainId)) return next(zoneNotFound());
+      return next();
+    } catch (error) { return next(error); }
+  });
+
   app.get('/api/dns-zones', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
-    return response.json({ data: await localZones() });
+    const zones = await localZones();
+    if (!siteScoped(request)) return response.json({ data: zones });
+    const owned = await Promise.all(zones.map((zone) => ownsWebDomain(request, zone.webDomainId)));
+    return response.json({ data: zones.filter((_, index) => owned[index]) });
   }));
   app.get('/api/dns-zones/:dnsZoneId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     emptyQuery(request.query);
@@ -261,6 +284,9 @@ export function mountExternalLifecycleRoutes(app, {
   }));
   app.post('/api/dns-zones', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = createInput(request.body);
+    if (siteScoped(request) && !await ownsWebDomain(request, body.webDomainId)) {
+      throw new ExternalLifecycleRegistryError('local_web_domain_required', 'DNS zone must be linked to a Domain on this panel host', 404);
+    }
     await localDomain(body.webDomainId, 'DNS zone');
     const resource = await dnsHostingRegistry.createZone({
       zoneName: body.name,

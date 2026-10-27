@@ -1036,6 +1036,10 @@ export function mountOsExternalParityRoutes(app, {
   app.post('/api/system/parity/os/:id/execute', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const auth = req.auth;
+      // Executes an adapter method named by the client; Owner only, whatever the adapter does.
+      if (!extractActorTenant(auth).isOwner) {
+        return res.status(403).json({ error: { code: 'forbidden', message: 'Only the Owner can execute parity adapters.' } });
+      }
       assertPreserveLinuxTenantIsolation({
         actor: auth,
         siteId: req.body?.siteId ?? null,
@@ -1135,6 +1139,10 @@ export function mountOsExternalParityRoutes(app, {
   app.post('/api/system/parity/external/:id/execute', requirePanelRouteAccess, async (req, res, next) => {
     try {
       const auth = req.auth;
+      // Executes an adapter method named by the client; Owner only, whatever the adapter does.
+      if (!extractActorTenant(auth).isOwner) {
+        return res.status(403).json({ error: { code: 'forbidden', message: 'Only the Owner can execute parity adapters.' } });
+      }
       assertPreserveLinuxTenantIsolation({
         actor: auth,
         siteId: req.body?.siteId ?? null,
