@@ -1,12 +1,12 @@
 # WEB-04 — Hosting, forwarding ve hosting olmadan domain davranışı
-Sonuç: KISMİ
-Ajan: AGENT_1 · Tarih: 2026-10-27 10:44 · Senaryo: `e2e/ozellik/web-04.spec.js` · Koşu: 2/2, test.fail 0
+Sonuç: GEÇTİ
+Ajan: AGENT_1 · Tarih: 2026-10-27 11:14 · Senaryo: `e2e/ozellik/web-04.spec.js` · Koşu: 2/2 passed (29.6s), test.fail 0
 
 ## Senaryolar
 | Test adı | Sonuç (geçti/düştü/bilinen hata) | Fiziksel kanıt |
 | --- | --- | --- |
-| mutlu yol: web hosting oluştur, barındırma ayarlarını uygula ve fiziksel HTTP cevabı al | geçti | Nginx HTTP yanıtı: 301/200, Server: nginx/1.24.0 (Ubuntu), barındırma ayarları (statik önbellek, HTTP/HTTPS) uygulandı |
-| hatalı girdi: geçersiz domain ve Nginx alt yol yönlendirmesinde hatalı girdiler reddedilir | geçti | HTML5 form validation engeli, Nginx Alt Yol Proxy builder format hatası uyarısı |
+| mutlu yol: web hosting oluştur, barındırma ayarlarını uygula ve fiziksel HTTP cevabı al | geçti | Nginx HTTP yanıtı alındı (status=301, server=nginx/1.24.0 (Ubuntu)). Barındırma ayarları kaydedildi ve afterAll ile Nginx conf/domain temizlendi. |
+| hatalı girdi: geçersiz domain ve Nginx alt yol yönlendirmesinde hatalı girdiler reddedilir | geçti | Boş/geçersiz domain HTML5 form validasyonuyla engellendi; Nginx alt yol proxy builder geçersiz format uyarısı gösterdi. |
 
 ## Hatalar
 | Sınıf | Başlık | Bulgu görevi |
