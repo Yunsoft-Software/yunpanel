@@ -31,7 +31,8 @@ test('only an exact, unrevoked key authenticates, also after a restart', async (
   const reloaded = createApiKeyStore({ filePath: f.filePath });
   assert.equal((await reloaded.authenticate(token)).id, key.id);
   const [prefix, id, secret] = token.split('_');
-  for (const candidate of [`${prefix}_${id}_${secret.slice(0, -1)}A`, `${prefix}_${'0'.repeat(12)}_${secret}`, 'ypk_x', '', null, `Bearer ${token}`]) {
+  const altered = `${secret.slice(0, -1)}${secret.endsWith('A') ? 'B' : 'A'}`;
+  for (const candidate of [`${prefix}_${id}_${altered}`, `${prefix}_${'0'.repeat(12)}_${secret}`, 'ypk_x', '', null, `Bearer ${token}`]) {
     assert.equal(await reloaded.authenticate(candidate), null, String(candidate));
   }
   await reloaded.revoke(key.id);
