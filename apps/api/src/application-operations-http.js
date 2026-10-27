@@ -675,9 +675,47 @@ export function mountApplicationOperationsRoutes(app, {
     app.get(`${basePath}/download`, requirePanelRouteAccess, asyncRoute((req, res) => handler(req, res, 'download')));
   };
 
+  // Site logs come from the site's own nginx files, named after the hostname nginx
+  // serves (a preferred Domain wins). The server-wide log is Owner-only in log-http.js.
+  const siteLogParameters = (requestQuery) => {
+    const { kind = 'access', domainId = null, ...rest } = requestQuery ?? {};
+    if (!['access', 'error'].includes(kind) || (domainId !== null && (typeof domainId !== 'string' || domainId.length > 64))) {
+      throw new ApplicationOperationsHttpError('invalid_log_query', 'Log kind or Domain is invalid');
+    }
+    return { kind, domainId, rest };
+  };
+  const siteLogHost = async (website, domainId) => {
+    if (!domainRegistry || typeof domainRegistry.listDomains !== 'function') {
+      throw new ApplicationOperationsHttpError('domain_registry_unavailable', 'Domain registry is unavailable', 503);
+    }
+    const owned = (await domainRegistry.listDomains()).filter((domain) => domain.websiteId === website.id);
+    const domain = domainId === null ? owned.find((item) => item.parentDomainId === null) ?? owned[0] ?? null
+      : owned.find((item) => item.id === domainId);
+    if (domainId !== null && !domain) throw new ApplicationOperationsHttpError('domain_not_found', 'Domain does not belong to this Website', 404);
+    return domain ? domain.nginxSettings?.preferredDomain ?? domain.primaryDomain : null;
+  };
+
+  app.get('/api/websites/:websiteId/application/logs/follow', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const { website, application } = await resolveWebsiteAndApp(request.params.websiteId);
+    const { kind, domainId, rest } = siteLogParameters(request.query);
+    if (application?.type === 'node') {
+      throw new ApplicationOperationsHttpError('live_logs_unsupported', 'Live follow is available for web server logs only', 409);
+    }
+    if (!nginxLogReader || typeof nginxLogReader.follow !== 'function') {
+      throw new ApplicationOperationsHttpError('nginx_logs_unavailable', 'Nginx log reader is unavailable', 503);
+    }
+    const query = normalizeLogQuery(rest, { now: now(), allowedLevels: JOURNAL_LEVELS, maxLimit: 200 });
+    const site = await siteLogHost(website, domainId);
+    const result = site === null ? { entries: [], cursor: null, reset: false, hasMore: false }
+      : await nginxLogReader.follow({ kind, site, levels: query.levels, search: query.search, limit: query.limit, cursor: query.cursor });
+    response.setHeader('cache-control', 'no-store');
+    return response.json({ data: result });
+  }));
+
   mountLogFormats('/api/websites/:websiteId/application/logs', async (request, response, format) => {
     const { website, application } = await resolveWebsiteAndApp(request.params.websiteId);
-    const query = normalizeLogQuery(request.query, { now: now(), allowedLevels: JOURNAL_LEVELS, maxLimit: 200 });
+    const { kind, domainId, rest } = siteLogParameters(request.query);
+    const query = normalizeLogQuery(rest, { now: now(), allowedLevels: JOURNAL_LEVELS, maxLimit: 200 });
 
     if (application?.type === 'node') {
       if (!journalLogReader || typeof journalLogReader.query !== 'function') {
@@ -700,8 +738,14 @@ export function mountApplicationOperationsRoutes(app, {
       if (!nginxLogReader || typeof nginxLogReader.query !== 'function') {
         throw new ApplicationOperationsHttpError('nginx_logs_unavailable', 'Nginx log reader is unavailable', 503);
       }
+      const site = await siteLogHost(website, domainId);
+      if (site === null) {
+        return sendLogResult(response, { entries: [], page: { limit: query.limit, hasMore: false }, range: { since: query.since, until: query.until } },
+          format, `website-${website.name}-nginx-logs.txt`);
+      }
       const result = await nginxLogReader.query({
-        kind: request.query.kind === 'error' ? 'error' : 'access',
+        kind,
+        site,
         since: query.since,
         until: query.until,
         levels: query.levels,

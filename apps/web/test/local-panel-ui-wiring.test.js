@@ -175,5 +175,7 @@ test('legacy Domain repair and real site file manager replace terminal and file 
   assert.doesNotMatch(files, /window\.prompt|window\.alert|innerHTML/);
   assert.match(detail, /<LogsPanel application=\{application\} domain=\{domain\} server=\{server\}/);
   assert.match(logs, /nginx-access/);
-  assert.match(logs, /\/logs\/node/);
+  // 27 Ekim 2026: site logs use the site's own endpoint, never the Owner-only /servers/ logs.
+  assert.match(logs, /\/websites\/\$\{encodeURIComponent\(domain\.websiteId\)\}\/application\/logs/);
+  assert.doesNotMatch(logs, /\/servers\//);
 });
