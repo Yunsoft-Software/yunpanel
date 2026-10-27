@@ -3,6 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
+- **Özellik** — Otomasyon API'si: kapsamlı API anahtarları (Ayarlar), tek çağrıyla tenant sitesi kurma/durdurma (503)/arşivleme (302)/silme; Plesk'teki Novasis kurulumunun karşılığı (`docs/otomasyon-api.md`).
+- **Özellik** — Bakım modu: her site için 503 (yönlendirme kuralları ve şifreli dizinler atlatamaz); .28'de nginx ile doğrulandı.
 - **Özellik** — Yönlendirme amaçlı (hosting'siz) domain: 301/302, yolu koruma, hedef sonradan değiştirilebilir; kendine yönlendirme engellendi. .28'de gerçek nginx ile doğrulandı.
 - **Hata** — E2E testleri kurulu Google Chrome'u görünmez açıyordu; testler sürerken kullanıcının Chrome'u açılmıyordu. Artık Playwright'ın kendi Chromium'u (`npm run e2e:install`).
 - **Özellik** — Şifre korumalı dizinler: site başına en çok 20 dizin, dizin başına kullanıcılar (parola yalnız hash olarak sunucuda); .28'de nginx ile atlatma denemelerine karşı doğrulandı.
