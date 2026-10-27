@@ -395,6 +395,28 @@ export function mountMailDiagnosticsRoutes(app, {
     return response.json({ data: result });
   }));
 
+  // Plesk "Track Email Delivery": one row per message with a status per recipient.
+  app.get('/api/mail-domains/:mailDomainId/delivery-tracking', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    const { mailDomain } = await scopedLocalMailDomain({
+      mailDomainRegistry,
+      domainRegistry,
+      mailDomainId: request.params.mailDomainId,
+      localServerId,
+    });
+    const { since = null, until = null, q = null, limit = '100', ...unknown } = request.query ?? {};
+    const iso = (value) => value === null || (typeof value === 'string' && Number.isFinite(Date.parse(value)) && new Date(value).toISOString() === value);
+    const count = Number(limit);
+    if (Object.keys(unknown).length || !iso(since) || !iso(until)
+      || (since && until && (Date.parse(since) > Date.parse(until) || Date.parse(until) - Date.parse(since) > 7 * 24 * 60 * 60 * 1000))
+      || (q !== null && (typeof q !== 'string' || q.length > 100 || /[\u0000-\u001f\u007f]/.test(q)))
+      || !Number.isInteger(count) || count < 1 || count > 200) {
+      throw new MailDiagnosticsHttpError('invalid_delivery_tracking_query', 'Use since/until (ISO, at most 7 days), q (up to 100 characters) and limit 1-200', 400);
+    }
+    const result = await deliveryService.getDeliveryTracking({ mailDomain, since, until, search: q || null, limit: count });
+    response.setHeader('cache-control', 'no-store');
+    return response.json({ data: result });
+  }));
+
   app.post('/api/mail-domains/:mailDomainId/test-delivery', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     requireManagement(request);
     const { mailDomain } = await scopedLocalMailDomain({

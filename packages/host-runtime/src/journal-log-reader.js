@@ -7,7 +7,7 @@ const JOURNALCTL_PATH = '/usr/bin/journalctl';
 const NODE_UNIT_PATTERN = /^yunpanel-node-[a-f0-9]{16}\.service$/;
 const FIXED_UNITS = new Set([
   'nginx.service', 'mariadb.service', 'mysql.service', 'docker.service', 'cron.service',
-  'postfix.service', 'dovecot.service', 'rspamd.service', 'yunpanel-api.service', 'yunpanel-web.service',
+  'postfix.service', 'postfix@-.service', 'dovecot.service', 'rspamd.service', 'yunpanel-api.service', 'yunpanel-web.service',
 ]);
 const CURSOR_PATTERN = /^[A-Za-z0-9;:_=.-]{1,512}$/;
 const PRIORITY_NAMES = Object.freeze(['emerg', 'alert', 'crit', 'error', 'warning', 'notice', 'info', 'debug']);

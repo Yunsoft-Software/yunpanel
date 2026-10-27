@@ -1,6 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import { validateEmail } from './auth-mailer.js';
 import { maskSecrets, maskSecretsInString } from './secret-masker.js';
+import { trackDeliveries } from './mail-delivery-tracker.js';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const ALL_PRIORITIES = Object.freeze([0, 1, 2, 3, 4, 5, 6, 7]);
 
 export class MailDeliveryDiagnosticsError extends Error {
   constructor(code, message, status = 400) {
@@ -359,6 +363,37 @@ export function createMailDeliveryDiagnosticsService({
     });
   }
 
+  // Ubuntu/Debian run Postfix as the instance unit postfix@-.service; postfix.service
+  // is only the parent and logs nothing there. The journal reader needs a range and
+  // priorities, so every read passes both.
+  async function readJournal(service, { since, until, limit = 200, search = null, pages = 10 }) {
+    const units = service === 'dovecot' ? ['dovecot.service'] : service === 'rspamd' ? ['rspamd.service'] : ['postfix@-.service', 'postfix.service'];
+    let entries = [];
+    for (const unit of units) {
+      let cursor = null;
+      for (let page = 0; page < pages; page += 1) {
+        const result = await journalLogReader.query({ unit, since, until, priorities: ALL_PRIORITIES, search, limit, cursor });
+        entries = entries.concat(result?.entries ?? []);
+        if (!result?.page?.hasMore || !result.page.nextCursor) break;
+        cursor = result.page.nextCursor;
+      }
+      if (entries.length) break;
+    }
+    return entries;
+  }
+
+  async function getDeliveryTracking({ mailDomain, since = null, until = null, search = null, limit = 100 } = {}) {
+    if (!journalLogReader || typeof journalLogReader.query !== 'function') {
+      return Object.freeze({ messages: Object.freeze([]), range: null, sideEffects: false });
+    }
+    const end = until ?? new Date(now()).toISOString();
+    const start = since ?? new Date(Date.parse(end) - DAY_MS).toISOString();
+    const entries = (await readJournal('postfix', { since: start, until: end }))
+      .map(entry => ({ timestamp: entry.timestamp, message: maskSecretsInString(entry.message ?? '') }));
+    const messages = trackDeliveries(entries, { domain: mailDomain?.domainName, search, limit });
+    return Object.freeze({ messages: Object.freeze(messages), range: Object.freeze({ since: start, until: end }), scannedLines: entries.length, sideEffects: false });
+  }
+
   async function getDeliveryLogs({ mailDomain = null, service = 'postfix', limit = 100, search = null } = {}) {
     if (!journalLogReader || (typeof journalLogReader.query !== 'function' && typeof journalLogReader.readServiceLogs !== 'function')) {
       return Object.freeze({
@@ -368,21 +403,18 @@ export function createMailDeliveryDiagnosticsService({
       });
     }
 
-    const serviceUnit = service === 'dovecot' ? 'dovecot.service'
-      : service === 'rspamd' ? 'rspamd.service'
-        : 'postfix.service';
-
-    const result = typeof journalLogReader.query === 'function'
-      ? await journalLogReader.query({ unit: serviceUnit, limit, search })
-      : await journalLogReader.readServiceLogs({ service, limit, search });
-
-    const entries = result?.entries ?? [];
+    const entries = typeof journalLogReader.query === 'function'
+      ? await readJournal(service, { since: new Date(now() - DAY_MS).toISOString(), until: new Date(now()).toISOString(), limit, search, pages: 1 })
+      : (await journalLogReader.readServiceLogs({ service, limit, search }))?.entries ?? [];
     const scopedDomain = mailDomain?.domainName ? mailDomain.domainName.toLowerCase() : null;
+    // A whole address domain, never a substring: a.com must not match data.com or mail.a.com.
+    const inScope = scopedDomain === null ? () => true
+      : (text) => new RegExp(`@${scopedDomain.replace(/[.]/g, '\\.')}(?![a-z0-9.-])`, 'i').test(text);
 
     const processed = [];
     for (const entry of entries) {
       const maskedMessage = maskSecretsInString(entry.message ?? '');
-      if (scopedDomain && !maskedMessage.toLowerCase().includes(scopedDomain)) {
+      if (!inScope(maskedMessage)) {
         continue;
       }
       const routing = classifyLogRouting(maskedMessage);
@@ -702,6 +734,7 @@ export function createMailDeliveryDiagnosticsService({
     getDnsRequirements,
     getQueueStatus,
     getDeliveryLogs,
+    getDeliveryTracking,
     sendTestEmail,
     verifyMailboxReception,
     getMailboxDiagnostics,

@@ -140,8 +140,9 @@ test('managed mail delivery diagnostics client routes and payloads', async (t) =
   assert.deepEqual(calls.map(({ url, options }) => [url, options.method]), [
     ['/api/panel/mail-domains/domain-xyz/delivery-diagnostics', 'GET'],
     ['/api/panel/mail-domains/domain-xyz/connection-settings', 'GET'],
-    ['/api/panel/mail-domains/domain-xyz/queue?limit=50&search=user', 'GET'],
-    ['/api/panel/mail-domains/domain-xyz/delivery-logs?limit=100&search=postfix', 'GET'],
+    // The server reads the search term from q; search= was silently ignored (fixed 2026-10-27).
+    ['/api/panel/mail-domains/domain-xyz/queue?limit=50&q=user', 'GET'],
+    ['/api/panel/mail-domains/domain-xyz/delivery-logs?limit=100&q=postfix', 'GET'],
     ['/api/panel/mail-domains/domain-xyz/test-delivery', 'POST'],
     ['/api/panel/mailboxes/mailbox-abc/delivery-diagnostics', 'GET'],
     ['/api/panel/mailboxes/mailbox-abc/connection-settings', 'GET'],

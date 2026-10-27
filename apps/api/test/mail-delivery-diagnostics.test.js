@@ -590,3 +590,36 @@ test('local vs external mail routing separation', async (t) => {
   assert.equal(localBody.data.managementMode, 'local');
   assert.equal(localBody.data.connectionSettings.routing, 'local');
 });
+
+// 2026-10-27: delivery tracking groups Postfix lines per message and scopes by the
+// exact address domain. "myexample.com" contains "example.com" and must not leak.
+const trackingLines = [
+  ['2026-10-27T10:00:01.000Z', 'AAAAAA1111: from=<info@example.com>, size=100, nrcpt=1 (queue active)'],
+  ['2026-10-27T10:00:02.000Z', 'AAAAAA1111: to=<friend@gmail.com>, relay=gmail.example.net[1.1.1.1]:25, dsn=2.0.0, status=sent (250 ok)'],
+  ['2026-10-27T10:00:03.000Z', 'BBBBBB2222: from=<ceo@myexample.com>, size=100, nrcpt=1 (queue active)'],
+  ['2026-10-27T10:00:04.000Z', 'BBBBBB2222: to=<partner@gmail.com>, relay=gmail.example.net[1.1.1.1]:25, dsn=2.0.0, status=sent (250 ok)'],
+  ['2026-10-27T10:00:05.000Z', 'CCCCCC3333: from=<a@foreign.com>, size=100, nrcpt=1 (queue active)'],
+  ['2026-10-27T10:00:06.000Z', 'CCCCCC3333: to=<b@foreign.com>, relay=local, dsn=2.0.0, status=sent (delivered)'],
+].map(([timestamp, message]) => ({ timestamp, level: 'info', message }));
+
+test('delivery tracking returns only messages of the exact mail domain, for its site administrator', async (t) => {
+  const base = await startServer(t, createMockApp({ auth: siteManagerAuth, logEntries: trackingLines }));
+  const own = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/delivery-tracking`);
+  assert.equal(own.status, 200);
+  const { messages } = (await own.json()).data;
+  assert.deepEqual(messages.map(message => message.queueId), ['AAAAAA1111']);
+  assert.equal(messages[0].status, 'sent');
+  assert.equal(JSON.stringify(messages).includes('myexample'), false);
+  assert.equal((await fetch(`${base}/api/mail-domains/${foreignMailDomain.id}/delivery-tracking`)).status, 403);
+  assert.equal((await fetch(`${base}/api/mail-domains/${localMailDomain.id}/delivery-tracking?since=yesterday`)).status, 400);
+  assert.equal((await fetch(`${base}/api/mail-domains/${localMailDomain.id}/delivery-tracking?extra=1`)).status, 400);
+});
+
+test('raw delivery logs match the whole address domain, not a substring', async (t) => {
+  const base = await startServer(t, createMockApp({ auth: siteManagerAuth, logEntries: trackingLines }));
+  const response = await fetch(`${base}/api/mail-domains/${localMailDomain.id}/delivery-logs`);
+  assert.equal(response.status, 200);
+  const text = JSON.stringify((await response.json()).data.entries);
+  assert.match(text, /info@example\.com/);
+  assert.equal(text.includes('myexample'), false, 'substring scoping leaked another domain');
+});
