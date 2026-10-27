@@ -303,9 +303,21 @@ def push():
     branch = git("branch", "--show-current").strip()
     if not branch or branch in tasks.CFG["protected_branches"]:
         sys.exit(f"push refused: '{branch or 'detached HEAD'}' is protected ({', '.join(tasks.CFG['protected_branches'])})")
-    dirty = [p for p in git("status", "--porcelain=v1").splitlines() if p[3:].strip('"') != LOG_PATH]
+    # Only commits are pushed. Unfinished files of a live claim (an agent still working) are not in the push and
+    # do not block it; any other uncommitted change might be work someone forgot to commit, so it still does.
+    all_tasks, _ = tasks.load_tasks()
+    now = time.time()
+    changes = changed_paths()
+    live = set()
+    for key, tid, _, owner in claims():
+        task = all_tasks.get(tid)
+        paths = [p for p in changes if task and owns(task, p)]
+        if tasks.is_protected(owner) or now - alive_at(key, paths) < tasks.stale_seconds():
+            live.update(paths)
+    dirty = sorted(p for p in changes if p not in live)
     if dirty:
-        sys.exit("push refused: uncommitted changes (commit or release them first):\n" + "\n".join("  " + p for p in dirty))
+        sys.exit("push refused: uncommitted changes outside live claims (commit or release them first):\n"
+                 + "\n".join("  " + p for p in dirty))
     commit([LOG_PATH], "orkestra: log")
     pending = unverified_commits()
     out = subprocess.run(["git", "push", "-u", "origin", branch], cwd=root(), capture_output=True, text=True, timeout=300)
