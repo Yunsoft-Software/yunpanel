@@ -133,6 +133,7 @@ import { mountMailboxRoutes } from './mailbox-http.js';
 import { MailboxPasswordError } from './mailbox-password.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { mountMailSmarthostRoutes } from './mail-smarthost-http.js';
+import { mountProtectedPathRoutes } from './protected-path-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -1338,6 +1339,10 @@ export function createApp(allOptions = {}) {
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, websiteRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
+  if (options.protectedPathAuthManager) {
+    mountProtectedPathRoutes(app, { domainRegistry, protectedPathAuthManager: options.protectedPathAuthManager, localServerId,
+      audit: options.auditStore ?? options.authStore?.audit ?? null });
+  }
   if (options.mailSmarthostRegistry && options.mailSmarthostManager) {
     mountMailSmarthostRoutes(app, {
       registry, localServerId, smarthostRegistry: options.mailSmarthostRegistry, smarthostManager: options.mailSmarthostManager,
