@@ -3,6 +3,9 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
+- **Özellik** — Performance Booster: site başına gzip (CSS/JS/JSON/SVG/font, proxy dahil) ve PHP'de tarayıcı önbelleği; .28'de gerçek yanıtla doğrulandı. *(dal: 27-10-2026-ozellik-3a)*
+- **Hata** — PHP/Node sitelerinde yeni nginx ayarlarının kaybolması kökten çözüldü: alanlar tek listede. *(dal: 27-10-2026-ozellik-3a)*
+- **Altyapı** — Yönlendirmelerin gerçek 301/302 davranışı .28'de geçici nginx ile doğrulandı.
 - **Özellik** — Site başına yönlendirme kuralları (tam yol / klasör, 301/302); gerçek nginx -t ile doğrulandı. *(dal: 27-10-2026-ozellik-3a)*
 - **Hata** — PHP ve Node sitelerinde yeni nginx ayarları (yönlendirmeler) sessizce kayboluyordu. *(dal: 27-10-2026-ozellik-3a)*
 - **Hata** — Barındırma formu yeniden yüklenince kaydedilmemiş yönlendirmeler kayboluyordu. *(dal: 27-10-2026-ozellik-3a)*
