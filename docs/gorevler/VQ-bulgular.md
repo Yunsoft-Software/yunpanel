@@ -321,3 +321,58 @@
     ℹ duration_ms 507.704125
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T810 · Doğrulama: test — RBAC: Authentication and Authorization on /api/firewall/ports
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-10-27 16:45
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - RBAC: Authentication and Authorization on /api/firewall/ports
+    - PROD-05 Firewall HTTP API Suite
+    
+    ime profiles without allocating a localhost port (0.7445ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (3.756375ms)
+    ✔ normalizes complete Node deployment specs (2.125667ms)
+    ✔ normalizes fixed Node process actions against a managed release (5.146333ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (6.661ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (1.46375ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (2.759333ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (28.789417ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (3.826917ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (2.887959ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.87425ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (4.758958ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.708166ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.34925ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (2.214208ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (5.3675ms)
+    ✔ normalizes python rollback, restart, and status specs (1.202833ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (4.062209ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (4.330583ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (1.668084ms)
+    ✔ tenant constants and role classification predicates (2.619292ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (4.123375ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (1.661583ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (1.273041ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.596ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.577208ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.508583ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.770125ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (1.193ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (1.130334ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (1.150917ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (1.177417ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (1.341333ms)
+    ✔ tenant context creation and account normalization security edge cases (0.604834ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 741.331125
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
