@@ -12,6 +12,7 @@ import { Badge, Button, ModalScope, EmptyState, Icon, KeyValues, LinkButton, Pag
 import { formatDate } from './site-model.js';
 import { paginateConsoleItems } from './ui/console-model.js';
 import './ui/mail-console.css';
+import MailDeliveryTrackingPanel from './MailDeliveryTrackingPanel.jsx';
 
 function useAsyncResource(loader, dependencies = []) {
   const [state, setState] = useState({ status: 'loading', data: null, error: null });
@@ -71,7 +72,7 @@ function MailDomainList() {
     {creating && <MailDomainCreateDialog onClose={() => setCreating(false)} onCreated={(created) => { domains.refresh(); navigate(`/mail/${encodeURIComponent(created.id)}`); }} />}
   </>;
 }
-const mailSections = [['mailboxes', 'Posta kutuları'], ['webmail', 'Webmail'], ['aliases', 'Takma adlar'], ['security', 'DNS ve DKIM'], ['configuration', 'Yapılandırma'], ['operations', 'Kuyruk ve loglar']];
+const mailSections = [['mailboxes', 'Posta kutuları'], ['webmail', 'Webmail'], ['aliases', 'Takma adlar'], ['security', 'DNS ve DKIM'], ['configuration', 'Yapılandırma'], ['delivery', 'Teslimat'], ['operations', 'Kuyruk ve loglar']];
 function MailDomainDetail({ mailDomainId }) {
   const [params] = useSearchParams();
   const section = mailSections.some(([key]) => key === params.get('section')) ? params.get('section') : 'mailboxes';
@@ -97,6 +98,7 @@ function MailDomainDetail({ mailDomainId }) {
         <div className="ws-mail-pane" hidden={section !== 'aliases'}><ModalScope active={section === 'aliases'}><MailAliasesPanel domain={domain} aliases={data.aliases ?? []} onChanged={detail.refresh} /></ModalScope></div>
         <div className="ws-mail-pane" hidden={section !== 'security'}><ModalScope active={section === 'security'}><MailDkimDiagnosticsPanel domain={domain} onChanged={detail.refresh} /></ModalScope></div>
         <div className="ws-mail-pane" hidden={section !== 'configuration'}><ModalScope active={section === 'configuration'}><MailConfigurationPanel domain={domain} onChanged={detail.refresh} /></ModalScope></div>
+        <div className="ws-mail-pane" hidden={section !== 'delivery'}><ModalScope active={section === 'delivery'}><MailDeliveryTrackingPanel domain={domain} /></ModalScope></div>
         <div className="ws-mail-pane" hidden={section !== 'operations'}><ModalScope active={section === 'operations'}><MailOperationsPanel /></ModalScope></div>
       </> : <Section title="Harici mail sağlayıcısı"><EmptyState icon="external" title="Posta hesapları harici sağlayıcıda yönetiliyor" detail="Bu alan adı yalnızca takip edilir. Yerel posta kutusu, takma ad ve DKIM işlemleri bu kayda uygulanmaz." /></Section>}
       <details className="ws-section ws-disclosure"><summary>Alan adı kayıt ayrıntıları</summary><KeyValues items={[

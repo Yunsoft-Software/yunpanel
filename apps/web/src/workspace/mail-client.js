@@ -189,7 +189,7 @@ export function getMailConnectionSettings(mailDomainId) {
 export function getMailDomainQueue(mailDomainId, { limit, search } = {}) {
   const query = new URLSearchParams();
   if (limit !== undefined) query.set('limit', String(limit));
-  if (search) query.set('search', search);
+  if (search) query.set('q', search);
   const qs = query.toString();
   return panelRequest(`${mailDomainPath(mailDomainId)}/queue${qs ? `?${qs}` : ''}`);
 }
@@ -197,9 +197,19 @@ export function getMailDomainQueue(mailDomainId, { limit, search } = {}) {
 export function getMailDomainDeliveryLogs(mailDomainId, { limit, search } = {}) {
   const query = new URLSearchParams();
   if (limit !== undefined) query.set('limit', String(limit));
-  if (search) query.set('search', search);
+  if (search) query.set('q', search);
   const qs = query.toString();
   return panelRequest(`${mailDomainPath(mailDomainId)}/delivery-logs${qs ? `?${qs}` : ''}`);
+}
+
+export function getMailDomainDeliveryTracking(mailDomainId, { since, until, search, limit } = {}) {
+  const query = new URLSearchParams();
+  if (since) query.set('since', since);
+  if (until) query.set('until', until);
+  if (search) query.set('q', search);
+  if (limit !== undefined) query.set('limit', String(limit));
+  const qs = query.toString();
+  return panelRequest(`${mailDomainPath(mailDomainId)}/delivery-tracking${qs ? `?${qs}` : ''}`);
 }
 
 export function sendMailDomainTestDelivery(mailDomainId, { recipient, subject } = {}) {

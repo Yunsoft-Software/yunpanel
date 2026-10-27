@@ -246,9 +246,9 @@ test('mail detail mounts all 6 real subpanels concurrently with section tab togg
   });
   await flush();
 
-  // 1. Verify all 6 panels are concurrently mounted in the DOM inside .ws-mail-pane (NO STUBS)
+  // 1. Verify all 7 panels (Teslimat added 2026-10-27) are concurrently mounted in .ws-mail-pane (NO STUBS)
   const panes = container.querySelectorAll('.ws-mail-pane');
-  assert.equal(panes.length, 6, 'Exactly 6 .ws-mail-pane elements must be mounted concurrently');
+  assert.equal(panes.length, 7, 'Exactly 7 .ws-mail-pane elements must be mounted concurrently');
 
   // Verify default active section is mailboxes (pane 0 visible, 1-5 hidden)
   assert.equal(panes[0].attributes.hidden, undefined, 'MailboxesPanel pane should NOT be hidden');
@@ -256,7 +256,8 @@ test('mail detail mounts all 6 real subpanels concurrently with section tab togg
   assert.notEqual(panes[2].attributes.hidden, undefined, 'Aliases pane should be hidden');
   assert.notEqual(panes[3].attributes.hidden, undefined, 'Security pane should be hidden');
   assert.notEqual(panes[4].attributes.hidden, undefined, 'Configuration pane should be hidden');
-  assert.notEqual(panes[5].attributes.hidden, undefined, 'Operations pane should be hidden');
+  assert.notEqual(panes[5].attributes.hidden, undefined, 'Delivery tracking pane should be hidden');
+  assert.notEqual(panes[6].attributes.hidden, undefined, 'Operations pane should be hidden');
 
   // Verify authentic content of each real subpanel
   assert.ok(panes[0].textContent.includes('admin@şirket-ana.com'), 'Pane 0 contains real MailboxesPanel data');
@@ -264,13 +265,14 @@ test('mail detail mounts all 6 real subpanels concurrently with section tab togg
   assert.ok(panes[2].textContent.includes('Mail aliasları'), 'Pane 2 contains real MailAliasesPanel data');
   assert.ok(panes[3].textContent.includes('DKIM') && panes[3].textContent.includes('rsa2048'), 'Pane 3 contains real MailDkimDiagnosticsPanel data');
   assert.ok(panes[4].textContent.includes('Host mail configuration'), 'Pane 4 contains real MailConfigurationPanel data');
-  assert.ok(panes[5].textContent.includes('Roundcube webmail'), 'Pane 5 contains real MailOperationsPanel data');
+  assert.ok(panes[5].textContent.includes('Teslimat takibi'), 'Pane 5 contains real MailDeliveryTrackingPanel');
+  assert.ok(panes[6].textContent.includes('Roundcube webmail'), 'Pane 6 contains real MailOperationsPanel data');
 
   // 2. Tab link navigation toggles hidden attributes while preserving panes
   const navTabs = container.querySelector('.ws-tabs');
   assert.ok(navTabs, 'Navigation tabs must exist');
   const tabLinks = navTabs.querySelectorAll('a');
-  assert.equal(tabLinks.length, 6, 'Must render 6 section tab links');
+  assert.equal(tabLinks.length, 7, 'Must render 7 section tab links');
 
   // Click on "Webmail" tab link
   const webmailLink = tabLinks.find((link) => link.textContent.includes('Webmail'));
@@ -827,7 +829,8 @@ test('fixture component actions: Roundcube webmail preview & bind with durable j
   });
   await flush();
 
-  const opsPane = panes[5];
+  // Operations is the 7th section since Teslimat was added (2026-10-27).
+  const opsPane = panes[6];
   assert.ok(opsPane.textContent.includes('Roundcube webmail'), 'Operations panel rendered');
   const configApplyBtn = opsPane.querySelectorAll((el) => el.tagName === 'BUTTON' && el.textContent.includes('Config apply'))[0];
   assert.ok(configApplyBtn, 'Roundcube Config apply button must exist');
