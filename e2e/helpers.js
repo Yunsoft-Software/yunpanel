@@ -2,8 +2,17 @@ import fs from 'fs';
 import path from 'path';
 import { expect } from '@playwright/test';
 
-export const OWNER_USERNAME = process.env.PANEL_OWNER_USER || 'yunsoft-owner';
-export const OWNER_PASSWORD = process.env.PANEL_OWNER_PASSWORD || 'b70646fcd0ceb42481c2f4fff95466493de0';
+// Credentials never live in the repository: env vars, else the private .local file (gitignored).
+function localOwnerCredentials() {
+  const file = path.resolve(process.cwd(), '.local/yunpanel-owner-password-only.json');
+  return fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : {};
+}
+const localOwner = localOwnerCredentials();
+export const OWNER_USERNAME = process.env.PANEL_OWNER_USER || localOwner.username || 'yunsoft-owner';
+export const OWNER_PASSWORD = process.env.PANEL_OWNER_PASSWORD || localOwner.password || '';
+if (!OWNER_PASSWORD) {
+  throw new Error('Owner password missing: set PANEL_OWNER_PASSWORD or create .local/yunpanel-owner-password-only.json');
+}
 
 const AUTH_DIR = path.resolve(process.cwd(), 'e2e/.auth');
 if (!fs.existsSync(AUTH_DIR)) {

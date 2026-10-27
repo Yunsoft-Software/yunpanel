@@ -1,7 +1,6 @@
 import { test, expect } from '@playwright/test';
 
-const OWNER_USERNAME = process.env.PANEL_OWNER_USER || 'yunsoft-owner';
-const OWNER_PASSWORD = process.env.PANEL_OWNER_PASSWORD || 'b70646fcd0ceb42481c2f4fff95466493de0';
+import { OWNER_USERNAME, OWNER_PASSWORD } from './helpers.js';
 
 async function loginAs(page, username, password) {
   await page.goto('/');
