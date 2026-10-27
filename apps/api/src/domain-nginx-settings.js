@@ -4,8 +4,8 @@ import { normalizeNginxSettings } from '@yunpanel/shared';
 // field missing here is silently dropped from the rendered site, so every new
 // optional nginx setting must be listed (tests: domain-nginx-*.test.js).
 const OPTIONAL_FIELDS = Object.freeze({
-  passenger: ['preferredDomain', 'redirectRules', 'gzip'],
-  php: ['preferredDomain', 'redirectRules', 'gzip', 'indexFiles', 'errorPages', 'documentRoot', 'staticAssetCacheSeconds'],
+  passenger: ['preferredDomain', 'redirectRules', 'gzip', 'protectedPaths'],
+  php: ['preferredDomain', 'redirectRules', 'gzip', 'protectedPaths', 'indexFiles', 'errorPages', 'documentRoot', 'staticAssetCacheSeconds'],
 });
 
 // Only trusted Domain state is projected when an existing Website resolves to

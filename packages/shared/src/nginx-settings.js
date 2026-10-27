@@ -1,4 +1,4 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip']);
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -163,6 +163,31 @@ function redirectRules(value) {
   }));
 }
 
+// Password-protected directories. Each path is a directory ("/admin/") whose
+// htpasswd file is named by protectedPathKey; users live only in that host file.
+function protectedPaths(value) {
+  if (value === null) return null;
+  if (!Array.isArray(value) || value.length > 20 || value.some(entry => !redirectPath(entry) || entry === '/' || !entry.endsWith('/')
+    || RESERVED_REDIRECT_SOURCES.some(reserved => entry.startsWith(reserved.endsWith('/') ? reserved : `${reserved}/`)))) {
+    throw new NginxSettingsValidationError('invalid_nginx_protected_paths', 'Protected paths must be up to 20 site directories such as /admin/');
+  }
+  // Nested or repeated paths would make one rule silently win over another.
+  if (value.some((entry, index) => value.some((other, at) => at !== index && entry.startsWith(other)))) {
+    throw new NginxSettingsValidationError('overlapping_nginx_protected_paths', 'Protected paths must not repeat or contain each other');
+  }
+  return Object.freeze([...value]);
+}
+
+// FNV-1a 64-bit: stable, file-name safe and available in the browser bundle too.
+export function protectedPathKey(path) {
+  let hash = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(path)) {
+    hash ^= BigInt(byte);
+    hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+  }
+  return hash.toString(16).padStart(16, '0');
+}
+
 function defaults(targetType) {
   if (targetType === 'proxy' || targetType === 'python') {
     return {
@@ -219,6 +244,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     ...fileSettings,
     ...(rules !== undefined ? { redirectRules: rules } : {}),
     ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
+    ...(Object.hasOwn(merged, 'protectedPaths') ? { protectedPaths: protectedPaths(merged.protectedPaths) } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({
