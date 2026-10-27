@@ -153,3 +153,66 @@
     ℹ duration_ms 783.80775
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T807 · Doğrulama: test — nvalid domains (0.67625ms)
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-10-27 14:41
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    meConfig rejects invalid entry points or workers (0.399ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.31875ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (5.232542ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (1.065208ms)
+    ✔ normalizes python rollback, restart, and status specs (2.843125ms)
+    ✔ tenant constants and role classification predicates (12.254458ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (2.7785ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (3.164958ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (15.917167ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.533542ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.39075ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.467333ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (3.147584ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (3.916542ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (3.70875ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.922125ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (1.214208ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (9.009209ms)
+    ✔ tenant context creation and account normalization security edge cases (1.393666ms)
+    ℹ tests 67
+    ℹ suites 0
+    ℹ pass 66
+    ℹ fail 1
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 1721.117083
+    
+    ✖ failing tests:
+    
+    test at test/nginx-redirect-rules.test.js:30:1
+    ✖ redirect rules reject nginx injection, unsafe schemes, reserved paths, loops and ambiguous prefixes (363.423292ms)
+      AssertionError [ERR_ASSERTION]: path validation must stay linear on hostile input
+          at TestContext.<anonymous> (file:///Volumes/DevSSD/Developer/Projects/Projeler/yunpanel/packages/shared/test/nginx-redirect-rules.test.js:48:10)
+          at Test.runInAsyncScope (node:async_hooks:227:14)
+          at Test.run (node:internal/test_runner/test:1402:25)
+          at Test.processPendingSubtests (node:internal/test_runner/test:974:18)
+          at Test.postRun (node:internal/test_runner/test:1542:19)
+          at Test.run (node:internal/test_runner/test:1467:12)
+          at async Test.processPendingSubtests (node:internal/test_runner/test:974:7) {
+        generatedMessage: false,
+        code: 'ERR_ASSERTION',
+        actual: false,
+        expected: true,
+        operator: '==',
+        diff: 'simple'
+      }
+    npm error Lifecycle script `test` failed with error:
+    npm error code 1
+    npm error path /Volumes/DevSSD/Developer/Projects/Projeler/yunpanel/packages/shared
+    npm error workspace @yunpanel/shared@0.3.0
+    npm error location /Volumes/DevSSD/Developer/Projects/Projeler/yunpanel/packages/shared
+    npm error command failed
+    npm error command sh -c node --test
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
