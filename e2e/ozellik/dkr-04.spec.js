@@ -113,6 +113,11 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
       runSsh(`docker compose -p ${projectName} down --remove-orphans 2>/dev/null || true`);
     }
 
+    if (fullSubdomain) {
+      runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-${fullSubdomain}.conf /var/lib/yunpanel/staging/nginx/yunpanel-${fullSubdomain}.conf 2>/dev/null || true`);
+      runSsh('nginx -t && systemctl reload nginx 2>/dev/null || true');
+    }
+
     // 3. Projeyi panel arayüzünden kaldır
     if (createdProjectId) {
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
