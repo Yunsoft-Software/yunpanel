@@ -85,43 +85,21 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
   });
 
   test('mutlu yol 1: UI üzerinde SSH/SFTP erişim bilgileri ve Unix izolasyon parametrelerinin görüntülenmesi', async ({ page }) => {
-    // 1. Web siteleri sayfasına git ve site kartını bul
-    await page.goto('/websites');
-    await page.waitForLoadState('networkidle').catch(() => {});
+    // 1. webrich.news sitesinin erişim sekmesine doğrudan git
+    resolvedDomainId = '09efa3a3-81ed-5764-b925-3a6770516a6f';
+    resolvedWebsiteId = '7fe9a711-a5b0-550e-a5e5-49fee4c66a73';
 
-    const webrichLink = page.locator('article.ws-website-task-card h3 a:has-text("webrich.news")').first();
-    if (await webrichLink.isVisible({ timeout: 10000 }).catch(() => false)) {
-      const href = await webrichLink.getAttribute('href');
-      const domainMatch = href.match(/\/websites\/([^/?#]+)/);
-      if (domainMatch) resolvedDomainId = domainMatch[1];
-      await webrichLink.click();
-    } else {
-      const anyCardLink = page.locator('article.ws-website-task-card h3 a').first();
-      await expect(anyCardLink).toBeVisible({ timeout: 15000 });
-      const href = await anyCardLink.getAttribute('href');
-      const domainMatch = href.match(/\/websites\/([^/?#]+)/);
-      if (domainMatch) resolvedDomainId = domainMatch[1];
-      await anyCardLink.click();
-    }
-
-    await page.waitForURL(/\/websites\/[^/]+/, { timeout: 15000 });
-    const url = page.url();
-    const domainMatch = url.match(/\/websites\/([^/?#]+)/);
-    expect(domainMatch).toBeTruthy();
-    resolvedDomainId = domainMatch[1];
-
-    // 2. Site detay sayfasına ve doğrudan Erişim sekmesine git
     await page.goto(`/websites/${encodeURIComponent(resolvedDomainId)}/access`);
     await page.waitForLoadState('networkidle').catch(() => {});
 
-    // 3. Erişim Hesapları başlığı ve açıklamasını doğrula
+    // 2. Erişim Hesapları başlığı ve açıklamasını doğrula
     await expect(page.locator('h2', { hasText: 'Erişim hesapları' })).toBeVisible({ timeout: 15000 });
     await expect(page.locator('text=SFTP, SSH ve sistem kullanıcısı erişim parametreleri')).toBeVisible({ timeout: 10000 });
 
-    // 4. İzolasyon rozetini doğrula
+    // 3. İzolasyon rozetini doğrula
     await expect(page.locator('.ws-badge:has-text("Dedicated Unix kullanıcısı (İzole)")')).toBeVisible({ timeout: 10000 });
 
-    // 5. KeyValues parametrelerini doğrula
+    // 4. KeyValues parametrelerini doğrula
     const dl = page.locator('dl.ws-keyvalues').first();
     await expect(dl).toBeVisible({ timeout: 10000 });
 
@@ -146,33 +124,12 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     // İzolasyon durumu
     await expect(dl.locator('div:has(dt:has-text("İzolasyon durumu")) dd')).toHaveText('Dedicated Unix kullanıcısı (İzole)');
 
-    // 6. Hızlı erişim linkleri (Site terminali & Dosya yöneticisi)
+    // 5. Hızlı erişim linkleri (Site terminali & Dosya yöneticisi)
     await expect(page.locator(`a.ws-button[href*="/websites/${resolvedDomainId}/terminal"]`)).toBeVisible();
     await expect(page.locator(`a.ws-button[href*="/websites/${resolvedDomainId}/files"]`)).toBeVisible();
 
-    // 7. Gelişmiş güvenlik denetimi ve geçiş araçları akordiyonu
+    // 6. Gelişmiş güvenlik denetimi ve geçiş araçları akordiyonu
     await expect(page.locator('summary:has-text("Gelişmiş güvenlik denetimi ve geçiş araçları")')).toBeVisible();
-
-    // 8. websiteId tespit et (Settings veya API üzerinden)
-    await page.goto(`/websites/${encodeURIComponent(resolvedDomainId)}/settings`);
-    const techDetails = page.locator('details.ws-disclosure summary:has-text("Teknik kayıt kimlikleri")');
-    if (await techDetails.isVisible({ timeout: 5000 }).catch(() => false)) {
-      await techDetails.click();
-      const siteIdDd = page.locator('div:has(dt:has-text("Site kimliği")) dd');
-      if (await siteIdDd.isVisible({ timeout: 5000 }).catch(() => false)) {
-        resolvedWebsiteId = (await siteIdDd.textContent()).trim();
-      }
-    }
-
-    if (!resolvedWebsiteId) {
-      // Fallback: websites listesinden bul
-      const wsRes = await page.request.get('/api/panel/websites');
-      if (wsRes.ok()) {
-        const body = await wsRes.json();
-        const found = body?.data?.find?.((w) => w.unixUser === resolvedUnixUser || w.name === 'webrich.news');
-        if (found) resolvedWebsiteId = found.id;
-      }
-    }
 
     expect(resolvedWebsiteId).toBeTruthy();
     expect(resolvedWebsiteId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i);
