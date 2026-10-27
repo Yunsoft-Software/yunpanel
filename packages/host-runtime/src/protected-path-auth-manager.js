@@ -2,15 +2,15 @@ import { execFile, spawn } from 'node:child_process';
 import { chmod, chown, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { protectedPathKey } from '@yunpanel/shared';
 
 // htpasswd files for password-protected directories (nginx auth_basic). Only
 // SHA-512 crypt hashes are stored, produced by openssl from stdin so a password
 // never appears in argv, logs or files. Files are root-owned, group-readable by
-// the nginx group (0640). Paths match packages/config-templates nginx.js.
+// the nginx group (0640) and named by the random key of the protected path, as in
+// packages/config-templates nginx.js.
 const execFileAsync = promisify(execFile);
 const HOSTNAME = /^(?=.{4,253}$)(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/;
-const DIRECTORY = /^\/(?:[A-Za-z0-9._~%-]+\/)+$/;
+const KEY = /^[a-f0-9]{16}$/;
 const USERNAME = /^[A-Za-z0-9._-]{1,64}$/;
 const MAX_USERS = 50;
 
@@ -44,11 +44,10 @@ export function createProtectedPathAuthManager({
     return run;
   }
 
-  function locate({ domain, path: directory }) {
+  function locate({ domain, key }) {
     if (typeof domain !== 'string' || !HOSTNAME.test(domain)) invalid('domain', 'Domain is invalid');
-    if (typeof directory !== 'string' || directory.length > 192 || !DIRECTORY.test(directory)
-      || directory.split('/').some(segment => segment === '.' || segment === '..')) invalid('path', 'Directory must look like /admin/');
-    return { directory: path.join(root, domain), file: path.join(root, domain, `${protectedPathKey(directory)}.htpasswd`) };
+    if (typeof key !== 'string' || !KEY.test(key)) invalid('key', 'Protected path key is invalid');
+    return { directory: path.join(root, domain), file: path.join(root, domain, `${key}.htpasswd`) };
   }
 
   async function group() {

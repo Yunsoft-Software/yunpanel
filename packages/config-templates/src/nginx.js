@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, protectedPathKey } from '@yunpanel/shared';
+import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, stableHexKey } from '@yunpanel/shared';
 import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
@@ -151,12 +151,12 @@ export const PROTECTED_PATH_AUTH_DIRECTORY = '/etc/nginx/yunpanel-auth';
 // runs before try_files, so an internal redirect to index.php cannot skip it.
 function protectedPathAuth(primaryDomain, paths = []) {
   if (!paths.length) return null;
-  const id = protectedPathKey(primaryDomain).slice(0, 12);
+  const id = stableHexKey(primaryDomain).slice(0, 12);
   const pattern = (path) => `"~^${path.replace(/[.]/g, '\\.')}"`;
   const realm = `$yp_auth_realm_${id}`;
   const file = `$yp_auth_file_${id}`;
-  const maps = `map $uri ${realm} {\n  default off;\n${paths.map(path => `  ${pattern(path)} "Restricted";`).join('\n')}\n}\n\n`
-    + `map $uri ${file} {\n  default /dev/null;\n${paths.map(path => `  ${pattern(path)} ${PROTECTED_PATH_AUTH_DIRECTORY}/${primaryDomain}/${protectedPathKey(path)}.htpasswd;`).join('\n')}\n}`;
+  const maps = `map $uri ${realm} {\n  default off;\n${paths.map(({ path }) => `  ${pattern(path)} "Restricted";`).join('\n')}\n}\n\n`
+    + `map $uri ${file} {\n  default /dev/null;\n${paths.map(({ path, key }) => `  ${pattern(path)} ${PROTECTED_PATH_AUTH_DIRECTORY}/${primaryDomain}/${key}.htpasswd;`).join('\n')}\n}`;
   return { maps, directives: `  auth_basic ${realm};\n  auth_basic_user_file ${file};` };
 }
 

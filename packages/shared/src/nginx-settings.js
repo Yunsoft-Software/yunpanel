@@ -163,23 +163,32 @@ function redirectRules(value) {
   }));
 }
 
-// Password-protected directories. Each path is a directory ("/admin/") whose
-// htpasswd file is named by protectedPathKey; users live only in that host file.
+// Password-protected directories: { path: "/admin/", key }. The random key names
+// the htpasswd file, so a Domain or path that is removed and created again (maybe
+// by another tenant) never inherits old users from a leftover file.
+const PROTECTED_PATH_KEY = /^[a-f0-9]{16}$/;
 function protectedPaths(value) {
   if (value === null) return null;
-  if (!Array.isArray(value) || value.length > 20 || value.some(entry => !redirectPath(entry) || entry === '/' || !entry.endsWith('/')
-    || RESERVED_REDIRECT_SOURCES.some(reserved => entry.startsWith(reserved.endsWith('/') ? reserved : `${reserved}/`)))) {
-    throw new NginxSettingsValidationError('invalid_nginx_protected_paths', 'Protected paths must be up to 20 site directories such as /admin/');
+  const validEntry = (entry) => entry && typeof entry === 'object' && !Array.isArray(entry)
+    && Object.keys(entry).length === 2 && typeof entry.key === 'string' && PROTECTED_PATH_KEY.test(entry.key)
+    && redirectPath(entry.path) && entry.path !== '/' && entry.path.endsWith('/')
+    && !RESERVED_REDIRECT_SOURCES.some(reserved => entry.path.startsWith(reserved.endsWith('/') ? reserved : `${reserved}/`));
+  if (!Array.isArray(value) || value.length > 20 || !value.every(validEntry)) {
+    throw new NginxSettingsValidationError('invalid_nginx_protected_paths', 'Protected paths must be up to 20 site directories such as /admin/ with a key');
   }
   // Nested or repeated paths would make one rule silently win over another.
-  if (value.some((entry, index) => value.some((other, at) => at !== index && entry.startsWith(other)))) {
-    throw new NginxSettingsValidationError('overlapping_nginx_protected_paths', 'Protected paths must not repeat or contain each other');
+  if (value.some((entry, index) => value.some((other, at) => at !== index && (entry.path.startsWith(other.path) || entry.key === other.key)))) {
+    throw new NginxSettingsValidationError('overlapping_nginx_protected_paths', 'Protected paths and their keys must be unique and must not contain each other');
   }
-  return Object.freeze([...value]);
+  return Object.freeze(value.map(entry => Object.freeze({ path: entry.path, key: entry.key })));
+}
+
+export function newProtectedPathKey() {
+  return [...globalThis.crypto.getRandomValues(new Uint8Array(8))].map(byte => byte.toString(16).padStart(2, '0')).join('');
 }
 
 // FNV-1a 64-bit: stable, file-name safe and available in the browser bundle too.
-export function protectedPathKey(path) {
+export function stableHexKey(path) {
   let hash = 0xcbf29ce484222325n;
   for (const byte of new TextEncoder().encode(path)) {
     hash ^= BigInt(byte);

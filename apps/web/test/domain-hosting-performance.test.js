@@ -27,7 +27,7 @@ for (const [targetType, draft] of [['proxy', { gzip: true }], ['php', { gzip: tr
 
 test('a protected directory draft survives a reload of a newer record', () => {
   const clean = createHostingForm(record('proxy'));
-  const form = editHostingForm(clean, 'nginxSettings', { ...clean.values.nginxSettings, protectedPaths: ['/admin/'] });
+  const form = editHostingForm(clean, 'nginxSettings', { ...clean.values.nginxSettings, protectedPaths: [{ path: '/admin/', key: '0123456789abcdef' }] });
   const next = reloadHostingForm(form, record('proxy', { desiredRevision: 4 }), form.base);
-  assert.deepEqual(next.values.nginxSettings.protectedPaths, ['/admin/']);
+  assert.deepEqual(next.values.nginxSettings.protectedPaths, [{ path: '/admin/', key: '0123456789abcdef' }]);
 });
