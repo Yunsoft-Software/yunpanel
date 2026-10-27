@@ -4,6 +4,31 @@
 >
 > Yöntem: Plesk'in sık kullanılan özellikleri YunPanel'in `apps/api/src`, `apps/web/src`, `packages/*/src` kodunda anahtar kelimeyle arandı. Ayrıca kendi yetenek kataloğu `apps/api/src/non-reseller-capabilities.js` (95 özellik: 70 completed, 13 partial, 9 deferred) okundu. Sınırlar: Plesk tarafı resmî belgeyle tek tek doğrulanmadı; farklı isimle yazılmış bir özellik kaçmış olabilir. Katalogdaki "completed" işareti çalıştığı anlamına gelmez; gerçek durum 1. dalga manuel test raporlarında (`docs/manuel-test/`).
 
+## Gerçek Plesk envanteri ve öncelik sırası (2026-10-27)
+Senior, İNSAN'ın açtığı oturumda Yunsoft'un canlı Plesk Obsidian 18.0.81 sunucusuna salt okunur baktı (DECISIONS 2026-10-27 istisnası; hiçbir ayar değiştirilmedi, müşteri/site adı kaydedilmedi). Sunucuda 177 domain, kurulu 29 eklenti, sunucu düzeyinde 66 araç var. Aynı üst domain altında tek tek açılmış onlarca subdomain bulunuyor; wildcard ihtiyacı gerçek.
+
+**Sıralama:** Önce Yunsoft'un Plesk'inde kurulu olup site ekranında günlük görünen ve YunPanel'de olmayanlar.
+
+| # | Plesk'te (nerede) | YunPanel'de | Not |
+|---|---|---|---|
+| 1 | **Hosting türü: yönlendirme / hosting'siz domain** ve **wildcard subdomain** (Add Domain/Subdomain, Hosting & DNS) | Yok; wildcard kodda reddediliyor | Bu sunucudaki kullanım biçiminde en çok iş kazandıracak madde |
+| 2 | **WP Toolkit 6.11** (kurulu, menüde) | Yarım/ertelendi (WP-03, WP-04, WP-07) | Akıllı güncelleme, toplu yönetim, güvenlik, klon/staging |
+| 3 | **Website Copying** (site Dashboard) | Yok | Siteyi başka domaine kopyalama |
+| 4 | **Password-Protected Directories** (site Dashboard) | Yok | |
+| 5 | **Site Import, Mail Importing, Plesk Migrator** (kurulu) | Yok/yarım (MIG-*) | Başka sunucudan site ve posta taşıma; YunPanel'e geçişte de lazım |
+| 6 | **Notifications** (Araçlar) ve **Watchdog** eklentisi | E-posta bildirimi yok; watchdog yalnız arka uçta, arayüzü yok | SSL/disk/servis uyarısı |
+| 7 | **Performance Booster** (nginx önbellek/sıkıştırma; site ve sunucu) | Yok | |
+| 8 | **Smarthost** (posta relay; sunucu ve site Mail sekmesi) | Yok | |
+| 9 | **Log Browser** (canlı log) | Log sayfası var, canlı akış yok | |
+| 10 | **Google Drive Backup** (kurulu) | Yok | Restic/rclone var; Drive hedefi eklenebilir |
+| 11 | **Imunify** (kurulu; malware tarama) | Yok/yarım (EKL-04) | |
+| 12 | **Advisor** (kurulu; güvenlik/performans önerileri) | Yalnız firewall önerisi | |
+| 13 | **Track Email Delivery** (site Mail sekmesi) | Kısmi (teslimat tanılama) | |
+| 14 | **Softaculous, Sitejet Builder** (kurulu) | Docker tabanlı uygulama marketi var; PHP uygulama kurucu ve site builder yok | |
+| 15 | Event Manager, Mass Email, Custom Buttons, Prohibited Domains, SOGo, Mobile Center | Yok | Düşük öncelik |
+
+**YunPanel'de karşılığı olanlar** (bu bakışta eksik görülmedi, ama gerçek çalışması 1. dalga testlerinde ölçülüyor): Git, PHP Composer, Laravel ve Node.js araçları, Docker ve Docker Proxy Rules, Let's Encrypt/SSL, Firewall, Fail2Ban benzeri koruma (CrowdSec), ModSecurity (yarım), MFA, SSH Terminal, Repair Kit benzeri onarım (Diagnose & Repair), Monitoring (Netdata), Scheduled Tasks, Backup Manager, DNS, Webmail (Roundcube).
+
 ## Nginx, domain ve yönlendirme (İNSAN'ın işaret ettiği zayıf alan)
 | Plesk özelliği | YunPanel durumu | Kanıt |
 |---|---|---|
