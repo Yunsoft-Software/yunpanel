@@ -1,33 +1,40 @@
 # T131 İnceleme Notu — Manuel test: DB-05 — Dump import/export, kopyalama ve backup/restore
 
-- **İnceleyen:** AGENT_2
-- **Tarih:** 2026-10-27 13:00
-- **İncelenen Commit:** `0f5e0128` (AGENT_1)
-- **Karar:** RET (REJECT)
+- **İnceleyen:** AGENT_4
+- **Tarih:** 2026-10-27 13:17
+- **İncelenen Commit:** `4db7e70a` (AGENT_2)
+- **Karar:** KABUL (ACCEPT)
 
 ---
 
 ## 1. İnceleme Özeti ve Bulgular
 
-### Olumlu Yönler:
-- `docs/manuel-test/DB-05.md`: 27 satır (≤40 satır kuralına uygun), `docs/manuel-test/YONTEM.md` şablonuna uygun.
-- `e2e/ozellik/db-05.spec.js`:
-  - Sıfır mock, sıfır `page.route` veya sahte veri.
-  - Veritabanı oluşturma, yedek alma, fiziksel checksum doğrulaması (`dumpSha256`, `dumpBytes`, `backedUp: true`) ve phpMyAdmin SQL dışa aktar gateway köprüsü testi doğru kurgulanmış.
-  - Hatalı girdi senaryosunda geçersiz onay metni ve sahte digest/sha fail-closed kontrolleri yer alıyor.
-- Orkestra kontrolleri (`orchestrator.py verify --quick`, `tasks.py lint`) başarıyla geçti.
+### Önceki Ret Gerekçesinin Giderilmesi:
+- Önceki incelemede belirtilen `test.afterAll` eksikliği giderilmiştir.
+- `e2e/ozellik/db-05.spec.js` dosyasına eklenen `test.afterAll` bloğunda:
+  - Veritabanı kimliği (`database-credential`) önizleme ve silme finalization akışı yürütülüyor.
+  - Veritabanı bağlamı (`database-binding`) gerekirse yedeklenip silme önizleme, job bekleme ve finalize akışı uygulanıyor.
+  - Test veritabanı şeması doğrudan sunucu API'si üzerinden kaldırılıyor.
+  - Hata durumunda fail-safe yakalama ve context kapatma güvenli şekilde uygulanıyor.
 
-### Reddetme Sebebi (Kabul Kriteri İhlali):
-- **Eksik `afterAll` Temizliği:**
-  - Görev sözleşmesinde (`python3 orkestra/tasks.py show T131`) kabul kriteri açıkça şöyledir:
-    > "Kabul: `e2e/ozellik/db-05.spec.js` gerçek panele karşı koşuyor ve beklenmeyen düşüş yok (bilinen hatalar test.fail ile); mock/page.route/sahte veri yok; en az bir fiziksel sonuç doğrulanıyor; **afterAll oluşturulan kaynakları siliyor**."
-  - `e2e/ozellik/db-05.spec.js` dosyası incelendiğinde hiçbir `test.afterAll` bloğunun bulunmadığı (`grep "afterAll"` sonucu boş) görülmüştür.
-  - Test sırasında oluşturulan `testDatabaseName` (`tdb05_a...`) isimli veritabanı test tamamlandıktan sonra silinmemekte ve sunucuda artık kaynak olarak kalmaktadır.
-  - `docs/manuel-test/DB-05.md` raporunda "Temizlenemeyen kaynaklar: —" yazılmasına karşın test kodunda temizlik mantığı yer almamaktadır.
+### Doğrulama ve Kriter Uygunluğu:
+1. **Mock ve Sahte Veri:**
+   - Sıfır mock, sıfır `page.route` veya sahte yanıt.
+   - Doğrudan test sunucusuna (`.28`) ve gerçek API/UI bileşenlerine karşı çalışıyor.
+2. **Fiziksel Kanıtlar:**
+   - Vendor dump yedeği alma: `database.backup` job (`backedUp: true`, 64 karakter SHA256 checksum, pozitif `dumpBytes`).
+   - Geri yükleme (restore): `restore-preview` digest doğrulaması, `database.restore` job'ı (`verified: true`, `preRestoreDumpSha256`).
+   - phpMyAdmin SQL dışa aktar köprüsü: URL yönlendirmesinde `route=/database/export` ve `db=...` parametreleri ile phpMyAdmin başlığı.
+   - Hatalı girdi ve güvenlik: Yanlış onay metninde butonun disabled kalması, geçersiz checksum/digest ile 400/404 fail-closed API yanıtı.
+3. **Dokümantasyon:**
+   - `docs/manuel-test/DB-05.md` dosyası 27 satırdır (≤ 40 satır kuralına uygun).
+   - `tasks/review/T131.md` eksiksiz doldurulmuş ve commit referansları belirtilmiştir.
+4. **Test ve Orkestra Koşuları:**
+   - `python3 orkestra/orchestrator.py verify --quick`: `doğrulama: ok; yeniden açılan: -; bulgu: -`.
+   - `python3 orkestra/tasks.py lint`: `lint OK`.
+   - Gerçek test koşusu (`sunucu-28-4` kilidiyle): `AGENT_N=4 npx playwright test e2e/ozellik/db-05.spec.js` -> 2 passed (29.7s).
 
 ---
 
-## 2. Düzeltme Talebi
-1. `e2e/ozellik/db-05.spec.js` içerisine `test.afterAll` bloğu eklenmelidir.
-2. `test.afterAll` içerisinde test sırasında oluşturulan `testDatabaseName` veritabanı (ve varsa oluşturulan diğer geçici kaynaklar) API veya arayüz üzerinden temizlenmelidir (diğer testlerdeki gibi hata durumunda loglayarak fail-safe biçimde).
-3. Test tekrar koşturulup kaynakların temizlendiği doğrulandıktan sonra görev tekrar teslim edilmelidir.
+## 2. Sonuç
+Görev sözleşmesindeki tüm kabul kriterleri eksiksiz karşılanmış, temizlik adımları doğrulanmış ve test başarıyla geçmiştir. Görev kabul edilmiştir.
