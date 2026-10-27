@@ -46,14 +46,14 @@ export function mountOperationalNotificationRoutes(app, {
   }
 
   // GET /api/notifications/preferences
-  app.get('/api/notifications/preferences', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/notifications/preferences', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (request, response) => {
     const actorId = request.auth?.user?.id || 'global';
     const preferences = notificationService.getPreferences(actorId);
     return response.json({ data: preferences });
   }));
 
   // PATCH /api/notifications/preferences
-  app.patch('/api/notifications/preferences', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.patch('/api/notifications/preferences', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (request, response) => {
     const actorId = request.auth?.user?.id || 'global';
     const updated = notificationService.updatePreferences(actorId, request.body ?? {});
     return response.json({ data: updated });
@@ -75,11 +75,11 @@ export function mountOperationalNotificationRoutes(app, {
     return response.json({ data: history });
   });
 
-  app.get('/api/notifications/history', requirePanelRouteAccess, historyHandler);
-  app.get('/api/notifications/deliveries', requirePanelRouteAccess, historyHandler);
+  app.get('/api/notifications/history', requirePanelRouteAccess, requireOwnerOrManagement, historyHandler);
+  app.get('/api/notifications/deliveries', requirePanelRouteAccess, requireOwnerOrManagement, historyHandler);
 
   // POST /api/notifications/test
-  app.post('/api/notifications/test', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/notifications/test', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (request, response) => {
     const actor = request.auth;
     const { channel = 'email', target = null, message = null } = request.body ?? {};
 
@@ -117,7 +117,7 @@ export function mountOperationalNotificationRoutes(app, {
   }));
 
   // GET /api/notifications/status
-  app.get('/api/notifications/status', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+  app.get('/api/notifications/status', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (_request, response) => {
     const status = notificationService.getStatus();
     return response.json({ data: status });
   }));
