@@ -158,7 +158,9 @@ import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
 import { SiteCreateError } from './site-create.js';
-import { mountSiteCreateRoutes } from './site-create-http.js';
+import { createLocalSiteCreator, mountSiteCreateRoutes } from './site-create-http.js';
+import { createTenantSiteService } from './tenant-site-service.js';
+import { mountTenantSiteRoutes } from './tenant-site-http.js';
 import { mountSiteFileRoutes, SiteFileHttpError } from './site-file-http.js';
 import { SiteFileManagerError } from './site-file-manager.js';
 import { SiteFileWorkerError } from './site-file-worker.js';
@@ -777,7 +779,7 @@ export function createApp(allOptions = {}) {
       });
     }
   }
-  mountSiteCreateRoutes(app, {
+  const siteCreateDependencies = {
     registry: localRegistry,
     applicationRegistry,
     dockerWorkloadRegistry,
@@ -792,7 +794,14 @@ export function createApp(allOptions = {}) {
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
     websiteProvisioningRuntime,
     siteMutationLock,
-  });
+  };
+  mountSiteCreateRoutes(app, siteCreateDependencies);
+  if (options.apiKeyStore && options.tenantSiteStore && websiteProvisioningRuntime && localServerId) {
+    mountTenantSiteRoutes(app, { service: createTenantSiteService({
+      siteCreator: createLocalSiteCreator(siteCreateDependencies), provisioning: websiteProvisioningRuntime,
+      domainRegistry, store: options.tenantSiteStore, localServerId,
+    }) });
+  }
   if (websiteProvisioningRuntime) {
     mountWebsiteProvisioningRoutes(app, {
       registry: websiteProvisioningRuntime.registry,

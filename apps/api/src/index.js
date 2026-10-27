@@ -1,5 +1,6 @@
 import { createApiKeyStore } from './api-key-store.js';
 import { createAutomationHandler } from './automation-http.js';
+import { createTenantSiteStore } from './tenant-site-store.js';
 import { createLocalPassengerReleaseOperation } from './local-passenger-release-operation.js';
 import http from 'node:http';
 import {createLocalPassengerRestartOperation} from './local-passenger-restart-operation.js';
@@ -708,6 +709,9 @@ const protectedPathAuthManager = createProtectedPathAuthManager();
 const apiKeyStore = createApiKeyStore({
   filePath: process.env.YUNPANEL_API_KEY_STORE ?? path.join(controlPlaneStateRoot, 'api-keys.json'),
 });
+const tenantSiteStore = createTenantSiteStore({
+  filePath: process.env.YUNPANEL_TENANT_SITE_STORE ?? path.join(controlPlaneStateRoot, 'tenant-sites.json'),
+});
 const databaseManager = createDatabaseManager();
 registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
@@ -1352,6 +1356,7 @@ const listener = createAuthenticatedApi({
       nginxLogReader,
       mailSmarthostRegistry,
       apiKeyStore,
+      tenantSiteStore,
       mailSmarthostManager,
       protectedPathAuthManager,
       jobLogStore,
