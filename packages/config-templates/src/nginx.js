@@ -182,6 +182,14 @@ function serverBlock({
   return `server {\n${listen}\n  server_name ${names};${bodySize}${access}${error}${acme}${certificates}\n\n${body}\n}`;
 }
 
+function serviceOverrideBody(override, headers) {
+  if (!override) return null;
+  const renderedHeaders = headerLines(headers);
+  const action = override.mode === 'unavailable' ? 'return 503;'
+    : `return ${override.status} ${override.url}${override.preservePath ? '$request_uri' : ''};`;
+  return `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    ${action}\n  }`;
+}
+
 function renderServerSet({
   primaryDomain,
   aliases,
@@ -213,10 +221,13 @@ function renderServerSet({
   const challengeOnlyNames = acmeOnlyNames(primaryDomain, aliases, acmeOnlyHostnames);
   const discoverySocket = normalizeMailDiscoverySocket(mailDiscoverySocketPath);
   const discoveryLocations = mailDiscoveryLocations(discoverySocket);
-  const rules = redirectLocations(nginxSettings.redirectRules ?? []);
+  // A service override replaces everything the site serves, so path rules and auth cannot bypass it.
+  const override = serviceOverrideBody(nginxSettings.serviceOverride, nginxSettings.headers);
+  const rules = override ? '' : redirectLocations(nginxSettings.redirectRules ?? []);
+  if (override) body = override;
   if (rules) body = `${rules}\n\n${body}`;
-  if (nginxSettings.gzip === true) body = `${GZIP_DIRECTIVES}\n\n${body}`;
-  const auth = protectedPathAuth(primaryDomain, nginxSettings.protectedPaths ?? []);
+  if (!override && nginxSettings.gzip === true) body = `${GZIP_DIRECTIVES}\n\n${body}`;
+  const auth = override ? null : protectedPathAuth(primaryDomain, nginxSettings.protectedPaths ?? []);
   if (auth) body = `${auth.directives}\n\n${body}`;
   const prelude = auth ? `${auth.maps}\n\n` : '';
   const tlsBody = discoveryLocations ? `${discoveryLocations}\n\n${body}` : body;

@@ -1,4 +1,6 @@
-const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths']);
+import { normalizeRedirectTarget } from './redirect-target.js';
+
+const COMMON_FIELDS = new Set(['clientMaxBodySizeMb', 'headers', 'preferredDomain', 'redirectRules', 'gzip', 'protectedPaths', 'serviceOverride']);
 const FILE_FIELDS = ['indexFiles', 'errorPages', 'documentRoot'];
 const ERROR_CODES = new Set(['403', '404', '500', '502', '503', '504']);
 const TARGET_FIELDS = Object.freeze({
@@ -8,7 +10,7 @@ const TARGET_FIELDS = Object.freeze({
   passenger: new Set([...COMMON_FIELDS]),
   php: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'staticAssetCacheSeconds']),
   // A forwarding-only Domain serves nothing, so path rules, auth and compression do not apply.
-  redirect: new Set(['clientMaxBodySizeMb', 'headers']),
+  redirect: new Set(['clientMaxBodySizeMb', 'headers', 'serviceOverride']),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -111,6 +113,19 @@ function headers(value) {
     seen.add(identity);
     return Object.freeze({ name: entry.name, value: entry.value, always: entry.always });
   }));
+}
+
+// Maintenance (503) or a temporary forward that replaces whatever the site serves.
+function serviceOverride(value) {
+  if (value === null) return null;
+  if (value && typeof value === 'object' && !Array.isArray(value)) {
+    if (value.mode === 'unavailable' && Object.keys(value).length === 1) return Object.freeze({ mode: 'unavailable' });
+    if (value.mode === 'redirect') {
+      const { mode, ...target } = value;
+      try { return Object.freeze({ mode, ...normalizeRedirectTarget(target) }); } catch { /* reported below */ }
+    }
+  }
+  throw new NginxSettingsValidationError('invalid_nginx_service_override', 'Service override must be maintenance or a safe http(s) redirect');
 }
 
 // Redirect paths and targets are written into nginx verbatim, so only a closed
@@ -256,6 +271,7 @@ export function normalizeNginxSettings(targetType, value = {}, base = null) {
     ...(rules !== undefined ? { redirectRules: rules } : {}),
     ...(Object.hasOwn(merged, 'gzip') ? { gzip: boolean(merged.gzip, 'gzip') } : {}),
     ...(Object.hasOwn(merged, 'protectedPaths') ? { protectedPaths: protectedPaths(merged.protectedPaths) } : {}),
+    ...(Object.hasOwn(merged, 'serviceOverride') ? { serviceOverride: serviceOverride(merged.serviceOverride) } : {}),
   };
   if (targetType === 'proxy' || targetType === 'python') {
     return Object.freeze({

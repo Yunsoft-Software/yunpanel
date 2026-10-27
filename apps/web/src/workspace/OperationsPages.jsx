@@ -7,6 +7,7 @@ import SystemUpdatePanel from '../SystemUpdatePanel.jsx';
 import ManagedServicesPanel from './ManagedServicesPanel.jsx';
 import NetworkDnsSettingsPanel from './NetworkDnsSettingsPanel.jsx';
 import SystemSettingsPanels from './SystemSettingsPanels.jsx';
+import ApiKeysPanel from './ApiKeysPanel.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
 import { ServerSummary } from './DashboardPage.jsx';
@@ -48,12 +49,13 @@ export function SettingsPage() {
   const { servers, domains, canManage } = useWorkspace();
   const [params] = useSearchParams();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  const section = ['account', 'dns', 'ai', 'updates', 'records'].includes(params.get('section'))
+  const section = ['account', 'dns', 'ai', 'api', 'updates', 'records'].includes(params.get('section'))
     ? params.get('section') : 'account';
   const categories = [
     ['account', 'Hesap ve erişim'],
     ['dns', 'DNS ve SSL'],
     ['ai', 'AI sağlayıcıları'],
+    ['api', 'API anahtarları'],
     ['updates', 'Güncellemeler'],
   ];
   return <>
@@ -65,6 +67,7 @@ export function SettingsPage() {
     {section === 'account' && <Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section>}
     {section === 'dns' && <><CollectionNotice resource={servers} label="Yerel sunucu" /><SystemSettingsPanels canManage={canManage} />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}</>}
     {section === 'ai' && canManage && <AiSettingsPanel />}
+    {section === 'api' && canManage && <ApiKeysPanel />}
     {section === 'updates' && <Section title="YunPanel güncellemeleri"><CollectionNotice resource={servers} label="Yerel sunucu" />{server && servers.status === 'ready' && !import.meta.env.DEV && <div className="ws-section-body"><SystemUpdatePanel key={server.id} server={server} /></div>}{import.meta.env.DEV && <p className="ws-muted ws-section-body">Paket güncelleme işlemleri geliştirme görünümünde kapalıdır.</p>}</Section>}
     {section === 'records' && <Section title="İşlemler ve kayıtlar" description="İşlemler, denetim kayıtları ve sistem tanılaması Araçlar ve Ayarlar altındaki Tanılama bölümündedir."><div className="ws-section-body ws-actions"><LinkButton to="/tools-settings" icon="settings">Araçlar ve Ayarlar</LinkButton><LinkButton to="/jobs" icon="jobs">İşlem geçmişi</LinkButton><LinkButton to="/audit" icon="shield">Denetim kayıtları</LinkButton><LinkButton to="/logs" icon="file">Günlükler</LinkButton><LinkButton to="/servers#server-diagnostics" icon="server">Sunucu tanılama</LinkButton><LinkButton to="/applications" icon="code">Uygulama envanteri</LinkButton><LinkButton to="/domains" icon="globe">Alan adları ve sertifikalar</LinkButton></div></Section>}
   </>;

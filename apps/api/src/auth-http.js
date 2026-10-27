@@ -190,6 +190,7 @@ export function createAuthenticatedApi({
   trustedProxyIps = TRUSTED_PROXY_DEFAULT,
   publicWebhookHandler = null,
   toolGatewayAuthorizer = null,
+  automationHandler = null,
 }) {
   const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, ownerMfaRequired, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
@@ -197,6 +198,9 @@ export function createAuthenticatedApi({
   const handler = createHandler();
   if (publicWebhookHandler !== null && typeof publicWebhookHandler !== 'function') {
     throw new TypeError('Public webhook handler must be a function');
+  }
+  if (automationHandler !== null && typeof automationHandler !== 'function') {
+    throw new TypeError('Automation handler must be a function');
   }
   if (toolGatewayAuthorizer !== null && typeof toolGatewayAuthorizer !== 'function') {
     throw new TypeError('Tool gateway authorizer must be a function');
@@ -231,6 +235,15 @@ export function createAuthenticatedApi({
       if (!publicWebhookHandler) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
       await publicWebhookHandler(request, response, pathname);
       return;
+    }
+
+    // Machine API: API keys only. A browser request (cookie or Origin) is refused so a
+    // panel session can never ride on it, and a key never reaches the panel routes below.
+    if (pathname === '/api/automation' || pathname.startsWith('/api/automation/')) {
+      if (!automationHandler) return json(response, 404, { error: { code: 'not_found', message: 'Not found.' } });
+      if (request.headers.origin || request.headers.cookie) throw new AuthError('automation_channel_only', 'The automation API does not accept browser requests.', 403);
+      boundary.peer(request);
+      return automationHandler(request, response, handler);
     }
 
     if (isAgentRoute(request.method, pathname)) {

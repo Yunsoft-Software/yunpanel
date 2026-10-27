@@ -17,7 +17,7 @@ test('SettingsPage: categories omit deprecated records tab, keeping only editabl
   const operationsSource = await source('OperationsPages.jsx');
 
   // Verify categories only contain actual editable settings categories
-  assert.match(operationsSource, /const categories = \[\s*\['account', 'Hesap ve erişim'\],\s*\['dns', 'DNS ve SSL'\],\s*\['ai', 'AI sağlayıcıları'\],\s*\['updates', 'Güncellemeler'\],\s*\];/);
+  assert.match(operationsSource, /const categories = \[\s*\['account', 'Hesap ve erişim'\],\s*\['dns', 'DNS ve SSL'\],\s*\['ai', 'AI sağlayıcıları'\],\s*\['api', 'API anahtarları'\],\s*\['updates', 'Güncellemeler'\],\s*\];/);
   // Verify records is NOT in categories array
   const categoriesBlock = operationsSource.slice(
     operationsSource.indexOf('const categories = ['),

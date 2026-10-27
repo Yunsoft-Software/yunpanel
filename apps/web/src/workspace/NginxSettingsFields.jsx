@@ -93,6 +93,9 @@ export default function NginxSettingsFields({ targetType, settings, disabled, on
         <span id={`${hint}-index-hint`} className="ws-field-hint">Öncelik sırasıyla, boşlukla ayırın. Boş bırakıldığında varsayılan kullanılır.</span></label>}
     </div>
     <p id={hint} className="ws-field-hint">Boş sayısal alanlar sunucunun varsayılanını kullanır. Yükleme boyutu 1–1024 MB; yanıt süresi 1–600 saniyedir.</p>
+    <label className="ws-check"><input type="checkbox" checked={settings.serviceOverride?.mode === 'unavailable'}
+      disabled={settings.serviceOverride?.mode === 'redirect'}
+      onChange={event => change('serviceOverride', event.target.checked ? { mode: 'unavailable' } : null)} />Bakım modu (ziyaretçiler 503 görür)</label>
     <label className="ws-check"><input type="checkbox" checked={settings.gzip === true}
       onChange={event => change('gzip', event.target.checked)} />Sıkıştırma (gzip)</label>
     {targetType === 'php' && <div className="ws-actions" role="group" aria-label="Statik önbellek hızlı seçimleri">

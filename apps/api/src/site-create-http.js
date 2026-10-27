@@ -178,6 +178,18 @@ async function persistProvisioning(plan, registry) {
   return registry.create(plan);
 }
 
+// The same local preview/create/provisioning path as POST /api/sites, for callers that
+// are not a browser session (the automation API). No site admin is created here.
+export function createLocalSiteCreator(dependencies = {}) {
+  return Object.freeze({
+    preview: (input) => previewWithProvisioning({ input: localInput(input, dependencies.localServerId), dependencies }),
+    create: (input, previewDigest, confirmation) => (dependencies.createSite ?? createSite)({
+      input: localInput(input, dependencies.localServerId), previewDigest, confirmation, ...dependencies,
+    }),
+    persistProvisioning: (plan) => persistProvisioning(plan, dependencies.websiteProvisioningRegistry),
+  });
+}
+
 export function mountSiteCreateRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
 

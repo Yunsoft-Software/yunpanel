@@ -134,6 +134,8 @@ import { MailboxPasswordError } from './mailbox-password.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
 import { mountMailSmarthostRoutes } from './mail-smarthost-http.js';
 import { mountProtectedPathRoutes } from './protected-path-http.js';
+import { mountApiKeyRoutes } from './api-key-http.js';
+import { mountAutomationRoutes } from './automation-http.js';
 import { ManagedServiceHttpError, mountManagedServiceRoutes } from './managed-service-http.js';
 import { mountNodeRuntimeRoutes, NodeRuntimeHttpError } from './node-runtime-http.js';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
@@ -156,7 +158,9 @@ import { RoundcubeSecretRegistryError } from './roundcube-secret-registry.js';
 import { createServerRegistry, RegistryError } from './server-registry.js';
 import { ServerDnsIdentityRegistryError } from './server-dns-identity-registry.js';
 import { SiteCreateError } from './site-create.js';
-import { mountSiteCreateRoutes } from './site-create-http.js';
+import { createLocalSiteCreator, mountSiteCreateRoutes } from './site-create-http.js';
+import { createTenantSiteService } from './tenant-site-service.js';
+import { mountTenantSiteRoutes } from './tenant-site-http.js';
 import { mountSiteFileRoutes, SiteFileHttpError } from './site-file-http.js';
 import { SiteFileManagerError } from './site-file-manager.js';
 import { SiteFileWorkerError } from './site-file-worker.js';
@@ -775,7 +779,7 @@ export function createApp(allOptions = {}) {
       });
     }
   }
-  mountSiteCreateRoutes(app, {
+  const siteCreateDependencies = {
     registry: localRegistry,
     applicationRegistry,
     dockerWorkloadRegistry,
@@ -790,7 +794,15 @@ export function createApp(allOptions = {}) {
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
     websiteProvisioningRuntime,
     siteMutationLock,
-  });
+  };
+  mountSiteCreateRoutes(app, siteCreateDependencies);
+  if (options.apiKeyStore && options.tenantSiteStore && websiteProvisioningRuntime && localServerId) {
+    mountTenantSiteRoutes(app, { service: createTenantSiteService({
+      siteCreator: createLocalSiteCreator(siteCreateDependencies), provisioning: websiteProvisioningRuntime,
+      domainRegistry, store: options.tenantSiteStore, localServerId, publication: core.domainPublication, jobRegistry,
+      removal: websiteRemovalRuntime,
+    }) });
+  }
   if (websiteProvisioningRuntime) {
     mountWebsiteProvisioningRoutes(app, {
       registry: websiteProvisioningRuntime.registry,
@@ -1339,6 +1351,10 @@ export function createApp(allOptions = {}) {
   mountLogRoutes(app, {
     registry, applicationRegistry, jobRegistry, websiteRegistry, journalLogReader, nginxLogReader, jobLogStore, localServerId,
   });
+  if (options.apiKeyStore) {
+    mountAutomationRoutes(app);
+    mountApiKeyRoutes(app, { apiKeyStore: options.apiKeyStore, audit: options.auditStore ?? options.authStore?.audit ?? null });
+  }
   if (options.protectedPathAuthManager) {
     mountProtectedPathRoutes(app, { domainRegistry, protectedPathAuthManager: options.protectedPathAuthManager, localServerId,
       audit: options.auditStore ?? options.authStore?.audit ?? null });

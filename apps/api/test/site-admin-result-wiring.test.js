@@ -185,7 +185,9 @@ function createRealStoreFixture(t) {
 
 test('production app wires userAdminStore to mountSiteCreateRoutes', async () => {
   const source = await readFile(appUrl, 'utf8');
-  assert.match(source, /mountSiteCreateRoutes\(app,\s*\{[\s\S]*userAdminStore,/);
+  // The same dependencies also build the automation API's site creator.
+  assert.match(source, /const siteCreateDependencies = \{[^}]*userAdminStore,/);
+  assert.match(source, /mountSiteCreateRoutes\(app, siteCreateDependencies\);/);
 });
 
 test('site-create HTTP calls provisionSiteAdmin and separates siteAdmin outcome from site creation', async () => {
