@@ -3,7 +3,11 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 27-10-2026
-- **Güvenlik** — KRİTİK: müşteri/bayi/site yöneticisi sunucu loglarını, tüm posta kuyruğunu ve başka sitelerin uygulama/dağıtım loglarını okuyabiliyordu; kapatıldı.
+- **Güvenlik** — KRİTİK: site rolleri başka kiracıların DNS bölgelerini ve DNS sağlayıcı kimlik bilgisini görüp değiştirebiliyordu; kapatıldı.
+- **Güvenlik** — KRİTİK: site rolleri Owner bildirim geçmişini okuyup tercihlerini değiştirebiliyor, test e-postası gönderttirebiliyordu; kapatıldı.
+- **Güvenlik** — Parity adaptörü çalıştırma (istemci adlı metot) yalnız Owner'a açıldı.
+- **Altyapı** — 284 ucun yetki denetimi: `docs/guvenlik-denetimi-2026-10-27.md`.
+- **Güvenlik** — Derinlemesine savunma: sunucu logları, posta kuyruğu ve uygulama/dağıtım logları uç düzeyinde de kapsamlandı (site kaynak sınırı bunları zaten engelliyordu; ilk "kritik" değerlendirmesi düzeltildi).
 - **Özellik** — Smarthost: giden posta başka SMTP üzerinden (yalnız Owner, TLS zorunlu, parola şifreli); .28'de gerçek Postfix ile doğrulandı.
 - **Güvenlik** — KRİTİK: site log sayfası müşterilere sunucunun genel nginx logunu (başka sitelerin kayıtları) gösteriyordu; artık yalnız sitenin kendi dosyası.
 - **Hata** — Site log sayfasında hata logu hiç açılamıyordu (`kind` parametresi reddediliyordu).
