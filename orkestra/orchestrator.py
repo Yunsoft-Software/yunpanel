@@ -361,6 +361,8 @@ def main(argv):
         for agent, kind, what in slots():
             note = tasks.CFG["qa_jobs"].get(what, "") if kind == "QA" else ""
             print(f"{agent}  {kind:6} {what}{'  — ' + note if note else ''}")
+    elif cmd == "finding" and any(a.startswith("--") for a in argv[2:]):
+        sys.exit('finding takes positional arguments only: orchestrator.py finding "title" "detail" [file ...]')
     elif cmd == "finding" and len(argv) >= 4:
         print(finding(argv[2], argv[3], argv[4:]) or "zaten kayıtlı")
     else:
