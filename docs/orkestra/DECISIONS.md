@@ -51,3 +51,8 @@
 ## 2026-10-27 · Repodaki Owner parolası
 - **Bulgu:** Owner parolası 21-09-2026'dan beri `e2e/helpers.js` ve `e2e/panel.spec.js` içinde açık metindi ve GitHub'a gönderilmişti. Dosyalar artık parolayı ortam değişkeninden ya da `.local/yunpanel-owner-password-only.json`'dan okuyor.
 - **Açık:** Parola git geçmişinde kaldığı için `.28` Owner parolası değiştirilmeli ve yeni parola yalnız `.local` dosyasına yazılmalı (İNSAN).
+
+## 2026-10-27 · Gerçek Plesk (.44) için tek salt okunur istisna
+- **Karar:** Yalnız senior Claude, Plesk'te olup YunPanel'de olmayan özellikleri çıkarmak için gerçek Plesk paneline (`.44`) bakabilir. Erişim İNSAN'ın kendi açtığı ve giriş yaptığı tarayıcı oturumu üzerinden olur; Claude parola girmez, parola hiçbir dosyada saklanmaz. Yalnız menü, eklenti, ayar ekranı ve özellik listesi okunur; kaydet/uygula/sil/kur/oluştur yapılmaz, müşteri ve site verisi (ad, e-posta, içerik) not edilmez, SSH kullanılmaz.
+- **Junior ajanlar:** `.44` yasağı istisnasız sürer (PROJE.md).
+- **Onaylayan:** İNSAN

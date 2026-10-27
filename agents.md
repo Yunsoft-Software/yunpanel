@@ -57,7 +57,7 @@
 
 ### Değişmeyen güvenlik ve veri sınırları
 
-- `.44` ile biten Plesk sunucusuna SSH, salt okunur inceleme, test, deploy veya başka amaçla dokunulmaz. Canlı işlemler yalnız repo dışı `.local/test-server.env` içindeki açık izinli YunPanel test hedefinde ve adres teyidinden sonra yapılır.
+- `.44` ile biten Plesk sunucusuna SSH, salt okunur inceleme, test, deploy veya başka amaçla dokunulmaz. (27 Ekim 2026 tek istisna: yalnız senior Claude, İNSAN'ın kendi açtığı Plesk tarayıcı oturumunda, hiçbir şeyi değiştirmeden özellik envanteri için bakabilir; junior ajanlar için yasak aynen geçerlidir. Ayrıntı `docs/orkestra/DECISIONS.md`.) Canlı işlemler yalnız repo dışı `.local/test-server.env` içindeki açık izinli YunPanel test hedefinde ve adres teyidinden sonra yapılır.
 - React + JavaScript/JSX; TypeScript veya yeni paralel UI motoru eklenmez. Mevcut Node/npm gereksinimleri düşürülmez. Ubuntu mevcut ilk çalışma hedefidir; Windows eşdeğerliği ayrı adapter/kurulum/test hattıdır ve Ubuntu koduyla tamamlandı denmez.
 - Root yönetim yetkisi authenticated backend'dedir; frontend'e veya barındırılan siteye verilmez. Site build/runtime/cron/dosya/terminal dedicated site Unix kullanıcısında çalışır. Owner root terminali ile müşteri/site terminali ayrıdır.
 - Auth/session/CSRF, backend RBAC, WebSocket reauthorization, secret masking, izinli yerel host, preview/confirmation, resource lock, durable job, idempotency ve rollback korunur. Reseller kapsamını sadeleştirmek tenant izolasyonunu, audit veya oturum iptalini sadeleştirmek değildir.

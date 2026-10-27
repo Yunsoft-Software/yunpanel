@@ -25,7 +25,7 @@
 - `.28`'de rutin yedek/snapshot alınmaz (agents.md 11 Ekim kuralı).
 
 ## Yasak alanlar ve sınırlar
-- **`.44` ile biten Plesk sunucusuna hiçbir amaçla dokunulmaz.**
+- **`.44` ile biten Plesk sunucusuna hiçbir amaçla dokunulmaz.** Junior ajanlar (Antigravity ve diğerleri) için istisnası yoktur: tarayıcı, SSH, API, ping, DNS sorgusu dahil hiçbir erişim yapılmaz; görev bunu gerektiriyorsa `block` edilir. Tek istisna 2026-10-27 DECISIONS kaydındaki senior salt okunur incelemesidir.
 - Junior ajanlar **asla push etmez.** Push yalnız senior tarafından, İNSAN'ın açık onayıyla, yalnız bugünün aktif dalına ve yalnız `python3 orkestra/orchestrator.py push` ile yapılır (KURALLAR §6). Push isteği agents.md 25 Ekim §9 toplu test koşturmasını tetiklemez; komut gerekiyorsa `verify --quick` çalıştırır. `main`'e push, merge, force push ve geçmiş silme yok. GitHub Actions yok.
 - Deployment (paket kurulumu, `.28` dışında herhangi bir hedef) ayrı İNSAN onayı ister.
 - Parola, token, key, cookie, MFA ve private config repoya, loga, rapora veya ekran görüntüsüne yazılmaz.
