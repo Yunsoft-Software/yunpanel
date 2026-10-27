@@ -119,7 +119,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     await expect(page.locator('text=SFTP, SSH ve sistem kullanıcısı erişim parametreleri')).toBeVisible({ timeout: 10000 });
 
     // 4. İzolasyon rozetini doğrula
-    await expect(page.locator('text=Dedicated Unix kullanıcısı (İzole)')).toBeVisible({ timeout: 10000 });
+    await expect(page.locator('.ws-badge:has-text("Dedicated Unix kullanıcısı (İzole)")')).toBeVisible({ timeout: 10000 });
 
     // 5. KeyValues parametrelerini doğrula
     const dl = page.locator('dl.ws-keyvalues');
