@@ -122,7 +122,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     await expect(page.locator('.ws-badge:has-text("Dedicated Unix kullanıcısı (İzole)")')).toBeVisible({ timeout: 10000 });
 
     // 5. KeyValues parametrelerini doğrula
-    const dl = page.locator('dl.ws-keyvalues');
+    const dl = page.locator('dl.ws-keyvalues').first();
     await expect(dl).toBeVisible({ timeout: 10000 });
 
     // Protokol
