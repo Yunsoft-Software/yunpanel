@@ -2,7 +2,7 @@ import { Fragment, useEffect, useState } from 'react';
 import { Link, Navigate, useLocation, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, CollectionNotice, EmptyState, ErrorNotice, Icon, KeyValues, LinkButton, PageHeading, Section } from './PanelKit.jsx';
-import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, safeReturnHref, selectedApplication, siteHref, siteJobs, formatDate } from './site-model.js';
+import { SITE_TABS, certificateState, externalSiteUrl, matchingApplications, normalizeSiteTab, parentTrail, safeReturnHref, selectedApplication, siteHref, siteJobs, formatDate, domainTargetLabel } from './site-model.js';
 import { ApplicationOperations, SslOperations } from './SiteOperations.jsx';
 import DomainOperations from './DomainOperations.jsx';
 import DomainHostingPanel from './DomainHostingPanel.jsx';
@@ -198,7 +198,7 @@ function SiteWorkspace({ websiteId, tab }) {
         </Section>
         <Section title="Yayın ve uygulama ayrıntıları" actions={application ? <Link to={siteHref(domain.id, 'node')}>Uygulama yönetimi</Link> : <Link to={siteHref(domain.id, 'ssl')}>SSL yönetimi</Link>}>
           <KeyValues items={[
-            ['Yayın hedefi', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
+            ['Yayın hedefi', domainTargetLabel(domain)],
             ['Uygulama', application?.name ?? (matches.length > 1 ? 'Uygulama bölümünden hedef seçin' : 'Bağlı uygulama yok')],
             ['Sistem kullanıcısı', website?.unixUser ?? '—'],
             ['SSL Durumu', ssl.label],

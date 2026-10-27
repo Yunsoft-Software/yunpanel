@@ -1,5 +1,5 @@
 import { DomainAliasError, aliasDomainFingerprint, aliasDomainSnapshot, refreshAliasPublication } from './domain-alias-model.js';
-import { HOSTING_SETTING_FIELDS, hostingSettingsChanges, hostingDraftValues, hostingValuesEqual } from './domain-hosting-model.js';
+import { hostingFields, hostingSettingsChanges, hostingDraftValues, hostingValuesEqual } from './domain-hosting-model.js';
 
 // State only: no persistence, authorization, HTTP requests or publishing here.
 export function createHostingForm(domain) {
@@ -10,8 +10,8 @@ export function hostingFormDirty(form) {
   return Boolean(form?.base) && !hostingValuesEqual(form.values, hostingDraftValues(form.base));
 }
 export function editHostingForm(form, field, value) {
-  if (!form?.base || !HOSTING_SETTING_FIELDS.includes(field)
-    || (field === 'nginxSettings' ? !value || typeof value !== 'object' || Array.isArray(value) : typeof value !== 'boolean')) {
+  if (!form?.base || !hostingFields(form.base.targetType).includes(field)
+    || (['nginxSettings', 'target'].includes(field) ? !value || typeof value !== 'object' || Array.isArray(value) : typeof value !== 'boolean')) {
     throw new DomainAliasError('hosting_draft_invalid', 'Barındırma ayarı doğrulanamadı.');
   }
   return { ...form, values: { ...form.values, [field]: structuredClone(value) } };
@@ -50,7 +50,7 @@ export function reloadHostingForm(form, domain, expected) {
   // Preserve only the user's changed fields. Untouched settings follow the new
   // record, so reloading must not silently revert another operator's changes.
   const previous = form?.base ? hostingDraftValues(form.base) : null;
-  for (const key of HOSTING_SETTING_FIELDS.filter(key => key !== 'nginxSettings')) {
+  for (const key of hostingFields(next.base.targetType).filter(key => key !== 'nginxSettings')) {
     if (previous && !hostingValuesEqual(form.values[key], previous[key])) next.values[key] = form.values[key];
   }
   // Optional fields absent from the reloaded record must not drop the user's draft of them.

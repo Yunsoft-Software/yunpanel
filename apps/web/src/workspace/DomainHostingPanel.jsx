@@ -11,6 +11,7 @@ import { createDomainHostingClient } from './domain-hosting-client.js';
 import { createHostingForm, editHostingForm, hostingFormDirty, hostingWriteBlock, refreshHostingForm, reloadHostingForm } from './domain-hosting-form.js';
 import NginxSettingsFields from './NginxSettingsFields.jsx';
 import ProtectedPathUsers from './ProtectedPathUsers.jsx';
+import RedirectTargetFields from './RedirectTargetFields.jsx';
 
 export const JAMSTACK_FRAMEWORK_PRESETS = [
   { id: 'nextjs', label: 'Next.js', path: '/api', innerPort: '3000', outerPort: '127.0.0.1:13000', websocket: true },
@@ -295,6 +296,8 @@ function HostingForm({ domain, generation }) {
         {notice && <div className="ws-notice" role="status">{notice}</div>}
         {blocked && <p className="ws-notice ws-notice-warn" role="status">{blocked}</p>}
         {form && <form className="ws-form" onSubmit={save} aria-describedby={hintId}>
+          {form.base.targetType === 'redirect' ? <RedirectTargetFields target={form.values.target}
+            disabled={busy || !canManage || form.base.state === 'suspended'} onChange={value => edit('target', value)} /> : <>
           <label className="ws-check"><input type="checkbox" checked={form.values.httpsRedirect}
             disabled={busy || !canManage || form.base.state === 'suspended' || (form.base.httpsMode !== 'managed' && !form.values.httpsRedirect)}
             onChange={(event) => edit('httpsRedirect', event.target.checked)} />HTTP → HTTPS yönlendirmesi</label>
@@ -307,12 +310,13 @@ function HostingForm({ domain, generation }) {
             && <p className="ws-notice ws-notice-warn">SSL sertifikası bağlı değil. Bu tercihin kaydedilmesi HTTPS erişiminin hazır olduğunu göstermez.</p>}
           <NginxSettingsFields domainNames={[form.base.primaryDomain, ...form.base.aliases]} targetType={form.base.targetType} settings={form.values.nginxSettings}
             disabled={busy || !canManage || form.base.state === 'suspended'} onChange={value => edit('nginxSettings', value)} />
+          </>}
           <div className="ws-actions">
             <Button type="submit" variant="primary" disabled={busy || Boolean(blocked) || (!dirty && !pendingPublication)}>{busy ? 'Ayarlar uygulanıyor…' : 'Kaydet ve uygula'}</Button>
             <Button disabled={busy || !canManage || !dirty} onClick={reset}>Değişiklikleri iptal et</Button>
           </div>
         </form>}
-        {form && <ProtectedPathUsers domainId={domain.id} savedPaths={form.base.nginxSettings.protectedPaths}
+        {form && form.base.targetType !== 'redirect' && <ProtectedPathUsers domainId={domain.id} savedPaths={form.base.nginxSettings.protectedPaths}
           disabled={busy || !canManage || form.base.state === 'suspended'} />}
         {busy && <p role="status">{progress?.phase === 'stage' ? 'Yapılandırma kontrol ediliyor…' : progress?.phase === 'activate' ? 'Ayarlar siteye uygulanıyor…' : 'Ayarlar kaydediliyor…'}</p>}
         <div className="ws-actions"><Badge state={pendingPublication ? 'staged' : 'active'}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında (Güncel)'}</Badge></div>

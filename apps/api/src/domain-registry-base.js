@@ -8,15 +8,17 @@ import {
   normalizeDomainSet,
   normalizeNginxSettings,
   normalizeProxyHost,
+  normalizeRedirectTarget,
+  RedirectTargetValidationError,
 } from '@yunpanel/shared';
 import { DomainHierarchyError, validateDomainHierarchy, validateDomainParent } from './domain-hierarchy.js';
 import { operationErrorDiagnosis } from './operation-diagnosis.js';
 
 const STORE_VERSION = 4;
-const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php', 'python']);
+const TARGET_TYPES = new Set(['static', 'proxy', 'passenger', 'php', 'python', 'redirect']);
 const HTTPS_MODES = new Set(['off', 'managed']);
 const DOMAIN_STATES = new Set(['draft', 'staged', 'active', 'suspended', 'error']);
-const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
+const UPDATE_FIELDS = new Set(['primaryDomain', 'aliases', 'httpsMode', 'httpsRedirect', 'canonicalRedirect', 'nginxSettings', 'target']);
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 
 export class DomainRegistryError extends Error {
@@ -150,8 +152,15 @@ function publicDomain(domain) {
 }
 
 function validateTarget(targetType, target) {
-  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy, passenger, php or python');
+  if (!TARGET_TYPES.has(targetType)) throw new DomainRegistryError('invalid_target_type', 'targetType must be static, proxy, passenger, php, python or redirect');
   if (!target || typeof target !== 'object' || Array.isArray(target)) throw new DomainRegistryError('invalid_target', 'target must be an object');
+  if (targetType === 'redirect') {
+    try { return normalizeRedirectTarget(target); }
+    catch (error) {
+      if (error instanceof RedirectTargetValidationError) throw new DomainRegistryError(error.code, error.message);
+      throw error;
+    }
+  }
   if (targetType === 'static') {
     if (typeof target.root !== 'string' || target.root.length < 2 || target.root.length > 500 || /[\u0000-\u001f\u007f]/.test(target.root)) {
       throw new DomainRegistryError('invalid_static_root', 'Static target root is invalid');
@@ -212,6 +221,13 @@ function settingsFromTarget(targetType, target) {
   if (targetType === 'proxy' || targetType === 'python') return settings(targetType, { websocket: target?.websocket !== false });
   if (targetType === 'static') return settings(targetType, { spaFallback: target?.spaFallback !== false });
   return settings(targetType, {});
+}
+
+// A forwarding Domain that points at one of its own names would loop forever.
+function assertNoRedirectLoop(targetType, target, names) {
+  if (targetType === 'redirect' && names.includes(new URL(target.url).hostname)) {
+    throw new DomainRegistryError('redirect_loop', 'A Domain cannot forward to one of its own names');
+  }
 }
 
 function targetWithSettings(targetType, target, nginxSettings) {
@@ -352,6 +368,12 @@ function normalizedUpdate(domain, changes) {
   if (nginxSettings.preferredDomain != null && ![names.primary, ...names.aliases].includes(nginxSettings.preferredDomain)) {
     throw new DomainRegistryError('nginx_preferred_domain_unbound', 'Preferred Domain must already belong to this Website', 409);
   }
+  // Only a forwarding Domain changes its target here; other targets follow their Website.
+  if (Object.hasOwn(changes, 'target') && domain.targetType !== 'redirect') {
+    throw new DomainRegistryError('invalid_domain_update', 'Only a forwarding Domain can change its target');
+  }
+  const target = domain.targetType === 'redirect' ? validateTarget('redirect', changes.target ?? domain.target) : null;
+  assertNoRedirectLoop(domain.targetType, target, [names.primary, ...names.aliases]);
   return Object.freeze({
     primaryDomain: names.primary,
     aliases: Object.freeze([...names.aliases]),
@@ -359,6 +381,7 @@ function normalizedUpdate(domain, changes) {
     httpsRedirect,
     canonicalRedirect,
     nginxSettings,
+    ...(target ? { target } : {}),
   });
 }
 
@@ -523,7 +546,8 @@ export function createDomainRegistry({
       || next.httpsRedirect !== domain.httpsRedirect
       || next.canonicalRedirect !== domain.canonicalRedirect;
     const settingsChanged = JSON.stringify(next.nginxSettings) !== JSON.stringify(domain.nginxSettings);
-    if (!hostnameChanged && !policyChanged && !settingsChanged) {
+    const targetChanged = next.target !== undefined && JSON.stringify(next.target) !== JSON.stringify(domain.target);
+    if (!hostnameChanged && !policyChanged && !settingsChanged && !targetChanged) {
       throw new DomainRegistryError('domain_update_no_changes', 'Domain already has the requested routing settings', 409);
     }
     if (hostnameChanged) {
@@ -558,6 +582,7 @@ export function createDomainRegistry({
         hostnameChanged,
         policyChanged,
         settingsChanged,
+        ...(next.target !== undefined ? { targetChanged } : {}),
         nginxSettings: Object.freeze({
           current: Object.freeze({
             ...domain.nginxSettings,
@@ -623,7 +648,7 @@ export function createDomainRegistry({
       ...preview.next.nginxSettings,
       headers: preview.next.nginxSettings.headers.map((header) => ({ ...header })),
     };
-    domain.target = targetWithSettings(domain.targetType, domain.target, domain.nginxSettings);
+    domain.target = targetWithSettings(domain.targetType, preview.next.target ?? domain.target, domain.nginxSettings);
     if (preview.impact.certificate.detached) domain.certificateId = null;
     domain.desiredRevision = preview.nextRevision;
     domain.stagedRevision = 0;
@@ -655,7 +680,7 @@ export function createDomainRegistry({
     })();
 
     const normalizedWebsiteId = await requireWebsiteBinding(websiteId, serverId);
-    if (normalizedWebsiteId === null && websiteBindingRequired() === true) {
+    if (normalizedWebsiteId === null && targetType !== 'redirect' && websiteBindingRequired() === true) {
       throw new DomainRegistryError('website_binding_required', 'New managed domains require an explicit Website binding', 409);
     }
     const normalized = normalizeDomains(primaryDomain, aliases);
@@ -670,6 +695,7 @@ export function createDomainRegistry({
     if (conflict) throw new DomainRegistryError('domain_conflict', 'A domain or alias is already managed', 409);
 
     const normalizedTarget = validateTarget(targetType, target);
+    assertNoRedirectLoop(targetType, normalizedTarget, [...requestedNames]);
     if (['passenger', 'php', 'python'].includes(targetType) && normalizedWebsiteId === null) {
       throw new DomainRegistryError(`${targetType}_website_binding_required`, `${targetType === 'php' ? 'PHP' : targetType === 'python' ? 'Python' : 'Passenger'} Domain targets require an explicit Website binding`, 409);
     }

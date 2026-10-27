@@ -55,6 +55,8 @@ export {
   stableHexKey,
 } from './nginx-settings.js';
 
+export { normalizeRedirectTarget, RedirectTargetValidationError } from './redirect-target.js';
+
 export {
   DEFAULT_APP_SERVER,
   DEFAULT_PYTHON_VERSION,

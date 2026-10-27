@@ -5,6 +5,7 @@ export {
   renderPhpSiteConfig,
   renderProxySiteConfig,
   renderPythonSiteConfig,
+  renderRedirectSiteConfig,
   renderStaticSiteConfig,
 } from './nginx.js';
 

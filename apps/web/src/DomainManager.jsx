@@ -4,7 +4,7 @@ import DomainList from './DomainList.jsx';
 import { domainCreatePayload } from './domain-form.js';
 import { panelRequest, waitForJob } from './api.js';
 
-const initialForm = { mode: 'domain', parentDomainId: '', prefix: '', primaryDomain: '', aliases: '', targetType: 'proxy', targetValue: '4301', httpsMode: 'off' };
+const initialForm = { mode: 'domain', parentDomainId: '', prefix: '', primaryDomain: '', aliases: '', targetType: 'proxy', targetValue: '4301', redirectStatus: 301, preservePath: true, httpsMode: 'off' };
 
 export default function DomainManager({ domains, domainAccess, certificates, certificateAccess, servers, onChanged }) {
   const [form, setForm] = useState(initialForm);
@@ -165,8 +165,12 @@ export default function DomainManager({ domains, domainAccess, certificates, cer
               <label>Primary domain<input ref={nameInput} value={form.primaryDomain} placeholder="example.com" required onChange={(event) => update('primaryDomain', event.target.value)} /></label>
             </>}
             <label>Aliases, comma separated<input value={form.aliases} onChange={(event) => update('aliases', event.target.value)} /><span className="domain-form-hint">Aliases share this target; they are not independent subdomains.</span></label>
-            <label>Target type<select value={form.targetType} onChange={(event) => setForm((current) => ({ ...current, targetType: event.target.value, targetValue: event.target.value === 'proxy' ? '4301' : '' }))}><option value="proxy">Loopback proxy</option><option value="static">Static root</option></select></label>
-            <label>{form.targetType === 'proxy' ? 'Upstream port' : 'Absolute web root'}<input type={form.targetType === 'proxy' ? 'number' : 'text'} min={form.targetType === 'proxy' ? 1024 : undefined} max={form.targetType === 'proxy' ? 65535 : undefined} value={form.targetValue} required onChange={(event) => update('targetValue', event.target.value)} /></label>
+            <label>Target type<select value={form.targetType} onChange={(event) => setForm((current) => ({ ...current, targetType: event.target.value, targetValue: event.target.value === 'proxy' ? '4301' : '' }))}><option value="proxy">Loopback proxy</option><option value="static">Static root</option><option value="redirect">Yönlendirme</option></select></label>
+            <label>{form.targetType === 'proxy' ? 'Upstream port' : form.targetType === 'redirect' ? 'Hedef adres' : 'Absolute web root'}<input type={form.targetType === 'proxy' ? 'number' : form.targetType === 'redirect' ? 'url' : 'text'} placeholder={form.targetType === 'redirect' ? 'https://yeni-alan.com' : undefined} min={form.targetType === 'proxy' ? 1024 : undefined} max={form.targetType === 'proxy' ? 65535 : undefined} value={form.targetValue} required onChange={(event) => update('targetValue', event.target.value)} /></label>
+            {form.targetType === 'redirect' && <>
+              <label>Yönlendirme türü<select value={form.redirectStatus} onChange={(event) => update('redirectStatus', Number(event.target.value))}><option value={301}>Kalıcı (301)</option><option value={302}>Geçici (302)</option></select></label>
+              <label className="domain-form-check"><input type="checkbox" checked={form.preservePath} onChange={(event) => update('preservePath', event.target.checked)} />Yolu koru</label>
+            </>}
             <label>HTTPS<select value={form.httpsMode} onChange={(event) => update('httpsMode', event.target.value)}><option value="off">Off</option><option value="managed">Managed</option></select></label>
             <button className="primary-button" type="submit" disabled={servers.length !== 1 || (isSubdomain && !parent)}>{busyId === 'create' ? 'Creating…' : isSubdomain ? 'Create subdomain' : 'Create domain'}</button>
           </fieldset>

@@ -7,6 +7,8 @@ const TARGET_FIELDS = Object.freeze({
   static: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'spaFallback', 'staticAssetCacheSeconds']),
   passenger: new Set([...COMMON_FIELDS]),
   php: new Set([...COMMON_FIELDS, ...FILE_FIELDS, 'staticAssetCacheSeconds']),
+  // A forwarding-only Domain serves nothing, so path rules, auth and compression do not apply.
+  redirect: new Set(['clientMaxBodySizeMb', 'headers']),
 });
 const BLOCKED_HEADERS = new Set([
   'cache-control',
@@ -214,7 +216,7 @@ function defaults(targetType) {
       headers: Object.freeze([]),
     };
   }
-  if (targetType === 'passenger' || targetType === 'php') {
+  if (targetType === 'passenger' || targetType === 'php' || targetType === 'redirect') {
     return {
       clientMaxBodySizeMb: null,
       headers: Object.freeze([]),

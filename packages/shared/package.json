@@ -5,7 +5,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.js",
-    "./nginx-settings": "./src/nginx-settings.js"
+    "./nginx-settings": "./src/nginx-settings.js",
+    "./redirect-target": "./src/redirect-target.js"
   },
   "scripts": {
     "test": "node --test"

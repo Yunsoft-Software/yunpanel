@@ -1,5 +1,5 @@
 import path from 'node:path';
-import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, stableHexKey } from '@yunpanel/shared';
+import { formatProxyHostForUrl, normalizeDomainSet, normalizeNginxSettings, normalizeRedirectTarget, stableHexKey } from '@yunpanel/shared';
 import { renderPassengerNodeDirectives } from './passenger-nginx.js';
 
 const SAFE_PATH = /^\/[A-Za-z0-9._/-]+$/;
@@ -417,6 +417,32 @@ export function renderPhpSiteConfig({
   const body = `${settings.documentRoot ? `  disable_symlinks on from=${safeRoot};\n` : ''}${phpBody({ root: scopedRoot, socketPath: safeSocket, nginxSettings: settings })}`;
   return renderServerSet({
     primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizedTls, body, canonicalRedirect, httpsRedirect, nginxSettings: settings, accessLogPath, errorLogPath,
+  });
+}
+
+// Forwarding-only Domain: every name answers with one redirect; only ACME is served.
+// HTTP forwards directly too, because a detour through HTTPS on the same host adds a hop.
+export function renderRedirectSiteConfig({
+  primaryDomain,
+  aliases = [],
+  acmeOnlyHostnames = [],
+  mailDiscoverySocketPath = null,
+  target,
+  acmeRoot = '/var/lib/yunpanel/acme',
+  tls = null,
+  nginxSettings = undefined,
+  accessLogPath = undefined,
+  errorLogPath = undefined,
+}) {
+  let forward;
+  try { forward = normalizeRedirectTarget(target); }
+  catch (error) { throw new NginxTemplateError(error.code ?? 'invalid_redirect_target', error.message); }
+  const settings = normalizeNginxSettings('redirect', nginxSettings ?? {});
+  const renderedHeaders = headerLines(settings.headers);
+  const body = `  location / {${renderedHeaders ? `\n${renderedHeaders}` : ''}\n    return ${forward.status} ${forward.url}${forward.preservePath ? '$request_uri' : ''};\n  }`;
+  return renderServerSet({
+    primaryDomain, aliases, acmeOnlyHostnames, mailDiscoverySocketPath, acmeRoot, tls: normalizeTls(tls), body,
+    canonicalRedirect: false, httpsRedirect: false, nginxSettings: settings, accessLogPath, errorLogPath,
   });
 }
 

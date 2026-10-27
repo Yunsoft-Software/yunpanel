@@ -7,7 +7,7 @@ import { createSslRequestDraft, sslContactEmail, sslDraftDirty, sslDraftKey, ssl
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, FileRootBadge, KeyValues, LinkButton, Section } from './PanelKit.jsx';
 import { resolveSubdomainSharedFileRoot } from './new-website-form.js';
-import { certificateState, formatDate, siteHref } from './site-model.js';
+import { certificateState, formatDate, siteHref, domainTargetLabel } from './site-model.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import SslRenewalPanel from './SslRenewalPanel.jsx';
 
@@ -181,7 +181,7 @@ export function DomainOperations({ domain }) {
     <div className="ws-section-body"><div className="ws-actions"><Badge state={pendingPublication ? 'staged' : domain.state}>{pendingPublication ? 'Yayına uygulanmayı bekliyor' : 'Yayında'}</Badge><Button variant="primary" disabled={locked || !pendingPublication} onClick={applyPublication}>Yayına uygula</Button></div><ErrorNotice error={operation.error} /></div>
     <KeyValues items={[
       ['Alan adı', domain.primaryDomain], ['Aliaslar', domain.aliases?.join(', ') || 'Yok'],
-      ['Hedef', domain.targetType === 'static' ? domain.target?.root : `127.0.0.1:${domain.target?.upstreamPort ?? '—'}`],
+      ['Hedef', domainTargetLabel(domain)],
       ['HTTPS tercihi', domain.httpsMode === 'managed' ? 'Yönetilen sertifika' : 'Kapalı'],
       ['Yayın durumu', !pendingPublication ? 'Yayında (Güncel)' : 'Yapılandırma yayına uygulanmayı bekliyor'],
       ['Son etkinleştirme', formatDate(domain.lastAppliedAt)],

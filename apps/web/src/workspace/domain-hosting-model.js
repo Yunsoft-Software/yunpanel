@@ -1,11 +1,14 @@
 import { DomainAliasError, aliasDomainSnapshot, sameAliases } from './domain-alias-model.js';
 import { normalizeNginxSettings } from '@yunpanel/shared/nginx-settings';
+import { normalizeRedirectTarget } from '@yunpanel/shared/redirect-target';
 
 // Routing identities and certificates remain outside this settings form.
 export const HOSTING_SETTING_FIELDS = Object.freeze(['httpsRedirect', 'canonicalRedirect', 'nginxSettings']);
+// A forwarding-only Domain also edits its target here.
+export const hostingFields = (targetType) => targetType === 'redirect' ? [...HOSTING_SETTING_FIELDS, 'target'] : HOSTING_SETTING_FIELDS;
 const POLICY_FIELDS = ['httpsRedirect', 'canonicalRedirect'];
 const SHA256 = /^[a-f0-9]{64}$/;
-const LABELS = Object.freeze({ httpsRedirect: 'HTTP → HTTPS', canonicalRedirect: 'Ek adları ana alan adına yönlendir', nginxSettings: 'Web sunucusu ayarları' });
+const LABELS = Object.freeze({ httpsRedirect: 'HTTP → HTTPS', canonicalRedirect: 'Ek adları ana alan adına yönlendir', nginxSettings: 'Web sunucusu ayarları', target: 'Yönlendirme hedefi' });
 const object = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
 function stable(value) {
   if (Array.isArray(value)) return value.map(stable);
@@ -20,12 +23,17 @@ function nginxSettings(domain, value) {
   try { return normalizeNginxSettings(domain.targetType, input); }
   catch { fail('hosting_draft_invalid', 'Web sunucusu ayarlarını kontrol edin. Başlangıç dosyaları benzersiz olmalı; hata sayfaları site içindeki HTML dosyalarına gitmeli ve başlangıç dosyasıyla aynı olmamalı. Sayılar belirtilen aralıkta, başlık adları benzersiz ve değerleri tek satır olmalı. Yönlendirmede kaynak / ile başlamalı, hedef site içi yol veya http(s) adresi olmalı.'); }
 }
+function redirectTarget(value) {
+  try { return normalizeRedirectTarget(value); }
+  catch { fail('hosting_draft_invalid', 'Yönlendirme hedefi http(s) ile başlayan geçerli bir adres olmalı; yol korunurken adreste ? kullanılamaz.'); }
+}
 export function hostingDraftValues(domain) {
   return { httpsRedirect: domain.httpsRedirect, canonicalRedirect: domain.canonicalRedirect,
-    nginxSettings: structuredClone(nginxSettings(domain, domain.nginxSettings)) };
+    nginxSettings: structuredClone(nginxSettings(domain, domain.nginxSettings)),
+    ...(domain.targetType === 'redirect' ? { target: { ...redirectTarget(domain.target) } } : {}) };
 }
 export function hostingExpectedDomain(base, changes, nextRevision) {
-  const next = { ...base, ...changes, desiredRevision: nextRevision, target: { ...base.target } };
+  const next = { ...base, ...changes, desiredRevision: nextRevision, target: { ...(changes.target ?? base.target) } };
   if (base.targetType === 'static') next.target.spaFallback = next.nginxSettings.spaFallback;
   if (['proxy', 'python'].includes(base.targetType)) next.target.websocket = next.nginxSettings.websocket;
   return next;
@@ -43,21 +51,26 @@ export function hostingSettingsFromDomain(domain) {
 }
 export function hostingSettingsChanges(domain, draft) {
   const base = baseRecord(domain);
-  if (!object(draft) || Object.keys(draft).length !== HOSTING_SETTING_FIELDS.length
-    || Object.keys(draft).some((key) => !HOSTING_SETTING_FIELDS.includes(key))
-    || HOSTING_SETTING_FIELDS.some((key) => !Object.hasOwn(draft, key))
+  const fields = hostingFields(base.targetType);
+  if (!object(draft) || Object.keys(draft).length !== fields.length
+    || Object.keys(draft).some((key) => !fields.includes(key))
+    || fields.some((key) => !Object.hasOwn(draft, key))
     || POLICY_FIELDS.some((key) => typeof draft[key] !== 'boolean')) {
     fail('hosting_draft_invalid', 'Barındırma formundaki yönlendirme ve web sunucusu ayarlarını kontrol edin.');
   }
   if (draft.httpsRedirect && base.httpsMode !== 'managed') {
     fail('invalid_redirect_policy', 'HTTP → HTTPS yönlendirmesinden önce SSL/TLS ekranında HTTPS yapılandırın.');
   }
-  const values = { ...draft, nginxSettings: nginxSettings(base, draft.nginxSettings) };
+  const values = { ...draft, nginxSettings: nginxSettings(base, draft.nginxSettings),
+    ...(base.targetType === 'redirect' ? { target: redirectTarget(draft.target) } : {}) };
+  if (values.target && [base.primaryDomain, ...base.aliases].includes(new URL(values.target.url).hostname)) {
+    fail('hosting_draft_invalid', 'Alan adı kendi adlarından birine yönlendirilemez.');
+  }
   if (values.nginxSettings.preferredDomain != null && ![base.primaryDomain, ...base.aliases].includes(values.nginxSettings.preferredDomain)) {
     fail('hosting_draft_invalid', 'Tercih edilen alan adı önce bu siteye bağlanmalıdır.');
   }
   const previous = hostingDraftValues(base);
-  const changes = Object.fromEntries(HOSTING_SETTING_FIELDS.filter((key) => !hostingValuesEqual(values[key], previous[key])).map((key) => [key, values[key]]));
+  const changes = Object.fromEntries(fields.filter((key) => !hostingValuesEqual(values[key], previous[key])).map((key) => [key, values[key]]));
   if (!Object.keys(changes).length) fail('hosting_no_changes', 'Kaydedilecek bir değişiklik yok.');
   return Object.freeze(changes);
 }
@@ -87,6 +100,8 @@ export function validateHostingSettingsPreview(domain, draft, preview) {
     || !hostingValuesEqual(preview.next.nginxSettings, expected.nginxSettings)
     || preview.impact?.hostnameChanged !== false || preview.impact?.policyChanged !== POLICY_FIELDS.some(key => Object.hasOwn(changes, key))
     || preview.impact?.settingsChanged !== Object.hasOwn(changes, 'nginxSettings') || preview.impact?.requiresStageAndActivation !== true
+    || (base.targetType === 'redirect' && (!hostingValuesEqual(preview.next.target, expected.target)
+      || preview.impact?.targetChanged !== Object.hasOwn(changes, 'target')))
     || preview.impact?.certificate?.id !== base.certificateId || preview.impact?.certificate?.detached !== false) {
     fail('hosting_response_invalid', 'Sunucunun önizlemesi seçilen site ve yönlendirme tercihleriyle eşleşmiyor.');
   }

@@ -13,6 +13,8 @@ function mismatch(message = 'Domain routing target does not match the bound Webs
 function websiteTargetMatches(website, targetType, target) {
   if (!website || typeof website !== 'object' || typeof website.runtimeType !== 'string') return true;
   const normalized = domainRegistryInternals.validateTarget(targetType, target);
+  // Any Website may own a forwarding-only name (old domain → its site).
+  if (targetType === 'redirect') return true;
 
   if (website.runtimeType === 'static') {
     if (targetType !== 'static' || normalized.root !== website.documentRoot) {
