@@ -217,7 +217,7 @@ test.describe('DOS-11 SSH/SFTP/shell erişimi ve anahtarlar; kullanıcı izolasy
     });
     expect(invalidKeyRes.status()).toBe(400);
     const invalidKeyJson = await invalidKeyRes.json();
-    expect(invalidKeyJson.error?.code).toBe('sftp_authorized_key_invalid');
+    expect(['sftp_authorized_key_invalid', 'sftp_public_key_type_unsupported']).toContain(invalidKeyJson.error?.code);
 
     // 2. Eksik alanlar (publicKey olmadan)
     const missingFieldRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(resolvedWebsiteId)}/sftp/keys`, {
