@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { apiKeyActor } from './api-key-actor.js';
 
 // One-call tenant sites for the automation API: <slug>.<key's parent Domain> proxied to
 // a loopback port inside the key's range. It reuses the panel's own site-create and
@@ -46,8 +47,8 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     return parent;
   }
 
-  // Provisioning acts for the Owner who created the key; the key's scope was checked before.
-  const actorFor = (key) => Object.freeze({ sessionId: operationIdFor(`api-key:${key.id}`), userId: key.createdBy, role: 'owner' });
+  // Provisioning acts for the Owner who created the key; host jobs re-check it (api-key-actor.js).
+  const actorFor = apiKeyActor;
 
   async function advance(record, key, limit) {
     let operation = await provisioning.get(record.operationId);

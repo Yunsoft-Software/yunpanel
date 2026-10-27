@@ -1,3 +1,4 @@
+import { createApiKeyActorAuthorizer } from './api-key-actor.js';
 import { createApiKeyStore } from './api-key-store.js';
 import { createAutomationHandler } from './automation-http.js';
 import { createTenantSiteStore } from './tenant-site-store.js';
@@ -380,11 +381,14 @@ const websitePhpToolsService = createWebsitePhpToolsService({
   phpFpmSiteManager: createPhpFpmSiteManager(),
   withApplicationLock: siteMutationLock.withApplicationLock,
 });
+// Assigned once the key and tenant stores exist; an automation actor has no panel session.
+let authorizeApiKeyActor = async () => null;
 const authorizeWebsitePhpActor = async (actor, websiteId) => {
   if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
     || !['owner', 'site_manager', 'reseller', 'customer'].includes(actor.role)) return null;
   const session = authStore.getSessionById(actor.sessionId);
-  if (!session || session.user.id !== actor.userId) return null;
+  if (!session) return authorizeApiKeyActor(actor, websiteId);
+  if (session.user.id !== actor.userId) return null;
   if (session.user.active === false) return null;
   const validRole = session.user.role === actor.role
     || (session.user.role === 'site_manager' && ['reseller', 'customer'].includes(actor.role));
@@ -398,7 +402,8 @@ const authorizeWebsiteRemovalActor = async (actor, websiteId = null) => {
   if (!actor || typeof actor.sessionId !== 'string' || typeof actor.userId !== 'string'
     || !['owner', 'site_manager', 'reseller', 'customer'].includes(actor.role)) return null;
   const session = authStore.getSessionById(actor.sessionId);
-  if (!session || session.user.id !== actor.userId) return null;
+  if (!session) return authorizeApiKeyActor(actor, websiteId);
+  if (session.user.id !== actor.userId) return null;
   if (session.user.active === false) return null;
   const validRole = session.user.role === actor.role
     || (session.user.role === 'site_manager' && ['reseller', 'customer'].includes(actor.role));
@@ -712,6 +717,8 @@ const apiKeyStore = createApiKeyStore({
 const tenantSiteStore = createTenantSiteStore({
   filePath: process.env.YUNPANEL_TENANT_SITE_STORE ?? path.join(controlPlaneStateRoot, 'tenant-sites.json'),
 });
+authorizeApiKeyActor = createApiKeyActorAuthorizer({ apiKeyStore, tenantSiteStore, ownerMfaRequired,
+  getAutomationUser: (userId) => authStore.getAutomationUser(userId), mfaEnabled: (userId) => authStore.mfa.enabled(userId) });
 const databaseManager = createDatabaseManager();
 registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
