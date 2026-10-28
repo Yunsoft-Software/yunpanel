@@ -105,3 +105,4 @@
 - 2026-10-27 16:40 orchestrator: verify 26e1f9e5..ed3c233a: ok, yeniden açılan -, bulgu -
 - 2026-10-27 16:45 orchestrator: verify ed3c233a..7d96cc60: failed, yeniden açılan -, bulgu ['T810']
 - 2026-10-27 16:53 orchestrator: verify ed3c233a..0b8df9ca: ok, yeniden açılan -, bulgu -
+- 2026-10-28 11:07 orchestrator: verify 0b8df9ca..fd99aca2: failed, yeniden açılan -, bulgu ['T814']

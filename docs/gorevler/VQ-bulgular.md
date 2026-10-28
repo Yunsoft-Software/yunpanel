@@ -406,3 +406,58 @@
     28-10-2026 son npm test --workspace @yunpanel/api sonucu 5314/5316: website-site-logs.test.js satır 62 ve 76 testleri entries [] döndüğü için başarısız. Testin line() fonksiyonu sabit 27/Oct/2026 10:00 +0300 satırları üretiyor; gerçek normalizeLogQuery varsayılan son 24 saati uygular. Tarih değişiminden bağımsız, açık since/until aralığıyla mevcut gerçek HTTP ve gerçek dosya okuyucu testlerini düzelt; beklentiyi gevşetme veya ürünün 24 saat filtresini kaldırma. Tarih sınırı senaryosunu da koru. Anahtar testindeki base64url underscore ayrıştırma hatası 9ab0622b içinde düzeltildi; o hatayı tekrar açma. Mock/stub ekleme. İlgili testler ve verify --quick yeşil kanıtlanmalı.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T814 · Doğrulama: test — a customer reads only the access log of their own site, never the server-wide ngin
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-10-28 11:07
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - a customer reads only the access log of their own site, never the server-wide nginx log
+    - the served hostname decides the file: a preferred www name reads www.<domain>.access.log
+    
+    without allocating a localhost port (0.850625ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (2.297833ms)
+    ✔ normalizes complete Node deployment specs (1.306584ms)
+    ✔ normalizes fixed Node process actions against a managed release (0.894792ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (4.955125ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (3.271334ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (8.227708ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (23.173292ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (4.17475ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (3.963959ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (1.828375ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (1.492417ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.279666ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.738542ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (3.216583ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (2.215333ms)
+    ✔ normalizes python rollback, restart, and status specs (0.951667ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (7.272916ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (1.033792ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (1.861834ms)
+    ✔ tenant constants and role classification predicates (3.085042ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (2.013834ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (1.892416ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (3.540542ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.421625ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.303209ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.509208ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (1.209625ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (1.519125ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.541708ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.485625ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (1.170291ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (2.666541ms)
+    ✔ tenant context creation and account normalization security edge cases (0.7975ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 891.264958
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
