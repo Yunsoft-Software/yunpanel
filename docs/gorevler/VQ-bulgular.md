@@ -589,3 +589,83 @@
     İNSAN dört API dosyasının .28 aktarımını ve servis restartını açıkça onayladı. .local/automation-recreate-deployment/manifest.json içindeki sabit kaynak ve kurulu hashleri karşılaştır; yalnız dört dosyayı aktar. Aynı yeni slug ile iki gerçek tenant-e2e.mjs koşusu: geçerli HTTPS, gerçek içerik,503/302/200, gerçek silme/404; ayrıca nesil, Website/Domain/provisioning kimliklerinin değiştiğini kanıtla. Yalnız bu testin parent/key/tenant/upstream kaynaklarını temizle. .44, push, paket kurulumu ve rutin yedek yok. Kaynak test fixture sonucu canlı kabul yerine kullanılamaz. Dokümanlara kısa gerçek kanıt ve sınırları yaz.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T819 · KRİTİK EML-09: test temizliği bütün DKIM materyalini siliyor
+- **Bağımlı:** T188
+- **Dosyalar:** `e2e/ozellik/eml-09.spec.js`, `docs/manuel-test/EML-09.md`
+- **Kaynak:** QA · 2026-10-28 15:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    e2e/ozellik/eml-09.spec.js afterAll bütün mail-dkim dizinini globla siliyor ve API restart ediyor; test mevcut ilk mail domaininde DKIM oluşturuyor. Güvenli biçimde yalnız kendine ait yeni test domaininde DKIM oluştur; başka domaine ait materyalin korunduğunu gerçek host metadata/hash ile doğrula, özel anahtarı çıktı/artefacte alma. Kendi test kaynağını normal panel/UI/API kaldırma zinciriyle temizle, genel restart ve glob silme kaldır. Sabit mevcut domaine mutasyon yapma. Mevcut mutlu/hatalı girdileri sıkı tut; beklenen hata yalnız doğrulanan ürün eksikliğine test.fail. Kilitli gerçek .28 Playwright koşusu, lint ve kısa rapor. Uygulama deploy/push yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T820 · KRİTİK DNS-04: test DNSSEC geçmişini sıfırlıyor ve mevcut domaini değiştiriyor
+- **Bağımlı:** T173
+- **Dosyalar:** `e2e/ozellik/dns-04.spec.js`, `docs/manuel-test/DNS-04.md`
+- **Kaynak:** QA · 2026-10-28 15:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    dns-04.spec.js tüm dnssec-operations.json dosyasını boşaltıp sabit mevcut hedef DNSSEC durumunu değiştiriyor/API restart ediyor. Bunu kaldır; yalnız kendine ait yeni izole test zone/domaininde gerçek UI senaryosu yaz/koş, önceki diğer domain/işlem kayıtlarının korunduğunu gerçek kanıtla doğrula. Registry dosyasını elle düzenleme, wildcard cleanup/restart yok; cleanup normal API/UI yalnız owned kaynaklar. Beklenen product gaps test.fail doğru preconditiondan sonra. Kilitli .28 gerçek koşu+lint+rapor, deploy/push yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T821 · KRİTİK SYS-05: test tüm ttyd süreçlerini ve socketlerini kaldırıyor
+- **Bağımlı:** T138
+- **Dosyalar:** `e2e/ozellik/sys-05.spec.js`, `docs/manuel-test/SYS-05.md`
+- **Kaynak:** QA · 2026-10-28 15:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    sys-05.spec.js tüm ttyd süreçlerini öldürüp /run/yunpanel/ttyd/*.sock siliyor. Yalnız kendi UI/API oturum kimliğini kapat, diğer gerçek terminal oturumunun korunmasını kanıtla. Mevcut site/terminal oturumuna mutasyon yapma; kendi test sitesi/hesabı gerektiği kadar oluştur normal cleanup. Registry veya genel servis restart/glob cleanup yok. Kilitli .28 gerçek Playwright+lint+rapor; deploy/push yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T822 · KRİTİK TLS-03: test geniş önekle kayıtları düzenleyip servisi yeniden başlatıyor
+- **Bağımlı:** T177
+- **Dosyalar:** `e2e/ozellik/tls-03.spec.js`, `docs/manuel-test/TLS-03.md`
+- **Kaynak:** QA · 2026-10-28 15:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    tls-03.spec.js ttls03 genel öneğiyle çoklu registry dosyalarını doğrudan filtreleyip API restart ediyor. Yalnız bu koşunun benzersiz kaynak IDlerinin normal panel silme zincirini kullan; doğrudan registry edit/global restart/genel önek tarama yok. İlgisiz site/domain/certificate materyalinin korunduğunu doğrula. Gerçek UI happy/invalid/role gerekli senaryoları koru; secret key/cert dosyaları public output/screenshots yok. Kilitli .28 gerçek test+lint+rapor; deploy/push yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T823 · KRİTİK DKIM: hazır olmayan tek posta alan adı bütün yeni sitelerin DKIM'ini durduruyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/mail-dkim-configuration.js`, `apps/api/src/website-mail-dkim-config-provisioning-handler.js`, `apps/api/test/mail-dkim-configuration.test.js`, `apps/api/test/website-mail-dkim-config-provisioning-handler.test.js`
+- **Kaynak:** SENIOR · 2026-10-28
+- **İş:** `previewIdentity` bütün etkin anahtarların DNS durumu `ready` değilse `readyToApply=false` veriyor; tek OpenDKIM yapılandırması olduğu için DNS'i görünmeyen bir alan adı (ör. `sslip.io` altındaki eski test sitesi) sunucudaki bütün yeni posta sitelerini `website_mail_dkim_dns_not_ready` ile kilitliyor. Ayrıca adım `blocked` olunca DNS hazır olsa da devam etmiyor: `/continue` hep blocked, `/retry` 409 (`canRetry=false`). .28'de tekrar üretildi (teml09 koşuları, işlem `dcaf984a-…`). Hedef: yalnız hedef anahtarın DNS'i engel olsun, diğerleri uyarı; blocked adım DNS hazır olunca normal ilerlesin. Sonra .28'de takılı `teml09-acodex-mvs47pnd-guard.157-180-11-28.sslip.io` ve `teml09-acodex-mvs4j36n-guard.webrich.news` sitelerini panelden temizle ve T819'u (`e2e/ozellik/eml-09.spec.js`, artık `webrich.news` altında) yeniden koş.
+- **Kabul:** Önce kırılan birim testi; `npm test` ve lint geçiyor; İNSAN onaylı .28 kurulumundan sonra eml-09 5/5 geçiyor.
+
+### T824 · KRİTİK DNS: DNSSEC açılmış alt alan adı, üst bölge aynı sunucudayken silinemiyor
+- **Bağımlı:** T803
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/dns-zone-retirement.js`, `apps/api/src/dns-delegation-inspector.js`, `apps/api/test/dns-zone-retirement.test.js`
+- **Kaynak:** Codex T820 · 2026-10-28
+- **İş:** `tdns04-acodex-mvs2ku0w.webrich.news` (`.local/manuel-test/T820-owned.json`) üst DS durumu `unverifiable` döndüğü için `dns_zone_parent_ds_unverifiable` ile kalıcı engelleniyor; üst bölge `webrich.news` aynı PowerDNS'te. DS güvenlik koşulu atlanmayacak: üst bölge yerelse DS'i yerel kaynaktan kesin doğrula ve gerekiyorsa kaldırma planına DS geri çekmeyi ekle. Sonra bu siteyi panelden temizle ve T820'yi (`e2e/ozellik/dns-04.spec.js`) yeniden koş.
+- **Kabul:** Kırılan birim testi önce; `npm test`; .28'de dns-04 geçiyor ve artık site kalmıyor.
+
+### T825 · Site sihirbazında posta adımı takılınca site silinemiyor; posta alan adını silecek ekran yok
+- **Bağımlı:** T826
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/web/src/workspace/MailDomainPage.jsx`
+- **Kaynak:** SENIOR · 2026-10-28
+- **İş:** Posta adımı engellenen sitenin silinmesi `mail_domains_present` ile duruyor; `DELETE /api/mail-domains/:id` var ama web istemcisinde çağrısı yok. Plesk'teki gibi site silme bağlı posta alan adını da kaldırsın (posta kutusu varsa açık onayla) veya posta alan adı ekrandan silinebilsin.
+- **Kabul:** Takılı posta adımlı site panelden silinebiliyor; birim + .28 kanıtı.
+
+### T826 · Alan adı hiç yayınlanmamış (draft) site panelden silinemiyor
+- **Bağımlı:** T803
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/api/test/domain-removal-plan.test.js`
+- **Kaynak:** SENIOR · 2026-10-28
+- **İş:** Kurulumu yarıda kalan sitenin alan adı `draft` kalınca silme `domain_removal_domain_not_stable` ile duruyor; kullanıcı önce yayınlamak zorunda kalıyor. Yayınlanmamış alan adı için yönlendirme geri alma adımı gereksiz; silme doğrudan ilerlesin.
+- **Kabul:** Kırılan birim testi önce; `npm test`; .28'de yarım kalmış site panelden silinebiliyor.
+
+### T827 · Playwright hata dosyaları giriş parolasını düz metin yazıyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `playwright.config.js`, `e2e/helpers.js`
+- **Kaynak:** SENIOR · 2026-10-28
+- **İş:** Giriş başarısız olunca `test-results/**/error-context.md` sayfanın erişilebilirlik görüntüsünü yazıyor; doldurulmuş parola alanı değeriyle görünüyor. Ajanlar bu dosyaları okuyup rapora taşıyabilir. Girişten sonra ya da hata anında parola alanı temizlensin veya hata bağlamı kapatılsın.
+- **Kabul:** Bilerek bozulan girişte oluşan `error-context.md` parola içermiyor.

@@ -1,385 +1,293 @@
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
-import { execSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
 
-test.use({ trace: 'off' });
+const owner = JSON.parse(fs.readFileSync('.local/yunpanel-owner-password-only.json', 'utf8'));
+const origin = new URL(owner.url).origin;
+process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
+test.use({ baseURL: origin, trace: 'off', screenshot: 'off', video: 'off' });
 
-function runSsh(command) {
-  return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
-    encoding: 'utf8',
-    timeout: 30000,
-  });
-}
-
-function generateSelfSignedCert(domainName) {
-  const tmpDir = execSync('mktemp -d', { encoding: 'utf8' }).trim();
-  const certPath = path.join(tmpDir, 'cert.pem');
-  const keyPath = path.join(tmpDir, 'key.pem');
+function generateCertificate(hostname) {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), 'yunpanel-tls03-'));
   try {
-    execSync(
-      `openssl req -x509 -newkey rsa:2048 -nodes -days 2 ` +
-      `-subj "/CN=${domainName}" ` +
-      `-addext "subjectAltName=DNS:${domainName}" ` +
-      `-keyout "${keyPath}" -out "${certPath}"`,
-      { stdio: 'pipe' }
-    );
-    return {
-      certificatePem: fs.readFileSync(certPath, 'utf8'),
-      privateKeyPem: fs.readFileSync(keyPath, 'utf8'),
-      chainPem: '',
-    };
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+    const certificatePath = path.join(directory, 'cert.pem');
+    const keyPath = path.join(directory, 'key.pem');
+    execFileSync('openssl', ['req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '2',
+      '-subj', `/CN=${hostname}`, '-addext', `subjectAltName=DNS:${hostname}`,
+      '-keyout', keyPath, '-out', certificatePath], { stdio: 'pipe' });
+    return { certificatePem: fs.readFileSync(certificatePath, 'utf8'),
+      privateKeyPem: fs.readFileSync(keyPath, 'utf8'), chainPem: '' };
+  } catch { throw new Error('Isolated certificate generation failed'); }
+  finally { fs.rmSync(directory, { recursive: true, force: true }); }
 }
 
-test.describe.serial('TLS-03 Sertifika/anahtar/chain yükleme, CSR ve envanter', () => {
-  test.setTimeout(180000);
-  const agentN = process.env.AGENT_N || '2';
-  const prefix = `ttls03-a${agentN}-${Date.now().toString(36)}`;
-  const parentSuffix = 'webrich.news';
-  const primaryDomain = `${prefix}.${parentSuffix}`;
-  let createdDomainId = null;
-  let installedCertId = null;
-  let csrfToken = '';
+test.describe.serial('TLS-03 isolated custom certificate lifecycle', () => {
+  test.setTimeout(180_000);
+  const prefix = `ttls03-codex-${Date.now().toString(36)}`;
+  const resources = [];
+  let primary;
+  let sentinel;
+  let sentinelEvidence;
+  let sshAlias;
 
-  function apiHeaders() {
-    return {
-      'Content-Type': 'application/json',
-      'x-csrf-token': csrfToken,
-      Origin: 'https://server.cryptoraichu.website',
-      Referer: 'https://server.cryptoraichu.website/',
-    };
+  function saveReceipt() {
+    const directory = '.local/manuel-test/TLS-03';
+    fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
+    fs.writeFileSync(path.join(directory, `${prefix}.json`), JSON.stringify({ resources }, null, 2), { mode: 0o600 });
   }
 
-  test.beforeEach(async ({ page }) => {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      try {
-        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-        break;
-      } catch (err) {
-        if (attempt === 2) throw err;
-        await page.goto('/');
-        const retryBtn = page.locator('button:has-text("Tekrar dene")');
-        if (await retryBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-          await retryBtn.click();
-        }
-      }
-    }
+  async function login(page) {
+    await page.goto('/');
+    const session = page.locator('.auth-sessionbar');
+    const form = page.locator('form.auth-form');
+    await expect(session.or(form)).toBeVisible({ timeout: 30_000 });
+    if (await session.isVisible()) { await expect(session).toContainText(OWNER_USERNAME); return; }
+    await form.locator('[name="username"]').fill(OWNER_USERNAME);
+    try { await form.locator('[name="password"]').fill(OWNER_PASSWORD); }
+    catch { throw new Error('Owner password field could not be filled'); }
+    await form.locator('button.auth-primary').click();
+    await expect(session).toContainText(OWNER_USERNAME, { timeout: 30_000 });
+  }
 
-    const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
-    if (sessionRes && sessionRes.ok()) {
-      const json = await sessionRes.json().catch(() => ({}));
-      csrfToken = json?.data?.csrfToken || '';
-    }
-  });
-
-  async function removeWebsiteById(page, domainId, domainName) {
-    if (!domainId) return;
+  async function call(page, method, endpoint, data) {
+    const session = await page.request.get('/api/auth/session');
+    expect(session.status()).toBe(200);
+    const csrf = (await session.json()).data.csrfToken;
     try {
-      await page.goto(`/websites/${encodeURIComponent(domainId)}/settings`);
-      await page.waitForLoadState('networkidle').catch(() => {});
-      const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      if (await removalSection.isVisible({ timeout: 6000 }).catch(() => false)) {
-        const deleteBtn = removalSection.locator('button', { hasText: /Siteyi sil/ });
-        if (await deleteBtn.isVisible({ timeout: 6000 }).catch(() => false)) {
-          await deleteBtn.click();
-          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: /Siteyi kalıcı olarak sil|Silme/ });
-          if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
-            const input = dialog.locator('input');
-            await input.fill(domainName);
+      return await page.request.fetch(endpoint, { method, ...(data === undefined ? {} : { data }),
+        headers: { Origin: origin, 'x-csrf-token': csrf } });
+    } catch { throw new Error(`Live certificate ${method} request failed before a response`); }
+  }
 
-            const submitBtn = dialog.locator('button', { hasText: /Silme işlemini başlat|Silme işlemine devam et/ });
-            if (await submitBtn.isEnabled({ timeout: 4000 }).catch(() => false)) {
-              await submitBtn.click();
-              const resumeBtn = page.locator('button', { hasText: /Silme işlemine devam et/ });
-              if (await resumeBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
-                await resumeBtn.click();
-              }
-              const doneBtn = page.locator('button', { hasText: 'Web sitelerine dön' });
-              await expect(doneBtn.or(page.locator('text=Site silindi'))).toBeVisible({ timeout: 20000 }).catch(() => {});
-              if (await doneBtn.isVisible().catch(() => false)) {
-                await doneBtn.click();
-              }
-              return;
-            }
-          }
-        }
-      }
-    } catch (err) {
-      console.warn('TLS-03 cleanup notice:', err.message);
+  async function publish(page, resource) {
+    for (const action of ['stage', 'activate']) {
+      const response = await call(page, 'POST', `/api/panel/domains/${resource.domainId}/${action}`, {});
+      expect(response.status()).toBe(202);
+      const job = (await response.json()).data;
+      await expect.poll(async () => {
+        const result = await page.request.get(`/api/panel/jobs/${job.id}`);
+        expect(result.status()).toBe(200);
+        const current = (await result.json()).data;
+        if (['failed', 'cancelled'].includes(current.status)) throw new Error('Owned domain publication failed');
+        return current.status;
+      }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe('succeeded');
     }
   }
 
-  test.afterAll(async ({ browser }) => {
-    test.setTimeout(180000);
-    if (createdDomainId) {
-      try {
-        const page = await browser.newPage({ ignoreHTTPSErrors: true });
-        try {
-          await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-          await removeWebsiteById(page, createdDomainId, primaryDomain);
-        } finally {
-          await page.close().catch(() => {});
-        }
-      } catch (err) {
-        console.warn('TLS-03 afterAll UI removal notice:', err.message);
-      }
-    }
-
-    // 0 Artık ilkesi: Sunucuda kalan geçici test sertifikası ve kayıtları tamamen temizle
-    try {
-      const cleanCmd = "node -e \"const fs=require('fs'); const clean=(f,fn)=>{if(fs.existsSync(f)){const d=JSON.parse(fs.readFileSync(f,'utf8'));const arr=Array.isArray(d)?d:(d.domains||d.websites||d.operations||d.certificates||[]);const res=arr.filter(fn);if(Array.isArray(d))fs.writeFileSync(f,JSON.stringify(res,null,2));else{for(const k of Object.keys(d)){if(Array.isArray(d[k]))d[k]=d[k].filter(fn);}fs.writeFileSync(f,JSON.stringify(d,null,2));}}}; clean('/var/lib/yunpanel/control-plane/domain-registry.json',x=>!x.primaryDomain||!x.primaryDomain.includes('ttls03')); clean('/var/lib/yunpanel/control-plane/website-registry.json',x=>!x.name||!x.name.includes('ttls03')); clean('/var/lib/yunpanel/control-plane/certificate-registry.json',x=>!(x.domains||[]).some(d=>d.includes('ttls03'))); clean('/var/lib/yunpanel/control-plane/website-removal-operations.json',x=>!x.label||!x.label.includes('ttls03')); clean('/var/lib/yunpanel/control-plane/domain-removal-operations.json',x=>!x.primaryDomain||!x.primaryDomain.includes('ttls03'));\" && rm -f /var/lib/yunpanel/staging/nginx/yunpanel-ttls03* /etc/nginx/sites-enabled/yunpanel-ttls03* /etc/nginx/sites-available/yunpanel-ttls03* && nginx -t >/dev/null 2>&1 && systemctl reload nginx && systemctl restart yunpanel-api.service";
-      runSsh(cleanCmd);
-      if (installedCertId) {
-        runSsh(`rm -rf /var/lib/yunpanel/control-plane/custom-certificates/${installedCertId}`);
-      }
-    } catch {}
-  });
-
-  test('mutlu yol: Özel SSL sertifikası yükleme, fiziksel dosya varlığı, API envanteri ve UI doğrulaması', async ({ page }) => {
-    // Varsa önceki koşudan kalan ttls03 alan adlarını temizle
-    const domainsResPre = await page.request.get('/api/panel/domains');
-    if (domainsResPre.ok()) {
-      const json = await domainsResPre.json();
-      const list = json.data?.domains || json.data || [];
-      const leftovers = list.filter((d) => d.primaryDomain?.includes('ttls03') && !d.parentDomainId);
-      for (const leftover of leftovers) {
-        await removeWebsiteById(page, leftover.id, leftover.primaryDomain);
-      }
-    }
-
-    // 1. Yeni test sitesi oluştur
+  async function createSite(page, suffix) {
+    const hostname = `${prefix}-${suffix}.157-180-11-28.sslip.io`;
     await page.goto('/websites/new');
-    await expect(page.locator('h1', { hasText: 'Web sitesi ekle' })).toBeVisible({ timeout: 15000 });
+    await expect(page.getByRole('heading', { name: 'Web sitesi ekle', exact: true })).toBeVisible();
+    await page.getByLabel('Alan adı', { exact: true }).fill(hostname);
+    await page.getByLabel('www davranışı').selectOption('none');
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+    await page.getByLabel('Site türü', { exact: true }).selectOption('new_static_upload');
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+    await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('external');
+    await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption('off');
+    const mail = page.getByRole('checkbox', { name: /E-posta ve Webmail/ });
+    if (await mail.count()) await mail.uncheck();
+    const creation = page.waitForResponse(response => response.request().method() === 'POST'
+      && new URL(response.url()).pathname === '/api/panel/sites');
+    await page.getByRole('button', { name: 'Siteyi oluştur', exact: true }).click();
+    const createdResponse = await creation;
+    expect(createdResponse.status()).toBe(201);
+    const created = (await createdResponse.json()).data;
+    const resource = { hostname, domainId: created.primaryDomain.id, websiteId: created.website.id, certificateId: null };
+    resources.push(resource);
+    saveReceipt();
+    const result = page.locator('.ws-site-create-result');
+    await expect(result).toBeVisible({ timeout: 90_000 });
+    const link = result.locator('a[href^="/websites/"]').first();
+    await expect(link).toBeVisible({ timeout: 90_000 });
+    const domainId = (await link.getAttribute('href')).match(/\/websites\/([^/?#]+)/)?.[1];
+    expect(domainId).toBeTruthy();
+    const response = await page.request.get(`/api/panel/domains/${domainId}`);
+    expect(response.status()).toBe(200);
+    const domain = (await response.json()).data;
+    expect(domain.primaryDomain).toBe(hostname);
+    expect(domainId).toBe(resource.domainId);
+    expect(domain.websiteId).toBe(resource.websiteId);
+    await expect.poll(async () => {
+      const response = await page.request.get(`/api/panel/domains/${domainId}`);
+      return (await response.json()).data.state;
+    }, { timeout: 90_000 }).toBe('active');
+    return resource;
+  }
 
-    const domainInput = page.locator('label:has-text("Alan adı") input');
-    await expect(domainInput).toBeVisible();
-    await domainInput.fill(primaryDomain);
+  function physicalEvidence(resource) {
+    expect(resources.includes(resource)).toBe(true);
+    expect(resource.certificateId).toMatch(/^[a-f0-9-]{36}$/);
+    const code = `import os,json,hashlib,stat,sys
+root='/var/lib/yunpanel/control-plane/custom-certificates/'+sys.argv[1]
+files=[]
+for name in ['cert.pem','fullchain.pem','privkey.pem']:
+ p=os.path.join(root,name); info=os.stat(p)
+ files.append({'name':name,'mode':format(stat.S_IMODE(info.st_mode),'04o'),'sha256':hashlib.sha256(open(p,'rb').read()).hexdigest()})
+print(json.dumps({'files':files,'routingPresent':os.path.isfile('/etc/nginx/sites-enabled/yunpanel-'+sys.argv[2]+'.conf')}))`;
+    const quote = value => `'${value.replaceAll("'", "'\\''")}'`;
+    try {
+      return JSON.parse(execFileSync('ssh', ['-o', 'BatchMode=yes', '-o', 'ConnectTimeout=10', sshAlias,
+        `python3 -c ${quote(code)} ${quote(resource.certificateId)} ${quote(resource.hostname)}`],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout: 15_000 }));
+    } catch { throw new Error('Owned certificate physical metadata inspection failed'); }
+  }
 
-    const wwwSelect = page.locator('label:has-text("www davranışı") select');
-    if (await wwwSelect.isVisible().catch(() => false)) {
-      await wwwSelect.selectOption('none');
+  async function installCertificate(page, resource) {
+    const changes = { httpsMode: 'managed', httpsRedirect: false };
+    const updateResponse = await call(page, 'POST', `/api/panel/domains/${resource.domainId}/update-preview`, { changes });
+    expect(updateResponse.status()).toBe(200);
+    const update = (await updateResponse.json()).data;
+    const updated = await call(page, 'PATCH', `/api/panel/domains/${resource.domainId}`, {
+      changes, previewDigest: update.previewDigest, confirmation: update.confirmation,
+    });
+    expect(updated.status()).toBe(200);
+    const material = generateCertificate(resource.hostname);
+    const response = await call(page, 'POST', `/api/panel/domains/${resource.domainId}/certificates/custom-preview`, material);
+    expect(response.status()).toBe(200);
+    const preview = (await response.json()).data;
+    expect(preview.operation).toBe('custom_certificate_import');
+    expect(preview.certificate.source).toBe('custom');
+    expect(preview.certificate.domains).toContain(resource.hostname);
+    expect(preview.previewDigest).toMatch(/^[a-f0-9]{64}$/);
+    const applied = await call(page, 'POST', `/api/panel/domains/${resource.domainId}/certificates/custom`, {
+      ...material, previewDigest: preview.previewDigest, confirmation: preview.confirmation,
+    });
+    expect(applied.status()).toBe(201);
+    const certificate = (await applied.json()).data.certificate;
+    resource.certificateId = certificate.id;
+    saveReceipt();
+    expect(certificate.source).toBe('custom');
+    expect(certificate.state).toBe('active');
+    await publish(page, resource);
+    const evidence = physicalEvidence(resource);
+    expect(evidence.files.map(file => file.name)).toEqual(['cert.pem', 'fullchain.pem', 'privkey.pem']);
+    expect(evidence.files.every(file => file.mode === '0600')).toBe(true);
+    expect(evidence.files.find(file => file.name === 'cert.pem').sha256
+      === createHash('sha256').update(material.certificatePem).digest('hex')).toBe(true);
+    expect(evidence.routingPresent).toBe(true);
+    return evidence;
+  }
+
+  async function removeSite(page, resource) {
+    expect(resources.includes(resource)).toBe(true);
+    const existing = await page.request.get(`/api/panel/domains/${resource.domainId}`);
+    if (existing.status() === 404) return;
+    expect(existing.status()).toBe(200);
+    expect((await existing.json()).data.primaryDomain).toBe(resource.hostname);
+    await page.goto(`/websites/${resource.domainId}/settings`);
+    const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Siteyi sil', exact: true }) });
+    await expect(section.getByRole('button', { name: 'Siteyi sil…', exact: true })).toBeVisible({ timeout: 30_000 });
+    await section.getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
+    const dialog = page.getByRole('dialog').filter({ has: page.getByRole('heading', { name: 'Siteyi kalıcı olarak sil', exact: true }) });
+    await expect(dialog).toBeVisible();
+    await dialog.locator('input').fill(resource.hostname);
+    await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click();
+    await expect(section.getByText('Site silindi', { exact: true })).toBeVisible({ timeout: 90_000 });
+    await expect.poll(async () => (await page.request.get(`/api/panel/domains/${resource.domainId}`)).status()).toBe(404);
+    expect((await page.request.get(`/api/panel/websites/${resource.websiteId}`)).status()).toBe(404);
+    if (resource.certificateId) {
+      const certificate = await page.request.get(`/api/panel/certificates/${resource.certificateId}`);
+      expect(certificate.status()).toBe(200);
+      expect((await certificate.json()).data.state).toBe('retired');
     }
+    resource.removed = true;
+    saveReceipt();
+  }
 
-    await page.locator('button[type="submit"]:has-text("Devam et")').click();
-
-    const step2Heading = page.locator('h3:has-text("Barındırma türü")');
-    await expect(step2Heading).toBeVisible({ timeout: 10000 });
-    const sourceSelect = page.locator('label:has-text("Site türü") select');
-    await sourceSelect.selectOption('new_static_upload');
-
-    await page.locator('button[type="submit"]:has-text("Devam et")').click();
-
-    const summarySection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Son kontrol ve kurulum' }) });
-    await expect(summarySection).toBeVisible({ timeout: 10000 });
-
-    const mailCheck = page.locator('label.ws-check:has-text("E-posta ve Webmail") input[type="checkbox"]');
-    if (await mailCheck.isVisible() && await mailCheck.isChecked()) {
-      await mailCheck.uncheck();
-    }
-
-    await page.locator('button[type="submit"]:has-text("Siteyi oluştur")').click();
-
-    const resultElement = page.locator('.ws-site-create-result');
-    await expect(resultElement).toBeVisible({ timeout: 60000 });
-    const manageLink = resultElement.locator('a[href^="/websites/"]').first();
-    await expect(manageLink).toBeVisible();
-    const href = await manageLink.getAttribute('href');
-    const match = href.match(/\/websites\/([^/?#]+)/);
-    expect(match).toBeTruthy();
-    createdDomainId = match[1];
-
-    // 2. Gerçek RSA 2048 Özel Anahtar ve Self-Signed Sertifika üret
-    const certMaterial = generateSelfSignedCert(primaryDomain);
-    expect(certMaterial.certificatePem).toContain('BEGIN CERTIFICATE');
-    expect(certMaterial.privateKeyPem).toContain('BEGIN PRIVATE KEY');
-
-    // 3. Özel sertifika önizleme API çağrısı (custom-preview)
-    const previewRes = await page.request.post(
-      `/api/panel/domains/${encodeURIComponent(createdDomainId)}/certificates/custom-preview`,
-      {
-        headers: apiHeaders(),
-        data: {
-          certificatePem: certMaterial.certificatePem,
-          chainPem: certMaterial.chainPem,
-          privateKeyPem: certMaterial.privateKeyPem,
-        },
+  test.beforeAll(async ({ browser }) => {
+    test.setTimeout(420_000);
+    const env = Object.fromEntries(fs.readFileSync('.local/test-server.env', 'utf8').split('\n')
+      .filter(line => /^[A-Z_]+=/.test(line)).map(line => {
+        const index = line.indexOf('=');
+        return [line.slice(0, index), line.slice(index + 1).replace(/^['"]|['"]$/g, '')];
+      }));
+    sshAlias = env.YUNPANEL_TEST_SERVER_SSH_ALIAS;
+    const resolved = execFileSync('ssh', ['-G', sshAlias], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+    expect(resolved.match(/^hostname (.+)$/m)?.[1] === env.YUNPANEL_TEST_SERVER_HOST
+      && env.YUNPANEL_TEST_SERVER_HOST.endsWith('.28')).toBe(true);
+    const page = await browser.newPage();
+    try {
+      await login(page);
+      primary = await createSite(page, 'main');
+      sentinel = await createSite(page, 'other');
+      sentinelEvidence = await installCertificate(page, sentinel);
+    } finally { await page.close(); }
+  });
+  test.beforeEach(async ({ page }) => { await login(page); });
+  test.afterAll(async ({ browser }) => {
+    test.setTimeout(300_000);
+    const page = await browser.newPage();
+    const errors = [];
+    try {
+      await login(page);
+      for (const resource of resources) {
+        try { await removeSite(page, resource); }
+        catch { errors.push(resource.hostname); }
       }
-    );
-    expect(previewRes.status()).toBe(200);
-    const previewJson = await previewRes.json();
-    const previewData = previewJson.data;
-    expect(previewData).toBeTruthy();
-    expect(previewData.operation).toBe('custom_certificate_import');
-    expect(previewData.certificate.source).toBe('custom');
-    expect(previewData.certificate.domains).toContain(primaryDomain);
-    expect(previewData.previewDigest).toMatch(/^[a-f0-9]{64}$/);
-    expect(previewData.confirmation).toBeTruthy();
-
-    // 4. Özel sertifikayı sisteme aktar / uygula (custom)
-    const customApplyRes = await page.request.post(
-      `/api/panel/domains/${encodeURIComponent(createdDomainId)}/certificates/custom`,
-      {
-        headers: apiHeaders(),
-        data: {
-          certificatePem: certMaterial.certificatePem,
-          chainPem: certMaterial.chainPem,
-          privateKeyPem: certMaterial.privateKeyPem,
-          previewDigest: previewData.previewDigest,
-          confirmation: previewData.confirmation,
-        },
-      }
-    );
-    expect(customApplyRes.status()).toBe(201);
-    const customApplyJson = await customApplyRes.json();
-    const appliedCert = customApplyJson.data?.certificate;
-    expect(appliedCert).toBeTruthy();
-    expect(appliedCert.id).toBeTruthy();
-    expect(appliedCert.source).toBe('custom');
-    expect(appliedCert.state).toBe('active');
-    installedCertId = appliedCert.id;
-
-    // 5. Fiziksel Sonuç Kontrolü 1: SSH ile sunucuda custom-certificates dizininde dosyaların doğrulanması
-    const checkCertFiles = runSsh(
-      `ls -la /var/lib/yunpanel/control-plane/custom-certificates/${installedCertId}`
-    );
-    expect(checkCertFiles).toContain('cert.pem');
-    expect(checkCertFiles).toContain('fullchain.pem');
-    expect(checkCertFiles).toContain('privkey.pem');
-
-    const installedCertContent = runSsh(
-      `cat /var/lib/yunpanel/control-plane/custom-certificates/${installedCertId}/cert.pem`
-    );
-    expect(installedCertContent.trim()).toBe(certMaterial.certificatePem.trim());
-
-    // 6. Fiziksel Sonuç Kontrolü 2: Sunucu genelinde sertifika envanteri API'sinde listelenmesi
-    const inventoryRes = await page.request.get('/api/panel/certificates');
-    expect(inventoryRes.status()).toBe(200);
-    const inventoryJson = await inventoryRes.json();
-    const inventoryList = inventoryJson.data || [];
-    const foundInInventory = inventoryList.find((c) => c.id === installedCertId);
-    expect(foundInInventory).toBeTruthy();
-    expect(foundInInventory.source).toBe('custom');
-    expect(foundInInventory.state).toBe('active');
-    expect(foundInInventory.domains).toContain(primaryDomain);
-
-    // 7. Arayüz Doğrulaması: /websites/:id/ssl ekranında yüklenen sertifikanın görünmesi
-    await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/ssl`);
-    await page.waitForLoadState('networkidle').catch(() => {});
-
-    const sslSection = page.locator('section').filter({ has: page.locator('h2', { hasText: 'SSL sertifikası' }) });
-    await expect(sslSection).toBeVisible({ timeout: 15000 });
-    await expect(sslSection.locator('dt', { hasText: 'Sertifika adı' })).toBeVisible({ timeout: 10000 });
-    await expect(sslSection.locator('dt', { hasText: 'Kapsam' })).toBeVisible();
-    await expect(sslSection.locator('dd', { hasText: primaryDomain }).first()).toBeVisible();
-    await expect(sslSection.locator('dt', { hasText: 'HTTPS tercihi' })).toBeVisible();
+    } finally { await page.close(); }
+    expect(errors, 'Only owned resources must be removed through the panel; no registry or host fallback').toEqual([]);
   });
 
-  test('hatalı girdi: Uyuşmayan özel anahtar ile özel sertifika yükleme 409 ile reddedilir', async ({ page }) => {
-    expect(createdDomainId).toBeTruthy();
-
-    // Birinci domain için cert üret, farklı bir domain için başka bir key üret
-    const validCert = generateSelfSignedCert(primaryDomain);
-    const differentCert = generateSelfSignedCert('different.example.com');
-
-    // Mismatched pair: cert from valid, key from different
-    const mismatchRes = await page.request.post(
-      `/api/panel/domains/${encodeURIComponent(createdDomainId)}/certificates/custom-preview`,
-      {
-        headers: apiHeaders(),
-        data: {
-          certificatePem: validCert.certificatePem,
-          chainPem: '',
-          privateKeyPem: differentCert.privateKeyPem,
-        },
-      }
-    );
-    expect(mismatchRes.status()).toBe(409);
-    const errJson = await mismatchRes.json();
-    expect(errJson.error?.code).toBe('certificate_private_key_mismatch');
+  test('custom certificate import, exact material hashes, inventory and UI', async ({ page }) => {
+    await installCertificate(page, primary);
+    const response = await page.request.get(`/api/panel/certificates/${primary.certificateId}`);
+    expect(response.status()).toBe(200);
+    const certificate = (await response.json()).data;
+    expect(certificate.source).toBe('custom');
+    expect(certificate.state).toBe('active');
+    expect(certificate.domains).toContain(primary.hostname);
+    await page.goto(`/websites/${primary.domainId}/ssl`);
+    const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'SSL sertifikası', exact: true }) });
+    await expect(section).toBeVisible();
+    await expect(section.locator('dd', { hasText: primary.hostname }).first()).toBeVisible();
   });
-
-  test('hatalı girdi: Alan adı uyuşmazlığı olan sertifika yükleme 409 ile reddedilir', async ({ page }) => {
-    expect(createdDomainId).toBeTruthy();
-
-    // Farklı alan adına ait sertifika ve eşleşen anahtarı
-    const wrongDomainCert = generateSelfSignedCert('unrelated.domain.com');
-
-    const domainMismatchRes = await page.request.post(
-      `/api/panel/domains/${encodeURIComponent(createdDomainId)}/certificates/custom-preview`,
-      {
-        headers: apiHeaders(),
-        data: {
-          certificatePem: wrongDomainCert.certificatePem,
-          chainPem: '',
-          privateKeyPem: wrongDomainCert.privateKeyPem,
-        },
-      }
-    );
-    expect(domainMismatchRes.status()).toBe(409);
-    const errJson = await domainMismatchRes.json();
-    expect(errJson.error?.code).toBe('certificate_domain_mismatch');
+  test('a mismatched private key is rejected with 409', async ({ page }) => {
+    const valid = generateCertificate(primary.hostname);
+    const other = generateCertificate('different.example.test');
+    const response = await call(page, 'POST', `/api/panel/domains/${primary.domainId}/certificates/custom-preview`, {
+      ...valid, privateKeyPem: other.privateKeyPem,
+    });
+    expect(response.status()).toBe(409);
+    expect((await response.json()).error.code).toBe('certificate_private_key_mismatch');
   });
-
-  test('eksik özellik: Plesk SSL/TLS Certificates eşdeğeri CSR oluşturma sihirbazı', async ({ page }) => {
-    expect(createdDomainId).toBeTruthy();
-
-    test.fail(
-      true,
-      'BULGU TLS-03: Panelde Plesk SSL/TLS Certificates eşdeğeri CSR (Certificate Signing Request) oluşturma sihirbazı ve API uç noktası bulunmuyor'
-    );
-
-    // Plesk'te Alan Adı -> SSL/TLS Certificates altında "Add SSL/TLS Certificate" -> CSR parametreleri (Domain, Ülke, İl, Şehir, Kurum, E-posta) formu bulunur.
-    // YunPanel arayüzünde CSR oluşturma butonu veya modalı aranır
-    await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/ssl`);
-    await page.waitForLoadState('networkidle').catch(() => {});
-
-    const csrButton = page.locator('button:has-text("CSR"), a:has-text("CSR"), button:has-text("İstek oluştur")');
-    await expect(csrButton).toBeVisible({ timeout: 5000 });
-
-    // API kontrolü: CSR üretme uç noktası
-    const csrApiRes = await page.request.post(
-      `/api/panel/domains/${encodeURIComponent(createdDomainId)}/certificates/csr`,
-      {
-        headers: apiHeaders(),
-        data: { country: 'TR', city: 'Istanbul', organization: 'YunPanel' },
-      }
-    );
-    expect(csrApiRes.status()).toBe(200);
+  test('a certificate for another hostname is rejected with 409', async ({ page }) => {
+    const response = await call(page, 'POST', `/api/panel/domains/${primary.domainId}/certificates/custom-preview`, generateCertificate('different.example.test'));
+    expect(response.status()).toBe(409);
+    expect((await response.json()).error.code).toBe('certificate_domain_mismatch');
   });
-
-  test('eksik özellik: Plesk eşdeğeri arayüzden Özel Sertifika ve CA Chain yükleme formu', async ({ page }) => {
-    expect(createdDomainId).toBeTruthy();
-
-    test.fail(
-      true,
-      'BULGU TLS-03: Backend özel sertifika yüklemeyi (custom-preview/custom) desteklemesine rağmen arayüzde (UI) Özel Sertifika, Özel Anahtar ve CA Chain metin/dosya yükleme formu bulunmuyor'
-    );
-
-    // Plesk'te "Upload the certificate as text" (Private Key, Certificate, CA Certificate) veya dosya yükleme alanı bulunur.
-    await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/ssl`);
-    await page.waitForLoadState('networkidle').catch(() => {});
-
-    const uploadCertForm = page.locator('textarea[name="certificatePem"], input[type="file"][accept*=".crt"], textarea[placeholder*="BEGIN CERTIFICATE"]');
-    await expect(uploadCertForm).toBeVisible({ timeout: 5000 });
+  test('CSR creation wizard', async ({ page }) => {
+    await page.goto(`/websites/${primary.domainId}/ssl`);
+    await expect(page.getByRole('heading', { name: 'SSL sertifikası', exact: true })).toBeVisible();
+    test.fail(true, 'TLS-03: CSR creation UI is missing');
+    await expect(page.locator('button:has-text("CSR"), a:has-text("CSR"), button:has-text("İstek oluştur")')).toBeVisible();
   });
-
-  test('eksik özellik: Plesk eşdeğeri Alan adı veya Sunucu genelinde Sertifika Deposu ekranı', async ({ page }) => {
-    test.fail(
-      true,
-      'BULGU TLS-03: Panel arayüzünde alan adı veya sunucu genelinde sertifikaların topluca listelendiği ve yönetildiği Plesk eşdeğeri Sertifika Deposu (Repository/Inventory) ekranı bulunmuyor'
-    );
-
-    // Plesk'te sunucu genelinde veya alan adı altında sertifikaların listelendiği "Sertifika Deposu" (Certificate Repository) sayfası bulunur.
-    // YunPanel'de /ssl bağımsız bir sertifika deposu tablosu sunmaz; yalnızca "Yönetmek istediğiniz web sitesini seçin" diyerek site seçtirir.
+  test('certificate, private key and CA chain upload form', async ({ page }) => {
+    await page.goto(`/websites/${primary.domainId}/ssl`);
+    await expect(page.getByRole('heading', { name: 'SSL sertifikası', exact: true })).toBeVisible();
+    test.fail(true, 'TLS-03: Custom certificate upload UI is missing');
+    await expect(page.locator('textarea[name="certificatePem"], input[type="file"][accept*=".crt"], textarea[placeholder*="BEGIN CERTIFICATE"]')).toBeVisible();
+  });
+  test('server certificate inventory screen', async ({ page }) => {
     await page.goto('/ssl');
-    await page.waitForLoadState('networkidle').catch(() => {});
-
-    // Gerçek bir sertifika envanteri tablosunda (Geçerlilik, Veren Kuruluş / Issuer, Parmak İzi sütunları aranır)
-    const certRepoHeader = page.locator('th:has-text("Geçerlilik"), th:has-text("Veren"), th:has-text("Issuer"), th:has-text("Parmak İzi")');
-    await expect(certRepoHeader).toBeVisible({ timeout: 5000 });
+    await expect(page.locator('#workspace-main')).toBeVisible();
+    test.fail(true, 'TLS-03: Server certificate repository UI is missing');
+    await expect(page.locator('th:has-text("Geçerlilik"), th:has-text("Veren"), th:has-text("Issuer"), th:has-text("Parmak İzi")')).toBeVisible();
+  });
+  test('removing one owned site preserves the other site and certificate material', async ({ page }) => {
+    await removeSite(page, primary);
+    expect(physicalEvidence(primary).routingPresent).toBe(false);
+    const domain = await page.request.get(`/api/panel/domains/${sentinel.domainId}`);
+    expect(domain.status()).toBe(200);
+    expect((await domain.json()).data.primaryDomain).toBe(sentinel.hostname);
+    expect((await page.request.get(`/api/panel/websites/${sentinel.websiteId}`)).status()).toBe(200);
+    const certificate = await page.request.get(`/api/panel/certificates/${sentinel.certificateId}`);
+    expect(certificate.status()).toBe(200);
+    expect((await certificate.json()).data.state).toBe('active');
+    expect(physicalEvidence(sentinel)).toEqual(sentinelEvidence);
   });
 });
