@@ -23,6 +23,8 @@ const PHP_FPM = '/usr/sbin/php-fpm8.3';
 const SQLITE = '/usr/bin/sqlite3';
 const NGINX = '/usr/sbin/nginx';
 const CURL = '/usr/bin/curl';
+const HTTP_HEALTH_ATTEMPTS = 10;
+const HTTP_HEALTH_RETRY_MS = 500;
 const SYSTEMCTL = '/usr/bin/systemctl';
 const ROOT_UID = 0;
 const ROOT_GID = 0;
@@ -347,20 +349,33 @@ export function createRoundcubeConfigActivator({
       ...preview.nginx.mappings,
     ];
     for (const endpoint of endpoints) {
-      await runCommand(
-        CURL,
-        [
-          '--fail', '--silent', '--show-error', '--insecure',
-          '--max-time', '10',
-          '--resolve', `${endpoint.hostname}:443:127.0.0.1`,
-          '--output', '/dev/null',
-          endpoint.endpoint,
-        ],
-        'roundcube_http_health_failed',
-        'Roundcube HTTPS endpoint did not become healthy',
-        { timeout: 15_000 },
-      );
+      // A reloaded PHP-FPM pool answers 502 for a moment; only a lasting failure rolls back.
+      for (let attempt = 1; ; attempt += 1) {
+        try {
+          await probeEndpoint(endpoint);
+          break;
+        } catch (error) {
+          if (attempt >= HTTP_HEALTH_ATTEMPTS) throw error;
+          await sleepFn(HTTP_HEALTH_RETRY_MS);
+        }
+      }
     }
+  }
+
+  async function probeEndpoint(endpoint) {
+    await runCommand(
+      CURL,
+      [
+        '--fail', '--silent', '--show-error', '--insecure',
+        '--max-time', '10',
+        '--resolve', `${endpoint.hostname}:443:127.0.0.1`,
+        '--output', '/dev/null',
+        endpoint.endpoint,
+      ],
+      'roundcube_http_health_failed',
+      'Roundcube HTTPS endpoint did not become healthy',
+      { timeout: 15_000 },
+    );
   }
 
   async function rollback(transactionId, runtimeIdentity, wwwIdentity) {

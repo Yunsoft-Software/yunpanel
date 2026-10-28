@@ -113,7 +113,7 @@ function enoent() {
   return Object.assign(new Error('missing'), { code: 'ENOENT' });
 }
 
-function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data' } = {}) {
+function fixture({ existingDatabase = false, failFirstFpmValidation = false, failFirstNginxConflict = false, groups = 'yunpanel-roundcube www-data', curlFailures = 0 } = {}) {
   const calls = [];
   const state = {
     databaseExists: existingDatabase,
@@ -123,6 +123,7 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
     failFpm: failFirstFpmValidation,
     restored: false,
     nginxConflict: failFirstNginxConflict,
+    curlFailures,
   };
   const manifest = {
     version: 2,
@@ -173,6 +174,10 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
       state.failFpm = false;
       throw new Error('invalid fpm');
     }
+    if (command === '/usr/bin/curl' && state.curlFailures > 0) {
+      state.curlFailures -= 1;
+      throw new Error('curl: (22) The requested URL returned error: 502');
+    }
     if (command === '/usr/sbin/nginx' && state.nginxConflict) {
       state.nginxConflict = false;
       return { stdout: '', stderr: 'nginx: [warn] conflicting server name "mail.example.com" on 0.0.0.0:443, ignored' };
@@ -205,6 +210,7 @@ function fixture({ existingDatabase = false, failFirstFpmValidation = false, fai
     backupManager,
     run,
     lstatFn,
+    sleepFn: async (ms) => { calls.push(['sleep', ms]); },
     readFileFn: async (target) => {
       if (target.includes('config.inc')) return CONFIG;
       if (target.includes('nginx')) return NGINX;
@@ -292,4 +298,22 @@ test('an exit-zero Nginx hostname collision rolls back before Roundcube can shad
   assert.ok(validation >= 0 && restore > validation);
   assert.equal(fx.calls.slice(0, restore).some(c => c[0] === 'run' && c[1] === '/usr/bin/systemctl' && c[2][0] === 'reload'), false);
   assert.equal(fx.state.databaseExists, true);
+});
+
+test('a brief 502 while PHP-FPM and Nginx reload does not roll back a healthy activation', async () => {
+  const fx = fixture({ curlFailures: 2 });
+  const result = await fx.activator.activateConfiguration(preview(), { transactionId: TX });
+  assert.equal(result.applied, true);
+  assert.equal(result.httpHealthy, true);
+  assert.equal(fx.state.restored, false);
+  assert.equal(fx.calls.filter((entry) => entry[0] === 'run' && entry[1] === '/usr/bin/curl').length, 3);
+});
+
+test('an endpoint that stays unhealthy still fails activation and restores the previous files', async () => {
+  const fx = fixture({ curlFailures: 1000 });
+  await assert.rejects(
+    fx.activator.activateConfiguration(preview(), { transactionId: TX }),
+    (error) => error.code === 'roundcube_http_health_failed',
+  );
+  assert.equal(fx.state.restored, true);
 });

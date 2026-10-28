@@ -669,3 +669,11 @@
 - **Kaynak:** SENIOR · 2026-10-28
 - **İş:** Giriş başarısız olunca `test-results/**/error-context.md` sayfanın erişilebilirlik görüntüsünü yazıyor; doldurulmuş parola alanı değeriyle görünüyor. Ajanlar bu dosyaları okuyup rapora taşıyabilir. Girişten sonra ya da hata anında parola alanı temizlensin veya hata bağlamı kapatılsın.
 - **Kabul:** Bilerek bozulan girişte oluşan `error-context.md` parola içermiyor.
+
+### T848 · Webmail etkinleştirmesi yeniden yükleme anındaki tek 502 yüzünden geri alınıyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `packages/host-runtime/src/roundcube-config-activator.js`, `packages/host-runtime/test/roundcube-config-activator.test.js`
+- **Kaynak:** SENIOR · 2026-10-28 (T823 canlı doğrulaması)
+- **İş:** `assertHttpHealthy` PHP-FPM/Nginx yeniden yüklemesinden hemen sonra her webmail adresini tek kez yokluyordu; .28'de bu anda bir istek 502 aldı ve `roundcube_mapping` her denemede `website_roundcube_apply_failed` ile geri alındı. Kısa aralıklı sınırlı yeniden deneme; kalıcı hata yine geri alır.
+- **Kabul:** Önce kırılan birim testi; `npm test`; .28'de takılı `roundcube_mapping` adımı yeniden denemeyle geçiyor.
