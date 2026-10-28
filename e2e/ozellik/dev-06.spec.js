@@ -14,6 +14,7 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
 
   let createdDomainId = null;
   let createdWebsiteId = null;
+  const createdTaskIds = new Set();
 
   function runSsh(command) {
     try {
@@ -81,6 +82,18 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
     }
   }
 
+  async function getApiHeaders(page) {
+    const origin = new URL(page.url()).origin;
+    const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
+    const sessionJson = sessionRes ? await sessionRes.json().catch(() => ({})) : {};
+    const csrf = sessionJson?.data?.csrfToken || sessionJson?.csrfToken || '';
+    return {
+      Origin: origin,
+      'x-csrf-token': csrf,
+      'Content-Type': 'application/json',
+    };
+  }
+
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -98,19 +111,34 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
   });
 
   test.afterAll(async ({ browser }) => {
-    if (!createdDomainId) return;
-    const page = await browser.newPage({ ignoreHTTPSErrors: true });
-    try {
-      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-      await removeWebsiteById(page, createdDomainId, siteDomain);
-    } catch (err) {
-      console.warn('DEV-06 afterAll cleanup notice:', err.message);
-    } finally {
-      await page.close().catch(() => {});
+    // 1. Arayüz üzerinden siteyi sil
+    if (createdDomainId) {
+      const page = await browser.newPage({ ignoreHTTPSErrors: true });
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeWebsiteById(page, createdDomainId, siteDomain);
+      } catch (err) {
+        console.warn('DEV-06 afterAll cleanup notice:', err.message);
+      } finally {
+        await page.close().catch(() => {});
+      }
     }
 
-    // Fiziksel temizlik kontrolü (0 artık ilkesi)
-    runSsh(`rm -f /etc/cron.d/yunpanel-* /etc/nginx/sites-enabled/*${siteDomain}* /etc/nginx/sites-available/*${siteDomain}* 2>/dev/null; systemctl reload nginx 2>/dev/null || true`);
+    // 2. Kalan spesifik cron dosyaları varsa yalnız bu teste ait olanları temizle (asla /etc/cron.d/yunpanel-* genel deseni kullanılmaz)
+    for (const taskId of createdTaskIds) {
+      runSsh(`rm -f /etc/cron.d/yunpanel-${taskId} 2>/dev/null || true`);
+    }
+    if (siteDomain) {
+      const matchingFiles = runSsh(`grep -l "${siteDomain}" /etc/cron.d/yunpanel-* 2>/dev/null || true`);
+      for (const f of matchingFiles.split('\n').filter(Boolean)) {
+        if (f.startsWith('/etc/cron.d/yunpanel-')) {
+          runSsh(`rm -f ${f} 2>/dev/null || true`);
+        }
+      }
+    }
+
+    // 3. Fiziksel temizlik kontrolü (0 artık ilkesi - yalnız bu teste ait Nginx dosyaları)
+    runSsh(`rm -f /etc/nginx/sites-enabled/*${siteDomain}* /etc/nginx/sites-available/*${siteDomain}* 2>/dev/null; systemctl reload nginx 2>/dev/null || true`);
   });
 
   test('mutlu yol: PHP sitesi oluştur, cron sekmesini aç, Laravel schedule:run görevini ekle, fiziksel cron.d dosyasını doğrula ve görevi temizle', async ({ page }) => {
@@ -235,11 +263,56 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
     await expect(taskRow).toContainText(cronSchedule);
     await expect(taskRow.locator('text=Yapılandırma hazır')).toBeVisible({ timeout: 45000 });
 
-    // Fiziksel Kontrol 2: SSH ile /etc/cron.d/ dizininde cron dosyası doğrulaması
-    const cronFileCheck = runSsh('cat /etc/cron.d/yunpanel-* 2>/dev/null');
+    // Panel API'sinden bu testin oluşturduğu görevin taskId'sini al
+    const cronsRes = await page.request.get(`/api/panel/websites/${encodeURIComponent(createdWebsiteId)}/crons`);
+    expect(cronsRes.ok()).toBeTruthy();
+    const cronsData = await cronsRes.json();
+    const mainTask = cronsData.data?.tasks?.find((t) => t.name === taskName);
+    expect(mainTask).toBeTruthy();
+    const mainTaskId = mainTask.id || mainTask.taskId;
+    expect(mainTaskId).toBeTruthy();
+    createdTaskIds.add(mainTaskId);
+
+    // Fiziksel Kontrol 2: SSH ile /etc/cron.d/ dizininde yalnız bu göreve ait dosyanın doğrulaması
+    const mainCronFilePath = `/etc/cron.d/yunpanel-${mainTaskId}`;
+    const cronFileCheck = runSsh(`cat ${mainCronFilePath} 2>/dev/null`);
     expect(cronFileCheck.length).toBeGreaterThan(0);
     expect(cronFileCheck).toContain(cronSchedule);
     expect(cronFileCheck).toContain('artisan schedule:run');
+    expect(cronFileCheck).toContain(siteDomain);
+
+    // İki ayrı test kaynağı izolasyon doğrulaması: İkinci bir zamanlanmış görev oluştur
+    const companionTaskName = 'Laravel Backup Clean Worker';
+    const companionSchedule = '0 3 * * *';
+    const companionCommand = `php /var/lib/yunpanel/sites/${siteDomain}/artisan backup:clean >> /dev/null 2>&1`;
+
+    const apiHeaders = await getApiHeaders(page);
+    const addCompanionRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(createdWebsiteId)}/crons`, {
+      headers: apiHeaders,
+      data: {
+        name: companionTaskName,
+        schedule: companionSchedule,
+        command: companionCommand,
+      },
+    });
+    expect(addCompanionRes.ok()).toBeTruthy();
+    const addCompanionData = await addCompanionRes.json();
+    const companionTaskId = addCompanionData.data?.task?.id || addCompanionData.data?.id;
+    expect(companionTaskId).toBeTruthy();
+    createdTaskIds.add(companionTaskId);
+
+    // İkinci görevin dosyasının oluştuğunu SSH ile doğrula
+    const companionCronPath = `/etc/cron.d/yunpanel-${companionTaskId}`;
+    let companionCreated = false;
+    for (let i = 0; i < 15; i++) {
+      const check = runSsh(`cat ${companionCronPath} 2>/dev/null`);
+      if (check.includes('backup:clean')) {
+        companionCreated = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(companionCreated).toBe(true);
 
     // İşlem durumu modalı açıksa kapat
     const jobModal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'İşlem durumu' });
@@ -268,12 +341,47 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
       await expect(jobModal).toBeHidden({ timeout: 10000 });
     }
 
-    // Tabloda görevin kaldırıldığını doğrula
+    // Tabloda silinen ilk görevin kaldırıldığını doğrula
     await expect(page.locator('tr').filter({ hasText: taskName })).toHaveCount(0, { timeout: 30000 });
 
-    // Fiziksel Kontrol 3: SSH ile cron dosyasının kaldırıldığını doğrula
-    const postDeleteCron = runSsh('cat /etc/cron.d/yunpanel-* 2>/dev/null');
-    expect(postDeleteCron).not.toContain('artisan schedule:run');
+    // Fiziksel Kontrol 3: SSH ile yalnız bu testin silinen cron dosyasının kaldırıldığını doğrula
+    const postDeleteCron = runSsh(`test -f ${mainCronFilePath} && echo "EXISTS" || echo "NOT_FOUND"`);
+    expect(postDeleteCron).toBe('NOT_FOUND');
+    createdTaskIds.delete(mainTaskId);
+
+    // İZOLASYON KANITI: İlk görev silindiğinde ikinci görevin dosyası ve registry kaydı KORUNDU
+    const companionStillExists = runSsh(`test -f ${companionCronPath} && echo "EXISTS" || echo "NOT_FOUND"`);
+    expect(companionStillExists).toBe('EXISTS');
+
+    const verifyApiRes = await page.request.get(`/api/panel/websites/${encodeURIComponent(createdWebsiteId)}/crons`);
+    expect(verifyApiRes.ok()).toBeTruthy();
+    const verifyApiData = await verifyApiRes.json();
+    const companionInRegistry = verifyApiData.data?.tasks?.find((t) => (t.id === companionTaskId || t.taskId === companionTaskId));
+    expect(companionInRegistry).toBeTruthy();
+    expect(companionInRegistry.name).toBe(companionTaskName);
+    expect(companionInRegistry.hostFileExists).toBe(true);
+
+    // Temizlik: İkinci görevi de API üzerinden sil ve sunucu dosyasının temizlendiğini doğrula (0 artık)
+    const deleteCompanionRes = await page.request.delete(
+      `/api/panel/websites/${encodeURIComponent(createdWebsiteId)}/crons/${encodeURIComponent(companionTaskId)}`,
+      {
+        headers: apiHeaders,
+        data: { expectedRevision: companionInRegistry.revision },
+      },
+    );
+    expect(deleteCompanionRes.ok()).toBeTruthy();
+
+    let companionCleaned = false;
+    for (let i = 0; i < 15; i++) {
+      const postDeleteCompanion = runSsh(`test -f ${companionCronPath} && echo "EXISTS" || echo "NOT_FOUND"`);
+      if (postDeleteCompanion === 'NOT_FOUND') {
+        companionCleaned = true;
+        break;
+      }
+      await new Promise((r) => setTimeout(r, 1000));
+    }
+    expect(companionCleaned).toBe(true);
+    createdTaskIds.delete(companionTaskId);
   });
 
   test('hatalı girdi / güvenlik: Geçersiz veya eksik parametrelerle cron oluşturma backend tarafından 400 ile engellenir ve var olmayan site 404 döner', async ({ page }) => {
