@@ -569,3 +569,13 @@
     ℹ duration_ms 452.136416
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T817 · Doğrulama raporu: API-01 hata sayımı ve tenant yeniden kurma kabul sınırı
+- **Bağımlı:** T299
+- **Dosyalar:** `docs/manuel-test/OZET.md`, `docs/otomasyon-api.md`, `docs/manuel-test/CODEX-KABUL-DENETIMI.md`
+- **Kaynak:** QA · 2026-10-28 14:02
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    CODEX bağımsız denetimi: docs/manuel-test/API-01.md ürün hatası yok diyor fakat OZET.md normal=1 ve toplam238 sayıyor. API-01 satırı0, toplam237 olmalı; tematik yüzdeler için sayım kanıtı yok. apps/api/test/tenant-site-recreate-lifecycle.test.js execFn, identityManager, domainRemovalRuntime ve cleanup stub kullanıyor; https:false ile çalışıyor. docs/otomasyon-api.md tam doğrulandı ifadesini yerel kısmi entegrasyon kanıtıyla sınırla; T812/T815 kabulü canlı .28 HTTPS yeniden kurmayı kanıtlamaz. Kabul: 124 rapor/124 benzersiz tablo satırı, kategori toplamları tutarlı, API-01 hata0, açık kabul sınırı yazılı, npm run lint. Uygulama veya kabul edilmiş görev geçmişi değiştirilmez.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
