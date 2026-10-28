@@ -115,3 +115,5 @@
 - 2026-10-28 11:43 orchestrator: verify a41000f3..7d4e983e: ok, yeniden açılan -, bulgu -
 - 2026-10-28 11:47 orchestrator: verify 7d4e983e..59aebbf7: ok, yeniden açılan -, bulgu -
 - 2026-10-28 11:51 orchestrator: verify 59aebbf7..657f57be: ok, yeniden açılan -, bulgu -
+- 2026-10-28 12:02 orchestrator: tick: 4/4 yuva işte, geri alınan 0
+- 2026-10-28 12:06 orchestrator: tick: 4/4 yuva işte, geri alınan 0
