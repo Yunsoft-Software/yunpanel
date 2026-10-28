@@ -20,7 +20,20 @@ const customer = (websiteIds) => Object.freeze({
   security: Object.freeze({ ownerMfaRequired: false, enrollmentRequired: false, managementAllowed: true }),
   access: Object.freeze({ mode: 'site_management', permissions: Object.freeze(['sites.manage']) }),
 });
-const line = (host, n) => `203.0.113.${n} - - [27/Oct/2026:10:00:0${n} +0300] "GET /${host}-${n} HTTP/1.1" 200 10 "-" "curl"\n`;
+const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+function formatNginxAccessDate(date) {
+  const pad = (n) => String(n).padStart(2, '0');
+  const d = pad(date.getUTCDate());
+  const m = MONTH_NAMES[date.getUTCMonth()];
+  const y = date.getUTCFullYear();
+  const h = pad(date.getUTCHours());
+  const min = pad(date.getUTCMinutes());
+  const s = pad(date.getUTCSeconds());
+  return `${d}/${m}/${y}:${h}:${min}:${s} +0000`;
+}
+
+const line = (host, n, date = new Date(Date.now() - (60_000 * n))) =>
+  `203.0.113.${n} - - [${formatNginxAccessDate(date)}] "GET /${host}-${n} HTTP/1.1" 200 10 "-" "curl"\n`;
 
 async function fixture(t) {
   const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-site-logs-'));
@@ -61,9 +74,13 @@ async function fixture(t) {
 
 test('a customer reads only the access log of their own site, never the server-wide nginx log', async (t) => {
   const f = await fixture(t);
-  await writeFile(path.join(f.logs, 'access.log'), line('sunucu-geneli', 1));
-  await writeFile(path.join(f.logs, 'other.example.test.access.log'), line('baska-site', 2));
-  await writeFile(path.join(f.logs, 'own.example.test.access.log'), line('kendi-sitem', 3));
+  const recentDate = new Date(Date.now() - 60_000);
+  const oldDate = new Date(Date.now() - (48 * 60 * 60 * 1_000));
+  await writeFile(path.join(f.logs, 'access.log'), line('sunucu-geneli', 1, recentDate));
+  await writeFile(path.join(f.logs, 'other.example.test.access.log'), line('baska-site', 2, recentDate));
+  await writeFile(path.join(f.logs, 'own.example.test.access.log'),
+    line('kendi-sitem-eski', 9, oldDate) + line('kendi-sitem', 3, recentDate)
+  );
   const result = await f.get(`/api/websites/${f.own.website.id}/application/logs?kind=access&level=info`);
   assert.equal(result.status, 200);
   assert.deepEqual(result.body.data.entries.map(entry => entry.message.match(/GET \/(\S+)/)[1]), ['kendi-sitem-3']);
@@ -71,13 +88,23 @@ test('a customer reads only the access log of their own site, never the server-w
   const byDefault = await f.get(`/api/websites/${f.own.website.id}/application/logs?level=info`);
   assert.equal(JSON.stringify(byDefault.body).includes('sunucu-geneli'), false, 'server-wide log leaked to a customer');
   assert.deepEqual(byDefault.body.data.entries.map(entry => entry.message.match(/GET \/(\S+)/)[1]), ['kendi-sitem-3']);
+
+  // Explicit since/until range queries can still retrieve historical logs outside the default 24h window
+  const sinceIso = new Date(oldDate.getTime() - 60_000).toISOString();
+  const untilIso = new Date(oldDate.getTime() + 60_000).toISOString();
+  const explicitRange = await f.get(`/api/websites/${f.own.website.id}/application/logs?kind=access&level=info&since=${encodeURIComponent(sinceIso)}&until=${encodeURIComponent(untilIso)}`);
+  assert.equal(explicitRange.status, 200);
+  assert.deepEqual(explicitRange.body.data.entries.map(entry => entry.message.match(/GET \/(\S+)/)[1]), ['kendi-sitem-eski-9']);
 });
 
 test('the served hostname decides the file: a preferred www name reads www.<domain>.access.log', async (t) => {
   const f = await fixture(t);
+  const now = Date.now();
+  const since = new Date(now - 300_000).toISOString();
+  const until = new Date(now + 60_000).toISOString();
   await writeFile(path.join(f.logs, 'pref.example.test.access.log'), line('eski-ad', 1));
   await writeFile(path.join(f.logs, 'www.pref.example.test.access.log'), line('tercih', 2));
-  const result = await f.get(`/api/websites/${f.preferred.website.id}/application/logs?kind=access&level=info`);
+  const result = await f.get(`/api/websites/${f.preferred.website.id}/application/logs?kind=access&level=info&since=${encodeURIComponent(since)}&until=${encodeURIComponent(until)}`);
   assert.deepEqual(result.body.data.entries.map(entry => entry.message.match(/GET \/(\S+)/)[1]), ['tercih-2']);
 });
 
