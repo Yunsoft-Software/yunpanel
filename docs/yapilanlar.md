@@ -3,6 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 28-10-2026
+- **Altyapı** — Otomasyon API'si `.28` gerçek HTTPS/API/Chromium kabulü 19/19 geçti; ACME ayarı yapıldı, tenant/üst domain/geçici uygulama/anahtar temizliği doğrulandı. Aynı slug'ı silip yeniden kurma hatası açık (`docs/otomasyon-api.md`).
+- **Hata** — Uygulaması ve dosya kökü olmayan proxy sitesi silinemiyordu; üretim dosya temizleme adaptörü düzeltildi, gerçek registry regresyonu ve ilgili 82 test geçti; tek dosya kullanıcı onayıyla `.28`e uygulandı.
 - **Hata** — Herkese açık web geçidi otomasyon isteklerini geçirmiyordu (Authorization siliniyordu); ayrı `/api/automation` yolu.
 - **Hata** — Tenant sitesi hazır olmadan durum değişikliği kabul edilip sonsuza dek bekliyordu; artık 409.
 - **Hata** — Orkestra `lock.sh break` SENIOR kilitlerini kırıyordu; ajanlar senior kurulumu sırasında `.28`'de test yaptı. Korumalı kilitler artık kırılmıyor.

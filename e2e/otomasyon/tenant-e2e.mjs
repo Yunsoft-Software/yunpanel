@@ -2,11 +2,13 @@
 // API key are read/held in memory only and never printed.
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
+import { chromium } from '@playwright/test';
 
 const credentials = JSON.parse(readFileSync('/Volumes/DevSSD/Developer/Projects/Projeler/yunpanel/.local/yunpanel-owner-password-only.json', 'utf8'));
 const base = new URL(credentials.url).origin;
 const PARENT = '157-180-11-28.sslip.io';
-const SLUG = 'ypt-e2e';
+const SLUG = process.env.YUNPANEL_TENANT_E2E_SLUG ?? `ypt-e2e-${Date.now().toString(36)}`;
+if (!/^[a-z][a-z0-9-]{1,28}[a-z0-9]$/.test(SLUG) || SLUG.includes('--')) throw new Error('Invalid tenant test slug');
 const HOST = `${SLUG}.${PARENT}`;
 const PORT = 32050;
 const log = (...parts) => console.log(new Date().toISOString().slice(11, 19), ...parts);
@@ -23,6 +25,7 @@ async function panel(method, path, body) {
   return { status: response.status, body: await response.json().catch(() => null) };
 }
 let key = '';
+let browser;
 async function automation(method, path, body) {
   const response = await fetch(`${base}/api/automation${path}`, { method, headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
     body: body ? JSON.stringify(body) : undefined });
@@ -73,12 +76,22 @@ try {
   check('https serves the upstream with a valid certificate', curl([`https://${HOST}/`]).startsWith('200 ') && curl([`https://${HOST}/`]).endsWith(' 0'), curl([`https://${HOST}/`]));
   const issuer = execFileSync('bash', ['-c', `echo | openssl s_client -connect ${HOST}:443 -servername ${HOST} 2>/dev/null | openssl x509 -noout -issuer`], { encoding: 'utf8' }).trim();
   check("certificate is Let's Encrypt", /Let's Encrypt/i.test(issuer), issuer);
+  browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage();
+  const browserResponse = await page.goto(`https://${HOST}/`);
+  check('Chromium serves the real upstream over verified HTTPS', browserResponse.status() === 200
+    && (await page.locator('body').innerText()).includes('YUNPANEL_AUTOMATION_E2E_32050'));
 
   for (const [state, extra, expect] of [['stopped', {}, '503'], ['archived', { redirectUrl: 'https://example.com/billing' }, '302 https://example.com/billing'], ['active', {}, '200']]) {
     const change = await automation('POST', `/tenant-sites/${SLUG}/state`, { state, ...extra });
     const done = await until((r) => ['active', 'attention'].includes(r.body?.data?.state) && r.body.data.mode === state, `mode ${state}`, 180_000);
     const answer = curl([`https://${HOST}/`]);
     check(`mode ${state}`, change.status < 300 && done.body.data.state === 'active' && answer.startsWith(expect), answer);
+    if (state !== 'archived') {
+      const response = await page.goto(`https://${HOST}/?e2e=${state}-${Date.now()}`);
+      check(`Chromium mode ${state}`, response.status() === Number(expect)
+        && (state !== 'active' || (await page.locator('body').innerText()).includes('YUNPANEL_AUTOMATION_E2E_32050')), String(response.status()));
+    }
   }
 
   const removal = await automation('DELETE', `/tenant-sites/${SLUG}`);
@@ -88,7 +101,9 @@ try {
   check('name no longer served by the tenant', !curl([`https://${HOST}/`]).startsWith('200 '), curl([`https://${HOST}/`]));
   check('record gone', (await automation('GET', `/tenant-sites/${SLUG}`)).status === 404);
 } finally {
+  await browser?.close();
   if (keyId) check('api key revoked', (await panel('DELETE', `/api-keys/${keyId}`)).status === 200);
   check('revoked key refused', (await automation('GET', '/whoami')).status === 401);
 }
 console.log(JSON.stringify({ passed: results.filter((r) => r.ok).length, failed: results.filter((r) => !r.ok).map((r) => r.name), parentId: parent?.id ?? null }));
+if (results.some((result) => !result.ok)) process.exitCode = 1;

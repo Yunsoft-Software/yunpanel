@@ -31,13 +31,18 @@ Yanıt: `{ data: { hostname, slug, upstreamPort, websiteId, state, mode, steps }
 ## DNS
 Alt alan adları için kayıt tek tek eklenmez: üst alan adında bir kez `*.st.novasis.ai A <sunucu IP>` kaydı yeterlidir. Sertifika her site için HTTP-01 ile alınır.
 
-## Doğrulama durumu (2026-10-27)
+## Doğrulama durumu (2026-10-28)
 - Otomatik testler: gerçek uygulama, kayıtlar, provisioning motoru, nginx yöneticisi, iş yürütücüsü, kaldırma motoru ve genel web geçidi; Unix kullanıcısı ve iç içe alan adı kaldırma yer tutucu.
 - `.28` (paket `0.3.0-2026102702`), `157-180-11-28.sslip.io` üst alan adıyla: anahtar oluşturma, tarayıcı isteğinin reddi, site + nginx + alan adı yayını geçti. Geçici nginx ile bakım (503), arşiv (302), ACME açık doğrulandı.
 - Uçtan uca ilk koşu, genel web geçidinin `Authorization`'ı silip değişiklikleri Origin'e bağladığını buldu; `/api/automation/*` için ayrı geçit yolu eklendi.
+- 28 Ekim `.28` kabulü: ACME adresi API env dosyasına tanımlandı, servis yeniden başlatıldı. Yarım sitenin sertifika adımı yeniden denendi ve geçti. Eski yayın kaydı nedeniyle site normal kaldırma akışıyla temizlendi.
+- `node e2e/otomasyon/tenant-e2e.mjs`: **19/19 geçti**, çıkış 0. Benzersiz tenant'ta gerçek Let's Encrypt sertifikası, HTTPS 200, Chromium ile uygulama içeriği, bakım 503, arşiv 302 + hedef adresi, yeniden 200, gerçek kaldırma ve ardından 404; anahtar iptali + 401 doğrulandı. Tarayıcı durum kontrolleri önbellekten bağımsız URL kullanır; başarısız kontrol artık sıfır olmayan çıkış verir.
+- Gerçek silmede bulunan `website_cleanup_application_drift` düzeltildi: Application/Unix kullanıcı/dosya kökü olmayan dış proxy sıfır dosya hedefiyle temizlenir. Gerçek dosya registry ve üretim adaptörüyle hata önce tekrar üretildi; ilgili 82 test geçti. Kullanıcı onayıyla yalnız `website-removal-cleanup-adapters.js` hash kontrolüyle `.28`e aktarıldı; paket sürümü değişmedi.
+- Anahtar saklama testi, base64url secret içindeki `_` karakterini yanlış ayırıyordu; tam secret kontrol edilir ve olumsuz doğrulama mesajına token yazılmaz. Tekrar koşarken `.28`in `127.0.0.1:32050` uygulaması `YUNPANEL_AUTOMATION_E2E_32050` metnini sunmalıdır. Betik varsayılan benzersiz slug üretir; açık yeniden kurma hatası için `YUNPANEL_TENANT_E2E_SLUG` ile sabit slug seçilebilir.
+- Eski tenant, iki benzersiz test tenant'ı, `157-180-11-28.sslip.io` üst domaini ve Nginx dosyaları kaldırıldı. Python süreci kapatıldı, `32050` portu/dizin temizliği ve etkin test anahtarı kalmadığı doğrulandı; sunucu kilitleri bırakıldı.
+- Silmeyi engelleyen beş eksik cron dosyasının registry kaydı, `SYS-06`/`DEV-06` testlerinin ad/komut/zamanlamasıyla birebir doğrulandı ve kullanıcının koşullu onayıyla normal API'den kaldırıldı; ilgili siteler korunuyor.
+- Son yerel doğrulama: ilgili 82/82, lint, build ve diff kontrolü geçti. Tam API koşusu **5314/5316**: `website-site-logs.test.js` içindeki iki testin sabit `27/Oct/2026` satırları varsayılan son 24 saat aralığının dışında kaldığı için kırmızı; bu testler bu tur değiştirilmedi. Diğer workspace testlerinde hata yok (host-runtime'da mevcut bir atlanan test var). Tam depo doğrulaması yeşil sayılmaz.
 
 ## Kalan işler (sırayla)
-1. `.28`'e `YUNPANEL_ACME_EMAIL` tanımla (adres: kullanıcı Plesk'te açıp verecek) ve API'yi yeniden başlat; bu olmadan panelden açılan siteler de sertifika alamaz.
-2. Yarım kalan `ypt-e2e.157-180-11-28.sslip.io` tenant'ı `.28`'de duruyor (sertifika adımı başarısız). Sertifika adımını yeniden dene, sonra 503/302/aktif ve **gerçek silme**yi uçtan uca koş (betik: `node e2e/otomasyon/tenant-e2e.mjs`). Bitince `157-180-11-28.sslip.io` üst alan adını kaldır.
-3. ~~Hazır olmadan `state` → 409 `tenant_site_not_ready`~~ — 28-10-2026 yapıldı.
-4. ~~Kit: `lock.sh break` SENIOR/İNSAN kilidini kırmasın~~ — 28-10-2026 yapıldı.
+1. **Aynı slug'ı silip yeniden oluşturma hatası açık:** hostname'den türetilen sabit provisioning kimliği eski `ready` kaydını, Website kaldırması da önceki domain kaldırma kaydını yeniden kullanıyor. Gerçek tekrarda yeni domain sertifikasızken `active` döndü; HTTPS hostname doğrulaması ve sonraki silme `website_removal_domains_still_attached` ile başarısız oldu. Yeni kurulum nesli için kimlik/journal tasarımı ve gerçek yeniden oluşturma testi gerekli. Bu durum tamamlandı sayılmıyor; başarılı 19 kontrol benzersiz tenant içindir. Hatalı tekrarın kaynakları normal domain/Website devam API'leriyle temizlendi.
+2. **Test temizliği riski:** `e2e/ozellik/dev-06.spec.js` içindeki `afterAll`, `/etc/cron.d/yunpanel-*` genel desenini siliyor. Bu kod başka testlerin cron dosyalarını da silebilir; yalnız kendi oluşturduğu görev kimlikleriyle sınırlandırılmalı. Bu tur betik çalıştırılmadı/değiştirilmedi; Antigravity duraklatılmış durumda bırakıldı.

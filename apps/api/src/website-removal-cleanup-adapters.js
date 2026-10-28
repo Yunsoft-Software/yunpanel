@@ -53,10 +53,15 @@ export function createWebsiteRemovalCleanupAdapters({
     );
   }
 
-  async function currentTarget(websiteId, applicationId) {
+  async function currentTarget(websiteId, applicationId, { allowExternalProxy = false } = {}) {
     const website = await websiteRegistry.getWebsite(websiteId);
     if (!website || website.id !== websiteId || website.applicationId !== applicationId) {
       unavailable('website_cleanup_identity_drift', 'Website/Application cleanup identity changed');
+    }
+    if (allowExternalProxy && applicationId === null && website.runtimeType === 'proxy'
+      && !website.unixUser && !website.systemUser && website.documentRoot == null
+      && !website.dockerWorkloadId && !website.managedComposeBinding) {
+      return Object.freeze({ website, application: null });
     }
     const application = await applicationRegistry.getApplication(applicationId);
     if (!application || application.id !== applicationId || application.serverId !== website.serverId) {
@@ -325,7 +330,8 @@ export function createWebsiteRemovalCleanupAdapters({
   }
 
   async function inspectFileCleanup({ websiteId, applicationId } = {}) {
-    const { website } = await currentTarget(websiteId, applicationId);
+    const { website, application } = await currentTarget(websiteId, applicationId, { allowExternalProxy: true });
+    if (application === null) return Object.freeze({ ready: true, websiteId, applicationId, targets: Object.freeze([]) });
     const targets = canonicalFileCleanupTargets(websiteId, applicationId);
     for (const target of targets) await absentOrDirectory(target, lstatFn);
     fileManagerContext(await ownedIdentitySource({ websiteId, systemUser: website.unixUser }));
@@ -337,6 +343,11 @@ export function createWebsiteRemovalCleanupAdapters({
     if (!Array.isArray(retainedBackups) || retainedBackups.some((id) => typeof id !== 'string' || !id)
       || !Array.isArray(retainedLogScopes) || retainedLogScopes.some((id) => typeof id !== 'string' || !id)) {
       unavailable('website_cleanup_retained_scope_invalid', 'Retained backup or log scope is invalid');
+    }
+    if (applicationId === null) {
+      return Object.freeze({ websiteId, applicationId,
+        retainedBackups: Object.freeze([...retainedBackups]), retainedLogScopes: Object.freeze([...retainedLogScopes]),
+        filesCleaned: true, cleanedFilesCount: 0 });
     }
     const { website } = await currentTarget(websiteId, applicationId);
     const source = await ownedIdentitySource({ websiteId, systemUser: website.unixUser });

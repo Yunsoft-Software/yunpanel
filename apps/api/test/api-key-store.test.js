@@ -17,11 +17,12 @@ test('a new key is shown once; only its hash is stored and listings never includ
   const f = await fixture(t);
   const { key, token } = await f.store.create(input);
   assert.match(token, /^ypk_[a-f0-9]{12}_[A-Za-z0-9_-]{43}$/);
+  const secret = /^ypk_[a-f0-9]{12}_([A-Za-z0-9_-]{43})$/.exec(token)[1];
   assert.deepEqual(key.scope, { parentDomain: 'st.novasis.ai', portMin: 32000, portMax: 32999 });
   const stored = await readFile(f.filePath, 'utf8');
-  assert.equal(stored.includes(token.split('_')[2]), false, 'secret never written');
+  assert.equal(stored.includes(secret), false, 'secret never written');
   const [listed] = await f.store.list();
-  assert.equal(JSON.stringify(listed).includes(token.split('_')[2]), false);
+  assert.equal(JSON.stringify(listed).includes(secret), false);
   assert.equal(Object.hasOwn(listed, 'hash'), false);
 });
 
@@ -30,10 +31,11 @@ test('only an exact, unrevoked key authenticates, also after a restart', async (
   const { key, token } = await f.store.create(input);
   const reloaded = createApiKeyStore({ filePath: f.filePath });
   assert.equal((await reloaded.authenticate(token)).id, key.id);
-  const [prefix, id, secret] = token.split('_');
+  const [, id, secret] = /^ypk_([a-f0-9]{12})_([A-Za-z0-9_-]{43})$/.exec(token);
+  const prefix = 'ypk';
   const altered = `${secret.slice(0, -1)}${secret.endsWith('A') ? 'B' : 'A'}`;
   for (const candidate of [`${prefix}_${id}_${altered}`, `${prefix}_${'0'.repeat(12)}_${secret}`, 'ypk_x', '', null, `Bearer ${token}`]) {
-    assert.equal(await reloaded.authenticate(candidate), null, String(candidate));
+    assert.equal(await reloaded.authenticate(candidate), null, 'invalid or changed token is refused');
   }
   await reloaded.revoke(key.id);
   assert.equal(await reloaded.authenticate(token), null);
