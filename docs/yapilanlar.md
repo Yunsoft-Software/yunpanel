@@ -3,7 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 28-10-2026
-- **Altyapı** — Otomasyon API'si `.28` gerçek HTTPS/API/Chromium kabulü 19/19 geçti; ACME ayarı yapıldı, tenant/üst domain/geçici uygulama/anahtar temizliği doğrulandı. Aynı slug'ı silip yeniden kurma hatası açık (`docs/otomasyon-api.md`).
+- **Hata** — Aynı slug ile tenant yeniden kurma `.28`de gerçek HTTPS/Chromium ile 20/20 + 19/19 geçti; nesil ve üç kaynak/işlem kimliği ayrıldı. Onaylı dört API dosyası hash kontrolüyle aktarıldı; tenant/üst domain/upstream temizlendi, anahtarlar iptal edildi; emekli sertifika materyali 30 günlük politikayla korunuyor (T818).
+- **Altyapı** — Otomasyon API'si benzersiz tenant ile `.28` gerçek HTTPS/API/Chromium kabulü 19/19 geçti; ACME ayarı yapıldı, tenant/üst domain/geçici uygulama/anahtar temizliği doğrulandı (`docs/otomasyon-api.md`).
 - **Hata** — Uygulaması ve dosya kökü olmayan proxy sitesi silinemiyordu; üretim dosya temizleme adaptörü düzeltildi, gerçek registry regresyonu ve ilgili 82 test geçti; tek dosya kullanıcı onayıyla `.28`e uygulandı.
 - **Hata** — Herkese açık web geçidi otomasyon isteklerini geçirmiyordu (Authorization siliniyordu); ayrı `/api/automation` yolu.
 - **Hata** — Tenant sitesi hazır olmadan durum değişikliği kabul edilip sonsuza dek bekliyordu; artık 409.
