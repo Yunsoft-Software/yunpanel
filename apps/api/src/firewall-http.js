@@ -42,7 +42,12 @@ function asyncRoute(handler) {
 
 function requireOwnerRole(request, response, next) {
   const user = request.auth?.user;
-  if (!user || user.role !== 'owner') {
+  if (!user) {
+    return response.status(401).json({
+      error: { code: 'unauthorized', message: 'Authentication required.' },
+    });
+  }
+  if (user.role !== 'owner') {
     return response.status(403).json({
       error: { code: 'forbidden', message: 'Owner permissions required for firewall operations.' },
     });

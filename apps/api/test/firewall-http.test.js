@@ -210,6 +210,18 @@ function createHttpApp({ firewallService, role = 'owner' } = {}) {
         access: { mode: 'site_management', permissions: ['sites.manage'] },
         security: { managementAllowed: true },
       };
+    } else if (role === 'reseller') {
+      req.auth = {
+        user: { id: 'usr-reseller-1', username: 'reseller1', role: 'reseller' },
+        access: { mode: 'reseller', permissions: ['sites.manage'] },
+        security: { managementAllowed: true },
+      };
+    } else if (role === 'customer') {
+      req.auth = {
+        user: { id: 'usr-customer-1', username: 'cust1', role: 'customer' },
+        access: { mode: 'customer', permissions: ['sites.manage'] },
+        security: { managementAllowed: true },
+      };
     }
     next();
   });
@@ -306,40 +318,89 @@ test('PROD-05 Firewall HTTP API Suite', async (suite) => {
   await suite.test('RBAC: Authentication and Authorization on /api/firewall/ports', async () => {
     const { firewallService } = createTestHarness();
 
-    // 1. Unauthenticated -> 401
+    // 1. Unauthenticated -> 401 on GET, POST, DELETE
     {
       const app = createHttpApp({ firewallService, role: 'unauthenticated' });
       const server = app.listen(0);
       const port = server.address().port;
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
-        assert.equal(res.status, 401);
+        const getRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
+        assert.equal(getRes.status, 401);
+
+        const postRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: 9000, protocol: 'tcp' }),
+        });
+        assert.equal(postRes.status, 401);
+
+        const delRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports/9000`, {
+          method: 'DELETE',
+        });
+        assert.equal(delRes.status, 401);
       } finally {
         server.close();
       }
     }
 
-    // 2. Site manager -> 403
-    {
-      const app = createHttpApp({ firewallService, role: 'site_manager' });
+    // 2. Site-scoped roles (site_manager, reseller, customer) -> 403 on GET, POST, DELETE
+    for (const scopedRole of ['site_manager', 'reseller', 'customer']) {
+      const app = createHttpApp({ firewallService, role: scopedRole });
       const server = app.listen(0);
       const port = server.address().port;
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
-        assert.equal(res.status, 403);
+        const getRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
+        assert.equal(getRes.status, 403, `${scopedRole} should get 403 on GET /api/firewall/ports`);
+
+        const postRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: 9000, protocol: 'tcp' }),
+        });
+        assert.equal(postRes.status, 403, `${scopedRole} should get 403 on POST /api/firewall/ports`);
+
+        const delRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports/9000`, {
+          method: 'DELETE',
+        });
+        assert.equal(delRes.status, 403, `${scopedRole} should get 403 on DELETE /api/firewall/ports/:port`);
       } finally {
         server.close();
       }
     }
 
-    // 3. Read only -> 200
+    // 3. Read only -> 200 on GET, 403 on POST and DELETE
     {
       const app = createHttpApp({ firewallService, role: 'read_only' });
       const server = app.listen(0);
       const port = server.address().port;
       try {
-        const res = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
-        assert.equal(res.status, 200);
+        const getRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
+        assert.equal(getRes.status, 200);
+
+        const postRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ port: 9000, protocol: 'tcp' }),
+        });
+        assert.equal(postRes.status, 403);
+
+        const delRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports/9000`, {
+          method: 'DELETE',
+        });
+        assert.equal(delRes.status, 403);
+      } finally {
+        server.close();
+      }
+    }
+
+    // 4. Owner -> 200 on GET
+    {
+      const app = createHttpApp({ firewallService, role: 'owner' });
+      const server = app.listen(0);
+      const port = server.address().port;
+      try {
+        const getRes = await fetch(`http://127.0.0.1:${port}/api/firewall/ports`);
+        assert.equal(getRes.status, 200);
       } finally {
         server.close();
       }
