@@ -10,6 +10,7 @@
 - **Hata** — Tenant sitesi hazır olmadan durum değişikliği kabul edilip sonsuza dek bekliyordu; artık 409.
 - **Hata** — Orkestra `lock.sh break` SENIOR kilitlerini kırıyordu; ajanlar senior kurulumu sırasında `.28`'de test yaptı. Korumalı kilitler artık kırılmıyor.
 
+- Canlı özellik testleri (sys-05, tls-03) yalnız kendi kaynaklarını siliyor; DKIM, DNSSEC silme, draft site silme, posta alan adı silme ve test çıktısında parola hataları T823–T827 olarak açıldı.
 ## 27-10-2026
 - **Özellik** — Otomasyon API'si: kapsamlı API anahtarları (Ayarlar), tek çağrıyla tenant sitesi kurma/durdurma (503)/arşivleme (302)/silme; Plesk'teki Novasis kurulumunun karşılığı (`docs/otomasyon-api.md`).
 - **Özellik** — Bakım modu: her site için 503 (yönlendirme kuralları ve şifreli dizinler atlatamaz); .28'de nginx ile doğrulandı.
