@@ -488,7 +488,10 @@ export function createWebsiteRemovalRuntime({
     if (!activeChild) {
       // Check if domain is already removed
       const lastOp = domainOps.find((dOp) => dOp.status === 'removed');
-      if (lastOp) {
+      const domainStillExists = typeof domainRegistry?.getDomain === 'function'
+        ? Boolean(await domainRegistry.getDomain(domainId))
+        : false;
+      if (lastOp && !domainStillExists) {
         return registry.succeedStep(op.id, step.id, { domainRemoved: true, domainId });
       }
 

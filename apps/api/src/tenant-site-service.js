@@ -21,9 +21,10 @@ export class TenantSiteError extends Error {
   }
 }
 
-// Stable identity: the same parent Domain and slug always map to the same site-create operation.
-function operationIdFor(hostname) {
-  const hex = createHash('sha256').update(`yunpanel:tenant-site:v1:${hostname}`).digest('hex');
+// Stable identity: the same parent Domain, slug and generation map to a unique site-create operation.
+function operationIdFor(hostname, generation = 1) {
+  const seed = generation > 1 ? `yunpanel:tenant-site:v2:${hostname}:${generation}` : `yunpanel:tenant-site:v1:${hostname}`;
+  const hex = createHash('sha256').update(seed).digest('hex');
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-4${hex.slice(13, 16)}-${'89ab'[parseInt(hex[16], 16) % 4]}${hex.slice(17, 20)}-${hex.slice(20, 32)}`;
 }
 
@@ -35,7 +36,7 @@ function slugOf(value) {
   return value;
 }
 
-export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId, publication = null, jobRegistry = null, removal = null }) {
+export function createTenantSiteService({ siteCreator, provisioning, domainRegistry, store, localServerId, publication = null, jobRegistry = null, removal = null, websiteRegistry = null }) {
   if (!siteCreator || !provisioning?.get || !provisioning?.runNext || !domainRegistry || !store || !localServerId) {
     throw new Error('Tenant sites require the site creator, provisioning engine, Domain registry and tenant store');
   }
@@ -64,6 +65,7 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     const failed = operation?.steps?.some((step) => ['failed', 'blocked', 'compensated'].includes(step.state)) || Boolean(record.publication?.error);
     return Object.freeze({
       hostname: record.hostname, slug: record.slug, upstreamPort: record.upstreamPort, websiteId: record.websiteId,
+      ...(record.generation ? { generation: record.generation } : {}),
       state: failed ? 'attention' : !operation?.ready ? 'provisioning' : record.publication ? 'publishing' : 'active',
       mode: record.mode ?? 'active',
       ...(record.publication?.error ? { error: record.publication.error } : {}),
@@ -89,7 +91,18 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
       if (record.upstreamPort !== upstreamPort) throw new TenantSiteError('tenant_port_change_unsupported', 'A tenant site keeps its port', 409);
       return { created: false, site: view(record, await advance(record, key, ADVANCE_LIMIT)) };
     }
-    const operationId = operationIdFor(hostname);
+    let generation = typeof store.getGeneration === 'function' ? await store.getGeneration(hostname) : 1;
+    let operationId = operationIdFor(hostname, generation);
+    while (true) {
+      const priorOp = await provisioning.get(operationId);
+      if (!priorOp) break;
+      const priorSite = typeof websiteRegistry?.getWebsite === 'function'
+        ? await websiteRegistry.getWebsite(priorOp.websiteId)
+        : null;
+      if (priorSite) break;
+      generation += 1;
+      operationId = operationIdFor(hostname, generation);
+    }
     const existing = (await domainRegistry.listDomains()).find((domain) => domain.primaryDomain === hostname || domain.aliases?.includes(hostname));
     if (existing) {
       // Only our own interrupted create (same deterministic operation, same Website) is resumed.
@@ -97,7 +110,7 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
       if (!interrupted || interrupted.websiteId !== existing.websiteId || existing.primaryDomain !== hostname) {
         throw new TenantSiteError('existing_domain_protected', 'This hostname already exists in the panel and is not a tenant site', 409);
       }
-      record = await store.put({ hostname, slug, parentDomain: parent.primaryDomain, upstreamPort, operationId, websiteId: existing.websiteId,
+      record = await store.put({ hostname, slug, parentDomain: parent.primaryDomain, upstreamPort, operationId, generation, websiteId: existing.websiteId,
         domainId: existing.id, createdByKey: key.id, createdAt: new Date().toISOString() });
       return { created: false, site: view(record, await advance(record, key, ADVANCE_LIMIT)) };
     }
@@ -114,7 +127,7 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     // Like POST /api/sites: the plan is taken after create, so finished metadata steps start as succeeded.
     if (!(await provisioning.get(operationId))) await siteCreator.persistProvisioning((await siteCreator.preview(input)).provisioning);
     record = await store.put({
-      hostname, slug, parentDomain: parent.primaryDomain, upstreamPort, operationId, websiteId: result.website.id,
+      hostname, slug, parentDomain: parent.primaryDomain, upstreamPort, operationId, generation, websiteId: result.website.id,
       domainId: result.primaryDomain.id, createdByKey: key.id, createdAt: new Date().toISOString(),
     });
     return { created: true, site: view(record, await advance(record, key, ADVANCE_LIMIT)) };
@@ -205,8 +218,17 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
     }
     const started = await removal.start({ websiteId: record.websiteId, previewDigest: preview.previewDigest, confirmation: preview.confirmation, actor });
     await store.put({ ...record, removal: { operationId: started.id } });
-    await removal.run({ websiteId: record.websiteId, operationId: started.id, expectedUpdatedAt: started.updatedAt,
-      confirmation: `run-website-remove:${record.websiteId}:${started.id}:${started.updatedAt}`, actor });
+    try {
+      const current = await removal.get(started.id);
+      if (current && !['removed', 'failed', 'blocked'].includes(current.status)) {
+        await removal.run({ websiteId: record.websiteId, operationId: current.id, expectedUpdatedAt: current.updatedAt,
+          confirmation: `run-website-remove:${record.websiteId}:${current.id}:${current.updatedAt}`, actor });
+      }
+    } catch (err) {
+      if (err?.code !== 'website_removal_execution_stale' && err?.code !== 'website_removal_busy') {
+        throw err;
+      }
+    }
     return removalView({ ...record, removal: { operationId: started.id } });
   }
 
