@@ -3,7 +3,7 @@
 # Usage:
 #   orkestra/lock.sh acquire NAME AGENT   # waits up to 120 s, then fails
 #   orkestra/lock.sh release NAME AGENT
-#   orkestra/lock.sh break NAME           # only for locks older than 10 minutes
+#   orkestra/lock.sh break NAME           # only for locks older than 10 minutes, never a SENIOR/İNSAN lock
 #   orkestra/lock.sh list
 set -euo pipefail
 
@@ -50,6 +50,12 @@ case "$cmd" in
     age=$(lock_age "$name")
     if (( age < STALE_SECONDS )); then
       echo "$name is only $age s old; refusing to break" >&2
+      exit 1
+    fi
+    holder=$(cut -d'|' -f1 < "$LOCKS/$name/owner" 2>/dev/null || echo '?')
+    # SENIOR/İNSAN may hold a lock for a long task (a deploy, a live test); only they release it.
+    if python3 "$ROOT/orkestra/tasks.py" protected "$holder"; then
+      echo "$name is held by protected owner $holder; refusing to break (ask them to release it)" >&2
       exit 1
     fi
     echo "breaking $name held by $(cat "$LOCKS/$name/owner" 2>/dev/null || echo '?') ($age s)"

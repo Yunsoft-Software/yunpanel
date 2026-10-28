@@ -28,6 +28,7 @@ Usage:
   tasks.py status                        summary
   tasks.py pause "reason"                no new claims or reviews; agents finish their current work and stop
   tasks.py resume                        allow claims again
+  tasks.py protected AGENT               exit 0 if AGENT is a protected owner (SENIOR, İNSAN)
   tasks.py lint                          ids, dependencies, cycles, file ownership
 """
 import json
@@ -550,6 +551,8 @@ def main(argv):
             print(f"PAUSED: {reason}")
             return
         sys.exit(f"paused: {reason} (tasks.py resume)")
+    if cmd == "protected" and len(args) == 1:
+        sys.exit(0 if is_protected(args[0]) else 1)
     if cmd == "pause" and len(args) == 1:
         os.makedirs(os.path.dirname(PAUSE_FILE), exist_ok=True)
         with open(PAUSE_FILE, "w", encoding="utf-8") as fh:
