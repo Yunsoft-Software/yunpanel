@@ -376,3 +376,33 @@
     ℹ duration_ms 741.331125
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T811 · KRİTİK: DEV-06 test temizliği başka sitelerin cron dosyalarını siliyor
+- **Bağımlı:** T163
+- **Dosyalar:** `e2e/ozellik/dev-06.spec.js`
+- **Kaynak:** QA · 2026-10-28 10:59
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    28-10-2026 kaynak kanıtı: e2e/ozellik/dev-06.spec.js afterAll, /etc/cron.d/yunpanel-* genel deseniyle tüm yönetilen cron dosyalarını siliyor. .28 otomasyon kabulünde beş eski SYS-06/DEV-06 test cron kaydı dosyasız bulundu; ad, komut ve zamanlama test kaynaklarıyla birebir doğrulanıp İNSAN onayıyla normal API üzerinden kaldırıldı. Genel yıkıcı komutu .28 üzerinde yeniden çalıştırma. Temizliği yalnız bu koşunun oluşturduğu görev kimlikleri ve normal panel API akışıyla sınırla; iki ayrı test kaynağından yalnız kendisininkini kaldırınca diğerinin dosyası ve registry kaydı korunduğunu gerçek API/host ile kanıtla. Diğer testler ve kullanıcı kaynakları korunmalı; mock/stub yok. Sonuç ve sınırı docs/otomasyon-api.md Kalan işler notuyla eşleştir.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T812 · Otomasyon: silinen tenant aynı slug ile eski provisioning ve kaldırma kayıtlarını kullanıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/tenant-site-service.js`, `apps/api/src/tenant-site-store.js`, `e2e/otomasyon/tenant-e2e.mjs`
+- **Kaynak:** QA · 2026-10-28 10:59
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    28-10-2026 gerçek .28 kabulünde ypt-e2e tenant silindi, aynı slug yeniden PUT edildi. Sabit hostname tabanlı provisioning operationId eski ready kaydını kullandı; yeni domain certificateId null iken API active döndü, HTTPS hostname doğrulaması başarısız oldu. Sonraki DELETE eski domain kaldırma kaydını tamamlanmış saydı ve website_removal_domains_still_attached ile durdu. Başarısız tekrarın bütün kaynakları normal APIlerle temizlendi. Ayrıntı docs/otomasyon-api.md Kalan işler 1. Canlı aynı tenant tekrar PUT idempotency davranışını koru; tamamen silinmiş tenant yeniden kurulumunda yeni nesil/journal kimliklerini güvenli ayır. Eski kaydı elle silerek veya kimlik/tenant korumasını atlayarak geçirme. e2e/otomasyon/tenant-e2e.mjs benzersiz tenant ile 19/19 geçti; bu kabul aynı slug yeniden kurulumunu kapsamıyor. Oluştur, sertifika, sil, aynı slug yeniden oluştur, gerçek sertifika/200, tekrar sil/404 senaryosunu gerçek .28 API/DB/tarayıcı ile kanıtla. .28 mevcut tek dosya hotfixi kaynakta 9ab0622b; yeni deployment için ayrıca kullanıcı hedef/scope izni gerekir.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T813 · Doğrulama: site log testlerinin sabit tarihi son 24 saat aralığının dışında kalıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/test/website-site-logs.test.js`
+- **Kaynak:** QA · 2026-10-28 10:59
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    28-10-2026 son npm test --workspace @yunpanel/api sonucu 5314/5316: website-site-logs.test.js satır 62 ve 76 testleri entries [] döndüğü için başarısız. Testin line() fonksiyonu sabit 27/Oct/2026 10:00 +0300 satırları üretiyor; gerçek normalizeLogQuery varsayılan son 24 saati uygular. Tarih değişiminden bağımsız, açık since/until aralığıyla mevcut gerçek HTTP ve gerçek dosya okuyucu testlerini düzelt; beklentiyi gevşetme veya ürünün 24 saat filtresini kaldırma. Tarih sınırı senaryosunu da koru. Anahtar testindeki base64url underscore ayrıştırma hatası 9ab0622b içinde düzeltildi; o hatayı tekrar açma. Mock/stub ekleme. İlgili testler ve verify --quick yeşil kanıtlanmalı.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
