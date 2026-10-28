@@ -279,6 +279,9 @@ const ORCHESTRATABLE_WEBSITE_IMPACT_BLOCKERS = new Set([
   'cron_dependencies_present',
   'backup_dependencies_present',
   'certificates_present',
+  // Domain removal retires the mail domain and its webmail mapping; mailboxes stay a hard stop.
+  'mail_domains_present',
+  'webmail_mapping_dependencies_present',
   'impact_apply_not_implemented',
 ]);
 

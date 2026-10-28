@@ -231,6 +231,35 @@ test('allows website removal preview when website domains have SSL certificates 
 });
 
 
+test('a mail-enabled site delegates its mail domain and webmail mapping to domain removal (T825)', () => {
+  const ws = website();
+  const imp = impact(ws, {
+    blockers: [
+      { code: 'mail_domains_present', resourceType: 'mail_domain', count: 1 },
+      { code: 'webmail_mapping_dependencies_present', resourceType: 'webmail_mapping', count: 1 },
+      { code: 'impact_apply_not_implemented', resourceType: 'website' },
+    ],
+  });
+
+  const preview = createWebsiteRemovalPreview({ website: ws, impact: imp });
+  assert.equal(preview.readyToStart, true);
+  assert.deepEqual(preview.hardBlockers, []);
+});
+
+test('mailboxes still block site removal so mail data is never deleted implicitly', () => {
+  const ws = website();
+  const imp = impact(ws, {
+    blockers: [
+      { code: 'mail_domains_present', resourceType: 'mail_domain', count: 1 },
+      { code: 'mailbox_dependencies_present', resourceType: 'mailbox', count: 2 },
+    ],
+  });
+
+  const preview = createWebsiteRemovalPreview({ website: ws, impact: imp });
+  assert.equal(preview.readyToStart, false);
+  assert.deepEqual(preview.hardBlockers, ['mailbox_dependencies_present']);
+});
+
 test('rejects missing or mismatched Application revision evidence', () => {
   const ws=website();
   const missing=impact(ws); delete missing.application;

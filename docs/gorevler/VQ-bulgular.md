@@ -647,15 +647,15 @@
 - **Kabul:** Kırılan birim testi önce; `npm test`; .28'de dns-04 geçiyor ve artık site kalmıyor.
 
 ### T825 · Site sihirbazında posta adımı takılınca site silinemiyor; posta alan adını silecek ekran yok
-- **Bağımlı:** T826
+- **Bağımlı:** T801
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/web/src/workspace/MailDomainPage.jsx`
+- **Dosyalar:** `apps/api/src/website-removal-plan.js`, `apps/api/test/website-removal-plan.test.js`
 - **Kaynak:** SENIOR · 2026-10-28
 - **İş:** Posta adımı engellenen sitenin silinmesi `mail_domains_present` ile duruyor; `DELETE /api/mail-domains/:id` var ama web istemcisinde çağrısı yok. Plesk'teki gibi site silme bağlı posta alan adını da kaldırsın (posta kutusu varsa açık onayla) veya posta alan adı ekrandan silinebilsin.
 - **Kabul:** Takılı posta adımlı site panelden silinebiliyor; birim + .28 kanıtı.
 
 ### T826 · Alan adı hiç yayınlanmamış (draft) site panelden silinemiyor
-- **Bağımlı:** T803
+- **Bağımlı:** T803, T825
 - **Sahip:** SENIOR
 - **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/api/test/domain-removal-plan.test.js`
 - **Kaynak:** SENIOR · 2026-10-28
