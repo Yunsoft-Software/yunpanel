@@ -38,6 +38,6 @@ Alt alan adları için kayıt tek tek eklenmez: üst alan adında bir kez `*.st.
 
 ## Kalan işler (sırayla)
 1. `.28`'e `YUNPANEL_ACME_EMAIL` tanımla (adres: kullanıcı Plesk'te açıp verecek) ve API'yi yeniden başlat; bu olmadan panelden açılan siteler de sertifika alamaz.
-2. Yarım kalan `ypt-e2e.157-180-11-28.sslip.io` tenant'ı `.28`'de duruyor (sertifika adımı başarısız). Sertifika adımını yeniden dene, sonra 503/302/aktif ve **gerçek silme**yi uçtan uca koş (betik: senior scratchpad `e2e-tenant.mjs`). Bitince `157-180-11-28.sslip.io` üst alan adını kaldır.
+2. Yarım kalan `ypt-e2e.157-180-11-28.sslip.io` tenant'ı `.28`'de duruyor (sertifika adımı başarısız). Sertifika adımını yeniden dene, sonra 503/302/aktif ve **gerçek silme**yi uçtan uca koş (betik: `node e2e/otomasyon/tenant-e2e.mjs`). Bitince `157-180-11-28.sslip.io` üst alan adını kaldır.
 3. ~~Hazır olmadan `state` → 409 `tenant_site_not_ready`~~ — 28-10-2026 yapıldı.
 4. ~~Kit: `lock.sh break` SENIOR/İNSAN kilidini kırmasın~~ — 28-10-2026 yapıldı.
