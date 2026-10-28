@@ -178,7 +178,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     });
   }
 
-  async function reconcileBlocked(operation, step) {
+  async function reconcileBlocked(operation, step, actor = null) {
     let inspected;
     try { inspected = await inspectStep(operation, step); }
     catch (error) {
@@ -199,6 +199,10 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
       });
     }
 
+    // The handler confirmed its apply never started and its precondition now holds.
+    if (inspected.satisfied !== true && inspected.applyRequired === true) {
+      return applyStep(operation.operationId, step, actor);
+    }
     if (inspected.satisfied !== true) {
       const code = publicErrorCode(
         { code: inspected.reason },
@@ -268,7 +272,7 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
     if (interruptedCompensation) return reconcileInterruptedCompensation(operation, interruptedCompensation);
 
     const blocked = operation.steps.find((step) => step.required && step.state === 'blocked');
-    if (blocked) return reconcileBlocked(operation, blocked);
+    if (blocked) return reconcileBlocked(operation, blocked, actor);
 
     const terminal = operation.steps.find((step) => step.required
       && ['failed', 'compensated'].includes(step.state));
@@ -288,6 +292,10 @@ export function createWebsiteProvisioningOrchestrator({ registry, handlers = {} 
       return Object.freeze({ operation, outcome: 'blocked', stepId: null, actionRequired: 'remediate' });
     }
 
+    return applyStep(operationId, step, actor);
+  }
+
+  async function applyStep(operationId, step, actor) {
     const handler = handlerFor(handlers, step);
     const applying = await registry.beginStep({ operationId, stepId: step.id });
     const applyingStep = applying.steps.find((candidate) => candidate.id === step.id);

@@ -385,12 +385,10 @@ export function createWebsiteMailDkimConfigProvisioningHandler({
     const latest = owned.at(-1) ?? null;
     if (!latest) {
       const desired = await preview(request);
-      return Object.freeze({
-        satisfied: false,
-        reason: desired?.readyToApply
-          ? 'website_mail_dkim_apply_required'
-          : 'website_mail_dkim_dns_not_ready',
-      });
+      // No owned job exists, so apply never started: a ready preview lets the step resume.
+      return desired?.readyToApply
+        ? Object.freeze({ satisfied: false, reason: 'website_mail_dkim_apply_required', applyRequired: true })
+        : Object.freeze({ satisfied: false, reason: 'website_mail_dkim_dns_not_ready' });
     }
     if (latest.status === 'succeeded') {
       return applyEvidence(successfulJob(latest, request, context.operationId, 'apply'), request);

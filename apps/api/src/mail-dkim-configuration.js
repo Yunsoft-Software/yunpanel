@@ -42,6 +42,10 @@ function publicConfiguration(preview) {
   });
 }
 
+function includedInSigning(entry, targetMailDomainId) {
+  return entry.mailDomainId === targetMailDomainId || ['ready', 'resolver_error'].includes(entry.state);
+}
+
 function previewIdentity(input, targetKey, preview, dnsDiagnostics) {
   const configuration = publicConfiguration(preview);
   const dnsStates = Object.freeze(dnsDiagnostics.map((entry) => Object.freeze({
@@ -59,15 +63,22 @@ function previewIdentity(input, targetKey, preview, dnsDiagnostics) {
     dnsStates,
   });
   const previewDigest = digest(identity);
-  const blockers = dnsStates.every((entry) => entry.state === 'ready')
-    ? Object.freeze([])
-    : Object.freeze(['mail_dkim_dns_not_ready']);
+  // Only the target's own record gates activation. Other domains whose record is definitely
+  // absent or wrong are left out of signing; an unanswered lookup cannot tell, so it blocks.
+  const blockers = [];
+  if (dnsStates.some((entry) => entry.mailDomainId === input.mailDomainId && entry.state !== 'ready')) {
+    blockers.push('mail_dkim_dns_not_ready');
+  }
+  if (dnsStates.some((entry) => entry.mailDomainId !== input.mailDomainId && entry.state === 'resolver_error')) {
+    blockers.push('mail_dkim_dns_unverifiable');
+  }
   return Object.freeze({
     ...identity,
+    excludedFromSigning: Object.freeze(dnsStates.filter((entry) => !includedInSigning(entry, input.mailDomainId))),
     previewDigest,
     confirmation: `apply-mail-dkim:${input.mailDomainId}:${previewDigest}`,
     readyToApply: blockers.length === 0,
-    blockers,
+    blockers: Object.freeze(blockers),
     configuration,
     dns: Object.freeze(dnsDiagnostics.map((entry) => Object.freeze({
       mailDomainId: entry.mailDomainId,
@@ -133,20 +144,6 @@ export function createMailDkimConfigurationService({
       throw new MailDkimConfigurationError('mail_dkim_state_invalid', 'Target DKIM key is missing from enabled signing state', 409);
     }
 
-    let preview;
-    try {
-      preview = previewRspamdDkimSigningConfig(enabledKeys.map((key) => ({
-        domain: key.domainName,
-        selector: key.selector,
-        publicKey: key.publicKey,
-      })));
-    } catch (error) {
-      if (error instanceof MailDkimTemplateError) {
-        throw new MailDkimConfigurationError('mail_dkim_state_invalid', 'Managed DKIM signing state is invalid', 409);
-      }
-      throw error;
-    }
-
     const dnsDiagnostics = Object.freeze(await Promise.all(enabledKeys.map(async (key) => {
       const diagnostics = await mailDiagnosticsInspector.inspect(key.domainName, { dkim: key });
       const diagnostic = diagnostics?.diagnostics?.dkim;
@@ -159,10 +156,29 @@ export function createMailDkimConfigurationService({
         diagnostic,
       });
     })));
+    const signingKeys = enabledKeys.filter((key) => includedInSigning({
+      mailDomainId: key.mailDomainId,
+      state: dnsDiagnostics.find((entry) => entry.mailDomainId === key.mailDomainId).diagnostic.state,
+    }, input.mailDomainId));
+
+    let preview;
+    try {
+      preview = previewRspamdDkimSigningConfig(signingKeys.map((key) => ({
+        domain: key.domainName,
+        selector: key.selector,
+        publicKey: key.publicKey,
+      })));
+    } catch (error) {
+      if (error instanceof MailDkimTemplateError) {
+        throw new MailDkimConfigurationError('mail_dkim_state_invalid', 'Managed DKIM signing state is invalid', 409);
+      }
+      throw error;
+    }
+
     return Object.freeze({
       input,
       targetKey,
-      enabledKeys: Object.freeze(enabledKeys),
+      signingKeys: Object.freeze(signingKeys),
       preview,
       publicPreview: previewIdentity(input, targetKey, preview, dnsDiagnostics),
     });
@@ -182,7 +198,7 @@ export function createMailDkimConfigurationService({
     }
     const state = await materializeState(input);
     if (!state.publicPreview.readyToApply) {
-      throw new MailDkimConfigurationError('mail_dkim_dns_not_ready', 'Every enabled managed DKIM DNS record must be ready before signing is applied', 409);
+      throw new MailDkimConfigurationError('mail_dkim_dns_not_ready', 'The target DKIM DNS record must be ready and every signed record verifiable before signing is applied', 409);
     }
     if (state.publicPreview.previewDigest !== expectedPreviewDigest
       || state.preview.sha256 !== expectedConfigurationSha256) {
@@ -190,7 +206,7 @@ export function createMailDkimConfigurationService({
     }
 
     const keys = [];
-    for (const key of state.enabledKeys) {
+    for (const key of state.signingKeys) {
       const materialized = await mailDkimRegistry.materializePrivateKey(key.mailDomainId);
       const metadata = materialized?.metadata;
       if (!metadata || metadata.domainName !== key.domainName || metadata.selector !== key.selector

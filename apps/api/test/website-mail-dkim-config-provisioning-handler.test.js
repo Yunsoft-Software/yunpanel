@@ -253,6 +253,23 @@ test('Website DKIM signing blocks without enqueue until public DNS diagnostics a
   assert.deepEqual(f.jobs(), []);
 });
 
+test('Website DKIM signing inspect reports an unstarted apply as ready once DNS is visible', async () => {
+  const waiting = fixture({ dnsReady: false });
+  assert.deepEqual(await waiting.handler.inspect(waiting.context), {
+    satisfied: false,
+    reason: 'website_mail_dkim_dns_not_ready',
+  });
+
+  const ready = fixture();
+  assert.deepEqual(await ready.handler.inspect(ready.context), {
+    satisfied: false,
+    reason: 'website_mail_dkim_apply_required',
+    applyRequired: true,
+  });
+  assert.deepEqual(ready.events(), []);
+  assert.deepEqual(ready.jobs(), []);
+});
+
 test('Website DKIM signing inspect recovers an operation-owned succeeded child after lost acknowledgement', async () => {
   const f = fixture({ initialApplyJob: true });
   const evidence = await f.handler.inspect(f.context);

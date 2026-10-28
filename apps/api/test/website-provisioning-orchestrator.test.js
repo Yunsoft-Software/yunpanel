@@ -283,6 +283,39 @@ test('blocked continuation refreshes actionable inspection evidence without re-a
   });
 });
 
+test('blocked step whose inspection reports an unstarted, now-ready apply runs apply once', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.create(plan());
+  await registry.beginStep({ operationId, stepId: 'unix_identity' });
+  await registry.blockStep({
+    operationId,
+    stepId: 'unix_identity',
+    error: 'website_mail_dkim_dns_not_ready',
+    evidence: { satisfied: false, reason: 'website_mail_dkim_dns_not_ready' },
+  });
+  let applyCalls = 0;
+  let observedState = null;
+  const orchestrator = createWebsiteProvisioningOrchestrator({
+    registry,
+    handlers: {
+      unix_identity: {
+        apply: async () => {
+          applyCalls += 1;
+          observedState = (await registry.get(operationId)).steps[0].state;
+          return { satisfied: true };
+        },
+        inspect: async () => ({ satisfied: false, reason: 'website_mail_dkim_apply_required', applyRequired: true }),
+      },
+    },
+  });
+
+  const result = await orchestrator.runNext(operationId);
+  assert.equal(applyCalls, 1);
+  assert.equal(observedState, 'applying');
+  assert.equal(result.outcome, 'progressed');
+  assert.equal(result.operation.steps[0].state, 'succeeded');
+});
+
 test('handler failure records bounded failed state instead of advancing', async () => {
   const registry = createWebsiteProvisioningRegistry();
   await registry.create(plan());

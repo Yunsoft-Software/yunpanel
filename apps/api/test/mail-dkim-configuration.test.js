@@ -46,7 +46,7 @@ function key(mailDomain, selector, keyPair) {
   };
 }
 
-function fixture({ secondDnsState = 'ready' } = {}) {
+function fixture({ secondDnsState = 'ready', firstDnsState = 'ready' } = {}) {
   const domains = [structuredClone(firstDomain), structuredClone(secondDomain)];
   let keys = [
     key(firstDomain, 'mail-a', firstPair),
@@ -75,7 +75,7 @@ function fixture({ secondDnsState = 'ready' } = {}) {
     mailDiagnosticsInspector: {
       async inspect(domainName, { dkim }) {
         diagnosticsCalls.push([domainName, dkim.selector]);
-        const state = domainName === secondDomain.domainName ? secondDnsState : 'ready';
+        const state = domainName === secondDomain.domainName ? secondDnsState : firstDnsState;
         return {
           diagnostics: {
             dkim: {
@@ -119,16 +119,33 @@ test('aggregate DKIM preview binds every enabled managed key and all DNS states'
   assert.deepEqual(state.diagnosticsCalls.map(([domain]) => domain), ['example.com', 'second.example']);
 });
 
-test('an unrelated enabled DKIM domain with missing DNS blocks global signing activation', async () => {
+test('an unrelated domain with missing DKIM DNS is left out of signing instead of blocking the target', async () => {
   const state = fixture({ secondDnsState: 'missing' });
   const preview = await state.service.previewApply(input);
 
-  assert.equal(preview.readyToApply, false);
-  assert.deepEqual(preview.blockers, ['mail_dkim_dns_not_ready']);
+  assert.equal(preview.readyToApply, true);
+  assert.deepEqual(preview.blockers, []);
+  assert.equal(preview.configuration.domains, 1);
   assert.deepEqual(preview.dnsStates, [
     { mailDomainId: firstDomain.id, domainName: 'example.com', state: 'ready' },
     { mailDomainId: secondDomain.id, domainName: 'second.example', state: 'missing' },
   ]);
+  assert.deepEqual(preview.excludedFromSigning, [
+    { mailDomainId: secondDomain.id, domainName: 'second.example', state: 'missing' },
+  ]);
+  const materialized = await state.service.materializeApply(input, {
+    expectedPreviewDigest: preview.previewDigest,
+    expectedConfigurationSha256: preview.configuration.sha256,
+  });
+  assert.deepEqual(materialized.keys.map((entry) => entry.domain), ['example.com']);
+});
+
+test('the target domain with missing DKIM DNS still blocks signing activation', async () => {
+  const state = fixture({ firstDnsState: 'missing' });
+  const preview = await state.service.previewApply(input);
+
+  assert.equal(preview.readyToApply, false);
+  assert.deepEqual(preview.blockers, ['mail_dkim_dns_not_ready']);
   await assert.rejects(
     state.service.materializeApply(input, {
       expectedPreviewDigest: preview.previewDigest,
@@ -136,6 +153,16 @@ test('an unrelated enabled DKIM domain with missing DNS blocks global signing ac
     }),
     (error) => error instanceof MailDkimConfigurationError && error.code === 'mail_dkim_dns_not_ready',
   );
+});
+
+test('an unverifiable unrelated DKIM record blocks rather than silently dropping a signing domain', async () => {
+  const state = fixture({ secondDnsState: 'resolver_error' });
+  const preview = await state.service.previewApply(input);
+
+  assert.equal(preview.readyToApply, false);
+  assert.deepEqual(preview.blockers, ['mail_dkim_dns_unverifiable']);
+  assert.equal(preview.configuration.domains, 2);
+  assert.deepEqual(preview.excludedFromSigning, []);
 });
 
 test('aggregate key-set change stales an older DKIM apply preview', async () => {

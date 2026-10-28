@@ -633,7 +633,7 @@
 ### T823 · KRİTİK DKIM: hazır olmayan tek posta alan adı bütün yeni sitelerin DKIM'ini durduruyor
 - **Bağımlı:** —
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/mail-dkim-configuration.js`, `apps/api/src/website-mail-dkim-config-provisioning-handler.js`, `apps/api/test/mail-dkim-configuration.test.js`, `apps/api/test/website-mail-dkim-config-provisioning-handler.test.js`
+- **Dosyalar:** `apps/api/src/mail-dkim-configuration.js`, `apps/api/src/website-mail-dkim-config-provisioning-handler.js`, `apps/api/test/mail-dkim-configuration.test.js`, `apps/api/test/website-mail-dkim-config-provisioning-handler.test.js`, `apps/api/src/website-provisioning-orchestrator.js`, `apps/api/test/website-provisioning-orchestrator.test.js`
 - **Kaynak:** SENIOR · 2026-10-28
 - **İş:** `previewIdentity` bütün etkin anahtarların DNS durumu `ready` değilse `readyToApply=false` veriyor; tek OpenDKIM yapılandırması olduğu için DNS'i görünmeyen bir alan adı (ör. `sslip.io` altındaki eski test sitesi) sunucudaki bütün yeni posta sitelerini `website_mail_dkim_dns_not_ready` ile kilitliyor. Ayrıca adım `blocked` olunca DNS hazır olsa da devam etmiyor: `/continue` hep blocked, `/retry` 409 (`canRetry=false`). .28'de tekrar üretildi (teml09 koşuları, işlem `dcaf984a-…`). Hedef: yalnız hedef anahtarın DNS'i engel olsun, diğerleri uyarı; blocked adım DNS hazır olunca normal ilerlesin. Sonra .28'de takılı `teml09-acodex-mvs47pnd-guard.157-180-11-28.sslip.io` ve `teml09-acodex-mvs4j36n-guard.webrich.news` sitelerini panelden temizle ve T819'u (`e2e/ozellik/eml-09.spec.js`, artık `webrich.news` altında) yeniden koş.
 - **Kabul:** Önce kırılan birim testi; `npm test` ve lint geçiyor; İNSAN onaylı .28 kurulumundan sonra eml-09 5/5 geçiyor.
