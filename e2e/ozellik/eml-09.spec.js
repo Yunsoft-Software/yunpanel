@@ -88,11 +88,28 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
     const site = { hostname, domainId: result.primaryDomain.id, websiteId: result.website.id, operationId: result.operationId };
     sites.push(site);
     await expect(page.locator('.ws-site-create-result')).toBeVisible({ timeout: 30_000 });
+    let lastUpdate = null;
+    let idlePolls = 0;
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/panel/sites/provisioning/${site.operationId}`);
-      expect(response.status()).toBe(200);
-      return (await response.json()).data.ready;
-    }, { timeout: 180_000, message: 'Owned mail site provisioning must complete' }).toBe(true);
+      // Provisioning reloads Nginx, which can drop a request. The result page then stops
+      // advancing and leaves "Devam et" to the user, so a stalled run is continued the same way.
+      try {
+        const response = await page.request.get(`/api/panel/sites/provisioning/${site.operationId}`);
+        expect(response.status()).toBe(200);
+        const operation = (await response.json()).data;
+        if (operation.ready) return true;
+        idlePolls = operation.updatedAt === lastUpdate ? idlePolls + 1 : 0;
+        lastUpdate = operation.updatedAt;
+        if (idlePolls >= 3) {
+          idlePolls = 0;
+          await call('POST', `/sites/provisioning/${site.operationId}/continue`,
+            { confirmation: `continue-site-provisioning:${site.operationId}` });
+        }
+      } catch (error) {
+        if (!/socket hang up|ECONNRESET|failed before a usable response/.test(String(error?.message))) throw error;
+      }
+      return false;
+    }, { timeout: 240_000, intervals: [3_000], message: 'Owned mail site provisioning must complete' }).toBe(true);
     const responseMail = await page.request.get('/api/panel/mail-domains');
     expect(responseMail.status()).toBe(200);
     const payload = (await responseMail.json()).data;
@@ -129,6 +146,7 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
   }
 
   test.beforeAll(async ({ browser }) => {
+    test.setTimeout(600_000);
     const config = Object.fromEntries(readFileSync('.local/test-server.env', 'utf8').split('\n')
       .filter((line) => /^[A-Z_]+=/.test(line)).map((line) => {
         const i = line.indexOf('='); return [line.slice(0, i), line.slice(i + 1).replace(/^['"]|['"]$/g, '')];
@@ -171,9 +189,12 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
   test('site wizard creates isolated DKIM keys, DNS records and relay-safe configuration', async () => {
     const target = sites[1];
     const dkim = await openDkim(target);
-    await expect(dkim.locator('dt').filter({ hasText: /^Selector$/ }).locator('+ dd')).toHaveText('mail');
+    // The wizard derives a per-operation selector (yp- + 24 hex) instead of a shared "mail".
+    const selectorCell = dkim.locator('dt').filter({ hasText: /^Selector$/ }).locator('+ dd');
+    await expect(selectorCell).toHaveText(/^yp-[a-f0-9]{24}$/);
+    const selector = (await selectorCell.innerText()).trim();
     await expect(dkim.locator('dt').filter({ hasText: /^Algoritma$/ }).locator('+ dd')).toHaveText('rsa-sha256');
-    await expect(dkim.locator('dt').filter({ hasText: /^DNS adı$/ }).locator('+ dd')).toContainText(`mail._domainkey.${target.hostname}`);
+    await expect(dkim.locator('dt').filter({ hasText: /^DNS adı$/ }).locator('+ dd')).toContainText(`${selector}._domainkey.${target.hostname}`);
     await expect(dkim.locator('dt').filter({ hasText: /^DNS değer$/ }).locator('+ dd')).toContainText('v=DKIM1');
     await dkim.getByRole('button', { name: 'Signing preview', exact: true }).click();
     await expect(dkim.locator('dt').filter({ hasText: /^Preview digest$/ }).locator('+ dd')).toHaveText(/^[a-f0-9]{64}$/);
@@ -249,7 +270,7 @@ print(json.dumps({'spf':spf,'dmarc':dmarc,'mxPresent':bool(mx),'relaySafe':'reje
     expect(keySnapshot()[sites[0].mailDomainId]).toEqual(guardKey);
     const guard = await page.request.get(`/api/panel/mail-domains/${sites[0].mailDomainId}/dkim`);
     expect(guard.status()).toBe(200);
-    expect((await guard.json()).data.selector).toBe('mail');
+    expect((await guard.json()).data.selector).toMatch(/^yp-[a-f0-9]{24}$/);
     expect(keySnapshot(sites.map((site) => site.mailDomainId))).toEqual(foreignKeys);
   });
 });
