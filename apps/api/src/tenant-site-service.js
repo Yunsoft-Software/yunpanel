@@ -156,6 +156,9 @@ export function createTenantSiteService({ siteCreator, provisioning, domainRegis
       || !MODES.has(body.state) || (body.state === 'archived') !== (typeof body.redirectUrl === 'string')) {
       throw new TenantSiteError('invalid_tenant_state', 'Send state active, stopped or archived; archived needs redirectUrl');
     }
+    if (!(await provisioning.get(record.operationId))?.ready) {
+      throw new TenantSiteError('tenant_site_not_ready', 'The site is still being set up; change its state once it is active', 409);
+    }
     record = await advancePublication(record);
     if (record.publication && !record.publication.error) throw new TenantSiteError('tenant_site_busy', 'A previous change is still being published', 409);
     const override = body.state === 'stopped' ? { mode: 'unavailable' }
