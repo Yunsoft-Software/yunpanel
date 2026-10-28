@@ -579,3 +579,13 @@
     CODEX bağımsız denetimi: docs/manuel-test/API-01.md ürün hatası yok diyor fakat OZET.md normal=1 ve toplam238 sayıyor. API-01 satırı0, toplam237 olmalı; tematik yüzdeler için sayım kanıtı yok. apps/api/test/tenant-site-recreate-lifecycle.test.js execFn, identityManager, domainRemovalRuntime ve cleanup stub kullanıyor; https:false ile çalışıyor. docs/otomasyon-api.md tam doğrulandı ifadesini yerel kısmi entegrasyon kanıtıyla sınırla; T812/T815 kabulü canlı .28 HTTPS yeniden kurmayı kanıtlamaz. Kabul: 124 rapor/124 benzersiz tablo satırı, kategori toplamları tutarlı, API-01 hata0, açık kabul sınırı yazılı, npm run lint. Uygulama veya kabul edilmiş görev geçmişi değiştirilmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T818 · Otomasyon: aynı slug için gerçek .28 HTTPS yeniden kurma kabulü
+- **Bağımlı:** T817
+- **Dosyalar:** `docs/otomasyon-api.md`, `docs/yapilanlar.md`, `docs/manuel-test/OTOMASYON-YENIDEN-KURMA.md`
+- **Kaynak:** QA · 2026-10-28 14:40
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    İNSAN dört API dosyasının .28 aktarımını ve servis restartını açıkça onayladı. .local/automation-recreate-deployment/manifest.json içindeki sabit kaynak ve kurulu hashleri karşılaştır; yalnız dört dosyayı aktar. Aynı yeni slug ile iki gerçek tenant-e2e.mjs koşusu: geçerli HTTPS, gerçek içerik,503/302/200, gerçek silme/404; ayrıca nesil, Website/Domain/provisioning kimliklerinin değiştiğini kanıtla. Yalnız bu testin parent/key/tenant/upstream kaynaklarını temizle. .44, push, paket kurulumu ve rutin yedek yok. Kaynak test fixture sonucu canlı kabul yerine kullanılamaz. Dokümanlara kısa gerçek kanıt ve sınırları yaz.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
