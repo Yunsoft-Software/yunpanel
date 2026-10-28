@@ -167,6 +167,10 @@ test('managed HTTPS plans a certificate for the tenant host', async (t) => {
   const created = await f.call('PUT', '/api/automation/tenant-sites/beta', { upstreamPort: 32011 });
   assert.equal(created.status, 202);
   assert.ok(created.body.data.steps.some(step => step.id === 'certificate'), JSON.stringify(created.body.data.steps));
+  // Until provisioning (certificate included) is done, a mode change is refused instead of waiting forever.
+  const early = await f.call('POST', '/api/automation/tenant-sites/beta/state', { state: 'stopped' });
+  assert.equal(early.status, 409);
+  assert.equal(early.body.error.code, 'tenant_site_not_ready');
 });
 
 test('scope, reserved names, ports and foreign hostnames are protected', async (t) => {
