@@ -10,8 +10,10 @@
 - **SORUNLU:** 1 (%0.8) (`BAK-08` — Yedek deposu başlatma UI eksikliği)
 - **ÇALIŞMIYOR:** 4 (%3.2) (`DOS-10` FTP, `EML-03` Autoresponder, `EML-05` Mailing list, `SEC-03` WAF/ModSecurity)
 - **Kritik Bulgu Sayısı:** 6 (6 bulgu satırı / 5 görev kimliği: `T800`, `T801`, `T802`, `T803`, `T804`)
-- **Normal Bulgu Sayısı:** 238
-- **İncelenen Mevcut Test Dosyası/Girdisi:** 763 (GEÇERLİ: 450, MOCK: 149, YÜZEYSEL: 95, KIRMIZI: 28, EKSİK: 25, YANLIŞ: 13, DİĞER: 2, BOŞ: 1)
+- **Normal Bulgu Satırı Sayısı:** 237 (API-01'de ürün hatası olmayan açıklama sayımdan çıkarıldı)
+- **Raporlardaki Mevcut Test Sınıflandırma Girdileri:** 763 (GEÇERLİ: 450, MOCK: 149, YÜZEYSEL: 95, KIRMIZI: 28, EKSİK: 25, YANLIŞ: 13, DİĞER: 2, BOŞ: 1)
+
+Sayılar raporların tarihsel bulgu ve sınıflandırma satırlarını toplar; aynı sorunun birden fazla raporda görünmesi mümkündür. Bunlar benzersiz açık hata veya benzersiz test dosyası sayıları değildir. Kritik satırlar, aşağıda düzeltildiği veya yeniden sınıflandırıldığı belirtilen geçmiş kayıtları da içerir. `test.fail` ile beklenen düşüşler ürünün çalıştığı anlamına gelmez. Bağımsız sayım ve kabul sınırı: [CODEX-KABUL-DENETIMI.md](CODEX-KABUL-DENETIMI.md).
 
 ---
 
@@ -19,7 +21,7 @@
 
 | ID | Özellik | Sonuç | Kritik | Normal | Bulgu Görevleri | 2. Dalga Önerisi |
 |---|---|---|:---:|:---:|:---:|---|
-| API-01 | REST işlevleri ve API anahtarı yaşam döngüsü | `ÇALIŞIYOR` | 0 | 1 | — | Koru / Düzelt |
+| API-01 | REST işlevleri ve API anahtarı yaşam döngüsü | `ÇALIŞIYOR` | 0 | 0 | — | Koru / Düzelt |
 | API-02 | XML API'deki kapsam için uyumluluk/eşdeğer işlem matrisi | `KISMİ` | 0 | 2 | — | Koru |
 | API-03 | CLI, olay handler'ları ve otomatik provisioning | `KISMİ` | 0 | 2 | — | Koru |
 | API-04 | Tek kullanımlık oturum/SSO ve denetlenebilir bağlam değişimi | `KISMİ` | 0 | 2 | — | Koru |
@@ -181,9 +183,9 @@
 
 ## 3. En Sık Tekrar Eden NORMAL Hata Kalıpları
 
-124 raporda tespit edilen toplam 238 normal bulgu tematik olarak analiz edildiğinde 6 ana kalıp öne çıkmaktadır:
+124 rapordaki toplam 237 normal bulgu satırı için aşağıdaki temalar derlenmiştir. Temalar arasında örtüşme olabilir; satır bazında tema eşleştirmesi bulunmadığı için yüzdesel dağılım veya sıklık sıralaması verilmez. WEB-01'deki bir KOZMETİK satır NORMAL toplamına dahildir.
 
-### 1. Plesk Eşdeğerliği ve UI Eylem/Form Kapsamı Eksiklikleri (En Yaygın: ~%35)
+### 1. Plesk Eşdeğerliği ve UI Eylem/Form Kapsamı Eksiklikleri
 - **Kalıp:** Arka uçta API veya servis yeteneği kısmen bulunsa bile ön yüzde son kullanıcının işlemi başlatabileceği modal, buton veya ayar girişinin olmaması.
 - **Örnekler:**
   - `BAK-02`: Yedek alma modalında dosya, e-posta veya veritabanı kapsam seçimi yok (yalnızca geri yüklemede var).
@@ -192,34 +194,34 @@
   - `RUN-02`: PHP havuz ayarları (`pm.max_children`, `memory_limit`) ve php.ini direktiflerinin arayüzden düzenlenememesi.
   - `API-02`, `API-03`: Plesk CLI provisioning ve Event Handler (olay tetikleyici) arayüzlerinin bulunmaması.
 
-### 2. Durum Güncelleme ve Reaktivite / Stale State Sorunları (~%20)
+### 2. Durum Güncelleme ve Reaktivite / Stale State Sorunları
 - **Kalıp:** Bir asenkron iş (yedekleme, geri alma, silme, oluşturma, DNS güncelleme) bittiğinde arayüzün (özet kartları, tablolar, rozetler) otomatik `refresh` yapmaması; sayfa yenilenene kadar eski veriyi göstermesi.
 - **Örnekler:**
   - `BAK-08`: Otomatik geri alma (`rolled_back`) veya `failed` sonrasında `Son geri yükleme sonucu` kartının ve snapshot tablosunun yenilenmemesi.
   - `DB-01`, `DB-02`: DB kullanıcısı silindiğinde veya yetki değiştirildiğinde liste ve kota sayacının otomatik güncellenmemesi.
   - `TLS-06`: SSL yenilendikten sonra sertifika parmak izi ve geçerlilik rozetlerinin sayfayı F5 yapmadan güncellenmemesi.
 
-### 3. İstemci Doğrulama Eksikliği ve Hata Mesajı Maskeleme (~%18)
+### 3. İstemci Doğrulama Eksikliği ve Hata Mesajı Maskeleme
 - **Kalıp:** Form girdilerinin (alan adı sözdizimi, UUID formatı, dosya boyutu, port çakışması, şifre eşleşmesi) istemci tarafında form submit edilmeden önce doğrulanmaması; arka uçtan gelen 400/409 yanıtlarının ise spesifik neden yerine genel fallback metinleriyle maskelenmesi.
 - **Örnekler:**
   - `WEB-01`: Sihirbaz Adım 1'de geçersiz alan adına izin verilmesi; Adım 3'te `409 domain_conflict` hatasının `"Önizleme doğrulanamadı..."` genel metniyle gizlenmesi.
   - `DEV-01`, `DEV-02`: Git repo URL'si hatalı olduğunda veya SSH anahtarı eksik olduğunda net hata kodu yerine genel bağlantı hatası verilmesi.
   - `BAK-06`: Seçici geri yüklemede boş seçim yapıldığında genel fallback hatası dönmesi.
 
-### 4. Alt Alan Adı (Subdomain) Dosya Kökü ve Dizin Ayrımı Tutarsızlıkları (~%12)
+### 4. Alt Alan Adı (Subdomain) Dosya Kökü ve Dizin Ayrımı Tutarsızlıkları
 - **Kalıp:** `AGENTS.md` 24 Ekim kuralı gereği subdomain'lerin ana domain çalışma alanında (`<domain-root>/subdomains/<subdomain>`) olması gerekirken, arayüz metni ile fiziksel disk yapısının farklı davranması.
 - **Örnekler:**
   - `WEB-01`: UI'da `/var/www/vhosts/<domain>/subdomains/<sub>` yazarken fiziksel sunucuda ayrı `/var/www/yunpanel/apps/<id>/current` açılması.
   - `DOS-05`: Subdomain dosya yöneticisinde ana domain köküne üst dizin gezintisi ve izin sınırlarının netleşmemesi.
 
-### 5. `AGENTS.md` Madde 6 Kural İhlalleri (Kozmetik / Buzzword / Ham Hata Kodları) (~%8)
+### 5. `AGENTS.md` Madde 6 Kural İhlalleri (Kozmetik / Buzzword / Ham Hata Kodları)
 - **Kalıp:** Kullanıcı arayüzünde parantez içi İngilizce buzzword, ham değişken veya teknik hata kodlarının yer alması.
 - **Örnekler:**
   - `BAK-08`: `(Rollback)`, `(rclone)`, `(health_check_failed)`.
   - `WEB-01`: Sonuç ekranında `application_metadata`, `website_metadata`, `primary_domain_metadata` ham snake_case anahtarlarının görünmesi.
   - `DKR-01`: Docker arayüzünde `(outputDir)`, `(healthPath)` ham alan isimleri.
 
-### 6. Kiracı (Tenant) & Rol Görünüm / Bildirim Filtreleri Tutarsızlığı (~%7)
+### 6. Kiracı (Tenant) & Rol Görünüm / Bildirim Filtreleri Tutarsızlığı
 - **Kalıp:** Bildirimlerin, sistem olaylarının veya kaynak listelerinin rollere (Owner / Reseller / Customer) göre doğru filtrelenmemesi.
 - **Örnekler:**
   - `TLS-06`: `checkCertificateExpirations()` bildirim üretirken `websiteId` geçirmediği için sertifika süre dolum bildirimlerinin yalnızca Owner'a gitmesi, site sahibine (Customer) düşmemesi.
@@ -383,6 +385,8 @@
 ## 5. Mevcut Test Sınıflarının Toplamı ve 2. Dalga İçin ID Başına "Koru / Düzelt / Yaz" Önerisi
 
 ### 5.1 Mevcut Testlerin Dağılımı
+
+Bu tablo raporlardaki sınıflandırmaları aktarır; dosyalar tekilleştirilmemiş ve her test bu özet kapsamında yeniden denetlenmemiştir. Bir sınıflandırma, başka bir katmanın veya canlı host kabulünün yerine geçmez. Örneğin T812/T815'in yeniden oluşturma fixture'ı Nginx komutu, kimlik ve silme adaptörlerini taklit eder; geçen yerel koşusu sıfır mock veya canlı HTTPS kanıtı değildir.
 
 | Test Sınıfı | Adet | Oran | 2. Dalga Stratejisi |
 |---|:---:|:---:|---|
