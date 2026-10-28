@@ -37,7 +37,7 @@ Alt alan adları için kayıt tek tek eklenmez: üst alan adında bir kez `*.st.
 - Uçtan uca ilk koşu, genel web geçidinin `Authorization`'ı silip değişiklikleri Origin'e bağladığını buldu; `/api/automation/*` için ayrı geçit yolu eklendi.
 
 ## Kalan işler (sırayla)
-1. `.28`'e `YUNPANEL_ACME_EMAIL` tanımla (hangi adres: kullanıcı kararı) ve API'yi yeniden başlat; bu olmadan panelden açılan siteler de sertifika alamaz.
+1. `.28`'e `YUNPANEL_ACME_EMAIL` tanımla (adres: kullanıcı Plesk'te açıp verecek) ve API'yi yeniden başlat; bu olmadan panelden açılan siteler de sertifika alamaz.
 2. Yarım kalan `ypt-e2e.157-180-11-28.sslip.io` tenant'ı `.28`'de duruyor (sertifika adımı başarısız). Sertifika adımını yeniden dene, sonra 503/302/aktif ve **gerçek silme**yi uçtan uca koş (betik: senior scratchpad `e2e-tenant.mjs`). Bitince `157-180-11-28.sslip.io` üst alan adını kaldır.
-3. Provisioning tamamlanmadan `state` çağrısı kabul edilip bekliyor; hazır değilken `409 tenant_site_not_ready` dönmeli.
-4. Kit: `lock.sh break` korumalı sahipleri (SENIOR, İNSAN) yok sayıyor; uzun senior işi sırasında ajanlar `.28` kilitlerini devraldı. Korumalı sahip kırılmamalı.
+3. ~~Hazır olmadan `state` → 409 `tenant_site_not_ready`~~ — 28-10-2026 yapıldı.
+4. ~~Kit: `lock.sh break` SENIOR/İNSAN kilidini kırmasın~~ — 28-10-2026 yapıldı.

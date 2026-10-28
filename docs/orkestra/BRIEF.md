@@ -23,7 +23,7 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
   - Juniorlar **duraklatıldı** (`tasks/PAUSED`). Devam: `python3 orkestra/tasks.py resume`, sonra `/orkestra-devam`. 1. dalga: 83 görev bitti, 44 açık.
   - Senior 3a/3b işleri bitti ve `docs/yapilanlar.md`'de: yönlendirme kuralları, Performance Booster, canlı log, Smarthost, teslimat takibi, şifreli dizinler, yönlendirme amaçlı domain, bakım modu, **otomasyon API'si** (API anahtarları + tenant siteleri).
   - Yarım iş: otomasyon API'sinin `.28` uçtan uca denemesi. `.28`'de paket `0.3.0-2026102702`; sertifika adımı `YUNPANEL_ACME_EMAIL` tanımlı olmadığı için durdu. Sıradaki adımlar: `docs/otomasyon-api.md` → "Kalan işler".
-  - Bilinen kit hatası: `lock.sh break` SENIOR/İNSAN kilitlerini de kırıyor (aynı listede).
+  - 28-10-2026: kilit hatası ve hazır-olmadan-durum hatası düzeltildi; kalan tek engel ACME e-postası.
 - 26-10-2026: orkestra kuruldu; aktif dal `26-10-2026` (`25-10-2026`'dan).
 - Açık ana işler: `plan.md` YP2-19…YP2-23 (merkezi Shadcn UI ve domain ağacı, subdomain file root, çoklu Linux, sıfır mock test hattı, Docker/Compose proxy) ve `todo.md` T-* gerçek kabul kapıları.
 - 1. dalga hazır (`docs/gorevler/G1-manuel-test.md`): T100 hazırlık → T101–T224 124 özelliğin gerçek tarayıcıda manuel testi → T299 özet. Yöntem `docs/manuel-test/YONTEM.md`, raporlar `docs/manuel-test/<ID>.md`. Kritik hatalar bulgu görevi (T800+) olup düzeltilir.

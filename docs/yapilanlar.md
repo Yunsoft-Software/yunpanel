@@ -2,6 +2,11 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 28-10-2026
+- **Hata** — Herkese açık web geçidi otomasyon isteklerini geçirmiyordu (Authorization siliniyordu); ayrı `/api/automation` yolu.
+- **Hata** — Tenant sitesi hazır olmadan durum değişikliği kabul edilip sonsuza dek bekliyordu; artık 409.
+- **Hata** — Orkestra `lock.sh break` SENIOR kilitlerini kırıyordu; ajanlar senior kurulumu sırasında `.28`'de test yaptı. Korumalı kilitler artık kırılmıyor.
+
 ## 27-10-2026
 - **Özellik** — Otomasyon API'si: kapsamlı API anahtarları (Ayarlar), tek çağrıyla tenant sitesi kurma/durdurma (503)/arşivleme (302)/silme; Plesk'teki Novasis kurulumunun karşılığı (`docs/otomasyon-api.md`).
 - **Özellik** — Bakım modu: her site için 503 (yönlendirme kuralları ve şifreli dizinler atlatamaz); .28'de nginx ile doğrulandı.
