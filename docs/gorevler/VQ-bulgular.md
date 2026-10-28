@@ -677,3 +677,11 @@
 - **Kaynak:** SENIOR · 2026-10-28 (T823 canlı doğrulaması)
 - **İş:** `assertHttpHealthy` PHP-FPM/Nginx yeniden yüklemesinden hemen sonra her webmail adresini tek kez yokluyordu; .28'de bu anda bir istek 502 aldı ve `roundcube_mapping` her denemede `website_roundcube_apply_failed` ile geri alındı. Kısa aralıklı sınırlı yeniden deneme; kalıcı hata yine geri alır.
 - **Kabul:** Önce kırılan birim testi; `npm test`; .28'de takılı `roundcube_mapping` adımı yeniden denemeyle geçiyor.
+
+### T849 · KRİTİK: posta alan adlı site silinirken DNS adımı kendi posta temizliği yüzünden düşüyor
+- **Bağımlı:** T825
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/domain-removal-runtime.js`, `apps/api/test/domain-removal-runtime.test.js`
+- **Kaynak:** SENIOR · 2026-10-28 (T825 canlı doğrulaması)
+- **İş:** Alan adı silme planı `authoritativeDns.zoneSnapshotDigest`'i başlangıçta sabitliyor; aynı zincirin `mail_domain` adımı MX/SPF/DKIM/DMARC kayıtlarını silince bölge özeti değişiyor ve `007:authoritative_dns` `domain_removal_dns_preview_drift` ile kalıcı `failed` oluyor (.28: `teml09-acodex-mvs6ww4k-target.webrich.news`, posta alan adı ve site bağlantısı silinmiş, bölge ve site kalmış). Özet, zincirin kendi önceki adımlarından sonra yeniden sabitlenmeli; zincir dışı değişiklik yine durdurmalı. Sonra .28'de 6 askıdaki + 2 draft `teml09-*` sitesini temizle, T819'u koş.
+- **Kabul:** Önce kırılan birim testi; `npm test`; .28'de posta alan adlı site panelden tamamen siliniyor (404).
