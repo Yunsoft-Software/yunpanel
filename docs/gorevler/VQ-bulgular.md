@@ -709,3 +709,11 @@
 - **Kaynak:** SENIOR · 2026-10-30 (T820 canlı koşusu)
 - **İş:** `defaultService` kendi `createDomainRegistry` örneğini açılışta bir kez belleğe okuyor; panelin sonradan eklediği alan adlarını görmüyor ve `/api/domains/:id/dns/dnssec` `domain_not_found` dönüyor (UI "DNSSEC durumu okunuyor…"da kalıyor). Panelin ortak kayıt defteri kullanılsın.
 - **Kabul:** Kırılan birim testi önce; `npm test`; .28'de dns-04 DNSSEC aç/kapat senaryosu çalışıyor.
+
+### T857 · KRİTİK: 16–23 karakterlik veritabanı parolası API'nin bir sonraki açılışını kilitliyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/database-credential-registry.js`, `apps/api/test/database-credential-registry.test.js`
+- **Kaynak:** SENIOR · 2026-10-30 (.28'de API 16:23–16:55 arası açılmadı)
+- **İş:** Parola kuralı 16–128 karakter; AES-GCM şifreli metni aynı bayt uzunluğunda. Açılış denetimi base64 uzunluğunu ≥32 istediği için 16–23 karakterlik parola çalışan API'de kabul edilip kaydediliyor, ama yeniden başlatmada `Database credential envelope is invalid` ile API açılmıyor. Denetim çözülmüş bayt uzunluğuna (16–128) baksın.
+- **Kabul:** Kırılan birim testi önce; `npm test`; .28'de API açılıyor ve kayıtların hepsi okunuyor.

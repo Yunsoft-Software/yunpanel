@@ -3,6 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 30-10-2026
+- **Hata** — 16–23 karakterlik veritabanı parolası artık API'nin bir sonraki açılışını kilitlemiyor (T857).
+- **Hata** — Bekleyen posta silmesi, başka bir alan adının postası değişince artık takılmıyor (T850).
 - **Test** — eml-09 (DKIM/posta güvenliği) ve dns-04 (DNSSEC) .28'de baştan sona geçiyor (T819, T820).
 - **Hata** — DNSSEC'li ya da aynı sunucudaki alt bölgeler artık silinebiliyor: üst bölgenin yetkili NXDOMAIN'i "DS yok" sayılıyor (T824).
 - **Hata** — Posta DNS rozetleri doğru kayıtları artık "Geçerli" gösteriyor (T851); API açıldıktan sonra eklenen alan adlarının DNSSEC ekranı açılıyor (T852).
