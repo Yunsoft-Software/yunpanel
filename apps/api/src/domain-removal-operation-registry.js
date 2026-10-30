@@ -1067,30 +1067,6 @@ export function createDomainRemovalOperationRegistry({
     });
   }
 
-  // Re-pins the journaled zone snapshot once this chain's own earlier steps changed the
-  // zone (Mail Domain cleanup removes its MX/SPF/DKIM/DMARC records). Only allowed while the
-  // authoritative DNS step runs and before any retirement child exists.
-  async function rebaseAuthoritativeDnsSnapshot(operationId, stepId, { expectedSnapshotDigest, snapshotDigest } = {}) {
-    return withMutation(async () => {
-      const id = safeId(operationId, 'operationId');
-      const operation = requireOperation(state.operations.find((candidate) => candidate.id === id));
-      const step = firstIncomplete(operation);
-      const planned = operation.plan.authoritativeDns;
-      if (!step || step.id !== stepId || step.kind !== 'authoritative_dns' || step.status !== 'running'
-        || !planned || planned.zoneSnapshotDigest !== expectedSnapshotDigest
-        || typeof snapshotDigest !== 'string' || !SHA256_PATTERN.test(snapshotDigest)) {
-        throw new DomainRemovalOperationRegistryError(
-          'domain_removal_dns_rebase_invalid',
-          'Authoritative DNS snapshot can only be re-pinned by its running step from the journaled value',
-          409,
-        );
-      }
-      return mutate(operation, {
-        plan: { ...operation.plan, authoritativeDns: { ...planned, zoneSnapshotDigest: snapshotDigest } },
-      });
-    });
-  }
-
   async function blockStep(operationId, stepId, error) {
     return withMutation(async () => {
       const id = safeId(operationId, 'operationId');
@@ -1166,7 +1142,6 @@ export function createDomainRemovalOperationRegistry({
     listInterrupted,
     markStepRunning,
     succeedStep,
-    rebaseAuthoritativeDnsSnapshot,
     blockStep,
     failStep,
   });
