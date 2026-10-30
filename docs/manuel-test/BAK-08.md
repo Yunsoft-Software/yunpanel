@@ -1,6 +1,6 @@
 # BAK-08 — Gerçek kurtarma, hata bildirimi ve yedek sahipliği
 Sonuç: KISMİ
-Ajan: AGENT_2 · Tarih: 2026-10-30 15:10 · Senaryo: `e2e/ozellik/bak-08.spec.js` · Koşu: 4/4, test.fail 1 (iki kez art arda geçti)
+Ajan: AGENT_1 · Tarih: 2026-10-30 15:43 · Senaryo: `e2e/ozellik/bak-08.spec.js` · Koşu: 4/4, test.fail 1 (iki kez art arda geçti)
 
 ## Senaryolar
 | Test adı | Sonuç | Fiziksel kanıt |

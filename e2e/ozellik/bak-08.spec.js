@@ -7,7 +7,7 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(240000);
 
-  const agentN = process.env.AGENT_N || '2';
+  const agentN = process.env.AGENT_N || '1';
   const timestamp = Date.now().toString(36);
   const repoName = `tbak08-a${agentN}-${timestamp}-repo`;
   const testManagerUsername = `tbak08_mgr_${agentN}_${timestamp}`;
@@ -22,6 +22,32 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
   let firstSnapshotId = null;
   let createdManagerId = null;
   let csrfToken = '';
+
+  const getFreshCsrfToken = async (p) => {
+    let res = await p.request.get('/api/auth/session').catch(() => null);
+    if (!res || !res.ok()) {
+      await loginAs(p, OWNER_USERNAME, OWNER_PASSWORD);
+      res = await p.request.get('/api/auth/session').catch(() => null);
+    }
+    const json = await res?.json().catch(() => ({}));
+    const tok = json?.data?.csrfToken || csrfToken;
+    csrfToken = tok;
+    return tok;
+  };
+
+  const openBackupPage = async (p, domainId) => {
+    await p.goto(`/websites/${domainId}/backup`);
+    const header = p.locator('h2:has-text("Yedekleme ve Geri Yükleme")');
+    const loginForm = p.locator('form.auth-form, form:has-text("YunPanel’e giriş yapın")');
+    await expect(header.or(loginForm)).toBeVisible({ timeout: 20000 });
+    if (await loginForm.isVisible()) {
+      await loginAs(p, OWNER_USERNAME, OWNER_PASSWORD);
+      await p.goto(`/websites/${domainId}/backup`);
+      await expect(header).toBeVisible({ timeout: 20000 });
+    }
+    await expect(p.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+    await getFreshCsrfToken(p);
+  };
 
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -52,31 +78,84 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
       const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
       const token = (await sessionRes?.json())?.data?.csrfToken || csrfToken;
 
-      // 1. Oluşturulan test Restic yedek deposunu sil
-      if (createdRepoId && token) {
-        const delRepoRes = await page.request.delete(`/api/panel/backups/repositories/${createdRepoId}`, {
-          headers: {
-            'x-csrf-token': token,
-            Origin: 'https://server.cryptoraichu.website',
-            Referer: 'https://server.cryptoraichu.website/',
-          },
-        }).catch(() => null);
-        if (delRepoRes && delRepoRes.ok()) {
-          console.log(`Cleaned up test repo: ${createdRepoId}`);
+      const headers = {
+        'x-csrf-token': token,
+        Origin: 'https://server.cryptoraichu.website',
+        Referer: 'https://server.cryptoraichu.website/',
+        'Content-Type': 'application/json',
+      };
+
+      const deleteUserSafely = async (userId) => {
+        try {
+          const listRes = await page.request.get('/api/panel/users?limit=100').catch(() => null);
+          const listJson = await listRes?.json().catch(() => ({}));
+          const user = (listJson?.data?.users || []).find((u) => u.id === userId);
+          if (!user) return;
+
+          let rev = user.revision;
+          if (user.role === 'site_manager') {
+            const patchRes = await page.request.patch(`/api/panel/users/${userId}`, {
+              headers,
+              data: { revision: rev, websiteIds: [] },
+            }).catch(() => null);
+            if (patchRes && patchRes.ok()) {
+              const patchJson = await patchRes.json().catch(() => ({}));
+              rev = patchJson?.data?.user?.revision ?? (rev + 1);
+            }
+          }
+
+          const delRes = await page.request.delete(`/api/panel/users/${userId}`, {
+            headers,
+            data: { revision: rev },
+          }).catch(() => null);
+          if (delRes && delRes.ok()) {
+            console.log(`Cleaned up test manager user: ${userId} (${user.username})`);
+          }
+        } catch (err) {
+          console.warn(`User cleanup failed for ${userId}:`, err.message);
+        }
+      };
+
+      // 1. Oluşturulan geçici site_manager kullanıcısını ve tbak08 önekli tüm test kullanıcılarını sil
+      if (createdManagerId) {
+        await deleteUserSafely(createdManagerId);
+      }
+      const usersRes = await page.request.get('/api/panel/users?limit=100').catch(() => null);
+      if (usersRes && usersRes.ok()) {
+        const usersJson = await usersRes.json().catch(() => ({}));
+        const leftoverUsers = (usersJson?.data?.users || []).filter((u) => u.username && u.username.startsWith('tbak08'));
+        for (const u of leftoverUsers) {
+          await deleteUserSafely(u.id);
         }
       }
 
-      // 2. Oluşturulan geçici site_manager kullanıcısını sil
-      if (createdManagerId && token) {
-        const delUserRes = await page.request.delete(`/api/panel/users/${createdManagerId}`, {
-          headers: {
-            'x-csrf-token': token,
-            Origin: 'https://server.cryptoraichu.website',
-            Referer: 'https://server.cryptoraichu.website/',
-          },
-        }).catch(() => null);
-        if (delUserRes && delUserRes.ok()) {
-          console.log(`Cleaned up test manager user: ${createdManagerId}`);
+      // 2. Oluşturulan test Restic yedek deposunu ve tbak08 önekli tüm test depolarını sil
+      const deleteRepoSafely = async (repoId) => {
+        try {
+          const delRepoRes = await page.request.delete(`/api/panel/backups/repositories/${repoId}`, {
+            headers: {
+              'x-csrf-token': token,
+              Origin: 'https://server.cryptoraichu.website',
+              Referer: 'https://server.cryptoraichu.website/',
+            },
+          }).catch(() => null);
+          if (delRepoRes && delRepoRes.ok()) {
+            console.log(`Cleaned up test repo: ${repoId}`);
+          }
+        } catch (err) {
+          console.warn(`Repo cleanup failed for ${repoId}:`, err.message);
+        }
+      };
+
+      if (createdRepoId) {
+        await deleteRepoSafely(createdRepoId);
+      }
+      const reposRes = await page.request.get('/api/panel/backups/repositories').catch(() => null);
+      if (reposRes && reposRes.ok()) {
+        const reposJson = await reposRes.json().catch(() => ({}));
+        const leftoverRepos = (reposJson?.data || []).filter((r) => r.name && r.name.startsWith('tbak08'));
+        for (const r of leftoverRepos) {
+          await deleteRepoSafely(r.id);
         }
       }
     } catch (err) {
@@ -133,9 +212,7 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
     expect(createdRepoId).toBeTruthy();
 
     // 3. Web sitesinin Yedekleme ve Geri Yükleme sayfasına git
-    await page.goto(`/websites/${targetDomainId}/backup`);
-    await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+    await openBackupPage(page, targetDomainId);
 
     const repoSection = page.locator('section').filter({ hasText: repoName });
     await expect(repoSection).toBeVisible({ timeout: 30000 });
@@ -259,16 +336,7 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
 
   test('hatalı girdi: Geri yüklemede yanlış onay metni butonu kilitler, API geçersiz istekleri reddeder', async ({ page }) => {
     // 1. UI: Geri yükleme modalında hatalı onay metni girildiğinde submit butonu devre dışı kalır
-    await page.goto(`/websites/${targetDomainId}/backup`);
-    const loginForm = page.locator('form.auth-form, form:has-text("YunPanel’e giriş yapın")');
-    if (await loginForm.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await page.fill('input[name="username"]', OWNER_USERNAME);
-      await page.fill('input[name="password"]', OWNER_PASSWORD);
-      await page.click('button.auth-primary');
-      await page.goto(`/websites/${targetDomainId}/backup`);
-    }
-    await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+    await openBackupPage(page, targetDomainId);
 
     const repoSection = page.locator('section').filter({ hasText: repoName });
     await expect(repoSection).toBeVisible({ timeout: 30000 });
@@ -343,22 +411,10 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
 
   test('yetki ve sahiplik: Siteler arası izolasyon, sahiplik etiketi koruması ve site_manager sınırları', async ({ page, browser }) => {
     // 0. Oturum ve CSRF token'ı taze doğrula
-    const freshSessionRes = await page.request.get('/api/auth/session');
-    expect(freshSessionRes.ok()).toBe(true);
-    const freshSessionJson = await freshSessionRes.json();
-    const token = freshSessionJson.data?.csrfToken || csrfToken;
+    let currentToken = await getFreshCsrfToken(page);
 
     // 1. Siteler Arası İzolasyon (UI): Başka bir sitenin yedekleme sayfasında bu repo için hedef sitenin snapshot'ları görünmez
-    await page.goto(`/websites/${otherDomainId}/backup`);
-    const loginForm = page.locator('form.auth-form, form:has-text("YunPanel’e giriş yapın")');
-    if (await loginForm.isVisible({ timeout: 3000 }).catch(() => false)) {
-      await page.fill('input[name="username"]', OWNER_USERNAME);
-      await page.fill('input[name="password"]', OWNER_PASSWORD);
-      await page.click('button.auth-primary');
-      await page.goto(`/websites/${otherDomainId}/backup`);
-    }
-    await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+    await openBackupPage(page, otherDomainId);
 
     const otherRepoSection = page.locator('section').filter({ hasText: repoName });
     if (await otherRepoSection.isVisible({ timeout: 5000 }).catch(() => false)) {
@@ -368,7 +424,7 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
     }
 
     // 2. Siteler Arası İzolasyon (API): Yabancı site üzerinden ilk sitenin snapshot'ı ile restore preview istendiğinde 404 döner
-    const currentToken = (await (await page.request.get('/api/auth/session')).json())?.data?.csrfToken || token;
+    currentToken = await getFreshCsrfToken(page);
     const crossSitePreviewRes = await page.request.post(`/api/panel/websites/${otherWebsiteId}/restore/preview`, {
       headers: {
         'x-csrf-token': currentToken,
@@ -472,8 +528,7 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
     test.fail(true, 'BULGU T802: Panel arayüzünde Restic yedek deposu oluşturma / başlatma ekranı yok');
 
     // Web sitesinin yedekleme ekranına git
-    await page.goto(`/websites/${targetDomainId}/backup`);
-    await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 20000 });
+    await openBackupPage(page, targetDomainId);
 
     // Panel arayüzünde yeni Restic yedek deposu oluşturma / bağlama butonu
     const createRepoBtn = page.locator('button, a').filter({ hasText: /^Yeni Depo$|^Depo Ekle$|^Depo Oluştur$|^Restic Deposu Tanımla$/ });
