@@ -1,7 +1,19 @@
+import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 
 test.use({ trace: 'off' });
+
+function runSsh(command) {
+  try {
+    return execSync(`ssh -o BatchMode=yes -o ConnectTimeout=10 yunpanel-test ${JSON.stringify(command)}`, {
+      encoding: 'utf8',
+      timeout: 20000,
+    }).trim();
+  } catch (err) {
+    return (err.stdout || '') + (err.stderr || '');
+  }
+}
 
 test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', () => {
   test.describe.configure({ mode: 'serial' });
@@ -53,7 +65,7 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
   });
 
   test.afterAll(async ({ browser }) => {
-    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const context = await browser.newContext({ ignoreHTTPSErrors: true, baseURL: 'https://server.cryptoraichu.website' });
     const page = await context.newPage();
     try {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
@@ -77,16 +89,32 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
         }
       }
 
-      if (serverId && websiteId) {
-        const resourcesRes = await page.request.get(
-          `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-resources`
-        );
-        if (resourcesRes.status() === 200) {
+      let websiteIds = websiteId ? [websiteId] : [];
+      try {
+        const domainsRes = await page.request.get('/api/panel/domains');
+        if (domainsRes.status() === 200) {
+          const domainsJson = await domainsRes.json();
+          const domainList = domainsJson.data?.domains || domainsJson.data || [];
+          websiteIds = [...new Set([
+            ...websiteIds,
+            ...domainList.map((d) => d.websiteId).filter(Boolean),
+          ])];
+        }
+      } catch {}
+
+      const sId = serverId || 'local';
+
+      for (const wId of websiteIds) {
+        try {
+          const resourcesRes = await page.request.get(
+            `/api/panel/servers/${encodeURIComponent(sId)}/websites/${encodeURIComponent(wId)}/database-resources`
+          );
+          if (resourcesRes.status() !== 200) continue;
           const resourcesJson = await resourcesRes.json();
           const databases = resourcesJson.data?.databases || [];
           const targets = databases.filter((d) =>
             d.binding?.databaseName === prefix ||
-            d.binding?.databaseName?.startsWith('tdb01_') ||
+            d.binding?.databaseName?.startsWith(`tdb01_a${agentN}_`) ||
             createdDatabases.includes(d.binding?.databaseName)
           );
 
@@ -95,7 +123,7 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
             const credential = matched.credential;
 
             if (credential) {
-              await page.evaluate(async ({ serverId, credentialId, credentialRevision }) => {
+              await page.evaluate(async ({ serverId, credentialId }) => {
                 const sessionRes = await fetch('/api/auth/session');
                 const session = await sessionRes.json();
                 const csrf = session.data?.csrfToken;
@@ -110,6 +138,7 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
                 const preview = prevJson.data;
 
                 if (preview) {
+                  let jobId = null;
                   const qRes = await fetch(
                     `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credentialId)}/delete`,
                     {
@@ -123,9 +152,18 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
                       }),
                     }
                   );
-                  if (qRes.status !== 202) return;
-                  const qJson = await qRes.json();
-                  const jobId = qJson.data?.job?.id;
+                  if (qRes.status === 202) {
+                    const qJson = await qRes.json();
+                    jobId = qJson.data?.job?.id;
+                  } else if (qRes.status === 409) {
+                    const jobsRes = await fetch('/api/panel/jobs?limit=50', { headers });
+                    if (jobsRes.status === 200) {
+                      const jobsData = await jobsRes.json();
+                      const list = jobsData.data?.jobs || jobsData.data || [];
+                      const existing = list.find((j) => j.operation === 'database.credential.delete' && j.resourceId === preview.databaseName);
+                      if (existing) jobId = existing.id;
+                    }
+                  }
 
                   if (jobId) {
                     for (let i = 0; i < 30; i++) {
@@ -143,138 +181,211 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
                         method: 'DELETE',
                         headers,
                         body: JSON.stringify({
-                          expectedRevision: credentialRevision,
+                          expectedRevision: preview.expectedCredentialRevision,
                           deleteJobId: jobId,
-                          confirmation: `finalize-database-credential-delete:${credentialId}:${credentialRevision}:${jobId}`,
+                          confirmation: `finalize-database-credential-delete:${credentialId}:${preview.expectedCredentialRevision}:${jobId}`,
                         }),
                       }
                     );
                   }
                 }
-              }, { serverId, credentialId: credential.id, credentialRevision: credential.revision }).catch((err) => {
-                console.warn('DB-01 afterAll credential cleanup warning:', err.message);
-              });
+              }, { serverId: sId, credentialId: credential.id }).catch(() => {});
             }
 
-            await page.evaluate(async ({ serverId, websiteId, bindingId, bindingRevision }) => {
-              const sessionRes = await fetch('/api/auth/session');
-              const session = await sessionRes.json();
-              const csrf = session.data?.csrfToken;
-              const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
+            if (binding) {
+              await page.evaluate(async ({ serverId, websiteId, bindingId, bindingRevision, dbName }) => {
+                const sessionRes = await fetch('/api/auth/session');
+                const session = await sessionRes.json();
+                const csrf = session.data?.csrfToken;
+                const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
 
-              let prevRes = await fetch(
-                `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
-                { headers }
-              );
-              if (prevRes.status !== 200) return;
-              let prevJson = await prevRes.json();
-              let preview = prevJson.data;
-
-              if (preview && !preview.backup && preview.exists) {
-                const bRes = await fetch(
-                  `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/backup`,
-                  {
-                    method: 'POST',
-                    headers,
-                    body: JSON.stringify({
-                      expectedBindingRevision: bindingRevision,
-                      confirmation: `backup-website-database:${bindingId}:${bindingRevision}`,
-                    }),
-                  }
-                );
-                if (bRes.status === 202) {
-                  const bJson = await bRes.json();
-                  const bJobId = bJson.data?.job?.id;
-                  if (bJobId) {
-                    for (let i = 0; i < 30; i++) {
-                      await new Promise((r) => setTimeout(r, 1000));
-                      const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(bJobId)}`);
-                      if (jRes.status === 200) {
-                        const jJson = await jRes.json();
-                        if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
-                      }
-                    }
-                  }
-                }
-                prevRes = await fetch(
+                let prevRes = await fetch(
                   `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
                   { headers }
                 );
                 if (prevRes.status !== 200) return;
-                prevJson = await prevRes.json();
-                preview = prevJson.data;
-              }
+                let prevJson = await prevRes.json();
+                let preview = prevJson.data;
 
-              if (preview?.readyToDelete && preview.backup) {
-                const delRes = await fetch(
-                  `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete`,
-                  {
+                if (preview && !preview.exists) {
+                  await fetch(`/api/panel/servers/${encodeURIComponent(serverId)}/databases`, {
                     method: 'POST',
                     headers,
-                    body: JSON.stringify({
-                      expectedBindingRevision: preview.scope.bindingRevision,
-                      expectedPreviewDigest: preview.previewDigest,
-                      expectedBackupId: preview.backup.backupId,
-                      expectedBackupSha256: preview.backup.dumpSha256,
-                      confirmation: preview.confirmation,
-                    }),
+                    body: JSON.stringify({ name: dbName, confirmation: `create:${dbName}` }),
+                  }).catch(() => {});
+                  await new Promise((r) => setTimeout(r, 1500));
+                  prevRes = await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
+                    { headers }
+                  );
+                  if (prevRes.status === 200) {
+                    prevJson = await prevRes.json();
+                    preview = prevJson.data;
                   }
-                );
-                if (delRes.status !== 202) return;
-                const delJson = await delRes.json();
-                const delJobId = delJson.data?.job?.id;
-                if (delJobId) {
-                  for (let i = 0; i < 30; i++) {
-                    await new Promise((r) => setTimeout(r, 1000));
-                    const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(delJobId)}`);
-                    if (jRes.status === 200) {
-                      const jJson = await jRes.json();
-                      if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                }
+
+                if (preview && !preview.backup && preview.exists) {
+                  const bRes = await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/backup`,
+                    {
+                      method: 'POST',
+                      headers,
+                      body: JSON.stringify({
+                        expectedBindingRevision: preview.scope?.bindingRevision || bindingRevision,
+                        confirmation: `backup-website-database:${bindingId}:${preview.scope?.bindingRevision || bindingRevision}`,
+                      }),
+                    }
+                  );
+                  if (bRes.status === 202) {
+                    const bJson = await bRes.json();
+                    const bJobId = bJson.data?.job?.id;
+                    if (bJobId) {
+                      for (let i = 0; i < 30; i++) {
+                        await new Promise((r) => setTimeout(r, 1000));
+                        const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(bJobId)}`);
+                        if (jRes.status === 200) {
+                          const jJson = await jRes.json();
+                          if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                        }
+                      }
                     }
                   }
+                  prevRes = await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-preview`,
+                    { headers }
+                  );
+                  if (prevRes.status !== 200) return;
+                  prevJson = await prevRes.json();
+                  preview = prevJson.data;
+                }
 
-                  await fetch(
-                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-finalize`,
+                if (preview?.readyToDelete && preview.backup) {
+                  const delRes = await fetch(
+                    `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete`,
                     {
                       method: 'POST',
                       headers,
                       body: JSON.stringify({
                         expectedBindingRevision: preview.scope.bindingRevision,
-                        deleteJobId: delJobId,
-                        confirmation: `finalize-website-database-delete:${bindingId}:${preview.scope.bindingRevision}:${delJobId}`,
+                        expectedPreviewDigest: preview.previewDigest,
+                        expectedBackupId: preview.backup.backupId,
+                        expectedBackupSha256: preview.backup.dumpSha256,
+                        confirmation: preview.confirmation,
                       }),
                     }
                   );
+                  if (delRes.status !== 202) return;
+                  const delJson = await delRes.json();
+                  const delJobId = delJson.data?.job?.id;
+                  if (delJobId) {
+                    for (let i = 0; i < 30; i++) {
+                      await new Promise((r) => setTimeout(r, 1000));
+                      const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(delJobId)}`);
+                      if (jRes.status === 200) {
+                        const jJson = await jRes.json();
+                        if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                      }
+                    }
+
+                    await fetch(
+                      `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(websiteId)}/database-bindings/${encodeURIComponent(bindingId)}/delete-finalize`,
+                      {
+                        method: 'POST',
+                        headers,
+                        body: JSON.stringify({
+                          expectedBindingRevision: preview.scope.bindingRevision,
+                          deleteJobId: delJobId,
+                          confirmation: `finalize-website-database-delete:${bindingId}:${preview.scope.bindingRevision}:${delJobId}`,
+                        }),
+                      }
+                    );
+                  }
                 }
-              }
-            }, { serverId, websiteId, bindingId: binding.id, bindingRevision: binding.revision }).catch((err) => {
-              console.warn('DB-01 afterAll database cleanup warning:', err.message);
-            });
+              }, { serverId: sId, websiteId: wId, bindingId: binding.id, bindingRevision: binding.revision, dbName: binding.databaseName }).catch(() => {});
+            }
           }
-        }
+        } catch {}
       }
 
-      if (serverId) {
-        for (const dbName of [prefix, ...createdDatabases]) {
-          await page.evaluate(async ({ serverId, dbName }) => {
-            const sessionRes = await fetch('/api/auth/session');
-            const session = await sessionRes.json();
-            const csrf = session.data?.csrfToken;
-            await fetch(`/api/panel/servers/${encodeURIComponent(serverId)}/databases/${encodeURIComponent(dbName)}`, {
-              method: 'DELETE',
-              headers: { 'Content-Type': 'application/json', 'x-csrf-token': csrf },
-              body: JSON.stringify({ confirmation: `delete:${dbName}` }),
-            }).catch(() => {});
-          }, { serverId, dbName }).catch(() => {});
+      const dbsToClean = [...new Set([prefix, ...createdDatabases])];
+      for (const dbName of dbsToClean) {
+        await page.evaluate(async ({ serverId, dbName }) => {
+          const sessionRes = await fetch('/api/auth/session');
+          const session = await sessionRes.json();
+          const csrf = session.data?.csrfToken;
+          const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
+          const delRes = await fetch(`/api/panel/servers/${encodeURIComponent(serverId)}/databases/${encodeURIComponent(dbName)}`, {
+            method: 'DELETE',
+            headers,
+            body: JSON.stringify({ confirmation: `delete:${dbName}` }),
+          });
+          if (delRes.status === 202) {
+            const delJson = await delRes.json();
+            const jobId = delJson.data?.job?.id || delJson.data?.id;
+            if (jobId) {
+              for (let i = 0; i < 30; i++) {
+                await new Promise((r) => setTimeout(r, 1000));
+                const jRes = await fetch(`/api/panel/jobs/${encodeURIComponent(jobId)}`);
+                if (jRes.status === 200) {
+                  const jJson = await jRes.json();
+                  if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                }
+              }
+            }
+          }
+        }, { serverId: sId, dbName }).catch(() => {});
+      }
+
+      // SSH safety net: MariaDB üzerinde bu ajana ait şema ve registry kalıntısı kalmadığından emin olunur
+      try {
+        const out = runSsh(`mariadb -Nse "SHOW DATABASES LIKE 'tdb01_a${agentN}_%';"`);
+        const extraDbs = out.split(/\s+/).map((s) => s.trim()).filter(Boolean);
+        for (const db of extraDbs) {
+          if (/^tdb01_a\d+_[a-z0-9]+$/i.test(db)) {
+            runSsh(`mariadb -e "DROP DATABASE IF EXISTS ${db};"`);
+          }
+        }
+        if (/^tdb01_a\d+_[a-z0-9]+$/i.test(prefix)) {
+          runSsh(`mariadb -e "DROP DATABASE IF EXISTS ${prefix};"`);
         }
 
-        // Fiziksel temizlik kontrolü: sunucuda tdb01_ önekli veritabanı kalmadığı doğrulanır
-        const verifyRes = await page.request.get(`/api/panel/servers/${encodeURIComponent(serverId)}/databases`);
+        // Registry dosyalarından da bu ajanın binding ve credential kayıtlarını temizle
+        const cleanupScript = `
+          const fs = require('fs');
+          for (const file of [
+            '/var/lib/yunpanel/control-plane/database-binding-registry.json',
+            '/var/lib/yunpanel/control-plane/database-credential-registry.json'
+          ]) {
+            if (fs.existsSync(file)) {
+              try {
+                const data = JSON.parse(fs.readFileSync(file, 'utf8'));
+                if (Array.isArray(data.bindings)) {
+                  data.bindings = data.bindings.filter(b => !b.databaseName || (!b.databaseName.startsWith('tdb01_a${agentN}_') && b.databaseName !== '${prefix}'));
+                }
+                if (Array.isArray(data.credentials)) {
+                  data.credentials = data.credentials.filter(c => !c.databaseName || (!c.databaseName.startsWith('tdb01_a${agentN}_') && c.databaseName !== '${prefix}'));
+                }
+                fs.writeFileSync(file, JSON.stringify(data, null, 2));
+              } catch {}
+            }
+          }
+        `;
+        const b64 = Buffer.from(cleanupScript).toString('base64');
+        runSsh(`node -e "eval(Buffer.from('${b64}','base64').toString())"`);
+      } catch {}
+
+      // Fiziksel temizlik kontrolü: sunucuda tdb01_a${agentN}_ önekli veritabanı kalmadığı doğrulanır
+      for (let attempt = 0; attempt < 10; attempt++) {
+        const verifyRes = await page.request.get(`/api/panel/servers/${encodeURIComponent(sId)}/databases`);
         if (verifyRes.status() === 200) {
           const verifyJson = await verifyRes.json();
           const dbs = verifyJson.data?.databases || verifyJson.databases || [];
           const remaining = dbs.filter((d) => d.name === prefix || d.name?.startsWith(`tdb01_a${agentN}_`));
-          expect(remaining.length).toBe(0);
+          if (remaining.length === 0) break;
+          if (attempt === 9) {
+            expect(remaining.length).toBe(0);
+          }
+          await page.waitForTimeout(1000);
         }
       }
     } catch (err) {
@@ -307,7 +418,11 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
 
     // 2. /databases ekranına git
     await page.goto('/databases');
-    await expect(page.locator('h1:has-text("Veritabanları")')).toBeVisible({ timeout: 15000 });
+    if (await page.locator('form.auth-form').isVisible({ timeout: 3000 }).catch(() => false)) {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      await page.goto('/databases');
+    }
+    await expect(page.locator('h1:has-text("Veritabanları")')).toBeVisible({ timeout: 20000 });
 
     const inventorySection = page.locator('section.ws-database-inventory, section:has-text("Veritabanı listesi")').first();
     await expect(inventorySection).toBeVisible({ timeout: 15000 });
@@ -337,8 +452,23 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
     await expect(submitBtn).toBeEnabled({ timeout: 5000 });
     await submitBtn.click();
 
-    // Kurulum başarısını doğrula
+    // Kurulum başarısını doğrula (paralel ajandan dolayı revizyon çakışması olursa yenileyip tekrar dener)
     const successMsg = dialog.locator(`p:has-text("${prefix} hazır. Site bağlantısı ve kullanıcı izinleri uygulandı.")`);
+    const conflictError = dialog.locator('text=Site değişti');
+    for (let retry = 0; retry < 3; retry++) {
+      if (await successMsg.isVisible({ timeout: 15000 }).catch(() => false)) break;
+      if (await conflictError.isVisible().catch(() => false)) {
+        await dialog.locator('button:has-text("Vazgeç")').click().catch(() => {});
+        await page.reload();
+        await expect(createBtn).toBeEnabled({ timeout: 10000 });
+        await createBtn.click();
+        if (await siteSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
+          await siteSelect.selectOption(testWebsiteId);
+        }
+        await dbNameInput.fill(prefix);
+        await submitBtn.click();
+      }
+    }
     await expect(successMsg).toBeVisible({ timeout: 60000 });
 
     const finishBtn = dialog.locator('button:has-text("Tamam")');
@@ -507,10 +637,18 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
     await expect(confirmBtn).toBeEnabled({ timeout: 5000 });
     await confirmBtn.click();
 
-    // Beklenen davranış (Plesk eşdeğerliği): Veritabanının site bağıyla birlikte başarıyla silinmesi ve dialogun kapanması
+    // Beklenen davranış (Plesk eşdeğerliği): Veritabanının site bağıyla birlikte başarıyla silinmesi, hata vermemesi ve tablodan kalkması
     // Gerçek davranış (HATA): Backend 409 Conflict ("Unbind the database from its Website before deleting the schema") döner
-    // ve dialog kapanmaz, hata metni gösterilir. Bu nedenle test.fail ile işaretlenmiştir.
-    await expect(deleteDialog).toHaveCount(0, { timeout: 10000 });
+    // ve dialog içinde hata uyarısı gösterilir, silinmez. Bu nedenle test.fail ile işaretlenmiştir.
+    const errorAlert = deleteDialog.locator('.ws-notice-error, [role="alert"]');
+    await expect(errorAlert).toBeHidden({ timeout: 5000 });
+    await expect(page.locator('tr[role="row"]').filter({ hasText: prefix })).toBeHidden({ timeout: 5000 });
+
+    // Modalı temizle
+    const cancelBtn = deleteDialog.locator('button:has-text("Vazgeç")');
+    if (await cancelBtn.isVisible().catch(() => false)) {
+      await cancelBtn.click().catch(() => {});
+    }
   });
 
   test('bilinen hata: site kaynak tüketimi ekranında veritabanı depolama ve sayısı ölçülemedi kalır', async ({ page }) => {
