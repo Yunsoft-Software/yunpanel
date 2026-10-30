@@ -113,6 +113,11 @@ function digError(error) {
 
 function outputFailure(stdout, { requireAuthoritative = false } = {}) {
   const dnsStatus = parseStatus(stdout);
+  // A parent authoritatively saying the name does not exist (a child zone hosted beside its
+  // parent without a delegation) is a definite "no DS", not a lookup failure.
+  if (requireAuthoritative && dnsStatus === 'NXDOMAIN') {
+    return authoritativeAnswer(stdout) ? null : 'PARENT_NOT_AUTHORITATIVE';
+  }
   if (dnsStatus !== 'NOERROR') return dnsStatus ? `DNS_${dnsStatus}` : 'DIG_OUTPUT_INVALID';
   if (requireAuthoritative && !authoritativeAnswer(stdout)) return 'PARENT_NOT_AUTHORITATIVE';
   return null;

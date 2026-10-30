@@ -75,6 +75,28 @@ test('parent DS inspector reports absent only when every discovered parent NS au
   assert.equal(runtime.calls.filter((args) => args.includes('+norecurse')).length, 2);
 });
 
+test('an authoritative NXDOMAIN from every parent NS proves there is no DS (child zone hosted beside its parent)', async () => {
+  const nxdomain = dig('NXDOMAIN', [], { authoritative: true });
+  const runtime = runner({ 'a.gtld-servers.net': nxdomain, 'b.gtld-servers.net': nxdomain });
+  const inspector = createDnsParentDsInspector({ runDig: runtime.runDig });
+  const result = await inspector.inspect({ domain: 'example.com' });
+
+  assert.equal(result.status, 'absent');
+  assert.equal(result.errorCode, null);
+});
+
+test('a non-authoritative NXDOMAIN or SERVFAIL from a parent NS keeps DS absence unverifiable', async () => {
+  for (const [answer, code] of [
+    [dig('NXDOMAIN'), 'PARENT_NS_PARENT_NOT_AUTHORITATIVE'],
+    [dig('SERVFAIL', [], { authoritative: true }), 'PARENT_NS_DNS_SERVFAIL'],
+  ]) {
+    const runtime = runner({ 'b.gtld-servers.net': answer });
+    const result = await createDnsParentDsInspector({ runDig: runtime.runDig }).inspect({ domain: 'example.com' });
+    assert.equal(result.status, 'unverifiable');
+    assert.equal(result.errorCode, code);
+  }
+});
+
 test('parent DS inspector keeps absence unverifiable if any parent NS times out or is non-authoritative', async () => {
   const timeoutRuntime = runner({
     'b.gtld-servers.net': Object.assign(new Error('timeout'), { code: 'ETIMEDOUT' }),

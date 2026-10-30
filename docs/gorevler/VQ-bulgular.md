@@ -641,7 +641,7 @@
 ### T824 · KRİTİK DNS: DNSSEC açılmış alt alan adı, üst bölge aynı sunucudayken silinemiyor
 - **Bağımlı:** T803
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/dns-zone-retirement.js`, `apps/api/src/dns-delegation-inspector.js`, `apps/api/test/dns-zone-retirement.test.js`
+- **Dosyalar:** `packages/host-runtime/src/dns-parent-ds-inspector.js`, `packages/host-runtime/test/dns-parent-ds-inspector.test.js`
 - **Kaynak:** Codex T820 · 2026-10-28
 - **İş:** `tdns04-acodex-mvs2ku0w.webrich.news` (`.local/manuel-test/T820-owned.json`) üst DS durumu `unverifiable` döndüğü için `dns_zone_parent_ds_unverifiable` ile kalıcı engelleniyor; üst bölge `webrich.news` aynı PowerDNS'te. DS güvenlik koşulu atlanmayacak: üst bölge yerelse DS'i yerel kaynaktan kesin doğrula ve gerekiyorsa kaldırma planına DS geri çekmeyi ekle. Sonra bu siteyi panelden temizle ve T820'yi (`e2e/ozellik/dns-04.spec.js`) yeniden koş.
 - **Kabul:** Kırılan birim testi önce; `npm test`; .28'de dns-04 geçiyor ve artık site kalmıyor.
