@@ -29,3 +29,9 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - 1. dalga hazır (`docs/gorevler/G1-manuel-test.md`): T100 hazırlık → T101–T224 124 özelliğin gerçek tarayıcıda manuel testi → T299 özet. Yöntem `docs/manuel-test/YONTEM.md`, raporlar `docs/manuel-test/<ID>.md`. Kritik hatalar bulgu görevi (T800+) olup düzeltilir.
 - Sıradaki: junior `/orkestra-devam` ile 1. dalgayı yürütür; senior ertesi gün `OZET.md` ve raporları inceler. 3. dalga için Plesk'te sık kullanılan özellik listesini İNSAN verecek.
 - 3. dalga adayları not olarak `docs/plesk-eksikler.md` ve `plan.md` sonunda (wildcard domain, hosting'siz yönlendirme, ek FTP vb.). Göreve çevrilmedi.
+
+## 30-10-2026 16:10 — Antigravity kotası bitti, kaldığımız yer
+- Pano DURAKLATILDI (`tasks/PAUSED`). Devam: `python3 orkestra/tasks.py resume` → Antigravity'de `/orkestra-devam`.
+- Yarım kalan 4 iş geri açıldı; yarım dosyalar bu makinede `tasks/recovery/` içinde (git'te yok): `T828-elle.patch` (bak-08, incelemede 2 kez reddedildi), `T836-rol-03.spec.js`, `T837-rol-04.spec.js`, `T838-rol-05.spec.js`. Görevi alan ajan önce bunlara baksın.
+- .28'de yarım koşulardan kalan 5 test hesabı var (`trol04-a3-*-c1` ×4, `trol05-a4-*-ro`); T837/T838'i alan ajan kendi temizliğinde kaldırsın.
+- Açık SENIOR işleri: T850, T826. Antigravity için hazır: T839–T847 ve temizlik T853–T856.
