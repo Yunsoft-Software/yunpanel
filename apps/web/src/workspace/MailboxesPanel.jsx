@@ -18,6 +18,7 @@ import {
 } from './mail-client.js';
 import { useUnsavedChanges } from './UnsavedChanges.jsx';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorNotice, KeyValues, Modal, Section } from './PanelKit.jsx';
+import { dmarcPolicy, mailDnsRequirementStatus } from './mail-dns-requirements.js';
 
 function destinationList(value) {
   return [...new Set(String(value ?? '').split(/[\n,]/).map((item) => item.trim()).filter(Boolean))];
@@ -139,10 +140,10 @@ function MailboxDiagnosticsModal({ mailbox, onClose }) {
 
             <Section title="DNS ve Doğrulama Durumu" description="Alan adı SPF, DKIM, DMARC ve MX kayıtlarının canlı doğrulama durumu.">
               <KeyValues items={[
-                ['MX Kaydı', <Badge key="mx" state={dns?.mx?.status === 'matched' ? 'active' : 'error'}>{dns?.mx?.status === 'matched' ? 'Doğrulandı' : 'Uyumsuz / Eksik'}</Badge>],
-                ['SPF Kaydı', <Badge key="spf" state={dns?.spf?.status === 'valid' ? 'active' : 'error'}>{dns?.spf?.status === 'valid' ? 'Geçerli' : 'Hatalı / Eksik'}</Badge>],
-                ['DKIM Kaydı', <Badge key="dkim" state={dns?.dkim?.status === 'valid' ? 'active' : dns?.dkim?.status === 'unconfigured' ? 'unknown' : 'error'}>{dns?.dkim?.status === 'valid' ? 'Geçerli' : dns?.dkim?.status === 'unconfigured' ? 'Yapılandırılmadı' : 'Hatalı'}</Badge>],
-                ['DMARC Kaydı', <Badge key="dmarc" state={dns?.dmarc?.status === 'valid' ? 'active' : 'warning'}>{dns?.dmarc?.status === 'valid' ? `Geçerli (${dns.dmarc.policy ?? 'none'})` : 'Eksik / Yapılandırılmadı'}</Badge>],
+                ['MX Kaydı', <Badge key="mx" state={mailDnsRequirementStatus(dns?.mx) === 'valid' ? 'active' : 'error'}>{mailDnsRequirementStatus(dns?.mx) === 'valid' ? 'Doğrulandı' : 'Uyumsuz / Eksik'}</Badge>],
+                ['SPF Kaydı', <Badge key="spf" state={mailDnsRequirementStatus(dns?.spf) === 'valid' ? 'active' : 'error'}>{mailDnsRequirementStatus(dns?.spf) === 'valid' ? 'Geçerli' : 'Hatalı / Eksik'}</Badge>],
+                ['DKIM Kaydı', <Badge key="dkim" state={mailDnsRequirementStatus(dns?.dkim) === 'valid' ? 'active' : mailDnsRequirementStatus(dns?.dkim) === 'unconfigured' ? 'unknown' : 'error'}>{mailDnsRequirementStatus(dns?.dkim) === 'valid' ? 'Geçerli' : mailDnsRequirementStatus(dns?.dkim) === 'unconfigured' ? 'Yapılandırılmadı' : 'Hatalı'}</Badge>],
+                ['DMARC Kaydı', <Badge key="dmarc" state={mailDnsRequirementStatus(dns?.dmarc) === 'valid' ? 'active' : 'warning'}>{mailDnsRequirementStatus(dns?.dmarc) === 'valid' ? `Geçerli (${dmarcPolicy(dns.dmarc) ?? 'none'})` : 'Eksik / Yapılandırılmadı'}</Badge>],
               ]} />
             </Section>
 

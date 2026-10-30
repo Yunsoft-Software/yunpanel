@@ -685,3 +685,19 @@
 - **Kaynak:** SENIOR · 2026-10-28 (T825 canlı doğrulaması)
 - **İş:** Alan adı silme planı `authoritativeDns.zoneSnapshotDigest`'i başlangıçta sabitliyor; aynı zincirin `mail_domain` adımı MX/SPF/DKIM/DMARC kayıtlarını silince bölge özeti değişiyor ve `007:authoritative_dns` `domain_removal_dns_preview_drift` ile kalıcı `failed` oluyor (.28: `teml09-acodex-mvs6ww4k-target.webrich.news`, posta alan adı ve site bağlantısı silinmiş, bölge ve site kalmış). Özet, zincirin kendi önceki adımlarından sonra yeniden sabitlenmeli; zincir dışı değişiklik yine durdurmalı. Sonra .28'de 6 askıdaki + 2 draft `teml09-*` sitesini temizle, T819'u koş.
 - **Kabul:** Önce kırılan birim testi; `npm test`; .28'de posta alan adlı site panelden tamamen siliniyor (404).
+
+### T850 · Bekleyen posta alan adı silmesi, başka bir posta alan adı değişince bir daha ilerleyemiyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/mail-domain-removal-config-phase.js`, `apps/api/test/mail-domain-removal-config-phase.test.js`
+- **Kaynak:** SENIOR · 2026-10-30 (T824/T825 canlı temizliği)
+- **İş:** Silme onayında `cleanupPlan.disableConfiguration.previewDigest` ve `configurationSha256` sunucudaki **bütün** posta yapılandırmasından sabitleniyor. Arada başka bir alan adının postası eklenir/silinirse bekleyen silme `mail_domain_removal_config_preview_stale` ile kalıcı `failed` oluyor (.28: `teml09-acodex-mvs4o7vu-guard.webrich.news`, `teml09-acodex-mvs47pnd-guard.157-180-11-28.sslip.io`). Hedef alan adının kendi durumu (`sourceStatus/Revision/UpdatedAt`) değişmediyse önizleme yeniden alınmalı; hedefin durumu değiştiyse yine durmalı. Sonra bu iki siteyi panelden temizle.
+- **Kabul:** Önce kırılan birim testi; `npm test`; .28'de iki site panelden siliniyor (404).
+
+### T851 · Posta DNS gereksinimleri doğru kayıtları da "Hatalı / Eksik" gösteriyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/web/src/workspace/mail-dns-requirements.js`, `apps/web/src/workspace/MailDkimDiagnosticsPanel.jsx`, `apps/web/src/workspace/MailboxesPanel.jsx`, `apps/web/test/mail-dns-requirements.test.js`
+- **Kaynak:** SENIOR · 2026-10-30 (T819 canlı koşusu)
+- **İş:** Arayüz `dnsRequirements.<kayıt>.status` alanını `valid`/`matched`/`unconfigured` diye okuyor; API ise tanılama aracının `state` alanını (`present`, `ready`, `not_configured`, `missing` …) döndürüyor. Bu yüzden MX/SPF/DKIM/DMARC/PTR doğru olsa da hep hata görünüyor. Gerçek `state` değerlerinden göster; DMARC politikasını mevcut kayıttan al.
+- **Kabul:** Birim testi; `npm test`; .28'de eml-09 tanılama senaryosu "Geçerli" görüyor.

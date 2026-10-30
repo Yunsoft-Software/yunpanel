@@ -126,13 +126,18 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
     if (current.status() === 404) { site.removed = true; return; }
     expect(current.status()).toBe(200);
     expect((await current.json()).data.primaryDomain).toBe(site.hostname);
-    await page.goto(`/websites/${site.domainId}/settings`);
-    await page.getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
-    const dialog = modal('Siteyi kalıcı olarak sil');
-    await expect(dialog).toBeVisible();
-    await dialog.locator('input').fill(site.hostname);
-    await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click();
-    await expect(page.getByText('Site silindi', { exact: true })).toBeVisible({ timeout: 120_000 });
+    // Removal pauses after each host job and waits for "Silme işlemine devam et", as for a user.
+    for (let round = 0; round < 25; round++) {
+      if ((await page.request.get(`/api/panel/domains/${site.domainId}`)).status() === 404) break;
+      await page.goto(`/websites/${site.domainId}/settings`);
+      const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
+      try { await start.click({ timeout: 20_000 }); }
+      catch { await page.waitForTimeout(5_000); continue; }
+      const dialog = page.getByRole('dialog');
+      await dialog.locator('input').fill(site.hostname);
+      await dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ }).click();
+      await page.waitForTimeout(8_000);
+    }
     expect((await page.request.get(`/api/panel/domains/${site.domainId}`)).status()).toBe(404);
     if (site.mailDomainId) expect((await page.request.get(`/api/panel/mail-domains/${site.mailDomainId}`)).status()).toBe(404);
     site.removed = true;
@@ -166,7 +171,7 @@ print(json.dumps(result))`, [JSON.stringify(excluded)]);
   });
 
   test.afterAll(async () => {
-    test.setTimeout(420_000);
+    test.setTimeout(900_000);
     const failures = [];
     if (page) {
       for (const site of [...sites].reverse()) {
@@ -211,7 +216,7 @@ mx=run(['dig','@127.0.0.1','MX',host,'+short'])
 relay=run(['postconf','-h','smtpd_relay_restrictions'])
 auth=run(['postconf','-h','smtpd_sasl_auth_enable'])
 submission=run(['postconf','-P','submission/inet/smtpd_relay_restrictions','submission/inet/smtpd_sasl_auth_enable'])
-print(json.dumps({'spf':spf,'dmarc':dmarc,'mxPresent':bool(mx),'relaySafe':'reject_unauth_destination' in relay,'anonymousSmtpAuthDisabled':auth=='no','submissionAuthRequired':'permit_sasl_authenticated,reject' in submission and 'smtpd_sasl_auth_enable=yes' in submission}))`, [target.hostname]);
+print(json.dumps({'spf':spf,'dmarc':dmarc,'mxPresent':bool(mx),'relaySafe':'reject_unauth_destination' in relay,'anonymousSmtpAuthDisabled':auth=='no','submissionAuthRequired':'permit_sasl_authenticated,reject' in submission and 'smtpd_sasl_auth_enable=yes' in submission.replace(' ','')}))`, [target.hostname]);
     expect(physical.spf).toContain('v=spf1');
     expect(physical.dmarc).toContain('v=DMARC1');
     expect(physical.mxPresent).toBe(true);
