@@ -830,7 +830,7 @@ function dnsRetirementPreview(overrides = {}) {
   };
 }
 
-function dnsRetirementChild({ status = 'deleted', updatedAt = '2026-09-18T21:00:00.000Z' } = {}) {
+function dnsRetirementChild({ status = 'deleted', updatedAt = '2026-09-18T21:00:00.000Z', snapshotDigest = zoneSnapshotDigest } = {}) {
   return {
     id: 'dns-retirement-operation-1',
     domainId: 'domain-1',
@@ -838,14 +838,14 @@ function dnsRetirementChild({ status = 'deleted', updatedAt = '2026-09-18T21:00:
     zoneName: 'example.com',
     domainRevision: 4,
     previewDigest: '5'.repeat(64),
-    snapshotDigest: zoneSnapshotDigest,
+    snapshotDigest,
     ownershipEvidenceDigest,
     snapshotRetentionDays: 30,
     status,
     result: status === 'deleted' ? {
       deleted: true,
       changed: true,
-      snapshotDigest: zoneSnapshotDigest,
+      snapshotDigest,
       deletedAt: '2026-09-18T21:00:00.000Z',
       retainUntil: '2026-10-18T21:00:00.000Z',
     } : null,
@@ -864,7 +864,7 @@ function dnsRetirementChild({ status = 'deleted', updatedAt = '2026-09-18T21:00:
   };
 }
 
-function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirementPreview() } = {}) {
+function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirementPreview(), childSnapshotDigest = zoneSnapshotDigest } = {}) {
   let child = initialChild;
   let previewCalls = 0;
   let startCalls = 0;
@@ -884,7 +884,7 @@ function dnsRetirementRuntimeFixture({ initialChild = null, preview = dnsRetirem
           previewDigest: '5'.repeat(64),
           confirmation: 'retire-authoritative-zone-confirmation',
         });
-        child = dnsRetirementChild();
+        child = dnsRetirementChild({ snapshotDigest: childSnapshotDigest });
         return child;
       },
       async retry(input) {
@@ -2660,4 +2660,122 @@ test('stale control-plane continuation is rejected before Domain mutation', asyn
       && error.code === 'domain_removal_step_continuation_stale',
   );
   assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
+});
+
+function mailAndDnsRemovalPreview() {
+  const mail = mailRemovalPreview();
+  const dns = authoritativeRemovalPreview();
+  return {
+    ...mail,
+    impact: {
+      ...mail.impact,
+      blockers: [...new Set([...mail.impact.blockers, ...dns.impact.blockers])].sort(),
+    },
+    plan: { ...mail.plan, authoritativeDns: dns.plan.authoritativeDns },
+  };
+}
+
+async function completeStepsBeforeDns(registry, preview) {
+  let operation = await completeRoutingStep(registry, preview);
+  for (const index of [1, 2]) {
+    operation = await registry.markStepRunning(operation.id, operation.steps[index].id);
+    operation = await registry.succeedStep(operation.id, operation.steps[index].id, {
+      referenceId: `step-${index}`,
+      evidenceDigest: String(index).repeat(64),
+    });
+  }
+  return operation;
+}
+
+async function continueDnsStep(runtime, operation) {
+  return runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[3].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[3].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+}
+
+test('zone records removed by the chain\'s own Mail Domain step re-pin the DNS snapshot instead of failing (T849)', async () => {
+  const registry = createRegistry();
+  const preview = mailAndDnsRemovalPreview();
+  let operation = await completeStepsBeforeDns(registry, preview);
+  assert.deepEqual(operation.steps.map((step) => step.kind),
+    ['routing_suspend', 'mail_domain', 'website_binding', 'authoritative_dns', 'metadata_finalization']);
+  const afterMailCleanup = 'a'.repeat(64);
+  const dns = dnsRetirementRuntimeFixture({
+    preview: dnsRetirementPreview({
+      zone: { exists: true, snapshotDigest: afterMailCleanup, ownershipOrigin: { evidenceDigest: ownershipEvidenceDigest } },
+    }),
+    childSnapshotDigest: afterMailCleanup,
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ websiteId: null }).manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  operation = await continueDnsStep(runtime, operation);
+  assert.equal(operation.steps[3].status, 'succeeded');
+  assert.equal(operation.steps[3].result.referenceId, 'dns-retirement-operation-1');
+  assert.equal((await registry.get(operation.id)).plan.authoritativeDns.zoneSnapshotDigest, afterMailCleanup);
+  assert.equal(dns.counts().startCalls, 1);
+});
+
+test('a changed zone snapshot without an in-chain mail cleanup still fails before DNS mutation', async () => {
+  const registry = createRegistry();
+  let operation = await completeWebsiteStep(registry);
+  const dns = dnsRetirementRuntimeFixture({
+    preview: dnsRetirementPreview({
+      zone: { exists: true, snapshotDigest: 'a'.repeat(64), ownershipOrigin: { evidenceDigest: ownershipEvidenceDigest } },
+    }),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => authoritativeRemovalPreview(),
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ websiteId: null }).manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  operation = await runtime.continueStep({
+    domainId: operation.domainId,
+    operationId: operation.id,
+    expectedUpdatedAt: operation.updatedAt,
+    stepId: operation.steps[2].id,
+    checksum: operation.checksum,
+    confirmation: `continue-domain-remove-step:${operation.domainId}:${operation.id}:${operation.steps[2].id}:${operation.updatedAt}:${operation.checksum}`,
+  });
+  assert.equal(operation.steps[2].status, 'failed');
+  assert.equal(operation.steps[2].error.code, 'domain_removal_dns_preview_drift');
+  assert.equal(dns.counts().startCalls, 0);
+});
+
+test('after in-chain mail cleanup, any drift beyond the zone snapshot still fails before DNS mutation', async () => {
+  const registry = createRegistry();
+  const preview = mailAndDnsRemovalPreview();
+  let operation = await completeStepsBeforeDns(registry, preview);
+  const dns = dnsRetirementRuntimeFixture({
+    preview: dnsRetirementPreview({
+      zone: { exists: true, snapshotDigest: 'a'.repeat(64), ownershipOrigin: { evidenceDigest: ownershipEvidenceDigest } },
+      retention: { configured: true, snapshotRetentionDays: 31 },
+    }),
+  });
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: completedSuspensionRuntime(),
+    domainRegistry: domainRegistryFixture({ websiteId: null }).manager,
+    dnsZoneRetirementRuntime: dns.runtime,
+  });
+
+  operation = await continueDnsStep(runtime, operation);
+  assert.equal(operation.steps[3].status, 'failed');
+  assert.equal(operation.steps[3].error.code, 'domain_removal_dns_preview_drift');
+  assert.equal((await registry.get(operation.id)).plan.authoritativeDns.zoneSnapshotDigest, zoneSnapshotDigest);
+  assert.equal(dns.counts().startCalls, 0);
 });

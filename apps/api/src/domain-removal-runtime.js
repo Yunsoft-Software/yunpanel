@@ -6,6 +6,8 @@ import {
 } from './domain-removal-operation-registry.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+// Earlier steps of the same chain that legitimately rewrite the authoritative zone.
+const ZONE_CLEANUP_STEP_KINDS = new Set(['mail_domain', 'webmail_mapping']);
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
 const CONTINUABLE_STEP_KINDS = new Set([
   'child_domain', 'certificate', 'webmail_mapping', 'mail_domain', 'external_dns_zone', 'website_binding',
@@ -1935,6 +1937,29 @@ export function createDomainRemovalRuntime({
     return preview;
   }
 
+  async function rebaseSnapshotAfterOwnedZoneCleanup(operation, step, runtime) {
+    const ownedZoneCleanup = operation.steps.some((candidate) => candidate.status === 'succeeded'
+      && ZONE_CLEANUP_STEP_KINDS.has(candidate.kind));
+    if (!ownedZoneCleanup) return operation;
+    let preview;
+    try { preview = await runtime.preview({ domainId: operation.domainId }); }
+    catch (error) { throw mapped(error); }
+    const snapshotDigest = preview?.zone?.snapshotDigest;
+    const planned = operation.plan.authoritativeDns;
+    if (typeof snapshotDigest !== 'string' || !SHA256_PATTERN.test(snapshotDigest)
+      || snapshotDigest === planned.zoneSnapshotDigest) return operation;
+    const repinned = {
+      ...operation,
+      plan: { ...operation.plan, authoritativeDns: { ...planned, zoneSnapshotDigest: snapshotDigest } },
+    };
+    // Everything except the snapshot itself must still match the journaled intent.
+    if (!exactDnsRetirementPreview(repinned, preview)) return operation;
+    return registry.rebaseAuthoritativeDnsSnapshot(operation.id, step.id, {
+      expectedSnapshotDigest: planned.zoneSnapshotDigest,
+      snapshotDigest,
+    });
+  }
+
   async function continueDnsRetirementChild(operation, child, runtime) {
     if (child?.status === 'deleted') return child;
     if (child && ['deleting', 'failed'].includes(child.status)) {
@@ -1970,7 +1995,8 @@ export function createDomainRemovalRuntime({
     const manager = requireDomainRegistry();
     const runtime = requireDnsZoneRetirementRuntime();
     const prepared = await runningStep(await loadOperation(operationId), 'authoritative_dns');
-    const { operation, step } = prepared;
+    const { step } = prepared;
+    let { operation } = prepared;
     const planned = operation.plan.authoritativeDns;
     if (step.resourceId !== operation.domainId
       || !planned || planned.zoneSnapshotDigest === null
@@ -2018,6 +2044,12 @@ export function createDomainRemovalRuntime({
           : 'DNS retirement child operation was not started before interruption',
         409,
       )));
+    }
+    if (!child) {
+      try { operation = await rebaseSnapshotAfterOwnedZoneCleanup(operation, step, runtime); }
+      catch (error) {
+        return publicOperation(await failControlPlaneStep(operation, step, error));
+      }
     }
     let result;
     try { result = await continueDnsRetirementChild(operation, child, runtime); }
