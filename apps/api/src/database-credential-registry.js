@@ -181,7 +181,10 @@ function validateEnvelope(record) {
       throw new DatabaseCredentialRegistryError('database_credential_state_invalid', 'Database credential envelope is invalid', 409);
     }
   }
-  if (typeof record.ciphertext !== 'string' || record.ciphertext.length < 32 || record.ciphertext.length > 256) {
+  // AES-GCM keeps the plaintext length, so the ciphertext spans what PASSWORD_PATTERN allows.
+  const ciphertext = typeof record.ciphertext === 'string' ? Buffer.from(record.ciphertext, 'base64') : null;
+  if (!ciphertext || ciphertext.toString('base64') !== record.ciphertext
+    || ciphertext.length < 16 || ciphertext.length > 128) {
     throw new DatabaseCredentialRegistryError('database_credential_state_invalid', 'Database credential envelope is invalid', 409);
   }
 }

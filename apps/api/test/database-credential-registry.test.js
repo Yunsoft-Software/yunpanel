@@ -132,3 +132,14 @@ test('credential deletion requires exact revision and typed confirmation', async
   assert.equal(deleted.deleted, true);
   assert.equal(await state.registry.getForBinding(bindingId), null);
 });
+
+test('the shortest and longest allowed passwords still reopen after a restart (API must not brick)', async (t) => {
+  for (const initialPassword of ['Short_Pass_12345', 'P'.repeat(20), 'L'.repeat(128)]) {
+    const state = await fixture(t);
+    const created = await state.registry.createCredential({ databaseBindingId: bindingId, initialPassword,
+      confirmation: `create-database-credential:${bindingId}:${expectedUsername}` });
+    const reopened = createDatabaseCredentialRegistry({ filePath: state.filePath, masterKey, getDatabaseBinding: async () => binding() });
+    await reopened.init();
+    assert.equal((await reopened.materializeCredential(created.id, { expectedRevision: created.revision })).password, initialPassword);
+  }
+});
