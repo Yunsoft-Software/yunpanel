@@ -191,7 +191,8 @@ print(json.dumps(result))`;
     const section = await changeSigning(page, true);
     await expect(section.locator('.dns-ds-box code').first()).toContainText(/^\d+\s+\d+\s+\d+\s+[A-Fa-f0-9]+$/);
     expect(physical(rootSite).signed).toBe(true);
-    expect(physical(rootSite).hasDnskey).toBe(true);
+    // PowerDNS may answer from its query cache for a short TTL after signing is enabled.
+    await expect.poll(() => physical(rootSite).hasDnskey, { timeout: 120_000, intervals: [5_000] }).toBe(true);
     await changeSigning(page, false);
     expect(physical(rootSite).signed).toBe(false);
     foreignUnchanged();

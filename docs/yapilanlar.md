@@ -2,6 +2,11 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 30-10-2026
+- **Test** — eml-09 (DKIM/posta güvenliği) ve dns-04 (DNSSEC) .28'de baştan sona geçiyor (T819, T820).
+- **Hata** — DNSSEC'li ya da aynı sunucudaki alt bölgeler artık silinebiliyor: üst bölgenin yetkili NXDOMAIN'i "DS yok" sayılıyor (T824).
+- **Hata** — Posta DNS rozetleri doğru kayıtları artık "Geçerli" gösteriyor (T851); API açıldıktan sonra eklenen alan adlarının DNSSEC ekranı açılıyor (T852).
+
 ## 28-10-2026
 - **Hata** — Aynı slug ile tenant yeniden kurma `.28`de gerçek HTTPS/Chromium ile 20/20 + 19/19 geçti; nesil ve üç kaynak/işlem kimliği ayrıldı. Onaylı dört API dosyası hash kontrolüyle aktarıldı; tenant/üst domain/upstream temizlendi, anahtarlar iptal edildi; emekli sertifika materyali 30 günlük politikayla korunuyor (T818).
 - **Altyapı** — Otomasyon API'si benzersiz tenant ile `.28` gerçek HTTPS/API/Chromium kabulü 19/19 geçti; ACME ayarı yapıldı, tenant/üst domain/geçici uygulama/anahtar temizliği doğrulandı (`docs/otomasyon-api.md`).
