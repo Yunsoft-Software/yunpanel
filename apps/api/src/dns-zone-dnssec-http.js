@@ -112,14 +112,15 @@ function rolloverOperationStorePath(env = process.env) {
   return env.YUNPANEL_DNSSEC_ROLLOVER_OPERATION_STORE ?? path.join(stateRoot(env), 'dnssec-rollover-operations.json');
 }
 
-async function defaultService(authoritativeService, dnsIdentityRegistry, env = process.env) {
+async function defaultService(authoritativeService, dnsIdentityRegistry, env = process.env, { domainRegistry: sharedDomainRegistry = null } = {}) {
   if (typeof authoritativeService?.localServerId !== 'string' || !authoritativeService.localServerId) {
     throw new DnsZoneDnssecHttpError('dnssec_local_server_unavailable', 'Local authoritative DNS server scope is unavailable', 503);
   }
-  const domainRegistry = createDomainRegistry({
+  // A private registry only holds the Domains present at startup; prefer the panel's own.
+  const domainRegistry = sharedDomainRegistry ?? createDomainRegistry({
     filePath: env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json'),
   });
-  await domainRegistry.init();
+  if (!sharedDomainRegistry) await domainRegistry.init();
   const secretRegistry = createPowerDnsSecretRegistry({
     filePath: env.YUNPANEL_POWERDNS_SECRET_STORE ?? path.join(stateRoot(env), 'powerdns-secret-registry.json'),
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -134,8 +135,8 @@ async function defaultService(authoritativeService, dnsIdentityRegistry, env = p
   });
 }
 
-async function defaultRuntime(authoritativeService, dnsIdentityRegistry, env = process.env, serviceOverride = null) {
-  const service = serviceOverride ?? await defaultService(authoritativeService, dnsIdentityRegistry, env);
+async function defaultRuntime(authoritativeService, dnsIdentityRegistry, env = process.env, serviceOverride = null, shared = {}) {
+  const service = serviceOverride ?? await defaultService(authoritativeService, dnsIdentityRegistry, env, shared);
   const registry = createDnsZoneDnssecOperationRegistry({
     filePath: serviceOverride ? null : operationStorePath(env),
   });
@@ -183,6 +184,7 @@ export function mountDnsZoneDnssecRoutes(app, {
   dnsIdentityRegistry = null,
   dnsZoneDnssecRuntime = null,
   dnsZoneDnssecService = null,
+  domainRegistry = null,
   env = process.env,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
@@ -227,7 +229,7 @@ export function mountDnsZoneDnssecRoutes(app, {
   function runtime() {
     if (dnsZoneDnssecRuntime) return Promise.resolve(dnsZoneDnssecRuntime);
     if (!runtimePromise) {
-      runtimePromise = defaultRuntime(authoritativeService, dnsIdentityRegistry, env, dnsZoneDnssecService);
+      runtimePromise = defaultRuntime(authoritativeService, dnsIdentityRegistry, env, dnsZoneDnssecService, { domainRegistry });
       runtimePromise.catch(() => { runtimePromise = null; });
     }
     return runtimePromise;

@@ -18,7 +18,7 @@ function stateRoot(env = process.env) {
   return path.dirname(serverStorePath);
 }
 
-async function defaultService({ dnsIdentityRegistry, authoritativeService, env = process.env } = {}) {
+async function defaultService({ dnsIdentityRegistry, authoritativeService, domainRegistry: sharedDomainRegistry = null, env = process.env } = {}) {
   if (typeof authoritativeService?.localServerId !== 'string' || !authoritativeService.localServerId) {
     throw new DnsZoneSecondaryStatusHttpError(
       'dns_secondary_local_server_unavailable',
@@ -26,10 +26,11 @@ async function defaultService({ dnsIdentityRegistry, authoritativeService, env =
       503,
     );
   }
-  const domainRegistry = createDomainRegistry({
+  // A private registry only holds the Domains present at startup; prefer the panel's own.
+  const domainRegistry = sharedDomainRegistry ?? createDomainRegistry({
     filePath: env.YUNPANEL_DOMAIN_STORE ?? path.resolve('.data/domain-registry.json'),
   });
-  await domainRegistry.init();
+  if (!sharedDomainRegistry) await domainRegistry.init();
   const secretRegistry = createPowerDnsSecretRegistry({
     filePath: env.YUNPANEL_POWERDNS_SECRET_STORE ?? path.join(stateRoot(env), 'powerdns-secret-registry.json'),
     masterKey: env.YUNPANEL_SECRET_MASTER_KEY ?? null,
@@ -66,6 +67,7 @@ export function mountDnsZoneSecondaryStatusRoutes(app, {
   dnsIdentityRegistry,
   authoritativeService,
   dnsZoneSecondaryStatusService = null,
+  domainRegistry = null,
   env = process.env,
 } = {}) {
   if (!app || typeof app.get !== 'function') throw new Error('Express application is required');
@@ -84,7 +86,7 @@ export function mountDnsZoneSecondaryStatusRoutes(app, {
   function service() {
     if (dnsZoneSecondaryStatusService) return Promise.resolve(dnsZoneSecondaryStatusService);
     if (!servicePromise) {
-      servicePromise = defaultService({ dnsIdentityRegistry, authoritativeService, env });
+      servicePromise = defaultService({ dnsIdentityRegistry, authoritativeService, domainRegistry, env });
       servicePromise.catch(() => { servicePromise = null; });
     }
     return servicePromise;

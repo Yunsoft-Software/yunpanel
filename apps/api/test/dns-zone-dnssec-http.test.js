@@ -362,3 +362,30 @@ test('DNSSEC rollover operations use a separate state-root store with an explici
     '/etc/yunpanel/private/rollovers.json',
   );
 });
+
+test('default DNSSEC service reads Domains from the panel registry, so sites added after startup are found (T852)', async () => {
+  const { mkdtemp, rm } = await import('node:fs/promises');
+  const { tmpdir } = await import('node:os');
+  const { join } = await import('node:path');
+  const directory = await mkdtemp(join(tmpdir(), 'dnssec-shared-registry-'));
+  const domain = {
+    id: '6f1c9a52-8a7e-4f0b-9b8e-2d3c4e5f6a7b',
+    serverId: 'local',
+    primaryDomain: 'added-later.example',
+    parentDomainId: null,
+  };
+  const panelDomainRegistry = { async getDomain(id) { return id === domain.id ? structuredClone(domain) : null; } };
+  try {
+    const service = await dnsZoneDnssecHttpInternals.defaultService(
+      { localServerId: 'local' },
+      null,
+      { YUNPANEL_DOMAIN_STORE: join(directory, 'domains.json'), YUNPANEL_STATE_DIR: directory,
+        YUNPANEL_POWERDNS_SECRET_STORE: join(directory, 'powerdns.json'),
+        YUNPANEL_SECRET_MASTER_KEY: Buffer.alloc(32, 7).toString('base64') },
+      { domainRegistry: panelDomainRegistry },
+    );
+    await assert.rejects(service.status({ domainId: domain.id }), (error) => error.code !== 'domain_not_found');
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});

@@ -701,3 +701,11 @@
 - **Kaynak:** SENIOR · 2026-10-30 (T819 canlı koşusu)
 - **İş:** Arayüz `dnsRequirements.<kayıt>.status` alanını `valid`/`matched`/`unconfigured` diye okuyor; API ise tanılama aracının `state` alanını (`present`, `ready`, `not_configured`, `missing` …) döndürüyor. Bu yüzden MX/SPF/DKIM/DMARC/PTR doğru olsa da hep hata görünüyor. Gerçek `state` değerlerinden göster; DMARC politikasını mevcut kayıttan al.
 - **Kabul:** Birim testi; `npm test`; .28'de eml-09 tanılama senaryosu "Geçerli" görüyor.
+
+### T852 · API açıldıktan sonra eklenen alan adlarının DNSSEC ekranı 404 veriyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/dns-zone-dnssec-http.js`, `apps/api/src/dns-zone-secondary-status-http.js`, `apps/api/src/powerdns-http.js`, `apps/api/test/dns-zone-dnssec-http.test.js`
+- **Kaynak:** SENIOR · 2026-10-30 (T820 canlı koşusu)
+- **İş:** `defaultService` kendi `createDomainRegistry` örneğini açılışta bir kez belleğe okuyor; panelin sonradan eklediği alan adlarını görmüyor ve `/api/domains/:id/dns/dnssec` `domain_not_found` dönüyor (UI "DNSSEC durumu okunuyor…"da kalıyor). Panelin ortak kayıt defteri kullanılsın.
+- **Kabul:** Kırılan birim testi önce; `npm test`; .28'de dns-04 DNSSEC aç/kapat senaryosu çalışıyor.
