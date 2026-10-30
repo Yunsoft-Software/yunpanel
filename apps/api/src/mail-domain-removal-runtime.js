@@ -315,6 +315,20 @@ export function createMailDomainRemovalRuntime({
     return mailDomainRemovalOperationPublicView(await execute(operation));
   }
 
+  async function recaptureStalePlan(operation) {
+    let current;
+    try { current = await previewProvider({ mailDomainId: operation.mailDomainId, parentOperationId: operation.parentOperationId }); }
+    // Without a fresh, ready preview the plain retry below runs and reports the stale plan again.
+    catch { return operation; }
+    if (current?.readyToStart !== true || current.blockers?.length !== 0) return operation;
+    try {
+      return await registry.recapture(operation.id, current, { expectedUpdatedAt: operation.updatedAt });
+    } catch (error) {
+      if (error?.code === 'mail_domain_removal_operation_not_recapturable') return operation;
+      throw mapped(error);
+    }
+  }
+
   async function retry({
     mailDomainId,
     operationId,
@@ -339,6 +353,9 @@ export function createMailDomainRemovalRuntime({
         'Mail Domain removal retry is stale or confirmation is invalid',
         409,
       );
+    }
+    if (operation.error?.code === 'mail_domain_removal_config_preview_stale') {
+      operation = await recaptureStalePlan(operation);
     }
     if (['blocked', 'failed'].includes(operation.status)) {
       try {

@@ -689,7 +689,7 @@
 ### T850 · Bekleyen posta alan adı silmesi, başka bir posta alan adı değişince bir daha ilerleyemiyor
 - **Bağımlı:** —
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/mail-domain-removal-config-phase.js`, `apps/api/test/mail-domain-removal-config-phase.test.js`
+- **Dosyalar:** `apps/api/src/mail-domain-removal-runtime.js`, `apps/api/src/mail-domain-removal-operation-registry.js`, `apps/api/test/mail-domain-removal-runtime.test.js`
 - **Kaynak:** SENIOR · 2026-10-30 (T824/T825 canlı temizliği)
 - **İş:** Silme onayında `cleanupPlan.disableConfiguration.previewDigest` ve `configurationSha256` sunucudaki **bütün** posta yapılandırmasından sabitleniyor. Arada başka bir alan adının postası eklenir/silinirse bekleyen silme `mail_domain_removal_config_preview_stale` ile kalıcı `failed` oluyor (.28: `teml09-acodex-mvs4o7vu-guard.webrich.news`, `teml09-acodex-mvs47pnd-guard.157-180-11-28.sslip.io`). Hedef alan adının kendi durumu (`sourceStatus/Revision/UpdatedAt`) değişmediyse önizleme yeniden alınmalı; hedefin durumu değiştiyse yine durmalı. Sonra bu iki siteyi panelden temizle.
 - **Kabul:** Önce kırılan birim testi; `npm test`; .28'de iki site panelden siliniyor (404).

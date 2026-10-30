@@ -785,6 +785,38 @@ export function createMailDomainRemovalOperationRegistry({
     interrupt(operationId, expectedUpdatedAt, error, 'failed')
   );
 
+  // A plan pinned at approval also fingerprints the server-wide mail configuration, which any
+  // other Mail Domain change invalidates. Before this removal ran anything, and only while the
+  // target itself is unchanged, its plan may be replaced by a fresh capture.
+  async function recapture(operationId, capture, { expectedUpdatedAt } = {}) {
+    const current = await requireCurrent(operationId, expectedUpdatedAt);
+    const candidate = operationFromCapture(capture, now, idFactory);
+    const sameSource = [
+      'parentOperationId', 'mailDomainId', 'webDomainId', 'domainName', 'managementMode',
+      'sourceStatus', 'sourceRevision', 'sourceUpdatedAt', 'removalMethod',
+    ].every((field) => current[field] === candidate[field]);
+    if (!['blocked', 'failed'].includes(current.status)
+      || current.error?.code !== 'mail_domain_removal_config_preview_stale'
+      || !EVIDENCE_FIELDS.every((field) => current[field] === null)
+      || !sameSource) {
+      throw new MailDomainRemovalOperationRegistryError(
+        'mail_domain_removal_operation_not_recapturable',
+        'Mail Domain removal plan can only be re-captured before any side effect for the same target state',
+        409,
+      );
+    }
+    return mutate(current, {
+      previewDigest: candidate.previewDigest,
+      confirmation: candidate.confirmation,
+      planDigest: candidate.planDigest,
+      cleanupPlan: candidate.cleanupPlan,
+      status: 'pending',
+      resumeStatus: null,
+      result: null,
+      error: null,
+    });
+  }
+
   async function retry(operationId, { expectedUpdatedAt } = {}) {
     const current = await requireCurrent(operationId, expectedUpdatedAt);
     if (!['blocked', 'failed'].includes(current.status) || !current.resumeStatus) {
@@ -836,6 +868,7 @@ export function createMailDomainRemovalOperationRegistry({
   return Object.freeze({
     init,
     create,
+    recapture,
     get,
     listForMailDomain,
     listIncomplete,

@@ -402,3 +402,64 @@ test('stale preview and retry confirmations fail before durable transition or ex
   );
   assert.deepEqual(state.counts(), { executorCalls: 1, inspectorCalls: 0 });
 });
+
+function stalePreviewRuntime(previews) {
+  let previewCalls = 0;
+  const seen = [];
+  const operationRegistry = registry();
+  const runtime = createMailDomainRemovalRuntime({
+    registry: operationRegistry,
+    previewProvider: async () => previews[Math.min(previewCalls++, previews.length - 1)],
+    stepExecutor: async (operation) => {
+      seen.push(operation.cleanupPlan.disableConfiguration.previewDigest);
+      if (seen.length === 1) {
+        const error = new Error('Mail configuration disable preview changed after removal approval');
+        error.code = 'mail_domain_removal_config_preview_stale';
+        throw error;
+      }
+      return outcome(operation, 'advance', { status: 'disabling', evidence: emptyEvidence() });
+    },
+    stepInspector: async (operation) => outcome(operation, 'blocked', {
+      error: { code: 'mail_domain_removal_retry_required', message: 'Explicit retry is required' },
+    }, false),
+  });
+  return { runtime, registry: operationRegistry, seen };
+}
+
+function refreshedPreview(overrides = {}) {
+  const base = removalPreview();
+  const cleanupPlan = { ...base.cleanupPlan, disableConfiguration: { previewDigest: '9'.repeat(64), configurationSha256: '8'.repeat(64) } };
+  const refreshedDigest = '7'.repeat(64);
+  return {
+    ...base,
+    cleanupPlan,
+    planDigest: createHash('sha256').update(JSON.stringify(cleanupPlan)).digest('hex'),
+    previewDigest: refreshedDigest,
+    confirmation: `remove-mail-domain:${mailDomainId}:${parentOperationId}:${refreshedDigest}`,
+    ...overrides,
+  };
+}
+
+test('retry re-captures a stale server-wide mail config plan when nothing ran and the target is unchanged (T850)', async () => {
+  const state = stalePreviewRuntime([removalPreview(), refreshedPreview()]);
+  const failed = await state.runtime.start(startInput());
+  assert.equal(failed.status, 'failed');
+  assert.equal(failed.error.code, 'mail_domain_removal_config_preview_stale');
+
+  const resumed = await state.runtime.retry(retryInput(failed));
+  assert.equal(resumed.status, 'disabling');
+  assert.deepEqual(state.seen, ['e'.repeat(64), '9'.repeat(64)]);
+  const stored = await state.registry.get(failed.id);
+  assert.equal(stored.previewDigest, '7'.repeat(64));
+  assert.equal(stored.planDigest, refreshedPreview().planDigest);
+});
+
+test('retry keeps the approved plan when the target Mail Domain itself changed', async () => {
+  const changed = refreshedPreview({ mailDomain: { ...removalPreview().mailDomain, revision: 6 } });
+  const state = stalePreviewRuntime([removalPreview(), changed]);
+  const failed = await state.runtime.start(startInput());
+
+  await state.runtime.retry(retryInput(failed));
+  assert.deepEqual(state.seen, ['e'.repeat(64), 'e'.repeat(64)]);
+  assert.equal((await state.registry.get(failed.id)).previewDigest, previewDigest);
+});
