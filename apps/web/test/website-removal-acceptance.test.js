@@ -80,9 +80,11 @@ test('BUG-20260923-02: blocker labels translate step obstacles clearly', () => {
   assert.match(childBlocked, /engellendi/);
 });
 
-test('BUG-20260923-02: recovery panel propagates updates to website and domain lists on success', async () => {
+test('BUG-20260923-02: recovery panel propagates updates to website and domain lists on success and uses compact notification drawer', async () => {
   const recoveryText = await source('WebsiteRemovalRecoveryPanel.jsx');
   assert.match(recoveryText, /onChanged\?\.()/);
+  assert.match(recoveryText, /Silme bildirimlerini aç/);
+  assert.match(recoveryText, /yp-notification-drawer/);
   const pageText = await source('WebsitesPage.jsx');
   assert.match(pageText, /<WebsiteRemovalRecoveryPanel onChanged=\{refreshAll\} \/>/);
 });

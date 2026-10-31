@@ -349,6 +349,8 @@ test('navigationItemActive: correctly identifies active routes and handles users
   assert.equal(navigationItemActive('/tools-settings', '/settings?section=dns'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings/users'), false);
   assert.equal(navigationItemActive('/tools-settings', '/users'), false);
+  assert.equal(navigationItemActive('/tools-settings', '/docker'), false);
+  assert.equal(navigationItemActive('/docker', '/docker'), true);
 });
 
 // --- 5. Source Wiring, Routing Structure and Guard Integrity ---

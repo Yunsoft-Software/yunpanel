@@ -232,9 +232,9 @@ function normalizedPlan(value) {
         || item.id !== childDomainIds[index]
         || typeof item.primaryDomain !== 'string' || item.primaryDomain.length < 1
         || item.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(item.primaryDomain)
-        || !['active', 'suspended'].includes(item.state)
+        || !['active', 'suspended', 'draft'].includes(item.state)
         || !Number.isSafeInteger(item.desiredRevision) || item.desiredRevision < 1
-        || (item.state === 'active' && item.suspensionOperationId !== null)
+        || (['active', 'draft'].includes(item.state) && item.suspensionOperationId !== null)
         || (item.state === 'suspended' && (typeof item.suspensionOperationId !== 'string'
           || !SAFE_ID.test(item.suspensionOperationId)))) {
         throw invalid('Child Domain intent evidence is invalid');

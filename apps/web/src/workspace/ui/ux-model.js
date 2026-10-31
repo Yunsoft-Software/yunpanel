@@ -88,7 +88,7 @@ export function navigationItemActive(to, pathname) {
       || currentPath === '/db' || currentPath.startsWith('/db/');
   }
   if (to === '/tools-settings') {
-    return (['/tools-settings', '/servers', '/firewall', '/dashboard', '/docker', '/applications', '/domains', '/jobs', '/audit', '/logs'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
+    return (['/tools-settings', '/servers', '/firewall', '/dashboard', '/applications', '/domains', '/jobs', '/audit', '/logs'].some((path) => currentPath === path || currentPath.startsWith(`${path}/`))
       || (currentPath === '/settings' || (currentPath.startsWith('/settings/') && currentPath !== '/settings/users' && !currentPath.startsWith('/settings/users/'))))
       && currentPath !== '/users' && !currentPath.startsWith('/users/');
   }

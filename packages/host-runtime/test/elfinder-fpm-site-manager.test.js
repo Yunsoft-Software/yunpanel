@@ -278,3 +278,17 @@ test('retirement cannot remove an unjournalled or reappearing pool', async () =>
   await assert.rejects(fx.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
   assert.equal(fx.files.get(configPath).content, 'operator configuration');
 });
+
+test('retirement removes a stale socket when PHP-FPM service is inactive after pool unlink', async () => {
+  const fx = fixture();
+  await fx.manager.apply(intent, { operationId });
+  fx.files.delete(configPath);
+  const originalRun = fx.manager;
+  assert.ok(originalRun);
+  const inactiveFx = fixture({ serviceInitiallyActive: false });
+  await inactiveFx.manager.apply(intent, { operationId });
+  const retired = await inactiveFx.manager.retire(intent, { operationId });
+  assert.equal(retired.satisfied, true);
+  assert.equal(retired.socketRemoved, true);
+});
+

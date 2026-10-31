@@ -106,15 +106,32 @@ export function createWebsiteRemovalCleanupAdapters({
     if (step && Object.entries(intent).some(([key, value]) => step.intent?.[key] !== value)) {
       unavailable('website_cleanup_elfinder_evidence_invalid', 'Website file manager journal scope changed');
     }
-    return { handler, hasJournal: Boolean(step), context: { intent: step?.intent ?? intent,
-      operationId: source.operation.operationId, evidence: step?.evidence ?? null } };
+    return {
+      handler,
+      hasJournal: Boolean(step),
+      stepState: step?.state ?? null,
+      context: {
+        intent: step?.intent ?? intent,
+        operationId: source.operation.operationId,
+        evidence: step?.evidence ?? null,
+      },
+    };
   }
 
   async function retireFileManager(source) {
-    const { handler, hasJournal, context } = fileManagerContext(source);
+    const { handler, hasJournal, stepState, context } = fileManagerContext(source);
     try {
-      if (hasJournal) await handler.retire(context);
-      const result = await handler.inspectRetirement(context);
+      let result;
+      if (hasJournal && stepState === 'succeeded') {
+        await handler.retire(context);
+        result = await handler.inspectRetirement(context);
+      } else {
+        result = await handler.inspectRetirement(context);
+        if (hasJournal && (!result || result.satisfied !== true || result.poolRemoved !== true || result.socketRemoved !== true)) {
+          await handler.retire(context);
+          result = await handler.inspectRetirement(context);
+        }
+      }
       if (!result || result.satisfied !== true || result.poolRemoved !== true || result.socketRemoved !== true
         || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId
         || result.unixUser !== source.website.unixUser) {
@@ -131,7 +148,7 @@ export function createWebsiteRemovalCleanupAdapters({
     const application = await applicationRegistry.getApplication(source.website.applicationId);
     if (steps.length === 0 && application?.type !== 'php') return;
     const step = steps[0], handler = websiteProvisioningRuntime.handlers?.php_runtime;
-    if (steps.length !== 1 || !['succeeded', 'compensated'].includes(step?.state)
+    if (steps.length !== 1 || !['succeeded', 'compensated', 'pending', 'failed', 'blocked'].includes(step?.state)
       || step.intent?.adapter !== 'php-fpm' || step.intent?.websiteId !== source.website.id
       || step.intent?.applicationId !== source.website.applicationId || step.intent?.unixUser !== source.website.unixUser) {
       unavailable('website_cleanup_php_evidence_invalid', 'Owned Website PHP provisioning journal is unavailable or changed');
@@ -143,8 +160,17 @@ export function createWebsiteRemovalCleanupAdapters({
     const context = { intent: step.intent, currentIntent,
       operationId: source.operation.operationId, evidence: step.evidence ?? null };
     try {
-      await handler.retire(context);
-      const result = await handler.inspectRetirement(context);
+      let result;
+      if (step.state === 'succeeded') {
+        await handler.retire(context);
+        result = await handler.inspectRetirement(context);
+      } else {
+        result = await handler.inspectRetirement(context);
+        if (!result?.satisfied || result.poolRemoved !== true || result.socketRemoved !== true) {
+          await handler.retire(context);
+          result = await handler.inspectRetirement(context);
+        }
+      }
       if (!result?.satisfied || result.poolRemoved !== true || result.socketRemoved !== true
         || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId
         || result.unixUser !== source.website.unixUser) {
@@ -162,7 +188,7 @@ export function createWebsiteRemovalCleanupAdapters({
     const intent = { adapter: 'openssh-internal-sftp', websiteId: source.website.id,
       applicationId: source.website.applicationId, unixUser: source.website.unixUser };
     if (steps.length > 1 || steps[0] && (Object.entries(intent).some(([key, value]) => steps[0].intent?.[key] !== value)
-      || !['succeeded', 'compensated'].includes(steps[0].state))) {
+      || !['succeeded', 'compensated', 'pending', 'failed', 'blocked'].includes(steps[0].state))) {
       unavailable('website_cleanup_sftp_evidence_invalid', 'Website SFTP journal scope changed');
     }
     if (typeof handler?.retire !== 'function' || typeof handler?.inspectRetirement !== 'function') {
@@ -170,8 +196,17 @@ export function createWebsiteRemovalCleanupAdapters({
     }
     const context = { intent: steps[0]?.intent ?? intent, operationId: source.operation.operationId };
     try {
-      if (steps.length) await handler.retire(context);
-      const result = await handler.inspectRetirement(context);
+      let result;
+      if (steps[0]?.state === 'succeeded') {
+        await handler.retire(context);
+        result = await handler.inspectRetirement(context);
+      } else {
+        result = await handler.inspectRetirement(context);
+        if (steps.length && (result?.satisfied !== true || result.sshdConfigRemoved !== true || result.mountUnitRemoved !== true || result.chrootRemoved !== true)) {
+          await handler.retire(context);
+          result = await handler.inspectRetirement(context);
+        }
+      }
       if (result?.satisfied !== true || result.sshdConfigRemoved !== true || result.mountUnitRemoved !== true || result.chrootRemoved !== true
         || result.websiteId !== source.website.id || result.applicationId !== source.website.applicationId || result.unixUser !== source.website.unixUser) {
         unavailable('website_cleanup_sftp_unverified', 'Website SFTP mount or configuration is still present');

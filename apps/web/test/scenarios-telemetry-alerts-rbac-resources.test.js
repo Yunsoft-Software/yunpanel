@@ -816,7 +816,10 @@ test('SCN-RBAC-01 [15]: navigationGroups and navigationItemActive isolate Owner,
   assert.deepEqual(customerReadOnlyGroup.items.map(([to]) => to), ['/websites']);
 
   // Route highlighting rules
-  assert.equal(navigationItemActive('/tools-settings', '/docker/proj-1'), true);
+  assert.equal(navigationItemActive('/tools-settings', '/docker'), false);
+  assert.equal(navigationItemActive('/tools-settings', '/docker/proj-1'), false);
+  assert.equal(navigationItemActive('/docker', '/docker'), true);
+  assert.equal(navigationItemActive('/docker', '/docker/proj-1'), true);
   assert.equal(navigationItemActive('/tools-settings', '/firewall'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings?section=dns'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings/users'), false);

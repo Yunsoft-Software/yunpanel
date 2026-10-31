@@ -717,10 +717,19 @@ export function createElFinderFpmSiteManager({
     }
     // Also reconcile an interruption after unlink but before FPM reload.
     await configTest(spec.runtime);
-    await reloadServiceIfActive(spec.runtime);
+    const wasActive = await serviceActive(spec.runtime);
+    if (wasActive) {
+      await reloadServiceIfActive(spec.runtime);
+    } else {
+      await rmFn(spec.preview.socketPath, { force: true });
+    }
     let result = await inspectRetirement(rawIntent);
     for (let attempt = 0; !result.satisfied && attempt < 40; attempt += 1) {
       await new Promise(resolve => setTimeout(resolve, 100));
+      result = await inspectRetirement(rawIntent);
+    }
+    if (!result.satisfied && await readOptional(spec.preview.artifact.path) === null) {
+      await rmFn(spec.preview.socketPath, { force: true });
       result = await inspectRetirement(rawIntent);
     }
     if (!result.satisfied) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_unverified',

@@ -114,6 +114,9 @@ const blockerLabels=Object.freeze({
  website_removal_interrupted:'Silme adımı kesintiye uğradı; açıkça yeniden devam edilmesi gerekiyor.',
  child_domain_removal_blocked:'Bağlı alan adı silme işlemi engellendi veya tamamlanamadı.',
  domain_removal_not_ready:'Bağlı alan adı henüz silmeye hazır değil.',
+ domain_removal_domain_not_stable:'Bağlı alan adı taslak veya tamamlanmamış yönlendirme durumunda kaldı; silme işlemine devam ederek kaldırabilirsiniz.',
+ website_cleanup_sftp_evidence_invalid:'SFTP kurulum kaydı yarım kaldığı için temizlik adımı duraklatıldı; devam ederek tamamlayabilirsiniz.',
+ website_cleanup_sftp_unverified:'SFTP yapılandırması ve bağlama noktası temizliği doğrulanamadı; devam ederek tekrar deneyin.',
  website_removal_cron_job_failed:'Zamanlanmış görev temizliği işlemi başarısız oldu.',
  website_removal_allocation_release_failed:'Barındırma kontenjanı ve kota serbest bırakma işlemi başarısız oldu.',
 });

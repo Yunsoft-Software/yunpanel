@@ -1109,6 +1109,7 @@ export function createDomainRegistry({
     expectedRevision,
     checksum,
     operationId,
+    allowDraft = false,
   } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
@@ -1124,6 +1125,32 @@ export function createDomainRegistry({
           409,
         );
       }
+      return publicDomain(domain);
+    }
+    if (domain.state === 'draft' && allowDraft === true) {
+      if (!Number.isSafeInteger(expectedRevision)
+        || expectedRevision < 1
+        || domain.desiredRevision !== expectedRevision
+        || domain.stagedRevision !== 0
+        || domain.stagedChecksum !== null
+        || domain.lastError !== null) {
+        throw new DomainRegistryError(
+          'domain_suspension_state_drift',
+          'Draft Domain state does not match expected removal suspension revision',
+          409,
+        );
+      }
+      const timestamp = new Date(now()).toISOString();
+      domain.state = 'suspended';
+      domain.stagedRevision = expectedRevision;
+      domain.appliedRevision = expectedRevision;
+      domain.stagedChecksum = expectedChecksum;
+      domain.appliedPrimaryDomain = domain.primaryDomain;
+      domain.suspensionOperationId = expectedOperationId;
+      domain.suspendedAt = timestamp;
+      domain.suspendedChecksum = expectedChecksum;
+      domain.updatedAt = timestamp;
+      await persist();
       return publicDomain(domain);
     }
     if (domain.state !== 'active') {

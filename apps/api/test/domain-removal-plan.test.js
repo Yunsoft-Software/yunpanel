@@ -716,3 +716,35 @@ test('rejects disconnected descendant inventory instead of guessing cascade orde
       && error.code === 'domain_removal_preview_invalid',
   );
 });
+
+test('plans removal for an unpublished draft Domain with deterministic draft checksum', () => {
+  const draftDomain = domain({
+    state: 'draft',
+    desiredRevision: 1,
+    stagedRevision: 0,
+    appliedRevision: 0,
+    stagedChecksum: null,
+    appliedPrimaryDomain: null,
+    suspendedChecksum: null,
+    suspensionOperationId: null,
+  });
+  const draftImpact = impact(draftDomain);
+  draftImpact.dependencies = {
+    ...draftImpact.dependencies,
+    childDomains: [],
+    authoritativeDns: {
+      status: 'available',
+      items: [noZoneDnsReference(draftDomain.id, '5'.repeat(64))],
+    },
+  };
+  const preview = createDomainRemovalPreview({
+    domain: draftDomain,
+    impact: draftImpact,
+  });
+  assert.equal(preview.readyToStart, true);
+  assert.equal(preview.domain.state, 'draft');
+  assert.equal(preview.domain.desiredRevision, 1);
+  assert.equal(preview.domain.suspensionOperationId, null);
+  assert.match(preview.domain.checksum, /^[a-f0-9]{64}$/);
+});
+

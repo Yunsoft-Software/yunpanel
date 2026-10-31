@@ -206,22 +206,54 @@ function normalizedBucket(bucket, field) {
   });
 }
 
+function draftDomainChecksum(domain) {
+  return digest({
+    kind: 'draft_domain_routing',
+    id: safeId(domain.id, 'domainId'),
+    serverId: safeId(domain.serverId, 'serverId'),
+    primaryDomain: domain.primaryDomain,
+    desiredRevision: domain.desiredRevision,
+    stagedRevision: domain.stagedRevision,
+    appliedRevision: domain.appliedRevision,
+    appliedPrimaryDomain: domain.appliedPrimaryDomain ?? null,
+  });
+}
+
 function domainSnapshot(domain) {
+  const isStableApplied = Boolean(
+    domain
+    && ['active', 'suspended'].includes(domain.state)
+    && Number.isSafeInteger(domain.desiredRevision) && domain.desiredRevision >= 1
+    && domain.stagedRevision === domain.desiredRevision
+    && domain.appliedRevision === domain.desiredRevision
+    && domain.appliedPrimaryDomain === domain.primaryDomain
+  );
+  const isStableDraft = Boolean(
+    domain
+    && domain.state === 'draft'
+    && Number.isSafeInteger(domain.desiredRevision) && domain.desiredRevision >= 1
+    && domain.stagedRevision === 0
+    && (domain.stagedChecksum === null || domain.stagedChecksum === undefined)
+    && (domain.appliedRevision === 0
+      ? (domain.appliedPrimaryDomain === null || domain.appliedPrimaryDomain === undefined)
+      : (Number.isSafeInteger(domain.appliedRevision)
+        && domain.appliedRevision > 0
+        && domain.appliedRevision < domain.desiredRevision
+        && domain.appliedPrimaryDomain === domain.primaryDomain))
+  );
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)
     || typeof domain.primaryDomain !== 'string' || domain.primaryDomain.length < 1
     || domain.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(domain.primaryDomain)
-    || !['active', 'suspended'].includes(domain.state)
-    || !Number.isSafeInteger(domain.desiredRevision) || domain.desiredRevision < 1
-    || domain.stagedRevision !== domain.desiredRevision
-    || domain.appliedRevision !== domain.desiredRevision
-    || domain.appliedPrimaryDomain !== domain.primaryDomain) {
+    || (!isStableApplied && !isStableDraft)) {
     throw new DomainRemovalPlanError(
       'domain_removal_domain_not_stable',
       'Domain must have an exact active or suspended applied routing revision before removal planning',
       409,
     );
   }
-  const stagedChecksum = safeDigest(domain.stagedChecksum, 'stagedChecksum');
+  const stagedChecksum = isStableDraft
+    ? draftDomainChecksum(domain)
+    : safeDigest(domain.stagedChecksum, 'stagedChecksum');
   const suspended = domain.state === 'suspended';
   if (suspended && (
     domain.suspendedChecksum !== stagedChecksum
@@ -851,6 +883,7 @@ export const domainRemovalPlanInternals = Object.freeze({
   orchestratableImpactBlockers: Object.freeze([...ORCHESTRATABLE_IMPACT_BLOCKERS]),
   orchestratableDnsBlockers: Object.freeze([...ORCHESTRATABLE_DNS_BLOCKERS]),
   digest,
+  draftDomainChecksum,
   domainSnapshot,
   impactBlockers,
   orderedChildDomains,

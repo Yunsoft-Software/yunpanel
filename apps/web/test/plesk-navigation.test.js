@@ -32,8 +32,12 @@ test('old Owner tools remain discoverable without promoting placeholders', () =>
   for (const link of ['/backups', '/statistics', '/subscriptions', '/service-plans']) assert.ok(!links.includes(link), link);
   assert.ok(Object.isFrozen(TOOLS_SETTINGS_GROUPS[0].items[0]));
 });
-test('nested legacy tool paths highlight Tools & Settings; Users is distinct', () => {
-  for (const path of ['/servers', '/settings', '/docker/one', '/applications/new', '/jobs', '/audit']) assert.equal(navigationItemActive('/tools-settings', path), true);
+test('nested legacy tool paths highlight Tools & Settings; Users and Docker Marketplace are distinct', () => {
+  for (const path of ['/servers', '/settings', '/applications/new', '/jobs', '/audit']) assert.equal(navigationItemActive('/tools-settings', path), true);
+  assert.equal(navigationItemActive('/tools-settings', '/docker'), false);
+  assert.equal(navigationItemActive('/tools-settings', '/docker/one'), false);
+  assert.equal(navigationItemActive('/docker', '/docker'), true);
+  assert.equal(navigationItemActive('/docker', '/docker/one'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings/users'), false);
   assert.equal(navigationItemActive('/settings/users', '/settings/users'), true);
   assert.equal(navigationItemActive('/tools-settings', '/settings/users/detail'), false);

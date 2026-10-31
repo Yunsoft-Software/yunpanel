@@ -2661,3 +2661,107 @@ test('stale control-plane continuation is rejected before Domain mutation', asyn
   );
   assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
 });
+
+test('routing step suspends a draft Domain directly through domainRegistry.markSuspended', async () => {
+  const registry = createRegistry();
+  const draftRecord = {
+    id: 'domain-1',
+    serverId: 'local',
+    primaryDomain: 'example.com',
+    websiteId: 'website-1',
+    certificateId: null,
+    parentDomainId: null,
+    state: 'draft',
+    desiredRevision: 1,
+    stagedRevision: 0,
+    appliedRevision: 0,
+    stagedChecksum: null,
+    appliedPrimaryDomain: null,
+    suspendedChecksum: null,
+    suspensionOperationId: null,
+    lastError: null,
+  };
+  const { domainRemovalPlanInternals } = await import('../src/domain-removal-plan.js');
+  const draftChecksum = domainRemovalPlanInternals.draftDomainChecksum(draftRecord);
+  const base = leafRemovalPreview();
+  const preview = {
+    ...base,
+    domain: {
+      ...base.domain,
+      state: 'draft',
+      desiredRevision: 1,
+      checksum: draftChecksum,
+      suspensionOperationId: null,
+    },
+    confirmation: `start-domain-remove:domain-1:1:${base.previewDigest}`,
+  };
+  let current = { ...draftRecord };
+  const runtime = createDomainRemovalRuntime({
+    registry,
+    previewProvider: async () => preview,
+    suspensionRuntime: {
+      listForDomain: async () => [],
+      get: async () => null,
+      start: async () => {
+        throw new Error('suspensionRuntime.start should not be called for draft Domain');
+      },
+      retrySuspend: async () => {
+        throw new Error('suspensionRuntime.retrySuspend should not be called for draft Domain');
+      },
+      preview: async () => ({
+        version: 1,
+        operation: 'domain_suspend',
+        domain: {
+          id: current.id,
+          serverId: current.serverId,
+          primaryDomain: current.primaryDomain,
+          desiredRevision: current.desiredRevision,
+          stagedRevision: current.stagedRevision,
+          appliedRevision: current.appliedRevision,
+          stagedChecksum: current.stagedChecksum,
+          state: current.state,
+        },
+        nginx: null,
+        activeJobs: [],
+        blockers: ['domain_active_state_required', 'domain_routing_evidence_invalid'],
+        readyToSuspend: false,
+        previewDigest: 'd'.repeat(64),
+        confirmation: null,
+        sideEffects: false,
+      }),
+    },
+    domainRegistry: {
+      getDomain: async () => current,
+      detachWebsiteForRemoval: async () => current,
+      detachCertificateForRemoval: async () => current,
+      finalizeDomainRemoval: async () => current,
+      markSuspended: async (domainId, { expectedRevision, checksum: csum, operationId, allowDraft }) => {
+        assert.equal(domainId, 'domain-1');
+        assert.equal(expectedRevision, 1);
+        assert.equal(csum, draftChecksum);
+        assert.equal(allowDraft, true);
+        current = {
+          ...current,
+          state: 'suspended',
+          stagedRevision: expectedRevision,
+          appliedRevision: expectedRevision,
+          stagedChecksum: csum,
+          appliedPrimaryDomain: current.primaryDomain,
+          suspendedChecksum: csum,
+          suspensionOperationId: operationId,
+          suspendedAt: '2026-09-18T21:00:00.000Z',
+        };
+        return current;
+      },
+    },
+  });
+
+  const started = await runtime.start({
+    domainId: preview.domain.id,
+    previewDigest: preview.previewDigest,
+    confirmation: preview.confirmation,
+  });
+  assert.equal(started.steps[0].status, 'succeeded');
+  assert.equal(started.steps[0].result.referenceId, `domain-remove-suspend:${started.id}`);
+});
+

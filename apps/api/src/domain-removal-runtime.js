@@ -4,6 +4,7 @@ import {
   domainRemovalOperationPublicView,
   DomainRemovalOperationRegistryError,
 } from './domain-removal-operation-registry.js';
+import { domainRemovalPlanInternals } from './domain-removal-plan.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
 const ROUTING_CHILD_STATUSES = new Set(['pending', 'suspending', 'suspended', 'failed']);
@@ -164,6 +165,35 @@ function exactSuspendedDomain(operation, domain, expectedSuspensionOperationId) 
     && domain.suspensionOperationId === expectedSuspensionOperationId
     && domain.appliedPrimaryDomain === operation.primaryDomain
     && domain.lastError === null);
+}
+
+function directSuspensionOperationId(operation) {
+  return `domain-remove-suspend:${operation.id}`;
+}
+
+function directSuspensionEvidence(operation, domain) {
+  const opId = directSuspensionOperationId(operation);
+  if (!exactSuspendedDomain(operation, domain, opId)
+    || typeof domain.suspendedAt !== 'string') {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_routing_evidence_invalid',
+      'Direct Domain suspension did not prove the exact removed routing state',
+      409,
+    );
+  }
+  return Object.freeze({
+    referenceId: opId,
+    evidenceDigest: digest({
+      operationId: opId,
+      domainId: domain.id,
+      serverId: domain.serverId,
+      primaryDomain: domain.primaryDomain,
+      domainRevision: domain.desiredRevision,
+      checksum: domain.suspendedChecksum,
+      status: 'suspended',
+      suspendedAt: domain.suspendedAt,
+    }),
+  });
 }
 
 function websiteBindingEvidence(operation, websiteId, suspensionId) {
@@ -2188,14 +2218,69 @@ export function createDomainRemovalRuntime({
     let preview;
     try { preview = await suspensionRuntime.preview({ domainId: operation.domainId }); }
     catch (error) { throw mapped(error); }
+    const domainIdentityMatches = Boolean(
+      preview?.domain?.id === operation.domainId
+      && preview.domain?.serverId === operation.serverId
+      && preview.domain?.primaryDomain === operation.primaryDomain
+      && preview.domain?.desiredRevision === operation.domainRevision
+    );
+    const domainMatches = Boolean(
+      domainIdentityMatches
+      && preview.domain?.stagedRevision === operation.domainRevision
+      && preview.domain?.appliedRevision === operation.domainRevision
+      && preview.domain?.stagedChecksum === operation.checksum
+    );
+    if (domainIdentityMatches
+      && preview?.readyToSuspend === false
+      && Array.isArray(preview.activeJobs)
+      && preview.activeJobs.length === 0
+      && typeof domainRegistry?.markSuspended === 'function') {
+      if (preview.domain?.state === 'suspended' && typeof domainRegistry?.getDomain === 'function') {
+        let currentDomain;
+        try { currentDomain = await domainRegistry.getDomain(operation.domainId); }
+        catch (error) { throw mapped(error); }
+        if (currentDomain && exactSuspendedDomain(operation, currentDomain, directSuspensionOperationId(operation))) {
+          return Object.freeze({ __directSuspendedDomain: currentDomain });
+        }
+      }
+      if (preview.domain?.state === 'draft') {
+        let draftCandidate = preview.domain;
+        if (typeof domainRegistry?.getDomain === 'function') {
+          try {
+            const loaded = await domainRegistry.getDomain(operation.domainId);
+            if (loaded) draftCandidate = loaded;
+          } catch (error) { throw mapped(error); }
+        }
+        const expectedDraftChecksum = domainRemovalPlanInternals.draftDomainChecksum(draftCandidate);
+        if (expectedDraftChecksum === operation.checksum) {
+          try {
+            const suspended = await domainRegistry.markSuspended(operation.domainId, {
+              expectedRevision: operation.domainRevision,
+              checksum: operation.checksum,
+              operationId: directSuspensionOperationId(operation),
+              allowDraft: true,
+            });
+            return Object.freeze({ __directSuspendedDomain: suspended });
+          } catch (error) { throw mapped(error); }
+        }
+      }
+      if (domainMatches
+        && Array.isArray(preview.blockers)
+        && preview.blockers.length === 1
+        && preview.blockers[0] === 'domain_nginx_deactivation_unavailable'
+        && preview.nginx?.reason === 'nginx_deactivation_unowned_absence') {
+        try {
+          const suspended = await domainRegistry.markSuspended(operation.domainId, {
+            expectedRevision: operation.domainRevision,
+            checksum: operation.checksum,
+            operationId: directSuspensionOperationId(operation),
+          });
+          return Object.freeze({ __directSuspendedDomain: suspended });
+        } catch (error) { throw mapped(error); }
+      }
+    }
     if (!preview || preview.readyToSuspend !== true
-      || preview.domain?.id !== operation.domainId
-      || preview.domain?.serverId !== operation.serverId
-      || preview.domain?.primaryDomain !== operation.primaryDomain
-      || preview.domain?.desiredRevision !== operation.domainRevision
-      || preview.domain?.stagedRevision !== operation.domainRevision
-      || preview.domain?.appliedRevision !== operation.domainRevision
-      || preview.domain?.stagedChecksum !== operation.checksum
+      || !domainMatches
       || typeof preview.previewDigest !== 'string' || !SHA256_PATTERN.test(preview.previewDigest)
       || typeof preview.confirmation !== 'string' || !preview.confirmation) {
       throw new DomainRemovalRuntimeError(
@@ -2277,6 +2362,21 @@ export function createDomainRemovalRuntime({
         return publicOperation(await blockRouting(operation, step, error));
       }
       return publicOperation(await failRouting(operation, step, error));
+    }
+
+    if (result?.__directSuspendedDomain) {
+      try {
+        return publicOperation(await registry.succeedStep(
+          operation.id,
+          step.id,
+          directSuspensionEvidence(operation, result.__directSuspendedDomain),
+        ));
+      } catch (error) {
+        if (Number(error?.status) === 409) {
+          return publicOperation(await blockRouting(operation, step, error));
+        }
+        throw error;
+      }
     }
 
     if (!result || result.status !== 'suspended') {
