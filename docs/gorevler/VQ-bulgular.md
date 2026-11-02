@@ -717,3 +717,57 @@
 - **Kaynak:** SENIOR · 2026-10-30 (.28'de API 16:23–16:55 arası açılmadı)
 - **İş:** Parola kuralı 16–128 karakter; AES-GCM şifreli metni aynı bayt uzunluğunda. Açılış denetimi base64 uzunluğunu ≥32 istediği için 16–23 karakterlik parola çalışan API'de kabul edilip kaydediliyor, ama yeniden başlatmada `Database credential envelope is invalid` ile API açılmıyor. Denetim çözülmüş bayt uzunluğuna (16–128) baksın.
 - **Kabul:** Kırılan birim testi önce; `npm test`; .28'de API açılıyor ve kayıtların hepsi okunuyor.
+
+### T858 · Doğrulama: test — Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation chec
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-02 10:04
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentation checks and handle partial reloads gracefully (live TLS and registry state)
+    
+     without allocating a localhost port (0.218875ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.11325ms)
+    ✔ normalizes complete Node deployment specs (0.291334ms)
+    ✔ normalizes fixed Node process actions against a managed release (0.645417ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (0.948584ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.209666ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.613292ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (7.442875ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.380292ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (0.492708ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.161125ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.185959ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.080625ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.070208ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (1.107167ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.083458ms)
+    ✔ normalizes python rollback, restart, and status specs (0.144125ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (0.770875ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.309583ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.217709ms)
+    ✔ tenant constants and role classification predicates (1.006333ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.234417ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (1.080542ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.44825ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.310542ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.298792ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.174166ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.180542ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.294375ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.170042ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.174834ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.22325ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.391333ms)
+    ✔ tenant context creation and account normalization security edge cases (0.148084ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 128.330292
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
