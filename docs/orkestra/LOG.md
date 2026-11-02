@@ -182,3 +182,4 @@
 - 2026-10-30 15:50 orchestrator: tick: 4/4 yuva işte, geri alınan 0
 - 2026-10-30 16:00 orchestrator: tick: 4/4 yuva işte, geri alınan 0
 - 2026-11-02 10:04 orchestrator: verify 11c860a5..17e82df8: failed, yeniden açılan -, bulgu ['T858']
+- 2026-11-02 10:12 orchestrator: verify 11c860a5..5958c95c: ok, yeniden açılan -, bulgu -
