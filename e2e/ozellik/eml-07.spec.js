@@ -33,28 +33,6 @@ test.describe('EML-07 Webmail, mail istemci ayarları ve otomatik yapılandırma
     }
   });
 
-  test.afterAll(async () => {
-    try {
-      runSsh(`node -e "
-        const fs = require('fs');
-        const { execSync } = require('child_process');
-        try {
-          execSync(\\"sqlite3 /var/lib/yunpanel/mail-auth/virtual-mail.sqlite3 \\\\\\"DELETE FROM virtual_mailboxes WHERE address LIKE '${prefix}%';\\\\\\"\\");
-        } catch {}
-        try {
-          const mbPath = '/var/lib/yunpanel/control-plane/mailbox-registry.json';
-          if (fs.existsSync(mbPath)) {
-            const data = JSON.parse(fs.readFileSync(mbPath, 'utf8'));
-            data.mailboxes = (data.mailboxes || []).filter(m => !m.address.startsWith('${prefix}'));
-            fs.writeFileSync(mbPath, JSON.stringify(data, null, 2) + '\\n');
-          }
-        } catch {}
-      " 2>/dev/null || true`);
-    } catch {
-      // Temizlik adımı
-    }
-  });
-
   test('mutlu yol: Webmail görünümü, e-posta istemci bağlantı ayarları tanılama modalı ve fiziksel servis yanıtları', async ({ page }) => {
     // 1. Mail sayfasına git ve yerel mail domainini seç
     await page.goto('/mail');

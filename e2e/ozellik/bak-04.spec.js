@@ -5,6 +5,8 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
+  // T859: leaves an enabled backup schedule on an existing site; rewrite on an owned site and clean up through the panel.
+  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(180000);
 
@@ -46,18 +48,6 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
       const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
       const token = (await sessionRes?.json())?.data?.csrfToken || csrfToken;
-
-      // 1. Hedef sitedeki zamanlama kaydını devre dışı bırak / temizle
-      if (targetWebsiteId && token) {
-        try {
-          execSync(
-            `ssh yunpanel-test "node -e \\"const fs=require('fs');const p='/var/lib/yunpanel/control-plane/website-backup-schedules.json';if(fs.existsSync(p)){const d=JSON.parse(fs.readFileSync(p,'utf8'));d.schedules=d.schedules.filter(s=>s.websiteId!=='${targetWebsiteId}');fs.writeFileSync(p,JSON.stringify(d,null,2));}\\""`,
-            { timeout: 15000 }
-          );
-        } catch (cleanErr) {
-          console.warn('Backup schedule remote cleanup notice:', cleanErr.message);
-        }
-      }
 
       // 2. Test amaçlı oluşturulan Restic reposunu temizle
       if (createdRepoId && token) {

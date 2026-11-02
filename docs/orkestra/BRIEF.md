@@ -36,4 +36,4 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - .28'de yarım koşulardan kalan 5 test hesabı var (`trol04-a3-*-c1` ×4, `trol05-a4-*-ro`); T837/T838'i alan ajan kendi temizliğinde kaldırsın.
 - Açık SENIOR işleri: T850, T826. Antigravity için hazır: T839–T847 ve temizlik T853–T856.
 - **UYARI (16:55):** `tasks/recovery/T838-rol-05.spec.js` .28 auth veritabanına `sqlite3` ile doğrudan yazıyor (`DELETE FROM auth_limits;` tüm tablo, `DELETE FROM users WHERE username LIKE …`). `sqlite3` CLI'da yabancı anahtar kapalı olduğu için sahipsiz satır bıraktı ve API açılışta `hosting_schema_invalid` ile düştü. Bu dosyayı **kullanmayın**; T838 baştan, yalnız panel/API ile yazılacak. `e2e/ozellik` içinde `auth.sqlite`'a dokunan diğer testler (api-04, eml-*, sec-04) de denetlenecek.
-
+- 02-11-2026: `17e82df8` ile T826 çözüldü. Canlı testlerin doğrudan yazması `scripts/validate-repository.mjs` ile yasak; `eml-02`, `eml-06`, `bak-04` T859'a kadar `test.skip`. Hâlâ pano duraklatılmış.

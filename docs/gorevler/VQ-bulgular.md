@@ -771,3 +771,10 @@
     ℹ duration_ms 128.330292
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T859 · eml-02, eml-06 ve bak-04 kendi test sitesiyle yeniden yazılacak
+- **Bağımlı:** T181, T185, T191
+- **Dosyalar:** `e2e/ozellik/eml-02.spec.js`, `e2e/ozellik/eml-06.spec.js`, `e2e/ozellik/bak-04.spec.js`
+- **Kaynak:** SENIOR · 2026-11-02
+- **İş:** Bu üç test paylaşılan kaynakları değiştiriyordu (`eml-02` yerel posta alan adının kutu/takma adları, `eml-06` gerçek posta alan adını kapatıp açma ve geride kalan harici alan adı, `bak-04` var olan siteye yedek planı). Kayıt dosyası/veritabanı düzenleyen temizlik kodları kaldırıldı ve testler `test.skip` ile kapatıldı. Her biri kendi test sitesini kurup kaynaklarını panelin normal akışıyla silecek şekilde yeniden yazılsın; `test.skip` kaldırılsın. Kaydı doğrudan yazmak yasak: `scripts/validate-repository.mjs` bunu reddeder. `eml-06` için panelde harici posta alan adını tek başına kaldıran yol yok; site silme kaldırıyor.
+- **Kabul:** Üç test `.28`'de iki kez art arda geçiyor, sonrasında bu öneklerde kaynak kalmıyor, `npm run lint` geçiyor.

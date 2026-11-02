@@ -280,7 +280,8 @@ test('Verify-TLS, renewal-outcome, and reload-outcome endpoints expose presentat
   });
 
   const validFrom = '2026-09-01T00:00:00.000Z';
-  const validTo = '2026-12-01T00:00:00.000Z';
+  // Stays outside the 30-day expiry warning whenever the suite runs.
+  const validTo = new Date(Date.now() + 90 * 24 * 60 * 60 * 1000).toISOString();
   const fingerprint256 = 'AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99:AA:BB:CC:DD:EE:FF:00:11:22:33:44:55:66:77:88:99';
 
   const certificate = await certificateRegistry.createForDomain({

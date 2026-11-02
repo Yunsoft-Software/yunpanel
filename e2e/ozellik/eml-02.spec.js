@@ -5,6 +5,8 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
+  // T859: changes the shared local Mail Domain's mailboxes and aliases; rewrite on an owned site and clean up through the panel.
+  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(300000);
 
@@ -37,27 +39,6 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
     await btn.click();
   }
 
-  test.beforeAll(async () => {
-    try {
-      runSsh(`node <<'EOF'
-const fs = require('fs');
-const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
-if (fs.existsSync(fwdPath)) {
-  const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
-  fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.includes('example.org') || d.includes('example.com') || d.startsWith('teml02')));
-  fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + String.fromCharCode(10));
-}
-const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
-if (fs.existsSync(alPath)) {
-  const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
-  alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith('teml02'));
-  fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + String.fromCharCode(10));
-}
-EOF
-`);
-    } catch {}
-  });
-
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
       try {
@@ -71,62 +52,6 @@ EOF
           await retryBtn.click();
         }
       }
-    }
-  });
-
-  test.afterAll(async () => {
-    // Test kaynaklarını SSH ile temizle
-    try {
-      runSsh(`
-sqlite3 /var/lib/yunpanel/mail-auth/virtual-mail.sqlite3 "DELETE FROM virtual_aliases WHERE source LIKE '${prefix}%'; DELETE FROM virtual_mailboxes WHERE address LIKE '${prefix}%';" 2>/dev/null || true
-node - "${prefix}" <<'EOF'
-const fs = require('fs');
-const prefix = process.argv[2];
-let dirty = false;
-try {
-  const mbPath = '/var/lib/yunpanel/control-plane/mailbox-registry.json';
-  if (fs.existsSync(mbPath)) {
-    const data = JSON.parse(fs.readFileSync(mbPath, 'utf8'));
-    const initialLen = (data.mailboxes || []).length;
-    data.mailboxes = (data.mailboxes || []).filter(m => !m.address.startsWith(prefix));
-    if (data.mailboxes.length !== initialLen) {
-      fs.writeFileSync(mbPath, JSON.stringify(data, null, 2) + String.fromCharCode(10));
-      dirty = true;
-    }
-  }
-  const fwdPath = '/var/lib/yunpanel/control-plane/mailbox-forwarding-registry.json';
-  if (fs.existsSync(fwdPath)) {
-    const fwdData = JSON.parse(fs.readFileSync(fwdPath, 'utf8'));
-    const initialLen = (fwdData.forwardings || []).length;
-    fwdData.forwardings = (fwdData.forwardings || []).filter(f => !f.destinations.some(d => d.startsWith(prefix) || d.includes('example.org')));
-    if (fwdData.forwardings.length !== initialLen) {
-      fs.writeFileSync(fwdPath, JSON.stringify(fwdData, null, 2) + String.fromCharCode(10));
-      dirty = true;
-    }
-  }
-  const alPath = '/var/lib/yunpanel/control-plane/mail-alias-registry.json';
-  if (fs.existsSync(alPath)) {
-    const alData = JSON.parse(fs.readFileSync(alPath, 'utf8'));
-    const initialLen = (alData.aliases || []).length;
-    alData.aliases = (alData.aliases || []).filter(a => !a.source.startsWith(prefix));
-    if (alData.aliases.length !== initialLen) {
-      fs.writeFileSync(alPath, JSON.stringify(alData, null, 2) + String.fromCharCode(10));
-      dirty = true;
-    }
-  }
-  if (dirty) {
-    process.exit(10);
-  }
-} catch (e) {
-  console.error(e);
-}
-EOF
-if [ $? -eq 10 ]; then
-  systemctl restart yunpanel-api 2>/dev/null || true
-fi
-`);
-    } catch {
-      // Temizlik hatası yok sayılabilir
     }
   });
 

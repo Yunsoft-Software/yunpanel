@@ -5,6 +5,8 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('EML-06 Domain mail aç/kapat, harici mail ve bulunmayan alıcı politikası', () => {
+  // T859: disables a shared Mail Domain and leaves an external one behind; rewrite on an owned site and clean up through the panel.
+  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(300000);
 
@@ -80,47 +82,6 @@ print(len(active))
           await retryBtn.click();
         }
       }
-    }
-  });
-
-  test.afterAll(async () => {
-    // 0 Artık ilkesi: Test sırasında açılan harici mail domain kaydını temizle ve yerel domainin enabled olduğundan emin ol
-    try {
-      if (externalMailDomainId || externalDomainName) {
-        runSsh(`node -e "
-          const fs = require('fs');
-          const p = '/var/lib/yunpanel/control-plane/mail-domain-registry.json';
-          if (fs.existsSync(p)) {
-            const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-            data.mailDomains = (data.mailDomains || []).filter(m => m.id !== '${externalMailDomainId}' && m.domainName !== '${externalDomainName}');
-            fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\\n');
-          }
-        " 2>/dev/null || true`);
-        // API in-memory senkronizasyonu için servisi sessizce yeniden başlat
-        runSsh('systemctl restart yunpanel-api');
-      }
-
-      // Yerel domainin her durumda enabled kaldığından emin ol
-      if (localDomainName) {
-        runSsh(`node -e "
-          const fs = require('fs');
-          const p = '/var/lib/yunpanel/control-plane/mail-domain-registry.json';
-          if (fs.existsSync(p)) {
-            const data = JSON.parse(fs.readFileSync(p, 'utf8'));
-            const item = (data.mailDomains || []).find(m => m.domainName === '${localDomainName}');
-            if (item && item.status !== 'enabled') {
-              item.status = 'enabled';
-              fs.writeFileSync(p, JSON.stringify(data, null, 2) + '\\n');
-            }
-          }
-          const { execSync } = require('child_process');
-          try {
-            execSync(\\"sqlite3 /var/lib/yunpanel/mail-auth/virtual-mail.sqlite3 \\\\\\"INSERT OR REPLACE INTO virtual_domains(domain, enabled) VALUES ('${localDomainName}', 1);\\\\\\"\\");
-          } catch {}
-        " 2>/dev/null || true`);
-      }
-    } catch {
-      // Temizlik adımı
     }
   });
 

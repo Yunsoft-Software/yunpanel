@@ -2,6 +2,10 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 02-11-2026
+- **Güvenlik** — Canlı testlerin panel veritabanına/kayıt dosyalarına doğrudan yazması ve panel servisini yeniden başlatması yasaklandı (lint reddediyor); 9 testten bu kod kaldırıldı, 3 test yeniden yazılana kadar kapatıldı (T859).
+- **Hata** — Yarım kalmış site panelden silinebiliyor; `.28`'de doğrulandı (T826).
+
 ## 30-10-2026
 - **Hata** — 16–23 karakterlik veritabanı parolası artık API'nin bir sonraki açılışını kilitlemiyor (T857).
 - **Hata** — Bekleyen posta silmesi, başka bir alan adının postası değişince artık takılmıyor (T850).

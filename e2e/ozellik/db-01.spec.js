@@ -349,29 +349,6 @@ test.describe('DB-01 MySQL/MariaDB oluşturma, silme, site ilişkisi ve boyut', 
           runSsh(`mariadb -e "DROP DATABASE IF EXISTS ${prefix};"`);
         }
 
-        // Registry dosyalarından da bu ajanın binding ve credential kayıtlarını temizle
-        const cleanupScript = `
-          const fs = require('fs');
-          for (const file of [
-            '/var/lib/yunpanel/control-plane/database-binding-registry.json',
-            '/var/lib/yunpanel/control-plane/database-credential-registry.json'
-          ]) {
-            if (fs.existsSync(file)) {
-              try {
-                const data = JSON.parse(fs.readFileSync(file, 'utf8'));
-                if (Array.isArray(data.bindings)) {
-                  data.bindings = data.bindings.filter(b => !b.databaseName || (!b.databaseName.startsWith('tdb01_a${agentN}_') && b.databaseName !== '${prefix}'));
-                }
-                if (Array.isArray(data.credentials)) {
-                  data.credentials = data.credentials.filter(c => !c.databaseName || (!c.databaseName.startsWith('tdb01_a${agentN}_') && c.databaseName !== '${prefix}'));
-                }
-                fs.writeFileSync(file, JSON.stringify(data, null, 2));
-              } catch {}
-            }
-          }
-        `;
-        const b64 = Buffer.from(cleanupScript).toString('base64');
-        runSsh(`node -e "eval(Buffer.from('${b64}','base64').toString())"`);
       } catch {}
 
       // Fiziksel temizlik kontrolü: sunucuda tdb01_a${agentN}_ önekli veritabanı kalmadığı doğrulanır

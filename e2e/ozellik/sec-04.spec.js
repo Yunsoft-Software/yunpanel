@@ -23,11 +23,6 @@ test.describe.serial('SEC-04 Oturum/MFA/parola politikası ve API erişim sını
     }
   }
 
-  test.afterAll(async () => {
-    // Test sırasında eklenmiş olabilecek geçici rate limit veya kullanıcı kayıtlarını temizle
-    runSsh(`sqlite3 /var/lib/yunpanel/control-plane/auth/auth.sqlite "DELETE FROM auth_limits WHERE key LIKE '%${prefix}%'; DELETE FROM users WHERE username LIKE '%${prefix}%';"`);
-  });
-
   test('mutlu yol: oturum çerezleri, MFA & aktif oturum listesi ve CSRF sınır kontrolü', async ({ page }) => {
     // 1. Giriş yap
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);

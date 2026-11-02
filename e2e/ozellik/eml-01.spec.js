@@ -91,22 +91,6 @@ print(len(active))
     }
   });
 
-  test.afterAll(async () => {
-    try {
-      runSsh(`python3 -c "
-import json, os, subprocess
-p = '/var/lib/yunpanel/control-plane/mailbox-registry.json'
-if os.path.exists(p):
-    d = json.load(open(p))
-    d['mailboxes'] = [m for m in d['mailboxes'] if not m['address'].startswith('${prefix}')]
-    json.dump(d, open(p, 'w'), indent=2)
-subprocess.run(['sqlite3', '/var/lib/yunpanel/mail-auth/virtual-mail.sqlite3', \\"DELETE FROM virtual_mailboxes WHERE address LIKE '${prefix}%';\\"], check=False)
-" 2>/dev/null || true`);
-    } catch {
-      // Temizlik hatası yok sayılabilir
-    }
-  });
-
   test('mutlu yol: Mailbox CRUD, kota belirleme, parola güncelleme ve Dovecot fiziksel doğrulama', async ({ page }) => {
     // 1. Mail sayfasına git ve yerel mail domainini bul
     await page.goto('/mail');

@@ -55,6 +55,26 @@ async function walk(directory) {
 
 await walk(root);
 
+// Live feature tests go through the panel. Writing its stores directly leaves state the API
+// refuses at startup: the sqlite3 CLI runs with foreign keys off and registries are cached.
+const liveTestWriteRules = [
+  [/sqlite3[^\n]*\b(DELETE FROM|INSERT( OR [A-Z]+)? INTO|UPDATE \w+ SET|REPLACE INTO|DROP TABLE|ALTER TABLE)\b/i, 'writes a panel database with sqlite3'],
+  [/systemctl\s+(restart|stop)\s+yunpanel-/, 'restarts a panel service'],
+];
+const registryPathPattern = /\/var\/lib\/yunpanel\/control-plane\/[\w./-]+\.json/;
+const registryWritePattern = /writeFileSync\(|json\.dump\(|open\([^)]*,\s*['"]w['"]\)/;
+const liveTestDirectory = path.join(root, 'e2e', 'ozellik');
+for (const entry of await readdir(liveTestDirectory)) {
+  if (!entry.endsWith('.spec.js')) continue;
+  const source = await readFile(path.join(liveTestDirectory, entry), 'utf8');
+  for (const [pattern, problem] of liveTestWriteRules) {
+    if (pattern.test(source)) violations.push(`e2e/ozellik/${entry}: ${problem}`);
+  }
+  if (registryPathPattern.test(source) && registryWritePattern.test(source)) {
+    violations.push(`e2e/ozellik/${entry}: edits a panel registry file`);
+  }
+}
+
 const packageLock = JSON.parse(await readFile(path.join(root, 'package-lock.json'), 'utf8'));
 for (const [packagePath, cpu] of supportedLinuxNativeBindings) {
   const binding = packageLock.packages?.[packagePath];
