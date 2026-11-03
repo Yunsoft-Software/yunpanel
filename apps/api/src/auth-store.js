@@ -560,7 +560,16 @@ export function createAuthStore({
   users.storeLock = storeLock;
   users.withLock = (fn) => storeLock.withLock(fn);
 
+  // Address for server alerts: the recovery address of the first active owner.
+  function ownerRecoveryEmail() {
+    const row = db.prepare(`SELECT recovery.email AS email FROM users
+      JOIN auth_recovery_emails AS recovery ON recovery.user_id = users.id
+      WHERE users.role = 'owner' AND users.active = 1 ORDER BY users.created_at LIMIT 1`).get();
+    return row?.email ?? null;
+  }
+
   return {
+    ownerRecoveryEmail,
     mfa,
     users,
     hostingAccounts: users.hostingAccounts,

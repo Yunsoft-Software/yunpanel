@@ -1,5 +1,5 @@
 import { requirePanelRouteAccess } from './panel-http-guard.js';
-import { OperationalNotificationError } from './operational-notification-service.js';
+import { OperationalNotificationError, OWNER_RECIPIENT_ID } from './operational-notification-service.js';
 
 export class OperationalNotificationHttpError extends Error {
   constructor(code, message, status = 400) {
@@ -46,17 +46,22 @@ export function mountOperationalNotificationRoutes(app, {
   }
 
   // GET /api/notifications/preferences
-  app.get('/api/notifications/preferences', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (request, response) => {
-    const actorId = request.auth?.user?.id || 'global';
-    const preferences = notificationService.getPreferences(actorId);
+  // Server alerts go to one owner recipient, so every owner edits the same preferences.
+  app.get('/api/notifications/preferences', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (_request, response) => {
+    const preferences = notificationService.getPreferences(OWNER_RECIPIENT_ID);
     return response.json({ data: preferences });
   }));
 
   // PATCH /api/notifications/preferences
   app.patch('/api/notifications/preferences', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (request, response) => {
-    const actorId = request.auth?.user?.id || 'global';
-    const updated = notificationService.updatePreferences(actorId, request.body ?? {});
+    const updated = notificationService.updatePreferences(OWNER_RECIPIENT_ID, request.body ?? {});
+    await notificationService.refreshAlertAddress?.();
     return response.json({ data: updated });
+  }));
+
+  // GET /api/notifications/feed
+  app.get('/api/notifications/feed', requirePanelRouteAccess, requireOwnerOrManagement, asyncRoute(async (_request, response) => {
+    return response.json({ data: notificationService.getFeed(OWNER_RECIPIENT_ID) });
   }));
 
   // GET /api/notifications/history (and /api/notifications/deliveries)

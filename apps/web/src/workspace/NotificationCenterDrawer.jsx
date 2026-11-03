@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
+import { panelRequest } from '../api.js';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Badge, Button, EmptyState, Icon, LinkButton } from './PanelKit.jsx';
 import { certificateState, formatDate, jobActive, siteHref } from './site-model.js';
@@ -194,7 +195,8 @@ export function computeWorkspaceAlerts({
 }
 
 export function NotificationCenterDrawer({ open = true, onClose, initialTab = 'tasks' }) {
-  const { domains, websites, certificates, servers, jobs, notice, setNotice, observe } = useWorkspace();
+  const { domains, websites, certificates, servers, jobs, notice, setNotice, observe, isOwner } = useWorkspace();
+  const [serverAlerts, setServerAlerts] = useState([]);
   const [activeTab, setActiveTab] = useState(initialTab);
   const [noticeHistory, setNoticeHistory] = useState([]);
   const [dismissedIds, setDismissedIds] = useState(() => new Set());
@@ -207,6 +209,15 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
       return [{ id: `notice-${Date.now()}`, text, createdAt: new Date().toISOString() }, ...prev].slice(0, 20);
     });
   }, [notice]);
+
+  useEffect(() => {
+    if (!open || !isOwner) return undefined;
+    let active = true;
+    panelRequest('/notifications/feed')
+      .then((items) => { if (active) setServerAlerts(items); })
+      .catch(() => { if (active) setServerAlerts([]); });
+    return () => { active = false; };
+  }, [open, isOwner]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -301,7 +312,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
             onClick={() => setActiveTab('alerts')}
           >
             <span>Sistem Uyarıları</span>
-            {alerts.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{alerts.length}</span>}
+            {alerts.length + serverAlerts.length > 0 && <span className="ws-nav-count" style={{ marginLeft: '0.35rem' }}>{alerts.length + serverAlerts.length}</span>}
           </button>
           <button
             type="button"
@@ -370,6 +381,13 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
 
           {activeTab === 'alerts' && (
             <section aria-label="Sistem Uyarıları" style={{ display: 'flex', flexDirection: 'column', gap: '0.6rem' }}>
+              {serverAlerts.map((item) => (
+                <article key={item.id} className="ws-alert-item">
+                  <strong>{item.title}</strong>
+                  <p className="ws-muted" style={{ margin: 0 }}>{item.message}</p>
+                  <small className="ws-muted">{formatDate(item.timestamp)}</small>
+                </article>
+              ))}
               {alerts.length > 0 ? (
                 <>
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -401,7 +419,7 @@ export function NotificationCenterDrawer({ open = true, onClose, initialTab = 't
                     </article>
                   ))}
                 </>
-              ) : (
+              ) : serverAlerts.length > 0 ? null : (
                 <EmptyState
                   title="Sistem uyarısı yok"
                   detail="SSL sertifikaları, sunucu kaynakları ve görev kuyruğunda dikkat gerektiren bir sorun tespit edilmedi."

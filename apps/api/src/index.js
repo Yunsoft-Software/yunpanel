@@ -156,6 +156,7 @@ import { createPleskImporter } from './plesk-importer.js';
 import { createResticRepositoryRegistry } from './restic-repository-registry.js';
 import { createRcloneRemoteRegistry } from './rclone-remote-registry.js';
 import { createSystemWatchdogService } from './system-watchdog-service.js';
+import { createOperationalNotificationSweep } from './operational-notification-sweep.js';
 
 const host = process.env.YUNPANEL_API_HOST ?? '127.0.0.1';
 const port = Number.parseInt(process.env.YUNPANEL_API_PORT ?? '3001', 10);
@@ -1187,7 +1188,20 @@ const authorizeWebsiteBackupSchedule = async grant => {
     && user.revision === record.creatorRevision && user.passwordChangedAt === record.creatorPasswordChangedAt
     && (!ownerMfaRequired || authStore.mfa.enabled(user.id)));
 };
+let operationalNotifications = null;
 const systemWatchdogService = createSystemWatchdogService({
+  // Throttling lives in the notification service, so each sweep can simply report what it sees.
+  onSweepReport: async (report) => {
+    for (const incident of report.incidents ?? []) {
+      if (incident.type !== 'service') continue;
+      await operationalNotifications?.notifyServiceOutage({
+        serviceId: incident.targetId,
+        status: incident.code,
+        critical: incident.critical === true,
+        message: incident.message,
+      });
+    }
+  },
   serverRegistry: registry,
   jobRegistry,
   localRuntime: () => localRuntimeInstance,
@@ -1287,6 +1301,9 @@ const listener = createAuthenticatedApi({
       aiAudit: authStore.audit,
       authorizeWebsiteActor: authorizeWebsitePhpActor,
       userAdminStore: authStore.users,
+      operationalNotificationStore: path.join(controlPlaneStateRoot, 'operational-notifications.json'),
+      ownerEmailLookup: () => authStore.ownerRecoveryEmail(),
+      onOperationalNotificationService: (service) => { operationalNotifications = service; },
       aiPolicyStore,
       aiProviderRegistry,
       aiConversationService,
@@ -1449,6 +1466,7 @@ if (websiteBackupOperationService && localRuntime) {
   backupScheduler.start();
 }
 systemWatchdogService.startPeriodicSweep({ intervalMs: 60_000, serverId: localServerId });
+if (operationalNotifications) createOperationalNotificationSweep({ service: operationalNotifications }).start();
 const server = http.createServer({ headersTimeout: 15_000, requestTimeout: 30_000 }, listener);
 const terminalAuthenticator = createLiveConnectionAuthenticator({
   store: authStore,

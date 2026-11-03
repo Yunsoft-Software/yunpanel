@@ -22,6 +22,7 @@ const confirmation = `backup:${websiteId}:${repositoryId}:${previewDigest}`;
 
 function createFixture({
   backupSucceeds = true,
+  onOperationFailed = null,
   restoreResult = { status: 'succeeded', snapshotId: 'snap-1', preRestoreSnapshotId: 'pre-snap-1', healthCheck: { satisfied: true } },
 } = {}) {
   const registry = { ...createWebsiteBackupOperationRegistry() };
@@ -82,6 +83,7 @@ function createFixture({
     registry,
     websiteBackupService,
     websiteRestoreService, jobRegistry,
+    onOperationFailed,
     websiteRegistry: { async getWebsite() { return { id: websiteId, serverId, revision: 1, applicationId: null }; } },
     resticRepositoryRegistry: { async getRepository() { return { id: repositoryId, serverId }; } },
     authorizeActor: async input => input, siteMutationLock: { withSiteLock: async (_identity, action) => action() },
@@ -182,6 +184,23 @@ test('queueBackup records failure in operation when executeBackup throws', async
   assert.equal(failed.status, 'failed');
   assert.equal(failed.error?.message, 'İşlem tamamlanamadı; kayıtlı hata ve geri alma durumunu kontrol edin');
   assert.ok(failed.finishedAt);
+});
+
+test('a failed backup reports once, and a reporting failure does not change the operation', async () => {
+  const reported = [];
+  const { service, registry } = createFixture({
+    backupSucceeds: false,
+    onOperationFailed: async (operation, error) => {
+      reported.push({ operation, error });
+      throw new Error('alert channel down');
+    },
+  });
+  const op = await service.queueBackup({ actor, websiteId, repositoryId, expectedPreviewDigest: previewDigest, confirmation });
+  const failed = await waitForOperationTerminal(registry, op.id);
+  assert.equal(failed.status, 'failed');
+  assert.equal(reported.length, 1);
+  assert.equal(reported[0].operation.websiteId, websiteId);
+  assert.ok(reported[0].error);
 });
 
 test('queueRestore executes pre-restore snapshot, health check and records success', async () => {

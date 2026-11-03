@@ -1,4 +1,6 @@
 import { randomUUID } from 'node:crypto';
+import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import {
   NOTIFICATION_EVENT_TYPES,
   NOTIFICATION_SEVERITY,
@@ -28,6 +30,10 @@ const DEFAULT_DISK_WARNING_PERCENT = 85;
 const DEFAULT_DISK_CRITICAL_PERCENT = 95;
 const DEFAULT_INODE_WARNING_PERCENT = 85;
 const DEFAULT_INODE_CRITICAL_PERCENT = 95;
+export const OWNER_RECIPIENT_ID = 'usr-owner';
+// A standing condition is not news every hour: it would mean a month of hourly mail per certificate.
+const STANDING_CONDITION_THROTTLE_MS = 24 * 60 * 60 * 1000;
+const RETIRED_CERTIFICATE_STATES = new Set(['retired', 'superseded']);
 
 export function createOperationalNotificationService({
   authMailer = null,
@@ -47,12 +53,52 @@ export function createOperationalNotificationService({
   inodeWarningThresholdPercent = DEFAULT_INODE_WARNING_PERCENT,
   inodeCriticalThresholdPercent = DEFAULT_INODE_CRITICAL_PERCENT,
   defaultOwnerEmail = 'admin@yunpanel.local',
+  ownerEmailLookup = null,
+  filePath = null,
   logger = console,
 } = {}) {
   const preferencesMap = new Map();
   const deliveryLog = [];
   const inPanelFeeds = new Map();
   const suppressionState = new Map();
+  let alertAddress = null;
+
+  function load() {
+    if (!filePath) return;
+    let stored;
+    try { stored = JSON.parse(readFileSync(filePath, 'utf8')); }
+    catch (error) {
+      // Alerts must never be the reason the panel does not start.
+      if (error?.code !== 'ENOENT') logger.error?.('[operational-notifications] state file unreadable; starting empty:', error.message);
+      return;
+    }
+    for (const [key, value] of Object.entries(stored.preferences ?? {})) preferencesMap.set(key, value);
+    for (const [key, value] of Object.entries(stored.feeds ?? {})) inPanelFeeds.set(key, value);
+    for (const [key, value] of Object.entries(stored.suppression ?? {})) suppressionState.set(key, value);
+    if (Array.isArray(stored.deliveries)) deliveryLog.push(...stored.deliveries.slice(-MAX_DELIVERY_LOG_SIZE));
+    alertAddress = typeof stored.alertAddress === 'string' ? stored.alertAddress : null;
+  }
+
+  function save() {
+    if (!filePath) return;
+    try {
+      mkdirSync(path.dirname(filePath), { recursive: true, mode: 0o700 });
+      const temporary = `${filePath}.${process.pid}.tmp`;
+      writeFileSync(temporary, JSON.stringify({
+        version: 1,
+        preferences: Object.fromEntries(preferencesMap),
+        feeds: Object.fromEntries(inPanelFeeds),
+        suppression: Object.fromEntries(suppressionState),
+        deliveries: deliveryLog,
+        alertAddress,
+      }), { mode: 0o600 });
+      renameSync(temporary, filePath);
+    } catch (error) {
+      logger.error?.('[operational-notifications] state could not be saved:', error.message);
+    }
+  }
+
+  load();
 
   function getPreferences(actorId = 'global') {
     const key = actorId || 'global';
@@ -138,6 +184,7 @@ export function createOperationalNotificationService({
     }
 
     preferencesMap.set(key, updated);
+    save();
     return JSON.parse(JSON.stringify(updated));
   }
 
@@ -157,7 +204,7 @@ export function createOperationalNotificationService({
   async function resolveEligibleRecipients(event) {
     const recipients = [];
     const ownerRecipient = {
-      id: 'usr-owner',
+      id: OWNER_RECIPIENT_ID,
       role: 'owner',
       email: defaultOwnerEmail,
       isGlobal: true,
@@ -173,6 +220,10 @@ export function createOperationalNotificationService({
           ownerRecipient.email = liveOwner.email || defaultOwnerEmail;
         }
       } catch {}
+    }
+    if (typeof ownerEmailLookup === 'function') {
+      try { ownerRecipient.email = (await ownerEmailLookup()) || ownerRecipient.email; }
+      catch (error) { logger.error?.('[operational-notifications] owner address lookup failed:', error.message); }
     }
 
     recipients.push(ownerRecipient);
@@ -284,7 +335,7 @@ export function createOperationalNotificationService({
   }
 
   async function sendEmailDelivery({ recipient, event, prefs, maskedTitle, maskedMessage, maskedDetails }) {
-    const toAddress = recipient.email || prefs.channels.email?.address;
+    const toAddress = prefs.channels.email?.address || recipient.email;
     if (!toAddress) {
       return {
         status: DELIVERY_STATUS.FAILED,
@@ -557,7 +608,8 @@ export function createOperationalNotificationService({
       }
 
       // 3. Alert Repeat Suppression (Throttling / Deduplication)
-      const throttleWindowMs = (prefs.throttling?.windowMinutes ?? (defaultThrottleWindowMs / 60000)) * 60 * 1000;
+      const throttleWindowMs = eventInput.throttleWindowMs
+        ?? (prefs.throttling?.windowMinutes ?? (defaultThrottleWindowMs / 60000)) * 60 * 1000;
       const throttleKey = `${recipient.id}:${eventType}:${targetKey}`;
       const lastSuppression = suppressionState.get(throttleKey);
 
@@ -668,6 +720,8 @@ export function createOperationalNotificationService({
           details: { ...baseDetails },
         });
         deliveryResults.push(record);
+        // Only a delivered alert may silence the next one.
+        if (emailOutcome.status === DELIVERY_STATUS.FAILED) suppressionState.delete(throttleKey);
       }
 
       // C. Webhook
@@ -701,6 +755,7 @@ export function createOperationalNotificationService({
       }
     }
 
+    save();
     return {
       eventId,
       eventType,
@@ -772,6 +827,7 @@ export function createOperationalNotificationService({
     const currentTime = typeof checkNow === 'function' ? checkNow() : checkNow;
 
     for (const cert of certificates) {
+      if (RETIRED_CERTIFICATE_STATES.has(cert.state)) continue;
       if (cert.state === 'error') {
         const res = await dispatch({
           eventType: NOTIFICATION_EVENT_TYPES.SSL_RENEWAL_FAILED,
@@ -779,6 +835,7 @@ export function createOperationalNotificationService({
           title: `SSL Yenileme Hatası: ${cert.certName || cert.id}`,
           message: `Sertifika yenileme işlemi başarısız oldu: ${cert.lastError || 'Bilinmeyen hata'}`,
           targetKey: `cert:${cert.id}`,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           details: {
             certificateId: cert.id,
             certName: cert.certName,
@@ -798,6 +855,7 @@ export function createOperationalNotificationService({
           title: `SSL Servis Yeniden Yükleme Uyarısı: ${cert.certName || cert.id}`,
           message: `Sertifika uygulandı ancak servis yeniden yükleme kısmi veya hatalı: ${cert.lastReloadOutcome.service}`,
           targetKey: `cert:${cert.id}`,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           details: {
             certificateId: cert.id,
             service: cert.lastReloadOutcome.service,
@@ -823,6 +881,7 @@ export function createOperationalNotificationService({
           title: `SSL Sertifikası Süresi Doldu: ${cert.certName || cert.id}`,
           message: `${cert.certName || cert.id} sertifikasının geçerlilik süresi dolmuştur. Web siteniz güvensiz görünebilir!`,
           targetKey: `cert:${cert.id}`,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           details: {
             certificateId: cert.id,
             certName: cert.certName,
@@ -839,6 +898,7 @@ export function createOperationalNotificationService({
           title: `Kritik SSL Süre Sonu: ${cert.certName || cert.id} (${daysRemaining} gün kaldı)`,
           message: `${cert.certName || cert.id} sertifikasının süresi ${daysRemaining} gün içinde dolacaktır.`,
           targetKey: `cert:${cert.id}`,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           details: {
             certificateId: cert.id,
             certName: cert.certName,
@@ -855,6 +915,7 @@ export function createOperationalNotificationService({
           title: `SSL Sertifikası Süre Sonu Yaklaşıyor: ${cert.certName || cert.id} (${daysRemaining} gün kaldı)`,
           message: `${cert.certName || cert.id} sertifikasının süresi ${daysRemaining} gün içinde dolacaktır.`,
           targetKey: `cert:${cert.id}`,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           details: {
             certificateId: cert.id,
             certName: cert.certName,
@@ -903,6 +964,7 @@ export function createOperationalNotificationService({
         const res = await dispatch({
           eventType: NOTIFICATION_EVENT_TYPES.DISK_THRESHOLD_WARNING,
           severity: NOTIFICATION_SEVERITY.WARNING,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           title: `Yüksek Disk Alanı Uyarısı: ${mount} (${diskPercent}%)`,
           message: `${mount} bağlama noktasındaki disk kullanımı %${diskPercent} eşiğini aştı.`,
           targetKey: `disk:${mount}`,
@@ -938,6 +1000,7 @@ export function createOperationalNotificationService({
         const res = await dispatch({
           eventType: NOTIFICATION_EVENT_TYPES.INODE_THRESHOLD_WARNING,
           severity: NOTIFICATION_SEVERITY.WARNING,
+          throttleWindowMs: STANDING_CONDITION_THROTTLE_MS,
           title: `Yüksek Inode Kullanımı Uyarısı: ${mount} (${inodePercent}%)`,
           message: `${mount} bağlama noktasındaki inode kullanımı %${inodePercent} eşiğini aştı.`,
           targetKey: `inode:${mount}`,
@@ -1053,6 +1116,23 @@ export function createOperationalNotificationService({
     return filtered.slice(-maxEntries).reverse();
   }
 
+  function getFeed(recipientId, { limit = 50 } = {}) {
+    const maxEntries = Math.min(Math.max(1, Number(limit) || 50), MAX_FEED_SIZE);
+    return (inPanelFeeds.get(recipientId) ?? []).slice(0, maxEntries);
+  }
+
+  // The sentinel runs without the API, so it reads the resolved address from the state file.
+  async function refreshAlertAddress(recipientId = OWNER_RECIPIENT_ID) {
+    let address = getPreferences(recipientId).channels.email?.address ?? null;
+    if (!address && typeof ownerEmailLookup === 'function') {
+      try { address = (await ownerEmailLookup()) || null; }
+      catch (error) { logger.error?.('[operational-notifications] owner address lookup failed:', error.message); }
+    }
+    alertAddress = address ?? defaultOwnerEmail ?? null;
+    save();
+    return alertAddress;
+  }
+
   function clearThrottling() {
     suppressionState.clear();
   }
@@ -1082,6 +1162,8 @@ export function createOperationalNotificationService({
     getPreferences,
     updatePreferences,
     getDeliveryHistory,
+    getFeed,
+    refreshAlertAddress,
     clearThrottling,
     getStatus,
   };

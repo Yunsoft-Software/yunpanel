@@ -778,3 +778,11 @@
 - **Kaynak:** SENIOR · 2026-11-02
 - **İş:** Bu üç test paylaşılan kaynakları değiştiriyordu (`eml-02` yerel posta alan adının kutu/takma adları, `eml-06` gerçek posta alan adını kapatıp açma ve geride kalan harici alan adı, `bak-04` var olan siteye yedek planı). Kayıt dosyası/veritabanı düzenleyen temizlik kodları kaldırıldı ve testler `test.skip` ile kapatıldı. Her biri kendi test sitesini kurup kaynaklarını panelin normal akışıyla silecek şekilde yeniden yazılsın; `test.skip` kaldırılsın. Kaydı doğrudan yazmak yasak: `scripts/validate-repository.mjs` bunu reddeder. `eml-06` için panelde harici posta alan adını tek başına kaldıran yol yok; site silme kaldırıyor.
 - **Kabul:** Üç test `.28`'de iki kez art arda geçiyor, sonrasında bu öneklerde kaynak kalmıyor, `npm run lint` geçiyor.
+
+### T860 · Sunucu uyarıları: e-posta, panel içi ve panelden bağımsız nöbetçi
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/operational-notification-service.js`, `apps/api/src/operational-notification-sweep.js`, `apps/api/src/operational-notification-http.js`, `apps/api/src/notification-sentinel.js`, `apps/web/src/workspace/NotificationSettingsPanel.jsx`, `apps/web/src/workspace/NotificationCenterDrawer.jsx`, `packaging/systemd/yunpanel-sentinel.service`, `packaging/systemd/yunpanel-sentinel.timer`
+- **Kaynak:** İNSAN · 2026-11-03
+- **İş:** Hazır bildirim motoru hiçbir yere bağlı değildi. Otomatik kontrol, kalıcı kayıt, sahibin adresi, e-posta göndericisi, ayar ekranı, panel içi akış, yedek ve servis olayları bağlandı; panel kapanınca da uyaran bağımsız nöbetçi eklendi.
+- **Kabul:** `npm test`; `.28`'de deneme e-postası gelir, API durdurulunca iki kontrol sonra kesinti, düzelince düzeldi e-postası gelir.

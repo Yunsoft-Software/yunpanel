@@ -885,3 +885,26 @@ test('manual watchdog recovery cannot pretend a running host operation was termi
   error=>error.code==='watchdog_job_recovery_requires_host_inspection'&&error.status===409);
  assert.equal(jobs.getCompletions().length,0);assert.equal(jobs.getJobs()[0].status,'running');
 });
+
+test('the periodic sweep reports each result, and a reporting failure is logged without stopping the sweep', async (t) => {
+  t.mock.timers.enable({ apis: ['setInterval'] });
+  const reports = [];
+  const logged = [];
+  const service = createSystemWatchdogService({
+    inspectServices: async () => [],
+    logger: { error: (...args) => logged.push(args), info() {}, warn() {} },
+    onSweepReport: async (report) => {
+      reports.push(report);
+      if (reports.length === 1) throw new Error('alert failed');
+    },
+  });
+  service.startPeriodicSweep({ intervalMs: 1000 });
+  for (const expected of [1, 2]) {
+    t.mock.timers.tick(1000);
+    for (let wait = 0; wait < 50 && reports.length < expected; wait += 1) await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(reports.length, expected);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+  assert.equal(logged.length, 1);
+  service.stop();
+});

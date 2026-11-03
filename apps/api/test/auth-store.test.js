@@ -549,3 +549,11 @@ test('hosting customer session profile includes quotas when defined in customer 
     },
   });
 });
+
+test('owner recovery email is available for server alerts', async (t) => {
+  const { store } = fixture(t);
+  assert.equal(store.ownerRecoveryEmail(), null);
+  const { token: setupToken } = store.issueSetupToken();
+  await store.completeSetup({ setupToken, username: 'Admin', password, email: 'owner@example.com' });
+  assert.equal(store.ownerRecoveryEmail(), 'owner@example.com');
+});

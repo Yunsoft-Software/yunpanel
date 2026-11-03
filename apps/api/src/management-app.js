@@ -524,6 +524,7 @@ export function createApp(allOptions = {}) {
     customerLookup,
   });
   const app = express();
+  let resolvedOperationalNotificationService = null;
   app.disable('x-powered-by');
   app.boundaryOptions = {
     websiteRegistry,
@@ -1181,6 +1182,13 @@ export function createApp(allOptions = {}) {
     const resolvedWebsiteBackupOperationService = options.websiteBackupOperationService ?? (
       (resolvedWebsiteBackupService || resolvedWebsiteRestoreService) ? createWebsiteBackupOperationService({
         registry: resolvedWebsiteBackupOperationRegistry,
+        onOperationFailed: (operation, error) => resolvedOperationalNotificationService?.notifyBackupFailure({
+          websiteId: operation.websiteId,
+          repositoryId: operation.repositoryId ?? null,
+          operationId: operation.id,
+          operationType: operation.kind === 'restore' ? 'restore' : 'backup',
+          error,
+        }),
         websiteBackupService: resolvedWebsiteBackupService,
         websiteRestoreService: resolvedWebsiteRestoreService,
         websiteRegistry,
@@ -1374,8 +1382,11 @@ export function createApp(allOptions = {}) {
       ttydSessionManager,
     });
   }
-  const resolvedOperationalNotificationService = operationalNotificationService ?? createOperationalNotificationService({
-    authMailer: options.authMailer ?? null,
+  resolvedOperationalNotificationService = operationalNotificationService ?? createOperationalNotificationService({
+    authMailer: options.authMailer ?? (options.operationalNotificationStore ? createAuthMailer() : null),
+    filePath: options.operationalNotificationStore ?? null,
+    ownerEmailLookup: options.ownerEmailLookup ?? null,
+    ...(options.operationalNotificationStore ? { defaultOwnerEmail: null } : {}),
     certificateRegistry,
     domainRegistry,
     websiteRegistry,
@@ -1388,6 +1399,7 @@ export function createApp(allOptions = {}) {
   mountOperationalNotificationRoutes(app, {
     notificationService: resolvedOperationalNotificationService,
   });
+  options.onOperationalNotificationService?.(resolvedOperationalNotificationService);
   const resolvedNftablesManager = nftablesManager ?? createNftablesManager();
   const resolvedAuditStore = options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null;
   const resolvedFirewallService = firewallService ?? createFirewallService({

@@ -37,6 +37,7 @@ export function createWebsiteBackupOperationService({
   dnsBackupAdapter = null,
   hostingBackupAdapter = null,
   backupScheduleRegistry = null, authorizeScheduledActor = null, getAutomationUser = null,
+  onOperationFailed = null,
   now = () => new Date().toISOString(),
 } = {}) {
   if (!registry || !['createOperation', 'getOperation', 'getExecutionOperation', 'listOperations', 'updateOperation'].every((method) => typeof registry[method] === 'function')) {
@@ -78,6 +79,11 @@ export function createWebsiteBackupOperationService({
   async function update(id, patch) {
     const operation = await registry.updateOperation(id, patch);
     if (typeof backupOperationRegistry?.updateWebsiteOperation === 'function') await backupOperationRegistry.updateWebsiteOperation(id, patch);
+    if (patch.status === 'failed') {
+      // An alert problem must not change the outcome of the backup operation.
+      try { await onOperationFailed?.(operation, patch.error ?? null); }
+      catch (error) { console.error('[yunpanel-api] backup failure alert could not be sent:', error?.code ?? error?.message); }
+    }
     return operation;
   }
 

@@ -44,6 +44,7 @@ export function createSystemWatchdogService({
   criticalServiceIds = DEFAULT_CRITICAL_SERVICES,
   now = () => Date.now(),
   logger = console,
+  onSweepReport = null,
 } = {}) {
   const criticalSet = new Set(criticalServiceIds);
   const recoveryLog = [];
@@ -698,7 +699,8 @@ export function createSystemWatchdogService({
     if (sweepTimer) clearInterval(sweepTimer);
     sweepTimer = setInterval(async () => {
       try {
-        await check({ serverId });
+        const report = await check({ serverId });
+        await onSweepReport?.(report);
       } catch (err) {
         logger.error?.('[system-watchdog] Periodic sweep error:', err);
       }
