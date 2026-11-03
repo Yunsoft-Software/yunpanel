@@ -218,3 +218,22 @@ test('the feed route returns the owner feed and saving preferences refreshes the
     server.close();
   }
 });
+
+test('a test email goes to the saved address, then the account address, without a typed target', async () => {
+  const mail = mailer();
+  const service = createOperationalNotificationService({
+    authMailer: mail, defaultOwnerEmail: null, ownerEmailLookup: async () => 'account@example.com', logger: silent,
+  });
+  const actor = { user: { id: 'real-owner-id', role: 'owner' } };
+
+  const first = await service.dispatchTestNotification({ actor, channel: 'email' });
+  assert.equal(first.delivered, true);
+  assert.equal(mail.sent.at(-1).to, 'account@example.com');
+
+  service.updatePreferences('usr-owner', { channels: { email: { address: 'alerts@example.com' } } });
+  await service.dispatchTestNotification({ actor, channel: 'email' });
+  assert.equal(mail.sent.at(-1).to, 'alerts@example.com');
+
+  await service.dispatchTestNotification({ actor, channel: 'email', target: 'typed@example.com' });
+  assert.equal(mail.sent.at(-1).to, 'typed@example.com');
+});

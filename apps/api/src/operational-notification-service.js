@@ -772,6 +772,9 @@ export function createOperationalNotificationService({
     message = null,
   } = {}) {
     const actorTenant = actor ? extractActorTenant(actor) : { id: 'usr-admin', role: 'owner', email: defaultOwnerEmail };
+    const emailTarget = channel === NOTIFICATION_CHANNELS.EMAIL
+      ? (target || await refreshAlertAddress() || actorTenant.email)
+      : null;
 
     const testEvent = {
       eventType: NOTIFICATION_EVENT_TYPES.TEST_NOTIFICATION,
@@ -787,7 +790,7 @@ export function createOperationalNotificationService({
         {
           id: actorTenant.id,
           role: actorTenant.role,
-          email: channel === 'email' ? (target || actorTenant.email || defaultOwnerEmail) : (actorTenant.email || defaultOwnerEmail),
+          email: emailTarget || actorTenant.email || defaultOwnerEmail,
           isGlobal: actorTenant.isGlobal ?? true,
           active: true,
         },
