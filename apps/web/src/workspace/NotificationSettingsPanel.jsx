@@ -31,20 +31,25 @@ export function deliveryProblem(entry) {
   return 'Gönderilemedi';
 }
 
+const CHECK_ROW = { display: 'flex', flexDirection: 'row', alignItems: 'center', gap: 8 };
+
 const date = (value) => (value ? new Date(value).toLocaleString('tr-TR') : '—');
 
 export default function NotificationSettingsPanel() {
   const [values, setValues] = useState(null);
   const [history, setHistory] = useState([]);
+  const [senderMissing, setSenderMissing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(null);
   const [notice, setNotice] = useState('');
 
   async function load() {
-    const [preferences, deliveries] = await Promise.all([
+    const [preferences, deliveries, status] = await Promise.all([
       panelRequest('/notifications/preferences'),
       panelRequest('/notifications/deliveries?channel=email&limit=10'),
+      panelRequest('/notifications/status'),
     ]);
+    setSenderMissing(status.channels?.email?.senderConfigured === false);
     setValues(notificationFormValues(preferences));
     setHistory(deliveries);
   }
@@ -62,20 +67,21 @@ export default function NotificationSettingsPanel() {
     <div className="ws-section-body">
       <ErrorNotice error={error} />
       {notice && <div className="ws-notice" role="status">{notice}</div>}
+      {senderMissing && <div className="ws-notice ws-notice-warn" role="alert">Gönderen adresi ayarlı değil; e-postalar alıcıda reddedilebilir.</div>}
       {values && <form className="ws-form" onSubmit={(event) => {
         event.preventDefault();
         run(async () => { await save(); setNotice('Kaydedildi.'); });
       }}>
-        <label><input type="checkbox" checked={values.enabled}
+        <label style={CHECK_ROW}><input type="checkbox" checked={values.enabled}
           onChange={(event) => setValues({ ...values, enabled: event.target.checked })} /> Bildirimler açık</label>
         <label>E-posta adresi<input type="email" value={values.address} maxLength="254" placeholder="Hesap e-postası kullanılır"
           onChange={(event) => setValues({ ...values, address: event.target.value })} /></label>
-        <label><input type="checkbox" checked={values.email}
+        <label style={CHECK_ROW}><input type="checkbox" checked={values.email}
           onChange={(event) => setValues({ ...values, email: event.target.checked })} /> E-posta gönder</label>
-        <label><input type="checkbox" checked={values.panel}
+        <label style={CHECK_ROW}><input type="checkbox" checked={values.panel}
           onChange={(event) => setValues({ ...values, panel: event.target.checked })} /> Panelde göster</label>
         <fieldset><legend>Olaylar</legend>
-          {CATEGORIES.map(([key, label]) => <label key={key}><input type="checkbox" checked={values.categories[key]}
+          {CATEGORIES.map(([key, label]) => <label key={key} style={CHECK_ROW}><input type="checkbox" checked={values.categories[key]}
             onChange={(event) => setValues({ ...values, categories: { ...values.categories, [key]: event.target.checked } })} /> {label}</label>)}
         </fieldset>
         <div className="ws-actions">
@@ -85,7 +91,7 @@ export default function NotificationSettingsPanel() {
             const result = await panelRequest('/notifications/test', {
               method: 'POST', body: { channel: 'email', target: values.address.trim() || null },
             });
-            setNotice(`Deneme ${result.recipient} adresine gönderildi. Spam klasörünü de kontrol edin.`);
+            setNotice(`Deneme ${result.recipient} için posta sunucusuna iletildi. Gelmezse spam klasörüne bakın.`);
           })}>Deneme gönder</Button>
         </div>
       </form>}
@@ -94,7 +100,7 @@ export default function NotificationSettingsPanel() {
         <thead><tr><th scope="col">Tarih</th><th scope="col">Konu</th><th scope="col">Durum</th></tr></thead>
         <tbody>{history.map((entry) => <tr key={entry.id}>
           <td>{date(entry.timestamp)}</td><td style={{ overflowWrap: 'anywhere' }}>{entry.title}</td>
-          <td><Badge state={deliveryProblem(entry) ? 'error' : 'active'}>{deliveryProblem(entry) ?? 'Gönderildi'}</Badge></td>
+          <td><Badge state={deliveryProblem(entry) ? 'error' : 'active'}>{deliveryProblem(entry) ?? 'İletildi'}</Badge></td>
         </tr>)}</tbody>
       </table></div>}
     </div>

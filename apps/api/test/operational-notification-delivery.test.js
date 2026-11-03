@@ -237,3 +237,10 @@ test('a test email goes to the saved address, then the account address, without 
   await service.dispatchTestNotification({ actor, channel: 'email', target: 'typed@example.com' });
   assert.equal(mail.sent.at(-1).to, 'typed@example.com');
 });
+
+test('status says whether a real sender address is configured', () => {
+  const without = createOperationalNotificationService({ emailSender: null, logger: silent });
+  assert.equal(without.getStatus().channels.email.senderConfigured, false);
+  const configured = createOperationalNotificationService({ emailSender: 'alerts@example.com', logger: silent });
+  assert.equal(configured.getStatus().channels.email.senderConfigured, true);
+});

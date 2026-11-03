@@ -54,6 +54,7 @@ export function createOperationalNotificationService({
   inodeCriticalThresholdPercent = DEFAULT_INODE_CRITICAL_PERCENT,
   defaultOwnerEmail = 'admin@yunpanel.local',
   ownerEmailLookup = null,
+  emailSender = process.env.YUNPANEL_SMTP_FROM ?? null,
   filePath = null,
   logger = console,
 } = {}) {
@@ -1144,7 +1145,7 @@ export function createOperationalNotificationService({
     return {
       status: 'active',
       channels: {
-        email: { available: Boolean(authMailer) },
+        email: { available: Boolean(authMailer), senderConfigured: Boolean(emailSender) },
         webhook: { available: Boolean(fetchFn) },
         panel: { available: true },
       },

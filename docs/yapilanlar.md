@@ -3,7 +3,8 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 03-11-2026
-- **Özellik** — Sunucu uyarıları: SSL, disk, yedek ve servis sorunları e-posta ve panel içi bildirimle geliyor; panel kapanınca da uyaran bağımsız nöbetçi eklendi (T860). `.28`'de henüz denenmedi.
+- **Özellik** — Sunucu uyarıları: SSL, disk, yedek ve servis sorunları e-posta ve panel içi bildirimle geliyor; panel kapanınca da uyaran bağımsız nöbetçi eklendi (T860). `.28`'de gerçek e-postayla doğrulandı.
+- **Hata** — Silinmiş siteden kalan veritabanı kaydı artık panelin açılmasını engellemiyor.
 
 ## 02-11-2026
 - **Güvenlik** — Canlı testlerin panel veritabanına/kayıt dosyalarına doğrudan yazması ve panel servisini yeniden başlatması yasaklandı (lint reddediyor); 9 testten bu kod kaldırıldı, 3 test yeniden yazılana kadar kapatıldı (T859).
