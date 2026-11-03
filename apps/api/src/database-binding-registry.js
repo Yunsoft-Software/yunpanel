@@ -177,8 +177,11 @@ export function createDatabaseBindingRegistry({
         );
       }
     } catch (error) {
+      // A record left behind by a removed site must not keep the whole panel from starting.
+      // It stays for review; changing it re-validates the reference and is refused.
       if (persisted && error instanceof DatabaseBindingRegistryError && error.status === 404) {
-        throw new DatabaseBindingRegistryError('database_binding_state_invalid', 'Persisted database binding reference is stale', 409);
+        console.error(`[yunpanel-api] database binding ${binding.id} (${binding.databaseName}) has a stale reference: ${error.code}`);
+        return;
       }
       throw error;
     }

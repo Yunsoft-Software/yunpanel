@@ -187,3 +187,29 @@ test('persisted binding with stale Website site-user fails closed on reopen', as
     (error) => error instanceof DatabaseBindingRegistryError && error.code === 'database_binding_site_user_drift',
   );
 });
+
+test('a binding whose site was removed is logged and does not stop the registry from opening', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-db-binding-orphan-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'bindings.json');
+  const registry = createDatabaseBindingRegistry({ filePath, ...dependencies() });
+  await registry.init();
+  const created = await registry.bindDatabase({
+    serverId,
+    databaseName: 'app_db',
+    websiteId,
+    applicationId,
+    confirmation: `bind-database:${serverId}:app_db:${websiteId}`,
+  });
+
+  const errors = [];
+  t.mock.method(console, 'error', (...args) => errors.push(args.join(' ')));
+  const reopened = createDatabaseBindingRegistry({
+    filePath,
+    ...dependencies({ getWebsite: async () => null }),
+  });
+  await reopened.init();
+  assert.equal((await reopened.getBinding(created.id)).id, created.id, 'the record is kept for review');
+  assert.equal(errors.length, 1);
+  assert.match(errors[0], new RegExp(created.id));
+});
