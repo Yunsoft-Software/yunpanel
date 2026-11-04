@@ -16,6 +16,7 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
   const testCustomerPassword = `CustP@ss-${Date.now().toString(36)}`;
 
   let createdDomainId = null;
+  let createdWebsiteId = null;
   let createdCustomerUserId = null;
   let csrfToken = '';
 
@@ -36,6 +37,7 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
   }
 
   async function removeDomainFallback(page, domainId) {
+    if (!domainId) return;
     try {
       const pRes = await page.request.post(`/api/panel/domains/${encodeURIComponent(domainId)}/removal-preview`, {
         headers: apiHeaders(),
@@ -54,10 +56,52 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
     }
   }
 
-  async function removeWebsiteById(page, domainId, domainName) {
-    if (!domainId) return;
+  async function removeWebsite(page, websiteId, domainName) {
+    if (!websiteId) return;
+    // 1. Doğrudan Website Removal API ile güvenli kaldırma
     try {
-      await page.goto(`/websites/${encodeURIComponent(domainId)}/settings`);
+      const prevRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(websiteId)}/removal-preview`, {
+        headers: apiHeaders(),
+      });
+      if (prevRes.ok()) {
+        const prevJson = await prevRes.json();
+        const preview = prevJson.preview || prevJson.data;
+        if (preview?.readyToStart && preview?.previewDigest && preview?.confirmation) {
+          const remRes = await page.request.post(`/api/panel/websites/${encodeURIComponent(websiteId)}/removal`, {
+            headers: apiHeaders(),
+            data: { previewDigest: preview.previewDigest, confirmation: preview.confirmation },
+          });
+          if (remRes.status() === 201) {
+            const remJson = await remRes.json();
+            const op = remJson.operation || remJson.data;
+            if (op?.actions?.runConfirmation) {
+              await page.request.post(`/api/panel/website-removal-operations/${encodeURIComponent(op.id)}/run`, {
+                headers: apiHeaders(),
+                data: { expectedUpdatedAt: op.updatedAt, confirmation: op.actions.runConfirmation },
+              }).catch(() => {});
+            }
+            for (let i = 0; i < 25; i++) {
+              await new Promise((r) => setTimeout(r, 1000));
+              const pollRes = await page.request.get(`/api/panel/website-removal-operations/${encodeURIComponent(op.id)}`, {
+                headers: apiHeaders(),
+              });
+              if (pollRes.ok()) {
+                const pollJson = await pollRes.json();
+                const status = pollJson.data?.status || pollJson.status;
+                if (status === 'removed' || status === 'failed') break;
+              }
+            }
+            return;
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('Website removal API notice:', err.message);
+    }
+
+    // 2. UI Fallback: /websites/${websiteId}/settings rotası üzerinden silme
+    try {
+      await page.goto(`/websites/${encodeURIComponent(websiteId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
       if (await removalSection.isVisible({ timeout: 10000 }).catch(() => false)) {
         const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
@@ -67,7 +111,7 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
           const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal, dialog[open]').filter({ hasText: 'Siteyi kalıcı olarak sil' });
           if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
             const input = dialog.locator('input');
-            await input.fill(domainName);
+            if (domainName) await input.fill(domainName);
             const submitBtn = dialog.locator('button', { hasText: 'Silme işlemini başlat' });
             if (await submitBtn.isEnabled({ timeout: 3000 }).catch(() => false)) {
               await submitBtn.click();
@@ -76,17 +120,14 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
               if (await doneBtn.isVisible({ timeout: 45000 }).catch(() => false)) {
                 await doneBtn.click();
                 await page.waitForURL(/\/websites/, { timeout: 10000 }).catch(() => {});
-                return;
               }
             }
           }
         }
       }
     } catch (err) {
-      console.warn('TLS-01 cleanup notice:', err.message);
+      console.warn('Website removal UI notice:', err.message);
     }
-    // Güvenlik engeli veya UI zaman aşımında alan adı kaldırma rotasıyla güvenle temizle
-    await removeDomainFallback(page, domainId);
   }
 
   test.beforeEach(async ({ page }) => {
@@ -118,12 +159,17 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
 
-        // 1. Oluşturulan web sitesini temizle
-        if (createdDomainId) {
-          await removeWebsiteById(page, createdDomainId, testPrimaryDomain);
+        // 1. Önce web sitesini (websiteId ile) sil
+        if (createdWebsiteId) {
+          await removeWebsite(page, createdWebsiteId, testPrimaryDomain);
         }
 
-        // 2. Oluşturulan müşteriyi temizle
+        // 2. Ardından bağlı alan adını (domainId ile) sil
+        if (createdDomainId) {
+          await removeDomainFallback(page, createdDomainId);
+        }
+
+        // 3. Oluşturulan müşteriyi temizle
         if (createdCustomerUserId) {
           await page.request.delete(`/api/panel/users/hosting/accounts/${encodeURIComponent(createdCustomerUserId)}/login`, {
             headers: apiHeaders(),
@@ -131,25 +177,37 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
           }).catch(() => {});
         }
 
-        // 3. Olası artık ttls01-a alan adlarını temizle
+        // 4. Olası artık ttls01- web sitelerini temizle
+        const wsRes = await page.request.get('/api/panel/websites').catch(() => null);
+        if (wsRes && wsRes.ok()) {
+          const wsJson = await wsRes.json();
+          const wsList = Array.isArray(wsJson.data) ? wsJson.data : (wsJson.data?.websites || wsJson.websites || []);
+          for (const w of wsList) {
+            if (w.name && w.name.startsWith('ttls01-')) {
+              await removeWebsite(page, w.id, w.name);
+            }
+          }
+        }
+
+        // 5. Olası artık ttls01- alan adlarını temizle
         const domainsRes = await page.request.get('/api/panel/domains').catch(() => null);
         if (domainsRes && domainsRes.ok()) {
           const domainsJson = await domainsRes.json();
           const list = Array.isArray(domainsJson.data) ? domainsJson.data : (domainsJson.data?.domains || domainsJson.domains || []);
           for (const d of list) {
-            if (d.primaryDomain && d.primaryDomain.startsWith('ttls01-a')) {
-              await removeWebsiteById(page, d.id, d.primaryDomain);
+            if (d.primaryDomain && d.primaryDomain.startsWith('ttls01-')) {
+              await removeDomainFallback(page, d.id);
             }
           }
         }
 
-        // 4. Olası artık ttls01-a müşteri hesaplarını temizle
+        // 6. Olası artık ttls01- müşteri hesaplarını temizle
         const custRes = await page.request.get('/api/panel/users/hosting/accounts?kind=customer&limit=100').catch(() => null);
         if (custRes && custRes.ok()) {
           const custJson = await custRes.json();
           const list = Array.isArray(custJson.data?.accounts) ? custJson.data.accounts : (custJson.accounts || []);
           for (const acc of list) {
-            if (acc.username && acc.username.startsWith('ttls01-a')) {
+            if (acc.username && acc.username.startsWith('ttls01-')) {
               await page.request.delete(`/api/panel/users/hosting/accounts/${encodeURIComponent(acc.id)}/login`, {
                 headers: apiHeaders(),
                 data: { revision: acc.revision ?? 1 },
@@ -163,6 +221,11 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
     } catch (err) {
       console.warn('afterAll general sweep error:', err.message);
     }
+
+    // 7. Fiziksel süpürme ve 0 artık garantisi (.28 temizlik garantisi)
+    try {
+      runSsh('rm -f /var/lib/yunpanel/staging/nginx/*ttls01* /var/lib/yunpanel/staging/nginx/rollback/*ttls01* /var/lib/yunpanel/staging/nginx/deactivation/*ttls01* 2>/dev/null || true');
+    } catch {}
   });
 
   test('mutlu yol: Web sitesi oluşturma, ACME SSL formu, staging doğrulaması, dry-run yenileme ve fiziksel TLS kanıtları', async ({ page }) => {
@@ -206,6 +269,18 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
     const match = href.match(/\/websites\/([^/?#]+)/);
     expect(match).toBeTruthy();
     createdDomainId = match[1];
+
+    // API üzerinden oluşturulan web sitesi ve alan adı kimliklerini al
+    const createdDomainsRes = await page.request.get('/api/panel/domains');
+    if (createdDomainsRes.ok()) {
+      const domJson = await createdDomainsRes.json();
+      const domList = Array.isArray(domJson.data) ? domJson.data : (domJson.data?.domains || domJson.domains || []);
+      const matchedDom = domList.find((d) => d.primaryDomain === testPrimaryDomain || d.id === createdDomainId);
+      if (matchedDom) {
+        createdDomainId = matchedDom.id;
+        createdWebsiteId = matchedDom.websiteId;
+      }
+    }
 
     // 2. Yeni sitenin SSL sekmesine git ve başlangıç durumunu doğrula
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/ssl`);
