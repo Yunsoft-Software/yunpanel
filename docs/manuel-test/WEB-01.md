@@ -1,6 +1,6 @@
 # WEB-01 — Domain ekleme ve amaca göre site oluşturma sihirbazı
 Sonuç: ÇALIŞIYOR
-Ajan: AGENT_2 · Tarih: 2026-11-04 11:41 · Senaryo: `e2e/ozellik/web-01.spec.js` · Koşu: 4/4, test.fail 1
+Ajan: AGENT_4 · Tarih: 2026-11-04 12:08 · Senaryo: `e2e/ozellik/web-01.spec.js` · Koşu: 4/4, test.fail 1
 
 ## Senaryolar
 | Test adı | Sonuç (geçti/düştü/bilinen hata) | Fiziksel kanıt |
@@ -25,4 +25,4 @@ Ajan: AGENT_2 · Tarih: 2026-11-04 11:41 · Senaryo: `e2e/ozellik/web-01.spec.js
 - Sihirbaz içinden doğrudan YAML editörüyle sıfırdan Docker Compose stack tanımlama.
 
 ## Temizlenemeyen kaynaklar
-— (Koşu sonunda tweb01-a2-* önekli tüm site ve müşteri kayıtları panelden silindi; kalan: 0)
+— (Koşu sonunda tweb01-a4-* önekli tüm site ve müşteri kayıtları panelden silindi; kalan: 0)
