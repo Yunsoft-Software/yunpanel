@@ -3,7 +3,7 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 04-11-2026
-- **Hata** — Kurulumu hiç başlamamış site, sunucuda kullanıcısı olmadığı doğrulanınca silinebiliyor; dosyası kalan siteyi "temizlendi" sayan önceki düzeltme geri alındı (T861).
+- **Hata** — Kurulumu hiç başlamamış site, sunucuda kullanıcısı olmadığı doğrulanınca silinebiliyor; dosyası kalan siteyi "temizlendi" sayan önceki düzeltme geri alındı (T861). `.28`'de 24 siteyle doğrulandı.
 
 ## 03-11-2026
 - **Özellik** — Sunucu uyarıları: SSL, disk, yedek ve servis sorunları e-posta ve panel içi bildirimle geliyor; panel kapanınca da uyaran bağımsız nöbetçi eklendi (T860). `.28`'de gerçek e-postayla doğrulandı.

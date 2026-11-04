@@ -5,8 +5,8 @@
 **Aktif Dal:** `04-11-2026`  
 
 > **Senior düzeltmesi (04-11-2026):** Bu rapor olduğu gibi kabul edilmemeli.
-> - T861 geri alındı ve yeniden yazıldı (`tasks/done/T861.md`).
-> - `.28`'de temizlik notlarına göre yaklaşık 55 test sitesi duruyor (T853: 10, T854: 22, T855: 17, T856: 6).
+> - T861 geri alındı ve yeniden yazıldı; `.28`'de 24 takılı site silinerek doğrulandı (`tasks/done/T861.md`).
+> - `.28`'de bu silmeden sonra hâlâ 81 test önekli site kayıtlı (tweb01, trun01/05/06, twp01/02, tdev01–04, ttls06); temizlik notlarındaki sayılar bunu eksik gösteriyordu.
 > - T862'de tam canlı test 45 dakikada bitmedi, kayıttaki son 17 test başarısız; "kırık test yok" kanıtlanmadı.
 > - `mail-server.js`, `sentinel-service.js`, `alert-engine.js`, `website-service.js` projede yok.
 > - `.28` API'si 04-11 12:30–12:32 arasında 3 kez yeniden başladı; nedeni bulunamadı.
