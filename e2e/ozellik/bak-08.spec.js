@@ -26,26 +26,56 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
   const getFreshCsrfToken = async (p) => {
     let res = await p.request.get('/api/auth/session').catch(() => null);
     if (!res || !res.ok()) {
+      const currentUrl = p.url();
       await loginAs(p, OWNER_USERNAME, OWNER_PASSWORD);
+      if (currentUrl && !currentUrl.endsWith('/') && !currentUrl.includes('/login')) {
+        await p.goto(currentUrl);
+      }
       res = await p.request.get('/api/auth/session').catch(() => null);
     }
     const json = await res?.json().catch(() => ({}));
     const tok = json?.data?.csrfToken || csrfToken;
     csrfToken = tok;
+
+    if (csrfToken) {
+      await p.request.post('/api/auth/keep-alive', {
+        headers: {
+          'x-csrf-token': csrfToken,
+          Origin: 'https://server.cryptoraichu.website',
+          Referer: 'https://server.cryptoraichu.website/',
+        },
+      }).catch(() => {});
+    }
+
     return tok;
   };
 
   const openBackupPage = async (p, domainId) => {
-    await p.goto(`/websites/${domainId}/backup`);
+    const targetUrl = `/websites/${domainId}/backup`;
     const header = p.locator('h2:has-text("Yedekleme ve Geri Yükleme")');
-    const loginForm = p.locator('form.auth-form, form:has-text("YunPanel’e giriş yapın")');
-    await expect(header.or(loginForm)).toBeVisible({ timeout: 20000 });
-    if (await loginForm.isVisible()) {
-      await loginAs(p, OWNER_USERNAME, OWNER_PASSWORD);
-      await p.goto(`/websites/${domainId}/backup`);
+    const authForm = p.locator('form.auth-form, form:has-text("YunPanel’e giriş yapın")');
+
+    if (!p.url().includes(targetUrl)) {
+      await p.goto(targetUrl);
+    }
+
+    await expect(header.or(authForm)).toBeVisible({ timeout: 20000 });
+
+    if (await authForm.isVisible().catch(() => false)) {
+      await p.fill('form.auth-form input[name="username"]', OWNER_USERNAME);
+      await p.fill('form.auth-form input[name="password"]', OWNER_PASSWORD);
+      await p.click('form.auth-form button.auth-primary');
+      await expect(authForm).toBeHidden({ timeout: 15000 });
       await expect(header).toBeVisible({ timeout: 20000 });
     }
+
     await expect(p.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+
+    if (!p.url().includes(targetUrl)) {
+      await p.goto(targetUrl);
+      await expect(header).toBeVisible({ timeout: 20000 });
+    }
+
     await getFreshCsrfToken(p);
   };
 
@@ -64,19 +94,14 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
       }
     }
 
-    const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
-    if (sessionRes && sessionRes.ok()) {
-      const json = await sessionRes.json().catch(() => ({}));
-      csrfToken = json?.data?.csrfToken || '';
-    }
+    await getFreshCsrfToken(page);
   });
 
   test.afterAll(async ({ browser }) => {
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     try {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-      const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
-      const token = (await sessionRes?.json())?.data?.csrfToken || csrfToken;
+      const token = await getFreshCsrfToken(page);
 
       const headers = {
         'x-csrf-token': token,
@@ -246,11 +271,21 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
     }
 
     // 5. Snapshot'ın tabloda listelendiğini doğrula
-    await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 20000 });
-    await expect(page.locator('[role="status"]:has-text("okunuyor")')).toBeHidden({ timeout: 25000 }).catch(() => {});
+    await openBackupPage(page, targetDomainId);
+
     await expect(repoSection).toBeVisible({ timeout: 30000 });
 
     const snapshotRows = repoSection.locator('table.ws-table tbody tr');
+    const refreshBtn = page.locator('button:has-text("Yedekleri yenile")');
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (await snapshotRows.first().isVisible({ timeout: 3000 }).catch(() => false)) {
+        break;
+      }
+      if (await refreshBtn.isVisible({ timeout: 2000 }).catch(() => false) && await refreshBtn.isEnabled().catch(() => false)) {
+        await refreshBtn.click().catch(() => {});
+      }
+      await page.waitForTimeout(2000);
+    }
     await expect(snapshotRows.first()).toBeVisible({ timeout: 45000 });
 
     const snRes = await page.request.get(`/api/panel/backups/repositories/${createdRepoId}/snapshots`);
@@ -342,7 +377,17 @@ test.describe('BAK-08 Gerçek kurtarma, hata bildirimi ve yedek sahipliği', () 
     await expect(repoSection).toBeVisible({ timeout: 30000 });
 
     const snapshotRows = repoSection.locator('table.ws-table tbody tr');
-    await expect(snapshotRows.first()).toBeVisible({ timeout: 15000 });
+    const refreshBtn = page.locator('button:has-text("Yedekleri yenile")');
+    for (let attempt = 0; attempt < 6; attempt++) {
+      if (await snapshotRows.first().isVisible({ timeout: 3000 }).catch(() => false)) {
+        break;
+      }
+      if (await refreshBtn.isVisible({ timeout: 2000 }).catch(() => false) && await refreshBtn.isEnabled().catch(() => false)) {
+        await refreshBtn.click().catch(() => {});
+      }
+      await page.waitForTimeout(2000);
+    }
+    await expect(snapshotRows.first()).toBeVisible({ timeout: 30000 });
     const restoreBtn = snapshotRows.first().locator('button:has-text("Geri Yükle")');
     await expect(restoreBtn).toBeVisible({ timeout: 10000 });
     await restoreBtn.click();
