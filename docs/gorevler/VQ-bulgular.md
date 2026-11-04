@@ -789,7 +789,7 @@
 
 ### T861 · Site silme: file_cleanup_preflight_failed ve unix_cleanup_evidence_unavailable
 - **Bağımlı:** T853
-- **Dosyalar:** `docs/manuel-test/temizlik-T853.md`
+- **Dosyalar:** `apps/api/src/website-removal-runtime.js`, `apps/api/test/website-removal-cleanup-preflight.test.js`, `docs/manuel-test/temizlik-T853.md`
 - **Kaynak:** QA · 2026-11-04 12:19
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
