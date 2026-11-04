@@ -786,3 +786,13 @@
 - **Kaynak:** İNSAN · 2026-11-03
 - **İş:** Hazır bildirim motoru hiçbir yere bağlı değildi. Otomatik kontrol, kalıcı kayıt, sahibin adresi, e-posta göndericisi, ayar ekranı, panel içi akış, yedek ve servis olayları bağlandı; panel kapanınca da uyaran bağımsız nöbetçi eklendi.
 - **Kabul:** `npm test`; `.28`'de deneme e-postası gelir, API durdurulunca iki kontrol sonra kesinti, düzelince düzeldi e-postası gelir.
+
+### T861 · Site silme: file_cleanup_preflight_failed ve unix_cleanup_evidence_unavailable
+- **Bağımlı:** T853
+- **Dosyalar:** `docs/manuel-test/temizlik-T853.md`
+- **Kaynak:** QA · 2026-11-04 12:19
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    .28'de 10 tweb sitesinde Unix kullanıcısı/provisioning kanıtı eksikliği nedeniyle silme önizlemesi file_cleanup_preflight_failed ve unix_cleanup_evidence_unavailable ile duruyor.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
