@@ -5,13 +5,13 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('EML-06 Domain mail aç/kapat, harici mail ve bulunmayan alıcı politikası', () => {
-  // T859: disables a shared Mail Domain and leaves an external one behind; rewrite on an owned site and clean up through the panel.
-  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(300000);
+  test.setTimeout(360000);
 
-  const agentN = process.env.AGENT_N || '4';
+  const agentN = process.env.AGENT_N || '2';
   const prefix = `teml06-a${agentN}-${Date.now().toString(36)}`;
+  let externalSite = null;
+  let localSite = null;
   let externalMailDomainId = '';
   let externalDomainName = '';
   let localMailDomainId = '';
@@ -33,6 +33,132 @@ test.describe('EML-06 Domain mail aç/kapat, harici mail ve bulunmayan alıcı p
       Origin: 'https://server.cryptoraichu.website',
       'x-csrf-token': csrf,
     };
+  }
+
+  async function call(page, method, path, data) {
+    const session = await page.request.get('/api/auth/session');
+    const token = (await session.json()).data?.csrfToken;
+    const origin = page.url() ? new URL(page.url()).origin : 'https://server.cryptoraichu.website';
+    const response = await page.request.fetch(`/api/panel${path}`, {
+      method,
+      headers: { origin, ...(method === 'GET' ? {} : { 'x-csrf-token': token }) },
+      ...(data === undefined ? {} : { data }),
+    });
+    return { status: response.status(), body: await response.json().catch(() => null) };
+  }
+
+  async function createSite(page, suffix, mailEnabled = false) {
+    const name = `${prefix}-${suffix}.webrich.news`;
+    await page.goto('/websites/new');
+    await expect(page.getByRole('heading', { name: 'Web sitesi ekle', exact: true })).toBeVisible({ timeout: 15000 });
+
+    await page.getByLabel('Alan adı', { exact: true }).fill(name);
+    const wwwSelect = page.getByLabel('www davranışı');
+    if (await wwwSelect.isVisible().catch(() => false)) {
+      await wwwSelect.selectOption('none');
+    }
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('Site türü', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('Site türü', { exact: true }).selectOption('new_static_upload');
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('DNS yönetimi', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('local');
+    await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption(mailEnabled ? 'managed' : 'off');
+
+    const mailCheckbox = page.locator('label:has-text("E-posta ve Webmail etkinleştir") input[type="checkbox"]');
+    if (await mailCheckbox.count()) {
+      if (mailEnabled) {
+        if (!(await mailCheckbox.isChecked())) await mailCheckbox.check();
+      } else {
+        if (await mailCheckbox.isChecked()) await mailCheckbox.uncheck();
+      }
+    }
+
+    const submitBtn = page.getByRole('button', { name: 'Siteyi oluştur', exact: true });
+    await expect(submitBtn).toBeVisible({ timeout: 15000 });
+    await expect(submitBtn).toBeEnabled({ timeout: 15000 });
+
+    const responsePromise = page.waitForResponse((response) => response.url().includes('/api/panel/sites')
+      && response.request().method() === 'POST'
+      && !response.url().includes('create-preview'));
+    await submitBtn.click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(201);
+    const result = (await response.json()).data;
+    const site = {
+      domainId: result.primaryDomain.id,
+      websiteId: result.website.id,
+      hostname: result.primaryDomain.primaryDomain || name,
+      operationId: result.operationId,
+    };
+    await expect(page.locator('.ws-site-create-result')).toBeVisible({ timeout: 60000 });
+
+    let lastUpdate = null;
+    let idlePolls = 0;
+    await expect.poll(async () => {
+      try {
+        const provRes = await page.request.get(`/api/panel/sites/provisioning/${site.operationId}`);
+        if (!provRes.ok()) return false;
+        const op = (await provRes.json()).data;
+        if (op.ready) return true;
+        idlePolls = op.updatedAt === lastUpdate ? idlePolls + 1 : 0;
+        lastUpdate = op.updatedAt;
+        if (idlePolls >= 3) {
+          idlePolls = 0;
+          await call(page, 'POST', `/sites/provisioning/${site.operationId}/continue`, {
+            confirmation: `continue-site-provisioning:${site.operationId}`,
+          });
+        }
+      } catch (err) {
+        if (!/socket hang up|ECONNRESET|fetch failed/i.test(String(err?.message))) throw err;
+      }
+      return false;
+    }, { timeout: 240000, intervals: [3000] }).toBe(true);
+
+    if (mailEnabled) {
+      const mailRes = await page.request.get('/api/panel/mail-domains');
+      const mailBody = await mailRes.json();
+      const mailDomains = Array.isArray(mailBody.data) ? mailBody.data : (mailBody.data?.mailDomains || []);
+      const found = mailDomains.find((m) => m.webDomainId === site.domainId || m.domainName === site.hostname);
+      expect(found).toBeTruthy();
+      site.mailDomainId = found.id;
+    }
+    return site;
+  }
+
+  async function removeSite(page, site) {
+    if (!site || !site.domainId) return;
+    try {
+      for (let round = 0; round < 30; round++) {
+        const current = await page.request.get(`/api/panel/domains/${site.domainId}`);
+        if (current.status() === 404) break;
+        await page.goto(`/websites/${site.domainId}/settings`);
+        const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
+        try {
+          await expect(start).toBeVisible({ timeout: 15000 });
+          await start.click();
+        } catch {
+          await page.waitForTimeout(3000);
+          continue;
+        }
+        const dialog = page.getByRole('dialog');
+        if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const input = dialog.locator('input');
+          if (await input.isVisible().catch(() => false)) {
+            await input.fill(site.hostname);
+          }
+          const confirmBtn = dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ });
+          if (await confirmBtn.isVisible().catch(() => false)) {
+            await confirmBtn.click();
+          }
+        }
+        await page.waitForTimeout(6000);
+      }
+    } catch (err) {
+      console.warn('removeSite notice:', err.message);
+    }
   }
 
   async function waitForMailJobsIdle(timeoutMs = 60000) {
@@ -85,18 +211,26 @@ print(len(active))
     }
   });
 
-  test('mutlu yol 1: Harici posta sağlayıcısı (external) ile mail domain oluşturma, UI gösterimi ve fiziksel Postfix izolasyonunun doğrulanması', async ({ page, request }) => {
-    // 1. Mail sayfasına git
+  test.afterAll(async ({ browser }) => {
+    test.setTimeout(300000);
+    const page = await browser.newPage({ ignoreHTTPSErrors: true });
+    try {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      if (externalSite) await removeSite(page, externalSite);
+      if (localSite) await removeSite(page, localSite);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  });
+
+  test('mutlu yol 1: Harici posta sağlayıcısı (external) ile mail domain oluşturma, UI gösterimi ve fiziksel Postfix izolasyonunun doğrulanması', async ({ page }) => {
+    // 1. Harici posta testi için e-posta kapalı bir test sitesi oluştur
+    externalSite = await createSite(page, 'ext', false);
+    externalDomainName = externalSite.hostname;
+
+    // 2. Mail sayfasına git
     await page.goto('/mail');
     await expect(page.locator('h1:has-text("Mail")')).toBeVisible({ timeout: 15000 });
-
-    // Mevcut kayıtlı mail alan adlarını doğrulanmış sayfa oturumuyla al
-    const res = await page.request.get('/api/panel/mail-domains');
-    expect(res.status()).toBe(200);
-    const body = await res.json();
-    const existingDomains = Array.isArray(body) ? body : body.data || body.items || [];
-    const trackedNames = new Set(existingDomains.map((d) => d.domainName));
-    console.log('TRACKED_MAIL_DOMAINS_COUNT:', trackedNames.size);
 
     // Mail alan adı ekle butonuna tıkla
     const addDomainBtn = page.locator('button:has-text("Mail alan adı ekle")').first();
@@ -107,7 +241,7 @@ print(len(active))
     const modal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Posta alan adı ekle' });
     await expect(modal).toBeVisible({ timeout: 10000 });
 
-    // Henüz mail domain'i olmayan bir üst alan adı seç
+    // Oluşturduğumuz external test alan adını seç
     const domainSelect = modal.locator('label:has-text("Alan adı") select');
     await expect(domainSelect).toBeVisible({ timeout: 10000 });
     await expect(domainSelect.locator('option')).not.toHaveCount(0, { timeout: 15000 });
@@ -117,16 +251,12 @@ print(len(active))
     for (const opt of options) {
       const val = await opt.getAttribute('value');
       const txt = (await opt.textContent())?.trim() || '';
-      if (val && txt && !trackedNames.has(txt)) {
+      if (txt === externalDomainName || val === externalSite.domainId) {
         chosenValue = val;
-        externalDomainName = txt;
         break;
       }
     }
     expect(chosenValue).toBeTruthy();
-    expect(externalDomainName).toBeTruthy();
-    console.log('CHOSEN_EXTERNAL_DOMAIN:', externalDomainName, 'ID:', chosenValue);
-
     await domainSelect.selectOption(chosenValue);
 
     // Yönetim modunu "Harici posta sağlayıcısı" olarak ayarla
@@ -138,17 +268,8 @@ print(len(active))
     await expect(submitBtn).toBeEnabled({ timeout: 10000 });
     await submitBtn.click();
 
-    // İstek sonucunu bekle ve hata varsa logla
-    const alertEl = modal.locator('[role="alert"]');
-    try {
-      await expect(modal).not.toBeVisible({ timeout: 15000 });
-    } catch (err) {
-      if (await alertEl.isVisible().catch(() => false)) {
-        const alertMsg = await alertEl.textContent();
-        console.error('MODAL_ALERT_FOUND:', alertMsg);
-      }
-      throw err;
-    }
+    // Modal kapanmalı
+    await expect(modal).not.toBeVisible({ timeout: 15000 });
 
     // Detay sayfasına geçişi bekle
     await page.waitForURL((url) => url.pathname.startsWith('/mail/') && url.pathname.length > 6, { timeout: 20000 });
@@ -173,30 +294,55 @@ print(len(active))
   });
 
   test('mutlu yol 2: Yerel mail alan adında posta servisini açma/kapatma (Activate/Suspend/Deactivate) ve fiziksel virtual_domains yansıması', async ({ page }) => {
-    // 1. Mail sayfasına git ve yerel mail alan adını bul
+    // 1. Yerel posta testi için e-posta kapalı bir test sitesi oluştur
+    localSite = await createSite(page, 'loc', false);
+    localDomainName = localSite.hostname;
+
+    // 2. Mail sayfasına git ve bu site için yerel posta hizmetini ekle
     await page.goto('/mail');
     await expect(page.locator('h1:has-text("Mail")')).toBeVisible({ timeout: 15000 });
 
-    const localDomainRow = page.locator('table.ws-table tbody tr', { hasText: 'Bu sunucuda' }).first();
-    await expect(localDomainRow).toBeVisible({ timeout: 15000 });
+    const addDomainBtn = page.locator('button:has-text("Mail alan adı ekle")').first();
+    await expect(addDomainBtn).toBeVisible({ timeout: 10000 });
+    await addDomainBtn.click();
 
-    const domainNameEl = localDomainRow.locator('td strong').first();
-    localDomainName = (await domainNameEl.textContent())?.trim() || 'yp-form.webrich.news';
+    const modal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Posta alan adı ekle' });
+    await expect(modal).toBeVisible({ timeout: 10000 });
 
-    // Detay sayfasına geç
-    const manageLink = localDomainRow.locator('a:has-text("Yönet")');
-    await manageLink.click();
-    await page.waitForURL(/\/mail\/[^/?]+/, { timeout: 15000 });
+    const domainSelect = modal.locator('label:has-text("Alan adı") select');
+    await expect(domainSelect).toBeVisible({ timeout: 10000 });
+    await expect(domainSelect.locator('option')).not.toHaveCount(0, { timeout: 15000 });
 
+    const options = await domainSelect.locator('option').all();
+    let chosenValue = null;
+    for (const opt of options) {
+      const val = await opt.getAttribute('value');
+      const txt = (await opt.textContent())?.trim() || '';
+      if (txt === localDomainName || val === localSite.domainId) {
+        chosenValue = val;
+        break;
+      }
+    }
+    expect(chosenValue).toBeTruthy();
+    await domainSelect.selectOption(chosenValue);
+
+    const modeSelect = modal.locator('label:has-text("Yönetim modu") select');
+    await modeSelect.selectOption('local');
+
+    const submitBtn = modal.locator('button[type="submit"]:has-text("Posta hizmetini oluştur")');
+    await expect(submitBtn).toBeEnabled({ timeout: 10000 });
+    await submitBtn.click();
+
+    await expect(modal).not.toBeVisible({ timeout: 15000 });
+
+    await page.waitForURL((url) => url.pathname.startsWith('/mail/') && url.pathname.length > 6, { timeout: 20000 });
     const urlMatch = page.url().match(/\/mail\/([^/?]+)/);
     localMailDomainId = urlMatch ? urlMatch[1] : '';
     expect(localMailDomainId).toBeTruthy();
 
-    // 2. "Yapılandırma" sekmesine git
-    const configTab = page.locator('.ws-tabs a:has-text("Yapılandırma")');
-    await expect(configTab).toBeVisible({ timeout: 10000 });
-    await configTab.click();
-    await page.waitForURL(/section=configuration/, { timeout: 10000 });
+    // 3. Doğrudan bu yerel mail alan adının "Yapılandırma" sekmesine git
+    await page.goto(`/mail/${localMailDomainId}?section=configuration`);
+    await page.waitForURL(/section=configuration/, { timeout: 15000 });
 
     // Host mail configuration panelini doğrula
     await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
@@ -236,7 +382,6 @@ print(len(active))
     expect(disabledCount).toBe('0');
 
     // 4. Posta servisini tekrar açma (Re-activate / Enabled) testi
-    // Sayfayı yeniden yükle ki güncel revision ve status (disabled) temizce yüklensin
     await page.reload();
     await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
 
@@ -303,11 +448,6 @@ print(len(active))
   });
 
   test('Plesk Parity kontrolü: Bulunmayan alıcı politikası (Mail for non-existent users: Bounce / Reject / Forward / Catch-all)', async ({ page }) => {
-    // Plesk Parity Gereksinimi EML-06:
-    // Plesk'te alan adı bazında "Mail Settings" -> "What to do with mail for non-existent users" seçenekleri bulunur:
-    // 1. Bounce with message (Geri çevir - 550 hata kodu ile)
-    // 2. Forward to address (Catch-all - tanımlı olmayan tüm postaları belirli bir adrese yönlendir)
-    // 3. Reject (Gelen postayı sessizce/doğrudan reddet)
     test.fail(
       true,
       'BULGU EML-06: Plesk Mail Settings eşdeğeri bulunmayan alıcı politikası (Catch-all / Bounce / Reject) arayüzü ve backend konfigürasyonu eksik.',
@@ -316,7 +456,6 @@ print(len(active))
     await page.goto(`/mail/${encodeURIComponent(localMailDomainId || 'c46068e1-82f3-4956-aa3f-f1e04d7ff9ee')}?section=configuration`);
     await expect(page.locator('h2:has-text("Host mail configuration")')).toBeVisible({ timeout: 15000 });
 
-    // Panelde Catch-all veya bulunmayan alıcı tercihi (Bounce / Reject / Forward) form kontrolü aranır
     const catchAllSelector = page.locator('label:has-text("Bulunmayan alıcı"), label:has-text("Catch-all"), label:has-text("Non-existent"), select[name="nonExistentPolicy"]');
     await expect(catchAllSelector).toBeVisible({ timeout: 3000 });
   });

@@ -5,16 +5,15 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
-  // T859: changes the shared local Mail Domain's mailboxes and aliases; rewrite on an owned site and clean up through the panel.
-  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(300000);
+  test.setTimeout(360000);
 
-  const agentN = process.env.AGENT_N || '3';
+  const agentN = process.env.AGENT_N || '2';
   const prefix = `teml02-a${agentN}-${Date.now().toString(36)}`;
   const aliasLocalPart = `${prefix}-al`;
   const srcMailboxLocalPart = `${prefix}-src`;
   const dstMailboxLocalPart = `${prefix}-dst`;
+  let createdSite = null;
   let targetDomainName = '';
   let fullAliasAddress = '';
   let fullSrcMailboxAddress = '';
@@ -27,6 +26,130 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
       encoding: 'utf8',
       timeout: 30000,
     });
+  }
+
+  async function call(page, method, path, data) {
+    const session = await page.request.get('/api/auth/session');
+    const token = (await session.json()).data?.csrfToken;
+    const origin = page.url() ? new URL(page.url()).origin : 'https://server.cryptoraichu.website';
+    const response = await page.request.fetch(`/api/panel${path}`, {
+      method,
+      headers: { origin, ...(method === 'GET' ? {} : { 'x-csrf-token': token }) },
+      ...(data === undefined ? {} : { data }),
+    });
+    return { status: response.status(), body: await response.json().catch(() => null) };
+  }
+
+  async function createSite(page) {
+    const name = `${prefix}.webrich.news`;
+    await page.goto('/websites/new');
+    await expect(page.getByRole('heading', { name: 'Web sitesi ekle', exact: true })).toBeVisible({ timeout: 15000 });
+
+    await page.getByLabel('Alan adı', { exact: true }).fill(name);
+    const wwwSelect = page.getByLabel('www davranışı');
+    if (await wwwSelect.isVisible().catch(() => false)) {
+      await wwwSelect.selectOption('none');
+    }
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('Site türü', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('Site türü', { exact: true }).selectOption('new_static_upload');
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('DNS yönetimi', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('local');
+    await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption('managed');
+
+    const mailCheckbox = page.locator('label:has-text("E-posta ve Webmail etkinleştir") input[type="checkbox"]');
+    if (await mailCheckbox.count()) {
+      if (!(await mailCheckbox.isChecked())) {
+        await mailCheckbox.check();
+      }
+    }
+
+    const submitBtn = page.getByRole('button', { name: 'Siteyi oluştur', exact: true });
+    await expect(submitBtn).toBeVisible({ timeout: 15000 });
+    await expect(submitBtn).toBeEnabled({ timeout: 15000 });
+
+    const responsePromise = page.waitForResponse((response) => response.url().includes('/api/panel/sites')
+      && response.request().method() === 'POST'
+      && !response.url().includes('create-preview'));
+
+    await submitBtn.click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(201);
+    const result = (await response.json()).data;
+    const site = {
+      domainId: result.primaryDomain.id,
+      websiteId: result.website.id,
+      hostname: result.primaryDomain.primaryDomain || name,
+      operationId: result.operationId,
+    };
+    await expect(page.locator('.ws-site-create-result')).toBeVisible({ timeout: 60000 });
+
+    let lastUpdate = null;
+    let idlePolls = 0;
+    await expect.poll(async () => {
+      try {
+        const provRes = await page.request.get(`/api/panel/sites/provisioning/${site.operationId}`);
+        if (!provRes.ok()) return false;
+        const op = (await provRes.json()).data;
+        if (op.ready) return true;
+        idlePolls = op.updatedAt === lastUpdate ? idlePolls + 1 : 0;
+        lastUpdate = op.updatedAt;
+        if (idlePolls >= 3) {
+          idlePolls = 0;
+          await call(page, 'POST', `/sites/provisioning/${site.operationId}/continue`, {
+            confirmation: `continue-site-provisioning:${site.operationId}`,
+          });
+        }
+      } catch (err) {
+        if (!/socket hang up|ECONNRESET|fetch failed/i.test(String(err?.message))) throw err;
+      }
+      return false;
+    }, { timeout: 240000, intervals: [3000] }).toBe(true);
+
+    const mailRes = await page.request.get('/api/panel/mail-domains');
+    const mailBody = await mailRes.json();
+    const mailDomains = Array.isArray(mailBody.data) ? mailBody.data : (mailBody.data?.mailDomains || []);
+    const found = mailDomains.find((m) => m.webDomainId === site.domainId || m.domainName === site.hostname);
+    expect(found).toBeTruthy();
+    site.mailDomainId = found.id;
+    console.log('CREATE_SITE_DONE:', site);
+    return site;
+  }
+
+  async function removeSite(page, site) {
+    if (!site || !site.domainId) return;
+    try {
+      for (let round = 0; round < 30; round++) {
+        const current = await page.request.get(`/api/panel/domains/${site.domainId}`);
+        if (current.status() === 404) break;
+        await page.goto(`/websites/${site.domainId}/settings`);
+        const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
+        try {
+          await expect(start).toBeVisible({ timeout: 15000 });
+          await start.click();
+        } catch {
+          await page.waitForTimeout(3000);
+          continue;
+        }
+        const dialog = page.getByRole('dialog');
+        if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const input = dialog.locator('input');
+          if (await input.isVisible().catch(() => false)) {
+            await input.fill(site.hostname);
+          }
+          const confirmBtn = dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ });
+          if (await confirmBtn.isVisible().catch(() => false)) {
+            await confirmBtn.click();
+          }
+        }
+        await page.waitForTimeout(6000);
+      }
+    } catch (err) {
+      console.warn('removeSite notice:', err.message);
+    }
   }
 
   async function fillAndConfirm(modalLocator, confirmButtonText) {
@@ -55,27 +178,33 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
     }
   });
 
+  test.afterAll(async ({ browser }) => {
+    test.setTimeout(300000);
+    if (createdSite) {
+      const page = await browser.newPage({ ignoreHTTPSErrors: true });
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeSite(page, createdSite);
+      } finally {
+        await page.close().catch(() => {});
+      }
+    }
+  });
+
   test('mutlu yol: Email alias ekleme/düzenleme/silme, forwarding yapılandırma ve yerel kopya saklama tercihi', async ({ page }) => {
-    // 1. Mail sayfasına git ve yerel mail domainini bul
-    await page.goto('/mail');
-    await expect(page.locator('h1:has-text("Mail")')).toBeVisible({ timeout: 15000 });
+    // 1. Kendi test sitemizi oluştur ve yerel mail domainini al
+    createdSite = await createSite(page);
+    targetDomainName = createdSite.hostname;
+    mailDomainId = createdSite.mailDomainId;
+    expect(mailDomainId).toBeTruthy();
 
-    const localDomainRow = page.locator('table.ws-table tbody tr', { hasText: 'Bu sunucuda' }).first();
-    await expect(localDomainRow).toBeVisible({ timeout: 15000 });
-
-    const domainNameEl = localDomainRow.locator('td strong').first();
-    targetDomainName = (await domainNameEl.textContent())?.trim() || 'yp-form.webrich.news';
     fullAliasAddress = `${aliasLocalPart}@${targetDomainName}`;
     fullSrcMailboxAddress = `${srcMailboxLocalPart}@${targetDomainName}`;
     fullDstMailboxAddress = `${dstMailboxLocalPart}@${targetDomainName}`;
 
-    const manageBtn = localDomainRow.locator('a:has-text("Yönet")');
-    await manageBtn.click();
-    await page.waitForURL(/\/mail\/[^/?]+/, { timeout: 15000 });
-
-    const urlMatch = page.url().match(/\/mail\/([^/?]+)/);
-    mailDomainId = urlMatch ? urlMatch[1] : '';
-    expect(mailDomainId).toBeTruthy();
+    // Mail alan adı detay sayfasına git
+    await page.goto(`/mail/${mailDomainId}`);
+    await page.waitForURL(new RegExp(`/mail/${mailDomainId}`), { timeout: 15000 });
 
     // -------------------------------------------------------------
     // BÖLÜM A: ALIAS OLUŞTURMA, DÜZENLEME, DOĞRULAMA VE SİLME
@@ -268,18 +397,9 @@ test.describe('EML-02 Alias, forwarding ve yerel kopya tercihleri', () => {
   });
 
   test('hatalı girdi: döngüsel/kendine yönlendirme reddedilir', async ({ page }) => {
-    await page.goto('/mail');
-    await expect(page.locator('h1:has-text("Mail")')).toBeVisible({ timeout: 15000 });
-
-    const localDomainRow = page.locator('table.ws-table tbody tr', { hasText: 'Bu sunucuda' }).first();
-    await expect(localDomainRow).toBeVisible({ timeout: 15000 });
-
-    const domainNameEl = localDomainRow.locator('td strong').first();
-    targetDomainName = (await domainNameEl.textContent())?.trim() || 'yp-form.webrich.news';
-
-    const manageBtn = localDomainRow.locator('a:has-text("Yönet")');
-    await manageBtn.click();
-    await page.waitForURL(/\/mail\/[^/?]+/, { timeout: 15000 });
+    expect(createdSite).toBeTruthy();
+    await page.goto(`/mail/${mailDomainId}`);
+    await page.waitForURL(new RegExp(`/mail/${mailDomainId}`), { timeout: 15000 });
 
     // 1. Alias döngüsel/kendine yönlendirme denemesi
     const aliasTab = page.locator('.ws-tabs a:has-text("Takma adlar")');

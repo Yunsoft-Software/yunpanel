@@ -5,20 +5,135 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
-  // T859: leaves an enabled backup schedule on an existing site; rewrite on an owned site and clean up through the panel.
-  test.skip(true, 'T859: needs an owned test site');
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(180000);
+  test.setTimeout(360000);
 
-  const agentN = process.env.AGENT_N || '1';
+  const agentN = process.env.AGENT_N || '2';
   const timestamp = Date.now().toString(36);
-  const repoName = `tbak04-a${agentN}-${timestamp}-repo`;
-  const targetDomainName = 'yp-node.webrich.news';
+  const prefix = `tbak04-a${agentN}-${timestamp}`;
+  const repoName = `${prefix}-repo`;
 
+  let createdSite = null;
   let createdRepoId = null;
   let targetDomainId = null;
   let targetWebsiteId = null;
   let csrfToken = '';
+
+  async function call(page, method, path, data) {
+    const session = await page.request.get('/api/auth/session');
+    const token = (await session.json()).data?.csrfToken;
+    const origin = page.url() ? new URL(page.url()).origin : 'https://server.cryptoraichu.website';
+    const response = await page.request.fetch(`/api/panel${path}`, {
+      method,
+      headers: { origin, ...(method === 'GET' ? {} : { 'x-csrf-token': token }) },
+      ...(data === undefined ? {} : { data }),
+    });
+    return { status: response.status(), body: await response.json().catch(() => null) };
+  }
+
+  async function createSite(page) {
+    const name = `${prefix}.webrich.news`;
+    await page.goto('/websites/new');
+    await expect(page.getByRole('heading', { name: 'Web sitesi ekle', exact: true })).toBeVisible({ timeout: 15000 });
+
+    await page.getByLabel('Alan adı', { exact: true }).fill(name);
+    const wwwSelect = page.getByLabel('www davranışı');
+    if (await wwwSelect.isVisible().catch(() => false)) {
+      await wwwSelect.selectOption('none');
+    }
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('Site türü', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('Site türü', { exact: true }).selectOption('new_static_upload');
+    await page.getByRole('button', { name: 'Devam et', exact: true }).click();
+
+    await expect(page.getByLabel('DNS yönetimi', { exact: true })).toBeVisible({ timeout: 15000 });
+    await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('local');
+    await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption('off');
+
+    const mailCheckbox = page.locator('label:has-text("E-posta ve Webmail etkinleştir") input[type="checkbox"]');
+    if (await mailCheckbox.count()) {
+      if (await mailCheckbox.isChecked()) {
+        await mailCheckbox.uncheck();
+      }
+    }
+
+    const submitBtn = page.getByRole('button', { name: 'Siteyi oluştur', exact: true });
+    await expect(submitBtn).toBeVisible({ timeout: 15000 });
+    await expect(submitBtn).toBeEnabled({ timeout: 15000 });
+
+    const responsePromise = page.waitForResponse((response) => response.url().includes('/api/panel/sites')
+      && response.request().method() === 'POST'
+      && !response.url().includes('create-preview'));
+    await submitBtn.click();
+    const response = await responsePromise;
+    expect(response.status()).toBe(201);
+    const result = (await response.json()).data;
+    const site = {
+      domainId: result.primaryDomain.id,
+      websiteId: result.website.id,
+      hostname: result.primaryDomain.primaryDomain || name,
+      operationId: result.operationId,
+    };
+    await expect(page.locator('.ws-site-create-result')).toBeVisible({ timeout: 60000 });
+
+    let lastUpdate = null;
+    let idlePolls = 0;
+    await expect.poll(async () => {
+      try {
+        const provRes = await page.request.get(`/api/panel/sites/provisioning/${site.operationId}`);
+        if (!provRes.ok()) return false;
+        const op = (await provRes.json()).data;
+        if (op.ready) return true;
+        idlePolls = op.updatedAt === lastUpdate ? idlePolls + 1 : 0;
+        lastUpdate = op.updatedAt;
+        if (idlePolls >= 3) {
+          idlePolls = 0;
+          await call(page, 'POST', `/sites/provisioning/${site.operationId}/continue`, {
+            confirmation: `continue-site-provisioning:${site.operationId}`,
+          });
+        }
+      } catch (err) {
+        if (!/socket hang up|ECONNRESET|fetch failed/i.test(String(err?.message))) throw err;
+      }
+      return false;
+    }, { timeout: 240000, intervals: [3000] }).toBe(true);
+
+    return site;
+  }
+
+  async function removeSite(page, site) {
+    if (!site || !site.domainId) return;
+    try {
+      for (let round = 0; round < 30; round++) {
+        const current = await page.request.get(`/api/panel/domains/${site.domainId}`);
+        if (current.status() === 404) break;
+        await page.goto(`/websites/${site.domainId}/settings`);
+        const start = page.getByRole('button', { name: /^(Siteyi sil…|Silme işlemine devam et…)$/ });
+        try {
+          await expect(start).toBeVisible({ timeout: 15000 });
+          await start.click();
+        } catch {
+          await page.waitForTimeout(3000);
+          continue;
+        }
+        const dialog = page.getByRole('dialog');
+        if (await dialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const input = dialog.locator('input');
+          if (await input.isVisible().catch(() => false)) {
+            await input.fill(site.hostname);
+          }
+          const confirmBtn = dialog.getByRole('button', { name: /^(Silme işlemini başlat|Silme işlemine devam et)$/ });
+          if (await confirmBtn.isVisible().catch(() => false)) {
+            await confirmBtn.click();
+          }
+        }
+        await page.waitForTimeout(6000);
+      }
+    } catch (err) {
+      console.warn('removeSite notice:', err.message);
+    }
+  }
 
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -43,11 +158,28 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
   });
 
   test.afterAll(async ({ browser }) => {
+    test.setTimeout(300000);
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     try {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
       const sessionRes = await page.request.get('/api/auth/session').catch(() => null);
       const token = (await sessionRes?.json())?.data?.csrfToken || csrfToken;
+
+      // 1. Zamanlamayı devre dışı bırak
+      if (targetWebsiteId && createdRepoId && token) {
+        await page.request.post(`/api/panel/websites/${targetWebsiteId}/backup-operations`, {
+          headers: {
+            'x-csrf-token': token,
+            Origin: 'https://server.cryptoraichu.website',
+            Referer: 'https://server.cryptoraichu.website/',
+          },
+          data: {
+            kind: 'plan',
+            repositoryId: createdRepoId,
+            schedule: { enabled: false },
+          },
+        }).catch(() => null);
+      }
 
       // 2. Test amaçlı oluşturulan Restic reposunu temizle
       if (createdRepoId && token) {
@@ -62,6 +194,11 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
           console.log(`Cleaned up test restic repo: ${createdRepoId}`);
         }
       }
+
+      // 3. Test amaçlı oluşturulan web sitesini kaldır
+      if (createdSite) {
+        await removeSite(page, createdSite);
+      }
     } catch (err) {
       console.warn('BAK-04 cleanup error:', err.message);
     } finally {
@@ -70,22 +207,12 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
   });
 
   test('mutlu yol: otomatik yedekleme zamanlaması ve saklama politikası yapılandırma, UI doğrulaması ve fiziksel schedule/exclusion kanıtı', async ({ page }) => {
-    // 1. Hedef web sitesinin websiteId ve domainId bilgilerini al
-    const sitesRes = await page.request.get('/api/panel/websites');
-    expect(sitesRes.ok()).toBe(true);
-    const sitesJson = await sitesRes.json();
-    const sites = Array.isArray(sitesJson.data) ? sitesJson.data : sitesJson.data?.websites || [];
-    const site = sites.find((w) => w.name === targetDomainName);
-    expect(site).toBeTruthy();
-    targetWebsiteId = site.id;
-
-    const domainsRes = await page.request.get('/api/panel/domains');
-    expect(domainsRes.ok()).toBe(true);
-    const domainsJson = await domainsRes.json();
-    const domains = Array.isArray(domainsJson.data) ? domainsJson.data : domainsJson.data?.domains || [];
-    const domain = domains.find((d) => d.websiteId === targetWebsiteId);
-    expect(domain).toBeTruthy();
-    targetDomainId = domain.id;
+    // 1. Kendi test sitemizi oluştur
+    createdSite = await createSite(page);
+    targetWebsiteId = createdSite.websiteId;
+    targetDomainId = createdSite.domainId;
+    expect(targetWebsiteId).toBeTruthy();
+    expect(targetDomainId).toBeTruthy();
 
     // 2. Test amaçlı Restic yedek deposunu oluştur (11 Ekim kuralı: test amaçlı izinli, bitince temizlenir)
     const createRepoRes = await page.request.post('/api/panel/backups/repositories', {
@@ -120,7 +247,7 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
     const modal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Yedekleme Planı ve Saklama Politikası' });
     await expect(modal).toBeVisible({ timeout: 10000 });
 
-    // Depo seçimi (birden fazla repo varsa yeni oluşturulan depoyu seç)
+    // Depo seçimi (oluşturulan depoyu seç)
     const repoSelect = modal.locator('select').first();
     if (await repoSelect.isVisible({ timeout: 2000 }).catch(() => false)) {
       const options = await repoSelect.locator('option').allTextContents();
@@ -176,6 +303,7 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
 
     // 9. Sayfayı yenile ve genel özet kartındaki dl.ws-keyvalues içeriğinde güncellemeleri doğrula
     await page.reload();
+    await expect(page.locator('button:has-text("Yedekleri yenile")')).toBeEnabled({ timeout: 30000 });
     const summarySection = page.locator('section').filter({ hasText: 'Yedekleme ve Geri Yükleme' });
     const summaryKeyValues = summarySection.locator('dl.ws-keyvalues');
     await expect(summaryKeyValues).toContainText('Son 5 · Günlük 5 · Haftalık 3', { timeout: 15000 });
@@ -235,12 +363,15 @@ test.describe('BAK-04 Zamanlama, rotasyon, saklama ve hariç tutmalar', () => {
   });
 
   test('hatalı girdi: geçersiz saklama sayısı ve geçersiz cron zamanlaması reddedilir', async ({ page }) => {
+    expect(createdSite).toBeTruthy();
     // 1. Web sitesinin Yedekleme sekmesine git
     await page.goto(`/websites/${targetDomainId}/backup`);
     await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Yedekleme bilgileri okunuyor…')).not.toBeVisible({ timeout: 30000 });
 
     const planBtn = page.locator('button:has-text("Plan ve Zamanlama")');
     await expect(planBtn).toBeVisible({ timeout: 15000 });
+    await expect(planBtn).toBeEnabled({ timeout: 15000 });
     await planBtn.click();
 
     const modal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: 'Yedekleme Planı ve Saklama Politikası' });
