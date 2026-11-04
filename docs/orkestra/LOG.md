@@ -214,3 +214,4 @@
 - 2026-11-04 14:19 orchestrator: recover: geri alınan [], kilit ['sunucu-28-genel'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
 - 2026-11-04 14:19 orchestrator: tick: 0/4 yuva işte, geri alınan 0
 - 2026-11-04 14:53 orchestrator: verify ee231329..61318074: failed, yeniden açılan -, bulgu ['T862']
+- 2026-11-04 14:54 orchestrator: verify ee231329..989d14b5: ok, yeniden açılan -, bulgu -
