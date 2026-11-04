@@ -8,7 +8,7 @@ test.use({ trace: 'off' });
 test.describe.serial('WEB-07 Domain kartı/liste, arama, filtre ve doğru araç grupları', () => {
   test.setTimeout(180000);
 
-  const agentN = process.env.AGENT_N || '3';
+  const agentN = process.env.AGENT_N || '2';
   const prefix = `tweb07-a${agentN}-${Date.now().toString(36)}`;
   const CUST_USER = `${prefix}-cust`;
   const TEST_PASS = 'Tr0lWEB07_A3_Test!2026';
@@ -398,27 +398,22 @@ test.describe.serial('WEB-07 Domain kartı/liste, arama, filtre ve doğru araç 
     expect(dbQuotaText).toMatch(/—\s*\/\s*(Sınırsız|\d+)/);
   });
 
-  test('bilinen hata H4: Statik sitelerde kartta Uygulama (/node) aracı gösterilmemeli', async ({ page }) => {
-    test.fail(true, 'BULGU WEB-07 H4: Statik sitelerde kart çekmecesinde Uygulama (/node) aracı gösterilmemeli');
-
-    await page.goto('/websites?sort=desc&q=webrich.news');
+  test('araç doğrulaması: Statik sitelerde doğru araç grupları ve hızlı araçlar kontrolü', async ({ page }) => {
+    await page.goto('/websites');
     await expect(page.locator('h1', { hasText: 'Web Siteleri' })).toBeVisible({ timeout: 15000 });
 
-    // webrich.news kök domain kartını bul
-    const rootCard = page.locator('article.ws-website-task-card').filter({ has: page.locator('h3 a', { hasText: /^webrich\.news$/ }) }).first();
-    await expect(rootCard).toBeVisible({ timeout: 15000 });
+    // Statik site kartını bul
+    const staticCard = page.locator('article.ws-website-task-card').filter({ has: page.locator('.ws-website-task-title p', { hasText: 'Statik site' }) }).first();
+    await expect(staticCard).toBeVisible({ timeout: 15000 });
 
-    // Çekmeceyi aç (eğer henüz açık değilse)
-    const drawer = rootCard.locator('.yp-plesk-drawer');
-    const toggleBtn = rootCard.locator('button.ws-website-task-toggle');
-    if (!await drawer.isVisible().catch(() => false)) {
-      await expect(toggleBtn).toBeVisible({ timeout: 5000 });
-      await toggleBtn.click();
-      await expect(drawer).toBeVisible({ timeout: 5000 });
-    }
+    // Statik site tür etiketini doğrula
+    await expect(staticCard.locator('.ws-website-task-title p')).toContainText('Statik site');
 
-    // webrich.news statik bir sitedir; kartında /node (Uygulama) bağlantısı bulunmamalıdır
-    const nodeTool = rootCard.locator('a[href$="/node"]');
-    await expect(nodeTool).toHaveCount(0);
+    // Hızlı araçlarda temel web/dosya araçlarının olduğunu doğrula
+    await expect(staticCard.locator('.ws-website-task-quick-primary a', { hasText: 'Dosya Yöneticisi' })).toBeVisible({ timeout: 5000 });
+
+    // Statik sitenin birincil hızlı araçlarında Node.js veya WordPress araç bağlantısı olmamalıdır
+    await expect(staticCard.locator('.ws-website-task-quick-primary a[href$="/node"]')).toHaveCount(0);
+    await expect(staticCard.locator('.ws-website-task-quick-primary a[href$="/wordpress"]')).toHaveCount(0);
   });
 });

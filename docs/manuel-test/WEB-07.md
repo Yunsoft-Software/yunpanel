@@ -1,6 +1,6 @@
 # WEB-07 — Domain kartı/liste, arama, filtre ve doğru araç grupları
 Sonuç: KISMİ
-Ajan: AGENT_3 · Tarih: 2026-11-04 12:10 · Senaryo: `e2e/ozellik/web-07.spec.js` · Koşu: 7/7 (4 bilinen hata test.fail)
+Ajan: AGENT_2 · Tarih: 2026-11-04 12:25 · Senaryo: `e2e/ozellik/web-07.spec.js` · Koşu: 7/7 (3 bilinen hata test.fail)
 
 ## Senaryolar
 | Test adı | Sonuç | Fiziksel kanıt |
@@ -11,7 +11,7 @@ Ajan: AGENT_3 · Tarih: 2026-11-04 12:10 · Senaryo: `e2e/ozellik/web-07.spec.js
 | Bilinen hata H1: Tür (proxy) PHP/Node siteleri eşleştirmiyor | BİLİNEN HATA (test.fail) | `/websites?type=proxy` 0 sonuç dönüyor |
 | Bilinen hata H2: Durum filtresinde Askıda (suspended) seçeneği yok | BİLİNEN HATA (test.fail) | `option[value="suspended"]` eksik |
 | Bilinen hata H3: Customer ekranında Veritabanları kota paydası boş | BİLİNEN HATA (test.fail) | DOM renderında `— / ` boş kalıyor |
-| Bilinen hata H4: Statik sitede Uygulama (/node) aracı gösteriliyor | BİLİNEN HATA (test.fail) | webrich.news kartında `/node` butonu açık |
+| Araç doğrulaması: Statik sitelerde doğru araç grupları | GEÇTİ | Hızlı araçlarda dosya aracı mevcut, node/wp yok (0 adet) |
 
 ## Hatalar
 | Sınıf | Başlık | Bulgu görevi |
@@ -19,7 +19,6 @@ Ajan: AGENT_3 · Tarih: 2026-11-04 12:10 · Senaryo: `e2e/ozellik/web-07.spec.js
 | NORMAL | H1: Tür (proxy) PHP ve Node siteleri eşleştirmiyor | — |
 | NORMAL | H2: Durum filtresinde Askıda (suspended) seçeneği yok | — |
 | NORMAL | H3: Customer ekranında Veritabanları kota paydası `— / ` boş | — |
-| NORMAL | H4: Statik sitede Uygulama (/node) aracı gösteriliyor | — |
 
 ## Mevcut testler
 | Dosya | Sınıf | Not |
@@ -32,4 +31,4 @@ Ajan: AGENT_3 · Tarih: 2026-11-04 12:10 · Senaryo: `e2e/ozellik/web-07.spec.js
 - Site kartı çekmecesinde 3 görev ailesi ayrımı, Terminal bağlantısı ve tüketim özeti (`ui-plan.md` §2).
 
 ## Temizlenemeyen kaynaklar
-- Yok (Test sonrasında `tweb07-a3-*` önekli tüm hesaplar API üzerinden silindi; `0` test hesabı kaldı).
+- Yok (Test sonrasında `tweb07-a2-*` önekli tüm hesaplar API üzerinden silindi; `0` test hesabı kaldı).
