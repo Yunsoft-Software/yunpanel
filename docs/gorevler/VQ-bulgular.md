@@ -796,3 +796,33 @@
     .28'de 10 tweb sitesinde Unix kullanıcısı/provisioning kanıtı eksikliği nedeniyle silme önizlemesi file_cleanup_preflight_failed ve unix_cleanup_evidence_unavailable ile duruyor.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T862 · Doğrulama: e2e-28 — locked sunucu-28-genel by VERIFY
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-04 14:53
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    configured repository and a real preview (439ms)
+      ✘   234 [chromium] › e2e/live-audit/05-ai-live.spec.js:3:1 › @ai-live Existing env key reaches real OpenRouter while the active provider is preserved (493ms)
+      ✘   235 [chromium] › e2e/live-audit/05-ai-live.spec.js:20:1 › @ai-live AI streams a real nonce response and retains it after close/reopen/reload (520ms)
+      ✘   236 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:11:1 › @mutation SSL issue on the disposable hostname produces a trusted, matching live certificate (438ms)
+      ✘   237 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:24:1 › @mutation SSL manual renewal changes the actual fingerprint and expiry instead of returning false success (468ms)
+      ✘   238 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:29:1 › @mutation A dedicated Restic repository initializes on the actual host (473ms)
+      ✘   239 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:36:1 › @mutation Backup creates an actual Restic snapshot receipt before content verification (487ms)
+      ✘   240 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:45:1 › @mutation A real selective Restic restore restores the saved file contents (412ms)
+      ✘   241 [chromium] › e2e/live-audit/06-host-lifecycle.spec.js:55:1 › @mutation Suspension stops only the owned Website and resume restores its HTTP service (491ms)
+      ✘   242 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:21:1 › @mutation Mail domain is created through its real form for the owned Website (133ms)
+      ✘   243 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:26:1 › @mutation Two actual mailboxes are created and rendered in the owned mail workspace (408ms)
+      ✘   244 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:31:1 › @mutation Mail quota, forwarding and alias CRUD retain actual revisions (487ms)
+      ✘   245 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:41:1 › @mutation Mail apply supports real IMAP login after a password rotation (404ms)
+      ✘   246 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:46:1 › @mutation Mail delivery sends only to the disposable sibling mailbox (508ms)
+      ✘   247 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:51:1 › @mutation DNS zone provisioning and TXT create update delete run on the owned hostname (405ms)
+      ✘   248 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:58:1 › @mutation Docker Compose creates a dedicated project with no published ports (116ms)
+      ✘   249 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:62:1 › @mutation Docker pulls starts stops its own actual Compose service (453ms)
+      ✘   250 [chromium] › e2e/live-audit/07-subsystem-mutation.spec.js:67:1 › @mutation Docker project offers normal teardown and removal in its real workspace (122ms)
+    
+    
+    TIMEOUT: `bash orkestra/lock.sh acquire sunucu-28-genel VERIFY && { npx playwright test; rc=$?; bash orkestra/lock.sh release sunucu-28-genel VERIFY; exit $rc; }` 45 dakikada bitmedi; süreç grubu durduruldu.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

@@ -204,3 +204,13 @@
 - 2026-11-04 12:46 orchestrator: recover: geri alınan ['T846@review'], kilit -, sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
 - 2026-11-04 12:50 orchestrator: verify 473b272f..d7de55d0: ok, yeniden açılan -, bulgu -
 - 2026-11-04 12:54 orchestrator: verify d7de55d0..ee231329: ok, yeniden açılan -, bulgu -
+- 2026-11-04 12:57 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:07 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:17 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:28 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:38 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:48 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 13:58 orchestrator: tick: 1/4 yuva işte, geri alınan 0
+- 2026-11-04 14:19 orchestrator: recover: geri alınan [], kilit ['sunucu-28-genel'], sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-11-04 14:19 orchestrator: tick: 0/4 yuva işte, geri alınan 0
+- 2026-11-04 14:53 orchestrator: verify ee231329..61318074: failed, yeniden açılan -, bulgu ['T862']
