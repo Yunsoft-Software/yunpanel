@@ -1,6 +1,6 @@
 # ROL-04 — Müşteri paneli ve abonelik/site seçimi
 Sonuç: KISMİ
-Ajan: AGENT_2 · Tarih: 2026-11-04 10:35 · Senaryo: `e2e/ozellik/rol-04.spec.js` · Koşu: 5/5 geçti (3 geçti, 2 test.fail)
+Ajan: AGENT_1 · Tarih: 2026-11-04 10:55 · Senaryo: `e2e/ozellik/rol-04.spec.js` · Koşu: İki kez art arda 5/5 geçti (3 geçti, 2 test.fail)
 
 ## Senaryolar
 | Test adı | Sonuç | Fiziksel kanıt |
