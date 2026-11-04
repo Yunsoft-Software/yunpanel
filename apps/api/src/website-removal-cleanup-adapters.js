@@ -82,15 +82,41 @@ export function createWebsiteRemovalCleanupAdapters({
     }
     const operations = await websiteProvisioningRuntime.registry.listForWebsite(websiteId);
     if (!Array.isArray(operations)) unavailable('website_cleanup_identity_evidence_unavailable', 'Website identity journal is unavailable');
-    for (const operation of operations) {
-      const step = operation?.steps?.find((entry) => entry.kind === 'unix_identity'
-        && entry.intent?.websiteId === websiteId
-        && entry.intent?.applicationId === website.applicationId
-        && entry.intent?.unixUser === systemUser
-        && ['succeeded', 'compensated'].includes(entry.state));
-      if (step && typeof operation.operationId === 'string') return Object.freeze({ website, operation, step });
-    }
+    const findStep = (states) => {
+      for (const operation of operations) {
+        const step = operation?.steps?.find((entry) => entry.kind === 'unix_identity'
+          && entry.intent?.websiteId === websiteId
+          && entry.intent?.applicationId === website.applicationId
+          && entry.intent?.unixUser === systemUser
+          && states.includes(entry.state));
+        if (step && typeof operation.operationId === 'string') return { operation, step };
+      }
+      return null;
+    };
+    const completed = findStep(['succeeded', 'compensated']);
+    if (completed) return Object.freeze({ website, ...completed });
+    const incomplete = findStep(['pending', 'failed', 'blocked']);
+    if (incomplete) return Object.freeze({ website, ...incomplete, neverProvisioned: await identityNeverCreated(incomplete) });
     unavailable('website_cleanup_identity_evidence_unavailable', 'Owned Website Unix identity evidence is unavailable');
+  }
+
+  // An unfinished step with a receipt follows normal compensation. Without one, the panel never
+  // created the account, so removal may only continue once the host confirms it does not exist.
+  async function identityNeverCreated({ operation, step }) {
+    const handler = websiteProvisioningRuntime.handlers.unix_identity;
+    const context = { intent: step.intent, operationId: operation.operationId, evidence: step.evidence };
+    let host;
+    try {
+      const compensation = await handler.inspectCompensation(context);
+      if (compensation?.preservedUnownedState !== true) return false;
+      host = await handler.inspect(context);
+    } catch {
+      unavailable('website_cleanup_identity_evidence_unavailable', 'Website Unix identity host state could not be verified');
+    }
+    if (host?.satisfied !== false || host.reason !== 'website_identity_user_missing') {
+      unavailable('website_cleanup_identity_unowned_account', 'A Unix account with this Website user name exists without an ownership receipt');
+    }
+    return true;
   }
 
   function fileManagerContext(source) {
@@ -335,6 +361,7 @@ export function createWebsiteRemovalCleanupAdapters({
     await retirePhpRuntime(source);
     await retireFileManager(source);
     const { websiteId, systemUser } = input;
+    if (source.neverProvisioned) return Object.freeze({ websiteId, systemUser, unixIdentityCleaned: true });
     const context = {
       intent: source.step.intent,
       operationId: source.operation.operationId,

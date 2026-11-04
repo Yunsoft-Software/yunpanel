@@ -5,10 +5,11 @@ import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-clea
 const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
 const systemUser='yunapp-123456789abc';
-function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,elfinderState='succeeded',elfinderRetireThrowsWithoutReceipt=false,php=false,phpConfig,failPhp=false,missingPhpJournal=false,phpState='succeeded',failSftp=false,withSftpJournal=false,sftpState='succeeded',sftpRetireThrowsWithoutReceipt=false}={}) {
+function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignPool=false,elfinderState='succeeded',elfinderRetireThrowsWithoutReceipt=false,php=false,phpConfig,failPhp=false,missingPhpJournal=false,phpState='succeeded',failSftp=false,withSftpJournal=false,sftpState='succeeded',sftpRetireThrowsWithoutReceipt=false,unixState='succeeded',unixReceipt=true,unixHostAccount=false,unixInspectThrows=false}={}) {
   const removed=[]; const removedSet=new Set(); const compensated=[];
   const retirementCalls=[]; const order=[];
   const phpCalls=[];
+  const unixCompensation=()=>unixReceipt?{satisfied:true,removedUser:true,removedGroup:true}:{satisfied:true,removedUser:false,preservedUnownedState:true};
   const retirement = { satisfied:true,poolRemoved:true,socketRemoved:true,websiteId,applicationId,unixUser:systemUser };
   const adapters=createWebsiteRemovalCleanupAdapters({
     websiteRegistry:{
@@ -18,7 +19,7 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
     applicationRegistry:{getApplication:async()=>({id:applicationId,type:php?'php':'static',serverId:'33333333-3333-4333-8333-333333333333'})},
     websiteProvisioningRuntime:{
       registry:{listForWebsite:async()=>[{operationId:'55555555-5555-4555-8555-555555555555',steps:[{
-        kind:'unix_identity',state:'succeeded',intent:{websiteId,applicationId,unixUser:systemUser,homeDirectory:'/var/lib/yunpanel/data/'+applicationId},evidence:{owned:true},
+        kind:'unix_identity',state:unixState,intent:{websiteId,applicationId,unixUser:systemUser,homeDirectory:'/var/lib/yunpanel/data/'+applicationId},evidence:unixState==='succeeded'?{owned:true}:null,
       }, {kind:'elfinder',state:elfinderState,intent:{adapter:'elfinder-fpm',websiteId:foreignPool?'44444444-4444-4444-8444-444444444444':websiteId,applicationId,unixUser:systemUser}},
       ...(php&&!missingPhpJournal?[{kind:'php_runtime',state:phpState,intent:{adapter:'php-fpm',websiteId,applicationId,unixUser:systemUser,documentRoot:'/var/lib/yunpanel/apps/'+applicationId+'/current/public'}}]:[]),
       ...(withSftpJournal?[{kind:'sftp',state:sftpState,intent:{adapter:'openssh-internal-sftp',websiteId,applicationId,unixUser:systemUser}}]:[])]}]},
@@ -32,8 +33,9 @@ function fixture({otherWebsite=false,symlink=false,failRetirement=false,foreignP
         retire:async(ctx)=>{order.push('php');phpCalls.push(ctx);if(failPhp)throw new Error('fixture PHP pool retained');return retirement;},
         inspectRetirement:async()=>retirement,
       },unix_identity:{
-        compensate:async(ctx)=>{order.push('unix');compensated.push(ctx);return{satisfied:true,removedUser:true,removedGroup:true};},
-        inspectCompensation:async()=>({satisfied:true,removedUser:true,removedGroup:true}),
+        compensate:async(ctx)=>{order.push('unix');compensated.push(ctx);return unixCompensation();},
+        inspectCompensation:async()=>unixCompensation(),
+        inspect:async()=>{if(unixInspectThrows)throw new Error('fixture host unreadable');return unixHostAccount?{satisfied:true,uid:2001,gid:2001}:{satisfied:false,reason:'website_identity_user_missing'};},
       }},
     },
     lstatFn:async(path)=>{
@@ -258,4 +260,44 @@ test('direct-systemd cleanup fails closed before host mutation when receipt is m
     (error) => error.code === 'website_cleanup_direct_systemd_drift',
   );
   assert.equal(drifted.hostCalls.some((entry) => entry.type === 'remove'), false);
+});
+
+test('a site whose Unix identity never ran is removable once the host confirms no account exists',async()=>{
+ for(const unixState of ['pending','failed','blocked']){
+  const f=fixture({unixState,unixReceipt:false,elfinderState:'pending'});
+  assert.equal((await f.adapters.inspectUnixIdentityCleanup({websiteId,systemUser})).ready,true);
+  assert.equal((await f.adapters.inspectFileCleanup({websiteId,applicationId})).ready,true);
+  await f.adapters.fileCleanupHandler({websiteId,applicationId});
+  assert.deepEqual(await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),{websiteId,systemUser,unixIdentityCleaned:true});
+  assert.equal(f.compensated.length,0,'nothing was created, so nothing is compensated');
+ }
+});
+
+test('an account with the site user name but no ownership receipt blocks removal',async()=>{
+ const f=fixture({unixState:'pending',unixReceipt:false,unixHostAccount:true,elfinderState:'pending'});
+ const blocked=e=>e.code==='website_cleanup_identity_unowned_account';
+ await assert.rejects(()=>f.adapters.inspectUnixIdentityCleanup({websiteId,systemUser}),blocked);
+ await assert.rejects(()=>f.adapters.inspectFileCleanup({websiteId,applicationId}),blocked);
+ await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),blocked);
+ await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),blocked);
+ assert.equal(f.removed.length,0);assert.equal(f.compensated.length,0);
+});
+
+test('a host that cannot be read keeps removal blocked instead of assuming the account is absent',async()=>{
+ const f=fixture({unixState:'pending',unixReceipt:false,unixInspectThrows:true,elfinderState:'pending'});
+ await assert.rejects(()=>f.adapters.fileCleanupHandler({websiteId,applicationId}),e=>e.code==='website_cleanup_identity_evidence_unavailable');
+ await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),e=>e.code==='website_cleanup_identity_evidence_unavailable');
+ assert.equal(f.removed.length,0);assert.equal(f.compensated.length,0);
+});
+
+test('an interrupted identity step with a receipt still compensates what it created',async()=>{
+ const f=fixture({unixState:'pending',unixReceipt:true,elfinderState:'pending'});
+ await f.adapters.unixIdentityCleanupHandler({websiteId,systemUser});
+ assert.equal(f.compensated.length,1);
+});
+
+test('a provisioning step in an unknown state stays blocked',async()=>{
+ const f=fixture({unixState:'running'});
+ await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),e=>e.code==='website_cleanup_identity_evidence_unavailable');
+ assert.equal(f.compensated.length,0);
 });

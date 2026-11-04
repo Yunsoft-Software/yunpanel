@@ -34,14 +34,6 @@ function cleanupInventory(value) {
   return value;
 }
 
-function isIdentityEvidenceUnavailable(error) {
-  const code = error?.code;
-  const message = error?.message ?? '';
-  return code === 'website_cleanup_identity_evidence_unavailable'
-    || code === 'website_cleanup_identity_drift'
-    || /receipt|evidence|no receipt/i.test(message);
-}
-
 function stepContinuationConfirmation(operation, step) {
   return `continue-website-remove-step:${operation.websiteId}:${operation.id}:${step.id}:${operation.updatedAt}`;
 }
@@ -300,19 +292,11 @@ export function createWebsiteRemovalRuntime({
     }
     if (typeof fileCleanupInspector === 'function' && current?.website?.id && plan?.applicationId) {
       try { await fileCleanupInspector({ websiteId: current.website.id, applicationId: plan.applicationId }); }
-      catch (error) {
-        if (!isIdentityEvidenceUnavailable(error)) {
-          missing.push('file_cleanup_preflight_failed');
-        }
-      }
+      catch { missing.push('file_cleanup_preflight_failed'); }
     }
     if (plan?.systemUser && typeof unixIdentityCleanupInspector === 'function' && current?.website?.id) {
       try { await unixIdentityCleanupInspector({ websiteId: current.website.id, systemUser: plan.systemUser }); }
-      catch (error) {
-        if (!isIdentityEvidenceUnavailable(error)) {
-          missing.push('unix_cleanup_evidence_unavailable');
-        }
-      }
+      catch { missing.push('unix_cleanup_evidence_unavailable'); }
     }
     const directSystemd = plan?.applicationRuntime?.adapter === 'direct-systemd';
     if (directSystemd) {
@@ -732,34 +716,20 @@ export function createWebsiteRemovalRuntime({
           requireCleanupMethod(fileCleanupHandler);
           const retainedBackups = [...(op.plan?.additional?.backups?.ids ?? [])];
           const retainedLogScopes = [...(op.plan?.additional?.logScopes?.ids ?? [])];
-          let cleanupResult;
-          try {
-            cleanupResult = await fileCleanupHandler({
-              websiteId: op.websiteId,
-              applicationId: op.applicationId,
-              retainedBackups: [...retainedBackups],
-              retainedLogScopes: [...retainedLogScopes],
-            });
-            requireCleanupReceipt(cleanupResult, { websiteId: op.websiteId, applicationId: op.applicationId }, 'filesCleaned');
-            if (!Array.isArray(cleanupResult.retainedBackups)
-              || cleanupResult.retainedBackups.length !== retainedBackups.length
-              || [...cleanupResult.retainedBackups].sort().some((id, index) => id !== [...retainedBackups].sort()[index])
-              || !Array.isArray(cleanupResult.retainedLogScopes)
-              || cleanupResult.retainedLogScopes.length !== retainedLogScopes.length
-              || [...cleanupResult.retainedLogScopes].sort().some((id, index) => id !== [...retainedLogScopes].sort()[index])) {
-              throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Retained backup or log scope was not verified.', 409);
-            }
-          } catch (error) {
-            if (isIdentityEvidenceUnavailable(error)) {
-              cleanupResult = {
-                filesCleaned: true,
-                retainedBackups,
-                retainedLogScopes,
-                cleanedFilesCount: 0,
-              };
-            } else {
-              throw error;
-            }
+          const cleanupResult = await fileCleanupHandler({
+            websiteId: op.websiteId,
+            applicationId: op.applicationId,
+            retainedBackups: [...retainedBackups],
+            retainedLogScopes: [...retainedLogScopes],
+          });
+          requireCleanupReceipt(cleanupResult, { websiteId: op.websiteId, applicationId: op.applicationId }, 'filesCleaned');
+          if (!Array.isArray(cleanupResult.retainedBackups)
+            || cleanupResult.retainedBackups.length !== retainedBackups.length
+            || [...cleanupResult.retainedBackups].sort().some((id, index) => id !== [...retainedBackups].sort()[index])
+            || !Array.isArray(cleanupResult.retainedLogScopes)
+            || cleanupResult.retainedLogScopes.length !== retainedLogScopes.length
+            || [...cleanupResult.retainedLogScopes].sort().some((id, index) => id !== [...retainedLogScopes].sort()[index])) {
+            throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Retained backup or log scope was not verified.', 409);
           }
           // Do not copy arbitrary adapter fields or secrets into the public operation result.
           op = await registry.succeedStep(op.id, step.id, {
@@ -773,17 +743,8 @@ export function createWebsiteRemovalRuntime({
         case 'unix_identity_cleanup': {
           requireCleanupMethod(unixIdentityCleanupHandler);
           const expected = { systemUser: step.resourceId, websiteId: op.websiteId };
-          let result;
-          try {
-            result = await unixIdentityCleanupHandler({ ...expected });
-            requireCleanupReceipt(result, expected, 'unixIdentityCleaned');
-          } catch (error) {
-            if (isIdentityEvidenceUnavailable(error)) {
-              result = { ...expected, unixIdentityCleaned: true, skipped: true };
-            } else {
-              throw error;
-            }
-          }
+          const result = await unixIdentityCleanupHandler({ ...expected });
+          requireCleanupReceipt(result, expected, 'unixIdentityCleaned');
           op = await registry.succeedStep(op.id, step.id, { unixIdentityCleaned: true });
           break;
         }
