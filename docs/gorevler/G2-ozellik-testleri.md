@@ -68,6 +68,7 @@ Ortak kurallar (hepsi için): yalnız bu koşunun benzersiz önekiyle (`t<id>-a<
 - **Bağımlı:** T113
 - **Dosyalar:** `e2e/ozellik/rol-05.spec.js`, `docs/manuel-test/ROL-05.md`
 - **İş:** `docs/manuel-test/ROL-05.md` raporundaki senaryoları `docs/manuel-test/YONTEM.md` yöntemiyle gerçek panele karşı Playwright testine çevir ve `sunucu-28-n` kilidiyle koş: 1 mutlu yol, 1 hatalı girdi, yetki içeriyorsa rol senaryosu; en az bir fiziksel sonuç. Rapordaki gerçek hatayı `test.fail` ile işaretle; yeni KRİTİK hatayı hemen bulgu görevi yap. Uygulama kodunu değiştirme. Ortak kurallara uy.
+- **Uyarı:** Önceki deneme auth veritabanına `sqlite3` ile yazıp `.28`'de panelin açılmamasına yol açtı. Kurtarma dosyasını kullanma, testi baştan yaz; kullanıcıları panelden oluştur ve panelden sil. `.28`'de önceki denemelerden kalan `trol04-*`, `trol05-*` hesaplarını da panelden kaldır.
 - **Kabul:** `e2e/ozellik/rol-05.spec.js` .28'de iki kez art arda koşuyor ve beklenmeyen düşüş yok; mock/`page.route`/sahte veri yok; koşudan sonra .28'de bu öneke ait kaynak kalmıyor (kanıtı raporda). Rapor ≤40 satır ve test dosyasının adını içeriyor.
 
 ### T839 · Özellik testi: ROL-06 — Ek yönetici hesapları ve yönetim yetkileri

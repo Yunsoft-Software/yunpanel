@@ -37,3 +37,11 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - Açık SENIOR işleri: T850, T826. Antigravity için hazır: T839–T847 ve temizlik T853–T856.
 - **UYARI (16:55):** `tasks/recovery/T838-rol-05.spec.js` .28 auth veritabanına `sqlite3` ile doğrudan yazıyor (`DELETE FROM auth_limits;` tüm tablo, `DELETE FROM users WHERE username LIKE …`). `sqlite3` CLI'da yabancı anahtar kapalı olduğu için sahipsiz satır bıraktı ve API açılışta `hosting_schema_invalid` ile düştü. Bu dosyayı **kullanmayın**; T838 baştan, yalnız panel/API ile yazılacak. `e2e/ozellik` içinde `auth.sqlite`'a dokunan diğer testler (api-04, eml-*, sec-04) de denetlenecek.
 - 02-11-2026: `17e82df8` ile T826 çözüldü. Canlı testlerin doğrudan yazması `scripts/validate-repository.mjs` ile yasak; `eml-02`, `eml-06`, `bak-04` T859'a kadar `test.skip`. Hâlâ pano duraklatılmış.
+
+## 04-11-2026 — Antigravity devam ediyor
+- Pano açık; 5 inceleme ve 18 hazır görev var. SENIOR'a ait açık görev yok; T859 dahil hazır görevleri junior alabilir.
+- `.28` sürümü dalla aynı; API, web ve nöbetçi çalışıyor. **Panel sunucusunu kapatma veya yeniden başlatma:** nöbetçi kesinti sayıp sahibine e-posta atar. Deploy/paket kurulumu yok.
+- Sunucu uyarıları açık ve gerçek e-posta gider. Testlerde kasıtlı yedek hatası üretmeden önce bunu göz önünde bulundur.
+- `tasks/recovery/KULLANMA-T838-rol-05.txt` kullanılmayacak; T828, T836, T837 dosyaları incelenip kullanılabilir.
+- Testlerde panel veritabanına ve kayıt dosyalarına yazmak `npm run lint` ile reddedilir.
+
