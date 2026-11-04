@@ -201,3 +201,5 @@
 - 2026-11-04 12:18 orchestrator: verify c3963c35..473b272f: ok, yeniden açılan -, bulgu -
 - 2026-11-04 12:26 orchestrator: tick: 4/4 yuva işte, geri alınan 0
 - 2026-11-04 12:36 orchestrator: tick: 4/4 yuva işte, geri alınan 0
+- 2026-11-04 12:46 orchestrator: recover: geri alınan ['T846@review'], kilit -, sahipsiz değişiklik (yedeklendi, dokunulmadı) 0
+- 2026-11-04 12:50 orchestrator: verify 473b272f..d7de55d0: ok, yeniden açılan -, bulgu -
