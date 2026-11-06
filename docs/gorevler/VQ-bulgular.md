@@ -919,3 +919,10 @@
     Nginx fastcgi_param SCRIPT_FILENAME /usr/lib/yunpanel/phpmyadmin/signon.php olarak unix:/run/php/yunpanel-phpmyadmin.sock'a yönlendiriyor. PHP-FPM havuzu yunpanel-phpmyadmin kullanıcısıyla çalışıyor. Sunucudaki /usr/lib/yunpanel/phpmyadmin/signon.php dosyasının sahipliği -rw-r----- 1 root root kalmış (grubu yunpanel-phpmyadmin değil root). Nginx error.log'da 'Unable to open primary script: /usr/lib/yunpanel/phpmyadmin/signon.php (Permission denied)' hatasıyla 403 Forbidden dönüyor ve DB-04 (SSO açılış) ile DB-05 (SQL dışa aktar) testleri bu nedenle phpMyAdmin oturumu açamıyor.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T875 · WEB-05 "SSL olmadan" testi artık sertifikalı siteyle karşılaşıyor
+- **Bağımlı:** T122
+- **Dosyalar:** `e2e/ozellik/web-05.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Site kurulumu artık sunucuda tamamlandığı için (T864) aynı `describe` içindeki site sertifikasını da alıyor; "hatalı girdi ve sınır durumu: SSL olmadan HTTPS uyarısı" testi sertifikasız site varsaydığından uyarıyı bulamıyor. Bu senaryo için sertifikasız bir durum kur (ör. HTTPS kapalı oluşturulan ayrı bir test sitesi) ve uyarıyı orada doğrula; form sınır değer kontrolü aynı kalsın. Mock yok; testin oluşturduğu siteyi panelden temizle.
+- **Kabul:** WEB-05 `.28`'de iki kez art arda 2/2 geçiyor; test sonunda `tweb05` öneğiyle site kalmıyor.
