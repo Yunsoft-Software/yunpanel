@@ -5,7 +5,7 @@ import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 test.use({ trace: 'off' });
 
 test.describe.serial('RUN-05 Node.js sürümü, app root, startup dosyası ve environment', () => {
-  test.setTimeout(120000);
+  test.setTimeout(180000);
 
   const agentN = process.env.AGENT_N || '3';
   const prefix = `trun05-a${agentN}-${Date.now().toString(36)}`;
@@ -159,17 +159,24 @@ test.describe.serial('RUN-05 Node.js sürümü, app root, startup dosyası ve en
     await expect(submitBtn).toBeVisible({ timeout: 10000 });
     await submitBtn.click();
 
-    // Kurulumun tamamlanmasını bekle
-    await expect(page.locator('text=Site oluşturuluyor').or(page.locator('text=Site hazırlandı')).or(page.locator('text=Site kuruluyor'))).toBeVisible({ timeout: 30000 }).catch(() => {});
+    // Kurulum sonucunu bekle
+    const resultElement = page.locator('.ws-site-create-result');
+    await expect(resultElement).toBeVisible({ timeout: 60000 });
+    await expect(resultElement).toContainText(primaryDomain);
 
-    // Web siteleri listesine git ve siteyi aç
-    await page.goto('/websites');
-    const siteRow = page.locator(`a:has-text("${primaryDomain}")`).first();
-    await expect(siteRow).toBeVisible({ timeout: 40000 });
-
-    const href = await siteRow.getAttribute('href');
+    const manageLink = resultElement.locator('a[href^="/websites/"]').first();
+    await expect(manageLink).toBeVisible();
+    const href = await manageLink.getAttribute('href');
     const domainIdMatch = href?.match(/\/websites\/([^/?#]+)/);
     createdDomainId = domainIdMatch ? decodeURIComponent(domainIdMatch[1]) : primaryDomain;
+
+    // Web siteleri listesine git ve arama kutusu ile siteyi doğrula
+    await page.goto('/websites');
+    const searchInput = page.getByRole('searchbox', { name: 'Site ara' });
+    await expect(searchInput).toBeVisible({ timeout: 15000 });
+    await searchInput.fill(primaryDomain);
+    const siteRow = page.locator(`a:has-text("${primaryDomain}")`).first();
+    await expect(siteRow).toBeVisible({ timeout: 20000 });
 
     // 2. Site Detay Sayfası - Node.js Sekmesi (`tab=node`)
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/node`);
@@ -208,5 +215,9 @@ test.describe.serial('RUN-05 Node.js sürümü, app root, startup dosyası ve en
     const httpCheck = await checkDirectHttp(primaryDomain).catch(err => ({ status: 0, error: err.message }));
     // Sitenin Nginx vhost kaydı oluşturulmuş ve yanıt dönüyor (200, 502, 503 veya yönlendirme)
     expect(httpCheck.status).toBeGreaterThan(0);
+
+    // 5. Temizlik: oluşturulan siteyi panelden sil
+    await removeWebsiteById(page, createdDomainId, primaryDomain);
+    createdDomainId = null;
   });
 });
