@@ -7,7 +7,7 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     await page.goto('/dashboard');
 
     // Click global AI Assistant button in toolbar
-    const aiBtn = page.locator('.ws-toolbar button:has-text("AI Asistan")');
+    const aiBtn = page.locator('.ws-toolbar button:has-text("AI Asistan"), button[aria-label="AI asistanı aç"]').first();
     await expect(aiBtn).toBeVisible({ timeout: 10000 });
     await aiBtn.click();
 
@@ -16,7 +16,7 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     await expect(drawerModal).toBeVisible({ timeout: 10000 });
 
     // Verify sidebar elements
-    await expect(drawerModal.locator('span:text-is("SOHBETLER")')).toBeVisible();
+    await expect(drawerModal.locator('strong:has-text("SOHBETLER")')).toBeVisible();
     const newChatBtn = drawerModal.locator('button:has-text("Yeni")');
     await expect(newChatBtn).toBeVisible();
 
@@ -37,10 +37,10 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
     await page.goto('/settings?section=ai');
 
-    const aiSection = page.locator('section').filter({ has: page.locator('h2:text-is("AI Asistanı ve Model Sağlayıcıları")') });
+    const aiSection = page.locator('section').filter({ has: page.locator('h2:has-text("AI Asistanı ve Model Sağlayıcıları")') });
     await expect(aiSection).toBeVisible({ timeout: 15000 });
 
-    const addBtn = aiSection.locator('button:has-text("Sağlayıcı ekle")');
+    const addBtn = aiSection.locator('button:has-text("Yeni Sağlayıcı Ekle"), button:has-text("Sağlayıcı ekle")');
     await expect(addBtn).toBeVisible();
     await addBtn.click();
 
@@ -48,11 +48,11 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     const form = aiSection.locator('form');
     await expect(form).toBeVisible();
 
-    const idInput = form.locator('label:has-text("Sağlayıcı kimliği") input');
-    const typeSelect = form.locator('label:has-text("Sağlayıcı türü") select');
-    const modelInput = form.locator('label:has-text("Varsayılan model") input');
+    const idInput = form.locator('label:has-text("Sağlayıcı Kimliği") input, label:has-text("Sağlayıcı kimliği") input');
+    const typeSelect = form.locator('label:has-text("Sağlayıcı Türü") select, label:has-text("Sağlayıcı türü") select');
+    const modelInput = form.locator('label:has-text("Varsayılan Model") input, label:has-text("Varsayılan model") input');
     const baseUrlInput = form.locator('label:has-text("Base URL") input');
-    const saveBtn = form.locator('button[type="submit"]:has-text("Kaydet")');
+    const saveBtn = form.locator('button[type="submit"]:has-text("Sağlayıcıyı Kaydet"), button[type="submit"]:has-text("Kaydet")');
 
     await expect(idInput).toBeVisible();
     await expect(typeSelect).toBeVisible();
@@ -64,7 +64,7 @@ test.describe('Module 15: AI Assistant & Provider Settings', () => {
     await baseUrlInput.fill('http://127.0.0.1:11434');
     await modelInput.fill('llama3.2');
 
-    // Uncheck "Aktif sağlayıcı yap" to not disrupt any existing active provider
+    // Uncheck "Bu sağlayıcıyı hemen aktif model olarak seç" if checked
     const activeCheckbox = form.locator('input[type="checkbox"]');
     if (await activeCheckbox.isChecked()) {
       await activeCheckbox.uncheck();
