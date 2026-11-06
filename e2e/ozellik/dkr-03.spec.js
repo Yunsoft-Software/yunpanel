@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -13,6 +13,7 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
   const projectName = `tdkr03_a${agentN}_${timestamp}`;
   const hostPort = 18300 + (parseInt(agentN, 10) * 20) + Math.floor(Math.random() * 15);
   const volumeName = `${projectName}_data`;
+  let createdProjectId = null;
 
   function runSsh(command) {
     try {
@@ -84,12 +85,18 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     }
   });
 
-  test.afterAll(async () => {
-    if (projectName) {
-      runSsh(`docker stop ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker compose -p ${projectName} down --volumes --remove-orphans 2>/dev/null || true`);
-      runSsh(`docker volume rm -f ${volumeName} ${projectName}_${volumeName} 2>/dev/null || true`);
+  test.afterAll(async ({ browser }) => {
+    if (createdProjectId || projectName) {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeDockerProject(page, createdProjectId, projectName);
+      } catch (err) {
+        console.warn('Docker cleanup notice:', err.message);
+      } finally {
+        await context.close().catch(() => {});
+      }
     }
   });
 
@@ -173,6 +180,9 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
 
     // Proje detay sayfasına yönlen
     await page.waitForURL(/\/docker\/[^/]+/, { timeout: 15000 });
+    const currentUrl = page.url();
+    const urlMatch = currentUrl.match(/\/docker\/([^/?#]+)/);
+    createdProjectId = urlMatch ? decodeURIComponent(urlMatch[1]) : null;
     await expect(page.locator('h1')).toContainText(projectName, { timeout: 15000 });
 
     // 2. UI Konfigürasyon Doğrulamaları
@@ -271,5 +281,6 @@ test.describe('DKR-03 Port, environment, volume ve restart politikası', () => {
     // Container'ın durduğunu/kaldırıldığını doğrula
     const absentResult = waitForContainerState(projectName, 'absent', 35, 2000);
     expect(absentResult.success, `Container silinmedi: ${absentResult.output}`).toBe(true);
+    createdProjectId = null;
   });
 });

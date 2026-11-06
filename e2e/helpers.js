@@ -79,3 +79,110 @@ export async function openFirstWebsiteWorkspace(page, targetDomain = 'webrich.ne
   await page.waitForURL(/\/websites\/[^/]+/, { timeout: 10000 });
 }
 
+export async function removeDockerProjectViaApi(request, projectId) {
+  if (!projectId) return false;
+  try {
+    const sessionRes = await request.get('/api/auth/session');
+    if (!sessionRes.ok()) return false;
+    const sessionJson = await sessionRes.json();
+    const csrfToken = sessionJson?.data?.csrfToken;
+    if (!csrfToken) return false;
+
+    const previewRes = await request.post(`/api/docker/projects/${encodeURIComponent(projectId)}/operations/remove/preview`, {
+      headers: { 'x-csrf-token': csrfToken },
+      data: {},
+    });
+    if (!previewRes.ok()) return false;
+    const previewJson = await previewRes.json();
+    const preview = previewJson?.data;
+    if (!preview?.previewDigest || !preview?.confirmation) return false;
+
+    const removeRes = await request.post(`/api/docker/projects/${encodeURIComponent(projectId)}/operations/remove`, {
+      headers: { 'x-csrf-token': csrfToken },
+      data: {
+        expectedPreviewDigest: preview.previewDigest,
+        confirmation: preview.confirmation,
+      },
+    });
+    if (removeRes.status() !== 202) return false;
+
+    // Poll until project is removed
+    for (let i = 0; i < 30; i++) {
+      await new Promise((r) => setTimeout(r, 1000));
+      const checkRes = await request.get(`/api/docker/projects/${encodeURIComponent(projectId)}`);
+      if (checkRes.status() === 404) return true;
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+export async function removeDockerProject(page, projectId, projectName = '') {
+  if (!projectId && !projectName) return;
+  // Try fast API removal first if projectId is available
+  if (projectId && page?.request) {
+    const ok = await removeDockerProjectViaApi(page.request, projectId);
+    if (ok) return;
+  }
+  try {
+    let targetUrl = projectId ? `/docker/${encodeURIComponent(projectId)}` : null;
+    if (!targetUrl && projectName) {
+      await page.goto('/docker');
+      const projectLink = page.locator(`a[href^="/docker/"]:has-text("${projectName}")`).first();
+      if (await projectLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await projectLink.click();
+        await page.waitForURL(/\/docker\/[^/]+/, { timeout: 10000 }).catch(() => {});
+        targetUrl = page.url();
+      }
+    } else if (targetUrl) {
+      await page.goto(targetUrl);
+    }
+    if (!targetUrl) return;
+
+    for (let attempt = 0; attempt < 5; attempt++) {
+      if (attempt > 0) {
+        await page.waitForTimeout(3000);
+        await page.reload().catch(() => {});
+      }
+      const removeBtn = page.locator('button:has-text("Projeyi kaldır")').first();
+      await removeBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
+      if (!await removeBtn.isVisible().catch(() => false)) continue;
+
+      await expect(removeBtn).toBeEnabled({ timeout: 35000 });
+      await removeBtn.click();
+
+      const modal = page.locator('.ws-modal').filter({ hasText: 'Docker Compose remove' });
+      const modalShown = await modal.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+      if (!modalShown) {
+        continue;
+      }
+
+      const confirmStr = await modal.locator('label strong').textContent();
+      if (confirmStr) {
+        const input = modal.locator('input');
+        await input.fill(confirmStr);
+
+        const confirmBtn = modal.locator('button:has-text("İşi sıraya al")');
+        await expect(confirmBtn).toBeEnabled({ timeout: 10000 });
+        await confirmBtn.click();
+        await expect(modal).not.toBeVisible({ timeout: 15000 });
+
+        // Wait until project removal job completes
+        for (let i = 0; i < 35; i++) {
+          await page.waitForTimeout(1000);
+          if (projectId) {
+            const check = await page.request.get(`/api/docker/projects/${encodeURIComponent(projectId)}`);
+            if (check.status() === 404) break;
+          }
+        }
+        await page.waitForURL('/docker', { timeout: 10000 }).catch(() => {});
+        break;
+      }
+    }
+  } catch (err) {
+    console.warn(`removeDockerProject notice (${projectId || projectName}):`, err.message);
+  }
+}
+
+

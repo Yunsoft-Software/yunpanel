@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -71,13 +71,17 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
     }
   });
 
-  test.afterAll(async () => {
-    if (projectName) {
-      runSsh(`docker compose -p ${projectName} down --remove-orphans 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-app-1 ${projectName}_app_1 2>/dev/null || true`);
-      const leftoverCids = runSsh(`docker ps -a --filter "name=${projectName}" -q`);
-      if (leftoverCids) {
-        runSsh(`docker rm -f ${leftoverCids.split('\n').join(' ')} 2>/dev/null || true`);
+  test.afterAll(async ({ browser }) => {
+    if (createdProjectId || projectName) {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeDockerProject(page, createdProjectId, projectName);
+      } catch (err) {
+        console.warn('Docker cleanup notice:', err.message);
+      } finally {
+        await context.close().catch(() => {});
       }
     }
     // Test için çekilen testImage'i temizle
@@ -222,6 +226,20 @@ test.describe('DKR-01 Registry/image arama, indirme ve image yönetimi', () => {
     expect(cid.length).toBeGreaterThan(0);
     const inspectImage = runSsh(`docker inspect --format="{{.Config.Image}}" ${cid}`);
     expect(inspectImage).toContain('alpine');
+
+    // 4. Projeyi panel arayüzünden kaldır ve silindiğini doğrula
+    await page.reload();
+    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    await expect(lifecycleSectionAfter).toBeVisible({ timeout: 15000 });
+    const removeBtn = lifecycleSectionAfter.locator('button:has-text("Projeyi kaldır")');
+    await expect(removeBtn).toBeEnabled({ timeout: 35000 });
+    await removeBtn.click();
+
+    await confirmLifecycleAction(page, 'remove');
+
+    const removeCheck = waitForContainerState(projectName, 'absent', 40, 2000);
+    expect(removeCheck.success, `Container silinmedi, hala mevcut: ${removeCheck.output}`).toBe(true);
+    createdProjectId = null;
   });
 
   test('Plesk eşdeğerlik kontrolü: Bağımsız yerel imaj yönetimi (Local Images listesi ve docker rmi arayüzü)', async ({ page }) => {

@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -103,16 +103,23 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     }
   });
 
-  test.afterAll(async () => {
+  test.afterAll(async ({ browser }) => {
     if (tempYmlPath && fs.existsSync(tempYmlPath)) {
       try {
         fs.unlinkSync(tempYmlPath);
       } catch {}
     }
-    if (projectName) {
-      runSsh(`docker compose -p ${projectName} down --remove-orphans 2>/dev/null || true`);
-      runSsh(`docker stop ${projectName}-web1-1 ${projectName}-web2-1 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-web1-1 ${projectName}-web2-1 2>/dev/null || true`);
+    if (createdProjectId || projectName) {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeDockerProject(page, createdProjectId, projectName);
+      } catch (err) {
+        console.warn('Docker cleanup notice:', err.message);
+      } finally {
+        await context.close().catch(() => {});
+      }
     }
   });
 
@@ -324,5 +331,6 @@ test.describe('DKR-05 Compose stack oluşturma/yükleme/güncelleme/up/stop/down
     await page.goto('/docker');
     await expect(page.locator('h1')).toContainText('Docker', { timeout: 15000 });
     await expect(page.locator(`text=${projectName}`)).not.toBeVisible({ timeout: 10000 });
+    createdProjectId = null;
   });
 });

@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -72,11 +72,18 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
     }
   });
 
-  test.afterAll(async () => {
-    if (projectName) {
-      runSsh(`docker stop ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker compose -p ${projectName} down --remove-orphans 2>/dev/null || true`);
+  test.afterAll(async ({ browser }) => {
+    if (createdProjectId || projectName) {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeDockerProject(page, createdProjectId, projectName);
+      } catch (err) {
+        console.warn('Docker cleanup notice:', err.message);
+      } finally {
+        await context.close().catch(() => {});
+      }
     }
   });
 
@@ -229,5 +236,6 @@ test.describe('DKR-02 Container oluşturma, başlatma, durdurma, yeniden oluştu
     await page.goto('/docker');
     await expect(page.locator('h1')).toContainText('Docker', { timeout: 15000 });
     await expect(page.locator(`text=${projectName}`)).not.toBeVisible({ timeout: 10000 });
+    createdProjectId = null;
   });
 });

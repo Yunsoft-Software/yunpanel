@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -46,27 +46,46 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
   }
 
   async function removeWebsiteById(page, domainId, domainName) {
-    if (!domainId) return;
+    if (!domainId && !domainName) return;
     try {
-      await page.goto(`/websites/${encodeURIComponent(domainId)}/settings`);
+      let targetDomainId = domainId;
+      if (!targetDomainId && domainName) {
+        await page.goto(`/websites?q=${encodeURIComponent(domainName)}`);
+        const siteLink = page.locator(`a[href^="/websites/"]:has-text("${domainName}")`).first();
+        if (await siteLink.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const href = await siteLink.getAttribute('href');
+          const m = href ? href.match(/\/websites\/([^/?#]+)/) : null;
+          if (m) targetDomainId = m[1];
+        }
+      }
+      if (!targetDomainId) return;
+
+      await page.goto(`/websites/${encodeURIComponent(targetDomainId)}/settings`);
       const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-      if (await removalSection.isVisible({ timeout: 10000 }).catch(() => false)) {
+      await removalSection.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
+      if (await removalSection.isVisible().catch(() => false)) {
         const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-        if (await deleteBtn.isVisible({ timeout: 8000 }).catch(() => false)) {
+        await deleteBtn.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
+        if (await deleteBtn.isVisible().catch(() => false)) {
           await deleteBtn.click();
-          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: 'Siteyi kalıcı olarak sil' });
-          if (await dialog.isVisible({ timeout: 8000 }).catch(() => false)) {
+          const dialog = page.locator('dialog.ws-modal, [role="dialog"], .ws-modal').filter({ hasText: /Siteyi kalıcı olarak sil|Silme/i });
+          await dialog.waitFor({ state: 'visible', timeout: 15000 }).catch(() => null);
+          if (await dialog.isVisible().catch(() => false)) {
+            const confirmStr = await dialog.locator('label strong').textContent().catch(() => null);
             const input = dialog.locator('input');
-            await input.fill(domainName);
-            const submitBtn = dialog.locator('button', { hasText: 'Silme işlemini başlat' });
-            if (await submitBtn.isEnabled({ timeout: 5000 }).catch(() => false)) {
-              await submitBtn.click();
-              const doneBtn = page.locator('button', { hasText: 'Web sitelerine dön' });
-              await expect(doneBtn.or(page.locator('text=Site silindi'))).toBeVisible({ timeout: 30000 }).catch(() => {});
-              if (await doneBtn.isVisible().catch(() => false)) {
-                await doneBtn.click();
-              }
+            await input.fill(confirmStr || domainName);
+            const submitBtn = dialog.locator('button[type="submit"]');
+            await expect(submitBtn).toBeEnabled({ timeout: 10000 });
+            await submitBtn.click();
+            await expect(dialog).not.toBeVisible({ timeout: 20000 }).catch(() => {});
+            // Wait until domain is completely removed from API
+            for (let i = 0; i < 40; i++) {
+              await page.waitForTimeout(1000);
+              const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(targetDomainId)}`);
+              if (res.status() === 404) break;
             }
+            // Extra safety buffer for background metadata finalization
+            await page.waitForTimeout(4000);
           }
         }
       }
@@ -92,13 +111,16 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
   });
 
   test.afterAll(async ({ browser }) => {
+    console.log('dkr-04 afterAll starting, createdDomainId:', createdDomainId, 'fullSubdomain:', fullSubdomain, 'createdProjectId:', createdProjectId, 'projectName:', projectName);
     // 1. Önce bağlı web sitesini temizle
-    if (createdDomainId) {
+    if (createdDomainId || fullSubdomain) {
+      console.log('dkr-04 afterAll: removing website...');
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
         await removeWebsiteById(page, createdDomainId, fullSubdomain);
+        console.log('dkr-04 afterAll: website removed successfully');
       } catch (err) {
         console.warn('Site clean-up notice:', err.message);
       } finally {
@@ -106,28 +128,15 @@ test.describe('DKR-04 Domain reverse-proxy bağlantısı ve container log/termin
       }
     }
 
-    // 2. Docker container ve Compose projesini host üzerinden temizle
-    if (projectName) {
-      runSsh(`docker stop ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker compose -p ${projectName} down --remove-orphans 2>/dev/null || true`);
-    }
-
-    // 3. Projeyi panel arayüzünden kaldır
-    if (createdProjectId) {
+    // 2. Projeyi panel arayüzünden kaldır
+    if (createdProjectId || projectName) {
+      console.log('dkr-04 afterAll: removing docker project...');
       const context = await browser.newContext({ ignoreHTTPSErrors: true });
       const page = await context.newPage();
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-        await page.goto(`/docker/${encodeURIComponent(createdProjectId)}`);
-        const lifecycleSection = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
-        if (await lifecycleSection.isVisible({ timeout: 10000 }).catch(() => false)) {
-          const removeBtn = lifecycleSection.locator('button:has-text("Projeyi kaldır")');
-          if (await removeBtn.isEnabled({ timeout: 10000 }).catch(() => false)) {
-            await removeBtn.click();
-            await confirmLifecycleAction(page, 'remove');
-          }
-        }
+        await removeDockerProject(page, createdProjectId, projectName);
+        console.log('dkr-04 afterAll: docker project removed successfully');
       } catch (err) {
         console.warn('Docker project clean-up notice:', err.message);
       } finally {

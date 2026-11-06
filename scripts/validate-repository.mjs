@@ -63,6 +63,7 @@ const liveTestWriteRules = [
   // Deleting what the panel provisioned leaves records the removal flow treats as drift, so it refuses to finish.
   [/runSsh\([^)\n]*\b(userdel|groupdel)\b/, 'deletes a Unix user behind the panel'],
   [/runSsh\([^)\n]*\brm\s+-[a-z]+\s+[^)\n]*(\/etc\/(nginx|php|cron\.d)\/|\/var\/lib\/yunpanel\/(homes|reports|staging)\/|\/run\/(php|yunpanel)\/)/, 'deletes panel-managed host files'],
+  [/runSsh\([^)\n]*\bdocker\s+(rm\b|volume\s+rm\b|compose\b[^\n]*\bdown\b)/, 'deletes Docker resources behind the panel'],
 ];
 const registryPathPattern = /\/var\/lib\/yunpanel\/control-plane\/[\w./-]+\.json/;
 const registryWritePattern = /writeFileSync\(|json\.dump\(|open\([^)]*,\s*['"]w['"]\)/;

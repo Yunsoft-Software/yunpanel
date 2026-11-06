@@ -1,6 +1,6 @@
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, removeDockerProject } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -70,12 +70,18 @@ test.describe('DKR-06 Container yapılandırma yedeği ile volume verisi yedeği
     }
   });
 
-  test.afterAll(async () => {
-    if (projectName) {
-      runSsh(`docker stop ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker rm -f ${projectName}-web-1 ${projectName}_web_1 2>/dev/null || true`);
-      runSsh(`docker compose -p ${projectName} down --volumes --remove-orphans 2>/dev/null || true`);
-      runSsh(`docker volume rm -f ${volumeName} ${projectName}_${volumeName} 2>/dev/null || true`);
+  test.afterAll(async ({ browser }) => {
+    if (createdProjectId || projectName) {
+      const context = await browser.newContext({ ignoreHTTPSErrors: true });
+      const page = await context.newPage();
+      try {
+        await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+        await removeDockerProject(page, createdProjectId, projectName);
+      } catch (err) {
+        console.warn('Docker cleanup notice:', err.message);
+      } finally {
+        await context.close().catch(() => {});
+      }
     }
   });
 
@@ -198,6 +204,20 @@ test.describe('DKR-06 Container yapılandırma yedeği ile volume verisi yedeği
     // Fiziksel Kanıt 4: HTTP 200 / nginx cevabı
     const httpRes = runSsh(`curl -s -m 5 http://127.0.0.1:${hostPort}`);
     expect(httpRes).toContain('nginx');
+
+    // 5. Projeyi panel arayüzünden kaldır ve silindiğini doğrula
+    await page.reload();
+    const lifecycleSectionAfter = page.locator('section').filter({ has: page.locator('h2:text-is("Lifecycle")') });
+    await expect(lifecycleSectionAfter).toBeVisible({ timeout: 15000 });
+    const removeBtn = lifecycleSectionAfter.locator('button:has-text("Projeyi kaldır")');
+    await expect(removeBtn).toBeEnabled({ timeout: 35000 });
+    await removeBtn.click();
+
+    await confirmLifecycleAction(page, 'remove');
+
+    const removeCheck = waitForContainerState(projectName, 'absent', 40, 2000);
+    expect(removeCheck.success, `Container silinmedi, hala mevcut: ${removeCheck.output}`).toBe(true);
+    createdProjectId = null;
   });
 
   test('Plesk Docker eşdeğerliği: Container yapılandırma yedeği ile volume verisi yedeğinin ayrımı ve seçilebilirliği', async ({ page }) => {
