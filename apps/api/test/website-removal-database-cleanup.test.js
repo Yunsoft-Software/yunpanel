@@ -10,8 +10,9 @@ function fixture({ sqlFails = false, checkpointFails = false, foreign = false } 
     siteUnixUser: binding.unixUser, databaseName: binding.databaseName, username: 'owned_user', host: 'localhost', privileges: ['ALL'], revision: 1, passwordUpdatedAt: '2026-10-11T00:00:00.000Z' };
   let liveBinding = { ...binding, ...(foreign ? { websiteId: applicationId } : {}) }, liveCredential = credential, schema = true, account = true, failCheckpoint = checkpointFails;
   const actions = [];
-  const operation = { id: operationId, websiteId, applicationId, serverId, systemUser: binding.unixUser,
-    plan: { additional: { databases: { ids: [bindingId] } } }, steps: [{ id: 'database-step', result: null }] };
+  // Same shape as a stored removal operation: the Website's Unix user lives in the plan.
+  const operation = { id: operationId, websiteId, applicationId, serverId,
+    plan: { systemUser: binding.unixUser, additional: { databases: { ids: [bindingId] } } }, steps: [{ id: 'database-step', result: null }] };
   const registry = { checkpointStep: async (_id, _stepId, result) => {
     if (failCheckpoint && result.databaseCleanup.entries[0]?.physicalVerified) { failCheckpoint = false; throw new Error('disk unavailable'); }
     operation.steps[0].result = structuredClone(result); actions.push('checkpoint');

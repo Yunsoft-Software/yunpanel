@@ -15,7 +15,7 @@ export function createWebsiteRemovalDatabaseCleanup({ registry, websiteRegistry,
   evidenceInspector = createDatabaseCredentialEvidenceInspector() } = {}) {
   function bindingScope(binding, operation) {
     if (!binding || binding.websiteId !== operation.websiteId || binding.serverId !== operation.serverId
-      || binding.applicationId !== operation.applicationId || binding.unixUser !== operation.systemUser
+      || binding.applicationId !== operation.applicationId || binding.unixUser !== operation.plan?.systemUser
       || !/^[A-Za-z0-9_]{1,64}$/.test(binding.databaseName ?? '') || isInfrastructureDatabase(binding.databaseName)
       || !Number.isSafeInteger(binding.revision) || binding.revision < 1) throw fail('Database binding is outside the removal scope');
     return snapshot(binding);
@@ -35,7 +35,7 @@ export function createWebsiteRemovalDatabaseCleanup({ registry, websiteRegistry,
   async function currentWebsite(operation) {
     const website = await websiteRegistry.getWebsite(operation.websiteId);
     if (!website || website.id !== operation.websiteId || website.serverId !== operation.serverId
-      || website.applicationId !== operation.applicationId || website.unixUser !== operation.systemUser) throw fail('Website identity changed before database retirement');
+      || website.applicationId !== operation.applicationId || website.unixUser !== operation.plan?.systemUser) throw fail('Website identity changed before database retirement');
   }
   async function sources(operation) {
     await currentWebsite(operation);
