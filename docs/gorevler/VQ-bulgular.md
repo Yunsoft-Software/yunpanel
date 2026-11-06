@@ -871,3 +871,31 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** `.28`'de `tweb05-a3-mw4v7w9k.webrich.news`: WEB-05 kurulum sürerken tercih edilen alan adını değiştirdi; kurulumun `domain_activation` adımı `website_domain_activation_state_drift` ile düştü. Alan adı kaydı `active` (revizyon 2/2/2) ama nginx üzerindeki ayar kayıtla uyuşmuyor (`domain_nginx_active_state_drift`). Silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile duruyor ve panelden çıkış yolu yok. Karar ver: kurulum bitmeden alan adı ayar değişikliği reddedilsin mi, yoksa sapmış nginx ayarı panelden yeniden uygulanabilsin mi; ve bu durumdaki site nasıl güvenle silinir.
 - **Kabul:** Yeniden üretilen durumda site panelden silinebiliyor ya da kurulum sürerken ayar değişikliği net bir mesajla reddediliyor; `.28`'deki site temizlenmiş.
+
+### T869 · 06-11 tam koşuda düşen yedek ve veritabanı testleri: BAK-05, BAK-06, DB-04, DB-05
+- **Bağımlı:** T131, T130, T136, T192
+- **Dosyalar:** `e2e/ozellik/bak-05.spec.js`, `e2e/ozellik/bak-06.spec.js`, `e2e/ozellik/db-04.spec.js`, `e2e/ozellik/db-05.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Bu testler 06-11 tam e2e koşusunda düştü. O koşudan sonra site kurulumu sunucuda tamamlanır hale geldi (T864) ve silme hataları giderildi; bir kısmı artık geçebilir. Her testi `.28`'de tek tek koş (yalnız bu dosyalar; tam koşu yapma) ve her biri için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası: düzelt (eski seçici, kurulum bitmeden kontrol, `fetch` ile `Host` başlığı gibi; örnek: WEB-08'deki `vhostGet`); (c) ürün hatası: testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Mock yok; panelin arkasından sunucuda silme yok; oluşturduğun her kaynağı panelden temizle.
+- **Kabul:** Her test için (a)/(b)/(c) sonucu raporda; (a) ve (b) olanlar `.28`'de iki kez art arda geçiyor; testlerden sonra `.28`'de bu görevin öneğiyle kalan site yok.
+
+### T870 · 06-11 tam koşuda düşen dosya ve çalışma ortamı testleri: DOS-05, DOS-09, DOS-10, RUN-04, RUN-06, RUN-07, RUN-08
+- **Bağımlı:** T157, T156, T129, T155, T153, T152, T148
+- **Dosyalar:** `e2e/ozellik/dos-05.spec.js`, `e2e/ozellik/dos-09.spec.js`, `e2e/ozellik/dos-10.spec.js`, `e2e/ozellik/run-04.spec.js`, `e2e/ozellik/run-06.spec.js`, `e2e/ozellik/run-07.spec.js`, `e2e/ozellik/run-08.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Bu testler 06-11 tam e2e koşusunda düştü. O koşudan sonra site kurulumu sunucuda tamamlanır hale geldi (T864) ve silme hataları giderildi; bir kısmı artık geçebilir. Her testi `.28`'de tek tek koş (yalnız bu dosyalar; tam koşu yapma) ve her biri için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası: düzelt (eski seçici, kurulum bitmeden kontrol, `fetch` ile `Host` başlığı gibi; örnek: WEB-08'deki `vhostGet`); (c) ürün hatası: testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Mock yok; panelin arkasından sunucuda silme yok; oluşturduğun her kaynağı panelden temizle.
+- **Kabul:** Her test için (a)/(b)/(c) sonucu raporda; (a) ve (b) olanlar `.28`'de iki kez art arda geçiyor; testlerden sonra `.28`'de bu görevin öneğiyle kalan site yok.
+
+### T871 · 06-11 tam koşuda düşen rol, güvenlik, sistem ve tls testleri: API-04, ROL-01, SYS-05, TLS-03
+- **Bağımlı:** T822, T821, T835, T216
+- **Dosyalar:** `e2e/ozellik/api-04.spec.js`, `e2e/ozellik/rol-01.spec.js`, `e2e/ozellik/sys-05.spec.js`, `e2e/ozellik/tls-03.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Bu testler 06-11 tam e2e koşusunda düştü. O koşudan sonra site kurulumu sunucuda tamamlanır hale geldi (T864) ve silme hataları giderildi; bir kısmı artık geçebilir. Her testi `.28`'de tek tek koş (yalnız bu dosyalar; tam koşu yapma) ve her biri için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası: düzelt (eski seçici, kurulum bitmeden kontrol, `fetch` ile `Host` başlığı gibi; örnek: WEB-08'deki `vhostGet`); (c) ürün hatası: testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Mock yok; panelin arkasından sunucuda silme yok; oluşturduğun her kaynağı panelden temizle.
+- **Kabul:** Her test için (a)/(b)/(c) sonucu raporda; (a) ve (b) olanlar `.28`'de iki kez art arda geçiyor; testlerden sonra `.28`'de bu görevin öneğiyle kalan site yok.
+
+### T872 · 06-11 tam koşuda düşen site ve arayüz testleri: WEB-04, WEB-06, WEB-07, UX-01, UX-04
+- **Bağımlı:** T847, T123, T143, T223, T844
+- **Dosyalar:** `e2e/ozellik/web-04.spec.js`, `e2e/ozellik/web-06.spec.js`, `e2e/ozellik/web-07.spec.js`, `e2e/ozellik/ux-01.spec.js`, `e2e/ozellik/ux-04.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Bu testler 06-11 tam e2e koşusunda düştü. O koşudan sonra site kurulumu sunucuda tamamlanır hale geldi (T864) ve silme hataları giderildi; bir kısmı artık geçebilir. Her testi `.28`'de tek tek koş (yalnız bu dosyalar; tam koşu yapma) ve her biri için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası: düzelt (eski seçici, kurulum bitmeden kontrol, `fetch` ile `Host` başlığı gibi; örnek: WEB-08'deki `vhostGet`); (c) ürün hatası: testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Mock yok; panelin arkasından sunucuda silme yok; oluşturduğun her kaynağı panelden temizle.
+- **Kabul:** Her test için (a)/(b)/(c) sonucu raporda; (a) ve (b) olanlar `.28`'de iki kez art arda geçiyor; testlerden sonra `.28`'de bu görevin öneğiyle kalan site yok.
