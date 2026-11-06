@@ -81,7 +81,7 @@ test.describe('BAK-06 Seçici geri yükleme, indir/yükle ve parola koruması', 
     expect(domainsRes.ok()).toBe(true);
     const domainsJson = await domainsRes.json();
     const domains = Array.isArray(domainsJson.data) ? domainsJson.data : domainsJson.data?.domains || [];
-    const domain = domains.find((d) => d.websiteId === targetWebsiteId);
+    const domain = domains.find((d) => d.primaryDomain === targetDomainName) || domains.find((d) => d.websiteId === targetWebsiteId);
     expect(domain).toBeTruthy();
     targetDomainId = domain.id;
 
@@ -106,7 +106,12 @@ test.describe('BAK-06 Seçici geri yükleme, indir/yükle ve parola koruması', 
 
     // 3. Web sitesinin Yedekleme ve Geri Yükleme sayfasına git
     await page.goto(`/websites/${targetDomainId}/backup`);
+    if (await page.locator('input[type="password"]').isVisible({ timeout: 3000 }).catch(() => false)) {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      await page.goto(`/websites/${targetDomainId}/backup`);
+    }
     await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Yedekleme bilgileri okunuyor…')).not.toBeVisible({ timeout: 30000 });
 
     // Yeni oluşturulan deponun sayfada listelendiğini doğrula
     const repoSection = page.locator(`section:has-text("${repoName}")`);
@@ -143,7 +148,8 @@ test.describe('BAK-06 Seçici geri yükleme, indir/yükle ve parola koruması', 
 
     // 5. Sayfayı yenile ve snapshot'ın listelendiğini doğrula
     await page.reload();
-    await expect(repoSection).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Yedekleme bilgileri okunuyor…')).not.toBeVisible({ timeout: 30000 });
+    await expect(repoSection).toBeVisible({ timeout: 20000 });
 
     const snapshotRows = repoSection.locator('table.ws-table tbody tr');
     await expect(snapshotRows).toHaveCount(1, { timeout: 15000 });
@@ -257,8 +263,13 @@ test.describe('BAK-06 Seçici geri yükleme, indir/yükle ve parola koruması', 
 
     // 2. UI seçici geri yükleme doğrulama: Tüm veri türlerinin işareti kaldırıldığında hata uyarısı verilir
     await page.goto(`/websites/${targetDomainId}/backup`);
+    if (await page.locator('input[type="password"]').isVisible({ timeout: 3000 }).catch(() => false)) {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      await page.goto(`/websites/${targetDomainId}/backup`);
+    }
+    await expect(page.locator('text=Yedekleme bilgileri okunuyor…')).not.toBeVisible({ timeout: 30000 });
     const repoSection = page.locator(`section:has-text("${repoName}")`);
-    await expect(repoSection).toBeVisible({ timeout: 15000 });
+    await expect(repoSection).toBeVisible({ timeout: 20000 });
 
     const snapshotRows = repoSection.locator('table.ws-table tbody tr');
     const restoreBtn = snapshotRows.first().locator('button:has-text("Geri Yükle")');

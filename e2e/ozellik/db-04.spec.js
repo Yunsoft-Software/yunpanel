@@ -7,9 +7,46 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(120000);
 
-  const agentN = process.env.AGENT_N || '3';
-  let targetDatabaseName = 'tdb04_a3_mvqgctuk';
+  const agentN = process.env.AGENT_N || '1';
+  const targetDatabaseName = `tdb04_a${agentN}_${Date.now().toString(36)}`;
   let testServerId = null;
+  let createdWebsiteId = null;
+
+  test.afterAll(async ({ browser }) => {
+    const page = await browser.newPage({ ignoreHTTPSErrors: true });
+    try {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      await page.goto('/databases');
+      await page.waitForLoadState('domcontentloaded');
+
+      const searchInput = page.getByRole('searchbox', { name: 'Veritabanı ara' });
+      if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
+        await searchInput.fill(targetDatabaseName);
+      }
+
+      const row = page.locator('tr[role="row"]').filter({ hasText: targetDatabaseName }).first();
+      if (await row.isVisible({ timeout: 5000 }).catch(() => false)) {
+        const deleteBtn = row.locator('button:has-text("Sil")');
+        if (await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
+          await deleteBtn.click();
+          const confirmDialog = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: /Veritabanını sil|Silmeyi onayla/i });
+          if (await confirmDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+            const input = confirmDialog.locator('input');
+            if (await input.isVisible({ timeout: 3000 }).catch(() => false)) {
+              await input.fill(targetDatabaseName);
+            }
+            const confirmBtn = confirmDialog.locator('button[type="submit"], button:has-text("Sil")');
+            await confirmBtn.click();
+            await expect(confirmDialog).toHaveCount(0, { timeout: 15000 });
+          }
+        }
+      }
+    } catch (cleanupErr) {
+      console.warn('DB-04 cleanup error:', cleanupErr.message);
+    } finally {
+      await page.close().catch(() => {});
+    }
+  });
 
   test.beforeEach(async ({ page }) => {
     for (let attempt = 0; attempt < 3; attempt++) {
@@ -34,51 +71,49 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
     const inventorySection = page.locator('section.ws-database-inventory, section:has-text("Veritabanı listesi")').first();
     await expect(inventorySection).toBeVisible({ timeout: 15000 });
 
-    // Hedef test veritabanını ara
-    let row = page.locator('tr[role="row"]').filter({ hasText: targetDatabaseName }).first();
+    // Her zaman yeni benzersiz test veritabanı oluştur
+    const createBtn = page.locator('button:has-text("Veritabanı oluştur")').first();
+    await expect(createBtn).toBeEnabled({ timeout: 10000 });
+    await createBtn.click();
 
-    // Eğer hedef veritabanı mevcut değilse arayüzden yeni bir tane oluştur
-    if (!(await row.isVisible({ timeout: 3000 }).catch(() => false))) {
-      const createBtn = page.locator('button:has-text("Veritabanı oluştur")').first();
-      await expect(createBtn).toBeEnabled({ timeout: 10000 });
-      await createBtn.click();
+    const dialog = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: /Veritabanı oluştur/i });
+    await expect(dialog).toBeVisible({ timeout: 10000 });
 
-      const dialog = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: /Veritabanı oluştur/i });
-      await expect(dialog).toBeVisible({ timeout: 10000 });
-
-      // Web sitesi seçimi
-      const siteSelect = dialog.locator('select').first();
-      if (await siteSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
-        const options = await siteSelect.locator('option').all();
-        for (const opt of options) {
-          const val = await opt.getAttribute('value');
-          if (val) {
-            await siteSelect.selectOption(val);
-            break;
-          }
+    // Web sitesi seçimi
+    const siteSelect = dialog.locator('select').first();
+    if (await siteSelect.isVisible({ timeout: 3000 }).catch(() => false)) {
+      const options = await siteSelect.locator('option').all();
+      for (const opt of options) {
+        const val = await opt.getAttribute('value');
+        if (val) {
+          await siteSelect.selectOption(val);
+          break;
         }
       }
-
-      targetDatabaseName = `tdb04_a${agentN}_${Date.now().toString(36)}`;
-      const dbNameInput = dialog.locator('label:has-text("Veritabanı adı") input, input[placeholder="ornek_site"]');
-      await expect(dbNameInput).toBeVisible({ timeout: 5000 });
-      await dbNameInput.fill(targetDatabaseName);
-
-      const submitBtn = dialog.locator('button[type="submit"]:has-text("Oluştur")');
-      await expect(submitBtn).toBeEnabled({ timeout: 5000 });
-      await submitBtn.click();
-
-      const successMsg = dialog.locator('p:has-text("hazır. Site bağlantısı ve kullanıcı izinleri uygulandı.")');
-      await expect(successMsg).toBeVisible({ timeout: 60000 });
-
-      const finishBtn = dialog.locator('button:has-text("Tamam")');
-      await expect(finishBtn).toBeVisible({ timeout: 5000 });
-      await finishBtn.click();
-      await expect(dialog).toHaveCount(0, { timeout: 10000 });
-
-      row = page.locator('tr[role="row"]').filter({ hasText: targetDatabaseName }).first();
     }
 
+    const dbNameInput = dialog.locator('label:has-text("Veritabanı adı") input, input[placeholder="ornek_site"]');
+    await expect(dbNameInput).toBeVisible({ timeout: 5000 });
+    await dbNameInput.fill(targetDatabaseName);
+
+    const submitBtn = dialog.locator('button[type="submit"]:has-text("Oluştur")');
+    await expect(submitBtn).toBeEnabled({ timeout: 5000 });
+    await submitBtn.click();
+
+    const successMsg = dialog.locator('p:has-text("hazır. Site bağlantısı ve kullanıcı izinleri uygulandı.")');
+    await expect(successMsg).toBeVisible({ timeout: 60000 });
+
+    const finishBtn = dialog.locator('button:has-text("Tamam")');
+    await expect(finishBtn).toBeVisible({ timeout: 5000 });
+    await finishBtn.click();
+    await expect(dialog).toHaveCount(0, { timeout: 10000 });
+
+    // Arama kutusu ile yeni veritabanını filtrele
+    const searchInput = page.getByRole('searchbox', { name: 'Veritabanı ara' });
+    await expect(searchInput).toBeVisible({ timeout: 10000 });
+    await searchInput.fill(targetDatabaseName);
+
+    const row = page.locator('tr[role="row"]').filter({ hasText: targetDatabaseName }).first();
     await expect(row).toBeVisible({ timeout: 15000 });
 
     // Satırdaki phpMyAdmin butonunu bul

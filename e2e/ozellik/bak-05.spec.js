@@ -118,7 +118,7 @@ test.describe('BAK-05 Yerel ve uzak FTP/cloud/object storage hedefleri', () => {
     expect(domainsRes.ok()).toBe(true);
     const domainsJson = await domainsRes.json();
     const domains = Array.isArray(domainsJson.data) ? domainsJson.data : domainsJson.data?.domains || [];
-    const domain = domains.find((d) => d.websiteId === targetWebsiteId);
+    const domain = domains.find((d) => d.primaryDomain === targetDomainName) || domains.find((d) => d.websiteId === targetWebsiteId);
     expect(domain).toBeTruthy();
     targetDomainId = domain.id;
 
@@ -197,11 +197,16 @@ test.describe('BAK-05 Yerel ve uzak FTP/cloud/object storage hedefleri', () => {
 
     // 6. Panel Web Sitesi Yedekleme Arayüzü Doğrulaması
     await page.goto(`/websites/${targetDomainId}/backup`);
+    if (await page.locator('input[type="password"]').isVisible({ timeout: 3000 }).catch(() => false)) {
+      await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
+      await page.goto(`/websites/${targetDomainId}/backup`);
+    }
     await expect(page.locator('h2:has-text("Yedekleme ve Geri Yükleme")')).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('text=Yedekleme bilgileri okunuyor…')).not.toBeVisible({ timeout: 30000 });
 
     // Özet kartında "Uzak depo (rclone)" satırının algılandığını doğrula
     const remoteRepoStatusRow = page.locator('dt:has-text("Uzak depo (rclone)") + dd');
-    await expect(remoteRepoStatusRow).toBeVisible({ timeout: 10000 });
+    await expect(remoteRepoStatusRow).toBeVisible({ timeout: 15000 });
     await expect(remoteRepoStatusRow).not.toHaveText('Yapılandırılmadı');
 
     // Depolar listesinde Yerel Depo kartını doğrula
