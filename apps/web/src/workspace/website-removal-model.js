@@ -98,6 +98,8 @@ const blockerLabels=Object.freeze({
  website_removal_child_scope_conflict:'Başka bir site bu alan adına bağlı. Önce bu ilişkiyi çözün.',
  website_removal_domains_still_attached:'Siteye bağlı alan adları henüz kaldırılmadı. Silme akışı durduruldu.',
  website_removal_state_mismatch:'Site kaydı değişti. Silme durumunu yeniden kontrol edin.',
+ website_removal_dependencies_added:'Silme planlandıktan sonra siteye bir veritabanı bağlandı. Önce o bağlantıyı kaldırın, sonra devam edin.',
+ website_cleanup_identity_unowned_account:'Sunucuda bu site kullanıcısı adıyla, panelin oluşturmadığı bir hesap var. Hesaba dokunulmadı; silme durduruldu.',
  application_env_cleanup_unavailable:'Application metadata/env cleanup lifecycle’ı kullanılamıyor.',
  file_cleanup_preflight_failed:'Canonical site dosya kökleri güvenli olarak doğrulanamadı.',
  unix_cleanup_evidence_unavailable:'Site Unix kullanıcısının ownership receipt’i bulunamadı; legacy kullanıcı otomatik silinmez.',

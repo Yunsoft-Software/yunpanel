@@ -453,3 +453,53 @@ test('direct-systemd preview is blocked before mutation when host evidence inspe
   assert.equal(blocked.readyToStart, false);
   assert.ok(blocked.hardBlockers.includes('runtime_cleanup_unavailable'));
 });
+
+async function runWithLateBinding({ withDatabases }) {
+  const registry = createWebsiteRemovalOperationRegistry();
+  await registry.init();
+  const preview = mockPreview({ withDomains: false, withDatabases, withRuntimeBinding: false });
+  const bindings = withDatabases ? [{ id: 'db-1', databaseName: 'mydb', revision: 3 }] : [];
+  const finalized = [];
+  const runtime = createWebsiteRemovalRuntime({
+    domainRegistry: { listDomains: async () => [] },
+    registry,
+    previewProvider: async () => preview,
+    domainRemovalRuntime: { start: async () => {} },
+    websiteRegistry: {
+      getWebsite: async () => (finalized.length ? null : { id: 'ws-1', serverId: 'srv-local', applicationId: 'app-1', revision: 1 }),
+      finalizeWebsiteRemoval: async (input) => { finalized.push(input); },
+    },
+    ...applicationCleanupDependencies(),
+    websiteSftpKeyRegistry: { listKeys: async () => [], revokeKey: async () => {} },
+    runtimeBindingRegistry: { getBinding: async () => null, removeOwnedPassenger: async () => {}, removeOwnedStatic: async () => {} },
+    unixIdentityCleanupHandler: async (input) => ({ ...input, unixIdentityCleaned: true }),
+    unixIdentityCleanupInspector: async ({ websiteId, systemUser }) => ({ ready: true, websiteId, applicationId: 'app-1', systemUser }),
+    fileCleanupInspector: async ({ websiteId, applicationId }) => ({ ready: true, websiteId, applicationId, targets: [] }),
+    fileCleanupHandler: async ({ websiteId, applicationId, retainedBackups, retainedLogScopes }) => ({ websiteId, applicationId, retainedBackups, retainedLogScopes, filesCleaned: true, cleanedFilesCount: 0 }),
+    databaseCleanupInspector: async () => ({ ready: true }),
+    databaseCleanupHandler: async () => ({ databaseBindingsCleaned: true, unboundBindings: [{ id: 'db-1', databaseName: 'mydb', unbound: true, physicalVerified: true }] }),
+    databaseCredentialRegistry: { getForBinding: async () => null, deleteCredential: async () => {} },
+    databaseBindingRegistry: { listBindings: async () => [...bindings], unbindDatabase: async () => {} },
+  });
+  let op = await runtime.start({ websiteId: preview.website.id, previewDigest: preview.previewDigest, confirmation: preview.confirmation });
+  // The database is bound after the plan was approved.
+  bindings.push({ id: 'db-late', databaseName: 'latedb', revision: 1 });
+  while (op.status === 'running') {
+    const nextStep = op.steps.find((s) => s.status === 'pending' || s.status === 'running');
+    if (!nextStep) break;
+    op = await runtime.continueStep({ websiteId: 'ws-1', operationId: op.id, stepId: nextStep.id,
+      expectedUpdatedAt: op.updatedAt, confirmation: op.actions.stepContinuationConfirmation });
+  }
+  return { op, finalized };
+}
+
+test('a database bound after the removal plan stops the removal before the Website record is deleted', async () => {
+  for (const withDatabases of [true, false]) {
+    const { op, finalized } = await runWithLateBinding({ withDatabases });
+    assert.notEqual(op.status, 'removed');
+    assert.equal(finalized.length, 0, 'the Website record must stay while a binding still points at it');
+    const stopped = op.steps.find((s) => s.error?.code === 'website_removal_dependencies_added');
+    assert.ok(stopped, `expected a stopped step, got ${JSON.stringify(op.steps.map((s) => [s.kind, s.status, s.error?.code]))}`);
+    assert.match(stopped.error.message, /latedb/);
+  }
+});

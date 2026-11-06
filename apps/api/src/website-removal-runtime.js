@@ -34,6 +34,16 @@ function cleanupInventory(value) {
   return value;
 }
 
+// A database bound after the plan was approved would be left pointing at a deleted Website.
+function requireNoUnplannedBindings(operation, bindings) {
+  const planned = new Set(operation.plan?.additional?.databases?.ids ?? []);
+  const added = bindings.filter((binding) => !planned.has(binding.id));
+  if (added.length) {
+    throw new WebsiteRemovalRuntimeError('website_removal_dependencies_added',
+      `A database was bound to this Website after removal was planned: ${added.map((binding) => binding.databaseName ?? binding.id).join(', ')}. Remove it, then continue.`, 409);
+  }
+}
+
 function stepContinuationConfirmation(operation, step) {
   return `continue-website-remove-step:${operation.websiteId}:${operation.id}:${step.id}:${operation.updatedAt}`;
 }
@@ -615,6 +625,7 @@ export function createWebsiteRemovalRuntime({
         case 'database_binding_cleanup': {
           requireCleanupMethod(databaseBindingRegistry?.listBindings);
           const bindings = cleanupInventory(await databaseBindingRegistry.listBindings({ websiteId: op.websiteId }));
+          requireNoUnplannedBindings(op, bindings);
           if (bindings.length || op.plan?.additional?.databases?.ids?.length) {
             requireCleanupMethod(databaseCleanupHandler);
             const result = await databaseCleanupHandler({ operation: op, stepId: step.id,
@@ -753,6 +764,9 @@ export function createWebsiteRemovalRuntime({
           requireCleanupMethod(websiteRegistry?.getWebsite);
           requireCleanupMethod(websiteRegistry?.finalizeWebsiteRemoval);
           const current = await websiteRegistry.getWebsite(op.websiteId);
+          if (current !== null && typeof databaseBindingRegistry?.listBindings === 'function') {
+            requireNoUnplannedBindings(op, cleanupInventory(await databaseBindingRegistry.listBindings({ websiteId: op.websiteId })));
+          }
           if (current !== null) {
             if (!current || current.id !== op.websiteId || current.serverId !== op.serverId
               || current.applicationId !== op.applicationId) {
