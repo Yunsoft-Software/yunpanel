@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 
 const owner = JSON.parse(fs.readFileSync('.local/yunpanel-owner-password-only.json', 'utf8'));
 const origin = new URL(owner.url).origin;
@@ -41,16 +41,7 @@ test.describe.serial('TLS-03 isolated custom certificate lifecycle', () => {
   }
 
   async function login(page) {
-    await page.goto('/');
-    const session = page.locator('.auth-sessionbar');
-    const form = page.locator('form.auth-form');
-    await expect(session.or(form)).toBeVisible({ timeout: 30_000 });
-    if (await session.isVisible()) { await expect(session).toContainText(OWNER_USERNAME); return; }
-    await form.locator('[name="username"]').fill(OWNER_USERNAME);
-    try { await form.locator('[name="password"]').fill(OWNER_PASSWORD); }
-    catch { throw new Error('Owner password field could not be filled'); }
-    await form.locator('button.auth-primary').click();
-    await expect(session).toContainText(OWNER_USERNAME, { timeout: 30_000 });
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
   }
 
   async function call(page, method, endpoint, data) {
