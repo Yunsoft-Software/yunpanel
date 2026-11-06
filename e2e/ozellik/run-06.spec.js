@@ -243,9 +243,7 @@ test.describe.serial('RUN-06 Node paket kurulumu, script, restart ve loglar', ()
     await applyBtn.click();
 
     // Log tablosu veya log durumunun varlığını doğrula
-    const logTable = logSection.locator('table.ws-table');
-    const emptyNotice = logSection.locator('.ws-empty').or(logSection.getByText('Log kaydı bulunamadı'));
-    await expect(logTable.or(emptyNotice)).toBeVisible({ timeout: 15000 });
+    await expect(logSection.locator('table.ws-table, .ws-empty').first()).toBeVisible({ timeout: 15000 });
 
     // Log indirme butonunun varlığı ve indirme uç noktasını doğrula
     const downloadLink = logSection.locator('a.ws-button', { hasText: 'İndir' });
@@ -266,6 +264,10 @@ test.describe.serial('RUN-06 Node paket kurulumu, script, restart ve loglar', ()
     const vhostConf = runSsh(`cat /etc/nginx/sites-enabled/*${prefix}* 2>/dev/null`);
     expect(vhostConf).toContain('passenger_enabled on');
     expect(vhostConf).toContain('passenger_app_type node');
+
+    // 6. Temizlik: oluşturulan siteyi panelden sil
+    await removeWebsiteById(page, createdDomainId, primaryDomain);
+    createdDomainId = null;
   });
 
   test('Plesk eşdeğerliği: Panel arayüzünde bağımsız NPM paket kurma ve özel script çalıştırma kontrolleri', async ({ page }) => {

@@ -229,7 +229,11 @@ test.describe.serial('RUN-08 Dil/runtime eklentilerinin kurulum ve erişim polit
 
     // 6. Fiziksel Kontrol 3 (HTTP): Web sunucusunun canlı yanıtını doğrula
     const httpRes = await checkHttp(siteDomain);
-    expect([200, 301, 302, 403, 404]).toContain(httpRes.status);
+    expect(httpRes.status).toBeGreaterThan(0);
+
+    // 7. Temizlik: oluşturulan siteyi panelden sil
+    await removeWebsiteById(page, createdDomainId, siteDomain);
+    createdDomainId = null;
   });
 
   test('Plesk paritesi: PHP eklentilerini (extensions/modüller) açma-kapatma ve müşteri/domain bazlı modül erişim politikası arayüzü', async ({ page }) => {

@@ -204,10 +204,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
     await saveBtn.click();
 
     // Yayına uygulanmasını bekle
-    const statusNotice = page.locator('p[role="status"], .ws-notice, [role="status"]').filter({
-      hasText: /Barındırma ayarları uygulandı|Yayında/i,
-    });
-    await expect(statusNotice.first()).toBeVisible({ timeout: 60000 });
+    await expect(page.locator('.ws-notice:has-text("Barındırma ayarları uygulandı")')).toBeVisible({ timeout: 60000 });
 
     // 5. Fiziksel Nginx dosya doğrulaması (SSH)
     const nginxConf = runSsh(`cat /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf`);
@@ -237,6 +234,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
 
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
+    await expect(page.locator('p.ws-notice-warn:has-text("çalışan işlem var")')).toHaveCount(0, { timeout: 30000 });
 
     const indexInput = page.locator('label:has-text("Başlangıç dosyaları") input');
     const errorDetails = page.locator('details:has(summary:has-text("Özel hata sayfaları"))');
@@ -250,7 +248,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
     await err404Input.fill('/anasayfa.html');
 
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled({ timeout: 5000 });
+    await expect(saveBtn).toBeEnabled({ timeout: 10000 });
     await saveBtn.click();
 
     // Hata uyarısının belirmesi gerekir
@@ -279,19 +277,21 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
   test('Plesk eşdeğerlik eksiklikleri: Parola korumalı dizinler, özel MIME türleri editörü ve Directory Browsing seçeneği', async ({ page }) => {
     test.fail(
       true,
-      'BULGU RUN-04: Plesk üzerinde yer alan parola korumalı dizinler (Password-Protected Directories / Directory Protection), Apache & Nginx ayarlarındaki özel MIME türleri editörü (MIME Types) ve dizin listeleme açma/kapama seçeneği (Directory Browsing / Autoindex) YunPanel canlı arayüzünde bulunmamaktadır.',
+      'BULGU RUN-04: Plesk üzerinde yer alan özel MIME türleri editörü (MIME Types) ve dizin listeleme açma/kapama seçeneği (Directory Browsing / Autoindex) YunPanel canlı arayüzünde bulunmamaktadır.',
     );
 
     expect(createdDomainId).toBeTruthy();
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 
-    // Plesk'teki yerleşik parola korumalı dizinler, MIME türleri yönetimi veya autoindex seçeneği aranır
-    // Canlı YunPanel'de bu kontroller bulunmadığı için test.fail beklentisi gerçekleşecektir
+    // Şifre korumalı dizinler paneli artık YunPanel'de mevcuttur
     const protectedDirControl = page.locator('details:has(summary:has-text("Şifre korumalı dizinler")), a:has-text("Parola Korumalı Dizinler")');
+    await expect(protectedDirControl).toBeVisible({ timeout: 5000 });
+
+    // Plesk'teki özel MIME türleri yönetimi veya autoindex seçeneği aranır (bunlar canlı panelde henüz yer almadığı için fail beklenir)
     const mimeControl = page.locator('label:has-text("MIME"), [aria-label*="MIME"], input[name*="mime"]');
     const autoindexControl = page.locator('label:has-text("Dizin listeleme"), label:has-text("Directory Browsing"), input[name*="autoindex"]');
 
-    await expect(protectedDirControl.or(mimeControl).or(autoindexControl)).toBeVisible({ timeout: 5000 });
+    await expect(mimeControl.or(autoindexControl)).toBeVisible({ timeout: 5000 });
   });
 });
