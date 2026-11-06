@@ -652,3 +652,12 @@ test('abandonment evidence is identity-bound and idempotent only for the same op
   const retry = await registry.abandonUncreated(abandonmentProof());
   assert.deepEqual(retry, first);
 });
+
+test('only operations with nothing but pending work left are offered to the server-side worker', async () => {
+  const registry = createWebsiteProvisioningRegistry();
+  await registry.init();
+  await registry.create(input({ operation: operationId }));
+  await registry.create(compensationOrderInput(secondOperationId, 'blocked'));
+  const ids = (await registry.listAdvanceable()).map((operation) => operation.operationId);
+  assert.deepEqual(ids, [operationId], 'a blocked step waits for the panel');
+});

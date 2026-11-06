@@ -601,6 +601,16 @@ export function createWebsiteProvisioningRegistry({
       .map(publicOperation));
   }
 
+  // Operations a server-side worker may move forward: only pending steps remain, nothing to inspect or repair.
+  async function listAdvanceable() {
+    await ensureInitialized();
+    return Object.freeze(state.operations
+      .filter((operation) => operation.terminalState !== 'abandoned'
+        && operation.steps.some((step) => step.state === 'pending')
+        && operation.steps.every((step) => ['pending', 'succeeded'].includes(step.state)))
+      .map(publicOperation));
+  }
+
   async function listAuthorizationSensitive() {
     await ensureInitialized();
     return Object.freeze(state.operations
@@ -631,6 +641,7 @@ export function createWebsiteProvisioningRegistry({
     failCompensation: (...args) => withStoreMutation(() => failCompensation(...args)),
     abandonUncreated: (...args) => withStoreMutation(() => abandonUncreated(...args)),
     listInterrupted: (...args) => withStoreRead(() => listInterrupted(...args)),
+    listAdvanceable: (...args) => withStoreRead(() => listAdvanceable(...args)),
     listAuthorizationSensitive: (...args) => withStoreRead(() => listAuthorizationSensitive(...args)),
   });
 }
