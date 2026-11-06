@@ -80,6 +80,10 @@ install -d -o yunpanel-elfinder -g yunpanel-elfinder -m 0700 /var/lib/yunpanel/e
 install -d -o root -g yunpanel -m 2770 /run/yunpanel
 install -d -o root -g yunpanel-phpmyadmin -m 0750 /run/yunpanel-phpmyadmin
 install -d -o root -g yunpanel-phpmyadmin -m 0750 /usr/lib/yunpanel/phpmyadmin
+if [ -f /usr/lib/yunpanel/phpmyadmin/signon.php ]; then
+  chown root:yunpanel-phpmyadmin /usr/lib/yunpanel/phpmyadmin/signon.php
+  chmod 0640 /usr/lib/yunpanel/phpmyadmin/signon.php
+fi
 install -d -o root -g yunpanel-elfinder -m 0750 /run/yunpanel-elfinder
 install -d -o root -g yunpanel-elfinder -m 0750 /usr/lib/yunpanel/elfinder
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane

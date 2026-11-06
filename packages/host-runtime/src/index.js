@@ -160,6 +160,7 @@ export {
 } from './roundcube-config-evidence-inspector.js';
 export {
   createPhpMyAdminConfigManager,
+  ensureSignonBridgePermissions,
   PhpMyAdminConfigManagerError,
   phpMyAdminConfigManagerInternals,
 } from './phpmyadmin-config-manager.js';

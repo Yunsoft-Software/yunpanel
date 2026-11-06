@@ -13,38 +13,86 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
   let createdWebsiteId = null;
 
   test.afterAll(async ({ browser }) => {
-    const page = await browser.newPage({ ignoreHTTPSErrors: true });
+    const context = await browser.newContext({ ignoreHTTPSErrors: true });
+    const page = await context.newPage();
     try {
       await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-      await page.goto('/databases');
-      await page.waitForLoadState('domcontentloaded');
 
-      const searchInput = page.getByRole('searchbox', { name: 'Veritabanı ara' });
-      if (await searchInput.isVisible({ timeout: 5000 }).catch(() => false)) {
-        await searchInput.fill(targetDatabaseName);
+      const sessionRes = await page.request.get('/api/auth/session');
+      const sessionJson = await sessionRes.json().catch(() => ({}));
+      const csrf = sessionJson.data?.csrfToken;
+      const headers = { 'Content-Type': 'application/json', 'x-csrf-token': csrf };
+
+      let serverId = testServerId;
+      if (!serverId) {
+        const serversRes = await page.request.get('/api/panel/servers', { headers });
+        if (serversRes.status() === 200) {
+          const serversJson = await serversRes.json();
+          serverId = serversJson.data?.servers?.[0]?.id || serversJson.data?.[0]?.id;
+        }
       }
 
-      const row = page.locator('tr[role="row"]').filter({ hasText: targetDatabaseName }).first();
-      if (await row.isVisible({ timeout: 5000 }).catch(() => false)) {
-        const deleteBtn = row.locator('button:has-text("Sil")');
-        if (await deleteBtn.isVisible({ timeout: 5000 }).catch(() => false)) {
-          await deleteBtn.click();
-          const confirmDialog = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: /Veritabanını sil|Silmeyi onayla/i });
-          if (await confirmDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
-            const input = confirmDialog.locator('input');
-            if (await input.isVisible({ timeout: 3000 }).catch(() => false)) {
-              await input.fill(targetDatabaseName);
+      if (serverId) {
+        const websitesRes = await page.request.get(`/api/panel/servers/${encodeURIComponent(serverId)}/websites`, { headers });
+        const websitesList = (await websitesRes.json().catch(() => ({})))?.data?.websites || [];
+        for (const w of websitesList) {
+          const resourcesRes = await page.request.get(
+            `/api/panel/servers/${encodeURIComponent(serverId)}/websites/${encodeURIComponent(w.id)}/database-resources`,
+            { headers }
+          );
+          if (resourcesRes.status() === 200) {
+            const resourcesJson = await resourcesRes.json();
+            const databases = resourcesJson.data?.databases || [];
+            const targets = databases.filter((d) => d.binding?.databaseName?.startsWith(`tdb04_a${agentN}_`));
+
+            for (const matched of targets) {
+              const credential = matched.credential;
+              if (credential) {
+                const prevRes = await page.request.get(
+                  `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credential.id)}/delete-preview`,
+                  { headers }
+                );
+                if (prevRes.status() === 200) {
+                  const prevJson = await prevRes.json();
+                  const preview = prevJson.data;
+                  if (preview) {
+                    const qRes = await page.request.post(
+                      `/api/panel/servers/${encodeURIComponent(serverId)}/database-credentials/${encodeURIComponent(credential.id)}/delete`,
+                      {
+                        headers,
+                        data: {
+                          expectedCredentialRevision: preview.expectedCredentialRevision,
+                          expectedBindingRevision: preview.expectedBindingRevision,
+                          expectedDesiredStateSha256: preview.desiredStateSha256,
+                          confirmation: preview.confirmation,
+                        },
+                      }
+                    );
+                    if (qRes.status() === 202) {
+                      const qJson = await qRes.json();
+                      const jobId = qJson.data?.job?.id;
+                      if (jobId) {
+                        for (let i = 0; i < 30; i++) {
+                          await new Promise((r) => setTimeout(r, 1000));
+                          const jRes = await page.request.get(`/api/panel/jobs/${encodeURIComponent(jobId)}`, { headers });
+                          if (jRes.status() === 200) {
+                            const jJson = await jRes.json();
+                            if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
             }
-            const confirmBtn = confirmDialog.locator('button[type="submit"], button:has-text("Sil")');
-            await confirmBtn.click();
-            await expect(confirmDialog).toHaveCount(0, { timeout: 15000 });
           }
         }
       }
     } catch (cleanupErr) {
       console.warn('DB-04 cleanup error:', cleanupErr.message);
     } finally {
-      await page.close().catch(() => {});
+      await context.close().catch(() => {});
     }
   });
 
@@ -65,6 +113,32 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
   });
 
   test('mutlu yol: Veritabanları ekranından phpMyAdmin SSO oturum açma, veritabanına erişim ve tablo listeleme', async ({ page, context }) => {
+    // 0. phpMyAdmin servis köprüsü ve havuzunun hazır/güncel olduğundan emin ol
+    const serversRes = await page.request.get('/api/panel/servers');
+    if (serversRes.status() === 200) {
+      const serversJson = await serversRes.json();
+      const sId = serversJson.data?.servers?.[0]?.id || serversJson.data?.[0]?.id;
+      if (sId) {
+        const installRes = await page.request.post(`/api/panel/servers/${encodeURIComponent(sId)}/services/phpmyadmin/install`, {
+          data: { confirmation: 'install:phpmyadmin' },
+        });
+        if (installRes.status() === 202) {
+          const installJson = await installRes.json();
+          const jobId = installJson.data?.id;
+          if (jobId) {
+            for (let i = 0; i < 40; i++) {
+              await new Promise((r) => setTimeout(r, 1000));
+              const jRes = await page.request.get(`/api/panel/jobs/${encodeURIComponent(jobId)}`);
+              if (jRes.status() === 200) {
+                const jJson = await jRes.json();
+                if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+              }
+            }
+          }
+        }
+      }
+    }
+
     await page.goto('/databases');
     await expect(page.locator('h1:has-text("Veritabanları")')).toBeVisible({ timeout: 15000 });
 
@@ -86,6 +160,7 @@ test.describe('DB-04 phpMyAdmin geçişi ve oturum/yetki izolasyonu', () => {
       for (const opt of options) {
         const val = await opt.getAttribute('value');
         if (val) {
+          createdWebsiteId = val;
           await siteSelect.selectOption(val);
           break;
         }
