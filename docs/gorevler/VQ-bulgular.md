@@ -926,3 +926,11 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** Site kurulumu artık sunucuda tamamlandığı için (T864) aynı `describe` içindeki site sertifikasını da alıyor; "hatalı girdi ve sınır durumu: SSL olmadan HTTPS uyarısı" testi sertifikasız site varsaydığından uyarıyı bulamıyor. Bu senaryo için sertifikasız bir durum kur (ör. HTTPS kapalı oluşturulan ayrı bir test sitesi) ve uyarıyı orada doğrula; form sınır değer kontrolü aynı kalsın. Mock yok; testin oluşturduğu siteyi panelden temizle.
 - **Kabul:** WEB-05 `.28`'de iki kez art arda 2/2 geçiyor; test sonunda `tweb05` öneğiyle site kalmıyor.
+
+### T876 · Askıdan geri açılan alan adının nginx ayarı kayıttan sapıyor
+- **Bağımlı:** T872
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/domain-suspension-runtime.js`, `e2e/ozellik/web-06.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** 06-11'de WEB-06'nın (askıya al / geri aç / sil) bıraktığı 6 sitenin ve WEB-05'in bir sitesinin alan adı `active` görünürken askıya alma önizlemesi `domain_nginx_active_state_drift` veriyordu; silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile durdu. Panelin `stage` + `activate` adımları ayarı düzeltti ve siteler silinebildi. Tekrar üret: hangi adım (geri açma, tercih edilen alan adı değişikliği) nginx ayarını kayıttaki özetle uyumsuz bırakıyor. Düzelt; WEB-06 testinin sonunda sitenin panelden silinebildiğini doğrulat.
+- **Kabul:** Askıya al → geri aç → sil akışı `.28`'de onarım adımı olmadan tamamlanıyor; birim testi var.
