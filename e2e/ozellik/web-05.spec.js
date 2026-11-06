@@ -20,14 +20,44 @@ function checkHttp(host) {
   });
 }
 
+async function deleteDomain(page, domainId, domainName) {
+  if (!domainId) return;
+  try {
+    await page.goto(`/websites/${encodeURIComponent(domainId)}/settings`);
+    const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
+    if (await removalSection.isVisible({ timeout: 5000 }).catch(() => false)) {
+      const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
+      if (await deleteBtn.isVisible().catch(() => false)) {
+        await deleteBtn.click();
+        const confirmDialog = page.locator('.ws-modal, [role="dialog"]').filter({ hasText: 'Siteyi kalıcı olarak sil' });
+        if (await confirmDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
+          const confirmInput = confirmDialog.locator('input');
+          if (await confirmInput.isVisible().catch(() => false)) {
+            await confirmInput.fill(domainName);
+          }
+          const confirmBtn = confirmDialog.locator('button', { hasText: 'Silme işlemini başlat' });
+          await confirmBtn.click();
+          await page.waitForURL(/\/websites$/, { timeout: 15000 }).catch(() => {});
+        }
+      }
+    }
+  } catch (err) {
+    console.error(`Clean-up failed for domain ${domainId} (${domainName}):`, err.message);
+  }
+}
+
 test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmeler', () => {
-  test.setTimeout(120000);
+  test.setTimeout(180000);
   const agentN = process.env.AGENT_N || '3';
   const prefix = `tweb05-a${agentN}-${Date.now().toString(36)}`;
   const parentSuffix = 'webrich.news';
   const primaryDomain = `${prefix}.${parentSuffix}`;
   const wwwAlias = `www.${primaryDomain}`;
   let createdDomainId = null;
+
+  const noSslPrefix = `tweb05nossl-a${agentN}-${Date.now().toString(36)}`;
+  const noSslDomain = `${noSslPrefix}.${parentSuffix}`;
+  let noSslDomainId = null;
 
   test.beforeEach(async ({ page }) => {
     page.on('console', msg => console.log(`[PAGE LOG] ${msg.text()}`));
@@ -36,35 +66,21 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
   });
 
   test.afterAll(async ({ browser }) => {
-    if (!createdDomainId) return;
     try {
       const page = await browser.newPage({ ignoreHTTPSErrors: true });
       try {
         await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
-        await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/settings`);
-
-        const removalSection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Siteyi sil' }) });
-        if (await removalSection.isVisible({ timeout: 5000 }).catch(() => false)) {
-          const deleteBtn = removalSection.locator('button', { hasText: 'Siteyi sil…' });
-          if (await deleteBtn.isVisible().catch(() => false)) {
-            await deleteBtn.click();
-            const confirmDialog = page.locator('.ws-modal, [role="dialog"]').filter({ hasText: 'Siteyi kalıcı olarak sil' });
-            if (await confirmDialog.isVisible({ timeout: 5000 }).catch(() => false)) {
-              const confirmInput = confirmDialog.locator('input');
-              if (await confirmInput.isVisible().catch(() => false)) {
-                await confirmInput.fill(primaryDomain);
-              }
-              const confirmBtn = confirmDialog.locator('button', { hasText: 'Silme işlemini başlat' });
-              await confirmBtn.click();
-              await page.waitForURL(/\/websites$/, { timeout: 15000 }).catch(() => {});
-            }
-          }
+        if (createdDomainId) {
+          await deleteDomain(page, createdDomainId, primaryDomain);
+        }
+        if (noSslDomainId) {
+          await deleteDomain(page, noSslDomainId, noSslDomain);
         }
       } finally {
         await page.close().catch(() => {});
       }
     } catch (err) {
-      console.error('Clean-up failed for domain:', createdDomainId, err.message);
+      console.error('Clean-up failed in afterAll:', err.message);
     }
   });
 
@@ -124,13 +140,29 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
     console.log(`Created domain ID: ${createdDomainId}`);
 
     // Kurulum sunucuda sürerken alan adı ayarları değiştirilemez (T868); bitmesini bekle.
-    const domainRecord = await (await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`)).json();
-    const websiteId = (domainRecord.data ?? domainRecord).websiteId;
-    expect(websiteId).toBeTruthy();
+    let websiteId = null;
     await expect.poll(async () => {
-      const latest = await (await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`)).json().catch(() => null);
-      const operation = latest?.data?.operation ?? latest?.data ?? null;
-      return operation?.ready === true;
+      try {
+        const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`);
+        if (!res.ok()) return null;
+        const domainRecord = await res.json();
+        websiteId = (domainRecord.data ?? domainRecord).websiteId;
+        return websiteId;
+      } catch {
+        return null;
+      }
+    }, { timeout: 30000, intervals: [1000] }).toBeTruthy();
+
+    await expect.poll(async () => {
+      try {
+        const res = await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`);
+        if (!res.ok()) return false;
+        const latest = await res.json();
+        const operation = latest?.data?.operation ?? latest?.data ?? null;
+        return operation?.ready === true;
+      } catch {
+        return false;
+      }
     }, { timeout: 120000, intervals: [2000] }).toBe(true);
 
     // 2. Barındırma (Hosting) Ayarları sayfasına git
@@ -186,9 +218,93 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
   });
 
   test('hatalı girdi ve sınır durumu: SSL olmadan HTTPS uyarısı ve form sınır değer kontrolü', async ({ page }) => {
-    // Hazırda oluşturulan domain üzerinden barındırma sayfasına git
-    expect(createdDomainId).toBeTruthy();
-    await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
+    // 1. Sertifikasız / HTTPS kapalı ayrı bir test sitesi oluştur
+    await page.goto('/websites/new');
+    await expect(page.locator('h1', { hasText: 'Web sitesi ekle' })).toBeVisible({ timeout: 15000 });
+
+    // Adım 1: Alan adı
+    const domainInput = page.locator('label:has-text("Alan adı") input');
+    await expect(domainInput).toBeVisible();
+    await domainInput.fill(noSslDomain);
+
+    const wwwSelect = page.locator('label:has-text("www davranışı") select');
+    await expect(wwwSelect).toBeVisible();
+    await wwwSelect.selectOption('none');
+
+    await page.locator('button[type="submit"]:has-text("Devam et")').click();
+
+    // Adım 2: Statik dosya yükleme hazır ayarını seç
+    const step2Heading = page.locator('h3:has-text("Barındırma türü")');
+    await expect(step2Heading).toBeVisible({ timeout: 10000 });
+
+    const sourceSelect = page.locator('label:has-text("Site türü") select');
+    await sourceSelect.selectOption('new_static_upload');
+
+    await page.locator('button[type="submit"]:has-text("Devam et")').click();
+
+    // Adım 3: HTTPS kapalı (Şimdilik HTTP) seç
+    const summarySection = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Son kontrol ve kurulum' }) });
+    await expect(summarySection).toBeVisible({ timeout: 10000 });
+    await expect(summarySection.locator('dd', { hasText: noSslDomain })).toBeVisible();
+
+    // Posta / Webmail kutusunun işaretini kaldır
+    const mailCheck = page.locator('label.ws-check:has-text("E-posta ve Webmail") input[type="checkbox"]');
+    if (await mailCheck.isVisible() && await mailCheck.isChecked()) {
+      await mailCheck.uncheck();
+    }
+
+    // HTTPS / Sertifika yönetimi: Şimdilik HTTP (off)
+    const httpsSelect = page.locator('select[aria-label="Sertifika yönetimi"]');
+    await expect(httpsSelect).toBeVisible();
+    await httpsSelect.selectOption('off');
+
+    const submitBtn = page.locator('button[type="submit"]:has-text("Siteyi oluştur")');
+    await submitBtn.click();
+
+    // Sonuç ekranını bekle
+    const resultElement = page.locator('.ws-site-create-result');
+    await expect(resultElement).toBeVisible({ timeout: 60000 });
+    await expect(resultElement).toContainText(noSslDomain);
+
+    // Domain ID'sini yakala
+    const manageLink = resultElement.locator('a[href^="/websites/"]').first();
+    await expect(manageLink).toBeVisible();
+    const href = await manageLink.getAttribute('href');
+    const match = href.match(/\/websites\/([^/?#]+)/);
+    expect(match).toBeTruthy();
+    noSslDomainId = match[1];
+    console.log(`Created no-SSL domain ID: ${noSslDomainId}`);
+
+    // Kurulum sunucuda sürerken alan adı ayarları değiştirilemez; bitmesini bekle.
+    let websiteId = null;
+    await expect.poll(async () => {
+      try {
+        const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(noSslDomainId)}`);
+        if (!res.ok()) return null;
+        const domainRecord = await res.json();
+        websiteId = (domainRecord.data ?? domainRecord).websiteId;
+        return websiteId;
+      } catch {
+        return null;
+      }
+    }, { timeout: 30000, intervals: [1000] }).toBeTruthy();
+
+    if (websiteId) {
+      await expect.poll(async () => {
+        try {
+          const res = await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`);
+          if (!res.ok()) return false;
+          const latest = await res.json();
+          const operation = latest?.data?.operation ?? latest?.data ?? null;
+          return operation?.ready === true;
+        } catch {
+          return false;
+        }
+      }, { timeout: 120000, intervals: [2000] }).toBe(true);
+    }
+
+    // Barındırma sayfasına git
+    await page.goto(`/websites/${encodeURIComponent(noSslDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 
     // 1. HTTP → HTTPS onay kutusu ve henüz SSL bağlanmamış managed HTTPS uyarısı kontrolü
@@ -228,5 +344,9 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
 
     // Değeri temizle / geçerli hale getir
     await bodySizeInput.fill('');
+
+    // Test sonu temizliği: noSslDomainId'yi panel üzerinden sil
+    await deleteDomain(page, noSslDomainId, noSslDomain);
+    noSslDomainId = null;
   });
 });
