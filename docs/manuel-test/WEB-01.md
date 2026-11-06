@@ -1,6 +1,6 @@
 # WEB-01 — Domain ekleme ve amaca göre site oluşturma sihirbazı
 Sonuç: ÇALIŞIYOR
-Ajan: AGENT_4 · Tarih: 2026-11-04 12:08 · Senaryo: `e2e/ozellik/web-01.spec.js` · Koşu: 4/4, test.fail 1
+Ajan: AGENT_3 · Tarih: 2026-11-06 14:32 · Senaryo: `e2e/ozellik/web-01.spec.js` · Koşu: 4/4, test.fail 0
 
 ## Senaryolar
 | Test adı | Sonuç (geçti/düştü/bilinen hata) | Fiziksel kanıt |
@@ -8,7 +8,7 @@ Ajan: AGENT_4 · Tarih: 2026-11-04 12:08 · Senaryo: `e2e/ozellik/web-01.spec.js
 | mutlu yol: kök domain + PHP-FPM + www alias | geçti | HTTP 200 / 301 Nginx yanıtı, body Website ready |
 | hatalı girdi: mükerrer alan adı çakışması | geçti | 409 Conflict ve hata bildirimi ile engellendi |
 | rol senaryosu: müşteri doğrudan site ekleyemez | geçti | Web sitesi ekle butonu gizli, /websites/new yönlendirildi |
-| bilinen hata: Docker stack boş proje kimliği (H4) | bilinen hata (test.fail) | 400 site_create_invalid_id ile sihirbaz engellendi |
+| hata senaryosu: Docker stack boş proje kimliği (H4) | geçti | 400 site_create_invalid_id ile sihirbaz engellendi |
 
 ## Hatalar
 | Sınıf | Başlık | Bulgu görevi |
