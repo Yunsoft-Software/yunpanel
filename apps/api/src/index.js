@@ -148,6 +148,7 @@ import { createWebsiteRemovalOperationRegistry } from './website-removal-operati
 import { createWebsiteRemovalDatabaseCleanup } from './website-removal-database-cleanup.js';
 import { createWebsiteRemovalRuntime } from './website-removal-runtime.js';
 import { createWebsiteRemovalWorker } from './website-removal-worker.js';
+import { createWebsiteProvisioningWorker } from './website-provisioning-worker.js';
 import { createWebsiteRemovalCleanupAdapters } from './website-removal-cleanup-adapters.js';
 import { createWebsiteRemovalPreview } from './website-removal-plan.js';
 import { previewResourceImpact } from './resource-impact.js';
@@ -1042,6 +1043,11 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
 const websiteRemovalWorker = websiteRemovalRuntime ? createWebsiteRemovalWorker({ registry: websiteRemovalOperationRegistry,
   runtime: websiteRemovalRuntime, onError: failure => console.error(`[yunpanel-api] removal worker: ${failure.code}`) }) : null;
+const websiteProvisioningWorker = createWebsiteProvisioningWorker({
+  registry: websiteProvisioningRuntime.registry, runtime: websiteProvisioningRuntime, websiteRegistry,
+  removalRegistry: websiteRemovalOperationRegistry,
+  onError: failure => console.error(`[yunpanel-api] provisioning worker: ${failure.code} ${failure.operationId ?? ''}`.trim()),
+});
 const dockerComposeRuntime = await createDockerComposeRuntime({
   env: process.env,
   serverRegistry: registry,
@@ -1459,6 +1465,7 @@ const renewalScheduler = startCertificateRenewalScheduler({
 });
 localRuntimeInstance = localRuntime;
 websiteRemovalWorker?.start();
+websiteProvisioningWorker.start();
 if (websiteBackupOperationService && localRuntime) {
   backupScheduler = createWebsiteBackupScheduler({ scheduleRegistry: backupScheduleRegistry, operationService: websiteBackupOperationService,
     authorizeSchedule: authorizeWebsiteBackupSchedule, serverId: localServerId,
@@ -1548,6 +1555,7 @@ async function shutdown(signal) {
   systemWatchdogService.stop();
   renewalScheduler.stop();
   if (websiteRemovalWorker) await websiteRemovalWorker.stop();
+  await websiteProvisioningWorker.stop();
   if (backupScheduler) {
     try { await backupScheduler.stop(); }
     catch { console.error('[yunpanel-api] backup scheduler shutdown failed'); }
