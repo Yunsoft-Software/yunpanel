@@ -833,3 +833,18 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** Bu testlerin temizlik adımı Docker konteyner, volume ve Compose projelerini `.28`'de doğrudan (`docker rm`, `docker volume rm`, `docker compose down`) siliyor; panel kaydı kalıyor ve panelin kaldırma akışı sonra bunu tutarsızlık sayıyor. Testin oluşturduğu her projeyi panelin kendi kaldırma akışıyla sil (arayüzden ya da panel API'si); doğrudan Docker silmesini kaldır. Bittiğinde `scripts/validate-repository.mjs` içindeki `liveTestWriteRules` listesine `runSsh` ile `docker (rm|volume rm|compose … down)` kuralını ekle. Site testlerindeki aynı sorun 06-11'de giderildi.
 - **Kabul:** Altı test `.28`'de iki kez art arda geçiyor; sonrasında panelde ve `docker ps -a`/`docker volume ls` çıktısında testten kalan proje yok; `npm run lint` yeni kuralla geçiyor.
+
+### T864 · Site oluşturma yarıda kalıyor: kurulum adımları ilerlemiyor
+- **Bağımlı:** —
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/web/src/workspace/SiteCreateResult.jsx`, `apps/web/src/workspace/provisioning-client.js`, `apps/web/src/workspace/provisioning-recovery.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** 06-11 tam e2e koşusunda `.28`'de açılan 42 site kurulumundan yaklaşık yarısı bir sunucu adımında (`unix_identity`, `elfinder`, `static_runtime`, `website_database`, `tls_activation`) `pending` kalıp hiç ilerlemedi; `passenger_health` 4 sitede `blocked`. Kurulum adımlarını tarayıcıdaki sonuç ekranı ilerletiyor; oluşturma isteğinin cevabı belirsiz gelince ekran "Sunucudaki sonuç henüz doğrulanamadı" deyip duruyor, sayfa kapanınca da kurulum orada kalıyor. Sonuç: sistem kullanıcısı oluşmuyor (RUN-01), site 502 veriyor (WEB-01, WEB-08), WEB-05/RUN-05 site kaydını bulamıyor. Önce tekrar üret: oluşturma cevabı neden belirsiz geliyor, yarım kalan kurulum kullanıcıya nasıl görünüyor ve nereden sürdürülebiliyor.
+- **Kabul:** Bir site oluşturulup sonuç sayfası kapatılsa bile kurulum ya tamamlanıyor ya da panelde sürdürülebilir/geri alınabilir görünüyor; WEB-01, WEB-05, WEB-08, RUN-01, RUN-05 `.28`'de geçiyor.
+
+### T865 · Eski kök e2e testleri güncel ekranla uyuşmuyor
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/01-auth-users.spec.js`, `e2e/02-website-creation.spec.js`, `e2e/03-website-workspace-tabs.spec.js`, `e2e/04-native-file-manager.spec.js`, `e2e/05-native-terminal.spec.js`, `e2e/06-authoritative-dns.spec.js`, `e2e/06-logs-and-audit.spec.js`, `e2e/07-ssl-certificates.spec.js`, `e2e/08-mail-webmail.spec.js`, `e2e/08-server-settings-jobs.spec.js`, `e2e/09-ai-assistant.spec.js`, `e2e/09-databases.spec.js`, `e2e/10-docker-compose.spec.js`, `e2e/11-app-tools.spec.js`, `e2e/12-domain-operations.spec.js`, `e2e/13-system-services.spec.js`, `e2e/14-logs-audit-jobs.spec.js`, `e2e/15-ai-assistant.spec.js`, `e2e/16-ui-preferences.spec.js`, `e2e/panel.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** 06-11 koşusunda bu 80 testin 52'si düştü; çoğu artık olmayan seçicileri arıyor (ör. `table.ws-table`). Her dosya için: `e2e/ozellik` aynı davranışı zaten test ediyorsa dosyayı sil ve rapora hangi `ozellik` testinin kapsadığını yaz; etmiyorsa güncel ekrana göre düzelt. Mock kullanılmaz; panelin arkasından sunucuda silme yapılmaz.
+- **Kabul:** Kalan kök testleri `.28`'de geçiyor; silinen her dosyanın karşılığı raporda yazılı; `npm run lint` geçiyor.
