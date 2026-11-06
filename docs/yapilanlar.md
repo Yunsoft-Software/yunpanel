@@ -2,6 +2,12 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 06-11-2026
+- **Hata** — Veritabanı olan siteler panelden silinemiyordu (silme adımı site kullanıcısını yanlış yerde arıyordu); düzeltildi, `.28`'e henüz kurulmadı.
+- **Hata** — Silme planı onaylandıktan sonra siteye bağlanan veritabanı artık silmeyi durduruyor; site kaydı silinip bağlantı sahipsiz kalmıyor.
+- **Güvenlik** — Canlı testlerin hata dosyalarına yazılan giriş parolası artık gizleniyor (T827).
+- **Altyapı** — Canlı testler artık panelin arkasından sunucuda dosya/kullanıcı silmiyor (lint engelliyor); tam canlı test rutin doğrulamadan çıktı, yalnız etkilenen alan test ediliyor. `.28`'de 103 test sitesi panelden temizlendi.
+
 ## 04-11-2026
 - **Hata** — Kurulumu hiç başlamamış site, sunucuda kullanıcısı olmadığı doğrulanınca silinebiliyor; dosyası kalan siteyi "temizlendi" sayan önceki düzeltme geri alındı (T861). `.28`'de 24 siteyle doğrulandı.
 
