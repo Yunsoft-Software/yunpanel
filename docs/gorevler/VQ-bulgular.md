@@ -849,3 +849,17 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** 06-11 koşusunda bu 80 testin 52'si düştü; çoğu artık olmayan seçicileri arıyor (ör. `table.ws-table`). Her dosya için: `e2e/ozellik` aynı davranışı zaten test ediyorsa dosyayı sil ve rapora hangi `ozellik` testinin kapsadığını yaz; etmiyorsa güncel ekrana göre düzelt. Mock kullanılmaz; panelin arkasından sunucuda silme yapılmaz.
 - **Kabul:** Kalan kök testleri `.28`'de geçiyor; silinen her dosyanın karşılığı raporda yazılı; `npm run lint` geçiyor.
+
+### T866 · RUN-05: Node.js site sihirbazı oluşturma isteği göndermiyor
+- **Bağımlı:** T128
+- **Dosyalar:** `e2e/ozellik/run-05.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** RUN-05 mutlu yolunda "Siteyi oluştur"a basıldıktan sonra `.28` erişim kaydında hiç `POST /api/panel/sites` yok; site oluşmuyor ve test siteyi listede bulamıyor. Önce tekrar üret: sihirbaz mı isteği göndermiyor (ürün hatası) yoksa test yanlış düğmeye/adıma mı basıyor. Ürün hatasıysa düzeltmeyi senior'a bulgu olarak yaz; test hatasıysa testi düzelt. Site listesinde arama kutusunu kullan, ilk sayfaya güvenme.
+- **Kabul:** RUN-05 `.28`'de iki kez art arda geçiyor ve oluşturduğu siteyi panelden siliyor.
+
+### T867 · WEB-01 H4 testi artık beklenmedik şekilde geçiyor
+- **Bağımlı:** T846
+- **Dosyalar:** `e2e/ozellik/web-01.spec.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** "bilinen hata: Docker / Compose Proxy … boş proje kimliği 400 (H4)" testi `test.fail` ile işaretli, ama 06-11'de site boş proje kimliğiyle oluştu ve kurulumu tamamlandı; test bu yüzden kırmızı. Panelde boş proje kimliğiyle oluşan Docker sitesinin ne yaptığını incele (hangi projeye bağlandı, çalışıyor mu). Doğru davranışsa `test.fail`'i kaldırıp beklenen sonucu doğrula ve oluşturduğu siteyi temizle; yanlışsa senior'a bulgu yaz.
+- **Kabul:** WEB-01 `.28`'de geçiyor; bu testin oluşturduğu site test sonunda panelden siliniyor.
