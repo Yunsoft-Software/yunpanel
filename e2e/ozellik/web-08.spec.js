@@ -1,6 +1,21 @@
+import http from 'node:http';
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 import { externalSiteUrl } from '../../apps/web/src/workspace/site-model.js';
+
+// fetch() cannot set Host, so it would hit the server's default vhost; ask the site's own vhost directly.
+function vhostGet(host) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({ hostname: '157.180.11.28', port: 80, path: '/', method: 'GET', headers: { Host: host }, timeout: 10000 }, (response) => {
+      let body = '';
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.on('timeout', () => request.destroy(new Error('timeout')));
+    request.on('error', reject);
+    request.end();
+  });
+}
 
 test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıları', () => {
   test.setTimeout(180000);
@@ -157,14 +172,14 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
     expect(detailHref).toBe(cardHref);
 
     // 4. Fiziksel Sonuç Kanıtı: Canlı Nginx vhost HTTP yanıtı
-    const activeResponse = await fetch('http://157.180.11.28/', {
-      headers: { Host: primaryDomain },
-      redirect: 'manual',
-    });
+    // Kurulum sonuç ekranından sonra sunucuda tamamlanır; vhost'u yoklamadan önce bitmesini bekle.
+    // TLS etkinleştirme nginx'i yeniden yüklerken bağlantı kapanabilir; o deneme 0 sayılır.
+    await expect.poll(async () => (await vhostGet(primaryDomain).catch(() => ({ status: 0 }))).status,
+      { timeout: 120000, intervals: [2000] }).toBeLessThan(400);
+    const activeResponse = await vhostGet(primaryDomain);
     expect([200, 301, 302]).toContain(activeResponse.status);
     if (activeResponse.status === 200) {
-      const body = await activeResponse.text();
-      expect(body.length).toBeGreaterThan(0);
+      expect(activeResponse.body.length).toBeGreaterThan(0);
     }
   });
 
@@ -201,10 +216,7 @@ test.describe.serial('WEB-08 Önizleme, geçici domain ve site açma bağlantıl
       await expect(siteCard.locator('a, button').filter({ hasText: 'Yayını Etkinleştir' })).toBeVisible({ timeout: 10000 });
 
       // Fiziksel Sonuç: Askıya alınan sitede vhost deaktive edilir / pasife alınır
-      const suspendedResponse = await fetch('http://157.180.11.28/', {
-        headers: { Host: primaryDomain },
-        redirect: 'manual',
-      });
+      const suspendedResponse = await vhostGet(primaryDomain);
       expect([301, 302, 404, 502, 503]).toContain(suspendedResponse.status);
 
       // Yeniden etkinleştir ve normale dön

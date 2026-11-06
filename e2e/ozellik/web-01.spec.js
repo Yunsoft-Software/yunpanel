@@ -251,6 +251,8 @@ test.describe.serial('WEB-01 Domain ekleme ve amaca göre site oluşturma sihirb
     expect(createdDomainId).toBeTruthy();
 
     // Fiziksel doğrulama 1: Nginx canlı HTTP port 80 yanıtı (HTTP 200 veya 301 yönlendirmesi)
+    // Kurulum sonuç ekranından sonra sunucuda tamamlanır; vhost'u yoklamadan önce bitmesini bekle.
+    await expect.poll(async () => (await checkHttp(primaryDomain, '/')).status, { timeout: 120000, intervals: [2000] }).toBeLessThan(400);
     const resPrimary = await checkHttp(primaryDomain, '/');
     expect([200, 301]).toContain(resPrimary.status);
     expect(resPrimary.server.toLowerCase()).toContain('nginx');
