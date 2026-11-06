@@ -2662,7 +2662,9 @@ test('stale control-plane continuation is rejected before Domain mutation', asyn
   assert.deepEqual(domains.counts(), { detachCalls: 0, finalizeCalls: 0 });
 });
 
-test('routing step suspends a draft Domain directly through domainRegistry.markSuspended', async () => {
+test('routing step suspends an unpublished draft or failed Domain directly through domainRegistry.markSuspended', async () => {
+  // A Domain whose first staging failed was never written to the host, so it is removed like a draft.
+  for (const [state, lastError] of [['draft', null], ['error', 'local_operation_failed']]) {
   const registry = createRegistry();
   const draftRecord = {
     id: 'domain-1',
@@ -2671,7 +2673,7 @@ test('routing step suspends a draft Domain directly through domainRegistry.markS
     websiteId: 'website-1',
     certificateId: null,
     parentDomainId: null,
-    state: 'draft',
+    state,
     desiredRevision: 1,
     stagedRevision: 0,
     appliedRevision: 0,
@@ -2679,7 +2681,7 @@ test('routing step suspends a draft Domain directly through domainRegistry.markS
     appliedPrimaryDomain: null,
     suspendedChecksum: null,
     suspensionOperationId: null,
-    lastError: null,
+    lastError,
   };
   const { domainRemovalPlanInternals } = await import('../src/domain-removal-plan.js');
   const draftChecksum = domainRemovalPlanInternals.draftDomainChecksum(draftRecord);
@@ -2688,7 +2690,7 @@ test('routing step suspends a draft Domain directly through domainRegistry.markS
     ...base,
     domain: {
       ...base.domain,
-      state: 'draft',
+      state,
       desiredRevision: 1,
       checksum: draftChecksum,
       suspensionOperationId: null,
@@ -2750,6 +2752,7 @@ test('routing step suspends a draft Domain directly through domainRegistry.markS
           suspendedChecksum: csum,
           suspensionOperationId: operationId,
           suspendedAt: '2026-09-18T21:00:00.000Z',
+          lastError: null,
         };
         return current;
       },
@@ -2763,5 +2766,6 @@ test('routing step suspends a draft Domain directly through domainRegistry.markS
   });
   assert.equal(started.steps[0].status, 'succeeded');
   assert.equal(started.steps[0].result.referenceId, `domain-remove-suspend:${started.id}`);
+}
 });
 

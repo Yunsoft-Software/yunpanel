@@ -308,3 +308,29 @@ test('active or resumed Domain cannot be finalized as removed', async () => {
       && error.code === 'domain_removal_suspension_evidence_invalid',
   );
 });
+
+test('a Domain whose first staging failed is suspended for removal like a draft; a published one is not', async () => {
+  const registry = createDomainRegistry();
+  const created = await registry.createDomain({
+    domainId, serverId: 'local', websiteId: null, primaryDomain: 'example.com', parentDomainId: null,
+    targetType: 'proxy', target: { upstreamHost: '127.0.0.1', upstreamPort: 3300 }, httpsMode: 'off',
+  });
+  await registry.markFailed(created.id, 'local_operation_failed');
+  const suspended = await registry.markSuspended(created.id, {
+    expectedRevision: created.desiredRevision, checksum, operationId, allowDraft: true,
+  });
+  assert.equal(suspended.state, 'suspended');
+  assert.equal(suspended.lastError, null);
+
+  const published = createDomainRegistry();
+  const live = await published.createDomain({
+    domainId: childId, serverId: 'local', websiteId: null, primaryDomain: 'live.example.com', parentDomainId: null,
+    targetType: 'proxy', target: { upstreamHost: '127.0.0.1', upstreamPort: 3301 }, httpsMode: 'off',
+  });
+  await published.markStaged(live.id, { checksum, configName: 'yunpanel-live.example.com.conf' });
+  await published.markApplied(live.id, { checksum });
+  await published.markFailed(live.id, 'local_operation_failed');
+  await assert.rejects(() => published.markSuspended(live.id, {
+    expectedRevision: live.desiredRevision, checksum, operationId, allowDraft: true,
+  }), (error) => error instanceof DomainRegistryError);
+});

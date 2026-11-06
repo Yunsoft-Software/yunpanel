@@ -228,9 +228,10 @@ function domainSnapshot(domain) {
     && domain.appliedRevision === domain.desiredRevision
     && domain.appliedPrimaryDomain === domain.primaryDomain
   );
+  // A Domain whose first staging failed ('error', never applied) has nothing on the host either.
   const isStableDraft = Boolean(
     domain
-    && domain.state === 'draft'
+    && (domain.state === 'draft' || (domain.state === 'error' && domain.appliedRevision === 0))
     && Number.isSafeInteger(domain.desiredRevision) && domain.desiredRevision >= 1
     && domain.stagedRevision === 0
     && (domain.stagedChecksum === null || domain.stagedChecksum === undefined)

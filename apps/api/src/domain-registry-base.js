@@ -1127,13 +1127,16 @@ export function createDomainRegistry({
       }
       return publicDomain(domain);
     }
-    if (domain.state === 'draft' && allowDraft === true) {
+    // A failed first staging never reached the host, so it is suspended for removal like a draft.
+    const unpublishedFailure = domain.state === 'error' && domain.appliedRevision === 0
+      && (domain.appliedPrimaryDomain ?? null) === null;
+    if ((domain.state === 'draft' || unpublishedFailure) && allowDraft === true) {
       if (!Number.isSafeInteger(expectedRevision)
         || expectedRevision < 1
         || domain.desiredRevision !== expectedRevision
         || domain.stagedRevision !== 0
         || domain.stagedChecksum !== null
-        || domain.lastError !== null) {
+        || (domain.state === 'draft' && domain.lastError !== null)) {
         throw new DomainRegistryError(
           'domain_suspension_state_drift',
           'Draft Domain state does not match expected removal suspension revision',
@@ -1149,6 +1152,7 @@ export function createDomainRegistry({
       domain.suspensionOperationId = expectedOperationId;
       domain.suspendedAt = timestamp;
       domain.suspendedChecksum = expectedChecksum;
+      domain.lastError = null;
       domain.updatedAt = timestamp;
       await persist();
       return publicDomain(domain);

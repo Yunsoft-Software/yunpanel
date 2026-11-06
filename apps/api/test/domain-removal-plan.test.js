@@ -748,3 +748,20 @@ test('plans removal for an unpublished draft Domain with deterministic draft che
   assert.match(preview.domain.checksum, /^[a-f0-9]{64}$/);
 });
 
+test('a Domain whose first staging failed is planned like a draft, but a once-published failed Domain is not', () => {
+  const failed = (overrides) => domain({
+    state: 'error', desiredRevision: 2, stagedRevision: 0, appliedRevision: 0, stagedChecksum: null,
+    appliedPrimaryDomain: null, suspendedChecksum: null, suspensionOperationId: null, ...overrides,
+  });
+  const plan = (current) => {
+    const currentImpact = impact(current);
+    currentImpact.dependencies = { ...currentImpact.dependencies, childDomains: [],
+      authoritativeDns: { status: 'available', items: [noZoneDnsReference(current.id, '5'.repeat(64))] } };
+    return createDomainRemovalPreview({ domain: current, impact: currentImpact });
+  };
+  const preview = plan(failed());
+  assert.equal(preview.readyToStart, true);
+  assert.equal(preview.domain.state, 'error');
+  assert.throws(() => plan(failed({ appliedRevision: 1, appliedPrimaryDomain: 'example.com' })),
+    (error) => error instanceof DomainRemovalPlanError && error.code === 'domain_removal_domain_not_stable');
+});

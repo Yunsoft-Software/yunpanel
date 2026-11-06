@@ -2243,7 +2243,7 @@ export function createDomainRemovalRuntime({
           return Object.freeze({ __directSuspendedDomain: currentDomain });
         }
       }
-      if (preview.domain?.state === 'draft') {
+      if (['draft', 'error'].includes(preview.domain?.state)) {
         let draftCandidate = preview.domain;
         if (typeof domainRegistry?.getDomain === 'function') {
           try {
