@@ -28,10 +28,6 @@
       {
         "name": "build",
         "cmd": "npm run build"
-      },
-      {
-        "name": "e2e-28",
-        "cmd": "bash orkestra/lock.sh acquire sunucu-28-genel VERIFY && { npx playwright test; rc=$?; bash orkestra/lock.sh release sunucu-28-genel VERIFY; exit $rc; }"
       }
     ]
   },

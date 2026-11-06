@@ -13,7 +13,8 @@
 
 ## Doğrulama
 - **Görev teslimi (zorunlu):** `npm run lint` + değiştirdiğin alanın birim/API testleri (`npm test --workspace <ilgili>` veya ilgili test dosyası). Görevin `Kabul` satırı ayrıca ne istiyorsa.
-- **Dalga sonu / tam:** `python3 orkestra/orchestrator.py verify` → lint, tüm testler (~100 sn), `npm run build` ve `sunucu-28` kilidiyle Playwright e2e. agents.md 25 Ekim §9'daki "toplu koşturma" bu adımdır. Kullanıcıya "tamamlandı" yalnız bu geçtikten sonra söylenir.
+- **Dalga sonu / tam:** `python3 orkestra/orchestrator.py verify` → lint, tüm birim testleri (~100 sn) ve `npm run build`. Kullanıcıya "tamamlandı" yalnız bu geçtikten sonra söylenir.
+- **Canlı test (`.28`, Playwright):** yalnız değişikliğin etkileyebileceği alanın testleri koşulur (ör. site silme değiştiyse ilgili `e2e/ozellik/*.spec.js`), `sunucu-28` kilidiyle; görev raporuna hangi testler koşulduğu yazılır. Tam e2e koşusu (543 test, ~1 sa 45 dk) rutin değildir; yalnız İNSAN istediğinde yapılır (İNSAN kararı, 06-11-2026).
 - Testler mock, stub HTTP cevabı veya sahte veri kullanmaz (agents.md 24 Ekim §1). Sadece kaynak metninde regex arayan test, test sayılmaz.
 
 ## İzinli test hedefleri
