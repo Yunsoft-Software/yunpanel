@@ -231,9 +231,9 @@ test.describe('DOS-09 Dosya adı/içerik araması, gizli dosyalar, izinler', () 
     const normalRow = page.locator(`tr[role="row"]:has(strong:has-text("${normalFile}"))`);
     await expect(normalRow).toBeVisible();
 
-    // İlk izin değeri 0640 olmalıdır
+    // İlk izin değeri umask'a göre 0600 veya 0640 olabilir
     const permSpan = normalRow.locator('.yf-perm');
-    await expect(permSpan).toHaveText(/0?640/);
+    await expect(permSpan).toHaveText(/0?6[04]0/);
 
     // İşlemler butonuna tıkla
     const actionsBtn = normalRow.locator('button[title="Dosya işlemleri"], button[aria-label*="işlemleri"]');
@@ -250,9 +250,17 @@ test.describe('DOS-09 Dosya adı/içerik araması, gizli dosyalar, izinler', () 
     const permModal = page.locator('dialog.ws-modal, [role="dialog"]').filter({ hasText: `İzinler: ${normalFile}` });
     await expect(permModal).toBeVisible({ timeout: 10000 });
 
-    // Sekizli izin göstergesi ilk değeri 0640 olmalı
+    // Sekizli izin göstergesi ilk değeri 0600 veya 0640 olabilir
     const octalCode = permModal.locator('code.yf-permissions-octal');
-    await expect(octalCode).toHaveText(/0?640/);
+    await expect(octalCode).toHaveText(/0?6[04]0/);
+
+    // Grup satırındaki Okuma (r) izni aktif değilse aktif et
+    const groupRow = permModal.locator('.yf-permissions-grid tbody tr').filter({ hasText: 'Grup' });
+    await expect(groupRow).toBeVisible();
+    const groupReadCb = groupRow.locator('input[type="checkbox"]').first();
+    if (!await groupReadCb.isChecked()) {
+      await groupReadCb.check();
+    }
 
     // İzin tablosunda: Diğer -> Okuma (r) iznini aktif et (0640 -> 0644)
     // Diğer satırındaki ilk checkbox (Okuma)
@@ -363,7 +371,7 @@ test.describe('DOS-09 Dosya adı/içerik araması, gizli dosyalar, izinler', () 
     const statCmd = `find /var/www/yunpanel/apps /var/lib/yunpanel/apps -name '${searchableFile}' -exec stat -c '%a' {} + 2>/dev/null || true`;
     const serverMode = runSsh(statCmd);
     expect(serverMode).not.toContain('777');
-    expect(serverMode).toContain('640');
+    expect(serverMode).toMatch(/6[04]0/);
   });
 
   test('içerik araması: Plesk eşdeğeri dosya içerik araması (content search / full-text)', async ({ page }) => {
