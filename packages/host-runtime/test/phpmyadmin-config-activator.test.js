@@ -156,6 +156,9 @@ function fixture({
     gatewayGid: 0,
     gatewayMode: 0o755,
     gatewayDirectoryExists: true,
+    bridgeUid: 0,
+    bridgeGid: 987,
+    bridgeMode: 0o640,
   };
   const manifest = {
     version: 2,
@@ -259,6 +262,9 @@ function fixture({
     if (target === '/stage/yunpanel-phpmyadmin-signon.php') {
       return file({ mode: 0o640, size: SIGNON_BRIDGE.length });
     }
+    if (target === phpMyAdminSignonTemplatePolicy.bridgePath) {
+      return file({ uid: state.bridgeUid, gid: state.bridgeGid, mode: state.bridgeMode, size: SIGNON_BRIDGE.length });
+    }
     if (target === phpMyAdminFpmTemplatePolicy.socketPath) {
       if (state.restored && !fpmExisted) throw enoent();
       return socket({ uid: 33, gid: 33, mode: 0o660 });
@@ -298,10 +304,15 @@ function fixture({
         state.gatewayUid = uid;
         state.gatewayGid = gid;
       }
+      if (target === phpMyAdminSignonTemplatePolicy.bridgePath) {
+        state.bridgeUid = uid;
+        state.bridgeGid = gid;
+      }
     },
     chmodFn: async (target, mode) => {
       calls.push(['chmod', target, mode]);
       if (target === phpMyAdminNginxTemplatePolicy.gatewaySocketPath) state.gatewayMode = mode;
+      if (target === phpMyAdminSignonTemplatePolicy.bridgePath) state.bridgeMode = mode;
     },
   });
   return { activator, calls, state };
@@ -336,6 +347,10 @@ test('activation installs staged configs and proves private FPM and HTTP sockets
     && entry[1] === phpMyAdminNginxTemplatePolicy.gatewaySocketPath
     && entry[2] === 0 && entry[3] === 995));
   assert.equal(fx.state.gatewayMode, 0o660);
+  assert.ok(fx.calls.some((entry) => entry[0] === 'chown'
+    && entry[1].startsWith(phpMyAdminSignonTemplatePolicy.bridgePath)
+    && entry[2] === 0 && entry[3] === 2002));
+  assert.equal(fx.state.bridgeMode, 0o640);
 });
 
 test('configuration failure restores the previous FPM and Nginx presence state', async () => {

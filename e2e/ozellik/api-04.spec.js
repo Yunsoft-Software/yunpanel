@@ -63,6 +63,29 @@ test.describe.serial('API-04 Tek kullanımlık oturum, SSO ve denetlenebilir ba�
     const websiteId = ownedDb.ownership.websiteId;
     const credentialId = ownedDb.ownership.credential.id;
 
+    // 3b. phpMyAdmin servis köprüsünün kurulu ve güncel olduğundan emin ol (Giriş köprüsü onarımı)
+    const installRes = await page.request.post(`/api/panel/servers/${server.id}/services/phpmyadmin/install`, {
+      headers: {
+        ...headers,
+        'Content-Type': 'application/json',
+      },
+      data: { confirmation: 'install:phpmyadmin' },
+    });
+    if (installRes.status() === 202) {
+      const installJson = await installRes.json();
+      const jobId = installJson.data?.id;
+      if (jobId) {
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 1000));
+          const jRes = await page.request.get(`/api/panel/jobs/${encodeURIComponent(jobId)}`, { headers });
+          if (jRes.status() === 200) {
+            const jJson = await jRes.json();
+            if (['succeeded', 'failed', 'cancelled'].includes(jJson.data?.status)) break;
+          }
+        }
+      }
+    }
+
     // 4. Tek kullanımlık SSO handoff token (capability) talep et
     const handoffRes = await page.request.post(
       `/api/panel/servers/${server.id}/websites/${websiteId}/phpmyadmin-handoffs`,

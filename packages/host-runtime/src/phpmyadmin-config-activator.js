@@ -321,15 +321,54 @@ export function createPhpMyAdminConfigActivator({
   async function assertSignonBridgeDirectory(runtimeIdentity) {
     try {
       const metadata = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgeDirectory);
-      if (!metadata.isDirectory() || metadata.isSymbolicLink()
-        || metadata.uid !== ROOT_UID || metadata.gid !== runtimeIdentity.gid
-        || (metadata.mode & 0o7777) !== SIGNON_BRIDGE_DIRECTORY_MODE) {
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) {
         throw new Error('unsafe signon bridge directory');
+      }
+      if (metadata.uid !== ROOT_UID || metadata.gid !== runtimeIdentity.gid
+        || (metadata.mode & 0o7777) !== SIGNON_BRIDGE_DIRECTORY_MODE) {
+        await chownFn(phpMyAdminSignonTemplatePolicy.bridgeDirectory, ROOT_UID, runtimeIdentity.gid);
+        await chmodFn(phpMyAdminSignonTemplatePolicy.bridgeDirectory, SIGNON_BRIDGE_DIRECTORY_MODE);
+        const repaired = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgeDirectory);
+        if (!repaired.isDirectory() || repaired.isSymbolicLink()
+          || repaired.uid !== ROOT_UID || repaired.gid !== runtimeIdentity.gid
+          || (repaired.mode & 0o7777) !== SIGNON_BRIDGE_DIRECTORY_MODE) {
+          throw new Error('signon bridge directory repair failed');
+        }
       }
     } catch {
       throw activationError(
         'phpmyadmin_signon_bridge_directory_unsafe',
         'phpMyAdmin signon bridge directory is unavailable or unsafe',
+      );
+    }
+  }
+
+  async function assertSignonBridgeFile(runtimeIdentity) {
+    try {
+      const metadata = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgePath);
+      if (!metadata.isFile() || metadata.isSymbolicLink()) throw new Error('unsafe signon bridge file');
+      if (metadata.uid !== ROOT_UID || metadata.gid !== runtimeIdentity.gid
+        || (metadata.mode & 0o7777) !== phpMyAdminSignonTemplatePolicy.bridgeMode) {
+        await chownFn(
+          phpMyAdminSignonTemplatePolicy.bridgePath,
+          ROOT_UID,
+          runtimeIdentity.gid,
+        );
+        await chmodFn(
+          phpMyAdminSignonTemplatePolicy.bridgePath,
+          phpMyAdminSignonTemplatePolicy.bridgeMode,
+        );
+        const repaired = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgePath);
+        if (!repaired.isFile() || repaired.isSymbolicLink()
+          || repaired.uid !== ROOT_UID || repaired.gid !== runtimeIdentity.gid
+          || (repaired.mode & 0o7777) !== phpMyAdminSignonTemplatePolicy.bridgeMode) {
+          throw new Error('signon bridge file metadata repair failed');
+        }
+      }
+    } catch {
+      throw activationError(
+        'phpmyadmin_signon_bridge_file_unsafe',
+        'phpMyAdmin signon bridge file is unavailable or unsafe',
       );
     }
   }
@@ -570,6 +609,7 @@ export function createPhpMyAdminConfigActivator({
           'phpmyadmin_signon_bridge_invalid',
           'Previous phpMyAdmin signon bridge validation failed',
         );
+        await assertSignonBridgeFile(runtimeIdentity);
       }
       await validateFpmConfig();
       await validateNginxConfig();
@@ -683,6 +723,7 @@ export function createPhpMyAdminConfigActivator({
         signonBridgeContent,
         { gid: runtimeIdentity.gid, mode: phpMyAdminSignonTemplatePolicy.bridgeMode },
       );
+      await assertSignonBridgeFile(runtimeIdentity);
       await atomicReplace(phpMyAdminFpmTemplatePolicy.poolPath, fpmContent);
       await atomicReplace(phpMyAdminNginxTemplatePolicy.configPath, nginxContent);
       await atomicReplace(
