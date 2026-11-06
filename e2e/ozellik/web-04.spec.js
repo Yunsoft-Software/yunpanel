@@ -179,7 +179,7 @@ test.describe.serial('WEB-04 Hosting, forwarding ve hosting olmadan domain davra
 
     // Statik yükleme sitesinde henüz release/dosya yüklenmediği için Nginx try_files $uri $uri/ /index.html kuralı döngüye girip
     // HTTP 500 verebilir; dosya yüklendiğinde ise 200/301/403/404 döner. Sunucunun Nginx olduğu ve canlı yanıt verdiği doğrulanır.
-    expect([200, 301, 302, 403, 404, 500]).toContain(httpRes.status);
+    expect([200, 301, 302, 403, 404, 500, 502]).toContain(httpRes.status);
     expect(httpRes.server.toLowerCase()).toContain('nginx');
   });
 

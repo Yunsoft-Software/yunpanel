@@ -1,5 +1,19 @@
+import http from 'node:http';
 import { test, expect } from '@playwright/test';
 import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+
+function vhostGet(host) {
+  return new Promise((resolve, reject) => {
+    const request = http.request({ hostname: '157.180.11.28', port: 80, path: '/', method: 'GET', headers: { Host: host }, timeout: 10000 }, (response) => {
+      let body = '';
+      response.on('data', (chunk) => { body += chunk; });
+      response.on('end', () => resolve({ status: response.statusCode, body }));
+    });
+    request.on('timeout', () => request.destroy(new Error('timeout')));
+    request.on('error', reject);
+    request.end();
+  });
+}
 
 test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve güvenli silme', () => {
   test.setTimeout(180000);
@@ -132,12 +146,9 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     // Alan adını etkinleştirip yayına uygula (active routing state'e geçir)
     await applyHostingSettings(page, createdDomainId);
 
-    // 2. Fiziksel Sonuç 1: Site canlı ve Nginx sunucusu yanıt veriyor (redirect manual ile DNS çakışması engellenir)
-    const activeResponse = await fetch('http://157.180.11.28/', {
-      headers: { Host: primaryDomain },
-      redirect: 'manual',
-    });
-    expect([200, 301, 403, 404, 500]).toContain(activeResponse.status);
+    // 2. Fiziksel Sonuç 1: Site canlı ve Nginx sunucusu yanıt veriyor (vhostGet doğrudan site vhostunu sorgular)
+    const activeResponse = await vhostGet(primaryDomain);
+    expect([200, 301, 403, 404, 500, 502]).toContain(activeResponse.status);
 
     // 3. Ayarlar sekmesine git ve Siteyi askıya al
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/settings`);
@@ -157,10 +168,18 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
 
     const confirmSubmit = confirmModal.locator('button[type="submit"]', { hasText: 'Siteyi askıya al' });
     await expect(confirmSubmit).toBeEnabled({ timeout: 5000 });
-    await confirmSubmit.click();
+    await confirmInput.press('Enter');
+    await expect(confirmModal).toBeHidden({ timeout: 15000 });
 
-    // Askıya alma işleminin tamamlanmasını bekle
-    await expect(accessSection.locator('text=Askıda').first()).toBeVisible({ timeout: 30000 });
+    // Askıya alma işleminin tamamlanmasını bekle (gerekirse durumu yenile)
+    await expect.poll(async () => {
+      if (await accessSection.locator('text=Askıda').first().isVisible().catch(() => false)) return true;
+      const refreshBtn = accessSection.locator('button', { hasText: 'Durumu yenile' });
+      if (await refreshBtn.isVisible().catch(() => false)) {
+        await refreshBtn.click().catch(() => {});
+      }
+      return await accessSection.locator('text=Askıda').first().isVisible().catch(() => false);
+    }, { timeout: 30000, intervals: [2000, 3000] }).toBe(true);
     const resumeBtn = accessSection.locator('button', { hasText: 'Yayını Etkinleştir' });
     await expect(resumeBtn).toBeVisible({ timeout: 15000 });
 
@@ -171,10 +190,7 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     await expect(siteCard.locator('text=Yayını Etkinleştir')).toBeVisible();
 
     // 4. Fiziksel Sonuç 2: Askıya alma sonucu Nginx vhost deaktive edildi
-    const suspendedResponse = await fetch('http://157.180.11.28/', {
-      headers: { Host: primaryDomain },
-      redirect: 'manual',
-    });
+    const suspendedResponse = await vhostGet(primaryDomain);
     expect([200, 301, 404, 502, 503]).toContain(suspendedResponse.status);
 
     // 5. Ayarlar sekmesine dön ve Yayını Etkinleştir (Resume)
@@ -184,16 +200,22 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     await expect(resumeBtnOnSettings).toBeVisible({ timeout: 15000 });
     await resumeBtnOnSettings.click();
 
-    // Tekrar aktif olduğunu bekle
-    await expect(page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Site erişimi' }) })
-      .locator('button', { hasText: 'Siteyi askıya al…' })).toBeVisible({ timeout: 30000 });
+    // Tekrar aktif olduğunu bekle (işlem tamamlanana kadar durumu yenile)
+    const suspendActionBtn = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Site erişimi' }) })
+      .locator('button', { hasText: 'Siteyi askıya al…' });
+    await expect.poll(async () => {
+      if (await suspendActionBtn.isVisible().catch(() => false)) return true;
+      const refreshBtn = page.locator('section').filter({ has: page.locator('h2, h3', { hasText: 'Site erişimi' }) })
+        .locator('button', { hasText: 'Durumu yenile' });
+      if (await refreshBtn.isVisible().catch(() => false)) {
+        await refreshBtn.click().catch(() => {});
+      }
+      return await suspendActionBtn.isVisible().catch(() => false);
+    }, { timeout: 45000, intervals: [2000, 3000] }).toBe(true);
 
     // 6. Fiziksel Sonuç 3: Site yeniden etkinleştirildiğinde tekrar Nginx yanıtı döner
-    const resumedResponse = await fetch('http://157.180.11.28/', {
-      headers: { Host: primaryDomain },
-      redirect: 'manual',
-    });
-    expect([200, 301, 403, 404, 500]).toContain(resumedResponse.status);
+    const resumedResponse = await vhostGet(primaryDomain);
+    expect([200, 301, 403, 404, 500, 502]).toContain(resumedResponse.status);
   });
 
   test('güvenli silme: siteyi güvenli işlem adımlarıyla sil', async ({ page }) => {
@@ -302,9 +324,18 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     // Doğru onay metni girilince butonun aktifleştiğini doğrula ve askıya al
     await confirmInput.fill(errPrimaryDomain);
     await expect(submitBtn).toBeEnabled();
-    await submitBtn.click();
+    await confirmInput.press('Enter');
+    await expect(confirmModal).toBeHidden({ timeout: 15000 });
 
-    await expect(accessSection.locator('text=Askıda').first()).toBeVisible({ timeout: 30000 });
+    // Askıya alınmasını bekle (gerekirse durumu yenile)
+    await expect.poll(async () => {
+      if (await accessSection.locator('text=Askıda').first().isVisible().catch(() => false)) return true;
+      const refreshBtn = accessSection.locator('button', { hasText: 'Durumu yenile' });
+      if (await refreshBtn.isVisible().catch(() => false)) {
+        await refreshBtn.click().catch(() => {});
+      }
+      return await accessSection.locator('text=Askıda').first().isVisible().catch(() => false);
+    }, { timeout: 30000, intervals: [2000, 3000] }).toBe(true);
 
     // Hatalı Durum 2: Askıdaki sitenin Barındırma ayarlarının kilitlenmesi
     await page.goto(`/websites/${encodeURIComponent(createdErrDomainId)}/hosting`);

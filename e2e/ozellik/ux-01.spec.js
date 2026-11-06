@@ -143,8 +143,9 @@ test.describe('UX-01 Plesk görev yerleşimi ve tüm rollerin doğru menüsü', 
     const taskCards = page.locator('.ws-website-task-card');
     await expect(taskCards.first()).toBeVisible({ timeout: 15000 });
 
-    // Kart üzerindeki hızlı araç bağlantılarından Domain ID'yi yakala
-    const firstCard = taskCards.first();
+    // Kart üzerindeki hızlı araç bağlantılarından Domain ID'yi yakala (Tam barındırma sunan bir site seç)
+    const hostingCard = taskCards.filter({ has: page.locator('.ws-website-task-title p', { hasText: /(Statik|PHP|Node|WordPress|Docker)/i }) }).first();
+    const firstCard = await hostingCard.isVisible().catch(() => false) ? hostingCard : taskCards.first();
     const overviewLink = firstCard.locator('a[href*="/websites/"]').first();
     const linkHref = await overviewLink.getAttribute('href');
     const domainMatch = linkHref?.match(/\/websites\/([^/?#]+)/);

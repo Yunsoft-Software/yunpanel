@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test';
 import { readFileSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
-import { OWNER_USERNAME, OWNER_PASSWORD } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
 
 const owner = JSON.parse(readFileSync('.local/yunpanel-owner-password-only.json', 'utf8'));
 const baseURL = new URL(owner.url).origin;
@@ -27,15 +27,9 @@ test.describe('UX-04 real appearance and personalization', () => {
   });
 
   async function login(page) {
-    await page.goto('/');
-    const form = page.locator('form.auth-form');
-    await expect(form).toBeVisible({ timeout: 30_000 });
-    await form.locator('[name="username"]').fill(OWNER_USERNAME);
-    try { await form.locator('[name="password"]').fill(OWNER_PASSWORD); }
-    catch { throw new Error('Owner password field could not be filled'); }
-    await form.locator('button.auth-primary').click();
+    await loginAs(page, OWNER_USERNAME, OWNER_PASSWORD);
     await expect(page.locator('.auth-sessionbar')).toContainText(OWNER_USERNAME, { timeout: 30_000 });
-    await expect(page.locator('.workspace-shell')).toBeVisible();
+    await expect(page.locator('.workspace-shell')).toBeVisible({ timeout: 15_000 });
   }
 
   async function appearance(page) {
@@ -53,11 +47,6 @@ test.describe('UX-04 real appearance and personalization', () => {
     if (page.isClosed()) return;
     const navigation = page.locator('.ws-sidebar[aria-modal="true"]');
     if (await navigation.count()) await navigation.getByRole('button', { name: 'Menüyü kapat', exact: true }).click();
-    const bar = page.locator('.auth-sessionbar');
-    if (await bar.isVisible()) {
-      await bar.getByRole('button', { name: 'Çıkış yap', exact: true }).click();
-      await expect(page.locator('form.auth-form')).toBeVisible({ timeout: 30_000 });
-    }
     await page.evaluate((key) => localStorage.removeItem(key), preferenceKey);
   });
 
@@ -139,7 +128,11 @@ test.describe('UX-04 real appearance and personalization', () => {
       await page.setViewportSize({ width, height: 900 });
       const menu = page.getByRole('button', { name: 'Ana menüyü aç', exact: true });
       await expect(menu).toBeVisible();
-      if (width < 900 && await menu.getAttribute('aria-expanded') !== 'true') await menu.click();
+      const sidebar = page.locator('.ws-sidebar');
+      if (width < 900 && !(await sidebar.evaluate((el) => el.classList.contains('is-open')))) {
+        await menu.click();
+        await expect(sidebar).toHaveClass(/is-open/, { timeout: 5000 });
+      }
       const controls = await appearance(page);
       await controls.theme.selectOption('light');
       await controls.density.selectOption('compact');
@@ -147,7 +140,10 @@ test.describe('UX-04 real appearance and personalization', () => {
       await expect(page.locator('html')).toHaveAttribute('data-ws-density', 'compact');
       const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth + 1);
       expect(overflow, `Horizontal overflow at ${width}px`).toBe(false);
-      if (width < 900) await page.locator('.ws-sidebar').getByRole('button', { name: 'Menüyü kapat', exact: true }).click();
+      if (width < 900) {
+        await sidebar.getByRole('button', { name: 'Menüyü kapat', exact: true }).click();
+        await expect(sidebar).not.toHaveClass(/is-open/, { timeout: 5000 });
+      }
     }
   });
 
