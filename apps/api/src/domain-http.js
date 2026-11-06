@@ -1,6 +1,7 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { DomainRegistryError } from './domain-registry.js';
 import { SiteMutationLockError } from './site-mutation-lock.js';
+import { provisioningInProgress } from './website-provisioning-worker.js';
 
 const REPARENT_PREVIEW_FIELDS = new Set(['parentDomainId']);
 const REPARENT_APPLY_FIELDS = new Set(['parentDomainId', 'previewDigest', 'confirmation']);
@@ -69,7 +70,15 @@ function assertUpdateApplyBody(body) {
   return Object.freeze({ changes: assertUpdateChanges(input.changes), previewDigest: input.previewDigest, confirmation: input.confirmation });
 }
 
-async function assertDomainUpdateIdle(domain, { jobRegistry = null, certificateRegistry = null } = {}) {
+async function assertDomainUpdateIdle(domain, {
+  jobRegistry = null, certificateRegistry = null, provisioningRegistry = null, now = () => Date.now(),
+} = {}) {
+  // Changing routing while setup still applies it makes the setup's activation step see drift (T868).
+  if (domain.websiteId && typeof provisioningRegistry?.getLatestForWebsite === 'function'
+    && provisioningInProgress(await provisioningRegistry.getLatestForWebsite(domain.websiteId), now())) {
+    throw new DomainRegistryError('domain_update_provisioning_in_progress',
+      'Wait for the Website setup to finish before changing its Domain settings', 409);
+  }
   const [jobs, allJobs, certificates] = await Promise.all([
     jobRegistry?.listJobs ? jobRegistry.listJobs({ resourceType: 'domain', resourceId: domain.id }) : [],
     jobRegistry?.listJobs ? jobRegistry.listJobs() : [],

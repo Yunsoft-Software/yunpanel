@@ -3,6 +3,16 @@
 // a step that failed or was blocked is left for the panel, never retried here.
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+// True while the worker would still move this operation forward: only pending or applying steps
+// remain and it changed within the idle window. Failed, blocked or abandoned setups wait for the panel.
+export function provisioningInProgress(operation, nowMs, maxIdleMs = DAY_MS) {
+  if (!operation || operation.ready === true || operation.status === 'abandoned' || !Array.isArray(operation.steps)) return false;
+  const updatedAt = Date.parse(operation.updatedAt);
+  return Number.isFinite(updatedAt) && nowMs - updatedAt <= maxIdleMs
+    && operation.steps.some((step) => ['pending', 'applying'].includes(step.state))
+    && operation.steps.every((step) => ['pending', 'applying', 'succeeded'].includes(step.state));
+}
+
 export function createWebsiteProvisioningWorker({
   registry, runtime, websiteRegistry, removalRegistry = null,
   now = () => Date.now(), maxIdleMs = DAY_MS, intervalMs = 2000, onError = () => {},

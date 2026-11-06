@@ -123,6 +123,16 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
     createdDomainId = match[1];
     console.log(`Created domain ID: ${createdDomainId}`);
 
+    // Kurulum sunucuda sürerken alan adı ayarları değiştirilemez (T868); bitmesini bekle.
+    const domainRecord = await (await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`)).json();
+    const websiteId = (domainRecord.data ?? domainRecord).websiteId;
+    expect(websiteId).toBeTruthy();
+    await expect.poll(async () => {
+      const latest = await (await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`)).json().catch(() => null);
+      const operation = latest?.data?.operation ?? latest?.data ?? null;
+      return operation?.ready === true;
+    }, { timeout: 120000, intervals: [2000] }).toBe(true);
+
     // 2. Barındırma (Hosting) Ayarları sayfasına git
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
