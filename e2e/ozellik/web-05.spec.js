@@ -174,11 +174,15 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
     expect(redirectResponse.status).toBe(301);
     expect(redirectResponse.location).toContain(wwwAlias);
 
-    // Tercih edilen alan adına doğrudan istek atıldığında 301 yönlendirmesi olmamalı (doğrudan Nginx vhost içeriği dönmeli)
+    // Tercih edilen alan adı başka bir alan adına yönlenmemeli. Kurulum SSL'i de tamamladığı için
+    // HTTP isteği yalnız aynı adresin HTTPS sürümüne 301 alabilir.
     const targetResponse = await checkHttp(wwwAlias);
-    console.log(`Target HTTP status: ${targetResponse.status}`);
-    expect(targetResponse.status).not.toBe(301);
-    expect([200, 403, 404, 500]).toContain(targetResponse.status);
+    console.log(`Target HTTP status: ${targetResponse.status}, location: ${targetResponse.location}`);
+    if (targetResponse.status === 301) {
+      expect(new URL(targetResponse.location).origin).toBe(`https://${wwwAlias}`);
+    } else {
+      expect([200, 403, 404, 500]).toContain(targetResponse.status);
+    }
   });
 
   test('hatalı girdi ve sınır durumu: SSL olmadan HTTPS uyarısı ve form sınır değer kontrolü', async ({ page }) => {
