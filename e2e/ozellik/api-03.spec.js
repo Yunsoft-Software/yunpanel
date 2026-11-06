@@ -120,16 +120,6 @@ test.describe.serial('API-03 CLI, olay handler ları ve otomatik provisioning', 
         await page.close().catch(() => {});
       }
     }
-
-    // Fiziksel temizlik garantisi (0 artık ilkesi)
-    if (resolvedUnixUser) {
-      runSsh(`id ${resolvedUnixUser} >/dev/null 2>&1 && userdel -f ${resolvedUnixUser} 2>/dev/null || true`);
-    }
-    if (defaultDocRoot) {
-      runSsh(`rm -rf ${defaultDocRoot} 2>/dev/null || true`);
-    }
-    runSsh(`rm -rf /var/www/yunpanel/apps/*${prefix}* /var/lib/yunpanel/homes/*${prefix}* 2>/dev/null || true`);
-    runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-*${prefix}*.conf /etc/nginx/sites-available/yunpanel-*${prefix}*.conf 2>/dev/null || true`);
   });
 
   test('mutlu yol: panelden site oluştur, otomatik provisioning ardışık adımlarını API ve canlı sunucuda doğrula', async ({ page }) => {

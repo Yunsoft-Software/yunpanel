@@ -112,9 +112,6 @@ test.describe.serial('DEV-05 Laravel environment, Artisan, Composer ve Node komu
     } finally {
       await page.close().catch(() => {});
     }
-
-    // Fiziksel temizlik kontrolü (0 artık ilkesi)
-    runSsh(`rm -f /etc/nginx/sites-enabled/*${siteDomain}* /etc/nginx/sites-available/*${siteDomain}* 2>/dev/null; systemctl reload nginx 2>/dev/null || true`);
   });
 
   test('mutlu yol: PHP sitesi oluştur, Composer araçlarını incele, composer/status ve site dosyaları/yapısını doğrula', async ({ page }) => {

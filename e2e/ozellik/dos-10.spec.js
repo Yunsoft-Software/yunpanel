@@ -26,9 +26,6 @@ test.describe('DOS-10 FTP/FTPS hesapları, dizin kapsamı ve kota', () => {
   test.describe.configure({ mode: 'serial' });
   test.setTimeout(120000);
 
-  const agentN = process.env.AGENT_N || '4';
-  const timestamp = Date.now().toString(36);
-  const testFtpUsername = `tdos10-a${agentN}-${timestamp}`;
 
   let resolvedDomainId = null;
   let resolvedWebsiteId = null;
@@ -48,17 +45,6 @@ test.describe('DOS-10 FTP/FTPS hesapları, dizin kapsamı ve kota', () => {
           await retryBtn.click();
         }
       }
-    }
-  });
-
-  test.afterAll(async () => {
-    // Test sırasında sunucuda veya panelde oluşturulmuş olabilecek test FTP hesaplarını ve artıklarını temizle
-    try {
-      if (testFtpUsername) {
-        runSsh(`id -u "${testFtpUsername}" >/dev/null 2>&1 && (userdel -r "${testFtpUsername}" || true) || true`);
-      }
-    } catch (err) {
-      console.warn('DOS-10 cleanup warning:', err.message);
     }
   });
 

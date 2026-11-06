@@ -60,6 +60,9 @@ await walk(root);
 const liveTestWriteRules = [
   [/sqlite3[^\n]*\b(DELETE FROM|INSERT( OR [A-Z]+)? INTO|UPDATE \w+ SET|REPLACE INTO|DROP TABLE|ALTER TABLE)\b/i, 'writes a panel database with sqlite3'],
   [/systemctl\s+(restart|stop)\s+yunpanel-/, 'restarts a panel service'],
+  // Deleting what the panel provisioned leaves records the removal flow treats as drift, so it refuses to finish.
+  [/runSsh\([^)\n]*\b(userdel|groupdel)\b/, 'deletes a Unix user behind the panel'],
+  [/runSsh\([^)\n]*\brm\s+-[a-z]+\s+[^)\n]*(\/etc\/(nginx|php|cron\.d)\/|\/var\/lib\/yunpanel\/(homes|reports|staging)\/|\/run\/(php|yunpanel)\/)/, 'deletes panel-managed host files'],
 ];
 const registryPathPattern = /\/var\/lib\/yunpanel\/control-plane\/[\w./-]+\.json/;
 const registryWritePattern = /writeFileSync\(|json\.dump\(|open\([^)]*,\s*['"]w['"]\)/;

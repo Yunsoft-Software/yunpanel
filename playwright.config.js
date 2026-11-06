@@ -2,6 +2,9 @@ import { defineConfig } from '@playwright/test';
 
 export default defineConfig({
   testDir: './e2e',
+  // live-audit needs its own setup and run folder: npx playwright test --config=playwright.live-audit.config.js.
+  // Run here without them, its mutation suites fail at once or act on a stale run's fixtures.
+  testIgnore: 'live-audit/**',
   timeout: 60000,
   workers: 1,
   reporter: [[process.env.CI ? 'dot' : 'list'], ['./e2e/redacting-reporter.js']],

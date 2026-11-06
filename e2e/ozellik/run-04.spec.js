@@ -96,8 +96,6 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
         await page.close().catch(() => {});
       }
     }
-    // Lingering auth files, vhost conf or directories cleanup on server (0 residue)
-    runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf /etc/nginx/sites-available/yunpanel-${siteDomain}.conf && rm -rf /etc/nginx/yunpanel-auth/${siteDomain}`);
   });
 
   test('mutlu yol: site oluştur, başlangıç dosyaları ve özel 404 sayfası yapılandır, Nginx ve fiziksel HTTP ile doğrula', async ({ page }) => {

@@ -82,7 +82,6 @@ test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uy
       console.warn('Clean-up failed for domain:', createdDomainId, err.message);
     } finally {
       await page.close().catch(() => {});
-      runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf && nginx -t && systemctl reload nginx || true`);
     }
   });
 

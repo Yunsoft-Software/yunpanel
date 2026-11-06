@@ -826,3 +826,10 @@
     TIMEOUT: `bash orkestra/lock.sh acquire sunucu-28-genel VERIFY && { npx playwright test; rc=$?; bash orkestra/lock.sh release sunucu-28-genel VERIFY; exit $rc; }` 45 dakikada bitmedi; süreç grubu durduruldu.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T863 · Docker testleri projeleri panelin arkasından siliyor
+- **Bağımlı:** T169, T168, T167, T166, T165, T164
+- **Dosyalar:** `e2e/ozellik/dkr-01.spec.js`, `e2e/ozellik/dkr-02.spec.js`, `e2e/ozellik/dkr-03.spec.js`, `e2e/ozellik/dkr-04.spec.js`, `e2e/ozellik/dkr-05.spec.js`, `e2e/ozellik/dkr-06.spec.js`, `scripts/validate-repository.mjs`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** Bu testlerin temizlik adımı Docker konteyner, volume ve Compose projelerini `.28`'de doğrudan (`docker rm`, `docker volume rm`, `docker compose down`) siliyor; panel kaydı kalıyor ve panelin kaldırma akışı sonra bunu tutarsızlık sayıyor. Testin oluşturduğu her projeyi panelin kendi kaldırma akışıyla sil (arayüzden ya da panel API'si); doğrudan Docker silmesini kaldır. Bittiğinde `scripts/validate-repository.mjs` içindeki `liveTestWriteRules` listesine `runSsh` ile `docker (rm|volume rm|compose … down)` kuralını ekle. Site testlerindeki aynı sorun 06-11'de giderildi.
+- **Kabul:** Altı test `.28`'de iki kez art arda geçiyor; sonrasında panelde ve `docker ps -a`/`docker volume ls` çıktısında testten kalan proje yok; `npm run lint` yeni kuralla geçiyor.

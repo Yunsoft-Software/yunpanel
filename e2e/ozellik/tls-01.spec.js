@@ -221,11 +221,6 @@ test.describe('TLS-01 Ücretsiz ACME issue, renew ve otomatik yenileme', () => {
     } catch (err) {
       console.warn('afterAll general sweep error:', err.message);
     }
-
-    // 7. Fiziksel süpürme ve 0 artık garantisi (.28 temizlik garantisi)
-    try {
-      runSsh('rm -f /var/lib/yunpanel/staging/nginx/*ttls01* /var/lib/yunpanel/staging/nginx/rollback/*ttls01* /var/lib/yunpanel/staging/nginx/deactivation/*ttls01* 2>/dev/null || true');
-    } catch {}
   });
 
   test('mutlu yol: Web sitesi oluşturma, ACME SSL formu, staging doğrulaması, dry-run yenileme ve fiziksel TLS kanıtları', async ({ page }) => {

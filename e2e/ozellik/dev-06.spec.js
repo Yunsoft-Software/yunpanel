@@ -123,22 +123,6 @@ test.describe.serial('DEV-06 Laravel scheduled task, log ve deployment senaryosu
         await page.close().catch(() => {});
       }
     }
-
-    // 2. Kalan spesifik cron dosyaları varsa yalnız bu teste ait olanları temizle (asla /etc/cron.d/yunpanel-* genel deseni kullanılmaz)
-    for (const taskId of createdTaskIds) {
-      runSsh(`rm -f /etc/cron.d/yunpanel-${taskId} 2>/dev/null || true`);
-    }
-    if (siteDomain) {
-      const matchingFiles = runSsh(`grep -l "${siteDomain}" /etc/cron.d/yunpanel-* 2>/dev/null || true`);
-      for (const f of matchingFiles.split('\n').filter(Boolean)) {
-        if (f.startsWith('/etc/cron.d/yunpanel-')) {
-          runSsh(`rm -f ${f} 2>/dev/null || true`);
-        }
-      }
-    }
-
-    // 3. Fiziksel temizlik kontrolü (0 artık ilkesi - yalnız bu teste ait Nginx dosyaları)
-    runSsh(`rm -f /etc/nginx/sites-enabled/*${siteDomain}* /etc/nginx/sites-available/*${siteDomain}* 2>/dev/null; systemctl reload nginx 2>/dev/null || true`);
   });
 
   test('mutlu yol: PHP sitesi oluştur, cron sekmesini aç, Laravel schedule:run görevini ekle, fiziksel cron.d dosyasını doğrula ve görevi temizle', async ({ page }) => {

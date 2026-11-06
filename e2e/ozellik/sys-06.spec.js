@@ -101,9 +101,6 @@ test.describe.serial('SYS-06 Cron/scheduled tasks; kullanıcı, zamanlama ve ç�
   });
 
   test.afterAll(async ({ browser }) => {
-    if (createdTaskId) {
-      runSsh(`rm -f /etc/cron.d/yunpanel-${createdTaskId}`);
-    }
     if (!createdDomainId) return;
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     try {

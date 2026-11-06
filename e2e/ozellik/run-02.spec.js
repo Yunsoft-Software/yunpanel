@@ -184,12 +184,6 @@ test.describe.serial('RUN-02 PHP sürümü/handler, php.ini ve PHP-FPM ayarları
       await page.close().catch(() => {});
     }
 
-    // Sunucu tarafı iz kalmama garantisi (SSH)
-    if (resolvedUnixUser) {
-      runSsh(`rm -f /etc/php/8.3/fpm/pool.d/yunpanel-${resolvedUnixUser}.conf /run/php/yunpanel-${resolvedUnixUser}.sock && systemctl reload php8.3-fpm || true`);
-    }
-    runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf /etc/nginx/sites-available/yunpanel-${siteDomain}.conf && nginx -t && systemctl reload nginx || true`);
-
     try {
       if (fs.existsSync(AUTH_DIR)) {
         for (const f of fs.readdirSync(AUTH_DIR)) {

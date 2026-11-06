@@ -101,8 +101,6 @@ test.describe.serial('DEV-02 Branch, deployment path, manuel/otomatik deployment
         await page.close().catch(() => {});
       }
     }
-    // Host seviyesinde kalıntı temizliği (sıfır artık)
-    runSsh(`rm -f /etc/nginx/sites-enabled/yunpanel-*${prefix}*.conf`);
   });
 
   test('mutlu yol: Git deposu ile site kur, branch/yol bilgilerini doğrula, manuel deploy tetikle ve webhook arayüzünü incele', async ({ page }) => {

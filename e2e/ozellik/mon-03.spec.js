@@ -85,10 +85,6 @@ test.describe('MON-03 Domain web istatistikleri, trafik ve kullanım raporları'
   });
 
   test.afterAll(async ({ browser }) => {
-    if (createdWebsiteId) {
-      runSsh(`kill $(cat /run/yunpanel/goaccess/${createdWebsiteId}.pid 2>/dev/null) 2>/dev/null || true`);
-      runSsh(`rm -f /var/lib/yunpanel/reports/goaccess/${createdWebsiteId}.html /run/yunpanel/goaccess/${createdWebsiteId}.* 2>/dev/null || true`);
-    }
     if (!createdDomainId) return;
     const page = await browser.newPage({ ignoreHTTPSErrors: true });
     try {

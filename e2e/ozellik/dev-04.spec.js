@@ -107,9 +107,6 @@ test.describe.serial('DEV-04 Laravel oluşturma, repositoryden kurma ve mevcut a
     } finally {
       await page.close().catch(() => {});
     }
-
-    // Fiziksel temizlik kontrolü (0 artık ilkesi)
-    runSsh(`rm -f /etc/nginx/sites-enabled/*${siteDomain}* /etc/nginx/sites-available/*${siteDomain}* 2>/dev/null; systemctl reload nginx 2>/dev/null || true`);
   });
 
   test('mutlu yol: PHP/Laravel hazır ayarı ile site oluştur, public docroot ve PHP-FPM yapılandırmasını ve Composer durumunu doğrula', async ({ page }) => {
