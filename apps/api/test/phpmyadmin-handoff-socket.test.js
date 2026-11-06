@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, lstat, mkdtemp, rm } from 'node:fs/promises';
+import { lstat, mkdtemp, rm } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -212,67 +212,4 @@ test('default socket policy stays outside the broader yunpanel gateway directory
   assert.equal(phpMyAdminHandoffSocketInternals.socketGroup, 'yunpanel-phpmyadmin');
   assert.equal(phpMyAdminHandoffSocketInternals.directoryMode, 0o750);
   assert.equal(phpMyAdminHandoffSocketInternals.socketMode, 0o660);
-});
-
-test('socket runtime repairs bridge file permissions when signon bridge file is present', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'pma-br-'));
-  const directory = path.join(root, 'runtime');
-  const socketPath = path.join(directory, 'handoff.sock');
-  const policyGid = 3003;
-  t.after(() => rm(root, { recursive: true, force: true }));
-
-  let bridgeChown = null;
-  let bridgeChmod = null;
-
-  async function mockLstat(target) {
-    if (target === '/usr/lib/yunpanel/phpmyadmin/signon.php') {
-      return {
-        isFile: () => true,
-        isSymbolicLink: () => false,
-        uid: 0,
-        gid: 0, // root:root -> needs repair
-        mode: 0o100640,
-      };
-    }
-    const metadata = await lstat(target);
-    return new Proxy(metadata, {
-      get(current, property, receiver) {
-        if (property === 'uid') return 0;
-        if (property === 'gid') return policyGid;
-        return Reflect.get(current, property, receiver);
-      },
-    });
-  }
-
-  const runtime = await startPhpMyAdminHandoffSocket({
-    phpMyAdminHandoffService: { async consume() { return null; } },
-    socketDirectory: directory,
-    socketPath,
-    run: async () => ({ stdout: `yunpanel-phpmyadmin:x:${policyGid}:\n` }),
-    chownFn: async (target, uid, gid) => {
-      if (target === '/usr/lib/yunpanel/phpmyadmin/signon.php') {
-        bridgeChown = { target, uid, gid };
-      }
-    },
-    chmodFn: async (target, mode) => {
-      if (target === '/usr/lib/yunpanel/phpmyadmin/signon.php') {
-        bridgeChmod = { target, mode };
-      } else {
-        await chmod(target, mode);
-      }
-    },
-    lstatFn: mockLstat,
-  });
-
-  t.after(async () => { await runtime.close(); });
-
-  assert.deepEqual(bridgeChown, {
-    target: '/usr/lib/yunpanel/phpmyadmin/signon.php',
-    uid: 0,
-    gid: policyGid,
-  });
-  assert.deepEqual(bridgeChmod, {
-    target: '/usr/lib/yunpanel/phpmyadmin/signon.php',
-    mode: 0o640,
-  });
 });

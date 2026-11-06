@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from 'node:crypto';
-import { chmod, chown, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   phpMyAdminFpmTemplatePolicy,
@@ -333,45 +333,12 @@ export function createPhpMyAdminConfigManager({
       targetPath: stagedSignonBridgePath,
       resultKey: 'signonBridgeSha256',
     }),
-    ensureSignonBridgePermissions: (options) => ensureSignonBridgePermissions({
-      chmodFn,
-      lstatFn,
-      ...options,
-    }),
     stageDirectory,
     stagedFpmPath,
     stagedNginxPath,
     stagedSignonConfigPath,
     stagedSignonBridgePath,
   });
-}
-
-export async function ensureSignonBridgePermissions({
-  bridgePath = phpMyAdminSignonTemplatePolicy.bridgePath,
-  gid = null,
-  mode = phpMyAdminSignonTemplatePolicy.bridgeMode,
-  lstatFn = lstat,
-  chownFn = chown,
-  chmodFn = chmod,
-} = {}) {
-  try {
-    const metadata = await lstatFn(bridgePath);
-    if (!metadata.isFile() || metadata.isSymbolicLink()) {
-      return Object.freeze({ present: false, repaired: false });
-    }
-    let repaired = false;
-    const targetGid = Number.isSafeInteger(gid) ? gid : metadata.gid;
-    if (metadata.uid !== 0 || (Number.isSafeInteger(gid) && metadata.gid !== gid)
-      || (metadata.mode & 0o7777) !== mode) {
-      await chownFn(bridgePath, 0, targetGid);
-      await chmodFn(bridgePath, mode);
-      repaired = true;
-    }
-    return Object.freeze({ present: true, repaired });
-  } catch (error) {
-    if (error?.code === 'ENOENT') return Object.freeze({ present: false, repaired: false });
-    throw error;
-  }
 }
 
 export const phpMyAdminConfigManagerInternals = Object.freeze({

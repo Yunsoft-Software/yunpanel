@@ -15,7 +15,6 @@ import {
 } from '@yunpanel/config-templates';
 import {
   createPhpMyAdminConfigManager,
-  ensureSignonBridgePermissions,
   PhpMyAdminConfigManagerError,
 } from '../src/phpmyadmin-config-manager.js';
 
@@ -141,54 +140,5 @@ test('staged inspection fails closed for content, mode and symlink drift', async
     await writeFile(target, fpmContent, { mode: 0o640 });
     await symlink(target, stagedPath);
     assert.equal((await manager.inspectStagedFpmPool(fpmPreview)).satisfied, false);
-  });
-});
-
-test('ensureSignonBridgePermissions detects and repairs permissions when bridge file exists', async () => {
-  await withTempDirectory(async (root) => {
-    const bridgePath = path.join(root, 'signon.php');
-    // Non-existent file returns present: false
-    const missing = await ensureSignonBridgePermissions({ bridgePath, gid: 115 });
-    assert.deepEqual(missing, { present: false, repaired: false });
-
-    // File with bad permissions (0600)
-    await writeFile(bridgePath, '<?php // test', { mode: 0o600 });
-    let chownCalled = null;
-    let chmodCalled = null;
-
-    const result = await ensureSignonBridgePermissions({
-      bridgePath,
-      gid: 115,
-      mode: 0o640,
-      chownFn: async (target, uid, gid) => { chownCalled = { target, uid, gid }; },
-      chmodFn: async (target, mode) => { chmodCalled = { target, mode }; await chmod(target, mode); },
-    });
-
-    assert.equal(result.present, true);
-    assert.equal(result.repaired, true);
-    assert.deepEqual(chownCalled, { target: bridgePath, uid: 0, gid: 115 });
-    assert.deepEqual(chmodCalled, { target: bridgePath, mode: 0o640 });
-
-    // Calling again with matching mode reports repaired: false
-    chownCalled = null;
-    chmodCalled = null;
-    const unchanged = await ensureSignonBridgePermissions({
-      bridgePath,
-      gid: 115,
-      mode: 0o640,
-      lstatFn: async () => ({
-        isFile: () => true,
-        isSymbolicLink: () => false,
-        uid: 0,
-        gid: 115,
-        mode: 0o100640,
-      }),
-      chownFn: async (target, uid, gid) => { chownCalled = { target, uid, gid }; },
-      chmodFn: async (target, mode) => { chmodCalled = { target, mode }; },
-    });
-    assert.equal(unchanged.present, true);
-    assert.equal(unchanged.repaired, false);
-    assert.equal(chownCalled, null);
-    assert.equal(chmodCalled, null);
   });
 });

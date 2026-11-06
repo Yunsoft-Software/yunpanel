@@ -3,7 +3,6 @@ import { chmod, chown, lstat, mkdir, rm } from 'node:fs/promises';
 import http from 'node:http';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { phpMyAdminSignonTemplatePolicy } from '@yunpanel/config-templates';
 import { PhpMyAdminHandoffError } from './phpmyadmin-handoff-service.js';
 
 const execFileAsync = promisify(execFile);
@@ -281,19 +280,6 @@ export async function startPhpMyAdminHandoffSocket({
       'phpmyadmin_handoff_socket_directory_unsafe',
       'phpMyAdmin handoff socket directory metadata is unsafe',
     );
-  }
-
-  try {
-    const bridgeStat = await lstatFn(phpMyAdminSignonTemplatePolicy.bridgePath);
-    if (bridgeStat.isFile() && !bridgeStat.isSymbolicLink()) {
-      if (bridgeStat.uid !== ROOT_UID || bridgeStat.gid !== group.gid
-        || (bridgeStat.mode & 0o7777) !== phpMyAdminSignonTemplatePolicy.bridgeMode) {
-        await chownFn(phpMyAdminSignonTemplatePolicy.bridgePath, ROOT_UID, group.gid);
-        await chmodFn(phpMyAdminSignonTemplatePolicy.bridgePath, phpMyAdminSignonTemplatePolicy.bridgeMode);
-      }
-    }
-  } catch (error) {
-    if (error?.code !== 'ENOENT') throw error;
   }
 
   try {
