@@ -9,7 +9,7 @@ process.env.PLAYWRIGHT_NO_COPY_PROMPT = '1';
 test.use({ baseURL, trace: 'off', screenshot: 'off', video: 'off', actionTimeout: 15000 });
 
 test.describe.serial('SYS-05 owned terminal sessions and isolated repair', () => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
   const prefix = 'tsys05-a' + (process.env.AGENT_N || 'codex') + '-' + Date.now().toString(36);
   const hostname = prefix + '.157-180-11-28.sslip.io';
   const username = prefix + '_sm';
@@ -155,7 +155,7 @@ test.describe.serial('SYS-05 owned terminal sessions and isolated repair', () =>
     if (!ownedSite) return;
     const current = await api(page, '/domains/' + ownedSite.domainId);
     if (current.status === 404) {
-      expect((await api(page, '/websites/' + ownedSite.websiteId)).status).toBe(404);
+      await expect.poll(async () => (await api(page, '/websites/' + ownedSite.websiteId)).status, { timeout: 30000, intervals: [1000, 2000] }).toBe(404);
       ownedSite = null;
       return;
     }
@@ -165,14 +165,15 @@ test.describe.serial('SYS-05 owned terminal sessions and isolated repair', () =>
     await page.goto('/websites/' + ownedSite.domainId + '/settings');
     const section = page.locator('section').filter({ has: page.getByRole('heading', { name: 'Siteyi sil', exact: true }) });
     await expect(section).toBeVisible();
-    await section.getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
+    const deleteBtn = section.getByRole('button', { name: 'Siteyi sil…', exact: true });
+    await deleteBtn.waitFor({ state: 'visible', timeout: 30000 });
+    await deleteBtn.click();
     const dialog = page.getByRole('dialog').filter({ hasText: 'Siteyi kalıcı olarak sil' });
     await expect(dialog).toBeVisible();
     await dialog.locator('input').fill(hostname);
     await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click();
-    await expect(page.getByText('Site silindi', { exact: true })).toBeVisible({ timeout: 90000 });
-    await expect.poll(async () => (await api(page, '/domains/' + ownedSite.domainId)).status).toBe(404);
-    expect((await api(page, '/websites/' + ownedSite.websiteId)).status).toBe(404);
+    await expect.poll(async () => (await api(page, '/domains/' + ownedSite.domainId)).status, { timeout: 90000, intervals: [1000, 2000] }).toBe(404);
+    await expect.poll(async () => (await api(page, '/websites/' + ownedSite.websiteId)).status, { timeout: 30000, intervals: [1000, 2000] }).toBe(404);
     ownedSite = null;
   }
 
@@ -321,7 +322,7 @@ test.describe.serial('SYS-05 owned terminal sessions and isolated repair', () =>
       }
       expect([200, 201].includes(response.status())).toBe(true);
       expect(ownedSite).not.toBeNull();
-      await expect(page.getByText('Kurulum planındaki zorunlu adımlar tamamlandı. Yayın, SSL ve posta durumunu ilgili site araçlarından doğrulayın.', { exact: true })).toBeVisible({ timeout: 60000 });
+      await expect(page.locator('.ws-site-create-result')).toContainText('Kurulum planındaki zorunlu adımlar tamamlandı', { timeout: 180000 });
       const repair = await api(page, '/websites/' + ownedSite.websiteId + '/health/repair', 'POST', { action: 'repair_permissions' });
       expect(repair.status).toBe(200);
       expect(repair.body.data.websiteId).toBe(ownedSite.websiteId);

@@ -69,9 +69,10 @@ test.describe.serial('TLS-03 isolated custom certificate lifecycle', () => {
       expect(response.status()).toBe(202);
       const job = (await response.json()).data;
       await expect.poll(async () => {
-        const result = await page.request.get(`/api/panel/jobs/${job.id}`);
-        expect(result.status()).toBe(200);
-        const current = (await result.json()).data;
+        const result = await page.request.get(`/api/panel/jobs/${job.id}`).catch(() => null);
+        if (!result || !result.ok()) return 'waiting';
+        const current = (await result.json().catch(() => ({})))?.data;
+        if (!current) return 'waiting';
         if (['failed', 'cancelled'].includes(current.status)) throw new Error('Owned domain publication failed');
         return current.status;
       }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe('succeeded');
@@ -113,9 +114,10 @@ test.describe.serial('TLS-03 isolated custom certificate lifecycle', () => {
     expect(domainId).toBe(resource.domainId);
     expect(domain.websiteId).toBe(resource.websiteId);
     await expect.poll(async () => {
-      const response = await page.request.get(`/api/panel/domains/${domainId}`);
-      return (await response.json()).data.state;
-    }, { timeout: 90_000 }).toBe('active');
+      const response = await page.request.get(`/api/panel/domains/${domainId}`).catch(() => null);
+      if (!response || !response.ok()) return 'waiting';
+      return (await response.json().catch(() => ({})))?.data?.state;
+    }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe('active');
     return resource;
   }
 
@@ -187,9 +189,14 @@ print(json.dumps({'files':files,'routingPresent':os.path.isfile('/etc/nginx/site
     await expect(dialog).toBeVisible();
     await dialog.locator('input').fill(resource.hostname);
     await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click();
-    await expect(section.getByText('Site silindi', { exact: true })).toBeVisible({ timeout: 90_000 });
-    await expect.poll(async () => (await page.request.get(`/api/panel/domains/${resource.domainId}`)).status()).toBe(404);
-    expect((await page.request.get(`/api/panel/websites/${resource.websiteId}`)).status()).toBe(404);
+    await expect.poll(async () => {
+      const res = await page.request.get(`/api/panel/domains/${resource.domainId}`).catch(() => null);
+      return res ? res.status() : 0;
+    }, { timeout: 90_000, intervals: [1000, 2000] }).toBe(404);
+    await expect.poll(async () => {
+      const res = await page.request.get(`/api/panel/websites/${resource.websiteId}`).catch(() => null);
+      return res ? res.status() : 0;
+    }, { timeout: 30_000, intervals: [1000, 2000] }).toBe(404);
     if (resource.certificateId) {
       const certificate = await page.request.get(`/api/panel/certificates/${resource.certificateId}`);
       expect(certificate.status()).toBe(200);

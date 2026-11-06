@@ -899,3 +899,23 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** Bu testler 06-11 tam e2e koşusunda düştü. O koşudan sonra site kurulumu sunucuda tamamlanır hale geldi (T864) ve silme hataları giderildi; bir kısmı artık geçebilir. Her testi `.28`'de tek tek koş (yalnız bu dosyalar; tam koşu yapma) ve her biri için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası: düzelt (eski seçici, kurulum bitmeden kontrol, `fetch` ile `Host` başlığı gibi; örnek: WEB-08'deki `vhostGet`); (c) ürün hatası: testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Mock yok; panelin arkasından sunucuda silme yok; oluşturduğun her kaynağı panelden temizle.
 - **Kabul:** Her test için (a)/(b)/(c) sonucu raporda; (a) ve (b) olanlar `.28`'de iki kez art arda geçiyor; testlerden sonra `.28`'de bu görevin öneğiyle kalan site yok.
+
+### T873 · API-04 phpMyAdmin SSO signon 403 Access denied: /usr/lib/yunpanel/phpmyadmin/signon.php dosya grubu root kalmış
+- **Bağımlı:** T216, T871
+- **Dosyalar:** `e2e/ozellik/api-04.spec.js`, `packages/config-templates/src/phpmyadmin-signon.js`, `packages/host-runtime/src/phpmyadmin-config-activator.js`
+- **Kaynak:** QA · 2026-11-06 15:49
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    API-04 test 1 ve test 2'de POST /tools/phpmyadmin/__yunpanel/signon isteği 403 Forbidden (Access denied.) dönüyor. İnceleme: Nginx fastcgi_param SCRIPT_FILENAME /usr/lib/yunpanel/phpmyadmin/signon.php olarak unix:/run/php/yunpanel-phpmyadmin.sock'a yönlendiriyor. PHP-FPM pool kullanıcısı yunpanel-phpmyadmin (gid 115). Ancak sunucudaki /usr/lib/yunpanel/phpmyadmin/signon.php dosyasının izinleri -rw-r----- 1 root root olarak kalmış (grubu yunpanel-phpmyadmin değil root). PHP-FPM pool kullanıcısı dosyayı okuyamadığı için Nginx/PHP-FPM Access denied. (403) dönüyor. packages/host-runtime/src/phpmyadmin-config-activator.js içinde bridgePath için gid: runtimeIdentity.gid ile atomicReplace yapılıyor; ancak sunucu ortamındaki dosya güncellenmemiş veya host kurulumunda chgrp yunpanel-phpmyadmin uygulanmamış.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T874 · DB-04 & DB-05: phpMyAdmin signon.php dosya grubu root kalmış, FastCGI 403 Permission denied dönüyor
+- **Bağımlı:** T130, T131, T869
+- **Dosyalar:** `packages/host-runtime/src/phpmyadmin-config-manager.js`, `e2e/ozellik/db-04.spec.js`, `e2e/ozellik/db-05.spec.js`
+- **Kaynak:** QA · 2026-11-06 15:58
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Nginx fastcgi_param SCRIPT_FILENAME /usr/lib/yunpanel/phpmyadmin/signon.php olarak unix:/run/php/yunpanel-phpmyadmin.sock'a yönlendiriyor. PHP-FPM havuzu yunpanel-phpmyadmin kullanıcısıyla çalışıyor. Sunucudaki /usr/lib/yunpanel/phpmyadmin/signon.php dosyasının sahipliği -rw-r----- 1 root root kalmış (grubu yunpanel-phpmyadmin değil root). Nginx error.log'da 'Unable to open primary script: /usr/lib/yunpanel/phpmyadmin/signon.php (Permission denied)' hatasıyla 403 Forbidden dönüyor ve DB-04 (SSO açılış) ile DB-05 (SQL dışa aktar) testleri bu nedenle phpMyAdmin oturumu açamıyor.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
