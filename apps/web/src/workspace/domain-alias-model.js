@@ -84,6 +84,7 @@ export function aliasErrorMessage(error) {
     domain_conflict: 'Bu alan adı başka bir kayıtta kullanılıyor.',
     domain_update_preview_stale: 'Önizlemeden sonra kayıt değişti. Güncel kaydı yükleyip yeniden inceleyin.',
     domain_update_operation_conflict: 'Bu site için çalışan işlem var. İşlem tamamlandıktan sonra yeniden inceleyin.',
+    domain_update_provisioning_in_progress: 'Site kurulumu sürüyor. Kurulum bitince alan adı ayarlarını değiştirebilirsiniz.',
     domain_suspended_update_blocked: 'Askıdaki alan adı değiştirilemez.',
     forbidden: 'Bu alan adını değiştirme yetkiniz yok.', unauthorized: 'Oturumunuz sona erdi.',
   };
