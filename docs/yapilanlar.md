@@ -3,7 +3,7 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 06-11-2026
-- **Hata** — İlk yayın adımı başarısız olmuş (hiç yayına çıkmamış) alan adı artık silinebiliyor; önceden sitesiyle birlikte silinemez kalıyordu. Kod `7c2b7c91` commit'ine (T867 adıyla) girdi; `.28`'e henüz kurulmadı.
+- **Hata** — İlk yayın adımı başarısız olmuş (hiç yayına çıkmamış) alan adı artık silinebiliyor; önceden sitesiyle birlikte silinemez kalıyordu. Kod `7c2b7c91` commit'ine (T867 adıyla) girdi; `.28`'de 4 takılı siteyle doğrulandı.
 - **Hata** — Site kurulumu artık tarayıcı sayfası kapansa bile sunucuda tamamlanıyor; yarım kalan siteler (kullanıcısı yok, 502) giderildi (T864). `.28`'de doğrulandı.
 - **Hata** — Veritabanı olan siteler panelden silinemiyordu (silme adımı site kullanıcısını yanlış yerde arıyordu); düzeltildi, `.28`'de doğrulandı.
 - **Hata** — Silme planı onaylandıktan sonra siteye bağlanan veritabanı artık silmeyi durduruyor; site kaydı silinip bağlantı sahipsiz kalmıyor.

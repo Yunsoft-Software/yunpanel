@@ -863,3 +863,11 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** "bilinen hata: Docker / Compose Proxy … boş proje kimliği 400 (H4)" testi `test.fail` ile işaretli, ama 06-11'de site boş proje kimliğiyle oluştu ve kurulumu tamamlandı; test bu yüzden kırmızı. Panelde boş proje kimliğiyle oluşan Docker sitesinin ne yaptığını incele (hangi projeye bağlandı, çalışıyor mu). Doğru davranışsa `test.fail`'i kaldırıp beklenen sonucu doğrula ve oluşturduğu siteyi temizle; yanlışsa senior'a bulgu yaz.
 - **Kabul:** WEB-01 `.28`'de geçiyor; bu testin oluşturduğu site test sonunda panelden siliniyor.
+
+### T868 · Kurulum sürerken alan adı ayarı değişince site silinemez kalıyor
+- **Bağımlı:** T849
+- **Sahip:** SENIOR
+- **Dosyalar:** `apps/api/src/website-provisioning-worker.js`, `apps/api/src/domain-removal-runtime.js`
+- **Kaynak:** SENIOR · 2026-11-06
+- **İş:** `.28`'de `tweb05-a3-mw4v7w9k.webrich.news`: WEB-05 kurulum sürerken tercih edilen alan adını değiştirdi; kurulumun `domain_activation` adımı `website_domain_activation_state_drift` ile düştü. Alan adı kaydı `active` (revizyon 2/2/2) ama nginx üzerindeki ayar kayıtla uyuşmuyor (`domain_nginx_active_state_drift`). Silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile duruyor ve panelden çıkış yolu yok. Karar ver: kurulum bitmeden alan adı ayar değişikliği reddedilsin mi, yoksa sapmış nginx ayarı panelden yeniden uygulanabilsin mi; ve bu durumdaki site nasıl güvenle silinir.
+- **Kabul:** Yeniden üretilen durumda site panelden silinebiliyor ya da kurulum sürerken ayar değişikliği net bir mesajla reddediliyor; `.28`'deki site temizlenmiş.
