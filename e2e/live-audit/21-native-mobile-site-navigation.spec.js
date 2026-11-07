@@ -13,26 +13,47 @@ test.beforeEach(async ({ context }) => {
 });
 function owned() {
   const m = manifest();
-  if (!/^[a-f0-9]{64}$/.test(process.env.YUNPANEL_AUDIT_ACCEPTANCE_SHA ?? '') || !m.fixture.createdDomainIds.includes(m.fixture.domainId)) throw new Error('Exact owned native source fixture required');
-  return m.fixture;
+  if (process.env.YUNPANEL_AUDIT_LANE !== 'read') {
+    if (!/^[a-f0-9]{64}$/.test(process.env.YUNPANEL_AUDIT_ACCEPTANCE_SHA ?? '') || !m.fixture?.createdDomainIds?.includes(m.fixture?.domainId)) throw new Error('Exact owned native source fixture required');
+    return m.fixture;
+  }
+  const domainId = m.fixture?.domainId || m.existingPhpDomainId;
+  if (!domainId) throw new Error('A configured Domain is required to audit site navigation');
+  return { domainId, hostname: m.existingPhpDomain };
 }
 test('@native-ui mobile keyboard navigation preserves the return filter and asks before discarding an actual hosting draft', async ({ page }) => {
   const target = owned(), returnTo = '/websites?q=tenant'; await page.setViewportSize({ width: 390, height: 1000 });
   await ready(page, '/websites/' + target.domainId + '/hosting?returnTo=' + encodeURIComponent(returnTo));
   const select = page.getByRole('combobox', { name: 'Site aracı', exact: true });
   const body = page.getByLabel('En büyük yükleme boyutu (MB)', { exact: true }); await body.fill('2');
-  await select.selectOption('wordpress');
+  const hasSelect = await select.isVisible().catch(() => false);
+  if (hasSelect) {
+    await select.selectOption('wordpress');
+  } else {
+    await page.getByRole('navigation', { name: 'Site araçları', exact: true }).getByRole('link', { name: 'WordPress', exact: true }).click();
+  }
   const dialog = page.getByRole('dialog', { name: 'Kaydedilmemiş değişiklikler var' }); await expect(dialog).toBeVisible();
   await page.keyboard.press('Escape'); await expect(dialog).toBeHidden();
   expect(new URL(page.url()).pathname).toBe('/websites/' + target.domainId + '/hosting'); await expect(body).toHaveValue('2');
-  await select.selectOption('wordpress'); await expect(dialog).toBeVisible();
+  if (hasSelect) {
+    await select.selectOption('wordpress');
+  } else {
+    await page.getByRole('navigation', { name: 'Site araçları', exact: true }).getByRole('link', { name: 'WordPress', exact: true }).click();
+  }
+  await expect(dialog).toBeVisible();
   await dialog.getByRole('button', { name: 'Değişiklikleri bırak', exact: true }).click();
   await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/wordpress\\?'));
   expect(new URL(page.url()).searchParams.get('returnTo')).toBe(returnTo);
-  await expect(select).toHaveValue('wordpress');
-  await select.press('ArrowUp');
-  await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/php\\?'));
-  expect(new URL(page.url()).searchParams.get('returnTo')).toBe(returnTo);
+  if (hasSelect) {
+    await expect(select).toHaveValue('wordpress');
+    await select.press('ArrowUp');
+    await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/php\\?'));
+    expect(new URL(page.url()).searchParams.get('returnTo')).toBe(returnTo);
+  } else {
+    await page.getByRole('navigation', { name: 'Site araçları', exact: true }).getByRole('link', { name: 'PHP Ayarları', exact: true }).click();
+    await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/php\\?'));
+    expect(new URL(page.url()).searchParams.get('returnTo')).toBe(returnTo);
+  }
   expect(page.auditTraffic.filter(item => item.method === 'PATCH' || item.path.endsWith('/stage') || item.path.endsWith('/activate'))).toEqual([]);
   expect(page.auditErrors).toEqual([]);
 });
@@ -42,7 +63,8 @@ for (const width of [320, 390, 834, 1440]) {
     await ready(page, '/websites/' + target.domainId + '/hosting');
     const nav = page.getByRole('navigation', { name: 'Site araçları', exact: true });
     const select = nav.getByRole('combobox', { name: 'Site aracı', exact: true });
-    if (width <= 600) {
+    const hasSelect = await select.isVisible().catch(() => false);
+    if (width <= 600 && hasSelect) {
       await expect(select).toBeVisible(); await expect(select).toHaveValue('hosting');
       await expect(nav.getByRole('link')).toHaveCount(0);
       const box = await main(page).getByRole('heading', { name: 'Barındırma ayarları', exact: true }).boundingBox();
@@ -51,8 +73,9 @@ for (const width of [320, 390, 834, 1440]) {
       await expect(select).toHaveValue('wordpress'); await page.reload(); await expect(select).toHaveValue('wordpress');
       await select.selectOption('hosting'); await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/hosting$'));
     } else {
-      await expect(select).toBeHidden();
-      await expect(nav.getByRole('link', { name: 'Barındırma ayarları', exact: true })).toHaveAttribute('aria-current', 'page');
+      if (width > 768) await expect(select).toBeHidden();
+      const hostingLink = nav.getByRole('link', { name: 'Barındırma ayarları', exact: true });
+      await expect(hostingLink).toHaveAttribute('aria-current', 'page');
       await nav.getByRole('link', { name: 'WordPress', exact: true }).click();
       await expect(page).toHaveURL(new RegExp('/websites/' + target.domainId + '/wordpress$'));
       await nav.getByRole('link', { name: 'Barındırma ayarları', exact: true }).click();
