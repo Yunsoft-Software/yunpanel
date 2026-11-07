@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -140,30 +140,7 @@ test.describe.serial('WEB-05 Tercih edilen domain, HTTP→HTTPS ve yönlendirmel
     console.log(`Created domain ID: ${createdDomainId}`);
 
     // Kurulum sunucuda sürerken alan adı ayarları değiştirilemez (T868); bitmesini bekle.
-    let websiteId = null;
-    await expect.poll(async () => {
-      try {
-        const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`);
-        if (!res.ok()) return null;
-        const domainRecord = await res.json();
-        websiteId = (domainRecord.data ?? domainRecord).websiteId;
-        return websiteId;
-      } catch {
-        return null;
-      }
-    }, { timeout: 30000, intervals: [1000] }).toBeTruthy();
-
-    await expect.poll(async () => {
-      try {
-        const res = await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`);
-        if (!res.ok()) return false;
-        const latest = await res.json();
-        const operation = latest?.data?.operation ?? latest?.data ?? null;
-        return operation?.ready === true;
-      } catch {
-        return false;
-      }
-    }, { timeout: 120000, intervals: [2000] }).toBe(true);
+    await waitForWebsiteSetup(page, createdDomainId);
 
     // 2. Barındırma (Hosting) Ayarları sayfasına git
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);

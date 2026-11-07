@@ -186,3 +186,16 @@ export async function removeDockerProject(page, projectId, projectName = '') {
 }
 
 
+
+// Website setup finishes on the server after the result screen, and the panel refuses Domain
+// setting changes until it does (domain_update_provisioning_in_progress). Wait before editing.
+export async function waitForWebsiteSetup(page, domainId, { timeout = 120000 } = {}) {
+  const domain = await (await page.request.get(`/api/panel/domains/${encodeURIComponent(domainId)}`)).json();
+  const websiteId = (domain.data ?? domain).websiteId;
+  expect(websiteId, 'Domain must be bound to a Website').toBeTruthy();
+  await expect.poll(async () => {
+    const latest = await (await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`)).json().catch(() => null);
+    return (latest?.data?.operation ?? latest?.data ?? null)?.ready === true;
+  }, { timeout, intervals: [2000], message: 'Website setup did not finish' }).toBe(true);
+  return websiteId;
+}

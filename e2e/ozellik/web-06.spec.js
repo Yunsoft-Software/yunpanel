@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 function vhostGet(host) {
   return new Promise((resolve, reject) => {
@@ -144,6 +144,7 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     createdDomainId = match[1];
 
     // Alan adını etkinleştirip yayına uygula (active routing state'e geçir)
+    await waitForWebsiteSetup(page, createdDomainId);
     await applyHostingSettings(page, createdDomainId);
 
     // 2. Fiziksel Sonuç 1: Site canlı ve Nginx sunucusu yanıt veriyor (vhostGet doğrudan site vhostunu sorgular)
@@ -300,6 +301,7 @@ test.describe.serial('WEB-06 Domain askıya alma, kapatma, etkinleştirme ve gü
     createdErrDomainId = match[1];
 
     // Alan adını etkinleştirip yayına uygula (active routing state'e geçir)
+    await waitForWebsiteSetup(page, createdErrDomainId);
     await applyHostingSettings(page, createdErrDomainId);
 
     // Ayarlar sekmesine git
