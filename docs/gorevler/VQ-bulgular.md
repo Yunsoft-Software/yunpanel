@@ -865,9 +865,9 @@
 - **Kabul:** WEB-01 `.28`'de geçiyor; bu testin oluşturduğu site test sonunda panelden siliniyor.
 
 ### T868 · Kurulum sürerken alan adı ayarı değişince site silinemez kalıyor
-- **Bağımlı:** T849
+- **Bağımlı:** T122, T804
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/website-provisioning-worker.js`, `apps/api/src/domain-removal-runtime.js`
+- **Dosyalar:** `apps/api/src/domain-http.js`, `apps/api/src/management-app.js`, `apps/api/src/website-provisioning-worker.js`, `apps/api/test/domain-update-provisioning-guard.test.js`, `apps/web/src/workspace/domain-alias-model.js`, `e2e/ozellik/web-05.spec.js`
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** `.28`'de `tweb05-a3-mw4v7w9k.webrich.news`: WEB-05 kurulum sürerken tercih edilen alan adını değiştirdi; kurulumun `domain_activation` adımı `website_domain_activation_state_drift` ile düştü. Alan adı kaydı `active` (revizyon 2/2/2) ama nginx üzerindeki ayar kayıtla uyuşmuyor (`domain_nginx_active_state_drift`). Silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile duruyor ve panelden çıkış yolu yok. Karar ver: kurulum bitmeden alan adı ayar değişikliği reddedilsin mi, yoksa sapmış nginx ayarı panelden yeniden uygulanabilsin mi; ve bu durumdaki site nasıl güvenle silinir.
 - **Kabul:** Yeniden üretilen durumda site panelden silinebiliyor ya da kurulum sürerken ayar değişikliği net bir mesajla reddediliyor; `.28`'deki site temizlenmiş.
@@ -921,7 +921,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T875 · WEB-05 "SSL olmadan" testi artık sertifikalı siteyle karşılaşıyor
-- **Bağımlı:** T122
+- **Bağımlı:** T122, T868
 - **Dosyalar:** `e2e/ozellik/web-05.spec.js`
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** Site kurulumu artık sunucuda tamamlandığı için (T864) aynı `describe` içindeki site sertifikasını da alıyor; "hatalı girdi ve sınır durumu: SSL olmadan HTTPS uyarısı" testi sertifikasız site varsaydığından uyarıyı bulamıyor. Bu senaryo için sertifikasız bir durum kur (ör. HTTPS kapalı oluşturulan ayrı bir test sitesi) ve uyarıyı orada doğrula; form sınır değer kontrolü aynı kalsın. Mock yok; testin oluşturduğu siteyi panelden temizle.
