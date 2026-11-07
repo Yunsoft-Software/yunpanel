@@ -32,7 +32,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
   - Görevin `Dosyalar` satırı gerçekten değişen dosyaları yazmalı; `tasks.py lint` aynı dosyaya yazan görevlerin sırasını `Bağımlı` ile ister.
 - **Doğrulama:** `python3 orkestra/orchestrator.py verify --quick` (lint + birim testleri). Tam `verify` buna derlemeyi ekler. Tam canlı e2e (yaklaşık 465 test, 1,5–2 saat) **rutin değildir**; yalnız değişikliğin etkilediği `e2e/ozellik` dosyaları koşulur (İNSAN kararı, 06-11).
 - **Push:** yalnız `python3 orkestra/orchestrator.py push`, yalnız İNSAN istediğinde. Commit mesajları `[skip ci]` ile biter.
-- **Devam eden iş:** Antigravity T880'in ortasında kapandı. Commit'lenmemiş yarım değişiklikler `e2e/live-audit/04,06,07,runtime.js`'te, `sunucu-28-1` kilidi de AGENT_1'de. Bir sonraki `/orkestra-devam` bunu toparlar; senior bu dosyalara dokunmamalı.
+- **Yarım kalan iş:** Antigravity T880'in ortasında kapandı. T880 yeniden açık. Yarım değişiklikler incelenmemiş haliyle iki yerde saklı: GitHub'daki `wip-T880-07-11` dalında (`e2e/live-audit/04,06,07,runtime.js`) ve bu makinede `tasks/recovery/T880-yarim-07-11.patch`. T880'i alan ya buradan devam eder ya da baştan yapar; dal olduğu gibi birleştirilmez.
 
 ## 4. Test sunucusu (`.28`)
 - Panel: `https://server.cryptoraichu.website`. SSH takma adı `yunpanel-test` (root). Adres ve giriş bilgisi yalnız `.local/test-server.env` ve `.local/yunpanel-owner-password-only.json`'da; Git'e, rapora veya loga yazılmaz.
@@ -70,7 +70,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 - Bilerek bırakılan: `yunapp-f8c9dd81395d` Unix kullanıcısı (uygulama kaydı duruyor). 07-11 sahipsiz kayıt temizliğinin yedeği: `/root/backup-orphans-202611071117`.
 
 ## 8. Açık işler ve kararlar
-- **T880** (junior, yarım): değişiklik yapan `live-audit` testleri.
+- **T880** (junior, açık): değişiklik yapan `live-audit` testleri. Yarım hali `wip-T880-07-11` dalında (bölüm 3).
 - **Website Copying:** sıradaki özellik. Tasarım görüşmesi başladı, karar yok. Plesk'teki gibi bir siteyi aynı sunucudaki başka bir siteye kopyalama; dosyalar ve isteğe bağlı veritabanları.
 - **Uyarı e-postaları spama düşüyor:** gönderen alan adında DKIM yok, sunucunun ters DNS'i uyuşmuyor. İNSAN "şimdilik kalsın" dedi.
 - **Plesk eksikleri:** `docs/plesk-eksikler.md` (başındaki 07-11 notu neyin yapıldığını söyler) ve `docs/plesk-feature-parity.md`.

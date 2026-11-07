@@ -23,7 +23,7 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 ## Güncel durum
 - **07-11-2026 — kaldığımız yer (önce bunu oku):**
   - Aktif dal `07-11-2026`. `.28`'de paket `0.3.0-2026110701` (son düzeltmelerin hepsi).
-  - Yarım iş: T880 (`live-audit` değişiklik yapan testleri). Commit'lenmemiş değişiklikler `e2e/live-audit/04,06,07,runtime.js`'te; `/orkestra-devam` toparlar.
+  - T880 (`live-audit` değişiklik yapan testleri) yeniden açık. Önceki yarım hali incelenmemiş: `git diff 07-11-2026...wip-T880-07-11` veya `tasks/recovery/T880-yarim-07-11.patch`. Uygunsa oradan devam et; `.28`'de bu yarım koşudan 8 `ypaudit-` sitesi kaldı, görevin sonunda panelden temizle.
   - Canlı testte yalnız değiştirdiğin alanın dosyalarını koş. Site kurup hemen alan adı ayarı değiştiren test önce `waitForWebsiteSetup` çağırır.
   - Test sitelerini temizlemek için `node e2e/tools/remove-test-sites.mjs` (listeler; `--apply` siler, panel akışıyla).
 - **27-10-2026 — (geçmiş):**
