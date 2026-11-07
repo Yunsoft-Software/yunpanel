@@ -928,9 +928,9 @@
 - **Kabul:** WEB-05 `.28`'de iki kez art arda 2/2 geçiyor; test sonunda `tweb05` öneğiyle site kalmıyor.
 
 ### T876 · Askıdan geri açılan alan adının nginx ayarı kayıttan sapıyor
-- **Bağımlı:** T872
+- **Bağımlı:** T872, T875, T827
 - **Sahip:** SENIOR
-- **Dosyalar:** `apps/api/src/domain-suspension-runtime.js`, `e2e/ozellik/web-06.spec.js`
+- **Dosyalar:** `e2e/helpers.js`, `e2e/ozellik/web-05.spec.js`, `e2e/ozellik/web-06.spec.js`
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** 06-11'de WEB-06'nın (askıya al / geri aç / sil) bıraktığı 6 sitenin ve WEB-05'in bir sitesinin alan adı `active` görünürken askıya alma önizlemesi `domain_nginx_active_state_drift` veriyordu; silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile durdu. Panelin `stage` + `activate` adımları ayarı düzeltti ve siteler silinebildi. Tekrar üret: hangi adım (geri açma, tercih edilen alan adı değişikliği) nginx ayarını kayıttaki özetle uyumsuz bırakıyor. Düzelt; WEB-06 testinin sonunda sitenin panelden silinebildiğini doğrulat.
 - **Kabul:** Askıya al → geri aç → sil akışı `.28`'de onarım adımı olmadan tamamlanıyor; birim testi var.
@@ -941,3 +941,10 @@
 - **Kaynak:** SENIOR · 2026-11-07
 - **İş:** `e2e/live-audit` testleri yalnız kendi ayarıyla koşar (`playwright.live-audit.config.js`, hazırlık `e2e/live-audit/setup.js`); 06-11'den beri varsayılan koşuda yoklar ve uzun süredir düzgün koşulmadılar. Yalnız bu salt okunur dosyaları koş, `@mutation`/`@ai-live` içeren dosyaları koşma. Komut: `YUNPANEL_AUDIT_RUN_DIR=.local/browser-audit/t877-<zaman> YUNPANEL_AUDIT_LANE=read npx playwright test --config=playwright.live-audit.config.js <dosyalar>`. Her seferinde yeni bir run klasörü kullan; `.local/browser-audit/current` eski bir koşuya ait, kullanma. Her düşen test için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası, düzelt (eski seçici, ekran metni değişmiş); (c) ürün hatası, testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Run klasöründeki dosyaları rapora kopyalama (giriş bilgisi içerebilir), yalnız sonuç sayılarını yaz.
 - **Kabul:** Her düşen test için (a)/(b)/(c) raporda; (a) ve (b) olanlar iki koşuda da geçiyor; test sunucusunda hiçbir şey değişmedi (salt okunur).
+
+### T878 · Site oluşturup hemen alan adı ayarı değiştiren testler kurulumu beklesin: API-03, RUN-01, RUN-03, RUN-04, TLS-03, TLS-05, WEB-03, WEB-04
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/ozellik/api-03 run-01 run-03 run-04 tls-03 tls-05 web-03 web-04.spec.js`
+- **Kaynak:** SENIOR · 2026-11-07
+- **İş:** Panel, sitenin kurulumu sürerken alan adı ve barındırma ayarı değişikliğini artık reddediyor (`domain_update_provisioning_in_progress`, T868). Bu testler site oluşturduktan hemen sonra barındırma ayarını kaydediyor ya da alan adını güncelliyor. Her birinde ilk değişiklikten önce `e2e/helpers.js` içindeki `waitForWebsiteSetup(page, domainId)` çağır; örnek: `web-06.spec.js`. Kendi bekleme kodu yazma. Yalnız bu dosyaları `.28`'de koş, tam koşu yapma.
+- **Kabul:** Sekiz test `.28`'de iki kez art arda geçiyor (beklenen `test.fail`'ler hariç); testlerden sonra bu görevin öneğiyle site kalmıyor.
