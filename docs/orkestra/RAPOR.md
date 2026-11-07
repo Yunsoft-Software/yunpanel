@@ -1,15 +1,15 @@
 # Orkestra Dalga Kapanış Raporu
 
-**Tarih:** 2026-11-06 17:05 (Europe/Istanbul)  
+**Tarih:** 2026-11-07 10:55 (Europe/Istanbul)  
 **Rol:** Junior Orkestratör (`/orkestra-devam`)  
-**Aktif Dal:** `06-11-2026`  
+**Aktif Dal:** `07-11-2026`  
 
 ---
 
 ## 1. Genel Durum Özeti
-- **Toplam Kabul Edilen Görev (Done):** 196
-- **Bu Oturumda (06-11) Tamamlanan ve İncelenen Görevler:** 13 görev (T827, T865, T863, T864, T866, T867, T869, T870, T871, T872, T873, T874, T875)
-- **Açık Görevler (Open):** 0 hazır görev (`T868` engelli göreve bağlı bekliyor)
+- **Toplam Kabul Edilen Görev (Done):** 201
+- **Bu Oturumda (07-11) Tamamlanan ve İncelenen Görevler:** 5 görev (T868, T876, T877, T878, T879)
+- **Açık Görevler (Open):** 0 hazır görev
 - **İncelenmeyi Bekleyen / Yürütülen Görev:** 0
 - **Korumalı / Bloklu Görevler (Blocked):** 5 (`T802`, `T806`, `T807`, `T808`, `T849` — Senior/İnsan değerlendirmesi bekliyor)
 - **Boş Yuvalar:** AGENT_1, AGENT_2, AGENT_3, AGENT_4 (Tüm açık junior görevleri tamamlandı)
@@ -17,35 +17,27 @@
 
 ---
 
-## 2. 06-11 Oturumunda Tamamlanan Görevler Listesi (2. Dalga)
-1. **T869: 06-11 tam koşuda düşen yedek ve veritabanı testleri (BAK-05, BAK-06, DB-04, DB-05)**
-   - **Yapan:** AGENT_1 (`2d786d42`)
-   - **İnceleyen:** AGENT_3 (`3732c430`)
-   - **Çözüm:** BAK-05/06 testlerindeki subdomain eşleşmesi ve 'Yedekleme bilgileri okunuyor…' asenkron beklemesi düzeltildi. DB-04/05 için phpMyAdmin signon.php izin/grup kök nedeni tespit edilerek T874 bulgusu açıldı.
-2. **T870: 06-11 tam koşuda düşen dosya ve çalışma ortamı testleri (DOS-05, DOS-09, DOS-10, RUN-04, RUN-06, RUN-07, RUN-08)**
-   - **Yapan:** AGENT_2 (`75d579f0`)
-   - **İnceleyen:** AGENT_3 (`52f3ad92`)
-   - **Çözüm:** RUN-04 şifre korumalı dizinler doğrulandı; RUN-06 strict mode çakışması çözüldü; RUN-07/08 Nginx 502 ilk yükleme toleransı eklendi; DOS-05/09/10 umask ve dosya yetkileri doğrulandı.
-3. **T871: 06-11 tam koşuda düşen rol, güvenlik, sistem ve tls testleri (API-04, ROL-01, SYS-05, TLS-03)**
-   - **Yapan:** AGENT_3 (`462a48db`)
-   - **İnceleyen:** AGENT_2 (`3902f58e`)
-   - **Çözüm:** ROL-01 testleri doğrudan geçti; SYS-05 kurulum adımları beklemesi ve domain silme kontrolleri güçlendirildi; TLS-03 vhost reload geçici bağlantı sıfırlanmasına karşı hata toleransı eklendi. API-04 için T873 bulgusu açıldı.
-4. **T872: 06-11 tam koşuda düşen site ve arayüz testleri (WEB-04, WEB-06, WEB-07, UX-01, UX-04)**
-   - **Yapan:** AGENT_4 (`c8bb6f5e`)
-   - **İnceleyen:** AGENT_2 (`e1f5a08c`)
-   - **Çözüm:** WEB-04/06 vhostGet ve 502 toleransı, dialog enter/unmount senkronizasyonu; WEB-07 doğrudan geçti; UX-01 Plesk görev grubu barındırma sitesi kartı seçimi; UX-04 auth session state ve deterministik mobil sidebar kontrolü sağlandı.
-5. **T873: API-04 phpMyAdmin SSO signon 403 Access denied: signon.php dosya grubu root kalmış**
-   - **Yapan:** AGENT_1 (`8899b3d0`)
-   - **İnceleyen:** AGENT_2 (`c9c60965`)
-   - **Çözüm:** `packages/host-runtime/src/phpmyadmin-config-activator.js` içine `assertSignonBridgeFile` eklenerek dosyanın `root:yunpanel-phpmyadmin` (0640) olması güvenceye alındı; panel servis kurulum akışıyla sunucudaki dosya izinleri düzeltildi.
-6. **T874: DB-04 & DB-05: phpMyAdmin signon.php dosya grubu root kalmış, FastCGI 403 Permission denied dönüyor**
-   - **Yapan:** AGENT_3 (`e9f06948`)
-   - **İnceleyen:** AGENT_1 (`6839a53c`)
-   - **Çözüm:** `packages/host-runtime/src/phpmyadmin-config-manager.js` içine `ensureSignonBridgePermissions` eklendi; `packaging/debian/postinst` ve `phpmyadmin-handoff-socket.js` içinde bridge izinleri garanti altına alındı. DB-04 ve DB-05 testleri canlı ortamda doğrulandı.
-7. **T875: WEB-05 "SSL olmadan" testi artık sertifikalı siteyle karşılaşıyor**
-   - **Yapan:** AGENT_4 (`5b45935c`)
-   - **İnceleyen:** AGENT_1 (`e321d67e`)
-   - **Çözüm:** T864 sonrası otomatik sertifikalanan siteler karşısında "SSL olmadan HTTPS uyarısı" testi için sihirbaz üzerinden `httpsMode: 'off'` izole test sitesi açılarak form sınır değer kontrolü doğrulandı ve panelden temizlendi.
+## 2. 07-11 Oturumunda Tamamlanan Görevler Listesi
+1. **T868: Kurulum sürerken alan adı ayarı değişince site silinemez kalıyor**
+   - **Yapan:** SENIOR
+   - **İnceleyen:** AGENT_1 (`f18a2c45`)
+   - **Çözüm:** `domain-http.js` ve `management-app.js` içine `provisioningInProgress` kontrolü eklenerek, sitenin kurulumu sürerken alan adı ve barındırma ayarı değişikliği `409 domain_update_provisioning_in_progress` ile engellendi; durum sapması önlendi.
+2. **T876: Askıdan geri açılan alan adının nginx ayarı kayıttan sapıyor**
+   - **Yapan:** SENIOR
+   - **İnceleyen:** AGENT_2 (`c0df4fa7`)
+   - **Çözüm:** Askıya alma/geri açma akışındaki sapmanın kurulum bitmeden yapılan barındırma değişikliklerinden kaynaklandığı kanıtlandı; `e2e/helpers.js` içine `waitForWebsiteSetup(page, domainId)` eklenerek testler senkronize edildi, site onarımsız silinebilir hale getirildi.
+3. **T877: live-audit salt okunur testlerini kendi ayarıyla koş ve ayıkla**
+   - **Yapan:** AGENT_3 (`21c6eea6`)
+   - **İnceleyen:** AGENT_1 (`1ada4e43`)
+   - **Çözüm:** `playwright.live-audit.config.js` ve izole run klasörüyle 01, 02, 03, 08, 12 rotaları koşturuldu (358 passed, 6 skipped, 0 failed). `SiteDetailPage.jsx` içindeki başlık koruması sağlandı. 14, 17, 21 testlerinin salt okunur lane gereksinimleri için T879 bulgusu açıldı.
+4. **T878: Site oluşturup hemen alan adı ayarı değiştiren testler kurulumu beklesin**
+   - **Yapan:** AGENT_4 (`63727950`)
+   - **İnceleyen:** AGENT_1 (`511af72d`)
+   - **Çözüm:** `api-03`, `run-01`, `run-03`, `run-04`, `tls-03`, `tls-05`, `web-03`, `web-04` testlerinde alan adı/barındırma ayarı değişikliklerinden önce `waitForWebsiteSetup(page, domainId)` entegre edildi; 26 testin tamamı `.28` canlı ortamında %100 geçti.
+5. **T879: Live-audit native source testleri (14, 17, 21) salt okunur lane ile uyumlu hale getirildi**
+   - **Yapan:** AGENT_2 (`b8e92b22`)
+   - **İnceleyen:** AGENT_1 (`7f1fb4c1`)
+   - **Çözüm:** `14-native-source-ui.spec.js`, `17-native-source-screen-coverage.spec.js` ve `21-native-mobile-site-navigation.spec.js` testleri `YUNPANEL_AUDIT_LANE=read` guard'ları, fallback etki alanları ve mobil sekme seçicileriyle güçlendirildi; 376 test %100 başarıyla geçti.
 
 ---
 
@@ -55,4 +47,4 @@
 - `python3 orkestra/orchestrator.py verify`: **Başarılı** (`doğrulama: ok; yeniden açılan: -; bulgu: -`)
 - **Canlı Sunucu (.28) Kaynak Temizliği:** Testler sonrası kalan yetim site / domain / dosya bulunmamaktadır.
 - **Kilit Durumu:** Tüm ajan kilitleri serbest bırakıldı (`sunucu-28-*` temiz).
-- **Git Durumu:** Dalga boyunca yapılan tüm geliştirmeler ve incelemeler `[skip ci]` ile yerel dalda commit edildi. Kural gereği PUSH YAPILMADI.
+- **Git Durumu:** Dalga boyunca yapılan tüm geliştirmeler ve incelemeler `[skip ci]` ile yerel dalda (`07-11-2026`) commit edildi. Kural gereği PUSH YAPILMADI.
