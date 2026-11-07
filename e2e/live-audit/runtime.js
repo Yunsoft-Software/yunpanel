@@ -33,7 +33,20 @@ export async function apiContext(storageState=AUTH_PATH) {
 }
 export async function apiCall(api,csrf,method,endpoint,data) {
   if(!endpoint.startsWith('/api/'))throw new Error('Expected an exact panel API route');
-  const response=await api.fetch(endpoint,{method,data,headers:{Origin:ORIGIN,'x-csrf-token':csrf},timeout:90000});
+  let response;
+  for (let attempt = 0; attempt < 4; attempt++) {
+    try {
+      response = await api.fetch(endpoint,{method,data,headers:{Origin:ORIGIN,'x-csrf-token':csrf},timeout:90000});
+      break;
+    } catch (error) {
+      const isTransient = /socket hang up|ECONNRESET|ETIMEDOUT|fetch failed/i.test(String(error?.message));
+      if (isTransient && attempt < 3) {
+        await new Promise(resolve => setTimeout(resolve, 1500));
+        continue;
+      }
+      throw error;
+    }
+  }
   const payload=await response.json().catch(()=>({}));
   return {status:response.status(),body:payload,data:payload.data};
 }
