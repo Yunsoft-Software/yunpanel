@@ -958,3 +958,10 @@
     14-native-source-ui.spec.js, 17-native-source-screen-coverage.spec.js ve 21-native-mobile-site-navigation.spec.js testleri başında YUNPANEL_AUDIT_ACCEPTANCE_SHA (64 karakter hex sha) ve m.fixture.provisioningReady / createdDomainIds doğrulaması yapmaktadır. Bu koşullar yalnız özel acceptance adımı ve mutation fixture'ları ile sağlandığı için salt okunur lane'de (YUNPANEL_AUDIT_LANE=read) bu testler doğrudan koşulamaz durumdadır.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T880 · live-audit değişiklik yapan testlerini kendi ayarıyla koş ve ayıkla
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/04-mutation-lifecycle 06-host-lifecycle 07-subsystem-mutation 09-role-mutation 10-removal-mutation 11-component-cleanup-mutation 13-native-source-mutation 15-native-source-removal-mutation 16-native-hosting-dns-restore 18-native-application-environment 19-native-hosting-settings 20-native-tenant-sites 22-native-hosting-file-settings.spec.js`
+- **Kaynak:** SENIOR · 2026-11-07
+- **İş:** T877'de salt okunur hat geçti. Şimdi `@mutation` dosyaları: her biri `.28`'de kendi test kaynağını kurar, değiştirir ve siler. `05-ai-live` kapsam dışı. Komut: `YUNPANEL_AUDIT_RUN_DIR=.local/browser-audit/t880-<zaman> YUNPANEL_AUDIT_LANE=mutation npx playwright test --config=playwright.live-audit.config.js <dosya>`; her dosyayı ayrı ve yeni bir run klasörüyle koş. Gerçek sertifika isteyen adımlar Let's Encrypt sınırına takılırsa bunu (c) olarak değil "dış sınır" olarak yaz ve geç. Her düşen test için: (a) artık geçiyor; (b) test hatası, düzelt; (c) ürün hatası, testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Panelin arkasından sunucuda silme yapma; her dosyadan sonra o dosyanın kurduğu siteleri, alan adlarını, veritabanlarını ve projeleri panelden kontrol et ve kalan varsa panelden sil. Run klasöründeki dosyaları rapora kopyalama.
+- **Kabul:** Her dosya için sonuç raporda; (a) ve (b) olanlar iki koşuda da geçiyor; testlerden sonra `.28`'de `ypaudit-` öneğiyle kaynak kalmıyor.
