@@ -1,6 +1,6 @@
 # YunPanel
 
-Bağlayıcı proje kuralları kök `agents.md`'dedir; her işten önce onu oku.
+Bağlayıcı proje kuralları kök `agents.md`'dedir; her işten önce onu oku. Güncel durum, test sunucusu, kurulum ve bilinen tuzaklar: `docs/DEVIR.md`.
 
 <!-- orkestra:start -->
 ## Orkestra (senior/junior çalışma düzeni)

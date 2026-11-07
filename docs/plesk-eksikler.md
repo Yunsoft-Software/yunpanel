@@ -4,6 +4,28 @@
 >
 > Yöntem: Plesk'in sık kullanılan özellikleri YunPanel'in `apps/api/src`, `apps/web/src`, `packages/*/src` kodunda anahtar kelimeyle arandı. Ayrıca kendi yetenek kataloğu `apps/api/src/non-reseller-capabilities.js` (95 özellik: 70 completed, 13 partial, 9 deferred) okundu. Sınırlar: Plesk tarafı resmî belgeyle tek tek doğrulanmadı; farklı isimle yazılmış bir özellik kaçmış olabilir. Katalogdaki "completed" işareti çalıştığı anlamına gelmez; gerçek durum 1. dalga manuel test raporlarında (`docs/manuel-test/`).
 
+## 07-11-2026 durumu (aşağıdaki tablolar 26–27 Ekim'den kalma)
+- **Yapıldı** (`docs/yapilanlar.md`, 27-10 ve 03-11):
+  - Hosting'siz yönlendirme amaçlı domain (#1'in yarısı; wildcard hâlâ yok).
+  - Şifre korumalı dizinler (#4).
+  - E-posta ve panel içi sunucu uyarıları + bağımsız nöbetçi (#6).
+  - Performance Booster: gzip ve tarayıcı önbelleği (#7).
+  - Smarthost (#8).
+  - Canlı log (#9).
+  - Posta teslimat takibi (#13).
+  - Yol bazlı yönlendirme kuralları.
+  - Site bakım modu.
+  - Otomasyon API'si.
+- **Sıradaki aday:** Website Copying (#3); tasarım görüşmesi başladı, karar yok.
+- Diğer açıklar tablolardaki gibi:
+  - Wildcard.
+  - WP Toolkit (#2).
+  - Taşıma araçları (#5).
+  - Ek FTP kullanıcıları.
+  - PHP eklenti yönetimi.
+  - Hotlink koruması.
+  - Nginx önbellekleme.
+
 ## Gerçek Plesk envanteri ve öncelik sırası (2026-10-27)
 Senior, İNSAN'ın açtığı oturumda Yunsoft'un canlı Plesk Obsidian 18.0.81 sunucusuna salt okunur baktı (DECISIONS 2026-10-27 istisnası; hiçbir ayar değiştirilmedi, müşteri/site adı kaydedilmedi). Sunucuda 177 domain, kurulu 29 eklenti, sunucu düzeyinde 66 araç var. Aynı üst domain altında tek tek açılmış onlarca subdomain bulunuyor; wildcard ihtiyacı gerçek.
 

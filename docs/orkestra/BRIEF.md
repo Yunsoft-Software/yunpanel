@@ -1,7 +1,9 @@
 # BRIEF — YunPanel
 
-**Şu anki senior:** Claude Code (Opus 5.5) · 2026-10-27
-**Junior:** Antigravity (4 yuva, `/orkestra-devam`) — şu an duraklatıldı
+**Şu anki senior:** Claude Code (Opus 5.5) · 2026-11-07
+**Junior:** Antigravity/Gemini (4 yuva, `/orkestra-devam`) — pano açık
+
+> Güncel durumun tamamı, test sunucusu, kurulum ve bilinen tuzaklar: `docs/DEVIR.md`. Aşağıdaki tarihli notlar geçmiştir.
 
 ## Amaç
 Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran düzeni, görev akışları ve özelliklerinin mevcut Node/React altyapısında işlevsel eşdeğeri. Renk değişikliği ya da katalog eklemek kabul sayılmaz; kabul, gerçek host üzerinde fiziksel sonuçtur.
@@ -19,7 +21,12 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - Belge sırası: `agents.md` → `plan.md` (açık işler) → `ui-plan.md` → `todo.md` (gerçek kabul kapıları) → `docs/plesk-feature-parity.md` (162 özellik).
 
 ## Güncel durum
-- **27-10-2026 — kaldığımız yer (önce bunu oku):**
+- **07-11-2026 — kaldığımız yer (önce bunu oku):**
+  - Aktif dal `07-11-2026`. `.28`'de paket `0.3.0-2026110701` (son düzeltmelerin hepsi).
+  - Yarım iş: T880 (`live-audit` değişiklik yapan testleri). Commit'lenmemiş değişiklikler `e2e/live-audit/04,06,07,runtime.js`'te; `/orkestra-devam` toparlar.
+  - Canlı testte yalnız değiştirdiğin alanın dosyalarını koş. Site kurup hemen alan adı ayarı değiştiren test önce `waitForWebsiteSetup` çağırır.
+  - Test sitelerini temizlemek için `node e2e/tools/remove-test-sites.mjs` (listeler; `--apply` siler, panel akışıyla).
+- **27-10-2026 — (geçmiş):**
   - Juniorlar **duraklatıldı** (`tasks/PAUSED`). Devam: `python3 orkestra/tasks.py resume`, sonra `/orkestra-devam`. 1. dalga: 83 görev bitti, 44 açık.
   - Senior 3a/3b işleri bitti ve `docs/yapilanlar.md`'de: yönlendirme kuralları, Performance Booster, canlı log, Smarthost, teslimat takibi, şifreli dizinler, yönlendirme amaçlı domain, bakım modu, **otomasyon API'si** (API anahtarları + tenant siteleri).
   - Yarım iş: otomasyon API'sinin `.28` uçtan uca denemesi. `.28`'de paket `0.3.0-2026102702`; sertifika adımı `YUNPANEL_ACME_EMAIL` tanımlı olmadığı için durdu. Sıradaki adımlar: `docs/otomasyon-api.md` → "Kalan işler".

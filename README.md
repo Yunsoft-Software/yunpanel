@@ -2,10 +2,12 @@
 
 Yunsoft'un Plesk Obsidian ekran düzenini, kullanım akışlarını ve özelliklerini mevcut Node/React altyapısıyla uyarlayan hosting paneli. Günlük merkez Web Siteleri ve Alan Adları; dosya, veritabanı, SSL, posta, DNS, runtime, yedek ve erişim aynı site bağlamında.
 
-9–10 Ekim 2026 incelemesi: .28'de güncel kaynak çalışıyor; günlük iş akışları ve gerçek sonuç/kabul zincirinde somut açıklar var. Kaynak testi, katalog veya Code Factory DONE ürün kabulü yerine geçmez. Gerçek 320 tarayıcı vakası ve izole host işlemleri yürütüldü; başarısız işlevler audit/plan içinde. 10 Ekim kullanıcı UI/UX ve hata düzeltme planının uygulanmasını onayladı. Kaynak geliştirmesi sürüyor; yeni deployment için ayrı hedef/kapsam onayı gerekir.
+**Projeyi devralan önce [docs/DEVIR.md](docs/DEVIR.md)'yi okusun:** güncel durum, çalışma düzeni, test sunucusu, kurulum, bilinen tuzaklar ve açık işler orada. Son değişiklikler: [docs/yapilanlar.md](docs/yapilanlar.md). Aşağıdaki plan/todo/audit belgeleri 9–12 Ekim'den kalma başvuru kaynaklarıdır.
 
 | Belge | İçerik |
 | --- | --- |
+| [docs/DEVIR.md](docs/DEVIR.md) | Devir notu: buradan başlayın |
+| [docs/yapilanlar.md](docs/yapilanlar.md) | Biten işler, en yeni üstte |
 | [agents.md](agents.md) | Bağlayıcı çalışma ve güvenlik kuralları |
 | [plan.md](plan.md) | Öncelikli açık uygulama işleri |
 | [ui-plan.md](ui-plan.md) | Plesk ekran/akış sözleşmesi |
