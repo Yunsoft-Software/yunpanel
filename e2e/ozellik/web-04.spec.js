@@ -1,6 +1,6 @@
 import http from 'node:http';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -26,7 +26,7 @@ function checkHttp(host, path = '/') {
 }
 
 test.describe.serial('WEB-04 Hosting, forwarding ve hosting olmadan domain davranışı', () => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
 
   const agentN = process.env.AGENT_N || '1';
   const prefix = `tweb04-a${agentN}-${Date.now().toString(36)}`;
@@ -151,6 +151,7 @@ test.describe.serial('WEB-04 Hosting, forwarding ve hosting olmadan domain davra
     createdDomainId = match[1];
 
     // 2. Barındırma (Hosting) Ayarları ekranına git
+    await waitForWebsiteSetup(page, createdDomainId);
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 

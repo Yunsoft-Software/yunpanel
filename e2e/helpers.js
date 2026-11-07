@@ -190,12 +190,28 @@ export async function removeDockerProject(page, projectId, projectName = '') {
 // Website setup finishes on the server after the result screen, and the panel refuses Domain
 // setting changes until it does (domain_update_provisioning_in_progress). Wait before editing.
 export async function waitForWebsiteSetup(page, domainId, { timeout = 120000 } = {}) {
-  const domain = await (await page.request.get(`/api/panel/domains/${encodeURIComponent(domainId)}`)).json();
-  const websiteId = (domain.data ?? domain).websiteId;
-  expect(websiteId, 'Domain must be bound to a Website').toBeTruthy();
+  let websiteId = null;
   await expect.poll(async () => {
-    const latest = await (await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`)).json().catch(() => null);
-    return (latest?.data?.operation ?? latest?.data ?? null)?.ready === true;
+    try {
+      const res = await page.request.get(`/api/panel/domains/${encodeURIComponent(domainId)}`);
+      if (!res.ok()) return null;
+      const domain = await res.json().catch(() => null);
+      websiteId = (domain?.data ?? domain)?.websiteId;
+      return websiteId;
+    } catch {
+      return null;
+    }
+  }, { timeout: 30000, intervals: [1000], message: 'Domain must be bound to a Website' }).toBeTruthy();
+
+  await expect.poll(async () => {
+    try {
+      const res = await page.request.get(`/api/panel/sites/${encodeURIComponent(websiteId)}/provisioning/latest`);
+      if (!res.ok()) return false;
+      const latest = await res.json().catch(() => null);
+      return (latest?.data?.operation ?? latest?.data ?? null)?.ready === true;
+    } catch {
+      return false;
+    }
   }, { timeout, intervals: [2000], message: 'Website setup did not finish' }).toBe(true);
   return websiteId;
 }

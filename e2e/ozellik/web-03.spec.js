@@ -1,9 +1,9 @@
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.describe('WEB-03 Domain alias; web/mail/DNS ve yönlendirme tercihleri', () => {
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(180000);
+  test.setTimeout(240000);
 
   const prefix = `tweb03-a${process.env.AGENT_N || '2'}-${Date.now().toString(36)}`;
   const siteDomain = `${prefix}.webrich.news`;
@@ -107,6 +107,7 @@ test.describe('WEB-03 Domain alias; web/mail/DNS ve yönlendirme tercihleri', ()
     expect(siteDomainId).not.toBe('new');
 
     // 2. Alan Adları sekmesine git ve Domain Alias ekle
+    await waitForWebsiteSetup(page, siteDomainId);
     await page.goto(`/websites/${siteDomainId}/domains`);
     await expect(page.locator('h1')).toContainText(siteDomain, { timeout: 20000 });
     await expect(page.locator('h2', { hasText: 'Ek alan adları (alias)' })).toBeVisible({ timeout: 15000 });

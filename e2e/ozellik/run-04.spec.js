@@ -1,13 +1,14 @@
 import http from 'node:http';
+import https from 'node:https';
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
 test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler', () => {
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(180000);
+  test.setTimeout(240000);
 
   const agentN = process.env.AGENT_N || '3';
   const prefix = `trun04-a${agentN}-${Date.now().toString(36)}`;
@@ -38,6 +39,30 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
           Host: host,
           ...headers,
         },
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode, headers: res.headers, body });
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  function checkHttps(host, path = '/', headers = {}) {
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: '157.180.11.28',
+        port: 443,
+        path,
+        method: 'GET',
+        headers: {
+          Host: host,
+          ...headers,
+        },
+        rejectUnauthorized: false,
       }, (res) => {
         let body = '';
         res.on('data', (chunk) => { body += chunk; });
@@ -146,6 +171,7 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
     const match = href.match(/\/websites\/([^/?#]+)/);
     expect(match).toBeTruthy();
     createdDomainId = match[1];
+    await waitForWebsiteSetup(page, createdDomainId);
 
     // 2. Sistem kullanıcısı ve DocRoot dizinini erişim sayfasından tespit et
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/access`);
@@ -200,14 +226,17 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
 
     // c) Ayarları kaydet ve uygula
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled({ timeout: 10000 });
+    await expect(saveBtn).toBeEnabled({ timeout: 60000 });
     await saveBtn.click();
 
     // Yayına uygulanmasını bekle
     await expect(page.locator('.ws-notice:has-text("Barındırma ayarları uygulandı")')).toBeVisible({ timeout: 60000 });
 
     // 5. Fiziksel Nginx dosya doğrulaması (SSH)
-    const nginxConf = runSsh(`cat /etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf`);
+    const vhostPath = `/etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf`;
+    await expect.poll(() => runSsh(`cat ${vhostPath}`), { timeout: 30000, intervals: [1000] })
+      .toContain('index anasayfa.html index.html;');
+    const nginxConf = runSsh(`cat ${vhostPath}`);
     // a) indexFiles direktifi
     expect(nginxConf).toContain('index anasayfa.html index.html;');
     expect(nginxConf).toContain('try_files $uri $uri/ =404;');
@@ -218,13 +247,19 @@ test.describe('RUN-04 MIME, index, hata sayfaları ve parola korumalı dizinler'
 
     // 6. Fiziksel HTTP istek doğrulamaları
     // a) Başlangıç dosyası önceliği: GET / -> ONCELIKLI_ANASAYFA_INDEX dönmeli (varsayılan index.html ezilir)
-    const indexRes = await checkHttp(siteDomain, '/');
+    let indexRes = await checkHttp(siteDomain, '/');
+    if (indexRes.status === 301) {
+      indexRes = await checkHttps(siteDomain, '/');
+    }
     expect(indexRes.status).toBe(200);
     expect(indexRes.body).toContain('ONCELIKLI_ANASAYFA_INDEX');
     expect(indexRes.body).not.toContain('VARSAYILAN_INDEX');
 
     // b) Özel 404 hata sayfası: GET /mevcut-olmayan-yol.html -> status 404 ve özel HTML içeriği
-    const errRes = await checkHttp(siteDomain, '/mevcut-olmayan-yol.html');
+    let errRes = await checkHttp(siteDomain, '/mevcut-olmayan-yol.html');
+    if (errRes.status === 301) {
+      errRes = await checkHttps(siteDomain, '/mevcut-olmayan-yol.html');
+    }
     expect(errRes.status).toBe(404);
     expect(errRes.body).toContain('OZEL_404_HATA_SAYFASI');
   });

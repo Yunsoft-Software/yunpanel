@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 const owner = JSON.parse(fs.readFileSync('.local/yunpanel-owner-password-only.json', 'utf8'));
 const origin = new URL(owner.url).origin;
@@ -109,6 +109,7 @@ test.describe.serial('TLS-03 isolated custom certificate lifecycle', () => {
       if (!response || !response.ok()) return 'waiting';
       return (await response.json().catch(() => ({})))?.data?.state;
     }, { timeout: 90_000, intervals: [500, 1000, 2000] }).toBe('active');
+    await waitForWebsiteSetup(page, domainId);
     return resource;
   }
 

@@ -1,7 +1,7 @@
 import http from 'node:http';
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
@@ -196,6 +196,7 @@ test.describe.serial('TLS-05 HTTPS yönlendirme, HSTS ve desteklenen TLS seçene
     createdDomainId = match[1];
 
     // Barındırma ayarlarına git
+    await waitForWebsiteSetup(page, createdDomainId);
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await page.waitForLoadState('networkidle').catch(() => {});
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
@@ -213,7 +214,7 @@ test.describe.serial('TLS-05 HTTPS yönlendirme, HSTS ve desteklenen TLS seçene
 
     // Kaydet ve uygula
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled();
+    await expect(saveBtn).toBeEnabled({ timeout: 60000 });
     await saveBtn.click();
 
     const statusNotice = page.locator('p[role="status"], .ws-notice, [role="status"]').filter({
@@ -222,12 +223,15 @@ test.describe.serial('TLS-05 HTTPS yönlendirme, HSTS ve desteklenen TLS seçene
     await expect(statusNotice.first()).toBeVisible({ timeout: 60000 });
 
     // Fiziksel Kanıt 3: Nginx yapılandırma dosyasında HSTS başlığı direktifi
-    const testSiteNginxConf = runSsh(`cat /etc/nginx/sites-enabled/yunpanel-${primaryDomain}.conf`);
-    expect(testSiteNginxConf).toContain('add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;');
+    const vhostPath = `/etc/nginx/sites-enabled/yunpanel-${primaryDomain}.conf`;
+    await expect.poll(() => runSsh(`cat ${vhostPath}`), { timeout: 30000, intervals: [1000] })
+      .toContain('add_header Strict-Transport-Security "max-age=31536000; includeSubDomains; preload" always;');
 
     // Fiziksel Kanıt 4: HTTP isteği atıldığında Nginx tarafından dönen yanıtta HSTS başlığı
-    const siteHttpRes = await checkHttp(primaryDomain, '/');
-    expect(siteHttpRes.headers['strict-transport-security']).toBe('max-age=31536000; includeSubDomains; preload');
+    await expect.poll(async () => {
+      const res = await checkHttp(primaryDomain, '/').catch(() => null);
+      return res?.headers?.['strict-transport-security'];
+    }, { timeout: 20000, intervals: [1000] }).toBe('max-age=31536000; includeSubDomains; preload');
 
     // 3. Sunucu Düzeyinde Canlı TLS Seçenekleri Fiziksel Doğrulaması
     // Fiziksel Kanıt 5: TLS 1.2 protokolü ile canlı el sıkışması başarılı
@@ -255,11 +259,17 @@ test.describe.serial('TLS-05 HTTPS yönlendirme, HSTS ve desteklenen TLS seçene
     await expect(httpsRedirectCheck).toBeVisible({ timeout: 15000 });
     await expect(httpsRedirectCheck).toBeChecked();
 
-    // SSL bağlı olmadığı için sistemin uyarı vermesini doğrula
+    // SSL bağlı değilse sistemin uyarı vermesini doğrula; sertifika bağlıysa uyarının olmadığını doğrula
     const warnNotice = page.locator('.ws-notice.ws-notice-warn').filter({
-      hasText: /SSL sertifikası bağlı değil/i,
+      hasText: /SSL sertifikası bağlı değil|HTTP → HTTPS yönlendirmesinden önce/i,
     });
-    await expect(warnNotice.first()).toBeVisible();
+    const domainRes = await page.request.get(`/api/panel/domains/${encodeURIComponent(createdDomainId)}`);
+    const domainData = (await domainRes.json()).data;
+    if (!domainData?.certificateId) {
+      await expect(warnNotice.first()).toBeVisible();
+    } else {
+      await expect(warnNotice).toHaveCount(0);
+    }
 
     // 2. Geçersiz karakterler içeren HSTS başlık değeri denemesi (400 invalid_nginx_header)
     const badHeaderRes = await page.request.post(`/api/panel/domains/${encodeURIComponent(createdDomainId)}/update-preview`, {

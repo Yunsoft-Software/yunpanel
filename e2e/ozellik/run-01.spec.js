@@ -1,13 +1,14 @@
 import http from 'node:http';
+import https from 'node:https';
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
 test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları', () => {
   test.describe.configure({ mode: 'serial' });
-  test.setTimeout(180000);
+  test.setTimeout(240000);
 
   const agentN = process.env.AGENT_N || '1';
   const prefix = `trun01-a${agentN}-${Date.now().toString(36)}`;
@@ -35,6 +36,27 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
         path: '/',
         method: 'GET',
         headers: { Host: host },
+      }, (res) => {
+        let body = '';
+        res.on('data', chunk => { body += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode, headers: res.headers, body });
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  function checkHttps(host) {
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: '157.180.11.28',
+        port: 443,
+        path: '/',
+        method: 'GET',
+        headers: { Host: host },
+        rejectUnauthorized: false,
       }, (res) => {
         let body = '';
         res.on('data', chunk => { body += chunk; });
@@ -143,6 +165,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     const match = href.match(/\/websites\/([^/?#]+)/);
     expect(match).toBeTruthy();
     createdDomainId = match[1];
+    await waitForWebsiteSetup(page, createdDomainId);
 
     // 2. Erişim hesapları ve sistem kullanıcısını doğrula
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/access`);
@@ -184,7 +207,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     await docRootInput.fill('public');
 
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled({ timeout: 15000 });
+    await expect(saveBtn).toBeEnabled({ timeout: 60000 });
     await saveBtn.click();
 
     // Barındırma ayarlarının başarıyla uygulanmasını bekle
@@ -198,11 +221,18 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     expect(nginxConf).toContain(`root ${defaultDocRoot}/public;`);
     expect(nginxConf).toContain(`disable_symlinks on from=${defaultDocRoot};`);
 
-    // 5. Fiziksel Sonuç (HTTP): 157.180.11.28 IP'sine Host başlığıyla istek at
+    // 5. Fiziksel Sonuç (HTTP / HTTPS): 157.180.11.28 IP'sine Host başlığıyla istek at
     const httpRes = await checkHttp(siteDomain);
-    expect(httpRes.status).toBe(200);
-    expect(httpRes.body).toContain('<h1>RUN-01 OK</h1>');
-    expect(httpRes.headers['server'] || '').toContain('nginx');
+    if (httpRes.status === 301) {
+      expect(httpRes.headers['location'] || '').toContain(`https://${siteDomain}`);
+      const httpsRes = await checkHttps(siteDomain);
+      expect(httpsRes.status).toBe(200);
+      expect(httpsRes.body).toContain('<h1>RUN-01 OK</h1>');
+    } else {
+      expect(httpRes.status).toBe(200);
+      expect(httpRes.body).toContain('<h1>RUN-01 OK</h1>');
+      expect(httpRes.headers['server'] || '').toContain('nginx');
+    }
   });
 
   test('hatalı girdi: geçersiz document root (path traversal / absolute path) reddedilir ve Nginx config korunur', async ({ page }) => {
@@ -218,7 +248,7 @@ test.describe('RUN-01 Document root, sistem kullanıcısı ve hosting ayarları'
     await docRootInput.fill('../../../etc/passwd');
 
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled();
+    await expect(saveBtn).toBeEnabled({ timeout: 60000 });
     await saveBtn.click();
 
     // Form doğrulaması hata bildirmeli

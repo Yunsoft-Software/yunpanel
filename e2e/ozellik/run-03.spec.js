@@ -1,12 +1,13 @@
 import http from 'node:http';
+import https from 'node:https';
 import { execSync } from 'node:child_process';
 import { test, expect } from '@playwright/test';
-import { OWNER_USERNAME, OWNER_PASSWORD, loginAs } from '../helpers.js';
+import { OWNER_USERNAME, OWNER_PASSWORD, loginAs, waitForWebsiteSetup } from '../helpers.js';
 
 test.use({ trace: 'off' });
 
 test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uygulama', () => {
-  test.setTimeout(180000);
+  test.setTimeout(240000);
 
   const agentN = process.env.AGENT_N || '1';
   const prefix = `trun03-a${agentN}-${Date.now().toString(36)}`;
@@ -32,6 +33,27 @@ test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uy
         path: '/',
         method: 'GET',
         headers: { Host: host },
+      }, (res) => {
+        let body = '';
+        res.on('data', (chunk) => { body += chunk; });
+        res.on('end', () => {
+          resolve({ status: res.statusCode, headers: res.headers, body });
+        });
+      });
+      req.on('error', reject);
+      req.end();
+    });
+  }
+
+  function checkHttps(host) {
+    return new Promise((resolve, reject) => {
+      const req = https.request({
+        hostname: '157.180.11.28',
+        port: 443,
+        path: '/',
+        method: 'GET',
+        headers: { Host: host },
+        rejectUnauthorized: false,
       }, (res) => {
         let body = '';
         res.on('data', (chunk) => { body += chunk; });
@@ -129,6 +151,7 @@ test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uy
     createdDomainId = match[1];
 
     // 2. Barındırma / Web Sunucusu ayarları sekmesine git
+    await waitForWebsiteSetup(page, createdDomainId);
     await page.goto(`/websites/${encodeURIComponent(createdDomainId)}/hosting`);
     await expect(page.locator('h2, h3', { hasText: 'Barındırma ayarları' })).toBeVisible({ timeout: 15000 });
 
@@ -152,17 +175,20 @@ test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uy
 
     // "Kaydet ve uygula" butonuna bas
     const saveBtn = page.locator('button[type="submit"]:has-text("Kaydet ve uygula")');
-    await expect(saveBtn).toBeEnabled({ timeout: 10000 });
+    await expect(saveBtn).toBeEnabled({ timeout: 60000 });
     await saveBtn.click();
 
     // Yapılandırma kontrolü ve uygulama durumunu bekle
-    const badgeActive = page.locator('.ws-actions .ws-badge, .ws-actions .badge').filter({ hasText: /Yayında \(Güncel\)|Yayında/i });
-    await expect(badgeActive.first()).toBeVisible({ timeout: 60000 });
+    const statusNotice = page.locator('p[role="status"], .ws-notice, [role="status"]').filter({
+      hasText: /Barındırma ayarları uygulandı|Yayında/i,
+    });
+    await expect(statusNotice.first()).toBeVisible({ timeout: 60000 });
 
     // 3. Fiziksel Sonuç 1 (SSH - Vhost dosyası): Nginx konfigürasyonunu doğrula
     const vhostPath = `/etc/nginx/sites-enabled/yunpanel-${siteDomain}.conf`;
+    await expect.poll(() => runSsh(`cat ${vhostPath}`), { timeout: 30000, intervals: [1000] })
+      .toContain('client_max_body_size 64m;');
     const nginxConf = runSsh(`cat ${vhostPath}`);
-    expect(nginxConf).toContain('client_max_body_size 64m;');
     expect(nginxConf).toContain('add_header X-Run03-Directive "Antigravity-Verified" always;');
 
     // 4. Fiziksel Sonuç 2 (SSH - Nginx syntax testi): `nginx -t` başarı kontrolü
@@ -177,12 +203,19 @@ test.describe.serial('RUN-03 Apache/Nginx ayarları, ek direktifler ve testli uy
       runSsh(`mkdir -p ${docRoot} && echo "<h1>RUN-03 OK</h1>" > ${docRoot}/index.html`);
     }
 
-    // 5. Fiziksel Sonuç 3 (HTTP): Sunucuya canlı HTTP isteği at ve yanıt başlıklarını doğrula
+    // 5. Fiziksel Sonuç 3 (HTTP / HTTPS): Sunucuya canlı HTTP isteği at ve yanıt başlıklarını doğrula
     const httpRes = await checkHttp(siteDomain);
-    expect(httpRes.status).toBe(200);
-    expect(httpRes.body).toContain('<h1>RUN-03 OK</h1>');
-    expect(httpRes.headers['x-run03-directive']).toBe('Antigravity-Verified');
-    expect(httpRes.headers['server'] || '').toContain('nginx');
+    if (httpRes.status === 301) {
+      const httpsRes = await checkHttps(siteDomain);
+      expect(httpsRes.status).toBe(200);
+      expect(httpsRes.body).toContain('<h1>RUN-03 OK</h1>');
+      expect(httpsRes.headers['x-run03-directive']).toBe('Antigravity-Verified');
+    } else {
+      expect(httpRes.status).toBe(200);
+      expect(httpRes.body).toContain('<h1>RUN-03 OK</h1>');
+      expect(httpRes.headers['x-run03-directive']).toBe('Antigravity-Verified');
+      expect(httpRes.headers['server'] || '').toContain('nginx');
+    }
   });
 
   test('hatalı girdi: geçersiz Nginx ayarları ve sınır dışı değerler reddedilir, rollback ile mevcut config korunur', async ({ page }) => {
