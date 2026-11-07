@@ -3,6 +3,7 @@
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
 ## 07-11-2026
+- **Altyapı** — `.28`'e son iki haftanın bütün düzeltmeleri gerçek kurulum paketiyle kuruldu (`0.3.0-2026110701`); servisler, siteler, phpMyAdmin girişi (DB-04) ve site kurulumu (WEB-08) paketle doğrulandı.
 - **Altyapı** — Askıya alınıp geri açılan sitelerin silinemez kalması aslında testlerin kurulum sürerken ayar kaydetmesinden geliyormuş; T868 kilidi bunu önlüyor, testler artık kurulumu bekliyor (T876).
 
 ## 06-11-2026
