@@ -2,6 +2,9 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 07-11-2026
+- **Altyapı** — Askıya alınıp geri açılan sitelerin silinemez kalması aslında testlerin kurulum sürerken ayar kaydetmesinden geliyormuş; T868 kilidi bunu önlüyor, testler artık kurulumu bekliyor (T876).
+
 ## 06-11-2026
 - **Hata** — phpMyAdmin'e tek tıkla giriş 403 veriyordu (paket kurulumu dosyayı yanlış grupla bırakıyordu); paket kurulumu ve phpMyAdmin etkinleştirme bunu düzeltiyor (T873/T874).
 - **Hata** — Site kurulumu sürerken alan adı ayarı değiştirilemiyor; önceden bu çakışma siteyi silinemez bırakıyordu (T868). `.28`'de doğrulandı, takılı kalan site panelden onarılıp silindi.
