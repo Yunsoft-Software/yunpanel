@@ -934,3 +934,10 @@
 - **Kaynak:** SENIOR · 2026-11-06
 - **İş:** 06-11'de WEB-06'nın (askıya al / geri aç / sil) bıraktığı 6 sitenin ve WEB-05'in bir sitesinin alan adı `active` görünürken askıya alma önizlemesi `domain_nginx_active_state_drift` veriyordu; silme `routing_suspend` adımında `domain_removal_suspension_preview_stale` ile durdu. Panelin `stage` + `activate` adımları ayarı düzeltti ve siteler silinebildi. Tekrar üret: hangi adım (geri açma, tercih edilen alan adı değişikliği) nginx ayarını kayıttaki özetle uyumsuz bırakıyor. Düzelt; WEB-06 testinin sonunda sitenin panelden silinebildiğini doğrulat.
 - **Kabul:** Askıya al → geri aç → sil akışı `.28`'de onarım adımı olmadan tamamlanıyor; birim testi var.
+
+### T877 · live-audit salt okunur testlerini kendi ayarıyla koş ve ayıkla
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/01-route-inventory 02-critical-flows 03-responsive-and-auth 08-forms-and-navigation 12-source-ui 14-native-source-ui 17-native-source-screen-coverage 21-native-mobile-site-navigation.spec.js`
+- **Kaynak:** SENIOR · 2026-11-07
+- **İş:** `e2e/live-audit` testleri yalnız kendi ayarıyla koşar (`playwright.live-audit.config.js`, hazırlık `e2e/live-audit/setup.js`); 06-11'den beri varsayılan koşuda yoklar ve uzun süredir düzgün koşulmadılar. Yalnız bu salt okunur dosyaları koş, `@mutation`/`@ai-live` içeren dosyaları koşma. Komut: `YUNPANEL_AUDIT_RUN_DIR=.local/browser-audit/t877-<zaman> YUNPANEL_AUDIT_LANE=read npx playwright test --config=playwright.live-audit.config.js <dosyalar>`. Her seferinde yeni bir run klasörü kullan; `.local/browser-audit/current` eski bir koşuya ait, kullanma. Her düşen test için raporda sonucu yaz: (a) artık geçiyor; (b) test hatası, düzelt (eski seçici, ekran metni değişmiş); (c) ürün hatası, testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Run klasöründeki dosyaları rapora kopyalama (giriş bilgisi içerebilir), yalnız sonuç sayılarını yaz.
+- **Kabul:** Her düşen test için (a)/(b)/(c) raporda; (a) ve (b) olanlar iki koşuda da geçiyor; test sunucusunda hiçbir şey değişmedi (salt okunur).
