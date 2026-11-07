@@ -105,7 +105,7 @@ function SiteWorkspace({ websiteId, tab }) {
     return true;
   }).map(([key, label]) => [key, key === 'node' && application?.type === 'node' ? 'Node.js' : key === 'node' && (application?.type === 'php' || website?.runtimeType === 'php') ? 'PHP / WordPress' : key === 'node' && application?.type === 'python' ? 'Python' : key === 'node' && (application?.type === 'docker' || website?.runtimeType === 'docker') ? 'Docker' : label]);
   if (tab === 'node' && (website?.runtimeType === 'php' || application?.type === 'php')) return <Navigate replace to={`${siteHref(domain.id, 'php')}${location.search}`} />;
-  if (!tabs.some(([key]) => key === tab)) return <EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} />;
+  if (!tabs.some(([key]) => key === tab)) return <><PageHeading title={domain.primaryDomain} /><EmptyState title="Bu hedefte bu araç kullanılamaz" detail="Yalnız bu sitenin çalışma türüyle desteklenen yönetim araçları gösterilir." action={<LinkButton to={siteHref(domain.id)}>Siteye dön</LinkButton>} /></>;
   const ssl = certificateState(domain, certificates.status === 'ready' ? certificates.items : null);
   const server = servers.items.find((item) => item.id === domain.serverId);
   const url = externalSiteUrl(domain);

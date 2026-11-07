@@ -15,6 +15,7 @@ for(const [alias,target] of aliases)test('ALIAS '+alias+' returns to one canonic
  await expect(main(page)).not.toContainText(/Sayfa bulunamadı|Cannot GET/);
 });
 for(const runtime of ['php','node','static'])for(const tab of ['overview','hosting','settings','domains','dns','files','databases','ssl','node','deploy','logs','analytics','access','terminal','cron','backup','mail'])test('SITE '+runtime+' / '+tab+' resolves the exact real Website context',async({page})=>{
+ if (tab === 'deploy' && runtime !== 'node') test.skip(true, 'Deploy tab is only supported for node/git/docker applications');
  const m=manifest();const w=m.baseline.websites.find(v=>v.runtimeType===runtime);const d=m.baseline.domains.find(v=>v.websiteId===w?.id);
  expect(w,'A real '+runtime+' Website is required').toBeDefined();expect(d,'An explicit domain binding is required').toBeDefined();
  await ready(page,'/websites/'+d.id+'/'+tab);

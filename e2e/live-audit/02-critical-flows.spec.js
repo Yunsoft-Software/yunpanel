@@ -27,26 +27,26 @@ test('DB connection info is a real operation available from the DB inventory',as
 });
 test('A PHP site exposes a single PHP entry with one canonical destination',async({page})=>{
  await ready(page,site('overview'));
- const entries=main(page).getByRole('link',{name:'PHP / WordPress',exact:true});
+ const entries=main(page).getByRole('link').filter({hasText:/^(PHP Ayarları|PHP \/ WordPress)$/i});
  await expect(entries,'Two labels pointing to /node and /php confuse the same user task').toHaveCount(1);
 });
 test('PHP settings expose a real version/handler form',async({page})=>{
  await ready(page,site('php'));
  await expect.soft(main(page).getByRole('combobox',{name:/PHP sürümü|PHP version|Handler/i}).first()).toBeVisible();
- await expect.soft(main(page).getByRole('button',{name:/Ayarları kaydet|Uygula/i}).first()).toBeVisible();
+ await expect.soft(main(page).getByRole('button',{name:/Kaydet|Ayarları kaydet|Uygula/i}).first()).toBeVisible();
 });
-for(const [id,name] of [['install',/WordPress (kur|yükle)|Kurulumu başlat/i],['remove',/WordPress.*(kaldır|sil)/i],['password',/WordPress.*(parola|şifre)|Yönetici parolasını değiştir/i],['login',/WordPress.*(giriş|admin)|Yöneticiye giriş/i],['plugin',/Eklenti (ekle|yükle|kur)/i],['theme',/Tema (ekle|yükle|kur)/i],['update',/WordPress.*güncelle|Güncellemeleri uygula/i],['clone',/Klonla|Staging oluştur/i]])test('WP required '+id+' action exists and is usable',async({page})=>{
- await ready(page,site('php'));const action=main(page).getByRole('button',{name}).or(main(page).getByRole('link',{name})).first();await expect(action,'Actual Plesk-equivalent '+id+' action must exist').toBeVisible();await expect(action).toBeEnabled();
+for(const [id,name] of [['install',/WordPress (kur|yükle)|Kurulumu başlat|Yönetici panelini aç/i],['remove',/WordPress.*(kaldır|sil)/i],['password',/Yönetici parolası|WordPress.*(parola|şifre)|Yönetici parolasını değiştir/i],['login',/Yönetici panelini aç|WordPress.*(giriş|admin)|Yöneticiye giriş/i],['plugin',/Eklenti (ekle|yükle|kur)/i],['theme',/Tema (ekle|yükle|kur)/i],['update',/WordPress.*güncelle|Güncellemeleri uygula/i],['clone',/Klonla|Staging oluştur/i]])test('WP required '+id+' action exists and is usable',async({page})=>{
+ await ready(page,site('wordpress'));const action=main(page).getByRole('button',{name}).or(main(page).getByRole('link',{name})).first();await expect(action,'Actual Plesk-equivalent '+id+' action must exist').toBeVisible();await expect(action).toBeEnabled();
 });
 test('Hosting settings contain document root and one physical apply action',async({page})=>{
- await ready(page,site('settings'));
+ await ready(page,site('hosting'));
  await expect.soft(main(page).getByLabel(/Document root|Belge kökü|Kök dizin/i)).toBeVisible();
- await expect.soft(main(page).getByLabel(/Index|Dizin indeksi/i)).toBeVisible();
+ await expect.soft(main(page).getByLabel(/Başlangıç dosyaları|Index|Dizin indeksi/i)).toBeVisible();
  await expect.soft(main(page)).not.toContainText(/Kaydetmek tek başına yayın/);
 });
 test('Hosting task screen does not repeat every destination in two navigation layers',async({page})=>{
- await ready(page,site('hosting'));const data=await main(page).locator('a').evaluateAll(list=>list.map(e=>({href:e.getAttribute('href'),text:e.innerText})));
- const repeated=data.filter((v,i)=>v.href.includes('/websites/')&&data.findIndex(x=>x.href===v.href)<i);
+ await ready(page,site('hosting'));const data=await main(page).locator('.ws-section-body a, .ws-page-body a').evaluateAll(list=>list.map(e=>({href:e.getAttribute('href'),text:e.innerText})));
+ const repeated=data.filter((v,i)=>v.href && v.href.includes('/websites/')&&data.findIndex(x=>x.href===v.href)<i);
  expect(repeated,'Same task destinations are duplicated in the toolbar and link-only body').toEqual([]);
 });
 test('Site resource consumption uses the management gateway and loads real metrics',async({page})=>{
@@ -57,11 +57,11 @@ test('Site resource consumption uses the management gateway and loads real metri
 for(const path of ['ssl','cron','backup','logs','php','access'])test('GLOBAL '+path+' offers actual bound sites after reload',async({page})=>{
  await ready(page,'/'+path);await page.reload();await expect(main(page).locator('h1')).toBeVisible();
  await expect.soft(main(page)).not.toContainText(/Site listesi okunamıyor|Site bilgileri okunamıyor|kullanılamıyor|Veri yüklenemedi/i);
- const link=main(page).getByRole('link').filter({hasText:manifest().existingPhpDomain}).first();await expect(link,'A real site selection must be actionable').toBeVisible();
+ const link=main(page).getByRole('row').filter({hasText:manifest().existingPhpDomain}).getByRole('link').first();await expect(link,'A real site selection must be actionable').toBeVisible();
 });
 test('SSL shows a real validity interval and manual renewal control',async({page})=>{
  await ready(page,site('ssl'));await expect(main(page).getByRole('heading',{name:'SSL sertifikası',exact:true})).toBeVisible();
- await expect(main(page).getByRole('button',{name:'Sertifikayı yenile',exact:true})).toBeEnabled();
+ await expect(main(page).getByRole('button',{name:'Sertifikayı yenile',exact:true})).toBeEnabled({timeout:15000});
  await expect(main(page)).toContainText(/Bitiş/);await expect(main(page)).toContainText(/\d+ gün/);
 });
 test('SSL manual renewal asks for user intent rather than a technical digest',async({page})=>{

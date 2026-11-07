@@ -948,3 +948,13 @@
 - **Kaynak:** SENIOR · 2026-11-07
 - **İş:** Panel, sitenin kurulumu sürerken alan adı ve barındırma ayarı değişikliğini artık reddediyor (`domain_update_provisioning_in_progress`, T868). Bu testler site oluşturduktan hemen sonra barındırma ayarını kaydediyor ya da alan adını güncelliyor. Her birinde ilk değişiklikten önce `e2e/helpers.js` içindeki `waitForWebsiteSetup(page, domainId)` çağır; örnek: `web-06.spec.js`. Kendi bekleme kodu yazma. Yalnız bu dosyaları `.28`'de koş, tam koşu yapma.
 - **Kabul:** Sekiz test `.28`'de iki kez art arda geçiyor (beklenen `test.fail`'ler hariç); testlerden sonra bu görevin öneğiyle site kalmıyor.
+
+### T879 · Live-audit native source testleri (14, 17, 21) salt okunur lane'de YUNPANEL_AUDIT_ACCEPTANCE_SHA ve mutation fixture'ı gerektiriyor
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/14-native-source-ui.spec.js`, `e2e/live-audit/17-native-source-screen-coverage.spec.js`, `e2e/live-audit/21-native-mobile-site-navigation.spec.js`
+- **Kaynak:** QA · 2026-11-07 10:24
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    14-native-source-ui.spec.js, 17-native-source-screen-coverage.spec.js ve 21-native-mobile-site-navigation.spec.js testleri başında YUNPANEL_AUDIT_ACCEPTANCE_SHA (64 karakter hex sha) ve m.fixture.provisioningReady / createdDomainIds doğrulaması yapmaktadır. Bu koşullar yalnız özel acceptance adımı ve mutation fixture'ları ile sağlandığı için salt okunur lane'de (YUNPANEL_AUDIT_LANE=read) bu testler doğrudan koşulamaz durumdadır.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
