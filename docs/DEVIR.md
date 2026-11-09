@@ -68,7 +68,8 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 
 ## 8. Açık işler ve kararlar
 - **T881** (senior yaptı, incelemede): `provision-zone` ile açılan bölgelere sahiplik makbuzu (`dns-zone-ownership.json`). Düzeltmeden önce bu yolla açılmış bölgelerin makbuzu yok, onlar korumalı kalır; test sunucusu dışında kurulum olursa "bölgeyi sahiplen" adımı gerekir.
-- **`live-audit` eksikleri (T880 sonrası):** `13,15,16,18,19,20,22` (59 test) 10 Ekim'in kabul ortamına bağlı olduğu için hiç çalışmıyor. `10` ve `11`'deki düşmeler için görev yok; `11`'deki posta verisi silme hatası gerçek ürün hatası olabilir.
+- **T884 (açık, ürün hatası):** WordPress kurulumu `wp core download` adımında düşüyor (`wordpress-toolkit-service.js:262`, ZIP adresi ile otomatik `--skip-*` bayrakları çakışıyor). `live-audit/04`'ün 3 testi bu yüzden kırmızı.
+- **Silinen `live-audit` testleri (T883):** Eski kabul ortamına bağlı 59 test silindi. Raporundaki "karşılığı var" matrisi doğrulanamadı (51 referansın 33'ünde test adı, 2'sinde dosya yok); bu davranışların başka testlerce sınandığını varsayma. Dosyalar `ba33f4a8^` commit'inde.
 - **Website Copying:** sıradaki özellik. Tasarım görüşmesi başladı, karar yok. Plesk'teki gibi bir siteyi aynı sunucudaki başka bir siteye kopyalama; dosyalar ve isteğe bağlı veritabanları.
 - **Uyarı e-postaları spama düşüyor:** gönderen alan adında DKIM yok, sunucunun ters DNS'i uyuşmuyor. İNSAN "şimdilik kalsın" dedi.
 - **Plesk eksikleri:** `docs/plesk-eksikler.md` (başındaki 07-11 notu neyin yapıldığını söyler) ve `docs/plesk-feature-parity.md`.
