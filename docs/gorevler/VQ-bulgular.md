@@ -965,3 +965,13 @@
 - **Kaynak:** SENIOR · 2026-11-07
 - **İş:** T877'de salt okunur hat geçti. Şimdi `@mutation` dosyaları: her biri `.28`'de kendi test kaynağını kurar, değiştirir ve siler. `05-ai-live` kapsam dışı. Komut: `YUNPANEL_AUDIT_RUN_DIR=.local/browser-audit/t880-<zaman> YUNPANEL_AUDIT_LANE=mutation npx playwright test --config=playwright.live-audit.config.js <dosya>`; her dosyayı ayrı ve yeni bir run klasörüyle koş. Gerçek sertifika isteyen adımlar Let's Encrypt sınırına takılırsa bunu (c) olarak değil "dış sınır" olarak yaz ve geç. Her düşen test için: (a) artık geçiyor; (b) test hatası, düzelt; (c) ürün hatası, testi değiştirme, `orchestrator.py finding` ile senior'a yaz. Panelin arkasından sunucuda silme yapma; her dosyadan sonra o dosyanın kurduğu siteleri, alan adlarını, veritabanlarını ve projeleri panelden kontrol et ve kalan varsa panelden sil. Run klasöründeki dosyaları rapora kopyalama.
 - **Kabul:** Her dosya için sonuç raporda; (a) ve (b) olanlar iki koşuda da geçiyor; testlerden sonra `.28`'de `ypaudit-` öneğiyle kaynak kalmıyor.
+
+### T881 · Provision edilen DNS zone sonrası domain/website silme dns_zone_delete_ownership_evidence_required ile kilitleniyor
+- **Bağımlı:** T803, T826
+- **Dosyalar:** `apps/api/src/domain-removal-plan.js`
+- **Kaynak:** QA · 2026-11-09 09:45
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    POST /api/domains/:id/dns/provision-zone ile zone açılan sitelerde, web sitesi silinmek istendiğinde (website removal operation -> domain_removal adımı) domain removal preview dnsRetirementImpact.preview den zone.ownershipOrigin?.evidenceDigest null döndüğü için domain-removal-plan.js satır 815te dns_zone_delete_ownership_evidence_required hardBlockers ekleniyor ve domain_removal_not_ready hatasıyla silme adımı blocked kalıyor. Bu durumdaki siteler panelden silinemez duruma düşüyor.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
