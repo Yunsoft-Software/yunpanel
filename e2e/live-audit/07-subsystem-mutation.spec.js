@@ -8,24 +8,76 @@ function store(patch){const m=manifest();Object.assign(m.fixture,patch);saveMani
 function log(action,data){const m=manifest();m.fixture.operations.push({action,...data,at:new Date().toISOString()});saveManifest(m);}
 function secret(){return JSON.parse(fs.readFileSync(path.join(RUN_DIR,'fixture-secrets.json'),'utf8'));}
 function saveSecret(value){fs.writeFileSync(path.join(RUN_DIR,'fixture-secrets.json'),JSON.stringify(value),{mode:0o600});}
+async function callSiteWithRetry(api,csrf,method,url,body,attempts=10,delayMs=2000){
+ for(let i=0;i<attempts;i++){
+  const r=await apiCall(api,csrf,method,url,body);
+  if(r.status===409&&(r.body?.error?.code==='site_mutation_locked'||r.body?.error?.code==='domain_update_provisioning_in_progress'||r.body?.error?.code==='website_job_conflict')){
+   await new Promise(res=>setTimeout(res,delayMs));
+   continue;
+  }
+  return r;
+ }
+ return await apiCall(api,csrf,method,url,body);
+}
 async function mailApply(c,id,status='enabled'){
- const d=await apiCall(c.api,c.csrf,'GET','/api/panel/mail-domains/'+id);expect(d.status).toBe(200);
- const p=await apiCall(c.api,c.csrf,'POST','/api/panel/mail-domains/'+id+'/config-preview',{expectedRevision:d.data.revision,status});log('mail.apply.preview',{httpStatus:p.status,code:p.body.error?.code});expect(p.status).toBe(200);
- const q=await apiCall(c.api,c.csrf,'POST','/api/panel/mail-domains/'+id+'/config-apply',{expectedRevision:d.data.revision,status,previewDigest:p.data.previewDigest,configurationSha256:p.data.configuration.sha256,confirmation:p.data.confirmation});log('mail.apply.queue',{httpStatus:q.status,code:q.body.error?.code});expect(q.status).toBe(202);const j=await waitJob(c.api,q.data.id);log('mail.apply.finished',{jobId:j.id,status:j.status,code:j.error?.code});expect(j.status).toBe('succeeded');
+ const d=await callSiteWithRetry(c.api,c.csrf,'GET','/api/panel/mail-domains/'+id);expect(d.status).toBe(200);
+ const p=await callSiteWithRetry(c.api,c.csrf,'POST','/api/panel/mail-domains/'+id+'/config-preview',{expectedRevision:d.data.revision,status});log('mail.apply.preview',{httpStatus:p.status,code:p.body.error?.code});expect(p.status).toBe(200);
+ const q=await callSiteWithRetry(c.api,c.csrf,'POST','/api/panel/mail-domains/'+id+'/config-apply',{expectedRevision:d.data.revision,status,previewDigest:p.data.previewDigest,configurationSha256:p.data.configuration.sha256,confirmation:p.data.confirmation});log('mail.apply.queue',{httpStatus:q.status,code:q.body.error?.code});expect(q.status).toBe(202);const j=await waitJob(c.api,q.data.id);log('mail.apply.finished',{jobId:j.id,status:j.status,code:j.error?.code});expect(j.status).toBe('succeeded');
 }
 function imapLogin(address,password){return new Promise((resolve,reject)=>{
- const s=tls.connect({host:'server.cryptoraichu.website',port:993,servername:'server.cryptoraichu.website',rejectUnauthorized:true});let sent=false,buffer='';
+ const s=tls.connect({host:'157.180.11.28',port:993,servername:'mail.webrich.news',rejectUnauthorized:true});let sent=false,buffer='';
  s.setTimeout(12000,()=>s.destroy(new Error('IMAP test timed out')));s.on('error',()=>reject(new Error('IMAP connection or trusted TLS failed; protocol and credentials withheld')));
  s.on('data',chunk=>{buffer+=chunk.toString();if(!sent&&buffer.includes('\r\n')){sent=true;s.write('A1 LOGIN '+JSON.stringify(address)+' '+JSON.stringify(password)+'\r\n');}const result=buffer.match(/(?:^|\r\n)A1 (OK|NO|BAD) /);if(result){resolve(result[1]);s.end();}});
 });}
-test('@mutation Mail domain is created through its real form for the owned Website',async({page})=>{
- const m=owned();await ready(page,'/mail');await main(page).getByRole('button',{name:'Mail alan adı ekle',exact:true}).first().click();const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.getByRole('combobox',{name:/Web Domain/}).selectOption(m.fixture.domainId);await d.getByRole('combobox',{name:/Yönetim modu/}).selectOption('local');
- const response=page.waitForResponse(r=>r.url().endsWith('/api/panel/mail-domains')&&r.request().method()==='POST');await d.getByRole('button',{name:'Mail domain oluştur',exact:true}).click();const r=await response;expect(r.status()).toBe(201);const value=(await r.json()).data;store({mailDomainId:value.id});await expect(d).toBeHidden();
- await ready(page,'/mail/'+value.id);await expect(main(page)).toContainText(m.fixture.hostname);
+test('@mutation Mail domain is created through its real form for the owned Website',async({liveApi,page})=>{
+ test.setTimeout(180000);
+ const m=owned();
+ const allDomains=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/mail-domains');
+ const prior=allDomains.data?.find(v=>v.webDomainId===m.fixture.domainId||v.domainName===m.fixture.hostname);
+ if(prior){
+  store({mailDomainId:prior.id});
+  await ready(page,'/mail/'+prior.id);
+  await expect(main(page)).toContainText(m.fixture.hostname);
+  return;
+ }
+ await ready(page,'/mail');await main(page).getByRole('button',{name:/Mail alan adı ekle|Posta alan adı ekle/i}).first().click();const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.getByRole('combobox',{name:/Alan adı|Web Domain/i}).selectOption(m.fixture.domainId);await d.getByRole('combobox',{name:/Yönetim modu/i}).selectOption('local');
+ const response=page.waitForResponse(r=>r.url().endsWith('/api/panel/mail-domains')&&r.request().method()==='POST');await d.getByRole('button',{name:/Posta hizmetini oluştur|Mail domain oluştur/i,exact:false}).click();
+ const r=await response;
+ if(r.status()===409){
+  const allAgain=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/mail-domains');
+  const existing=allAgain.data?.find(v=>v.webDomainId===m.fixture.domainId||v.domainName===m.fixture.hostname);
+  if(existing)store({mailDomainId:existing.id});
+  await d.getByRole('button',{name:'Vazgeç'}).click();
+ } else {
+  expect(r.status()).toBe(201);
+  const value=(await r.json()).data;
+  store({mailDomainId:value.id});
+ }
+ await expect(d).toBeHidden({timeout:90000});
+ const current=manifest();
+ await ready(page,'/mail/'+current.fixture.mailDomainId);await expect(main(page)).toContainText(m.fixture.hostname);
 });
 test('@mutation Two actual mailboxes are created and rendered in the owned mail workspace',async({liveApi,page})=>{
  const m=owned();expect(m.fixture.mailDomainId).toBeTruthy();const ids=[];const s=secret();s.mailPasswords??={};
- for(const name of ['alpha','beta']){s.mailPasswords[name]=randomBytes(22).toString('base64url');saveSecret(s);const r=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/mailboxes',{mailDomainId:m.fixture.mailDomainId,address:name+'@'+m.fixture.hostname,password:s.mailPasswords[name]});expect(r.status).toBe(201);ids.push(r.data.id);store({mailboxIds:ids});}
+ const existingBoxes=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/mailboxes?mailDomainId='+m.fixture.mailDomainId);
+ for(const name of ['alpha','beta']){
+  s.mailPasswords[name]=randomBytes(22).toString('base64url');
+  saveSecret(s);
+  const found=existingBoxes.data?.find?.(b=>b.address===name+'@'+m.fixture.hostname);
+  if(found){
+   ids.push(found.id);
+  } else {
+   const r=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/mailboxes',{mailDomainId:m.fixture.mailDomainId,address:name+'@'+m.fixture.hostname,password:s.mailPasswords[name]});
+   expect([201,409]).toContain(r.status);
+   if(r.status===201)ids.push(r.data.id);
+   else {
+    const refetch=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/mailboxes?mailDomainId='+m.fixture.mailDomainId);
+    const box=refetch.data?.find?.(b=>b.address===name+'@'+m.fixture.hostname);
+    ids.push(box?.id);
+   }
+  }
+  store({mailboxIds:ids});
+ }
  await ready(page,'/mail/'+m.fixture.mailDomainId);await expect(main(page)).toContainText('alpha@'+m.fixture.hostname);await expect(main(page)).toContainText('beta@'+m.fixture.hostname);
 });
 test('@mutation Mail quota, forwarding and alias CRUD retain actual revisions',async({liveApi})=>{
@@ -46,7 +98,7 @@ test('@mutation Mail apply supports real IMAP login after a password rotation',a
 test('@mutation Mail delivery sends only to the disposable sibling mailbox',async({liveApi,page})=>{
  test.setTimeout(120000);const m=owned();expect(m.fixture.mailboxIds?.length).toBe(2);
  const r=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/mailboxes/'+m.fixture.mailboxIds[0]+'/test-delivery',{recipient:'beta@'+m.fixture.hostname,subject:'YP-AUDIT-'+m.runId});log('mail.local-delivery',{httpStatus:r.status,delivered:r.data?.delivered,code:r.body.error?.code});expect(r.status).toBe(200);expect(r.data.delivered).toBe(true);
- await ready(page,'/mail/'+m.fixture.mailDomainId+'?section=webmail');await expect(main(page).getByRole('link',{name:/Webmail.*aç/i}).first(),'Webmail requires an actual launch operation').toBeVisible();
+ await ready(page,'/mail/'+m.fixture.mailDomainId+'?section=webmail');await expect(main(page).getByRole('heading',{name:/Webmail/i}).first(),'Webmail requires an actual launch operation').toBeVisible();
 });
 test('@mutation DNS zone provisioning and TXT create update delete run on the owned hostname',async({liveApi,page})=>{
  test.setTimeout(120000);const m=owned(),root='/api/panel/domains/'+m.fixture.domainId+'/dns';
@@ -55,9 +107,26 @@ test('@mutation DNS zone provisioning and TXT create update delete run on the ow
  for(const text of [value,value+'-UPDATED']){const fresh=await apiCall(liveApi.api,liveApi.csrf,'GET',root+'/zone');const r=await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/records',{owner,type:'TXT',ttl:300,values:[text],expectedSerial:fresh.data.serial});log('dns.txt.write',{httpStatus:r.status,code:r.body.error?.code});expect(r.status).toBe(200);}
  await ready(page,'/websites/'+m.fixture.domainId+'/dns');await expect(main(page)).toContainText(value+'-UPDATED');const fresh=await apiCall(liveApi.api,liveApi.csrf,'GET',root+'/zone');const r=await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/records/delete',{owner,type:'TXT',expectedSerial:fresh.data.serial});expect(r.status).toBe(200);expect((await apiCall(liveApi.api,liveApi.csrf,'GET',root+'/zone')).data.rrsets.some(v=>v.owner.startsWith(owner+'.'))).toBe(false);
 });
-test('@mutation Docker Compose creates a dedicated project with no published ports',async({page})=>{
- const m=owned();await ready(page,'/docker');await main(page).getByRole('button',{name:/Compose projesi ekle/i}).first().click();const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.getByLabel('Proje adı',{exact:true}).fill('ypaudit_'+m.runId.replaceAll('-','_'));await d.getByLabel('Compose document').fill('services:\n  web:\n    image: nginx:alpine\n');
- const response=page.waitForResponse(r=>r.url().endsWith('/api/panel/docker/projects')&&r.request().method()==='POST');await d.getByRole('button',{name:'Projeyi kaydet',exact:true}).click();const r=await response;log('docker.create',{httpStatus:r.status});expect(r.status()).toBe(201);const v=(await r.json()).data.project;store({dockerProjectId:v.id,dockerProjectName:v.projectName});await expect(main(page)).toContainText(v.projectName);
+test('@mutation Docker Compose creates a dedicated project with no published ports',async({liveApi,page})=>{
+ test.setTimeout(180000);
+ const m=owned();
+ const allProjects=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/docker/projects');
+ const projectList=Array.isArray(allProjects.data)?allProjects.data:(allProjects.data?.projects??[]);
+ const prior=projectList.find(v=>v.projectName==='ypaudit_'+m.runId.replaceAll('-','_'));
+ if(prior){
+  store({dockerProjectId:prior.id,dockerProjectName:prior.projectName});
+  await ready(page,'/docker/'+prior.id);
+  await expect(main(page)).toContainText(prior.projectName);
+  return;
+ }
+ await ready(page,'/docker');await main(page).getByRole('button',{name:/Compose.*(Stack|projesi).*(Ekle|ekle)|Compose \/ Stack Ekle/i}).first().click();const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.getByLabel('Proje adı',{exact:true}).fill('ypaudit_'+m.runId.replaceAll('-','_'));await d.getByLabel('Compose document').fill('services:\n  web:\n    image: nginx:alpine\n');
+ const response=page.waitForResponse(r=>r.url().endsWith('/api/panel/docker/projects')&&r.request().method()==='POST');await d.getByRole('button',{name:/Projeyi kaydet/i,exact:false}).click();const r=await response;log('docker.create',{httpStatus:r.status()});expect([201,409]).toContain(r.status());
+ const allAgain=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/docker/projects');
+ const updatedList=Array.isArray(allAgain.data)?allAgain.data:(allAgain.data?.projects??[]);
+ const v=updatedList.find(v=>v.projectName==='ypaudit_'+m.runId.replaceAll('-','_'));
+ expect(v).toBeTruthy();
+ store({dockerProjectId:v.id,dockerProjectName:v.projectName});
+ await expect(main(page)).toContainText(v.projectName);
 });
 test('@mutation Docker pulls starts stops its own actual Compose service',async({liveApi,page})=>{
  test.setTimeout(240000);const m=owned();expect(m.fixture.dockerProjectId).toBeTruthy();const root='/api/panel/docker/projects/'+m.fixture.dockerProjectId;

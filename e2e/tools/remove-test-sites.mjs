@@ -24,8 +24,15 @@ const csrf = (await (await page.request.get('/api/auth/session')).json()).data?.
 const headers = { 'x-csrf-token': csrf, origin: ORIGIN };
 const body = async (response) => { try { return await response.json(); } catch { return null; } };
 const api = async (method, path, data) => {
-  const response = await page.request.fetch(`/api/panel${path}`, { method, headers, data });
-  return { status: response.status(), body: await body(response) };
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      const response = await page.request.fetch(`/api/panel${path}`, { method, headers, data });
+      return { status: response.status(), body: await body(response) };
+    } catch (e) {
+      if (attempt === 4) throw e;
+      await page.waitForTimeout(1000 * (attempt + 1));
+    }
+  }
 };
 const listOf = (value) => (Array.isArray(value) ? value : value?.data ?? []);
 

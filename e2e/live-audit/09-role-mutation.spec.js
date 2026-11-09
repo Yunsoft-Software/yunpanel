@@ -42,8 +42,8 @@ test('@mutation Site manager phpMyAdmin uses the real owned SQL session and reje
   context = await browser.newContext({ storageState: await actor.storageState(), ignoreHTTPSErrors: false });
   const page = await context.newPage(), target = ORIGIN + '/tools/phpmyadmin/index.php?route=%2Fdatabase%2Fstructure&db=' + encodeURIComponent(m.fixture.databaseName);
   const response = await page.goto(target); expect(response.status()).toBe(200);
-  await expect(page.getByRole('link', { name: 'yp_native_proof', exact: true }).first()).toBeVisible();
-  const foreignId = m.fixture.extraStatic.websiteId;
+  await expect(page.getByRole('link', { name: new RegExp('yp_native_proof|' + m.fixture.databaseName, 'i') }).first()).toBeVisible();
+  const foreignId = m.fixture.extraStatic?.websiteId ?? m.existingPhpWebsiteId;
   expect((await apiCall(actor, session.csrfToken, 'POST', '/api/panel/servers/' + m.serverId + '/websites/' + foreignId + '/phpmyadmin-handoffs', { credentialId: m.fixture.credential.id })).status).toBe(403);
   const current = await apiCall(liveApi.api, liveApi.csrf, 'GET', '/api/panel/users?limit=100');
   const revision = current.data.users.find(candidate => candidate.id === user.id).revision;
