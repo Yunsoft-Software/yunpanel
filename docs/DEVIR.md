@@ -18,7 +18,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 | `scripts/` | Paket (`build-deb.sh`), lint (`validate-repository.mjs`), kurtarma araçları. |
 
 ## 2. Şu anki durum (07-11-2026)
-- **Dal:** `07-11-2026`, GitHub'la eşit. Her gün o günün tarihiyle (GG-AA-YYYY) yeni dal açılır, bir önceki günün dalından. `main`'e yazılmaz; `main` çok geride ve bilerek öyle.
+- **Dal:** `09-11-2026` (GitHub'daki en güncel dal `07-11-2026`; bugünkü dal yerelde). Her gün o günün tarihiyle (GG-AA-YYYY) yeni dal açılır, bir önceki günün dalından. `main`'e yazılmaz; `main` çok geride ve bilerek öyle.
 - **Test sunucusu (`.28`):** Paket `0.3.0-2026110701` kurulu; son iki haftanın bütün düzeltmeleri bu pakette. Servisler sağlıklı; phpMyAdmin girişi ve site kurulumu paketle doğrulandı.
 - **Son iki haftada yapılanlar:** `docs/yapilanlar.md` (her iş tek satır, en yeni üstte).
 - **Testler:** `npm test` ve `npm run lint` geçiyor.
