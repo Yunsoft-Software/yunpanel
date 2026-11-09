@@ -21,7 +21,11 @@ Yunsoft'un kendi hosting ve sunucu yönetim paneli. Plesk Obsidian'ın ekran dü
 - Belge sırası: `agents.md` → `plan.md` (açık işler) → `ui-plan.md` → `todo.md` (gerçek kabul kapıları) → `docs/plesk-feature-parity.md` (162 özellik).
 
 ## Güncel durum
-- **07-11-2026 — kaldığımız yer (önce bunu oku):**
+- **09-11-2026 — kaldığımız yer (önce bunu oku):**
+  - Aktif dal `09-11-2026`. Hazır işler: T881 incelemesi, T882, T883. T880 bitti; `wip-T880-07-11` dalı artık kullanılmaz.
+  - `live-audit` dosyalarını yalnız kendi ayarıyla ve her seferinde yeni bir run klasörüyle koş; `05-ai-live`'ı koşma.
+  - Silme denemelerinde gerçekten çözümlenen ad kullan (`….157.180.11.28.sslip.io`); `.example.internal` gibi adların DNS bölgesi silinemez.
+- **07-11-2026 — (geçmiş):**
   - Aktif dal `09-11-2026`. `.28`'de paket `0.3.0-2026110701` (son düzeltmelerin hepsi).
   - T880 (`live-audit` değişiklik yapan testleri) yeniden açık. Önceki yarım hali incelenmemiş: `git diff 07-11-2026...wip-T880-07-11` veya `tasks/recovery/T880-yarim-07-11.patch`. Uygunsa oradan devam et; `.28`'de bu yarım koşudan 8 `ypaudit-` sitesi kaldı, görevin sonunda panelden temizle.
   - T880 bitince, başka ajan canlı test koşmuyorken `node e2e/tools/remove-test-sites.mjs` ile listele, `--apply` ile sil; 14 eski `tweb06e-`/`tweb05nossl-` sitesi de buna dahil. Sonucu rapora sayı olarak yaz ve yeniden listeleyerek doğrula.

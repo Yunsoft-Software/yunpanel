@@ -975,3 +975,17 @@
     POST /api/domains/:id/dns/provision-zone ile zone açılan sitelerde, web sitesi silinmek istendiğinde (website removal operation -> domain_removal adımı) domain removal preview dnsRetirementImpact.preview den zone.ownershipOrigin?.evidenceDigest null döndüğü için domain-removal-plan.js satır 815te dns_zone_delete_ownership_evidence_required hardBlockers ekleniyor ve domain_removal_not_ready hatasıyla silme adımı blocked kalıyor. Bu durumdaki siteler panelden silinemez duruma düşüyor.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T882 · live-audit 04, 10 ve 11: kalan düşmeleri ve sessiz atlamaları çöz
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/04-mutation-lifecycle.spec.js`, `e2e/live-audit/10-removal-mutation.spec.js`, `e2e/live-audit/11-component-cleanup-mutation.spec.js`
+- **Kaynak:** SENIOR · 2026-11-09
+- **İş:** T880'den kalanlar. (1) `11`: posta verisi silme işi (`mail_data_delete`) sunucuda `local_operation_failed` veriyor; nedenini sunucu kaydından bul. (2) `10`: site silme `domain_removal_not_ready` ile düştü; T881 sonrası tekrar koş, hâlâ düşüyorsa gerçek engeli `domains/:id/removal` önizlemesinden oku. (3) `04`: WordPress parola ve kaldırma testleri düğme görünmezse `test.skip` ile geçiyor; düğme kaybolsa da test sorun göstermez. Test kendi WordPress'ini kursun ya da düğme yoksa düşsün. Her dosya için `YUNPANEL_AUDIT_RUN_DIR=.local/browser-audit/<görev>-<zaman> YUNPANEL_AUDIT_LANE=mutation npx playwright test --config=playwright.live-audit.config.js <dosya>`, her seferinde yeni run klasörü. Ürün hatası bulursan testi gevşetme; `orchestrator.py finding` ile senior'a yaz. Kurduğun kaynakları panelden temizle.
+- **Kabul:** Üç dosyanın her testi için sonuç raporda (geçti / test düzeltildi / bulgu numarası); `04`'te koşulsuz `test.skip` kalmadı; geçenler iki koşuda da geçiyor; `.28`'de `ypaudit-` kaynağı kalmadı.
+
+### T883 · Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
+- **Kaynak:** SENIOR · 2026-11-09
+- **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
+- **Kabul:** 59 testin her biri raporda (silindi + karşılığı / yeniden yazıldı / listelendi + gerekçe); kalan testler `.28`'de iki koşuda da geçiyor ya da bulgu numarası var; `.28`'de `ypaudit-` kaynağı kalmadı; `npm run lint` geçiyor.
