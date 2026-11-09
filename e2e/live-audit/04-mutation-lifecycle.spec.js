@@ -1,12 +1,14 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, randomBytes } from 'node:crypto';
 import { test,expect,manifest,saveManifest,RUN_DIR,apiCall,waitJob,ready,main } from './support.js';
 import { advanceProvisioning } from '../../apps/web/src/workspace/provisioning-advance.js';
 
 function owned(){const m=manifest();expect(m.fixture.websiteId,'Disposable PHP fixture must have been created successfully; this is a prerequisite, not a skipped feature').toBeTruthy();expect(m.fixture.createdWebsiteIds).toContain(m.fixture.websiteId);expect(m.baseline.websites.map(v=>v.id)).not.toContain(m.fixture.websiteId);return m;}
 function record(action,value){const m=manifest();m.fixture.operations.push({action,...value,at:new Date().toISOString()});saveManifest(m);}
 function check(r,label,statuses=[200]){record(label,{httpStatus:r.status,code:r.body.error?.code??null});expect(statuses,label+' must return its actual success response').toContain(r.status);return r.data;}
+function secret(){return JSON.parse(fs.readFileSync(path.join(RUN_DIR,'fixture-secrets.json'),'utf8'));}
+function saveSecret(value){fs.writeFileSync(path.join(RUN_DIR,'fixture-secrets.json'),JSON.stringify(value,null,2),{mode:0o600});}
 const endpoint=(m,suffix)=>'/api/panel/websites/'+m.fixture.websiteId+suffix;
 const UI=(m,tab)=>'/websites/'+m.fixture.domainId+'/'+tab;
 
@@ -124,18 +126,70 @@ test('@mutation 09 PHP settings success must actually persist a changed FPM limi
  const body={config:{maxChildren},expectedRevision:preview.websiteRevision,previewDigest:preview.previewDigest,confirmation:preview.confirmation};const changed=check(await callSiteWithRetry(liveApi,'POST',endpoint(m,'/php-tools/config'),body),'php.config.apply',[200,202]);const jobId=changed.job?.id??changed.id;expect(jobId).toBeTruthy();await waitJob(liveApi.api,jobId);
  const after=check(await apiCall(liveApi.api,liveApi.csrf,'GET',endpoint(m,'/php-tools/config')),'php.config.read-after');expect(after.fpm.maxChildren,'A successful PHP save must change the persisted actual setting').toBe(maxChildren);
 });
+async function cleanPublicWpFiles(liveApi, m) {
+  const dir = await apiCall(liveApi.api, liveApi.csrf, 'GET', endpoint(m, '/files'));
+  if (Array.isArray(dir.data?.entries) && dir.data.entries.length > 0) {
+    const paths = dir.data.entries.map(e => e.name);
+    await apiCall(liveApi.api, liveApi.csrf, 'POST', endpoint(m, '/files/batch-delete'), {
+      paths,
+      confirmation: 'batch-delete:' + m.fixture.websiteId,
+    });
+  }
+}
+
 test('@mutation 10 WP backend downloads real WordPress into the disposable Website',async({liveApi})=>{
  test.setTimeout(120000);const m=owned();const result=await callSiteWithRetry(liveApi,'POST',endpoint(m,'/wp-cli/run'),{command:'core',args:['download','--skip-content'],timeout:90000});
  record('wp.download',{httpStatus:result.status,success:result.body.success,exitCode:result.body.exitCode});expect(result.status).toBe(200);expect(result.body.success).toBe(true);expect(result.body.exitCode).toBe(0);
+ await cleanPublicWpFiles(liveApi, m);
 });
-test('@mutation 11 WP normal UI can install and configure WordPress on the disposable site',async({page})=>{
- const m=owned();await ready(page,UI(m,'wordpress'));const install=main(page).getByRole('button',{name:/WordPress kur|Kurulumu başlat/i});await expect(install).toBeVisible();
+test('@mutation 11 WP normal UI can install and configure WordPress on the disposable site',async({page,liveApi})=>{
+ test.setTimeout(240000);const m=owned();const s=secret();
+ s.wpAdminPassword=s.wpAdminPassword||('WpPass-'+randomBytes(10).toString('hex')+'!');
+ saveSecret(s);
+ await cleanPublicWpFiles(liveApi, m);
+ await ready(page,UI(m,'wordpress'));
+ const isInstalled=await main(page).locator('.ws-badge').filter({hasText:'Kurulu'}).isVisible().catch(()=>false);
+ if(!isInstalled){
+  const form=main(page).locator('form.ws-form-grid');
+  await expect(form,'WordPress installation form must be available on the uninstalled site').toBeVisible({timeout:20000});
+  await form.getByLabel(/Site başlığı/i).fill('Audit WP '+m.runId);
+  await form.getByLabel(/Yönetici kullanıcı adı/i).fill('wpadmin');
+  await form.getByLabel(/Yönetici e-posta adresi/i).fill('admin@'+m.fixture.hostname);
+  await form.getByLabel(/Yönetici parolası/i).fill(s.wpAdminPassword);
+  const schemeSelect=form.getByLabel(/Site adresi/i);
+  if(await schemeSelect.isVisible()){await schemeSelect.selectOption('http');}
+  await form.getByRole('button',{name:/^WordPress kur$/i}).click();
+  await expect(main(page).locator('.ws-badge').filter({hasText:'Kurulu'})).toBeVisible({timeout:180000});
+ }
+ await expect(main(page).getByRole('button',{name:/Yönetici parolasını değiştir|Yönetici parolası/i})).toBeVisible({timeout:15000});
 });
 test('@mutation 12 WP normal UI can change its fixture admin password',async({page})=>{
- const m=owned();await ready(page,UI(m,'wordpress'));const action=main(page).getByRole('button',{name:/Yönetici parolasını değiştir|Yönetici parolası/i});if(!await action.isVisible()){test.skip(true,'WordPress is not installed yet on the disposable site');return;}await action.click();await expect(page.getByRole('dialog')).toBeVisible();
+ test.setTimeout(120000);const m=owned();const s=secret();
+ const newPass='NewWpPass-'+randomBytes(10).toString('hex')+'!';
+ await ready(page,UI(m,'wordpress'));
+ const action=main(page).getByRole('button',{name:/Yönetici parolasını değiştir|Yönetici parolası/i});
+ await expect(action,'WordPress password button must be visible for an installed WordPress site').toBeVisible({timeout:15000});
+ await action.click();
+ const d=page.getByRole('dialog');
+ await expect(d).toBeVisible();
+ await d.getByLabel(/Yeni parola/i).fill(newPass);
+ await d.getByRole('button',{name:/Yönetici parolasını değiştir/i}).click();
+ await expect(d).toBeHidden({timeout:60000});
+ s.wpAdminPassword=newPass;saveSecret(s);
 });
 test('@mutation 13 WP normal UI can uninstall the disposable WordPress installation',async({page})=>{
- const m=owned();await ready(page,UI(m,'wordpress'));const action=main(page).getByRole('button',{name:/WordPress.*(kaldır|sil)/i});if(!await action.isVisible()){test.skip(true,'WordPress is not installed yet on the disposable site');return;}await action.click();await expect(page.getByRole('dialog')).toBeVisible();
+ test.setTimeout(180000);const m=owned();
+ await ready(page,UI(m,'wordpress'));
+ const action=main(page).getByRole('button',{name:/WordPress.*(kaldır|sil)/i});
+ await expect(action,'WordPress uninstall button must be visible for an installed WordPress site').toBeVisible({timeout:15000});
+ await action.click();
+ const d=page.getByRole('dialog');
+ await expect(d).toBeVisible();
+ const confirm=d.getByRole('button',{name:/Yedekle ve WordPress.*kaldır/i});
+ await expect(confirm).toBeVisible();
+ await confirm.click();
+ await expect(d).toBeHidden({timeout:120000});
+ await expect(main(page).getByRole('button',{name:/^WordPress kur$/i})).toBeVisible({timeout:120000});
 });
 test('@mutation 14 Cron creates, changes and removes a real dedicated-user task',async({liveApi,page})=>{
  const m=owned();let created;if(m.fixture.cron?.id){created=check(await apiCall(liveApi.api,liveApi.csrf,'GET',endpoint(m,'/crons/'+m.fixture.cron.id)),'cron.read-existing');}else{created=check(await apiCall(liveApi.api,liveApi.csrf,'POST',endpoint(m,'/crons'),{name:'ypaudit-'+m.runId,schedule:'0 0 1 1 *',command:'/usr/bin/true',enabled:false}),'cron.create',[201]);if(created.job?.id)await waitJob(liveApi.api,created.job.id);}const cron=created.cron??created.task??created;expect(cron.id).toBeTruthy();const current=manifest();current.fixture.cron=cron;saveManifest(current);

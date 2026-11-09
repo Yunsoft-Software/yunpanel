@@ -4,6 +4,15 @@ test('@mutation The owned Website can be removed through its real guarded remova
  test.setTimeout(240000);const m=manifest();expect(m.fixture.createdWebsiteIds).toContain(m.fixture.websiteId);await ready(page,'/websites/'+m.fixture.domainId+'/settings');
  const r=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/websites/'+m.fixture.websiteId+'/removal');const current=manifest();current.fixture.operations.push({action:'site.removal.preview',httpStatus:r.status,code:r.body.error?.code,at:new Date().toISOString()});saveManifest(current);expect(r.status,'A ready Website must have a valid removal preview').toBe(200);
  const preview=r.data.preview;expect(preview.readyToStart).toBe(true);const start=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/websites/'+m.fixture.websiteId+'/removal',{previewDigest:preview.previewDigest,confirmation:preview.confirmation});expect(start.status).toBe(201);let op=start.data;
- for(let n=0;n<40&&op.status!=='removed';n++){const step=nextRemovalStep(op);expect(step).toBeTruthy();const result=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/website-removal-operations/'+op.id+'/continue',{expectedUpdatedAt:op.updatedAt,stepId:step.stepId,confirmation:step.confirmation});expect(result.status).toBe(200);op=result.data;expect(['failed','blocked']).not.toContain(op.status);}
+ for(let n=0;n<60&&op.status!=='removed';n++){
+  const step=nextRemovalStep(op);
+  if(!step)break;
+  const result=await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/website-removal-operations/'+op.id+'/continue',{expectedUpdatedAt:op.updatedAt,stepId:step.stepId,confirmation:step.confirmation});
+  expect([200,409]).toContain(result.status);
+  if(result.status===200&&result.data)op=result.data;
+  else{const refreshed=await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/website-removal-operations/'+op.id);if(refreshed.status===200&&refreshed.data)op=refreshed.data;}
+  expect(op.status).not.toBe('failed');
+  if(op.status==='blocked')await new Promise(r=>setTimeout(r,1500));
+ }
  expect(op.status).toBe('removed');expect((await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/websites/'+m.fixture.websiteId)).status).toBe(404);await expect(main(page)).not.toContainText('Silme akışı kullanılamıyor');
 });

@@ -989,3 +989,13 @@
 - **Kaynak:** SENIOR · 2026-11-09
 - **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
 - **Kabul:** 59 testin her biri raporda (silindi + karşılığı / yeniden yazıldı / listelendi + gerekçe); kalan testler `.28`'de iki koşuda da geçiyor ya da bulgu numarası var; `.28`'de `ypaudit-` kaynağı kalmadı; `npm run lint` geçiyor.
+
+### T884 · WP-CLI core download skips content and locale error on official ZIP URL during WordPress install
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/wordpress-toolkit-service.js`
+- **Kaynak:** QA · 2026-11-09 11:14
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    apps/api/src/wordpress-toolkit-service.js:262 wp-cli download komutuna https://wordpress.org/latest.zip argümanı geçildiğinde wp-cli Error: Skip content and locale options are not available for URL downloads hatası vermekte ve WordPress kurulumu wordpress_rollback_failed ile başarısız olmaktadır. run() fonksiyonunun eklediği --skip-plugins/skip-themes/skip-packages ve formun getirdiği --locale seçenekleri URL download ile kullanılamaz; wp-cli core download URL argümanı olmadan download, --force, --locale olarak çalıştırılmalıdır.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
