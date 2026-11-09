@@ -65,6 +65,7 @@ import { createDnsProviderCredentialRegistry } from './dns-provider-credential-r
 import { createDnsZoneRetirementOperationRegistry } from './dns-zone-retirement-operation-registry.js';
 import { createDnsZoneRetirementRuntime } from './dns-zone-retirement-runtime.js';
 import { createDnsZoneRetirementService } from './dns-zone-retirement.js';
+import { createDnsZoneOwnershipRegistry } from './dns-zone-ownership-registry.js';
 import { createDockerComposeApiHandler } from './docker-compose-api-handler.js';
 import {
   createDockerComposeProjectRegistryBootstrap,
@@ -222,6 +223,8 @@ const dnsZoneReapplyOperationStorePath = process.env.YUNPANEL_DNS_ZONE_REAPPLY_O
   ?? path.join(controlPlaneStateRoot, 'dns-zone-reapply-operations.json');
 const dnsZoneRetirementOperationStorePath = process.env.YUNPANEL_DNS_ZONE_RETIREMENT_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'dns-zone-retirement-operations.json');
+const dnsZoneOwnershipStorePath = process.env.YUNPANEL_DNS_ZONE_OWNERSHIP_STORE
+  ?? path.join(controlPlaneStateRoot, 'dns-zone-ownership.json');
 const mailDomainStorePath = process.env.YUNPANEL_MAIL_DOMAIN_STORE ?? path.resolve('.data/mail-domain-registry.json');
 const mailDomainRemovalOperationStorePath = process.env.YUNPANEL_MAIL_DOMAIN_REMOVAL_OPERATION_STORE
   ?? path.join(controlPlaneStateRoot, 'mail-domain-removal-operations.json');
@@ -908,10 +911,13 @@ const websiteSuspensionRuntime = localServerId && domainSuspensionRuntime
     localServerId,
   })
   : null;
+const dnsZoneOwnershipRegistry = createDnsZoneOwnershipRegistry({ filePath: dnsZoneOwnershipStorePath });
+await dnsZoneOwnershipRegistry.init();
 const dnsZoneRetirementService = localServerId && powerDnsSecretRegistry
   ? createDnsZoneRetirementService({
     domainRegistry,
     powerDnsSecretRegistry,
+    ownershipRegistry: dnsZoneOwnershipRegistry,
     provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
       ? websiteProvisioningRuntime.registry
       : null,
@@ -1316,6 +1322,7 @@ const listener = createAuthenticatedApi({
       domainSuspensionRuntime,
       dnsZoneRetirementImpactService: dnsZoneRetirementService,
       dnsZoneRetirementRuntime,
+      dnsZoneOwnershipRegistry,
       backupOperationRegistry,
       durableJobRegistry,
       websiteBackupOperationStorePath: path.join(controlPlaneStateRoot, 'website-backup-operations.json'),

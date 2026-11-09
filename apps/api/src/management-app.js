@@ -409,6 +409,7 @@ export function createApp(allOptions = {}) {
   dnsZoneTemplateRegistry = null,
   dnsZoneReapplyRuntime = null,
   dnsZoneRetirementImpactService = null,
+  dnsZoneOwnershipRegistry = null,
   dnsZoneRetirementPolicy = null,
   databaseBindingRegistry = null,
   databaseCredentialRegistry = null,
@@ -560,6 +561,7 @@ export function createApp(allOptions = {}) {
       ? createDnsZoneRetirementService({
         domainRegistry,
         powerDnsSecretRegistry,
+        ownershipRegistry: dnsZoneOwnershipRegistry,
         mailDomainRegistry,
         jobRegistry,
         provisioningRegistry: typeof websiteProvisioningRuntime?.registry?.listForDnsZone === 'function'
@@ -913,6 +915,7 @@ export function createApp(allOptions = {}) {
       dnsZoneTemplateRegistry,
       dnsZoneReapplyRuntime,
       jobRegistry,
+      dnsZoneOwnershipRegistry,
       ...(powerDnsSecretRegistry ? { domainRegistry, powerDnsSecretRegistry } : {}),
       ...(dnsRetirementImpact
         && typeof dnsRetirementImpact.captureDeletionSnapshot === 'function'

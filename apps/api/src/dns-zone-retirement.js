@@ -140,7 +140,7 @@ function zoneImpact(zone) {
   });
 }
 
-function provisioningOwnership(domain, operations) {
+function provisioningOwnership(domain, operations, panelReceipt = null) {
   const inherited = (domain.parentDomainId ?? null) !== null;
   if (operations === null) {
     return Object.freeze({ status: inherited ? 'parent_zone_owned' : 'unavailable', operationId: null, evidenceDigest: null });
@@ -205,6 +205,14 @@ function provisioningOwnership(domain, operations) {
       operationId: null,
       evidenceDigest: null,
       candidateCount: candidates.length,
+    });
+  }
+  if (invalidEvidenceCount === 0 && panelReceipt) {
+    return Object.freeze({
+      status: 'provisioning_created',
+      operationId: panelReceipt.operationId,
+      updatedAt: panelReceipt.createdAt,
+      evidenceDigest: digest({ source: 'panel_zone_provision', ...panelReceipt }),
     });
   }
   return Object.freeze({
@@ -322,6 +330,7 @@ export function createDnsZoneRetirementService({
   domainRegistry,
   powerDnsSecretRegistry,
   provisioningRegistry = null,
+  ownershipRegistry = null,
   mailDomainRegistry = null,
   jobRegistry = null,
   retentionPolicy: rawRetentionPolicy = null,
@@ -333,6 +342,8 @@ export function createDnsZoneRetirementService({
     || typeof domainRegistry.listDomains !== 'function'
     || !powerDnsSecretRegistry || typeof powerDnsSecretRegistry.materializeForServer !== 'function'
     || (provisioningRegistry !== null && typeof provisioningRegistry.listForDnsZone !== 'function')
+    || (ownershipRegistry !== null && (typeof ownershipRegistry.getForZone !== 'function'
+      || typeof ownershipRegistry.removeForZone !== 'function'))
     || (mailDomainRegistry !== null && typeof mailDomainRegistry.listMailDomains !== 'function')
     || (jobRegistry !== null && typeof jobRegistry.listJobs !== 'function')
     || !zoneManager || typeof zoneManager.getZone !== 'function'
@@ -403,7 +414,12 @@ export function createDnsZoneRetirementService({
         );
       }
     }
-    const ownershipOrigin = provisioningOwnership(domain, provisioningOperations);
+    const panelReceipt = ownershipRegistry === null ? null : await ownershipRegistry.getForZone({
+      serverId: domain.serverId,
+      webDomainId: domain.id,
+      zoneName: domain.primaryDomain,
+    });
+    const ownershipOrigin = provisioningOwnership(domain, provisioningOperations, panelReceipt);
 
     let mailDependencies = null;
     if (mailDomainRegistry !== null) {
@@ -661,8 +677,9 @@ export function createDnsZoneRetirementService({
     }
 
     const secret = await materializeSecret(serverId);
+    let deleted;
     try {
-      return await zoneManager.deleteSnapshot({
+      deleted = await zoneManager.deleteSnapshot({
         zoneName,
         apiKey: secret.apiKey,
         snapshot,
@@ -673,6 +690,12 @@ export function createDnsZoneRetirementService({
       }
       throw error;
     }
+    // A leftover receipt must not vouch for a different zone created later under this name.
+    try { await ownershipRegistry?.removeForZone({ serverId, zoneName }); }
+    catch (error) {
+      console.error(`[yunpanel-api] DNS zone ownership receipt not removed for ${zoneName}: ${error?.code ?? error?.name ?? 'error'}`);
+    }
+    return deleted;
   }
 
   return Object.freeze({

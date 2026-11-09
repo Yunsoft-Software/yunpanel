@@ -521,6 +521,8 @@ export function mountPowerDnsRoutes(app, {
   domainRegistry = null,
   powerDnsSecretRegistry = null,
   websiteProvisioningRegistry = null,
+  dnsZoneOwnershipRegistry = null,
+  powerDnsZoneManager = null,
   jobRegistry = null,
   mailDomainRegistry = null,
   mailDkimRegistry = null,
@@ -802,14 +804,24 @@ export function mountPowerDnsRoutes(app, {
       serial,
       mail: mailState?.intent ?? null,
     });
-    const manager = createPowerDnsZoneManager();
-    await manager.apply({
+    const manager = powerDnsZoneManager ?? createPowerDnsZoneManager();
+    const applied = await manager.apply({
       zoneName: domain.primaryDomain,
       apiKey: secret.apiKey,
       records: desired.records,
       dnssec: identity.settings?.dnssecDefault === true,
       notifySecondaries: Array.isArray(identity.settings?.secondaryDns) && identity.settings.secondaryDns.length > 0,
     });
+    // Only a zone this request created is the panel's to delete later; a pre-existing zone stays protected.
+    if (applied?.created === true && dnsZoneOwnershipRegistry) {
+      try {
+        await dnsZoneOwnershipRegistry.recordCreated({
+          serverId: domain.serverId, webDomainId: domain.id, zoneName: domain.primaryDomain,
+        });
+      } catch (error) {
+        console.error(`[yunpanel-api] DNS zone ownership receipt not saved for ${domain.primaryDomain}: ${error?.code ?? error?.name ?? 'error'}`);
+      }
+    }
     const zone = await zoneRecordsOperation(async () => (await zoneRecordsService()).getZone({ domainId: domain.id }));
     return response.json({ data: zone });
   }));

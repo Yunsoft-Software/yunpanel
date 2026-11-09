@@ -967,8 +967,8 @@
 - **Kabul:** Her dosya için sonuç raporda; (a) ve (b) olanlar iki koşuda da geçiyor; testlerden sonra `.28`'de `ypaudit-` öneğiyle kaynak kalmıyor.
 
 ### T881 · Provision edilen DNS zone sonrası domain/website silme dns_zone_delete_ownership_evidence_required ile kilitleniyor
-- **Bağımlı:** T803, T826
-- **Dosyalar:** `apps/api/src/domain-removal-plan.js`
+- **Bağımlı:** T852, T868
+- **Dosyalar:** `apps/api/src/dns-zone-ownership-registry.js`, `apps/api/src/dns-zone-retirement.js`, `apps/api/src/powerdns-http.js`, `apps/api/src/index.js`, `apps/api/src/management-app.js`, `apps/api/test/dns-zone-ownership-registry.test.js`
 - **Kaynak:** QA · 2026-11-09 09:45
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
