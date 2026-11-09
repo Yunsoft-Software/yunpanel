@@ -19,7 +19,7 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 
 ## 2. Şu anki durum (07-11-2026)
 - **Dal:** `09-11-2026` (GitHub'daki en güncel dal `07-11-2026`; bugünkü dal yerelde). Her gün o günün tarihiyle (GG-AA-YYYY) yeni dal açılır, bir önceki günün dalından. `main`'e yazılmaz; `main` çok geride ve bilerek öyle.
-- **Test sunucusu (`.28`):** Paket `0.3.0-2026110701` kurulu; son iki haftanın bütün düzeltmeleri bu pakette. Servisler sağlıklı; phpMyAdmin girişi ve site kurulumu paketle doğrulandı.
+- **Test sunucusu (`.28`):** Paket `0.3.0-2026110701` kurulu; üstüne T881'in API dosyaları tek tek kopyalandı (bir sonraki paket bunları içerecek). Servisler sağlıklı; phpMyAdmin girişi ve site kurulumu paketle doğrulandı.
 - **Son iki haftada yapılanlar:** `docs/yapilanlar.md` (her iş tek satır, en yeni üstte).
 - **Testler:** `npm test` ve `npm run lint` geçiyor.
 
@@ -32,7 +32,6 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
   - Görevin `Dosyalar` satırı gerçekten değişen dosyaları yazmalı; `tasks.py lint` aynı dosyaya yazan görevlerin sırasını `Bağımlı` ile ister.
 - **Doğrulama:** `python3 orkestra/orchestrator.py verify --quick` (lint + birim testleri). Tam `verify` buna derlemeyi ekler. Tam canlı e2e (yaklaşık 465 test, 1,5–2 saat) **rutin değildir**; yalnız değişikliğin etkilediği `e2e/ozellik` dosyaları koşulur (İNSAN kararı, 06-11).
 - **Push:** yalnız `python3 orkestra/orchestrator.py push`, yalnız İNSAN istediğinde. Commit mesajları `[skip ci]` ile biter.
-- **Yarım kalan iş:** Antigravity T880'in ortasında kapandı. T880 yeniden açık. Yarım değişiklikler incelenmemiş haliyle iki yerde saklı: GitHub'daki `wip-T880-07-11` dalında (`e2e/live-audit/04,06,07,runtime.js`) ve bu makinede `tasks/recovery/T880-yarim-07-11.patch`. T880'i alan ya buradan devam eder ya da baştan yapar; dal olduğu gibi birleştirilmez.
 
 ## 4. Test sunucusu (`.28`)
 - Panel: `https://server.cryptoraichu.website`. SSH takma adı `yunpanel-test` (root). Adres ve giriş bilgisi yalnız `.local/test-server.env` ve `.local/yunpanel-owner-password-only.json`'da; Git'e, rapora veya loga yazılmaz.
@@ -64,13 +63,12 @@ Yunsoft'un kendi hosting paneli: Plesk Obsidian'ın ekran düzeni, iş akışlar
 - Test sitelerinin adı `t<alan><nn>[ek]-…` (örn. `tweb05-a3-…`, `tweb05nossl-a4-…`) ya da `ypaudit-…` biçimindedir.
 - Listele: `node e2e/tools/remove-test-sites.mjs` · sil: `--apply` (isteğe bağlı ad öneki: `--apply tweb05`). Araç panelin kendi silme akışını kullanır. Alan adı yönlendirmesi sapmış siteleri önce panelin `stage` + `activate` adımlarıyla onarır.
 - Silmeden önce bir `sunucu-28-*` kilidi al; junior'un çalışan bir görevine ait siteleri silme (o görev kendi temizler).
-- **Şu an `.28`'de 22 test sitesi var:**
-  - 14 eski `tweb06e-`/`tweb05nossl-` sitesi. Önceki temizliklerin ad kalıbı bunları kaçırdı; silinebilir.
-  - 8 `ypaudit-` sitesi, yarım kalan T880'e ait.
+- **09-11 durumu:** `.28`'de test sitesi yok. Tek artık, bir deneme alan adı: `tdns99-a9-mw8wxrv5.example.internal` (askıda, DNS bölgesi duruyor). `.example.internal` gerçek bir ad olmadığı için panel üst alan DNSSEC durumunu doğrulayamıyor (`dns_zone_parent_ds_unverifiable`) ve silmeyi durduruyor. Silme denemelerinde gerçekten çözümlenen bir ad kullan (`….157.180.11.28.sslip.io`).
 - Bilerek bırakılan: `yunapp-f8c9dd81395d` Unix kullanıcısı (uygulama kaydı duruyor). 07-11 sahipsiz kayıt temizliğinin yedeği: `/root/backup-orphans-202611071117`.
 
 ## 8. Açık işler ve kararlar
-- **T880** (junior, açık): değişiklik yapan `live-audit` testleri. Yarım hali `wip-T880-07-11` dalında (bölüm 3).
+- **T881** (senior yaptı, incelemede): `provision-zone` ile açılan bölgelere sahiplik makbuzu (`dns-zone-ownership.json`). Düzeltmeden önce bu yolla açılmış bölgelerin makbuzu yok, onlar korumalı kalır; test sunucusu dışında kurulum olursa "bölgeyi sahiplen" adımı gerekir.
+- **`live-audit` eksikleri (T880 sonrası):** `13,15,16,18,19,20,22` (59 test) 10 Ekim'in kabul ortamına bağlı olduğu için hiç çalışmıyor. `10` ve `11`'deki düşmeler için görev yok; `11`'deki posta verisi silme hatası gerçek ürün hatası olabilir.
 - **Website Copying:** sıradaki özellik. Tasarım görüşmesi başladı, karar yok. Plesk'teki gibi bir siteyi aynı sunucudaki başka bir siteye kopyalama; dosyalar ve isteğe bağlı veritabanları.
 - **Uyarı e-postaları spama düşüyor:** gönderen alan adında DKIM yok, sunucunun ters DNS'i uyuşmuyor. İNSAN "şimdilik kalsın" dedi.
 - **Plesk eksikleri:** `docs/plesk-eksikler.md` (başındaki 07-11 notu neyin yapıldığını söyler) ve `docs/plesk-feature-parity.md`.

@@ -2,6 +2,9 @@
 
 > Her biten iş tek kısa satır. Yeni en üstte. Tür: **Özellik**, **Hata**, **Güvenlik**, **Altyapı**. Ayrıntı commit'te; görev raporları `tasks/done/`.
 
+## 09-11-2026
+- **Hata** — DNS ekranından bölge açılan siteler ve alan adları silinemiyordu; panel artık kendi oluşturduğu bölgenin sahiplik kaydını tutuyor, dışarıdan gelen bölgeler korunmaya devam ediyor (T881). `.28`'de uçtan uca doğrulandı.
+
 ## 07-11-2026
 - **Altyapı** — `.28`'e son iki haftanın bütün düzeltmeleri gerçek kurulum paketiyle kuruldu (`0.3.0-2026110701`); servisler, siteler, phpMyAdmin girişi (DB-04) ve site kurulumu (WEB-08) paketle doğrulandı.
 - **Altyapı** — Askıya alınıp geri açılan sitelerin silinemez kalması aslında testlerin kurulum sürerken ayar kaydetmesinden geliyormuş; T868 kilidi bunu önlüyor, testler artık kurulumu bekliyor (T876).
