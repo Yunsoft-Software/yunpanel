@@ -1,15 +1,15 @@
 # Orkestra Dalga Kapanış Raporu
 
-**Tarih:** 2026-11-09 09:47 (Europe/Istanbul)  
+**Tarih:** 2026-11-09 11:36 (Europe/Istanbul)  
 **Rol:** Junior Orkestratör (`/orkestra-devam`)  
 **Aktif Dal:** `09-11-2026`  
 
 ---
 
 ## 1. Genel Durum Özeti
-- **Toplam Kabul Edilen Görev (Done):** 202
-- **Bu Oturumda (09-11) Tamamlanan ve İncelenen Görevler:** 1 görev (T880) + 1 Bulgu (T881)
-- **Açık Görevler (Open):** 1 (T881: DNS zone sonrası domain/website silme evidence kilidi bulgusu — Senior planlaması bekleniyor)
+- **Toplam Kabul Edilen Görev (Done):** 205
+- **Bu Oturumda (09-11 2. Dalga) Tamamlanan ve İncelenen Görevler:** 3 görev (T881, T882, T883) + 1 Bulgu (T884)
+- **Açık Görevler (Open):** 1 (T884: WP-CLI core download skips content/locale argüman hatası bulgusu)
 - **İncelenmeyi Bekleyen / Yürütülen Görev:** 0
 - **Korumalı / Bloklu Görevler (Blocked):** 5 (`T802`, `T806`, `T807`, `T808`, `T849` — Senior/İnsan değerlendirmesi bekliyor)
 - **Boş Yuvalar:** AGENT_1, AGENT_2, AGENT_3, AGENT_4
@@ -17,15 +17,23 @@
 
 ---
 
-## 2. 09-11 Oturumunda Tamamlanan Görevler Listesi
-1. **T880: live-audit değişiklik yapan testlerini kendi ayarıyla koş ve ayıkla**
-   - **Yapan:** AGENT_1 (`f8e0327c`)
-   - **İnceleyen:** AGENT_2 (`268563ab`)
-   - **Çözüm:** `tasks/recovery/T880-yarim-07-11.patch` incelenip uygulandı; `04-mutation-lifecycle.spec.js` (13 passed, 2 skipped), `06-host-lifecycle.spec.js` (12 passed), `07-subsystem-mutation.spec.js` (9 passed) ve `09-role-mutation.spec.js` (3 passed) mutasyon testleri izole run klasörleriyle başarıyla koşturuldu. `05-ai-live` koşulmadı.
-   - **Test Siteleri Temizliği:** `e2e/tools/remove-test-sites.mjs --apply` ile 23 test sitesinden 20'si panel üzerinden güvenle silindi. Kalan 3 site için T881 bulgusu açıldı; sunucu arkasından SSH ile elle müdahale yapılmadı.
-2. **T881 (Bulgu): Provision edilen DNS zone sonrası domain/website silme `dns_zone_delete_ownership_evidence_required` ile kilitleniyor**
-   - **Açan:** Junior Orkestratör
-   - **Detay:** `POST /api/domains/:id/dns/provision-zone` ile zone açılan domainlerde, `dnsRetirementImpact.preview` sonucunda `ownershipOrigin.evidenceDigest` PowerDNS tarafında null kaldığı için `domain-removal-plan.js` (satır 815) `dns_zone_delete_ownership_evidence_required` hard blocker'ı ekliyor ve `domain_removal_not_ready` ile silme operasyonu blocked kalıyor.
+## 2. 09-11 2. Dalga Tamamlanan Görevler Listesi
+1. **T881: Provision edilen DNS zone sonrası domain/website silme kilitleniyor**
+   - **Yapan:** SENIOR
+   - **İnceleyen:** AGENT_1 (`28ea85b2`)
+   - **Çözüm:** `dns-zone-ownership-registry.js` eklenerek panelin oluşturduğu bölgeler için 0600 izinli kalıcı makbuz tutuldu; `dns-zone-retirement.js`, `powerdns-http.js` ve `management-app.js` entegrasyonu sağlandı. 7 yeni birim testi ve 35 DNS retirement testi başarıyla doğrulandı.
+2. **T883: Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır**
+   - **Yapan:** AGENT_3 (`ba33f4a8`)
+   - **İnceleyen:** AGENT_1 (`b4dee88d`)
+   - **Çözüm:** 10 Ekim 2026 kabul ortamına bağlı 59 test incelendi; tüm işlevlerin modern `e2e/ozellik` ve `e2e/live-audit` (04, 06, 07, 09, 10) testlerinde birebir karşılıkları belgelendi. Karşılığı bulunan ve test kalmayan 7 eski dosya (`13`, `15`, `16`, `18`, `19`, `20`, `22`) ve `native-control.js` güvenle kaldırıldı.
+3. **T882: live-audit 04, 10 ve 11: kalan düşmeleri ve sessiz atlamaları çöz**
+   - **Yapan:** AGENT_2 (`f9f31047`)
+   - **İnceleyen:** AGENT_1 (`abad3f33`)
+   - **Çözüm:** `11-component-cleanup-mutation.spec.js` içinde posta kutusu devre dışı bırakıldıktan sonra mail domain config apply ile quiesce sağlandı ve `mail_data_delete` işi düzeltildi. `10-removal-mutation.spec.js` içinde asenkron child domain removal beklemesi güçlendirildi; tüm kaynaklar (web, db, mail, unix kimliği) temizlendi. `04-mutation-lifecycle.spec.js` içinde koşulsuz skip'ler kaldırılarak form doldurma akışları işletildi; WP-CLI download URL argüman hatası için T884 bulgusu açıldı.
+4. **T884 (Bulgu): WP-CLI core download skips content and locale error on official ZIP URL during WordPress install**
+   - **Açan:** AGENT_2
+   - **Doğrulayan:** AGENT_1
+   - **Detay:** `apps/api/src/wordpress-toolkit-service.js:262` satırında `run()` otomatik `--skip-plugins/skip-themes/skip-packages` bayraklarını eklerken, WP-CLI `core download <url>` komutuna URL geçildiğinde bu seçeneklerin ve `--locale` seçeneğinin reddedildiği (`Error: Skip content and locale options are not available for URL downloads`) ve WordPress kurulumunun `wordpress_rollback_failed` ile başarısız olduğu tespit edildi.
 
 ---
 
@@ -33,5 +41,6 @@
 - `npm run lint`: **Başarılı** (`Repository policy validation passed.`)
 - `python3 orkestra/tasks.py lint`: **Başarılı** (`lint OK`)
 - `python3 orkestra/orchestrator.py verify`: **Başarılı** (`doğrulama: ok; yeniden açılan: -; bulgu: -`)
+- **Canlı Sunucu (.28) Kaynak Temizliği:** Testler sonrası kalan yetim test sitesi bulunmamaktadır (`0 test site(s)`).
 - **Kilit Durumu:** Tüm ajan kilitleri serbest bırakıldı (`sunucu-28-*` temiz).
 - **Git Durumu:** Dalga boyunca yapılan tüm geliştirmeler ve incelemeler `[skip ci]` ile yerel dalda (`09-11-2026`) commit edildi. Kural gereği PUSH YAPILMADI.
