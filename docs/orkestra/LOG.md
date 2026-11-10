@@ -229,3 +229,4 @@
 
 - 2026-11-10 Codex: `10-11-2026` dalı yerel önceki daldan açıldı; GitHub `09-11-2026` (58f4dfe1) fast-forward alındı. Eski dallar ve yerel özel dosyalar korundu.
 - 2026-11-10 20:23 orchestrator: verify abad3f33..58f4dfe1: ok, yeniden açılan -, bulgu -
+- 2026-11-10 20:43 orchestrator: verify 58f4dfe1..5ea65d78: ok, yeniden açılan -, bulgu -
