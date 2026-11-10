@@ -226,3 +226,6 @@
 - 2026-11-07 12:53 orchestrator: verify 7f1fb4c1..9ee6420f: ok, yeniden açılan -, bulgu -
 - 2026-11-09 09:46 orchestrator: verify 9ee6420f..268563ab: ok, yeniden açılan -, bulgu -
 - 2026-11-09 11:35 orchestrator: verify 268563ab..abad3f33: ok, yeniden açılan -, bulgu -
+
+- 2026-11-10 Codex: `10-11-2026` dalı yerel önceki daldan açıldı; GitHub `09-11-2026` (58f4dfe1) fast-forward alındı. Eski dallar ve yerel özel dosyalar korundu.
+- 2026-11-10 20:23 orchestrator: verify abad3f33..58f4dfe1: ok, yeniden açılan -, bulgu -
