@@ -44,3 +44,12 @@
 - **Canlı Sunucu (.28) Kaynak Temizliği:** Testler sonrası kalan yetim test sitesi bulunmamaktadır (`0 test site(s)`).
 - **Kilit Durumu:** Tüm ajan kilitleri serbest bırakıldı (`sunucu-28-*` temiz).
 - **Git Durumu:** Dalga boyunca yapılan tüm geliştirmeler ve incelemeler `[skip ci]` ile yerel dalda (`09-11-2026`) commit edildi. Kural gereği PUSH YAPILMADI.
+
+## 10-11-2026 — Yerel devam ve T884
+
+- GitHub'daki en ileri günlük dal `09-11-2026` (`58f4dfe1`) idi; önceki yerel HEAD'i içeriyordu. 165 commit, `10-11-2026` dalına fast-forward alındı. Eski dallar ve özel yerel kayıtlar korundu.
+- Hazır tek iş T884 idi. İlk düzeltme `b64d2428`, dil girdi türü ve maskeli iş hatası düzeltmesi `a709c68d`, bağımsız kabul `5ea65d78`. Ayrıntı: [T884 kabul kaydı](../../tasks/done/T884.md).
+- WP-CLI 2.12.0, açık ZIP URL'si ile `tr_TR` indirme seçeneğinin birleşimini reddetti. URL'siz yerelleştirilmiş tar denemesinde dosya yolları kısaldı ve çekirdek sağlama toplamı başarısız oldu. Resmî ZIP korundu; İngilizce dışındaki dil, kurulumdan sonra WordPress'in kendi dil paketi API'siyle yüklenip doğrulanıyor. İzinler, site kullanıcısı, parola aktarımı ve geri alma zinciri değişmedi.
+- `.28` üzerinde izole WP-CLI ve ayrı Unix soketli gerçek MariaDB ile Türkçe kurulum, dil dosyaları, etkin dil ve çekirdek sağlama toplamı bağımsız doğrulandı. Ajanın aynı kapsamdaki denemesi İngilizce varsayılanı, tekrar uygulamayı, olmayan dilin reddini ve yönetici parolasını da doğruladı. Geçici kaynaklar kaldırıldı; test kilitleri bırakıldı. Canlı panelin kurulu paketi değiştirilmedi.
+- İlgili 15 WordPress testi geçti. `python3 orkestra/orchestrator.py verify`, `5ea65d78` üzerinde lint, test ve build ile geçti; doğrulama kaydı `aa445cbb`. Canlı panelin tam E2E turu çalıştırılmadı.
+- Hazır/açık/incelemede görev: 0; 206 tamamlanan görev kaydı var. Önceki 5 engelli kayıt korundu. T883 için [devir notundaki](../DEVIR.md) kapsam çekincesi geçerlidir. Push veya dağıtım yapılmadı.
