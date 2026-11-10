@@ -43,7 +43,7 @@ export function normalizeWordPressActionOptions(input) {
   if (action === 'install' && (!UUID.test(input.databaseBindingId ?? '') || typeof input.title !== 'string' || !input.title.trim() || input.title.length > 120
     || /[\u0000-\u001f\u007f]/u.test(input.title) || !USER.test(input.adminUser ?? '')
     || typeof input.adminEmail !== 'string' || input.adminEmail.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.adminEmail)
-    || !/^[a-z]{2,3}(?:_[A-Z]{2})?$/.test(input.locale ?? '') || !['http', 'https'].includes(input.scheme))) throw fail('wordpress_install_input_invalid', 'WordPress kurulum bilgilerini kontrol edin', 400);
+    || typeof input.locale !== 'string' || !/^[a-z]{2,3}(?:_[A-Z]{2})?$/.test(input.locale) || !['http', 'https'].includes(input.scheme))) throw fail('wordpress_install_input_invalid', 'WordPress kurulum bilgilerini kontrol edin', 400);
   if (['clone', 'staging'].includes(action) && (!UUID.test(input.targetWebsiteId ?? '') || !UUID.test(input.databaseBindingId ?? '') || !['http', 'https'].includes(input.scheme))) throw fail('wordpress_clone_input_invalid', 'Klon hedefi ve veritabanı geçersiz', 400);
   if (action === 'password' && !USER.test(input.username ?? '')) throw fail('wordpress_user_invalid', 'WordPress yöneticisi geçersiz', 400);
   if (Object.hasOwn(input, 'package') && !PACKAGE.test(input.package ?? '')) throw fail('wordpress_package_invalid', 'WordPress.org eklenti veya tema adı geçersiz', 400);
@@ -276,7 +276,7 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
             + 'if (wp_download_language_pack($language) !== $language) { WP_CLI::error("WordPress language pack could not be installed."); } '
             + 'update_option("WPLANG", $language); '
             + 'if (get_option("WPLANG") !== $language) { WP_CLI::error("WordPress site language could not be set."); }';
-          await run(payload.websiteId, 'eval', [code], null, 'wordpress_locale_failed');
+          await run(payload.websiteId, 'eval', [code], null, 'wordpress_install_failed');
         }
         await verifyPassword(options.adminUser, password);
       } else if (options.action === 'password') {
