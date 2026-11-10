@@ -101,14 +101,14 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
     if (!prefix) throw fail('wordpress_table_prefix_invalid', 'WordPress tablo kapsamı doğrulanamadı');
     return { present: true, binding, credential, prefix, entries: listing.entries, configSha256: file.sha256 ?? digest(text) };
   }
-  async function run(websiteId, command, args, input = null) {
+  async function run(websiteId, command, args, input = null, failureCode = null) {
     const current = await context(websiteId);
     const result = await tools.runWpCli(websiteId, { relativeDirectory: current.relativeRoot, command, args: [...args, '--skip-plugins', '--skip-themes', '--skip-packages'], input, timeout: 300_000 });
     if (result?.success !== true || result.exitCode !== 0) {
       const phases = { 'core.download': 'wordpress_download_failed', 'config.create': 'wordpress_configuration_failed',
         'db.check': 'wordpress_database_check_failed', 'core.install': 'wordpress_install_failed',
         'core.verify-checksums': 'wordpress_core_verification_failed', 'eval': 'wordpress_password_verification_failed' };
-      throw fail(phases[command === 'eval' ? 'eval' : `${command}.${args[0]}`] ?? 'wordpress_cli_failed', 'WordPress işlemi tamamlanamadı; önceki durum ve işlem kaydı korunuyor', 502);
+      throw fail(failureCode ?? phases[command === 'eval' ? 'eval' : `${command}.${args[0]}`] ?? 'wordpress_cli_failed', 'WordPress işlemi tamamlanamadı; önceki durum ve işlem kaydı korunuyor', 502);
     }
     return result;
   }
@@ -259,7 +259,8 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
         const binding = await databaseBindingRegistry.getBinding(options.databaseBindingId);
         const credential = await databaseCredentialRegistry.getForBinding(binding.id);
         const secret = await databaseCredentialRegistry.materializeCredential(credential.id, { expectedRevision: credential.revision });
-        await run(payload.websiteId, 'core', ['download', 'https://wordpress.org/latest.zip', '--force', `--locale=${options.locale}`]);
+        // Keep the ZIP to avoid WP-CLI's long-path tar extraction issue. URL downloads reject locale flags.
+        await run(payload.websiteId, 'core', ['download', 'https://wordpress.org/latest.zip', '--force']);
         await run(payload.websiteId, 'config', ['create', `--dbname=${binding.databaseName}`, `--dbuser=${credential.username}`, '--dbhost=localhost',
           `--dbprefix=yp${payload.websiteId.replaceAll('-', '').slice(0, 12)}_`, '--prompt=dbpass'], secret.password + '\n');
         await config(current);
@@ -269,6 +270,14 @@ export function createWordPressToolkitService({ tools, jobRegistry, authorizeAct
           `--admin_user=${options.adminUser}`, `--admin_email=${options.adminEmail}`, `--locale=${options.locale}`, '--prompt=admin_password', '--skip-email'], password + '\n');
         await run(payload.websiteId, 'core', ['is-installed']);
         await run(payload.websiteId, 'core', ['verify-checksums']);
+        if (options.locale !== 'en_US') {
+          const code = 'require_once ABSPATH . "wp-admin/includes/admin.php"; require_once ABSPATH . "wp-admin/includes/translation-install.php"; '
+            + '$language = ' + JSON.stringify(options.locale) + '; '
+            + 'if (wp_download_language_pack($language) !== $language) { WP_CLI::error("WordPress language pack could not be installed."); } '
+            + 'update_option("WPLANG", $language); '
+            + 'if (get_option("WPLANG") !== $language) { WP_CLI::error("WordPress site language could not be set."); }';
+          await run(payload.websiteId, 'eval', [code], null, 'wordpress_locale_failed');
+        }
         await verifyPassword(options.adminUser, password);
       } else if (options.action === 'password') {
         const admins = await status(payload.websiteId);
