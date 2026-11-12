@@ -147,7 +147,8 @@ test.describe('T887 real dedicated Node provisioning and environment restore', (
         saved = accepted(await fixture.call('GET', environmentPath + '/status')); return saved.savedRevision;
       }, { timeout: 5000, intervals: [200, 500] }).toBe(before.savedRevision + 1);
       const masked = accepted(await fixture.call('GET', environmentPath)).find(item => item.key === KEY);
-      expect(masked?.secret).toBe(true); expect(masked?.hasValue).toBe(true); expect(masked?.value).toBeUndefined();
+      expect(masked?.secret === true).toBe(true); expect(masked?.hasValue === true).toBe(true);
+      expect(masked?.value !== undefined, 'The API must never return the protected value').toBe(false);
       environmentWrites++;
       if (!receiptKnown) fixture.record('node.environment.save-reconciled', { receiptKnown: false, savedRevision: saved.savedRevision, maskedKeyObserved: true });
       const jobsPath = '/api/panel/jobs?resourceType=application&resourceId=' + target.applicationId;
