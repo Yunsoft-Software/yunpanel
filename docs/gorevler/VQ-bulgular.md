@@ -1173,3 +1173,58 @@
     Bağımsız T887 incelemesinde gerçek .28 GET /api/system/diagnostics/version HTTP200, data.commit/sourceInfo.sourceCommit b3f505cf14c341d58d472ea3b8916a31, buildId build-20261001-0300 ve buildTime 2026-10-01 verdi. Pinned salt okunur dpkg-query kurulu0.3.0-2026111001; API PID846281 ve üç kritik native JS SHA256 a2fdc8c1 ile aynı. Bu üç dosya karşılaştırması bütün ağacın eşitliği iddiası değildir. Yerel core-app.js140-149 sabit fallbackler aynı değerleri üretir; metadata yokken sourceCommit deployed fallbacke eşitlenip sourceMatchesDeployed:true ve RUNTIME SYNCHRONIZED olur. Saf resolver env:{} ile tekrar üretildi. build-deb.sh build commit/time manifesti üretmiyor; SystemSettingsPanels bu veriyi senkronize gösterebiliyor. Host metadata env alanları okunmadığından eksik veya stale explicit env ayrımı kanıtlanmadı; runtime eski denmiyor. Beklenen gerçek paketten immutable build kimliği; metadata yoksa unknown/unverified ve kaynak/runtime eşitliği kanıtlanmamış olsun. Güvenli kanıt .local/t883-20261112/t887-review-agent1-20261112-01/native-diagnostic-readonly.json ve native-code-identity-proof.json. Bu test diliminde ürün/deploy değişikliği yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T902 · Doğrulama: test — conversation ownership, legacy preservation, paging and storage failures through t
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-12 21:51
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - conversation ownership, legacy preservation, paging and storage failures through the real service
+    - re-creating a deleted tenant with the same slug generates a new generation/journal and avoids old provisioning/removal collisions
+    
+    rofiles without allocating a localhost port (0.817625ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (1.189125ms)
+    ✔ normalizes complete Node deployment specs (79.124958ms)
+    ✔ normalizes fixed Node process actions against a managed release (1.918875ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (81.656417ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (130.519167ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (1.661958ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (172.652458ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (2.79825ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (2.448ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.610041ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (8.211708ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.739333ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.374875ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (5.017167ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.43125ms)
+    ✔ normalizes python rollback, restart, and status specs (0.670917ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (2.420584ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.989166ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.671333ms)
+    ✔ tenant constants and role classification predicates (3.6235ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.879792ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (2.765959ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (1.1795ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (1.382ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.577458ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.850083ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.604375ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (1.02225ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.95525ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (1.401666ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.905833ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (1.073584ms)
+    ✔ tenant context creation and account normalization security edge cases (0.471ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 2691.057125
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
