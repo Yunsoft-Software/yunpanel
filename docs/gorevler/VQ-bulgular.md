@@ -1233,7 +1233,7 @@
 
 ### T903 · Doğrulama: test — independent SQLite writers serialize the last site slot (same operation: true)
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `apps/api/test/hosting-site-allocation-concurrency.test.js`, `apps/api/test/runner.js`
 - **Kaynak:** QA · 2026-11-12 22:26
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
