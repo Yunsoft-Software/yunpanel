@@ -1286,8 +1286,8 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T904 · Doğrulama: test — concurrent normal HTTP job enqueues during an active in-flight reconciliation succ
-- **Bağımlı:** —
-- **Dosyalar:** —
+- **Bağımlı:** T899
+- **Dosyalar:** `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`
 - **Kaynak:** QA · 2026-11-13 01:38
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
