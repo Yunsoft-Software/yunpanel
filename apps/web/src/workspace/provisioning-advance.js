@@ -1,7 +1,9 @@
 // Client sequencing only. Host inspection, locks and authorization stay in the
 // existing provisioning engine. Never replay a POST after an uncertain result.
 const STEP_STATES = new Set(['pending', 'applying', 'blocked', 'succeeded', 'failed', 'compensating', 'compensated']);
+const STOP_STEP_STATES = new Set(['failed', 'blocked', 'compensating', 'compensated']);
 const OUTCOMES = new Set(['progressed', 'reconciled', 'ready', 'failed', 'blocked', 'interrupted', 'compensated', 'compensation_interrupted', 'compensation_failed']);
+const LOCK_CONTENTION_CODES = new Set(['site_mutation_locked', 'site_mutation_lock_race']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const isRecord = (value) => Boolean(value && typeof value === 'object' && !Array.isArray(value));
 
@@ -16,6 +18,9 @@ function checkAbort(signal) {
     error.name = 'AbortError';
     throw error;
   }
+}
+function isPreExecutionLockConflict(error) {
+  return Boolean(error && error.status === 409 && LOCK_CONTENTION_CODES.has(error.code));
 }
 function verifiedOperation(operation, id, websiteId = null) {
   if (!isRecord(operation) || operation.operationId !== id
@@ -54,11 +59,111 @@ function verifiedResult(result, previous, id) {
   }
   return operation;
 }
+function verifiedReconciledOperation(snapshot, previous, id) {
+  const latest = verifiedOperation(snapshot, id, previous.websiteId);
+  if (latest.steps.length !== previous.steps.length) throw invalidResponse();
+  for (let i = 0; i < latest.steps.length; i += 1) {
+    const before = previous.steps[i];
+    const current = latest.steps[i];
+    if (current.id !== before.id
+      || current.required !== before.required
+      || (before.state === 'succeeded' && current.state !== 'succeeded')) {
+      throw invalidResponse();
+    }
+  }
+  if (latest.status === 'abandoned' && latest.ready) throw invalidResponse();
+  const requiredSteps = latest.steps.filter((step) => step.required);
+  if (latest.status !== 'abandoned' && requiredSteps.length > 0
+    && requiredSteps.every((step) => step.state === 'succeeded') && !latest.ready) {
+    throw invalidResponse();
+  }
+  return latest;
+}
+function reconciliationEvent(previous, latest, id) {
+  let changedStep = null;
+  let stepProgressed = false;
+  for (let i = 0; i < latest.steps.length; i += 1) {
+    const before = previous.steps[i];
+    const current = latest.steps[i];
+    if (current.state !== before.state) {
+      changedStep = current;
+      if (current.state === 'succeeded') stepProgressed = true;
+      if (STOP_STEP_STATES.has(current.state)) break;
+    }
+  }
+  const readyChanged = latest.ready !== previous.ready;
+  const statusChanged = latest.status !== previous.status;
+  if (!changedStep && !readyChanged && !statusChanged) return null;
 
-export async function advanceProvisioning({ operationId, read, advance, maxSteps = 30, signal, onStep, isCurrent = () => true } = {}) {
+  let outcome = 'interrupted';
+  if (latest.ready) outcome = 'ready';
+  else if (latest.steps.some((step) => step.state === 'failed')) outcome = 'failed';
+  else if (latest.status === 'abandoned' || latest.steps.some((step) => step.state === 'blocked')) outcome = 'blocked';
+  else if (latest.steps.some((step) => step.state === 'compensating')) outcome = 'compensation_interrupted';
+  else if (latest.steps.some((step) => step.state === 'compensated')) outcome = 'compensated';
+  else if (stepProgressed) outcome = 'reconciled';
+
+  return {
+    operationId: id,
+    outcome,
+    stepId: changedStep ? changedStep.id : null,
+    operation: latest,
+  };
+}
+function shouldStopReconciliation(operation) {
+  return operation.ready === true
+    || operation.status === 'abandoned'
+    || operation.steps.some((step) => STOP_STEP_STATES.has(step.state));
+}
+async function waitForPollDelay(delayMs, signal, checkCurrent) {
+  checkCurrent();
+  if (delayMs > 0) {
+    let timer = null;
+    let onAbort = null;
+    try {
+      await new Promise((resolve, reject) => {
+        onAbort = () => {
+          try {
+            checkCurrent();
+          } catch (abortError) {
+            reject(abortError);
+            return;
+          }
+          const abortError = new Error('Kurulum takibi durduruldu; sunucudaki işlem devam ediyor olabilir.');
+          abortError.name = 'AbortError';
+          reject(abortError);
+        };
+        if (signal?.aborted) {
+          onAbort();
+          return;
+        }
+        signal?.addEventListener('abort', onAbort, { once: true });
+        timer = setTimeout(resolve, delayMs);
+      });
+    } finally {
+      if (timer !== null) clearTimeout(timer);
+      if (onAbort) signal?.removeEventListener('abort', onAbort);
+    }
+  }
+  checkCurrent();
+}
+
+export async function advanceProvisioning({
+  operationId,
+  read,
+  advance,
+  maxSteps = 30,
+  lockPollLimit = 0,
+  lockPollDelayMs = 500,
+  signal,
+  onStep,
+  isCurrent = () => true,
+} = {}) {
   if (typeof operationId !== 'string' || !UUID.test(operationId)
     || typeof read !== 'function' || typeof advance !== 'function' || typeof isCurrent !== 'function'
-    || !Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 100) {
+    || !Number.isSafeInteger(maxSteps) || maxSteps < 1 || maxSteps > 100
+    || !Number.isSafeInteger(lockPollLimit) || lockPollLimit < 0 || lockPollLimit > 600
+    || !Number.isSafeInteger(lockPollDelayMs) || lockPollDelayMs < 0 || lockPollDelayMs > 5000) {
     throw new TypeError('Geçerli kurulum kimliği, istemci ve 1–100 adımlık ilerleme sınırı gerekir.');
   }
   const checkCurrent = () => {
@@ -76,9 +181,30 @@ export async function advanceProvisioning({ operationId, read, advance, maxSteps
   let operation = verifiedOperation(snapshot, operationId);
   for (let index = 0; index < maxSteps && canAdvance(operation); index += 1) {
     checkCurrent();
-    // A rejected request (including 429/5xx/timeout) does not prove non-execution.
-    // Propagate it, with no automatic retry or swallowed manual-retry failure.
-    const result = await advance({ signal });
+    let result;
+    try {
+      // A rejected request (including 429/5xx/timeout) does not prove non-execution.
+      // Propagate it, with no automatic retry or swallowed manual-retry failure.
+      result = await advance({ signal });
+    } catch (error) {
+      if (!isPreExecutionLockConflict(error) || lockPollLimit < 1) throw error;
+      checkCurrent();
+      for (let poll = 0; poll < lockPollLimit; poll += 1) {
+        await waitForPollDelay(lockPollDelayMs, signal, checkCurrent);
+        const nextSnapshot = await read({ signal });
+        checkCurrent();
+        const latest = verifiedReconciledOperation(nextSnapshot, operation, operationId);
+        const event = reconciliationEvent(operation, latest, operationId);
+        operation = latest;
+        if (event) {
+          checkCurrent();
+          if (typeof onStep === 'function') onStep(event);
+          checkCurrent();
+        }
+        if (shouldStopReconciliation(operation)) return operation;
+      }
+      return operation;
+    }
     checkCurrent();
     operation = verifiedResult(result, operation, operationId);
     if (typeof onStep === 'function') onStep(result);

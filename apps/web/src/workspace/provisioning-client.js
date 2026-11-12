@@ -68,12 +68,15 @@ export function compensateWebsiteProvisioningStep(operationId, provisioningStepI
   });
 }
 
-export async function autoAdvanceWebsiteProvisioning(operationId, { maxSteps = 30, signal, onStep } = {}) {
+export async function autoAdvanceWebsiteProvisioning(
+  operationId,
+  { maxSteps = 30, lockPollLimit = 120, lockPollDelayMs = 500, signal, onStep } = {},
+) {
   const id = uuid(operationId, 'provisioning operation id');
   const started = sessionVersion();
   return advanceProvisioning({
     isCurrent: () => started === sessionVersion() && !sessionTransitionPending(),
-    operationId: id, maxSteps, signal, onStep,
+    operationId: id, maxSteps, lockPollLimit, lockPollDelayMs, signal, onStep,
     read: ({ signal: requestSignal }) => panelRequest(`/sites/provisioning/${encodeURIComponent(id)}`, { signal: requestSignal }),
     advance: ({ signal: requestSignal }) => panelRequest(`/sites/provisioning/${encodeURIComponent(id)}/continue`, {
       method: 'POST',
