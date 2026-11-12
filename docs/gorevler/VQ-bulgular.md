@@ -1145,7 +1145,7 @@
 
 ### T899 · Paralel normal işlerde kuyruk recovery required 503 ile geçici kapanıyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/durable-job-registry.js`, `apps/api/src/local-runtime.js`
+- **Dosyalar:** `apps/api/src/durable-job-registry.js`, `apps/api/src/local-runtime.js`, `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`
 - **Kaynak:** QA · 2026-11-12 18:16
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
