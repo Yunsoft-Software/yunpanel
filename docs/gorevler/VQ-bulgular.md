@@ -1100,3 +1100,23 @@
     T888 gerçek Chrome normal hosted UI: 5hesap ve 3ayrı customer static site. Üçüncü directcustomer site durableoperation GET ready:true ve10zorunluadım succeeded; fakat nativeUI kırmızı Site kaydı oluşturuldu ancak kurulumun son durumu doğrulanamadı mesajında sftp/nginx/static/domainpending göstererek kaldı. Trafik aynı /sites/provisioning/<id>/continue için409, pageErrors boş. LocalUIoverlay/mock yok. İlkikisimarkerHTTP/UID geçti; bu UIassert gevşetilmedi, sonraki2serialcase ilkkoşudaçalışmadı. Özel ekran/traffic .local/t883-20261112/t888-chrome-20261112-01. Sunucu hazırken istemci hata gösteriyor; yalnız belgeli preexecution409 sonrası aynıdurableişi okuyup görünümü doğru sonuca taşı. Transport belirsizliğinde yeni create veya kör retry yok, failed/blocked gerçekdurum saklanmaz. Bu test diliminde deploy yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T895 · T883 doğrulanmış davranış matrisi ve sonraki öncelikler güncel belgede yok
+- **Bağımlı:** —
+- **Dosyalar:** `docs/test-scenarios-matrix.md`, `docs/t883-coverage-and-priorities-2026-11-12.md`
+- **Kaynak:** QA · 2026-11-12 17:25
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Kullanıcının 12 Kasım talebi: T883 test kapsamı açığını gerçek .28 sonuçlarıyla değerlendir, ardından site kopyalama ve kalan özellikler için öncelikli plan çıkar. 38 eski mantıksal senaryo/59 proje koşusunun assertion auditini, yeni gerçek test adı/dosyası ve çalıştırıldı-geçti/hata-bulgu/çalışmadı/izinli kanala çevrilemeyen kapı ayrımıyla yaz. Başlangıç matrisi 22kısmi16eksik0tam; eski yanlış kabul tekrarlanmaz. Her gerçek yeni koşunun source/hash/paket sınırı, physicalcleanup ve kalan ownresidue açık olsun. Site kopyalamayı uygulama; mevcutWPclone motorunu ve genelcopy eksiğini kaynakla ayırıp öncelik+bağımlılık+kabul ölçütleri öner. Kök plan.md ve senior rol dosyaları değiştirilmez; bu doküman öneri ve test raporudur. Testler bitene kadar belgeyi açık/ara olarak tut; tüm ilgili kaynak kapısı sonunda sonuçları kesinleştir.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T896 · Canlı test yardımcısı belirsiz oluşturma sonrası null journal yanıtını yanlış ayrıştırıyor
+- **Bağımlı:** T885, T890
+- **Dosyalar:** `e2e/live-audit/owned-fixture.js`
+- **Kaynak:** QA · 2026-11-12 17:33
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T887 22 q1b gerçek create transport belirsizliğinden sonra GET provisioning/latest HTTP200 {data:null}, Website404; f.call body.data null değerini nullish fallback ile {data:null} wrapper yapıp recoverCreation operation.websiteId undefined assertion atıyor. Bu ürün değil test yardımcısı kusuru. Dar düzeltme: data field mevcutsa null koru; latest null ise aynı identity bounded read ve açık belirsiz/notcreated hata, create tekrar yok. Previewden doğrulanmış expected UnixUser/documentRoot bilgisini erken ledgera kaydederek başarısız/hiçoluşmamış fixture cleanup fiziksel yokluk kanıtını da mümkün kıl; kimlik tahmini/yenidenatama yok. SafeApi tarafından zaten maskelenmiş transport için yalnız allowlist ECONNRESET/socket hang up/timeout/context-disposed gibi güvenli hint koru; headers/cookie/URLquery/rawcause yok. Tekrarlı mutationlarda stale keep-alive şüphesini ayırmak için normal API client Connection:close transportu kullanılabilir, gerçek status/assertionlar değişmez. Native gerçek API/UI smokes +null read contract proof +lint; ürün/deploy/rootwrite yok. Diğer ajan kaynakları değişmez.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
