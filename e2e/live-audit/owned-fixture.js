@@ -16,6 +16,15 @@ const KEY = /^[a-z0-9][a-z0-9-]{0,43}$/i;
 const USER = /^yunapp-[a-z0-9]{8,32}$/;
 const wait = ms => new Promise(resolve => setTimeout(resolve, ms));
 const codeOf = body => /^[a-z0-9_]{1,100}$/i.test(body?.error?.code ?? '') ? body.error.code : 'unknown';
+function transportHint(error) {
+  const message = String(error?.message ?? '');
+  for (const [pattern, hint] of [[/ECONNRESET/i, 'ECONNRESET'], [/socket hang up/i, 'socket_hang_up'],
+    [/ETIMEDOUT|Timeout \d+ms exceeded/i, 'request_timeout'], [/Request context disposed/i, 'context_disposed'],
+    [/ECONNREFUSED/i, 'ECONNREFUSED'], [/ENOTFOUND/i, 'ENOTFOUND'], [/ERR_SOCKET_CLOSED/i, 'ERR_SOCKET_CLOSED']]) {
+    if (pattern.test(message)) return hint;
+  }
+  return 'transport_detail_withheld';
+}
 function checked(result, label, statuses = [200]) {
   if (!statuses.includes(result.status)) throw new Error(`${label}: HTTP ${result.status} ${codeOf(result.body)}`);
   return result.data;
@@ -63,7 +72,9 @@ function requestHost(ip, hostname, pathname, options = {}) {
 // Every mutation is sent once. An uncertain response is recovered by reading the same durable identity.
 export async function createOwnedFixture(liveApi, options = {}) {
   assert.ok(liveApi?.api && typeof liveApi.csrf === 'string', 'A real authenticated API context is required');
-  const { key, runtime = 'php', source, create, timeoutMs = 300000, dns: dnsMode = { mode: 'external' }, mail = { mode: 'none' }, database = { mode: 'none' }, cleanupOnly = false } = options;
+  const { key, runtime = 'php', source, create, timeoutMs = 300000, dns: dnsMode = { mode: 'external' }, mail = { mode: 'none' }, database = { mode: 'none' }, cleanupOnly = false,
+    connectionClose = process.env.YUNPANEL_AUDIT_CONNECTION_CLOSE === '1' } = options;
+  assert.equal(typeof connectionClose, 'boolean');
   assert.match(key ?? '', KEY);
   assert.ok(['php', 'static', 'node', 'python'].includes(runtime), 'Unsupported owned runtime');
   assert.ok(process.env.YUNPANEL_AUDIT_RUN_DIR && path.basename(RUN_DIR) !== 'current', 'Use an explicit fresh audit run directory');
@@ -75,17 +86,22 @@ export async function createOwnedFixture(liveApi, options = {}) {
   const file = path.join(directory, key + '.json');
   let ledger = fs.existsSync(file) ? JSON.parse(fs.readFileSync(file, 'utf8')) : null;
   let activeInput;
-  const call = async (method, endpoint, data) => {
+  const call = async (method, endpoint, data, { requestTimeoutMs = 120000, retryGets = true } = {}) => {
     assert.ok(endpoint.startsWith('/api/'), 'Expected a panel API route');
     let response;
     for (let attempt = 0; ; attempt++) {
-      try { response = await liveApi.api.fetch(endpoint, { method, data, headers: { Origin: ORIGIN, 'x-csrf-token': liveApi.csrf }, maxRedirects: 0, timeout: 120000 }); }
-      catch { if (method === 'GET' && attempt < 3) { await wait(700); continue; } throw Object.assign(new Error(`Owned fixture transport failed: ${method} ${endpoint.split('?')[0]}`), { code: 'owned_fixture_transport' }); }
-      if (method === 'GET' && [502, 503, 504].includes(response.status()) && attempt < 3) { await wait(700); continue; }
+      try { response = await liveApi.api.fetch(endpoint, { method, data, headers: { Origin: ORIGIN, 'x-csrf-token': liveApi.csrf, ...(connectionClose ? { Connection: 'close' } : {}) }, maxRedirects: 0, timeout: requestTimeoutMs }); }
+      catch (error) {
+        const hint = transportHint(error);
+        if (ledger) record('api-transport-error', { method, route: endpoint.split('?')[0], hint });
+        if (method === 'GET' && retryGets && attempt < 3) { await wait(700); continue; }
+        throw Object.assign(new Error(`Owned fixture transport failed: ${method} ${endpoint.split('?')[0]} [${hint}]`), { code: 'owned_fixture_transport', transportHint: hint });
+      }
+      if (method === 'GET' && retryGets && [502, 503, 504].includes(response.status()) && attempt < 3) { await wait(700); continue; }
       break;
     }
     const body = await response.json().catch(() => null);
-    return { status: response.status(), body, data: body?.data ?? body };
+    return { status: response.status(), body, data: body && Object.hasOwn(body, 'data') ? body.data : body };
   };
   function save() {
     const tmp = file + '.tmp'; fs.writeFileSync(tmp, JSON.stringify(ledger, null, 2) + '\n', { mode: 0o600 }); fs.renameSync(tmp, file);
@@ -110,7 +126,7 @@ export async function createOwnedFixture(liveApi, options = {}) {
     const hostname = `ypaudit-${key.toLowerCase()}-${nonce}.${ip}.sslip.io`;
     assert.ok(!sites.some(s => s.name === hostname));
     ledger = { key, runId: run.runId, target: ip, origin: ORIGIN, nonce, runtime, hostname, serverId: servers[0].id,
-      baselineSiteIds: sites.filter(s => !/^ypaudit-/.test(s.name)).map(s => s.id), baselineRepositories: repos.map(r => r.id), events: [], createdAt: new Date().toISOString() };
+      baselineSiteIds: sites.filter(s => !/^ypaudit-/.test(s.name)).map(s => s.id), baselineRepositories: repos.map(r => r.id), apiConnectionClose: connectionClose, events: [], createdAt: new Date().toISOString() };
     ledger.baselineHttp = [];
     const domains = checked(await call('GET', '/api/panel/domains'), 'HTTP sibling baseline');
     for (const domain of domains.filter(d => ledger.baselineSiteIds.includes(d.websiteId))) {
@@ -139,6 +155,15 @@ export async function createOwnedFixture(liveApi, options = {}) {
     assert.match(preview.ids?.websiteId ?? '', UUID); assert.match(preview.ids?.applicationId ?? '', UUID); assert.match(preview.ids?.primaryDomainId ?? '', UUID);
     assert.ok(!ledger.baselineSiteIds.includes(preview.ids.websiteId));
     ledger.websiteId = preview.ids.websiteId; ledger.applicationId = preview.ids.applicationId; ledger.domainId = preview.ids.primaryDomainId;
+    const expected = preview.plan?.website;
+    assert.equal(expected?.id, ledger.websiteId); assert.equal(expected.applicationId, ledger.applicationId);
+    assert.equal(expected.serverId, ledger.serverId); assert.equal(expected.name, ledger.hostname); assert.equal(expected.runtimeType, runtime);
+    assert.match(expected.unixUser ?? '', USER);
+    const paths = createWebsitePathContract(ledger);
+    const root = runtime === 'static' ? path.posix.join(paths.static.publishRoot, 'current')
+      : runtime === 'php' ? path.posix.join(paths.runtime.currentRelease, 'public') : paths.runtime.currentRelease;
+    assert.equal(expected.documentRoot, root, 'Preview file root is outside its exact owned runtime contract');
+    ledger.unixUser = expected.unixUser; ledger.documentRoot = expected.documentRoot; ledger.identitySource = 'verified-site-create-preview';
     ledger.provisioningId = preview.provisioning?.operationId ?? ledger.provisioningId;
     if (ledger.provisioningId) assert.match(ledger.provisioningId, UUID);
     save();
@@ -146,15 +171,29 @@ export async function createOwnedFixture(liveApi, options = {}) {
   async function recoverCreation() {
     const preview = checked(await call('POST', '/api/panel/sites/create-preview', { input: activeInput }), 'recover exact create preview');
     bindPreview(preview);
-    const latest = await call('GET', '/api/panel/sites/' + ledger.websiteId + '/provisioning/latest');
-    if (latest.status === 200) {
-      const operation = latest.data.operation ?? latest.data; assert.equal(operation.websiteId, ledger.websiteId);
-      if (ledger.provisioningId) assert.equal(operation.operationId, ledger.provisioningId);
-      assert.match(operation.operationId, UUID); ledger.provisioningId = operation.operationId; save(); return true;
+    const deadline = Date.now() + 5000; let reads = 0;
+    while (Date.now() < deadline && reads < 8) {
+      reads += 1;
+      let latest;
+      try {
+        latest = await call('GET', '/api/panel/sites/' + ledger.websiteId + '/provisioning/latest', undefined,
+          { requestTimeoutMs: Math.max(250, Math.min(2000, deadline - Date.now())), retryGets: false });
+      } catch (error) { if (error.code !== 'owned_fixture_transport') throw error; await wait(250); continue; }
+      if (latest.status !== 200 && latest.status !== 404) checked(latest, 'same creation journal');
+      const operation = latest.status === 200 && latest.data
+        ? (Object.hasOwn(latest.data, 'operation') ? latest.data.operation : latest.data) : null;
+      if (operation) {
+        assert.equal(operation.websiteId, ledger.websiteId);
+        if (ledger.provisioningId) assert.equal(operation.operationId, ledger.provisioningId);
+        assert.match(operation.operationId, UUID); ledger.provisioningId = operation.operationId; save(); return true;
+      }
+      record('creation-journal-not-observed', { read: reads, httpStatus: latest.status });
+      await wait(350);
     }
+    ledger.creationUnconfirmed = true; record('creation-remains-unconfirmed', { authoritativeReads: reads, createReplayed: false });
     return false;
   }
-  if (cleanupOnly && ledger.provisioningId !== ledger.operationId) assert.ok(await recoverCreation(), 'The UI creation identity could not be recovered for cleanup');
+  if (cleanupOnly && (!ledger.unixUser || !ledger.documentRoot || ledger.provisioningId !== ledger.operationId)) await recoverCreation();
   if (!cleanupOnly) {
   if (!ledger.createSent) {
     const preview = checked(await call('POST', '/api/panel/sites/create-preview', { input: activeInput }), 'site preview'); bindPreview(preview);
@@ -173,10 +212,11 @@ export async function createOwnedFixture(liveApi, options = {}) {
     } catch (error) {
       if (error?.code !== 'owned_fixture_transport') throw error;
       record('create-response-uncertain');
-      if (!await recoverCreation()) throw error;
+      if (!await recoverCreation()) throw Object.assign(new Error('Owned creation was not observed after bounded journal reads; exact ledger retained and creation was not replayed'),
+        { code: 'owned_fixture_creation_unconfirmed', transportHint: error.transportHint });
     }
   } else if (!ledger.provisioningId || !ledger.ready) {
-    assert.ok(await recoverCreation(), 'A prior create is uncertain; do not send another creation request');
+    if (!await recoverCreation()) throw Object.assign(new Error('A prior owned creation remains unconfirmed after bounded reads; creation was not replayed'), { code: 'owned_fixture_creation_unconfirmed' });
   }
   assert.match(ledger.websiteId, UUID); assert.match(ledger.applicationId, UUID); assert.match(ledger.domainId, UUID);
   const provisionPath = '/api/panel/sites/provisioning/' + ledger.provisioningId;
@@ -210,11 +250,13 @@ export async function createOwnedFixture(liveApi, options = {}) {
   const site = checked(siteResponse, 'owned site identity');
   assert.equal(site.id, ledger.websiteId); assert.equal(site.name, ledger.hostname); assert.equal(site.serverId, ledger.serverId);
   assert.equal(site.applicationId, ledger.applicationId); assert.match(site.unixUser ?? '', USER);
+  if (ledger.unixUser) assert.equal(site.unixUser, ledger.unixUser, 'Website Unix identity differs from its verified preview');
+  if (ledger.documentRoot) assert.equal(site.documentRoot, ledger.documentRoot, 'Website file root differs from its verified preview');
   ledger.unixUser = site.unixUser; ledger.documentRoot = site.documentRoot; save();
   } else assert.equal(siteResponse.status, 404);
   const fixture = {
     get ledger() { return structuredClone(ledger); }, api: liveApi.api, csrf: liveApi.csrf, call, record,
-    endpoint, route: (tab = 'overview') => '/websites/' + ledger.domainId + '/' + tab,
+    endpoint, route: (tab = 'overview') => '/websites/' + ledger.domainId + '/' + tab, reconcileCreation: recoverCreation,
     waitJob: async (id, duration = timeoutMs) => {
       assert.match(id, UUID); const stop = Date.now() + duration;
       while (Date.now() < stop) { const job = checked(await call('GET', '/api/panel/jobs/' + id), 'job read'); if (['succeeded', 'failed', 'cancelled'].includes(job.status)) return job; await wait(700); }
