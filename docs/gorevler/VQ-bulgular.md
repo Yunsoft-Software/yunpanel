@@ -1039,3 +1039,23 @@
     Silinen 20 dosyasındaki üç mantıksal senaryoyu normal native .28 UI/API ile yeniden yaz. İki reseller müşteri ve doğrudan müşteri için 3 ayrı gerçek site/UID/release/HTTP; API job tool WS izolasyonu ve parent revoke; normal UI removal ve fiziksel/account cleanup. Eski acceptance/SHA/localdist/root mutation yok. İki fresh run veya gerçek bulgu, ürün/deploy yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T889 · Yeni PHP sitesi ilk kurulumunda PHP-FPM uygulama doğrulaması aralıklı başarısız
+- **Bağımlı:** —
+- **Dosyalar:** `packages/host-runtime/src/php-fpm-site-manager.js`
+- **Kaynak:** QA · 2026-11-12 16:53
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T885 gerçek native .28 ilk PHP smoke: normal create/provisioning php_runtime adımı php_fpm_apply_unverified verdi; Unix kimliği, elFinder ve php_bootstrap geçti. Kaynak koduna veya host kayıtlarına müdahale yapılmadı. Aynı koşunun sitesi normal removal ile temizlendi, Website/Domain/Application404 ve kalıntı yokluğu doğrulandı. Yeni farklı PHP fixture ile tekrar tüm kurulum/HTTP/temizlik geçti; kök neden henüz kanıtlanmadı, reload/socket zamanlama varsayımı teşhis sayılmaz. Özel kanıt .local/t885-smoke/run-1794490934/owned-fixtures/t885-smoke.json ve php-repeat-*; T885 raporu. Gerçek kurulumu tekrarlayıp hatanın gerekçesini kaydet; yanlış başarısızlık/başarılılık üretmeden hazır olmayı fiziksel doğrula. Yeni deploy bu test kapsamına dahil değil.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T890 · Sahipli test yardımcısı otomatik provisioning işçisiyle devam çakışmasını yanlış hata sayıyor
+- **Bağımlı:** T885
+- **Dosyalar:** `e2e/live-audit/owned-fixture.js`
+- **Kaynak:** QA · 2026-11-12 16:55
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T886 native ilk debug: normal UI ve normal API static create sonrası server automatic worker devam ederken owned-fixture POST /sites/provisioning/:id/continue HTTP409 site_mutation_locked alıp testi bitiriyor. Ürün hatası değildir; finalready ve requiredstep assertions korunarak yalnız belgeli409 busy/stale durumunda aynı operation okunup beklenmeli; kör mutation retry yok. UygulamaHTTP400/403 ve gerçekfailedstep yine hata. Gerçek fresh PHP/static UI/API kur-sil ile tekrar üret, düzelt, cleanup yokluğunu doğrula. Diğer dosyalara ve ürün/deploy/restarta dokunma.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
