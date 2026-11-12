@@ -1,9 +1,25 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { lstat as realLstat } from 'node:fs/promises';
+import net from 'node:net';
 import test from 'node:test';
+import { createApplicationIdentity } from '../src/application-identity.js';
 import {
   createPhpFpmSiteManager,
   PhpFpmSiteManagerError,
 } from '../src/php-fpm-site-manager.js';
+import { createPhpSiteContainerManager } from '../src/php-site-container-manager.js';
+import { createServiceUmaskManager } from '../src/service-umask-manager.js';
+import { createWebsiteIdentityPathManager } from '../src/website-identity-path-manager.js';
+
+const realLinuxPhpFpmRoot = process.platform === 'linux'
+  && process.getuid?.() === 0
+  && existsSync('/usr/sbin/php-fpm8.3')
+  && existsSync('/usr/bin/dpkg-query')
+  && existsSync('/usr/bin/systemctl')
+  && existsSync('/usr/bin/ss');
 
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
@@ -132,7 +148,8 @@ function fakeHost({ packageInstalled = false, serviceActive = false } = {}) {
       return { stdout: '' };
     }
     if (file === '/usr/bin/ss') {
-      return { stdout: entries.has(configPath) && entries.has(socketPath) ? `u_str LISTEN 0 0 ${socketPath}` : '' };
+      const hasPoolForUser = [...entries.keys()].some((k) => k.endsWith(`/fpm/pool.d/yunpanel-${unixUser}.conf`));
+      return { stdout: hasPoolForUser && entries.has(socketPath) ? `u_str LISTEN 0 0 ${socketPath}` : '' };
     }
     throw new Error(`unexpected command ${file} ${args.join(' ')}`);
   };
@@ -739,3 +756,113 @@ test('PHP retirement inspection checks other versions and listeners even without
   host.entries.delete(socketPath);
   assert.equal((await siteManager.inspectRetirement(intent())).reason, 'php_fpm_retirement_listener_pending');
 });
+
+test('PHP-FPM site manager rejects invalid bounded socket readiness polling options before running commands', () => {
+  for (const invalid of [
+    { pollDelayMs: 0 },
+    { pollDelayMs: -1 },
+    { pollDelayMs: 10_000 },
+    { pollAttempts: 0 },
+    { pollAttempts: -1 },
+    { pollAttempts: 500 },
+    { delayFn: null },
+  ]) {
+    assert.throws(
+      () => createPhpFpmSiteManager(invalid),
+      (err) => err instanceof PhpFpmSiteManagerError && err.code === 'php_fpm_dependencies_invalid',
+    );
+  }
+});
+
+// Runs against the real Linux PHP-FPM + systemd + ss + Unix identity stack on a root host (.28 after deploy);
+// skipped where Linux root / php8.3-fpm / systemd are absent rather than simulating host binaries.
+test(
+  'real Linux PHP-FPM: apply, UMask restart and update verify live 0660 pool socket and clean up completely',
+  { skip: realLinuxPhpFpmRoot ? false : 'needs Linux root + php8.3-fpm + systemd + ss (run on the .28 test host after package deploy)' },
+  async () => {
+    const versionOut = execFileSync('/usr/sbin/php-fpm8.3', ['-v'], { encoding: 'utf8' });
+    assert.match(versionOut, /PHP 8\.3\./);
+
+    const liveWebsiteId = randomUUID();
+    const liveAppId = randomUUID();
+    const liveOpId = randomUUID();
+    const liveUpdateOpId = randomUUID();
+    const liveUser = createApplicationIdentity(liveAppId).unixUser;
+    const liveHome = `/var/lib/yunpanel/data/${liveAppId}`;
+    const liveDocRoot = `/var/lib/yunpanel/apps/${liveAppId}/current/public`;
+
+    const realIdentity = createWebsiteIdentityPathManager();
+    const realContainer = createPhpSiteContainerManager();
+    const realUmask = createServiceUmaskManager();
+    const realFpm = createPhpFpmSiteManager();
+
+    try {
+      await realIdentity.apply({
+        user: liveUser,
+        homeDirectory: liveHome,
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+      }, { operationId: liveOpId });
+      await realContainer.apply({
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+      }, { operationId: liveOpId });
+
+      const liveIntent = {
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+        unixUser: liveUser,
+        documentRoot: liveDocRoot,
+      };
+      const applied = await realFpm.apply(liveIntent, { operationId: liveOpId });
+      assert.equal(applied.satisfied, true);
+
+      const sockStat = await realLstat(applied.socketPath);
+      assert.equal(sockStat.isSocket(), true);
+      assert.equal(sockStat.mode & 0o777, 0o660);
+
+      // Prove real OS connection to the live PHP-FPM Unix socket
+      await new Promise((resolve, reject) => {
+        const conn = net.createConnection(applied.socketPath);
+        conn.once('connect', () => {
+          conn.destroy();
+          resolve();
+        });
+        conn.once('error', reject);
+      });
+
+      await realUmask.apply({ runtime: 'php', phpVersion: '8.3' }, { operationId: liveOpId });
+      let postRestart = null;
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        postRestart = await realFpm.inspect(liveIntent);
+        if (postRestart.satisfied) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      assert.equal(postRestart?.satisfied, true);
+
+      const updated = await realFpm.update({ ...liveIntent, maxChildren: 7 }, {
+        previousIntent: liveIntent,
+        operationId: liveUpdateOpId,
+      });
+      assert.equal(updated.satisfied, true);
+      await realFpm.compensate({ ...liveIntent, maxChildren: 7 }, { operationId: liveUpdateOpId });
+    } finally {
+      await realFpm.compensate({
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+        unixUser: liveUser,
+        documentRoot: liveDocRoot,
+      }, { operationId: liveOpId }).catch(() => {});
+      await realContainer.compensate({
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+      }, { operationId: liveOpId }).catch(() => {});
+      await realIdentity.compensate({
+        user: liveUser,
+        homeDirectory: liveHome,
+        websiteId: liveWebsiteId,
+        applicationId: liveAppId,
+      }, { operationId: liveOpId }).catch(() => {});
+    }
+  },
+);

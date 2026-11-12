@@ -77,6 +77,10 @@ test('PHP-FPM Runtime Golden Path - Distro Baseline, Multi-Version & Verified Re
             return { stdout: '' };
           }
         }
+        if (file === '/usr/bin/ss') {
+          const sock = phpFpmSocketPath(unixUser);
+          return { stdout: entries.has(sock) ? `u_str LISTEN 0 0 ${sock}\n` : '' };
+        }
         throw new Error(`unexpected command: ${file} ${args.join(' ')}`);
       },
       lstatFn: async (file) => {

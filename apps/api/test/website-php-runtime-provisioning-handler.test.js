@@ -459,3 +459,20 @@ test('PHP container metadata migration uses source release identity and isolated
   await handler.compensateContainerMigration({ intent: intent(), operationId, releaseOperationId });
   assert.equal(calls.some(([name]) => name === 'container-migration-compensate'), true);
 });
+
+test('PHP runtime handler rejects invalid bounded UMask restart polling options before invoking managers', () => {
+  for (const invalid of [
+    { pollDelayMs: 0 },
+    { pollDelayMs: -1 },
+    { pollDelayMs: 10_000 },
+    { pollAttempts: 0 },
+    { pollAttempts: -1 },
+    { pollAttempts: 500 },
+    { delayFn: null },
+  ]) {
+    assert.throws(
+      () => createWebsitePhpRuntimeProvisioningHandler(invalid),
+      { code: 'website_php_runtime_dependencies_invalid' },
+    );
+  }
+});

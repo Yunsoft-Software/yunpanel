@@ -201,12 +201,17 @@ export function createPhpFpmSiteManager({
   renameFn = rename,
   rmFn = rm,
   writeFileFn = writeFile,
+  pollDelayMs = 100,
+  pollAttempts = 40,
+  delayFn = delay,
 } = {}) {
   if (!identityManager || typeof identityManager.inspect !== 'function'
     || typeof run !== 'function' || typeof lstatFn !== 'function'
     || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
     || typeof renameFn !== 'function' || typeof rmFn !== 'function'
-    || typeof writeFileFn !== 'function') {
+    || typeof writeFileFn !== 'function' || typeof delayFn !== 'function'
+    || !Number.isSafeInteger(pollDelayMs) || pollDelayMs < 1 || pollDelayMs > 5_000
+    || !Number.isSafeInteger(pollAttempts) || pollAttempts < 1 || pollAttempts > 200) {
     throw new PhpFpmSiteManagerError('php_fpm_dependencies_invalid', 'PHP-FPM Website manager dependencies are invalid');
   }
 
@@ -755,7 +760,9 @@ export function createPhpFpmSiteManager({
 
     if (receipt.state === 'active') {
       const existing = await inspect(rawIntent);
-      if (existing.satisfied) return Object.freeze({ ...existing, created: receipt.mutated });
+      if (existing.satisfied && await socketListening(phpFpmSocketPath(spec.unixUser))) {
+        return Object.freeze({ ...existing, created: receipt.mutated });
+      }
     }
 
     const currentAfterReceipt = await readOptional(configPath);
@@ -770,10 +777,12 @@ export function createPhpFpmSiteManager({
     try {
       await configTest(spec.phpVersion);
       await activateService(spec.phpVersion);
-      const verified = await inspect(rawIntent);
-      if (!verified.satisfied) {
-        throw new PhpFpmSiteManagerError('php_fpm_apply_unverified', 'PHP-FPM Website pool activation could not be verified');
-      }
+      const verified = await waitForPoolReady(
+        rawIntent,
+        spec,
+        'php_fpm_apply_unverified',
+        'PHP-FPM Website pool activation could not be verified',
+      );
       receipt = await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
       return Object.freeze({ ...verified, created: receipt.mutated });
     } catch (error) {
@@ -812,8 +821,12 @@ export function createPhpFpmSiteManager({
       await atomicWrite(configPath, renderWebsitePhpFpmPool(spec.templateInput), phpFpmTemplatePolicy.poolMode);
       await configTest(spec.phpVersion);
       await reloadServiceIfActive(spec.phpVersion);
-      const after = await inspect(rawIntent);
-      if (!after.satisfied) throw new PhpFpmSiteManagerError('php_fpm_update_unverified', 'Updated PHP configuration could not be verified');
+      const after = await waitForPoolReady(
+        rawIntent,
+        spec,
+        'php_fpm_update_unverified',
+        'Updated PHP configuration could not be verified',
+      );
       await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
       return Object.freeze({ ...after, updated: true });
     } catch (error) {
@@ -839,6 +852,34 @@ export function createPhpFpmSiteManager({
       return output.split('\n').some(line => line.trim().split(/\s+/).includes(socketPath));
     } catch { throw new PhpFpmSiteManagerError('php_fpm_socket_owner_unverified', 'Website PHP socket listeners could not be verified'); }
   }
+  async function waitForPoolReady(rawIntent, spec, unverifiedCode, unverifiedMessage) {
+    const targetSocket = phpFpmSocketPath(spec.unixUser);
+    for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
+      let verified = null;
+      let transientSocketMode = false;
+      try {
+        verified = await inspect(rawIntent);
+      } catch (error) {
+        if (error instanceof PhpFpmSiteManagerError && error.code === 'php_fpm_socket_drift' && attempt + 1 < pollAttempts) {
+          const socketInfo = await lstatFn(targetSocket).catch(() => null);
+          if (socketInfo?.isSocket?.() && !socketInfo.isSymbolicLink?.()) {
+            transientSocketMode = true;
+          } else {
+            throw error;
+          }
+        } else {
+          throw error;
+        }
+      }
+      if (!transientSocketMode && verified?.satisfied && await socketListening(targetSocket)) {
+        return verified;
+      }
+      if (attempt + 1 < pollAttempts) {
+        await delayFn(pollDelayMs);
+      }
+    }
+    throw new PhpFpmSiteManagerError(unverifiedCode, unverifiedMessage);
+  }
   async function releaseSocket(spec) {
     const socket = phpFpmSocketPath(spec.unixUser);
     for (let attempt = 0; attempt < 30; attempt++) {
@@ -850,7 +891,7 @@ export function createPhpFpmSiteManager({
         } catch (error) { if (!missingPath(error)) throw error; }
         return;
       }
-      await delay(100);
+      await delayFn(pollDelayMs);
     }
     throw new PhpFpmSiteManagerError('php_fpm_socket_transition_busy', 'The old PHP pool is still serving requests; its configuration was restored');
   }
@@ -1012,10 +1053,12 @@ export function createPhpFpmSiteManager({
       );
     }
     await reloadServiceIfActive(spec.phpVersion);
-    const verified = await inspect(rawIntent);
-    if (!verified?.satisfied) {
-      throw new PhpFpmSiteManagerError('php_fpm_migration_unverified', 'PHP-FPM migration could not be verified');
-    }
+    const verified = await waitForPoolReady(
+      rawIntent,
+      spec,
+      'php_fpm_migration_unverified',
+      'PHP-FPM migration could not be verified',
+    );
     receipt = await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
     return Object.freeze({
       ...verified,

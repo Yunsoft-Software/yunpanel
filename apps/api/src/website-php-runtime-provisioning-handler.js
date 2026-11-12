@@ -1,3 +1,4 @@
+import { setTimeout as delay } from 'node:timers/promises';
 import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createPhpSiteContainerManager } from '@yunpanel/host-runtime/php-site-container-manager';
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
@@ -56,11 +57,17 @@ export function createWebsitePhpRuntimeProvisioningHandler({
   containerManager = createPhpSiteContainerManager(),
   fpmManager = createPhpFpmSiteManager(),
   umaskManager = createServiceUmaskManager(),
+  pollDelayMs = 100,
+  pollAttempts = 40,
+  delayFn = delay,
 } = {}) {
   if (!containerManager || typeof containerManager.apply !== 'function' || typeof containerManager.inspect !== 'function'
     || !fpmManager || typeof fpmManager.apply !== 'function' || typeof fpmManager.inspect !== 'function'
     || typeof fpmManager.compensate !== 'function' || typeof fpmManager.inspectCompensation !== 'function'
-    || !umaskManager || typeof umaskManager.apply !== 'function' || typeof umaskManager.inspect !== 'function') {
+    || !umaskManager || typeof umaskManager.apply !== 'function' || typeof umaskManager.inspect !== 'function'
+    || typeof delayFn !== 'function'
+    || !Number.isSafeInteger(pollDelayMs) || pollDelayMs < 1 || pollDelayMs > 5_000
+    || !Number.isSafeInteger(pollAttempts) || pollAttempts < 1 || pollAttempts > 200) {
     throw new WebsitePhpRuntimeProvisioningError(
       'website_php_runtime_dependencies_invalid',
       'Website PHP runtime provisioning dependencies are invalid',
@@ -90,7 +97,12 @@ export function createWebsitePhpRuntimeProvisioningHandler({
         'PHP-FPM service UMask=0027 could not be verified',
       );
     }
-    const fpm = await fpmManager.inspect(normalized);
+    let fpm = null;
+    for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
+      fpm = await fpmManager.inspect(normalized);
+      if (fpm?.satisfied && fpm.adapter === 'php-fpm') break;
+      if (attempt + 1 < pollAttempts) await delayFn(pollDelayMs);
+    }
     if (!fpm?.satisfied || fpm.adapter !== 'php-fpm') {
       throw new WebsitePhpRuntimeProvisioningError(
         'website_php_fpm_restart_unverified',
