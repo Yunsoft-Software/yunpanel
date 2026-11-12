@@ -1068,4 +1068,15 @@
 
     T887 native .28 /19 Chrome debug: owned PHP normal UI Kaydet ve uygula -> update-preview200, PATCH200, domain stage400 invalid_operation_payload. Yeni header,2MiBbodylimit,cache120 uygulanamadı; orijinal ayara normal API dönüşten sonraki stage de400. Aynı native pakette Node ve static hosting senaryoları geçti. .local/t883-20261112/t887-debug-19-chrome özel route/API kanıtı; altı test kaynağı normal removal ile temizlendi. Kaynak şüphesi validatePhpDomainStage PHP-only nginxSettings alanlarını inheritedPassenger doğrulamasına aktarırken staticAssetCacheSeconds alanını ayırmıyor; henüz kök neden diye kabul edilmez, dar gerçek API tekrarının mesajıyla doğrula. Testi gevşetme; PHP canonical envelope ve gerçek HTTP etkisi için regresyonu düzelt. Bu test çalışmasında deploy/servis restart yok.
 
+- **Doğrulanmış ek kanıt (12 Kasım):** Sabit T890 yardımcıyla taze API tekrarında original `{clientMaxBodySizeMb:null,headers:[]}` üzerine yalnız `staticAssetCacheSeconds:120` eklendi: preview200/PATCH200/stage400, `invalid_operation_payload`, `domain.stage nginxSettings are invalid`, details null; aktif Nginx checksum değişmedi. Özel kayıt `.local/t883-20261112/t887-php-stage-repro-stable-1/php-stage-proof.json`. Sonraki fiziksel silme kalıntısı ayrı T892.
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T892 · Başarısız PHP ayar hazırlamasından sonra site silme aktif Nginx dosyasını bırakıyor
+- **Bağımlı:** T803, T826, T849
+- **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/api/src/domain-removal-runtime.js`
+- **Kaynak:** QA · 2026-11-12 17:14
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T887 iki bağımsız owned native .28 lifecycle: PHP hosting update PATCH200 sonrası stage400 invalid_operation_payload (T891); normal Website removal sonra Website/Domain/Application404, Unix user/group, canonical4roots, FPM/socket ve mount yok; fakat /etc/nginx/sites-enabled/yunpanel-<exact-owned-hostname>.conf regular uid0gid0 mode0600 kalıyor. 3sn sonra salt okunur tekrar aynı. İlkdebug19 altı ledgerdan yalnız buPHP kalıntılı, diğerbeş fizikseltemiz; stableminimalAPIrepro ikinciaynıkalıntı. Özel kanıt .local/t883-20261112/t887-debug-19-chrome/physical-cleanup-summary.json ve t887-php-stage-repro-stable-1/physical-cleanup-details.json ile physical-cleanup-repeat.json. Registry/hostconfigelledeğiştirilmedi. Desiredrevision>applied sonrası draft removal eski applied Nginx hedefini kaçırıyor olabilir; kaynak çıkarımı, kanıtlanmış neden değil. Aktif config kalırken removed ilan etme; normal lifecycle ile doğrulanmış owned configi kaldır, yabancı configi koru ve gerçek HTTP/physical regresyon yaz. Bu test diliminde deploy yok; kalıntılar kanıt/scopeledger ile korunuyor.
+
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
