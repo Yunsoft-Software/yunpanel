@@ -56,12 +56,14 @@ test.describe('T887 native owned index and error preferences', () => {
   }
   test.beforeAll(async ({}, info) => { projectName = (info.project.name.startsWith('firefox') ? 'ff' : 'cr') + '-w' + info.workerIndex; actor = await apiContext(); });
   test.afterAll(async () => {
+    test.setTimeout(360000);
     const failures = [];
     for (const key of [...keys].reverse()) try {
       const fixture = [...sites.values()].find(value => value.ledger.key === key);
       const ledger = fixture ? await fixture.cleanup() : await cleanupOwnedFixture(actor, { key });
       const absent = readOnlyHostProbe({ ledger }, 'lifecycle-absence');
       expect(absent.unixUserExists).toBe(false); expect(absent.unixGroupExists).toBe(false);
+      expect(absent.roots.length).toBeGreaterThanOrEqual(4);
       expect(absent.roots.every(value => !value.exists)).toBe(true); expect(absent.nginxFiles.every(value => !value.exists)).toBe(true);
       expect(absent.fpmFiles).toEqual([]); expect(absent.sockets).toEqual([]); expect(absent.mounts).toEqual([]);
     } catch (error) { failures.push(error.message); }
