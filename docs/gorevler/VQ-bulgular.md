@@ -1083,7 +1083,7 @@
 
 ### T893 · Depo oluşturma initialize true sonrası 201 uninitialized dönebiliyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/restic-repository-registry.js`, `apps/api/src/backup-repository-http.js`
+- **Dosyalar:** `apps/api/src/restic-repository-registry.js`, `apps/api/src/backup-repository-http.js`, `apps/api/test/restic-repository-registry.test.js`, `apps/api/test/backup-repository-http.test.js`
 - **Kaynak:** QA · 2026-11-12 17:21
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
