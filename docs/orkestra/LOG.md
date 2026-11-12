@@ -230,3 +230,6 @@
 - 2026-11-10 Codex: `10-11-2026` dalı yerel önceki daldan açıldı; GitHub `09-11-2026` (58f4dfe1) fast-forward alındı. Eski dallar ve yerel özel dosyalar korundu.
 - 2026-11-10 20:23 orchestrator: verify abad3f33..58f4dfe1: ok, yeniden açılan -, bulgu -
 - 2026-11-10 20:43 orchestrator: verify 58f4dfe1..5ea65d78: ok, yeniden açılan -, bulgu -
+
+- 2026-11-12 Codex: İNSAN önce T883 gerçek test kapsamı açığının kapatılmasını ve .28 doğrulamasını, ardından site kopyalama ve kalan özellikler için öncelikli plan hazırlanmasını istedi. Yeni dal 12-11-2026, doğrulanmış/push edilmiş a2fdc8c1 tabanından açıldı; dağıtım ve yeni özellik uygulaması bu dilimde yok.
+- 2026-11-12 16:21 orchestrator: verify 5ea65d78..a2fdc8c1: ok, yeniden açılan -, bulgu -
