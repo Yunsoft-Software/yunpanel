@@ -180,18 +180,26 @@ export async function createOwnedFixture(liveApi, options = {}) {
   }
   assert.match(ledger.websiteId, UUID); assert.match(ledger.applicationId, UUID); assert.match(ledger.domainId, UUID);
   const provisionPath = '/api/panel/sites/provisioning/' + ledger.provisioningId;
-  const deadline = Date.now() + timeoutMs; let lastAdvance = null;
+  const deadline = Date.now() + timeoutMs; let lastAdvance = null; let busyRetries = 0;
   while (!ledger.ready && Date.now() < deadline) {
     let state = checked(await call('GET', provisionPath), 'provisioning'); assert.equal(state.websiteId, ledger.websiteId); assert.equal(state.operationId, ledger.provisioningId);
     const failed = state.steps.find(s => s.required && ['failed', 'blocked', 'compensation_failed'].includes(s.state));
     if (failed) { record('provisioning-failed', { step: failed.id, state: failed.state, error: failed.error }); throw new Error(`Required provisioning failed: ${failed.id} ${failed.error ?? failed.state}; owned ledger retained`); }
     if (state.ready) { ledger.ready = true; save(); break; }
     const idle = state.steps.every(s => ['pending', 'succeeded'].includes(s.state));
-    const stamp = state.updatedAt ?? JSON.stringify(state.steps.map(s => [s.id, s.state]));
+    const stamp = JSON.stringify(state.steps.map(s => [s.id, s.state]));
     if (idle && stamp !== lastAdvance) {
       lastAdvance = stamp;
-      try { checked(await call('POST', provisionPath + '/continue', { confirmation: 'continue-site-provisioning:' + ledger.provisioningId }), 'provisioning continue', [200, 202]); }
-      catch (error) { if (error?.code !== 'owned_fixture_transport') throw error; record('provisioning-response-uncertain'); }
+      try {
+        const result = await call('POST', provisionPath + '/continue', { confirmation: 'continue-site-provisioning:' + ledger.provisioningId });
+        if (result.status === 409 && codeOf(result.body) === 'site_mutation_locked') {
+          // The server rejected this call before execution. Read the same operation before a bounded retry.
+          assert.ok(busyRetries < 10, 'Provisioning remained busy after bounded authoritative reads');
+          busyRetries += 1; lastAdvance = null;
+          record('provisioning-busy', { operationId: ledger.provisioningId, code: codeOf(result.body), readRetry: busyRetries });
+          await wait(800);
+        } else { checked(result, 'provisioning continue', [200, 202]); busyRetries = 0; }
+      } catch (error) { if (error?.code !== 'owned_fixture_transport') throw error; record('provisioning-response-uncertain'); }
     }
     await wait(700);
   }
