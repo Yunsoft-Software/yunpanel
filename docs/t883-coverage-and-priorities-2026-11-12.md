@@ -4,7 +4,7 @@
 
 ## Kapsam ve sürüm
 
-Kullanıcı önce T883 kapsam açığının gerçek `.28` sonuçlarıyla kapatılmasını, ardından site kopyalama ve kalan işler için öncelikli plan istedi. Bu dilim yeni özellik uygulaması veya dağıtım içermez. Yerel dal `12-11-2026`, taban `a2fdc8c1`. Kurulu native paket `0.3.0-2026111001` ve ürün kaynağı `a2fdc8c1`; yeni testler yerel Playwright üzerinden bu gerçek pakete gider.
+Kullanıcı önce T883 kapsam açığının gerçek `.28` sonuçlarıyla kapatılmasını, ardından site kopyalama ve kalan işler için öncelikli plan istedi. Bu dilim yeni özellik uygulaması veya dağıtım içermez. Yerel dal `12-11-2026`, taban ve son dağıtım referansı `a2fdc8c1`. Kurulu native paket `0.3.0-2026111001`; yeni testler yerel Playwright üzerinden bu gerçek pakete gider. Pinned sunucu okumasında API entry/PID ve WordPress toolkit, website restore, PHP-FPM yöneticisinin üç kaynak dosyası hash'i `a2fdc8c1` ile ayrıca eşleşti. Bu üç dosya kontrolü bütün ağacın hash eşitliği iddiası değildir. Tanılama API'sindeki eski build alanları kimlik kanıtı sayılmadı; T901'e kaydedildi.
 
 İlk bağımsız kaynak/assertion denetimi: 32 literal test çağrısı parametrelerle **38 mantıksal senaryo** olur. Eski ayarda Chromium38 + Firefox21 = **59 koşu** vardı; 59 farklı özellik yoktur. Önceki T883 matrisi kabul kanıtı olarak kullanılmaz. Silinen kaynaklar `ba33f4a8^` içinde korunur. Denetimde tam karşılık0, kısmi22, eksik16 bulundu; bu sayılar canlı sonuç değildir.
 
@@ -76,6 +76,15 @@ Ortak yardımcı T885 (`96bf599e`) bağımsız gerçek create/upload/HTTP/UID/re
 | T898 | Geçerli B terminali açıkken silme Unix kullanıcı adımında kaldı; terminal kapatılıp aynı journal normal devam ettirilince tamamlandı | Silmede otomatik terminal iptali açık; son normal temizlik geçti |
 | T899 | Eşzamanlı normal işlerde enqueue503 `durable_job_reconciliation_required`; daha sonra API jobs0/recovery[] ve değişmemiş uptime görüldü | Geçici kuyruk/ack davranışı araştırılacak; servis restart yapılmadı |
 | T900 | Gerçek dosya/SQL/mail/sır backup başarılı; değişikliklerden sonra restore `restore_rollback_failed`, durable job `local_operation_failed` | Birleşik restore ve hata halinde rollback geçmedi. Alt adaptör nedeni güvenli mevcut kayıttan belirlenemiyor; veri içeriği/sırlar açılmadan aşama+alt hata kodu görünürlüğü gerekli. |
+| T901 | Gerçek tanılama API'si eski `build-20261001`/`b3f505…` alanlarını döndürüyor; boş metadata ile sabit fallback'lar ve yanlış senkron kabulü yerel gerçek resolver'da da üretildi | Kurulu paketin eski olduğu sonucu çıkarılmadı. Eksik veya stale host metadata ayrımı henüz kanıtlanmadı. Build kimliği gerçek paketle bağlanmalı; bilinmeyen kimlik senkron diye gösterilmemeli. |
+
+## Tamamlanan geçici yedek temizliği
+
+T887'nin başarılı akışları ve bağımsız Firefox18 tekrarı için **16 sahipli Restic depo dizini ve10 materialize edilmiş geçici yedek dizini** temizlendi. Önce ve sonra aynı33 hedef okundu:26silme hedefi yok,7koruma hedefi mevcut.34gerçek snapshot kimliği backup/restore makbuzlarıyla birebir eşleşti; altı kullanılmayan repo boştu. Metadata404, Unix root sahipliği/izin, canonical yol, symlink ve mount sınırları kontrol edildi. Silme öncesi manifest ve iki dry-run bağımsız incelendi; tahmini WebsiteID yolu veya toplu glob kullanılmadı.
+
+**Korunanlar:** T900'ün başarısız restore deposu ve geçici kaynak dizini; eski T886 denemelerinin henüz restore kabulü olmayan5otomatik WordPress deposu; kalıcı işlem/rollback/idempotency makbuzları. Kontrolde adı tek tek belirlenmiş25makbuz/manifest dosyası mevcut kaldı. Korunan depoların katalog kaydı önceki normal yardımcı temizliğinde silinmişti; fiziksel varlık tek başına geri yüklenebilirlik kanıtı değildir. T892'nin iki aktif Nginx artığı bu temizlik kapsamına alınmadı ve elle silinmedi.
+
+Son okuma: aktif iş0, recovery kaydı0, API PID846281 ve NRestarts0. Bu, T887 temizliğinden sonraki noktadır; kalan T886 koşularının son kontrolü ayrıca kaydedilecek.
 
 WordPress parola503 henüz güvenli hata kodu ve durable request okunarak ayrıştırılıyor; henüz kök neden veya başarı iddiası yok. İlk debuglardaki UI selector, Playwright independent context storageState ve yardımcı continuation çakışmaları test kusuru olarak ayrıldı; ürün hatası diye yazılmadı.
 
@@ -97,7 +106,7 @@ WordPress parola503 henüz güvenli hata kodu ve durable request okunarak ayrı�
    | 2 | Birleşik backup/restore hatası; kuyruk/depo önkoşulları sağlıklı olmalı | Aynı snapshot'tan dosya+gerçek SQL+mailbox config+silinmiş benzersiz ileti+korunan sır iki fresh koşuda geri gelir. Başarısız health dönüşü öncesi durumun geri alınması ve kaynak/kardeş korunması ayrı ölçülür. |
    | 3 | T892 aktif Nginx artığı, T898 açık terminalle silme; posta bağlı silmenin gerçek sonucu | Normal panel kaldırması aynı journal üzerinden tamamlanır; terminal oturumu sona erer, tüm canonical yollar/Unix/FPM/Nginx/DB/posta bağı ve test snapshotları kapsamına göre yoktur. Yalnız API404 yeterli değildir. |
    | 4 | T891 PHP ayarı stage hatası, T889/T897 FPM ve kardeş sürekliliği | Tek formdan gerçek FPM/Nginx etkisi; başka site kaldırılırken dinamik PHP nonce/UID/SAPI ilk yanıtta korunur. |
-   | 5 | T894 native kurulum ekranı | Belgeli preexecution409 sonrası aynı gerçek işlem UI'da doğru gösterilir; çift site/iş ve kalıcı yanlış hata görünümü oluşmaz. |
+   | 5 | T894 native kurulum ekranı ve T901 build kimliği | Belgeli preexecution409 sonrası aynı gerçek işlem UI'da doğru gösterilir; çift site/iş ve kalıcı yanlış hata görünümü oluşmaz. Paket/frontend build kimliği gerçek üretilmiş metadata ile bağlanır; eksik bilgi senkron kabul edilmez. |
 
    Geçmiş başarısız sonuç korunur; sonraki başarılı deneme kök nedeni kanıtlanmamış aralıklı hatayı tek başına kapatmaz. Bu dilimde ürün düzeltmesi/deploy yapılmadı.
 2. **P1a: mevcut WordPress klon/staging akışının kabulü.** `wordpress-clone-service.js` ayrı, önceden hazırlanmış boş PHP hedefi ve boş ayrı DB/kullanıcı ister; hedefi kendisi kurmaz. Prefix tabloları, serialized search-replace, home/siteurl ve staging noindex/cron davranışı yeniden yazılmadan gerçek test edilir. Kabul: hedefe özgü dosya/SQL içeriği ve fresh admin login, ayrı UID/DB erişimi, kaynak dosya/DB/HTTP korunması, yetki reddi, değişmiş önizleme, kayıp cevap ve yarım import. Mevcut sınırlar tek dosya16MiB, toplam256MiB, SQL16MiB, 20.000 kayıt ve kök URL'dir; multisite desteklenmiş sayılmaz. Mevcut hata yolu kısmi hedefi korur; güvenli devam/yalnız işe ait kalıntı temizliği ayrıca tasarlanmalıdır. `noindex` ve cron kapatma özel erişim veya e-posta/webhook yan etkilerinin durması değildir; staging erişim ve dış etki politikası kabulden önce netleşir.
