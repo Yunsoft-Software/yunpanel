@@ -95,6 +95,7 @@ test.describe('T887 native owned hosting settings', () => {
   for (const kind of ['php', 'node', 'static']) test('@mutation ' + kind + ' hosting saves once and changes actual response headers body limits and cache', async ({ page }) => {
     test.setTimeout(360000); const fixture = await site(kind), before = await currentDomain(fixture), original = before.nginxSettings;
     expect(before.state).toBe('active'); expect(before.appliedRevision).toBe(before.desiredRevision);
+    expect(original.headers.some(header => header.name.toLowerCase() === 'x-yunpanel-t887')).toBe(false);
     const headerValue = 't887-' + kind + '-' + randomBytes(6).toString('hex'); let css, failure;
     fixture.record('hosting.ui.original', { runtime: kind, nginxSettings: original });
     try {
@@ -124,7 +125,7 @@ test.describe('T887 native owned hosting settings', () => {
       for (const endpoint of ['/update-preview', '', '/stage', '/activate']) expect(mutations.filter(entry => entry.path === root + endpoint)).toHaveLength(1);
       const saved = await currentDomain(fixture); expect(saved.nginxSettings.clientMaxBodySizeMb).toBe(2);
       expect(saved.appliedRevision).toBe(saved.desiredRevision);
-      expect(saved.nginxSettings.headers).toContainEqual({ name: 'X-YunPanel-T887', value: headerValue, always: true });
+      expect(saved.nginxSettings.headers.at(-1)).toEqual({ name: 'X-YunPanel-T887', value: headerValue, always: true });
       const home = await fixture.http('/'); expect(home.status).toBe(200); expect(home.headers['x-yunpanel-t887']).toBe(headerValue);
       const oversized = await fixture.http('/', { method: 'POST', body: Buffer.alloc(3 * 1024 * 1024, 'x') });
       expect(oversized.status).toBe(413); expect(oversized.headers['x-yunpanel-t887']).toBe(headerValue);
