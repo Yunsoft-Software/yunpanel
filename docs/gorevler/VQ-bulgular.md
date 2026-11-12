@@ -1120,3 +1120,13 @@
     T887 22 q1b gerçek create transport belirsizliğinden sonra GET provisioning/latest HTTP200 {data:null}, Website404; f.call body.data null değerini nullish fallback ile {data:null} wrapper yapıp recoverCreation operation.websiteId undefined assertion atıyor. Bu ürün değil test yardımcısı kusuru. Dar düzeltme: data field mevcutsa null koru; latest null ise aynı identity bounded read ve açık belirsiz/notcreated hata, create tekrar yok. Previewden doğrulanmış expected UnixUser/documentRoot bilgisini erken ledgera kaydederek başarısız/hiçoluşmamış fixture cleanup fiziksel yokluk kanıtını da mümkün kıl; kimlik tahmini/yenidenatama yok. SafeApi tarafından zaten maskelenmiş transport için yalnız allowlist ECONNRESET/socket hang up/timeout/context-disposed gibi güvenli hint koru; headers/cookie/URLquery/rawcause yok. Tekrarlı mutationlarda stale keep-alive şüphesini ayırmak için normal API client Connection:close transportu kullanılabilir, gerçek status/assertionlar değişmez. Native gerçek API/UI smokes +null read contract proof +lint; ürün/deploy/rootwrite yok. Diğer ajan kaynakları değişmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T897 · Statik site silme tamamlandıktan sonra çalışan PHP WordPress kardeş site 502 verdi
+- **Bağımlı:** T861, T889
+- **Dosyalar:** `apps/api/src/website-removal-runtime.js`, `packages/host-runtime/src/php-fpm-site-manager.js`
+- **Kaynak:** QA · 2026-11-12 17:37
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T886 13 fullq1 native .28: yeni PHP sitenin Türkçe WP kurulumu, gerçek publicHTTP200 ve fresh adminlogin önce geçti. Ayrı owned static site normal removal tamamlandı, Website/Domain/Application404; hemen sonraki PHP sibling rootHTTP ilk yanıt502 (200 bekleniyor), WPstatus installedtrue. Strict assertion korunuyor; kaynak/runtime neden henüzkanıtlanmadı. T889 ilkPHPFPMapply bulgusu ayrı; aynı neden diye varsayma. Koşu5pass1fail8upstreamnedeniyleçalışmadı; her iki owned yaşam döngüsü normaltemizlendi. Özel .local/t883-20261112/ altında T886 lifecycle-q1 kanıtı. Siblinggate sonrasına taşınarak diğerkanallar ayrıca çalıştırılıyor, bu hata başarıya çevrilmiyor. Yeni before/after pinnedvhostHTTP/Nginxhash/safeFPMreadback ve boundedtakip, ilk502yi gizlemeden nedeni ayıracak. Kaynak düzeltmesi varsa dedicateduser ve çalışan kardeşlerin sürekliliği korunmalı. Bu test diliminde deploy/servisrestart yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
