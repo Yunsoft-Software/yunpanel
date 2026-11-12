@@ -50,6 +50,7 @@ test.afterAll(async()=>{
  test.setTimeout(360000);
  const failures=[];
  if(owner&&state?.fixture.mailboxIds)for(const id of state.fixture.mailboxIds){try{await removeMailbox(owner,id);}catch(e){failures.push('mailbox '+id+': '+String(e.message).split('\n')[0]);}}
+ if(owner&&state?.fixture.websiteId){try{await recordOwnedSnapshotInventory();}catch(e){const current=manifest();current.fixture.repositorySnapshotInventory={status:'unknown_keep',snapshots:[]};saveManifest(current);failures.push('snapshot inventory: '+String(e.message).split('\n')[0]);}}
  if(uploadedStatic){try{await uploadedStatic.cleanup();verifyOwnedAbsence(uploadedStatic);}catch(e){failures.push('static cleanup: '+String(e.message).split('\n')[0]);}}
  if(owner&&staticKey&&!uploadedStatic&&fs.existsSync(path.join(RUN_DIR,'owned-fixtures',staticKey+'.json'))){try{await cleanupOwnedFixture(owner,{key:staticKey});}catch(e){failures.push('static ledger cleanup: '+String(e.message).split('\n')[0]);}}
  if(primary){try{await cleanupPrimary();verifyOwnedAbsence(primary);}catch(e){failures.push('primary cleanup: '+String(e.message).split('\n')[0]);}}
@@ -57,6 +58,25 @@ test.afterAll(async()=>{
  await owner?.api.dispose();
  expect(failures,'All owned resources must be cleaned through their normal panel lifecycle').toEqual([]);
 });
+async function recordOwnedSnapshotInventory(){
+ const m=owned(),id=m.fixture.websiteId;
+ const jobs=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/jobs?resourceType=application&resourceId='+m.fixture.applicationId),'cleanup.snapshot-application-jobs');
+ expect(jobs.some(job=>['queued','running'].includes(job.status)),'Snapshot inventory requires finished WordPress writers').toBe(false);
+ const operations=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/websites/'+id+'/backup-operations'),'cleanup.snapshot-operations');
+ expect(operations.some(op=>['queued','running'].includes(op.status)),'Snapshot inventory requires finished backup writers').toBe(false);
+ const all=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/backups/repositories'),'cleanup.snapshot-repositories');
+ const matches=all.filter(repo=>repo.name==='website-'+id);expect(matches.length).toBeLessThanOrEqual(1);
+ const inventory=[];
+ for(const repo of matches){
+  expect(repo.id).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
+  expect(m.baselineRepositoryIds).not.toContain(repo.id);expect(repo.serverId).toBe(m.serverId);expect(repo.backend).toBe('local');expect(repo.target).toBe('/var/lib/yunpanel/backups/restic/repos/'+repo.id);
+  const rows=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/backups/repositories/'+repo.id+'/snapshots'),'cleanup.snapshot-metadata');
+  for(const snapshot of rows){expect(snapshot.id).toMatch(/^[a-f0-9]{64}$/i);expect(snapshot.tags).toContain('website:'+id);}
+  inventory.push({repositoryId:repo.id,target:repo.target,snapshots:rows.map(snapshot=>({id:snapshot.id,tags:snapshot.tags}))});
+ }
+ m.fixture.repositorySnapshotInventory={status:'observed',repositories:inventory};saveManifest(m);
+ record('cleanup.owned-snapshot-inventory',{repositories:inventory.length,snapshots:inventory.reduce((count,repo)=>count+repo.snapshots.length,0)});
+}
 function verifyOwnedAbsence(fixture){
  const physical=readOnlyHostProbe(fixture,'lifecycle-absence');
  expect(physical.unixUserExists).toBe(false);expect(physical.unixGroupExists).toBe(false);
