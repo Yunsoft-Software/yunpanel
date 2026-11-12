@@ -1,7 +1,45 @@
 import { useEffect, useState } from 'react';
 import { Badge, Button, ErrorNotice, KeyValues, Section } from './PanelKit.jsx';
 import { getPanelSettings, updatePanelSettings } from './system-settings-client.js';
-import { FRONTEND_BUILD_ID, FRONTEND_ASSET_ID } from './deployment-diagnostics-client.js';
+import {
+  FRONTEND_BUILD_ID,
+  FRONTEND_ASSET_ID,
+  FRONTEND_BUILD_VERIFIED,
+  resolveFrontendBuildIdentity,
+} from './deployment-diagnostics-client.js';
+
+function formatDiagnosticIdentity(value) {
+  if (typeof value !== 'string') return 'Doğrulanmadı';
+  const trimmed = value.trim();
+  if (!trimmed || trimmed.toLowerCase() === 'unknown') return 'Doğrulanmadı';
+  return trimmed;
+}
+
+function resolveRuntimeSyncBadge(deployment, frontend) {
+  const backendVerified = deployment?.buildVerified === true;
+  const frontendVerified = frontend.buildVerified === true;
+  const frontendBuildMatches = frontend.buildId === deployment?.buildId;
+  const frontendAssetMatches = frontend.assetId === deployment?.assetId;
+
+  if (
+    backendVerified
+    && frontendVerified
+    && deployment?.sourceInfo?.sourceMatchesDeployed === true
+    && frontendBuildMatches
+    && frontendAssetMatches
+  ) {
+    return { state: 'synchronized', label: 'Senkronize' };
+  }
+
+  if (
+    deployment?.evidence?.diverged === true
+    || (backendVerified && frontendVerified && (!frontendBuildMatches || !frontendAssetMatches))
+  ) {
+    return { state: 'diverged', label: 'Farklılaşmış' };
+  }
+
+  return { state: 'unknown', label: 'Doğrulanmadı' };
+}
 
 function formatUptime(seconds) {
   if (!seconds || seconds < 0) return '—';
@@ -15,11 +53,16 @@ function formatUptime(seconds) {
   return parts.join(' ');
 }
 
-export default function SystemSettingsPanels({ canManage = true, diagnostics = false }) {
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
+export default function SystemSettingsPanels({
+  canManage = true,
+  diagnostics = false,
+  initialData = null,
+  frontendIdentity = null,
+}) {
+  const [data, setData] = useState(initialData);
+  const [loading, setLoading] = useState(initialData === null);
   const [error, setError] = useState(null);
-  const [acmeEmailInput, setAcmeEmailInput] = useState('');
+  const [acmeEmailInput, setAcmeEmailInput] = useState(initialData?.dnsSsl?.acmeEmail ?? '');
   const [savingAcmeEmail, setSavingAcmeEmail] = useState(false);
   const [acmeEmailError, setAcmeEmailError] = useState(null);
   const [acmeEmailSuccess, setAcmeEmailSuccess] = useState(false);
@@ -42,6 +85,7 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
   };
 
   useEffect(() => {
+    if (initialData !== null) return;
     load();
   }, []);
 
@@ -72,6 +116,17 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
     observability,
   } = data;
 
+  const activeFrontend = frontendIdentity
+    ? resolveFrontendBuildIdentity(frontendIdentity)
+    : {
+      buildId: FRONTEND_BUILD_ID,
+      assetId: FRONTEND_ASSET_ID,
+      buildVerified: FRONTEND_BUILD_VERIFIED,
+    };
+  const runtimeSync = data.deployment
+    ? resolveRuntimeSyncBadge(data.deployment, activeFrontend)
+    : { state: 'unknown', label: 'Doğrulanmadı' };
+
   return (
     <>
       {diagnostics && <Section
@@ -101,14 +156,14 @@ export default function SystemSettingsPanels({ canManage = true, diagnostics = f
         )}
         <KeyValues items={[
           ['Backend API sürümü', `v${data.deployment.version}`],
-          ['Backend derleme kimliği', data.deployment.buildId],
-          ['Backend commit', data.deployment.commit],
+          ['Backend derleme kimliği', formatDiagnosticIdentity(data.deployment.buildId)],
+          ['Backend commit', formatDiagnosticIdentity(data.deployment.commit)],
           ['Veri şema sürümü', `Şema v${data.deployment.schemaVersion}`],
-          ['Frontend derleme kimliği', FRONTEND_BUILD_ID],
-          ['Frontend varlık kimliği', FRONTEND_ASSET_ID],
+          ['Frontend derleme kimliği', formatDiagnosticIdentity(activeFrontend.buildId)],
+          ['Frontend varlık kimliği', formatDiagnosticIdentity(activeFrontend.assetId)],
           ['Çalışma zamanı senkronizasyonu', (
-            <Badge state={data.deployment.sourceInfo?.sourceMatchesDeployed ? 'synchronized' : 'diverged'}>
-              {data.deployment.sourceInfo?.sourceMatchesDeployed ? 'Senkronize' : 'Farklılaşmış'}
+            <Badge state={runtimeSync.state}>
+              {runtimeSync.label}
             </Badge>
           )],
           ['Son tanılama kontrolü', data.deployment.lastCheckedAt ? new Date(data.deployment.lastCheckedAt).toLocaleString() : 'Bilinmiyor'],

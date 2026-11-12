@@ -1,3 +1,4 @@
+import { readFileSync } from 'node:fs';
 import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
@@ -98,6 +99,55 @@ export function sanitizeDiagnosticInfo(value) {
   return value;
 }
 
+const DEFAULT_BUILD_MANIFEST_PATH = '/usr/lib/yunpanel/build-info.json';
+const COMMIT_HASH_PATTERN = /^[0-9a-f]{7,64}$/i;
+const BUILD_TOKEN_PATTERN = /^[A-Za-z0-9._:-]{3,128}$/;
+
+function isKnownDiagnosticToken(value) {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  return trimmed.length > 0 && trimmed.toLowerCase() !== 'unknown';
+}
+
+function normalizeBuildToken(value) {
+  if (!isKnownDiagnosticToken(value)) return null;
+  const trimmed = value.trim();
+  return BUILD_TOKEN_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+function normalizeCommitHash(value) {
+  if (!isKnownDiagnosticToken(value)) return null;
+  const trimmed = value.trim().toLowerCase();
+  return COMMIT_HASH_PATTERN.test(trimmed) ? trimmed : null;
+}
+
+function normalizeBuildTime(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsed = Date.parse(value);
+  if (Number.isNaN(parsed)) return null;
+  return new Date(parsed).toISOString();
+}
+
+function readVerifiedBuildManifest(manifestPath) {
+  if (typeof manifestPath !== 'string' || !manifestPath.trim()) return null;
+  try {
+    const raw = JSON.parse(readFileSync(manifestPath, 'utf8'));
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.buildVerified === false) {
+      return null;
+    }
+    const buildId = normalizeBuildToken(raw.buildId);
+    const assetId = normalizeBuildToken(raw.assetId);
+    const commit = normalizeCommitHash(raw.commit);
+    const buildTime = normalizeBuildTime(raw.buildTime);
+    if (!buildId || !assetId || !commit || !buildTime) {
+      return null;
+    }
+    return { buildId, assetId, commit, buildTime };
+  } catch {
+    return null;
+  }
+}
+
 export function evaluateDeploymentEvidence({
   deployedCommit,
   sourceCommit,
@@ -105,14 +155,20 @@ export function evaluateDeploymentEvidence({
   buildId,
   deployedAt,
 } = {}) {
-  const diverged = Boolean(isDirtyTree) || (Boolean(sourceCommit) && Boolean(deployedCommit) && sourceCommit !== deployedCommit);
+  const knownDeployedCommit = isKnownDiagnosticToken(deployedCommit) ? deployedCommit.trim() : null;
+  const knownSourceCommit = isKnownDiagnosticToken(sourceCommit) ? sourceCommit.trim() : null;
+  const dirty = Boolean(isDirtyTree);
+  const commitMismatch = Boolean(knownSourceCommit && knownDeployedCommit && knownSourceCommit !== knownDeployedCommit);
+  const diverged = dirty || commitMismatch;
+  const verified = !diverged && Boolean(knownDeployedCommit && knownSourceCommit && knownDeployedCommit === knownSourceCommit);
+  const status = diverged ? 'diverged' : (verified ? 'synchronized' : 'unverified');
   const warnings = [];
 
-  if (isDirtyTree) {
+  if (dirty) {
     warnings.push('Uncommitted changes detected in local source workspace: runtime code may differ from repository tree.');
   }
-  if (sourceCommit && deployedCommit && sourceCommit !== deployedCommit) {
-    warnings.push(`Local source HEAD (${sourceCommit}) does not match deployed runtime commit (${deployedCommit}). Deploy pipeline execution required for changes to take effect.`);
+  if (commitMismatch) {
+    warnings.push(`Local source HEAD (${knownSourceCommit}) does not match deployed runtime commit (${knownDeployedCommit}). Deploy pipeline execution required for changes to take effect.`);
   }
 
   return {
@@ -122,14 +178,18 @@ export function evaluateDeploymentEvidence({
       deployedAt: deployedAt ?? null,
     },
     source: {
-      commit: sourceCommit ?? null,
-      isDirtyTree: Boolean(isDirtyTree),
+      commit: knownSourceCommit,
+      isDirtyTree: dirty,
     },
+    status,
+    verified,
     diverged,
     warnings,
     summary: diverged
       ? 'RUNTIME DIVERGENCE: Source code modifications have NOT been deployed to the live runtime environment.'
-      : 'RUNTIME SYNCHRONIZED: Live runtime build matches current source commit.',
+      : verified
+        ? 'RUNTIME SYNCHRONIZED: Live runtime build matches current source commit.'
+        : 'RUNTIME UNVERIFIED: Build or source commit metadata is unavailable; source/runtime equality is not proven.',
   };
 }
 
@@ -137,13 +197,35 @@ export function resolveDeploymentDiagnostics(options = {}) {
   const env = options.env ?? process.env;
   const now = options.now instanceof Date ? options.now : new Date(options.now ?? Date.now());
 
-  const buildId = options.buildId ?? env.YUNPANEL_BUILD_ID ?? 'build-20261001-0300';
-  const commit = options.commit ?? env.YUNPANEL_COMMIT_HASH ?? env.GIT_COMMIT ?? 'b3f505cf14c341d58d472ea3b8916a31';
-  const buildTime = options.buildTime ?? env.YUNPANEL_BUILD_TIME ?? env.BUILD_TIMESTAMP ?? '2026-10-01T03:00:00.000Z';
-  const assetId = options.assetId ?? env.YUNPANEL_ASSET_ID ?? `assets-${buildId}`;
+  const defaultManifestPath = options.env === undefined ? DEFAULT_BUILD_MANIFEST_PATH : null;
+  const manifestPath = options.manifestPath !== undefined
+    ? options.manifestPath
+    : (env.YUNPANEL_BUILD_MANIFEST_PATH ?? defaultManifestPath);
+  const manifest = readVerifiedBuildManifest(manifestPath);
+
+  const buildId = normalizeBuildToken(options.buildId)
+    ?? normalizeBuildToken(env.YUNPANEL_BUILD_ID)
+    ?? manifest?.buildId
+    ?? 'unknown';
+  const commit = normalizeCommitHash(options.commit)
+    ?? normalizeCommitHash(env.YUNPANEL_COMMIT_HASH ?? env.GIT_COMMIT)
+    ?? manifest?.commit
+    ?? 'unknown';
+  const buildTime = normalizeBuildTime(options.buildTime)
+    ?? normalizeBuildTime(env.YUNPANEL_BUILD_TIME ?? env.BUILD_TIMESTAMP)
+    ?? manifest?.buildTime
+    ?? null;
+  const assetId = normalizeBuildToken(options.assetId)
+    ?? normalizeBuildToken(env.YUNPANEL_ASSET_ID)
+    ?? manifest?.assetId
+    ?? 'unknown';
+  const buildVerified = commit !== 'unknown'
+    && buildId !== 'unknown'
+    && assetId !== 'unknown'
+    && buildTime !== null;
   const environment = options.environment ?? env.NODE_ENV ?? 'production';
 
-  const sourceCommit = options.sourceCommit ?? env.YUNPANEL_SOURCE_COMMIT ?? commit;
+  const sourceCommit = normalizeCommitHash(options.sourceCommit ?? env.YUNPANEL_SOURCE_COMMIT ?? null);
   const isDirtyTree = options.isDirtyTree !== undefined
     ? Boolean(options.isDirtyTree)
     : (env.YUNPANEL_DIRTY_TREE === 'true' || env.YUNPANEL_DIRTY_TREE === '1');
@@ -167,11 +249,12 @@ export function resolveDeploymentDiagnostics(options = {}) {
     commit,
     buildTime,
     assetId,
+    buildVerified,
     environment,
     sourceInfo: {
       sourceCommit,
       isDirtyTree,
-      sourceMatchesDeployed: !evidence.diverged,
+      sourceMatchesDeployed: evidence.verified === true && !evidence.diverged,
       warning: sourceDiffWarning,
     },
     evidence,
@@ -328,8 +411,13 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
     };
   }
 
-  const assetMismatch = Boolean(frontendAssetId && frontendAssetId !== backend.assetId);
-  const buildMismatch = Boolean(frontendBuildId && frontendBuildId !== backend.buildId);
+  const hasKnownBackendBuild = Boolean(normalizeBuildToken(backend.buildId));
+  const hasKnownBackendAsset = Boolean(normalizeBuildToken(backend.assetId));
+  const hasKnownFrontendBuild = Boolean(normalizeBuildToken(frontendBuildId));
+  const hasKnownFrontendAsset = Boolean(normalizeBuildToken(frontendAssetId));
+
+  const assetMismatch = hasKnownFrontendAsset && hasKnownBackendAsset && frontendAssetId.trim() !== backend.assetId.trim();
+  const buildMismatch = hasKnownFrontendBuild && hasKnownBackendBuild && frontendBuildId.trim() !== backend.buildId.trim();
 
   if (assetMismatch || buildMismatch) {
     return {
@@ -346,6 +434,24 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
       },
       frontend: frontendSummary,
       message: `Stale frontend asset cache detected: client is running ${frontendAssetId || frontendBuildId}, current deployed is ${backend.assetId || backend.buildId}.`,
+    };
+  }
+
+  if (!hasKnownBackendBuild || !hasKnownBackendAsset || !hasKnownFrontendBuild || !hasKnownFrontendAsset) {
+    return {
+      status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN,
+      compatible: false,
+      staleCache: false,
+      requiresRefresh: false,
+      hardRefreshRequired: false,
+      backend: {
+        version: backend.version,
+        schemaVersion: backend.schemaVersion,
+        buildId: backend.buildId,
+        assetId: backend.assetId,
+      },
+      frontend: frontendSummary,
+      message: 'Deployment synchronization cannot be verified because backend or frontend build metadata is unknown.',
     };
   }
 
@@ -607,8 +713,15 @@ export function createApp({
   applicationDeployQueue = null,
   websiteRegistry = null,
   customerLookup = null,
+  deploymentDiagnosticsOptions = null,
+  buildManifestPath = undefined,
 } = {}) {
   const app = express();
+  const resolveAppDeploymentDiagnostics = () => resolveDeploymentDiagnostics({
+    ...(environment !== undefined ? { environment } : {}),
+    ...(buildManifestPath !== undefined ? { manifestPath: buildManifestPath } : {}),
+    ...(deploymentDiagnosticsOptions ?? {}),
+  });
   const reconciliationJobs = new Map();
   const queueDeploy = applicationDeployQueue ?? createApplicationDeployQueue({
     applicationRegistry,
@@ -1277,7 +1390,7 @@ export function createApp({
     ['/api/system/diagnostics/version', '/api/diagnostics/deployment', '/api/diagnostics/version'],
     requireDeploymentDiagnosticsAccess,
     (request, response) => {
-      const deployment = resolveDeploymentDiagnostics();
+      const deployment = resolveAppDeploymentDiagnostics();
       const frontendQuery = {
         version: request.query.frontendVersion || request.query.version || undefined,
         buildId: request.query.frontendBuildId || request.query.buildId || undefined,
@@ -1306,7 +1419,7 @@ export function createApp({
     ['/api/system/diagnostics/version/compare', '/api/diagnostics/deployment/compare'],
     requireDeploymentDiagnosticsAccess,
     (request, response) => {
-      const deployment = resolveDeploymentDiagnostics();
+      const deployment = resolveAppDeploymentDiagnostics();
       const frontend = request.body || {};
       const comparison = compareDeploymentVersions(deployment, frontend);
       const freshness = evaluateFreshnessState({

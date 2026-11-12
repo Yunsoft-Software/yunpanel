@@ -131,6 +131,13 @@ install -d "$package_root/usr/lib/yunpanel/vendor/wp-cli"
 install -m 0755 "$wp_cli_vendor_root/wp-cli.phar" "$package_root/usr/lib/yunpanel/vendor/wp-cli/wp"
 install -m 0644 "$wp_cli_vendor_root/VERSION" "$package_root/usr/lib/yunpanel/vendor/wp-cli/VERSION"
 cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"
+node "$repository_root/scripts/emit-build-info.mjs" \
+  --repo "$repository_root" \
+  --package-version "$version" \
+  --verify-web-dist "$repository_root/apps/web/dist/build-info.json" \
+  --output "$package_root/usr/lib/yunpanel/build-info.json"
+chmod 0644 "$package_root/usr/lib/yunpanel/build-info.json"
+rm -f -- "$package_root/usr/share/yunpanel/web/build-info.json"
 cp -a "$elfinder_vendor_root/." "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/"
 rm -rf -- "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder/.git"
 node --input-type=module - <<'NODE' >"$package_root/usr/share/yunpanel/elfinder/connector.php"

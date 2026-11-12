@@ -2,6 +2,11 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
+import { execFileSync } from 'node:child_process';
+import { mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import express from 'express';
 import {
   API_VERSION,
@@ -18,6 +23,9 @@ import {
   createApp as createCoreApp,
 } from '../src/core-app.js';
 import { createApp } from '../src/app.js';
+
+const emitBuildInfoScriptPath = fileURLToPath(new URL('../../../scripts/emit-build-info.mjs', import.meta.url));
+const buildDebScriptPath = fileURLToPath(new URL('../../../scripts/build-deb.sh', import.meta.url));
 
 function createMockAuthApp({ userRole = 'owner', userStatus = 'active', permissions = null } = {}) {
   const app = express();
@@ -63,25 +71,127 @@ function createMockAuthApp({ userRole = 'owner', userStatus = 'active', permissi
   return app;
 }
 
-test('AC1: Backend build/commit ID, schema version, and sensitive data sanitization', async (t) => {
-  await t.test('resolveDeploymentDiagnostics outputs version, schemaVersion, commit, buildId, and environment', () => {
+test('AC1: Backend build/commit ID, unverified defaults, precedence, schema version, and sanitization', async (t) => {
+  await t.test('resolveDeploymentDiagnostics outputs verified metadata when explicit build fields are valid', () => {
     const diag = resolveDeploymentDiagnostics({
-      buildId: 'build-20261001-01',
+      buildId: 'build-20261112-01',
       commit: 'abc123def456',
-      buildTime: '2026-10-01T00:00:00.000Z',
-      assetId: 'assets-build-20261001-01',
+      buildTime: '2026-11-12T00:00:00.000Z',
+      assetId: 'assets-build-20261112-01',
       environment: 'production',
-      now: new Date('2026-10-01T01:00:00.000Z'),
+      now: new Date('2026-11-12T01:00:00.000Z'),
     });
 
     assert.equal(diag.version, API_VERSION);
     assert.equal(diag.schemaVersion, SCHEMA_VERSION);
-    assert.equal(diag.buildId, 'build-20261001-01');
+    assert.equal(diag.buildId, 'build-20261112-01');
     assert.equal(diag.commit, 'abc123def456');
-    assert.equal(diag.buildTime, '2026-10-01T00:00:00.000Z');
-    assert.equal(diag.assetId, 'assets-build-20261001-01');
+    assert.equal(diag.buildTime, '2026-11-12T00:00:00.000Z');
+    assert.equal(diag.assetId, 'assets-build-20261112-01');
+    assert.equal(diag.buildVerified, true);
     assert.equal(diag.environment, 'production');
-    assert.equal(diag.lastCheckedAt, '2026-10-01T01:00:00.000Z');
+    assert.equal(diag.lastCheckedAt, '2026-11-12T01:00:00.000Z');
+  });
+
+  await t.test('T901 regression: resolveDeploymentDiagnostics({ env: {} }) never uses hardcoded build/commit fallbacks or fake source synchronization', () => {
+    const diag = resolveDeploymentDiagnostics({ env: {} });
+
+    assert.equal(diag.commit, 'unknown');
+    assert.equal(diag.buildId, 'unknown');
+    assert.equal(diag.assetId, 'unknown');
+    assert.equal(diag.buildTime, null);
+    assert.equal(diag.buildVerified, false);
+    assert.equal(diag.sourceInfo.sourceCommit, null);
+    assert.equal(diag.sourceInfo.sourceMatchesDeployed, false);
+    assert.equal(diag.evidence.verified, false);
+    assert.equal(diag.evidence.diverged, false);
+    assert.equal(diag.evidence.status, 'unverified');
+    assert.match(diag.evidence.summary, /RUNTIME UNVERIFIED/);
+    assert.doesNotMatch(diag.evidence.summary, /RUNTIME SYNCHRONIZED/);
+
+    const serialized = JSON.stringify(diag);
+    assert.equal(serialized.includes('b3f505cf14c341d58d472ea3b8916a31'), false);
+    assert.equal(serialized.includes('build-20261001-0300'), false);
+    assert.equal(serialized.includes('2026-10-01T03:00:00.000Z'), false);
+  });
+
+  await t.test('invalid env values and missing/corrupt manifest fail safe to unknown/unverified', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-diag-corrupt-'));
+    t.after(() => rm(tempDir, { recursive: true, force: true }));
+    const corruptManifestPath = path.join(tempDir, 'corrupt-build-info.json');
+    await writeFile(corruptManifestPath, '{not-valid-json', 'utf8');
+
+    const diag = resolveDeploymentDiagnostics({
+      manifestPath: corruptManifestPath,
+      env: {
+        YUNPANEL_BUILD_ID: 'unknown',
+        YUNPANEL_COMMIT_HASH: 'not-a-hex-commit!!',
+        YUNPANEL_ASSET_ID: '   ',
+        YUNPANEL_BUILD_TIME: 'invalid-date',
+        YUNPANEL_SOURCE_COMMIT: 'unknown',
+      },
+    });
+
+    assert.equal(diag.buildId, 'unknown');
+    assert.equal(diag.commit, 'unknown');
+    assert.equal(diag.assetId, 'unknown');
+    assert.equal(diag.buildTime, null);
+    assert.equal(diag.buildVerified, false);
+    assert.equal(diag.sourceInfo.sourceCommit, null);
+    assert.equal(diag.sourceInfo.sourceMatchesDeployed, false);
+  });
+
+  await t.test('precedence follows options -> env -> manifest file', async () => {
+    const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-diag-prec-'));
+    t.after(() => rm(tempDir, { recursive: true, force: true }));
+    const manifestPath = path.join(tempDir, 'build-info.json');
+    await writeFile(manifestPath, JSON.stringify({
+      version: API_VERSION,
+      schemaVersion: SCHEMA_VERSION,
+      buildId: 'build-from-manifest',
+      assetId: 'assets-from-manifest',
+      commit: '1111111111111111111111111111111111111111',
+      buildTime: '2026-11-10T10:00:00.000Z',
+      buildVerified: true,
+    }), 'utf8');
+
+    const fromManifest = resolveDeploymentDiagnostics({ manifestPath, env: {} });
+    assert.equal(fromManifest.buildId, 'build-from-manifest');
+    assert.equal(fromManifest.assetId, 'assets-from-manifest');
+    assert.equal(fromManifest.commit, '1111111111111111111111111111111111111111');
+    assert.equal(fromManifest.buildVerified, true);
+    assert.equal(fromManifest.sourceInfo.sourceCommit, null);
+    assert.equal(fromManifest.sourceInfo.sourceMatchesDeployed, false);
+
+    const fromEnv = resolveDeploymentDiagnostics({
+      manifestPath,
+      env: {
+        YUNPANEL_BUILD_ID: 'build-from-env',
+        YUNPANEL_ASSET_ID: 'assets-from-env',
+        YUNPANEL_COMMIT_HASH: '2222222222222222222222222222222222222222',
+        YUNPANEL_BUILD_TIME: '2026-11-11T10:00:00.000Z',
+      },
+    });
+    assert.equal(fromEnv.buildId, 'build-from-env');
+    assert.equal(fromEnv.assetId, 'assets-from-env');
+    assert.equal(fromEnv.commit, '2222222222222222222222222222222222222222');
+    assert.equal(fromEnv.buildVerified, true);
+
+    const fromOptions = resolveDeploymentDiagnostics({
+      manifestPath,
+      env: {
+        YUNPANEL_BUILD_ID: 'build-from-env',
+        YUNPANEL_COMMIT_HASH: '2222222222222222222222222222222222222222',
+      },
+      buildId: 'build-from-options',
+      assetId: 'assets-from-options',
+      commit: '3333333333333333333333333333333333333333',
+      buildTime: '2026-11-12T10:00:00.000Z',
+    });
+    assert.equal(fromOptions.buildId, 'build-from-options');
+    assert.equal(fromOptions.assetId, 'assets-from-options');
+    assert.equal(fromOptions.commit, '3333333333333333333333333333333333333333');
+    assert.equal(fromOptions.buildVerified, true);
   });
 
   await t.test('sanitizeDiagnosticInfo strips secrets, tokens, credentials, and sensitive host filesystem paths', () => {
@@ -257,16 +367,16 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
   const backend = {
     version: '0.3.0',
     schemaVersion: 3,
-    buildId: 'build-20261001-deploy-1',
-    assetId: 'assets-build-20261001-deploy-1',
+    buildId: 'build-20261112-deploy-1',
+    assetId: 'assets-build-20261112-deploy-1',
   };
 
-  await t.test('detects fully synchronized frontend and backend', () => {
+  await t.test('detects fully synchronized frontend and backend when both buildId and assetId are known and match', () => {
     const comparison = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
-      buildId: 'build-20261001-deploy-1',
-      assetId: 'assets-build-20261001-deploy-1',
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
     });
 
     assert.equal(comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
@@ -276,12 +386,52 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     assert.equal(comparison.hardRefreshRequired, false);
   });
 
+  await t.test('returns UNKNOWN (never SYNCHRONIZED) when frontend or backend buildId/assetId is missing or unknown', () => {
+    const missingFrontendIds = compareDeploymentVersions(backend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+    });
+    assert.equal(missingFrontendIds.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(missingFrontendIds.compatible, false);
+    assert.equal(missingFrontendIds.staleCache, false);
+    assert.equal(missingFrontendIds.requiresRefresh, false);
+    assert.equal(missingFrontendIds.hardRefreshRequired, false);
+
+    const unknownFrontendIds = compareDeploymentVersions(backend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'unknown',
+      assetId: 'unknown',
+    });
+    assert.equal(unknownFrontendIds.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(unknownFrontendIds.compatible, false);
+    assert.equal(unknownFrontendIds.staleCache, false);
+
+    const unknownBackend = {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'unknown',
+      assetId: 'unknown',
+    };
+    const againstUnknownBackend = compareDeploymentVersions(unknownBackend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
+    });
+    assert.equal(againstUnknownBackend.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(againstUnknownBackend.compatible, false);
+    assert.equal(againstUnknownBackend.staleCache, false);
+    assert.equal(againstUnknownBackend.requiresRefresh, false);
+    assert.equal(againstUnknownBackend.hardRefreshRequired, false);
+  });
+
   await t.test('detects version mismatch when frontend version differs', () => {
     const comparison = compareDeploymentVersions(backend, {
       version: '0.2.9',
       schemaVersion: 3,
-      buildId: 'build-20261001-deploy-1',
-      assetId: 'assets-build-20261001-deploy-1',
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
     });
 
     assert.equal(comparison.status, DEPLOYMENT_COMPARISON_STATUSES.VERSION_MISMATCH);
@@ -290,11 +440,11 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     assert.match(comparison.message, /version 0\.2\.9 differs/);
   });
 
-  await t.test('detects stale cache when frontend version matches but assetId is outdated', () => {
+  await t.test('detects stale cache when frontend version matches but known assetId is outdated', () => {
     const comparison = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
-      buildId: 'build-20261001-deploy-1',
+      buildId: 'build-20261112-deploy-1',
       assetId: 'assets-build-20260930-cached-old',
     });
 
@@ -306,12 +456,12 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     assert.match(comparison.message, /Stale frontend asset cache detected/);
   });
 
-  await t.test('detects stale cache when frontend version matches but buildId is outdated', () => {
+  await t.test('detects stale cache when frontend version matches but known buildId is outdated', () => {
     const comparison = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
       buildId: 'build-20260930-old',
-      assetId: 'assets-build-20261001-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
     });
 
     assert.equal(comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
@@ -324,8 +474,8 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     const comparison = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 2,
-      buildId: 'build-20261001-deploy-1',
-      assetId: 'assets-build-20261001-deploy-1',
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
     });
 
     assert.equal(comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SCHEMA_MISMATCH);
@@ -344,7 +494,7 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
 });
 
 test('AC3: Health indicators: strict separation of last checked, stale, and unknown states', async (t) => {
-  const staleThresholdMs = 30 * 1000; // 30 seconds
+  const staleThresholdMs = 30 * 1000;
   const referenceNow = Date.parse('2026-10-01T12:00:00.000Z');
 
   await t.test('missing lastCheckedAt yields unknown status and is NEVER considered healthy', () => {
@@ -374,7 +524,6 @@ test('AC3: Health indicators: strict separation of last checked, stale, and unkn
   });
 
   await t.test('delayed check (> threshold) yields stale status and is NEVER considered healthy', () => {
-    // Checked 45 seconds ago (threshold is 30 seconds)
     const delayedTime = new Date(referenceNow - 45 * 1000).toISOString();
 
     const freshness = evaluateFreshnessState({
@@ -384,7 +533,7 @@ test('AC3: Health indicators: strict separation of last checked, stale, and unkn
     });
 
     assert.equal(freshness.status, FRESHNESS_STATUSES.STALE);
-    assert.equal(freshness.healthy, false); // Critical AC3 assertion: delayed check is never healthy
+    assert.equal(freshness.healthy, false);
     assert.equal(freshness.stale, true);
     assert.equal(freshness.unknown, false);
     assert.equal(freshness.elapsedMs, 45000);
@@ -392,7 +541,6 @@ test('AC3: Health indicators: strict separation of last checked, stale, and unkn
   });
 
   await t.test('recent check (<= threshold) with successful status yields healthy', () => {
-    // Checked 10 seconds ago (threshold is 30 seconds)
     const recentTime = new Date(referenceNow - 10 * 1000).toISOString();
 
     const freshness = evaluateFreshnessState({
@@ -424,57 +572,89 @@ test('AC3: Health indicators: strict separation of last checked, stale, and unkn
   });
 });
 
-test('AC4: Distinguishing source code modifications from deployed runtime builds', async (t) => {
-  await t.test('clean repository matching deployed commit reports synchronized', () => {
+test('AC4: Distinguishing source code modifications and unverified metadata from deployed runtime builds', async (t) => {
+  await t.test('clean repository matching known deployed commit reports synchronized and verified', () => {
     const evidence = evaluateDeploymentEvidence({
-      deployedCommit: 'hash-abc-123',
-      sourceCommit: 'hash-abc-123',
+      deployedCommit: 'a1b2c3d4e5f6',
+      sourceCommit: 'a1b2c3d4e5f6',
       isDirtyTree: false,
       buildId: 'build-production-1',
-      deployedAt: '2026-10-01T02:00:00Z',
+      deployedAt: '2026-11-12T02:00:00Z',
     });
 
     assert.equal(evidence.diverged, false);
+    assert.equal(evidence.verified, true);
+    assert.equal(evidence.status, 'synchronized');
     assert.equal(evidence.warnings.length, 0);
     assert.match(evidence.summary, /RUNTIME SYNCHRONIZED/);
-    assert.equal(evidence.deployed.commit, 'hash-abc-123');
-    assert.equal(evidence.source.commit, 'hash-abc-123');
+    assert.equal(evidence.deployed.commit, 'a1b2c3d4e5f6');
+    assert.equal(evidence.source.commit, 'a1b2c3d4e5f6');
     assert.equal(evidence.source.isDirtyTree, false);
+  });
+
+  await t.test('missing or unknown deployed/source commit reports unverified and never claims synchronized', () => {
+    const missingSource = evaluateDeploymentEvidence({
+      deployedCommit: 'a1b2c3d4e5f6',
+      sourceCommit: null,
+      isDirtyTree: false,
+      buildId: 'build-production-1',
+      deployedAt: '2026-11-12T02:00:00Z',
+    });
+    assert.equal(missingSource.diverged, false);
+    assert.equal(missingSource.verified, false);
+    assert.equal(missingSource.status, 'unverified');
+    assert.equal(
+      missingSource.summary,
+      'RUNTIME UNVERIFIED: Build or source commit metadata is unavailable; source/runtime equality is not proven.',
+    );
+
+    const unknownDeployed = evaluateDeploymentEvidence({
+      deployedCommit: 'unknown',
+      sourceCommit: 'a1b2c3d4e5f6',
+      isDirtyTree: false,
+    });
+    assert.equal(unknownDeployed.diverged, false);
+    assert.equal(unknownDeployed.verified, false);
+    assert.equal(unknownDeployed.status, 'unverified');
+    assert.match(unknownDeployed.summary, /RUNTIME UNVERIFIED/);
   });
 
   await t.test('dirty working tree reports uncommitted modifications warning', () => {
     const evidence = evaluateDeploymentEvidence({
-      deployedCommit: 'hash-abc-123',
-      sourceCommit: 'hash-abc-123',
+      deployedCommit: 'a1b2c3d4e5f6',
+      sourceCommit: 'a1b2c3d4e5f6',
       isDirtyTree: true,
       buildId: 'build-production-1',
-      deployedAt: '2026-10-01T02:00:00Z',
+      deployedAt: '2026-11-12T02:00:00Z',
     });
 
     assert.equal(evidence.diverged, true);
+    assert.equal(evidence.verified, false);
     assert.ok(evidence.warnings.some((w) => w.includes('Uncommitted changes detected')));
     assert.match(evidence.summary, /RUNTIME DIVERGENCE/);
   });
 
   await t.test('source commit diverged from deployed runtime commit reports deployment pending warning', () => {
     const evidence = evaluateDeploymentEvidence({
-      deployedCommit: 'hash-abc-123',
-      sourceCommit: 'hash-def-456',
+      deployedCommit: 'a1b2c3d4e5f6',
+      sourceCommit: 'f6e5d4c3b2a1',
       isDirtyTree: false,
       buildId: 'build-production-1',
-      deployedAt: '2026-10-01T02:00:00Z',
+      deployedAt: '2026-11-12T02:00:00Z',
     });
 
     assert.equal(evidence.diverged, true);
-    assert.ok(evidence.warnings.some((w) => w.includes('Local source HEAD (hash-def-456) does not match deployed runtime commit (hash-abc-123)')));
+    assert.equal(evidence.verified, false);
+    assert.ok(evidence.warnings.some((w) => w.includes('Local source HEAD (f6e5d4c3b2a1) does not match deployed runtime commit (a1b2c3d4e5f6)')));
     assert.match(evidence.summary, /RUNTIME DIVERGENCE/);
   });
 
   await t.test('resolveDeploymentDiagnostics embeds full source vs runtime evidence', () => {
     const diag = resolveDeploymentDiagnostics({
-      commit: 'hash-deployed',
-      sourceCommit: 'hash-local-ahead',
+      commit: '1111111abcdef',
+      sourceCommit: '2222222abcdef',
       isDirtyTree: true,
+      env: {},
     });
 
     assert.equal(diag.sourceInfo.sourceMatchesDeployed, false);
@@ -484,11 +664,141 @@ test('AC4: Distinguishing source code modifications from deployed runtime builds
   });
 });
 
-test('AC5: End-to-end HTTP routes via createCoreApp and createApp', async (t) => {
+test('AC5: Real git repository emit-build-info CLI, fail-closed package verification, and end-to-end HTTP routes', async (t) => {
   const origin = 'https://panel.yunpanel.internal';
 
-  await t.test('createCoreApp exposes GET /api/system/diagnostics/version with comparison and freshness', async () => {
-    const core = createCoreApp();
+  await t.test('emit-build-info.mjs fails closed when git HEAD is unavailable or web dist commit mismatches HEAD', async () => {
+    const nonGitDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-non-git-'));
+    t.after(() => rm(nonGitDir, { recursive: true, force: true }));
+
+    // 1. Non-git directory without commit env must fail closed
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', nonGitDir,
+        '--output', path.join(nonGitDir, 'build-info.json'),
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0,
+    );
+
+    // 2. Empty git repo without commits must fail closed
+    const emptyGitDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-empty-git-'));
+    t.after(() => rm(emptyGitDir, { recursive: true, force: true }));
+    execFileSync('git', ['init'], { cwd: emptyGitDir, stdio: 'pipe' });
+
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', emptyGitDir,
+        '--output', path.join(emptyGitDir, 'build-info.json'),
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0,
+    );
+
+    // 3. Real git repo: stale web dist commit mismatch must fail closed
+    const repoDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-real-git-'));
+    t.after(() => rm(repoDir, { recursive: true, force: true }));
+    execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'YunPanel Test'], { cwd: repoDir, stdio: 'pipe' });
+
+    await writeFile(path.join(repoDir, 'file.txt'), 'commit-1\n', 'utf8');
+    execFileSync('git', ['add', 'file.txt'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'first commit'], { cwd: repoDir, stdio: 'pipe' });
+
+    const webDistManifestPath = path.join(repoDir, 'dist', 'build-info.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--output', webDistManifestPath,
+    ], {
+      env: { PATH: process.env.PATH },
+      stdio: 'pipe',
+    });
+
+    // Advance HEAD to commit-2 without rebuilding web dist
+    await writeFile(path.join(repoDir, 'file.txt'), 'commit-2\n', 'utf8');
+    execFileSync('git', ['add', 'file.txt'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'second commit'], { cwd: repoDir, stdio: 'pipe' });
+
+    const packageManifestPath = path.join(repoDir, 'pkg', 'build-info.json');
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', repoDir,
+        '--package-version', '0.3.0-2026111301',
+        '--verify-web-dist', webDistManifestPath,
+        '--output', packageManifestPath,
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0 && /does not match|mismatch/i.test(String(err.stderr)),
+    );
+  });
+
+  await t.test('real emit-build-info.mjs manifest drives createCoreApp HTTP endpoints cleanly', async () => {
+    const repoDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-http-git-'));
+    t.after(() => rm(repoDir, { recursive: true, force: true }));
+
+    execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'test@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'YunPanel Test'], { cwd: repoDir, stdio: 'pipe' });
+    await writeFile(path.join(repoDir, 'app.js'), 'export const ok = true;\n', 'utf8');
+    execFileSync('git', ['add', 'app.js'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'release commit'], { cwd: repoDir, stdio: 'pipe' });
+
+    const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+    const webDistManifestPath = path.join(repoDir, 'web-dist', 'build-info.json');
+    const packageManifestPath = path.join(repoDir, 'usr', 'lib', 'yunpanel', 'build-info.json');
+
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--output', webDistManifestPath,
+    ], {
+      env: {
+        PATH: process.env.PATH,
+        YUNPANEL_BUILD_TIME: '2026-11-12T22:00:00.000Z',
+      },
+      stdio: 'pipe',
+    });
+
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--package-version', '0.3.0-2026111201',
+      '--verify-web-dist', webDistManifestPath,
+      '--output', packageManifestPath,
+    ], {
+      env: { PATH: process.env.PATH },
+      stdio: 'pipe',
+    });
+
+    const manifestStat = await stat(packageManifestPath);
+    assert.equal(manifestStat.mode & 0o777, 0o644);
+    const webManifest = JSON.parse(await readFile(webDistManifestPath, 'utf8'));
+    const pkgManifest = JSON.parse(await readFile(packageManifestPath, 'utf8'));
+
+    assert.equal(pkgManifest.commit, headCommit);
+    assert.equal(pkgManifest.packageVersion, '0.3.0-2026111201');
+    assert.equal(pkgManifest.buildId, webManifest.buildId);
+    assert.equal(pkgManifest.assetId, webManifest.assetId);
+    assert.equal(pkgManifest.buildTime, '2026-11-12T22:00:00.000Z');
+    assert.equal(pkgManifest.buildVerified, true);
+
+    const core = createCoreApp({
+      deploymentDiagnosticsOptions: {
+        manifestPath: packageManifestPath,
+        env: {},
+      },
+    });
     const app = createMockAuthApp({ userRole: 'owner' });
     app.use(core);
 
@@ -497,55 +807,138 @@ test('AC5: End-to-end HTTP routes via createCoreApp and createApp', async (t) =>
     const port = server.address().port;
     t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
 
-    // 1. GET with matching frontend query
-    const res = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}`, {
+    // 1. Matching verified frontend -> SYNCHRONIZED
+    const syncQuery = new URLSearchParams({
+      frontendVersion: API_VERSION,
+      frontendSchemaVersion: String(SCHEMA_VERSION),
+      frontendBuildId: webManifest.buildId,
+      frontendAssetId: webManifest.assetId,
+    });
+    const syncRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version?${syncQuery}`, {
       headers: { origin },
     });
-    assert.equal(res.status, 200);
-    const json = await res.json();
-    assert.equal(json.data.version, API_VERSION);
-    assert.equal(json.data.schemaVersion, SCHEMA_VERSION);
-    assert.equal(json.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
-    assert.equal(json.data.freshness.status, FRESHNESS_STATUSES.HEALTHY);
+    assert.equal(syncRes.status, 200);
+    const syncJson = await syncRes.json();
+    assert.equal(syncJson.data.commit, headCommit);
+    assert.equal(syncJson.data.buildId, webManifest.buildId);
+    assert.equal(syncJson.data.assetId, webManifest.assetId);
+    assert.equal(syncJson.data.buildVerified, true);
+    assert.equal(syncJson.data.sourceInfo.sourceCommit, null);
+    assert.equal(syncJson.data.sourceInfo.sourceMatchesDeployed, false);
+    assert.equal(syncJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+    assert.equal(syncJson.data.freshness.status, FRESHNESS_STATUSES.HEALTHY);
 
-    // 2. GET with stale cache frontend query (different assetId)
-    const staleRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendAssetId=assets-old-cache`, {
-      headers: { origin },
-    });
+    // 2. Missing / unknown frontend buildId & assetId -> UNKNOWN (never SYNCHRONIZED)
+    const unknownRes = await fetch(
+      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
+      { headers: { origin } },
+    );
+    assert.equal(unknownRes.status, 200);
+    const unknownJson = await unknownRes.json();
+    assert.equal(unknownJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(unknownJson.data.comparison.compatible, false);
+
+    // 3. Stale frontend assetId -> STALE_CACHE
+    const staleRes = await fetch(
+      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendAssetId=assets-old-cache`,
+      { headers: { origin } },
+    );
     assert.equal(staleRes.status, 200);
     const staleJson = await staleRes.json();
     assert.equal(staleJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
     assert.equal(staleJson.data.comparison.staleCache, true);
 
-    // 3. POST /api/system/diagnostics/version/compare with JSON body
+    // 4. POST /api/system/diagnostics/version/compare with verified vs unknown vs stale
+    const postSyncRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: API_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        assetId: webManifest.assetId,
+        buildId: webManifest.buildId,
+      }),
+    });
+    assert.equal(postSyncRes.status, 200);
+    assert.equal((await postSyncRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+
+    const postUnknownRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: { origin, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        version: API_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        assetId: 'unknown',
+        buildId: 'unknown',
+      }),
+    });
+    assert.equal(postUnknownRes.status, 200);
+    assert.equal((await postUnknownRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+
+    // 5. Alias endpoint
+    const aliasRes = await fetch(`http://127.0.0.1:${port}/api/diagnostics/deployment`, {
+      headers: { origin },
+    });
+    assert.equal(aliasRes.status, 200);
+    assert.equal((await aliasRes.json()).data.commit, headCommit);
+  });
+
+  await t.test('createCoreApp without build metadata returns unknown build identity and UNKNOWN comparison', async () => {
+    const core = createCoreApp({
+      deploymentDiagnosticsOptions: {
+        manifestPath: null,
+        env: {},
+      },
+    });
+    const app = createMockAuthApp({ userRole: 'owner' });
+    app.use(core);
+
+    const server = http.createServer(app).listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const port = server.address().port;
+    t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+
+    const res = await fetch(
+      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
+      { headers: { origin } },
+    );
+    assert.equal(res.status, 200);
+    const json = await res.json();
+    assert.equal(json.data.commit, 'unknown');
+    assert.equal(json.data.buildId, 'unknown');
+    assert.equal(json.data.assetId, 'unknown');
+    assert.equal(json.data.buildVerified, false);
+    assert.equal(json.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+
     const postRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
       method: 'POST',
       headers: { origin, 'content-type': 'application/json' },
       body: JSON.stringify({
         version: API_VERSION,
         schemaVersion: SCHEMA_VERSION,
-        assetId: json.data.assetId,
-        buildId: json.data.buildId,
+        buildId: 'build-client-1',
+        assetId: 'assets-client-1',
       }),
     });
     assert.equal(postRes.status, 200);
-    const postJson = await postRes.json();
-    assert.equal(postJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+    assert.equal((await postRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+  });
 
-    // 4. Aliases /api/diagnostics/deployment and /api/diagnostics/version
-    const aliasRes = await fetch(`http://127.0.0.1:${port}/api/diagnostics/deployment`, {
-      headers: { origin },
-    });
-    assert.equal(aliasRes.status, 200);
-    const aliasJson = await aliasRes.json();
-    assert.equal(aliasJson.data.version, API_VERSION);
+  await t.test('build-deb.sh emits verified /usr/lib/yunpanel/build-info.json checked against web dist build-info.json', async () => {
+    const buildScript = await readFile(buildDebScriptPath, 'utf8');
+    assert.match(buildScript, /scripts\/emit-build-info\.mjs/);
+    assert.match(buildScript, /--verify-web-dist "\$repository_root\/apps\/web\/dist\/build-info\.json"/);
+    assert.match(buildScript, /--output "\$package_root\/usr\/lib\/yunpanel\/build-info\.json"/);
   });
 
   await t.test('unauthorized or forbidden accounts cannot access diagnostics endpoint', async () => {
-    // Unauthenticated
-    {
-      const core = createCoreApp();
-      const app = createMockAuthApp({ userRole: 'unauthenticated' });
+    for (const [role, expectedStatus] of [
+      ['unauthenticated', 401],
+      ['customer', 403],
+      ['reseller', 403],
+    ]) {
+      const core = createCoreApp({ deploymentDiagnosticsOptions: { env: {} } });
+      const app = createMockAuthApp({ userRole: role });
       app.use(core);
 
       const server = http.createServer(app).listen(0, '127.0.0.1');
@@ -554,37 +947,7 @@ test('AC5: End-to-end HTTP routes via createCoreApp and createApp', async (t) =>
       t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
 
       const res = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version`);
-      assert.equal(res.status, 401);
-    }
-
-    // Customer role
-    {
-      const core = createCoreApp();
-      const app = createMockAuthApp({ userRole: 'customer' });
-      app.use(core);
-
-      const server = http.createServer(app).listen(0, '127.0.0.1');
-      await once(server, 'listening');
-      const port = server.address().port;
-      t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
-
-      const res = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version`);
-      assert.equal(res.status, 403);
-    }
-
-    // Reseller role
-    {
-      const core = createCoreApp();
-      const app = createMockAuthApp({ userRole: 'reseller' });
-      app.use(core);
-
-      const server = http.createServer(app).listen(0, '127.0.0.1');
-      await once(server, 'listening');
-      const port = server.address().port;
-      t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
-
-      const res = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version`);
-      assert.equal(res.status, 403);
+      assert.equal(res.status, expectedStatus);
     }
   });
 
