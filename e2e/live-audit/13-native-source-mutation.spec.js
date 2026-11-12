@@ -189,11 +189,12 @@ async function nativeMailboxPassword(c,m,password){
 test('@mutation source three-step form creates an uploaded static site without Git and serves the actual uploaded HTML',async({page,liveApi},info)=>{
  test.setTimeout(300000);const m=owned();
  uploadedStatic=await createOwnedFixture(owner,{key:staticKey,runtime:'static',create:async(input,_preview,recordInput)=>{
-  const route='**/api/panel/sites';const observe=async routed=>{if(routed.request().method()==='POST')recordInput(routed.request().postDataJSON().input);await routed.continue();};await page.route(route,observe);
+  let uiOperationId=null;const route='**/api/panel/sites';const observe=async routed=>{if(routed.request().method()==='POST'){const actual=routed.request().postDataJSON().input;recordInput(actual);uiOperationId=actual.operationId;}await routed.continue();};await page.route(route,observe);
+  const rejected=async response=>{const match=new URL(response.url()).pathname.match(/^\/api\/panel\/sites\/provisioning\/([a-f0-9-]{36})\/continue$/i);if(response.request().method()!=='POST'||response.status()<400||match?.[1]!==uiOperationId)return;const body=await response.json().catch(()=>({})),code=body.error?.code;record('static.ui-provisioning-rejected',{operationId:uiOperationId,status:response.status(),code:typeof code==='string'&&/^[a-z0-9_]{1,120}$/.test(code)?code:null});};page.on('response',rejected);
   try{await ready(page,'/websites/new');await page.getByLabel('Alan adı',{exact:true}).fill(input.primaryDomain);await page.locator('label').filter({hasText:'www davranışı'}).locator('select').selectOption('none');await main(page).getByRole('button',{name:'Devam et',exact:true}).click();
    await page.getByLabel('Site türü',{exact:true}).selectOption('new_static_upload');await expect(page.getByRole('textbox',{name:'GitHub repository',exact:true})).toHaveCount(0);await main(page).getByRole('button',{name:'Devam et',exact:true}).click();await page.getByLabel('DNS yönetimi',{exact:true}).selectOption('external');await page.getByLabel('Sertifika yönetimi',{exact:true}).selectOption('off');await page.getByRole('checkbox',{name:/Otomatik E-Posta|E-posta ve Webmail/}).uncheck();
    const createdEvent=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/panel/sites'&&r.request().method()==='POST',{timeout:180000});await main(page).getByRole('button',{name:'Siteyi oluştur',exact:true}).click();const response=await createdEvent;expect([200,201]).toContain(response.status());const created=(await response.json()).data;await expect(main(page).getByLabel('Site kurulum durumu')).toContainText('Kurulum planındaki zorunlu adımlar tamamlandı',{timeout:180000});return created;
-  }finally{await page.unroute(route,observe);}
+  }finally{page.off('response',rejected);await page.unroute(route,observe);}
  }});
  const target=uploadedStatic.ledger;m.fixture.extraStatic={...target};m.fixture.createdWebsiteIds.push(target.websiteId);m.fixture.createdDomainIds.push(target.domainId);saveManifest(m);
  const application=check(await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/applications/'+target.applicationId),'static.upload.application');expect(application.state).toBe('active');expect(application.repositoryUrl).toBe(null);expect(application.currentCommitSha).toBe(null);
@@ -527,8 +528,19 @@ test('@mutation source WordPress administrator password rotates through the UI a
 });
 
 
+async function ensureStaticRemovalTarget(m){
+ if(m.fixture.extraStatic)return m.fixture.extraStatic;
+ // A selected removal run prepares an independent API fixture. It cannot satisfy the UI-create gate.
+ uploadedStatic=await createOwnedFixture(owner,{key:staticKey,runtime:'static'});
+ const target=uploadedStatic.ledger,marker='T886-STATIC-REMOVAL-PREREQUISITE-'+m.runId;
+ const site=check(await apiCall(owner.api,owner.csrf,'GET',uploadedStatic.endpoint()),'static.remove.prerequisite-site');expect(site.runtimeType).toBe('static');
+ await uploadedStatic.upload('index.html',marker);const actual=await uploadedStatic.http('/');expect(actual.status).toBe(200);expect(actual.body).toBe(marker);
+ const physical=readOnlyHostProbe(uploadedStatic,'owned-site-files');expect(physical.unixUserExists).toBe(true);expect(physical.uid).toBeGreaterThan(0);
+ m.fixture.extraStatic={...target};m.fixture.createdWebsiteIds.push(target.websiteId);m.fixture.createdDomainIds.push(target.domainId);saveManifest(m);
+ record('static.remove.api-prerequisite-only',{websiteId:target.websiteId,actualHttp:true,siteUid:physical.uid,uiCreateVerified:false});return m.fixture.extraStatic;
+}
 test('@mutation source uploaded static Website removal completes its real lifecycle and preserves the PHP sibling', async ({ liveApi }) => {
- test.setTimeout(240000); const m = owned(), target = m.fixture.extraStatic;
+ test.setTimeout(420000); const m = owned(), target = await ensureStaticRemovalTarget(m);
  expect(target?.websiteId).toBeTruthy(); expect(target.removed).not.toBe(true);
  expect(m.fixture.createdWebsiteIds).toContain(target.websiteId);
  const beforeNginx=readOnlyHostProbe(primary,'nginx-config');expect(beforeNginx.exists).toBe(true);expect(beforeNginx.sha256).toMatch(/^[a-f0-9]{64}$/);const beforeHttp=await primary.http('/');record('static.remove.sibling-before',{status:beforeHttp.status,nginxSha256:beforeNginx.sha256});expect(beforeHttp.status).toBe(200);
