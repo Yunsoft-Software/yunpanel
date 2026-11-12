@@ -984,7 +984,7 @@
 - **Kabul:** Üç dosyanın her testi için sonuç raporda (geçti / test düzeltildi / bulgu numarası); `04`'te koşulsuz `test.skip` kalmadı; geçenler iki koşuda da geçiyor; `.28`'de `ypaudit-` kaynağı kalmadı.
 
 ### T883 · Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır
-- **Bağımlı:** —
+- **Bağımlı:** T886, T887, T888
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
 - **Kaynak:** SENIOR · 2026-11-09
 - **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
@@ -997,5 +997,45 @@
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     apps/api/src/wordpress-toolkit-service.js:262 wp-cli download komutuna https://wordpress.org/latest.zip argümanı geçildiğinde wp-cli Error: Skip content and locale options are not available for URL downloads hatası vermekte ve WordPress kurulumu wordpress_rollback_failed ile başarısız olmaktadır. run() fonksiyonunun eklediği --skip-plugins/skip-themes/skip-packages ve formun getirdiği --locale seçenekleri URL download ile kullanılamaz; wp-cli core download URL argümanı olmadan download, --force, --locale olarak çalıştırılmalıdır.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T885 · T883 gerçek canlı testleri için sahipli kaynak yardımcıları eksik
+- **Bağımlı:** —
+- **Dosyalar:** `e2e/live-audit/owned-fixture.js`
+- **Kaynak:** QA · 2026-11-12 16:31
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Normal .28 panel API kullanımı, tekil run ledger, idempotent provision ve normal cleanup, güvenli salt okunur fiziksel kanıt sağlayan ortak test yardımcısı ekle. Eski acceptance SHA/extraStatic/root mutation yok. Gerçek smoke fixture kur-sil ile doğrula. Test girdileri dışında ürün kodu ve deploy kapsam dışı.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T886 · T883 site DB posta WordPress ve silme senaryoları eksik
+- **Bağımlı:** T883
+- **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`
+- **Kaynak:** QA · 2026-11-12 16:31
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Silinen 13 ve 15 dosyalarındaki 17 mantıksal senaryoyu güncel normal UI/API ve yalnız sahipli kaynaklarla tamamla; eski acceptance ortamını geri kurma. Her assertion için gerçek kanıt, iki fresh run veya gerçek bulgu kaydı; restart gibi desteklenmeyen adımı açık gerekçesiyle koru, skip/pass sayma. Testleri gevşetme; ürün değişikliği/deploy yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T887 · T883 hosting DNS ve gerçek Node ortam geri yükleme senaryoları eksik
+- **Bağımlı:** T883
+- **Dosyalar:** `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
+- **Kaynak:** QA · 2026-11-12 16:31
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Silinen 16 18 19 22 dosyalarındaki 18 mantıksal senaryoyu native .28 UI/API ve sahipli kaynaklarla tamamla. Eski env/SHA/extraStatic/root mutation yok. HTTP header/body/index/error, responsive/negative, DNS hosting backup rollback ve actual Node secret restore assertions. İki fresh run veya bulgu numarası; fiziksel kanıt ve tam cleanup, ürün kodu/deploy yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T888 · T883 gerçek tenant site job terminal ve iptal zinciri kapsamı eksik
+- **Bağımlı:** T883
+- **Dosyalar:** `e2e/live-audit/20-native-tenant-sites.spec.js`
+- **Kaynak:** QA · 2026-11-12 16:31
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Silinen 20 dosyasındaki üç mantıksal senaryoyu normal native .28 UI/API ile yeniden yaz. İki reseller müşteri ve doğrudan müşteri için 3 ayrı gerçek site/UID/release/HTTP; API job tool WS izolasyonu ve parent revoke; normal UI removal ve fiziksel/account cleanup. Eski acceptance/SHA/localdist/root mutation yok. İki fresh run veya gerçek bulgu, ürün/deploy yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
