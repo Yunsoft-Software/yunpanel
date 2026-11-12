@@ -1042,7 +1042,7 @@
 
 ### T889 · Yeni PHP sitesi ilk kurulumunda PHP-FPM uygulama doğrulaması aralıklı başarısız
 - **Bağımlı:** —
-- **Dosyalar:** `packages/host-runtime/src/php-fpm-site-manager.js`
+- **Dosyalar:** `packages/host-runtime/src/php-fpm-site-manager.js`, `packages/host-runtime/test/php-fpm-site-manager.test.js`, `apps/api/src/website-php-runtime-provisioning-handler.js`, `apps/api/test/website-php-runtime-provisioning-handler.test.js`, `apps/api/test/php-fpm-runtime-golden-path.test.js`
 - **Kaynak:** QA · 2026-11-12 16:53
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
