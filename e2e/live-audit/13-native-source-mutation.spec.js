@@ -22,9 +22,9 @@ const manifest=()=>state;
 function saveManifest(value){state=value;fs.writeFileSync(stateFile,JSON.stringify(value,null,2),{mode:0o600});}
 function owned(){expect(primary?.ledger.websiteId,'The current run must own its disposable PHP site').toBe(state?.fixture.websiteId);return state;}
 function record(action,data){primary.record(action,data);state.fixture.operations.push({action,...data,at:new Date().toISOString()});saveManifest(state);}
-function check(r,label,status=200){record(label,{status:r.status,code:r.body?.error?.code??null});expect(Array.isArray(status)?status:[status],label+' '+(r.body?.error?.code??'')).toContain(r.status);return r.data;}
+function check(r,label,status=200){record(label,{status:r.status,code:r.body?.error?.code??null});expect(Array.isArray(status)?status:[status],label+' '+(r.body?.error?.code??'')).toContain(r.status);if(label.endsWith('.connection')){const value=r.data;expect(value.databaseName).toBe(state.fixture.databaseName);expect(value.username).toBe(state.fixture.credential.username);expect(value.username).not.toBe('root');expect(value.host).toBe('localhost');expect(value.port).toBe(3306);}return r.data;}
 async function apiCall(api,csrf,method,endpoint,data){
- let response;for(let attempt=0;;attempt++){try{response=await api.fetch(endpoint,{method,data,headers:{Origin:ORIGIN,'x-csrf-token':csrf},timeout:120000,maxRedirects:0});}catch(error){if(method==='GET'&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}throw error;}if(method==='GET'&&[502,503,504].includes(response.status())&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}break;}
+ let response;for(let attempt=0;;attempt++){try{response=await api.fetch(endpoint,{method,data,headers:{Origin:ORIGIN,'x-csrf-token':csrf,Connection:'close'},timeout:120000,maxRedirects:0});}catch(error){if(method==='GET'&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}throw error;}if(method==='GET'&&[502,503,504].includes(response.status())&&attempt<3){await new Promise(r=>setTimeout(r,700));continue;}break;}
  const body=await response.json().catch(()=>({}));return{status:response.status(),body,data:body.data??body};
 }
 function secrets(){return JSON.parse(fs.readFileSync(secretsFile,'utf8'));}
@@ -122,11 +122,11 @@ test('@mutation source one database form creates real schema, binding, grants an
  const d=page.getByRole('dialog');await expect(d).toBeVisible();await d.locator('select').filter({has:page.locator('option[value="'+m.fixture.websiteId+'"]')}).selectOption(m.fixture.websiteId);await d.getByLabel('Veritabanı adı',{exact:true}).fill(m.fixture.databaseName);
  const response=page.waitForResponse(r=>new URL(r.url()).pathname==='/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases'&&r.request().method()==='POST');
  await d.getByRole('button',{name:'Oluştur',exact:true}).click();const r=await response;expect(r.status()).toBe(202);const created=(await r.json()).data;
- m.fixture.binding=created.binding;m.fixture.credential=created.credential;m.fixture.createdDatabaseNames=[m.fixture.databaseName];saveManifest(m);
+ expect(created.binding.websiteId).toBe(m.fixture.websiteId);expect(created.binding.applicationId).toBe(m.fixture.applicationId);expect(created.binding.unixUser).toBe(m.fixture.unixUser);expect(created.credential.websiteId).toBe(m.fixture.websiteId);expect(created.credential.applicationId).toBe(m.fixture.applicationId);expect(created.credential.siteUnixUser).toBe(m.fixture.unixUser);m.fixture.binding=created.binding;m.fixture.credential=created.credential;m.fixture.createdDatabaseNames=[m.fixture.databaseName];saveManifest(m);
  const j=await waitJob(liveApi.api,created.job.id);expect(j.status).toBe('succeeded');await expect(d).toContainText('hazır. Site bağlantısı ve kullanıcı izinleri uygulandı.',{timeout:30000});await d.getByRole('button',{name:'Tamam',exact:true}).click();await expect(d).toBeHidden();
  const connection=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+created.binding.id+'/connection',{revealPassword:true}),'database.connection');expect(Boolean(connection.password&&connection.username&&connection.databaseName)).toBe(true);
- const proof='DB-NATIVE-'+m.runId,name='db-proof.php';const source='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');$db->query("CREATE TABLE yp_native_proof (id INT PRIMARY KEY, value VARCHAR(128))");$s=$db->prepare("INSERT INTO yp_native_proof VALUES (1, ?)");$v='+JSON.stringify(proof)+';$s->bind_param("s",$v);$s->execute();$r=$db->query("SELECT value FROM yp_native_proof WHERE id=1")->fetch_assoc();echo json_encode(["proof"=>$r["value"]]);';
- try{await upload(liveApi,m,name,source);const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/'+name);expect(actual.status()).toBe(200);expect((await actual.json()).proof).toBe(proof);record('database.real-application-query',{verified:true,jobId:j.id});}finally{await remove(liveApi,m,name);}
+ const proof='DB-NATIVE-'+m.runId,name='db-proof.php';const source='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');$db->query("CREATE TABLE yp_native_proof (id INT PRIMARY KEY, value VARCHAR(128))");$s=$db->prepare("INSERT INTO yp_native_proof VALUES (1, ?)");$v='+JSON.stringify(proof)+';$s->bind_param("s",$v);$s->execute();$r=$db->query("SELECT value FROM yp_native_proof WHERE id=1")->fetch_assoc();$global=false;$grants=$db->query("SHOW GRANTS");while($grant=$grants->fetch_row()){if(str_contains($grant[0]," ON *.* ")&&!str_starts_with($grant[0],"GRANT USAGE ON *.* "))$global=true;}echo json_encode(["proof"=>$r["value"],"globalPrivileges"=>$global]);';
+ try{await upload(liveApi,m,name,source);const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/'+name);expect(actual.status()).toBe(200);const actualData=await actual.json();expect(actualData.proof).toBe(proof);expect(actualData.globalPrivileges).toBe(false);record('database.real-application-query',{verified:true,jobId:j.id});}finally{await remove(liveApi,m,name);}
 });
 
 test('@mutation source SQL import uploads a real SQL file through phpMyAdmin, verifies the database row and removes only its table', async ({ page, liveApi }) => {
@@ -188,10 +188,15 @@ test('@mutation source PHP settings change the actual FPM runtime and persist at
 
 async function browserLogin(browser,installed,username,password,phase='initial'){
  const c=await browser.newContext({ignoreHTTPSErrors:false,storageState:{cookies:[],origins:[]}});
- try{const hostname=new URL(installed.loginUrl).hostname;const previousSiteSessions=(await c.cookies()).filter(v=>v.domain===hostname||v.domain==='.'+hostname).length;expect(previousSiteSessions,'A fresh login context must contain no site session').toBe(0);const p=await c.newPage();const response=await p.goto(installed.loginUrl,{waitUntil:'domcontentloaded'});record('wordpress.browser-login.http',{phase,status:response?.status()??null,hostname:new URL(p.url()).hostname,path:new URL(p.url()).pathname,title:await p.title(),formInputs:await p.locator('#user_login').count(),previousSiteSessions});await p.locator('#user_login').fill(username);await p.locator('#user_pass').fill(password);await p.locator('#wp-submit').click();await expect(p).toHaveURL(/\/wp-admin\//);await expect(p.locator('#wpadminbar')).toBeVisible();}finally{await c.close();}
+ try{
+  const hostname=new URL(installed.loginUrl).hostname,own=values=>values.filter(v=>v.domain===hostname||v.domain==='.'+hostname);const previousSiteSessions=own(await c.cookies()).length;expect(previousSiteSessions,'A fresh login context must contain no site session').toBe(0);
+  const p=await c.newPage();const response=await p.goto(installed.loginUrl,{waitUntil:'domcontentloaded'});const afterGet=own(await c.cookies());record('wordpress.browser-login.http',{phase,status:response?.status()??null,hostname:new URL(p.url()).hostname,path:new URL(p.url()).pathname,title:await p.title(),formInputs:await p.locator('#user_login').count(),previousSiteSessions,wpTestSessionPresent:afterGet.some(v=>v.name==='wordpress_test_cookie'),secureSessions:afterGet.filter(v=>v.secure).length});expect(response?.status(),'The real login form must respond successfully').toBe(200);
+  await p.locator('#user_login').fill(username);await p.locator('#user_pass').fill(password);const submitted=p.waitForResponse(r=>new URL(r.url()).pathname==='/wp-login.php'&&r.request().method()==='POST',{timeout:45000});await p.locator('#wp-submit').click();const result=await submitted;let testSessionSent=null;try{testSessionSent=/(?:^|;\s*)wordpress_test_cookie=/.test((await result.request().allHeaders()).cookie??'');}catch{}record('wordpress.browser-login.post',{phase,status:result.status(),testSessionSent});
+  try{await expect(p).toHaveURL(/\/wp-admin\//,{timeout:30000});await expect(p.locator('#wpadminbar')).toBeVisible({timeout:30000});}catch(error){const box=p.locator('#login_error');const message=await box.count()?await box.textContent():'';record('wordpress.browser-login.result',{phase,path:new URL(p.url()).pathname,title:await p.title(),loginErrorPresent:Boolean(message),testSessionFailure:/çerez|cookie/i.test(message??''),credentialsRejected:/(parola|şifre).*(yanlış|geçersiz)|incorrect.*password|invalid.*username/i.test(message??'')});throw error;}
+ }finally{await c.close();}
 }
 
-test('@mutation source WordPress installs in Turkish against the real site DB and authenticates in a fresh browser',async({liveApi,page,browser})=>{
+test('@mutation source WordPress installs in Turkish against the real site DB and verifies actual HTTP and locale',async({liveApi,page,browser})=>{
  test.setTimeout(480000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress',sec=secrets(),username='t886_admin';expect(m.fixture.binding?.id).toBeTruthy();
  await ready(page,'/websites/'+m.fixture.domainId+'/wordpress');const form=main(page).locator('form.ws-form-grid');await expect(form).toBeVisible();
  await form.getByLabel('Site başlığı',{exact:true}).fill('T886 Türkçe '+m.runId);await form.getByLabel('Yönetici kullanıcı adı',{exact:true}).fill(username);await form.getByLabel('Yönetici e-posta adresi',{exact:true}).fill(sec.siteAdminEmail);await form.locator('input[type=password]').fill(sec.wpAdminPassword);
@@ -200,7 +205,7 @@ test('@mutation source WordPress installs in Turkish against the real site DB an
  expect((await waitJob(liveApi.api,install.job.id,420000)).status).toBe('succeeded');
  const installed=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.installed');expect(installed.installed).toBe(true);expect(installed.loginUrl).toBe('http://'+m.fixture.hostname+'/wp-login.php');expect(installed.administrators).toContain(username);
  const http=await liveApi.api.get('http://'+m.fixture.hostname+'/');expect(http.status()).toBe(200);expect(await http.text()).toMatch(/<html[^>]*\blang=["']tr(?:-TR)?["']/i);const locale=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/websites/'+m.fixture.websiteId+'/wp-cli/run',{command:'eval',args:['echo json_encode(array("locale"=>get_locale(),"available"=>in_array("tr_TR",get_available_languages(),true)));','--skip-plugins','--skip-themes','--skip-packages'],timeout:30000}),'wordpress.actual-locale');expect(locale.success).toBe(true);expect(JSON.parse(locale.stdout.trim())).toEqual({locale:'tr_TR',available:true});
- await browserLogin(browser,installed,username,sec.wpAdminPassword);record('wordpress.real-browser-login',{verified:true});
+ record('wordpress.real-installation',{verified:true,locale:'tr_TR'});
 
 });
 
@@ -249,9 +254,37 @@ test('@mutation source actual IMAP authentication finds the SMTP test message on
  const sender=await imapReceipt({...input,address:'alpha@'+m.fixture.hostname,password:sec.mailPasswords.alpha});expect(sender).toMatchObject({authenticated:true,received:false,messages:0});record('mail.actual-imap-receipt',{recipient:received,sender});
 });
 
+// Fetch and remove only the unique message created by this run. Never EXPUNGE a whole mailbox.
+async function ownedImapMessage({hostname,address,password,subject,remove=false,expectedSha256=null}){
+ return await new Promise((resolve,reject)=>{
+  const socket=tls.connect({host:'157.180.11.28',port:993,servername:hostname,rejectUnauthorized:true});let buffer=Buffer.alloc(0),stage='greeting',uid=null,uidValidity=null,message=null,finished=false;
+  const timer=setTimeout(()=>fail(),45000);
+  function finish(error,value){if(finished)return;finished=true;clearTimeout(timer);if(error){socket.destroy();reject(error);}else{socket.end('A9 LOGOUT\r\n');resolve(value);}}
+  function fail(){finish(new Error('Owned IMAP message operation failed at '+stage+'; credentials and protocol withheld'));}
+  function send(next,command){stage=next;buffer=Buffer.alloc(0);socket.write(command+'\r\n');}
+  function tagged(tag,text=buffer.toString('latin1')){return text.match(new RegExp('(?:^|\\r\\n)'+tag+' (OK|NO|BAD) '))?.[1];}
+  function ids(text){const line=text.match(/\* SEARCH([^\r\n]*)/)?.[1]?.trim()??'';if(!line)return[];const list=line.split(/\s+/);if(list.some(v=>!/^\d+$/.test(v)))throw new Error('Invalid owned UID search');return list.map(Number);}
+  socket.on('error',()=>fail());
+  socket.on('data',chunk=>{if(finished)return;buffer=Buffer.concat([buffer,chunk]);if(buffer.length>1024*1024)return fail();try{
+   const text=buffer.toString('latin1');
+   if(stage==='greeting'&&text.includes('\r\n'))return send('login','A1 LOGIN '+JSON.stringify(address)+' '+JSON.stringify(password));
+   if(stage==='login'&&tagged('A1')){if(tagged('A1')!=='OK')return fail();return send('select','A2 SELECT INBOX');}
+   if(stage==='select'&&tagged('A2')){if(tagged('A2')!=='OK')return fail();uidValidity=Number(text.match(/\[UIDVALIDITY (\d+)\]/)?.[1]);if(!Number.isSafeInteger(uidValidity)||uidValidity<1)return fail();return send('search','A3 UID SEARCH HEADER Subject '+JSON.stringify(subject));}
+   if(stage==='search'&&tagged('A3')){if(tagged('A3')!=='OK')return fail();const matches=ids(text);if(matches.length===0&&!remove)return finish(null,{count:0});if(matches.length!==1)return fail();uid=matches[0];return send('fetch','A4 UID FETCH '+uid+' (BODY.PEEK[])');}
+   if(stage==='fetch'){
+    const literal=text.match(/\{(\d+)\}\r\n/);if(!literal)return;if(Number(literal[1])>512*1024)return fail();const start=literal.index+literal[0].length,end=start+Number(literal[1]);if(buffer.length<end)return;const status=tagged('A4',buffer.subarray(end).toString('latin1'));if(!status)return;if(status!=='OK')return fail();const contents=buffer.subarray(start,end);message={count:1,uid,uidValidity,bytes:contents.length,sha256:createHash('sha256').update(contents).digest('hex')};
+    if(expectedSha256&&message.sha256!==expectedSha256)return fail();if(!remove)return finish(null,message);return send('mark','A5 UID STORE '+uid+' +FLAGS.SILENT (\\Deleted)');
+   }
+   if(stage==='mark'&&tagged('A5')){if(tagged('A5')!=='OK')return fail();return send('expunge','A6 UID EXPUNGE '+uid);}
+   if(stage==='expunge'&&tagged('A6')){if(tagged('A6')!=='OK')return fail();return send('absent','A7 UID SEARCH HEADER Subject '+JSON.stringify(subject));}
+   if(stage==='absent'&&tagged('A7')){if(tagged('A7')!=='OK')return fail();const matches=ids(text);if(matches.length)return fail();finish(null,{...message,removed:true,remaining:0});}
+  }catch{fail();}});
+ });
+}
+
 test('@mutation source real backup restores file content, SQL, mailbox authentication and the protected environment secret',async({liveApi})=>{
  test.setTimeout(480000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId,sec=secrets();expect(m.fixture.mailHostname).toBeTruthy();
- await nativeMailboxPassword(liveApi,m,sec.mailPasswords.beta);const repo=await ownRepository(liveApi);
+ await nativeMailboxPassword(liveApi,m,sec.mailPasswords.beta);const messageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};const originalMessage=await ownedImapMessage(messageInput);expect(originalMessage.count).toBe(1);m.fixture.originalMessage=originalMessage;saveManifest(m);record('backup.mail-message-before',originalMessage);const repo=await ownRepository(liveApi);
  const markerName='native-restore-proof-'+m.runId+'.txt',marker='NATIVE-RESTORE-'+m.runId,sqlName='native-restore-sql-'+m.runId+'.php',changedProof='CHANGED-'+m.runId+'-'+randomBytes(6).toString('hex');
  const connection=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+m.fixture.binding.id+'/connection',{revealPassword:true}),'backup.database.connection');
  const sql='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');if($_SERVER["REQUEST_METHOD"]==="POST"){$db->query('+JSON.stringify("UPDATE yp_native_proof SET value='"+changedProof+"' WHERE id=1")+');}$row=$db->query("SELECT value FROM yp_native_proof WHERE id=1")->fetch_assoc();echo json_encode(["proof"=>$row["value"]]);';
@@ -260,7 +293,7 @@ test('@mutation source real backup restores file content, SQL, mailbox authentic
  check(await apiCall(liveApi.api,liveApi.csrf,'PUT',envRoot,{secret:sec.environmentBefore}),'backup.environment.original');
  const envBefore=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.environment.before');await verifyProtectedWebhookSecret(sec.environmentBefore,202);
  const preview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup/preview',{repositoryId:repo.id}),'backup.preview');const queued=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'backup',repositoryId:repo.id,expectedPreviewDigest:preview.backupSetDigest,confirmation:preview.confirmation,tags:['t886-'+m.runId]}),'backup.queue',202);
- const backedUp=await finishedBackup(liveApi,root,queued),snapshotId=backedUp.result?.snapshot?.snapshotId;expect(snapshotId).toBeTruthy();m.fixture.nativeBackup={repositoryId:repo.id,snapshotId,operationId:queued.id,markerName};saveManifest(m);
+ const backedUp=await finishedBackup(liveApi,root,queued),snapshotId=backedUp.result?.snapshot?.snapshotId;expect(snapshotId).toBeTruthy();m.fixture.nativeBackup={repositoryId:repo.id,snapshotId,operationId:queued.id,markerName};saveManifest(m);const removedMessage=await ownedImapMessage({...messageInput,remove:true,expectedSha256:originalMessage.sha256});expect(removedMessage.removed).toBe(true);expect(removedMessage.remaining).toBe(0);expect((await ownedImapMessage(messageInput)).count).toBe(0);record('backup.mail-message-deleted',{uid:removedMessage.uid,sha256:removedMessage.sha256,remaining:0});
  await upload(liveApi,m,markerName,'CHANGED-'+m.runId);const changedSql=await liveApi.api.post(sqlUrl);expect(changedSql.status()).toBe(200);expect((await changedSql.json()).proof).toBe(changedProof);
  sec.nativeBackupChangedPassword=randomBytes(30).toString('base64url');saveSecrets(sec);await nativeMailboxPassword(liveApi,m,sec.nativeBackupChangedPassword);
  expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.nativeBackupChangedPassword})).authenticated).toBe(true);
@@ -268,7 +301,7 @@ test('@mutation source real backup restores file content, SQL, mailbox authentic
  const input={repositoryId:repo.id,snapshotId,healthPath:'/'+markerName,timeoutSeconds:30,include:['paths','databases','mail','environment']};const restorePreview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/restore/preview',input),'backup.restore.preview');const restore=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'restore',...input,expectedPreviewDigest:restorePreview.previewDigest,confirmation:restorePreview.confirmation}),'backup.restore.queue',202);
  await finishedBackup(liveApi,root,restore);
  const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(actual.status()).toBe(200);expect(await actual.text()).toBe(marker);const restoredSql=await liveApi.api.get(sqlUrl);expect(restoredSql.status()).toBe(200);expect((await restoredSql.json()).proof).toBe(beforeRow.proof);
- const oldLogin=await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId});expect(oldLogin).toMatchObject({authenticated:true,received:true,messages:1});expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.nativeBackupChangedPassword})).authenticated).toBe(false);
+ const restoredMessage=await ownedImapMessage(messageInput);expect(restoredMessage.count).toBe(1);expect(restoredMessage.sha256).toBe(originalMessage.sha256);expect(restoredMessage.bytes).toBe(originalMessage.bytes);record('backup.mail-message-restored',{sha256:restoredMessage.sha256,bytes:restoredMessage.bytes,count:restoredMessage.count});const oldLogin=await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId});expect(oldLogin).toMatchObject({authenticated:true,received:true,messages:1});expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.nativeBackupChangedPassword})).authenticated).toBe(false);
  const envAfter=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.environment.restored');expect(envAfter).toEqual(envBefore);await verifyProtectedWebhookSecret(sec.environmentBefore,202);await verifyProtectedWebhookSecret(sec.environmentAfter,401);
  record('backup.real-content-and-authentication',{verified:true,snapshotId,restoreOperationId:restore.id,file:true,sql:true,originalMailboxAuthentication:true,changedMailboxAuthenticationRejected:true,messageRestored:true,environmentMetadata:true,environmentValueVerified:true,verificationQueuedNoDeployment:true});
 });
@@ -276,30 +309,30 @@ test('@mutation source real backup restores file content, SQL, mailbox authentic
 test('@mutation source WordPress plugin and theme lifecycle changes real inventory and keeps the actual site responding', async ({ liveApi, page }) => {
  test.setTimeout(360000); const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress';
  const initial=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.packages.initial');expect(initial.installed).toBe(true);
- const plugin='hello-dolly',theme='twentytwentyone',previousTheme=initial.themes.find(item=>item.status==='active')?.name;
+ const plugin='hello-dolly',previousTheme=initial.themes.find(item=>item.status==='active')?.name,theme=previousTheme==='twentytwentyone'?'twentytwentytwo':'twentytwentyone';const installJobs=[];
  expect(previousTheme).toBeTruthy();expect(previousTheme).not.toBe(theme);
  async function action(options){
   const preview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/preview',{options}),'wordpress.package.preview');
   const queued=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/actions',{options,requestId:randomUUID(),expectedWebsiteRevision:preview.websiteRevision,
    previewDigest:preview.previewDigest,confirmation:preview.confirmation}),'wordpress.package.queue',202);
-  const job=await waitJob(liveApi.api,queued.job.id,180000);record('wordpress.package.native',{action:options.action,package:options.package,status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
+  const job=await waitJob(liveApi.api,queued.job.id,180000);record('wordpress.package.native',{action:options.action,package:options.package,jobId:job.id,status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');if(options.action.endsWith('.install'))installJobs.push({action:options.action,jobId:job.id});
   const status=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.package.inventory');
   const response=await liveApi.api.get('http://'+m.fixture.hostname+'/');expect(response.status()).toBe(200);
   return status;
  }
  let current=initial;
- if(!current.plugins.some(item=>item.name===plugin))current=await action({action:'plugin.install',package:plugin});
+ if(current.plugins.some(item=>item.name===plugin)){if(current.plugins.find(item=>item.name===plugin).status==='active')current=await action({action:'plugin.deactivate',package:plugin});expect(current.plugins.find(item=>item.name===plugin).status).toBe('inactive');current=await action({action:'plugin.remove',package:plugin});}expect(current.plugins.some(item=>item.name===plugin)).toBe(false);current=await action({action:'plugin.install',package:plugin});
  expect(current.plugins.some(item=>item.name===plugin)).toBe(true);
  current=await action({action:'plugin.activate',package:plugin});expect(current.plugins.find(item=>item.name===plugin)?.status).toBe('active');
  current=await action({action:'plugin.deactivate',package:plugin});expect(current.plugins.find(item=>item.name===plugin)?.status).toBe('inactive');
  current=await action({action:'plugin.remove',package:plugin});expect(current.plugins.some(item=>item.name===plugin)).toBe(false);
- if(!current.themes.some(item=>item.name===theme))current=await action({action:'theme.install',package:theme});
+ if(current.themes.some(item=>item.name===theme)){expect(current.themes.find(item=>item.name===theme).status).toBe('inactive');current=await action({action:'theme.remove',package:theme});}expect(current.themes.some(item=>item.name===theme)).toBe(false);current=await action({action:'theme.install',package:theme});expect(current.themes.some(item=>item.name===theme)).toBe(true);
  current=await action({action:'theme.activate',package:theme});expect(current.themes.find(item=>item.name===theme)?.status).toBe('active');
  const themed=await liveApi.api.get('http://'+m.fixture.hostname+'/');expect(await themed.text()).toContain('/themes/'+theme+'/');
  current=await action({action:'theme.activate',package:previousTheme});expect(current.themes.find(item=>item.name===previousTheme)?.status).toBe('active');
  current=await action({action:'theme.remove',package:theme});expect(current.themes.some(item=>item.name===theme)).toBe(false);
  await ready(page,'/websites/'+m.fixture.domainId+'/wordpress');await expect(main(page).getByRole('heading',{name:'WordPress',exact:true})).toBeVisible();
- await expect(page.getByRole('dialog')).toHaveCount(0);record('wordpress.package-lifecycle',{verified:true,pluginRemoved:true,themeRemoved:true,previousThemeRestored:true});
+ await expect(page.getByRole('dialog')).toHaveCount(0);expect(installJobs.map(item=>item.action).sort()).toEqual(['plugin.install','theme.install']);expect(new Set(installJobs.map(item=>item.jobId)).size).toBe(2);record('wordpress.package-install-jobs',{jobs:installJobs});record('wordpress.package-lifecycle',{verified:true,pluginRemoved:true,themeRemoved:true,previousThemeRestored:true});
 });
 
 test('@mutation source WordPress refuses CLI success when a plugin breaks actual HTTP and verifies the real backup rollback', async ({ liveApi }) => {
@@ -377,6 +410,10 @@ test('@mutation source WordPress removal removes actual core files and prefix ta
 });
 
 
+test('@mutation source WordPress administrator authenticates in a fresh browser after Turkish installation',async({liveApi,browser})=>{
+ test.setTimeout(180000);const m=owned(),sec=secrets();const installed=check(await apiCall(liveApi.api,liveApi.csrf,'GET','/api/panel/websites/'+m.fixture.websiteId+'/wordpress'),'wordpress.login.installed');expect(installed.installed).toBe(true);await browserLogin(browser,installed,'t886_admin',sec.wpAdminPassword);record('wordpress.real-browser-login',{verified:true});
+});
+
 test('@mutation source WordPress administrator password rotates through the UI and authenticates in a fresh browser',async({liveApi,page,browser})=>{
  test.setTimeout(180000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId+'/wordpress',sec=secrets(),username='t886_admin';const installed=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root),'wordpress.password.installed');expect(installed.installed).toBe(true);
  await ready(page,'/websites/'+m.fixture.domainId+'/wordpress');await main(page).getByRole('button',{name:'Yönetici parolası',exact:true}).click();const d=page.getByRole('dialog');await expect(d).toBeVisible();const next=randomBytes(30).toString('base64url')+'!aA7';sec.pendingWpPassword=next;saveSecrets(sec);await d.getByLabel('Yeni parola',{exact:true}).fill(next);
@@ -428,7 +465,7 @@ test('@mutation source uploaded static Website removal completes its real lifecy
  const sibling = check(await apiCall(liveApi.api, liveApi.csrf, 'GET', '/api/panel/websites/' + m.fixture.websiteId + '/wordpress'), 'static.remove.php-sibling');
  expect(sibling.installed).toBe(true);
  const siblingHttp=await liveApi.api.get('http://'+m.fixture.hostname+'/');const direct=await primary.http('/');const afterNginx=readOnlyHostProbe(primary,'nginx-config');record('static.remove.sibling-after',{status:siblingHttp.status(),directStatus:direct.status,nginxSha256:afterNginx.sha256});if(siblingHttp.status()!==200||direct.status!==200){const physical=readOnlyHostProbe(primary,'owned-site-files');record('static.remove.sibling-runtime',{uid:physical.uid,unixUserExists:physical.unixUserExists,fpmFiles:physical.fpmFiles,sockets:physical.sockets});await new Promise(r=>setTimeout(r,1000));const followup=await primary.http('/');record('static.remove.sibling-followup',{status:followup.status});}expect(siblingHttp.status(),'Deleting the static site must preserve the PHP sibling immediately').toBe(200);expect(direct.status).toBe(200);expect(afterNginx.sha256).toBe(beforeNginx.sha256);
- const result = manifest(); result.fixture.extraStatic.removed = true; saveManifest(result);await uploadedStatic.cleanup();const physical=readOnlyHostProbe(uploadedStatic,'lifecycle-absence');expect(physical.unixUserExists).toBe(false);expect(physical.unixGroupExists).toBe(false);expect(physical.roots.every(v=>!v.exists)).toBe(true);expect(physical.fpmFiles).toEqual([]);expect(physical.sockets).toEqual([]);expect(physical.nginxFiles.every(v=>!v.exists)).toBe(true);
+ const result = manifest(); result.fixture.extraStatic.removed = true; saveManifest(result);await uploadedStatic.cleanup();const physical=readOnlyHostProbe(uploadedStatic,'lifecycle-absence');expect(physical.unixUserExists).toBe(false);expect(physical.unixGroupExists).toBe(false);expect(physical.roots.length).toBeGreaterThanOrEqual(4);expect(physical.roots.every(v=>!v.exists)).toBe(true);expect(physical.mounts).toEqual([]);expect(physical.fpmFiles).toEqual([]);expect(physical.sockets).toEqual([]);expect(physical.nginxFiles.every(v=>!v.exists)).toBe(true);
  record('static.remove.catalog-and-sibling', { verified: true, websiteId: target.websiteId,
   physicalAbsenceVerified: true });
 });
