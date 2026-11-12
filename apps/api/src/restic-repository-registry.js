@@ -1,9 +1,10 @@
-import { createCipheriv, createDecipheriv, createHash, randomBytes, randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { createCipheriv, createDecipheriv, randomBytes, randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
-import { createResticManager, ResticError } from '@yunpanel/host-runtime';
+import { createResticManager } from '@yunpanel/host-runtime';
 import { normalizeEnvironmentMasterKey } from './application-environment-registry.js';
+import { createProcessStoreLock } from './process-store-lock.js';
 
 const STORE_VERSION = 1;
 const ALGORITHM = 'aes-256-gcm';
@@ -144,38 +145,67 @@ export function createResticRepositoryRegistry({
   resticManager = null,
   now = () => Date.now(),
 } = {}) {
+  const resolvedFilePath = path.resolve(filePath);
+  const storeLock = createProcessStoreLock({ filePath: resolvedFilePath });
   const encryptionKey = masterKey ? normalizeMasterKey(masterKey) : null;
   const manager = resticManager ?? createResticManager({ now });
   let state = { version: STORE_VERSION, repositories: [] };
   let initialized = false;
-  let writeQueue = Promise.resolve();
+  let storeQueue = Promise.resolve();
 
-  async function persist() {
-    writeQueue = writeQueue.then(async () => {
-      await mkdir(path.dirname(filePath), { recursive: true });
-      const temporaryPath = `${filePath}.${randomUUID()}.tmp`;
-      const payload = JSON.stringify(state, null, 2);
+  function withStoreLock(action) {
+    const execute = () => storeLock.withLock(action);
+    const result = storeQueue.then(execute, execute);
+    storeQueue = result.then(() => undefined, () => undefined);
+    return result;
+  }
+
+  async function writeDiskState(nextState) {
+    await mkdir(path.dirname(resolvedFilePath), { recursive: true });
+    const temporaryPath = `${resolvedFilePath}.${randomUUID()}.tmp`;
+    const payload = JSON.stringify(nextState, null, 2);
+    try {
       await writeFile(temporaryPath, payload, { encoding: 'utf8', mode: 0o600 });
-      await rename(temporaryPath, filePath);
-    });
-    return writeQueue;
+      await rename(temporaryPath, resolvedFilePath);
+      state = nextState;
+    } finally {
+      await rm(temporaryPath, { force: true }).catch(() => {});
+    }
+  }
+
+  async function syncFromDisk({ createIfMissing = false, strict = false } = {}) {
+    try {
+      const raw = await readFile(resolvedFilePath, 'utf8');
+      const parsed = JSON.parse(raw);
+      if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.repositories)) {
+        if (strict) {
+          throw new ResticRepositoryRegistryError('restic_repository_state_invalid', 'Restic repository store is invalid', 409);
+        }
+        return state;
+      }
+      state = parsed;
+      return state;
+    } catch (error) {
+      if (error instanceof ResticRepositoryRegistryError) throw error;
+      if (error?.code === 'ENOENT') {
+        if (createIfMissing) {
+          const emptyState = { version: STORE_VERSION, repositories: [] };
+          await writeDiskState(emptyState);
+        }
+        return state;
+      }
+      if (strict) throw error;
+      return state;
+    }
   }
 
   async function init() {
-    if (!initialized) {
-      try {
-        const raw = await readFile(filePath, 'utf8');
-        const parsed = JSON.parse(raw);
-        if (!parsed || parsed.version !== STORE_VERSION || !Array.isArray(parsed.repositories)) {
-          throw new ResticRepositoryRegistryError('restic_repository_state_invalid', 'Restic repository store is invalid', 409);
-        }
-        state = parsed;
-      } catch (error) {
-        if (error?.code !== 'ENOENT') throw error;
-        await persist();
-      }
+    if (initialized) return;
+    await withStoreLock(async () => {
+      if (initialized) return;
+      await syncFromDisk({ createIfMissing: true, strict: true });
       initialized = true;
-    }
+    });
   }
 
   async function ensureInitialized() {
@@ -210,102 +240,104 @@ export function createResticRepositoryRegistry({
       throw new ResticRepositoryRegistryError('restic_target_invalid', 'Repository target is required');
     }
 
-    const existing = state.repositories.find((r) => r.id === id) ?? null;
-    if (existing) {
-      if (existing.serverId !== normalizedServerId || existing.name !== repoName) {
-        throw new ResticRepositoryRegistryError('restic_repository_identity_conflict', 'Repository identity conflicts with existing state', 409);
-      }
-      return publicRepository(existing);
-    }
-
-    if (state.repositories.some((r) => r.serverId === normalizedServerId && r.name === repoName)) {
-      throw new ResticRepositoryRegistryError('restic_repository_name_conflict', 'Repository name already exists on this server', 409);
-    }
-
+    const normalizedRetentionPolicy = normalizeRetentionPolicy(retentionPolicy);
     const encrypted = encryptPassword(encryptionKey, id, password);
-    const timestamp = new Date(now()).toISOString();
-    const record = {
-      id,
-      serverId: normalizedServerId,
-      name: repoName,
-      backend,
-      target: resolvedTarget.trim(),
-      status: 'uninitialized',
-      encryptedPassword: encrypted,
-      retentionPolicy: normalizeRetentionPolicy(retentionPolicy),
-      lastCheckedAt: null,
-      lastSnapshotAt: null,
-      error: null,
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    };
 
-    state.repositories.push(record);
-    await persist();
-    return publicRepository(record);
-  }
-
-  async function reloadFromDisk() {
-    try {
-      const raw = await readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.version === STORE_VERSION && Array.isArray(parsed.repositories)) {
-        state = parsed;
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const existing = state.repositories.find((r) => r.id === id) ?? null;
+      if (existing) {
+        if (existing.serverId !== normalizedServerId || existing.name !== repoName) {
+          throw new ResticRepositoryRegistryError('restic_repository_identity_conflict', 'Repository identity conflicts with existing state', 409);
+        }
+        return publicRepository(existing);
       }
-    } catch {
-      // ignore
-    }
+
+      if (state.repositories.some((r) => r.serverId === normalizedServerId && r.name === repoName)) {
+        throw new ResticRepositoryRegistryError('restic_repository_name_conflict', 'Repository name already exists on this server', 409);
+      }
+
+      const timestamp = new Date(now()).toISOString();
+      const record = {
+        id,
+        serverId: normalizedServerId,
+        name: repoName,
+        backend,
+        target: resolvedTarget.trim(),
+        status: 'uninitialized',
+        encryptedPassword: encrypted,
+        retentionPolicy: normalizedRetentionPolicy,
+        lastCheckedAt: null,
+        lastSnapshotAt: null,
+        error: null,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+      };
+
+      state.repositories.push(record);
+      await writeDiskState(state);
+      return publicRepository(record);
+    });
   }
 
   async function getRepository(repositoryId) {
     await ensureInitialized();
     const id = normalizeUuid(repositoryId, 'repositoryId');
-    let record = state.repositories.find((r) => r.id === id);
-    if (!record) {
-      await reloadFromDisk();
-      record = state.repositories.find((r) => r.id === id);
-    }
-    return record ? publicRepository(record) : null;
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const record = state.repositories.find((r) => r.id === id);
+      return record ? publicRepository(record) : null;
+    });
   }
 
   async function listRepositories({ serverId = null } = {}) {
     await ensureInitialized();
-    await reloadFromDisk();
     const normalizedServerId = serverId === null ? null : normalizeUuid(serverId, 'serverId');
-    return state.repositories
-      .filter((r) => normalizedServerId === null || r.serverId === normalizedServerId)
-      .map(publicRepository);
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      return state.repositories
+        .filter((r) => normalizedServerId === null || r.serverId === normalizedServerId)
+        .map(publicRepository);
+    });
   }
 
   async function updateRepository(repositoryId, { name, retentionPolicy } = {}) {
     await ensureInitialized();
     const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
+    const nextName = name !== undefined ? normalizeName(name) : undefined;
+    const nextRetentionPolicy = retentionPolicy !== undefined ? normalizeRetentionPolicy(retentionPolicy) : undefined;
 
-    if (name !== undefined) {
-      const newName = normalizeName(name);
-      if (state.repositories.some((r) => r.serverId === record.serverId && r.name === newName && r.id !== id)) {
-        throw new ResticRepositoryRegistryError('restic_repository_name_conflict', 'Repository name already exists on this server', 409);
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const record = state.repositories.find((r) => r.id === id);
+      if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
+
+      if (nextName !== undefined) {
+        if (state.repositories.some((r) => r.serverId === record.serverId && r.name === nextName && r.id !== id)) {
+          throw new ResticRepositoryRegistryError('restic_repository_name_conflict', 'Repository name already exists on this server', 409);
+        }
+        record.name = nextName;
       }
-      record.name = newName;
-    }
-    if (retentionPolicy !== undefined) {
-      record.retentionPolicy = normalizeRetentionPolicy(retentionPolicy);
-    }
-    record.updatedAt = new Date(now()).toISOString();
-    await persist();
-    return publicRepository(record);
+      if (nextRetentionPolicy !== undefined) {
+        record.retentionPolicy = nextRetentionPolicy;
+      }
+      record.updatedAt = new Date(now()).toISOString();
+      await writeDiskState(state);
+      return publicRepository(record);
+    });
   }
 
   async function deleteRepository(repositoryId) {
     await ensureInitialized();
     const id = normalizeUuid(repositoryId, 'repositoryId');
-    const index = state.repositories.findIndex((r) => r.id === id);
-    if (index === -1) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    state.repositories.splice(index, 1);
-    await persist();
-    return true;
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const index = state.repositories.findIndex((r) => r.id === id);
+      if (index === -1) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
+      state.repositories.splice(index, 1);
+      await writeDiskState(state);
+      return true;
+    });
   }
 
   function revealPassword(repositoryId) {
@@ -315,73 +347,92 @@ export function createResticRepositoryRegistry({
     return decryptPassword(encryptionKey, record);
   }
 
+  async function readRepositoryCredentials(repositoryId) {
+    await ensureInitialized();
+    const id = normalizeUuid(repositoryId, 'repositoryId');
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const record = state.repositories.find((r) => r.id === id);
+      if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
+      return {
+        id,
+        target: record.target,
+        retentionPolicy: record.retentionPolicy ? { ...record.retentionPolicy } : null,
+        password: decryptPassword(encryptionKey, record),
+      };
+    });
+  }
+
+  async function applyRepositoryMutation(id, mutate) {
+    return withStoreLock(async () => {
+      await syncFromDisk();
+      const liveRecord = state.repositories.find((r) => r.id === id);
+      if (!liveRecord) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
+      mutate(liveRecord);
+      await writeDiskState(state);
+      return liveRecord;
+    });
+  }
+
   // --- Restic Lifecycle Wrappers ---
 
   async function initResticRepository(repositoryId) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
+    const { id, target, password } = await readRepositoryCredentials(repositoryId);
 
     try {
-      const result = await manager.init({ repository: record.target, password });
-      record.status = 'ready';
-      record.error = null;
-      record.updatedAt = new Date(now()).toISOString();
-      await persist();
+      const result = await manager.init({ repository: target, password });
+      await applyRepositoryMutation(id, (liveRecord) => {
+        liveRecord.status = 'ready';
+        liveRecord.error = null;
+        liveRecord.updatedAt = new Date(now()).toISOString();
+      });
       return Object.freeze({ ...result, status: 'ready' });
     } catch (error) {
-      record.status = 'error';
-      record.error = error.message;
-      record.updatedAt = new Date(now()).toISOString();
-      await persist();
+      await applyRepositoryMutation(id, (liveRecord) => {
+        liveRecord.status = 'error';
+        liveRecord.error = error.message;
+        liveRecord.updatedAt = new Date(now()).toISOString();
+      }).catch((mutationError) => {
+        if (mutationError?.code !== 'restic_repository_not_found') throw mutationError;
+      });
       throw error;
     }
   }
 
   async function checkResticRepository(repositoryId, { readDataSubset = null } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
+    const { id, target, password } = await readRepositoryCredentials(repositoryId);
 
     try {
-      const result = await manager.check({ repository: record.target, password, readDataSubset });
-      record.status = 'ready';
-      record.error = null;
-      record.lastCheckedAt = result.checkedAt;
-      record.updatedAt = new Date(now()).toISOString();
-      await persist();
+      const result = await manager.check({ repository: target, password, readDataSubset });
+      await applyRepositoryMutation(id, (liveRecord) => {
+        liveRecord.status = 'ready';
+        liveRecord.error = null;
+        liveRecord.lastCheckedAt = result.checkedAt;
+        liveRecord.updatedAt = new Date(now()).toISOString();
+      });
       return result;
     } catch (error) {
-      record.status = 'error';
-      record.error = error.message;
-      record.updatedAt = new Date(now()).toISOString();
-      await persist();
+      await applyRepositoryMutation(id, (liveRecord) => {
+        liveRecord.status = 'error';
+        liveRecord.error = error.message;
+        liveRecord.updatedAt = new Date(now()).toISOString();
+      }).catch((mutationError) => {
+        if (mutationError?.code !== 'restic_repository_not_found') throw mutationError;
+      });
       throw error;
     }
   }
 
   async function unlockResticRepository(repositoryId, { removeAll = false } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
-    return manager.unlock({ repository: record.target, password, removeAll });
+    const { target, password } = await readRepositoryCredentials(repositoryId);
+    return manager.unlock({ repository: target, password, removeAll });
   }
 
   async function createSnapshot(repositoryId, { paths, tags = [], excludes = [], parentSnapshotId = null } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
+    const { id, target, password } = await readRepositoryCredentials(repositoryId);
 
     const receipt = await manager.createSnapshot({
-      repository: record.target,
+      repository: target,
       password,
       paths,
       tags,
@@ -389,48 +440,33 @@ export function createResticRepositoryRegistry({
       parentSnapshotId,
     });
 
-    record.lastSnapshotAt = receipt.createdAt;
-    record.updatedAt = new Date(now()).toISOString();
-    await persist();
+    await applyRepositoryMutation(id, (liveRecord) => {
+      liveRecord.lastSnapshotAt = receipt.createdAt;
+      liveRecord.updatedAt = new Date(now()).toISOString();
+    });
     return receipt;
   }
 
   async function listSnapshots(repositoryId, { tags = [], path = null } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
-    return manager.listSnapshots({ repository: record.target, password, tags, path });
+    const { target, password } = await readRepositoryCredentials(repositoryId);
+    return manager.listSnapshots({ repository: target, password, tags, path });
   }
 
   async function applyRetention(repositoryId, { policy = null, prune = false, tags = [] } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
-    const effectivePolicy = policy ?? record.retentionPolicy ?? {};
-    return manager.forget({ repository: record.target, password, policy: effectivePolicy, prune, tags });
+    const { target, password, retentionPolicy } = await readRepositoryCredentials(repositoryId);
+    const effectivePolicy = policy ?? retentionPolicy ?? {};
+    return manager.forget({ repository: target, password, policy: effectivePolicy, prune, tags });
   }
 
   async function pruneResticRepository(repositoryId) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
-    return manager.prune({ repository: record.target, password });
+    const { target, password } = await readRepositoryCredentials(repositoryId);
+    return manager.prune({ repository: target, password });
   }
 
   async function restoreSnapshot(repositoryId, { snapshotId, targetDirectory, include = [], exclude = [] } = {}) {
-    await ensureInitialized();
-    const id = normalizeUuid(repositoryId, 'repositoryId');
-    const record = state.repositories.find((r) => r.id === id);
-    if (!record) throw new ResticRepositoryRegistryError('restic_repository_not_found', 'Repository not found', 404);
-    const password = decryptPassword(encryptionKey, record);
+    const { target, password } = await readRepositoryCredentials(repositoryId);
     return manager.restore({
-      repository: record.target,
+      repository: target,
       password,
       snapshotId,
       targetDirectory,

@@ -278,3 +278,203 @@ test('POST /api/backups/remotes/:remoteId/test tests remote connectivity', async
   const body = await res.json();
   assert.equal(body.data.ok, true);
 });
+
+test('POST /api/backups/repositories with initialize:true returns 201 ready even under concurrent GET /api/backups/repositories polling', async (t) => {
+  const { randomBytes } = await import('node:crypto');
+  const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createResticManager } = await import('@yunpanel/host-runtime');
+  const { createResticRepositoryRegistry } = await import('../src/restic-repository-registry.js');
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-http-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const cliPath = path.join(root, 'real-restic-cli');
+  await writeFile(
+    cliPath,
+    `#!${process.execPath}
+import fs from 'node:fs';
+import path from 'node:path';
+const repo = process.env.RESTIC_REPOSITORY;
+const pwFile = process.env.RESTIC_PASSWORD_FILE;
+const pw = fs.readFileSync(pwFile, 'utf8');
+if (!repo || pw.length < 8) process.exit(2);
+await new Promise((r) => setTimeout(r, 40));
+fs.mkdirSync(repo, { recursive: true, mode: 0o700 });
+fs.writeFileSync(path.join(repo, 'config'), JSON.stringify({ initialized: true }), { mode: 0o600 });
+process.stdout.write(JSON.stringify({ message_type: 'initialized', id: 'cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34' }) + '\\n');
+`,
+    { mode: 0o700 },
+  );
+  await chmod(cliPath, 0o700);
+  await mkdir(path.join(root, 'repos'), { recursive: true, mode: 0o700 });
+
+  const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+  const storePath = path.join(root, 'restic-repositories.json');
+  const resticRepositoryRegistry = createResticRepositoryRegistry({
+    filePath: storePath,
+    localRepoBase: path.join(root, 'repos'),
+    masterKey: randomBytes(32),
+    serverExists: async (id) => id === serverId,
+    resticManager: createResticManager({ resticPath: cliPath }),
+  });
+  await resticRepositoryRegistry.init();
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.auth = ownerAuth;
+    next();
+  });
+  mountBackupRepositoryRoutes(app, { resticRepositoryRegistry, localServerId: serverId });
+  app.use((error, _req, res, _next) => {
+    if (isBackupRepositoryHttpError(error)) {
+      return res.status(error.status ?? 400).json({ error: { code: error.code, message: error.message } });
+    }
+    return res.status(500).json({ error: { code: 'internal_error', message: error.message } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    server.close();
+    await once(server, 'close');
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const reqHeaders = { 'Content-Type': 'application/json', connection: 'close' };
+
+  const polling = (async () => {
+    for (let i = 0; i < 6; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
+      assert.equal(listRes.status, 200);
+      await listRes.json();
+    }
+  })();
+
+  const [createRes] = await Promise.all([
+    fetch(`${baseUrl}/api/backups/repositories`, {
+      method: 'POST',
+      headers: reqHeaders,
+      body: JSON.stringify({
+        name: 't893_concurrent_repo',
+        backend: 'local',
+        password: 'super_strong_t893_password',
+        initialize: true,
+      }),
+    }),
+    polling,
+  ]);
+
+  assert.equal(createRes.status, 201);
+  const createBody = await createRes.json();
+  assert.equal(createBody.data.status, 'ready');
+
+  const getRes = await fetch(`${baseUrl}/api/backups/repositories/${createBody.data.id}`, { headers: { connection: 'close' } });
+  assert.equal(getRes.status, 200);
+  const getBody = await getRes.json();
+  assert.equal(getBody.data.status, 'ready');
+
+  const diskStore = JSON.parse(await readFile(storePath, 'utf8'));
+  assert.equal(diskStore.repositories[0]?.status, 'ready');
+});
+
+test('POST /api/backups/repositories with initialize:true fails closed and persists error status when Restic CLI init fails under concurrent polling', async (t) => {
+  const { randomBytes } = await import('node:crypto');
+  const { chmod, mkdir, mkdtemp, readFile, rm, writeFile } = await import('node:fs/promises');
+  const os = await import('node:os');
+  const path = await import('node:path');
+  const { createResticManager } = await import('@yunpanel/host-runtime');
+  const { createResticRepositoryRegistry } = await import('../src/restic-repository-registry.js');
+
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-fail-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  const cliPath = path.join(root, 'failing-restic-cli');
+  await writeFile(
+    cliPath,
+    `#!${process.execPath}
+await new Promise((r) => setTimeout(r, 40));
+process.stderr.write('Fatal: create repository at target failed: permission denied\\n');
+process.exit(1);
+`,
+    { mode: 0o700 },
+  );
+  await chmod(cliPath, 0o700);
+  await mkdir(path.join(root, 'repos'), { recursive: true, mode: 0o700 });
+
+  const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
+  const storePath = path.join(root, 'restic-repositories.json');
+  const resticRepositoryRegistry = createResticRepositoryRegistry({
+    filePath: storePath,
+    localRepoBase: path.join(root, 'repos'),
+    masterKey: randomBytes(32),
+    serverExists: async (id) => id === serverId,
+    resticManager: createResticManager({ resticPath: cliPath }),
+  });
+  await resticRepositoryRegistry.init();
+
+  const app = express();
+  app.use(express.json());
+  app.use((req, _res, next) => {
+    req.auth = ownerAuth;
+    next();
+  });
+  mountBackupRepositoryRoutes(app, { resticRepositoryRegistry, localServerId: serverId });
+  app.use((error, _req, res, _next) => {
+    if (isBackupRepositoryHttpError(error)) {
+      return res.status(error.status ?? 400).json({ error: { code: error.code, message: error.message } });
+    }
+    return res.status(500).json({ error: { code: 'internal_error', message: error.message } });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+  t.after(async () => {
+    server.closeAllConnections();
+    server.close();
+    await once(server, 'close');
+  });
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const reqHeaders = { 'Content-Type': 'application/json', connection: 'close' };
+
+  const polling = (async () => {
+    for (let i = 0; i < 6; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
+      assert.equal(listRes.status, 200);
+      await listRes.json();
+    }
+  })();
+
+  const [createRes] = await Promise.all([
+    fetch(`${baseUrl}/api/backups/repositories`, {
+      method: 'POST',
+      headers: reqHeaders,
+      body: JSON.stringify({
+        name: 't893_failed_repo',
+        backend: 'local',
+        password: 'super_strong_t893_password',
+        initialize: true,
+      }),
+    }),
+    polling,
+  ]);
+
+  assert.notEqual(createRes.status, 201);
+  assert.ok(createRes.status >= 400 && createRes.status < 600);
+  const errBody = await createRes.json();
+  assert.equal(typeof errBody.error?.code, 'string');
+
+  const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
+  assert.equal(listRes.status, 200);
+  const listBody = await listRes.json();
+  assert.equal(listBody.data.length, 1);
+  assert.equal(listBody.data[0].status, 'error');
+  assert.match(listBody.data[0].error ?? '', /permission denied|failed/i);
+
+  const diskStore = JSON.parse(await readFile(storePath, 'utf8'));
+  assert.equal(diskStore.repositories[0]?.status, 'error');
+});

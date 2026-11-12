@@ -1,3 +1,4 @@
+import { RcloneError, ResticError } from '@yunpanel/host-runtime';
 import { requirePanelRouteAccess } from './panel-http-guard.js';
 import { ResticRepositoryRegistryError } from './restic-repository-registry.js';
 import { RcloneRemoteRegistryError } from './rclone-remote-registry.js';
@@ -15,7 +16,9 @@ export class BackupRepositoryHttpError extends Error {
 export function isBackupRepositoryHttpError(error) {
   return error instanceof BackupRepositoryHttpError
     || error instanceof ResticRepositoryRegistryError
-    || error instanceof RcloneRemoteRegistryError;
+    || error instanceof RcloneRemoteRegistryError
+    || error instanceof ResticError
+    || error instanceof RcloneError;
 }
 
 function asyncRoute(handler) {
@@ -72,6 +75,13 @@ export function mountBackupRepositoryRoutes(app, {
       if (initialize) {
         await resticRepositoryRegistry.initResticRepository(repository.id);
         repository = await resticRepositoryRegistry.getRepository(repository.id);
+        if (!repository || repository.status !== 'ready') {
+          throw new BackupRepositoryHttpError(
+            'restic_repository_init_unverified',
+            'Repository initialization could not be verified as ready',
+            502,
+          );
+        }
       }
       return response.status(201).json({ data: repository });
     }));
@@ -79,6 +89,14 @@ export function mountBackupRepositoryRoutes(app, {
     // Initialize repository
     app.post('/api/backups/repositories/:repositoryId/init', requireOwner, asyncRoute(async (request, response) => {
       const result = await resticRepositoryRegistry.initResticRepository(request.params.repositoryId);
+      const repository = await resticRepositoryRegistry.getRepository(request.params.repositoryId);
+      if (!repository || repository.status !== 'ready') {
+        throw new BackupRepositoryHttpError(
+          'restic_repository_init_unverified',
+          'Repository initialization could not be verified as ready',
+          502,
+        );
+      }
       return response.json({ data: result });
     }));
 
