@@ -8,10 +8,15 @@ import { siteFixture, allocation } from '../test-support/hosting-site-fixture.js
 
 for (const sameOperation of [false, true]) {
   test(`independent SQLite writers serialize the last site slot (same operation: ${sameOperation})`, { timeout: 15000 }, async (t) => {
+    const started = performance.now();
+    const elapsed = () => Math.round((performance.now() - started) * 10) / 10;
+    const phases = { fixtureReadyMs: null, workerReadyMs: [], allWorkersReadyMs: null, reserveResultMs: [] };
+    t.after(() => t.diagnostic(`SQLite worker phases: ${JSON.stringify(phases)}`));
     const dir = mkdtempSync(path.join(os.tmpdir(), 'yunpanel-site-race-'));
     t.after(() => rmSync(dir, { recursive: true, force: true }));
     const filePath = path.join(dir, 'auth.sqlite');
     const f = siteFixture(t, { filePath });
+    phases.fixtureReadyMs = elapsed();
     const workers = [allocation(1), allocation(sameOperation ? 1 : 2, sameOperation ? 'customer-a' : 'customer-b')].map((plan) =>
       new Worker(new URL('../test-support/hosting-site-race-worker.js', import.meta.url), { workerData: { filePath, plan } }));
     t.after(async () => { await Promise.all(workers.map((worker) => worker.terminate())); });
@@ -20,9 +25,13 @@ for (const sameOperation of [false, true]) {
       worker.on('error', reject);
       worker.on('exit', (exitCode) => { if (exitCode) reject(new Error(`Worker exited ${exitCode}`)); });
       worker.on('message', (message) => {
-        if (message !== 'ready') { resolve(message); return; }
+        if (message !== 'ready') { phases.reserveResultMs.push(elapsed()); resolve(message); return; }
+        phases.workerReadyMs.push(elapsed());
         ready += 1;
-        if (ready === workers.length) for (const item of workers) item.postMessage('reserve');
+        if (ready === workers.length) {
+          phases.allWorkersReadyMs = elapsed();
+          for (const item of workers) item.postMessage('reserve');
+        }
       });
     })));
     assert.equal(results.filter((item) => item.ok).length, sameOperation ? 2 : 1);

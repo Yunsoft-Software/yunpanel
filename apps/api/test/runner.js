@@ -8,5 +8,7 @@ const args = userArgs.length > 0
 
 // A hung test must fail with its name instead of blocking the whole suite forever.
 // Do not add --test-force-exit: it silently drops late-registered tests (5237 -> ~5200).
-const result = spawnSync(process.execPath, ['--test', '--test-timeout=120000', ...args], { stdio: 'inherit' });
+// Bound file-process pressure on the 8 GiB development machine. Tests still run
+// their own concurrent SQLite workers and HTTP clients without serialization.
+const result = spawnSync(process.execPath, ['--test', '--test-concurrency=2', '--test-timeout=120000', ...args], { stdio: 'inherit' });
 process.exit(result.status ?? 0);
