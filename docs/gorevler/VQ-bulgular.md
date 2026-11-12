@@ -1080,3 +1080,23 @@
     T887 iki bağımsız owned native .28 lifecycle: PHP hosting update PATCH200 sonrası stage400 invalid_operation_payload (T891); normal Website removal sonra Website/Domain/Application404, Unix user/group, canonical4roots, FPM/socket ve mount yok; fakat /etc/nginx/sites-enabled/yunpanel-<exact-owned-hostname>.conf regular uid0gid0 mode0600 kalıyor. 3sn sonra salt okunur tekrar aynı. İlkdebug19 altı ledgerdan yalnız buPHP kalıntılı, diğerbeş fizikseltemiz; stableminimalAPIrepro ikinciaynıkalıntı. Özel kanıt .local/t883-20261112/t887-debug-19-chrome/physical-cleanup-summary.json ve t887-php-stage-repro-stable-1/physical-cleanup-details.json ile physical-cleanup-repeat.json. Registry/hostconfigelledeğiştirilmedi. Desiredrevision>applied sonrası draft removal eski applied Nginx hedefini kaçırıyor olabilir; kaynak çıkarımı, kanıtlanmış neden değil. Aktif config kalırken removed ilan etme; normal lifecycle ile doğrulanmış owned configi kaldır, yabancı configi koru ve gerçek HTTP/physical regresyon yaz. Bu test diliminde deploy yok; kalıntılar kanıt/scopeledger ile korunuyor.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T893 · Depo oluşturma initialize true sonrası 201 uninitialized dönebiliyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/restic-repository-registry.js`, `apps/api/src/backup-repository-http.js`
+- **Kaynak:** QA · 2026-11-12 17:21
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T887 native16 ilk Chrome koşusu: POST /api/panel/backups/repositories initialize:true ->201 fakat repository.status=uninitialized; synchronous initialize varsayılanı backup-repository-http:72init/get/201 ready sözleşmesine uymuyor. Hazır-depo assertionı doğru nedenle kırıldı; DNS/hosting restore bu ilkkoşuda henüzçalışmadı. Ayrı init regression korunarak normal initialize:false + /init + gerçek /check + GET ready hazırlığıyla restore diğerkanallar ayrıca sınanıyor. Kaynak çıkarımı: listRepositories.reloadFromDisk stateyi değiştirirken initResticRepository await manager.init öncesi record referansı tutuyor; statusready detachedrecord üzerinde kalabilir. Kök neden gerçek eşzamanlı okuma/initialization tekrarında kanıtlanmalı; şimdilik çıkarım. Ürün/deploydeğişikliği yok, test gevşetilmez. Özel16 koşusu T887 raporunda kesin adreslenecek.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T894 · Site kurulum arayüzü worker kilit çakışması sonrası gerçek hazır durumu göstermiyor
+- **Bağımlı:** T864
+- **Dosyalar:** `apps/web/src/workspace/provisioning-client.js`
+- **Kaynak:** QA · 2026-11-12 17:21
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T888 gerçek Chrome normal hosted UI: 5hesap ve 3ayrı customer static site. Üçüncü directcustomer site durableoperation GET ready:true ve10zorunluadım succeeded; fakat nativeUI kırmızı Site kaydı oluşturuldu ancak kurulumun son durumu doğrulanamadı mesajında sftp/nginx/static/domainpending göstererek kaldı. Trafik aynı /sites/provisioning/<id>/continue için409, pageErrors boş. LocalUIoverlay/mock yok. İlkikisimarkerHTTP/UID geçti; bu UIassert gevşetilmedi, sonraki2serialcase ilkkoşudaçalışmadı. Özel ekran/traffic .local/t883-20261112/t888-chrome-20261112-01. Sunucu hazırken istemci hata gösteriyor; yalnız belgeli preexecution409 sonrası aynıdurableişi okuyup görünümü doğru sonuca taşı. Transport belirsizliğinde yeni create veya kör retry yok, failed/blocked gerçekdurum saklanmaz. Bu test diliminde deploy yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
