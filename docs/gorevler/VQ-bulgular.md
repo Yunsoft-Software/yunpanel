@@ -1130,3 +1130,23 @@
     T886 13 fullq1 native .28: yeni PHP sitenin Türkçe WP kurulumu, gerçek publicHTTP200 ve fresh adminlogin önce geçti. Ayrı owned static site normal removal tamamlandı, Website/Domain/Application404; hemen sonraki PHP sibling rootHTTP ilk yanıt502 (200 bekleniyor), WPstatus installedtrue. Strict assertion korunuyor; kaynak/runtime neden henüzkanıtlanmadı. T889 ilkPHPFPMapply bulgusu ayrı; aynı neden diye varsayma. Koşu5pass1fail8upstreamnedeniyleçalışmadı; her iki owned yaşam döngüsü normaltemizlendi. Özel .local/t883-20261112/ altında T886 lifecycle-q1 kanıtı. Siblinggate sonrasına taşınarak diğerkanallar ayrıca çalıştırılıyor, bu hata başarıya çevrilmiyor. Yeni before/after pinnedvhostHTTP/Nginxhash/safeFPMreadback ve boundedtakip, ilk502yi gizlemeden nedeni ayıracak. Kaynak düzeltmesi varsa dedicateduser ve çalışan kardeşlerin sürekliliği korunmalı. Bu test diliminde deploy/servisrestart yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T898 · Açık geçerli site terminali normal silmede kapanmadan Unix kullanıcı temizliği başarısız oluyor
+- **Bağımlı:** T861, T897
+- **Dosyalar:** `apps/api/src/website-removal-runtime.js`
+- **Kaynak:** QA · 2026-11-12 18:16
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T888 Chrome04 tam165API/CSRF/job/5PTY/revoke güvenlik senaryosu geçti. RA/CA iptal4001, B/directPTYler geçerliaçık kaldı. Sonraki normal UI silmede A başarılı; açık Bterminali varken B journal unix_identity_cleanup / website_identity_compensation_user_failed ile failed. Domain/root/Nginx/FPM/socket/mount kaldırılmış, UnixUID986 user/group ve Website/App metadata kaldı. afterAll actorbrowsercontexts kapatıldı; aynı failed journal authoritativeread sonrası bir /run202 ile removed/5adım succeeded oldu ve normalcb/rbprofile/logincleanup tamamlandı. Root/process/registrywrite veya Unixforce delete yok. Originalfailurekorunur; gerçek activePTYrevocationremovaldanönceolsun ve aynıjournal ilerlesin. Özel t888-chrome-20261112-04/t888-final-recovery-cleanup-proof.json ve orijinal journal/traffic kanıtları. Firefoxsecurity henüzçalışmadı. Bu dilimde ürün/deploydeğişikliği yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T899 · Paralel normal işlerde kuyruk recovery required 503 ile geçici kapanıyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/api/src/durable-job-registry.js`, `apps/api/src/local-runtime.js`
+- **Kaynak:** QA · 2026-11-12 18:16
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T886 lifecycle-q3 üçpozitifakıştan sonra PHPconfig enqueue503 durable_job_reconciliation_required; yeni işoluşmadı ve POSTtekrarlanmadı. Önceki WordPressqueue503kodu yakalanamadığıiçin aynı neden sayılmaz. Diğer ikiworker in-flight normalişleri bitirdi, yeni batchlerdurduruldu. Normal APIqueued0/running0 ve ownjobs terminal; kök saltokunur disk projection job-registry.json.recovery.json version1 jobs[]; APIuptime10Kasım21:07 active NRestarts0. Dolayısıyla bu gözlemde panelrestart veya kalıcıdosyadüzenleme yapılmadı, bekleyenrecoverystate bulunmadı. Kaynak çıkarımı: automaticcomplete/reconciliationack penceresi globalenqueueguardı geçici etkileyebilir; henüzkök nedenkanıtlanmadı. Native UI/API bu durumda gerçekkalıcırequestkimliğiyle doğruyenileme/güvenlibudget göstermeli; genelretry/blindPOSTolmaz. Eşzamanlıgerçekikiişile tekrarüret, sağlamack/jobdurumunu ölç; güvenlikgatekapatılmaz. Şimdi kalanmutatingpozitifkapsam sıralıkoşulacak, builk503başarıyasayılmaz.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
