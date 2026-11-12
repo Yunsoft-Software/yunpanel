@@ -1176,7 +1176,7 @@
 
 ### T902 · Doğrulama: test — conversation ownership, legacy preservation, paging and storage failures through t
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `apps/api/test/ai-conversation-storage.test.js`, `apps/api/test/tenant-site-recreate-lifecycle.test.js`
 - **Kaynak:** QA · 2026-11-12 21:51
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1226,5 +1226,7 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 2691.057125
+
+- **12 Kasım RCA ve dar kapsam:** İki dosya ilk dar koşuda3/4, ikinci aynı kaynak koşusunda4/4 geçti. Tenant generation3 DELETE için test yalnız202 bekliyordu; gerçek router `state=removed` ise200, sürüyorsa202 döndürür. Gerçek200/senkron tamamlanma dalı ilk koşuda gözlendi. Testte geçerli HTTP durumu ile semantik state bağlanacak; generation/journal/kimlik/yokluk assertionları korunacak. AI storage dar koşularda iki kez geçti; tam dalgadaki neden henüz kanıtlanmadı. Bu dosyada yalnız alt process başarısızlığı için güvenli status/signal/error-code tanısı güçlendirilebilir; süre artırma, beklenti gevşetme, force-exit veya ürün kaynağı değişikliği yok. Sonraki tam doğrulamanın tam çıktısı özel600dosyada tutulacak. Kaynak rootcause kanıtı `.local/t883-20261112/t902-repro/safe-repro-summary.json`; staging stream timer olasılığı bu iki hatanın nedeni diye gösterilmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
