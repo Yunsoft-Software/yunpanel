@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, stat } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
@@ -16,20 +16,48 @@ import { createAuthenticatedApi } from '../src/auth-http.js';
 import { createAuthStore } from '../src/auth-store.js';
 import { createCertificateRegistry } from '../src/certificate-registry.js';
 import { createDomainRegistry } from '../src/domain-registry.js';
-import { createDurableJobRegistry, DurableJobRegistryError } from '../src/durable-job-registry.js';
+import { createDurableJobRegistry } from '../src/durable-job-registry.js';
 import { createJobRegistry } from '../src/job-registry.js';
 import { reconcileCompletedJob } from '../src/job-reconciliation.js';
 import { startLocalRuntime } from '../src/local-runtime.js';
+import { createProcessStoreLock } from '../src/process-store-lock.js';
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
 async function createRealRuntimeHarness(t, {
   onBeforeReconcile = null,
-  reconcileOverride = null,
   liveReconciliationWindowMs = undefined,
 } = {}) {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t899-live-queue-'));
-  t.after(() => rm(dir, { recursive: true, force: true }));
+  const gateReleases = [];
+  function registerGateRelease(fn) {
+    gateReleases.push(fn);
+  }
+
+  let authStore = null;
+  let runtime = null;
+  let server = null;
+
+  // Register ONE ordered teardown hook so server, runtime executor, and SQLite FDs
+  // always close completely before the temporary directory is removed.
+  t.after(async () => {
+    for (const release of gateReleases) {
+      try { release(); } catch {}
+    }
+    if (server) {
+      await new Promise((resolve) => {
+        try { server.closeAllConnections(); } catch {}
+        server.close(() => resolve());
+      });
+    }
+    if (runtime) {
+      await runtime.stop().catch(() => {});
+    }
+    if (authStore) {
+      try { authStore.close(); } catch {}
+    }
+    await rm(dir, { recursive: true, force: true });
+  });
 
   const stagingDir = path.join(dir, 'nginx-staging');
   const sitesDir = path.join(dir, 'nginx-sites');
@@ -38,8 +66,7 @@ async function createRealRuntimeHarness(t, {
   await mkdir(sitesDir, { recursive: true });
   await mkdir(webRootBase, { recursive: true });
 
-  const authStore = createAuthStore({ filePath: path.join(dir, 'auth.sqlite') });
-  t.after(() => authStore.close());
+  authStore = createAuthStore({ filePath: path.join(dir, 'auth.sqlite') });
   const password = randomBytes(32).toString('base64url');
   await authStore.completeSetup({
     setupToken: authStore.issueSetupToken().token,
@@ -52,8 +79,9 @@ async function createRealRuntimeHarness(t, {
   await serverRegistry.init();
   const localServer = await serverRegistry.createLocalServer({ hostname: 't899-local.example.internal' });
 
+  const domainsFilePath = path.join(dir, 'domains.json');
   const domainRegistry = createDomainRegistry({
-    filePath: path.join(dir, 'domains.json'),
+    filePath: domainsFilePath,
     serverExists: async (id) => Boolean(await serverRegistry.getServer(id)),
   });
   await domainRegistry.init();
@@ -78,11 +106,54 @@ async function createRealRuntimeHarness(t, {
   });
   await websiteRegistry.init();
 
+  let deferredLiveWaitCount = 0;
+  const deferredWaiters = [];
+  function notifyDeferredLiveWait() {
+    deferredLiveWaitCount += 1;
+    for (let i = deferredWaiters.length - 1; i >= 0; i -= 1) {
+      if (deferredLiveWaitCount >= deferredWaiters[i].target) {
+        const [entry] = deferredWaiters.splice(i, 1);
+        entry.resolve(deferredLiveWaitCount);
+      }
+    }
+  }
+  function waitForDeferredLiveWaiters(targetCount, timeoutMs = 5_000) {
+    if (deferredLiveWaitCount >= targetCount) return Promise.resolve(deferredLiveWaitCount);
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => {
+        reject(new Error(`Timed out waiting for ${targetCount} live reconciliation waiters (observed ${deferredLiveWaitCount})`));
+      }, timeoutMs);
+      deferredWaiters.push({
+        target: targetCount,
+        resolve: (count) => {
+          clearTimeout(timer);
+          resolve(count);
+        },
+      });
+    });
+  }
+
   const jobFilePath = path.join(dir, 'job-registry.json');
   const durableJobRegistry = createDurableJobRegistry({
     filePath: jobFilePath,
     registryFactory: createJobRegistry,
     automaticReconciliation: true,
+    storeLockFactory: (lockOptions) => {
+      const realLock = createProcessStoreLock(lockOptions);
+      return {
+        withLock: (fn) => realLock.withLock(async () => {
+          const outcome = await fn();
+          if (
+            outcome
+            && typeof outcome === 'object'
+            && Reflect.ownKeys(outcome).some((key) => typeof key === 'symbol' && key.description === 'deferredLiveReconciliation')
+          ) {
+            notifyDeferredLiveWait();
+          }
+          return outcome;
+        }),
+      };
+    },
     ...(liveReconciliationWindowMs === undefined ? {} : { liveReconciliationWindowMs }),
   });
   await durableJobRegistry.init();
@@ -93,22 +164,16 @@ async function createRealRuntimeHarness(t, {
 
   const nginxManager = createNginxManager({ stagingDir, sitesDir });
   const hostOperations = {
-    operations: [OPERATIONS.DOMAIN_STAGE, OPERATIONS.SYSTEM_PACKAGES_INSPECT],
-    supports: (operation) => operation === OPERATIONS.DOMAIN_STAGE || operation === OPERATIONS.SYSTEM_PACKAGES_INSPECT,
+    operations: [OPERATIONS.DOMAIN_STAGE],
+    supports: (operation) => operation === OPERATIONS.DOMAIN_STAGE,
     executeOperation: async (operation, payload) => {
       if (operation === OPERATIONS.DOMAIN_STAGE) return nginxManager.stageDomain(payload);
-      return {
-        packageName: 'yunpanel',
-        installed: true,
-        installedVersion: '0.3.0-2026111001',
-        candidateVersion: '0.3.0-2026111001',
-        updateAvailable: false,
-      };
+      throw new Error(`Unsupported operation in harness: ${operation}`);
     },
   };
 
   const faults = [];
-  const runtime = await startLocalRuntime({
+  runtime = await startLocalRuntime({
     serverId: localServer.id,
     hostname: localServer.hostname,
     runtimeVersion: '0.3.0-2026111001',
@@ -123,16 +188,14 @@ async function createRealRuntimeHarness(t, {
     hostOperations,
     reconcile: async (context) => {
       if (onBeforeReconcile) await onBeforeReconcile(context);
-      if (reconcileOverride) return reconcileOverride(context);
       return reconcileCompletedJob(context);
     },
     onError: (err) => { faults.push(err); },
     snapshotIntervalMs: 60_000,
   });
-  t.after(async () => { await runtime.stop(); });
 
   const origin = 'http://127.0.0.1:5173';
-  const server = http.createServer(createAuthenticatedApi({
+  server = http.createServer(createAuthenticatedApi({
     store: authStore,
     publicOrigin: origin,
     development: true,
@@ -149,10 +212,6 @@ async function createRealRuntimeHarness(t, {
     }),
   })).listen(0, '127.0.0.1');
   await once(server, 'listening');
-  t.after(() => new Promise((resolve) => {
-    server.closeAllConnections();
-    server.close(resolve);
-  }));
 
   const baseUrl = `http://127.0.0.1:${server.address().port}`;
   const headers = {
@@ -194,6 +253,7 @@ async function createRealRuntimeHarness(t, {
   return {
     dir,
     stagingDir,
+    domainsFilePath,
     jobFilePath,
     recoveryFilePath: `${jobFilePath}.recovery.json`,
     localServer,
@@ -202,6 +262,9 @@ async function createRealRuntimeHarness(t, {
     jobRegistry,
     runtime,
     faults,
+    registerGateRelease,
+    waitForDeferredLiveWaiters,
+    deferredLiveWaitCount: () => deferredLiveWaitCount,
     createStaticDomainOverHttp,
     stageDomainOverHttp,
   };
@@ -215,6 +278,13 @@ async function waitForTerminalJob(jobRegistry, jobId, timeoutMs = 5_000) {
     await new Promise((resolve) => setTimeout(resolve, 15));
   }
   throw new Error(`Timed out waiting for job ${jobId} to reach terminal state`);
+}
+
+async function waitForRecoveryCleared(durableJobRegistry, timeoutMs = 3_000) {
+  const deadline = Date.now() + timeoutMs;
+  while (durableJobRegistry.recovery() !== null && Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
 }
 
 test('concurrent normal HTTP job enqueues during an active in-flight reconciliation succeed without transient 503', async (t) => {
@@ -232,106 +302,122 @@ test('concurrent normal HTTP job enqueues during an active in-flight reconciliat
       await allowReconcileFinish;
     },
   });
+  harness.registerGateRelease(() => allowReconcileFinishResolve());
 
   const domainAlpha = await harness.createStaticDomainOverHttp('alpha');
   const domainBeta = await harness.createStaticDomainOverHttp('beta');
   const domainGamma = await harness.createStaticDomainOverHttp('gamma');
 
-  const first = await harness.stageDomainOverHttp(domainAlpha.id);
-  assert.equal(first.status, 202);
-  const firstJobId = first.body.data.id;
+  try {
+    const first = await harness.stageDomainOverHttp(domainAlpha.id);
+    assert.equal(first.status, 202);
+    const firstJobId = first.body.data.id;
 
-  // Wait until Job 1 has completed host execution, opened beginReconciliation,
-  // persisted terminal state, and entered reconcileCompletedJob.
-  await enteredReconcile;
+    await enteredReconcile;
 
-  // Fire two concurrent normal HTTP enqueue requests on independent domains during the exact
-  // reconciliation window, releasing Job 1's reconciliation right after both requests arrive.
-  const releaseSoon = new Promise((resolve) => setTimeout(resolve, 25)).then(() => {
+    const secondPromise = harness.stageDomainOverHttp(domainBeta.id);
+    const thirdPromise = harness.stageDomainOverHttp(domainGamma.id);
+
+    // Deterministically prove both HTTP requests entered the live reconciliation wait branch
+    // before Job 1's real reconcileCompletedJob is allowed to proceed.
+    const waiterCount = await harness.waitForDeferredLiveWaiters(2);
+    assert.equal(waiterCount >= 2, true);
     allowReconcileFinishResolve();
-  });
-  const [second, third] = await Promise.all([
-    harness.stageDomainOverHttp(domainBeta.id),
-    harness.stageDomainOverHttp(domainGamma.id),
-    releaseSoon,
-  ]);
 
-  assert.equal(second.status, 202, `expected 202 for second job, got ${second.status}: ${JSON.stringify(second.body)}`);
-  assert.equal(third.status, 202, `expected 202 for third job, got ${third.status}: ${JSON.stringify(third.body)}`);
-  assert.notEqual(second.body.data.id, firstJobId);
-  assert.notEqual(third.body.data.id, firstJobId);
-  assert.notEqual(second.body.data.id, third.body.data.id);
+    const [second, third] = await Promise.all([secondPromise, thirdPromise]);
+    assert.equal(second.status, 202, `expected 202 for second job, got ${second.status}: ${JSON.stringify(second.body)}`);
+    assert.equal(third.status, 202, `expected 202 for third job, got ${third.status}: ${JSON.stringify(third.body)}`);
+    assert.notEqual(second.body.data.id, firstJobId);
+    assert.notEqual(third.body.data.id, firstJobId);
+    assert.notEqual(second.body.data.id, third.body.data.id);
 
-  const [job1, job2, job3] = await Promise.all([
-    waitForTerminalJob(harness.jobRegistry, firstJobId),
-    waitForTerminalJob(harness.jobRegistry, second.body.data.id),
-    waitForTerminalJob(harness.jobRegistry, third.body.data.id),
-  ]);
-  assert.equal(job1.status, 'succeeded');
-  assert.equal(job2.status, 'succeeded');
-  assert.equal(job3.status, 'succeeded');
+    const [job1, job2, job3] = await Promise.all([
+      waitForTerminalJob(harness.jobRegistry, firstJobId),
+      waitForTerminalJob(harness.jobRegistry, second.body.data.id),
+      waitForTerminalJob(harness.jobRegistry, third.body.data.id),
+    ]);
+    assert.equal(job1.status, 'succeeded');
+    assert.equal(job2.status, 'succeeded');
+    assert.equal(job3.status, 'succeeded');
 
-  // Wait for the final job's reconciliation acknowledgement to settle on disk.
-  const ackDeadline = Date.now() + 2_000;
-  while (harness.durableJobRegistry.recovery() !== null && Date.now() < ackDeadline) {
-    await new Promise((resolve) => setTimeout(resolve, 10));
+    await waitForRecoveryCleared(harness.durableJobRegistry);
+    assert.equal(harness.durableJobRegistry.recovery(), null);
+    assert.equal(harness.faults.length, 0);
+
+    for (const created of [domainAlpha, domainBeta, domainGamma]) {
+      const updated = await harness.domainRegistry.getDomain(created.id);
+      assert.equal(updated.stagedRevision, 1);
+      assert.match(updated.stagedChecksum, /^[0-9a-f]{64}$/);
+      const stagedStat = await stat(path.join(harness.stagingDir, `yunpanel-${created.primaryDomain}.conf`));
+      assert.equal(stagedStat.isFile(), true);
+    }
+
+    const recoveryDisk = JSON.parse(await readFile(harness.recoveryFilePath, 'utf8'));
+    assert.deepEqual(recoveryDisk.jobs, []);
+  } finally {
+    allowReconcileFinishResolve();
   }
-  assert.equal(harness.durableJobRegistry.recovery(), null);
-  assert.equal(harness.faults.length, 0);
-
-  for (const created of [domainAlpha, domainBeta, domainGamma]) {
-    const updated = await harness.domainRegistry.getDomain(created.id);
-    assert.equal(updated.stagedRevision, 1);
-    assert.match(updated.stagedChecksum, /^[0-9a-f]{64}$/);
-    const stagedStat = await stat(path.join(harness.stagingDir, `yunpanel-${created.primaryDomain}.conf`));
-    assert.equal(stagedStat.isFile(), true);
-  }
-
-  const recoveryDisk = JSON.parse(await readFile(harness.recoveryFilePath, 'utf8'));
-  assert.deepEqual(recoveryDisk.jobs, []);
 });
 
 test('reconciliation fault immediately aborts any waiting enqueue and preserves the fail-closed 503 recovery gate', async (t) => {
   let enteredReconcileResolve;
   const enteredReconcile = new Promise((resolve) => { enteredReconcileResolve = resolve; });
-  let failReconcileResolve;
-  const failReconcile = new Promise((resolve) => { failReconcileResolve = resolve; });
+  let proceedWithDiskFaultResolve;
+  const proceedWithDiskFault = new Promise((resolve) => { proceedWithDiskFaultResolve = resolve; });
+  let savedDomainsJson = null;
 
   const harness = await createRealRuntimeHarness(t, {
-    reconcileOverride: async () => {
+    onBeforeReconcile: async () => {
       enteredReconcileResolve();
-      await failReconcile;
-      return { reconciled: false, error: { code: 'local_reconciliation_failed' } };
+      await proceedWithDiskFault;
     },
   });
+  harness.registerGateRelease(() => proceedWithDiskFaultResolve());
 
   const domainAlpha = await harness.createStaticDomainOverHttp('fault-alpha');
   const domainBeta = await harness.createStaticDomainOverHttp('fault-beta');
   const domainGamma = await harness.createStaticDomainOverHttp('fault-gamma');
 
-  const first = await harness.stageDomainOverHttp(domainAlpha.id);
-  assert.equal(first.status, 202);
-  await enteredReconcile;
+  try {
+    const first = await harness.stageDomainOverHttp(domainAlpha.id);
+    assert.equal(first.status, 202);
+    await enteredReconcile;
 
-  const triggerFailure = new Promise((resolve) => setTimeout(resolve, 25)).then(() => {
-    failReconcileResolve();
-  });
-  const [concurrent] = await Promise.all([
-    harness.stageDomainOverHttp(domainBeta.id),
-    triggerFailure,
-  ]);
+    const concurrentPromise = harness.stageDomainOverHttp(domainBeta.id);
+    await harness.waitForDeferredLiveWaiters(1);
 
-  assert.equal(concurrent.status, 503);
-  assert.equal(concurrent.body?.error?.code, 'durable_job_reconciliation_required');
-  assert.equal(harness.faults.length, 1);
-  assert.equal(harness.faults[0]?.code, 'local_reconciliation_failed');
+    // Induce a real OS filesystem error (EISDIR) on domains.json right before
+    // real reconcileCompletedJob -> domainRegistry.markStaged persists state.
+    savedDomainsJson = await readFile(harness.domainsFilePath, 'utf8');
+    await rm(harness.domainsFilePath, { force: true });
+    await mkdir(harness.domainsFilePath);
+    proceedWithDiskFaultResolve();
 
-  const subsequent = await harness.stageDomainOverHttp(domainGamma.id);
-  assert.equal(subsequent.status, 503);
-  assert.equal(subsequent.body?.error?.code, 'durable_job_reconciliation_required');
+    const concurrent = await concurrentPromise;
+    assert.equal(concurrent.status, 503);
+    assert.equal(concurrent.body?.error?.code, 'durable_job_reconciliation_required');
+    assert.equal(harness.faults.length, 1);
+    assert.equal(harness.faults[0]?.code, 'local_reconciliation_failed');
 
-  const recoveryDisk = JSON.parse(await readFile(harness.recoveryFilePath, 'utf8'));
-  assert.deepEqual(recoveryDisk.jobs, [{ jobId: first.body.data.id, serverId: harness.localServer.id }]);
+    // Restore domains.json so domain lookup succeeds, proving the subsequent 503 comes
+    // strictly from the unacknowledged durable recovery record on disk.
+    await rm(harness.domainsFilePath, { recursive: true, force: true });
+    await writeFile(harness.domainsFilePath, savedDomainsJson, { mode: 0o600 });
+    savedDomainsJson = null;
+
+    const subsequent = await harness.stageDomainOverHttp(domainGamma.id);
+    assert.equal(subsequent.status, 503);
+    assert.equal(subsequent.body?.error?.code, 'durable_job_reconciliation_required');
+
+    const recoveryDisk = JSON.parse(await readFile(harness.recoveryFilePath, 'utf8'));
+    assert.deepEqual(recoveryDisk.jobs, [{ jobId: first.body.data.id, serverId: harness.localServer.id }]);
+  } finally {
+    proceedWithDiskFaultResolve();
+    if (savedDomainsJson !== null) {
+      await rm(harness.domainsFilePath, { recursive: true, force: true }).catch(() => {});
+      await writeFile(harness.domainsFilePath, savedDomainsJson, { mode: 0o600 }).catch(() => {});
+    }
+  }
 });
 
 test('stalled live reconciliation past the bounded window fails closed with durable_job_reconciliation_required', async (t) => {
@@ -339,34 +425,34 @@ test('stalled live reconciliation past the bounded window fails closed with dura
   const enteredReconcile = new Promise((resolve) => { enteredReconcileResolve = resolve; });
   let releaseStalledResolve;
   const releaseStalled = new Promise((resolve) => { releaseStalledResolve = resolve; });
+  let hookedFirst = false;
 
   const harness = await createRealRuntimeHarness(t, {
     liveReconciliationWindowMs: 80,
     onBeforeReconcile: async () => {
+      if (hookedFirst) return;
+      hookedFirst = true;
       enteredReconcileResolve();
       await releaseStalled;
     },
   });
-  t.after(() => releaseStalledResolve());
+  harness.registerGateRelease(() => releaseStalledResolve());
 
   const domainAlpha = await harness.createStaticDomainOverHttp('stall-alpha');
+  const domainBeta = await harness.createStaticDomainOverHttp('stall-beta');
   try {
     const first = await harness.stageDomainOverHttp(domainAlpha.id);
     assert.equal(first.status, 202);
     await enteredReconcile;
 
-    await assert.rejects(
-      harness.jobRegistry.enqueue({
-        serverId: harness.localServer.id,
-        type: 'system.packages.inspect',
-        operation: OPERATIONS.SYSTEM_PACKAGES_INSPECT,
-        payload: {},
-        resourceType: 'system',
-        resourceId: harness.localServer.id,
-      }),
-      (err) => err instanceof DurableJobRegistryError && err.code === 'durable_job_reconciliation_required',
-    );
+    const stalledEnqueuePromise = harness.stageDomainOverHttp(domainBeta.id);
+    await harness.waitForDeferredLiveWaiters(1);
+
+    const stalledResponse = await stalledEnqueuePromise;
+    assert.equal(stalledResponse.status, 503);
+    assert.equal(stalledResponse.body?.error?.code, 'durable_job_reconciliation_required');
   } finally {
     releaseStalledResolve();
+    await waitForRecoveryCleared(harness.durableJobRegistry);
   }
 });
