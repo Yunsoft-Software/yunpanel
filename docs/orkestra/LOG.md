@@ -238,3 +238,4 @@
 - 2026-11-12 19:08 orchestrator: tick: 4/4 yuva işte, geri alınan 0
 - 2026-11-12 20:00 orchestrator: verify 796385ea..62894e9f: ok, yeniden açılan -, bulgu -
 - 2026-11-12 21:51 orchestrator: verify 62894e9f..7f066b72: failed, yeniden açılan -, bulgu ['T902']
+- 2026-11-12 22:26 orchestrator: verify 62894e9f..c47c56d1: failed, yeniden açılan -, bulgu ['T903']

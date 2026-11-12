@@ -1230,3 +1230,57 @@
 - **12 Kasım RCA ve dar kapsam:** İki dosya ilk dar koşuda3/4, ikinci aynı kaynak koşusunda4/4 geçti. Tenant generation3 DELETE için test yalnız202 bekliyordu; gerçek router `state=removed` ise200, sürüyorsa202 döndürür. Gerçek200/senkron tamamlanma dalı ilk koşuda gözlendi. Testte geçerli HTTP durumu ile semantik state bağlanacak; generation/journal/kimlik/yokluk assertionları korunacak. AI storage dar koşularda iki kez geçti; tam dalgadaki neden henüz kanıtlanmadı. Bu dosyada yalnız alt process başarısızlığı için güvenli status/signal/error-code tanısı güçlendirilebilir; süre artırma, beklenti gevşetme, force-exit veya ürün kaynağı değişikliği yok. Sonraki tam doğrulamanın tam çıktısı özel600dosyada tutulacak. Kaynak rootcause kanıtı `.local/t883-20261112/t902-repro/safe-repro-summary.json`; staging stream timer olasılığı bu iki hatanın nedeni diye gösterilmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T903 · Doğrulama: test — independent SQLite writers serialize the last site slot (same operation: true)
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-12 22:26
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - independent SQLite writers serialize the last site slot (same operation: true)
+    
+    ut allocating a localhost port (21.639875ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.524833ms)
+    ✔ normalizes complete Node deployment specs (2.597917ms)
+    ✔ normalizes fixed Node process actions against a managed release (28.559417ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (10.756667ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (137.695792ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (40.642083ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (135.389167ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (1.493709ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (6.231125ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.67175ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.645125ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.301958ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (103.7905ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (3.31ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.628667ms)
+    ✔ normalizes python rollback, restart, and status specs (0.916708ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (131.82225ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (58.110708ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (2.057083ms)
+    ✔ tenant constants and role classification predicates (12.913542ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (1.807459ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (14.85875ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (53.33575ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (1.471292ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (5.564125ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (73.126417ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (1.764834ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (2.280375ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (2.418583ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.885083ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.848083ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.810375ms)
+    ✔ tenant context creation and account normalization security edge cases (0.6205ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 5002.255
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
