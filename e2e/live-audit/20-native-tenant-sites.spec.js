@@ -2,6 +2,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomBytes, createHash } from 'node:crypto';
 import { request } from '@playwright/test';
+import { createWebsitePathContract } from '../../packages/host-runtime/src/website-path-contract.js';
 import { test, expect, apiContext, safeApi, ORIGIN, RUN_DIR, ready, main, auditNetworkOptions } from './support.js';
 import { createOwnedFixture, cleanupOwnedFixture, readOnlyHostProbe } from './owned-fixture.js';
 
@@ -40,8 +41,11 @@ async function createAccount(key, kind, extra = {}) {
   state.accounts[key] = { id: account.id, username: input.username, kind }; save(); return account;
 }
 function owned(key) { const f = fixtures[key]; expect(f, 'An owned tenant fixture is required').toBeTruthy(); return f; }
-function assertPhysicalGone(proof) {
-  expect(proof.unixUserExists).toBe(false); expect(proof.unixGroupExists).toBe(false); expect(proof.roots).toHaveLength(4);
+function assertPhysicalGone(proof, ledger) {
+  const contract = createWebsitePathContract(ledger);
+  const expectedRoots = [ledger.documentRoot, contract.runtime.applicationRoot, contract.workspace.homeDirectory, contract.static.buildRoot, contract.static.publishRoot];
+  expect(proof.roots.map(p => p.path).sort()).toEqual([...new Set(expectedRoots)].sort());
+  expect(proof.unixUserExists).toBe(false); expect(proof.unixGroupExists).toBe(false);
   expect(proof.roots.every(p => !p.exists)).toBe(true); expect(proof.fpmFiles).toEqual([]); expect(proof.sockets).toEqual([]);
   expect(proof.nginxFiles.length).toBeGreaterThan(0); expect(proof.nginxFiles.every(p => !p.exists)).toBe(true); expect(proof.mounts).toEqual([]);
 }
@@ -51,7 +55,7 @@ async function cleanupSites() {
     if (!state.sites[key]) continue;
     try {
       const result = fixtures[key] ? await fixtures[key].cleanup() : await cleanupOwnedFixture(owner, { key: state.sites[key].key });
-      const physical = readOnlyHostProbe({ ledger: result }, 'lifecycle-absence'); assertPhysicalGone(physical);
+      const physical = readOnlyHostProbe({ ledger: result }, 'lifecycle-absence'); assertPhysicalGone(physical, result);
       state.sites[key].removed = true; state.sites[key].physicalAbsent = true; save();
     } catch (error) { failures.push({ key, message: String(error.message).split('\n')[0] }); }
   }
@@ -240,7 +244,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
       await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click(); const response = await pending; expect(response.status()).toBe(201); const operation = (await response.json()).data;
       expect(operation.execution.mode).toBe('automatic'); expect(operation.websiteId).toBe(t.websiteId); state.sites[key].removalId = operation.id; save();
       await expect.poll(async () => { const current = ok(await call(owner, 'GET', '/api/panel/website-removal-operations/' + operation.id), 'Read same normal UI removal'); expect(current.id).toBe(operation.id); expect(current.websiteId).toBe(t.websiteId); expect(['failed', 'blocked']).not.toContain(current.status); return current.status; }, { timeout: 180000, intervals: [500, 1000] }).toBe('removed');
-      await f.cleanup(); assertPhysicalGone(readOnlyHostProbe(f, 'lifecycle-absence')); state.sites[key].removed = true; state.sites[key].physicalAbsent = true; save();
+      await f.cleanup(); assertPhysicalGone(readOnlyHostProbe(f, 'lifecycle-absence'), t); state.sites[key].removed = true; state.sites[key].physicalAbsent = true; save();
       for (const other of siteKeys.filter(k => !state.sites[k].removed)) { const reply = await owned(other).http('/'); expect(reply.status).toBe(200); expect(reply.body).toContain(state.sites[other].marker); }
       record('normal-ui-removal', { websiteId: t.websiteId, sameJournalId: operation.id, physicalAbsent: true });
     }
