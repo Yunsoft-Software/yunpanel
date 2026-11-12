@@ -19,6 +19,8 @@ const RECOVERY_MESSAGE = 'Persisted running jobs require reconciliation before n
 const RECOVERABLE_STATUSES = new Set(['running', 'succeeded', 'failed']);
 const TERMINAL_STATUSES = new Set(['succeeded', 'failed']);
 const JOB_STORE_VERSION = 1;
+const DEFAULT_LIVE_RECONCILIATION_WINDOW_MS = 5_000;
+const DEFERRED_LIVE_RECONCILIATION = Symbol('deferredLiveReconciliation');
 
 function safeRecoveryJob(job) {
   const rawId = job?.id ?? job?.jobId;
@@ -62,6 +64,7 @@ export function createDurableJobRegistry({
   registryFactory,
   recoveryStoreFactory = createJobRecoveryStore,
   automaticReconciliation = false,
+  liveReconciliationWindowMs = DEFAULT_LIVE_RECONCILIATION_WINDOW_MS,
   now = () => Date.now(),
   storeLockFactory = createProcessStoreLock,
 } = {}) {
@@ -69,6 +72,9 @@ export function createDurableJobRegistry({
   if (typeof registryFactory !== 'function') throw new DurableJobRegistryError('durable_job_factory_required', 'Durable job registry requires a registry factory');
   if (typeof recoveryStoreFactory !== 'function') throw new DurableJobRegistryError('durable_job_recovery_factory_required', 'Durable job registry requires a recovery store factory');
   if (typeof automaticReconciliation !== 'boolean') throw new DurableJobRegistryError('durable_job_reconciliation_mode_invalid', 'Durable job automatic reconciliation mode is invalid');
+  if (!Number.isInteger(liveReconciliationWindowMs) || liveReconciliationWindowMs < 10 || liveReconciliationWindowMs > 60_000) {
+    throw new DurableJobRegistryError('durable_job_reconciliation_window_invalid', 'Durable job live reconciliation window is invalid');
+  }
   if (typeof storeLockFactory !== 'function') throw new DurableJobRegistryError('durable_job_store_lock_invalid', 'Durable job store lock factory is invalid');
 
   const recoveryFilePath = `${filePath}.recovery.json`;
@@ -85,14 +91,77 @@ export function createDurableJobRegistry({
   let recovery = null;
   const reconciliationPending = new Set();
   const explicitlyBegunReconciliation = new Set();
+  const activeLiveReconciliations = new Map();
+
+  function settleLiveReconciliation(key) {
+    const current = activeLiveReconciliations.get(key);
+    if (!current) return false;
+    activeLiveReconciliations.delete(key);
+    if (current.timer) clearTimeout(current.timer);
+    current.resolve();
+    return true;
+  }
+
+  function settleServerLiveReconciliations(targetServerId = null) {
+    let settled = 0;
+    for (const [key, entry] of [...activeLiveReconciliations.entries()]) {
+      if (targetServerId === null || entry.serverId === targetServerId) {
+        if (settleLiveReconciliation(key)) settled += 1;
+      }
+    }
+    return settled;
+  }
+
+  function registerLiveReconciliation(identity) {
+    const key = recoveryKey(identity);
+    settleLiveReconciliation(key);
+    let resolvePromise;
+    const promise = new Promise((resolve) => { resolvePromise = resolve; });
+    const expiresAt = now() + liveReconciliationWindowMs;
+    const timer = setTimeout(() => {
+      settleLiveReconciliation(key);
+    }, liveReconciliationWindowMs);
+    timer.unref?.();
+    activeLiveReconciliations.set(key, {
+      serverId: identity.serverId,
+      jobId: identity.jobId,
+      promise,
+      resolve: resolvePromise,
+      timer,
+      expiresAt,
+    });
+  }
+
+  function liveRecoveryWaitPromise() {
+    if (!recovery || fatal || !Array.isArray(recovery.jobs) || recovery.jobs.length === 0) return null;
+    const currentNow = now();
+    const promises = [];
+    for (const job of recovery.jobs) {
+      const key = recoveryKey(job);
+      const active = activeLiveReconciliations.get(key);
+      if (!active) return null;
+      if (currentNow >= active.expiresAt) {
+        settleLiveReconciliation(key);
+        return null;
+      }
+      promises.push(active.promise);
+    }
+    return promises.length > 0 ? Promise.all(promises) : null;
+  }
+
+  function abortLiveReconciliation({ serverId = null, jobId = null } = {}) {
+    if (jobId !== null && serverId !== null) {
+      const identity = safeRecoveryJob({ id: jobId, serverId });
+      return identity ? settleLiveReconciliation(recoveryKey(identity)) : false;
+    }
+    if (typeof serverId === 'string' && serverId.length >= 1) {
+      return settleServerLiveReconciliations(serverId) > 0;
+    }
+    return settleServerLiveReconciliations(null) > 0;
+  }
 
   function assertHealthy() {
     if (fatal) throw new DurableJobRegistryError(fatal.code, fatal.message);
-  }
-
-  function assertMutationAllowed(method) {
-    assertHealthy();
-    if (recovery && method !== 'complete') throw new DurableJobRegistryError(RECOVERY_CODE, RECOVERY_MESSAGE);
   }
 
   function latch(code, message) {
@@ -276,13 +345,17 @@ export function createDurableJobRegistry({
     return { identity, key, explicit: false };
   }
 
-  async function mutate(method, args) {
-    await init();
+  async function mutateOnce(method, args) {
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
       // Another API/worker process may have committed since this instance last
       // touched the store. Reload only after acquiring the store-wide lock.
       await reloadDurableState({ inspectRecovery: false });
-      assertMutationAllowed(method);
+      assertHealthy();
+      if (recovery && method !== 'complete') {
+        const waitForLive = liveRecoveryWaitPromise();
+        if (waitForLive) return { [DEFERRED_LIVE_RECONCILIATION]: waitForLive };
+        throw new DurableJobRegistryError(RECOVERY_CODE, RECOVERY_MESSAGE);
+      }
       if (typeof registry[method] !== 'function') throw new DurableJobRegistryError('durable_job_method_missing', `Durable job registry does not implement ${method}`);
       try {
         const automatic = method === 'complete' ? await prepareAutomaticReconciliation(args[0] ?? {}) : null;
@@ -300,6 +373,10 @@ export function createDurableJobRegistry({
         }
         return result;
       } catch (error) {
+        if (method === 'complete') {
+          const identity = safeRecoveryJob({ id: args[0]?.jobId, serverId: args[0]?.serverId });
+          if (identity) settleLiveReconciliation(recoveryKey(identity));
+        }
         if (fatal) throw error;
         await reloadDurableState({ inspectRecovery: method === 'claimNext' || method === 'complete' });
         throw error;
@@ -309,7 +386,22 @@ export function createDurableJobRegistry({
     return operation;
   }
 
-  async function beginReconciliation({ serverId, jobId } = {}) {
+  async function mutate(method, args) {
+    await init();
+    const deadline = Date.now() + liveReconciliationWindowMs + 250;
+    while (true) {
+      const outcome = await mutateOnce(method, args);
+      if (!outcome || typeof outcome !== 'object' || !(DEFERRED_LIVE_RECONCILIATION in outcome)) {
+        return outcome;
+      }
+      if (Date.now() >= deadline) {
+        throw new DurableJobRegistryError(RECOVERY_CODE, RECOVERY_MESSAGE);
+      }
+      await outcome[DEFERRED_LIVE_RECONCILIATION];
+    }
+  }
+
+  async function beginReconciliation({ serverId, jobId } = {}, { liveInFlight = false } = {}) {
     await init();
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
       await reloadDurableState({ inspectRecovery: false });
@@ -331,6 +423,7 @@ export function createDurableJobRegistry({
       reconciliationPending.add(key);
       explicitlyBegunReconciliation.add(key);
       setRecovery([...(recovery?.jobs ?? []), identity]);
+      if (liveInFlight === true) registerLiveReconciliation(identity);
       return { jobId, serverId, status: job.status, pending: true };
     }));
     mutationTail = operation.catch(() => {});
@@ -340,35 +433,40 @@ export function createDurableJobRegistry({
   async function acknowledgeReconciliation({ serverId, jobId } = {}) {
     await init();
     const operation = mutationTail.then(() => storeLock.withLock(async () => {
-      await reloadDurableState({ inspectRecovery: false });
-      assertHealthy();
-      const identity = safeRecoveryJob({ id: jobId, serverId });
-      if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
-      let job;
       try {
-        job = await registry.getJob(jobId);
-      } catch {
-        latch('durable_job_recovery_scan_failed', 'Durable job registry could not inspect recovery state');
-      }
-      if (!job || job.serverId !== serverId) throw new DurableJobRegistryError('durable_job_reconciliation_job_not_found', 'Durable job reconciliation job was not found');
-      if (!TERMINAL_STATUSES.has(job.status)) throw new DurableJobRegistryError('durable_job_reconciliation_not_ready', 'Durable job reconciliation can only be acknowledged after terminal completion');
-
-      const stored = recoverySnapshotJobs();
-      const key = recoveryKey(identity);
-      const recorded = stored.some((candidate) => recoveryKey(candidate) === key);
-      if (!recorded) {
-        if (reconciliationPending.has(key) || recovery?.jobs.some((candidate) => recoveryKey(candidate) === key)) {
-          latch('durable_job_recovery_state_invalid', 'Durable job recovery memory does not match the recovery record');
+        await reloadDurableState({ inspectRecovery: false });
+        assertHealthy();
+        const identity = safeRecoveryJob({ id: jobId, serverId });
+        if (!identity) throw new DurableJobRegistryError('durable_job_reconciliation_identity_invalid', 'Durable job reconciliation identity is invalid');
+        let job;
+        try {
+          job = await registry.getJob(jobId);
+        } catch {
+          latch('durable_job_recovery_scan_failed', 'Durable job registry could not inspect recovery state');
         }
-        explicitlyBegunReconciliation.delete(key);
-        return { jobId, serverId, status: job.status, acknowledged: false };
-      }
+        if (!job || job.serverId !== serverId) throw new DurableJobRegistryError('durable_job_reconciliation_job_not_found', 'Durable job reconciliation job was not found');
+        if (!TERMINAL_STATUSES.has(job.status)) throw new DurableJobRegistryError('durable_job_reconciliation_not_ready', 'Durable job reconciliation can only be acknowledged after terminal completion');
 
-      await removeRecoveryJob(identity);
-      reconciliationPending.delete(key);
-      explicitlyBegunReconciliation.delete(key);
-      setRecovery((recovery?.jobs ?? []).filter((candidate) => recoveryKey(candidate) !== key));
-      return { jobId, serverId, status: job.status, acknowledged: true };
+        const stored = recoverySnapshotJobs();
+        const key = recoveryKey(identity);
+        const recorded = stored.some((candidate) => recoveryKey(candidate) === key);
+        if (!recorded) {
+          if (reconciliationPending.has(key) || recovery?.jobs.some((candidate) => recoveryKey(candidate) === key)) {
+            latch('durable_job_recovery_state_invalid', 'Durable job recovery memory does not match the recovery record');
+          }
+          explicitlyBegunReconciliation.delete(key);
+          return { jobId, serverId, status: job.status, acknowledged: false };
+        }
+
+        await removeRecoveryJob(identity);
+        reconciliationPending.delete(key);
+        explicitlyBegunReconciliation.delete(key);
+        setRecovery((recovery?.jobs ?? []).filter((candidate) => recoveryKey(candidate) !== key));
+        return { jobId, serverId, status: job.status, acknowledged: true };
+      } finally {
+        const candidate = safeRecoveryJob({ id: jobId, serverId });
+        if (candidate) settleLiveReconciliation(recoveryKey(candidate));
+      }
     }));
     mutationTail = operation.catch(() => {});
     return operation;
@@ -441,6 +539,7 @@ export function createDurableJobRegistry({
     reauthorizeJob: (...args) => mutate('reauthorizeJob', args),
     beginReconciliation,
     acknowledgeReconciliation,
+    abortLiveReconciliation,
     getReconciliationJob,
     findIdempotentJob: (...args) => read('findIdempotentJob', args),
     getJobForIdempotencyKey: (...args) => read('getJobForIdempotencyKey', args),

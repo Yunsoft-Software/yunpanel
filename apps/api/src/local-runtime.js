@@ -261,6 +261,7 @@ export async function startLocalRuntime({
     stopping = (async () => {
       let stopError = null;
       try { await executor?.stop?.(); } catch (error) { stopError = error; }
+      try { jobRegistry.abortLiveReconciliation?.({ serverId }); } catch {}
       try { await lock?.release?.(); } catch (error) { if (!stopError) stopError = error; }
       resourcesClosed = true;
       if (stopError) throw stopError;
@@ -273,6 +274,7 @@ export async function startLocalRuntime({
     fault = Object.freeze({ ...metadata });
     const safeError = safeFaultError(fault, message);
     try { onError(safeError); } catch {}
+    try { jobRegistry.abortLiveReconciliation?.({ serverId }); } catch {}
     void closeResources().catch(() => {});
   }
 
@@ -340,9 +342,22 @@ export async function startLocalRuntime({
     if (recoverRunningJobs) await recoverRunningJobs();
     await reconcileStartupRecovery({ jobRegistry, serverId, reconcileJob });
 
+    const executorJobRegistry = typeof jobRegistry.beginReconciliation === 'function'
+      && typeof jobRegistry.acknowledgeReconciliation === 'function'
+      ? new Proxy(jobRegistry, {
+        get(target, property, receiver) {
+          if (property === 'beginReconciliation') {
+            return (input, options = {}) => target.beginReconciliation(input, { ...options, liveInFlight: true });
+          }
+          const value = Reflect.get(target, property, receiver);
+          return typeof value === 'function' ? value.bind(target) : value;
+        },
+      })
+      : jobRegistry;
+
     executor = executorFactory({
       serverId,
-      jobRegistry,
+      jobRegistry: executorJobRegistry,
       supportsOperation: (operation) => hostOperations.supports(operation),
       executeOperation: (operation, payload, execution) => hostOperations.executeOperation(operation, payload, execution),
       reconcileCompletedJob: reconcileJob,
