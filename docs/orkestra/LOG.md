@@ -240,3 +240,5 @@
 - 2026-11-12 21:51 orchestrator: verify 62894e9f..7f066b72: failed, yeniden açılan -, bulgu ['T902']
 - 2026-11-12 22:26 orchestrator: verify 62894e9f..c47c56d1: failed, yeniden açılan -, bulgu ['T903']
 - 2026-11-12 22:44 orchestrator: verify 62894e9f..5007a124: ok, yeniden açılan -, bulgu -
+
+- 2026-11-13 00:00 AGENT_1: `13-11-2026` dalı `PROJE.md` günlük dal kuralına göre `12-11-2026` (`afbc2042`) dalından aktif claim yokken açıldı.
