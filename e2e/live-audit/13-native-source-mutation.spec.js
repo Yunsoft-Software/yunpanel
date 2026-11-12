@@ -50,13 +50,61 @@ test.afterAll(async()=>{
  test.setTimeout(360000);
  const failures=[];
  if(owner&&state?.fixture.mailboxIds)for(const id of state.fixture.mailboxIds){try{await removeMailbox(owner,id);}catch(e){failures.push('mailbox '+id+': '+String(e.message).split('\n')[0]);}}
- if(uploadedStatic){try{await uploadedStatic.cleanup();}catch(e){failures.push('static cleanup: '+String(e.message).split('\n')[0]);}}
+ if(uploadedStatic){try{await uploadedStatic.cleanup();verifyOwnedAbsence(uploadedStatic);}catch(e){failures.push('static cleanup: '+String(e.message).split('\n')[0]);}}
  if(owner&&staticKey&&!uploadedStatic&&fs.existsSync(path.join(RUN_DIR,'owned-fixtures',staticKey+'.json'))){try{await cleanupOwnedFixture(owner,{key:staticKey});}catch(e){failures.push('static ledger cleanup: '+String(e.message).split('\n')[0]);}}
- if(primary){try{await primary.cleanup();}catch(e){failures.push('primary cleanup: '+String(e.message).split('\n')[0]);}}
+ if(primary){try{await cleanupPrimary();verifyOwnedAbsence(primary);}catch(e){failures.push('primary cleanup: '+String(e.message).split('\n')[0]);}}
  else if(owner&&primaryKey&&fs.existsSync(path.join(RUN_DIR,'owned-fixtures',primaryKey+'.json'))){try{await cleanupOwnedFixture(owner,{key:primaryKey});}catch(e){failures.push('primary ledger cleanup: '+String(e.message).split('\n')[0]);}}
  await owner?.api.dispose();
  expect(failures,'All owned resources must be cleaned through their normal panel lifecycle').toEqual([]);
 });
+function verifyOwnedAbsence(fixture){
+ const physical=readOnlyHostProbe(fixture,'lifecycle-absence');
+ expect(physical.unixUserExists).toBe(false);expect(physical.unixGroupExists).toBe(false);
+ expect(physical.roots.length).toBeGreaterThanOrEqual(4);expect(physical.roots.every(root=>!root.exists)).toBe(true);
+ expect(physical.mounts).toEqual([]);expect(physical.fpmFiles).toEqual([]);expect(physical.sockets).toEqual([]);
+ expect(physical.nginxFiles.every(file=>!file.exists)).toBe(true);
+ fixture.record('cleanup.physical-absence',{unixUserAbsent:true,unixGroupAbsent:true,rootsAbsent:true,mountsAbsent:true,fpmAbsent:true,socketsAbsent:true,nginxAbsent:true});
+}
+async function cleanupPrimary(){
+ try{await primary.cleanup();return;}catch(error){
+  if(!String(error.message).startsWith('Owned removal stopped: domain_removal child_domain_removal_blocked'))throw error;
+ }
+ // Mail removal deliberately advances one durable phase per explicit parent continuation.
+ // Wait on the same owned child instead of starting another removal or bypassing its jobs.
+ const identity=primary.ledger,websiteOperationId=identity.removalId;
+ expect(websiteOperationId).toMatch(/^ws-rem-[a-f0-9-]{36}$/i);
+ const root='/api/panel/domains/'+identity.domainId+'/removal-operations';
+ const listed=check(await apiCall(owner.api,owner.csrf,'GET',root),'cleanup.domain-journals');
+ const candidates=listed.operations.filter(op=>op.domainId===identity.domainId);
+ expect(candidates,'Exactly one owned Domain child must be authoritative').toHaveLength(1);
+ expect(state.fixture.mailDomainId).toBeTruthy();
+ expect(candidates[0].steps.some(step=>step.kind==='mail_domain'&&step.resourceId===state.fixture.mailDomainId)).toBe(true);
+ const childId=candidates[0].id;let removed=false;const deadline=Date.now()+180000;
+ while(Date.now()<deadline){
+  const current=check(await apiCall(owner.api,owner.csrf,'GET',root+'/'+childId),'cleanup.domain-journal').operation;
+  expect(current.id).toBe(childId);expect(current.domainId).toBe(identity.domainId);
+  if(current.status==='removed'){removed=true;break;}
+  const step=current.steps.find(item=>item.status!=='succeeded');
+  expect(step,'An unfinished owned Domain child must expose its next step').toBeTruthy();
+  expect(current.checksum).toMatch(/^[a-f0-9]{64}$/);expect(current.actions.stepContinuationConfirmation).toBeTruthy();
+  const advanced=check(await apiCall(owner.api,owner.csrf,'POST',root+'/'+childId+'/continue',{
+   expectedUpdatedAt:current.updatedAt,stepId:step.id,checksum:current.checksum,confirmation:current.actions.stepContinuationConfirmation,
+  }),'cleanup.domain-continue').operation;
+  expect(advanced.id).toBe(childId);expect(advanced.domainId).toBe(identity.domainId);
+  record('cleanup.domain-phase',{operationId:childId,stepId:step.id,status:advanced.status});
+  await new Promise(resolve=>setTimeout(resolve,1500));
+ }
+ expect(removed,'The same owned Domain child must finish through its normal public lifecycle').toBe(true);
+ const operation=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/website-removal-operations/'+websiteOperationId),'cleanup.website-journal');
+ expect(operation.websiteId).toBe(identity.websiteId);
+ if(operation.status!=='removed'){
+  expect(operation.status).toBe('blocked');expect(operation.error?.code).toBe('child_domain_removal_blocked');expect(operation.actions.runConfirmation).toBeTruthy();
+  const resumed=check(await apiCall(owner.api,owner.csrf,'POST','/api/panel/website-removal-operations/'+websiteOperationId+'/run',{
+   expectedUpdatedAt:operation.updatedAt,confirmation:operation.actions.runConfirmation,
+  }),'cleanup.website-resume',202);expect(resumed.id).toBe(websiteOperationId);
+ }
+ await primary.cleanup();
+}
 async function removeMailbox(c,id){
  const base='/api/panel/mailboxes/'+id;let r=await apiCall(c.api,c.csrf,'GET',base);if(r.status===404)return;const box=check(r,'cleanup.mailbox.read');expect(box.mailDomainId).toBe(state.fixture.mailDomainId);
  if(box.enabled){check(await apiCall(c.api,c.csrf,'PATCH',base,{expectedRevision:box.revision,enabled:false}),'cleanup.mailbox.disable');await applyMail(c,state.fixture.mailDomainId,'enabled');}
@@ -73,6 +121,19 @@ async function finishedBackup(c,root,operation){
  const job=await waitJob(c.api,operation.jobId);record('backup.native.job',{status:job.status,code:job.error?.code});expect(job.status).toBe('succeeded');
  const actual=check(await apiCall(c.api,c.csrf,'GET',root+'/backup-operations/'+operation.id),'backup.native.operation');
  expect(actual.status).toBe('succeeded');return actual;
+}
+async function ensureWordPressRemovalSnapshot(c,m){
+ if(m.fixture.nativeBackup?.snapshotId)return m.fixture.nativeBackup;
+ // An independently selected WordPress case prepares its own normal backup.
+ // It does not stand in for the separate combined mail/environment restore gate.
+ const repository=await ownRepository(c),root='/api/panel/websites/'+m.fixture.websiteId;
+ const preview=check(await apiCall(c.api,c.csrf,'POST',root+'/backup/preview',{repositoryId:repository.id}),'wordpress.remove.backup-preview');
+ const queued=check(await apiCall(c.api,c.csrf,'POST',root+'/backup-operations',{
+  kind:'backup',repositoryId:repository.id,expectedPreviewDigest:preview.backupSetDigest,confirmation:preview.confirmation,tags:['t886-wp-remove-'+m.runId],
+ }),'wordpress.remove.backup-queue',202);
+ const actual=await finishedBackup(c,root,queued);expect(actual.result?.snapshot?.snapshotId).toBeTruthy();
+ m.fixture.nativeBackup={repositoryId:repository.id,snapshotId:actual.result.snapshot.snapshotId,operationId:queued.id,purpose:'wordpress-removal-only'};saveManifest(m);
+ record('wordpress.remove.standalone-snapshot',{operationId:queued.id,snapshotId:m.fixture.nativeBackup.snapshotId});return m.fixture.nativeBackup;
 }
 async function nativeMailboxPassword(c,m,password){
  const box=check(await apiCall(c.api,c.csrf,'GET','/api/panel/mailboxes/'+m.fixture.mailboxIds[1]),'backup.mailbox');
@@ -368,9 +429,9 @@ test('@mutation source WordPress core update verifies real checksums, inventory 
 });
 
 test('@mutation source WordPress removal removes actual core files and prefix tables, preserves other content, then restores the owned installation', async ({ liveApi }) => {
- test.setTimeout(240000);
+ test.setTimeout(420000);
  const m = owned(), websiteRoot = '/api/panel/websites/' + m.fixture.websiteId, root = websiteRoot + '/wordpress';
- const saved = m.fixture.nativeBackup;
+ const saved = await ensureWordPressRemovalSnapshot(liveApi,m);
  expect(saved?.snapshotId).toBeTruthy();
  const connection = check(await apiCall(liveApi.api, liveApi.csrf, 'POST', '/api/panel/servers/' + m.serverId + '/websites/' + m.fixture.websiteId + '/databases/' + m.fixture.binding.id + '/connection', { revealPassword: true }), 'wordpress.remove.connection');
  const probe = 'native-wp-remove-proof-' + m.runId + '.php';
