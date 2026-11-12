@@ -1062,7 +1062,7 @@
 
 ### T891 · PHP barındırma ayarları kaydediliyor ancak hazırlama invalid_operation_payload ile reddediliyor
 - **Bağımlı:** —
-- **Dosyalar:** `packages/protocol/src/index-node-passenger.js`
+- **Dosyalar:** `packages/protocol/src/index-node-passenger.js`, `packages/protocol/test/domain-php-stage.test.js`, `apps/api/test/domain-job-flow-v2.test.js`
 - **Kaynak:** QA · 2026-11-12 17:04
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
