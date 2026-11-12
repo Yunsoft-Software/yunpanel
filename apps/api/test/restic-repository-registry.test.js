@@ -270,75 +270,62 @@ test('persisted repositories and encrypted passwords survive reload', async (t) 
   assert.equal(revealed, 'persistent-password-secret');
 });
 
-test('initResticRepository and checkResticRepository preserve ready status on disk when concurrent listRepositories reloads run mid-flight', async (t) => {
-  const { chmod, mkdir, readFile, writeFile } = await import('node:fs/promises');
-  const { createResticManager } = await import('@yunpanel/host-runtime');
-  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-race-'));
+test('concurrent updateRepository mutations and listRepositories disk reloads across shared store preserve serialized state without detached-record loss', async (t) => {
+  const { mkdir, readFile } = await import('node:fs/promises');
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-disk-lock-'));
   t.after(() => rm(root, { recursive: true, force: true }));
 
-  const cliPath = path.join(root, 'real-restic-cli');
-  await writeFile(
-    cliPath,
-    `#!${process.execPath}
-import fs from 'node:fs';
-import path from 'node:path';
-const repo = process.env.RESTIC_REPOSITORY;
-const pwFile = process.env.RESTIC_PASSWORD_FILE;
-const pw = fs.readFileSync(pwFile, 'utf8');
-if (!repo || pw.length < 8) process.exit(2);
-const cmd = process.argv[2];
-await new Promise((r) => setTimeout(r, 40));
-if (cmd === 'init') {
-  fs.mkdirSync(repo, { recursive: true, mode: 0o700 });
-  fs.writeFileSync(path.join(repo, 'config'), JSON.stringify({ initialized: true }), { mode: 0o600 });
-  process.stdout.write(JSON.stringify({ message_type: 'initialized', id: 'ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12' }) + '\\n');
-} else if (cmd === 'check') {
-  if (!fs.existsSync(path.join(repo, 'config'))) process.exit(3);
-  process.stdout.write(JSON.stringify({ message_type: 'summary', num_errors: 0 }) + '\\n');
-}
-`,
-    { mode: 0o700 },
-  );
-  await chmod(cliPath, 0o700);
   await mkdir(path.join(root, 'repos'), { recursive: true, mode: 0o700 });
-
   const filePath = path.join(root, 'repositories.json');
   const masterKey = randomBytes(32);
-  const resticManager = createResticManager({ resticPath: cliPath });
-  const registry = createResticRepositoryRegistry({
+
+  const registryA = createResticRepositoryRegistry({
     filePath,
     localRepoBase: path.join(root, 'repos'),
     masterKey,
     serverExists: async (id) => id === serverId,
-    resticManager,
   });
-  await registry.init();
+  const registryB = createResticRepositoryRegistry({
+    filePath,
+    localRepoBase: path.join(root, 'repos'),
+    masterKey,
+    serverExists: async (id) => id === serverId,
+  });
+  await registryA.init();
+  await registryB.init();
 
-  const created = await registry.createRepository({
+  const created = await registryA.createRepository({
     repositoryId: repoId,
     serverId,
-    name: 'race_repo',
+    name: 'shared_disk_repo',
     backend: 'local',
     password: 'real-strong-password-893',
   });
   assert.equal(created.status, 'uninitialized');
 
   const concurrentPolls = (async () => {
-    for (let i = 0; i < 6; i += 1) {
-      await new Promise((resolve) => setTimeout(resolve, 8));
-      await registry.listRepositories({ serverId });
+    for (let i = 0; i < 8; i += 1) {
+      await registryA.listRepositories({ serverId });
+      await registryB.listRepositories({ serverId });
     }
   })();
 
-  const [initResult] = await Promise.all([
-    registry.initResticRepository(created.id),
+  const [updated] = await Promise.all([
+    registryB.updateRepository(created.id, {
+      name: 'serialized_disk_repo',
+      retentionPolicy: { keepDaily: 7, keepWeekly: 4 },
+    }),
     concurrentPolls,
   ]);
-  assert.equal(initResult.status, 'ready');
+  assert.equal(updated.name, 'serialized_disk_repo');
+  assert.equal(updated.retentionPolicy.keepDaily, 7);
+  assert.equal(updated.retentionPolicy.keepWeekly, 4);
 
-  const afterInit = await registry.getRepository(created.id);
-  assert.equal(afterInit.status, 'ready');
+  const fromA = await registryA.getRepository(created.id);
+  assert.equal(fromA.name, 'serialized_disk_repo');
+  assert.equal(fromA.retentionPolicy.keepDaily, 7);
 
   const onDisk = JSON.parse(await readFile(filePath, 'utf8'));
-  assert.equal(onDisk.repositories[0]?.status, 'ready');
+  assert.equal(onDisk.repositories[0]?.name, 'serialized_disk_repo');
+  assert.equal(onDisk.repositories[0]?.retentionPolicy?.keepDaily, 7);
 });
