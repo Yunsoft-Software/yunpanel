@@ -279,7 +279,7 @@ test('POST /api/backups/remotes/:remoteId/test tests remote connectivity', async
   assert.equal(body.data.ok, true);
 });
 
-test('POST /api/backups/repositories with initialize:true fails closed on real missing Restic binary ENOENT and persists error status despite concurrent GET polling', async (t) => {
+test('POST /api/backups/repositories with initialize:true fails closed with exact restic_binary_missing and restic_command_failed codes and persists error status despite concurrent GET polling', async (t) => {
   const { randomBytes } = await import('node:crypto');
   const { mkdir, mkdtemp, readFile, rm } = await import('node:fs/promises');
   const os = await import('node:os');
@@ -289,77 +289,92 @@ test('POST /api/backups/repositories with initialize:true fails closed on real m
 
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t893-enoent-'));
   await mkdir(path.join(root, 'repos'), { recursive: true, mode: 0o700 });
+  t.after(() => rm(root, { recursive: true, force: true }));
 
-  const missingBinaryPath = path.join(root, 'missing-restic-binary');
   const serverId = '6f2cc8d7-995f-4c20-b9a8-e2ce07b760d7';
-  const storePath = path.join(root, 'restic-repositories.json');
-  const resticRepositoryRegistry = createResticRepositoryRegistry({
-    filePath: storePath,
-    localRepoBase: path.join(root, 'repos'),
-    masterKey: randomBytes(32),
-    serverExists: async (id) => id === serverId,
-    resticManager: createResticManager({ resticPath: missingBinaryPath }),
-  });
-  await resticRepositoryRegistry.init();
 
-  const app = express();
-  app.use(express.json());
-  app.use((req, _res, next) => {
-    req.auth = ownerAuth;
-    next();
-  });
-  mountBackupRepositoryRoutes(app, { resticRepositoryRegistry, localServerId: serverId });
-  app.use((error, _req, res, _next) => {
-    if (isBackupRepositoryHttpError(error)) {
-      return res.status(error.status ?? 400).json({ error: { code: error.code, message: error.message } });
-    }
-    return res.status(500).json({ error: { code: 'internal_error', message: error.message } });
-  });
+  for (const scenario of [
+    {
+      name: 't893_missing_binary_repo',
+      resticPath: path.join(root, 'missing-restic-binary'),
+      expectedStatus: 503,
+      expectedCode: 'restic_binary_missing',
+    },
+    {
+      name: 't893_nonexec_dir_repo',
+      resticPath: root,
+      expectedStatus: 500,
+      expectedCode: 'restic_command_failed',
+    },
+  ]) {
+    const storePath = path.join(root, `${scenario.name}.json`);
+    const resticRepositoryRegistry = createResticRepositoryRegistry({
+      filePath: storePath,
+      localRepoBase: path.join(root, 'repos'),
+      masterKey: randomBytes(32),
+      serverExists: async (id) => id === serverId,
+      resticManager: createResticManager({ resticPath: scenario.resticPath }),
+    });
+    await resticRepositoryRegistry.init();
 
-  const server = http.createServer(app);
-  await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
-  t.after(async () => {
-    server.closeAllConnections();
-    server.close();
-    await once(server, 'close');
-    await rm(root, { recursive: true, force: true });
-  });
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
-  const reqHeaders = { 'Content-Type': 'application/json', connection: 'close' };
+    const app = express();
+    app.use(express.json());
+    app.use((req, _res, next) => {
+      req.auth = ownerAuth;
+      next();
+    });
+    mountBackupRepositoryRoutes(app, { resticRepositoryRegistry, localServerId: serverId });
+    app.use((error, _req, res, _next) => {
+      if (isBackupRepositoryHttpError(error)) {
+        return res.status(error.status ?? 400).json({ error: { code: error.code, message: error.message } });
+      }
+      return res.status(500).json({ error: { code: 'internal_error', message: error.message } });
+    });
 
-  const polling = (async () => {
-    for (let i = 0; i < 6; i += 1) {
+    const server = http.createServer(app);
+    await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
+    try {
+      const baseUrl = `http://127.0.0.1:${server.address().port}`;
+      const reqHeaders = { 'Content-Type': 'application/json', connection: 'close' };
+
+      const polling = (async () => {
+        for (let i = 0; i < 6; i += 1) {
+          const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
+          assert.equal(listRes.status, 200);
+          await listRes.json();
+        }
+      })();
+
+      const [createRes] = await Promise.all([
+        fetch(`${baseUrl}/api/backups/repositories`, {
+          method: 'POST',
+          headers: reqHeaders,
+          body: JSON.stringify({
+            name: scenario.name,
+            backend: 'local',
+            password: 'super_strong_t893_password',
+            initialize: true,
+          }),
+        }),
+        polling,
+      ]);
+
+      assert.equal(createRes.status, scenario.expectedStatus);
+      const errBody = await createRes.json();
+      assert.equal(errBody.error?.code, scenario.expectedCode);
+
       const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
       assert.equal(listRes.status, 200);
-      await listRes.json();
+      const listBody = await listRes.json();
+      assert.equal(listBody.data.length, 1);
+      assert.equal(listBody.data[0].status, 'error');
+
+      const diskStore = JSON.parse(await readFile(storePath, 'utf8'));
+      assert.equal(diskStore.repositories[0]?.status, 'error');
+    } finally {
+      server.closeAllConnections();
+      server.close();
+      await once(server, 'close');
     }
-  })();
-
-  const [createRes] = await Promise.all([
-    fetch(`${baseUrl}/api/backups/repositories`, {
-      method: 'POST',
-      headers: reqHeaders,
-      body: JSON.stringify({
-        name: 't893_missing_binary_repo',
-        backend: 'local',
-        password: 'super_strong_t893_password',
-        initialize: true,
-      }),
-    }),
-    polling,
-  ]);
-
-  assert.notEqual(createRes.status, 201);
-  assert.ok(createRes.status >= 400 && createRes.status < 600);
-  const errBody = await createRes.json();
-  assert.equal(typeof errBody.error?.code, 'string');
-
-  const listRes = await fetch(`${baseUrl}/api/backups/repositories`, { headers: { connection: 'close' } });
-  assert.equal(listRes.status, 200);
-  const listBody = await listRes.json();
-  assert.equal(listBody.data.length, 1);
-  assert.equal(listBody.data[0].status, 'error');
-
-  const diskStore = JSON.parse(await readFile(storePath, 'utf8'));
-  assert.equal(diskStore.repositories[0]?.status, 'error');
+  }
 });
