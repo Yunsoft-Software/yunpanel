@@ -73,3 +73,42 @@ test('PHP stage preserves canonical file settings and rejects unsafe or noncanon
   ]) assert.throws(() => createOperationEnvelope({ id: 'php-domain-stage-unsafe-files', operation: OPERATIONS.DOMAIN_STAGE,
     payload: { ...payload, nginxSettings: { ...nginxSettings, ...patch } } }), /nginxSettings/);
 });
+
+test('PHP stage accepts canonical staticAssetCacheSeconds and documentRoot settings while rejecting out-of-range values', () => {
+  for (const nginxSettings of [
+    { clientMaxBodySizeMb: null, staticAssetCacheSeconds: 120, headers: [] },
+    { clientMaxBodySizeMb: 2, staticAssetCacheSeconds: 120, headers: [{ name: 'X-Cache-Mode', value: 'php-static', always: true }] },
+    { clientMaxBodySizeMb: null, staticAssetCacheSeconds: 0, headers: [] },
+    { clientMaxBodySizeMb: null, staticAssetCacheSeconds: null, headers: [] },
+    {
+      clientMaxBodySizeMb: 32,
+      documentRoot: 'subpath/public',
+      indexFiles: ['index.php', 'index.html'],
+      errorPages: { 404: '/errors/404.html' },
+      staticAssetCacheSeconds: 86_400,
+      headers: [],
+    },
+  ]) {
+    const next = { ...payload, nginxSettings };
+    const envelope = createOperationEnvelope({
+      id: 'php-domain-stage-cache-valid',
+      operation: OPERATIONS.DOMAIN_STAGE,
+      payload: next,
+    });
+    assert.deepEqual(envelope.payload, next);
+  }
+
+  for (const invalidCache of [-1, 3.5, 31_536_001, '120', true]) {
+    assert.throws(
+      () => createOperationEnvelope({
+        id: 'php-domain-stage-cache-invalid',
+        operation: OPERATIONS.DOMAIN_STAGE,
+        payload: {
+          ...payload,
+          nginxSettings: { clientMaxBodySizeMb: null, headers: [], staticAssetCacheSeconds: invalidCache },
+        },
+      }),
+      /nginxSettings/,
+    );
+  }
+});
