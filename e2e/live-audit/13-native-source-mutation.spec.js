@@ -66,35 +66,63 @@ function verifyOwnedAbsence(fixture){
  fixture.record('cleanup.physical-absence',{unixUserAbsent:true,unixGroupAbsent:true,rootsAbsent:true,mountsAbsent:true,fpmAbsent:true,socketsAbsent:true,nginxAbsent:true});
 }
 async function cleanupPrimary(){
+ const identity=primary.ledger,mailDomainId=state?.fixture.mailDomainId;
+ const root='/api/panel/domains/'+identity.domainId+'/removal-operations';
+ let before=null;
+ if(mailDomainId){
+  const journals=check(await apiCall(owner.api,owner.csrf,'GET',root),'cleanup.domain-before');
+  const jobs=await ownedMailCleanupJobs(identity,mailDomainId);
+  expect(jobs.some(job=>['queued','running'].includes(job.status)),'Own mail setup/cleanup jobs must finish before Website removal').toBe(false);
+  before={domainOperationIds:journals.operations.map(op=>op.id),mailJobIds:jobs.map(job=>job.id)};
+  const current=manifest();current.fixture.cleanupBaseline=before;saveManifest(current);
+ }
  try{await primary.cleanup();return;}catch(error){
   if(!String(error.message).startsWith('Owned removal stopped: domain_removal child_domain_removal_blocked'))throw error;
  }
- // Mail removal deliberately advances one durable phase per explicit parent continuation.
- // Wait on the same owned child instead of starting another removal or bypassing its jobs.
- const identity=primary.ledger,websiteOperationId=identity.removalId;
+ expect(before,'A child continuation requires the baseline recorded before this owned removal started').toBeTruthy();
+ const websiteOperationId=primary.ledger.removalId;
  expect(websiteOperationId).toMatch(/^ws-rem-[a-f0-9-]{36}$/i);
- const root='/api/panel/domains/'+identity.domainId+'/removal-operations';
+ const website=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/website-removal-operations/'+websiteOperationId),'cleanup.website-boundary');
+ expect(website.id).toBe(websiteOperationId);expect(website.websiteId).toBe(identity.websiteId);expect(website.serverId).toBe(identity.serverId);expect(website.applicationId).toBe(identity.applicationId);
+ expect(website.steps.some(step=>step.kind==='domain_removal'&&step.resourceId===identity.domainId&&step.error?.code==='child_domain_removal_blocked')).toBe(true);
  const listed=check(await apiCall(owner.api,owner.csrf,'GET',root),'cleanup.domain-journals');
- const candidates=listed.operations.filter(op=>op.domainId===identity.domainId);
- expect(candidates,'Exactly one owned Domain child must be authoritative').toHaveLength(1);
- expect(state.fixture.mailDomainId).toBeTruthy();
- expect(candidates[0].steps.some(step=>step.kind==='mail_domain'&&step.resourceId===state.fixture.mailDomainId)).toBe(true);
- const childId=candidates[0].id;let removed=false;const deadline=Date.now()+180000;
- while(Date.now()<deadline){
-  const current=check(await apiCall(owner.api,owner.csrf,'GET',root+'/'+childId),'cleanup.domain-journal').operation;
-  expect(current.id).toBe(childId);expect(current.domainId).toBe(identity.domainId);
-  if(current.status==='removed'){removed=true;break;}
-  const step=current.steps.find(item=>item.status!=='succeeded');
+ const candidates=listed.operations.filter(op=>!before.domainOperationIds.includes(op.id));
+ expect(candidates,'Exactly one new Domain journal must be observed during this owned Website lifecycle').toHaveLength(1);
+ const child=candidates[0],childId=child.id;
+ expect(child.domainId).toBe(identity.domainId);expect(child.serverId).toBe(identity.serverId);expect(child.primaryDomain).toBe(identity.hostname);
+ expect(Date.parse(child.createdAt)).toBeGreaterThanOrEqual(Date.parse(website.createdAt));
+ expect(child.plan.websiteId).toBe(identity.websiteId);expect(child.plan.applicationId).toBe(identity.applicationId);expect(child.plan.mailDomainIds).toEqual([mailDomainId]);
+ const intent=child.plan.mailDomainIntents;expect(intent).toHaveLength(1);expect(intent[0]).toMatchObject({id:mailDomainId,webDomainId:identity.domainId,domainName:identity.hostname,managementMode:'local'});
+ const current=manifest();current.fixture.cleanupDomainOperationId=childId;saveManifest(current);
+ let removed=false;const deadline=Date.now()+180000;let continuations=0;
+ while(Date.now()<deadline&&continuations<12){
+  // Actual public job IDs belong to this exact new removal interval and owned mail domain.
+  // No parent continuation is sent while its disable/backup/delete worker is pending.
+  const jobs=await ownedMailCleanupJobs(identity,mailDomainId);
+  for(const job of jobs.filter(job=>!before.mailJobIds.includes(job.id))){
+   expect(Date.parse(job.createdAt)).toBeGreaterThanOrEqual(Date.parse(website.createdAt));
+   const types={'mail.config.apply':'mail.config.apply','mail.data.backup':'mail_data_backup','mail.data.delete':'mail_data_delete'};
+   expect(Object.keys(types)).toContain(job.operation);expect(job.type).toBe(types[job.operation]);
+   const terminal=['queued','running'].includes(job.status)?await waitJob(owner.api,job.id,Math.min(120000,Math.max(1,deadline-Date.now()))):job;
+   expect(terminal.id).toBe(job.id);expect(terminal.serverId).toBe(identity.serverId);expect(terminal.resourceType).toBe('mail_domain');expect(terminal.resourceId).toBe(mailDomainId);expect(terminal.operation).toBe(job.operation);
+   record('cleanup.owned-mail-job',{jobId:terminal.id,operation:terminal.operation,status:terminal.status,code:terminal.error?.code??null});expect(terminal.status).toBe('succeeded');
+  }
+  const operation=check(await apiCall(owner.api,owner.csrf,'GET',root+'/'+childId),'cleanup.domain-journal').operation;
+  expect(operation.id).toBe(childId);expect(operation.domainId).toBe(identity.domainId);expect(operation.serverId).toBe(identity.serverId);
+  if(operation.status==='removed'){removed=true;break;}
+  const step=operation.steps.find(item=>item.status!=='succeeded');
   expect(step,'An unfinished owned Domain child must expose its next step').toBeTruthy();
-  expect(current.checksum).toMatch(/^[a-f0-9]{64}$/);expect(current.actions.stepContinuationConfirmation).toBeTruthy();
+  expect(operation.checksum).toMatch(/^[a-f0-9]{64}$/);expect(operation.actions.stepContinuationConfirmation).toBeTruthy();
   const advanced=check(await apiCall(owner.api,owner.csrf,'POST',root+'/'+childId+'/continue',{
-   expectedUpdatedAt:current.updatedAt,stepId:step.id,checksum:current.checksum,confirmation:current.actions.stepContinuationConfirmation,
+   expectedUpdatedAt:operation.updatedAt,stepId:step.id,checksum:operation.checksum,confirmation:operation.actions.stepContinuationConfirmation,
   }),'cleanup.domain-continue').operation;
-  expect(advanced.id).toBe(childId);expect(advanced.domainId).toBe(identity.domainId);
-  record('cleanup.domain-phase',{operationId:childId,stepId:step.id,status:advanced.status});
-  await new Promise(resolve=>setTimeout(resolve,1500));
+  expect(advanced.id).toBe(childId);expect(advanced.domainId).toBe(identity.domainId);expect(advanced.updatedAt).not.toBe(operation.updatedAt);
+  record('cleanup.domain-phase',{operationId:childId,stepId:step.id,status:advanced.status,continuation:++continuations});
+  if(advanced.status==='removed'){removed=true;break;}
  }
- expect(removed,'The same owned Domain child must finish through its normal public lifecycle').toBe(true);
+ expect(removed,'The same observed owned Domain child must finish through its normal public lifecycle').toBe(true);
+ const removedChild=check(await apiCall(owner.api,owner.csrf,'GET',root+'/'+childId),'cleanup.domain-removed').operation;
+ expect(removedChild.id).toBe(childId);expect(removedChild.domainId).toBe(identity.domainId);expect(removedChild.status).toBe('removed');
  const operation=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/website-removal-operations/'+websiteOperationId),'cleanup.website-journal');
  expect(operation.websiteId).toBe(identity.websiteId);
  if(operation.status!=='removed'){
@@ -104,6 +132,12 @@ async function cleanupPrimary(){
   }),'cleanup.website-resume',202);expect(resumed.id).toBe(websiteOperationId);
  }
  await primary.cleanup();
+}
+async function ownedMailCleanupJobs(identity,mailDomainId){
+ const rows=check(await apiCall(owner.api,owner.csrf,'GET','/api/panel/jobs?resourceType=mail_domain&resourceId='+mailDomainId),'cleanup.mail-jobs');
+ expect(Array.isArray(rows)).toBe(true);
+ for(const job of rows){expect(job.serverId).toBe(identity.serverId);expect(job.resourceType).toBe('mail_domain');expect(job.resourceId).toBe(mailDomainId);}
+ return rows;
 }
 async function removeMailbox(c,id){
  const base='/api/panel/mailboxes/'+id;let r=await apiCall(c.api,c.csrf,'GET',base);if(r.status===404)return;const box=check(r,'cleanup.mailbox.read');expect(box.mailDomainId).toBe(state.fixture.mailDomainId);
@@ -122,11 +156,17 @@ async function finishedBackup(c,root,operation){
  const actual=check(await apiCall(c.api,c.csrf,'GET',root+'/backup-operations/'+operation.id),'backup.native.operation');
  expect(actual.status).toBe('succeeded');return actual;
 }
+async function recordOwnedBackupResources(c,m){
+ const set=check(await apiCall(c.api,c.csrf,'GET','/api/panel/websites/'+m.fixture.websiteId+'/backup-set'),'backup.owned-resource-set');
+ expect(set.website.id).toBe(m.fixture.websiteId);expect(set.stagedRoot).toBe('/var/lib/yunpanel/backups/resources/website/'+m.fixture.websiteId);
+ m.fixture.backupResources={websiteId:m.fixture.websiteId,stagedRoot:set.stagedRoot,observedFromActualBackupSet:true};saveManifest(m);
+ record('backup.owned-staging',{websiteId:m.fixture.websiteId,stagedRoot:set.stagedRoot});
+}
 async function ensureWordPressRemovalSnapshot(c,m){
  if(m.fixture.nativeBackup?.snapshotId)return m.fixture.nativeBackup;
  // An independently selected WordPress case prepares its own normal backup.
  // It does not stand in for the separate combined mail/environment restore gate.
- const repository=await ownRepository(c),root='/api/panel/websites/'+m.fixture.websiteId;
+ await recordOwnedBackupResources(c,m);const repository=await ownRepository(c),root='/api/panel/websites/'+m.fixture.websiteId;
  const preview=check(await apiCall(c.api,c.csrf,'POST',root+'/backup/preview',{repositoryId:repository.id}),'wordpress.remove.backup-preview');
  const queued=check(await apiCall(c.api,c.csrf,'POST',root+'/backup-operations',{
   kind:'backup',repositoryId:repository.id,expectedPreviewDigest:preview.backupSetDigest,confirmation:preview.confirmation,tags:['t886-wp-remove-'+m.runId],
@@ -346,6 +386,7 @@ async function ownedImapMessage({hostname,address,password,subject,remove=false,
 
 test('@mutation source real backup restores file content, SQL, mailbox authentication and the protected environment secret',async({liveApi})=>{
  test.setTimeout(480000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId,sec=secrets();expect(m.fixture.mailHostname).toBeTruthy();
+ await recordOwnedBackupResources(liveApi,m);
  await nativeMailboxPassword(liveApi,m,sec.mailPasswords.beta);const messageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};const originalMessage=await ownedImapMessage(messageInput);expect(originalMessage.count).toBe(1);m.fixture.originalMessage=originalMessage;saveManifest(m);record('backup.mail-message-before',originalMessage);const repo=await ownRepository(liveApi);
  const markerName='native-restore-proof-'+m.runId+'.txt',marker='NATIVE-RESTORE-'+m.runId,sqlName='native-restore-sql-'+m.runId+'.php',changedProof='CHANGED-'+m.runId+'-'+randomBytes(6).toString('hex');
  const connection=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+m.fixture.binding.id+'/connection',{revealPassword:true}),'backup.database.connection');
@@ -466,7 +507,9 @@ test('@mutation source WordPress removal removes actual core files and prefix ta
    const actual = await liveApi.api.get('http://' + m.fixture.hostname + '/'); expect(actual.status()).toBe(200);
    record('wordpress.remove.restored-installation', { verified: true });
   }
-  if(!queued)await remove(liveApi,m,probe);
+  const remainingProbe=await apiCall(liveApi.api,liveApi.csrf,'GET',websiteRoot+'/files/text?path='+probe);
+  expect([200,404],'The exact owned probe must be readable or already absent').toContain(remainingProbe.status);
+  if(remainingProbe.status===200)await remove(liveApi,m,probe);
   const absent=await apiCall(liveApi.api,liveApi.csrf,'GET',websiteRoot+'/files/text?path='+probe);expect(absent.status).toBe(404);
  }
 });
