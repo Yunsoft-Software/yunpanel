@@ -1156,7 +1156,7 @@
 
 ### T900 · Gerçek birleşik site geri yüklemesi geri alma sırasında da başarısız oluyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/website-restore-service.js`, `apps/api/src/website-backup-operation-registry.js`, `apps/api/test/website-restore-service.test.js`
+- **Dosyalar:** `apps/api/src/application-environment-registry.js`, `apps/api/src/website-restore-service.js`, `apps/api/src/website-mail-backup-adapter.js`, `apps/api/src/website-backup-operation-registry.js`, `apps/api/src/website-backup-operation-service.js`, `apps/api/test/website-restore-service.test.js`, `apps/api/test/website-environment-backup-adapter.test.js`
 - **Kaynak:** QA · 2026-11-12 19:23
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
