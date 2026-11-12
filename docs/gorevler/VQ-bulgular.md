@@ -1059,3 +1059,13 @@
     T886 native ilk debug: normal UI ve normal API static create sonrası server automatic worker devam ederken owned-fixture POST /sites/provisioning/:id/continue HTTP409 site_mutation_locked alıp testi bitiriyor. Ürün hatası değildir; finalready ve requiredstep assertions korunarak yalnız belgeli409 busy/stale durumunda aynı operation okunup beklenmeli; kör mutation retry yok. UygulamaHTTP400/403 ve gerçekfailedstep yine hata. Gerçek fresh PHP/static UI/API kur-sil ile tekrar üret, düzelt, cleanup yokluğunu doğrula. Diğer dosyalara ve ürün/deploy/restarta dokunma.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T891 · PHP barındırma ayarları kaydediliyor ancak hazırlama invalid_operation_payload ile reddediliyor
+- **Bağımlı:** —
+- **Dosyalar:** `packages/protocol/src/index-node-passenger.js`
+- **Kaynak:** QA · 2026-11-12 17:04
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T887 native .28 /19 Chrome debug: owned PHP normal UI Kaydet ve uygula -> update-preview200, PATCH200, domain stage400 invalid_operation_payload. Yeni header,2MiBbodylimit,cache120 uygulanamadı; orijinal ayara normal API dönüşten sonraki stage de400. Aynı native pakette Node ve static hosting senaryoları geçti. .local/t883-20261112/t887-debug-19-chrome özel route/API kanıtı; altı test kaynağı normal removal ile temizlendi. Kaynak şüphesi validatePhpDomainStage PHP-only nginxSettings alanlarını inheritedPassenger doğrulamasına aktarırken staticAssetCacheSeconds alanını ayırmıyor; henüz kök neden diye kabul edilmez, dar gerçek API tekrarının mesajıyla doğrula. Testi gevşetme; PHP canonical envelope ve gerçek HTTP etkisi için regresyonu düzelt. Bu test çalışmasında deploy/servis restart yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.

@@ -233,3 +233,4 @@
 
 - 2026-11-12 Codex: İNSAN önce T883 gerçek test kapsamı açığının kapatılmasını ve .28 doğrulamasını, ardından site kopyalama ve kalan özellikler için öncelikli plan hazırlanmasını istedi. Yeni dal 12-11-2026, doğrulanmış/push edilmiş a2fdc8c1 tabanından açıldı; dağıtım ve yeni özellik uygulaması bu dilimde yok.
 - 2026-11-12 16:21 orchestrator: verify 5ea65d78..a2fdc8c1: ok, yeniden açılan -, bulgu -
+- 2026-11-12 16:57 orchestrator: tick: 4/4 yuva işte, geri alınan 0
