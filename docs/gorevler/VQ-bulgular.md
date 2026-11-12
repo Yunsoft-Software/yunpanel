@@ -1011,7 +1011,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T886 · T883 site DB posta WordPress ve silme senaryoları eksik
-- **Bağımlı:** T885
+- **Bağımlı:** T885, T900
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`
 - **Kaynak:** QA · 2026-11-12 16:31
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
@@ -1155,7 +1155,7 @@
 
 
 ### T900 · Gerçek birleşik site geri yüklemesi geri alma sırasında da başarısız oluyor
-- **Bağımlı:** —
+- **Bağımlı:** T895
 - **Dosyalar:** `apps/api/src/application-environment-registry.js`, `apps/api/src/website-restore-service.js`, `apps/api/src/website-mail-backup-adapter.js`, `apps/api/src/website-backup-operation-registry.js`, `apps/api/src/website-backup-operation-service.js`, `apps/api/test/website-restore-service.test.js`, `apps/api/test/website-environment-backup-adapter.test.js`, `e2e/live-audit/13-native-source-mutation.spec.js`, `docs/t883-coverage-and-priorities-2026-11-12.md`, `docs/test-scenarios-matrix.md`
 - **Kaynak:** QA · 2026-11-12 19:23
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
