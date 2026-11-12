@@ -405,29 +405,151 @@ async function ownedImapMessage({hostname,address,password,subject,remove=false,
  });
 }
 
-test('@mutation source real backup restores file content, SQL, mailbox authentication and the protected environment secret',async({liveApi})=>{
- test.setTimeout(480000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId,sec=secrets();expect(m.fixture.mailHostname).toBeTruthy();
- await recordOwnedBackupResources(liveApi,m);
- await nativeMailboxPassword(liveApi,m,sec.mailPasswords.beta);const messageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};const originalMessage=await ownedImapMessage(messageInput);expect(originalMessage.count).toBe(1);m.fixture.originalMessage=originalMessage;saveManifest(m);record('backup.mail-message-before',originalMessage);const repo=await ownRepository(liveApi);
- const markerName='native-restore-proof-'+m.runId+'.txt',marker='NATIVE-RESTORE-'+m.runId,sqlName='native-restore-sql-'+m.runId+'.php',changedProof='CHANGED-'+m.runId+'-'+randomBytes(6).toString('hex');
- const connection=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+m.fixture.binding.id+'/connection',{revealPassword:true}),'backup.database.connection');
- const sql='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');if($_SERVER["REQUEST_METHOD"]==="POST"){$db->query('+JSON.stringify("UPDATE yp_native_proof SET value='"+changedProof+"' WHERE id=1")+');}$row=$db->query("SELECT value FROM yp_native_proof WHERE id=1")->fetch_assoc();echo json_encode(["proof"=>$row["value"]]);';
- await upload(liveApi,m,markerName,marker);await upload(liveApi,m,sqlName,sql);const sqlUrl='http://'+m.fixture.hostname+'/'+sqlName;const beforeSql=await liveApi.api.get(sqlUrl);expect(beforeSql.status()).toBe(200);const beforeRow=await beforeSql.json();
+function sqlToken(value){return String(value).replace(/[^A-Za-z0-9_-]/g,'-').slice(0,40);}
+async function ensureCompoundPrerequisites(c,m){
+ if(!m.fixture.binding?.id){
+  const site=check(await apiCall(c.api,c.csrf,'GET','/api/panel/websites/'+m.fixture.websiteId),'compound.prerequisite.website');
+  const created=check(await apiCall(c.api,c.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases',{databaseName:m.fixture.databaseName,mode:'create',expectedWebsiteRevision:site.revision}),'compound.prerequisite.database',202);
+  expect((await waitJob(c.api,created.job.id)).status).toBe('succeeded');
+  m.fixture.binding=created.binding;m.fixture.credential=created.credential;m.fixture.createdDatabaseNames=[m.fixture.databaseName];saveManifest(m);
+  const connection=check(await apiCall(c.api,c.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+created.binding.id+'/connection',{revealPassword:true}),'compound.prerequisite.connection');
+  const initName='compound-db-init-'+m.runId+'.php',proof='DB-NATIVE-'+sqlToken(m.runId);
+  const initSource='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');$db->query("CREATE TABLE IF NOT EXISTS yp_native_proof (id INT PRIMARY KEY, value VARCHAR(128))");$s=$db->prepare("REPLACE INTO yp_native_proof VALUES (1, ?)");$v='+JSON.stringify(proof)+';$s->bind_param("s",$v);$s->execute();$r=$db->query("SELECT value FROM yp_native_proof WHERE id=1")->fetch_assoc();echo json_encode(["proof"=>$r["value"]]);';
+  try{await upload(c,m,initName,initSource);const actual=await c.api.get('http://'+m.fixture.hostname+'/'+initName);expect(actual.status()).toBe(200);expect((await actual.json()).proof).toBe(proof);}finally{await remove(c,m,initName);}
+  record('compound.db.api-prerequisite-only',{databaseName:m.fixture.databaseName,uiCreateVerified:false});
+ }
+ if(!m.fixture.mailDomainId){
+  const createdDomain=check(await apiCall(c.api,c.csrf,'POST','/api/panel/mail-domains',{name:m.fixture.hostname,webDomainId:m.fixture.domainId,managementMode:'local'}),'compound.prerequisite.mail-domain',201);
+  m.fixture.mailDomainId=createdDomain.id;saveManifest(m);
+ }
+ if((m.fixture.mailboxIds?.length??0)<2){
+  const sec=secrets();sec.mailPasswords??={};m.fixture.mailboxIds??=[];
+  const existingBoxes=check(await apiCall(c.api,c.csrf,'GET','/api/panel/mailboxes?mailDomainId='+m.fixture.mailDomainId),'compound.prerequisite.mailboxes');
+  for(const name of ['alpha','beta']){
+   sec.mailPasswords[name]??=randomBytes(24).toString('base64url');saveSecrets(sec);
+   const address=name+'@'+m.fixture.hostname;let box=existingBoxes.find(item=>item.address===address);
+   if(!box)box=check(await apiCall(c.api,c.csrf,'POST','/api/panel/mailboxes',{mailDomainId:m.fixture.mailDomainId,address,password:sec.mailPasswords[name]}),'compound.prerequisite.mailbox',201);
+   if(!m.fixture.mailboxIds.includes(box.id))m.fixture.mailboxIds.push(box.id);
+  }
+  saveManifest(m);await applyMail(c,m.fixture.mailDomainId,'enabled');
+  record('compound.mail.api-prerequisite-only',{mailDomainId:m.fixture.mailDomainId,mailboxes:m.fixture.mailboxIds.length,uiCreateVerified:false});
+ }
+ if(!m.fixture.mailHostname){
+  const settings=check(await apiCall(c.api,c.csrf,'GET','/api/panel/mailboxes/'+m.fixture.mailboxIds[1]+'/connection-settings'),'compound.prerequisite.imap-settings');
+  const hostname=settings.mailHostname??settings.incoming?.hostname;expect(typeof hostname).toBe('string');m.fixture.mailHostname=hostname;saveManifest(m);
+ }
+}
+async function ensureCompoundBackupFixture(c,m){
+ if(m.fixture.nativeBackup?.purpose==='compound')return m.fixture.nativeBackup;
+ await ensureCompoundPrerequisites(c,m);
+ const root='/api/panel/websites/'+m.fixture.websiteId,sec=secrets();expect(m.fixture.mailHostname).toBeTruthy();
+ await recordOwnedBackupResources(c,m);
+ await nativeMailboxPassword(c,m,sec.mailPasswords.beta);
+ const messageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};
+ let originalMessage=await ownedImapMessage(messageInput);
+ if(originalMessage.count===0){
+  const delivered=check(await apiCall(c.api,c.csrf,'POST','/api/panel/mailboxes/'+m.fixture.mailboxIds[0]+'/test-delivery',{recipient:'beta@'+m.fixture.hostname,subject:'OWNED-NATIVE-'+m.runId}),'compound.prerequisite.delivery');
+  expect(delivered.delivered).toBe(true);
+  for(let attempt=0;attempt<15&&originalMessage.count===0;attempt++){await new Promise(r=>setTimeout(r,500));originalMessage=await ownedImapMessage(messageInput);}
+ }
+ expect(originalMessage.count).toBe(1);m.fixture.originalMessage=originalMessage;saveManifest(m);record('backup.mail-message-before',originalMessage);
+ const repo=await ownRepository(c);
+ const markerName='native-restore-proof-'+m.runId+'.txt',marker='NATIVE-RESTORE-'+m.runId;
+ const healthProbeName='native-restore-health-'+m.runId+'.php',snapshotAHealthBody='OWNED-SNAPSHOT-A-HEALTH-503';
+ const snapshotAHealthSource='<?php http_response_code(503); header("Content-Type: text/plain"); echo "OWNED-SNAPSHOT-A-HEALTH-503";';
+ const sqlName='native-restore-sql-'+m.runId+'.php';
+ const connection=check(await apiCall(c.api,c.csrf,'POST','/api/panel/servers/'+m.serverId+'/websites/'+m.fixture.websiteId+'/databases/'+m.fixture.binding.id+'/connection',{revealPassword:true}),'backup.database.connection');
+ const sql='<?php header("Content-Type: application/json");mysqli_report(MYSQLI_REPORT_ERROR | MYSQLI_REPORT_STRICT);$db=new mysqli('+[connection.host,connection.username,connection.password,connection.databaseName].map(v=>JSON.stringify(v)).join(',')+');if($_SERVER["REQUEST_METHOD"]==="POST"){$raw=file_get_contents("php://input");$decoded=is_string($raw)&&$raw!==""?json_decode($raw,true):null;$next=is_array($decoded)&&isset($decoded["value"])?$decoded["value"]:($_POST["value"]??($_GET["value"]??""));if(!is_string($next)||!preg_match("/^[A-Za-z0-9_-]{1,96}$/",$next)){http_response_code(400);echo json_encode(["error"=>"invalid_sql_proof"]);exit;}$stmt=$db->prepare("UPDATE yp_native_proof SET value = ? WHERE id = 1");$stmt->bind_param("s",$next);$stmt->execute();}$row=$db->query("SELECT value FROM yp_native_proof WHERE id = 1")->fetch_assoc();echo json_encode(["proof"=>$row["value"]]);';
+ await upload(c,m,markerName,marker);await upload(c,m,healthProbeName,snapshotAHealthSource);await upload(c,m,sqlName,sql);
+ const beforeMarker=await c.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(beforeMarker.status()).toBe(200);expect(await beforeMarker.text()).toBe(marker);
+ const beforeHealth=await c.api.get('http://'+m.fixture.hostname+'/'+healthProbeName);expect(beforeHealth.status()).toBe(503);expect(await beforeHealth.text()).toBe(snapshotAHealthBody);
+ const sqlUrl='http://'+m.fixture.hostname+'/'+sqlName;const beforeSql=await c.api.get(sqlUrl);expect(beforeSql.status()).toBe(200);const beforeRow=await beforeSql.json();expect(typeof beforeRow.proof).toBe('string');
  const envRoot='/api/panel/applications/'+m.fixture.applicationId+'/github-webhook';sec.environmentBefore=randomBytes(32).toString('base64url');sec.environmentAfter=randomBytes(32).toString('base64url');saveSecrets(sec);
- check(await apiCall(liveApi.api,liveApi.csrf,'PUT',envRoot,{secret:sec.environmentBefore}),'backup.environment.original');
- const envBefore=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.environment.before');await verifyProtectedWebhookSecret(sec.environmentBefore,202);
- const preview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup/preview',{repositoryId:repo.id}),'backup.preview');const queued=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'backup',repositoryId:repo.id,expectedPreviewDigest:preview.backupSetDigest,confirmation:preview.confirmation,tags:['t886-'+m.runId]}),'backup.queue',202);
- const backedUp=await finishedBackup(liveApi,root,queued),snapshotId=backedUp.result?.snapshot?.snapshotId;expect(snapshotId).toBeTruthy();m.fixture.nativeBackup={repositoryId:repo.id,snapshotId,operationId:queued.id,markerName};saveManifest(m);const removedMessage=await ownedImapMessage({...messageInput,remove:true,expectedSha256:originalMessage.sha256});expect(removedMessage.removed).toBe(true);expect(removedMessage.remaining).toBe(0);expect((await ownedImapMessage(messageInput)).count).toBe(0);record('backup.mail-message-deleted',{uid:removedMessage.uid,sha256:removedMessage.sha256,remaining:0});
- await upload(liveApi,m,markerName,'CHANGED-'+m.runId);const changedSql=await liveApi.api.post(sqlUrl);expect(changedSql.status()).toBe(200);expect((await changedSql.json()).proof).toBe(changedProof);
+ check(await apiCall(c.api,c.csrf,'PUT',envRoot,{secret:sec.environmentBefore}),'backup.environment.original');
+ const envBefore=check(await apiCall(c.api,c.csrf,'GET',envRoot),'backup.environment.before');await verifyProtectedWebhookSecret(sec.environmentBefore,202);
+ const preview=check(await apiCall(c.api,c.csrf,'POST',root+'/backup/preview',{repositoryId:repo.id}),'backup.preview');const queued=check(await apiCall(c.api,c.csrf,'POST',root+'/backup-operations',{kind:'backup',repositoryId:repo.id,expectedPreviewDigest:preview.backupSetDigest,confirmation:preview.confirmation,tags:['t886-'+m.runId]}),'backup.queue',202);
+ const backedUp=await finishedBackup(c,root,queued),snapshotId=backedUp.result?.snapshot?.snapshotId;expect(snapshotId).toBeTruthy();
+ m.fixture.nativeBackup={purpose:'compound',repositoryId:repo.id,snapshotId,operationId:queued.id,markerName,marker,healthProbeName,snapshotAHealthBody,sqlName,snapshotASqlProof:beforeRow.proof,originalMessage,envBefore};saveManifest(m);
+ return m.fixture.nativeBackup;
+}
+
+test('@mutation source real backup restores file content, SQL, mailbox authentication and the protected environment secret',async({liveApi})=>{
+ test.setTimeout(480000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId;
+ const saved=await ensureCompoundBackupFixture(liveApi,m),sec=secrets();
+ const {repositoryId,snapshotId,markerName,marker,healthProbeName,snapshotAHealthBody,sqlName,snapshotASqlProof,originalMessage,envBefore}=saved;
+ const sqlUrl='http://'+m.fixture.hostname+'/'+sqlName,envRoot='/api/panel/applications/'+m.fixture.applicationId+'/github-webhook';
+ const messageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};
+ const changedProof='CHANGED-'+sqlToken(m.runId)+'-'+randomBytes(6).toString('hex');
+ const removedMessage=await ownedImapMessage({...messageInput,remove:true,expectedSha256:originalMessage.sha256});expect(removedMessage.removed).toBe(true);expect(removedMessage.remaining).toBe(0);expect((await ownedImapMessage(messageInput)).count).toBe(0);record('backup.mail-message-deleted',{uid:removedMessage.uid,sha256:removedMessage.sha256,remaining:0});
+ await upload(liveApi,m,markerName,'CHANGED-'+m.runId);const changedSql=await liveApi.api.post(sqlUrl,{data:{value:changedProof}});expect(changedSql.status()).toBe(200);expect((await changedSql.json()).proof).toBe(changedProof);
  sec.nativeBackupChangedPassword=randomBytes(30).toString('base64url');saveSecrets(sec);await nativeMailboxPassword(liveApi,m,sec.nativeBackupChangedPassword);
  expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.nativeBackupChangedPassword})).authenticated).toBe(true);
  check(await apiCall(liveApi.api,liveApi.csrf,'PUT',envRoot,{secret:sec.environmentAfter}),'backup.environment.changed');await verifyProtectedWebhookSecret(sec.environmentBefore,401);await verifyProtectedWebhookSecret(sec.environmentAfter,202);
- const input={repositoryId:repo.id,snapshotId,healthPath:'/'+markerName,timeoutSeconds:30,include:['paths','databases','mail','environment']};const restorePreview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/restore/preview',input),'backup.restore.preview');const restore=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'restore',...input,expectedPreviewDigest:restorePreview.previewDigest,confirmation:restorePreview.confirmation}),'backup.restore.queue',202);
+ const input={repositoryId,snapshotId,healthPath:'/'+markerName,timeoutSeconds:30,include:['paths','databases','mail','environment']};const restorePreview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/restore/preview',input),'backup.restore.preview');const restore=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'restore',...input,expectedPreviewDigest:restorePreview.previewDigest,confirmation:restorePreview.confirmation}),'backup.restore.queue',202);
  await finishedBackup(liveApi,root,restore);
- const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(actual.status()).toBe(200);expect(await actual.text()).toBe(marker);const restoredSql=await liveApi.api.get(sqlUrl);expect(restoredSql.status()).toBe(200);expect((await restoredSql.json()).proof).toBe(beforeRow.proof);
+ const actual=await liveApi.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(actual.status()).toBe(200);expect(await actual.text()).toBe(marker);
+ const restoredHealthProbe=await liveApi.api.get('http://'+m.fixture.hostname+'/'+healthProbeName);expect(restoredHealthProbe.status()).toBe(503);expect(await restoredHealthProbe.text()).toBe(snapshotAHealthBody);
+ const restoredSql=await liveApi.api.get(sqlUrl);expect(restoredSql.status()).toBe(200);expect((await restoredSql.json()).proof).toBe(snapshotASqlProof);
  const restoredMessage=await ownedImapMessage(messageInput);expect(restoredMessage.count).toBe(1);expect(restoredMessage.sha256).toBe(originalMessage.sha256);expect(restoredMessage.bytes).toBe(originalMessage.bytes);record('backup.mail-message-restored',{sha256:restoredMessage.sha256,bytes:restoredMessage.bytes,count:restoredMessage.count});const oldLogin=await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId});expect(oldLogin).toMatchObject({authenticated:true,received:true,messages:1});expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.nativeBackupChangedPassword})).authenticated).toBe(false);
  const envAfter=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.environment.restored');expect(envAfter).toEqual(envBefore);await verifyProtectedWebhookSecret(sec.environmentBefore,202);await verifyProtectedWebhookSecret(sec.environmentAfter,401);
  record('backup.real-content-and-authentication',{verified:true,snapshotId,restoreOperationId:restore.id,file:true,sql:true,originalMailboxAuthentication:true,changedMailboxAuthenticationRejected:true,messageRestored:true,environmentMetadata:true,environmentValueVerified:true,verificationQueuedNoDeployment:true});
+});
+
+test('@mutation source compound restore refuses owned HTTP health failure and rolls back file, SQL, mailbox password, deleted RFC822 message and protected secret while preserving sibling HTTP',async({liveApi})=>{
+ test.setTimeout(540000);const m=owned(),root='/api/panel/websites/'+m.fixture.websiteId;
+ const siblingTarget=await ensureStaticRemovalTarget(m);expect(siblingTarget?.websiteId).toBeTruthy();expect(siblingTarget.removed).not.toBe(true);expect(uploadedStatic).toBeTruthy();
+ const siblingBefore=await uploadedStatic.http('/');expect(siblingBefore.status).toBe(200);expect(siblingBefore.body).toContain(m.runId);
+ const saved=await ensureCompoundBackupFixture(liveApi,m),sec=secrets();
+ const {repositoryId,snapshotId,markerName,marker,healthProbeName,sqlName,snapshotASqlProof,originalMessage}=saved;
+ const sqlUrl='http://'+m.fixture.hostname+'/'+sqlName,envRoot='/api/panel/applications/'+m.fixture.applicationId+'/github-webhook';
+ const stateBMarker='ROLLBACK-STATE-B-FILE-'+m.runId,stateBHealthBody='OWNED-STATE-B-HEALTH-200-'+m.runId;
+ const stateBHealthSource='<?php http_response_code(200); header("Content-Type: text/plain"); echo '+JSON.stringify(stateBHealthBody)+';';
+ await upload(liveApi,m,markerName,stateBMarker);await upload(liveApi,m,healthProbeName,stateBHealthSource);
+ const markerBeforeRestore=await liveApi.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(markerBeforeRestore.status()).toBe(200);const markerBeforeText=await markerBeforeRestore.text();expect(markerBeforeText).toBe(stateBMarker);expect(markerBeforeText).not.toBe(marker);
+ const healthBeforeRestore=await liveApi.api.get('http://'+m.fixture.hostname+'/'+healthProbeName);expect(healthBeforeRestore.status()).toBe(200);expect(await healthBeforeRestore.text()).toBe(stateBHealthBody);
+ const stateBSqlProof='ROLLBACK-B-SQL-'+sqlToken(m.runId)+'-'+randomBytes(6).toString('hex');expect(stateBSqlProof).not.toBe(snapshotASqlProof);
+ const updatedSql=await liveApi.api.post(sqlUrl,{data:{value:stateBSqlProof}});expect(updatedSql.status()).toBe(200);expect((await updatedSql.json()).proof).toBe(stateBSqlProof);
+ const sqlBeforeRestore=await liveApi.api.get(sqlUrl);expect(sqlBeforeRestore.status()).toBe(200);const sqlBeforeRow=await sqlBeforeRestore.json();expect(sqlBeforeRow.proof).toBe(stateBSqlProof);expect(sqlBeforeRow.proof).not.toBe(snapshotASqlProof);
+ const snapshotAMessageInput={hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:'OWNED-NATIVE-'+m.runId};
+ const presentSnapshotAMessage=await ownedImapMessage(snapshotAMessageInput);expect(presentSnapshotAMessage.count).toBe(1);expect(presentSnapshotAMessage.sha256).toBe(originalMessage.sha256);
+ const deletedSnapshotAMessage=await ownedImapMessage({...snapshotAMessageInput,remove:true,expectedSha256:originalMessage.sha256});expect(deletedSnapshotAMessage.removed).toBe(true);expect(deletedSnapshotAMessage.remaining).toBe(0);
+ expect((await ownedImapMessage(snapshotAMessageInput)).count).toBe(0);
+ const stateBSubject='OWNED-ROLLBACK-B-'+m.runId;
+ const deliveredStateB=check(await apiCall(liveApi.api,liveApi.csrf,'POST','/api/panel/mailboxes/'+m.fixture.mailboxIds[0]+'/test-delivery',{recipient:'beta@'+m.fixture.hostname,subject:stateBSubject}),'backup.rollback.mail-delivery');expect(deliveredStateB.delivered).toBe(true);
+ let stateBMessage={count:0};
+ for(let attempt=0;attempt<15&&stateBMessage.count===0;attempt++){stateBMessage=await ownedImapMessage({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta,subject:stateBSubject});if(stateBMessage.count===0)await new Promise(r=>setTimeout(r,500));}
+ expect(stateBMessage.count).toBe(1);expect(stateBMessage.sha256).toMatch(/^[a-f0-9]{64}$/);expect(stateBMessage.sha256).not.toBe(originalMessage.sha256);expect(stateBMessage.bytes).toBeGreaterThan(0);
+ sec.rollbackStateBPassword=randomBytes(30).toString('base64url');expect(sec.rollbackStateBPassword).not.toBe(sec.mailPasswords.beta);saveSecrets(sec);
+ await nativeMailboxPassword(liveApi,m,sec.rollbackStateBPassword);
+ expect(await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.rollbackStateBPassword,subject:stateBSubject})).toMatchObject({authenticated:true,received:true,messages:1});
+ expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta})).authenticated).toBe(false);
+ sec.rollbackEnvironmentB=randomBytes(32).toString('base64url');expect(sec.rollbackEnvironmentB).not.toBe(sec.environmentBefore);saveSecrets(sec);
+ check(await apiCall(liveApi.api,liveApi.csrf,'PUT',envRoot,{secret:sec.rollbackEnvironmentB}),'backup.rollback.environment-state-b');
+ const envStateBMeta=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.rollback.environment-before');
+ await verifyProtectedWebhookSecret(sec.rollbackEnvironmentB,202);await verifyProtectedWebhookSecret(sec.environmentBefore,401);
+ const input={repositoryId,snapshotId,healthPath:'/'+healthProbeName,timeoutSeconds:5,include:['paths','databases','mail','environment']};
+ const restorePreview=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/restore/preview',input),'backup.rollback.restore-preview');
+ const restoreOp=check(await apiCall(liveApi.api,liveApi.csrf,'POST',root+'/backup-operations',{kind:'restore',...input,expectedPreviewDigest:restorePreview.previewDigest,confirmation:restorePreview.confirmation}),'backup.rollback.restore-queue',202);
+ const restoreJob=await waitJob(liveApi.api,restoreOp.jobId,360000);record('backup.rollback.job',{jobId:restoreJob.id,status:restoreJob.status,code:restoreJob.error?.code??null});expect(restoreJob.status).toBe('succeeded');
+ const rolledBackOp=check(await apiCall(liveApi.api,liveApi.csrf,'GET',root+'/backup-operations/'+restoreOp.id),'backup.rollback.operation');
+ expect(rolledBackOp.status).toBe('rolled_back');expect(rolledBackOp.result?.status).toBe('rolled_back');
+ expect(rolledBackOp.result?.rollbackReason).toBe('health_check_failed');expect(rolledBackOp.result?.failurePhase).toBe('health_check');
+ expect(rolledBackOp.preRestoreSnapshotId).toMatch(/^[a-f0-9]{64}$/i);expect(rolledBackOp.result?.preRestoreSnapshotId).toBe(rolledBackOp.preRestoreSnapshotId);expect(rolledBackOp.result?.preRestoreSnapshotId).not.toBe(snapshotId);
+ expect(rolledBackOp.result?.healthCheck?.satisfied).toBe(false);expect(rolledBackOp.result?.healthCheck?.statusCode).toBe(503);
+ const siblingFirstHttp=await uploadedStatic.http('/');const primaryFirstHttp=await primary.http('/');
+ expect(siblingFirstHttp.status,'Static sibling first HTTP response after compound rollback must be 200 without retry').toBe(200);expect(siblingFirstHttp.body).toBe(siblingBefore.body);
+ expect(primaryFirstHttp.status,'Primary site root first HTTP response after compound rollback must be 200 without retry').toBe(200);
+ const markerAfterRollback=await liveApi.api.get('http://'+m.fixture.hostname+'/'+markerName);expect(markerAfterRollback.status()).toBe(200);const markerAfterText=await markerAfterRollback.text();expect(markerAfterText).toBe(stateBMarker);expect(markerAfterText).not.toBe(marker);
+ const healthAfterRollback=await liveApi.api.get('http://'+m.fixture.hostname+'/'+healthProbeName);expect(healthAfterRollback.status()).toBe(200);expect(await healthAfterRollback.text()).toBe(stateBHealthBody);
+ const sqlAfterRollback=await liveApi.api.get(sqlUrl);expect(sqlAfterRollback.status()).toBe(200);const sqlAfterRow=await sqlAfterRollback.json();expect(sqlAfterRow.proof).toBe(stateBSqlProof);expect(sqlAfterRow.proof).not.toBe(snapshotASqlProof);
+ expect(await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.rollbackStateBPassword,subject:stateBSubject})).toMatchObject({authenticated:true,received:true,messages:1});
+ expect((await imapReceipt({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.mailPasswords.beta})).authenticated).toBe(false);
+ const deletedSnapshotAAfterRollback=await ownedImapMessage({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.rollbackStateBPassword,subject:'OWNED-NATIVE-'+m.runId});expect(deletedSnapshotAAfterRollback.count).toBe(0);
+ const stateBMessageAfterRollback=await ownedImapMessage({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.rollbackStateBPassword,subject:stateBSubject});expect(stateBMessageAfterRollback.count).toBe(1);expect(stateBMessageAfterRollback.sha256).toBe(stateBMessage.sha256);expect(stateBMessageAfterRollback.bytes).toBe(stateBMessage.bytes);
+ const cleanedStateBMessage=await ownedImapMessage({hostname:m.fixture.mailHostname,address:'beta@'+m.fixture.hostname,password:sec.rollbackStateBPassword,subject:stateBSubject,remove:true,expectedSha256:stateBMessage.sha256});expect(cleanedStateBMessage.removed).toBe(true);expect(cleanedStateBMessage.remaining).toBe(0);
+ const envAfterRollback=check(await apiCall(liveApi.api,liveApi.csrf,'GET',envRoot),'backup.rollback.environment-after');expect(envAfterRollback).toEqual(envStateBMeta);
+ await verifyProtectedWebhookSecret(sec.rollbackEnvironmentB,202);await verifyProtectedWebhookSecret(sec.environmentBefore,401);
+ record('backup.compound-health-rollback-verified',{verified:true,snapshotId,preRestoreSnapshotId:rolledBackOp.result.preRestoreSnapshotId,restoreOperationId:restoreOp.id,rollbackReason:rolledBackOp.result.rollbackReason,failurePhase:rolledBackOp.result.failurePhase,healthStatusCode:rolledBackOp.result.healthCheck.statusCode,siblingFirstHttpStatus:siblingFirstHttp.status,siblingBodyPreserved:true,primaryFirstHttpStatus:primaryFirstHttp.status,fileStateBRestored:true,healthProbeStateBRestored:true,sqlStateBRestored:true,stateBMailboxAuthentication:true,snapshotAMailboxAuthenticationRejected:true,deletedSnapshotAMessageAbsent:true,stateBMessagePreserved:true,stateBMessageCleaned:true,environmentMetadataPreserved:true,environmentHmacStateBVerified:true,environmentHmacSnapshotARejected:true,verificationQueuedNoDeployment:true});
 });
 
 test('@mutation source WordPress plugin and theme lifecycle changes real inventory and keeps the actual site responding', async ({ liveApi, page }) => {
