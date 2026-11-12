@@ -1011,7 +1011,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T886 · T883 site DB posta WordPress ve silme senaryoları eksik
-- **Bağımlı:** T883
+- **Bağımlı:** T885
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`
 - **Kaynak:** QA · 2026-11-12 16:31
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
@@ -1021,7 +1021,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T887 · T883 hosting DNS ve gerçek Node ortam geri yükleme senaryoları eksik
-- **Bağımlı:** T883
+- **Bağımlı:** T885
 - **Dosyalar:** `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
 - **Kaynak:** QA · 2026-11-12 16:31
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
@@ -1031,7 +1031,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T888 · T883 gerçek tenant site job terminal ve iptal zinciri kapsamı eksik
-- **Bağımlı:** T883
+- **Bağımlı:** T885
 - **Dosyalar:** `e2e/live-audit/20-native-tenant-sites.spec.js`
 - **Kaynak:** QA · 2026-11-12 16:31
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
