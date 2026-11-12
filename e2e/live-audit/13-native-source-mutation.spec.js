@@ -110,6 +110,7 @@ test('@mutation @managed-repair source managed phpMyAdmin repair stages actual t
  expect(job.result.configurationResult.httpHealthy).toBe(true);
  expect(job.result.configurationResult.fpmSocketHealthy).toBe(true);
  expect(job.result.configurationResult.gatewaySocketHealthy).toBe(true);
+ expect(job.result.configurationResult.transactionId,'A real managed repair must expose its transaction receipt identity').toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
  const current = manifest(); current.fixture.phpMyAdminConfigurationTransaction = job.result.configurationResult.transactionId; saveManifest(current);
 });
 
