@@ -1,7 +1,11 @@
 import { OPERATIONS } from '@yunpanel/protocol';
 import { WebsiteBackupOperationRegistryError } from './website-backup-operation-registry.js';
 import { WebsiteBackupError } from './website-backup-service.js';
-import { WebsiteRestoreError } from './website-restore-service.js';
+import {
+  SAFE_RESTORE_FAILURE_PHASES,
+  SAFE_RESTORE_ROLLBACK_PHASES,
+  WebsiteRestoreError,
+} from './website-restore-service.js';
 import { compileBackupSchedule } from './backup-schedule-time.js';
 import { normalizeWebsiteBackupScheduleAuthorization } from './website-backup-schedule-authorization.js';
 
@@ -310,14 +314,46 @@ export function createWebsiteBackupOperationService({
         }
         await liveActor(operation.actor, website.id);
         const finishedAt = now();
+        const rolledBackHealth = result.status === 'rolled_back' && result.rollbackReason === 'health_check_failed';
+        const rolledBackExec = result.status === 'rolled_back' && !rolledBackHealth;
         const completed = await update(operation.id, { status: result.status, snapshotId: result.snapshot?.snapshotId ?? operation.snapshotId,
           preRestoreSnapshotId: result.preRestoreSnapshotId ?? null, result, finishedAt,
-          progress: { phase: result.status, percent: null, message: result.status === 'rolled_back' ? 'Sağlık kontrolü başarısız; önceki durum geri alındı' : 'İşlem doğrulanarak tamamlandı' },
-          steps: operation.steps.map((step) => ({ ...step, status: result.status === 'rolled_back' && step.name === 'health_check' ? 'rolled_back' : 'succeeded', updatedAt: finishedAt })) });
+          progress: {
+            phase: result.status,
+            percent: null,
+            message: rolledBackHealth
+              ? 'Sağlık kontrolü başarısız; önceki durum geri alındı'
+              : (rolledBackExec ? 'Geri yükleme tamamlanamadı; önceki durum güvenli şekilde geri alındı' : 'İşlem doğrulanarak tamamlandı'),
+          },
+          steps: operation.steps.map((step) => ({
+            ...step,
+            status: rolledBackHealth && step.name === 'health_check'
+              ? 'rolled_back'
+              : (rolledBackExec && step.name === 'restore'
+                ? 'rolled_back'
+                : (rolledBackExec && step.name === 'health_check' ? 'pending' : 'succeeded')),
+            updatedAt: finishedAt,
+          })) });
         return resultFor(completed);
       } catch (error) {
-        await update(operation.id, { status: 'failed', error: { code: /^[a-z0-9_]{1,100}$/.test(error.code ?? '') ? error.code : 'website_backup_execution_failed',
-          message: 'İşlem tamamlanamadı; kayıtlı hata ve geri alma durumunu kontrol edin' }, finishedAt: now(), progress: { phase: 'failed', percent: null, message: 'İşlem tamamlanamadı' } });
+        const safeCode = (value) => (typeof value === 'string' && /^[a-z0-9_]{1,100}$/.test(value) ? value : null);
+        const phase = SAFE_RESTORE_FAILURE_PHASES.has(error?.details?.failurePhase) ? error.details.failurePhase : null;
+        const restoreErrorCode = safeCode(error?.details?.restoreErrorCode);
+        const rollbackPhase = SAFE_RESTORE_ROLLBACK_PHASES.has(error?.details?.rollbackPhase) ? error.details.rollbackPhase : null;
+        const rollbackErrorCode = safeCode(error?.details?.rollbackErrorCode);
+        await update(operation.id, {
+          status: 'failed',
+          error: {
+            code: safeCode(error?.code) ?? 'website_backup_execution_failed',
+            message: 'İşlem tamamlanamadı; kayıtlı hata ve geri alma durumunu kontrol edin',
+            ...(phase ? { phase } : {}),
+            ...(restoreErrorCode ? { restoreErrorCode } : {}),
+            ...(rollbackPhase ? { rollbackPhase } : {}),
+            ...(rollbackErrorCode ? { rollbackErrorCode } : {}),
+          },
+          finishedAt: now(),
+          progress: { phase: 'failed', percent: null, message: 'İşlem tamamlanamadı' },
+        });
         throw error;
       }
     });

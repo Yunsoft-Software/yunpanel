@@ -1,10 +1,52 @@
 import { createHash } from 'node:crypto';
+import { rm } from 'node:fs/promises';
+import path from 'node:path';
 import { assertUuid } from '@yunpanel/shared';
 import { createWebsiteRestoreReceiptStore } from '@yunpanel/host-runtime';
 import { resolveWebsiteRestoreSelection, assertWebsiteSnapshotContent } from './website-restore-selection.js';
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const SAFE_ERROR_CODE_PATTERN = /^[a-z0-9_]{1,100}$/;
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
+
+export const SAFE_RESTORE_FAILURE_PHASES = new Set([
+  'pre_restore',
+  'files_restore',
+  'database_restore',
+  'mail_restore',
+  'environment_restore',
+  'dns_restore',
+  'hosting_restore',
+  'health_check',
+]);
+
+export const SAFE_RESTORE_ROLLBACK_PHASES = new Set([
+  'rollback_files',
+  'rollback_database',
+  'rollback_mail',
+  'rollback_environment',
+  'rollback_dns',
+  'rollback_hosting',
+]);
+
+function sanitizeRestoreSubErrorCode(error, fallback) {
+  return typeof error?.code === 'string' && SAFE_ERROR_CODE_PATTERN.test(error.code)
+    ? error.code
+    : fallback;
+}
+
+function isSafeStagedRoot(stagedRoot) {
+  return typeof stagedRoot === 'string'
+    && path.posix.isAbsolute(stagedRoot)
+    && path.posix.normalize(stagedRoot) === stagedRoot
+    && stagedRoot.split('/').filter(Boolean).length >= 3;
+}
+
+async function clearStagedRoot(backupSet, rmFn = rm) {
+  if (isSafeStagedRoot(backupSet?.stagedRoot)) {
+    await rmFn(backupSet.stagedRoot, { recursive: true, force: true });
+  }
+}
 
 export class WebsiteRestoreError extends Error {
   constructor(code, message, status = 400, details = null, cause = undefined) {
@@ -255,47 +297,114 @@ export function createWebsiteRestoreService({
         tags: ['pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`], executionJobId, operationId: operationId ? `${operationId}:pre` : null })).snapshot
       : await resticManager.createSnapshot({ repository: repository.target, password, paths: rollbackPaths,
         tags: [...backupSet.tags, 'pre-restore', `restore-of:${preview.snapshotId}`, `tx:${transactionId}`], excludes: backupSet.excludePatterns });
-    } catch {
-      throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot failed; no restore was attempted', 500);
+    } catch (preError) {
+      throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot failed; no restore was attempted', 500, {
+        failurePhase: 'pre_restore',
+        restoreErrorCode: sanitizeRestoreSubErrorCode(preError, 'pre_restore_snapshot_failed'),
+      });
     }
-    if (!preRestore?.snapshotId) throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot was not verified', 502);
+    if (!preRestore?.snapshotId) throw new WebsiteRestoreError('pre_restore_snapshot_failed', 'Pre-restore snapshot was not verified', 502, {
+      failurePhase: 'pre_restore',
+      restoreErrorCode: 'pre_restore_snapshot_unverified',
+    });
     const journal = { transactionId, websiteId: website.id, websiteRevision: preview.websiteRevision, repositoryId: repository.id,
       snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId, previewDigest: preview.previewDigest, rollbackPaths };
     // This write must succeed before any restore changes a file.
     await resolvedReceiptStore.write({ ...journal, status: 'pre_restore_created' });
-    async function rollback(reason, healthCheck = null, restoreError = null) {
+    async function rollback(reason, failurePhase, healthCheck = null, restoreError = null) {
+      const normalizedFailurePhase = SAFE_RESTORE_FAILURE_PHASES.has(failurePhase) ? failurePhase : 'files_restore';
+      const restoreErrorCode = restoreError
+        ? sanitizeRestoreSubErrorCode(restoreError, 'restore_step_failed')
+        : (reason === 'health_check_failed' ? 'health_check_failed' : null);
+      let rollbackPhase = 'rollback_files';
       try {
+        await clearStagedRoot(backupSet);
         await resticManager.restore({ repository: repository.target, password, snapshotId: preRestore.snapshotId, targetDirectory: '/', include: rollbackPaths });
-        if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
-        if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
-        if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
-        if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
-        if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        if (databaseBackupAdapter) {
+          rollbackPhase = 'rollback_database';
+          await databaseBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        }
+        if (mailBackupAdapter) {
+          rollbackPhase = 'rollback_mail';
+          await mailBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        }
+        if (environmentBackupAdapter) {
+          rollbackPhase = 'rollback_environment';
+          await environmentBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        }
+        if (dnsBackupAdapter) {
+          rollbackPhase = 'rollback_dns';
+          await dnsBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        }
+        if (hostingBackupAdapter) {
+          rollbackPhase = 'rollback_hosting';
+          await hostingBackupAdapter.restore({ backupSet, include: rollbackPaths, operationId, rollback: true });
+        }
       } catch (rollbackError) {
-        throw new WebsiteRestoreError('restore_rollback_failed', 'Restore failed and rollback requires recovery', 500,
-          { preRestoreSnapshotId: preRestore.snapshotId }, new AggregateError([restoreError, rollbackError].filter(Boolean), 'Restore recovery requires inspection'));
+        throw new WebsiteRestoreError(
+          'restore_rollback_failed',
+          'Restore failed and rollback requires recovery',
+          500,
+          Object.freeze({
+            preRestoreSnapshotId: preRestore.snapshotId,
+            failurePhase: normalizedFailurePhase,
+            ...(restoreErrorCode ? { restoreErrorCode } : {}),
+            rollbackPhase: SAFE_RESTORE_ROLLBACK_PHASES.has(rollbackPhase) ? rollbackPhase : 'rollback_files',
+            rollbackErrorCode: sanitizeRestoreSubErrorCode(rollbackError, 'rollback_step_failed'),
+          }),
+        );
       }
       await resolvedReceiptStore.write({ ...journal, status: 'rolled_back', rollbackReason: reason, healthCheck });
-      return Object.freeze({ status: 'rolled_back', websiteId: website.id, snapshotId: preview.snapshotId,
-        preRestoreSnapshotId: preRestore.snapshotId, rollbackReason: reason, healthCheck, rolledBackAt: new Date().toISOString() });
+      return Object.freeze({
+        status: 'rolled_back',
+        websiteId: website.id,
+        snapshotId: preview.snapshotId,
+        preRestoreSnapshotId: preRestore.snapshotId,
+        rollbackReason: reason,
+        failurePhase: normalizedFailurePhase,
+        ...(restoreErrorCode ? { restoreErrorCode } : {}),
+        healthCheck,
+        rolledBackAt: new Date().toISOString(),
+      });
     }
     try {
-      await resticManager.restore({ repository: repository.target, password, snapshotId: preview.snapshotId, targetDirectory: '/', include: [...preview.include] });
-      if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: preview.include, operationId });
-      if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: preview.include, operationId });
-      if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: preview.include, operationId });
-      if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: preview.include, operationId });
-      if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: preview.include, operationId });
-    } catch (error) {
-      return rollback('restore_execution_failed', null, error);
+      let forwardPhase = 'files_restore';
+      try {
+        await clearStagedRoot(backupSet);
+        await resticManager.restore({ repository: repository.target, password, snapshotId: preview.snapshotId, targetDirectory: '/', include: [...preview.include] });
+        if (databaseBackupAdapter) {
+          forwardPhase = 'database_restore';
+          await databaseBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+        }
+        if (mailBackupAdapter) {
+          forwardPhase = 'mail_restore';
+          await mailBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+        }
+        if (environmentBackupAdapter) {
+          forwardPhase = 'environment_restore';
+          await environmentBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+        }
+        if (dnsBackupAdapter) {
+          forwardPhase = 'dns_restore';
+          await dnsBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+        }
+        if (hostingBackupAdapter) {
+          forwardPhase = 'hosting_restore';
+          await hostingBackupAdapter.restore({ backupSet, include: preview.include, operationId });
+        }
+      } catch (error) {
+        return await rollback('restore_execution_failed', forwardPhase, null, error);
+      }
+      let healthCheck;
+      try { healthCheck = await healthInspector.inspect(preview.healthSpec); }
+      catch { healthCheck = { satisfied: false, statusCode: null, attempts: 1, error: 'Website health check could not complete' }; }
+      if (healthCheck?.satisfied !== true) return await rollback('health_check_failed', 'health_check', healthCheck);
+      await resolvedReceiptStore.write({ ...journal, status: 'succeeded', healthCheck });
+      return Object.freeze({ status: 'succeeded', websiteId: website.id, snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId,
+        selective: preview.selective, include: [...preview.include], healthCheck, restoredAt: new Date().toISOString() });
+    } finally {
+      await clearStagedRoot(backupSet);
     }
-    let healthCheck;
-    try { healthCheck = await healthInspector.inspect(preview.healthSpec); }
-    catch { healthCheck = { satisfied: false, statusCode: null, attempts: 1, error: 'Website health check could not complete' }; }
-    if (healthCheck?.satisfied !== true) return rollback('health_check_failed', healthCheck);
-    await resolvedReceiptStore.write({ ...journal, status: 'succeeded', healthCheck });
-    return Object.freeze({ status: 'succeeded', websiteId: website.id, snapshotId: preview.snapshotId, preRestoreSnapshotId: preRestore.snapshotId,
-      selective: preview.selective, include: [...preview.include], healthCheck, restoredAt: new Date().toISOString() });
   }
 
   return Object.freeze({

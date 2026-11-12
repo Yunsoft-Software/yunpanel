@@ -129,66 +129,105 @@ export function createWebsiteMailBackupAdapter({ domainRegistry, mailDomainRegis
       const saved = codec.decode(target.identity, await readFile(target.target, 'utf8'));
       if (saved.version !== 1 || saved.mailDomainId !== mail.mailDomainId || saved.domainName !== mail.domainName
         || !['enabled', 'disabled'].includes(saved.status) || !saved.nativeSql) throw fail('website_mail_backup_scope_invalid');
-      const existingBoxes = await mailboxRegistry.listMailboxes({ mailDomainId: mail.mailDomainId });
-      const existingIds = existingBoxes.map(box => box.id);
-      await mailboxRegistry.restoreDomainBackup(mail.mailDomainId, saved.mailboxes);
-      const ids = saved.mailboxes.records.map(box => box.id);
-      const removedIds = existingIds.filter(id => !ids.includes(id));
-      await mailAliasRegistry.restoreDomainBackup(mail.mailDomainId, saved.aliases);
-      await mailboxQuotaRegistry.restoreMailboxBackup(ids, saved.quotas, { removedIds });
-      await mailboxForwardingRegistry.restoreMailboxBackup(ids, saved.forwardings, { removedIds });
-      let current = await mailDomainRegistry.getMailDomain(mail.mailDomainId);
-      if (current.status !== saved.status) current = await mailDomainRegistry.transitionLocalStatus(current.id, { expectedRevision: current.revision, status: saved.status });
-      const bundle = await desiredBundle(current);
-      if (digest(expectedSql(bundle, mail.domainName)) !== digest(saved.nativeSql)) throw fail('website_mail_backup_catalog_mismatch');
-      const siblingsBefore = await liveSql(mail.domainName, true);
-      if (digest(siblingsBefore) !== digest(expectedSql(bundle, mail.domainName, true))) throw fail('website_mail_restore_sibling_drift');
-      if (include.some(root => within(mail.stagedDataDirectory, root))) {
-        const backupId = `website-${mail.mailDomainId}`;
-        const dataBackup = dataManager(backupSet);
-        const materialized = await dataBackup.materializeBackup(backupId);
+      const restoresMailData = Boolean(mail.stagedDataDirectory && include.some(root => within(mail.stagedDataDirectory, root)));
+      const backupId = `website-${mail.mailDomainId}`;
+      let dataBackup = null;
+      let materialized = null;
+      if (restoresMailData) {
+        dataBackup = dataManager(backupSet);
+        materialized = await dataBackup.materializeBackup(backupId);
         if (materialized.manifest.contentSha256 !== saved.dataManifest?.contentSha256
           || materialized.manifest.sourcePresent !== saved.dataManifest.sourcePresent) throw fail('website_mail_backup_data_unverified');
-        const disabledInput = { mailDomainId: current.id, expectedRevision: current.revision, status: 'disabled' };
-        let disabled = bundle;
-        if (current.status !== 'disabled') {
-          const preview = await mailConfigurationService.previewTransition(disabledInput);
-          disabled = await mailConfigurationService.materializeTransition(disabledInput, {
-            expectedPreviewDigest: preview.previewDigest, expectedConfigurationSha256: preview.configurationSha256,
-          });
-        }
-        await applyBundle(disabled, transactionId(operationId, mail.mailDomainId, rollback, 'quiesce'));
-        const addresses = new Set([...existingBoxes.map(box => box.address), ...saved.mailboxes.records.map(box => box.address)]);
-        for (const address of addresses) {
-          const proof = await accessGuard.quiesce(address);
-          if (!proof.accessDisabled || !proof.sessionsCleared) throw fail('website_mail_restore_access_unverified');
-        }
-        const targetData = await mailDataInspector.inspectDomain(mail.domainName);
-        if (materialized.manifest.sourcePresent) {
-          const engine = dataRestoreFactory({ backupManager: dataBackup, mailDataInspector });
-          const restored = await engine.restore({ transactionId: transactionId(operationId, mail.mailDomainId, rollback, 'data'),
-            backupId, scope: 'domain', identity: mail.domainName, expectedTargetSnapshotSha256: targetData.snapshotSha256 });
-          if (!restored.applied || restored.contentSha256 !== saved.dataManifest.contentSha256
-            || !(await engine.inspectRestored({ backupId, scope: 'domain', identity: mail.domainName })).satisfied) throw fail('website_mail_restore_data_unverified');
-        } else if (targetData.present) {
-          const tx = transactionId(operationId, mail.mailDomainId, rollback, 'empty-data');
-          const beforeId = `pre-empty-restore:${tx}`;
-          await dataBackup.backup({ backupId: beforeId, scope: 'domain', identity: mail.domainName,
-            expectedSnapshotSha256: targetData.snapshotSha256 });
-          const engine = dataDeleteFactory({ backupManager: dataBackup, mailDataInspector, mailboxAccessGuard: accessGuard });
-          const deleted = await engine.deleteData({ transactionId: tx, backupId: beforeId, scope: 'domain',
-            identity: mail.domainName, expectedTargetSnapshotSha256: targetData.snapshotSha256 });
-          if (!deleted.deleted || !(await engine.inspectDeleted({ transactionId: tx, backupId: beforeId,
-            scope: 'domain', identity: mail.domainName })).satisfied) throw fail('website_mail_restore_data_unverified');
-        }
       }
-      const tx = transactionId(operationId, mail.mailDomainId, rollback);
-      await applyBundle(bundle, tx);
-      if (digest(await liveSql(mail.domainName)) !== digest(saved.nativeSql)
-        || digest(await liveSql(mail.domainName, true)) !== digest(siblingsBefore)) throw fail('website_mail_restore_unverified');
-      if (include.some(root => within(mail.stagedDataDirectory, root)) && !saved.dataManifest.sourcePresent
-        && (await mailDataInspector.inspectDomain(mail.domainName)).present) throw fail('website_mail_restore_data_unverified');
-      results.push({ mailDomainId: mail.mailDomainId, verified: true, mailboxCount: ids.length });
+      const existingBoxes = await mailboxRegistry.listMailboxes({ mailDomainId: mail.mailDomainId });
+      const existingIds = existingBoxes.map(box => box.id);
+      const priorMailboxes = typeof mailboxRegistry.exportDomainBackup === 'function' ? await mailboxRegistry.exportDomainBackup(mail.mailDomainId) : null;
+      const priorAliases = typeof mailAliasRegistry.exportDomainBackup === 'function' ? await mailAliasRegistry.exportDomainBackup(mail.mailDomainId) : null;
+      const priorQuotas = typeof mailboxQuotaRegistry.exportMailboxBackup === 'function' ? await mailboxQuotaRegistry.exportMailboxBackup(existingIds) : null;
+      const priorForwardings = typeof mailboxForwardingRegistry.exportMailboxBackup === 'function' ? await mailboxForwardingRegistry.exportMailboxBackup(existingIds) : null;
+      const priorStatus = target.current.status;
+      let registriesMutated = false;
+      let sqlActivated = false;
+      try {
+        await mailboxRegistry.restoreDomainBackup(mail.mailDomainId, saved.mailboxes);
+        registriesMutated = true;
+        const ids = saved.mailboxes.records.map(box => box.id);
+        const removedIds = existingIds.filter(id => !ids.includes(id));
+        await mailAliasRegistry.restoreDomainBackup(mail.mailDomainId, saved.aliases);
+        await mailboxQuotaRegistry.restoreMailboxBackup(ids, saved.quotas, { removedIds });
+        await mailboxForwardingRegistry.restoreMailboxBackup(ids, saved.forwardings, { removedIds });
+        let current = await mailDomainRegistry.getMailDomain(mail.mailDomainId);
+        if (current.status !== saved.status) current = await mailDomainRegistry.transitionLocalStatus(current.id, { expectedRevision: current.revision, status: saved.status });
+        const bundle = await desiredBundle(current);
+        if (digest(expectedSql(bundle, mail.domainName)) !== digest(saved.nativeSql)) throw fail('website_mail_backup_catalog_mismatch');
+        const siblingsBefore = await liveSql(mail.domainName, true);
+        if (digest(siblingsBefore) !== digest(expectedSql(bundle, mail.domainName, true))) throw fail('website_mail_restore_sibling_drift');
+        if (restoresMailData) {
+          const disabledInput = { mailDomainId: current.id, expectedRevision: current.revision, status: 'disabled' };
+          let disabled = bundle;
+          if (current.status !== 'disabled') {
+            const preview = await mailConfigurationService.previewTransition(disabledInput);
+            disabled = await mailConfigurationService.materializeTransition(disabledInput, {
+              expectedPreviewDigest: preview.previewDigest, expectedConfigurationSha256: preview.configurationSha256,
+            });
+          }
+          await applyBundle(disabled, transactionId(operationId, mail.mailDomainId, rollback, 'quiesce'));
+          sqlActivated = true;
+          const addresses = new Set([...existingBoxes.map(box => box.address), ...saved.mailboxes.records.map(box => box.address)]);
+          for (const address of addresses) {
+            const proof = await accessGuard.quiesce(address);
+            if (!proof.accessDisabled || !proof.sessionsCleared) throw fail('website_mail_restore_access_unverified');
+          }
+          const targetData = await mailDataInspector.inspectDomain(mail.domainName);
+          if (materialized.manifest.sourcePresent) {
+            const engine = dataRestoreFactory({ backupManager: dataBackup, mailDataInspector });
+            const restored = await engine.restore({ transactionId: transactionId(operationId, mail.mailDomainId, rollback, 'data'),
+              backupId, scope: 'domain', identity: mail.domainName, expectedTargetSnapshotSha256: targetData.snapshotSha256 });
+            if (!restored.applied || restored.contentSha256 !== saved.dataManifest.contentSha256
+              || !(await engine.inspectRestored({ backupId, scope: 'domain', identity: mail.domainName })).satisfied) throw fail('website_mail_restore_data_unverified');
+          } else if (targetData.present) {
+            const tx = transactionId(operationId, mail.mailDomainId, rollback, 'empty-data');
+            const beforeId = `pre-empty-restore:${tx}`;
+            await dataBackup.backup({ backupId: beforeId, scope: 'domain', identity: mail.domainName,
+              expectedSnapshotSha256: targetData.snapshotSha256 });
+            const engine = dataDeleteFactory({ backupManager: dataBackup, mailDataInspector, mailboxAccessGuard: accessGuard });
+            const deleted = await engine.deleteData({ transactionId: tx, backupId: beforeId, scope: 'domain',
+              identity: mail.domainName, expectedTargetSnapshotSha256: targetData.snapshotSha256 });
+            if (!deleted.deleted || !(await engine.inspectDeleted({ transactionId: tx, backupId: beforeId,
+              scope: 'domain', identity: mail.domainName })).satisfied) throw fail('website_mail_restore_data_unverified');
+          }
+        }
+        const tx = transactionId(operationId, mail.mailDomainId, rollback);
+        await applyBundle(bundle, tx);
+        sqlActivated = true;
+        if (digest(await liveSql(mail.domainName)) !== digest(saved.nativeSql)
+          || digest(await liveSql(mail.domainName, true)) !== digest(siblingsBefore)) throw fail('website_mail_restore_unverified');
+        if (restoresMailData && !saved.dataManifest.sourcePresent
+          && (await mailDataInspector.inspectDomain(mail.domainName)).present) throw fail('website_mail_restore_data_unverified');
+        results.push({ mailDomainId: mail.mailDomainId, verified: true, mailboxCount: ids.length });
+      } catch (mailRestoreError) {
+        if (registriesMutated && priorMailboxes && priorAliases && priorQuotas && priorForwardings) {
+          try {
+            const mutatedIds = saved.mailboxes.records.map(box => box.id);
+            const revertRemovedIds = mutatedIds.filter(id => !existingIds.includes(id));
+            await mailboxRegistry.restoreDomainBackup(mail.mailDomainId, priorMailboxes);
+            await mailAliasRegistry.restoreDomainBackup(mail.mailDomainId, priorAliases);
+            await mailboxQuotaRegistry.restoreMailboxBackup(existingIds, priorQuotas, { removedIds: revertRemovedIds });
+            await mailboxForwardingRegistry.restoreMailboxBackup(existingIds, priorForwardings, { removedIds: revertRemovedIds });
+            let revertedDomain = await mailDomainRegistry.getMailDomain(mail.mailDomainId);
+            if (revertedDomain && revertedDomain.status !== priorStatus && typeof mailDomainRegistry.transitionLocalStatus === 'function') {
+              revertedDomain = await mailDomainRegistry.transitionLocalStatus(revertedDomain.id, { expectedRevision: revertedDomain.revision, status: priorStatus });
+            }
+            if (sqlActivated && revertedDomain) {
+              const revertBundle = await desiredBundle(revertedDomain);
+              await applyBundle(revertBundle, transactionId(operationId, mail.mailDomainId, rollback, 'revert'));
+            }
+          } catch {
+            // Preserve the authoritative mail restore failure code for outer rollback.
+          }
+        }
+        throw mailRestoreError;
+      }
     }
     return results;
   }

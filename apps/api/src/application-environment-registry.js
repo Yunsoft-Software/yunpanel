@@ -760,17 +760,24 @@ export function createApplicationEnvironmentRegistry({
     if (snapshot?.version !== 1 || snapshot.applicationId !== id || !Array.isArray(snapshot.variables)
       || snapshot.variables.length > 256 || new Set(snapshot.variables.map(record => record?.key)).size !== snapshot.variables.length) throw invalid();
     const variables = snapshot.variables.map(source => {
-      if (!source || source.applicationId !== id || typeof source.secret !== 'boolean'
-        || Object.keys(source).length !== 9 || !['applicationId', 'key', 'secret', 'value', 'ciphertext', 'iv', 'tag', 'createdAt', 'updatedAt'].every(field => Object.hasOwn(source, field))) throw invalid();
+      if (!source || source.applicationId !== id || typeof source.secret !== 'boolean') throw invalid();
+      const isGitCredential = source.key === GIT_CREDENTIAL_KEY;
+      const isWebhookSecret = source.key === GITHUB_WEBHOOK_SECRET_KEY;
+      const expectedFields = isGitCredential
+        ? ['applicationId', 'key', 'secret', 'value', 'ciphertext', 'iv', 'tag', 'credentialType', 'createdAt', 'updatedAt']
+        : ['applicationId', 'key', 'secret', 'value', 'ciphertext', 'iv', 'tag', 'createdAt', 'updatedAt'];
+      if (Object.keys(source).length !== expectedFields.length || !expectedFields.every(field => Object.hasOwn(source, field))) throw invalid();
       try {
-        normalizeEnvironmentKey(source.key);
+        if (!isGitCredential && !isWebhookSecret) normalizeEnvironmentKey(source.key);
         validateTimestamp(source.createdAt, 'createdAt'); validateTimestamp(source.updatedAt, 'updatedAt');
         if (source.createdAt === null || source.updatedAt === null) throw invalid();
         if (source.secret) {
           if (source.value !== null) throw invalid();
           const value = decryptValue(encryptionKey, source);
-          if (source.key === GIT_CREDENTIAL_KEY) normalizeGitDeploymentCredential(JSON.parse(value));
-          else if (source.key === GITHUB_WEBHOOK_SECRET_KEY) normalizeWebhookSecret(value);
+          if (isGitCredential) {
+            const parsed = normalizeGitDeploymentCredential(JSON.parse(value), { nullable: false });
+            if (parsed.type !== source.credentialType) throw invalid();
+          } else if (isWebhookSecret) normalizeWebhookSecret(value);
           else normalizeEnvironmentValue(value);
         } else {
           if (INTERNAL_KEYS.has(source.key) || source.ciphertext !== null || source.iv !== null || source.tag !== null) throw invalid();
@@ -783,16 +790,23 @@ export function createApplicationEnvironmentRegistry({
     if (savedMetadata && savedMetadata.applicationId !== id) throw invalid();
     const currentMetadata = environmentState(state, id);
     const previous = state.variables.filter(record => record.applicationId === id);
+    const userVariables = variables.filter(record => !INTERNAL_KEYS.has(record.key));
+    const previousUserVariables = previous.filter(record => !INTERNAL_KEYS.has(record.key));
     // Empty PHP/static application catalogs have no process environment to apply.
     if (!variables.length && !previous.length && !currentMetadata && !savedMetadata) return publicEnvironmentState(null, id);
+    if (!userVariables.length && !previousUserVariables.length && !currentMetadata && !savedMetadata) {
+      state.variables = [...state.variables.filter(record => record.applicationId !== id), ...variables];
+      await persist();
+      return publicEnvironmentState(null, id);
+    }
     const timestamp = new Date(now()).toISOString();
     state.variables = [...state.variables.filter(record => record.applicationId !== id), ...variables];
     state.environments = state.environments.filter(record => record.applicationId !== id);
     const metadata = { applicationId: id, revision: Math.max(currentMetadata?.revision ?? 0, savedMetadata?.revision ?? 0, now()) + 1,
       appliedRevision: null, appliedReleaseId: null, lastChangedAt: timestamp, lastAppliedAt: null,
-      lastChange: { source: 'restore', added: variables.filter(record => !previous.some(before => before.key === record.key)).length,
-        updated: variables.filter(record => previous.some(before => before.key === record.key)).length,
-        deleted: previous.filter(record => !variables.some(after => after.key === record.key)).length } };
+      lastChange: { source: 'restore', added: userVariables.filter(record => !previousUserVariables.some(before => before.key === record.key)).length,
+        updated: userVariables.filter(record => previousUserVariables.some(before => before.key === record.key)).length,
+        deleted: previousUserVariables.filter(record => !userVariables.some(after => after.key === record.key)).length } };
     state.environments.push(validateEnvironmentState(metadata));
     await persist();
     return publicEnvironmentState(metadata, id);

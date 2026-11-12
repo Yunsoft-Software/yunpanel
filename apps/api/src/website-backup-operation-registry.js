@@ -1,15 +1,61 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 import { assertWebsiteSnapshotContent, resolveWebsiteRestoreSelection } from './website-restore-selection.js';
-import { websiteRestoreTransactionId } from './website-restore-service.js';
+import {
+  SAFE_RESTORE_FAILURE_PHASES,
+  SAFE_RESTORE_ROLLBACK_PHASES,
+  websiteRestoreTransactionId,
+} from './website-restore-service.js';
 
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
+const SAFE_ERROR_CODE_PATTERN = /^[a-z0-9_]{1,100}$/;
 const OPERATION_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'rolled_back']);
 const OPERATION_KINDS = new Set(['backup', 'restore', 'check', 'plan']);
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
+
+function isSafeStagedRoot(stagedRoot) {
+  return typeof stagedRoot === 'string'
+    && path.posix.isAbsolute(stagedRoot)
+    && path.posix.normalize(stagedRoot) === stagedRoot
+    && stagedRoot.split('/').filter(Boolean).length >= 3;
+}
+
+async function clearStagedRoot(backupSet) {
+  if (isSafeStagedRoot(backupSet?.stagedRoot)) {
+    await rm(backupSet.stagedRoot, { recursive: true, force: true });
+  }
+}
+
+function sanitizePublicOperationError(error) {
+  if (!error || typeof error !== 'object') return null;
+  const code = typeof error.code === 'string' && SAFE_ERROR_CODE_PATTERN.test(error.code)
+    ? error.code
+    : 'website_backup_execution_failed';
+  const message = typeof error.message === 'string' ? error.message : 'İşlem tamamlanamadı';
+  const phase = typeof error.phase === 'string' && SAFE_RESTORE_FAILURE_PHASES.has(error.phase)
+    ? error.phase
+    : null;
+  const restoreErrorCode = typeof error.restoreErrorCode === 'string' && SAFE_ERROR_CODE_PATTERN.test(error.restoreErrorCode)
+    ? error.restoreErrorCode
+    : null;
+  const rollbackPhase = typeof error.rollbackPhase === 'string' && SAFE_RESTORE_ROLLBACK_PHASES.has(error.rollbackPhase)
+    ? error.rollbackPhase
+    : null;
+  const rollbackErrorCode = typeof error.rollbackErrorCode === 'string' && SAFE_ERROR_CODE_PATTERN.test(error.rollbackErrorCode)
+    ? error.rollbackErrorCode
+    : null;
+  return Object.freeze({
+    code,
+    message,
+    ...(phase ? { phase } : {}),
+    ...(restoreErrorCode ? { restoreErrorCode } : {}),
+    ...(rollbackPhase ? { rollbackPhase } : {}),
+    ...(rollbackErrorCode ? { rollbackErrorCode } : {}),
+  });
+}
 
 export class WebsiteBackupOperationRegistryError extends Error {
   constructor(code, message, status = 400) {
@@ -42,7 +88,7 @@ export function websiteBackupOperationPublicView(operation) {
       ? Object.freeze([...operation.include])
       : Object.freeze([]),
     result: operation.result ? Object.freeze({ ...operation.result }) : null,
-    error: operation.error ? Object.freeze({ code: operation.error.code, message: operation.error.message }) : null,
+    error: sanitizePublicOperationError(operation.error),
     restartEvidence: operation.restartEvidence ? Object.freeze({ ...operation.restartEvidence }) : null,
     createdAt: operation.createdAt,
     startedAt: operation.startedAt ?? null,
@@ -380,12 +426,17 @@ export function createWebsiteBackupOperationRegistry({
               if (dnsBackupAdapter) await dnsBackupAdapter.assertSupported(backupSet, paths);
               if (hostingBackupAdapter) await hostingBackupAdapter.assertSupported(backupSet, paths);
               if ([...(!dnsBackupAdapter ? (backupSet.dns ?? []).map(dns => dns.stagedZonePath) : []), ...(!hostingBackupAdapter ? (backupSet.nginx ?? []).flatMap(nginx => [nginx.stagedConfigPath,nginx.stagedMetadataPath]) : [])].some(selected)) throw new WebsiteBackupOperationRegistryError('website_restore_resource_adapter_unavailable', 'Hosting rollback engine is unavailable', 503);
-              await resticManager.restore({ repository: repository.target, password, snapshotId: receipt.preRestoreSnapshotId, targetDirectory: '/', include: [...paths] });
-              if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
-              if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
-              if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
-              if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
-              if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              try {
+                await clearStagedRoot(backupSet);
+                await resticManager.restore({ repository: repository.target, password, snapshotId: receipt.preRestoreSnapshotId, targetDirectory: '/', include: [...paths] });
+                if (databaseBackupAdapter) await databaseBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+                if (mailBackupAdapter) await mailBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+                if (environmentBackupAdapter) await environmentBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+                if (dnsBackupAdapter) await dnsBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+                if (hostingBackupAdapter) await hostingBackupAdapter.restore({ backupSet, include: paths, operationId: op.id, rollback: true });
+              } finally {
+                await clearStagedRoot(backupSet);
+              }
               await receiptStore.write({ ...receipt, status: 'rolled_back', rollbackReason: 'interrupted_by_restart_rollback_recovered' });
               return { status: 'rolled_back', preRestoreSnapshotId: receipt.preRestoreSnapshotId,
                 result: { status: 'rolled_back', websiteId: op.websiteId, snapshotId: op.snapshotId, preRestoreSnapshotId: receipt.preRestoreSnapshotId, rollbackReason: 'interrupted_by_restart_rollback_recovered' },

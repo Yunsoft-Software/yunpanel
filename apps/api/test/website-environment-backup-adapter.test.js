@@ -54,3 +54,39 @@ test('an empty PHP catalog round trips without inventing a process environment o
   assert.equal((await f.registry.environmentStatus(f.application.id)).savedRevision, 0);
   assert.deepEqual(f.calls, []);
 });
+
+test('PHP catalog with protected webhook secret and Git deployment credential round-trips through backup and restore (T900)', async t => {
+  const f = await fixture(t, 'php', false);
+  const originalWebhook = 'whsec_original_1234567890abcdefghijklmnop';
+  const changedWebhook = 'whsec_changed_9876543210zyxwvutsrqponmlkj';
+  await f.registry.setWebhookSecret({ applicationId: f.application.id, secret: originalWebhook });
+  await f.registry.setDeploymentCredential({
+    applicationId: f.application.id,
+    credential: { type: 'github_token', token: 'ghp_originalTokenValue1234567890abcdef' },
+  });
+  const webhookBefore = await f.registry.webhookSecret(f.application.id);
+  const credBefore = await f.registry.deploymentCredential(f.application.id);
+
+  await f.adapter.capture(f.backupSet);
+  const rawBackup = await readFile(f.backupSet.env.stagedMetadataPath, 'utf8');
+  assert.doesNotMatch(rawBackup, /whsec_original|ghp_originalTokenValue/);
+
+  await f.registry.setWebhookSecret({ applicationId: f.application.id, secret: changedWebhook });
+  await f.registry.setDeploymentCredential({
+    applicationId: f.application.id,
+    credential: { type: 'github_token', token: 'ghp_changedTokenValue9876543210fedcba' },
+  });
+  assert.equal(await f.registry.materializeWebhookSecret(f.application.id), changedWebhook);
+
+  const result = await f.adapter.restore({ backupSet: f.backupSet, include: [f.backupSet.stagedRoot], operationId: randomUUID() });
+  assert.equal(result[0].restored, true);
+  assert.equal(result[0].savedRevision, 0);
+  assert.equal(await f.registry.materializeWebhookSecret(f.application.id), originalWebhook);
+  assert.deepEqual(await f.registry.webhookSecret(f.application.id), webhookBefore);
+  assert.deepEqual(await f.registry.materializeDeploymentCredential(f.application.id), {
+    type: 'github_token',
+    token: 'ghp_originalTokenValue1234567890abcdef',
+  });
+  assert.deepEqual(await f.registry.deploymentCredential(f.application.id), credBefore);
+  assert.equal((await f.registry.environmentStatus(f.application.id)).savedRevision, 0);
+});
