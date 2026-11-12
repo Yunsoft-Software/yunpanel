@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+
+function assertConversationChildSuccess(script) {
+  const child = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {
+    encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  const outcome = { status: child.status, signal: child.signal, errorCode: child.error?.code ?? null };
+  assert.ok(child.status === 0 && child.signal === null && !child.error,
+    `Conversation child process failed: ${JSON.stringify(outcome)}`);
+}
 
 // The real conversation service and real temporary filesystem run in the child.
 // Only provider/orchestrator imports are replaced; no external model is called.
@@ -150,9 +159,7 @@ test('conversation ownership, legacy preservation, paging and storage failures t
       assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
     } finally { await rm(dir, { recursive: true, force: true }); }
   `;
-  assert.doesNotThrow(() => execFileSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {
-    encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'],
-  }));
+  assertConversationChildSuccess(script);
 });
 
 test('real mounted conversation handlers preserve the auth boundary and reject actor/query spoofing', () => {
@@ -222,7 +229,5 @@ test('real mounted conversation handlers preserve the auth boundary and reject a
       assert.equal(mockRes.statusCode, 403);
     } finally { await rm(directory, { recursive: true, force: true }); }
   `;
-  assert.doesNotThrow(() => execFileSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {
-    encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'],
-  }));
+  assertConversationChildSuccess(script);
 });

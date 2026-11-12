@@ -281,6 +281,18 @@ async function untilState(call, slug, targetStates, timeoutMs = 10_000) {
   return result;
 }
 
+function assertRemovalResponse(result, slug) {
+  const site = result.body?.data;
+  assert.equal(site?.slug, slug);
+  assert.equal(site?.hostname, `${slug}.st.example.test`);
+  if (result.status === 200) {
+    assert.equal(site.state, 'removed');
+  } else {
+    assert.equal(result.status, 202);
+    assert.equal(site.state, 'removing');
+  }
+}
+
 test('re-creating a deleted tenant with the same slug generates a new generation/journal and avoids old provisioning/removal collisions', async (t) => {
   const f = await fixture(t);
   const slug = 'ypt-recreate';
@@ -302,7 +314,7 @@ test('re-creating a deleted tenant with the same slug generates a new generation
 
   // 2. Removal of first generation
   const delete1 = await f.call('DELETE', `/api/automation/tenant-sites/${slug}`);
-  assert.equal(delete1.status, 202);
+  assertRemovalResponse(delete1, slug);
   const removed1 = await untilState(f.call, slug, ['removed', '404']);
   assert.ok(['removed', '404'].includes(removed1.status === 404 ? '404' : removed1.body?.data?.state));
 
@@ -332,7 +344,7 @@ test('re-creating a deleted tenant with the same slug generates a new generation
 
   // 4. Delete the re-created tenant (second generation)
   const delete2 = await f.call('DELETE', `/api/automation/tenant-sites/${slug}`);
-  assert.equal(delete2.status, 202);
+  assertRemovalResponse(delete2, slug);
 
   // Must NOT fail with website_removal_domains_still_attached!
   const removed2 = await untilState(f.call, slug, ['removed', 'attention', '404'], 15_000);
@@ -356,7 +368,7 @@ test('re-creating a deleted tenant with the same slug generates a new generation
 
   // Clean up generation 3
   const delete3 = await f.call('DELETE', `/api/automation/tenant-sites/${slug}`);
-  assert.equal(delete3.status, 202);
+  assertRemovalResponse(delete3, slug);
   const removed3 = await untilState(f.call, slug, ['removed', '404']);
   assert.ok(['removed', '404'].includes(removed3.status === 404 ? '404' : removed3.body?.data?.state));
 });
