@@ -1,5 +1,6 @@
 import { advanceWebsiteRemovalCronCleanup, WebsiteRemovalCronCleanupError } from './website-removal-cron-cleanup.js';
 import { WebsiteRemovalCleanupAdapterError } from './website-removal-cleanup-adapters.js';
+import { createLiveSessionRegistry } from './live-session-registry.js';
 
 const SAFE_ID = /^[A-Za-z0-9._:-]{1,128}$/;
 const SHA256_PATTERN = /^[a-f0-9]{64}$/;
@@ -97,6 +98,7 @@ export function createWebsiteRemovalRuntime({
   siteMutationLock = null,
   hostingAllocationReleaseHandler = null,
   authorizeActor = null,
+  liveSessions = createLiveSessionRegistry(),
   automaticExecution = false,
 } = {}) {
   if (typeof automaticExecution !== 'boolean' || automaticExecution && typeof authorizeActor !== 'function') {
@@ -258,6 +260,13 @@ export function createWebsiteRemovalRuntime({
     await registry.init();
     // Inspect-first reconciliation for interrupted operations
     const operations = await registry.list();
+    // Restore the admission barrier before the first reconciliation await. A
+    // legacy journal without durable terminal evidence remains fenced/unknown.
+    for (const op of operations) {
+      if (op.status === 'removed') continue;
+      const receipt = [...op.steps].reverse().find(step => step.result?.terminalDrain)?.result.terminalDrain ?? null;
+      liveSessions.restoreWebsiteRemoval(op.websiteId, op.id, op.plan?.terminalLifecycle ?? null, receipt);
+    }
     for (const op of operations) {
       if (op.status === 'running') {
         const step = firstIncomplete(op);
@@ -394,7 +403,25 @@ export function createWebsiteRemovalRuntime({
         throw new WebsiteRemovalRuntimeError('website_removal_operation_in_progress', 'Continue the existing removal operation before starting another.', 409);
       }
       const lockedActor = await requireLiveActor(liveActor, websiteId);
-      const op = await registry.create(currentPreview, { actor: lockedActor, executionMode: automaticExecution ? 'automatic' : 'manual' });
+      const reservation = liveSessions.reserveWebsiteRemoval(websiteId);
+      let op, terminalLifecycle;
+      try {
+        terminalLifecycle = await reservation.snapshot();
+        op = await registry.create({ ...currentPreview, plan: { ...currentPreview.plan, terminalLifecycle } },
+          { actor: lockedActor, executionMode: automaticExecution ? 'automatic' : 'manual' });
+        liveSessions.commitWebsiteRemoval(websiteId, op.id, terminalLifecycle);
+      } catch (error) {
+        // Persistence may have completed before an I/O error was reported. Only
+        // an authoritative empty history permits releasing the provisional fence.
+        const current = await registry.listForWebsite(websiteId);
+        if (Array.isArray(current) && current.every(value => value.status === 'removed')) reservation.cancel();
+        else if (Array.isArray(current) && terminalLifecycle) {
+          const matching = current.filter(value => value.status !== 'removed'
+            && value.plan?.terminalLifecycle?.reservationId === terminalLifecycle.reservationId);
+          if (matching.length === 1) liveSessions.commitWebsiteRemoval(websiteId, matching[0].id, terminalLifecycle);
+        }
+        throw error;
+      }
       if (automaticExecution) return publicOperation(op);
       return runNextStep(op.id, lockedActor);
     });
@@ -568,6 +595,7 @@ export function createWebsiteRemovalRuntime({
     op = await loadOperation(operationId);
 
     try {
+      let terminalDrain = null;
       if (op.plan?.managedComposeBinding) {
         const current = await websiteRegistry.getWebsite(op.websiteId);
         // Metadata may already be absent after a successful delete whose receipt
@@ -584,6 +612,13 @@ export function createWebsiteRemovalRuntime({
         if (!Array.isArray(domains) || domains.some(domain => domain.websiteId === op.websiteId)) {
           throw new WebsiteRemovalRuntimeError('website_removal_domains_still_attached', 'Remove the bound Domains before deleting Website files or identity', 409);
         }
+      }
+      if (['file_cleanup', 'unix_identity_cleanup'].includes(step.kind)) {
+        const priorReceipt = [...op.steps].reverse().find(value => value.result?.terminalDrain)?.result.terminalDrain ?? null;
+        terminalDrain = await liveSessions.drainWebsite(op.websiteId, op.id,
+          { snapshot: op.plan?.terminalLifecycle ?? null, priorReceipt });
+        // Persist the verified drain before either destructive cleanup adapter.
+        await registry.checkpointStep(op.id, step.id, { ...(step.result ?? {}), terminalDrain });
       }
       switch (step.kind) {
         case 'domain_removal': {
@@ -744,7 +779,7 @@ export function createWebsiteRemovalRuntime({
           }
           // Do not copy arbitrary adapter fields or secrets into the public operation result.
           op = await registry.succeedStep(op.id, step.id, {
-            filesCleaned: true, retainedBackups, retainedLogScopes,
+            filesCleaned: true, retainedBackups, retainedLogScopes, terminalDrain,
             ...(Number.isSafeInteger(cleanupResult.cleanedFilesCount) && cleanupResult.cleanedFilesCount >= 0
               ? { cleanedFilesCount: cleanupResult.cleanedFilesCount } : {}),
           });
@@ -756,7 +791,7 @@ export function createWebsiteRemovalRuntime({
           const expected = { systemUser: step.resourceId, websiteId: op.websiteId };
           const result = await unixIdentityCleanupHandler({ ...expected });
           requireCleanupReceipt(result, expected, 'unixIdentityCleaned');
-          op = await registry.succeedStep(op.id, step.id, { unixIdentityCleaned: true });
+          op = await registry.succeedStep(op.id, step.id, { unixIdentityCleaned: true, terminalDrain });
           break;
         }
 
@@ -851,12 +886,14 @@ export function createWebsiteRemovalRuntime({
     } catch (err) {
       const known = err instanceof WebsiteRemovalRuntimeError
         || err instanceof WebsiteRemovalCronCleanupError
-        || err instanceof WebsiteRemovalCleanupAdapterError;
+        || err instanceof WebsiteRemovalCleanupAdapterError || err?.name === 'TerminalLifecycleError'
+        || typeof err?.code === 'string' && err.code.startsWith('terminal_drain_');
       const error = {
         code: typeof err?.code === 'string' && /^[a-z][a-z0-9_]{0,79}$/.test(err.code) ? err.code : 'website_removal_step_failed',
         message: known ? err.message : 'Cleanup failed. Check the server diagnostics before explicitly continuing.',
       };
-      const blocked = (err instanceof WebsiteRemovalCleanupAdapterError) || (known && [
+      const blocked = (err instanceof WebsiteRemovalCleanupAdapterError) || err?.name === 'TerminalLifecycleError'
+        || typeof err?.code === 'string' && err.code.startsWith('terminal_drain_') || (known && [
         'website_removal_cleanup_unavailable',
         'website_removal_cleanup_unverified',
         'website_removal_cron_job_failed',

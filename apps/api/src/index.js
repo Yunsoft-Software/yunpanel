@@ -38,7 +38,7 @@ import { createApplicationEnvironmentRegistry } from './application-environment-
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationPassengerMigrationPreviewService } from './application-passenger-migration-preview.js';
 import { createApplicationPassengerMigrationService } from './application-passenger-migration-service.js';
-import { createTerminalProcessManager } from './terminal-process-manager.js';
+import { captureTerminalGenerationBoundary, createTerminalProcessManager, recoverOwnedTerminalLease } from './terminal-process-manager.js';
 import { createTerminalWebSocketServer } from './terminal-websocket.js';
 import { createApplicationRegistry } from './application-registry.js';
 import { createApplicationRuntimeBindingRegistry } from './application-runtime-binding-registry.js';
@@ -277,6 +277,10 @@ if (dnsZoneRetentionDaysRaw !== null
     || dnsZoneSnapshotRetentionDays > 3650)) {
   throw new Error('YUNPANEL_DNS_ZONE_SNAPSHOT_RETENTION_DAYS must be an integer between 1 and 3650');
 }
+
+// Observe the existing service generation before registry initialization, any
+// local socket/runtime, worker or HTTP listener can create an API child.
+const terminalGenerationBoundary = captureTerminalGenerationBoundary();
 
 function reportLocalExecutorFault(error) {
   const code = typeof error?.code === 'string' ? error.code : 'local_executor_fault';
@@ -727,11 +731,12 @@ authorizeApiKeyActor = createApiKeyActorAuthorizer({ apiKeyStore, tenantSiteStor
 const databaseManager = createDatabaseManager();
 registry.databaseSecurityHardener = () => databaseManager.hardenSecurityBaseline();
 await prepareRootAuthStateOwnership({ filePath: authStorePath });
-const liveSessions = createLiveSessionRegistry();
+const liveSessions = createLiveSessionRegistry({ requireGenerationBoundary: true, generationBoundary: terminalGenerationBoundary });
 const authStore = createAuthStore({ filePath: authStorePath, liveSessions });
 const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });
-const terminalProcessManager = createTerminalProcessManager();
+const terminalProcessManager = createTerminalProcessManager({ liveSessions });
 const ttydSessionManager = createTtydSessionManager({ liveSessions });
+liveSessions.configureWebsiteRecovery(recoverOwnedTerminalLease);
 const auditedJobRegistry = createAuditedJobRegistry({
   registry: durableJobRegistry,
   audit: authStore.audit,
@@ -981,6 +986,7 @@ const websiteRemovalDatabaseCleanup = createWebsiteRemovalDatabaseCleanup({ regi
   databaseBindingRegistry, databaseCredentialRegistry, databaseManager, databaseCredentialOperation: localDatabaseCredentialOperation });
 const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
   ? createWebsiteRemovalRuntime({
+    liveSessions,
     domainRegistry,
     registry: websiteRemovalOperationRegistry,
     previewProvider: async ({ websiteId }) => {

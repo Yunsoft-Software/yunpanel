@@ -63,6 +63,13 @@ export function createTerminalCapabilityRegistry({
   }
   const capabilities = new Map();
 
+  function assertOpen(target) {
+    if (target.scope !== 'site' || !liveSessions) return;
+    try { liveSessions.assertWebsiteOpen(target.websiteId); }
+    catch (error) { throw new TerminalCapabilityError(error.code ?? 'terminal_website_removing',
+      error.code === 'terminal_website_removing' ? 'Site siliniyor' : 'Terminal kullanılamıyor', error.status ?? 409); }
+  }
+
   function remove(key) {
     const record = capabilities.get(key);
     if (!record) return false;
@@ -81,6 +88,7 @@ export function createTerminalCapabilityRegistry({
     const normalizedSessionId = boundedIdentity(sessionId, 'sessionId');
     const normalizedUserId = boundedIdentity(userId, 'userId');
     const normalizedTarget = normalizeTarget(target);
+    assertOpen(normalizedTarget);
     prune();
     const capability = randomBytes(32).toString('base64url');
     const key = digest(capability);
@@ -97,6 +105,7 @@ export function createTerminalCapabilityRegistry({
       record.unregister = liveSessions.register({
         sessionId: normalizedSessionId,
         userId: normalizedUserId,
+        websiteId: normalizedTarget.scope === 'site' ? normalizedTarget.websiteId : null,
         terminate: () => remove(key),
       }).unregister;
     }
@@ -117,6 +126,7 @@ export function createTerminalCapabilityRegistry({
     if (record.sessionId !== sessionId || record.userId !== userId) {
       throw new TerminalCapabilityError('terminal_capability_binding_invalid', 'Terminal capability is bound to another session', 403);
     }
+    assertOpen(record.target);
     return Object.freeze({ target: record.target, expiresAt: record.expiresAt });
   }
 

@@ -137,6 +137,7 @@ export function createTerminalWebSocketServer({
   function terminate(record, reason, closeCode = 4000, notice = null) {
     if (record.closed) return false;
     record.closed = true;
+    record.abort.abort();
     sessions.delete(record.id);
     if (record.interval !== null) clearIntervalFn(record.interval);
     record.unregister?.();
@@ -197,6 +198,7 @@ export function createTerminalWebSocketServer({
       ready: false,
       closed: false,
       openAccepted: false,
+      abort: new AbortController(),
     };
     sessions.set(record.id, record);
     websocket.once('close', () => terminate(record, 'client_closed', 1000));
@@ -204,6 +206,7 @@ export function createTerminalWebSocketServer({
     record.unregister = liveSessions.register({
       sessionId: record.sessionId,
       userId: record.userId,
+      websiteId: record.target.scope === 'site' ? record.target.websiteId : null,
       terminate: (reason) => terminate(record, reason, 4001, { type: 'revoked', reason }),
     }).unregister;
     websocket.on('message', (data, isBinary) => {
@@ -241,6 +244,7 @@ export function createTerminalWebSocketServer({
     try {
       record.terminal = await terminalProcessManager.open({
         target: record.target,
+        signal: record.abort.signal,
         onData: (data) => sendOutput(record, data),
         onExit: ({ exitCode, signal }) => {
           if (record.closed) return;
@@ -248,7 +252,7 @@ export function createTerminalWebSocketServer({
           terminate(record, 'process_exit', 1000);
         },
       });
-      if (record.closed) { record.terminal.close(); return; }
+      if (record.closed) { record.terminal.close(); await record.terminal.drain?.(); return; }
       recordAudit(record, 'opened', 'succeeded');
     } catch (error) {
       const code = error instanceof TerminalProcessError ? error.code : 'terminal_start_failed';

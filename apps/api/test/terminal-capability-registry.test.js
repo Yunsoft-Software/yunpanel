@@ -64,3 +64,20 @@ test('terminal target policy accepts only exact root or isolated site identities
     },
   }));
 });
+
+test('T898 Website removal rejects new and old capabilities while preserving the same Owner root and B capabilities', async () => {
+  const liveSessions = createLiveSessionRegistry();
+  const registry = createTerminalCapabilityRegistry({ liveSessions });
+  const site = { scope: 'site', serverId: 'server-1', websiteId: 'website-a', user: 'yunapp-123456789abc', cwd: '/var/www/yunpanel/apps/app/current' };
+  const credentials = { sessionId: 'owner-session', userId: 'owner-user' };
+  const a = registry.issue({ ...credentials, target: site });
+  const b = registry.issue({ ...credentials, target: { ...site, websiteId: 'website-b' } });
+  const root = registry.issue({ ...credentials, target: serverTarget });
+  const reservation = liveSessions.reserveWebsiteRemoval(site.websiteId);
+  assert.throws(() => registry.issue({ ...credentials, target: site }), { code: 'terminal_website_removing', status: 409 });
+  assert.throws(() => registry.consume(a.capability, credentials), { code: 'terminal_website_removing', status: 409 });
+  liveSessions.commitWebsiteRemoval(site.websiteId, 'removal-a', await reservation.snapshot());
+  assert.equal(registry.consume(b.capability, credentials).target.websiteId, 'website-b');
+  assert.equal(registry.consume(root.capability, credentials).target.scope, 'server');
+  assert.equal(registry.size(), 0);
+});

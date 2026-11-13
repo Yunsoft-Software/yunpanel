@@ -7,7 +7,7 @@ const indexUrl = new URL('../src/index.js', import.meta.url);
 test('production binds ttyd terminal gateway to auth, live-session and capability boundary', async () => {
   const source = await readFile(indexUrl, 'utf8');
   for (const expected of [
-    'const liveSessions = createLiveSessionRegistry();',
+    'const liveSessions = createLiveSessionRegistry({ requireGenerationBoundary: true, generationBoundary: terminalGenerationBoundary });',
     'const authStore = createAuthStore({ filePath: authStorePath, liveSessions });',
     'const terminalCapabilityRegistry = createTerminalCapabilityRegistry({ liveSessions });',
     'const ttydSessionManager = createTtydSessionManager({ liveSessions });',
