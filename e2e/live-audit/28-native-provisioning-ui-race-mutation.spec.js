@@ -134,17 +134,20 @@ function sideContinue(entry, before) {
 
 async function createUi(entry, page, input, recordInput) {
   entry.hostname = input.primaryDomain; entry.serverId = input.serverId;
+  let creationWaiter = null, primaryError = null;
   const createPattern = '**/api/panel/sites';
   const continuePattern = /\/api\/panel\/sites\/provisioning\/[a-f0-9-]{36}\/continue$/i;
   const createObserver = async route => {
-    try {
-      if (route.request().method() === 'POST') {
-        const actual = route.request().postDataJSON()?.input;
-        assert.equal(actual.primaryDomain, entry.hostname); recordInput(actual); entry.proof.uiCreatePosts += 1;
-        expect(entry.proof.uiCreatePosts, 'One normal UI create only').toBe(1);
-      }
-    } catch (error) { entry.errors.push(error); }
-    finally { await route.continue(); }
+    if (route.request().method() === 'POST') {
+      entry.proof.uiCreateIntents += 1;
+      expect(entry.proof.uiCreateIntents, 'Reject a second create before changing the owned identity ledger').toBe(1);
+      const actual = route.request().postDataJSON()?.input;
+      assert.equal(actual.primaryDomain, entry.hostname);
+      recordInput(actual);
+      entry.proof.uiCreatePosts += 1;
+    }
+    // A rejected guard throws before this success-only forwarding point.
+    await route.continue();
   };
   const barrier = async route => {
     const request = route.request(), id = new URL(request.url()).pathname.split('/').at(-2);
@@ -177,7 +180,8 @@ async function createUi(entry, page, input, recordInput) {
   const onRequest = request => {
     const pathname = new URL(request.url()).pathname;
     if (request.method() === 'POST' && (pathname === '/api/panel/sites' || entry.ids && pathname === '/api/panel/sites/provisioning/' + entry.ids.provisioningId + '/continue')) {
-      entry.requests.set(request, { kind: pathname === '/api/panel/sites' ? 'create' : 'continue', startedAt: Date.now(), finished: false });
+      entry.requests.set(request, { kind: pathname === '/api/panel/sites' ? 'create' : 'continue',
+        requestSequence: ++entry.eventSequence, startedAt: Date.now(), finished: false });
     }
   };
   const onFinished = request => { const row = entry.requests.get(request); if (row) { row.finished = true; row.finishedAt = Date.now(); } };
@@ -188,6 +192,8 @@ async function createUi(entry, page, input, recordInput) {
   const onResponse = response => track(entry, (async () => {
     const request = response.request(), pathname = new URL(response.url()).pathname;
     if (request.method() !== 'POST') return;
+    // Capture browser event order before JSON/identity awaits; Date.now can tie.
+    const responseSequence = ++entry.eventSequence, observedAt = Date.now();
     const wire = entry.requests.get(request); if (wire) wire.httpStatus = response.status();
     if (pathname === '/api/panel/sites/create-preview' && request.postDataJSON()?.input?.primaryDomain === entry.hostname) {
       expect(response.status()).toBe(200); bindPreview(entry, (await response.json()).data); return;
@@ -196,8 +202,8 @@ async function createUi(entry, page, input, recordInput) {
     const identityDeadline = Date.now() + 2000;
     while (!entry.ids && Date.now() < identityDeadline) await delay(10);
     if (!entry.ids || pathname !== '/api/panel/sites/provisioning/' + entry.ids.provisioningId + '/continue') return;
-    const observedAt = Date.now(), body = await response.json();
-    const row = { operationId: entry.ids.provisioningId, httpStatus: response.status(), code: safeCode(body?.error?.code), observedAt };
+    const body = await response.json();
+    const row = { operationId: entry.ids.provisioningId, httpStatus: response.status(), code: safeCode(body?.error?.code), responseSequence, observedAt };
     entry.proof.uiResponses.push(row);
     if (response.status() === 409) {
       if (LOCK_CODES.has(row.code)) entry.documentedUiConflictSeen = true;
@@ -217,9 +223,16 @@ async function createUi(entry, page, input, recordInput) {
     await main(page).getByRole('button', { name: 'Devam et', exact: true }).click();
     await page.getByLabel('DNS yönetimi', { exact: true }).selectOption('external'); await page.getByLabel('Sertifika yönetimi', { exact: true }).selectOption('off');
     await page.getByRole('checkbox', { name: /Otomatik E-Posta|E-posta ve Webmail/ }).uncheck();
-    const creation = page.waitForResponse(response => new URL(response.url()).pathname === '/api/panel/sites' && response.request().method() === 'POST', { timeout: 180000 });
+    const waiter = { startedAt: Date.now(), timeoutMs: 180000, settled: false };
+    entry.proof.createWaiter = waiter;
+    creationWaiter = page.waitForResponse(response => new URL(response.url()).pathname === '/api/panel/sites' && response.request().method() === 'POST', { timeout: 180000 }).then(
+      response => { Object.assign(waiter, { settled: true, settledAt: Date.now(), httpStatus: response.status() }); return { response }; },
+      error => { Object.assign(waiter, { settled: true, settledAt: Date.now(), errorKind: error.name }); return { error }; },
+    );
+    track(entry, creationWaiter);
     await main(page).getByRole('button', { name: 'Siteyi oluştur', exact: true }).click();
-    const response = await creation; expect([200, 201]).toContain(response.status()); const created = (await response.json()).data;
+    const settled = await creationWaiter; if (settled.error) throw settled.error;
+    const response = settled.response; expect([200, 201]).toContain(response.status()); const created = (await response.json()).data;
     assert.ok(entry.ids); assert.equal(created.operationId, entry.ids.createOperationId);
     assert.equal(created.website?.id, entry.ids.websiteId); assert.equal(created.website?.applicationId, entry.ids.applicationId);
     assert.equal(created.primaryDomain?.id, entry.ids.domainId); assert.equal(created.primaryDomain.primaryDomain, entry.hostname);
@@ -239,15 +252,26 @@ async function createUi(entry, page, input, recordInput) {
     const screenshot = path.join(RUN_DIR, entry.key + '-same-operation-ready.png');
     await page.screenshot({ path: screenshot, fullPage: false }); fs.chmodSync(screenshot, 0o600);
     return created;
-  } finally {
-    const deadline = Date.now() + 120000;
-    while ((entry.tasks.size || [...entry.requests.values()].some(row => !row.finished)) && Date.now() < deadline) await delay(50);
-    expect(entry.tasks.size, 'Every actual side request/response/barrier must settle before cleanup').toBe(0);
-    expect([...entry.requests.values()].every(row => row.finished)).toBe(true);
-    entry.proof.uiRequests = [...entry.requests.values()]; entry.proof.transportUncertain = entry.uncertain;
-    page.off('request', onRequest); page.off('requestfinished', onFinished); page.off('requestfailed', onFailed); page.off('response', onResponse);
-    await page.unroute(createPattern, createObserver); await page.unroute(continuePattern, routedBarrier);
-    entry.observersSettled = true;
+  } catch (error) { primaryError = error; throw error; }
+  finally {
+    try {
+      // The handled waiter keeps its original deadline even if click fails first.
+      if (creationWaiter) await creationWaiter;
+      const deadline = Date.now() + 120000;
+      while ((entry.tasks.size || [...entry.requests.values()].some(row => !row.finished)) && Date.now() < deadline) await delay(50);
+      expect(entry.tasks.size, 'Every actual side request/response/barrier must settle before cleanup').toBe(0);
+      expect([...entry.requests.values()].every(row => row.finished)).toBe(true);
+      entry.proof.uiRequests = [...entry.requests.values()]; entry.proof.transportUncertain = entry.uncertain;
+      entry.observersSettled = true;
+    } catch (error) {
+      entry.proof.observerFailures.push({ errorKind: error.name });
+      if (!primaryError) { primaryError = error; throw error; }
+    } finally {
+      try {
+        page.off('request', onRequest); page.off('requestfinished', onFinished); page.off('requestfailed', onFailed); page.off('response', onResponse);
+        await page.unroute(createPattern, createObserver); await page.unroute(continuePattern, routedBarrier);
+      } catch (error) { entry.observersSettled = false; if (!primaryError) throw error; }
+    }
   }
 }
 
@@ -330,16 +354,17 @@ test('@mutation source actual UI lock409 reconciles the same owned operation to 
   try {
     for (let trial = 1; trial <= 3; trial++) {
       const key = 't894-ui-' + trial + '-' + (info.project.name.startsWith('firefox') ? 'ff' : 'cr') + '-w' + info.workerIndex;
-      const entry = { key, tasks: new Set(), requests: new Map(), errors: [], sideSteps: new Set(), uncertain: false,
-        proof: { key, trial, uiCreatePosts: 0, sidePosts: [], uiResponses: [], uiConflicts: [], barriers: [], reads: [], observerFailures: [] } };
+      const entry = { key, tasks: new Set(), requests: new Map(), errors: [], sideSteps: new Set(), uncertain: false, eventSequence: 0,
+        proof: { key, trial, uiCreateIntents: 0, uiCreatePosts: 0, sidePosts: [], uiResponses: [], uiConflicts: [], barriers: [], reads: [], observerFailures: [] } };
       entries.push(entry); proof.trials.push(entry.proof);
+      let trialError = null;
       try {
         entry.fixture = await createOwnedFixture(owner, { key, runtime: 'static', create: (input, _preview, recordInput) => createUi(entry, page, input, recordInput) });
         expect(entry.errors).toEqual([]);
         expect(page.auditErrors ?? []).toEqual([]);
         expect(entry.uncertain, 'Uncertain transport stops new trial/side mutations and upload; only known-ID drain and cleanup remain').toBe(false);
         const firstConflict = entry.proof.uiConflicts[0];
-        if (firstConflict) expect(entry.proof.uiRequests.filter(row => row.kind === 'continue' && row.startedAt > firstConflict.observedAt),
+        if (firstConflict) expect(entry.proof.uiRequests.filter(row => row.kind === 'continue' && row.requestSequence > firstConflict.responseSequence),
           'The UI must reconcile with GETs instead of replaying continue after its documented409').toHaveLength(0);
         const physical = readOnlyHostProbe(entry.fixture, 'owned-site-files'); expect(physical.unixUserExists).toBe(true); expect(physical.uid).toBeGreaterThan(0);
         const filename = 'index.html', nonce = randomBytes(18).toString('hex');
@@ -351,7 +376,11 @@ test('@mutation source actual UI lock409 reconciles the same owned operation to 
         await preserveBaseline('ui-ready-' + key); expect(entry.proof.uiCreatePosts).toBe(1); expect(entry.errors).toEqual([]);
         expect(entry.uncertain, 'Uncertain transport remains a failure; no new trial or mutation replay').toBe(false);
         causal = entry.proof.uiConflicts.length > 0 && Boolean(entry.proof.domReady);
-      } finally { await cleanup(entry); }
+      } catch (error) { trialError = error; throw error; }
+      finally {
+        try { await cleanup(entry); }
+        catch (error) { entry.proof.cleanupFailure = { errorKind: error.name, automaticRetry: false }; if (!trialError) throw error; }
+      }
       if (causal) { proof.causalAcceptance = 'observed'; proof.causalTrial = trial; break; }
     }
     if (!causal) {
