@@ -365,6 +365,12 @@ async function browserLogin(browser,installed,username,password,phase='initial')
    return{functionPresent:Boolean(source),delayed200ms:/setTimeout\s*\(/.test(source)&&/},\s*200\s*\)/.test(source),targetsUser:/getElementById\(\s*["']user_login["']\s*\)/.test(source),targetsPass:/getElementById\(\s*["']user_pass["']\s*\)/.test(source),clearsValue:/\.value\s*=\s*["']["']/.test(source),focusAndSelect:/\.focus\(\)/.test(source)&&/\.select\(\)/.test(source),callPrinted:[...document.scripts].some(script=>!script.src&&/\bwp_attempt_focus\s*\(\s*\)\s*;/.test(script.textContent??''))};
   },binding);
   observation.submitListenerInstalled=true;
+  stage='initial-autofocus';
+  expect(observation.inlineFocusShape.functionPresent&&observation.inlineFocusShape.targetsUser&&!observation.inlineFocusShape.targetsPass&&observation.inlineFocusShape.focusAndSelect&&observation.inlineFocusShape.callPrinted,'The fresh WordPress form must expose its normal username autofocus').toBe(true);
+  // WordPress focuses/selects the username asynchronously; wait before either private fill.
+  await expect(p.locator('#user_login'),'The initial WordPress autofocus must finish before entering credentials').toBeFocused();
+  observation.initialFocus=await p.evaluate(()=>{const user=document.querySelector('#user_login'),pass=document.querySelector('#user_pass');return{userFocused:document.activeElement===user,userNonempty:user?Boolean(user.value):null,passNonempty:pass?Boolean(pass.value):null,elapsedMs:Math.round(performance.now())};});
+  expect(observation.initialFocus.userFocused,'The initial focus must still belong to the username field').toBe(true);
   async function fillPrivate(selector,value,field){try{await p.locator(selector).fill(value);}catch(error){observation.fillFailure={field,timeout:error?.name==='TimeoutError',transportCode:transportCode(error?.message)};const safe=new Error('WordPress private input fill failed; values and call log withheld');if(error?.name==='TimeoutError')safe.name='TimeoutError';throw safe;}}
   stage='fill-user';await fillPrivate('#user_login',username,'user');stage='fill-pass';await fillPrivate('#user_pass',password,'password');
   stage='form-before-submit';observation.formBeforeSubmit=await p.evaluate(({expectedUser,expectedPassword})=>{
@@ -372,6 +378,10 @@ async function browserLogin(browser,installed,username,password,phase='initial')
    const action=form?new URL(form.action,location.href):null;
    return{formPresent:Boolean(form),checkValidity:form?form.checkValidity():null,userNonempty:user?Boolean(user.value):null,passNonempty:pass?Boolean(pass.value):null,userMatchesExpected:user?user.value===expectedUser:null,passMatchesExpected:pass?pass.value===expectedPassword:null,userEqualsSuppliedPass:user?user.value===expectedPassword:null,activeField:document.activeElement===user?'user':document.activeElement===pass?'password':null,buttonDisabled:button?button.disabled:null,actionScheme:action?.protocol??null,actionOrigin:action?.origin??null,actionPath:action?.pathname??null};
   },{expectedUser:username,expectedPassword:password});
+  expect(observation.formBeforeSubmit.userMatchesExpected,'The username must remain in its own field').toBe(true);
+  expect(observation.formBeforeSubmit.passMatchesExpected,'The supplied pass must remain in its own field').toBe(true);
+  expect(observation.formBeforeSubmit.userEqualsSuppliedPass,'The username field must never contain the supplied pass').toBe(false);
+  expect(observation.formBeforeSubmit.checkValidity,'The real login form must be valid before its only submit click').toBe(true);
   // Attach both handlers immediately: a click error must not leave the response waiter rejecting unobserved.
   const submitted=p.waitForResponse(r=>new URL(r.url()).pathname==='/wp-login.php'&&r.request().method()==='POST',{timeout:45000}).then(response=>({response}),error=>({error}));
   stage='submit-click';observation.clickAttempted=true;await p.locator('#wp-submit').click();observation.clickResolved=true;
