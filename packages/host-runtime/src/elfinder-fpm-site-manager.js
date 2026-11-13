@@ -1,7 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { constants } from 'node:fs';
-import { lstat, mkdir, open, readFile, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, open, readFile, readlink, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import { createConnection } from 'node:net';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -210,6 +210,71 @@ function normalizeRetirementCheckpoint(value, { operationId, spec } = {}) {
     reloadAttempted: value.reloadAttempted, mainPid: value.mainPid,
     socketUid: value.socketUid, socketGid: value.socketGid,
     protectedListeners: Object.freeze(listeners) });
+}
+
+function configurationUnverified() {
+  return new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_configuration_unverified',
+    'The current shared FPM listener configuration could not be verified');
+}
+
+function canonicalListenerPath(value) {
+  return typeof value === 'string' && value.length <= 4096 && value !== '/'
+    && /^\/[A-Za-z0-9._/-]+$/.test(value) && path.posix.normalize(value) === value;
+}
+
+// Parse only the complete engine-produced pool/listen projection. All other
+// directive values, including environment values, remain private and discarded.
+function parseResolvedFpmListeners(raw, configurationPath) {
+  if (typeof raw !== 'string' || Buffer.byteLength(raw) > MAX_RETIREMENT_BYTES
+    || raw.includes('\0') || !canonicalListenerPath(configurationPath)) throw configurationUnverified();
+  const pools = [], names = new Set(), paths = new Set(); let global = false, current = null, complete = false;
+  for (const line of raw.split(/\r?\n/)) {
+    if (!line.trim()) continue;
+    const matched = line.match(/^\[[^\]\r\n]+\] NOTICE:\s*(.*)$/);
+    if (!matched || line.length > 16_384 || complete) throw configurationUnverified();
+    const body = matched[1].trim(); if (!body) continue;
+    if (body === `configuration file ${configurationPath} test is successful`) {
+      if (!global || pools.length === 0 || !current?.listen) throw configurationUnverified();
+      complete = true; continue;
+    }
+    const section = body.match(/^\[([A-Za-z0-9._-]{1,128})\]$/);
+    if (section) {
+      if (current && !current.listen) throw configurationUnverified();
+      if (section[1] === 'global') {
+        if (global || pools.length) throw configurationUnverified();
+        global = true; continue;
+      }
+      if (!global || names.has(section[1]) || pools.length >= 4096) throw configurationUnverified();
+      names.add(section[1]); current = { pool: section[1], listen: null }; pools.push(current); continue;
+    }
+    const listening = body.match(/^listen\s*=\s*(.*)$/);
+    if (listening) {
+      const value = listening[1];
+      if (!current || current.listen || !canonicalListenerPath(value) || paths.has(value)) throw configurationUnverified();
+      paths.add(value); current.listen = value; continue;
+    }
+    if (!global || !/^[A-Za-z_][A-Za-z0-9_.]*(?:\[[^\]\r\n]+\])?\s*=\s*.*$/.test(body)) throw configurationUnverified();
+  }
+  if (!complete) throw configurationUnverified();
+  const projection = pools.map(value => Object.freeze(value)).sort((a, b) => a.pool < b.pool ? -1 : a.pool > b.pool ? 1 : 0);
+  return Object.freeze({ pools: Object.freeze(projection), topologySha256: sha256(JSON.stringify(projection)) });
+}
+
+function retiredListenerRequirements(receipt, checkpoint, pools) {
+  if (receipt?.state !== 'compensated' || receipt.mutated !== true || receipt.previousConfig !== null
+    || checkpoint?.state !== 'retired' || !Array.isArray(pools) || !pools.length || pools.length > 4096) throw configurationUnverified();
+  const declared = pools.map(row => row.listen);
+  if (!declared.every(canonicalListenerPath) || new Set(declared).size !== declared.length
+    || declared.includes(checkpoint.socketPath)) throw configurationUnverified();
+  const configured = new Set(declared);
+  return Object.freeze({ declared: Object.freeze([...declared].sort()),
+    unconfigured: Object.freeze(checkpoint.protectedListeners.filter(row => !configured.has(row.path))),
+    configuredProtected: Object.freeze(checkpoint.protectedListeners.filter(row => configured.has(row.path))) });
+}
+
+function retiredListenerCoverage(requirements, servicePaths, allPaths) {
+  return requirements.declared.every(value => servicePaths.has(value))
+    && requirements.unconfigured.every(value => !allPaths.has(value.path));
 }
 
 function missingPath(error) {
@@ -983,6 +1048,103 @@ export function createElFinderFpmSiteManager({
     return true;
   }
 
+  async function masterConfigurationBinding(runtime, deadline) {
+    let handle, primaryError = null;
+    try {
+      const service = await serviceState(runtime, deadline);
+      if (!service.active || !service.stable) throw configurationUnverified();
+      const binary = await realpath(binaryPathFor(runtime));
+      const executable = await readlink(`/proc/${service.mainPid}/exe`);
+      const binaryInfo = await lstat(binary);
+      if (executable !== binary || !binaryInfo.isFile() || binaryInfo.isSymbolicLink()
+        || binaryInfo.uid !== 0 || binaryInfo.gid !== 0 || (modeOf(binaryInfo) & 0o022)) throw configurationUnverified();
+      const target = `/proc/${service.mainPid}/cmdline`;
+      deadline.left(); handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const before = await handle.stat({ bigint: true });
+      if (!before.isFile() || before.uid !== 0n || before.gid !== 0n || before.nlink !== 1n) throw configurationUnverified();
+      const bytes = Buffer.alloc(8193); let count = 0;
+      while (count < bytes.length) {
+        deadline.left(); const result = await handle.read(bytes, count, bytes.length - count, null);
+        if (!result.bytesRead) break;
+        count += result.bytesRead;
+      }
+      if (!count || count > 8192) throw configurationUnverified();
+      const descriptor = await handle.stat({ bigint: true }), current = await lstat(target, { bigint: true });
+      if (['dev', 'ino', 'mode', 'uid', 'gid', 'nlink'].some(key => before[key] !== descriptor[key] || before[key] !== current[key])) throw configurationUnverified();
+      const configurationPath = path.posix.join(path.posix.dirname(runtime.poolDirectory), 'php-fpm.conf');
+      const firstToken = bytes.subarray(0, count).toString('utf8').split('\0')[0];
+      if (firstToken !== `php-fpm: master process (${configurationPath})` || await realpath(configurationPath) !== configurationPath) throw configurationUnverified();
+      const configuration = await lstat(configurationPath, { bigint: true });
+      if (!configuration.isFile() || configuration.isSymbolicLink() || configuration.uid !== 0n || configuration.gid !== 0n
+        || configuration.nlink !== 1n || (modeOf(configuration) & 0o022) || configuration.size > BigInt(MAX_RETIREMENT_BYTES)) throw configurationUnverified();
+      deadline.left();
+      return { mainPid: service.mainPid, binary, configurationPath,
+        configurationIdentity: sha256(JSON.stringify(['dev', 'ino', 'mode', 'uid', 'gid', 'size', 'mtimeNs', 'ctimeNs'].map(key => String(configuration[key])))) };
+    } catch (error) {
+      primaryError = error instanceof ElFinderFpmSiteManagerError ? error : configurationUnverified();
+      throw primaryError;
+    } finally {
+      try { await handle?.close(); }
+      catch { if (!primaryError) throw configurationUnverified(); }
+    }
+  }
+
+  async function resolvedListenerConfiguration(binding, deadline) {
+    try {
+      const result = await run(binding.binary, ['-tt', '--fpm-config', binding.configurationPath], {
+        timeout: deadline.left(30_000), env: { ...process.env, LC_ALL: 'C' },
+      });
+      const stdout = String(result.stdout ?? ''), stderr = String(result.stderr ?? '');
+      if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > MAX_RETIREMENT_BYTES
+        || (stdout.trim() && stderr.trim())) throw configurationUnverified();
+      deadline.left(); return parseResolvedFpmListeners(stdout.trim() ? stdout : stderr, binding.configurationPath);
+    } catch (error) {
+      if (error instanceof ElFinderFpmSiteManagerError) throw error;
+      // Engine dumps can contain environment values; neither streams nor errors
+      // from the child are copied into a public failure or a receipt.
+      throw configurationUnverified();
+    }
+  }
+
+  async function currentRetiredListenersReady(spec, receipt, checkpoint, observed, deadline) {
+    if (!observed.active) {
+      // Preserve the pre-existing inactive/no-protected-listener semantics.
+      // No active health or missing-listener exemption is claimed here.
+      return !checkpoint.wasActive && observed.stable && checkpoint.protectedListeners.length === 0
+        ? { satisfied: true, mode: 'inactive-preserved', currentListenerCount: 0, legitimatelyRemovedListenerCount: 0 }
+        : { satisfied: false };
+    }
+    const binding = await masterConfigurationBinding(spec.runtime, deadline);
+    if (!observed.stable || observed.mainPid !== binding.mainPid) return { satisfied: false };
+    const first = await resolvedListenerConfiguration(binding, deadline);
+    const requirements = retiredListenerRequirements(receipt, checkpoint, first.pools);
+    async function verify(inventory) {
+      if (!inventory.active || !inventory.stable || inventory.mainPid !== binding.mainPid
+        || inventory.allUnixPaths.has(spec.preview.socketPath)
+        || !retiredListenerCoverage(requirements, new Set(inventory.listeners.map(row => row.path)), inventory.allUnixPaths)) return false;
+      for (const target of [spec.preview.artifact.path, spec.preview.socketPath, ...requirements.unconfigured.map(row => row.path)]) {
+        deadline.left();
+        try { await lstatFn(target); return false; }
+        catch (error) { if (!missingPath(error)) throw configurationUnverified(); }
+      }
+      for (const target of requirements.declared) {
+        const actual = inventory.listeners.find(row => row.path === target);
+        const original = requirements.configuredProtected.find(row => row.path === target);
+        if (original && ['uid', 'gid', 'mode'].some(key => actual[key] !== original[key])) return false;
+        if (!await connectListener(target, deadline)) return false;
+      }
+      return true;
+    }
+    if (!await verify(await listenerInventory(spec.runtime, deadline))) return { satisfied: false };
+    const second = await resolvedListenerConfiguration(binding, deadline);
+    const finalBinding = await masterConfigurationBinding(spec.runtime, deadline);
+    if (first.topologySha256 !== second.topologySha256 || JSON.stringify(binding) !== JSON.stringify(finalBinding)) throw configurationUnverified();
+    if (!await verify(await listenerInventory(spec.runtime, deadline))) return { satisfied: false };
+    deadline.left();
+    return { satisfied: true, mode: 'resolved-current', currentListenerCount: requirements.declared.length,
+      legitimatelyRemovedListenerCount: requirements.unconfigured.length, topologySha256: second.topologySha256 };
+  }
+
   async function ownedPool(spec) {
     let metadata;
     try { metadata = await lstatFn(spec.preview.artifact.path); }
@@ -1087,15 +1249,18 @@ export function createElFinderFpmSiteManager({
       return Object.freeze({ satisfied: false, reason: 'elfinder_fpm_retirement_listener_pending',
         websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser });
     }
+    let retirementReadiness = null;
     if (checkpoint) {
-      if (!await protectedReady(checkpoint, observed, deadline)) return Object.freeze({ satisfied: false,
+      retirementReadiness = await currentRetiredListenersReady(spec, receipt, checkpoint, observed, deadline);
+      if (!retirementReadiness.satisfied) return Object.freeze({ satisfied: false,
         reason: 'elfinder_fpm_retirement_sibling_pending', websiteId: spec.websiteId,
         applicationId: spec.applicationId, unixUser: spec.unixUser });
     }
     deadline.left();
     return Object.freeze({ satisfied: true, poolRemoved: true, socketRemoved: true,
       websiteId: spec.websiteId, applicationId: spec.applicationId, unixUser: spec.unixUser,
-      retirementVerified: Boolean(checkpoint), neverCreatedAbsence: !receipt && !checkpoint });
+      retirementVerified: Boolean(checkpoint), neverCreatedAbsence: !receipt && !checkpoint,
+      ...(retirementReadiness ? { retirementReadiness: Object.freeze(retirementReadiness) } : {}) });
   }
 
   async function retire(rawIntent, options = {}) {
@@ -1107,6 +1272,14 @@ export function createElFinderFpmSiteManager({
         'The operation receipt does not prove exclusive ownership of the file manager pool');
     }
     let checkpoint = await loadRetirementCheckpoint(operationId, spec, deadline);
+    if (receipt.state === 'compensated' && checkpoint?.state === 'retired') {
+      // A completed retirement is a read-only no-op. Never rewrite its immutable
+      // baseline or unlink/reload again when later site lifecycles have changed.
+      const result = await inspectRetirement(rawIntent, { operationId, deadline });
+      if (!result.satisfied) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_unverified',
+        'The completed file manager retirement could not be verified');
+      return Object.freeze({ ...result, reloaded: false, alreadyRetired: true, readiness: result.retirementReadiness });
+    }
     const current = await ownedPool(spec), owner = await socketOwner(spec.runtime, deadline);
     if (current !== null && (receipt.state === 'compensated' || checkpoint?.reloadAttempted || checkpoint?.state === 'retired')) {
       throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_blocked',
@@ -1192,6 +1365,9 @@ export const elFinderFpmSiteManagerInternals = Object.freeze({
   normalizeReceipt,
   normalizeRetirementCheckpoint,
   readRetirementJson,
+  parseResolvedFpmListeners,
+  retiredListenerRequirements,
+  retiredListenerCoverage,
   retirementBinding,
   listenerMetadata,
   specDigest,

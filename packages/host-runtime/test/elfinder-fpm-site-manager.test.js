@@ -371,6 +371,35 @@ test('original receipt schema preserves retained state and rejects foreign bindi
   }
 });
 
+test('completed retirement policy retains configured listeners and only exempts no-longer-declared paths', () => {
+  const receipt = receiptInput({ state: 'compensated' });
+  const checkpoint = checkpointInput({ state: 'retired', reloadAttempted: true });
+  const original = JSON.stringify(checkpoint), [survivor, removed] = checkpoint.protectedListeners;
+  // Normalized declaration sets are pure policy inputs, not fabricated FPM output.
+  const pools = [{ pool: 'surviving', listen: survivor.path }, { pool: 'new-current', listen: '/run/php/new-current.sock' }];
+  const plan = internals.retiredListenerRequirements(receipt, checkpoint, pools);
+  assert.deepEqual(plan.unconfigured, [removed]); assert.deepEqual(plan.configuredProtected, [survivor]);
+  const current = new Set(pools.map(row => row.listen));
+  assert.equal(internals.retiredListenerCoverage(plan, current, current), true);
+  assert.equal(internals.retiredListenerCoverage(plan, new Set(['/run/php/new-current.sock']), current), false,
+    'A still-configured missing listener cannot become a successful retired no-op');
+  assert.equal(internals.retiredListenerCoverage(plan, current, new Set([...current, removed.path])), false,
+    'An undeclared listener that still exists cannot be treated as removed');
+  for (const state of ['prepared', 'reload_started']) assert.throws(() => internals.retiredListenerRequirements(receipt, { ...checkpoint, state }, pools),
+    { code: 'elfinder_fpm_retirement_configuration_unverified' });
+  assert.throws(() => internals.retiredListenerRequirements(receiptInput(), checkpoint, pools), { code: 'elfinder_fpm_retirement_configuration_unverified' });
+  assert.throws(() => internals.retiredListenerRequirements(receipt, checkpoint, [{ pool: 'own-reappeared', listen: checkpoint.socketPath }]),
+    { code: 'elfinder_fpm_retirement_configuration_unverified' });
+  assert.equal(JSON.stringify(checkpoint), original, 'The original immutable baseline is never rewritten');
+});
+
+test('resolved configuration parser rejects unrecognized, empty and oversized input without exposing values', () => {
+  for (const value of ['', 'not engine output', '\0', 'x'.repeat(1024 * 1024 + 1)]) {
+    assert.throws(() => internals.parseResolvedFpmListeners(value, '/etc/php/8.3/fpm/php-fpm.conf'),
+      { code: 'elfinder_fpm_retirement_configuration_unverified' });
+  }
+});
+
 async function fifoAttempt(target, method, kind, receiptRoot) {
   const moduleUrl = new URL('../src/elfinder-fpm-site-manager.js', import.meta.url).href;
   const script = `

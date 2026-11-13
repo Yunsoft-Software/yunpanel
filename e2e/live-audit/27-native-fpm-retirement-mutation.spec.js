@@ -41,7 +41,7 @@ function exclusiveWindow() {
 
 // Only the real pinned helper is allowed. This probe reads no configuration contents,
 // environment, request payload, journal MESSAGE or private receipt into its output.
-function fpmRead(fixtures, afterCursor = null, completionId = null) {
+function fpmRead(fixtures, afterCursor = null, completionId = null, inspectFixture = null) {
   exclusiveWindow(); expect(fs.realpathSync(PINNED_HELPER)).toBe(PINNED_HELPER);
   expect(hash(fs.readFileSync(PINNED_HELPER))).toBe(HELPER_SHA);
   const rows = fixtures.map(fixture => {
@@ -50,7 +50,11 @@ function fpmRead(fixtures, afterCursor = null, completionId = null) {
       unixUser: l.unixUser, runtime: l.runtime, target: l.target,
       phpSocket: phpFpmSocketPath(l.unixUser), elfinderSocket: elFinderFpmSocketPath(l.unixUser) };
   });
-  const payload = Buffer.from(JSON.stringify({ rows, afterCursor, completionId })).toString('base64');
+  const inspection = inspectFixture ? { websiteId: inspectFixture.ledger.websiteId,
+    applicationId: inspectFixture.ledger.applicationId, unixUser: inspectFixture.ledger.unixUser,
+    operationId: inspectFixture.ledger.provisioningId,
+    managerSha256: hash(fs.readFileSync(new URL('../../packages/host-runtime/src/elfinder-fpm-site-manager.js', import.meta.url))) } : null;
+  const payload = Buffer.from(JSON.stringify({ rows, afterCursor, completionId, inspection })).toString('base64');
   const python = String.raw`import os,sys,json,re,stat,hashlib,subprocess,base64
 x=json.loads(base64.b64decode(sys.argv[1]));unit='php8.3-fpm.service'
 uuid=re.compile(r'^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$')
@@ -61,6 +65,28 @@ for row in x['rows']:
  assert row['unixUser']=='yunapp-'+hashlib.sha256(row['applicationId'].encode()).hexdigest()[:12]
  assert row['phpSocket']=='/run/php/yunpanel-'+row['unixUser']+'.sock'
  assert row['elfinderSocket']=='/run/php/yunpanel-elfinder-'+row['unixUser']+'.sock'
+inspection=None
+if x.get('inspection'):
+ selected=x['inspection'];assert len([r for r in x['rows'] if all(r[k]==selected[k] for k in ['websiteId','applicationId','unixUser','operationId'])])==1
+ module='/usr/lib/yunpanel/packages/host-runtime/src/elfinder-fpm-site-manager.js'
+ m=os.lstat(module);assert stat.S_ISREG(m.st_mode) and not stat.S_ISLNK(m.st_mode) and m.st_uid==0 and m.st_gid==0 and not(m.st_mode&0o022) and m.st_size<=1048576 and os.path.realpath(module)==module
+ assert re.fullmatch('[a-f0-9]{64}',selected['managerSha256']) and hashlib.sha256(open(module,'rb').read()).hexdigest()==selected['managerSha256']
+ api=subprocess.check_output(['/usr/bin/systemctl','show','yunpanel-api','--property=MainPID','--value'],text=True).strip();assert re.fullmatch('[1-9][0-9]*',api)
+ node=os.readlink('/proc/'+api+'/exe');nm=os.lstat(node)
+ assert os.path.basename(node)=='node' and os.path.realpath(node)==node and stat.S_ISREG(nm.st_mode) and nm.st_uid==0 and not(nm.st_mode&0o022)
+ script="""const p=JSON.parse(Buffer.from(process.argv[1],'base64').toString());
+try {
+ const major=Number(process.versions.node.split('.')[0]);if(major<24)throw new Error('version');
+ const {createElFinderFpmSiteManager}=await import('file:///usr/lib/yunpanel/packages/host-runtime/src/elfinder-fpm-site-manager.js');
+ const r=await createElFinderFpmSiteManager().inspectRetirement({websiteId:p.websiteId,applicationId:p.applicationId,unixUser:p.unixUser},{operationId:p.operationId});
+ const q=r.retirementReadiness;
+ process.stdout.write(JSON.stringify({satisfied:r.satisfied,reason:r.reason??null,websiteId:r.websiteId,applicationId:r.applicationId,unixUser:r.unixUser,poolRemoved:r.poolRemoved??false,socketRemoved:r.socketRemoved??false,retirementVerified:r.retirementVerified??false,readiness:q?{mode:q.mode,currentListenerCount:q.currentListenerCount,legitimatelyRemovedListenerCount:q.legitimatelyRemovedListenerCount,topologySha256:q.topologySha256??null}:null}));
+}catch(error){process.stdout.write(JSON.stringify({satisfied:false,websiteId:p.websiteId,applicationId:p.applicationId,unixUser:p.unixUser,inspectionErrorCode:/^[a-z0-9_]{1,100}$/.test(error.code??'')?error.code:'withheld'}));process.exitCode=2;}"""
+ inspected=subprocess.run([node,'--input-type=module','--eval',script,base64.b64encode(json.dumps(selected).encode()).decode()],capture_output=True,text=True,timeout=65)
+ assert len(inspected.stdout.encode())<=65536 and inspected.returncode in [0,2]
+ inspection=json.loads(inspected.stdout)
+ assert all(inspection[k]==selected[k] for k in ['websiteId','applicationId','unixUser'])
+ assert hashlib.sha256(open(module,'rb').read()).hexdigest()==selected['managerSha256']
 pid=subprocess.check_output(['/usr/bin/systemctl','show',unit,'--property=MainPID','--value'],text=True).strip()
 assert re.fullmatch('[1-9][0-9]*',pid)
 assert subprocess.run(['/usr/bin/systemctl','is-active','--quiet',unit],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL).returncode==0
@@ -91,9 +117,8 @@ if identity is None:
 else:assert re.fullmatch('[a-f0-9]{32}',identity)
 assert all(r.get('MESSAGE_ID')==identity for r in completed)
 cursor=records[-1].get('__CURSOR') if records else x['afterCursor'];assert isinstance(cursor,str) and cursor
-owned_receipts=[]
-for row in x['rows']:
- p='/var/lib/yunpanel/staging/elfinder-fpm-sites/'+row['operationId']+'.json'
+def read_private_receipt(row,suffix):
+ p='/var/lib/yunpanel/staging/elfinder-fpm-sites/'+row['operationId']+suffix
  assert os.path.realpath(p)==p
  parent=os.path.dirname(p)
  while True:
@@ -101,9 +126,8 @@ for row in x['rows']:
   if parent=='/':break
   parent=os.path.dirname(parent)
  def receiptIdentity(meta):return (meta.st_dev,meta.st_ino,meta.st_mode,meta.st_uid,meta.st_gid,meta.st_nlink,meta.st_size,meta.st_mtime_ns,meta.st_ctime_ns)
- try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
- except FileNotFoundError:
-  owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True});continue
+ try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC|os.O_NONBLOCK)
+ except FileNotFoundError:return None,None
  try:
   meta=os.fstat(fd);assert stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and meta.st_gid==0 and stat.S_IMODE(meta.st_mode)==0o600 and meta.st_nlink==1 and meta.st_size<=65536
   with os.fdopen(fd,'rb',closefd=False) as handle:raw=handle.read(65537)
@@ -111,14 +135,24 @@ for row in x['rows']:
  finally:os.close(fd)
  receipt=json.loads(raw)
  assert all(receipt[k]==row[k] for k in ['websiteId','applicationId','unixUser','operationId'])
- owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'state':receipt['state'],'mutated':receipt['mutated'],'previousConfigIsNull':receipt['previousConfig'] is None,'configSha256':receipt['configSha256'],'receiptSha256':hashlib.sha256(raw).hexdigest()})
-print(json.dumps({'serviceUnit':unit,'mainPid':int(pid),'listeners':sorted(listeners,key=lambda v:v['path']),'journalCursor':cursor,'reloadCompletionMessageId':identity,'reloadCompletions':[{'cursor':r['__CURSOR'],'monotonicTimestamp':r.get('__MONOTONIC_TIMESTAMP'),'realtimeTimestamp':r.get('__REALTIME_TIMESTAMP')} for r in completed],'ownedReceipts':owned_receipts}))
+ return receipt,hashlib.sha256(raw).hexdigest()
+owned_receipts=[];retirement_receipts=[]
+for row in x['rows']:
+ receipt,digest=read_private_receipt(row,'.json')
+ if receipt is None:owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True})
+ else:owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'state':receipt['state'],'mutated':receipt['mutated'],'previousConfigIsNull':receipt['previousConfig'] is None,'configSha256':receipt['configSha256'],'receiptSha256':digest})
+ checkpoint,digest=read_private_receipt(row,'.retirement.json')
+ if checkpoint is None:retirement_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True})
+ else:
+  protected=checkpoint['protectedListeners'];assert isinstance(protected,list) and len(protected)<=4096 and all(re.fullmatch(r'/[A-Za-z0-9._/-]+',v['path']) and os.path.normpath(v['path'])==v['path'] for v in protected)
+  retirement_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'state':checkpoint['state'],'receiptSha256':digest,'protectedPaths':[v['path'] for v in protected]})
+print(json.dumps({'serviceUnit':unit,'mainPid':int(pid),'listeners':sorted(listeners,key=lambda v:v['path']),'journalCursor':cursor,'reloadCompletionMessageId':identity,'reloadCompletions':[{'cursor':r['__CURSOR'],'monotonicTimestamp':r.get('__MONOTONIC_TIMESTAMP'),'realtimeTimestamp':r.get('__REALTIME_TIMESTAMP')} for r in completed],'ownedReceipts':owned_receipts,'retirementReceipts':retirement_receipts,'installedInspection':inspection}))
 `;
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
   let result;
   try {
     result = JSON.parse(execFileSync('python3', [PINNED_HELPER, 'python3 -c ' + quote(python) + ' ' + quote(payload)],
-      { encoding: 'utf8', timeout: 30000, maxBuffer: 3 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }));
+      { encoding: 'utf8', timeout: inspection ? 90000 : 30000, maxBuffer: 3 * 1024 * 1024, stdio: ['ignore', 'pipe', 'pipe'] }));
   } catch { throw new Error('The exact pinned FPM read-only observation failed; protected details withheld'); }
   expect(hash(fs.readFileSync(PINNED_HELPER))).toBe(HELPER_SHA); exclusiveWindow(); return result;
 }
@@ -274,6 +308,40 @@ test('@mutation normal static removal reloads shared FPM once and preserves two 
     expect(noop.reloadCompletions).toEqual([]);
     proof.retirement = { exactReloadCount: after.reloadCompletions.length, twoCleanupStepsVerified: true,
       protectedListenerCount: protectedListeners.length, actualListenerReadiness: true, historical502Cause: 'OPEN' };
+    const originalReceipt = noop.ownedReceipts.find(row => row.websiteId === retiring.fixture.ledger.websiteId);
+    const originalCheckpoint = noop.retirementReceipts.find(row => row.websiteId === retiring.fixture.ledger.websiteId);
+    expect(originalReceipt.state).toBe('compensated'); expect(originalCheckpoint.state).toBe('retired');
+    const removingSibling = siblings[1], remainingSibling = siblings[0];
+    const removedSiblingPaths = [phpFpmSocketPath(removingSibling.fixture.ledger.unixUser), elFinderFpmSocketPath(removingSibling.fixture.ledger.unixUser)];
+    for (const socket of removedSiblingPaths) expect(originalCheckpoint.protectedPaths).toContain(socket);
+    // A later, independent normal lifecycle is allowed to remove a listener that
+    // the already-completed static operation once protected.
+    removingSibling.cleanupAttempted = true;
+    const siblingRemoved = await removingSibling.fixture.cleanup(); removingSibling.removalLedger = siblingRemoved;
+    const lateFirstReads = await Promise.allSettled([dynamic(remainingSibling, 'first-after-php-sibling-removal'),
+      originalHttp(original.scheme).then(result => { removingSibling.originalFirst = result; })]);
+    let lateError = lateFirstReads.find(row => row.status === 'rejected')?.reason;
+    try { await verifyRemoval(removingSibling, siblingRemoved); } catch (error) { lateError ??= error; }
+    if (lateError) throw lateError;
+    const beforeLateInspection = fpmRead(owned.map(entry => entry.fixture)); proof.beforeLateInspection = beforeLateInspection;
+    for (const socket of removedSiblingPaths) expect(beforeLateInspection.listeners.some(row => row.path === socket)).toBe(false);
+    // This is the actual installed module's read-only inspect, never a direct
+    // root retire call. The normal same-journal caller is a separate root gate.
+    const late = fpmRead(owned.map(entry => entry.fixture), beforeLateInspection.journalCursor,
+      before.reloadCompletionMessageId, retiring.fixture); proof.lateInspection = late;
+    const inspected = late.installedInspection;
+    expect(inspected.satisfied, inspected.inspectionErrorCode ?? inspected.reason).toBe(true);
+    expect(inspected.retirementVerified).toBe(true); expect(inspected.poolRemoved).toBe(true); expect(inspected.socketRemoved).toBe(true);
+    expect(inspected.readiness.mode).toBe('resolved-current');
+    expect(inspected.readiness.legitimatelyRemovedListenerCount).toBe(removedSiblingPaths.length);
+    expect(inspected.readiness.currentListenerCount).toBeGreaterThan(0);
+    expect(late.reloadCompletions).toEqual([]);
+    expect(late.ownedReceipts.find(row => row.websiteId === retiring.fixture.ledger.websiteId).receiptSha256).toBe(originalReceipt.receiptSha256);
+    expect(late.retirementReceipts.find(row => row.websiteId === retiring.fixture.ledger.websiteId).receiptSha256).toBe(originalCheckpoint.receiptSha256);
+    const lastReads = await Promise.allSettled([dynamic(remainingSibling, 'first-after-late-readonly-inspect'), preserveOriginal('late-readonly-inspect')]);
+    const lastError = lastReads.find(row => row.status === 'rejected')?.reason; if (lastError) throw lastError;
+    proof.lateIdempotent = { actualInstalledReadOnlyInspection: true, oldCheckpointAndReceiptUnchanged: true,
+      normalSiblingRemovalVerified: true, legitimatelyRemovedListenerCount: removedSiblingPaths.length, extraReloads: 0 };
   } catch (error) { failure = error; }
   finally {
     for (const entry of [...owned].reverse()) if (!entry.cleanupAttempted) {
