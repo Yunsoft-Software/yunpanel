@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, readdir, rm, symlink } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createElFinderFpmSiteManager } from '@yunpanel/host-runtime';
+import { createApplicationIdentity } from '@yunpanel/host-runtime/application-identity';
 import {
   createWebsiteElFinderProvisioningHandler,
   WebsiteElFinderProvisioningError,
@@ -261,4 +266,15 @@ test('Website elFinder apply fails closed if FPM does not survive shared service
     (error) => error instanceof WebsiteElFinderProvisioningError
       && error.code === 'website_elfinder_fpm_restart_unverified',
   );
+});
+
+test('retirement inspection passes exact operation identity to the real manager disk preflight', async t => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-inspect-')), alias = `${root}-alias`;
+  t.after(async () => { await rm(alias, { force: true }); await rm(root, { recursive: true, force: true }); });
+  await symlink(root, alias, 'dir');
+  const actualIdentity = createApplicationIdentity(intent.applicationId);
+  const handler = createWebsiteElFinderProvisioningHandler({ fpmManager: createElFinderFpmSiteManager({ receiptRoot: alias }) });
+  await assert.rejects(handler.inspectRetirement({ intent: { ...intent, unixUser: actualIdentity.unixUser }, operationId }),
+    { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
+  assert.deepEqual(await readdir(root), []);
 });

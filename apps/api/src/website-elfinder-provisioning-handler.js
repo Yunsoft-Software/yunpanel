@@ -155,10 +155,10 @@ export function createWebsiteElFinderProvisioningHandler({
     return fpmManager.retire(elFinderIntent(intent), { operationId });
   }
 
-  async function inspectRetirement({ intent } = {}) {
+  async function inspectRetirement({ intent, operationId } = {}) {
     if (typeof fpmManager.inspectRetirement !== 'function') throw new WebsiteElFinderProvisioningError(
       'website_elfinder_retirement_unavailable', 'Website file manager retirement inspection is unavailable');
-    return fpmManager.inspectRetirement(elFinderIntent(intent));
+    return fpmManager.inspectRetirement(elFinderIntent(intent), { operationId });
   }
 
   return Object.freeze({ apply, inspect, compensate, inspectCompensation, retire, inspectRetirement });

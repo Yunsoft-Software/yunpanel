@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import {
   elFinderFpmPoolPath,
   elFinderFpmSocketPath,
@@ -10,6 +13,7 @@ import { createApplicationIdentity } from '../src/application-identity.js';
 import {
   createElFinderFpmSiteManager,
   ElFinderFpmSiteManagerError,
+  elFinderFpmSiteManagerInternals as internals,
 } from '../src/elfinder-fpm-site-manager.js';
 
 const websiteId = '12345678-1234-4234-8234-123456789012';
@@ -247,48 +251,106 @@ test('elFinder FPM rejects forged Website Unix identity before inspection', asyn
   );
 });
 
-test('retirement removes the owned pool and socket and verifies shared FPM config before Unix cleanup', async () => {
-  const fx = fixture();
-  await fx.manager.apply(intent, { operationId });
-  const result = await fx.manager.retire(intent, { operationId });
-  assert.deepEqual(result, { satisfied: true, poolRemoved: true, socketRemoved: true, websiteId, applicationId, unixUser });
-  assert.equal(fx.files.has(configPath), false);
-  assert.deepEqual(await fx.manager.inspectRetirement(intent), result);
-  assert.deepEqual(await fx.manager.retire(intent, { operationId }), result);
-});
-
-test('retirement reconciles a crash between pool unlink and service reload', async () => {
-  const fx = fixture();
-  await fx.manager.apply(intent, { operationId });
-  fx.files.delete(configPath); // The fixture socket remains until systemctl reload.
-  assert.equal((await fx.manager.inspectRetirement(intent)).satisfied, false);
-  const before = fx.calls.filter(call => call[0] === 'run' && call[2][0] === 'reload').length;
-  assert.equal((await fx.manager.retire(intent, { operationId })).satisfied, true);
-  assert.equal(fx.calls.filter(call => call[0] === 'run' && call[2][0] === 'reload').length > before, true);
-});
-
-test('retirement cannot remove an unjournalled or reappearing pool', async () => {
+// Runtime retirement outcomes are measured by native27 on the real shared FPM
+// service: two fresh PHP siblings, normal static removal, actual journal reload
+// count, earliest dynamic responses and normal cleanup. The old in-memory fake
+// retirement/crash/inactive cases are not runtime evidence. Unsafe crash/service
+// fault, retained/foreign live pool channels remain explicit native OPEN gates.
+// Existing apply/configtest rollback/compensate compatibility tests above stay.
+test('retirement refuses an unjournalled pool before any mutation (legacy compatibility)', async () => {
   const unknown = fixture({ initialConfig: 'operator configuration' });
   await assert.rejects(unknown.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
   assert.equal(unknown.files.get(configPath).content, 'operator configuration');
-  const fx = fixture();
-  await fx.manager.apply(intent, { operationId });
-  await fx.manager.retire(intent, { operationId });
-  fx.files.set(configPath, { content: 'operator configuration', mode: 0o600 });
-  await assert.rejects(fx.manager.retire(intent, { operationId }), error => error.code === 'elfinder_fpm_retirement_blocked');
-  assert.equal(fx.files.get(configPath).content, 'operator configuration');
+  assert.deepEqual(unknown.calls, []);
 });
 
-test('retirement removes a stale socket when PHP-FPM service is inactive after pool unlink', async () => {
-  const fx = fixture();
-  await fx.manager.apply(intent, { operationId });
-  fx.files.delete(configPath);
-  const originalRun = fx.manager;
-  assert.ok(originalRun);
-  const inactiveFx = fixture({ serviceInitiallyActive: false });
-  await inactiveFx.manager.apply(intent, { operationId });
-  const retired = await inactiveFx.manager.retire(intent, { operationId });
-  assert.equal(retired.satisfied, true);
-  assert.equal(retired.socketRemoved, true);
+const spec = internals.normalizeIntent(intent);
+function receiptInput(overrides = {}) {
+  return { version: 1, operationId, websiteId, applicationId, unixUser,
+    specDigest: internals.specDigest(spec), configSha256: spec.preview.sha256,
+    mutated: true, previousConfig: null, state: 'active', ...overrides };
+}
+async function privateReceipt(t, content) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-retirement-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const target = path.join(root, `${operationId}.json`);
+  if (content !== undefined) await writeFile(target, content, { mode: 0o600 });
+  return { root, target, manager: createElFinderFpmSiteManager({ receiptRoot: root }) };
+}
+
+test('real empty receipt directory cannot start retirement or create a checkpoint', async t => {
+  const fx = await privateReceipt(t);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_blocked' });
+  assert.deepEqual(await readdir(fx.root), []);
+});
+
+test('real malformed receipt is preserved and rejected before service access', async t => {
+  const contents = '{'; const fx = await privateReceipt(t, contents);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_receipt_invalid' });
+  assert.equal(await readFile(fx.target, 'utf8'), contents);
+  assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
+});
+
+test('real foreign receipt binding is preserved without a retirement checkpoint', async t => {
+  const contents = JSON.stringify(receiptInput({ websiteId: applicationId }));
+  const fx = await privateReceipt(t, contents);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_receipt_invalid' });
+  assert.equal(await readFile(fx.target, 'utf8'), contents);
+  assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
+});
+
+test('real retained-pool receipt is never converted into deletion ownership', async t => {
+  const contents = JSON.stringify(receiptInput({ mutated: false, previousConfig: renderElFinderFpmPool(spec.templateInput) }));
+  const fx = await privateReceipt(t, contents);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_blocked' });
+  assert.equal(await readFile(fx.target, 'utf8'), contents);
+  assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
+});
+
+test('real private receipt preflight cannot be bypassed by compensated state', async t => {
+  const contents = JSON.stringify(receiptInput({ state: 'compensated' }));
+  const fx = await privateReceipt(t, contents), alias = `${fx.root}-alias`;
+  t.after(() => rm(alias, { force: true })); await symlink(fx.root, alias, 'dir');
+  const manager = createElFinderFpmSiteManager({ receiptRoot: alias });
+  await assert.rejects(manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
+  assert.equal(await readFile(fx.target, 'utf8'), contents);
+  assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
+});
+
+// These are pure schema inputs, never canned process/socket/HTTP observations.
+function checkpointInput(overrides = {}) {
+  return { ...internals.retirementBinding(operationId, spec), state: 'prepared', wasActive: true,
+    mainPid: process.pid, socketUid: process.getuid(), socketGid: process.getgid(), reloadAttempted: false,
+    protectedListeners: [{ path: '/run/php/sibling-a.sock', uid: process.getuid(), gid: process.getgid(), mode: 0o660 },
+      { path: '/run/php/sibling-b.sock', uid: process.getuid(), gid: process.getgid(), mode: 0o660 }], ...overrides };
+}
+test('retirement schema binds exact operation, runtime and immutable sibling identities', () => {
+  const input = checkpointInput(), value = internals.normalizeRetirementCheckpoint(input, { operationId, spec });
+  assert.equal(value.serviceUnit, 'php8.3-fpm.service'); assert.deepEqual(value.protectedListeners, input.protectedListeners);
+  assert.equal(Object.isFrozen(value), true); assert.equal(Object.isFrozen(value.protectedListeners), true);
+  assert.equal(Object.isFrozen(value.protectedListeners[0]), true);
+  const invalid = [
+    { operationId: websiteId }, { websiteId: applicationId }, { applicationId: websiteId }, { unixUser: 'root' },
+    { specDigest: '0'.repeat(64) }, { configSha256: '0'.repeat(64) }, { serviceUnit: 'php8.2-fpm.service' },
+    { socketPath: '/run/php/foreign.sock' }, { unexpected: true }, { state: 'verified' },
+    { state: 'prepared', reloadAttempted: true },
+    { state: 'reload_started', reloadAttempted: false }, { wasActive: false }, { mainPid: 0 },
+    { socketUid: -1 }, { socketGid: 0.5 }, { protectedListeners: [input.protectedListeners[0], input.protectedListeners[0]] },
+    { protectedListeners: [...input.protectedListeners].reverse() },
+    { protectedListeners: [{ ...input.protectedListeners[0], path: spec.preview.socketPath }] },
+    { protectedListeners: [{ ...input.protectedListeners[0], path: '/run/php/../foreign.sock' }] },
+    { protectedListeners: [{ ...input.protectedListeners[0], extra: true }] },
+  ];
+  for (const change of invalid) assert.throws(() => internals.normalizeRetirementCheckpoint(checkpointInput(change), { operationId, spec }),
+    { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
+});
+
+test('reload intent and inactive schema states cannot manufacture terminal readiness', () => {
+  const started = internals.normalizeRetirementCheckpoint(checkpointInput({ state: 'reload_started', reloadAttempted: true }), { operationId, spec });
+  assert.equal(started.state, 'reload_started'); assert.equal('satisfied' in started, false);
+  const inactive = checkpointInput({ wasActive: false, mainPid: 0, protectedListeners: [] });
+  assert.equal(internals.normalizeRetirementCheckpoint(inactive, { operationId, spec }).wasActive, false);
+  assert.throws(() => internals.normalizeRetirementCheckpoint({ ...inactive, reloadAttempted: true }, { operationId, spec }),
+    { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
 });
 
