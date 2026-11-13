@@ -206,9 +206,34 @@ async function pair(action, wave) {
   const completed = await Promise.all(observations.map(async ({ entry, row, queued }) => {
     try {
       const readStartedAt = Date.now();
-      const actual = accepted(await entry.fixture.call('GET', '/api/panel/jobs/' + queued.id, undefined, { retryGets: false }), 'Read actual own job');
+      let actual, authoritativeReadStartedAt = readStartedAt, recoveredRead = false;
+      try {
+        const reply = await entry.fixture.call('GET', '/api/panel/jobs/' + queued.id, undefined, { retryGets: false });
+        row.initialRead = { wave, action, jobId: queued.id, startedAt: readStartedAt, finishedAt: Date.now(),
+          httpStatus: reply.status, transportUncertain: false };
+        entry.fixture.record('jobs.initial-read-http', row.initialRead);
+        actual = accepted(reply, 'Read actual own job');
+      } catch (error) {
+        if (error.code !== 'owned_fixture_transport') throw error;
+        const allowed = ['ECONNRESET', 'socket_hang_up', 'request_timeout', 'context_disposed', 'ECONNREFUSED', 'ENOTFOUND', 'ERR_SOCKET_CLOSED', 'transport_detail_withheld'];
+        row.initialRead = { wave, action, jobId: queued.id, startedAt: readStartedAt, finishedAt: Date.now(),
+          httpStatus: null, status: null, transportUncertain: true,
+          transportHint: allowed.includes(error.transportHint) ? error.transportHint : null };
+        entry.fixture.record('jobs.initial-read-transport', row.initialRead);
+        authoritativeReadStartedAt = Date.now();
+        row.readReconciliation = { jobId: queued.id, startedAt: authoritativeReadStartedAt, waitBudgetMs: 180000,
+          sameKnownJobId: true, mutationReplayed: false, authoritativeReadVerified: false };
+        entry.fixture.record('jobs.same-id-read-intent', row.readReconciliation);
+        // GET-only reconciliation of the already accepted durable identity. Never repeat an enqueue or site HTTP request.
+        actual = await entry.fixture.waitJob(queued.id, 180000); recoveredRead = true;
+      }
       assertJob(actual, entry, action, queued.id);
-      const pendingObservation = { wave, action, jobId: queued.id, startedAt: readStartedAt, finishedAt: Date.now(), status: actual.status };
+      if (recoveredRead) {
+        Object.assign(row.readReconciliation, { finishedAt: Date.now(), status: actual.status, authoritativeReadVerified: true });
+        entry.fixture.record('jobs.same-id-read-result', row.readReconciliation);
+      }
+      const pendingObservation = { wave, action, jobId: queued.id, startedAt: authoritativeReadStartedAt, finishedAt: Date.now(), status: actual.status,
+        readMode: recoveredRead ? 'same-id-bounded-wait-after-transport' : 'initial-get' };
       entry.fixture.record('jobs.actual-status', pendingObservation); row.actualStatus = pendingObservation;
       const final = terminal(actual.status) ? actual : await entry.fixture.waitJob(queued.id, 180000);
       assertJob(final, entry, action, queued.id); row.terminalStatus = final.status;
