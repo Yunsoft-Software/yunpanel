@@ -128,3 +128,15 @@ T886 uygulama/DB/posta/WP/silme32, T887 DNS/hosting/ortam72, T888 tenant/API/job
 | T892-STAGED | Ayrı sahipli aktif PHP sitesi; normal update-preview/PATCH ve gerçek stage işi; activate yapılmadan stagedRevision = desiredRevision > appliedRevision; eski aktif Nginx hash ve HTTP korunur; normal kaldırma | Aynı fiziksel yokluk ve ilk yanıt kardeş sürekliliği; yalnız o işin sahipli yapılandırması kaldırılır | Kaynak `88d18c35` ile eklendi; yeni paket ve iki taze `.28` koşusu açık |
 
 Testler gerçek panel API'sini ve sabit hedefli salt okunur fiziksel probu kullanır. Boş exec cevabı Nginx configtest/reload kanıtı değildir. Önceden kalan iki Nginx artığının elle silinmesi bu senaryolara dahil değildir; bunlar ayrı güvenli kurtarma kabulü olarak açık kalır.
+
+
+## 13 Kasım 2026 — T901 yayımlanan API yolu
+
+Gerçek kurulu `621c8757` üzerinde Owner oturumuyla bare `/api/system/diagnostics/version` public web gateway'den404; yayımlanan `/api/panel/system/diagnostics/version` ve CSRF'li `/compare`200 döndü. Tam kimlik senkron, eksik kimlik belirsiz, eski commit farklı olarak gerçek API'de doğrulandı. Bağımsız kaynak incelemesi, yeniden kullanılabilir tarayıcı yardımcılarının varsayılan URL'lerinin yanlış bare yolu kullandığını doğruladı; mevcut Tanılama ekranı ayrı settings API'sini kullanır ve bu bulgu o ekranın bozuk olduğu iddiası değildir.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç | Önceki kapsam açığı |
+|---|---|---|---|
+| T901-PUBLIC-DEFAULT | Gerçek panel web gateway → authenticated API → SQLite AuthStore; GET/POST yardımcıları endpoint override olmadan | Public `/api/panel/system/...` yoluna gider; tam kimlik200/synchronized; eksik kimlikunknown; aynıID/eski commitstale_cache | Eski testler endpoint'i doğrudan core API adresine override ediyordu |
+| T901-PUBLIC-AUTH | Aynı gerçek gateway; çerezsiz GET ve CSRF'siz karşılaştırma POST'u | 401/403; bare `/api/system/...`404 kalır, allowlist genişlemez | Native gateway ve default URL birlikte sınanmıyordu |
+
+İki varsayılan URL düzeltmesi ve gerçek gateway regresyonu hazırlanacak. Yerel gateway testi yeni paket/native varsayılan istemci veya gerçek DOM kabulünün yerine geçmez; P0 döngüsünde yeniden doğrulanır.
