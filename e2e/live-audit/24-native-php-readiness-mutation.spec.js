@@ -24,9 +24,13 @@ const hash = value => createHash('sha256').update(value).digest('hex');
 const sourceSha256 = hash(fs.readFileSync(new URL(import.meta.url)));
 const helperSha256 = hash(fs.readFileSync(new URL('./owned-fixture.js', import.meta.url)));
 const probeSha256 = hash(fs.readFileSync(new URL('./php-readiness-probe.js', import.meta.url)));
+const UUID = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i;
+const safeCode = value => typeof value === 'string' && /^[a-z][a-z0-9_]{0,95}$/.test(value) ? value : null;
+const OPERATION_STATES = new Set(['pending', 'partial', 'blocked', 'applying', 'compensating', 'failed', 'ready', 'abandoned']);
+const STEP_STATES = new Set(['pending', 'applying', 'succeeded', 'failed', 'blocked', 'compensating', 'compensated']);
 const entries = [];
 let actor, original;
-const proof = { sourceSha256, helperSha256, probeSha256, waves: [], cleanups: [], mechanism: 'OPEN' };
+const proof = { sourceSha256, helperSha256, probeSha256, createResponses: [], waves: [], cleanups: [], mechanism: 'OPEN' };
 
 function accepted(reply, label, statuses = [200]) {
   const code = /^[a-z0-9_]+$/.test(reply.body?.error?.code ?? '') ? reply.body.error.code : null;
@@ -151,8 +155,57 @@ async function normalCreateAtBarrier(input, preview, gate, entry) {
     // The helper may only reconcile this exact persisted operation with reads, never POST it again.
     throw Object.assign(new Error('Owned normal PHP create receipt is uncertain; reconcile the exact journal without replay'), { code: 'owned_fixture_transport' });
   }
-  expect([200, 201], 'Normal PHP creation must return its actual receipt').toContain(response.status());
-  return (await response.json()).data;
+  const status = response.status(); let body = null, jsonParsed = false;
+  try { body = await response.json(); jsonParsed = true; } catch { /* Retain only the actual status and parse outcome. */ }
+  const ledgerFile = path.join(RUN_DIR, 'owned-fixtures', entry.key + '.json');
+  assert.equal(fs.realpathSync(ledgerFile), ledgerFile); assert.equal(fs.statSync(ledgerFile).mode & 0o077, 0);
+  const ledger = JSON.parse(fs.readFileSync(ledgerFile, 'utf8'));
+  assert.equal(ledger.key, entry.key); assert.equal(ledger.runId, manifest().runId);
+  assert.equal(ledger.operationId, input.operationId); assert.equal(ledger.operationId, preview.operationId);
+  for (const field of ['operationId', 'websiteId', 'applicationId', 'domainId', 'serverId']) assert.match(ledger[field], UUID);
+  if (ledger.provisioningId != null) assert.match(ledger.provisioningId, UUID);
+  const record = { key: entry.key, runId: ledger.runId, status, jsonParsed, errorCode: safeCode(body?.error?.code),
+    operationId: ledger.operationId, provisioningId: ledger.provisioningId ?? null,
+    websiteId: ledger.websiteId, applicationId: ledger.applicationId, domainId: ledger.domainId, serverId: ledger.serverId,
+    operationReadback: null };
+  proof.createResponses.push(record);
+  // Persist the response evidence before any diagnostic GET or the original strict assertion.
+  privateJson('t889-native-readiness.json', proof);
+  if (![200, 201].includes(status)) {
+    const operationId = ledger.provisioningId ?? ledger.operationId;
+    const readback = { requestedOperationId: operationId, httpStatus: null, transportFailed: false, jsonParsed: false,
+      errorCode: null, operationPresent: false, identityChecked: false, identityMatched: false, status: null, ready: null,
+      steps: [], unrecognizedStepCount: null };
+    record.operationReadback = readback;
+    try {
+      const reply = await actor.api.get('/api/panel/sites/provisioning/' + operationId,
+        { headers: { Connection: 'close' }, timeout: 10000, maxRedirects: 0 });
+      readback.httpStatus = reply.status(); let payload = null;
+      try { payload = await reply.json(); readback.jsonParsed = true; } catch { /* No raw body or parse error is retained. */ }
+      readback.errorCode = safeCode(payload?.error?.code);
+      const operation = payload?.data;
+      readback.operationPresent = reply.status() === 200 && operation !== null && typeof operation === 'object' && !Array.isArray(operation);
+      if (readback.operationPresent) {
+        readback.identityChecked = true;
+        readback.identityMatched = operation.operationId === operationId && operation.websiteId === ledger.websiteId;
+        if (readback.identityMatched) {
+          readback.status = OPERATION_STATES.has(operation.status) ? operation.status : null;
+          readback.ready = typeof operation.ready === 'boolean' ? operation.ready : null;
+          const expectedSteps = new Set((preview.provisioning?.steps ?? []).map(step => safeCode(step.id)).filter(Boolean));
+          if (Array.isArray(operation.steps) && operation.steps.length <= 40) {
+            readback.steps = operation.steps.filter(step => expectedSteps.has(step?.id)).map(step => ({
+              id: step.id, state: STEP_STATES.has(step.state) ? step.state : null,
+              required: typeof step.required === 'boolean' ? step.required : null, errorCode: safeCode(step.error),
+            }));
+            readback.unrecognizedStepCount = operation.steps.length - readback.steps.length;
+          }
+        }
+      }
+    } catch { readback.transportFailed = true; /* The original create status remains the failure. */ }
+    privateJson('t889-native-readiness.json', proof);
+  }
+  expect([200, 201], 'Normal PHP creation must return its actual receipt ' + (record.errorCode ?? 'error-code-unavailable')).toContain(status);
+  return body?.data;
 }
 
 function assertPhp(reply, site, challenge, phase) {
