@@ -987,6 +987,7 @@
 ### T883 · Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır
 - **Bağımlı:** T886, T887, T888
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
+- **Kilit:** hosting-settings-audit
 - **Kaynak:** SENIOR · 2026-11-09
 - **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
 - **Kabul:** 59 testin her biri raporda (silindi + karşılığı / yeniden yazıldı / listelendi + gerekçe); kalan testler `.28`'de iki koşuda da geçiyor ya da bulgu numarası var; `.28`'de `ypaudit-` kaynağı kalmadı; `npm run lint` geçiyor.
@@ -1064,6 +1065,7 @@
 ### T891 · PHP barındırma ayarları kaydediliyor ancak hazırlama invalid_operation_payload ile reddediliyor
 - **Bağımlı:** T887
 - **Dosyalar:** `packages/protocol/src/index-node-passenger.js`, `packages/protocol/test/domain-php-stage.test.js`, `apps/api/test/domain-job-flow-v2.test.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`
+- **Kilit:** hosting-settings-audit
 - **Kaynak:** QA · 2026-11-12 17:04
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
