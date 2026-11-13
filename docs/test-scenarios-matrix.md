@@ -166,6 +166,17 @@ Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak dü
 
 Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. T898'in geçerli T897/T889 bağımlılıkları korunur.
 
+## 13 Kasım 2026 — T905 taze WordPress giriş gözlemi
+
+İkinci taze native13 koşusunda gerçek DB formu ve Türkçe kurulum geçti; boş tarayıcı oturumunda giriş GET200 ve test cookie vardı, fakat giriş POST yanıtı 45 saniyede gözlenmedi. İlk koşunun 4/4 sonucu bu kırmızıyı kapatmaz; sonraki statik silme serial testi çalışmadı. Neden henüz sınıflandırılamaz.
+
+| Senaryo | Gözlem ve korunan sınır |
+|---|---|
+| WP-LOGIN-TRANSPORT | Gerçek request/response/requestfailed olayları; yalnız method/path/status/allowlist hata kodu. Cookie, headers, body, postdata ve kullanıcı/parola değeri kaydedilmez. |
+| WP-LOGIN-FORM | Gerçek form action origin/scheme/path, submit gerçekleşmesi, validity ve alanların yalnız dolu/boş bayrağı; submit düğmesi disabled durumu. Form veya ağ yanıtı değiştirilmez. |
+| WP-LOGIN-TIMEOUT | Aynı timeout ve assertion korunur; hata anında gerçek URL path, admin bar/login error varlığı ve güvenli sınıf bayrakları kaydedilir. Otomatik POST tekrarı, selector/timeout gevşetme yok. |
+| WP-LOGIN-NATIVE | İncelenmiş yardımcıyla yeni sahipli fixture üzerinde tekrar; ardından normal kaldırma ve fiziksel yokluk. Yeşil tekrar nedensellik kanıtının yerine geçmez. |
+
 
 ## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
 

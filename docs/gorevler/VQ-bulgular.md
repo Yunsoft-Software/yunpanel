@@ -987,7 +987,7 @@
 ### T883 · Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır
 - **Bağımlı:** T886, T887, T888
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
-- **Kilit:** hosting-settings-audit
+- **Kilit:** hosting-settings-audit, source-audit-13
 - **Kaynak:** SENIOR · 2026-11-09
 - **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
 - **Kabul:** 59 testin her biri raporda (silindi + karşılığı / yeniden yazıldı / listelendi + gerekçe); kalan testler `.28`'de iki koşuda da geçiyor ya da bulgu numarası var; `.28`'de `ypaudit-` kaynağı kalmadı; `npm run lint` geçiyor.
@@ -1341,5 +1341,18 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 473.897708
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T905 · WordPress taze giriste POST yaniti gozlenmiyor
+- **Bağımlı:** T886
+- **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`
+- **Kilit:** source-audit-13
+- **Kaynak:** QA · 2026-11-13 05:51
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Native .28 package0.3.0-2026111301/source621 t897-wp-chrome-q2: realDBform+TurkishWPinstall passed; fresh emptybrowserContext GETwp-login200/form1/testcookiepresent, then waitForResponse exactPOST timedout45s. Staticremoval serialtailSKIPPED, notPASS. Previousq1all4PASS doesnotcloseit. Ownfixture normalcleanedallmetadata/physical. Beforeproductchange instrument browserLogin actualrequest/response/requestfailed-safeerrorcodes/formsubmission/validity/action/scheme andposttimeoutURL/DOMbooleans; NEVERpassword/usernamevalues/cookies/headers/postdata/HTML/trace. Preserveactualbrowser/no mocks,noblindloginPOSTretry,no timeout/selector/assertrelaxation. Boundnativefreshrepeatwithobservations; classifyactualfailureastransport/form/productfromevidence beforefixing. Privateq2mutation-results.json/ledger under .local/p0-native-20261113. Helper/sourceinstrumentationonly first; nativefailurecause remainsOPEN.
+
+    Bu ön dilim yalnız mevcut gerçek tarayıcı yardımcısına güvenli gözlem ekler; T883 genel ürün kabulünü beklemek yerine T886 test kaynağı üzerine sıralanır ve T883 ile source-audit-13 kilidini paylaşır. Ürün/deploy değişikliği bu test dosyası sözleşmesinin dışında kalır. T889/T897/T898 bağımlılıkları korunur.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
