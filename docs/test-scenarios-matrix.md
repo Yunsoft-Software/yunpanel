@@ -140,3 +140,15 @@ Gerçek kurulu `621c8757` üzerinde Owner oturumuyla bare `/api/system/diagnosti
 | T901-PUBLIC-AUTH | Aynı gerçek gateway; çerezsiz GET ve CSRF'siz karşılaştırma POST'u | 401/403; bare `/api/system/...`404 kalır, allowlist genişlemez | Native gateway ve default URL birlikte sınanmıyordu |
 
 İki varsayılan URL düzeltmesi ve gerçek gateway regresyonu hazırlanacak. Yerel gateway testi yeni paket/native varsayılan istemci veya gerçek DOM kabulünün yerine geçmez; P0 döngüsünde yeniden doğrulanır.
+
+
+## 13 Kasım 2026 — T891 native PHP ayar temizliği
+
+Kurulu621c8757 üzerinde `t891-chrome-q1` gerçek UI save/stage202, header/body-limit/cache HTTP kontrollerini geçti (`hosting.ui.http verified:true`); test eski ayara dönüşte başarısız oldu. PATCH alanları birleştirdiği için ilk kayıtta bulunmayan `staticAssetCacheSeconds` alanını geri dönüş nesnesinden atlamak yeni120değerini temizlemez. Önceki testin strict eşitliği haklı olarak bunu yakaladı; koşu PASS sayılmadı. Site afterAll normal silinip fiziksel yokluğu doğrulandı.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç |
+|---|---|---|
+| T891-CACHE-RESET | Native PHP UI'da ilk olmayan cache alanı120eklenir; normal preview/PATCH ile aynı alan açıkça null temizlenir; stage/activate işleri gerçek | Strict beklenen canonical reset kaydı (nullable alan null), yeni header/body/cache değerleri temizlenir; gerçek CSS/HTTP cache davranışı özgün davranışa döner; beklenti subset/partial yapılmaz |
+| T891-STAGE-HTTP | Tek UI kaydetme → preview/PATCH/stage/activate ve sayfa yenileme | Birer mutation; stage202/job succeeded; gerçek header/413/cache120; özgün ayara normal dönüş ve fiziksel test kaynağı temizliği; Chrome ve Firefox taze koşular |
+
+Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak düzeltmesi korunur. T891'in yeni native19dosyası, önceki T887 tesliminden sonra sıralanır. Bu bir product stage hatası yeniden üretimi veya beklenti gevşetmesi değildir.

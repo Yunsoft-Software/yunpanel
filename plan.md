@@ -104,3 +104,5 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 - Kullanıcı Gemini kota engelinden sonra Codex devralmasını açıkça onayladı. T894/T901 yerel kontrolleri native kabul değildir; P1 kopyalama mevcut P0 gerçek kabul kapılarından sonra ilerler.
 
 - T901 ek native bulgusu: tarayıcı tanılama yardımcılarının iki varsayılan URL'si yayımlanan `/api/panel/system/...` sözleşmesine bağlanacak; gerçek gateway/AuthStore üzerinden endpoint override olmadan ve auth/CSRF reddiyle regresyon yazılacak. Mevcut Tanılama ekranının ayrı settings API'si bozuk sayılmadı.
+
+- T891 native19 yardımcı düzeltmesi: PHP cache alanını geri dönüşte atlamak yerine normal PATCH ile açık null temizle; strict canonical kayıt ve gerçek HTTP cache geri dönüşünü doğrula. İlk yeni Chrome koşusu cleanup hatası nedeniyle kırmızı tutulur; Chrome/Firefox taze tekrarlar bekler.
