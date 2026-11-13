@@ -363,7 +363,8 @@ test('@mutation source actual UI lock409 reconciles the same owned operation to 
         expect(entry.errors).toEqual([]);
         expect(page.auditErrors ?? []).toEqual([]);
         expect(entry.uncertain, 'Uncertain transport stops new trial/side mutations and upload; only known-ID drain and cleanup remain').toBe(false);
-        const firstConflict = entry.proof.uiConflicts[0];
+        const firstConflict = entry.proof.uiConflicts.reduce((first, row) =>
+          !first || row.responseSequence < first.responseSequence ? row : first, null);
         if (firstConflict) expect(entry.proof.uiRequests.filter(row => row.kind === 'continue' && row.requestSequence > firstConflict.responseSequence),
           'The UI must reconcile with GETs instead of replaying continue after its documented409').toHaveLength(0);
         const physical = readOnlyHostProbe(entry.fixture, 'owned-site-files'); expect(physical.unixUserExists).toBe(true); expect(physical.uid).toBeGreaterThan(0);
