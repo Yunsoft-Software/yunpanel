@@ -209,6 +209,9 @@ test('PHP settings update verifies current pool, persists receipt, reloads and c
   const changed = intent({ maxChildren: 9, memoryLimitMb: 512 });
   const result = await siteManager.update(changed, { previousIntent: intent(), operationId: nextOperation });
   assert.equal(result.satisfied, true);
+  assert.equal(result.readiness.phase, 'pool_update');
+  assert.equal(result.readiness.lastSatisfied, true);
+  assert.equal(result.readiness.listenerObserved, true);
   assert.match(host.entries.get(configPath).content, /pm.max_children = 9/);
   assert.match(host.entries.get(configPath).content, /memory_limit\] = 512M/);
   assert.equal((await siteManager.update(changed, { previousIntent: intent(), operationId: nextOperation })).satisfied, true);
@@ -258,6 +261,17 @@ test('PHP-FPM site apply installs distro FPM and activates a dedicated Website p
   assert.equal(result.configPath, configPath);
   assert.equal(result.socketPath, socketPath);
   assert.equal(result.created, true);
+  // This existing legacy host harness checks the evidence envelope, not native readiness causality.
+  assert.deepEqual(Object.keys(result.readiness).sort(), ['phase', 'attempts', 'elapsedMs', 'firstSatisfied', 'lastSatisfied',
+    'firstReason', 'lastReason', 'firstListenerObserved', 'lastListenerObserved', 'listenerObserved'].sort());
+  assert.equal(result.readiness.phase, 'pool_activation');
+  assert.equal(result.readiness.attempts, 1);
+  assert.equal(result.readiness.firstSatisfied, true); assert.equal(result.readiness.lastSatisfied, true);
+  assert.equal(result.readiness.firstReason, null); assert.equal(result.readiness.lastReason, null);
+  assert.equal(result.readiness.firstListenerObserved, true); assert.equal(result.readiness.lastListenerObserved, true);
+  assert.equal(result.readiness.listenerObserved, true);
+  assert.ok(Number.isSafeInteger(result.readiness.elapsedMs) && result.readiness.elapsedMs >= 0);
+  assert.ok(Object.isFrozen(result.readiness));
   assert.equal(host.packageInstalled(), true);
   assert.equal(host.serviceActive(), true);
   assert.equal(host.entries.get(configPath)?.mode, 0o600);

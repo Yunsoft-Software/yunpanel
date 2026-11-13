@@ -28,6 +28,30 @@ const RECEIPT_ROOT = '/var/lib/yunpanel/staging/php-fpm-sites';
 const RECEIPT_VERSION = 1;
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const RECEIPT_STATES = new Set(['prepared', 'active', 'compensated']);
+const READINESS_REASONS = new Set([
+  'php_fpm_identity_unavailable', 'php_fpm_document_root_missing', 'php_fpm_package_missing',
+  'php_fpm_pool_missing', 'php_fpm_config_invalid', 'php_fpm_service_inactive',
+  'php_fpm_socket_missing', 'php_fpm_socket_drift',
+]);
+
+function readinessObservation(result, listenerObserved = null, errorCode = null) {
+  const reason = errorCode ?? result?.reason;
+  return Object.freeze({
+    satisfied: typeof result?.satisfied === 'boolean' ? result.satisfied : null,
+    reason: READINESS_REASONS.has(reason) ? reason : null,
+    listenerObserved,
+  });
+}
+
+function readinessEvidence(phase, startedAt, attempts, first, last) {
+  return Object.freeze({
+    phase, attempts, elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    firstSatisfied: first.satisfied, lastSatisfied: last.satisfied,
+    firstReason: first.reason, lastReason: last.reason,
+    firstListenerObserved: first.listenerObserved, lastListenerObserved: last.listenerObserved,
+    listenerObserved: last.listenerObserved,
+  });
+}
 
 export class PhpFpmSiteManagerError extends Error {
   constructor(code, message) {
@@ -759,9 +783,12 @@ export function createPhpFpmSiteManager({
     }
 
     if (receipt.state === 'active') {
+      const inspectionStartedAt = performance.now();
       const existing = await inspect(rawIntent);
       if (existing.satisfied && await socketListening(phpFpmSocketPath(spec.unixUser))) {
-        return Object.freeze({ ...existing, created: receipt.mutated });
+        const observation = readinessObservation(existing, true);
+        return Object.freeze({ ...existing, created: receipt.mutated,
+          readiness: readinessEvidence('pool_activation', inspectionStartedAt, 1, observation, observation) });
       }
     }
 
@@ -826,6 +853,7 @@ export function createPhpFpmSiteManager({
         spec,
         'php_fpm_update_unverified',
         'Updated PHP configuration could not be verified',
+        'pool_update',
       );
       await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
       return Object.freeze({ ...after, updated: true });
@@ -852,11 +880,14 @@ export function createPhpFpmSiteManager({
       return output.split('\n').some(line => line.trim().split(/\s+/).includes(socketPath));
     } catch { throw new PhpFpmSiteManagerError('php_fpm_socket_owner_unverified', 'Website PHP socket listeners could not be verified'); }
   }
-  async function waitForPoolReady(rawIntent, spec, unverifiedCode, unverifiedMessage) {
+  async function waitForPoolReady(rawIntent, spec, unverifiedCode, unverifiedMessage, phase = 'pool_activation') {
     const targetSocket = phpFpmSocketPath(spec.unixUser);
+    const startedAt = performance.now();
+    let first = null, last = null;
     for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
       let verified = null;
       let transientSocketMode = false;
+      let inspectErrorCode = null;
       try {
         verified = await inspect(rawIntent);
       } catch (error) {
@@ -864,6 +895,7 @@ export function createPhpFpmSiteManager({
           const socketInfo = await lstatFn(targetSocket).catch(() => null);
           if (socketInfo?.isSocket?.() && !socketInfo.isSymbolicLink?.()) {
             transientSocketMode = true;
+            inspectErrorCode = error.code;
           } else {
             throw error;
           }
@@ -871,14 +903,21 @@ export function createPhpFpmSiteManager({
           throw error;
         }
       }
-      if (!transientSocketMode && verified?.satisfied && await socketListening(targetSocket)) {
-        return verified;
+      let listenerObserved = null;
+      if (!transientSocketMode && verified?.satisfied) listenerObserved = await socketListening(targetSocket);
+      last = readinessObservation(verified, listenerObserved, inspectErrorCode);
+      first ??= last;
+      if (!transientSocketMode && verified?.satisfied && listenerObserved) {
+        return Object.freeze({ ...verified,
+          readiness: readinessEvidence(phase, startedAt, attempt + 1, first, last) });
       }
       if (attempt + 1 < pollAttempts) {
         await delayFn(pollDelayMs);
       }
     }
-    throw new PhpFpmSiteManagerError(unverifiedCode, unverifiedMessage);
+    const error = new PhpFpmSiteManagerError(unverifiedCode, unverifiedMessage);
+    error.readiness = readinessEvidence(phase, startedAt, pollAttempts, first, last);
+    throw error;
   }
   async function releaseSocket(spec) {
     const socket = phpFpmSocketPath(spec.unixUser);
@@ -1058,6 +1097,7 @@ export function createPhpFpmSiteManager({
       spec,
       'php_fpm_migration_unverified',
       'PHP-FPM migration could not be verified',
+      'pool_migration',
     );
     receipt = await persistReceipt(operationId, spec, { ...receipt, state: 'active' });
     return Object.freeze({

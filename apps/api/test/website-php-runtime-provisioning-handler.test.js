@@ -80,6 +80,16 @@ test('PHP runtime locks containers, activates FPM, enforces UMask=0027 and reche
   assert.equal(result.containerOwner, 'root:root');
   assert.equal(result.releaseUid, 1201);
   assert.equal(result.runtimeUmask, '0027');
+  // A manager that supplied no observations must not acquire fabricated activation evidence.
+  assert.equal(result.readiness.poolActivation, null);
+  const afterUmask = result.readiness.afterUmask;
+  assert.equal(afterUmask.phase, 'after_umask'); assert.equal(afterUmask.attempts, 1);
+  assert.equal(afterUmask.firstSatisfied, true); assert.equal(afterUmask.lastSatisfied, true);
+  assert.equal(afterUmask.firstReason, null); assert.equal(afterUmask.lastReason, null);
+  assert.equal(afterUmask.firstListenerObserved, null); assert.equal(afterUmask.lastListenerObserved, null);
+  assert.equal(afterUmask.listenerObserved, null);
+  assert.ok(Number.isSafeInteger(afterUmask.elapsedMs) && afterUmask.elapsedMs >= 0);
+  assert.ok(Object.isFrozen(result.readiness) && Object.isFrozen(afterUmask));
 });
 
 test('PHP runtime inspect does not claim readiness when container lockdown drifted', async () => {

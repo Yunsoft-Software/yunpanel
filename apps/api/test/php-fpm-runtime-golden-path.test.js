@@ -243,6 +243,10 @@ test('PHP-FPM Runtime Golden Path - Distro Baseline, Multi-Version & Verified Re
     assert.equal(applied.phpVersion, '8.2');
     assert.equal(applied.serviceUnit, 'php8.2-fpm.service');
     assert.equal(applied.configPath, `/etc/php/8.2/fpm/pool.d/yunpanel-${unixUser}.conf`);
+    // Existing legacy harness metadata coverage; this is not a real FPM transition proof.
+    assert.equal(applied.readiness.phase, 'pool_activation');
+    assert.equal(applied.readiness.lastSatisfied, true);
+    assert.equal(applied.readiness.listenerObserved, true);
 
     // Proves apt-cache policy was verified
     const aptCacheCall = host.calls.find(([file]) => file === '/usr/bin/apt-cache');

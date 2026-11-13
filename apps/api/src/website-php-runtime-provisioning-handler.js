@@ -3,6 +3,39 @@ import { createPhpFpmSiteManager } from '@yunpanel/host-runtime';
 import { createPhpSiteContainerManager } from '@yunpanel/host-runtime/php-site-container-manager';
 import { createServiceUmaskManager } from '@yunpanel/host-runtime/service-umask-manager';
 
+const READINESS_REASONS = new Set([
+  'php_fpm_identity_unavailable', 'php_fpm_document_root_missing', 'php_fpm_package_missing',
+  'php_fpm_pool_missing', 'php_fpm_config_invalid', 'php_fpm_service_inactive', 'php_fpm_socket_missing', 'php_fpm_socket_drift',
+]);
+
+function activationEvidence(value) {
+  if (!value || value.phase !== 'pool_activation'
+    || !Number.isInteger(value.attempts) || value.attempts < 1 || value.attempts > 200
+    || !Number.isSafeInteger(value.elapsedMs) || value.elapsedMs < 0) return null;
+  for (const key of ['firstSatisfied', 'lastSatisfied', 'firstListenerObserved', 'lastListenerObserved', 'listenerObserved']) {
+    if (value[key] !== null && typeof value[key] !== 'boolean') return null;
+  }
+  for (const key of ['firstReason', 'lastReason']) if (value[key] !== null && !READINESS_REASONS.has(value[key])) return null;
+  return Object.freeze(Object.fromEntries(['phase', 'attempts', 'elapsedMs', 'firstSatisfied', 'lastSatisfied',
+    'firstReason', 'lastReason', 'firstListenerObserved', 'lastListenerObserved', 'listenerObserved'].map(key => [key, value[key]])));
+}
+
+function poolObservation(result) {
+  return Object.freeze({
+    satisfied: typeof result?.satisfied === 'boolean' ? result.satisfied : null,
+    reason: READINESS_REASONS.has(result?.reason) ? result.reason : null,
+  });
+}
+
+function postUmaskEvidence(startedAt, attempts, first, last) {
+  return Object.freeze({
+    phase: 'after_umask', attempts, elapsedMs: Math.max(0, Math.round(performance.now() - startedAt)),
+    firstSatisfied: first.satisfied, lastSatisfied: last.satisfied, firstReason: first.reason, lastReason: last.reason,
+    // This phase invokes inspect, which does not query the listener inventory.
+    firstListenerObserved: null, lastListenerObserved: null, listenerObserved: null,
+  });
+}
+
 export class WebsitePhpRuntimeProvisioningError extends Error {
   constructor(code, message, status = 503) {
     super(message);
@@ -98,16 +131,23 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       );
     }
     let fpm = null;
+    const startedAt = performance.now();
+    let attempts = 0, first = null, last = null;
     for (let attempt = 0; attempt < pollAttempts; attempt += 1) {
       fpm = await fpmManager.inspect(normalized);
+      attempts += 1;
+      last = poolObservation(fpm); first ??= last;
       if (fpm?.satisfied && fpm.adapter === 'php-fpm') break;
       if (attempt + 1 < pollAttempts) await delayFn(pollDelayMs);
     }
     if (!fpm?.satisfied || fpm.adapter !== 'php-fpm') {
-      throw new WebsitePhpRuntimeProvisioningError(
+      const error = new WebsitePhpRuntimeProvisioningError(
         'website_php_fpm_restart_unverified',
         'PHP-FPM Website pool did not recover after UMask policy activation',
       );
+      error.readiness = Object.freeze({ poolActivation: activationEvidence(initialFpm.readiness),
+        afterUmask: postUmaskEvidence(startedAt, attempts, first, last) });
+      throw error;
     }
     return Object.freeze({
       ...fpm,
@@ -116,6 +156,8 @@ export function createWebsitePhpRuntimeProvisioningHandler({
       releaseUid: container.releaseUid,
       releaseGid: container.releaseGid,
       runtimeUmask: umask.umask,
+      readiness: Object.freeze({ poolActivation: activationEvidence(initialFpm.readiness),
+        afterUmask: postUmaskEvidence(startedAt, attempts, first, last) }),
     });
   }
 
