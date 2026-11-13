@@ -25,8 +25,13 @@ async function currentDomain(fixture) {
 }
 async function publish(fixture, settings) {
   const root = domainPath(fixture), before = await currentDomain(fixture);
-  if (!isDeepStrictEqual(before.nginxSettings, settings)) {
-    const input = { changes: { nginxSettings: settings } };
+  // PATCH merges settings. A legacy PHP envelope omits cache, so clearing a
+  // cache introduced by this test requires an explicit canonical null value.
+  const desired = before.targetType === 'php'
+    ? { ...settings, staticAssetCacheSeconds: settings.staticAssetCacheSeconds ?? null }
+    : settings;
+  if (!isDeepStrictEqual(before.nginxSettings, desired)) {
+    const input = { changes: { nginxSettings: desired } };
     const preview = accepted(await fixture.call('POST', root + '/update-preview', input));
     accepted(await fixture.call('PATCH', root, { ...input, previewDigest: preview.previewDigest, confirmation: preview.confirmation }));
   }
@@ -37,7 +42,7 @@ async function publish(fixture, settings) {
       expect((await fixture.waitJob(queued.id)).status).toBe('succeeded');
     }
   }
-  const result = await currentDomain(fixture); expect(result.nginxSettings).toEqual(settings);
+  const result = await currentDomain(fixture); expect(result.nginxSettings).toEqual(desired);
   expect(result.appliedRevision).toBe(result.desiredRevision); return result;
 }
 
@@ -96,9 +101,20 @@ test.describe('T887 native owned hosting settings', () => {
     test.setTimeout(360000); const fixture = await site(kind), before = await currentDomain(fixture), original = before.nginxSettings;
     expect(before.state).toBe('active'); expect(before.appliedRevision).toBe(before.desiredRevision);
     expect(original.headers.some(header => header.name.toLowerCase() === 'x-yunpanel-t887')).toBe(false);
-    const headerValue = 't887-' + kind + '-' + randomBytes(6).toString('hex'); let css, failure;
+    const headerValue = 't887-' + kind + '-' + randomBytes(6).toString('hex'); let css, cacheBaseline, failure;
+    const cssBody = 'body{color:#123}';
     fixture.record('hosting.ui.original', { runtime: kind, nginxSettings: original });
     try {
+      if (['php', 'static'].includes(kind)) {
+        expect(original.staticAssetCacheSeconds ?? null).not.toBe(120);
+        css = 'yp-t887-' + randomBytes(6).toString('hex') + '.css';
+        await uploadOwned(fixture, css, cssBody);
+        const baseline = await fixture.http('/' + css);
+        expect(baseline.status).toBe(200); expect(baseline.body).toBe(cssBody);
+        cacheBaseline = baseline.headers['cache-control'] ?? null;
+        expect((cacheBaseline ?? '').split(',').map(value => value.trim().toLowerCase())).not.toContain('max-age=120');
+        fixture.record('hosting.ui.cache-baseline', { runtime: kind, filename: css, cacheControl: cacheBaseline });
+      }
       await ready(page, fixture.route('hosting'));
       await expect(main(page).getByRole('heading', { name: 'Barındırma ayarları', exact: true })).toBeVisible();
       await expect(page.getByRole('dialog')).toHaveCount(0);
@@ -131,14 +147,19 @@ test.describe('T887 native owned hosting settings', () => {
       expect(oversized.status).toBe(413); expect(oversized.headers['x-yunpanel-t887']).toBe(headerValue);
       if (kind === 'static') expect((await fixture.http('/yp-t887-missing-' + headerValue)).status).toBe(404);
       if (['php', 'static'].includes(kind)) {
-        css = 'yp-t887-' + randomBytes(6).toString('hex') + '.css'; await uploadOwned(fixture, css, 'body{color:#123}');
-        const asset = await fixture.http('/' + css); expect(asset.status).toBe(200); expect(asset.headers['cache-control']).toContain('max-age=120');
-        await fixture.deleteFile(css); css = null;
+        const asset = await fixture.http('/' + css); expect(asset.status).toBe(200); expect(asset.body).toBe(cssBody);
+        expect(asset.headers['cache-control']).toContain('max-age=120');
       }
       await page.reload(); await expect(page.getByLabel('En büyük yükleme boyutu (MB)', { exact: true })).toHaveValue('2');
       expect(page.auditErrors).toEqual([]); fixture.record('hosting.ui.http', { runtime: kind, verified: true, phpCacheEvolution: kind === 'php' });
     } catch (error) { failure = error; }
-    for (const cleanup of [...(css ? [() => fixture.deleteFile(css)] : []), () => publish(fixture, original)]) {
+    for (const cleanup of [() => publish(fixture, original), ...(css && cacheBaseline !== undefined ? [async () => {
+      const restored = await fixture.http('/' + css);
+      expect(restored.status).toBe(200); expect(restored.body).toBe(cssBody);
+      expect(restored.headers['cache-control'] ?? null).toBe(cacheBaseline);
+      expect(restored.headers['x-yunpanel-t887'] ?? null).toBeNull();
+      fixture.record('hosting.ui.cache-restored', { runtime: kind, filename: css, cacheControl: restored.headers['cache-control'] ?? null, verified: true });
+    }] : []), ...(css ? [() => fixture.deleteFile(css)] : [])]) {
       try { await cleanup(); }
       catch (error) { fixture.record('hosting.ui.cleanup-failure', { runtime: kind, errorKind: error.name, errorCode: error.code ?? null }); failure ??= error; }
     }
