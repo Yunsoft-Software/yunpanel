@@ -252,3 +252,4 @@
 - 2026-11-13 08:38 orchestrator: verify 68daa011..03f4e632: ok, yeniden açılan -, bulgu -
 - 2026-11-13 09:06 orchestrator: verify 03f4e632..b2aa74bd: failed, yeniden açılan -, bulgu ['T907']
 - 2026-11-13 09:14 orchestrator: verify 03f4e632..99079fcb: ok, yeniden açılan -, bulgu -
+- 2026-11-13 16:59 orchestrator: verify 99079fcb..7bb3eac3: failed, yeniden açılan -, bulgu ['T908']
