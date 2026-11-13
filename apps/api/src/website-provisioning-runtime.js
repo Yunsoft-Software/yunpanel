@@ -1,4 +1,4 @@
-import { createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
+import { createNginxManager, createWebsiteIdentityPathManager } from '@yunpanel/host-runtime';
 import { createWebsiteHttpHealthInspector } from '@yunpanel/host-runtime/website-http-health-inspector';
 import { createWebsiteDnsZoneProvisioningHandler } from './website-dns-zone-provisioning-handler.js';
 import { createWebsiteCertificateProvisioningHandler } from './website-certificate-provisioning-handler.js';
@@ -28,6 +28,7 @@ import {
   WebsiteProvisioningOrchestratorError,
 } from './website-provisioning-orchestrator.js';
 import { createWebsiteProvisioningRegistry } from './website-provisioning-registry.js';
+import { createWebsiteProvisioningRetirementProvider, WebsiteProvisioningRetirementError } from './website-provisioning-retirement-provider.js';
 import { createWebsiteRoundcubeProvisioningHandler } from './website-roundcube-provisioning-handler.js';
 import { createWebsiteSftpKeyAwareProvisioningHandler } from './website-sftp-provisioning-handler.js';
 import { createWebsiteTlsProvisioningHandler } from './website-tls-provisioning-handler.js';
@@ -91,6 +92,24 @@ export function createWebsiteProvisioningRuntime({
   let isolationAudit = null;
   let isolationMigration = null;
   let isolationAuditDependencies = null;
+  let retirementControlPlane = null;
+  const resolvedNginxManager = nginxManager ?? createNginxManager();
+  const retirementProvider = Object.freeze({
+    withRetiredRouting(context, action) {
+      if (!retirementControlPlane) throw new WebsiteProvisioningRetirementError('website_provisioning_retirement_unavailable', 503);
+      return retirementControlPlane.provider.withRetiredRouting(context, action);
+    },
+  });
+  async function nginxCompensationGuard(context, action) {
+    if (retirementControlPlane) return retirementControlPlane.provider.withCompensationRouting(context, action);
+    const liveRegistry = isolationAuditDependencies?.websiteRegistry ?? websiteRegistry;
+    const retired = context.operation?.steps?.find(step => step.id === 'domain_activation')?.compensation?.evidence?.retired === true;
+    if (retired || (domainControlPlane && !liveRegistry)
+      || (liveRegistry && await liveRegistry.getWebsite(context.websiteId) === null)) {
+      throw new WebsiteProvisioningRetirementError('website_provisioning_retirement_unavailable', 503);
+    }
+    return action();
+  }
 
   async function auditIsolation(websiteId) {
     if (!isolationAudit) {
@@ -127,7 +146,8 @@ export function createWebsiteProvisioningRuntime({
       ...(elFinderSharedApplicationManager ? { elFinderSharedApplicationManager } : {}),
       ...(elFinderGatewayManager ? { elFinderGatewayManager } : {}),
       ...(sftpSiteManager ? { sftpSiteManager } : {}),
-      ...(nginxManager ? { nginxManager } : {}),
+      nginxManager: resolvedNginxManager,
+      nginxCompensationGuard,
     }),
     dns_zone: createWebsiteDnsZoneProvisioningHandler(),
     node_release: nodeReleaseHandler(),
@@ -300,8 +320,35 @@ export function createWebsiteProvisioningRuntime({
     }
     handlers.domain_activation = createWebsiteDomainActivationProvisioningHandler({
       domainRegistry: nextDomainRegistry,
+      retirementProvider,
     });
     domainControlPlane = Object.freeze({ domainRegistry: nextDomainRegistry });
+    return Object.freeze({ configured: true });
+  }
+
+  function configureRetirementControlPlane(dependencies = {}) {
+    const { domainRegistry: domains, websiteRegistry: websites, applicationRegistry: applications,
+      websiteRemovalRegistry, domainRemovalRegistry, localServerId } = dependencies;
+    if (!domainControlPlane || domains !== domainControlPlane.domainRegistry) {
+      throw new Error('Retirement requires the configured canonical Domain registry');
+    }
+    if (isolationAuditDependencies && (websites !== isolationAuditDependencies.websiteRegistry
+      || applications !== isolationAuditDependencies.applicationRegistry
+      || (isolationAuditDependencies.localServerId !== null && localServerId !== isolationAuditDependencies.localServerId))) {
+      throw new Error('Retirement requires the configured canonical Website and Application registries');
+    }
+    const next = { domainRegistry: domains, websiteRegistry: websites, applicationRegistry: applications,
+      websiteRemovalRegistry, domainRemovalRegistry, localServerId };
+    if (retirementControlPlane) {
+      if (Object.entries(next).some(([key, value]) => retirementControlPlane[key] !== value)) {
+        throw new Error('Website retirement dependencies cannot be replaced');
+      }
+      return Object.freeze({ configured: true });
+    }
+    const provider = createWebsiteProvisioningRetirementProvider({
+      ...next, provisioningRegistry: registry, nginxManager: resolvedNginxManager,
+    });
+    retirementControlPlane = Object.freeze({ ...next, provider });
     return Object.freeze({ configured: true });
   }
 
@@ -943,6 +990,7 @@ export function createWebsiteProvisioningRuntime({
     configureSftpKeys,
     configureIsolationAudit,
     configureDomainControlPlane,
+    configureRetirementControlPlane,
     configurePassengerEnvironment,
     configurePassengerControlPlane,
     configurePythonControlPlane,

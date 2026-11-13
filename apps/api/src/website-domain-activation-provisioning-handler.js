@@ -101,10 +101,11 @@ function publicEvidence(spec) {
   });
 }
 
-export function createWebsiteDomainActivationProvisioningHandler({ domainRegistry } = {}) {
+export function createWebsiteDomainActivationProvisioningHandler({ domainRegistry, retirementProvider = null } = {}) {
   if (!domainRegistry || typeof domainRegistry.getDomain !== 'function'
     || typeof domainRegistry.activateProvisionedDomains !== 'function'
-    || typeof domainRegistry.resetProvisionedDomains !== 'function') {
+    || typeof domainRegistry.resetProvisionedDomains !== 'function'
+    || (retirementProvider !== null && typeof retirementProvider?.withRetiredRouting !== 'function')) {
     throw new WebsiteDomainActivationProvisioningError(
       'website_domain_activation_dependencies_invalid',
       'Provisioned Domain activation dependencies are invalid',
@@ -166,6 +167,14 @@ export function createWebsiteDomainActivationProvisioningHandler({ domainRegistr
 
   async function inspectCompensation(context = {}) {
     const spec = normalizedIntent(context);
+    const live = await Promise.all(spec.domains.map(expected => domainRegistry.getDomain(expected.domainId)));
+    if (live.every(domain => domain === null) && retirementProvider) {
+      return retirementProvider.withRetiredRouting(context, proof => Object.freeze({
+        ...proof,
+        adapter: 'domain-activation',
+        domains: Object.freeze(spec.domains.map(entry => Object.freeze({ ...entry }))),
+      }));
+    }
     const state = await inspectState(spec, { compensation: true });
     if (state === 'pristine') {
       return Object.freeze({

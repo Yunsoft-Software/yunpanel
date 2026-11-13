@@ -450,6 +450,30 @@ export function createDomainRegistry({
   let state = emptyState();
   let initialized = false;
   let writeChain = Promise.resolve();
+  let routingNamespaceChain = Promise.resolve();
+
+  function withRoutingNamespace(action) {
+    const run = routingNamespaceChain.catch(() => {}).then(async () => {
+      await ensureInitialized();
+      return action();
+    });
+    routingNamespaceChain = run.then(() => {}, () => {});
+    return run;
+  }
+
+  function withRoutingNamespaceReservation(action) {
+    if (typeof action !== 'function') {
+      throw new DomainRegistryError('invalid_routing_namespace_action', 'Routing namespace action is required');
+    }
+    return withRoutingNamespace(() => action(Object.freeze(state.domains.map((domain) => Object.freeze({
+      id: domain.id,
+      serverId: domain.serverId,
+      websiteId: domain.websiteId ?? null,
+      primaryDomain: domain.primaryDomain,
+      aliases: Object.freeze([...domain.aliases]),
+      appliedPrimaryDomain: domain.appliedPrimaryDomain ?? null,
+    })))));
+  }
 
   if (typeof serverExists !== 'function' || (getWebsite !== null && typeof getWebsite !== 'function') || typeof websiteBindingRequired !== 'function') {
     throw new DomainRegistryError('invalid_domain_registry_dependencies', 'Domain registry dependencies are invalid');
@@ -1407,11 +1431,12 @@ export function createDomainRegistry({
 
   return {
     init,
-    createDomain,
+    createDomain: (input) => withRoutingNamespace(() => createDomain(input)),
     previewDomainUpdate,
-    updateDomain,
+    updateDomain: (input) => withRoutingNamespace(() => updateDomain(input)),
     previewDomainReparent,
-    reparentDomain,
+    reparentDomain: (input) => withRoutingNamespace(() => reparentDomain(input)),
+    withRoutingNamespaceReservation,
     bindWebsite,
     rollbackWebsiteBinding,
     detachWebsiteForRemoval,

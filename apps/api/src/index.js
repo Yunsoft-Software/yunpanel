@@ -1047,6 +1047,14 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
   })
   : null;
 if (websiteRemovalRuntime) await websiteRemovalRuntime.init();
+if (websiteRemovalRuntime && domainRemovalRuntimeBundle) {
+  websiteProvisioningRuntime.configureRetirementControlPlane({
+    domainRegistry, websiteRegistry, applicationRegistry,
+    websiteRemovalRegistry: websiteRemovalOperationRegistry,
+    domainRemovalRegistry: domainRemovalRuntimeBundle.registry,
+    localServerId,
+  });
+}
 const websiteRemovalWorker = websiteRemovalRuntime ? createWebsiteRemovalWorker({ registry: websiteRemovalOperationRegistry,
   runtime: websiteRemovalRuntime, onError: failure => console.error(`[yunpanel-api] removal worker: ${failure.code}`) }) : null;
 const websiteProvisioningWorker = createWebsiteProvisioningWorker({

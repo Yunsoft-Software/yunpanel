@@ -563,8 +563,14 @@ export function createNginxManager({
       ? path.join(sitesDir, configNameForDomain(receipt.previousPrimaryDomain))
       : null;
     const current = await activationState({ activePath, previousActivePath });
+    const ownership = Object.freeze({
+      receiptVersion: receipt.version,
+      hadPreviousActive: receipt.active.exists,
+      previousPrimaryDomain: receipt.previousPrimaryDomain,
+    });
     if (stateMatchesReceipt(current, receipt)) {
       return {
+        ...ownership,
         satisfied: true,
         configName,
         checksum,
@@ -573,7 +579,7 @@ export function createNginxManager({
       };
     }
     if (stateMatchesCandidate(current, checksum, Boolean(previousActivePath))) {
-      return { satisfied: false, reason: 'nginx_compensation_pending', configName, checksum };
+      return { ...ownership, satisfied: false, reason: 'nginx_compensation_pending', configName, checksum };
     }
     throw new NginxManagerError('nginx_compensation_drift', 'Nginx compensation refused because active state has drifted');
   }

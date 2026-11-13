@@ -4,10 +4,34 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
 
 const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
 const websiteId = 'f73cc6ac-07e8-4d22-b29a-741154687d20';
 const applicationId = '6dcb8908-3f3e-43da-9452-15fd6b51ac76';
+
+test('retirement wiring accepts real canonical registries once and refuses replacement', async t => {
+  const dir = await mkdtemp(path.join(tmpdir(), 't892-retirement-wiring-'));
+  t.after(() => rm(dir, { recursive: true, force: true }));
+  const domainRegistry = createDomainRegistry({ filePath: path.join(dir, 'domains.json') });
+  const applicationRegistry = createApplicationRegistry({ filePath: path.join(dir, 'applications.json') });
+  const websiteRegistry = createWebsiteRegistry({ filePath: path.join(dir, 'websites.json') });
+  const websiteRemovalRegistry = createWebsiteRemovalOperationRegistry({ filePath: path.join(dir, 'website-removals.json') });
+  const domainRemovalRegistry = createDomainRemovalOperationRegistry({ filePath: path.join(dir, 'domain-removals.json') });
+  await Promise.all([domainRegistry.init(), applicationRegistry.init(), websiteRegistry.init(), websiteRemovalRegistry.init(), domainRemovalRegistry.init()]);
+  const runtime = createWebsiteProvisioningRuntime({ filePath: path.join(dir, 'provisioning.json') });
+  const dependencies = { domainRegistry, applicationRegistry, websiteRegistry, websiteRemovalRegistry, domainRemovalRegistry, localServerId: 'local' };
+  assert.throws(() => runtime.configureRetirementControlPlane(dependencies), /canonical Domain registry/);
+  runtime.configureDomainControlPlane({ domainRegistry });
+  assert.deepEqual(runtime.configureRetirementControlPlane(dependencies), { configured: true });
+  assert.deepEqual(runtime.configureRetirementControlPlane({ ...dependencies }), { configured: true });
+  assert.throws(() => runtime.configureRetirementControlPlane({ ...dependencies, localServerId: 'other' }), /cannot be replaced/);
+  assert.throws(() => runtime.configureRetirementControlPlane({ ...dependencies, domainRegistry: createDomainRegistry() }), /canonical Domain registry/);
+});
 
 function plan({ operation = operationId, website = websiteId } = {}) {
   return {

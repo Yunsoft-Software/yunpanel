@@ -368,6 +368,7 @@ export function createWebsiteProvisioningHandlers({
   phpFpmSiteManager = createPhpFpmSiteManager(),
   staticDeploymentManager = createWebsiteStaticDeploymentManager(),
   nginxManager = createNginxManager(),
+  nginxCompensationGuard = null,
 } = {}) {
   if (!identityManager
     || typeof identityManager.apply !== 'function'
@@ -399,6 +400,7 @@ export function createWebsiteProvisioningHandlers({
     || typeof nginxManager.inspectActiveDomain !== 'function'
     || typeof nginxManager.activateDomain !== 'function'
     || typeof nginxManager.compensateDomain !== 'function'
+    || (nginxCompensationGuard !== null && typeof nginxCompensationGuard !== 'function')
     || typeof nginxManager.inspectDomainCompensation !== 'function') {
     throw new WebsiteProvisioningHandlerError(
       'website_provisioning_handler_dependencies_invalid',
@@ -621,19 +623,21 @@ export function createWebsiteProvisioningHandlers({
   }
 
   async function compensateNginx(context = {}) {
-    const target = await nginxCompensationTarget(context);
-    if (!target) {
-      return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
-    }
-    return nginxManager.compensateDomain(target);
+    const execute = async () => {
+      const target = await nginxCompensationTarget(context);
+      if (!target) return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
+      return nginxManager.compensateDomain(target);
+    };
+    return nginxCompensationGuard ? nginxCompensationGuard(context, execute) : execute();
   }
 
   async function inspectNginxCompensation(context = {}) {
-    const target = await nginxCompensationTarget(context);
-    if (!target) {
-      return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
-    }
-    return nginxManager.inspectDomainCompensation(target);
+    const execute = async () => {
+      const target = await nginxCompensationTarget(context);
+      if (!target) return Object.freeze({ satisfied: false, reason: 'website_nginx_compensation_stage_unavailable' });
+      return nginxManager.inspectDomainCompensation(target);
+    };
+    return nginxCompensationGuard ? nginxCompensationGuard(context, execute) : execute();
   }
 
   return Object.freeze({
