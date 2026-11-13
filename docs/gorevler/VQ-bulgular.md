@@ -1152,11 +1152,13 @@
 
 ### T899 · Paralel normal işlerde kuyruk recovery required 503 ile geçici kapanıyor
 - **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/durable-job-registry.js`, `apps/api/src/local-runtime.js`, `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`
+- **Dosyalar:** `apps/api/src/durable-job-registry.js`, `apps/api/src/local-runtime.js`, `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`, `e2e/live-audit/26-native-job-concurrency-mutation.spec.js`
 - **Kaynak:** QA · 2026-11-12 18:16
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     T886 lifecycle-q3 üçpozitifakıştan sonra PHPconfig enqueue503 durable_job_reconciliation_required; yeni işoluşmadı ve POSTtekrarlanmadı. Önceki WordPressqueue503kodu yakalanamadığıiçin aynı neden sayılmaz. Diğer ikiworker in-flight normalişleri bitirdi, yeni batchlerdurduruldu. Normal APIqueued0/running0 ve ownjobs terminal; kök saltokunur disk projection job-registry.json.recovery.json version1 jobs[]; APIuptime10Kasım21:07 active NRestarts0. Dolayısıyla bu gözlemde panelrestart veya kalıcıdosyadüzenleme yapılmadı, bekleyenrecoverystate bulunmadı. Kaynak çıkarımı: automaticcomplete/reconciliationack penceresi globalenqueueguardı geçici etkileyebilir; henüzkök nedenkanıtlanmadı. Native UI/API bu durumda gerçekkalıcırequestkimliğiyle doğruyenileme/güvenlibudget göstermeli; genelretry/blindPOSTolmaz. Eşzamanlıgerçekikiişile tekrarüret, sağlamack/jobdurumunu ölç; güvenlikgatekapatılmaz. Şimdi kalanmutatingpozitifkapsam sıralıkoşulacak, builk503başarıyasayılmaz.
+
+    Native26 ön dilimi: iki normal sahipli statik siteyi sırayla kur, gerçek HTTP nonce ve aktif Nginx hash doğrula; en fazla üç dalgada normal draft ayar/preview ve iki ayrı domain için eşzamanlı stage/activate job POST'ları. Her POST tek gönderim, 202 ve farklı gerçek job ID zorunlu; tüm own jobs terminal succeeded, gerçek config/HTTP header etkisi, API yeniden başlatmadan ilerleme ve ters sırada normal metadata/fiziksel cleanup doğrulanır. Gözlenen örtüşme ve statuslar kaydedilir; yerel deterministik reconciliation kabulüyle native zamanlama kanıtı karıştırılmaz. Yeni test yardımcı/shared motor yazmaz ve ürün kaynağı bu test diliminde değişmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 

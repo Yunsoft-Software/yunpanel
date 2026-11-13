@@ -181,6 +181,10 @@ Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HT
 
 Mevcut native16 initialize:true senaryosu yalnız tek POST sonrasını okur. Bu dilim aynı senaryoya sınırlı iki gerçek GET/list poller ekler; POST bir kez gönderilir. Geçerli gözlem, POST tamamlanmadan gerçek başarılı listelerin dönmesidir. Kendi satırı init sırasında uninitialized görülmediyse yarışın nedenselliği açık kalır. Başarı iddiası için POST201 ready, ayrı GET ready, gerçek Restic check200 ve snapshots[] gerekir. Normal metadata DELETE/404 ve exact fiziksel cleanup-required kaydı tutulur; özel kanıt olmadan depo yolu silinmez. Yerel ENOENT/disk-lock testleri gerçek Restic initialization yerine geçmez.
 
+## 13 Kasım 2026 — T899 native eşzamanlı işler
+
+Yeni native26 iki fresh sahipli statik site üzerinde en fazla üç gerçek stage/activate dalgasını eşzamanlı kuyruğa verir. Öncesinde sırayla normal kurulum, gerçek nonce HTTP ve aktif config SHA; sonrasında her tek POST için202/ayrı durable job ID ve terminal succeeded, gerçek config/header etkisi ve normal ters cleanup/Unix/FPM/socket/mount/kök yokluğu doğrulanır. 503, kayıp job veya retry başarı sayılmaz. Gerçek enqueue zamanları kaydedilir; doğal örtüşme, yerel deterministik completion/ack penceresi kanıtının yerine geçirilmez. Kaynak motoru veya shared fixture değiştirilmez.
+
 
 ## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
 

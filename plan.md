@@ -114,3 +114,5 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 - T905: ikinci taze WordPress girişinde POST yanıtı gözlenmedi. Ürün düzeltmesinden önce gerçek request/form/timeout gözlemi eklenip tekrar üretilecek; credential veya ham ağ içeriği kaydedilmez, süre/assertion/tek POST kuralı korunur. İlk başarılı koşu ve çalışmayan serial kuyruk başarı diye yazılmaz.
 
 - T893: mevcut native initialize:true testinde tek POST ile eşzamanlı gerçek list okumaları ve fiziksel Restic check/snapshots kanıtı eklenecek. GET/POST gerçek örtüşmesi ayrıca kaydedilir; sahte CLI kullanılmaz ve boş init reposu temizliği yalnız doğrulanmış own allowlist ile yapılır.
+
+- T899: yerel gerçek HTTP reconciliation regresyonuna ek olarak iki sahipli sitede sınırlı eşzamanlı native stage/activate job, kalıcı sonuç ve gerçek HTTP/config etkisi doğrulanacak; 503 veya belirsiz POST tekrar edilmez.
