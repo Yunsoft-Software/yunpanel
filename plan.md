@@ -112,3 +112,5 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 - T892 tarihsel iki Nginx artığı: özgün provisioning ve terminal removal kanıtına dayanan compensation-only retired yolu, mevcut Nginx receipt/drift/configtest/reload/rollback motoruyla tamamlanacak. Domain yeniden oluşturulmaz; current name/alias ataması merkezi namespace reservation altında Nginx compensation öncesi yeniden denetlenir. Native25 gerçek yeniden-atama reddi ve iki eski exact dosyanın özgün API journal telafisi yeni pakette geçene kadar tarihsel kapı açık.
 
 - T905: ikinci taze WordPress girişinde POST yanıtı gözlenmedi. Ürün düzeltmesinden önce gerçek request/form/timeout gözlemi eklenip tekrar üretilecek; credential veya ham ağ içeriği kaydedilmez, süre/assertion/tek POST kuralı korunur. İlk başarılı koşu ve çalışmayan serial kuyruk başarı diye yazılmaz.
+
+- T893: mevcut native initialize:true testinde tek POST ile eşzamanlı gerçek list okumaları ve fiziksel Restic check/snapshots kanıtı eklenecek. GET/POST gerçek örtüşmesi ayrıca kaydedilir; sahte CLI kullanılmaz ve boş init reposu temizliği yalnız doğrulanmış own allowlist ile yapılır.

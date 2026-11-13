@@ -1086,12 +1086,15 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T893 · Depo oluşturma initialize true sonrası 201 uninitialized dönebiliyor
-- **Bağımlı:** —
-- **Dosyalar:** `apps/api/src/restic-repository-registry.js`, `apps/api/src/backup-repository-http.js`, `apps/api/test/restic-repository-registry.test.js`, `apps/api/test/backup-repository-http.test.js`
+- **Bağımlı:** T887
+- **Dosyalar:** `apps/api/src/restic-repository-registry.js`, `apps/api/src/backup-repository-http.js`, `apps/api/test/restic-repository-registry.test.js`, `apps/api/test/backup-repository-http.test.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`
+- **Kilit:** hosting-settings-audit
 - **Kaynak:** QA · 2026-11-12 17:21
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     T887 native16 ilk Chrome koşusu: POST /api/panel/backups/repositories initialize:true ->201 fakat repository.status=uninitialized; synchronous initialize varsayılanı backup-repository-http:72init/get/201 ready sözleşmesine uymuyor. Hazır-depo assertionı doğru nedenle kırıldı; DNS/hosting restore bu ilkkoşuda henüzçalışmadı. Ayrı init regression korunarak normal initialize:false + /init + gerçek /check + GET ready hazırlığıyla restore diğerkanallar ayrıca sınanıyor. Kaynak çıkarımı: listRepositories.reloadFromDisk stateyi değiştirirken initResticRepository await manager.init öncesi record referansı tutuyor; statusready detachedrecord üzerinde kalabilir. Kök neden gerçek eşzamanlı okuma/initialization tekrarında kanıtlanmalı; şimdilik çıkarım. Ürün/deploydeğişikliği yok, test gevşetilmez. Özel16 koşusu T887 raporunda kesin adreslenecek.
+
+    Native ön dilim mevcut initialize:true testini genişletir: tek normal POST sırasında sınırlı iki gerçek GET/list poller; en az bir başarılı liste POST bitmeden dönmeli. Gerçek init penceresinde kendi uninitialized satırı görülemezse nedensellik açık kalır. Sonra 201 ready, kalıcı GET ready, gerçek Restic /check ve boş snapshots doğrulanır. Belirsiz POST yeniden gönderilmez; yalnız kanıtlı own repository normal metadata DELETE +404, fiziksel cleanup-required kaydıyla bırakılır. Fiziksel repo silme ayrı exact allowlist ve root incelemesi gerektirir. Sahte binary/manager/HTTP veya zaman aşımı gevşetme yok.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 

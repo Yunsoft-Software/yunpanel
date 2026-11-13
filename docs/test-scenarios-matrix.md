@@ -177,6 +177,10 @@ Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HT
 | WP-LOGIN-TIMEOUT | Aynı timeout ve assertion korunur; hata anında gerçek URL path, admin bar/login error varlığı ve güvenli sınıf bayrakları kaydedilir. Otomatik POST tekrarı, selector/timeout gevşetme yok. |
 | WP-LOGIN-NATIVE | İncelenmiş yardımcıyla yeni sahipli fixture üzerinde tekrar; ardından normal kaldırma ve fiziksel yokluk. Yeşil tekrar nedensellik kanıtının yerine geçmez. |
 
+## 13 Kasım 2026 — T893 gerçek initialize/list yarışı
+
+Mevcut native16 initialize:true senaryosu yalnız tek POST sonrasını okur. Bu dilim aynı senaryoya sınırlı iki gerçek GET/list poller ekler; POST bir kez gönderilir. Geçerli gözlem, POST tamamlanmadan gerçek başarılı listelerin dönmesidir. Kendi satırı init sırasında uninitialized görülmediyse yarışın nedenselliği açık kalır. Başarı iddiası için POST201 ready, ayrı GET ready, gerçek Restic check200 ve snapshots[] gerekir. Normal metadata DELETE/404 ve exact fiziksel cleanup-required kaydı tutulur; özel kanıt olmadan depo yolu silinmez. Yerel ENOENT/disk-lock testleri gerçek Restic initialization yerine geçmez.
+
 
 ## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
 
