@@ -1074,7 +1074,7 @@
 
 ### T892 · Başarısız PHP ayar hazırlamasından sonra site silme aktif Nginx dosyasını bırakıyor
 - **Bağımlı:** T803, T826
-- **Dosyalar:** `apps/api/src/domain-removal-plan.js`, `apps/api/src/domain-removal-runtime.js`
+- **Dosyalar:** `apps/api/src/domain-registry-base.js`, `apps/api/src/domain-removal-plan.js`, `apps/api/src/domain-removal-runtime.js`, `apps/api/src/domain-removal-production-runtime.js`, `apps/api/test/domain-registry.test.js`, `apps/api/test/domain-removal-plan.test.js`, `apps/api/test/domain-removal-runtime.test.js`, `apps/api/test/domain-removal-production-runtime.test.js`
 - **Kilit:** domain-removal
 - **Kaynak:** QA · 2026-11-12 17:14
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
@@ -1095,7 +1095,7 @@
 
 ### T894 · Site kurulum arayüzü worker kilit çakışması sonrası gerçek hazır durumu göstermiyor
 - **Bağımlı:** T864
-- **Dosyalar:** `apps/web/src/workspace/provisioning-client.js`, `apps/web/src/workspace/provisioning-advance.js`, `apps/web/test/provisioning-advance.test.js`, `apps/api/test/website-provisioning-ui-lock-reconciliation.test.js`
+- **Dosyalar:** `apps/web/src/workspace/provisioning-client.js`, `apps/web/src/workspace/provisioning-advance.js`, `apps/web/test/provisioning-advance.test.js`, `apps/web/test/provisioning-client.test.js`, `apps/api/test/website-provisioning-ui-lock-reconciliation.test.js`
 - **Kaynak:** QA · 2026-11-12 17:21
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
