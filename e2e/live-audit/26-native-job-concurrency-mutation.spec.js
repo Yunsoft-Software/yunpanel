@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import https from 'node:https';
+import { checkServerIdentity } from 'node:tls';
 import dns from 'node:dns/promises';
 import { createHash } from 'node:crypto';
 import { test, expect, apiContext, manifest, privateJson, RUN_DIR } from './support.js';
@@ -40,23 +42,68 @@ async function inventory() {
   expect(Array.isArray(rows)).toBe(true); return rows;
 }
 
-async function baselineHttp() {
-  assert.match(baseline.hostname, /^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$/);
-  const addresses = await dns.lookup(baseline.hostname, { all: true });
+async function baselineRequest({ hostname, scheme }) {
+  assert.match(hostname, /^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$/);
+  assert.ok(['http', 'https'].includes(scheme));
+  const addresses = await dns.lookup(hostname, { all: true });
   assert.ok(addresses.length && addresses.every(row => row.address === TARGET));
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: TARGET, port: 80, path: '/', headers: { Host: baseline.hostname, Connection: 'close' }, timeout: 15000 }, response => {
+    const transport = scheme === 'https' ? https : http;
+    const req = transport.get({ hostname: TARGET, port: scheme === 'https' ? 443 : 80, path: '/', agent: false,
+      headers: { Host: hostname, Connection: 'close' }, timeout: 15000,
+      ...(scheme === 'https' ? { servername: hostname, rejectUnauthorized: true,
+        checkServerIdentity: (servername, certificate) => servername === hostname
+          ? checkServerIdentity(hostname, certificate) : new Error('Baseline sibling TLS server name changed'),
+      } : {}),
+    }, response => {
+      const tlsVerified = scheme === 'https' ? response.socket?.authorized === true : null;
+      if (scheme === 'https' && tlsVerified !== true) { req.destroy(new Error('Baseline sibling TLS peer was not authenticated')); return; }
       let bytes = 0;
       response.on('data', chunk => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) req.destroy(new Error('Baseline sibling response exceeds the bounded read')); });
-      response.on('end', () => resolve({ status: response.statusCode })); response.on('error', reject);
+      const locations = [];
+      for (let index = 0; index < response.rawHeaders.length; index += 2) {
+        if (response.rawHeaders[index].toLowerCase() === 'location') locations.push(response.rawHeaders[index + 1]);
+      }
+      response.on('end', () => resolve({ status: response.statusCode, locations, tlsVerified }));
+      response.on('error', () => reject(new Error('Baseline sibling bounded response failed')));
     });
-    req.on('timeout', () => req.destroy(new Error('Baseline sibling first HTTP response timed out'))); req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('Baseline sibling first canonical response timed out')));
+    req.on('error', error => {
+      const code = /^[A-Z0-9_]{1,80}$/.test(error.code ?? '') ? error.code : 'REQUEST_FAILED';
+      reject(new Error('Baseline sibling canonical request failed: ' + code));
+    });
   });
 }
 
+async function baselineEndpoint(hostname) {
+  const preflight = await baselineRequest({ hostname, scheme: 'http' });
+  let scheme = 'http', validatedLocation = null;
+  if (preflight.status !== 200) {
+    assert.ok([301, 308].includes(preflight.status), 'Baseline preflight must be HTTP200 or a permanent canonical HTTPS redirect');
+    assert.equal(preflight.locations.length, 1, 'Baseline canonical redirect must have exactly one Location');
+    const location = preflight.locations[0];
+    assert.ok(typeof location === 'string' && location.length <= 2048 && !/[\u0000-\u0020\u007f@?#]/.test(location),
+      'Baseline redirect must contain no credentials, query, fragment or whitespace');
+    let canonical; try { canonical = new URL(location); } catch { throw new Error('Baseline canonical redirect must be an absolute HTTPS URL'); }
+    assert.ok(canonical.protocol === 'https:' && canonical.hostname === hostname && canonical.port === ''
+      && canonical.username === '' && canonical.password === '' && canonical.pathname === '/'
+      && canonical.search === '' && canonical.hash === '' && canonical.origin === 'https://' + hostname,
+    'Baseline canonical redirect must stay on the exact hostname, HTTPS443 and root path');
+    scheme = 'https'; validatedLocation = location;
+  }
+  proof.baselinePreflight = { status: preflight.status, requestScheme: 'http', requestPort: 80,
+    redirectVerified: scheme === 'https', redirectLocation: validatedLocation, canonicalUrl: scheme + '://' + hostname + '/',
+    canonicalPort: scheme === 'https' ? 443 : 80, requiredCanonicalStatus: 200 };
+  privateJson('t899-original-sibling-preflight.json', proof.baselinePreflight);
+  return { hostname, scheme };
+}
+
+const baselineHttp = () => baselineRequest(baseline.endpoint);
+
 async function preserveBaseline(phase, firstReply = null) {
   const first = firstReply ?? await baselineHttp();
-  proof.baselineReads ??= []; proof.baselineReads.push({ phase, firstHttpStatus: first.status });
+  proof.baselineReads ??= []; proof.baselineReads.push({ phase, scheme: baseline.endpoint.scheme, firstHttpStatus: first.status, tlsVerified: first.tlsVerified });
+  if (baseline.endpoint.scheme === 'https') expect(first.tlsVerified, 'Canonical sibling TLS chain and hostname must remain verified').toBe(true);
   expect(first.status, 'Original healthy PHP sibling first response after ' + phase).toBe(200);
   const rows = await inventory();
   expect(baseline.websiteIds.every(id => rows.some(row => row.id === id)), 'All original Website identities must survive').toBe(true);
@@ -236,6 +283,7 @@ test.beforeAll(async () => {
   expect(php.applicationId).toMatch(UUID); expect(run.existingPhpDomainId).toMatch(UUID);
   baseline = { websiteIds: rows.map(row => row.id), hostname: run.existingPhpDomain, phpWebsiteId: php.id,
     phpApplicationId: php.applicationId, phpDomainId: run.existingPhpDomainId };
+  baseline.endpoint = await baselineEndpoint(baseline.hostname);
   await preserveBaseline('before-owned-sites');
 });
 test.afterAll(async () => {
