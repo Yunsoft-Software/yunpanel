@@ -185,6 +185,10 @@ Mevcut native16 initialize:true senaryosu yalnız tek POST sonrasını okur. Bu 
 
 Yeni native26 iki fresh sahipli statik site üzerinde en fazla üç gerçek stage/activate dalgasını eşzamanlı kuyruğa verir. Öncesinde sırayla normal kurulum, gerçek nonce HTTP ve aktif config SHA; sonrasında her tek POST için202/ayrı durable job ID ve terminal succeeded, gerçek config/header etkisi ve normal ters cleanup/Unix/FPM/socket/mount/kök yokluğu doğrulanır. 503, kayıp job veya retry başarı sayılmaz. Gerçek enqueue zamanları kaydedilir; doğal örtüşme, yerel deterministik completion/ack penceresi kanıtının yerine geçirilmez. Kaynak motoru veya shared fixture değiştirilmez.
 
+## 13 Kasım 2026 — T894 gerçek UI ve eşzamanlı devam
+
+Native28 en fazla üç fresh sahipli UI denemesi ile tek create/same-operation kuralını korur. İkinci gerçek istemci, kendi operation kimliği ve mevcut durumuna bakarak en fazla iki normal continue çağrısı yapar; yalnız gerçek UI isteği gerekirse pass-through gönderim bariyerinde kısa tutulur. Yanıt veya body/header içeriği değiştirilmez; route.fulfill/abort, fake409, root lock/journal yazma veya backend gecikme motoru yoktur. Kabul için UI’nin kendi gerçek409+belgeli code’u, o ana ait aynı operation GET ve daha sonra gerçek backend ready/allrequired succeeded ile operation’a ait site/DOM hazır hali birlikte gerekir. UI409 oluşmazsa causal kabul açık/fail; normal UI yeşili bu kanıt değildir. Kimliksiz/uncertain POST yeniden gönderilmez. Gerçek dosya/HTTP/Unix/root ve ters normal cleanup ayrıca doğrulanır; desteklenmeyen rol/tarayıcı kanalları kapsanmış sayılmaz.
+
 
 ## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
 

@@ -116,3 +116,5 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 - T893: mevcut native initialize:true testinde tek POST ile eşzamanlı gerçek list okumaları ve fiziksel Restic check/snapshots kanıtı eklenecek. GET/POST gerçek örtüşmesi ayrıca kaydedilir; sahte CLI kullanılmaz ve boş init reposu temizliği yalnız doğrulanmış own allowlist ile yapılır.
 
 - T899: yerel gerçek HTTP reconciliation regresyonuna ek olarak iki sahipli sitede sınırlı eşzamanlı native stage/activate job, kalıcı sonuç ve gerçek HTTP/config etkisi doğrulanacak; 503 veya belirsiz POST tekrar edilmez.
+
+- T894: normal arayüz kurulumuna ek olarak gerçek UI continue409, aynı durable operation’ın hata anı GET’i ve son DOM/backend ready eşleşmesi native28’de sınanacak. İkinci gerçek istemci ve yalnız pass-through gönderim bariyeri kullanılabilir; sentetik yanıt/lock/state yok. Ürün kodu ancak gerçek yeni tekrar üretime göre değişir; tarihi UI hatası sıradan happy path ile kapatılmaz.
