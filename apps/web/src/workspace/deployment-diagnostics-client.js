@@ -106,7 +106,7 @@ export const FRONTEND_DIRTY = resolvedFrontendIdentity.dirty;
 export const FRONTEND_BUILD_VERIFIED = resolvedFrontendIdentity.buildVerified;
 
 export async function fetchDeploymentDiagnostics({
-  endpoint = '/api/system/diagnostics/version',
+  endpoint = '/api/panel/system/diagnostics/version',
   includeFrontendComparison = true,
   frontendIdentity = null,
   headers = {},
@@ -141,7 +141,7 @@ export async function fetchDeploymentDiagnostics({
 }
 
 export async function compareDeploymentWithServer(frontendInfo, {
-  endpoint = '/api/system/diagnostics/version/compare',
+  endpoint = '/api/panel/system/diagnostics/version/compare',
   csrfToken = null,
   headers = {},
   fetchFn = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : globalThis.fetch,

@@ -5,12 +5,13 @@ import assert from 'node:assert/strict';
 import http from 'node:http';
 import { once } from 'node:events';
 import { execFileSync } from 'node:child_process';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import { createPanelServer } from '../server.js';
 import { createAuthStore } from '../../api/src/auth-store.js';
 import { createAuthenticatedApi } from '../../api/src/auth-http.js';
 import {
@@ -38,32 +39,53 @@ const { default: SystemSettingsPanels } = await import('../src/workspace/SystemS
 const emitBuildInfoScriptPath = fileURLToPath(new URL('../../../scripts/emit-build-info.mjs', import.meta.url));
 const PUBLIC_ORIGIN = 'https://panel.example.test';
 
-async function startRealAuthenticatedDiagnosticsServer(t, deploymentDiagnosticsOptions) {
+async function startRealAuthenticatedDiagnosticsServer(t, deploymentDiagnosticsOptions, { gateway = false } = {}) {
   const authDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-auth-'));
   const store = createAuthStore({
     filePath: path.join(authDir, 'auth.sqlite'),
     masterKey: 'a'.repeat(64),
   });
+  const servers = [];
   t.after(async () => {
+    for (const server of [...servers].reverse()) {
+      await new Promise((resolve) => {
+        server.close(resolve);
+        server.closeAllConnections();
+      });
+    }
     store.close();
     await rm(authDir, { recursive: true, force: true });
   });
+  const proxyToken = 'g'.repeat(43);
 
   const listener = createAuthenticatedApi({
     store,
     publicOrigin: PUBLIC_ORIGIN,
     ownerMfaRequired: false,
+    ...(gateway ? { proxyToken, trustedProxyIps: '127.0.0.1' } : {}),
     createHandler: () => createCoreApp({ deploymentDiagnosticsOptions }),
   });
 
   const server = http.createServer(listener).listen(0, '127.0.0.1');
+  servers.push(server);
   await once(server, 'listening');
-  t.after(() => new Promise((resolve) => {
-    server.close(resolve);
-    server.closeAllConnections();
-  }));
-
-  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  let baseUrl = `http://127.0.0.1:${server.address().port}`;
+  if (gateway) {
+    const webRoot = path.join(authDir, 'web');
+    await mkdir(webRoot);
+    await writeFile(path.join(webRoot, 'index.html'), '<!doctype html><title>Diagnostics transport</title>');
+    const panel = createPanelServer({
+      apiHost: '127.0.0.1',
+      apiPort: server.address().port,
+      allowedClientIps: '127.0.0.1',
+      publicOrigin: PUBLIC_ORIGIN,
+      proxyToken,
+      webRoot,
+    }).listen(0, '127.0.0.1');
+    servers.push(panel);
+    await once(panel, 'listening');
+    baseUrl = `http://127.0.0.1:${panel.address().port}`;
+  }
   const { token: setupToken } = store.issueSetupToken();
 
   const setupRes = await fetch(`${baseUrl}/api/auth/setup`, {
@@ -392,6 +414,89 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer work through re
   });
   assert.equal(comparedStale.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
   assert.equal(comparedStale.comparison.staleCache, true);
+});
+
+test('default diagnostics client routes cross the real public panel gateway with SQLite auth and CSRF', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-default-diagnostics-gateway-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const repo = path.join(root, 'repo');
+  execFileSync('git', ['init', repo], { stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'gateway@yunpanel.local'], { cwd: repo, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.name', 'YunPanel Gateway'], { cwd: repo, stdio: 'pipe' });
+  const manifests = [];
+  const manifestPaths = [];
+  for (const revision of ['A', 'B']) {
+    await writeFile(path.join(repo, 'source.js'), `export default '${revision}';\n`);
+    execFileSync('git', ['add', 'source.js'], { cwd: repo, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', `actual revision ${revision}`], { cwd: repo, stdio: 'pipe' });
+    const manifestPath = path.join(root, `build-${revision}.json`);
+    execFileSync(process.execPath, [emitBuildInfoScriptPath, '--repo', repo, '--require-clean', '--output', manifestPath], {
+      env: {
+        PATH: process.env.PATH,
+        YUNPANEL_BUILD_ID: 'public-gateway-reused-build',
+        YUNPANEL_ASSET_ID: 'public-gateway-reused-assets',
+        YUNPANEL_BUILD_TIME: '2026-11-13T00:00:00.000Z',
+      },
+      stdio: 'pipe',
+    });
+    manifests.push(JSON.parse(await readFile(manifestPath, 'utf8')));
+    manifestPaths.push(manifestPath);
+  }
+  assert.notEqual(manifests[0].commit, manifests[1].commit);
+  assert.equal(manifests[0].buildId, manifests[1].buildId);
+  assert.equal(manifests[0].assetId, manifests[1].assetId);
+  assert.equal(manifests[0].buildTime, manifests[1].buildTime);
+
+  const { baseUrl, cookieHeader, csrfToken } = await startRealAuthenticatedDiagnosticsServer(t, {
+    manifestPath: manifestPaths[1],
+    env: { YUNPANEL_SOURCE_COMMIT: manifests[1].commit },
+  }, { gateway: true });
+
+  // Node has no browser origin. Resolve only the client's default origin to
+  // this gateway; retain the exact path/query/options and use real fetch.
+  const gatewayFetch = (input, options) => {
+    const url = new URL(input, 'http://localhost');
+    assert.equal(url.origin, 'http://localhost');
+    return fetch(new URL(`${url.pathname}${url.search}`, baseUrl), options);
+  };
+  const authHeaders = { cookie: cookieHeader, origin: PUBLIC_ORIGIN };
+
+  // Bare internal API paths stay unpublished. No gateway allowlist changes.
+  for (const suffix of ['', '/compare']) {
+    const response = await fetch(`${baseUrl}/api/system/diagnostics/version${suffix}`, {
+      method: suffix ? 'POST' : 'GET',
+      headers: { ...authHeaders, 'x-csrf-token': csrfToken },
+    });
+    assert.equal(response.status, 404);
+    await response.text();
+  }
+  await assert.rejects(fetchDeploymentDiagnostics({ fetchFn: gatewayFetch }), /status 401/);
+  await assert.rejects(compareDeploymentWithServer(manifests[1], {
+    fetchFn: gatewayFetch, headers: authHeaders,
+  }), /status 403/);
+
+  const cases = [
+    { identity: manifests[1], status: DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED, compatible: true },
+    { identity: undefined, status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN, compatible: false },
+    { identity: manifests[0], status: DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE, compatible: false },
+  ];
+  for (const { identity, status, compatible } of cases) {
+    const got = await fetchDeploymentDiagnostics({
+      fetchFn: gatewayFetch, headers: authHeaders, frontendIdentity: identity,
+    });
+    const compared = await compareDeploymentWithServer(identity, {
+      fetchFn: gatewayFetch, headers: authHeaders, csrfToken,
+    });
+    for (const result of [got, compared]) {
+      assert.equal(result.commit, manifests[1].commit);
+      assert.equal(result.buildVerified, true);
+      assert.equal(result.comparison.status, status);
+      assert.equal(result.comparison.compatible, compatible);
+      if (status === DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE) {
+        assert.equal(result.comparison.staleCache, true);
+      }
+    }
+  }
 });
 
 test('SystemSettingsPanels renders Doğrulanmadı, Senkronize, and Farklılaşmış states accurately', () => {
