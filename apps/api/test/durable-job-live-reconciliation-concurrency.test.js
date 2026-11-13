@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import http from 'node:http';
@@ -426,12 +426,15 @@ test('stalled live reconciliation past the bounded window fails closed with dura
   let releaseStalledResolve;
   const releaseStalled = new Promise((resolve) => { releaseStalledResolve = resolve; });
   let hookedFirst = false;
+  let reconcileEnteredAt = null;
+  const liveWindowMs = 80;
 
   const harness = await createRealRuntimeHarness(t, {
-    liveReconciliationWindowMs: 80,
+    liveReconciliationWindowMs: liveWindowMs,
     onBeforeReconcile: async () => {
       if (hookedFirst) return;
       hookedFirst = true;
+      reconcileEnteredAt = performance.now();
       enteredReconcileResolve();
       await releaseStalled;
     },
@@ -440,19 +443,60 @@ test('stalled live reconciliation past the bounded window fails closed with dura
 
   const domainAlpha = await harness.createStaticDomainOverHttp('stall-alpha');
   const domainBeta = await harness.createStaticDomainOverHttp('stall-beta');
+  const betaBefore = await harness.domainRegistry.getDomain(domainBeta.id);
+  let firstJobId;
   try {
     const first = await harness.stageDomainOverHttp(domainAlpha.id);
     assert.equal(first.status, 202);
+    firstJobId = first.body.data.id;
     await enteredReconcile;
 
-    const stalledEnqueuePromise = harness.stageDomainOverHttp(domainBeta.id);
-    await harness.waitForDeferredLiveWaiters(1);
+    // The live timer was registered before the real executor reached this hook.
+    // Wait for that unchanged real 80ms window to expire, rather than requiring
+    // an HTTP request to win an 80ms disk/scheduler race under suite load.
+    const expiredBy = reconcileEnteredAt + liveWindowMs;
+    while (performance.now() < expiredBy) {
+      await new Promise(resolve => setTimeout(resolve, Math.ceil(expiredBy - performance.now())));
+    }
+    assert.equal(performance.now() - reconcileEnteredAt >= liveWindowMs, true);
+    const expectedRecovery = [{ jobId: firstJobId, serverId: harness.localServer.id }];
+    assert.deepEqual(harness.durableJobRegistry.recovery(), {
+      code: 'durable_job_reconciliation_required', jobs: expectedRecovery,
+    });
+    assert.deepEqual(JSON.parse(await readFile(harness.recoveryFilePath, 'utf8')).jobs, expectedRecovery);
 
-    const stalledResponse = await stalledEnqueuePromise;
+    const stalledResponse = await harness.stageDomainOverHttp(domainBeta.id);
     assert.equal(stalledResponse.status, 503);
     assert.equal(stalledResponse.body?.error?.code, 'durable_job_reconciliation_required');
+    assert.deepEqual(harness.durableJobRegistry.recovery(), {
+      code: 'durable_job_reconciliation_required', jobs: expectedRecovery,
+    });
+    assert.deepEqual(JSON.parse(await readFile(harness.recoveryFilePath, 'utf8')).jobs, expectedRecovery);
+    assert.deepEqual((await harness.jobRegistry.listJobs()).map(job => job.id), [firstJobId]);
+    const persistedJobs = JSON.parse(await readFile(harness.jobFilePath, 'utf8')).jobs;
+    assert.deepEqual(persistedJobs.map(job => [job.id, job.serverId, job.resourceId]), [[firstJobId, harness.localServer.id, domainAlpha.id]]);
+    assert.deepEqual(await harness.jobRegistry.listJobs({ resourceType: 'domain', resourceId: domainBeta.id }), []);
+    assert.equal((await harness.domainRegistry.getDomain(domainBeta.id)).stagedRevision, betaBefore.stagedRevision);
+    t.diagnostic(JSON.stringify({ phase: 'actual-expired-window', httpStatus: stalledResponse.status,
+      errorCode: stalledResponse.body.error.code, deferredWaiters: harness.deferredLiveWaitCount(),
+      exactRecoveryIdentityPreserved: true, betaEnqueueAbsent: true }));
+    assert.equal(harness.deferredLiveWaitCount(), 0, 'An expired live window must fail closed without registering another live waiter');
   } finally {
     releaseStalledResolve();
     await waitForRecoveryCleared(harness.durableJobRegistry);
   }
+  assert.equal(harness.durableJobRegistry.recovery(), null);
+  assert.deepEqual(JSON.parse(await readFile(harness.recoveryFilePath, 'utf8')).jobs, []);
+  assert.equal(harness.faults.length, 0);
+  const firstJob = await harness.jobRegistry.getJob(firstJobId);
+  assert.equal(firstJob.status, 'succeeded'); assert.equal(firstJob.resourceId, domainAlpha.id);
+  assert.equal(firstJob.serverId, harness.localServer.id); assert.equal(firstJob.operation, OPERATIONS.DOMAIN_STAGE);
+  const alpha = await harness.domainRegistry.getDomain(domainAlpha.id);
+  assert.equal(alpha.stagedRevision, domainAlpha.desiredRevision);
+  const stagedFile = path.join(harness.stagingDir, `yunpanel-${domainAlpha.primaryDomain}.conf`);
+  assert.equal((await stat(stagedFile)).isFile(), true);
+  const checksum = createHash('sha256').update(await readFile(stagedFile)).digest('hex');
+  assert.equal(alpha.stagedChecksum, checksum); assert.equal(firstJob.result.checksum, checksum);
+  assert.equal((await harness.domainRegistry.getDomain(domainBeta.id)).stagedRevision, betaBefore.stagedRevision);
+  await assert.rejects(stat(path.join(harness.stagingDir, `yunpanel-${domainBeta.primaryDomain}.conf`)), { code: 'ENOENT' });
 });
