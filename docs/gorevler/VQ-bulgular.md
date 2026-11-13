@@ -1451,7 +1451,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T909 · Doğrulama: test — stalled live reconciliation past the bounded window fails closed with durable_job_
-- **Bağımlı:** T899
+- **Bağımlı:** T899, T904
 - **Dosyalar:** `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`
 - **Kaynak:** QA · 2026-11-13 18:25
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
