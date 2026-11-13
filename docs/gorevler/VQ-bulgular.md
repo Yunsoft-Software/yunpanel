@@ -1134,7 +1134,7 @@
 
 ### T897 · Statik site silme tamamlandıktan sonra çalışan PHP WordPress kardeş site 502 verdi
 - **Bağımlı:** T861, T891
-- **Dosyalar:** `packages/host-runtime/src/elfinder-fpm-site-manager.js`, `packages/host-runtime/test/elfinder-fpm-site-manager.test.js`, `e2e/live-audit/27-native-fpm-retirement-mutation.spec.js`
+- **Dosyalar:** `packages/host-runtime/src/elfinder-fpm-site-manager.js`, `packages/host-runtime/test/elfinder-fpm-site-manager.test.js`, `e2e/live-audit/27-native-fpm-retirement-mutation.spec.js`, `apps/api/src/website-elfinder-provisioning-handler.js`, `apps/api/test/website-elfinder-provisioning-handler.test.js`
 - **Kaynak:** QA · 2026-11-12 17:37
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1142,6 +1142,7 @@
 
 
     13 Kasım 2026 İNSAN onayı: T889 tarihsel nedensellik kapısı AÇIK kalır; bu görev T861/T891 kaynak önkoşullarıyla bağımsız gerçek elFinder FPM retirement kusurunu düzeltir. Onaylanan .local/antigravity-review-20261113/t889-gate-decision-proposal.md kapsamıdır. İlk502'nin nedeni aynıymış gibi yazılmaz. Somut kaynak açıklığı: static removal elFinder compensate/retire ve identity cleanup yollarında ortak PHP-FPM'i tekrarlı reload edebiliyor; kendi pool/socket yokluğunu kontrol ederken önceden sağlıklı kardeş listener'ların geri hazır olmasını doğrulamadan terminal başarı dönebiliyor. Mevcut manager/receipt/configtest/hash/drift/retained-pool korumaları korunarak reload tekrarı kaldırılmalı ve önceden sağlıklı aynı-servis listener'ları gerçek bounded readiness ile korunmalı. Yeni FPM motoru, sahte binary/socket/HTTP veya servis bozma yok.
+    Zorunlu mevcut API bağlantısı: inspectRetirement wrapper aynı operationId değerini mevcut FPM manager’a aktarır; checkpoint durum/sağlık kontrolü API inspect kısa yolunda düşürülemez. Bu dar aktarım ve gerçek dosya/manager ile doğrulaması aynı retirement düzeltmesidir; yeni motor veya tarama fallback’i yoktur.
     Önce yeni native27 senaryo matrisi ve gerçek eski davranış kanıtı; sonra dar kaynak dilimi. Aynı normal static removal, en az iki fresh gerçek PHP sibling, her ilk dynamic nonce/nonrootUID/fpm-fcgi/no-store200, mümkünse gerçek journal/typed reload sayısı ve idempotent retirement; bozuk/foreign/retained receipt, drift ve hata/rollback sınırları; aynı PHP sürümü ve exact pool/socket kimliği. Her own kaynak normal API ile temizlenir; canonical Unix/group/FPM/socket/Nginx/mount yokluğu ve orijinal site kimlikleri/ilk canonical TLS200 korunur. Native test yalnız root tarafından izinli .28'de, kaynak fulltest+bağımsız inceleme ve eşleşen paket onayından sonra kabul edilir. Eski failed native kayıtlar korunur. T898 bundan sonra kalır. T889 veya genel P0 bu görevle kapanmaz.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
