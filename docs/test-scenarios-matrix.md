@@ -165,3 +165,18 @@ Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak dü
 | T889-CAUSAL | Aynı gerçek activation inspect'inde ilk satisfied:false + allowlist reason → son satisfied:true | En az bir gerçek geçiş gözlenirse eski tek-inspect hata yolunun sınıfı tekrar üretilmiş olur. Yalnız listener:false→true yeterli değildir. Tüm attempts1/ilktrue ise mekanizma AÇIK; atlanan veya sahte PASS yok |
 
 Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. T898'in geçerli T897/T889 bağımlılıkları korunur.
+
+
+## 13 Kasım 2026 — T892 özgün journal ile emekli site telafisi
+
+Native23iki taze koşuda4/4 geçti. Önceden kalmış iki dosya ise duruyor. Güncel salt okunur sunucu projection'ı, her dosyanın SHA'sını özgün provisioning Nginx evidence ve rollback makbuzuyla eşleştirdi; her iki özgün activation'dan önce aktif dosya yoktu. Eski kayıtlarda hash görünmemesi sahiplik uydurularak giderilmedi. Aynı hostname ile yeni site kurarak eski dosyayı üzerine yazma ve elle config silme uygulanmayacak.
+
+| Senaryo | Gerçek kaynak/sınır | Zorunlu sonuç |
+|---|---|---|
+| T892-RETIRED-PROOF | Özgün provisioning kaynakları + terminal kendi Website/Domain removal journal'ları; aynıserver/domain/name; mevcut Website/Application/Domain yok; adı/aliası başka kayda atanmamış | Yalnız compensation yolunda retired-satisfied; Domain oluşturma/reset yok. Salt404, eksik/nonterminal/foreign journal, yanlışID/server/name tek başına yetmez |
+| T892-RETIRED-NGINX | Aynı gerçek NginxManager instance'ı; doğrulanmış receipt; prior-active yok, rename yok; özgün checksum hâlen aktif veya zaten doğrulanmış absent | Özgün sıra domain_activation→nginx compensation; mevcut configtest/reload/rollback motoru kullanılır. Yabancı/drift checksum, bozuk/eksik receipt veya prior-active varsa değişiklik yok |
+| T892-NAMESPACE-ATOMIC | Gerçek tek backend'in canonical DomainRegistry create/update/reparent ile aynı merkezi namespace serialization sınırı; immutable snapshot → provider → Nginx işlemi bitene kadar reservation | Eski site UUID kilidi tek başına yeterli sayılmaz; farklı UUID ile yeni primary/alias ataması araya giremez. skipLock namespace sınırını atlayamaz; ham lockfile+eski cache güvenli sayılmaz |
+| T892-REASSIGNMENT | Native25: A normal kur/normal sil; A'nın domain_activation compensation'ı retired; sonra B normal kur ve A adını B alias'ına normal PATCH ile kaydet | Eski A nginx compensation, dosya zaten yokken bile yeniden atama nedeniyle reddedilir; B'nin aktif hash'i ve ilk dinamik HTTP korunur. Alias normal API ile kaldırılınca A idempotent compensation geçer |
+| T892-HISTORICAL | İki exact eski provisioning ID; gerçek current SHA ve receipt ön-durum/kimlik kapıları; Owner mevcut API ve typed confirmation | Yeni eşleşen paket+inceleme sonrası aynı özgün journal'ların desteklenen telafisi iki eski dosyayı kaldırır; yeni kimlik üretilmez, field/journal elle değiştirilmez; tüm yan hedef/kardeşler korunur |
+
+Yeni endpoint/panel/host motoru eklenmez. Namespace sınırı tek mevcut backend/canonical registry kapsamındadır; process/disk lock yapılacaksa tüm yazanlar ve kilit içi reload gerekir, yalnız yeni lockfile eklenmez. Native25 ve tarihsel iki pozitif telafi, kaynak/yerel model kontrolleriyle geçmiş sayılmaz.
