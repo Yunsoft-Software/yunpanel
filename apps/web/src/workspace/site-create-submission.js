@@ -7,7 +7,7 @@ const record = (value) => Boolean(value && typeof value === 'object' && !Array.i
 const validId = (value) => typeof value === 'string' && UUID.test(value);
 const invalid = () => new Error('Site oluşturma sonucu doğrulanamadı.');
 
-export const EMPTY_SITE_SUBMISSION = Object.freeze({ phase: 'idle', created: null, steps: Object.freeze([]), error: null, siteAdmin: null });
+export const EMPTY_SITE_SUBMISSION = Object.freeze({ phase: 'idle', operationId: null, created: null, steps: Object.freeze([]), error: null, siteAdmin: null });
 export function siteSubmissionBusy(state) {
   return ['previewing', 'creating', 'provisioning'].includes(state.phase);
 }
@@ -102,7 +102,7 @@ export function createSiteSubmission({ request, advance, isCurrent = () => true,
       expected = expectedResult(preview, snapshot, customerId);
       sealed = true;
       stage = 'create';
-      publish({ phase: 'creating' });
+      publish({ phase: 'creating', operationId: expected.operationId });
       if (!current()) return state;
       const result = await request(customerId ? '/sites/hosted' : '/sites', {
         method: 'POST', body: { input: snapshot, ...(customerId ? { customerId } : {}), previewDigest: preview.previewDigest, confirmation: preview.confirmation }, signal,
