@@ -220,6 +220,54 @@ function missingPackage(error) {
   return Number.isInteger(error?.code) && error.code === 1;
 }
 
+function retirementDeadline() {
+  const started = performance.now(), end = started + RETIREMENT_TIMEOUT_MS;
+  return { started,
+    left(maximum = 10_000) {
+      const remaining = Math.ceil(end - performance.now());
+      if (remaining <= 0) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_timeout',
+        'FPM retirement could not verify listener readiness within its deadline');
+      return Math.min(maximum, remaining);
+    } };
+}
+
+async function readRetirementJson(target, deadline = retirementDeadline(), kind = 'checkpoint') {
+  const invalidCode = kind === 'receipt' ? 'elfinder_fpm_receipt_invalid' : 'elfinder_fpm_retirement_checkpoint_invalid';
+  const unavailableCode = kind === 'receipt' ? 'elfinder_fpm_receipt_unavailable' : 'elfinder_fpm_retirement_checkpoint_unavailable';
+  let handle, primaryError = null;
+  deadline.left();
+  try { handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK); }
+  catch (error) {
+    if (missingPath(error)) return undefined;
+    throw new ElFinderFpmSiteManagerError(invalidCode,
+      'FPM retirement record could not be safely opened');
+  }
+  try {
+    deadline.left(); const before = await handle.stat({ bigint: true });
+    const same = (other) => ['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeNs', 'ctimeNs']
+      .every(key => before[key] === other[key]);
+    if (!before.isFile() || before.uid !== 0n || before.gid !== 0n || before.nlink !== 1n
+      || modeOf(before) !== 0o600 || before.size > BigInt(MAX_RETIREMENT_BYTES)) throw new Error('metadata');
+    const buffer = Buffer.alloc(MAX_RETIREMENT_BYTES + 1); let bytes = 0;
+    while (bytes < buffer.length) {
+      deadline.left(); const result = await handle.read(buffer, bytes, buffer.length - bytes, null);
+      if (result.bytesRead === 0) break;
+      bytes += result.bytesRead;
+    }
+    if (bytes > MAX_RETIREMENT_BYTES || BigInt(bytes) !== before.size
+      || !same(await handle.stat({ bigint: true })) || !same(await lstat(target, { bigint: true }))) throw new Error('identity');
+    deadline.left();
+    return JSON.parse(buffer.subarray(0, bytes).toString('utf8'));
+  } catch (error) {
+    primaryError = error instanceof ElFinderFpmSiteManagerError ? error
+      : new ElFinderFpmSiteManagerError(invalidCode, 'FPM retirement record is invalid or changed during its bounded read');
+    throw primaryError;
+  } finally {
+    try { await handle.close(); }
+    catch { if (!primaryError) throw new ElFinderFpmSiteManagerError(unavailableCode, 'The FPM retirement record descriptor could not be closed'); }
+  }
+}
+
 export function createElFinderFpmSiteManager({
   receiptRoot = RECEIPT_ROOT,
   identityManager = createWebsiteIdentityPathManager(),
@@ -746,16 +794,6 @@ export function createElFinderFpmSiteManager({
     return Object.freeze({ ...after, receiptState: receipt.state });
   }
 
-  function retirementDeadline() {
-    const started = performance.now(), end = started + RETIREMENT_TIMEOUT_MS;
-    return { started,
-      left(maximum = 10_000) {
-        const remaining = Math.ceil(end - performance.now());
-        if (remaining <= 0) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_timeout',
-          'FPM retirement could not verify listener readiness within its deadline');
-        return Math.min(maximum, remaining);
-      } };
-  }
 
   async function trustedRetirementRoot({ allowMissing = false } = {}) {
     if (typeof receiptRoot !== 'string' || !/^\/[A-Za-z0-9._/-]+$/.test(receiptRoot)
@@ -783,41 +821,23 @@ export function createElFinderFpmSiteManager({
     }
   }
 
-  async function loadRetirementCheckpoint(operationId, spec, deadline) {
+  async function loadRetirementDocument(operationId, spec, deadline, kind) {
     deadline.left(); const exists = await trustedRetirementRoot({ allowMissing: true }); deadline.left();
     if (!exists) return null;
-    const target = path.posix.join(receiptRoot, `${operationId}.retirement.json`);
-    let handle, primaryError = null;
-    try { handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW); }
-    catch (error) {
-      if (missingPath(error)) return null;
-      throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_checkpoint_invalid',
-        'FPM retirement checkpoint could not be safely opened');
-    }
-    try {
-      const before = await handle.stat({ bigint: true });
-      const same = (other) => ['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeNs', 'ctimeNs']
-        .every(key => before[key] === other[key]);
-      if (!before.isFile() || before.uid !== 0n || before.gid !== 0n || before.nlink !== 1n
-        || modeOf(before) !== 0o600 || before.size > BigInt(MAX_RETIREMENT_BYTES)) throw new Error('metadata');
-      const buffer = Buffer.alloc(MAX_RETIREMENT_BYTES + 1); let bytes = 0;
-      while (bytes < buffer.length) {
-        deadline.left(); const result = await handle.read(buffer, bytes, buffer.length - bytes, null);
-        if (result.bytesRead === 0) break;
-        bytes += result.bytesRead;
-      }
-      if (bytes > MAX_RETIREMENT_BYTES || BigInt(bytes) !== before.size
-        || !same(await handle.stat({ bigint: true })) || !same(await lstat(target, { bigint: true }))) throw new Error('identity');
-      deadline.left();
-      return normalizeRetirementCheckpoint(JSON.parse(buffer.subarray(0, bytes).toString('utf8')), { operationId, spec });
-    } catch (error) {
-      primaryError = error instanceof ElFinderFpmSiteManagerError ? error
-        : new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_checkpoint_invalid', 'FPM retirement checkpoint is invalid or changed during its bounded read');
-      throw primaryError;
-    } finally {
-      try { await handle.close(); }
-      catch { if (!primaryError) throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_checkpoint_unavailable', 'The FPM retirement checkpoint descriptor could not be closed'); }
-    }
+    const target = kind === 'receipt' ? receiptPath(operationId)
+      : path.posix.join(receiptRoot, `${operationId}.retirement.json`);
+    const value = await readRetirementJson(target, deadline, kind);
+    if (value === undefined) return null;
+    return kind === 'receipt' ? normalizeReceipt(value, { operationId, spec })
+      : normalizeRetirementCheckpoint(value, { operationId, spec });
+  }
+
+  async function loadRetirementCheckpoint(operationId, spec, deadline) {
+    return loadRetirementDocument(operationId, spec, deadline, 'checkpoint');
+  }
+
+  async function loadRetirementReceipt(operationId, spec, deadline) {
+    return loadRetirementDocument(operationId, spec, deadline, 'receipt');
   }
 
   async function persistRetirementCheckpoint(operationId, spec, value, deadline) {
@@ -1039,7 +1059,7 @@ export function createElFinderFpmSiteManager({
 
   async function inspectRetirement(rawIntent, { operationId: rawOperationId, deadline = retirementDeadline() } = {}) {
     const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
-    const operationId = normalizeOperationId(rawOperationId), receipt = await loadReceipt(operationId, spec);
+    const operationId = normalizeOperationId(rawOperationId), receipt = await loadRetirementReceipt(operationId, spec, deadline);
     const checkpoint = await loadRetirementCheckpoint(operationId, spec, deadline);
     if ((receipt && (!receipt.mutated || receipt.previousConfig !== null)) || (!receipt && checkpoint)) {
       return Object.freeze({ satisfied: false, reason: 'elfinder_fpm_retirement_ownership_unverified',
@@ -1081,7 +1101,7 @@ export function createElFinderFpmSiteManager({
   async function retire(rawIntent, options = {}) {
     const spec = normalizeIntent(rawIntent, defaultRuntimeOptions);
     const operationId = normalizeOperationId(options.operationId), deadline = retirementDeadline();
-    let receipt = await loadReceipt(operationId, spec), reloaded = false;
+    let receipt = await loadRetirementReceipt(operationId, spec, deadline), reloaded = false;
     if (!receipt || !receipt.mutated || receipt.previousConfig !== null) {
       throw new ElFinderFpmSiteManagerError('elfinder_fpm_retirement_blocked',
         'The operation receipt does not prove exclusive ownership of the file manager pool');
@@ -1171,6 +1191,7 @@ export const elFinderFpmSiteManagerInternals = Object.freeze({
   normalizeOperationId,
   normalizeReceipt,
   normalizeRetirementCheckpoint,
+  readRetirementJson,
   retirementBinding,
   listenerMetadata,
   specDigest,

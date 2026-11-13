@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   elFinderFpmPoolPath,
   elFinderFpmSocketPath,
@@ -270,39 +271,44 @@ function receiptInput(overrides = {}) {
     specDigest: internals.specDigest(spec), configSha256: spec.preview.sha256,
     mutated: true, previousConfig: null, state: 'active', ...overrides };
 }
-async function privateReceipt(t, content) {
+async function privateReceipt(t, content, untrustedAlias = false) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-elfinder-retirement-'));
   t.after(() => rm(root, { recursive: true, force: true }));
   const target = path.join(root, `${operationId}.json`);
   if (content !== undefined) await writeFile(target, content, { mode: 0o600 });
-  return { root, target, manager: createElFinderFpmSiteManager({ receiptRoot: root }) };
+  let receiptRoot = root;
+  if (untrustedAlias) {
+    receiptRoot = `${root}-alias`; await symlink(root, receiptRoot, 'dir');
+    t.after(() => rm(receiptRoot, { force: true }));
+  }
+  return { root, target, receiptRoot, manager: createElFinderFpmSiteManager({ receiptRoot }) };
 }
 
-test('real empty receipt directory cannot start retirement or create a checkpoint', async t => {
-  const fx = await privateReceipt(t);
-  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_blocked' });
+test('real empty untrusted receipt directory cannot start retirement or create a checkpoint', async t => {
+  const fx = await privateReceipt(t, undefined, true);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
   assert.deepEqual(await readdir(fx.root), []);
 });
 
-test('real malformed receipt is preserved and rejected before service access', async t => {
-  const contents = '{'; const fx = await privateReceipt(t, contents);
-  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_receipt_invalid' });
+test('real malformed receipt in an untrusted directory is preserved before service access', async t => {
+  const contents = '{'; const fx = await privateReceipt(t, contents, true);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
   assert.equal(await readFile(fx.target, 'utf8'), contents);
   assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
 });
 
-test('real foreign receipt binding is preserved without a retirement checkpoint', async t => {
+test('real foreign receipt in an untrusted directory is preserved without a checkpoint', async t => {
   const contents = JSON.stringify(receiptInput({ websiteId: applicationId }));
-  const fx = await privateReceipt(t, contents);
-  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_receipt_invalid' });
+  const fx = await privateReceipt(t, contents, true);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
   assert.equal(await readFile(fx.target, 'utf8'), contents);
   assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
 });
 
-test('real retained-pool receipt is never converted into deletion ownership', async t => {
+test('real retained receipt in an untrusted directory is not converted into deletion ownership', async t => {
   const contents = JSON.stringify(receiptInput({ mutated: false, previousConfig: renderElFinderFpmPool(spec.templateInput) }));
-  const fx = await privateReceipt(t, contents);
-  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_blocked' });
+  const fx = await privateReceipt(t, contents, true);
+  await assert.rejects(fx.manager.retire(intent, { operationId }), { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
   assert.equal(await readFile(fx.target, 'utf8'), contents);
   assert.deepEqual(await readdir(fx.root), [`${operationId}.json`]);
 });
@@ -352,5 +358,66 @@ test('reload intent and inactive schema states cannot manufacture terminal readi
   assert.equal(internals.normalizeRetirementCheckpoint(inactive, { operationId, spec }).wasActive, false);
   assert.throws(() => internals.normalizeRetirementCheckpoint({ ...inactive, reloadAttempted: true }, { operationId, spec }),
     { code: 'elfinder_fpm_retirement_checkpoint_invalid' });
+});
+
+test('original receipt schema preserves retained state and rejects foreign bindings', () => {
+  const retained = receiptInput({ mutated: false, previousConfig: renderElFinderFpmPool(spec.templateInput) });
+  assert.equal(internals.normalizeReceipt(retained, { operationId, spec }).mutated, false);
+  assert.equal(internals.normalizeReceipt(retained, { operationId, spec }).previousConfig, retained.previousConfig);
+  for (const value of [null, [], receiptInput({ websiteId: applicationId }), receiptInput({ operationId: websiteId }),
+    receiptInput({ applicationId: websiteId }), receiptInput({ unixUser: 'root' }), receiptInput({ state: 'retired' }),
+    receiptInput({ configSha256: '0'.repeat(64) }), receiptInput({ specDigest: '0'.repeat(64) })]) {
+    assert.throws(() => internals.normalizeReceipt(value, { operationId, spec }), { code: 'elfinder_fpm_receipt_invalid' });
+  }
+});
+
+async function fifoAttempt(target, method, kind, receiptRoot) {
+  const moduleUrl = new URL('../src/elfinder-fpm-site-manager.js', import.meta.url).href;
+  const script = `
+    import { createElFinderFpmSiteManager, elFinderFpmSiteManagerInternals } from ${JSON.stringify(moduleUrl)};
+    const [target, method, kind, root, rawIntent, operationId] = process.argv.slice(1);
+    const manager = method === 'reader' ? null : createElFinderFpmSiteManager({ receiptRoot: root });
+    process.send({ began: true });
+    try {
+      if (method === 'reader') await elFinderFpmSiteManagerInternals.readRetirementJson(target, undefined, kind);
+      else await manager[method](JSON.parse(rawIntent), { operationId });
+      process.send({ resolved: true });
+    } catch (error) { process.send({ errorName: error.name, errorCode: error.code ?? null }); }
+    finally { process.disconnect(); }
+  `;
+  return new Promise(resolve => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script, target, method, kind,
+      receiptRoot, JSON.stringify(intent), operationId], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    const result = { began: false, timedOut: false, observation: null }; let timer;
+    const bound = duration => { clearTimeout(timer); timer = setTimeout(() => { result.timedOut = true; child.kill('SIGKILL'); }, duration); };
+    bound(5000);
+    child.on('message', value => {
+      if (value.began) { result.began = true; bound(1500); }
+      else result.observation = value;
+    });
+    child.on('error', () => { result.spawnFailed = true; });
+    child.on('close', (code, signal) => { clearTimeout(timer); resolve({ ...result, code, signal }); });
+  });
+}
+
+for (const [method, kind, expectedCode] of [
+  ['reader', 'receipt', 'elfinder_fpm_receipt_invalid'],
+  ['reader', 'checkpoint', 'elfinder_fpm_retirement_checkpoint_invalid'],
+  ['retire', 'receipt', 'elfinder_fpm_retirement_checkpoint_invalid'],
+  ['inspectRetirement', 'receipt', 'elfinder_fpm_retirement_checkpoint_invalid'],
+]) test(`real FIFO ${method}/${kind} is rejected without blocking or changing its inode`, async t => {
+  const fx = await privateReceipt(t, undefined, method !== 'reader'), suffix = kind === 'checkpoint' ? '.retirement.json' : '.json';
+  const target = path.join(fx.root, operationId + suffix);
+  execFileSync('/usr/bin/mkfifo', ['-m', '600', target], { stdio: 'ignore' });
+  const before = await lstat(target);
+  assert.equal(before.isFIFO(), true);
+  const result = await fifoAttempt(target, method, kind, fx.receiptRoot);
+  assert.equal(result.began, true); assert.equal(result.timedOut, false, 'A real FIFO open must not wait for a writer');
+  assert.equal(result.code, 0); assert.equal(result.signal, null);
+  assert.deepEqual(result.observation, { errorName: 'ElFinderFpmSiteManagerError', errorCode: expectedCode });
+  const after = await lstat(target);
+  assert.equal(after.isFIFO(), true); assert.equal(after.dev, before.dev); assert.equal(after.ino, before.ino);
+  assert.equal(after.mode, before.mode); assert.equal(after.uid, before.uid); assert.equal(after.gid, before.gid);
+  assert.deepEqual(await readdir(fx.root), [operationId + suffix]);
 });
 
