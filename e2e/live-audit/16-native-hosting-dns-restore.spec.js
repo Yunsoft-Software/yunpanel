@@ -106,17 +106,82 @@ test.describe('T887 real owned DNS and hosting restore', () => {
   test('@mutation repository create with initialization returns a ready catalog and a physically valid repository', async () => {
     test.setTimeout(240000); const f = await site(); let repository, failure;
     const name = 'ypaudit-t887-init-' + f.ledger.nonce;
+    const observations = [], pollerFailures = [];
+    let createStartedAt = null, createFinishedAt = null, pollers = [];
     f.record('backup.repository.intent', { name, initialize: true });
     try {
-      repository = accepted(await f.call('POST', '/api/panel/backups/repositories', { name, backend: 'local', password: randomBytes(36).toString('base64url'), initialize: true }), 201);
+      const baseline = accepted(await f.call('GET', '/api/panel/backups/repositories'));
+      expect(Array.isArray(baseline)).toBe(true);
+      expect(baseline.some(row => row.name === name)).toBe(false);
+      const baselineIds = new Set(baseline.map(row => row.id));
+      createStartedAt = Date.now();
+      // Exactly one mutation. Concurrent catalog reads never replay a lost POST.
+      const creation = f.call('POST', '/api/panel/backups/repositories', {
+        name, backend: 'local', password: randomBytes(36).toString('base64url'), initialize: true,
+      }).finally(() => { createFinishedAt = Date.now(); });
+      const pollUntil = createStartedAt + 15000;
+      pollers = [1, 2].map(async poller => {
+        let lastStartedAt = null, lastPendingAtStart = null;
+        try {
+          for (let attempt = 0; attempt < 100 && createFinishedAt === null && Date.now() < pollUntil; attempt++) {
+            const startedAt = Date.now(), postPendingAtStart = createFinishedAt === null;
+            lastStartedAt = startedAt; lastPendingAtStart = postPendingAtStart;
+            const reply = await f.call('GET', '/api/panel/backups/repositories', undefined, { requestTimeoutMs: 10000, retryGets: false });
+            const finishedAt = Date.now(), postPendingAtEnd = createFinishedAt === null;
+            const rows = Array.isArray(reply.data) ? reply.data : [];
+            const ownRows = rows.filter(row => row.name === name).map(row => ({
+              id: /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i.test(row.id ?? '') ? row.id : null,
+              status: ['uninitialized', 'ready', 'error'].includes(row.status) ? row.status : 'unknown',
+            }));
+            const observation = { poller, attempt, startedAt, finishedAt, postPendingAtStart, postPendingAtEnd,
+              httpStatus: reply.status, ownRows };
+            observations.push(observation); f.record('backup.repository.concurrent-list', observation);
+            accepted(reply); expect(Array.isArray(reply.data)).toBe(true);
+            expect(ownRows.every(row => row.id !== null && !baselineIds.has(row.id))).toBe(true);
+            if (createFinishedAt !== null) break;
+            await new Promise(resolve => setTimeout(resolve, 100));
+          }
+        } catch (error) {
+          pollerFailures.push(error);
+          f.record('backup.repository.concurrent-list-failure', { poller, startedAt: lastStartedAt, finishedAt: Date.now(),
+            postPendingAtStart: lastPendingAtStart, postPendingAtEnd: createFinishedAt === null,
+            errorKind: error.name, errorCode: error.code ?? null });
+        }
+      });
+      const created = accepted(await creation, 201);
+      expect(created.name).toBe(name); expect(created.backend).toBe('local'); expect(created.serverId).toBe(f.ledger.serverId);
+      expect(created.id).toMatch(/^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i);
+      expect(baselineIds.has(created.id)).toBe(false); expect(typeof created.target).toBe('string'); expect(created.target.length).toBeGreaterThan(0);
+      repository = created;
       f.record('backup.repository.owned', { repositoryId: repository.id, target: repository.target, name });
+      await Promise.all(pollers);
+      if (pollerFailures.length) throw pollerFailures[0];
+      const concurrent = observations.filter(row => row.httpStatus === 200 && row.postPendingAtStart && row.postPendingAtEnd);
+      expect(concurrent.length, 'At least one real catalog response must return while the single create POST is pending').toBeGreaterThan(0);
+      const ownUninitialized = concurrent.some(row => row.ownRows.some(own => own.id === repository.id && own.status === 'uninitialized'));
+      f.record('backup.repository.concurrent-init-window', { repositoryId: repository.id, createStartedAt, createFinishedAt,
+        successfulListsWhilePending: concurrent.length, ownUninitializedObserved: ownUninitialized, causalAcceptance: ownUninitialized ? 'observed' : 'open' });
+      if (!ownUninitialized) f.record('openAcceptance', { id: 'T893.actual-uninitialized-list-window',
+        reason: 'Concurrent real catalog reads completed before create returned, but this run did not observe its owned row uninitialized during that window.',
+        requiredChannel: 'A real native initialization window with the exact owned uninitialized catalog row; no fake delay or engine response' });
       const readback = accepted(await f.call('GET', '/api/panel/backups/repositories/' + repository.id));
       const checked = await f.call('POST', '/api/panel/backups/repositories/' + repository.id + '/check', {});
+      const snapshots = accepted(await f.call('GET', '/api/panel/backups/repositories/' + repository.id + '/snapshots'));
       f.record('backup.repository.initialize-contract', { createStatus: repository.status, readbackStatus: readback.status,
-        physicalCheckHttpStatus: checked.status, physicalCheckErrorCode: checked.body?.error?.code ?? null });
+        physicalCheckHttpStatus: checked.status, physicalCheckErrorCode: checked.body?.error?.code ?? null,
+        emptySnapshots: Array.isArray(snapshots) && snapshots.length === 0 });
       expect(repository.status).toBe('ready'); expect(readback.status).toBe('ready'); expect(checked.status, checked.body?.error?.code).toBe(200);
+      expect(snapshots).toEqual([]);
     } catch (error) { failure = error; }
+    finally {
+      await Promise.all(pollers);
+      if (createStartedAt !== null && !repository) f.record('backup.repository.create-unconfirmed', { name, createStartedAt, createFinishedAt,
+        postReplayed: false, observedOwnRepositoryIds: [...new Set(observations.flatMap(row => row.ownRows.map(own => own.id)))], automaticCleanupAttempted: false });
+    }
     if (repository) try {
+      const current = accepted(await f.call('GET', '/api/panel/backups/repositories/' + repository.id));
+      expect(current.id).toBe(repository.id); expect(current.name).toBe(name); expect(current.target).toBe(repository.target);
+      expect(current.serverId).toBe(f.ledger.serverId); expect(current.backend).toBe('local');
       accepted(await f.call('DELETE', '/api/panel/backups/repositories/' + repository.id));
       expect((await f.call('GET', '/api/panel/backups/repositories/' + repository.id)).status).toBe(404);
       f.record('backup.repository.physical-cleanup-required', { repositoryId: repository.id, target: repository.target, name: repository.name, registryAbsent: true });
