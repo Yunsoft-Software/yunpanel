@@ -1376,56 +1376,9 @@
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
-### T907 · Doğrulama: test — Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişim
-- **Bağımlı:** —
-- **Dosyalar:** —
+### T907 · Site oluşturma oturum sıfırlama testi yeni kimlik alanını kapsamıyor
+- **Bağımlı:** T901
+- **Dosyalar:** `apps/api/test/staging-e2e-verification.test.js`
 - **Kaynak:** QA · 2026-11-13 09:06
-- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
-
-    Başarısız testler:
-    - Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki değişimi, unmount/abort, parola temizleme ve sonuç erişilebilirliği
-    
-    e runtime profiles without allocating a localhost port (0.260833ms)
-    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.136ms)
-    ✔ normalizes complete Node deployment specs (0.336541ms)
-    ✔ normalizes fixed Node process actions against a managed release (1.372625ms)
-    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (1.134542ms)
-    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.258333ms)
-    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.4155ms)
-    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (8.419292ms)
-    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.267292ms)
-    ✔ normalizePythonRuntimeConfig applies canonical defaults (0.601583ms)
-    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.181ms)
-    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.224375ms)
-    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.104209ms)
-    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.113334ms)
-    ✔ normalizePythonApplicationSpec normalizes complete spec (0.598458ms)
-    ✔ normalizePythonApplicationSpec rejects invalid fields (0.264292ms)
-    ✔ normalizes python rollback, restart, and status specs (0.422167ms)
-    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (0.943917ms)
-    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.404916ms)
-    ✔ redirect Domains accept only settings that apply to a redirect response (0.28ms)
-    ✔ tenant constants and role classification predicates (0.797833ms)
-    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.255ms)
-    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.6095ms)
-    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.177ms)
-    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.142209ms)
-    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.120334ms)
-    ✔ createTenantContext builds accurate tenant context for all roles (0.158709ms)
-    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.227042ms)
-    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.335375ms)
-    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.181125ms)
-    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.203625ms)
-    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.297667ms)
-    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.51875ms)
-    ✔ tenant context creation and account normalization security edge cases (0.176084ms)
-    ℹ tests 72
-    ℹ suites 0
-    ℹ pass 72
-    ℹ fail 0
-    ℹ cancelled 0
-    ℹ skipped 0
-    ℹ todo 0
-    ℹ duration_ms 184.287541
-
-- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+- **İş:** Full-source-gate06 sourceb2aa74bd: 8694 test/8692pass/1fail/1skip; tek hata Source contract T-DEV-CREATE-RESULT testinde satır9234 deepEqual EMPTY_SITE_SUBMISSION. T906 yeni doğrulanmış operationId state alanını boş durumda null ile sıfırlar; mevcut expected nesne alanı hiç kapsamıyor. Gerçek diff yalnız actual operationId:null ekidir. Beklenen boş state'e operationId:null ekle; strict deepEqual, session-change/no-publish/password-clear/unmount/abort assertionlarını ve diğer senaryoları koru. Yeni mock/harness/HTTP veya ürün değişikliği yok. Bu eski source/state sözleşmesi uyumluluk kontrolüdür, native kanıt değildir; gerçek native28 DOM regresyonu ve T906 kabulü ayrıdır. Önce mevcut kırmızıyı scoped testte doğrula, sonra aynı scoped test+lint ve root yeni tam kapı geçmeli. Başarısız06 kanıtı korunur, paket kurulmaz.
+- **Kabul:** Aynı tam deepEqual yeni açık null alanını doğruluyor, ilgili scoped contract ve başarılı yeni aggregate gate; T906 native kabulü ayrıca açık.
