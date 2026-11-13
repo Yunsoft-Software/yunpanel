@@ -1451,8 +1451,8 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T909 · Doğrulama: test — stalled live reconciliation past the bounded window fails closed with durable_job_
-- **Bağımlı:** —
-- **Dosyalar:** —
+- **Bağımlı:** T899
+- **Dosyalar:** `apps/api/test/durable-job-live-reconciliation-concurrency.test.js`
 - **Kaynak:** QA · 2026-11-13 18:25
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1501,5 +1501,7 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 1207.668375
+
+    Dar tanı ve test sözleşmesi: full-source-gate-08 Node24/defaultumask0022/frozen c44677f7 gerçek logunda test:423, helper:124 `Timed out waiting for 1 live reconciliation waiters (observed 0)`. 80ms gerçek canlı uzlaşma penceresi HTTP bekleyici kaydolmadan dolmuş olabilir; bu ürün kusuru diye varsayılmaz. Önce gerçek file-backed registry/gerçek HTTP ile tekrar üret; deadline, 503 error code ve exact durable recovery kimliği korunarak hatalı test zamanlama varsayımını düzelt. Window/timeout artırma, retry/skip veya sahte clock/servis/HTTP cevabı yok. Gerekli kaynak hatası kanıtlanırsa mevcut bu test sözleşmesinde ürün dosyası yazılmadan root'a bildir. T899'un native kabulü veya T908'in eski bilinmeyen hatası bu kayıtta değiştirilmez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
