@@ -2,6 +2,8 @@
 // existing provisioning engine. Never replay a POST after an uncertain result.
 const STEP_STATES = new Set(['pending', 'applying', 'blocked', 'succeeded', 'failed', 'compensating', 'compensated']);
 const STOP_STEP_STATES = new Set(['failed', 'blocked', 'compensating', 'compensated']);
+const COMPENSATION_STATES = new Set(['compensating', 'compensated']);
+const LATER_ACTIVE_OR_SUCCEEDED_STATES = new Set(['succeeded', 'applying', 'compensating']);
 const OUTCOMES = new Set(['progressed', 'reconciled', 'ready', 'failed', 'blocked', 'interrupted', 'compensated', 'compensation_interrupted', 'compensation_failed']);
 const LOCK_CONTENTION_CODES = new Set(['site_mutation_locked', 'site_mutation_lock_race']);
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -59,15 +61,28 @@ function verifiedResult(result, previous, id) {
   }
   return operation;
 }
+function hasReverseCompensationOrder(latest, index) {
+  if (latest.ready !== false) return false;
+  for (let j = index + 1; j < latest.steps.length; j += 1) {
+    if (LATER_ACTIVE_OR_SUCCEEDED_STATES.has(latest.steps[j].state)) return false;
+  }
+  return true;
+}
 function verifiedReconciledOperation(snapshot, previous, id) {
   const latest = verifiedOperation(snapshot, id, previous.websiteId);
   if (latest.steps.length !== previous.steps.length) throw invalidResponse();
   for (let i = 0; i < latest.steps.length; i += 1) {
     const before = previous.steps[i];
     const current = latest.steps[i];
-    if (current.id !== before.id
-      || current.required !== before.required
-      || (before.state === 'succeeded' && current.state !== 'succeeded')) {
+    if (current.id !== before.id || current.required !== before.required) {
+      throw invalidResponse();
+    }
+    if (COMPENSATION_STATES.has(current.state) && !hasReverseCompensationOrder(latest, i)) {
+      throw invalidResponse();
+    }
+    if (before.state === 'succeeded'
+      && current.state !== 'succeeded'
+      && !COMPENSATION_STATES.has(current.state)) {
       throw invalidResponse();
     }
   }
@@ -80,33 +95,55 @@ function verifiedReconciledOperation(snapshot, previous, id) {
   return latest;
 }
 function reconciliationEvent(previous, latest, id) {
-  let changedStep = null;
+  const changed = [];
   let stepProgressed = false;
   for (let i = 0; i < latest.steps.length; i += 1) {
     const before = previous.steps[i];
     const current = latest.steps[i];
     if (current.state !== before.state) {
-      changedStep = current;
+      changed.push(current);
       if (current.state === 'succeeded') stepProgressed = true;
-      if (STOP_STEP_STATES.has(current.state)) break;
     }
   }
   const readyChanged = latest.ready !== previous.ready;
   const statusChanged = latest.status !== previous.status;
-  if (!changedStep && !readyChanged && !statusChanged) return null;
+  if (changed.length === 0 && !readyChanged && !statusChanged) return null;
 
   let outcome = 'interrupted';
-  if (latest.ready) outcome = 'ready';
-  else if (latest.steps.some((step) => step.state === 'failed')) outcome = 'failed';
-  else if (latest.status === 'abandoned' || latest.steps.some((step) => step.state === 'blocked')) outcome = 'blocked';
-  else if (latest.steps.some((step) => step.state === 'compensating')) outcome = 'compensation_interrupted';
-  else if (latest.steps.some((step) => step.state === 'compensated')) outcome = 'compensated';
-  else if (stepProgressed) outcome = 'reconciled';
+  let targetStep = changed.at(-1) ?? null;
+  if (latest.ready) {
+    outcome = 'ready';
+  } else if (latest.steps.some((step) => step.state === 'failed')) {
+    outcome = 'failed';
+    targetStep = changed.find((step) => step.state === 'failed')
+      ?? latest.steps.find((step) => step.state === 'failed')
+      ?? targetStep;
+  } else if (latest.status === 'abandoned' || latest.steps.some((step) => step.state === 'blocked')) {
+    outcome = 'blocked';
+    targetStep = changed.find((step) => step.state === 'blocked')
+      ?? latest.steps.find((step) => step.state === 'blocked')
+      ?? targetStep;
+  } else if (latest.steps.some((step) => step.state === 'compensating')) {
+    outcome = 'compensation_interrupted';
+    targetStep = changed.find((step) => step.state === 'compensating')
+      ?? latest.steps.find((step) => step.state === 'compensating')
+      ?? targetStep;
+  } else if (latest.steps.some((step) => step.state === 'compensated')) {
+    outcome = 'compensated';
+    targetStep = changed.find((step) => step.state === 'compensated')
+      ?? latest.steps.find((step) => step.state === 'compensated')
+      ?? targetStep;
+  } else if (stepProgressed) {
+    outcome = 'reconciled';
+    targetStep = changed.findLast((step) => step.state === 'succeeded') ?? targetStep;
+  } else {
+    targetStep = changed.find((step) => step.state === 'applying') ?? targetStep;
+  }
 
   return {
     operationId: id,
     outcome,
-    stepId: changedStep ? changedStep.id : null,
+    stepId: targetStep ? targetStep.id : null,
     operation: latest,
   };
 }

@@ -288,12 +288,15 @@ test('after earlier POST steps succeed, lock 409 reconciles remaining worker ste
   assert.equal(events[2].outcome, 'ready');
 });
 
-for (const terminalState of ['failed', 'blocked', 'compensating', 'compensated']) {
-  test(`lock 409 reconciliation stops immediately when worker step enters ${terminalState}`, async () => {
+for (const [terminalState, expectedOutcome] of [
+  ['failed', 'failed'],
+  ['blocked', 'blocked'],
+]) {
+  test(`lock 409 reconciliation stops immediately when pending step enters applying -> ${terminalState}`, async () => {
     const stoppedOp = operation([step('sftp', 'succeeded'), step('nginx', terminalState), step('domain')]);
     const snapshots = [
-      operation([step('sftp'), step('nginx'), step('domain')]),
-      operation([step('sftp', 'applying'), step('nginx'), step('domain')]),
+      operation([step('sftp', 'succeeded'), step('nginx'), step('domain')]),
+      operation([step('sftp', 'succeeded'), step('nginx', 'applying'), step('domain')]),
       stoppedOp,
       operation([step('sftp', 'succeeded'), step('nginx', 'succeeded'), step('domain', 'succeeded')]),
     ];
@@ -318,6 +321,135 @@ for (const terminalState of ['failed', 'blocked', 'compensating', 'compensated']
     assert.equal(final.steps[1].state, terminalState);
     assert.deepEqual(calls, ['read', 'advance', 'read', 'read']);
     assert.equal(events.length, 2);
+    assert.equal(events[0].outcome, 'interrupted');
+    assert.equal(events[0].stepId, 'nginx');
+    assert.equal(events[1].outcome, expectedOutcome);
+    assert.equal(events[1].stepId, 'nginx');
+  });
+}
+
+test('two-tab recovery probe: initial [unix_identity: succeeded, elfinder: pending] + 409 site_mutation_locked reconciles GET [unix_identity: compensating, elfinder: pending] cleanly', async () => {
+  const initial = {
+    operationId: id,
+    websiteId,
+    ready: false,
+    status: 'pending',
+    steps: [
+      { id: 'unix_identity', required: true, state: 'succeeded' },
+      { id: 'elfinder', required: true, state: 'pending' },
+    ],
+  };
+  const latest = {
+    operationId: id,
+    websiteId,
+    ready: false,
+    status: 'pending',
+    steps: [
+      { id: 'unix_identity', required: true, state: 'compensating' },
+      { id: 'elfinder', required: true, state: 'pending' },
+    ],
+  };
+  const snapshots = [initial, latest];
+  let readCount = 0;
+  let postCount = 0;
+  const events = [];
+  const final = await advanceProvisioning({
+    operationId: id,
+    lockPollLimit: 10,
+    lockPollDelayMs: 0,
+    read: async () => {
+      readCount += 1;
+      return snapshots.shift();
+    },
+    advance: async () => {
+      postCount += 1;
+      throw Object.assign(new Error('locked by recovery tab'), { status: 409, code: 'site_mutation_locked' });
+    },
+    onStep: (event) => events.push(event),
+  });
+  assert.equal(readCount, 2);
+  assert.equal(postCount, 1);
+  assert.equal(events.length, 1);
+  assert.equal(events[0].outcome, 'compensation_interrupted');
+  assert.equal(events[0].stepId, 'unix_identity');
+  assert.equal(final, latest);
+  assert.equal(final.steps[0].state, 'compensating');
+});
+
+for (const [label, initialSteps, pollSnapshots, expectedOutcome, expectedStepId] of [
+  [
+    'succeeded -> compensated',
+    [step('unix_identity', 'succeeded'), step('elfinder')],
+    [operation([step('unix_identity', 'compensated'), step('elfinder')])],
+    'compensated',
+    'unix_identity',
+  ],
+  [
+    'failed-in-between (applying -> compensating)',
+    [step('unix_identity', 'succeeded'), step('elfinder'), step('nginx')],
+    [
+      operation([step('unix_identity', 'succeeded'), step('elfinder', 'applying'), step('nginx')]),
+      operation([step('unix_identity', 'succeeded'), step('elfinder', 'compensating'), step('nginx')]),
+    ],
+    'compensation_interrupted',
+    'elfinder',
+  ],
+  [
+    'multi-step reverse compensation [compensating, compensated, pending]',
+    [step('step1', 'succeeded'), step('step2', 'succeeded'), step('step3')],
+    [operation([step('step1', 'compensating'), step('step2', 'compensated'), step('step3')])],
+    'compensation_interrupted',
+    'step1',
+  ],
+  [
+    'multi-step reverse compensation completed [compensated, compensated, pending]',
+    [step('step1', 'succeeded'), step('step2', 'succeeded'), step('step3')],
+    [operation([step('step1', 'compensated'), step('step2', 'compensated'), step('step3')])],
+    'compensated',
+    'step1',
+  ],
+  [
+    'earlier compensation with later non-blocking failed step [compensating, failed]',
+    [step('unix_identity', 'succeeded'), step('static_upload_state')],
+    [operation([step('unix_identity', 'compensating'), step('static_upload_state', 'failed')])],
+    'failed',
+    'static_upload_state',
+  ],
+  [
+    'earlier compensation with later blocked step [compensating, blocked]',
+    [step('unix_identity', 'succeeded'), step('runtime')],
+    [operation([step('unix_identity', 'compensating'), step('runtime', 'blocked')])],
+    'blocked',
+    'runtime',
+  ],
+]) {
+  test(`lock 409 reconciliation accepts backend-permitted compensation path (${label}) and stops immediately`, async () => {
+    const snapshots = [
+      operation(initialSteps),
+      ...pollSnapshots,
+      operation(initialSteps.map((item) => step(item.id, 'succeeded'))),
+    ];
+    const calls = [];
+    const events = [];
+    const final = await advanceProvisioning({
+      operationId: id,
+      lockPollLimit: 10,
+      lockPollDelayMs: 0,
+      read: async () => {
+        calls.push('read');
+        return snapshots.shift();
+      },
+      advance: async () => {
+        calls.push('advance');
+        throw Object.assign(new Error('locked'), { status: 409, code: 'site_mutation_locked' });
+      },
+      onStep: (event) => events.push(event),
+    });
+    assert.equal(final, pollSnapshots.at(-1));
+    assert.equal(final.ready, false);
+    assert.equal(calls.length, 2 + pollSnapshots.length);
+    assert.equal(events.at(-1)?.outcome, expectedOutcome);
+    assert.equal(events.at(-1)?.stepId, expectedStepId);
   });
 }
 
@@ -381,17 +513,24 @@ for (const nonLockError of [
   });
 }
 
-for (const [label, brokenSnapshot] of [
-  ['regressed succeeded step', operation([step('nginx', 'pending'), step('certificate', 'succeeded')])],
-  ['changed step order', operation([step('certificate', 'succeeded'), step('nginx', 'succeeded')])],
-  ['changed required flag', operation([step('nginx', 'succeeded'), { ...step('certificate'), required: false }])],
-  ['removed step', operation([step('nginx', 'succeeded')])],
-  ['wrong websiteId', operation([step('nginx', 'succeeded'), step('certificate')], { websiteId: otherId })],
-  ['wrong operationId', operation([step('nginx', 'succeeded'), step('certificate')], { operationId: otherId })],
+for (const [label, initialSteps, brokenSnapshot] of [
+  ['succeeded -> pending regression', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'pending'), step('certificate', 'succeeded')])],
+  ['succeeded -> applying regression', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'applying'), step('certificate')])],
+  ['succeeded -> blocked regression', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'blocked'), step('certificate')])],
+  ['succeeded -> failed regression', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'failed'), step('certificate')])],
+  ['out-of-order compensation [compensating, succeeded]', [step('step1', 'succeeded'), step('step2', 'succeeded'), step('step3')], operation([step('step1', 'compensating'), step('step2', 'succeeded'), step('step3')])],
+  ['out-of-order compensation [compensated, succeeded]', [step('step1', 'succeeded'), step('step2', 'succeeded'), step('step3')], operation([step('step1', 'compensated'), step('step2', 'succeeded'), step('step3')])],
+  ['out-of-order compensation [compensating, applying]', [step('step1', 'succeeded'), step('step2'), step('step3')], operation([step('step1', 'compensating'), step('step2', 'applying'), step('step3')])],
+  ['out-of-order compensation [compensating, compensating]', [step('step1', 'succeeded'), step('step2', 'succeeded'), step('step3')], operation([step('step1', 'compensating'), step('step2', 'compensating'), step('step3')])],
+  ['changed step order', [step('nginx', 'succeeded'), step('certificate')], operation([step('certificate', 'succeeded'), step('nginx', 'succeeded')])],
+  ['changed required flag', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'succeeded'), { ...step('certificate'), required: false }])],
+  ['removed step', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'succeeded')])],
+  ['wrong websiteId', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'succeeded'), step('certificate')], { websiteId: otherId })],
+  ['wrong operationId', [step('nginx', 'succeeded'), step('certificate')], operation([step('nginx', 'succeeded'), step('certificate')], { operationId: otherId })],
 ]) {
   test(`monotonicity/identity violation during lock poll (${label}) throws invalidResponse before onStep`, async () => {
     const snapshots = [
-      operation([step('nginx', 'succeeded'), step('certificate')]),
+      operation(initialSteps),
       brokenSnapshot,
     ];
     const events = [];
