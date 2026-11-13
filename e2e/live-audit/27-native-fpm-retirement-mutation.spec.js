@@ -94,12 +94,24 @@ cursor=records[-1].get('__CURSOR') if records else x['afterCursor'];assert isins
 owned_receipts=[]
 for row in x['rows']:
  p='/var/lib/yunpanel/staging/elfinder-fpm-sites/'+row['operationId']+'.json'
+ assert os.path.realpath(p)==p
+ parent=os.path.dirname(p)
+ while True:
+  ancestor=os.lstat(parent);assert stat.S_ISDIR(ancestor.st_mode) and not stat.S_ISLNK(ancestor.st_mode) and ancestor.st_uid==0 and ancestor.st_gid==0 and not stat.S_IMODE(ancestor.st_mode)&0o022
+  if parent=='/':break
+  parent=os.path.dirname(parent)
+ def identity(meta):return (meta.st_dev,meta.st_ino,meta.st_mode,meta.st_uid,meta.st_gid,meta.st_nlink,meta.st_size,meta.st_mtime_ns,meta.st_ctime_ns)
+ try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
+ except FileNotFoundError:
+  owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True});continue
  try:
-  meta=os.lstat(p);assert stat.S_ISREG(meta.st_mode) and not stat.S_ISLNK(meta.st_mode) and meta.st_uid==0 and stat.S_IMODE(meta.st_mode)==0o600 and meta.st_size<=65536
-  raw=open(p,'rb').read();receipt=json.loads(raw)
-  assert all(receipt[k]==row[k] for k in ['websiteId','applicationId','unixUser','operationId'])
-  owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'state':receipt['state'],'mutated':receipt['mutated'],'previousConfigIsNull':receipt['previousConfig'] is None,'configSha256':receipt['configSha256'],'receiptSha256':hashlib.sha256(raw).hexdigest()})
- except FileNotFoundError:owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True})
+  meta=os.fstat(fd);assert stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and meta.st_gid==0 and stat.S_IMODE(meta.st_mode)==0o600 and meta.st_nlink==1 and meta.st_size<=65536
+  with os.fdopen(fd,'rb',closefd=False) as handle:raw=handle.read(65537)
+  assert len(raw)<=65536 and len(raw)==meta.st_size and identity(os.fstat(fd))==identity(meta) and identity(os.lstat(p))==identity(meta)
+ finally:os.close(fd)
+ receipt=json.loads(raw)
+ assert all(receipt[k]==row[k] for k in ['websiteId','applicationId','unixUser','operationId'])
+ owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'state':receipt['state'],'mutated':receipt['mutated'],'previousConfigIsNull':receipt['previousConfig'] is None,'configSha256':receipt['configSha256'],'receiptSha256':hashlib.sha256(raw).hexdigest()})
 print(json.dumps({'serviceUnit':unit,'mainPid':int(pid),'listeners':sorted(listeners,key=lambda v:v['path']),'journalCursor':cursor,'reloadCompletionMessageId':identity,'reloadCompletions':[{'cursor':r['__CURSOR'],'monotonicTimestamp':r.get('__MONOTONIC_TIMESTAMP'),'realtimeTimestamp':r.get('__REALTIME_TIMESTAMP')} for r in completed],'ownedReceipts':owned_receipts}))
 `;
   const quote = value => "'" + value.replaceAll("'", "'\\''") + "'";
@@ -254,7 +266,9 @@ test('@mutation normal static removal reloads shared FPM once and preserves two 
     // The manager's two normal calls are exercised by file/Unix cleanup above;
     // this public no-op is not claimed as a direct extra manager invocation.
     await retiring.fixture.cleanup();
-    await Promise.all(siblings.map(entry => dynamic(entry, 'first-after-public-removal-noop')));
+    const noopReads = await Promise.allSettled(siblings.map(entry => dynamic(entry, 'first-after-public-removal-noop')));
+    const noopError = noopReads.find(row => row.status === 'rejected')?.reason;
+    if (noopError) throw noopError;
     const noop = fpmRead(owned.map(entry => entry.fixture), after.journalCursor, before.reloadCompletionMessageId);
     proof.publicRemovalNoop = noop;
     expect(noop.reloadCompletions).toEqual([]);
