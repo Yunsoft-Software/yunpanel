@@ -1095,7 +1095,7 @@
 
 ### T894 · Site kurulum arayüzü worker kilit çakışması sonrası gerçek hazır durumu göstermiyor
 - **Bağımlı:** T864
-- **Dosyalar:** `apps/web/src/workspace/provisioning-client.js`, `apps/web/src/workspace/provisioning-advance.js`, `apps/web/test/provisioning-advance.test.js`, `apps/web/test/provisioning-client.test.js`, `apps/api/test/website-provisioning-ui-lock-reconciliation.test.js`
+- **Dosyalar:** `apps/web/src/workspace/provisioning-client.js`, `apps/web/src/workspace/provisioning-advance.js`, `apps/web/test/provisioning-advance.test.js`, `apps/web/test/provisioning-client.test.js`
 - **Kaynak:** QA · 2026-11-12 17:21
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1168,7 +1168,7 @@
 
 ### T901 · Paket tanılaması doğrulanmamış sabit build kaydını senkronize gösteriyor
 - **Bağımlı:** T800
-- **Dosyalar:** `apps/api/src/core-app.js`, `scripts/build-deb.sh`, `scripts/emit-build-info.mjs`, `apps/web/vite.config.js`, `apps/web/src/workspace/deployment-diagnostics-client.js`, `apps/web/src/workspace/SystemSettingsPanels.jsx`, `apps/api/test/deployment-version-diagnostics.test.js`, `apps/web/test/deployment-diagnostics-client.test.js`
+- **Dosyalar:** `apps/api/src/core-app.js`, `scripts/build-deb.sh`, `scripts/emit-build-info.mjs`, `apps/web/vite.config.js`, `apps/web/src/workspace/deployment-diagnostics-client.js`, `apps/web/src/workspace/SystemSettingsPanels.jsx`, `apps/api/test/deployment-version-diagnostics.test.js`, `apps/web/test/deployment-diagnostics-client.test.js`, `apps/web/test/ember-staging-deployment-acceptance.test.js`, `apps/api/test/staging-e2e-verification.test.js`
 - **Kaynak:** QA · 2026-11-12 20:28
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
