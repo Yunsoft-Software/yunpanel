@@ -2,6 +2,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import http from 'node:http';
+import https from 'node:https';
+import { checkServerIdentity } from 'node:tls';
 import dns from 'node:dns/promises';
 import { createHash, randomBytes } from 'node:crypto';
 import { test, expect, apiContext, manifest, privateJson, RUN_DIR, ORIGIN } from './support.js';
@@ -38,26 +40,78 @@ async function inventory() {
   expect(Array.isArray(rows)).toBe(true); return rows;
 }
 
-async function originalHttp(hostname) {
+async function originalRequest({ hostname, scheme }) {
   assert.match(hostname, /^[a-z0-9][a-z0-9.-]{0,251}[a-z0-9]$/);
+  assert.ok(['http', 'https'].includes(scheme));
   const addresses = await dns.lookup(hostname, { all: true });
   assert.ok(addresses.length && addresses.every(row => row.address === TARGET));
   return new Promise((resolve, reject) => {
-    const req = http.get({ hostname: TARGET, port: 80, path: '/', headers: { Host: hostname, Connection: 'close' }, timeout: 15000 }, res => {
+    const transport = scheme === 'https' ? https : http;
+    const req = transport.get({ hostname: TARGET, port: scheme === 'https' ? 443 : 80, path: '/', agent: false,
+      headers: { Host: hostname, Connection: 'close' }, timeout: 15000,
+      ...(scheme === 'https' ? {
+        servername: hostname, rejectUnauthorized: true,
+        checkServerIdentity: (servername, certificate) => servername === hostname
+          ? checkServerIdentity(hostname, certificate)
+          : new Error('Original sibling TLS server name changed'),
+      } : {}),
+    }, res => {
+      const tlsVerified = scheme === 'https' ? res.socket?.authorized === true : null;
+      if (scheme === 'https' && tlsVerified !== true) {
+        req.destroy(new Error('Original sibling TLS peer was not authenticated')); return;
+      }
       let bytes = 0;
       res.on('data', chunk => { bytes += chunk.length; if (bytes > 4 * 1024 * 1024) req.destroy(new Error('Owned sibling response exceeds the bounded read')); });
-      res.on('end', () => resolve({ status: res.statusCode })); res.on('error', reject);
+      const locations = [];
+      for (let index = 0; index < res.rawHeaders.length; index += 2) {
+        if (res.rawHeaders[index].toLowerCase() === 'location') locations.push(res.rawHeaders[index + 1]);
+      }
+      res.on('end', () => resolve({ status: res.statusCode, locations, tlsVerified }));
+      res.on('error', () => reject(new Error('Original sibling bounded response failed')));
     });
-    req.on('timeout', () => req.destroy(new Error('Original sibling first HTTP response timed out'))); req.on('error', reject);
+    req.on('timeout', () => req.destroy(new Error('Original sibling first canonical response timed out')));
+    // TLS errors can carry a raw certificate. Preserve only the safe code.
+    req.on('error', error => {
+      const code = /^[A-Z0-9_]{1,80}$/.test(error.code ?? '') ? error.code : 'REQUEST_FAILED';
+      reject(new Error('Original sibling canonical request failed: ' + code));
+    });
   });
+}
+
+async function originalEndpoint(hostname) {
+  const preflight = await originalRequest({ hostname, scheme: 'http' });
+  let scheme = 'http', validatedLocation = null;
+  if (preflight.status !== 200) {
+    assert.ok([301, 308].includes(preflight.status), 'Original sibling preflight must be HTTP200 or a permanent canonical HTTPS redirect');
+    assert.equal(preflight.locations.length, 1, 'Original sibling canonical redirect must have exactly one Location');
+    const location = preflight.locations[0];
+    assert.ok(typeof location === 'string' && location.length <= 2048 && !/[\u0000-\u0020\u007f@?#]/.test(location),
+      'Original sibling redirect must contain no credentials, query, fragment or whitespace');
+    let canonical;
+    try { canonical = new URL(location); } catch { throw new Error('Original sibling canonical redirect must be an absolute HTTPS URL'); }
+    assert.ok(canonical.protocol === 'https:' && canonical.hostname === hostname && canonical.port === ''
+      && canonical.username === '' && canonical.password === '' && canonical.pathname === '/'
+      && canonical.search === '' && canonical.hash === '' && canonical.origin === 'https://' + hostname,
+    'Original sibling canonical redirect must stay on the exact hostname, HTTPS443 and root path');
+    scheme = 'https';
+    validatedLocation = location;
+  }
+  const endpoint = { hostname, scheme };
+  proof.originalSiblingPreflight = { status: preflight.status, requestScheme: 'http', requestPort: 80,
+    redirectVerified: scheme === 'https', redirectLocation: validatedLocation, canonicalUrl: scheme + '://' + hostname + '/',
+    canonicalPort: scheme === 'https' ? 443 : 80, requiredCanonicalStatus: 200 };
+  privateJson('t889-original-sibling-preflight.json', proof.originalSiblingPreflight);
+  return endpoint;
 }
 
 async function originalPreserved(phase) {
   const rows = await inventory();
   expect(original.websiteIds.every(id => rows.some(row => row.id === id)), 'Every original Website identity must survive ' + phase).toBe(true);
   // One exact request, without an HTTP retry hiding a first failure.
-  const reply = await originalHttp(original.hostname);
-  proof.originalSiblingReads ??= []; proof.originalSiblingReads.push({ phase, status: reply.status });
+  const reply = await originalRequest(original.endpoint);
+  proof.originalSiblingReads ??= []; proof.originalSiblingReads.push({ phase, scheme: original.endpoint.scheme,
+    status: reply.status, tlsVerified: reply.tlsVerified });
+  if (original.endpoint.scheme === 'https') expect(reply.tlsVerified, 'Canonical sibling TLS chain and hostname must remain verified').toBe(true);
   expect(reply.status, 'Original healthy PHP sibling first response after ' + phase).toBe(200);
 }
 
@@ -188,6 +242,7 @@ test.beforeAll(async () => {
   actor = await apiContext(); const run = manifest(), rows = await inventory();
   expect(run.target).toBe(TARGET); expect(rows.some(row => row.id === run.existingPhpWebsiteId)).toBe(true);
   original = { websiteIds: rows.map(row => row.id), hostname: run.existingPhpDomain };
+  original.endpoint = await originalEndpoint(original.hostname);
   await originalPreserved('before-owned-waves');
 });
 
