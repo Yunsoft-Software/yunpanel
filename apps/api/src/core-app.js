@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { assertApplicationWebsiteIdle } from './application-website-job-guard.js';
 import express from 'express';
 import { OPERATIONS } from '@yunpanel/protocol';
@@ -128,23 +128,80 @@ function normalizeBuildTime(value) {
   return new Date(parsed).toISOString();
 }
 
-function readVerifiedBuildManifest(manifestPath) {
-  if (typeof manifestPath !== 'string' || !manifestPath.trim()) return null;
+function hasExplicitEnvString(value) {
+  return value !== undefined && value !== null && String(value).trim() !== '';
+}
+
+function inspectBuildManifestFile(manifestPath) {
+  if (typeof manifestPath !== 'string' || !manifestPath.trim()) {
+    return {
+      state: 'absent',
+      exists: false,
+      valid: false,
+      dirty: false,
+      manifest: null,
+      warning: null,
+    };
+  }
+  if (!existsSync(manifestPath)) {
+    return {
+      state: 'absent',
+      exists: false,
+      valid: false,
+      dirty: false,
+      manifest: null,
+      warning: null,
+    };
+  }
   try {
     const raw = JSON.parse(readFileSync(manifestPath, 'utf8'));
-    if (!raw || typeof raw !== 'object' || Array.isArray(raw) || raw.buildVerified === false) {
-      return null;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) {
+      return {
+        state: 'corrupt',
+        exists: true,
+        valid: false,
+        dirty: false,
+        manifest: null,
+        warning: 'Package build-info.json manifest is corrupt or invalid; runtime build provenance is unverified.',
+      };
     }
+    const dirty = raw.dirty === true;
+    const rawVerified = raw.buildVerified === true;
     const buildId = normalizeBuildToken(raw.buildId);
     const assetId = normalizeBuildToken(raw.assetId);
     const commit = normalizeCommitHash(raw.commit);
     const buildTime = normalizeBuildTime(raw.buildTime);
-    if (!buildId || !assetId || !commit || !buildTime) {
-      return null;
+
+    if (dirty || !rawVerified || !buildId || !assetId || !commit || !buildTime) {
+      return {
+        state: dirty ? 'dirty' : 'unverified',
+        exists: true,
+        valid: false,
+        dirty,
+        manifest: null,
+        warning: dirty
+          ? 'Package build-info.json manifest was built from a dirty working tree; runtime build provenance is unverified.'
+          : 'Package build-info.json manifest is incomplete or unverified; runtime build provenance is unverified.',
+      };
     }
-    return { buildId, assetId, commit, buildTime };
+
+    return {
+      state: 'verified',
+      exists: true,
+      valid: true,
+      dirty: false,
+      manifest: { buildId, assetId, commit, buildTime },
+      warning: null,
+    };
   } catch {
-    return null;
+    return {
+      state: 'corrupt',
+      exists: true,
+      valid: false,
+      dirty: false,
+      manifest: null,
+      warning: 'Package build-info.json manifest is corrupt or unreadable; runtime build provenance is unverified.',
+    };
   }
 }
 
@@ -154,21 +211,38 @@ export function evaluateDeploymentEvidence({
   isDirtyTree = false,
   buildId,
   deployedAt,
+  metadataConflict = false,
+  manifestInvalid = false,
+  extraWarnings = [],
 } = {}) {
   const knownDeployedCommit = isKnownDiagnosticToken(deployedCommit) ? deployedCommit.trim() : null;
   const knownSourceCommit = isKnownDiagnosticToken(sourceCommit) ? sourceCommit.trim() : null;
   const dirty = Boolean(isDirtyTree);
   const commitMismatch = Boolean(knownSourceCommit && knownDeployedCommit && knownSourceCommit !== knownDeployedCommit);
   const diverged = dirty || commitMismatch;
-  const verified = !diverged && Boolean(knownDeployedCommit && knownSourceCommit && knownDeployedCommit === knownSourceCommit);
+  const provenanceBlocked = Boolean(metadataConflict || manifestInvalid);
+  const verified = !diverged && !provenanceBlocked && Boolean(knownDeployedCommit && knownSourceCommit && knownDeployedCommit === knownSourceCommit);
   const status = diverged ? 'diverged' : (verified ? 'synchronized' : 'unverified');
-  const warnings = [];
+  const warnings = Array.isArray(extraWarnings) ? [...extraWarnings] : [];
 
   if (dirty) {
     warnings.push('Uncommitted changes detected in local source workspace: runtime code may differ from repository tree.');
   }
   if (commitMismatch) {
     warnings.push(`Local source HEAD (${knownSourceCommit}) does not match deployed runtime commit (${knownDeployedCommit}). Deploy pipeline execution required for changes to take effect.`);
+  }
+
+  let summary;
+  if (diverged) {
+    summary = 'RUNTIME DIVERGENCE: Source code modifications have NOT been deployed to the live runtime environment.';
+  } else if (verified) {
+    summary = 'RUNTIME SYNCHRONIZED: Live runtime build matches current source commit.';
+  } else if (metadataConflict) {
+    summary = 'RUNTIME UNVERIFIED: Environment deployment metadata conflicts with immutable package build-info.json; source/runtime equality is not proven.';
+  } else if (manifestInvalid) {
+    summary = 'RUNTIME UNVERIFIED: Package build-info.json manifest is corrupt, dirty, or unverified; source/runtime equality is not proven.';
+  } else {
+    summary = 'RUNTIME UNVERIFIED: Build or source commit metadata is unavailable; source/runtime equality is not proven.';
   }
 
   return {
@@ -185,11 +259,7 @@ export function evaluateDeploymentEvidence({
     verified,
     diverged,
     warnings,
-    summary: diverged
-      ? 'RUNTIME DIVERGENCE: Source code modifications have NOT been deployed to the live runtime environment.'
-      : verified
-        ? 'RUNTIME SYNCHRONIZED: Live runtime build matches current source commit.'
-        : 'RUNTIME UNVERIFIED: Build or source commit metadata is unavailable; source/runtime equality is not proven.',
+    summary,
   };
 }
 
@@ -201,34 +271,85 @@ export function resolveDeploymentDiagnostics(options = {}) {
   const manifestPath = options.manifestPath !== undefined
     ? options.manifestPath
     : (env.YUNPANEL_BUILD_MANIFEST_PATH ?? defaultManifestPath);
-  const manifest = readVerifiedBuildManifest(manifestPath);
+  const manifestInspection = inspectBuildManifestFile(manifestPath);
 
-  const buildId = normalizeBuildToken(options.buildId)
-    ?? normalizeBuildToken(env.YUNPANEL_BUILD_ID)
-    ?? manifest?.buildId
-    ?? 'unknown';
-  const commit = normalizeCommitHash(options.commit)
-    ?? normalizeCommitHash(env.YUNPANEL_COMMIT_HASH ?? env.GIT_COMMIT)
-    ?? manifest?.commit
-    ?? 'unknown';
-  const buildTime = normalizeBuildTime(options.buildTime)
-    ?? normalizeBuildTime(env.YUNPANEL_BUILD_TIME ?? env.BUILD_TIMESTAMP)
-    ?? manifest?.buildTime
-    ?? null;
-  const assetId = normalizeBuildToken(options.assetId)
-    ?? normalizeBuildToken(env.YUNPANEL_ASSET_ID)
-    ?? manifest?.assetId
-    ?? 'unknown';
-  const buildVerified = commit !== 'unknown'
+  const rawEnvBuildId = hasExplicitEnvString(env.YUNPANEL_BUILD_ID) ? String(env.YUNPANEL_BUILD_ID).trim() : null;
+  const envBuildId = normalizeBuildToken(rawEnvBuildId);
+  const rawEnvCommitSource = env.YUNPANEL_COMMIT_HASH ?? env.YUNPANEL_BUILD_COMMIT ?? env.GIT_COMMIT;
+  const rawEnvCommit = hasExplicitEnvString(rawEnvCommitSource) ? String(rawEnvCommitSource).trim() : null;
+  const envCommit = normalizeCommitHash(rawEnvCommit);
+  const rawEnvBuildTimeSource = env.YUNPANEL_BUILD_TIME ?? env.BUILD_TIMESTAMP;
+  const rawEnvBuildTime = hasExplicitEnvString(rawEnvBuildTimeSource) ? String(rawEnvBuildTimeSource).trim() : null;
+  const envBuildTime = normalizeBuildTime(rawEnvBuildTime);
+  const rawEnvAssetId = hasExplicitEnvString(env.YUNPANEL_ASSET_ID) ? String(env.YUNPANEL_ASSET_ID).trim() : null;
+  const envAssetId = normalizeBuildToken(rawEnvAssetId);
+
+  let buildId;
+  let commit;
+  let buildTime;
+  let assetId;
+  let metadataConflict = false;
+  let manifestInvalid = false;
+  const extraWarnings = [];
+
+  if (manifestInspection.state === 'verified') {
+    const { manifest } = manifestInspection;
+    buildId = normalizeBuildToken(options.buildId) ?? manifest.buildId;
+    commit = normalizeCommitHash(options.commit) ?? manifest.commit;
+    buildTime = normalizeBuildTime(options.buildTime) ?? manifest.buildTime;
+    assetId = normalizeBuildToken(options.assetId) ?? manifest.assetId;
+
+    const conflictingFields = [];
+    if (options.buildId === undefined && rawEnvBuildId !== null && envBuildId !== manifest.buildId) {
+      conflictingFields.push('buildId');
+    }
+    if (options.commit === undefined && rawEnvCommit !== null && envCommit !== manifest.commit) {
+      conflictingFields.push('commit');
+    }
+    if (options.assetId === undefined && rawEnvAssetId !== null && envAssetId !== manifest.assetId) {
+      conflictingFields.push('assetId');
+    }
+    if (options.buildTime === undefined && rawEnvBuildTime !== null && envBuildTime !== manifest.buildTime) {
+      conflictingFields.push('buildTime');
+    }
+
+    if (conflictingFields.length > 0) {
+      metadataConflict = true;
+      extraWarnings.push(
+        `Environment deployment metadata (${conflictingFields.join(', ')}) conflicts with immutable package build-info.json; authoritative package manifest values are retained and runtime provenance is marked unverified.`,
+      );
+    }
+  } else if (manifestInspection.exists) {
+    manifestInvalid = true;
+    buildId = normalizeBuildToken(options.buildId) ?? 'unknown';
+    commit = normalizeCommitHash(options.commit) ?? 'unknown';
+    buildTime = normalizeBuildTime(options.buildTime) ?? null;
+    assetId = normalizeBuildToken(options.assetId) ?? 'unknown';
+    if (manifestInspection.warning) {
+      extraWarnings.push(manifestInspection.warning);
+    }
+  } else {
+    buildId = normalizeBuildToken(options.buildId) ?? envBuildId ?? 'unknown';
+    commit = normalizeCommitHash(options.commit) ?? envCommit ?? 'unknown';
+    buildTime = normalizeBuildTime(options.buildTime) ?? envBuildTime ?? null;
+    assetId = normalizeBuildToken(options.assetId) ?? envAssetId ?? 'unknown';
+  }
+
+  const isDirtyTree = options.isDirtyTree !== undefined
+    ? Boolean(options.isDirtyTree)
+    : (env.YUNPANEL_DIRTY_TREE === 'true' || env.YUNPANEL_DIRTY_TREE === '1');
+  const dirty = Boolean(isDirtyTree || manifestInspection.dirty || options.dirty === true);
+
+  const buildVerified = !dirty
+    && !metadataConflict
+    && !manifestInvalid
+    && commit !== 'unknown'
     && buildId !== 'unknown'
     && assetId !== 'unknown'
     && buildTime !== null;
   const environment = options.environment ?? env.NODE_ENV ?? 'production';
 
   const sourceCommit = normalizeCommitHash(options.sourceCommit ?? env.YUNPANEL_SOURCE_COMMIT ?? null);
-  const isDirtyTree = options.isDirtyTree !== undefined
-    ? Boolean(options.isDirtyTree)
-    : (env.YUNPANEL_DIRTY_TREE === 'true' || env.YUNPANEL_DIRTY_TREE === '1');
 
   const evidence = evaluateDeploymentEvidence({
     deployedCommit: commit,
@@ -236,6 +357,9 @@ export function resolveDeploymentDiagnostics(options = {}) {
     isDirtyTree,
     buildId,
     deployedAt: buildTime,
+    metadataConflict,
+    manifestInvalid,
+    extraWarnings,
   });
 
   const sourceDiffWarning = options.sourceDiffWarning ?? (
@@ -249,12 +373,16 @@ export function resolveDeploymentDiagnostics(options = {}) {
     commit,
     buildTime,
     assetId,
+    dirty,
+    metadataConflict,
+    manifestInvalid,
     buildVerified,
     environment,
     sourceInfo: {
       sourceCommit,
+      dirty,
       isDirtyTree,
-      sourceMatchesDeployed: evidence.verified === true && !evidence.diverged,
+      sourceMatchesDeployed: buildVerified && evidence.verified === true && !evidence.diverged,
       warning: sourceDiffWarning,
     },
     evidence,
@@ -437,7 +565,15 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
     };
   }
 
-  if (!hasKnownBackendBuild || !hasKnownBackendAsset || !hasKnownFrontendBuild || !hasKnownFrontendAsset) {
+  const provenanceUnverified = Boolean(
+    backend.dirty === true
+    || backend.metadataConflict === true
+    || backend.manifestInvalid === true
+    || frontendClient.dirty === true
+    || frontendClient.buildVerified === false,
+  );
+
+  if (provenanceUnverified || !hasKnownBackendBuild || !hasKnownBackendAsset || !hasKnownFrontendBuild || !hasKnownFrontendAsset) {
     return {
       status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN,
       compatible: false,

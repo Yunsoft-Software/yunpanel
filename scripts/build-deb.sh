@@ -134,6 +134,7 @@ cp -a apps/web/dist/. "$package_root/usr/share/yunpanel/web/"
 node "$repository_root/scripts/emit-build-info.mjs" \
   --repo "$repository_root" \
   --package-version "$version" \
+  --require-clean \
   --verify-web-dist "$repository_root/apps/web/dist/build-info.json" \
   --output "$package_root/usr/lib/yunpanel/build-info.json"
 chmod 0644 "$package_root/usr/lib/yunpanel/build-info.json"

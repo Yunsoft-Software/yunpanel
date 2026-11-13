@@ -11,7 +11,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import express from 'express';
+import { createAuthStore } from '../../api/src/auth-store.js';
+import { createAuthenticatedApi } from '../../api/src/auth-http.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
@@ -35,20 +36,78 @@ import {
 const { default: SystemSettingsPanels } = await import('../src/workspace/SystemSettingsPanels.jsx');
 
 const emitBuildInfoScriptPath = fileURLToPath(new URL('../../../scripts/emit-build-info.mjs', import.meta.url));
+const PUBLIC_ORIGIN = 'https://panel.example.test';
 
-function createOwnerApiServer(coreApp) {
-  const app = express();
-  app.use(express.json());
-  app.use((req, _res, next) => {
-    req.auth = {
-      user: { id: 'usr-owner-1', username: 'admin', role: 'owner', status: 'active' },
-      access: { mode: 'management', permissions: ['*'] },
-      security: { managementAllowed: true },
-    };
-    next();
+async function startRealAuthenticatedDiagnosticsServer(t, deploymentDiagnosticsOptions) {
+  const authDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-auth-'));
+  const store = createAuthStore({
+    filePath: path.join(authDir, 'auth.sqlite'),
+    masterKey: 'a'.repeat(64),
   });
-  app.use(coreApp);
-  return http.createServer(app);
+  t.after(async () => {
+    store.close();
+    await rm(authDir, { recursive: true, force: true });
+  });
+
+  const listener = createAuthenticatedApi({
+    store,
+    publicOrigin: PUBLIC_ORIGIN,
+    ownerMfaRequired: false,
+    createHandler: () => createCoreApp({ deploymentDiagnosticsOptions }),
+  });
+
+  const server = http.createServer(listener).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { token: setupToken } = store.issueSetupToken();
+
+  const setupRes = await fetch(`${baseUrl}/api/auth/setup`, {
+    method: 'POST',
+    headers: {
+      origin: PUBLIC_ORIGIN,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      setupToken,
+      username: 'admin',
+      password: 'OwnerStrongPassword!2026',
+      email: 'owner@example.test',
+    }),
+  });
+  assert.equal(setupRes.status, 201);
+
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      origin: PUBLIC_ORIGIN,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: 'admin',
+      password: 'OwnerStrongPassword!2026',
+    }),
+  });
+  assert.equal(loginRes.status, 200);
+  const setCookies = loginRes.headers.getSetCookie();
+  const sessionCookiePair = setCookies
+    .map((entry) => entry.split(';')[0].trim())
+    .find((pair) => pair.startsWith('__Host-yunpanel_session='));
+  assert.ok(sessionCookiePair, 'Expected __Host-yunpanel_session cookie from /api/auth/login');
+
+  const loginPayload = await loginRes.json();
+  const csrfToken = loginPayload.data?.csrfToken;
+  assert.ok(typeof csrfToken === 'string' && csrfToken.length > 10, 'Expected session csrfToken from /api/auth/login');
+
+  return {
+    baseUrl,
+    cookieHeader: sessionCookiePair,
+    csrfToken,
+  };
 }
 
 function baseSettingsPayload(deployment) {
@@ -159,8 +218,10 @@ test('resolveFrontendBuildIdentity validates build-info manifests strictly', asy
     { buildId: 'unknown', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: '2026-11-12T00:00:00Z' },
     { buildId: 'build-1', assetId: 'unknown', commit: 'a1b2c3d4', buildTime: '2026-11-12T00:00:00Z' },
     { buildId: 'build-1', assetId: 'assets-1', commit: 'not-hex!!', buildTime: '2026-11-12T00:00:00Z' },
-    { buildId: 'build-1', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: 'not-a-date' },
+    { buildId: 'build-1', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: 'not-a-date', buildVerified: true },
+    { buildId: 'build-1', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: '2026-11-12T00:00:00Z' },
     { buildId: 'build-1', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: '2026-11-12T00:00:00Z', buildVerified: false },
+    { buildId: 'build-1', assetId: 'assets-1', commit: 'a1b2c3d4', buildTime: '2026-11-12T00:00:00Z', dirty: true, buildVerified: true },
   ]) {
     const resolved = resolveFrontendBuildIdentity(invalid);
     assert.equal(resolved.buildId, 'unknown');
@@ -171,7 +232,9 @@ test('resolveFrontendBuildIdentity validates build-info manifests strictly', asy
   }
 
   const repoDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-diag-'));
+  const outDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-diag-out-'));
   t.after(() => rm(repoDir, { recursive: true, force: true }));
+  t.after(() => rm(outDir, { recursive: true, force: true }));
   execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.email', 'web@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'YunPanel Web'], { cwd: repoDir, stdio: 'pipe' });
@@ -180,7 +243,7 @@ test('resolveFrontendBuildIdentity validates build-info manifests strictly', asy
   execFileSync('git', ['commit', '-m', 'web build commit'], { cwd: repoDir, stdio: 'pipe' });
   const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
 
-  const manifestPath = path.join(repoDir, 'build-info.json');
+  const manifestPath = path.join(outDir, 'build-info.json');
   execFileSync(process.execPath, [
     emitBuildInfoScriptPath,
     '--repo', repoDir,
@@ -196,15 +259,56 @@ test('resolveFrontendBuildIdentity validates build-info manifests strictly', asy
   const rawManifest = await readFile(manifestPath, 'utf8');
   const verified = resolveFrontendBuildIdentity(rawManifest);
   assert.equal(verified.buildVerified, true);
+  assert.equal(verified.dirty, false);
   assert.equal(verified.commit, headCommit);
   assert.equal(verified.buildTime, '2026-11-12T23:00:00.000Z');
   assert.notEqual(verified.buildId, 'unknown');
   assert.notEqual(verified.assetId, 'unknown');
+
+  // Dirty tracked file modification must emit dirty: true / buildVerified: false and resolve to unknown/Doğrulanmadı
+  await writeFile(path.join(repoDir, 'index.js'), 'console.log("dirty");\n', 'utf8');
+  const dirtyManifestPath = path.join(outDir, 'dirty-build-info.json');
+  execFileSync(process.execPath, [
+    emitBuildInfoScriptPath,
+    '--repo', repoDir,
+    '--output', dirtyManifestPath,
+  ], {
+    env: { PATH: process.env.PATH },
+    stdio: 'pipe',
+  });
+  const rawDirtyManifest = await readFile(dirtyManifestPath, 'utf8');
+  const parsedDirtyManifest = JSON.parse(rawDirtyManifest);
+  assert.equal(parsedDirtyManifest.dirty, true);
+  assert.equal(parsedDirtyManifest.buildVerified, false);
+
+  const resolvedDirty = resolveFrontendBuildIdentity(rawDirtyManifest);
+  assert.equal(resolvedDirty.buildVerified, false);
+  assert.equal(resolvedDirty.dirty, true);
+  assert.equal(resolvedDirty.buildId, 'unknown');
+  assert.equal(resolvedDirty.assetId, 'unknown');
+  assert.equal(resolvedDirty.commit, 'unknown');
+
+  const dirtyBackendDeployment = resolveDeploymentDiagnostics({
+    manifestPath: dirtyManifestPath,
+    env: {},
+  });
+  const dirtyUiHtml = renderToStaticMarkup(createElement(SystemSettingsPanels, {
+    diagnostics: true,
+    initialData: baseSettingsPayload(dirtyBackendDeployment),
+    frontendIdentity: parsedDirtyManifest,
+  }));
+  assert.match(
+    dirtyUiHtml,
+    /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-neutral"><span aria-hidden="true"><\/span>Doğrulanmadı<\/span><\/dd>/,
+  );
+  assert.doesNotMatch(dirtyUiHtml, />Senkronize</);
 });
 
-test('fetchDeploymentDiagnostics and compareDeploymentWithServer talk to real createCoreApp HTTP server', async (t) => {
+test('fetchDeploymentDiagnostics and compareDeploymentWithServer work through real SQLite AuthStore session + CSRF HTTP boundary', async (t) => {
   const repoDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-client-http-'));
+  const outDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-client-http-out-'));
   t.after(() => rm(repoDir, { recursive: true, force: true }));
+  t.after(() => rm(outDir, { recursive: true, force: true }));
   execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.email', 'web@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
   execFileSync('git', ['config', 'user.name', 'YunPanel Web'], { cwd: repoDir, stdio: 'pipe' });
@@ -212,7 +316,7 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer talk to real cr
   execFileSync('git', ['add', 'main.jsx'], { cwd: repoDir, stdio: 'pipe' });
   execFileSync('git', ['commit', '-m', 'client http commit'], { cwd: repoDir, stdio: 'pipe' });
 
-  const manifestPath = path.join(repoDir, 'build-info.json');
+  const manifestPath = path.join(outDir, 'build-info.json');
   execFileSync(process.execPath, [
     emitBuildInfoScriptPath,
     '--repo', repoDir,
@@ -223,16 +327,44 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer talk to real cr
   });
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 
-  const server = createOwnerApiServer(createCoreApp({
-    deploymentDiagnosticsOptions: { manifestPath, env: {} },
-  })).listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  const port = server.address().port;
-  t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+  const { baseUrl, cookieHeader, csrfToken } = await startRealAuthenticatedDiagnosticsServer(t, {
+    manifestPath,
+    env: {},
+  });
+
+  // 0. Unauthenticated GET and CSRF-less POST are strictly rejected by createAuthenticatedApi
+  await assert.rejects(
+    () => fetchDeploymentDiagnostics({
+      endpoint: `${baseUrl}/api/system/diagnostics/version`,
+    }),
+    /status 401/,
+  );
+
+  await assert.rejects(
+    () => compareDeploymentWithServer({
+      version: FRONTEND_VERSION,
+      schemaVersion: FRONTEND_SCHEMA_VERSION,
+      buildId: manifest.buildId,
+      assetId: manifest.assetId,
+    }, {
+      endpoint: `${baseUrl}/api/system/diagnostics/version/compare`,
+      headers: {
+        cookie: cookieHeader,
+        origin: PUBLIC_ORIGIN,
+      },
+    }),
+    /status 403/,
+  );
+
+  const authHeaders = {
+    cookie: cookieHeader,
+    origin: PUBLIC_ORIGIN,
+  };
 
   // 1. Default uninjected client sends unknown frontend identity -> comparison must be UNKNOWN
   const uninjectedDiag = await fetchDeploymentDiagnostics({
-    endpoint: `http://127.0.0.1:${port}/api/system/diagnostics/version`,
+    endpoint: `${baseUrl}/api/system/diagnostics/version`,
+    headers: authHeaders,
   });
   assert.equal(uninjectedDiag.commit, manifest.commit);
   assert.equal(uninjectedDiag.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
@@ -240,20 +372,23 @@ test('fetchDeploymentDiagnostics and compareDeploymentWithServer talk to real cr
 
   // 2. Verified matching frontend identity -> SYNCHRONIZED
   const matchingDiag = await fetchDeploymentDiagnostics({
-    endpoint: `http://127.0.0.1:${port}/api/system/diagnostics/version`,
+    endpoint: `${baseUrl}/api/system/diagnostics/version`,
     frontendIdentity: manifest,
+    headers: authHeaders,
   });
   assert.equal(matchingDiag.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
   assert.equal(matchingDiag.comparison.compatible, true);
 
-  // 3. POST compareDeploymentWithServer with stale assetId -> STALE_CACHE
+  // 3. POST compareDeploymentWithServer with real session cookie + CSRF token and stale assetId -> STALE_CACHE
   const comparedStale = await compareDeploymentWithServer({
     version: FRONTEND_VERSION,
     schemaVersion: FRONTEND_SCHEMA_VERSION,
     buildId: manifest.buildId,
     assetId: 'assets-stale-cached-bundle',
   }, {
-    endpoint: `http://127.0.0.1:${port}/api/system/diagnostics/version/compare`,
+    endpoint: `${baseUrl}/api/system/diagnostics/version/compare`,
+    csrfToken,
+    headers: authHeaders,
   });
   assert.equal(comparedStale.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
   assert.equal(comparedStale.comparison.staleCache, true);

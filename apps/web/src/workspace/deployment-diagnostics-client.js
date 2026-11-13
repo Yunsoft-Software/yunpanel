@@ -39,7 +39,13 @@ export function resolveFrontendBuildIdentity(rawInfo) {
     }
   }
 
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || parsed.buildVerified === false) {
+  if (
+    !parsed
+    || typeof parsed !== 'object'
+    || Array.isArray(parsed)
+    || parsed.dirty === true
+    || parsed.buildVerified !== true
+  ) {
     return {
       version: FRONTEND_VERSION,
       schemaVersion: FRONTEND_SCHEMA_VERSION,
@@ -47,6 +53,7 @@ export function resolveFrontendBuildIdentity(rawInfo) {
       assetId: 'unknown',
       commit: 'unknown',
       buildTime: null,
+      dirty: Boolean(parsed?.dirty),
       buildVerified: false,
     };
   }
@@ -64,6 +71,7 @@ export function resolveFrontendBuildIdentity(rawInfo) {
       assetId: 'unknown',
       commit: 'unknown',
       buildTime: null,
+      dirty: false,
       buildVerified: false,
     };
   }
@@ -79,6 +87,7 @@ export function resolveFrontendBuildIdentity(rawInfo) {
     assetId,
     commit,
     buildTime,
+    dirty: false,
     buildVerified: true,
   };
 }
@@ -99,6 +108,7 @@ export async function fetchDeploymentDiagnostics({
   endpoint = '/api/system/diagnostics/version',
   includeFrontendComparison = true,
   frontendIdentity = null,
+  headers = {},
   fetchFn = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : globalThis.fetch,
 } = {}) {
   const baseOrigin = (typeof window !== 'undefined' && window.location?.origin)
@@ -115,7 +125,8 @@ export async function fetchDeploymentDiagnostics({
     url.searchParams.set('frontendSchemaVersion', String(identity.schemaVersion));
   }
   const res = await fetchFn(url.toString(), {
-    headers: { Accept: 'application/json' },
+    credentials: 'same-origin',
+    headers: { Accept: 'application/json', ...headers },
   });
   if (!res.ok) {
     throw new Error(`Diagnostics request failed with status ${res.status}`);
@@ -126,14 +137,22 @@ export async function fetchDeploymentDiagnostics({
 
 export async function compareDeploymentWithServer(frontendInfo, {
   endpoint = '/api/system/diagnostics/version/compare',
+  csrfToken = null,
+  headers = {},
   fetchFn = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : globalThis.fetch,
 } = {}) {
+  const requestHeaders = {
+    'Content-Type': 'application/json',
+    Accept: 'application/json',
+    ...headers,
+  };
+  if (csrfToken) {
+    requestHeaders['x-csrf-token'] = csrfToken;
+  }
   const res = await fetchFn(endpoint, {
     method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: 'application/json',
-    },
+    credentials: 'same-origin',
+    headers: requestHeaders,
     body: JSON.stringify(frontendInfo),
   });
   if (!res.ok) {

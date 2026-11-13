@@ -8,6 +8,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import express from 'express';
+import { createAuthStore } from '../src/auth-store.js';
+import { createAuthenticatedApi } from '../src/auth-http.js';
 import {
   API_VERSION,
   SCHEMA_VERSION,
@@ -26,6 +28,83 @@ import { createApp } from '../src/app.js';
 
 const emitBuildInfoScriptPath = fileURLToPath(new URL('../../../scripts/emit-build-info.mjs', import.meta.url));
 const buildDebScriptPath = fileURLToPath(new URL('../../../scripts/build-deb.sh', import.meta.url));
+
+async function startRealAuthenticatedCoreServer(t, {
+  deploymentDiagnosticsOptions,
+  publicOrigin = 'https://panel.yunpanel.internal',
+} = {}) {
+  const authDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-diag-auth-'));
+  const store = createAuthStore({
+    filePath: path.join(authDir, 'auth.sqlite'),
+    masterKey: 'b'.repeat(64),
+  });
+  t.after(async () => {
+    store.close();
+    await rm(authDir, { recursive: true, force: true });
+  });
+
+  const listener = createAuthenticatedApi({
+    store,
+    publicOrigin,
+    ownerMfaRequired: false,
+    createHandler: () => createCoreApp({ deploymentDiagnosticsOptions }),
+  });
+
+  const server = http.createServer(listener).listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  t.after(() => new Promise((resolve) => {
+    server.close(resolve);
+    server.closeAllConnections();
+  }));
+
+  const baseUrl = `http://127.0.0.1:${server.address().port}`;
+  const { token: setupToken } = store.issueSetupToken();
+
+  const setupRes = await fetch(`${baseUrl}/api/auth/setup`, {
+    method: 'POST',
+    headers: {
+      origin: publicOrigin,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      setupToken,
+      username: 'admin',
+      password: 'OwnerStrongPassword!2026',
+      email: 'owner@yunpanel.internal',
+    }),
+  });
+  assert.equal(setupRes.status, 201);
+
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: {
+      origin: publicOrigin,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify({
+      username: 'admin',
+      password: 'OwnerStrongPassword!2026',
+    }),
+  });
+  assert.equal(loginRes.status, 200);
+
+  const cookieHeader = loginRes.headers
+    .getSetCookie()
+    .map((entry) => entry.split(';')[0].trim())
+    .find((pair) => pair.startsWith('__Host-yunpanel_session='));
+  assert.ok(cookieHeader, 'Expected __Host-yunpanel_session cookie from /api/auth/login');
+
+  const loginJson = await loginRes.json();
+  const csrfToken = loginJson.data?.csrfToken;
+  assert.ok(typeof csrfToken === 'string' && csrfToken.length > 10, 'Expected session csrfToken');
+
+  return {
+    baseUrl,
+    publicOrigin,
+    cookieHeader,
+    csrfToken,
+  };
+}
 
 function createMockAuthApp({ userRole = 'owner', userStatus = 'active', permissions = null } = {}) {
   const app = express();
@@ -115,7 +194,7 @@ test('AC1: Backend build/commit ID, unverified defaults, precedence, schema vers
     assert.equal(serialized.includes('2026-10-01T03:00:00.000Z'), false);
   });
 
-  await t.test('invalid env values and missing/corrupt manifest fail safe to unknown/unverified', async () => {
+  await t.test('invalid env values and corrupt/dirty/unverified manifests fail safe and block env fallback', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-diag-corrupt-'));
     t.after(() => rm(tempDir, { recursive: true, force: true }));
     const corruptManifestPath = path.join(tempDir, 'corrupt-build-info.json');
@@ -136,12 +215,61 @@ test('AC1: Backend build/commit ID, unverified defaults, precedence, schema vers
     assert.equal(diag.commit, 'unknown');
     assert.equal(diag.assetId, 'unknown');
     assert.equal(diag.buildTime, null);
+    assert.equal(diag.manifestInvalid, true);
     assert.equal(diag.buildVerified, false);
     assert.equal(diag.sourceInfo.sourceCommit, null);
     assert.equal(diag.sourceInfo.sourceMatchesDeployed, false);
+
+    // Corrupt, dirty, or unverified manifest on disk MUST block valid env fallback
+    const validEnv = {
+      YUNPANEL_BUILD_ID: 'build-env-valid',
+      YUNPANEL_ASSET_ID: 'assets-env-valid',
+      YUNPANEL_COMMIT_HASH: '4444444444444444444444444444444444444444',
+      YUNPANEL_BUILD_TIME: '2026-11-12T10:00:00.000Z',
+      YUNPANEL_SOURCE_COMMIT: '4444444444444444444444444444444444444444',
+    };
+
+    const dirtyManifestPath = path.join(tempDir, 'dirty-build-info.json');
+    await writeFile(dirtyManifestPath, JSON.stringify({
+      version: API_VERSION,
+      schemaVersion: SCHEMA_VERSION,
+      buildId: 'build-dirty-manifest',
+      assetId: 'assets-dirty-manifest',
+      commit: '4444444444444444444444444444444444444444',
+      buildTime: '2026-11-12T10:00:00.000Z',
+      dirty: true,
+      buildVerified: false,
+    }), 'utf8');
+
+    const unverifiedManifestPath = path.join(tempDir, 'unverified-build-info.json');
+    await writeFile(unverifiedManifestPath, JSON.stringify({
+      version: API_VERSION,
+      schemaVersion: SCHEMA_VERSION,
+      buildId: 'build-unverified-manifest',
+      assetId: 'assets-unverified-manifest',
+      commit: '4444444444444444444444444444444444444444',
+      buildTime: '2026-11-12T10:00:00.000Z',
+      dirty: false,
+      buildVerified: false,
+    }), 'utf8');
+
+    for (const invalidPath of [corruptManifestPath, dirtyManifestPath, unverifiedManifestPath]) {
+      const blocked = resolveDeploymentDiagnostics({
+        manifestPath: invalidPath,
+        env: validEnv,
+      });
+      assert.equal(blocked.manifestInvalid, true);
+      assert.equal(blocked.buildVerified, false);
+      assert.equal(blocked.buildId, 'unknown');
+      assert.equal(blocked.commit, 'unknown');
+      assert.equal(blocked.evidence.verified, false);
+      assert.notEqual(blocked.evidence.status, 'synchronized');
+      assert.equal(blocked.sourceInfo.sourceMatchesDeployed, false);
+      assert.doesNotMatch(blocked.evidence.summary, /RUNTIME SYNCHRONIZED/);
+    }
   });
 
-  await t.test('precedence follows options -> env -> manifest file', async () => {
+  await t.test('authoritative manifest precedence: options -> manifest (env never overwrites manifest; env applies only when manifest is absent)', async () => {
     const tempDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-diag-prec-'));
     t.after(() => rm(tempDir, { recursive: true, force: true }));
     const manifestPath = path.join(tempDir, 'build-info.json');
@@ -152,19 +280,23 @@ test('AC1: Backend build/commit ID, unverified defaults, precedence, schema vers
       assetId: 'assets-from-manifest',
       commit: '1111111111111111111111111111111111111111',
       buildTime: '2026-11-10T10:00:00.000Z',
+      dirty: false,
       buildVerified: true,
     }), 'utf8');
 
+    // 1. Verified manifest without env
     const fromManifest = resolveDeploymentDiagnostics({ manifestPath, env: {} });
     assert.equal(fromManifest.buildId, 'build-from-manifest');
     assert.equal(fromManifest.assetId, 'assets-from-manifest');
     assert.equal(fromManifest.commit, '1111111111111111111111111111111111111111');
+    assert.equal(fromManifest.metadataConflict, false);
     assert.equal(fromManifest.buildVerified, true);
     assert.equal(fromManifest.sourceInfo.sourceCommit, null);
     assert.equal(fromManifest.sourceInfo.sourceMatchesDeployed, false);
 
-    const fromEnv = resolveDeploymentDiagnostics({
-      manifestPath,
+    // 2. When manifest is absent, explicit env is used
+    const fromEnvWithoutManifest = resolveDeploymentDiagnostics({
+      manifestPath: path.join(tempDir, 'missing-build-info.json'),
       env: {
         YUNPANEL_BUILD_ID: 'build-from-env',
         YUNPANEL_ASSET_ID: 'assets-from-env',
@@ -172,11 +304,34 @@ test('AC1: Backend build/commit ID, unverified defaults, precedence, schema vers
         YUNPANEL_BUILD_TIME: '2026-11-11T10:00:00.000Z',
       },
     });
-    assert.equal(fromEnv.buildId, 'build-from-env');
-    assert.equal(fromEnv.assetId, 'assets-from-env');
-    assert.equal(fromEnv.commit, '2222222222222222222222222222222222222222');
-    assert.equal(fromEnv.buildVerified, true);
+    assert.equal(fromEnvWithoutManifest.buildId, 'build-from-env');
+    assert.equal(fromEnvWithoutManifest.assetId, 'assets-from-env');
+    assert.equal(fromEnvWithoutManifest.commit, '2222222222222222222222222222222222222222');
+    assert.equal(fromEnvWithoutManifest.buildVerified, true);
 
+    // 3. When verified manifest exists, conflicting env NEVER overwrites manifest and triggers metadataConflict
+    const conflictingEnv = resolveDeploymentDiagnostics({
+      manifestPath,
+      env: {
+        YUNPANEL_BUILD_ID: 'build-from-env',
+        YUNPANEL_ASSET_ID: 'assets-from-env',
+        YUNPANEL_COMMIT_HASH: '2222222222222222222222222222222222222222',
+        YUNPANEL_BUILD_TIME: '2026-11-11T10:00:00.000Z',
+        YUNPANEL_SOURCE_COMMIT: '1111111111111111111111111111111111111111',
+      },
+    });
+    assert.equal(conflictingEnv.buildId, 'build-from-manifest');
+    assert.equal(conflictingEnv.assetId, 'assets-from-manifest');
+    assert.equal(conflictingEnv.commit, '1111111111111111111111111111111111111111');
+    assert.equal(conflictingEnv.buildTime, '2026-11-10T10:00:00.000Z');
+    assert.equal(conflictingEnv.metadataConflict, true);
+    assert.equal(conflictingEnv.buildVerified, false);
+    assert.equal(conflictingEnv.evidence.verified, false);
+    assert.equal(conflictingEnv.evidence.status, 'unverified');
+    assert.equal(conflictingEnv.sourceInfo.sourceMatchesDeployed, false);
+    assert.ok(conflictingEnv.evidence.warnings.some((w) => w.includes('conflicts with immutable package build-info.json')));
+
+    // 4. Direct function options still take explicit programmatic precedence
     const fromOptions = resolveDeploymentDiagnostics({
       manifestPath,
       env: {
@@ -191,6 +346,7 @@ test('AC1: Backend build/commit ID, unverified defaults, precedence, schema vers
     assert.equal(fromOptions.buildId, 'build-from-options');
     assert.equal(fromOptions.assetId, 'assets-from-options');
     assert.equal(fromOptions.commit, '3333333333333333333333333333333333333333');
+    assert.equal(fromOptions.metadataConflict, false);
     assert.equal(fromOptions.buildVerified, true);
   });
 
@@ -708,8 +864,9 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     execFileSync('git', ['config', 'user.email', 'test@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
     execFileSync('git', ['config', 'user.name', 'YunPanel Test'], { cwd: repoDir, stdio: 'pipe' });
 
+    await writeFile(path.join(repoDir, '.gitignore'), 'dist/\npkg/\n', 'utf8');
     await writeFile(path.join(repoDir, 'file.txt'), 'commit-1\n', 'utf8');
-    execFileSync('git', ['add', 'file.txt'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['add', '.gitignore', 'file.txt'], { cwd: repoDir, stdio: 'pipe' });
     execFileSync('git', ['commit', '-m', 'first commit'], { cwd: repoDir, stdio: 'pipe' });
 
     const webDistManifestPath = path.join(repoDir, 'dist', 'build-info.json');
@@ -743,9 +900,350 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     );
   });
 
-  await t.test('real emit-build-info.mjs manifest drives createCoreApp HTTP endpoints cleanly', async () => {
+  await t.test('T901 review regressions: dirty git tree marks buildVerified:false/dirty:true, release mode rejects dirty state, and --verify-web-dist rejects env overrides', async (subT) => {
+    const workRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t901-probe-'));
+    subT.after(() => rm(workRoot, { recursive: true, force: true }));
+
+    const repoDir = path.join(workRoot, 'repo');
+    const outDir = path.join(workRoot, 'out');
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'probe@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'YunPanel Probe'], { cwd: repoDir, stdio: 'pipe' });
+
+    const trackedFile = path.join(repoDir, 'app.js');
+    await writeFile(trackedFile, 'export const version = "A";\n', 'utf8');
+    execFileSync('git', ['add', 'app.js'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'commit A'], { cwd: repoDir, stdio: 'pipe' });
+    const commitA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+
+    // 1. Clean web manifest generation with explicit build identity
+    const cleanWebManifestPath = path.join(outDir, 'clean-web-build-info.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--output', cleanWebManifestPath,
+    ], {
+      env: {
+        PATH: process.env.PATH,
+        YUNPANEL_BUILD_ID: 'build-web-A',
+        YUNPANEL_ASSET_ID: 'assets-web-A',
+        YUNPANEL_BUILD_TIME: '2026-11-13T00:00:00.000Z',
+      },
+      stdio: 'pipe',
+    });
+    const cleanWebManifest = JSON.parse(await readFile(cleanWebManifestPath, 'utf8'));
+    assert.equal(cleanWebManifest.commit, commitA);
+    assert.equal(cleanWebManifest.version, API_VERSION);
+    assert.equal(cleanWebManifest.buildId, 'build-web-A');
+    assert.equal(cleanWebManifest.assetId, 'assets-web-A');
+    assert.equal(cleanWebManifest.buildTime, '2026-11-13T00:00:00.000Z');
+    assert.equal(cleanWebManifest.dirty, false);
+    assert.equal(cleanWebManifest.buildVerified, true);
+
+    // 2. --verify-web-dist WITHOUT env overrides preserves exact web manifest identity
+    const exactPkgManifestPath = path.join(outDir, 'exact-pkg-build-info.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--package-version', '0.3.0-2026111301',
+      '--verify-web-dist', cleanWebManifestPath,
+      '--output', exactPkgManifestPath,
+    ], {
+      env: { PATH: process.env.PATH },
+      stdio: 'pipe',
+    });
+    const exactPkgManifest = JSON.parse(await readFile(exactPkgManifestPath, 'utf8'));
+    assert.equal(exactPkgManifest.version, cleanWebManifest.version);
+    assert.equal(exactPkgManifest.commit, cleanWebManifest.commit);
+    assert.equal(exactPkgManifest.buildId, cleanWebManifest.buildId);
+    assert.equal(exactPkgManifest.assetId, cleanWebManifest.assetId);
+    assert.equal(exactPkgManifest.buildTime, cleanWebManifest.buildTime);
+    assert.equal(exactPkgManifest.dirty, false);
+    assert.equal(exactPkgManifest.buildVerified, true);
+    assert.equal(exactPkgManifest.packageVersion, '0.3.0-2026111301');
+
+    // 3. --verify-web-dist WITH mismatched env overrides fails closed (exit !== 0)
+    for (const mismatchedEnv of [
+      { YUNPANEL_BUILD_ID: 'build-package-B' },
+      { YUNPANEL_ASSET_ID: 'assets-package-B' },
+      { YUNPANEL_BUILD_TIME: '2026-11-13T01:00:00.000Z' },
+      { YUNPANEL_VERSION: '0.3.1' },
+      { YUNPANEL_COMMIT_HASH: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
+      { YUNPANEL_BUILD_COMMIT: 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef' },
+    ]) {
+      assert.throws(
+        () => execFileSync(process.execPath, [
+          emitBuildInfoScriptPath,
+          '--repo', repoDir,
+          '--verify-web-dist', cleanWebManifestPath,
+          '--output', path.join(outDir, 'rejected-override.json'),
+        ], {
+          env: { PATH: process.env.PATH, ...mismatchedEnv },
+          stdio: 'pipe',
+        }),
+        (err) => err.status !== 0,
+        `Expected --verify-web-dist to reject mismatched env ${JSON.stringify(mismatchedEnv)}`,
+      );
+    }
+
+    // 4. Modify tracked app.js -> git status --porcelain reports " M app.js"
+    await writeFile(trackedFile, 'export const version = "B-dirty";\n', 'utf8');
+    const porcelain = execFileSync('git', ['status', '--porcelain', '--untracked-files=normal'], {
+      cwd: repoDir,
+      encoding: 'utf8',
+    }).trim();
+    assert.match(porcelain, /^M\s+app\.js$/m);
+
+    // 4a. Default WIP mode succeeds (does not break local vite build) but sets dirty: true & buildVerified: false
+    const dirtyWipManifestPath = path.join(outDir, 'dirty-wip-build-info.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--output', dirtyWipManifestPath,
+    ], {
+      env: { PATH: process.env.PATH },
+      stdio: 'pipe',
+    });
+    const dirtyWipManifest = JSON.parse(await readFile(dirtyWipManifestPath, 'utf8'));
+    assert.equal(dirtyWipManifest.commit, commitA);
+    assert.equal(dirtyWipManifest.dirty, true);
+    assert.equal(dirtyWipManifest.buildVerified, false);
+
+    // 4b. Release mode (--require-clean and --verify-web-dist) rejects dirty repo and dirty manifest fail-closed
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', repoDir,
+        '--require-clean',
+        '--output', path.join(outDir, 'rejected-dirty-release.json'),
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0,
+    );
+
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', repoDir,
+        '--verify-web-dist', cleanWebManifestPath,
+        '--output', path.join(outDir, 'rejected-dirty-tree-pkg.json'),
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0,
+    );
+
+    // Restore clean working tree, then verify --verify-web-dist STILL rejects the dirty web manifest
+    execFileSync('git', ['checkout', '--', 'app.js'], { cwd: repoDir, stdio: 'pipe' });
+    assert.throws(
+      () => execFileSync(process.execPath, [
+        emitBuildInfoScriptPath,
+        '--repo', repoDir,
+        '--verify-web-dist', dirtyWipManifestPath,
+        '--output', path.join(outDir, 'rejected-dirty-web-manifest-pkg.json'),
+      ], {
+        env: { PATH: process.env.PATH },
+        stdio: 'pipe',
+      }),
+      (err) => err.status !== 0,
+    );
+
+    // 4c. Backend resolver & real AuthStore HTTP server treat dirty/unverified manifest as unverified / UNKNOWN (never SYNCHRONIZED)
+    const dirtyDiag = resolveDeploymentDiagnostics({
+      manifestPath: dirtyWipManifestPath,
+      env: {},
+    });
+    assert.equal(dirtyDiag.dirty, true);
+    assert.equal(dirtyDiag.buildVerified, false);
+    assert.equal(dirtyDiag.buildId, 'unknown');
+    assert.equal(dirtyDiag.assetId, 'unknown');
+    assert.equal(dirtyDiag.commit, 'unknown');
+    assert.equal(dirtyDiag.sourceInfo.dirty, true);
+    assert.equal(dirtyDiag.sourceInfo.sourceMatchesDeployed, false);
+
+    const dirtyAuth = await startRealAuthenticatedCoreServer(subT, {
+      deploymentDiagnosticsOptions: {
+        manifestPath: dirtyWipManifestPath,
+        env: {},
+      },
+      publicOrigin: origin,
+    });
+
+    const dirtyHttpRes = await fetch(
+      `${dirtyAuth.baseUrl}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=${dirtyWipManifest.buildId}&frontendAssetId=${dirtyWipManifest.assetId}`,
+      {
+        headers: {
+          origin,
+          cookie: dirtyAuth.cookieHeader,
+        },
+      },
+    );
+    assert.equal(dirtyHttpRes.status, 200);
+    const dirtyHttpJson = await dirtyHttpRes.json();
+    assert.equal(dirtyHttpJson.data.buildVerified, false);
+    assert.equal(dirtyHttpJson.data.dirty, true);
+    assert.equal(dirtyHttpJson.data.sourceInfo.dirty, true);
+    assert.equal(dirtyHttpJson.data.sourceInfo.sourceMatchesDeployed, false);
+    assert.equal(dirtyHttpJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(dirtyHttpJson.data.comparison.compatible, false);
+  });
+
+  await t.test('T901 runtime env conflict regression: stale runtime env never overwrites immutable package build-info.json or faked SYNCHRONIZED state', async (subT) => {
+    const workRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t901-env-probe-'));
+    subT.after(() => rm(workRoot, { recursive: true, force: true }));
+
+    const repoDir = path.join(workRoot, 'repo');
+    const outDir = path.join(workRoot, 'out');
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'envprobe@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'YunPanel Env Probe'], { cwd: repoDir, stdio: 'pipe' });
+
+    await writeFile(path.join(repoDir, 'server.js'), 'export const release = 1;\n', 'utf8');
+    execFileSync('git', ['add', 'server.js'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'verified package commit'], { cwd: repoDir, stdio: 'pipe' });
+    const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+
+    const packageManifestPath = path.join(outDir, 'build-info.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--require-clean',
+      '--package-version', '0.3.0-2026111302',
+      '--output', packageManifestPath,
+    ], {
+      env: { PATH: process.env.PATH },
+      stdio: 'pipe',
+    });
+    const pkgManifest = JSON.parse(await readFile(packageManifestPath, 'utf8'));
+    assert.equal(pkgManifest.commit, headCommit);
+    assert.equal(pkgManifest.buildVerified, true);
+    assert.equal(pkgManifest.dirty, false);
+
+    // Exact t901-runtime-env-probe-01 scenario: stale env + matching stale YUNPANEL_SOURCE_COMMIT
+    const staleCommit = '1111111111111111111111111111111111111111';
+    const staleEnv = {
+      YUNPANEL_BUILD_ID: 'build-stale-20261001',
+      YUNPANEL_ASSET_ID: 'assets-stale-20261001',
+      YUNPANEL_COMMIT_HASH: staleCommit,
+      YUNPANEL_BUILD_TIME: '2026-10-01T03:00:00.000Z',
+      YUNPANEL_SOURCE_COMMIT: staleCommit,
+    };
+
+    const diag = resolveDeploymentDiagnostics({
+      manifestPath: packageManifestPath,
+      env: staleEnv,
+    });
+
+    // Authoritative package manifest fields MUST be retained (never overwritten by stale env)
+    assert.equal(diag.commit, headCommit);
+    assert.equal(diag.buildId, pkgManifest.buildId);
+    assert.equal(diag.assetId, pkgManifest.assetId);
+    assert.equal(diag.buildTime, pkgManifest.buildTime);
+
+    // Conflict MUST mark provenance unverified and block synchronization
+    assert.equal(diag.metadataConflict, true);
+    assert.equal(diag.buildVerified, false);
+    assert.equal(diag.evidence.verified, false);
+    assert.equal(diag.evidence.diverged, true);
+    assert.equal(diag.evidence.status, 'diverged');
+    assert.equal(diag.sourceInfo.sourceMatchesDeployed, false);
+    assert.ok(diag.evidence.warnings.some((w) => w.includes('conflicts with immutable package build-info.json')));
+    assert.ok(diag.sourceInfo.warning && diag.sourceInfo.warning.includes('conflicts with immutable package build-info.json'));
+    assert.doesNotMatch(diag.evidence.summary, /RUNTIME SYNCHRONIZED/);
+
+    // Same-commit YUNPANEL_SOURCE_COMMIT with conflicting stale YUNPANEL_BUILD_ID -> status: 'unverified' (never 'synchronized')
+    const sameSourceStaleBuildDiag = resolveDeploymentDiagnostics({
+      manifestPath: packageManifestPath,
+      env: {
+        YUNPANEL_BUILD_ID: 'build-stale-20261001',
+        YUNPANEL_SOURCE_COMMIT: headCommit,
+      },
+    });
+    assert.equal(sameSourceStaleBuildDiag.commit, headCommit);
+    assert.equal(sameSourceStaleBuildDiag.buildId, pkgManifest.buildId);
+    assert.equal(sameSourceStaleBuildDiag.metadataConflict, true);
+    assert.equal(sameSourceStaleBuildDiag.buildVerified, false);
+    assert.equal(sameSourceStaleBuildDiag.evidence.verified, false);
+    assert.equal(sameSourceStaleBuildDiag.evidence.status, 'unverified');
+    assert.equal(sameSourceStaleBuildDiag.sourceInfo.sourceMatchesDeployed, false);
+    assert.doesNotMatch(sameSourceStaleBuildDiag.evidence.summary, /RUNTIME SYNCHRONIZED/);
+
+    // Real SQLite AuthStore + session cookie + CSRF HTTP verification under stale env conflict
+    const authServer = await startRealAuthenticatedCoreServer(subT, {
+      deploymentDiagnosticsOptions: {
+        manifestPath: packageManifestPath,
+        env: staleEnv,
+      },
+      publicOrigin: origin,
+    });
+
+    const query = new URLSearchParams({
+      frontendVersion: API_VERSION,
+      frontendSchemaVersion: String(SCHEMA_VERSION),
+      frontendBuildId: pkgManifest.buildId,
+      frontendAssetId: pkgManifest.assetId,
+    });
+    const getRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version?${query}`, {
+      headers: {
+        origin,
+        cookie: authServer.cookieHeader,
+      },
+    });
+    assert.equal(getRes.status, 200);
+    const getJson = await getRes.json();
+    assert.equal(getJson.data.commit, headCommit);
+    assert.equal(getJson.data.buildId, pkgManifest.buildId);
+    assert.equal(getJson.data.metadataConflict, true);
+    assert.equal(getJson.data.buildVerified, false);
+    assert.equal(getJson.data.sourceInfo.sourceMatchesDeployed, false);
+    assert.equal(getJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(getJson.data.comparison.compatible, false);
+
+    // POST without CSRF token is rejected 403
+    const noCsrfRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: {
+        origin,
+        cookie: authServer.cookieHeader,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        version: API_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        buildId: pkgManifest.buildId,
+        assetId: pkgManifest.assetId,
+      }),
+    });
+    assert.equal(noCsrfRes.status, 403);
+
+    // POST with valid CSRF token returns UNKNOWN due to backend metadataConflict
+    const compareRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: {
+        origin,
+        cookie: authServer.cookieHeader,
+        'x-csrf-token': authServer.csrfToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        version: API_VERSION,
+        schemaVersion: SCHEMA_VERSION,
+        buildId: pkgManifest.buildId,
+        assetId: pkgManifest.assetId,
+      }),
+    });
+    assert.equal(compareRes.status, 200);
+    const compareJson = await compareRes.json();
+    assert.equal(compareJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(compareJson.data.comparison.compatible, false);
+  });
+
+  await t.test('real emit-build-info.mjs manifest drives createAuthenticatedApi + createCoreApp HTTP endpoints cleanly', async (subT) => {
     const repoDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-http-git-'));
-    t.after(() => rm(repoDir, { recursive: true, force: true }));
+    subT.after(() => rm(repoDir, { recursive: true, force: true }));
 
     execFileSync('git', ['init'], { cwd: repoDir, stdio: 'pipe' });
     execFileSync('git', ['config', 'user.email', 'test@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
@@ -755,8 +1253,10 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     execFileSync('git', ['commit', '-m', 'release commit'], { cwd: repoDir, stdio: 'pipe' });
 
     const headCommit = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
-    const webDistManifestPath = path.join(repoDir, 'web-dist', 'build-info.json');
-    const packageManifestPath = path.join(repoDir, 'usr', 'lib', 'yunpanel', 'build-info.json');
+    const artifactsDir = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-http-artifacts-'));
+    subT.after(() => rm(artifactsDir, { recursive: true, force: true }));
+    const webDistManifestPath = path.join(artifactsDir, 'web-dist', 'build-info.json');
+    const packageManifestPath = path.join(artifactsDir, 'usr', 'lib', 'yunpanel', 'build-info.json');
 
     execFileSync(process.execPath, [
       emitBuildInfoScriptPath,
@@ -774,6 +1274,7 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
       emitBuildInfoScriptPath,
       '--repo', repoDir,
       '--package-version', '0.3.0-2026111201',
+      '--require-clean',
       '--verify-web-dist', webDistManifestPath,
       '--output', packageManifestPath,
     ], {
@@ -793,19 +1294,23 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal(pkgManifest.buildTime, '2026-11-12T22:00:00.000Z');
     assert.equal(pkgManifest.buildVerified, true);
 
-    const core = createCoreApp({
+    const authServer = await startRealAuthenticatedCoreServer(subT, {
       deploymentDiagnosticsOptions: {
         manifestPath: packageManifestPath,
         env: {},
       },
+      publicOrigin: origin,
     });
-    const app = createMockAuthApp({ userRole: 'owner' });
-    app.use(core);
-
-    const server = http.createServer(app).listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const port = server.address().port;
-    t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
+    const authGetHeaders = {
+      origin,
+      cookie: authServer.cookieHeader,
+    };
+    const authPostHeaders = {
+      origin,
+      cookie: authServer.cookieHeader,
+      'x-csrf-token': authServer.csrfToken,
+      'content-type': 'application/json',
+    };
 
     // 1. Matching verified frontend -> SYNCHRONIZED
     const syncQuery = new URLSearchParams({
@@ -814,8 +1319,8 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
       frontendBuildId: webManifest.buildId,
       frontendAssetId: webManifest.assetId,
     });
-    const syncRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version?${syncQuery}`, {
-      headers: { origin },
+    const syncRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version?${syncQuery}`, {
+      headers: authGetHeaders,
     });
     assert.equal(syncRes.status, 200);
     const syncJson = await syncRes.json();
@@ -830,8 +1335,8 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
 
     // 2. Missing / unknown frontend buildId & assetId -> UNKNOWN (never SYNCHRONIZED)
     const unknownRes = await fetch(
-      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
-      { headers: { origin } },
+      `${authServer.baseUrl}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
+      { headers: authGetHeaders },
     );
     assert.equal(unknownRes.status, 200);
     const unknownJson = await unknownRes.json();
@@ -840,8 +1345,8 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
 
     // 3. Stale frontend assetId -> STALE_CACHE
     const staleRes = await fetch(
-      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendAssetId=assets-old-cache`,
-      { headers: { origin } },
+      `${authServer.baseUrl}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendAssetId=assets-old-cache`,
+      { headers: authGetHeaders },
     );
     assert.equal(staleRes.status, 200);
     const staleJson = await staleRes.json();
@@ -849,9 +1354,9 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal(staleJson.data.comparison.staleCache, true);
 
     // 4. POST /api/system/diagnostics/version/compare with verified vs unknown vs stale
-    const postSyncRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
+    const postSyncRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version/compare`, {
       method: 'POST',
-      headers: { origin, 'content-type': 'application/json' },
+      headers: authPostHeaders,
       body: JSON.stringify({
         version: API_VERSION,
         schemaVersion: SCHEMA_VERSION,
@@ -862,9 +1367,9 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal(postSyncRes.status, 200);
     assert.equal((await postSyncRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
 
-    const postUnknownRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
+    const postUnknownRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version/compare`, {
       method: 'POST',
-      headers: { origin, 'content-type': 'application/json' },
+      headers: authPostHeaders,
       body: JSON.stringify({
         version: API_VERSION,
         schemaVersion: SCHEMA_VERSION,
@@ -876,31 +1381,30 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal((await postUnknownRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
 
     // 5. Alias endpoint
-    const aliasRes = await fetch(`http://127.0.0.1:${port}/api/diagnostics/deployment`, {
-      headers: { origin },
+    const aliasRes = await fetch(`${authServer.baseUrl}/api/diagnostics/deployment`, {
+      headers: authGetHeaders,
     });
     assert.equal(aliasRes.status, 200);
     assert.equal((await aliasRes.json()).data.commit, headCommit);
   });
 
-  await t.test('createCoreApp without build metadata returns unknown build identity and UNKNOWN comparison', async () => {
-    const core = createCoreApp({
+  await t.test('createCoreApp without build metadata returns unknown build identity and UNKNOWN comparison through real AuthStore', async (subT) => {
+    const authServer = await startRealAuthenticatedCoreServer(subT, {
       deploymentDiagnosticsOptions: {
         manifestPath: null,
         env: {},
       },
+      publicOrigin: origin,
     });
-    const app = createMockAuthApp({ userRole: 'owner' });
-    app.use(core);
-
-    const server = http.createServer(app).listen(0, '127.0.0.1');
-    await once(server, 'listening');
-    const port = server.address().port;
-    t.after(() => new Promise((resolve) => { server.close(resolve); server.closeAllConnections(); }));
 
     const res = await fetch(
-      `http://127.0.0.1:${port}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
-      { headers: { origin } },
+      `${authServer.baseUrl}/api/system/diagnostics/version?frontendVersion=${API_VERSION}&frontendSchemaVersion=${SCHEMA_VERSION}&frontendBuildId=unknown&frontendAssetId=unknown`,
+      {
+        headers: {
+          origin,
+          cookie: authServer.cookieHeader,
+        },
+      },
     );
     assert.equal(res.status, 200);
     const json = await res.json();
@@ -910,9 +1414,14 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal(json.data.buildVerified, false);
     assert.equal(json.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
 
-    const postRes = await fetch(`http://127.0.0.1:${port}/api/system/diagnostics/version/compare`, {
+    const postRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version/compare`, {
       method: 'POST',
-      headers: { origin, 'content-type': 'application/json' },
+      headers: {
+        origin,
+        cookie: authServer.cookieHeader,
+        'x-csrf-token': authServer.csrfToken,
+        'content-type': 'application/json',
+      },
       body: JSON.stringify({
         version: API_VERSION,
         schemaVersion: SCHEMA_VERSION,
@@ -924,9 +1433,10 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal((await postRes.json()).data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
   });
 
-  await t.test('build-deb.sh emits verified /usr/lib/yunpanel/build-info.json checked against web dist build-info.json', async () => {
+  await t.test('build-deb.sh emits verified /usr/lib/yunpanel/build-info.json checked against clean tree and web dist build-info.json', async () => {
     const buildScript = await readFile(buildDebScriptPath, 'utf8');
     assert.match(buildScript, /scripts\/emit-build-info\.mjs/);
+    assert.match(buildScript, /--require-clean/);
     assert.match(buildScript, /--verify-web-dist "\$repository_root\/apps\/web\/dist\/build-info\.json"/);
     assert.match(buildScript, /--output "\$package_root\/usr\/lib\/yunpanel\/build-info\.json"/);
   });
