@@ -116,3 +116,15 @@ Bu doküman, YunPanel'i gerçek bir son kullanıcının (Owner, Reseller, Custom
 T886 uygulama/DB/posta/WP/silme32, T887 DNS/hosting/ortam72, T888 tenant/API/job/tool/WS4 olmak üzere **108 olumlu assertion icrası**, ilgili gerçek native paket üzerinde iki fresh koşuyla kaydedildi. Tarayıcı/koşu kapsamları ayrıntılı raporda ayrıdır;108 özellik veya bütün panel için yüzde hesaplanmaz. Yeni ilk dinamik PHP yanıtı ve tam fiziksel temizlik kontrolleri önceki yüzeysel marker/API404 kabulünün yerine geçti.
 
 **T883 genel kabulü açık:** T889 PHP kurulum kararlılığı, T891 PHP settings stage, T892 silme sonrası iki Nginx artığı, T893 aralıklı depo init durumu, T894 native kurulum görünümü, T897 aralıklı PHP kardeş sürekliliği, T898 açık terminalle silme, T899 geçici kuyruk kapısı, T900 birleşik restore+rollback hatası ve T901 gerçek build kimliği bulguları açık tutuldu. Kırmızı testler yeşil sayılmadı; tarihsel orphan/DNS/draft/index-error kesinti kanalları, farklı PHP sürümü, gerçek API restart ve farklı WordPress sürümüne upgrade henüz doğrulanmadı. Seçili paths+databases restore, tablo bazında veya birleşik posta/ortam restore değildir. Son tam kaynak kapısında T902 testleri geçti fakat bağımsız SQLite writer testi15s süre aşımıyla iptal edildi (T903); tüm kapı kırmızı tutuldu. T903 dosya süreçlerini2ile sınırlar, gerçek iki-worker yarışı/15s sınır/assertionlar korunur. Maker ve bağımsız63/63 koşularından sonra `5007a124` tam görev lint/lint/test/build kapısı geçti (`3caefb36`):8549test/8548pass/0fail/0cancel/1Postfix-root ortam skip. Bu kaynak kabulüdür; yukarıdaki native açık kapılar kapanmadı.
+
+
+## 13 Kasım 2026 — T892 aktif ve istenen ayar ayrımı
+
+Önceki `19` barındırma testleri ayarları etkinleştirip eski hâline döndürdükten sonra temizlik yapar; bu, istenen ayar aktif yapılandırmadan ilerideyken silmeyi sınamaz. `23-native-applied-domain-removal-mutation.spec.js` için kaynak geliştirme öncesi kabul matrisi:
+
+| Senaryo | Gerçek önkoşul ve işlem | Zorunlu sonuç | Durum |
+|---|---|---|---|
+| T892-DRAFT | Ayrı Unix kimlikli, gerçekten çalışan sahipli PHP sitesi; normal update-preview/PATCH; stage yapılmadan desiredRevision > appliedRevision; eski aktif Nginx hash ve HTTP korunur; normal kaldırma | Aynı kaldırma journalı tamamlanır; Website/Domain/Application404, canonical kökler/Unix/FPM/socket/Nginx/mount yok; ayrı dinamik PHP kardeş ilk HTTP200, beklenen içerik/UID/fpm-fcgi/no-store | Kaynak hazırlanıyor; yeni paket ve iki taze `.28` koşusu açık |
+| T892-STAGED | Ayrı sahipli aktif PHP sitesi; normal update-preview/PATCH ve gerçek stage işi; activate yapılmadan stagedRevision = desiredRevision > appliedRevision; eski aktif Nginx hash ve HTTP korunur; normal kaldırma | Aynı fiziksel yokluk ve ilk yanıt kardeş sürekliliği; yalnız o işin sahipli yapılandırması kaldırılır | Kaynak hazırlanıyor; yeni paket ve iki taze `.28` koşusu açık |
+
+Testler gerçek panel API'sini ve sabit hedefli salt okunur fiziksel probu kullanır. Boş exec cevabı Nginx configtest/reload kanıtı değildir. Önceden kalan iki Nginx artığının elle silinmesi bu senaryolara dahil değildir; bunlar ayrı güvenli kurtarma kabulü olarak açık kalır.

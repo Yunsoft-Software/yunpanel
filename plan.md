@@ -95,3 +95,10 @@ Website silme sırası: receipt sahibi SFTP mount/OpenSSH/chroot → PHP pool/so
 ## 26 Ekim 2026 — 3. dalga adayları (not, henüz onaylı görev değil)
 
 - [ ] **Plesk'te olup YunPanel'de olmayan özellikler:** [docs/plesk-eksikler.md](docs/plesk-eksikler.md). Öne çıkanlar: wildcard domain (`*.alan.com`, şu an kodda reddediliyor), hosting'siz domain yönlendirme (forwarding), yol bazlı yönlendirme kuralları, nginx önbellekleme, ek FTP kullanıcıları, şifre korumalı dizinler, site kopyalama, yöneticiye e-posta bildirimi, canlı log, PHP eklenti yönetimi, mail içe aktarma. İş sırası: 1. dalga manuel test → 2. dalga gerçek senaryo testleri → 3. dalga bu liste + İNSAN'ın vereceği sık kullanılanlar listesi (`docs/orkestra/DECISIONS.md`).
+
+
+## 13 Kasım 2026 — P0 devam dilimi
+
+- T892: gerçek aktif PHP yapılandırmasından sonra iki ayrı `desired > applied` silme yolu (yalnız kaydedilmiş draft; hazırlanmış fakat etkinleştirilmemiş staged) kaynakta tamamlanır. Gerçek Nginx dosyası/Unix/FPM/canonical kök yokluğu ve kardeş PHP'nin ilk HTTP yanıtı `23-native-applied-domain-removal-mutation.spec.js` ile iki taze `.28` koşusunda doğrulanana kadar kabul açıktır. Önceki iki yetim dosya korunur; doğrudan dosya temizliği normal kaldırmanın yerine geçmez.
+- T901 paket hazırlığında artık gerçek temiz Git kimliği gerekir. `.git` içermeyen eski `git archive` akışı doğrulanmış kaynak sayılmaz. Son bağımsız kaynak incelemesi ve tam verify sonrasında exact clean checkout'tan eşleşen Linux paketi hazırlanır; kurulum ve servis restart ayrı dağıtım onayından sonra yapılır.
+- Kullanıcı Gemini kota engelinden sonra Codex devralmasını açıkça onayladı. T894/T901 yerel kontrolleri native kabul değildir; P1 kopyalama mevcut P0 gerçek kabul kapılarından sonra ilerler.

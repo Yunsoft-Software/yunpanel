@@ -1074,7 +1074,7 @@
 
 ### T892 · Başarısız PHP ayar hazırlamasından sonra site silme aktif Nginx dosyasını bırakıyor
 - **Bağımlı:** T803, T826
-- **Dosyalar:** `apps/api/src/domain-registry-base.js`, `apps/api/src/domain-removal-plan.js`, `apps/api/src/domain-removal-runtime.js`, `apps/api/src/domain-removal-production-runtime.js`, `apps/api/test/domain-registry.test.js`, `apps/api/test/domain-removal-plan.test.js`, `apps/api/test/domain-removal-runtime.test.js`, `apps/api/test/domain-removal-production-runtime.test.js`
+- **Dosyalar:** `apps/api/src/domain-registry-base.js`, `apps/api/src/domain-removal-plan.js`, `apps/api/src/domain-removal-runtime.js`, `apps/api/src/domain-removal-production-runtime.js`, `apps/api/test/domain-registry.test.js`, `apps/api/test/domain-removal-plan.test.js`, `apps/api/test/domain-removal-runtime.test.js`, `apps/api/test/domain-removal-production-runtime.test.js`, `e2e/live-audit/23-native-applied-domain-removal-mutation.spec.js`
 - **Kilit:** domain-removal
 - **Kaynak:** QA · 2026-11-12 17:14
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
