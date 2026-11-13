@@ -525,14 +525,22 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     schemaVersion: 3,
     buildId: 'build-20261112-deploy-1',
     assetId: 'assets-build-20261112-deploy-1',
+    commit: 'abcdef1234567890',
+    buildTime: '2026-11-12T00:00:00.000Z',
+    dirty: false,
+    buildVerified: true,
   };
 
-  await t.test('detects fully synchronized frontend and backend when both buildId and assetId are known and match', () => {
+  await t.test('detects fully synchronized frontend and backend only when both sides are verified and buildId, assetId, commit, and buildTime all match', () => {
     const comparison = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
       buildId: 'build-20261112-deploy-1',
       assetId: 'assets-build-20261112-deploy-1',
+      commit: 'abcdef1234567890',
+      buildTime: '2026-11-12T00:00:00.000Z',
+      dirty: false,
+      buildVerified: true,
     });
 
     assert.equal(comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
@@ -540,46 +548,140 @@ test('AC2: Frontend and backend deployment comparison and stale cache detection'
     assert.equal(comparison.staleCache, false);
     assert.equal(comparison.requiresRefresh, false);
     assert.equal(comparison.hardRefreshRequired, false);
+    assert.equal(comparison.backend.commit, 'abcdef1234567890');
+    assert.equal(comparison.backend.buildTime, '2026-11-12T00:00:00.000Z');
+    assert.equal(comparison.frontend.commit, 'abcdef1234567890');
+    assert.equal(comparison.frontend.buildTime, '2026-11-12T00:00:00.000Z');
   });
 
-  await t.test('returns UNKNOWN (never SYNCHRONIZED) when frontend or backend buildId/assetId is missing or unknown', () => {
+  await t.test('returns UNKNOWN (never SYNCHRONIZED) when frontend or backend buildId/assetId/commit/buildTime/buildVerified is missing or unverified', () => {
     const missingFrontendIds = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
     });
     assert.equal(missingFrontendIds.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
     assert.equal(missingFrontendIds.compatible, false);
-    assert.equal(missingFrontendIds.staleCache, false);
-    assert.equal(missingFrontendIds.requiresRefresh, false);
-    assert.equal(missingFrontendIds.hardRefreshRequired, false);
 
-    const unknownFrontendIds = compareDeploymentVersions(backend, {
+    // Matching buildId & assetId WITHOUT commit/buildTime/buildVerified MUST return UNKNOWN
+    const idOnlyFrontend = compareDeploymentVersions(backend, {
       version: '0.3.0',
       schemaVersion: 3,
-      buildId: 'unknown',
-      assetId: 'unknown',
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
     });
-    assert.equal(unknownFrontendIds.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
-    assert.equal(unknownFrontendIds.compatible, false);
-    assert.equal(unknownFrontendIds.staleCache, false);
+    assert.equal(idOnlyFrontend.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(idOnlyFrontend.compatible, false);
+
+    for (const incompleteFrontend of [
+      {
+        version: '0.3.0',
+        schemaVersion: 3,
+        buildId: 'build-20261112-deploy-1',
+        assetId: 'assets-build-20261112-deploy-1',
+        buildTime: '2026-11-12T00:00:00.000Z',
+        buildVerified: true,
+      },
+      {
+        version: '0.3.0',
+        schemaVersion: 3,
+        buildId: 'build-20261112-deploy-1',
+        assetId: 'assets-build-20261112-deploy-1',
+        commit: 'abcdef1234567890',
+        buildVerified: true,
+      },
+      {
+        version: '0.3.0',
+        schemaVersion: 3,
+        buildId: 'build-20261112-deploy-1',
+        assetId: 'assets-build-20261112-deploy-1',
+        commit: 'abcdef1234567890',
+        buildTime: '2026-11-12T00:00:00.000Z',
+        buildVerified: false,
+      },
+    ]) {
+      const result = compareDeploymentVersions(backend, incompleteFrontend);
+      assert.equal(result.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+      assert.equal(result.compatible, false);
+    }
+
+    // Partial backend (e.g. buildTime: null -> buildVerified: false) MUST return UNKNOWN even when IDs and commit match
+    const partialBackend = resolveDeploymentDiagnostics({
+      manifestPath: null,
+      env: {
+        YUNPANEL_BUILD_ID: 'build-20261112-deploy-1',
+        YUNPANEL_ASSET_ID: 'assets-build-20261112-deploy-1',
+        YUNPANEL_COMMIT_HASH: 'abcdef1234567890',
+      },
+    });
+    assert.equal(partialBackend.buildVerified, false);
+    assert.equal(partialBackend.buildTime, null);
+    const againstPartialBackend = compareDeploymentVersions(partialBackend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
+      commit: 'abcdef1234567890',
+      buildTime: '2026-11-12T00:00:00.000Z',
+      dirty: false,
+      buildVerified: true,
+    });
+    assert.equal(againstPartialBackend.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(againstPartialBackend.compatible, false);
 
     const unknownBackend = {
       version: '0.3.0',
       schemaVersion: 3,
       buildId: 'unknown',
       assetId: 'unknown',
+      commit: 'unknown',
+      buildTime: null,
+      buildVerified: false,
     };
     const againstUnknownBackend = compareDeploymentVersions(unknownBackend, {
       version: '0.3.0',
       schemaVersion: 3,
       buildId: 'build-20261112-deploy-1',
       assetId: 'assets-build-20261112-deploy-1',
+      commit: 'abcdef1234567890',
+      buildTime: '2026-11-12T00:00:00.000Z',
+      buildVerified: true,
     });
     assert.equal(againstUnknownBackend.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
     assert.equal(againstUnknownBackend.compatible, false);
-    assert.equal(againstUnknownBackend.staleCache, false);
-    assert.equal(againstUnknownBackend.requiresRefresh, false);
-    assert.equal(againstUnknownBackend.hardRefreshRequired, false);
+  });
+
+  await t.test('detects stale cache when reused buildId/assetId hide a commit or buildTime mismatch', () => {
+    const commitMismatch = compareDeploymentVersions(backend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
+      commit: '1111111111111111',
+      buildTime: '2026-11-12T00:00:00.000Z',
+      dirty: false,
+      buildVerified: true,
+    });
+    assert.equal(commitMismatch.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+    assert.equal(commitMismatch.compatible, false);
+    assert.equal(commitMismatch.staleCache, true);
+    assert.equal(commitMismatch.requiresRefresh, true);
+    assert.equal(commitMismatch.hardRefreshRequired, true);
+
+    const buildTimeMismatch = compareDeploymentVersions(backend, {
+      version: '0.3.0',
+      schemaVersion: 3,
+      buildId: 'build-20261112-deploy-1',
+      assetId: 'assets-build-20261112-deploy-1',
+      commit: 'abcdef1234567890',
+      buildTime: '2026-11-11T23:00:00.000Z',
+      dirty: false,
+      buildVerified: true,
+    });
+    assert.equal(buildTimeMismatch.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+    assert.equal(buildTimeMismatch.compatible, false);
+    assert.equal(buildTimeMismatch.staleCache, true);
+    assert.equal(buildTimeMismatch.requiresRefresh, true);
+    assert.equal(buildTimeMismatch.hardRefreshRequired, true);
   });
 
   await t.test('detects version mismatch when frontend version differs', () => {
@@ -1312,12 +1414,16 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
       'content-type': 'application/json',
     };
 
-    // 1. Matching verified frontend -> SYNCHRONIZED
+    // 1. Matching verified frontend (with commit, buildTime, dirty=false, buildVerified=true) -> SYNCHRONIZED
     const syncQuery = new URLSearchParams({
       frontendVersion: API_VERSION,
       frontendSchemaVersion: String(SCHEMA_VERSION),
       frontendBuildId: webManifest.buildId,
       frontendAssetId: webManifest.assetId,
+      frontendCommit: webManifest.commit,
+      frontendBuildTime: webManifest.buildTime,
+      frontendDirty: 'false',
+      frontendBuildVerified: 'true',
     });
     const syncRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version?${syncQuery}`, {
       headers: authGetHeaders,
@@ -1332,6 +1438,21 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     assert.equal(syncJson.data.sourceInfo.sourceMatchesDeployed, false);
     assert.equal(syncJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
     assert.equal(syncJson.data.freshness.status, FRESHNESS_STATUSES.HEALTHY);
+
+    // 1b. Matching buildId/assetId WITHOUT commit/buildTime/buildVerified -> UNKNOWN (never SYNCHRONIZED)
+    const idOnlyQuery = new URLSearchParams({
+      frontendVersion: API_VERSION,
+      frontendSchemaVersion: String(SCHEMA_VERSION),
+      frontendBuildId: webManifest.buildId,
+      frontendAssetId: webManifest.assetId,
+    });
+    const idOnlyRes = await fetch(`${authServer.baseUrl}/api/system/diagnostics/version?${idOnlyQuery}`, {
+      headers: authGetHeaders,
+    });
+    assert.equal(idOnlyRes.status, 200);
+    const idOnlyJson = await idOnlyRes.json();
+    assert.equal(idOnlyJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(idOnlyJson.data.comparison.compatible, false);
 
     // 2. Missing / unknown frontend buildId & assetId -> UNKNOWN (never SYNCHRONIZED)
     const unknownRes = await fetch(
@@ -1362,6 +1483,10 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
         schemaVersion: SCHEMA_VERSION,
         assetId: webManifest.assetId,
         buildId: webManifest.buildId,
+        commit: webManifest.commit,
+        buildTime: webManifest.buildTime,
+        dirty: false,
+        buildVerified: true,
       }),
     });
     assert.equal(postSyncRes.status, 200);
@@ -1386,6 +1511,170 @@ test('AC5: Real git repository emit-build-info CLI, fail-closed package verifica
     });
     assert.equal(aliasRes.status, 200);
     assert.equal((await aliasRes.json()).data.commit, headCommit);
+  });
+
+  await t.test('T901 probe-03 regressions: partial unverified backend returns UNKNOWN and reused buildId/assetId across distinct commits returns STALE_CACHE over real AuthStore HTTP', async (subT) => {
+    const workRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-t901-probe03-'));
+    subT.after(() => rm(workRoot, { recursive: true, force: true }));
+
+    const repoDir = path.join(workRoot, 'repo');
+    const outDir = path.join(workRoot, 'out');
+    execFileSync('git', ['init', repoDir], { stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.email', 'probe03@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['config', 'user.name', 'YunPanel Probe 03'], { cwd: repoDir, stdio: 'pipe' });
+
+    const sourceFile = path.join(repoDir, 'module.js');
+    await writeFile(sourceFile, 'export const rev = "A";\n', 'utf8');
+    execFileSync('git', ['add', 'module.js'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'clean commit A'], { cwd: repoDir, stdio: 'pipe' });
+    const commitA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+
+    const manifestAPath = path.join(outDir, 'manifest-a.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--require-clean',
+      '--output', manifestAPath,
+    ], {
+      env: {
+        PATH: process.env.PATH,
+        YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+        YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+        YUNPANEL_BUILD_TIME: '2026-11-13T00:00:00.000Z',
+      },
+      stdio: 'pipe',
+    });
+    const manifestA = JSON.parse(await readFile(manifestAPath, 'utf8'));
+
+    await writeFile(sourceFile, 'export const rev = "B";\n', 'utf8');
+    execFileSync('git', ['add', 'module.js'], { cwd: repoDir, stdio: 'pipe' });
+    execFileSync('git', ['commit', '-m', 'clean commit B'], { cwd: repoDir, stdio: 'pipe' });
+    const commitB = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+    assert.notEqual(commitA, commitB);
+
+    const manifestBPath = path.join(outDir, 'manifest-b.json');
+    execFileSync(process.execPath, [
+      emitBuildInfoScriptPath,
+      '--repo', repoDir,
+      '--require-clean',
+      '--output', manifestBPath,
+    ], {
+      env: {
+        PATH: process.env.PATH,
+        YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+        YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+        YUNPANEL_BUILD_TIME: '2026-11-13T01:00:00.000Z',
+      },
+      stdio: 'pipe',
+    });
+    const manifestB = JSON.parse(await readFile(manifestBPath, 'utf8'));
+    assert.equal(manifestA.buildId, manifestB.buildId);
+    assert.equal(manifestA.assetId, manifestB.assetId);
+    assert.equal(manifestA.commit, commitA);
+    assert.equal(manifestB.commit, commitB);
+
+    // 1. Açık 1: Partial backend (manifestPath: null, valid buildId/assetId/commitB, missing buildTime -> buildVerified: false)
+    const partialServer = await startRealAuthenticatedCoreServer(subT, {
+      deploymentDiagnosticsOptions: {
+        manifestPath: null,
+        env: {
+          YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+          YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+          YUNPANEL_COMMIT_HASH: commitB,
+        },
+      },
+      publicOrigin: origin,
+    });
+
+    const partialQuery = new URLSearchParams({
+      frontendVersion: API_VERSION,
+      frontendSchemaVersion: String(SCHEMA_VERSION),
+      frontendBuildId: manifestB.buildId,
+      frontendAssetId: manifestB.assetId,
+      frontendCommit: manifestB.commit,
+      frontendBuildTime: manifestB.buildTime,
+      frontendDirty: 'false',
+      frontendBuildVerified: 'true',
+    });
+    const partialGetRes = await fetch(`${partialServer.baseUrl}/api/system/diagnostics/version?${partialQuery}`, {
+      headers: {
+        origin,
+        cookie: partialServer.cookieHeader,
+      },
+    });
+    assert.equal(partialGetRes.status, 200);
+    const partialGetJson = await partialGetRes.json();
+    assert.equal(partialGetJson.data.buildVerified, false);
+    assert.equal(partialGetJson.data.buildTime, null);
+    assert.equal(partialGetJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(partialGetJson.data.comparison.compatible, false);
+
+    const partialPostRes = await fetch(`${partialServer.baseUrl}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: {
+        origin,
+        cookie: partialServer.cookieHeader,
+        'x-csrf-token': partialServer.csrfToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(manifestB),
+    });
+    assert.equal(partialPostRes.status, 200);
+    const partialPostJson = await partialPostRes.json();
+    assert.equal(partialPostJson.data.buildVerified, false);
+    assert.equal(partialPostJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+    assert.equal(partialPostJson.data.comparison.compatible, false);
+
+    // 2. Açık 2: Verified backendB (commitB, 01:00Z) vs verified frontendA (commitA, 00:00Z) with identical reused buildId/assetId
+    const backendBServer = await startRealAuthenticatedCoreServer(subT, {
+      deploymentDiagnosticsOptions: {
+        manifestPath: manifestBPath,
+        env: {
+          YUNPANEL_SOURCE_COMMIT: commitB,
+        },
+      },
+      publicOrigin: origin,
+    });
+
+    const reusedQueryA = new URLSearchParams({
+      frontendVersion: manifestA.version,
+      frontendSchemaVersion: String(manifestA.schemaVersion),
+      frontendBuildId: manifestA.buildId,
+      frontendAssetId: manifestA.assetId,
+      frontendCommit: manifestA.commit,
+      frontendBuildTime: manifestA.buildTime,
+      frontendDirty: 'false',
+      frontendBuildVerified: 'true',
+    });
+    const reusedGetRes = await fetch(`${backendBServer.baseUrl}/api/system/diagnostics/version?${reusedQueryA}`, {
+      headers: {
+        origin,
+        cookie: backendBServer.cookieHeader,
+      },
+    });
+    assert.equal(reusedGetRes.status, 200);
+    const reusedGetJson = await reusedGetRes.json();
+    assert.equal(reusedGetJson.data.buildVerified, true);
+    assert.equal(reusedGetJson.data.sourceInfo.sourceMatchesDeployed, true);
+    assert.equal(reusedGetJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+    assert.equal(reusedGetJson.data.comparison.compatible, false);
+    assert.equal(reusedGetJson.data.comparison.staleCache, true);
+
+    const reusedPostRes = await fetch(`${backendBServer.baseUrl}/api/system/diagnostics/version/compare`, {
+      method: 'POST',
+      headers: {
+        origin,
+        cookie: backendBServer.cookieHeader,
+        'x-csrf-token': backendBServer.csrfToken,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(manifestA),
+    });
+    assert.equal(reusedPostRes.status, 200);
+    const reusedPostJson = await reusedPostRes.json();
+    assert.equal(reusedPostJson.data.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+    assert.equal(reusedPostJson.data.comparison.compatible, false);
+    assert.equal(reusedPostJson.data.comparison.staleCache, true);
   });
 
   await t.test('createCoreApp without build metadata returns unknown build identity and UNKNOWN comparison through real AuthStore', async (subT) => {

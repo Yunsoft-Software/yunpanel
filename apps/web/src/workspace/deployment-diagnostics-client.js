@@ -102,6 +102,7 @@ export const FRONTEND_BUILD_ID = resolvedFrontendIdentity.buildId;
 export const FRONTEND_ASSET_ID = resolvedFrontendIdentity.assetId;
 export const FRONTEND_COMMIT = resolvedFrontendIdentity.commit;
 export const FRONTEND_BUILD_TIME = resolvedFrontendIdentity.buildTime;
+export const FRONTEND_DIRTY = resolvedFrontendIdentity.dirty;
 export const FRONTEND_BUILD_VERIFIED = resolvedFrontendIdentity.buildVerified;
 
 export async function fetchDeploymentDiagnostics({
@@ -123,6 +124,10 @@ export async function fetchDeploymentDiagnostics({
     url.searchParams.set('frontendBuildId', identity.buildId);
     url.searchParams.set('frontendAssetId', identity.assetId);
     url.searchParams.set('frontendSchemaVersion', String(identity.schemaVersion));
+    url.searchParams.set('frontendCommit', identity.commit);
+    url.searchParams.set('frontendBuildTime', identity.buildTime ?? '');
+    url.searchParams.set('frontendDirty', String(Boolean(identity.dirty)));
+    url.searchParams.set('frontendBuildVerified', String(Boolean(identity.buildVerified)));
   }
   const res = await fetchFn(url.toString(), {
     credentials: 'same-origin',
@@ -141,6 +146,20 @@ export async function compareDeploymentWithServer(frontendInfo, {
   headers = {},
   fetchFn = (typeof window !== 'undefined' && window.fetch) ? window.fetch.bind(window) : globalThis.fetch,
 } = {}) {
+  const payload = frontendInfo && typeof frontendInfo === 'object'
+    ? {
+      ...frontendInfo,
+      version: frontendInfo.version ?? FRONTEND_VERSION,
+      schemaVersion: frontendInfo.schemaVersion ?? FRONTEND_SCHEMA_VERSION,
+      buildId: frontendInfo.buildId ?? 'unknown',
+      assetId: frontendInfo.assetId ?? 'unknown',
+      commit: frontendInfo.commit ?? 'unknown',
+      buildTime: frontendInfo.buildTime ?? null,
+      dirty: Boolean(frontendInfo.dirty),
+      buildVerified: frontendInfo.buildVerified === true,
+    }
+    : { ...resolvedFrontendIdentity };
+
   const requestHeaders = {
     'Content-Type': 'application/json',
     Accept: 'application/json',
@@ -153,7 +172,7 @@ export async function compareDeploymentWithServer(frontendInfo, {
     method: 'POST',
     credentials: 'same-origin',
     headers: requestHeaders,
-    body: JSON.stringify(frontendInfo),
+    body: JSON.stringify(payload),
   });
   if (!res.ok) {
     throw new Error(`Comparison request failed with status ${res.status}`);

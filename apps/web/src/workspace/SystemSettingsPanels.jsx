@@ -4,9 +4,14 @@ import { getPanelSettings, updatePanelSettings } from './system-settings-client.
 import {
   FRONTEND_BUILD_ID,
   FRONTEND_ASSET_ID,
+  FRONTEND_COMMIT,
+  FRONTEND_BUILD_TIME,
+  FRONTEND_DIRTY,
   FRONTEND_BUILD_VERIFIED,
   resolveFrontendBuildIdentity,
 } from './deployment-diagnostics-client.js';
+
+const HEX_COMMIT_RE = /^[0-9a-f]{7,64}$/i;
 
 function formatDiagnosticIdentity(value) {
   if (typeof value !== 'string') return 'Doğrulanmadı';
@@ -15,11 +20,47 @@ function formatDiagnosticIdentity(value) {
   return trimmed;
 }
 
+function normalizeHexCommit(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim().toLowerCase();
+  return HEX_COMMIT_RE.test(trimmed) ? trimmed : null;
+}
+
+function normalizeIsoBuildTimestamp(value) {
+  if (typeof value !== 'string' || !value.trim()) return null;
+  const parsedMs = Date.parse(value);
+  return Number.isNaN(parsedMs) ? null : parsedMs;
+}
+
 function resolveRuntimeSyncBadge(deployment, frontend) {
-  const backendVerified = deployment?.buildVerified === true;
-  const frontendVerified = frontend.buildVerified === true;
-  const frontendBuildMatches = frontend.buildId === deployment?.buildId;
-  const frontendAssetMatches = frontend.assetId === deployment?.assetId;
+  const backendVerified = deployment?.buildVerified === true && deployment?.dirty !== true;
+  const frontendVerified = frontend?.buildVerified === true && frontend?.dirty !== true;
+
+  const backendCommit = normalizeHexCommit(deployment?.commit);
+  const frontendCommit = normalizeHexCommit(frontend?.commit);
+  const backendBuildTimeMs = normalizeIsoBuildTimestamp(deployment?.buildTime);
+  const frontendBuildTimeMs = normalizeIsoBuildTimestamp(frontend?.buildTime);
+
+  const frontendBuildMatches = Boolean(
+    typeof frontend?.buildId === 'string'
+    && frontend.buildId !== 'unknown'
+    && frontend.buildId === deployment?.buildId,
+  );
+  const frontendAssetMatches = Boolean(
+    typeof frontend?.assetId === 'string'
+    && frontend.assetId !== 'unknown'
+    && frontend.assetId === deployment?.assetId,
+  );
+  const frontendCommitMatches = Boolean(
+    frontendCommit
+    && backendCommit
+    && frontendCommit === backendCommit,
+  );
+  const frontendBuildTimeMatches = Boolean(
+    frontendBuildTimeMs !== null
+    && backendBuildTimeMs !== null
+    && frontendBuildTimeMs === backendBuildTimeMs,
+  );
 
   if (
     backendVerified
@@ -27,13 +68,24 @@ function resolveRuntimeSyncBadge(deployment, frontend) {
     && deployment?.sourceInfo?.sourceMatchesDeployed === true
     && frontendBuildMatches
     && frontendAssetMatches
+    && frontendCommitMatches
+    && frontendBuildTimeMatches
   ) {
     return { state: 'synchronized', label: 'Senkronize' };
   }
 
   if (
     deployment?.evidence?.diverged === true
-    || (backendVerified && frontendVerified && (!frontendBuildMatches || !frontendAssetMatches))
+    || (
+      backendVerified
+      && frontendVerified
+      && (
+        !frontendBuildMatches
+        || !frontendAssetMatches
+        || !frontendCommitMatches
+        || !frontendBuildTimeMatches
+      )
+    )
   ) {
     return { state: 'diverged', label: 'Farklılaşmış' };
   }
@@ -121,6 +173,9 @@ export default function SystemSettingsPanels({
     : {
       buildId: FRONTEND_BUILD_ID,
       assetId: FRONTEND_ASSET_ID,
+      commit: FRONTEND_COMMIT,
+      buildTime: FRONTEND_BUILD_TIME,
+      dirty: FRONTEND_DIRTY,
       buildVerified: FRONTEND_BUILD_VERIFIED,
     };
   const runtimeSync = data.deployment

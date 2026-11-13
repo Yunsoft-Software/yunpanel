@@ -499,3 +499,165 @@ test('SystemSettingsPanels renders Doğrulanmadı, Senkronize, and Farklılaşm�
     /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-warn"><span aria-hidden="true"><\/span>Farklılaşmış<\/span><\/dd>/,
   );
 });
+
+test('T901 probe-03 client + SSR regressions: partial backend yields UNKNOWN/Doğrulanmadı and reused buildId/assetId across commitA vs commitB yields STALE_CACHE/Farklılaşmış', async (t) => {
+  const workRoot = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-web-probe03-'));
+  t.after(() => rm(workRoot, { recursive: true, force: true }));
+
+  const repoDir = path.join(workRoot, 'repo');
+  const outDir = path.join(workRoot, 'out');
+  execFileSync('git', ['init', repoDir], { stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.email', 'webprobe03@yunpanel.local'], { cwd: repoDir, stdio: 'pipe' });
+  execFileSync('git', ['config', 'user.name', 'YunPanel Web Probe 03'], { cwd: repoDir, stdio: 'pipe' });
+
+  const trackedPath = path.join(repoDir, 'App.jsx');
+  await writeFile(trackedPath, 'export default "A";\n', 'utf8');
+  execFileSync('git', ['add', 'App.jsx'], { cwd: repoDir, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-m', 'commit A'], { cwd: repoDir, stdio: 'pipe' });
+  const commitA = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, encoding: 'utf8' }).trim();
+
+  const manifestAPath = path.join(outDir, 'manifest-a.json');
+  execFileSync(process.execPath, [
+    emitBuildInfoScriptPath,
+    '--repo', repoDir,
+    '--require-clean',
+    '--output', manifestAPath,
+  ], {
+    env: {
+      PATH: process.env.PATH,
+      YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+      YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+      YUNPANEL_BUILD_TIME: '2026-11-13T00:00:00.000Z',
+    },
+    stdio: 'pipe',
+  });
+  const manifestA = JSON.parse(await readFile(manifestAPath, 'utf8'));
+
+  await writeFile(trackedPath, 'export default "B";\n', 'utf8');
+  execFileSync('git', ['add', 'App.jsx'], { cwd: repoDir, stdio: 'pipe' });
+  execFileSync('git', ['commit', '-m', 'commit B'], { cwd: repoDir, stdio: 'pipe' });
+  const commitB = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repoDir, stdio: 'pipe', encoding: 'utf8' }).trim();
+  assert.notEqual(commitA, commitB);
+
+  const manifestBPath = path.join(outDir, 'manifest-b.json');
+  execFileSync(process.execPath, [
+    emitBuildInfoScriptPath,
+    '--repo', repoDir,
+    '--require-clean',
+    '--output', manifestBPath,
+  ], {
+    env: {
+      PATH: process.env.PATH,
+      YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+      YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+      YUNPANEL_BUILD_TIME: '2026-11-13T01:00:00.000Z',
+    },
+    stdio: 'pipe',
+  });
+  const manifestB = JSON.parse(await readFile(manifestBPath, 'utf8'));
+
+  // 1. Açık 1: Partial backend (missing buildTime -> buildVerified: false) over real AuthStore HTTP + SSR
+  const partialAuth = await startRealAuthenticatedDiagnosticsServer(t, {
+    manifestPath: null,
+    env: {
+      YUNPANEL_BUILD_ID: 'build-reused-operator-id',
+      YUNPANEL_ASSET_ID: 'assets-reused-operator-id',
+      YUNPANEL_COMMIT_HASH: commitB,
+    },
+  });
+  const partialHeaders = {
+    cookie: partialAuth.cookieHeader,
+    origin: PUBLIC_ORIGIN,
+  };
+
+  const partialGet = await fetchDeploymentDiagnostics({
+    endpoint: `${partialAuth.baseUrl}/api/system/diagnostics/version`,
+    frontendIdentity: manifestB,
+    headers: partialHeaders,
+  });
+  assert.equal(partialGet.buildVerified, false);
+  assert.equal(partialGet.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+  assert.equal(partialGet.comparison.compatible, false);
+
+  const partialPost = await compareDeploymentWithServer(manifestB, {
+    endpoint: `${partialAuth.baseUrl}/api/system/diagnostics/version/compare`,
+    csrfToken: partialAuth.csrfToken,
+    headers: partialHeaders,
+  });
+  assert.equal(partialPost.buildVerified, false);
+  assert.equal(partialPost.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN);
+  assert.equal(partialPost.comparison.compatible, false);
+
+  const partialSsrHtml = renderToStaticMarkup(createElement(SystemSettingsPanels, {
+    diagnostics: true,
+    initialData: baseSettingsPayload(partialGet),
+    frontendIdentity: manifestB,
+  }));
+  assert.match(
+    partialSsrHtml,
+    /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-neutral"><span aria-hidden="true"><\/span>Doğrulanmadı<\/span><\/dd>/,
+  );
+  assert.doesNotMatch(partialSsrHtml, />Senkronize</);
+
+  // 2. Açık 2: Verified backendB (commitB, 01:00Z) + frontendA (commitA, 00:00Z) sharing reused buildId/assetId
+  const backendBAuth = await startRealAuthenticatedDiagnosticsServer(t, {
+    manifestPath: manifestBPath,
+    env: {
+      YUNPANEL_SOURCE_COMMIT: commitB,
+    },
+  });
+  const backendBHeaders = {
+    cookie: backendBAuth.cookieHeader,
+    origin: PUBLIC_ORIGIN,
+  };
+
+  const mismatchedGet = await fetchDeploymentDiagnostics({
+    endpoint: `${backendBAuth.baseUrl}/api/system/diagnostics/version`,
+    frontendIdentity: manifestA,
+    headers: backendBHeaders,
+  });
+  assert.equal(mismatchedGet.buildVerified, true);
+  assert.equal(mismatchedGet.sourceInfo.sourceMatchesDeployed, true);
+  assert.equal(mismatchedGet.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+  assert.equal(mismatchedGet.comparison.compatible, false);
+  assert.equal(mismatchedGet.comparison.staleCache, true);
+
+  const mismatchedPost = await compareDeploymentWithServer(manifestA, {
+    endpoint: `${backendBAuth.baseUrl}/api/system/diagnostics/version/compare`,
+    csrfToken: backendBAuth.csrfToken,
+    headers: backendBHeaders,
+  });
+  assert.equal(mismatchedPost.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE);
+  assert.equal(mismatchedPost.comparison.compatible, false);
+  assert.equal(mismatchedPost.comparison.staleCache, true);
+
+  const mismatchedSsrHtml = renderToStaticMarkup(createElement(SystemSettingsPanels, {
+    diagnostics: true,
+    initialData: baseSettingsPayload(mismatchedGet),
+    frontendIdentity: manifestA,
+  }));
+  assert.match(
+    mismatchedSsrHtml,
+    /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-warn"><span aria-hidden="true"><\/span>Farklılaşmış<\/span><\/dd>/,
+  );
+  assert.doesNotMatch(mismatchedSsrHtml, />Senkronize</);
+
+  // Matching manifestB against backendB -> SYNCHRONIZED & Senkronize
+  const matchedGet = await fetchDeploymentDiagnostics({
+    endpoint: `${backendBAuth.baseUrl}/api/system/diagnostics/version`,
+    frontendIdentity: manifestB,
+    headers: backendBHeaders,
+  });
+  assert.equal(matchedGet.comparison.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
+  assert.equal(matchedGet.comparison.compatible, true);
+
+  const matchedSsrHtml = renderToStaticMarkup(createElement(SystemSettingsPanels, {
+    diagnostics: true,
+    initialData: baseSettingsPayload(matchedGet),
+    frontendIdentity: manifestB,
+  }));
+  assert.match(
+    matchedSsrHtml,
+    /Çalışma zamanı senkronizasyonu<\/dt><dd><span class="ws-badge ws-badge-good"><span aria-hidden="true"><\/span>Senkronize<\/span><\/dd>/,
+  );
+});

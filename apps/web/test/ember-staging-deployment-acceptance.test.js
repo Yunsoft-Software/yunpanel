@@ -119,12 +119,15 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
   const testCommit = '4d03c772';
   const testBuildId = 'build-20261006-0730';
   const testAssetId = `assets-${testBuildId}`;
+  const testBuildTime = '2026-10-06T07:30:00.000Z';
 
   const serverDiag = resolveDeploymentDiagnostics({
     buildId: testBuildId,
     assetId: testAssetId,
     commit: testCommit,
+    buildTime: testBuildTime,
     environment: 'production',
+    env: {},
   });
 
   assert.equal(serverDiag.version, API_VERSION);
@@ -194,6 +197,9 @@ test('Criterion 3: Commit hash, asset hashes, font hashes, and cache freshness v
     schemaVersion: SCHEMA_VERSION,
     buildId: testBuildId,
     assetId: testAssetId,
+    commit: testCommit,
+    buildTime: testBuildTime,
+    buildVerified: true,
   };
   const syncResult = compareDeploymentVersions(serverDiag, synchronizedClient);
   assert.equal(syncResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);

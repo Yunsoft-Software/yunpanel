@@ -469,8 +469,31 @@ export function evaluateFreshnessState(options = {}) {
   };
 }
 
+function parseOptionalBooleanParam(value) {
+  if (typeof value === 'boolean') return value;
+  if (typeof value !== 'string') return undefined;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === 'true' || normalized === '1') return true;
+  if (normalized === 'false' || normalized === '0') return false;
+  return undefined;
+}
+
 export function compareDeploymentVersions(backendDeployment, frontendClient = {}) {
   const backend = backendDeployment || resolveDeploymentDiagnostics();
+  const normalizedBackendBuildId = normalizeBuildToken(backend.buildId);
+  const normalizedBackendAssetId = normalizeBuildToken(backend.assetId);
+  const normalizedBackendCommit = normalizeCommitHash(backend.commit);
+  const normalizedBackendBuildTime = normalizeBuildTime(backend.buildTime);
+
+  const backendSummary = {
+    version: backend.version,
+    schemaVersion: backend.schemaVersion,
+    buildId: backend.buildId,
+    assetId: backend.assetId,
+    commit: normalizedBackendCommit ?? (backend.commit ?? null),
+    buildTime: normalizedBackendBuildTime ?? (backend.buildTime ?? null),
+  };
+
   if (!frontendClient || typeof frontendClient !== 'object' || Object.keys(frontendClient).length === 0) {
     return {
       status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN,
@@ -478,12 +501,7 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
       staleCache: false,
       requiresRefresh: false,
       hardRefreshRequired: false,
-      backend: {
-        version: backend.version,
-        schemaVersion: backend.schemaVersion,
-        buildId: backend.buildId,
-        assetId: backend.assetId,
-      },
+      backend: backendSummary,
       frontend: null,
       message: 'Frontend client version information was not supplied.',
     };
@@ -494,13 +512,26 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
     buildId: frontendBuildId,
     assetId: frontendAssetId,
     schemaVersion: frontendSchemaVersion,
+    commit: frontendCommit,
+    buildTime: frontendBuildTime,
+    dirty: frontendDirtyRaw,
+    buildVerified: frontendBuildVerifiedRaw,
   } = frontendClient;
+
+  const normalizedFrontendBuildId = normalizeBuildToken(frontendBuildId);
+  const normalizedFrontendAssetId = normalizeBuildToken(frontendAssetId);
+  const normalizedFrontendCommit = normalizeCommitHash(frontendCommit);
+  const normalizedFrontendBuildTime = normalizeBuildTime(frontendBuildTime);
+  const frontendDirty = parseOptionalBooleanParam(frontendDirtyRaw) === true;
+  const frontendVerified = parseOptionalBooleanParam(frontendBuildVerifiedRaw) === true;
 
   const frontendSummary = {
     version: frontendVersion ?? null,
     schemaVersion: frontendSchemaVersion !== undefined && frontendSchemaVersion !== null ? Number(frontendSchemaVersion) : null,
     buildId: frontendBuildId ?? null,
     assetId: frontendAssetId ?? null,
+    commit: normalizedFrontendCommit ?? (frontendCommit ?? null),
+    buildTime: normalizedFrontendBuildTime ?? (frontendBuildTime ?? null),
   };
 
   if (frontendSchemaVersion !== undefined && frontendSchemaVersion !== null && Number(frontendSchemaVersion) !== backend.schemaVersion) {
@@ -510,12 +541,7 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
       staleCache: false,
       requiresRefresh: true,
       hardRefreshRequired: true,
-      backend: {
-        version: backend.version,
-        schemaVersion: backend.schemaVersion,
-        buildId: backend.buildId,
-        assetId: backend.assetId,
-      },
+      backend: backendSummary,
       frontend: frontendSummary,
       message: `Data schema version mismatch: frontend expects schema ${frontendSchemaVersion}, but backend serves schema ${backend.schemaVersion}.`,
     };
@@ -528,66 +554,71 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
       staleCache: false,
       requiresRefresh: true,
       hardRefreshRequired: true,
-      backend: {
-        version: backend.version,
-        schemaVersion: backend.schemaVersion,
-        buildId: backend.buildId,
-        assetId: backend.assetId,
-      },
+      backend: backendSummary,
       frontend: frontendSummary,
       message: `API version mismatch: frontend version ${frontendVersion} differs from backend ${backend.version}.`,
     };
   }
 
-  const hasKnownBackendBuild = Boolean(normalizeBuildToken(backend.buildId));
-  const hasKnownBackendAsset = Boolean(normalizeBuildToken(backend.assetId));
-  const hasKnownFrontendBuild = Boolean(normalizeBuildToken(frontendBuildId));
-  const hasKnownFrontendAsset = Boolean(normalizeBuildToken(frontendAssetId));
+  const assetMismatch = Boolean(
+    normalizedFrontendAssetId && normalizedBackendAssetId && normalizedFrontendAssetId !== normalizedBackendAssetId,
+  );
+  const buildMismatch = Boolean(
+    normalizedFrontendBuildId && normalizedBackendBuildId && normalizedFrontendBuildId !== normalizedBackendBuildId,
+  );
+  const commitMismatch = Boolean(
+    normalizedFrontendCommit && normalizedBackendCommit && normalizedFrontendCommit !== normalizedBackendCommit,
+  );
+  const buildTimeMismatch = Boolean(
+    normalizedFrontendBuildTime && normalizedBackendBuildTime && normalizedFrontendBuildTime !== normalizedBackendBuildTime,
+  );
 
-  const assetMismatch = hasKnownFrontendAsset && hasKnownBackendAsset && frontendAssetId.trim() !== backend.assetId.trim();
-  const buildMismatch = hasKnownFrontendBuild && hasKnownBackendBuild && frontendBuildId.trim() !== backend.buildId.trim();
-
-  if (assetMismatch || buildMismatch) {
+  if (assetMismatch || buildMismatch || commitMismatch || buildTimeMismatch) {
+    const mismatchDetail = (commitMismatch || buildTimeMismatch) && !assetMismatch && !buildMismatch
+      ? `Stale frontend asset cache detected: client commit/buildTime (${normalizedFrontendCommit || normalizedFrontendBuildTime}) differs from current deployed (${normalizedBackendCommit || normalizedBackendBuildTime}).`
+      : `Stale frontend asset cache detected: client is running ${frontendAssetId || frontendBuildId}, current deployed is ${backend.assetId || backend.buildId}.`;
     return {
       status: DEPLOYMENT_COMPARISON_STATUSES.STALE_CACHE,
       compatible: false,
       staleCache: true,
       requiresRefresh: true,
       hardRefreshRequired: true,
-      backend: {
-        version: backend.version,
-        schemaVersion: backend.schemaVersion,
-        buildId: backend.buildId,
-        assetId: backend.assetId,
-      },
+      backend: backendSummary,
       frontend: frontendSummary,
-      message: `Stale frontend asset cache detected: client is running ${frontendAssetId || frontendBuildId}, current deployed is ${backend.assetId || backend.buildId}.`,
+      message: mismatchDetail,
     };
   }
 
-  const provenanceUnverified = Boolean(
-    backend.dirty === true
-    || backend.metadataConflict === true
-    || backend.manifestInvalid === true
-    || frontendClient.dirty === true
-    || frontendClient.buildVerified === false,
+  const backendProvenanceVerified = Boolean(
+    backend.buildVerified === true
+    && backend.dirty !== true
+    && backend.metadataConflict !== true
+    && backend.manifestInvalid !== true
+    && normalizedBackendBuildId
+    && normalizedBackendAssetId
+    && normalizedBackendCommit
+    && normalizedBackendBuildTime,
   );
 
-  if (provenanceUnverified || !hasKnownBackendBuild || !hasKnownBackendAsset || !hasKnownFrontendBuild || !hasKnownFrontendAsset) {
+  const frontendProvenanceVerified = Boolean(
+    !frontendDirty
+    && frontendVerified
+    && normalizedFrontendBuildId
+    && normalizedFrontendAssetId
+    && normalizedFrontendCommit
+    && normalizedFrontendBuildTime,
+  );
+
+  if (!backendProvenanceVerified || !frontendProvenanceVerified) {
     return {
       status: DEPLOYMENT_COMPARISON_STATUSES.UNKNOWN,
       compatible: false,
       staleCache: false,
       requiresRefresh: false,
       hardRefreshRequired: false,
-      backend: {
-        version: backend.version,
-        schemaVersion: backend.schemaVersion,
-        buildId: backend.buildId,
-        assetId: backend.assetId,
-      },
+      backend: backendSummary,
       frontend: frontendSummary,
-      message: 'Deployment synchronization cannot be verified because backend or frontend build metadata is unknown.',
+      message: 'Deployment synchronization cannot be verified because backend or frontend build provenance metadata is incomplete or unverified.',
     };
   }
 
@@ -597,12 +628,7 @@ export function compareDeploymentVersions(backendDeployment, frontendClient = {}
     staleCache: false,
     requiresRefresh: false,
     hardRefreshRequired: false,
-    backend: {
-      version: backend.version,
-      schemaVersion: backend.schemaVersion,
-      buildId: backend.buildId,
-      assetId: backend.assetId,
-    },
+    backend: backendSummary,
     frontend: frontendSummary,
     message: 'Frontend and backend deployment versions are fully synchronized.',
   };
@@ -1527,11 +1553,17 @@ export function createApp({
     requireDeploymentDiagnosticsAccess,
     (request, response) => {
       const deployment = resolveAppDeploymentDiagnostics();
+      const rawFrontendCommit = request.query.frontendCommit ?? request.query.commit;
+      const rawFrontendBuildTime = request.query.frontendBuildTime ?? request.query.buildTime;
       const frontendQuery = {
         version: request.query.frontendVersion || request.query.version || undefined,
         buildId: request.query.frontendBuildId || request.query.buildId || undefined,
         assetId: request.query.frontendAssetId || request.query.assetId || undefined,
         schemaVersion: request.query.frontendSchemaVersion || request.query.schemaVersion || undefined,
+        commit: typeof rawFrontendCommit === 'string' && rawFrontendCommit.trim() ? rawFrontendCommit.trim() : undefined,
+        buildTime: typeof rawFrontendBuildTime === 'string' && rawFrontendBuildTime.trim() ? rawFrontendBuildTime.trim() : undefined,
+        dirty: parseOptionalBooleanParam(request.query.frontendDirty ?? request.query.dirty),
+        buildVerified: parseOptionalBooleanParam(request.query.frontendBuildVerified ?? request.query.buildVerified),
       };
 
       const hasFrontendInfo = Object.values(frontendQuery).some((v) => v !== undefined);

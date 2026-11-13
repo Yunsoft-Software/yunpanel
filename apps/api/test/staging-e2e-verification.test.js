@@ -9385,12 +9385,15 @@ test('Source contract T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda g
   const currentBuildId = 'build-20261001-0300';
   const currentAssetId = `assets-${currentBuildId}`;
   const currentCommit = '70a51f6f';
+  const currentBuildTime = '2026-10-01T03:00:00.000Z';
 
   const diagnostics = resolveDeploymentDiagnostics({
     buildId: currentBuildId,
     assetId: currentAssetId,
     commit: currentCommit,
+    buildTime: currentBuildTime,
     environment: 'production',
+    env: {},
   });
 
   assert.equal(diagnostics.version, API_VERSION);
@@ -9418,6 +9421,9 @@ test('Source contract T-DEV-JOB-UX: .44 kesinlikle hariç izinli test hostunda g
     schemaVersion: SCHEMA_VERSION,
     buildId: currentBuildId,
     assetId: currentAssetId,
+    commit: currentCommit,
+    buildTime: currentBuildTime,
+    buildVerified: true,
   };
   const matchResult = compareDeploymentVersions(diagnostics, matchingClient);
   assert.equal(matchResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
@@ -9854,12 +9860,15 @@ test('Source contract T-EMBER: Yalnız izin verilen test hostunda yeni build da�
   const testCommit = '4db554f7';
   const testBuildId = 'build-20261005-1530';
   const testAssetId = `assets-${testBuildId}`;
+  const testBuildTime = '2026-10-05T15:30:00.000Z';
 
   const serverDiag = resolveDeploymentDiagnostics({
     buildId: testBuildId,
     assetId: testAssetId,
     commit: testCommit,
+    buildTime: testBuildTime,
     environment: 'production',
+    env: {},
   });
 
   assert.equal(serverDiag.version, API_VERSION);
@@ -9884,6 +9893,9 @@ test('Source contract T-EMBER: Yalnız izin verilen test hostunda yeni build da�
     schemaVersion: SCHEMA_VERSION,
     buildId: testBuildId,
     assetId: testAssetId,
+    commit: testCommit,
+    buildTime: testBuildTime,
+    buildVerified: true,
   };
   const syncComp = compareDeploymentVersions(serverDiag, syncClient);
   assert.equal(syncComp.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
@@ -13634,12 +13646,15 @@ test('Source contract T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve
   const testCommit = '9c48cc30';
   const testBuildId = 'build-20261006-0005';
   const testAssetId = `assets-${testBuildId}`;
+  const testBuildTime = '2026-10-06T00:05:00.000Z';
 
   const serverDiag = resolveDeploymentDiagnostics({
     buildId: testBuildId,
     assetId: testAssetId,
     commit: testCommit,
+    buildTime: testBuildTime,
     environment: 'production',
+    env: {},
   });
 
   assert.equal(serverDiag.version, API_VERSION);
@@ -13669,6 +13684,9 @@ test('Source contract T-SITE-WORKSPACE: Yalnız izin verilen test hostuna API ve
     schemaVersion: SCHEMA_VERSION,
     buildId: testBuildId,
     assetId: testAssetId,
+    commit: testCommit,
+    buildTime: testBuildTime,
+    buildVerified: true,
   };
   const syncResult = compareDeploymentVersions(serverDiag, syncClient);
   assert.equal(syncResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
@@ -15082,12 +15100,15 @@ test("Source contract T-VISUAL: Yalnız izin verilen test hostuna normal dağıt
   const runningCommit = '4d03c772';
   const runningBuildId = 'build-20261006-0730';
   const runningAssetId = `assets-${runningBuildId}`;
+  const runningBuildTime = '2026-10-06T07:30:00.000Z';
 
   const serverDiag = resolveDeploymentDiagnostics({
     buildId: runningBuildId,
     assetId: runningAssetId,
     commit: runningCommit,
+    buildTime: runningBuildTime,
     environment: 'production',
+    env: {},
   });
 
   assert.equal(serverDiag.version, API_VERSION);
@@ -15117,6 +15138,9 @@ test("Source contract T-VISUAL: Yalnız izin verilen test hostuna normal dağıt
     schemaVersion: SCHEMA_VERSION,
     buildId: runningBuildId,
     assetId: runningAssetId,
+    commit: runningCommit,
+    buildTime: runningBuildTime,
+    buildVerified: true,
   };
   const syncResult = compareDeploymentVersions(serverDiag, syncClient);
   assert.equal(syncResult.status, DEPLOYMENT_COMPARISON_STATUSES.SYNCHRONIZED);
