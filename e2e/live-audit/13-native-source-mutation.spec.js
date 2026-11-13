@@ -311,12 +311,55 @@ test('@mutation source PHP settings change the actual FPM runtime and persist at
 
 async function browserLogin(browser,installed,username,password,phase='initial'){
  const c=await browser.newContext({ignoreHTTPSErrors:false,storageState:{cookies:[],origins:[]}});
+ let p,primaryError;
+ const transportCodes=new Set(['ERR_ABORTED','ERR_FAILED','ERR_EMPTY_RESPONSE','ERR_CONNECTION_CLOSED','ERR_CONNECTION_RESET','ERR_CONNECTION_REFUSED','ERR_CONNECTION_TIMED_OUT','ERR_TIMED_OUT','ERR_NAME_NOT_RESOLVED','ERR_NETWORK_CHANGED','ERR_INTERNET_DISCONNECTED','ERR_ADDRESS_UNREACHABLE','ERR_SSL_PROTOCOL_ERROR','ERR_CERT_AUTHORITY_INVALID','ERR_PROXY_CONNECTION_FAILED','NS_ERROR_NET_RESET','NS_ERROR_NET_TIMEOUT','NS_BINDING_ABORTED']);
+ const transportCode=value=>{const code=String(value??'').match(/\b(?:ERR_[A-Z_]+|NS_ERROR_[A-Z_]+|NS_BINDING_ABORTED)\b/)?.[0];return transportCodes.has(code)?code:null;};
+ const observation={phase,requestCount:0,postRequestCount:0,responseCount:0,postResponseCount:0,requestFailedCount:0,submitEventCount:0,trustedSubmitEventCount:0,submitListenerInstalled:false,clickAttempted:false,clickResolved:false,events:[],droppedEvents:0,formBeforeSubmit:null,failure:null};
+ let stage='fresh-context';
+ const events=new Map();
+ const append=value=>{if(observation.events.length<40)observation.events.push(value);else observation.droppedEvents+=1;};
+ const requestIdentity=request=>{try{const url=new URL(request.url());if(url.hostname!==new URL(installed.loginUrl).hostname||!(url.pathname==='/wp-login.php'||url.pathname.startsWith('/wp-admin/')))return null;return{method:request.method(),path:url.pathname};}catch{return null;}};
+ async function safeState(){
+  let timer;
+  try{return await Promise.race([p.evaluate(()=>{
+   const message=document.querySelector('#login_error')?.textContent??'';
+   return{path:location.pathname,title:document.title,adminBarPresent:Boolean(document.querySelector('#wpadminbar')),loginErrorPresent:Boolean(message),testSessionFailure:/çerez|cookie/i.test(message),credentialsRejected:/(parola|şifre).*(yanlış|geçersiz)|incorrect.*password|invalid.*username/i.test(message)};
+  }),new Promise(resolve=>{timer=setTimeout(()=>resolve(null),2000);})]);}catch{return null;}finally{clearTimeout(timer);}
+ }
  try{
   const hostname=new URL(installed.loginUrl).hostname,own=values=>values.filter(v=>v.domain===hostname||v.domain==='.'+hostname);const previousSiteSessions=own(await c.cookies()).length;expect(previousSiteSessions,'A fresh login context must contain no site session').toBe(0);
-  const p=await c.newPage();const response=await p.goto(installed.loginUrl,{waitUntil:'domcontentloaded'});const afterGet=own(await c.cookies());record('wordpress.browser-login.http',{phase,status:response?.status()??null,hostname:new URL(p.url()).hostname,path:new URL(p.url()).pathname,title:await p.title(),formInputs:await p.locator('#user_login').count(),previousSiteSessions,wpTestSessionPresent:afterGet.some(v=>v.name==='wordpress_test_cookie'),secureSessions:afterGet.filter(v=>v.secure).length});expect(response?.status(),'The real login form must respond successfully').toBe(200);
-  await p.locator('#user_login').fill(username);await p.locator('#user_pass').fill(password);const submitted=p.waitForResponse(r=>new URL(r.url()).pathname==='/wp-login.php'&&r.request().method()==='POST',{timeout:45000});await p.locator('#wp-submit').click();const result=await submitted;let testSessionSent=null;try{testSessionSent=/(?:^|;\s*)wordpress_test_cookie=/.test((await result.request().allHeaders()).cookie??'');}catch{}record('wordpress.browser-login.post',{phase,status:result.status(),testSessionSent});
-  try{await expect(p).toHaveURL(/\/wp-admin\//,{timeout:30000});await expect(p.locator('#wpadminbar')).toBeVisible({timeout:30000});}catch(error){const box=p.locator('#login_error');const message=await box.count()?await box.textContent():'';record('wordpress.browser-login.result',{phase,path:new URL(p.url()).pathname,title:await p.title(),loginErrorPresent:Boolean(message),testSessionFailure:/çerez|cookie/i.test(message??''),credentialsRejected:/(parola|şifre).*(yanlış|geçersiz)|incorrect.*password|invalid.*username/i.test(message??'')});throw error;}
- }finally{await c.close();}
+  p=await c.newPage();
+  events.set('request',request=>{const id=requestIdentity(request);if(!id)return;observation.requestCount+=1;if(id.method==='POST')observation.postRequestCount+=1;append({kind:'request',...id});});
+  events.set('response',response=>{const id=requestIdentity(response.request());if(!id)return;observation.responseCount+=1;if(id.method==='POST')observation.postResponseCount+=1;append({kind:'response',...id,status:response.status()});});
+  events.set('requestfailed',request=>{const id=requestIdentity(request);if(!id)return;observation.requestFailedCount+=1;append({kind:'requestfailed',...id,transportCode:transportCode(request.failure()?.errorText)});});
+  for(const [name,handler]of events)p.on(name,handler);
+  stage='login-get';const response=await p.goto(installed.loginUrl,{waitUntil:'domcontentloaded'});const afterGet=own(await c.cookies());record('wordpress.browser-login.http',{phase,status:response?.status()??null,hostname:new URL(p.url()).hostname,path:new URL(p.url()).pathname,title:await p.title(),formInputs:await p.locator('#user_login').count(),previousSiteSessions,wpTestSessionPresent:afterGet.some(v=>v.name==='wordpress_test_cookie'),secureSessions:afterGet.filter(v=>v.secure).length});expect(response?.status(),'The real login form must respond successfully').toBe(200);
+  const binding='__yunpanelT905ObservedSubmit';
+  await p.exposeBinding(binding,(source,value)=>{if(source.page!==p||source.frame!==p.mainFrame()||typeof value?.trusted!=='boolean'||Object.keys(value).length!==1)return;observation.submitEventCount+=1;if(value.trusted)observation.trustedSubmitEventCount+=1;});
+  await p.evaluate(name=>{document.addEventListener('submit',event=>{if(!(event.target instanceof HTMLFormElement)||event.target.id!=='loginform')return;void window[name]({trusted:event.isTrusted}).catch(()=>{});},{capture:true,passive:true});},binding);
+  observation.submitListenerInstalled=true;
+  stage='fill-user';await p.locator('#user_login').fill(username);stage='fill-pass';await p.locator('#user_pass').fill(password);
+  stage='form-before-submit';observation.formBeforeSubmit=await p.evaluate(()=>{
+   const form=document.querySelector('#loginform'),user=document.querySelector('#user_login'),pass=document.querySelector('#user_pass'),button=document.querySelector('#wp-submit');
+   const action=form?new URL(form.action,location.href):null;
+   return{formPresent:Boolean(form),checkValidity:form?form.checkValidity():null,userNonempty:user?Boolean(user.value):null,passNonempty:pass?Boolean(pass.value):null,buttonDisabled:button?button.disabled:null,actionScheme:action?.protocol??null,actionOrigin:action?.origin??null,actionPath:action?.pathname??null};
+  });
+  // Attach both handlers immediately: a click error must not leave the response waiter rejecting unobserved.
+  const submitted=p.waitForResponse(r=>new URL(r.url()).pathname==='/wp-login.php'&&r.request().method()==='POST',{timeout:45000}).then(response=>({response}),error=>({error}));
+  stage='submit-click';observation.clickAttempted=true;await p.locator('#wp-submit').click();observation.clickResolved=true;
+  stage='post-response';const settled=await submitted;if(settled.error)throw settled.error;const result=settled.response;
+  let testSessionSent=null;try{testSessionSent=/(?:^|;\s*)wordpress_test_cookie=/.test((await result.request().allHeaders()).cookie??'');}catch{}record('wordpress.browser-login.post',{phase,status:result.status(),testSessionSent});
+  stage='admin-url';await expect(p).toHaveURL(/\/wp-admin\//,{timeout:30000});stage='admin-bar';await expect(p.locator('#wpadminbar')).toBeVisible({timeout:30000});stage='verified';
+ }catch(error){
+  primaryError=error;
+  const current=await safeState();
+  observation.failure={stage,timeout:error?.name==='TimeoutError'||/timed?\s*out|timeout/i.test(String(error?.message??'')),transportCode:transportCode(error?.message),path:current?.path??null,adminBarPresent:current?.adminBarPresent??null,loginErrorPresent:current?.loginErrorPresent??null,testSessionFailure:current?.testSessionFailure??null,credentialsRejected:current?.credentialsRejected??null};
+  try{record('wordpress.browser-login.result',{phase,path:current?.path??null,title:current?.title??null,loginErrorPresent:current?.loginErrorPresent??null,testSessionFailure:current?.testSessionFailure??null,credentialsRejected:current?.credentialsRejected??null});}catch{/* Preserve the original browser failure even if writing its observation fails. */}
+  throw error;
+ }finally{
+  try{try{if(p)for(const [name,handler]of events)p.off(name,handler);record('wordpress.browser-login.observation',{...observation,stage});}catch(error){if(!primaryError)throw error;}}
+  finally{try{await c.close();}catch(error){if(!primaryError)throw error;}}
+ }
 }
 
 test('@mutation source WordPress installs in Turkish against the real site DB and verifies actual HTTP and locale',async({liveApi,page,browser})=>{
