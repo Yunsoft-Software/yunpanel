@@ -164,7 +164,7 @@ Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak dü
 | T889-NATIVE-READY | En fazla iki taze dalga, dalga başına en fazla iki paralel normal sahipli PHP kurulumu; gerçek API/Unix/FPM/HTTP ve exact owned registry'nin yalnız salt okunur hazırlık projection'ı | Her ilk dinamik yanıt200/nonce/nonrootUID/fpm-fcgi/no-store; her kaynak normal API ile kaldırılır ve canonical/Unix/FPM/socket/Nginx/mount yokluğu; özgün kardeşler korunur |
 | T889-CAUSAL | Aynı gerçek activation inspect'inde ilk satisfied:false + allowlist reason → son satisfied:true | En az bir gerçek geçiş gözlenirse eski tek-inspect hata yolunun sınıfı tekrar üretilmiş olur. Yalnız listener:false→true yeterli değildir. Tüm attempts1/ilktrue ise mekanizma AÇIK; atlanan veya sahte PASS yok |
 
-Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. T898'in geçerli T897/T889 bağımlılıkları korunur.
+Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. 13 Kasım kullanıcı onayıyla T889 nedensellik kapısı açık kalır; T897 artık T861/T891 ardından, T898 ise T861/T897 ardından yürür. Diğer kabul ve izolasyon sınırları korunur.
 
 ## 13 Kasım 2026 — T905 taze WordPress giriş gözlemi
 
@@ -203,3 +203,18 @@ Native23iki taze koşuda4/4 geçti. Önceden kalmış iki dosya ise duruyor. Gü
 | T892-HISTORICAL | İki exact eski provisioning ID; gerçek current SHA ve receipt ön-durum/kimlik kapıları; Owner mevcut API ve typed confirmation | Yeni eşleşen paket+inceleme sonrası aynı özgün journal'ların desteklenen telafisi iki eski dosyayı kaldırır; yeni kimlik üretilmez, field/journal elle değiştirilmez; tüm yan hedef/kardeşler korunur |
 
 Yeni endpoint/panel/host motoru eklenmez. Namespace sınırı tek mevcut backend/canonical registry kapsamındadır; process/disk lock yapılacaksa tüm yazanlar ve kilit içi reload gerekir, yalnız yeni lockfile eklenmez. Native25 ve tarihsel iki pozitif telafi, kaynak/yerel model kontrolleriyle geçmiş sayılmaz.
+
+
+## 13 Kasım 2026 — Onaylanan T897/T898 kaynak sırası
+
+Kullanıcı T889 açık kalırken `t889-gate-decision-proposal.md` kapsamını uygulamayı açıkça onayladı. T897 eski502 nedenselliğini kapatmaz; mevcut elFinder FPM retirement invariantını düzeltir. T898, T897 kabulünden sonra mevcut terminal motorunda Website fence/lease/awaitable drain uygular. Root plan tamamlanma işaretleri verilmez; teknik kaynak sözleşmeleri görevlerde ve bu matriste tutulur.
+
+| Senaryo | Gerçek sınır | Zorunlu sonuç |
+|---|---|---|
+| T897-RETIRE | Tek normal owned static removal; gerçek aynı-servis FPM ve en az iki fresh normal PHP sibling | Kendi pool/socket yok; önceden sağlıklı sibling listener'lar bounded gerçek readiness; her ilk dynamic nonce/UID/SAPI/no-store200; tekrarlı shared reload yok |
+| T897-IDEMPOTENT | Aynı gerçek original receipt ve terminal removal kimlikleri; identity-cleanup tekrar kontrolü | Doğru terminal durum yeniden reload gerektirmeden doğrulanır; retained/foreign/drift pool veya eksik readiness başarı olmaz |
+| T897-ERROR | Gerçek validation/receipt/drift/rollback sınırları; global PHP servisi bozulmaz | Hata ve belirsizlik görünür, kardeşler korunur; fake binary/socket/service/HTTP yok |
+| T897-CLEAN | Normal reverse API cleanup; original site inventory/canonical TLS ve physical readback | Website/Domain/Application404, Unix/group/canonical roots/FPM/socket/Nginx/mount yok, baseline ilk canonical HTTP200 |
+| T898-FENCE | Mevcut NodePTY/ttyd pending-open ve active Website-bound oturumlar; aynı removal journal | Removal fence sonrası yeni site token/open/consume/WS reddedilir; pending ve active kendi oturumları Unix cleanup öncesi gerçek exit/drain ile kapanır |
+| T898-ISOLATION | Açık B/site/root/diğer tenant oturumları ile sahipli A removal | Yalnız A drain edilir; B ve root ilk challenge yanıtı korunur, RBAC/CSRF/session revoke gevşetilmez |
+| T898-RETRY | Timeout/failure ve aynı authoritative journal | Doğrulanamayan drain temizliğe başarı vermez; yeni journal/mutation replay, force userdel, broad UID kill veya yeni terminal motoru yok |

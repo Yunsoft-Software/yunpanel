@@ -1133,12 +1133,16 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T897 · Statik site silme tamamlandıktan sonra çalışan PHP WordPress kardeş site 502 verdi
-- **Bağımlı:** T861, T889
-- **Dosyalar:** `apps/api/src/website-removal-runtime.js`, `packages/host-runtime/src/php-fpm-site-manager.js`
+- **Bağımlı:** T861, T891
+- **Dosyalar:** `packages/host-runtime/src/elfinder-fpm-site-manager.js`, `packages/host-runtime/test/elfinder-fpm-site-manager.test.js`, `e2e/live-audit/27-native-fpm-retirement-mutation.spec.js`
 - **Kaynak:** QA · 2026-11-12 17:37
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     T886 13 fullq1 native .28: yeni PHP sitenin Türkçe WP kurulumu, gerçek publicHTTP200 ve fresh adminlogin önce geçti. Ayrı owned static site normal removal tamamlandı, Website/Domain/Application404; hemen sonraki PHP sibling rootHTTP ilk yanıt502 (200 bekleniyor), WPstatus installedtrue. Strict assertion korunuyor; kaynak/runtime neden henüzkanıtlanmadı. T889 ilkPHPFPMapply bulgusu ayrı; aynı neden diye varsayma. Koşu5pass1fail8upstreamnedeniyleçalışmadı; her iki owned yaşam döngüsü normaltemizlendi. Özel .local/t883-20261112/ altında T886 lifecycle-q1 kanıtı. Siblinggate sonrasına taşınarak diğerkanallar ayrıca çalıştırılıyor, bu hata başarıya çevrilmiyor. Yeni before/after pinnedvhostHTTP/Nginxhash/safeFPMreadback ve boundedtakip, ilk502yi gizlemeden nedeni ayıracak. Kaynak düzeltmesi varsa dedicateduser ve çalışan kardeşlerin sürekliliği korunmalı. Bu test diliminde deploy/servisrestart yok.
+
+
+    13 Kasım 2026 İNSAN onayı: T889 tarihsel nedensellik kapısı AÇIK kalır; bu görev T861/T891 kaynak önkoşullarıyla bağımsız gerçek elFinder FPM retirement kusurunu düzeltir. Onaylanan .local/antigravity-review-20261113/t889-gate-decision-proposal.md kapsamıdır. İlk502'nin nedeni aynıymış gibi yazılmaz. Somut kaynak açıklığı: static removal elFinder compensate/retire ve identity cleanup yollarında ortak PHP-FPM'i tekrarlı reload edebiliyor; kendi pool/socket yokluğunu kontrol ederken önceden sağlıklı kardeş listener'ların geri hazır olmasını doğrulamadan terminal başarı dönebiliyor. Mevcut manager/receipt/configtest/hash/drift/retained-pool korumaları korunarak reload tekrarı kaldırılmalı ve önceden sağlıklı aynı-servis listener'ları gerçek bounded readiness ile korunmalı. Yeni FPM motoru, sahte binary/socket/HTTP veya servis bozma yok.
+    Önce yeni native27 senaryo matrisi ve gerçek eski davranış kanıtı; sonra dar kaynak dilimi. Aynı normal static removal, en az iki fresh gerçek PHP sibling, her ilk dynamic nonce/nonrootUID/fpm-fcgi/no-store200, mümkünse gerçek journal/typed reload sayısı ve idempotent retirement; bozuk/foreign/retained receipt, drift ve hata/rollback sınırları; aynı PHP sürümü ve exact pool/socket kimliği. Her own kaynak normal API ile temizlenir; canonical Unix/group/FPM/socket/Nginx/mount yokluğu ve orijinal site kimlikleri/ilk canonical TLS200 korunur. Native test yalnız root tarafından izinli .28'de, kaynak fulltest+bağımsız inceleme ve eşleşen paket onayından sonra kabul edilir. Eski failed native kayıtlar korunur. T898 bundan sonra kalır. T889 veya genel P0 bu görevle kapanmaz.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
