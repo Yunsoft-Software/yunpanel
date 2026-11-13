@@ -1363,3 +1363,15 @@
     Bu ön dilim yalnız mevcut gerçek tarayıcı yardımcısına güvenli gözlem ekler; T883 genel ürün kabulünü beklemek yerine T886 test kaynağı üzerine sıralanır ve T883 ile source-audit-13 kilidini paylaşır. Ürün/deploy değişikliği bu test dosyası sözleşmesinin dışında kalır. T889/T897/T898 bağımlılıkları korunur.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T906 · Site olusturma sonucunda dogrulanmis islem kimligi gosterilmiyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/web/src/workspace/site-create-submission.js`
+- **Kaynak:** QA · 2026-11-13 08:59
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Gerçek .28/0.3.0-2026111302/source1b6 native28 q1, source353b74b1: tek create201, gerçek backend/DOM tüm required adımlar ready; ancak teknik ayrıntılarda İşlem kimliği alanı —. createReceipt.operationId/provisioningId geçerli5d8dd6c3-1af3-4bca-a51a-8b23802e7a05 iken SiteCreateResult state.operationId/domain.operationId bulamıyor. Source site-create-submission doğrulanmış expected.operationId bilgisini state içine hiç yayınlamıyor. Gerçek test toContainText(operationId) kırıldı; bu assertion/süre kaldırılmayacak veya gevşetilmeyecek. Own site normal cleanup, üç metadata404 ve tüm physicalabsence geçti; diğer siteler korundu. Özel t894-native28-chrome13-02-q1 kırmızı kanıtı korunur; UI409 bu koşuda gözlenmedi.
+    Yalnız mevcut submission state sınırında doğrulanmış işlem kimliğini koru. Kimliği preview doğrulamasından önce sunucuda doğrulanmış gibi yayınlama; domain/Website/provisioning kimliklerini birbirine karıştırma. Preview başarısızlığı, belirsiz create, recorded/provisioning/ready/attention ve session geçişi davranışları; single-create/no-replay ve mevcut hata güvenliği korunsun. Yeni motor, sentetik HTTP/fixture servisi, test beklenti gevşetme veya başka UI düzenlemesi yok. Mevcut kırmızı native28 gerçek regresyonudur; callback/harness veya metin-regex kontrolleri native kanıt diye sunulmaz.
+    Güncel onaylı P0 package/test/fix döngüsünde root bağımsız kaynak incelemesi+ilgili test+tam kaynak kapısından sonra eşleşen yeni paketi yalnız .28'e kuracak. Aynı native28 DOM işlem/Website/domain/hostname eşleşmesi iki fresh koşuda doğrulanmalı; gerçek allowed409 nedenselliği T894'ün ayrı kabulüdür ve gözlenmezse açık kalır. Eski UNKNOWN/GC/başka P0 kapıları bu dar düzeltmeyle kapanmaz.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
