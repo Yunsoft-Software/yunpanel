@@ -59,6 +59,18 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
     domain.lastSuspensionOperationId = null;
     domain.lastResumedAt = null;
   }
+  if (domain.appliedChecksum === undefined) {
+    if (domain.appliedRevision > 0 && domain.stagedRevision === domain.appliedRevision
+      && typeof domain.stagedChecksum === 'string' && SHA256_PATTERN.test(domain.stagedChecksum)) {
+      domain.appliedChecksum = domain.stagedChecksum;
+    } else if (domain.state === 'suspended'
+      && typeof domain.suspendedChecksum === 'string' && SHA256_PATTERN.test(domain.suspendedChecksum)
+      && domain.appliedRevision > 0) {
+      domain.appliedChecksum = domain.suspendedChecksum;
+    } else {
+      domain.appliedChecksum = null;
+    }
+  }
   const normalizedSettings = settings(domain.targetType, domain.nginxSettings);
   if (JSON.stringify(normalizedSettings) !== JSON.stringify(domain.nginxSettings)
     || ((domain.targetType === 'proxy' || domain.targetType === 'python') && domain.target?.websocket !== normalizedSettings.websocket)
@@ -76,6 +88,11 @@ function hydrateDomain(domain, sourceVersion = STORE_VERSION) {
   }
   if (domain.appliedPrimaryDomain !== null && normalizeDomains(domain.appliedPrimaryDomain, []).primary !== domain.appliedPrimaryDomain) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted applied Domain identity is invalid', 409);
+  }
+  if ((domain.appliedRevision === 0 && domain.appliedChecksum !== null)
+    || (domain.appliedChecksum !== null
+      && (typeof domain.appliedChecksum !== 'string' || !SHA256_PATTERN.test(domain.appliedChecksum)))) {
+    throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain applied checksum is invalid', 409);
   }
   if (domain.lastError !== null && (typeof domain.lastError !== 'string' || !/^[a-z0-9_]{1,120}$/.test(domain.lastError))) {
     throw new DomainRegistryError('invalid_domain_state', 'Persisted Domain error metadata is invalid', 409);
@@ -142,6 +159,7 @@ function publicDomain(domain) {
   return {
     ...domain,
     websiteId: domain.websiteId ?? null,
+    appliedChecksum: domain.appliedChecksum ?? null,
     aliases: [...domain.aliases],
     target: { ...domain.target },
     nginxSettings: structuredClone(domain.nginxSettings),
@@ -289,6 +307,7 @@ function assertSuspendable(domain, { expectedRevision, checksum }) {
     || domain.stagedRevision !== expectedRevision
     || domain.appliedRevision !== expectedRevision
     || domain.stagedChecksum !== checksum
+    || (domain.appliedChecksum !== null && domain.appliedChecksum !== undefined && domain.appliedChecksum !== checksum)
     || domain.appliedPrimaryDomain !== domain.primaryDomain
     || domain.lastError !== null) {
     throw new DomainRegistryError(
@@ -714,7 +733,7 @@ export function createDomainRegistry({
       target: targetWithSettings(targetType, normalizedTarget, normalizedNginxSettings),
       nginxSettings: { ...normalizedNginxSettings, headers: normalizedNginxSettings.headers.map((header) => ({ ...header })) },
       httpsMode, httpsRedirect, canonicalRedirect,
-      certificateId: null, appliedPrimaryDomain: null,
+      certificateId: null, appliedPrimaryDomain: null, appliedChecksum: null,
       state: 'draft', desiredRevision: 1, stagedRevision: 0, stagedChecksum: null, stagedConfigName: null,
       lastStagedAt: null, appliedRevision: 0, lastAppliedAt: null, lastError: null,
       suspensionOperationId: null, suspendedAt: null, suspendedChecksum: null,
@@ -957,21 +976,23 @@ export function createDomainRegistry({
       const active = domain.stagedRevision === entry.expectedRevision
         && domain.appliedRevision === entry.expectedRevision
         && domain.stagedChecksum === checksum
+        && (domain.appliedChecksum ?? checksum) === checksum
         && domain.stagedConfigName === configName
         && domain.appliedPrimaryDomain === domain.primaryDomain
         && domain.state === 'active'
         && domain.lastError === null;
       const pristine = domain.certificateId === null
         && domain.stagedRevision === 0 && domain.appliedRevision === 0
-        && domain.stagedChecksum === null && domain.stagedConfigName === null
+        && domain.stagedChecksum === null && (domain.appliedChecksum ?? null) === null
+        && domain.stagedConfigName === null
         && domain.lastStagedAt === null && domain.lastAppliedAt === null
         && domain.appliedPrimaryDomain === null && domain.state === 'draft'
         && domain.lastError === null;
       if (!active && !pristine) {
         throw new DomainRegistryError('provisioned_domain_state_drift', 'Provisioned Domain routing state changed before activation', 409);
       }
-      changed ||= pristine;
-      return { domain, active };
+      changed ||= pristine || (active && domain.appliedChecksum !== checksum);
+      return { domain, active: active && domain.appliedChecksum === checksum };
     });
 
     if (changed) {
@@ -983,6 +1004,7 @@ export function createDomainRegistry({
         domain.stagedConfigName = configName;
         domain.lastStagedAt = timestamp;
         domain.appliedRevision = domain.desiredRevision;
+        domain.appliedChecksum = checksum;
         domain.appliedPrimaryDomain = domain.primaryDomain;
         domain.lastAppliedAt = timestamp;
         domain.state = 'active';
@@ -1016,7 +1038,8 @@ export function createDomainRegistry({
       }
       const pristine = domain.certificateId === null
         && domain.stagedRevision === 0 && domain.appliedRevision === 0
-        && domain.stagedChecksum === null && domain.stagedConfigName === null
+        && domain.stagedChecksum === null && (domain.appliedChecksum ?? null) === null
+        && domain.stagedConfigName === null
         && domain.lastStagedAt === null && domain.lastAppliedAt === null
         && domain.appliedPrimaryDomain === null && domain.state === 'draft'
         && domain.lastError === null;
@@ -1024,6 +1047,7 @@ export function createDomainRegistry({
         && domain.stagedRevision === entry.expectedRevision
         && domain.appliedRevision === entry.expectedRevision
         && domain.stagedChecksum === checksum
+        && (domain.appliedChecksum ?? checksum) === checksum
         && domain.stagedConfigName === configName
         && domain.appliedPrimaryDomain === domain.primaryDomain
         && domain.state === 'active'
@@ -1044,6 +1068,7 @@ export function createDomainRegistry({
         domain.stagedConfigName = null;
         domain.lastStagedAt = null;
         domain.appliedRevision = 0;
+        domain.appliedChecksum = null;
         domain.appliedPrimaryDomain = null;
         domain.lastAppliedAt = null;
         domain.state = 'draft';
@@ -1096,6 +1121,7 @@ export function createDomainRegistry({
     if (checksum !== domain.stagedChecksum) throw new DomainRegistryError('staged_checksum_mismatch', 'Activated checksum does not match staged desired state', 409);
     const timestamp = new Date(now()).toISOString();
     domain.appliedRevision = domain.desiredRevision;
+    domain.appliedChecksum = checksum;
     domain.appliedPrimaryDomain = domain.primaryDomain;
     domain.state = 'active';
     domain.lastAppliedAt = timestamp;
@@ -1110,11 +1136,19 @@ export function createDomainRegistry({
     checksum,
     operationId,
     allowDraft = false,
+    allowPriorAppliedForRemoval = false,
   } = {}) {
     await ensureInitialized();
     const domain = requireDomain(state, domainId);
     const expectedChecksum = suspensionChecksum(checksum);
     const expectedOperationId = suspensionOperationId(operationId);
+    if (allowDraft === true && allowPriorAppliedForRemoval === true) {
+      throw new DomainRegistryError(
+        'domain_suspension_state_drift',
+        'Domain suspension mode flags are mutually exclusive',
+        409,
+      );
+    }
     if (domain.state === 'suspended') {
       if (domain.desiredRevision !== expectedRevision
         || domain.suspendedChecksum !== expectedChecksum
@@ -1127,11 +1161,13 @@ export function createDomainRegistry({
       }
       return publicDomain(domain);
     }
-    // A failed first staging never reached the host, so it is suspended for removal like a draft.
-    const unpublishedFailure = domain.state === 'error' && domain.appliedRevision === 0
-      && (domain.appliedPrimaryDomain ?? null) === null;
-    if ((domain.state === 'draft' || unpublishedFailure) && allowDraft === true) {
-      if (!Number.isSafeInteger(expectedRevision)
+    if (allowDraft === true) {
+      // Only a Domain that never reached the host can be suspended for removal as a host-free draft.
+      if (!(domain.state === 'draft' || domain.state === 'error')
+        || domain.appliedRevision !== 0
+        || (domain.appliedPrimaryDomain ?? null) !== null
+        || (domain.appliedChecksum ?? null) !== null
+        || !Number.isSafeInteger(expectedRevision)
         || expectedRevision < 1
         || domain.desiredRevision !== expectedRevision
         || domain.stagedRevision !== 0
@@ -1148,6 +1184,39 @@ export function createDomainRegistry({
       domain.stagedRevision = expectedRevision;
       domain.appliedRevision = expectedRevision;
       domain.stagedChecksum = expectedChecksum;
+      domain.appliedChecksum = expectedChecksum;
+      domain.appliedPrimaryDomain = domain.primaryDomain;
+      domain.suspensionOperationId = expectedOperationId;
+      domain.suspendedAt = timestamp;
+      domain.suspendedChecksum = expectedChecksum;
+      domain.lastError = null;
+      domain.updatedAt = timestamp;
+      await persist();
+      return publicDomain(domain);
+    }
+    if (allowPriorAppliedForRemoval === true) {
+      if (!['draft', 'staged', 'error'].includes(domain.state)
+        || !Number.isSafeInteger(expectedRevision)
+        || expectedRevision < 1
+        || domain.desiredRevision !== expectedRevision
+        || !Number.isSafeInteger(domain.appliedRevision)
+        || domain.appliedRevision < 1
+        || domain.appliedRevision > expectedRevision
+        || typeof domain.appliedPrimaryDomain !== 'string'
+        || domain.appliedPrimaryDomain.length < 1
+        || domain.appliedChecksum !== expectedChecksum) {
+        throw new DomainRegistryError(
+          'domain_suspension_state_drift',
+          'Prior-applied Domain state does not match expected removal suspension evidence',
+          409,
+        );
+      }
+      const timestamp = new Date(now()).toISOString();
+      domain.state = 'suspended';
+      domain.stagedRevision = expectedRevision;
+      domain.appliedRevision = expectedRevision;
+      domain.stagedChecksum = expectedChecksum;
+      domain.appliedChecksum = expectedChecksum;
       domain.appliedPrimaryDomain = domain.primaryDomain;
       domain.suspensionOperationId = expectedOperationId;
       domain.suspendedAt = timestamp;
@@ -1167,6 +1236,7 @@ export function createDomainRegistry({
     assertSuspendable(domain, { expectedRevision, checksum: expectedChecksum });
     const timestamp = new Date(now()).toISOString();
     domain.state = 'suspended';
+    domain.appliedChecksum = expectedChecksum;
     domain.suspensionOperationId = expectedOperationId;
     domain.suspendedAt = timestamp;
     domain.suspendedChecksum = expectedChecksum;

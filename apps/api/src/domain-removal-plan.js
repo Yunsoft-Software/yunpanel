@@ -227,37 +227,51 @@ function domainSnapshot(domain) {
     && domain.stagedRevision === domain.desiredRevision
     && domain.appliedRevision === domain.desiredRevision
     && domain.appliedPrimaryDomain === domain.primaryDomain
+    && (domain.appliedChecksum === undefined || domain.appliedChecksum === domain.stagedChecksum)
   );
-  // A Domain whose first staging failed ('error', never applied) has nothing on the host either.
-  const isStableDraft = Boolean(
+  // Only a Domain that never reached the host has no active Nginx config to deactivate.
+  const isUnpublishedDraft = Boolean(
     domain
-    && (domain.state === 'draft' || (domain.state === 'error' && domain.appliedRevision === 0))
+    && (domain.state === 'draft' || domain.state === 'error')
     && Number.isSafeInteger(domain.desiredRevision) && domain.desiredRevision >= 1
+    && domain.appliedRevision === 0
+    && (domain.appliedPrimaryDomain === null || domain.appliedPrimaryDomain === undefined)
+    && (domain.appliedChecksum === null || domain.appliedChecksum === undefined)
     && domain.stagedRevision === 0
     && (domain.stagedChecksum === null || domain.stagedChecksum === undefined)
-    && (domain.appliedRevision === 0
-      ? (domain.appliedPrimaryDomain === null || domain.appliedPrimaryDomain === undefined)
-      : (Number.isSafeInteger(domain.appliedRevision)
-        && domain.appliedRevision > 0
-        && domain.appliedRevision < domain.desiredRevision
-        && domain.appliedPrimaryDomain === domain.primaryDomain))
+  );
+  const isPriorAppliedPendingChange = Boolean(
+    domain
+    && ['draft', 'staged', 'error'].includes(domain.state)
+    && Number.isSafeInteger(domain.desiredRevision) && domain.desiredRevision >= 1
+    && Number.isSafeInteger(domain.appliedRevision)
+    && domain.appliedRevision >= 1
+    && domain.appliedRevision <= domain.desiredRevision
+    && typeof domain.appliedPrimaryDomain === 'string'
+    && domain.appliedPrimaryDomain.length >= 1
+    && domain.appliedPrimaryDomain.length <= 253
+    && !/[\u0000-\u001f\u007f]/.test(domain.appliedPrimaryDomain)
+    && typeof domain.appliedChecksum === 'string'
+    && SHA256_PATTERN.test(domain.appliedChecksum)
   );
   if (!domain || typeof domain !== 'object' || Array.isArray(domain)
     || typeof domain.primaryDomain !== 'string' || domain.primaryDomain.length < 1
     || domain.primaryDomain.length > 253 || /[\u0000-\u001f\u007f]/.test(domain.primaryDomain)
-    || (!isStableApplied && !isStableDraft)) {
+    || (!isStableApplied && !isUnpublishedDraft && !isPriorAppliedPendingChange)) {
     throw new DomainRemovalPlanError(
       'domain_removal_domain_not_stable',
       'Domain must have an exact active or suspended applied routing revision before removal planning',
       409,
     );
   }
-  const stagedChecksum = isStableDraft
+  const routingChecksum = isUnpublishedDraft
     ? draftDomainChecksum(domain)
-    : safeDigest(domain.stagedChecksum, 'stagedChecksum');
+    : isPriorAppliedPendingChange
+      ? safeDigest(domain.appliedChecksum, 'appliedChecksum')
+      : safeDigest(domain.stagedChecksum, 'stagedChecksum');
   const suspended = domain.state === 'suspended';
   if (suspended && (
-    domain.suspendedChecksum !== stagedChecksum
+    domain.suspendedChecksum !== routingChecksum
     || typeof domain.suspensionOperationId !== 'string'
     || !SAFE_ID.test(domain.suspensionOperationId)
   )) {
@@ -292,7 +306,7 @@ function domainSnapshot(domain) {
       : safeId(domain.parentDomainId, 'parentDomainId'),
     state: domain.state,
     desiredRevision: domain.desiredRevision,
-    checksum: stagedChecksum,
+    checksum: routingChecksum,
     suspensionOperationId: suspended ? domain.suspensionOperationId : null,
   });
 }

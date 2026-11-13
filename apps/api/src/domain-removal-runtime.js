@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { createNginxManager } from '@yunpanel/host-runtime';
 
 import {
   domainRemovalOperationPublicView,
@@ -48,6 +49,34 @@ function mapped(error) {
     return new DomainRemovalRuntimeError(error.code, error.message, error.status);
   }
   return error;
+}
+
+function normalizeHostDeactivationInspection(value, checksum) {
+  if (!value || typeof value !== 'object'
+    || value.checksum !== checksum
+    || typeof value.satisfied !== 'boolean'
+    || (value.deactivationCandidate !== undefined && typeof value.deactivationCandidate !== 'boolean')) {
+    throw new DomainRemovalRuntimeError(
+      'domain_removal_host_inspection_invalid',
+      'Nginx deactivation inspection returned invalid evidence',
+      503,
+    );
+  }
+  return Object.freeze({
+    satisfied: value.satisfied,
+    deactivationCandidate: value.deactivationCandidate === true,
+    reason: typeof value.reason === 'string' ? value.reason : null,
+    configName: typeof value.configName === 'string' ? value.configName : null,
+    checksum,
+  });
+}
+
+function mapPriorAppliedNginxError(error, fallbackCode, fallbackMessage) {
+  if (error instanceof DomainRemovalRuntimeError) return error;
+  if (typeof error?.code === 'string' && error.code.startsWith('nginx_')) {
+    return new DomainRemovalRuntimeError(error.code, error.message, 409);
+  }
+  return new DomainRemovalRuntimeError(fallbackCode, fallbackMessage, 503);
 }
 
 function routingRetryConfirmation(operation) {
@@ -917,6 +946,7 @@ export function createDomainRemovalRuntime({
   mailDomainRemovalRuntime = null,
   roundcubeDomainMappingRegistry = null,
   roundcubeDomainMappingService = null,
+  nginxManager = createNginxManager(),
 } = {}) {
   if (!registry || typeof registry.init !== 'function' || typeof registry.create !== 'function'
     || typeof registry.get !== 'function' || typeof registry.listForDomain !== 'function'
@@ -929,6 +959,9 @@ export function createDomainRemovalRuntime({
     || typeof suspensionRuntime.retrySuspend !== 'function'
     || typeof suspensionRuntime.get !== 'function'
     || typeof suspensionRuntime.listForDomain !== 'function'
+    || !nginxManager
+    || typeof nginxManager.inspectDomainDeactivation !== 'function'
+    || typeof nginxManager.deactivateDomain !== 'function'
     || (domainRegistry !== null && (
       typeof domainRegistry?.getDomain !== 'function'
       || typeof domainRegistry?.detachWebsiteForRemoval !== 'function'
@@ -2243,25 +2276,154 @@ export function createDomainRemovalRuntime({
           return Object.freeze({ __directSuspendedDomain: currentDomain });
         }
       }
-      if (['draft', 'error'].includes(preview.domain?.state)) {
-        let draftCandidate = preview.domain;
+      if (['draft', 'staged', 'error'].includes(preview.domain?.state)) {
+        let loaded = preview.domain;
         if (typeof domainRegistry?.getDomain === 'function') {
-          try {
-            const loaded = await domainRegistry.getDomain(operation.domainId);
-            if (loaded) draftCandidate = loaded;
-          } catch (error) { throw mapped(error); }
+          try { loaded = await domainRegistry.getDomain(operation.domainId); }
+          catch (error) { throw mapped(error); }
+          if (!loaded) {
+            throw new DomainRemovalRuntimeError(
+              'domain_removal_suspension_preview_stale',
+              'Domain disappeared before removal routing suspension',
+              409,
+            );
+          }
         }
-        const expectedDraftChecksum = domainRemovalPlanInternals.draftDomainChecksum(draftCandidate);
-        if (expectedDraftChecksum === operation.checksum) {
+        const isUnpublishedDraft = ['draft', 'error'].includes(loaded?.state)
+          && loaded.appliedRevision === 0
+          && (loaded.appliedPrimaryDomain ?? null) === null
+          && (loaded.appliedChecksum ?? null) === null
+          && loaded.stagedRevision === 0
+          && (loaded.stagedChecksum ?? null) === null;
+        if (isUnpublishedDraft) {
+          const expectedDraftChecksum = domainRemovalPlanInternals.draftDomainChecksum(loaded);
+          if (expectedDraftChecksum === operation.checksum) {
+            try {
+              const suspended = await domainRegistry.markSuspended(operation.domainId, {
+                expectedRevision: operation.domainRevision,
+                checksum: operation.checksum,
+                operationId: directSuspensionOperationId(operation),
+                allowDraft: true,
+              });
+              return Object.freeze({ __directSuspendedDomain: suspended });
+            } catch (error) { throw mapped(error); }
+          }
+        } else if (['draft', 'staged', 'error'].includes(loaded?.state)
+          && Number.isSafeInteger(loaded?.appliedRevision)
+          && loaded.appliedRevision >= 1) {
+          if (loaded.id !== operation.domainId
+            || loaded.serverId !== operation.serverId
+            || loaded.primaryDomain !== operation.primaryDomain
+            || loaded.desiredRevision !== operation.domainRevision
+            || loaded.appliedRevision > operation.domainRevision
+            || typeof loaded.appliedPrimaryDomain !== 'string'
+            || loaded.appliedPrimaryDomain.length < 1
+            || loaded.appliedPrimaryDomain.length > 253
+            || /[\u0000-\u001f\u007f]/.test(loaded.appliedPrimaryDomain)
+            || loaded.appliedChecksum !== operation.checksum) {
+            throw new DomainRemovalRuntimeError(
+              'domain_removal_suspension_preview_stale',
+              'Domain suspension preview no longer matches journaled removal intent',
+              409,
+            );
+          }
+          let inspection;
           try {
-            const suspended = await domainRegistry.markSuspended(operation.domainId, {
-              expectedRevision: operation.domainRevision,
-              checksum: operation.checksum,
-              operationId: directSuspensionOperationId(operation),
-              allowDraft: true,
-            });
-            return Object.freeze({ __directSuspendedDomain: suspended });
-          } catch (error) { throw mapped(error); }
+            inspection = normalizeHostDeactivationInspection(
+              await nginxManager.inspectDomainDeactivation({
+                primaryDomain: loaded.appliedPrimaryDomain,
+                checksum: operation.checksum,
+              }),
+              operation.checksum,
+            );
+          } catch (error) {
+            throw mapPriorAppliedNginxError(
+              error,
+              'domain_removal_host_inspection_unavailable',
+              'Nginx deactivation state could not be inspected during Domain removal',
+            );
+          }
+          let hostChanged = false;
+          if (!inspection.satisfied && inspection.deactivationCandidate) {
+            let deactivated;
+            try {
+              deactivated = await nginxManager.deactivateDomain({
+                primaryDomain: loaded.appliedPrimaryDomain,
+                checksum: operation.checksum,
+              });
+            } catch (error) {
+              throw mapPriorAppliedNginxError(
+                error,
+                'domain_removal_host_deactivation_failed',
+                'Nginx Domain deactivation failed during removal',
+              );
+            }
+            if (!deactivated || deactivated.satisfied !== true || deactivated.checksum !== operation.checksum) {
+              throw new DomainRemovalRuntimeError(
+                'domain_removal_host_deactivation_unverified',
+                'Nginx Domain deactivation did not confirm removed routing state',
+                503,
+              );
+            }
+            hostChanged = true;
+            try {
+              inspection = normalizeHostDeactivationInspection(
+                await nginxManager.inspectDomainDeactivation({
+                  primaryDomain: loaded.appliedPrimaryDomain,
+                  checksum: operation.checksum,
+                }),
+                operation.checksum,
+              );
+            } catch (error) {
+              throw mapPriorAppliedNginxError(
+                error,
+                'domain_removal_host_inspection_unavailable',
+                'Nginx deactivation post-condition could not be inspected during Domain removal',
+              );
+            }
+            if (inspection.satisfied !== true) {
+              throw new DomainRemovalRuntimeError(
+                'nginx_deactivation_unverified',
+                'Nginx deactivation post-condition could not be verified',
+                409,
+              );
+            }
+          }
+          if (inspection.satisfied
+            || (!inspection.satisfied
+              && !inspection.deactivationCandidate
+              && inspection.reason === 'nginx_deactivation_unowned_absence')) {
+            try {
+              const suspended = await domainRegistry.markSuspended(operation.domainId, {
+                expectedRevision: operation.domainRevision,
+                checksum: operation.checksum,
+                operationId: directSuspensionOperationId(operation),
+                allowPriorAppliedForRemoval: true,
+              });
+              return Object.freeze({ __directSuspendedDomain: suspended });
+            } catch (error) {
+              if (hostChanged && typeof nginxManager.rollbackDomainDeactivation === 'function') {
+                try {
+                  await nginxManager.rollbackDomainDeactivation({
+                    primaryDomain: loaded.appliedPrimaryDomain,
+                    checksum: operation.checksum,
+                  });
+                } catch {
+                  throw new DomainRemovalRuntimeError(
+                    'domain_removal_host_compensation_uncertain',
+                    'Nginx deactivation changed host state but control-plane suspension commit failed',
+                    503,
+                  );
+                }
+              }
+              throw mapped(error);
+            }
+          }
+          throw new DomainRemovalRuntimeError(
+            'domain_removal_host_deactivation_unavailable',
+            'Active Nginx configuration could not be safely deactivated for Domain removal',
+            409,
+          );
         }
       }
       if (domainMatches

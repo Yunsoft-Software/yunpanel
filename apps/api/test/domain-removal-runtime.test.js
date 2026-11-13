@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createNginxManager } from '@yunpanel/host-runtime';
 
 import { createDomainRemovalOperationRegistry } from '../src/domain-removal-operation-registry.js';
 import {
@@ -16,6 +21,65 @@ const dnsPreviewDigest = 'e'.repeat(64);
 const zoneSnapshotDigest = 'f'.repeat(64);
 const ownershipEvidenceDigest = '1'.repeat(64);
 const childChecksum = '2'.repeat(64);
+
+// Local filesystem guards used by prior-applied removal. These do not activate
+// Nginx or claim native HTTP/configtest/reload acceptance.
+async function withRemovalNginxDisk(t) {
+  const root = await mkdtemp(path.join(os.tmpdir(), 't892-nginx-guard-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const sitesDir = path.join(root, 'sites');
+  await mkdir(sitesDir);
+  return {
+    root,
+    activePath: path.join(sitesDir, 'yunpanel-routing.example.test.conf'),
+    manager: createNginxManager({
+      sitesDir,
+      stagingDir: path.join(root, 'staging'),
+      // Real execFile receives an absent owned path: no host command can run.
+      nginxPath: path.join(root, 'missing-nginx'),
+      systemctlPath: path.join(root, 'missing-systemctl'),
+    }),
+  };
+}
+
+test('prior-applied removal Nginx guard preserves foreign bytes on physical checksum drift', async (t) => {
+  const disk = await withRemovalNginxDisk(t);
+  const foreign = '# operator-owned configuration\n';
+  await writeFile(disk.activePath, foreign);
+  await assert.rejects(
+    disk.manager.deactivateDomain({ primaryDomain: 'routing.example.test', checksum }),
+    (error) => error.code === 'nginx_deactivation_drift',
+  );
+  assert.equal(await readFile(disk.activePath, 'utf8'), foreign);
+});
+
+test('prior-applied removal Nginx guard rejects a real directory at the config path', async (t) => {
+  const disk = await withRemovalNginxDisk(t);
+  await mkdir(disk.activePath);
+  await assert.rejects(
+    disk.manager.inspectDomainDeactivation({ primaryDomain: 'routing.example.test', checksum }),
+    (error) => error.code === 'nginx_deactivation_inspection_failed',
+  );
+});
+
+test('prior-applied removal Nginx guard rejects a real missing executable and restores exact disk bytes', async (t) => {
+  const disk = await withRemovalNginxDisk(t);
+  const content = '# isolated removal disk fixture; never loaded into Nginx\n';
+  const actualChecksum = createHash('sha256').update(content).digest('hex');
+  await writeFile(disk.activePath, content);
+  await assert.rejects(
+    disk.manager.deactivateDomain({
+      primaryDomain: 'routing.example.test',
+      checksum: actualChecksum,
+    }),
+    (error) => error.code === 'nginx_deactivation_rollback_failed',
+  );
+  assert.equal(await readFile(disk.activePath, 'utf8'), content);
+  assert.equal((await disk.manager.inspectDomainDeactivation({
+    primaryDomain: 'routing.example.test',
+    checksum: actualChecksum,
+  })).deactivationCandidate, true);
+});
 
 function childNoZoneDnsPlan() {
   return {

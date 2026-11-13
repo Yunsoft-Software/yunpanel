@@ -4,6 +4,7 @@ import test from 'node:test';
 import {
   createDomainRemovalPreview,
   DomainRemovalPlanError,
+  domainRemovalPlanInternals,
 } from '../src/domain-removal-plan.js';
 
 const checksum = 'a'.repeat(64);
@@ -764,4 +765,86 @@ test('a Domain whose first staging failed is planned like a draft, but a once-pu
   assert.equal(preview.domain.state, 'error');
   assert.throws(() => plan(failed({ appliedRevision: 1, appliedPrimaryDomain: 'example.com' })),
     (error) => error instanceof DomainRemovalPlanError && error.code === 'domain_removal_domain_not_stable');
+});
+
+test('plans removal for once-published draft, staged and error Domains by binding exact appliedChecksum and fails closed when appliedChecksum is missing', () => {
+  const appliedChecksum = '7'.repeat(64);
+  const stagedChecksum = '8'.repeat(64);
+  const planFor = (current) => {
+    const currentImpact = impact(current);
+    currentImpact.dependencies = {
+      ...currentImpact.dependencies,
+      childDomains: [],
+      authoritativeDns: {
+        status: 'available',
+        items: [noZoneDnsReference(current.id, '5'.repeat(64))],
+      },
+    };
+    return createDomainRemovalPreview({ domain: current, impact: currentImpact });
+  };
+
+  for (const variant of [
+    domain({
+      state: 'draft',
+      primaryDomain: 'renamed.example.com',
+      desiredRevision: 2,
+      stagedRevision: 0,
+      appliedRevision: 1,
+      stagedChecksum: null,
+      appliedPrimaryDomain: 'example.com',
+      appliedChecksum,
+      suspendedChecksum: null,
+      suspensionOperationId: null,
+    }),
+    domain({
+      state: 'staged',
+      desiredRevision: 2,
+      stagedRevision: 2,
+      appliedRevision: 1,
+      stagedChecksum,
+      appliedPrimaryDomain: 'example.com',
+      appliedChecksum,
+      suspendedChecksum: null,
+      suspensionOperationId: null,
+    }),
+    domain({
+      state: 'error',
+      desiredRevision: 2,
+      stagedRevision: 0,
+      appliedRevision: 1,
+      stagedChecksum: null,
+      appliedPrimaryDomain: 'example.com',
+      appliedChecksum,
+      suspendedChecksum: null,
+      suspensionOperationId: null,
+    }),
+  ]) {
+    const preview = planFor(variant);
+    assert.equal(preview.readyToStart, true);
+    assert.equal(preview.domain.state, variant.state);
+    assert.equal(preview.domain.desiredRevision, 2);
+    assert.equal(preview.domain.checksum, appliedChecksum);
+    assert.notEqual(
+      preview.domain.checksum,
+      domainRemovalPlanInternals.draftDomainChecksum(variant),
+    );
+  }
+
+  for (const state of ['draft', 'staged', 'error']) {
+    const broken = domain({
+      state,
+      desiredRevision: 2,
+      stagedRevision: state === 'staged' ? 2 : 0,
+      appliedRevision: 1,
+      stagedChecksum: state === 'staged' ? stagedChecksum : null,
+      appliedPrimaryDomain: 'example.com',
+      appliedChecksum: null,
+      suspendedChecksum: null,
+      suspensionOperationId: null,
+    });
+    assert.throws(
+      () => planFor(broken),
+      (error) => error instanceof DomainRemovalPlanError && error.code === 'domain_removal_domain_not_stable',
+    );
+  }
 });

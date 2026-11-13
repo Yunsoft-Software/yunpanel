@@ -37,6 +37,7 @@ export function createDomainRemovalProductionRuntime({
   roundcubeDomainMappingRegistry,
   roundcubeDomainMappingService,
   websiteCronImpactProvider = null,
+  nginxManager,
   localServerId,
 } = {}) {
   const required = [
@@ -60,7 +61,12 @@ export function createDomainRemovalProductionRuntime({
     || required.some(([dependency, method]) => !dependency || typeof dependency[method] !== 'function')
     || !domainSuspensionRuntime
     || !mailDomainRemovalRuntime
-    || !roundcubeDomainMappingService) {
+    || !roundcubeDomainMappingService
+    || (nginxManager !== undefined && (
+      !nginxManager
+      || typeof nginxManager.inspectDomainDeactivation !== 'function'
+      || typeof nginxManager.deactivateDomain !== 'function'
+    ))) {
     throw new DomainRemovalProductionRuntimeError(
       'domain_removal_production_dependencies_invalid',
       'Domain removal production runtime dependencies are unavailable',
@@ -180,6 +186,7 @@ export function createDomainRemovalProductionRuntime({
     mailDomainRemovalRuntime,
     roundcubeDomainMappingRegistry,
     roundcubeDomainMappingService,
+    ...(nginxManager !== undefined ? { nginxManager } : {}),
   });
 
   return Object.freeze({
