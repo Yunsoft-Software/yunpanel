@@ -1510,7 +1510,8 @@
 
 ### T910 · Doğrulama: test — cleanup result whitelists safe fields; arbitrary adapter secrets are not published
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `apps/api/test/website-removal-cleanup.test.js`, `apps/api/test/website-removal-http.test.js`, `apps/api/test/website-removal-target.test.js`
+- **Kilit:** terminal-removal-audit
 - **Kaynak:** QA · 2026-11-13 23:49
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1561,5 +1562,7 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 1183.2125
+
+    13 Kasım P0 döngüsü dar test kapsamı: full-source-gate-11 source90a03b11 gerçek raw stack5530–5587 korunur. Yeni terminalDrain güvenli typed sonucu whitelist içinde exact doğrulanır, adapter key/secret sızıntısı beklentisi kaldırılmaz. Restart ve overlap pozitifleri geçerli gerçek file-backed journal + aynı shared lifecycle reservation/commit ile kurulmalı; legacy eksik kanıt hâlâ blocked/fenced ve cleanup yoktur. Callback kapısına hiç ulaşmayan eski legacy fixture timeout artışı/retry/skip veya yeni sahte servis/HTTP/process/fs ile geçirtilemez. Anlamlı gerçek disk/HTTP veya saf durum sınırı kullan; kaynak üretim dosyası değiştirme gereği kanıtlanırsa önce root bildir. Yalnız bu üç test dosyası; T898 ürün/kernel düzeltmesi ayrı kalır. İlgili üç dosya tam batch + bağımsız inceleme ve sonraki full-source-gate-12 gereklidir.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
