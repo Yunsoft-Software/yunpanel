@@ -9233,6 +9233,7 @@ test('Source contract T-DEV-CREATE-RESULT: React StrictMode, logout/login, yetki
   // New session begins with EMPTY_SITE_SUBMISSION, zero residual state
   assert.deepEqual(EMPTY_SITE_SUBMISSION, {
     phase: 'idle',
+    operationId: null,
     created: null,
     steps: [],
     error: null,
