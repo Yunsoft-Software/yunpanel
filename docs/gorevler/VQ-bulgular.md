@@ -987,7 +987,7 @@
 ### T883 · Eski kabul ortamına bağlı live-audit testlerini güncelle ya da kaldır
 - **Bağımlı:** T886, T887, T888
 - **Dosyalar:** `e2e/live-audit/13-native-source-mutation.spec.js`, `e2e/live-audit/15-native-source-removal-mutation.spec.js`, `e2e/live-audit/16-native-hosting-dns-restore.spec.js`, `e2e/live-audit/18-native-application-environment.spec.js`, `e2e/live-audit/19-native-hosting-settings.spec.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`, `e2e/live-audit/22-native-hosting-file-settings.spec.js`
-- **Kilit:** hosting-settings-audit, source-audit-13
+- **Kilit:** hosting-settings-audit, source-audit-13, terminal-removal-audit
 - **Kaynak:** SENIOR · 2026-11-09
 - **İş:** Bu 59 test 10 Ekim'deki geçici kabul ortamına bağlı (`YUNPANEL_AUDIT_ACCEPTANCE_SHA`, `.local/acceptance-candidate/host-control.py`, `extraStatic`) ve hemen düşüyor; yani hiçbir şey sınamıyor. Bu ortamı geri kurma. Her test için karar ver: davranışı `e2e/ozellik` veya kalan `live-audit` zaten sınıyorsa testi sil ve raporda karşılığını `dosya:test adı` ile yaz; sınamıyorsa normal koşuda (panel API'si ve arayüz, kendi kaynağını kurup silerek) çalışacak şekilde yeniden yaz. Karşılık gösteremediğin testi silme. Sunucuya root ile müdahale eden adımları panel akışına çevir; çevrilemiyorsa testi silme, raporda gerekçesiyle listele. Dosyada test kalmazsa dosyayı sil.
 - **Kabul:** 59 testin her biri raporda (silindi + karşılığı / yeniden yazıldı / listelendi + gerekçe); kalan testler `.28`'de iki koşuda da geçiyor ya da bulgu numarası var; `.28`'de `ypaudit-` kaynağı kalmadı; `npm run lint` geçiyor.
@@ -1147,12 +1147,18 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T898 · Açık geçerli site terminali normal silmede kapanmadan Unix kullanıcı temizliği başarısız oluyor
-- **Bağımlı:** T861, T897
-- **Dosyalar:** `apps/api/src/website-removal-runtime.js`
+- **Bağımlı:** T861, T897, T892, T888
+- **Dosyalar:** `apps/api/src/live-session-registry.js`, `apps/api/src/terminal-capability-registry.js`, `apps/api/src/terminal-process-manager.js`, `apps/api/src/ttyd-session-manager.js`, `apps/api/src/terminal-websocket.js`, `apps/api/src/website-removal-runtime.js`, `apps/api/src/index.js`, `apps/api/test/live-session-registry.test.js`, `apps/api/test/terminal-capability-registry.test.js`, `apps/api/test/website-removal-runtime.test.js`, `apps/api/test/website-removal-runtime-binding.test.js`, `apps/api/test/website-removal-cleanup-preflight.test.js`, `apps/api/test/terminal-websocket-policy.test.js`, `apps/api/test/ttyd-session-manager.test.js`, `apps/api/test/terminal-production-wiring.test.js`, `e2e/live-audit/20-native-tenant-sites.spec.js`
+- **Kilit:** terminal-removal-audit
 - **Kaynak:** QA · 2026-11-12 18:16
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
     T888 Chrome04 tam165API/CSRF/job/5PTY/revoke güvenlik senaryosu geçti. RA/CA iptal4001, B/directPTYler geçerliaçık kaldı. Sonraki normal UI silmede A başarılı; açık Bterminali varken B journal unix_identity_cleanup / website_identity_compensation_user_failed ile failed. Domain/root/Nginx/FPM/socket/mount kaldırılmış, UnixUID986 user/group ve Website/App metadata kaldı. afterAll actorbrowsercontexts kapatıldı; aynı failed journal authoritativeread sonrası bir /run202 ile removed/5adım succeeded oldu ve normalcb/rbprofile/logincleanup tamamlandı. Root/process/registrywrite veya Unixforce delete yok. Originalfailurekorunur; gerçek activePTYrevocationremovaldanönceolsun ve aynıjournal ilerlesin. Özel t888-chrome-20261112-04/t888-final-recovery-cleanup-proof.json ve orijinal journal/traffic kanıtları. Firefoxsecurity henüzçalışmadı. Bu dilimde ürün/deploydeğişikliği yok.
+
+
+    13 Kasım İNSAN onaylı t889-gate-decision-proposal kapsamı: T897 bağımlılığı ve T889 OPEN korunur. T892/T888 yalnız mevcut index/native20 yazarlarının kabul edilmiş kaynak önkoşullarıdır; hiçbir açık kabul atlanmaz. Kesin inceleme .local/antigravity-review-20261113/t898-readonly-scope/proposal.md. Mevcut shared registry/NodePTY/ttyd/capability/WS/removal nesnelerinde Website-ID fence + ilk async işlem öncesi pending-open lease + doğrulanmış awaitable drain uygulanır. Başka motor, auth/Unix adapter veya gateway yeniden yazılmaz.
+    Fence ilk kalıcı removal journal'da ve startup/init'te unfinished journal için kurulur; aynı journal retry sırasında sürer. Fence sonrası capability issue/consume/WS/ttyd open/authorize reddedilir; fence öncesi pending lease geç child yaratırsa o da kendi lifecycle ile kapanıp gerçek exit/drain beklenir. En az file_cleanup ve kesinlikle unix_identity_cleanup öncesi kendi Website terminal drain doğrulanır. WS close veya map boşluğu tek başına yetmez: gerçek child exit, bilinen sahipli process/group yokluğu ve ttyd socket cleanup gerekir; EPERM, PID-reuse veya belirsizlikte kapalı kalır. Root ve başka Website/tenant oturumları korunur; UID-genel arama/kill, forceuserdel, servis bozma, yeni terminal motoru veya belirsiz mutation retry yok. Terminal dışı detached süreçlerin evrensel temizliği iddia edilmez.
+    Mevcut fake spawn/EventEmitter/fs/HTTP testleri yeni native kabul için genişletilmez. Saf registry/state ve gerçek file-backed journal kanıtları davranış sınırı içindir; gerçek OS/child/group/socket/RBAC/CSRF/WebSocket/drain/ilk sibling challenge kabulü native20'de normal Owner/Reseller/Customer tarayıcı/API yaşam döngüsünde yapılır. Native timeout veya gerçekleşmeyen pending-race OPEN kalır; ilk hata sonraki yeşille silinmez. Kaynak fulltest + bağımsız review + eşleşen yeni paket + iki fresh gerçek run + tüm metadata/canonicalUnix/FPM/socket/Nginx/mount/DB cleanup olmadan bitmiş sayılmaz. Host/native test rootta seri yürür, source maker bu kapsamda host/network işlemez.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
@@ -1389,7 +1395,7 @@
 
 ### T908 · Doğrulama: test — GET /api/websites/:websiteId/cache returns policy
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `apps/api/test/website-cache-http.test.js`
 - **Kaynak:** QA · 2026-11-13 16:59
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1438,5 +1444,7 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 413.820042
+
+    İlk başlangıç doğrulaması kaynak7bb3 üzerinde kırıldı; önce bu exact testin gerçek error/stack ve server/request kapanışını izole koşuda kanıtla. Eski source test servis/auth stub kullanıyor ve native ürün kanıtı değildir; yeni mock, canned response veya assertion/timeout gevşetme ekleme. Dar actual HTTP/server lifecycle sorunu varsa gerçek neden ve regression ile gider; yeni pozitif ürün kanıtı gerekiyorsa gerçek file-backed registry/service/AuthStore ve HTTP kullan, kapsamı başka dosyaya kendi başına genişletme. Global failed kaydı korunur; sadece yeşil rerun eski nedeni çözülmüş sayılmaz.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
