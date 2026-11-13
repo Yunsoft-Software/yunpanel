@@ -100,14 +100,14 @@ for row in x['rows']:
   ancestor=os.lstat(parent);assert stat.S_ISDIR(ancestor.st_mode) and not stat.S_ISLNK(ancestor.st_mode) and ancestor.st_uid==0 and ancestor.st_gid==0 and not stat.S_IMODE(ancestor.st_mode)&0o022
   if parent=='/':break
   parent=os.path.dirname(parent)
- def identity(meta):return (meta.st_dev,meta.st_ino,meta.st_mode,meta.st_uid,meta.st_gid,meta.st_nlink,meta.st_size,meta.st_mtime_ns,meta.st_ctime_ns)
+ def receiptIdentity(meta):return (meta.st_dev,meta.st_ino,meta.st_mode,meta.st_uid,meta.st_gid,meta.st_nlink,meta.st_size,meta.st_mtime_ns,meta.st_ctime_ns)
  try:fd=os.open(p,os.O_RDONLY|os.O_NOFOLLOW|os.O_CLOEXEC)
  except FileNotFoundError:
   owned_receipts.append({'websiteId':row['websiteId'],'operationId':row['operationId'],'absent':True});continue
  try:
   meta=os.fstat(fd);assert stat.S_ISREG(meta.st_mode) and meta.st_uid==0 and meta.st_gid==0 and stat.S_IMODE(meta.st_mode)==0o600 and meta.st_nlink==1 and meta.st_size<=65536
   with os.fdopen(fd,'rb',closefd=False) as handle:raw=handle.read(65537)
-  assert len(raw)<=65536 and len(raw)==meta.st_size and identity(os.fstat(fd))==identity(meta) and identity(os.lstat(p))==identity(meta)
+  assert len(raw)<=65536 and len(raw)==meta.st_size and receiptIdentity(os.fstat(fd))==receiptIdentity(meta) and receiptIdentity(os.lstat(p))==receiptIdentity(meta)
  finally:os.close(fd)
  receipt=json.loads(raw)
  assert all(receipt[k]==row[k] for k in ['websiteId','applicationId','unixUser','operationId'])
