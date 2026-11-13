@@ -152,3 +152,16 @@ Kurulu621c8757 üzerinde `t891-chrome-q1` gerçek UI save/stage202, header/body-
 | T891-STAGE-HTTP | Tek UI kaydetme → preview/PATCH/stage/activate ve sayfa yenileme | Birer mutation; stage202/job succeeded; gerçek header/413/cache120; özgün ayara normal dönüş ve fiziksel test kaynağı temizliği; Chrome ve Firefox taze koşular |
 
 Test yardımcı temizliği T891 diliminde düzeltilecek; PHP protokol kaynak düzeltmesi korunur. T891'in yeni native19dosyası, önceki T887 tesliminden sonra sıralanır. Bu bir product stage hatası yeniden üretimi veya beklenti gevşetmesi değildir.
+
+
+## 13 Kasım 2026 — T889 gerçek hazırlık nedenselliği
+
+İki yeni native23 koşusunda sekiz PHP fixture'ı ilk dinamik nonce/UID/SAPI/no-store yanıtı ve fiziksel temizliğiyle geçti; native13 T900PHP/SQL akışları da geçti. Bunlar güncel regresyon kanıtıdır. Eski run1794490934 kaydı ilk `php_fpm_apply_unverified` için reason/config/socket/UMask gözlemi saklamamış; sonraki yeşil koşular tek başına tarihsel aralıklı bulguyu kapatmaz.
+
+| Senaryo | Gerçek kaynak ve sınır | Kabul |
+|---|---|---|
+| T889-OBSERVATION | Mevcut manager/handler gerçek inspect sonuçları; ilk pool activation ve UMask sonrası faz ayrı; ilk/son satisfied/reason/listener ve gerçek attempts/elapsed | Kontrol edilmeyen alan null, uydurma false yok; serbest stderr/config/parola/çıktı evidence'e giremez; mevcut final başarısızlıklar yutulmaz; UI geliştirme notu eklenmez |
+| T889-NATIVE-READY | En fazla iki taze dalga, dalga başına en fazla iki paralel normal sahipli PHP kurulumu; gerçek API/Unix/FPM/HTTP ve exact owned registry'nin yalnız salt okunur hazırlık projection'ı | Her ilk dinamik yanıt200/nonce/nonrootUID/fpm-fcgi/no-store; her kaynak normal API ile kaldırılır ve canonical/Unix/FPM/socket/Nginx/mount yokluğu; özgün kardeşler korunur |
+| T889-CAUSAL | Aynı gerçek activation inspect'inde ilk satisfied:false + allowlist reason → son satisfied:true | En az bir gerçek geçiş gözlenirse eski tek-inspect hata yolunun sınıfı tekrar üretilmiş olur. Yalnız listener:false→true yeterli değildir. Tüm attempts1/ilktrue ise mekanizma AÇIK; atlanan veya sahte PASS yok |
+
+Global PHP servisini bozma/durdurma, root registry yazma, uydurma PHP/systemd/HTTP motoru veya otomatik Linux-root fixture kullanılmaz. Süre yalnız uyku aralıkları değildir; inspect/configtest/systemctl süreleri de gerçek toplam süreye dahil edilir. T898'in geçerli T897/T889 bağımlılıkları korunur.
