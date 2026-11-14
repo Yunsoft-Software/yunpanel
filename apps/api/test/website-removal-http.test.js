@@ -9,6 +9,7 @@ import { renderCronTaskFile } from '@yunpanel/config-templates';
 import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
 import { createProcessStoreLock, ProcessStoreLockError } from '../src/process-store-lock.js';
 import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
+import { createLiveSessionRegistry } from '../src/live-session-registry.js';
 
 function createExpressMockApp() {
   const globalMiddlewares = [];
@@ -1165,7 +1166,13 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
   }
 });
 
-test('website-removal-http reconciles interrupted running step upon restart as blocked (fail-closed) and does not blindly replay', async () => {
+for (const legacy of [false, true]) {
+test(legacy
+  ? 'website-removal-http keeps a legacy interrupted journal without terminal evidence fenced on explicit continuation'
+  : 'website-removal-http reconciles interrupted running step upon restart as blocked (fail-closed) and does not blindly replay', async (t) => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-removal-restart-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const filePath = path.join(directory, 'removals.json');
   const localServerId = '11111111-1111-4111-8111-111111111111';
   const websiteId = '22222222-2222-4222-8222-555555555555';
 
@@ -1201,12 +1208,20 @@ test('website-removal-http reconciles interrupted running step upon restart as b
     },
   });
 
-  const registry = createWebsiteRemovalOperationRegistry();
+  const registry = createWebsiteRemovalOperationRegistry({ filePath });
   await registry.init();
 
-  // Create operation and simulate a crash that left step 0 in 'running' state
-  const op = await registry.create(preview);
+  const liveSessions = createLiveSessionRegistry();
+  const reservation = legacy ? null : liveSessions.reserveWebsiteRemoval(websiteId);
+  const snapshot = reservation ? await reservation.snapshot() : null;
+  const op = await registry.create(legacy ? preview
+    : { ...preview, plan: { ...preview.plan, terminalLifecycle: snapshot } });
+  if (!legacy) liveSessions.commitWebsiteRemoval(websiteId, op.id, snapshot);
+  // Persist the interruption, then load a distinct registry instance from disk.
   await registry.markStepRunning(op.id, op.steps[0].id);
+  const restartedRegistry = createWebsiteRemovalOperationRegistry({ filePath });
+  await restartedRegistry.init();
+  const restartedLiveSessions = createLiveSessionRegistry();
 
   let blindReplayCalls = 0;
   const fileCleanupHandler = async (input) => {
@@ -1217,7 +1232,8 @@ test('website-removal-http reconciles interrupted running step upon restart as b
   // Simulate server restart: new runtime initialized on existing registry
   const restartedRuntime = createWebsiteRemovalRuntime({
     domainRegistry: { listDomains: async () => [] },
-    registry,
+    registry: restartedRegistry,
+    liveSessions: restartedLiveSessions,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: { getWebsite: async () => ({ id: websiteId, serverId: localServerId, applicationId: null }), finalizeWebsiteRemoval: async () => {} },
@@ -1269,11 +1285,32 @@ test('website-removal-http reconciles interrupted running step upon restart as b
       }),
     });
     assert.equal(resContinue.status, 200);
-    assert.equal(blindReplayCalls, 1, 'File cleanup executed only upon explicit continuation');
+    const continued = (await resContinue.json()).operation;
+    assert.equal(continued.id, op.id); assert.equal(continued.websiteId, websiteId);
+    if (legacy) {
+      assert.equal(continued.status, 'blocked');
+      assert.equal(continued.steps[0].error.code, 'terminal_drain_evidence_unavailable');
+      assert.equal(blindReplayCalls, 0, 'Missing terminal evidence cannot authorize cleanup');
+      assert.throws(() => restartedLiveSessions.assertWebsiteOpen(websiteId), { code: 'terminal_website_removing' });
+      assert.doesNotThrow(() => restartedLiveSessions.assertWebsiteOpen('other-website'));
+    } else {
+      assert.equal(blindReplayCalls, 1, 'File cleanup executed only upon explicit continuation');
+      assert.equal(continued.steps[0].status, 'succeeded');
+      assert.equal(continued.steps[0].result.terminalDrain.verified, true);
+      assert.equal(continued.steps[0].result.terminalDrain.operationId, op.id);
+      assert.equal(continued.steps[0].result.terminalDrain.snapshotSha256,
+        createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'));
+      assert.equal(continued.steps[0].result.terminalDrain.zeroOpenUnderFence, true);
+    }
+    const persisted = JSON.parse(await readFile(filePath, 'utf8'));
+    assert.equal(persisted.length, 1); assert.equal(persisted[0].id, op.id);
+    assert.equal(persisted[0].steps[0].status, continued.steps[0].status);
+    assert.deepEqual(persisted[0].steps[0].result, continued.steps[0].result);
   } finally {
-    server.close();
+    await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
   }
 });
+}
 
 test('website-removal-http enforces idempotency, prevents duplicate operations, and handles unknown-result reconciliation safely', async () => {
   const localServerId = '11111111-1111-4111-8111-111111111111';

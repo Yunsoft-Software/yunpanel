@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -55,7 +56,19 @@ for (const receipt of [undefined, null, true, {}, { filesCleaned: 'true' }, { fi
 test('cleanup result whitelists safe fields; arbitrary adapter secrets are not published', async () => {
   const f = await removalFixture({ fileCleanupHandler: async (input) => ({ ...input, filesCleaned: true, cleanedFilesCount: 3, secret: 'do-not-publish' }) });
   const op = await f.runtime.start(removalStart(f.preview));
-  assert.deepEqual(op.steps[0].result, { filesCleaned: true, retainedBackups: [], retainedLogScopes: [], cleanedFilesCount: 3 });
+  const drain = op.steps[0].result.terminalDrain;
+  assert.equal(new Date(drain.startedAt).toISOString(), drain.startedAt);
+  assert.equal(new Date(drain.completedAt).toISOString(), drain.completedAt);
+  assert.ok(Date.parse(drain.completedAt) >= Date.parse(drain.startedAt));
+  assert.deepEqual(op.steps[0].result, {
+    filesCleaned: true, retainedBackups: [], retainedLogScopes: [], cleanedFilesCount: 3,
+    terminalDrain: {
+      version: 1, websiteId: op.websiteId, operationId: op.id,
+      snapshotSha256: createHash('sha256').update(JSON.stringify(op.plan.terminalLifecycle)).digest('hex'),
+      verified: true, scope: 'website_manager_owned', leaseCount: 0, processCount: 0,
+      leases: [], zeroOpenUnderFence: true, startedAt: drain.startedAt, completedAt: drain.completedAt,
+    },
+  });
   assert.doesNotMatch(JSON.stringify(op), /do-not-publish/);
 });
 test('retained backups cannot be changed through either input mutation or a false receipt', async () => {

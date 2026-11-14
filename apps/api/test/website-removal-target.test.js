@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
 import { createWebsiteRemovalRuntime } from '../src/website-removal-runtime.js';
 import { mountWebsiteRemovalRoutes } from '../src/website-removal-http.js';
 import { removalFixture, removalPreview, removalStart, removalContinue, deferred } from '../test-support/website-removal-fixture.js';
@@ -62,13 +67,40 @@ test('two runtime instances sharing a registry cannot start the same Website con
   assert.equal((await f.registry.list()).length, 1); assert.equal(f.calls.length, 1);
 });
 test('overlapping continuation cannot replay an in-flight cleanup step', async () => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yunpanel-removal-overlap-'));
   const entered = deferred(), wait = deferred(); let cleanups = 0;
-  const f = await removalFixture({ fileCleanupHandler: async (input) => { cleanups++; entered.resolve(); await wait.promise; return { ...input, filesCleaned: true }; } });
-  const op = await f.registry.create(f.preview);
-  const current = await f.runtime.get(op.id);
-  const running = f.runtime.continueStep(removalContinue(current)); await entered.promise;
-  await assert.rejects(f.runtime.continueStep(removalContinue(current)), code('website_removal_busy'));
-  wait.resolve(); await running; assert.equal(cleanups, 1);
+  let running;
+  try {
+    const filePath = path.join(directory, 'removals.json');
+    const registry = createWebsiteRemovalOperationRegistry({ filePath }); await registry.init();
+    const liveSessions = createLiveSessionRegistry();
+    const f = await removalFixture({ registry, liveSessions,
+      fileCleanupHandler: async (input) => { cleanups++; entered.resolve(); await wait.promise; return { ...input, filesCleaned: true }; } });
+    const reservation = liveSessions.reserveWebsiteRemoval(f.preview.website.id);
+    const snapshot = await reservation.snapshot();
+    const op = await registry.create({ ...f.preview, plan: { ...f.preview.plan, terminalLifecycle: snapshot } });
+    liveSessions.commitWebsiteRemoval(op.websiteId, op.id, snapshot);
+    const current = await f.runtime.get(op.id);
+    running = f.runtime.continueStep(removalContinue(current));
+    await Promise.race([entered.promise, running.then(result => {
+      throw new Error('Cleanup was not entered: ' + (result.error?.code ?? result.status));
+    })]);
+    const inFlight = await f.runtime.get(op.id);
+    assert.equal(inFlight.steps[0].status, 'running');
+    assert.equal(inFlight.steps[0].result.terminalDrain.verified, true);
+    const disk = JSON.parse(await readFile(filePath, 'utf8'));
+    assert.equal(disk.length, 1); assert.equal(disk[0].id, op.id);
+    assert.deepEqual(disk[0].steps[0].result.terminalDrain, inFlight.steps[0].result.terminalDrain);
+    await assert.rejects(f.runtime.continueStep(removalContinue(inFlight)), code('website_removal_busy'));
+    wait.resolve();
+    const finished = await running;
+    assert.equal(finished.id, op.id); assert.equal(finished.steps[0].status, 'succeeded');
+    assert.equal(cleanups, 1); assert.equal((await registry.list()).length, 1);
+  } finally {
+    wait.resolve();
+    if (running) await running;
+    await rm(directory, { recursive: true, force: true });
+  }
 });
 test('failed preview releases the in-process guard for a corrected request', async () => {
   let broken = true;
