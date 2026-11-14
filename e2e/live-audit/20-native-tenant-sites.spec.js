@@ -144,8 +144,13 @@ async function connectTtyd(context, session) {
   let output = '', connected = false, closed = false;
   page.on('websocket', socket => {
     if (new URL(socket.url()).pathname !== session.basePath + 'ws') return;
+    const decoder = new TextDecoder('utf-8');
     connected = true;
-    socket.on('framereceived', frame => { output = (output + Buffer.from(frame.payload).toString('utf8')).slice(-16384); });
+    socket.on('framereceived', frame => {
+      const payload = Buffer.from(frame.payload);
+      if (payload[0] !== 0x30) return;
+      output = (output + decoder.decode(payload.subarray(1), { stream: true })).slice(-16384);
+    });
     socket.on('close', () => { closed = true; });
   });
   const response = await page.goto(session.basePath, { waitUntil: 'domcontentloaded' }); expect(response.status()).toBe(200);
