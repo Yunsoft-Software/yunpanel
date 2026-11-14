@@ -222,9 +222,23 @@ function trackPendingAction(kind, websiteId, promise) {
         state.ttyd.push({ sessionId: value.data.sessionId, websiteId, siteKey: 'b', overlap: true });
       } else expect(value.body.error.code).toBe(value.status === 401 ? 'terminal_capability_invalid' : 'terminal_website_removing');
       proof.status = value.status;
+    } else if (kind === 'website-removal') {
+      proof.status = value.status;
+      proof.code = /^[a-z0-9_]{1,100}$/.test(value.body?.error?.code ?? '') ? value.body.error.code : null;
+      expect(value.status).toBe(201); expect(value.data.websiteId).toBe(websiteId);
+      expect(value.data.id).toMatch(/^ws-rem-[a-f0-9-]{36}$/i);
+      const ownSite = Object.values(state.sites).find(site => site.websiteId === websiteId); expect(ownSite).toBeTruthy();
+      proof.operationId = value.data.id; ownSite.removalId = value.data.id; save();
+    } else if (kind === 'capability') {
+      proof.status = value.status;
+      proof.code = /^[a-z0-9_]{1,100}$/.test(value.body?.error?.code ?? '') ? value.body.error.code : null;
+      expect([201, 409]).toContain(value.status);
+      if (value.status === 409) expect(value.body.error.code).toBe('terminal_website_removing');
+      else expect(typeof value.data.capability === 'string' && value.data.capability.length > 0).toBe(true);
     }
     proof.outcome = 'KNOWN'; proof.completedAt = new Date().toISOString();
-    record('T898-pending-action-completed', { ...proof });
+    // Do not insert a ledger write before the real capability's dependent ttyd request.
+    if (kind !== 'capability') record('T898-pending-action-completed', { ...proof });
     return value;
   }).catch(error => {
     proof.outcome = 'UNKNOWN_KEEP'; proof.completedAt = new Date().toISOString();
@@ -255,6 +269,14 @@ async function settlePendingActions() {
     } catch {
       unknown.push({ proof: { kind: 'known-terminal-reconciliation', outcome: 'UNKNOWN_KEEP' } });
     }
+  }
+  for (const value of pendingActions.filter(item => item.proof.kind === 'website-removal' && item.proof.operationId)) {
+    try {
+      const reply = await call(owner, 'GET', '/api/panel/website-removal-operations/' + value.proof.operationId);
+      expect(reply.status).toBe(200); expect(reply.data.id).toBe(value.proof.operationId); expect(reply.data.websiteId).toBe(value.proof.websiteId);
+      record('T883-pending-removal-reconciled-before-cleanup', { websiteId: value.proof.websiteId,
+        operationId: value.proof.operationId, status: reply.data.status, readOnly: true });
+    } catch { unknown.push({ proof: { kind: 'known-removal-reconciliation', outcome: 'UNKNOWN_KEEP' } }); }
   }
   record('T898-pending-actions-joined-before-cleanup', { actions: pendingActions.map(value => ({ ...value.proof })),
     unknownCount: unknown.length, noMutationReplay: true });
@@ -542,7 +564,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     record('parent-chain-revocation', { jobId, terminalChecks: terminals.map(v => ({ ...v.proof, closeCode: ['ra', 'ca'].includes(v.actor.key) ? 4001 : null })), siblingAndDirectSessionsUsable: true, allThreeHttpMarkersPreserved: true }); state.scopeAccepted = true; save();
   });
 
-  test('@mutation tenant normal UI removes the three owned sites before exact hosting profiles and logins are deleted', async ({ page, browser }) => {
+  test('@mutation tenant normal UI removes two sites and a natural API pipeline drains the third before exact account cleanup', async ({ page, browser }) => {
     test.setTimeout(600000); await ensureTopology(null, 'api');
     expect(state.scopeAccepted, 'The complete five-actor RBAC/CSRF/PTY scenario must precede removal').toBe(true);
     const root = await ownerRootConsole(page.context());
@@ -620,28 +642,73 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
 
 
     for (const key of siteKeys) {
-      const f = owned(key), t = f.ledger; await ready(page, f.route('settings')); await main(page).getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
-      const dialog = page.getByRole('dialog', { name: 'Siteyi kalıcı olarak sil' }); await expect(dialog).toBeVisible(); await dialog.getByRole('textbox').fill(t.hostname);
-      let consumeCapability, pendingTtyd, pendingTtydFinished = false, overlapStartAt, pendingNode, nodeStart, cancellation;
+      const f = owned(key), t = f.ledger; let dialog;
+      if (key !== 'b') {
+        await ready(page, f.route('settings')); await main(page).getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
+        dialog = page.getByRole('dialog', { name: 'Siteyi kalıcı olarak sil' }); await expect(dialog).toBeVisible(); await dialog.getByRole('textbox').fill(t.hostname);
+      }
+      const removalChannel = key === 'b' ? 'api' : 'ui';
+      let consumeCapability, pendingTtyd, pendingTtydFinished = false, overlapStartAt, pendingNode, nodeStart, cancellation, pendingRemoval;
       if (key === 'b') {
         const unconnectedSession = await createTtyd('b');
         bBefore = terminalHostRead({ shells: [bShell, connected.shellPid], ttyd: [connectedSession.sessionId, unconnectedSession.sessionId] });
         record('T898-real-unconnected-at-removal', { websiteId: t.websiteId, sessionId: unconnectedSession.sessionId, before: bBefore });
         pendingNode = await preparePendingNode(page.context(), t);
         consumeCapability = ok(await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }), 'Issue unused pre-fence capability', [201]);
-        const capabilityReply = await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId });
-        const raceCapability = ok(capabilityReply, 'Issue one real overlap capability', [201]);
-        cancellation = { websiteId: t.websiteId, capabilityStatus: capabilityReply.status, ttydPosts: 1 };
+        const removalPreview = ok(await call(owner, 'GET', f.endpoint('/removal')), 'Read actual same-Website removal preview').preview;
+        expect(removalPreview.readyToStart).toBe(true); expect(removalPreview.website.id).toBe(t.websiteId);
+        expect(removalPreview.website.applicationId).toBe(t.applicationId); expect(removalPreview.website.serverId).toBe(t.serverId);
+        expect(removalPreview.plan.applicationId).toBe(t.applicationId); expect(removalPreview.plan.systemUser).toBe(t.unixUser);
+        expect(removalPreview.previewDigest).toMatch(/^[a-f0-9]{64}$/); expect(typeof removalPreview.confirmation === 'string' && removalPreview.confirmation.length > 0).toBe(true);
+        cancellation = { websiteId: t.websiteId, capabilityStatus: null, ttydPosts: 0, ttydStartedAt: null,
+          capabilityIssuedAt: null, capabilityResponseAt: null, removalResponseAt: null, ttydPendingAtRemovalResponse: false, nodePendingAtRemovalResponse: false };
         overlapStartAt = new Date().toISOString();
-        record('T898-pending-open-attempts-started', { websiteId: t.websiteId, overlapStartAt, nodeUiClicks: 1, ttydPosts: 1, outcome: 'PENDING' });
         nodeStart = trackPendingAction('node-ui', t.websiteId, pendingNode.start());
-        pendingTtyd = trackPendingAction('ttyd', t.websiteId, call(owner, 'POST', '/api/panel/terminal/ttyd-sessions', { capability: raceCapability.capability }))
-          .then(value => { pendingTtydFinished = true; return value; })
-          .catch(error => { record('T898-pending-ttyd-transport-unknown', { websiteId: t.websiteId, outcome: 'UNKNOWN_KEEP', noPostRetry: true }); throw error; });
-        pendingTtyd.catch(() => {});
+        cancellation.removalStartedAt = new Date().toISOString();
+        const removalRequest = call(owner, 'POST', f.endpoint('/removal'), {
+          previewDigest: removalPreview.previewDigest, confirmation: removalPreview.confirmation,
+        }).then(value => {
+          cancellation.removalResponseAt = new Date().toISOString();
+          cancellation.ttydPendingAtRemovalResponse = Boolean(pendingTtyd) && !pendingTtydFinished;
+          cancellation.nodePendingAtRemovalResponse = pendingNode.proof.readyAt === null;
+          return value;
+        });
+        pendingRemoval = trackPendingAction('website-removal', t.websiteId, removalRequest);
+        pendingRemoval.catch(() => {});
+        cancellation.capabilityRequestedAt = new Date().toISOString();
+        const capabilityRequest = trackPendingAction('capability', t.websiteId,
+          call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }));
+        capabilityRequest.catch(() => {});
+        // The only await is the real business dependency: a fresh capability response.
+        const capabilityReply = await capabilityRequest; cancellation.capabilityStatus = capabilityReply.status;
+        cancellation.capabilityResponseAt = new Date().toISOString();
+        cancellation.capabilityIssuedAt = capabilityReply.status === 201 ? cancellation.capabilityResponseAt : null;
+        const priorEffectUnknown = pendingActions.some(value => value.proof.websiteId === t.websiteId
+          && value.proof.outcome === 'UNKNOWN_KEEP');
+        if (priorEffectUnknown) throw new Error('An own pending response is unverified; no further terminal mutation is allowed');
+        if (capabilityReply.status === 201) {
+          cancellation.ttydStartedAt = new Date().toISOString();
+          const ttydRequest = call(owner, 'POST', '/api/panel/terminal/ttyd-sessions', { capability: capabilityReply.data.capability })
+            .then(value => { pendingTtydFinished = true; return value; });
+          pendingTtyd = trackPendingAction('ttyd', t.websiteId, ttydRequest)
+            .catch(error => { record('T898-pending-ttyd-transport-unknown', { websiteId: t.websiteId, outcome: 'UNKNOWN_KEEP', noPostRetry: true }); throw error; });
+          pendingTtyd.catch(() => {});
+        }
+        cancellation.ttydPosts = pendingTtyd ? 1 : 0;
+        record('T898-pending-open-attempts-started', { websiteId: t.websiteId, overlapStartAt, nodeUiClicks: 1,
+          ttydPosts: cancellation.ttydPosts, removalPosts: 1, capabilityPosts: 1, removalChannel, outcome: 'PENDING',
+          removalStartedAt: cancellation.removalStartedAt, capabilityRequestedAt: cancellation.capabilityRequestedAt,
+          capabilityResponseAt: cancellation.capabilityResponseAt, capabilityIssuedAt: cancellation.capabilityIssuedAt, ttydStartedAt: cancellation.ttydStartedAt,
+          pipeline: 'removal-capability-ttyd', timingClock: 'client_wall_clock', noArtificialDelay: true, noPreissuedCapabilityFallback: true });
       }
-      const pending = page.waitForResponse(r => new URL(r.url()).pathname === f.endpoint('/removal') && r.request().method() === 'POST');
-      await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click(); const response = await pending; expect(response.status()).toBe(201); const operation = (await response.json()).data;
+      let operation;
+      if (key === 'b') {
+        const response = await pendingRemoval; expect(response.status).toBe(201); operation = response.data;
+        record('T883-normal-api-removal', { websiteId: t.websiteId, operationId: operation.id, channel: removalChannel, noPostRetry: true });
+      } else {
+        const pending = page.waitForResponse(r => new URL(r.url()).pathname === f.endpoint('/removal') && r.request().method() === 'POST');
+        await dialog.getByRole('button', { name: 'Silme işlemini başlat', exact: true }).click(); const response = await pending; expect(response.status()).toBe(201); operation = (await response.json()).data;
+      }
       expect(operation.execution.mode).toBe('automatic'); expect(operation.websiteId).toBe(t.websiteId); state.sites[key].removalId = operation.id; save();
       const generation = operation.plan.terminalLifecycle.generationBoundary;
       expect(generation.verified).toBe(true); expect(generation.source).toBe('systemd_cgroup_v2');
@@ -653,8 +720,8 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         expect(lease.evidence.creator.pid).toBe(generation.api.pid); expect(lease.evidence.creator.starttime).toBe(generation.api.starttime);
       }
       if (key === 'b') {
-        const pendingAtRemovalResponse = !pendingTtydFinished;
-        const nodePendingAtRemovalResponse = pendingNode.proof.readyAt === null;
+        const pendingAtRemovalResponse = cancellation.ttydPendingAtRemovalResponse;
+        const nodePendingAtRemovalResponse = cancellation.nodePendingAtRemovalResponse;
         const snapshot = immutableTerminalSnapshot(operation.plan.terminalLifecycle);
         expect(snapshot.websiteId).toBe(t.websiteId); expect(snapshot.generationBoundary.api).toEqual(preserved.apiIdentity);
         const candidates = snapshot.leases.filter(value => value.backend === 'ttyd' && value.evidence.started === false);
@@ -672,16 +739,18 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         expect((await call(owner, 'GET', '/api/panel/websites/' + t.websiteId)).status).toBe(200);
         const consumed = await call(owner, 'POST', '/api/panel/terminal/ttyd-sessions', { capability: consumeCapability.capability });
         expect(consumed.status).toBe(401); expect(consumed.body.error.code).toBe('terminal_capability_invalid');
-        const overlap = await pendingTtyd;
-        expect([201, 401, 409]).toContain(overlap.status);
-        if (overlap.status === 409) expect(overlap.body.error.code).toBe('terminal_website_removing');
-        if (overlap.status === 401) expect(overlap.body.error.code).toBe('terminal_capability_invalid');
-        cancellation.responseStatus = overlap.status; cancellation.responseCode = overlap.body?.error?.code ?? null;
+        const overlap = pendingTtyd ? await pendingTtyd : null;
+        if (overlap) {
+          expect([201, 401, 409]).toContain(overlap.status);
+          if (overlap.status === 409) expect(overlap.body.error.code).toBe('terminal_website_removing');
+          if (overlap.status === 401) expect(overlap.body.error.code).toBe('terminal_capability_invalid');
+        }
+        cancellation.responseStatus = overlap?.status ?? null; cancellation.responseCode = overlap?.body?.error?.code ?? null;
         cancellation.ownerStatusAfter = (await call(owner, 'GET', '/api/auth/session')).status;
         expect(cancellation.ownerStatusAfter).toBe(200);
         const pendingLeaseObserved = operation.plan.terminalLifecycle.leases.some(value => value.backend === 'ttyd' && value.evidence.started === false);
-        record('T898-real-pending-ttyd-overlap', { operationId: operation.id, overlapStartAt, observedAt: new Date().toISOString(), pendingAtRemovalResponse,
-          responseStatus: overlap.status, sessionId: overlap.data?.sessionId ?? null, pendingLeaseObserved,
+        record('T898-real-pending-ttyd-overlap', { operationId: operation.id, removalChannel, overlapStartAt, observedAt: new Date().toISOString(), pendingAtRemovalResponse,
+          responseStatus: overlap?.status ?? null, sessionId: overlap?.data?.sessionId ?? null, pendingLeaseObserved,
           causality: pendingLeaseObserved && pendingAtRemovalResponse ? 'OBSERVED' : 'OPEN', noPostRetry: true });
         const nodePendingLeaseObserved = operation.plan.terminalLifecycle.leases.some(value => value.backend === 'node-pty' && value.evidence.started === false);
         record('T898-real-pending-node-overlap', { operationId: operation.id, observedAt: new Date().toISOString(), nodePendingAtRemovalResponse,
@@ -735,7 +804,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
       }
       await f.cleanup(); assertPhysicalGone(readOnlyHostProbe(f, 'lifecycle-absence'), t); state.sites[key].removed = true; state.sites[key].physicalAbsent = true; save();
       for (const other of siteKeys.filter(k => !state.sites[k].removed)) { const reply = await owned(other).http('/'); expect(reply.status).toBe(200); expect(reply.body).toContain(state.sites[other].marker); }
-      record('normal-ui-removal', { websiteId: t.websiteId, sameJournalId: operation.id, physicalAbsent: true });
+      record(removalChannel === 'api' ? 'normal-api-removal' : 'normal-ui-removal', { websiteId: t.websiteId, sameJournalId: operation.id, channel: removalChannel, physicalAbsent: true });
       if (key !== 'direct') {
         expect(root.closed()).toBe(false); expect(direct.proof.closed).toBe(false);
         const current = terminalHostRead({ shells: [root.shellPid, directShell] });
@@ -748,9 +817,11 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         record('T898-root-and-other-Website-preserved', { afterRemoving: t.websiteId, sameActualIdentities: current, firstDynamicOutput: true });
         if (key === 'b') {
           cancellation.ttydPosts = pendingActions.filter(value => value.proof.kind === 'ttyd' && value.proof.websiteId === t.websiteId).length;
+          cancellation.removalPosts = pendingActions.filter(value => value.proof.kind === 'website-removal' && value.proof.websiteId === t.websiteId).length;
+          cancellation.capabilityPosts = pendingActions.filter(value => value.proof.kind === 'capability' && value.proof.websiteId === t.websiteId).length;
           const reasons = [];
           if (cancellation.candidateLeaseIds.length !== 1) reasons.push('pending_lease_not_unique');
-          if (cancellation.capabilityStatus !== 201 || cancellation.ttydPosts !== 1) reasons.push('normal_intent_unverified');
+          if (cancellation.capabilityStatus !== 201 || cancellation.ttydPosts !== 1 || cancellation.removalPosts !== 1 || cancellation.capabilityPosts !== 1) reasons.push('normal_intent_unverified');
           if (cancellation.responseStatus !== 409 || cancellation.responseCode !== 'terminal_website_removing') reasons.push('typed_fence_rejection_unobserved');
           if (cancellation.ownerStatusBefore !== 200 || cancellation.ownerStatusAfter !== 200) reasons.push('owner_session_unverified');
           for (const value of cancellation.closures) {
@@ -765,11 +836,15 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
           record('T883-pre-spawn-fence-cancellation', { acceptanceGate: 'T883.pre-spawn-fence-cancellation', acceptanceSatisfied: reasons.length === 0,
             causality: reasons.length === 0 ? 'OBSERVED' : 'OPEN', reasons, websiteId: t.websiteId, operationId: operation.id,
             snapshotSha256: cancellation.snapshotSha256, candidateLeaseIds: cancellation.candidateLeaseIds,
-            capabilityStatus: cancellation.capabilityStatus, ttydPosts: cancellation.ttydPosts, responseStatus: cancellation.responseStatus,
+            capabilityStatus: cancellation.capabilityStatus, ttydPosts: cancellation.ttydPosts,
+            removalPosts: cancellation.removalPosts, capabilityPosts: cancellation.capabilityPosts, responseStatus: cancellation.responseStatus,
+            removalStartedAt: cancellation.removalStartedAt, capabilityRequestedAt: cancellation.capabilityRequestedAt,
+            capabilityResponseAt: cancellation.capabilityResponseAt, capabilityIssuedAt: cancellation.capabilityIssuedAt, ttydStartedAt: cancellation.ttydStartedAt,
+            removalResponseAt: cancellation.removalResponseAt, timingClock: 'client_wall_clock',
             responseCode: cancellation.responseCode, ownerStatusBefore: cancellation.ownerStatusBefore, ownerStatusAfter: cancellation.ownerStatusAfter,
             closures: cancellation.closures, sameApiGeneration: cancellation.sameApiGeneration, knownOsAbsent: cancellation.knownOsAbsent,
             physicalAbsent: state.sites[key].physicalAbsent, rootAndOtherWebsiteFirstOutputPreserved: true,
-            zeroProcessCandidateHasNoInventedPidOrSocket: true, strictHttpOverlapIsSeparate: true, noPostRetry: true });
+            zeroProcessCandidateHasNoInventedPidOrSocket: true, strictHttpOverlapIsSeparate: true, removalChannel, noPostRetry: true });
         }
         if (key === 'a') {
           const bStillLive = terminalHostRead({ shells: [bShell, connected.shellPid], ttyd: [connectedSession.sessionId] });
