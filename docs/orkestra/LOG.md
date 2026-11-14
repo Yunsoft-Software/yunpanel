@@ -264,3 +264,4 @@
 - 2026-11-15 00:46 orchestrator: 15 Kasım kullanıcı talebi: T889 OPEN; önce ttyd yarış kanıtı ve T908 gerçek nedeni, sonra T883 kalan kabul senaryoları/tam test/.28 gerçek doğrulama. Temiz 10e10bc5 noktasından günlük dal15-11-2026 açıldı; önceki dağıtım/sonuçlar yeni gerçek ölçüm yerine sayılmaz.
 - 2026-11-15 00:49 orchestrator: verify 20ca3591..29d02d9a: ok, yeniden açılan -, bulgu -
 - 2026-11-15 01:27 orchestrator: verify 29d02d9a..96794af0: failed, yeniden açılan -, bulgu ['T912']
+- 2026-11-15 01:52 orchestrator: verify 29d02d9a..cce5574d: ok, yeniden açılan -, bulgu -
