@@ -273,6 +273,49 @@ async function assertKnownGone(snapshot, sessionId = null) {
 }
 function save() { fs.writeFileSync(statePath, JSON.stringify(state, null, 2) + '\n', { mode: 0o600 }); }
 function record(kind, proof) { state.events.push({ kind, ...proof, at: new Date().toISOString() }); save(); }
+function immutableTerminalSnapshot(value) {
+  const snapshot = structuredClone(value);
+  const shape = (object, names) => expect(Object.keys(object).sort()).toEqual(names.split(' ').sort());
+  const processIdentity = value => {
+    shape(value, 'pid ppid pgid sid starttime');
+    for (const key of ['pid', 'ppid', 'pgid', 'sid']) expect(Number.isSafeInteger(value[key]) && value[key] >= (key === 'ppid' ? 0 : 1)).toBe(true);
+    expect(value.starttime).toMatch(/^[0-9]{1,30}$/);
+  };
+  shape(snapshot, 'version websiteId reservationId generationId generationBoundary capturedAt complete leases');
+  expect(snapshot.version).toBe(1); expect(snapshot.complete).toBe(true); expect(snapshot.websiteId).toMatch(UUID);
+  expect(snapshot.reservationId).toMatch(UUID); expect(snapshot.generationId).toMatch(UUID);
+  expect(snapshot.capturedAt).toMatch(/^\d{4}-\d\d-\d\dT[0-9:.]+Z$/);
+  const boundary = snapshot.generationBoundary;
+  shape(boundary, 'version verified source unit cgroup killMode sendSigkill onlyCurrentApiMember api socketNamespace unitSha256 observedAt');
+  expect(boundary.version).toBe(1); expect(boundary.verified).toBe(true); expect(boundary.source).toBe('systemd_cgroup_v2');
+  expect(boundary.unit).toBe('yunpanel-api.service'); expect(boundary.cgroup).toBe('/system.slice/yunpanel-api.service');
+  expect(boundary.killMode).toBe('control-group'); expect(boundary.sendSigkill).toBe(true); expect(boundary.onlyCurrentApiMember).toBe(true);
+  expect(boundary.unitSha256).toMatch(/^[a-f0-9]{64}$/); expect(boundary.observedAt).toMatch(/^\d{4}-\d\d-\d\dT[0-9:.]+Z$/); processIdentity(boundary.api);
+  shape(boundary.socketNamespace, 'path empty exists dev ino gid mode');
+  expect(boundary.socketNamespace.path).toBe('/run/yunpanel/ttyd'); expect(boundary.socketNamespace.empty).toBe(true);
+  expect(typeof boundary.socketNamespace.exists).toBe('boolean'); expect(Number.isSafeInteger(boundary.socketNamespace.gid) && boundary.socketNamespace.gid > 0).toBe(true);
+  for (const key of ['dev', 'ino']) if (boundary.socketNamespace.exists) expect(boundary.socketNamespace[key]).toMatch(/^[0-9]{1,30}$/); else expect(boundary.socketNamespace[key]).toBeNull();
+  expect(boundary.socketNamespace.mode).toBe(boundary.socketNamespace.exists ? 0o2770 : null);
+  expect(Array.isArray(snapshot.leases) && snapshot.leases.length <= 100).toBe(true);
+  for (const lease of snapshot.leases) {
+    shape(lease, 'leaseId backend evidence'); expect(lease.leaseId).toMatch(UUID); expect(['node-pty', 'ttyd']).toContain(lease.backend);
+    expect(lease.evidence.version).toBe(1); expect(typeof lease.evidence.started).toBe('boolean');
+    shape(lease.evidence, lease.evidence.started ? 'version started root known socket creator' : 'version started');
+    if (lease.evidence.started) {
+      processIdentity(lease.evidence.root); processIdentity(lease.evidence.creator);
+      expect(Array.isArray(lease.evidence.known) && lease.evidence.known.length <= 256).toBe(true); lease.evidence.known.forEach(processIdentity);
+      if (lease.evidence.socket !== null) {
+        shape(lease.evidence.socket, 'path identity'); expect(lease.evidence.socket.path).toMatch(/^\/run\/yunpanel\/ttyd\/[a-f0-9-]{36}\.sock$/);
+        const identity = lease.evidence.socket.identity; shape(identity, 'dev ino uid gid mode kernelInode');
+        for (const key of ['dev', 'ino', 'kernelInode']) expect(identity[key]).toMatch(/^[0-9]{1,30}$/);
+        for (const key of ['uid', 'gid', 'mode']) expect(Number.isSafeInteger(identity[key]) && identity[key] >= 0).toBe(true);
+      }
+    }
+  }
+  expect(new Set(snapshot.leases.map(value => value.leaseId)).size).toBe(snapshot.leases.length);
+  const freeze = object => { for (const value of Object.values(object)) if (value && typeof value === 'object') freeze(value); return Object.freeze(object); };
+  return freeze(snapshot);
+}
 async function call(actor, method, endpoint, data) {
   let response;
   for (let attempt = 0; ; attempt++) {
@@ -579,14 +622,16 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     for (const key of siteKeys) {
       const f = owned(key), t = f.ledger; await ready(page, f.route('settings')); await main(page).getByRole('button', { name: 'Siteyi sil…', exact: true }).click();
       const dialog = page.getByRole('dialog', { name: 'Siteyi kalıcı olarak sil' }); await expect(dialog).toBeVisible(); await dialog.getByRole('textbox').fill(t.hostname);
-      let consumeCapability, pendingTtyd, pendingTtydFinished = false, overlapStartAt, pendingNode, nodeStart;
+      let consumeCapability, pendingTtyd, pendingTtydFinished = false, overlapStartAt, pendingNode, nodeStart, cancellation;
       if (key === 'b') {
         const unconnectedSession = await createTtyd('b');
         bBefore = terminalHostRead({ shells: [bShell, connected.shellPid], ttyd: [connectedSession.sessionId, unconnectedSession.sessionId] });
         record('T898-real-unconnected-at-removal', { websiteId: t.websiteId, sessionId: unconnectedSession.sessionId, before: bBefore });
         pendingNode = await preparePendingNode(page.context(), t);
         consumeCapability = ok(await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }), 'Issue unused pre-fence capability', [201]);
-        const raceCapability = ok(await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId }), 'Issue one real overlap capability', [201]);
+        const capabilityReply = await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId });
+        const raceCapability = ok(capabilityReply, 'Issue one real overlap capability', [201]);
+        cancellation = { websiteId: t.websiteId, capabilityStatus: capabilityReply.status, ttydPosts: 1 };
         overlapStartAt = new Date().toISOString();
         record('T898-pending-open-attempts-started', { websiteId: t.websiteId, overlapStartAt, nodeUiClicks: 1, ttydPosts: 1, outcome: 'PENDING' });
         nodeStart = trackPendingAction('node-ui', t.websiteId, pendingNode.start());
@@ -610,8 +655,17 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
       if (key === 'b') {
         const pendingAtRemovalResponse = !pendingTtydFinished;
         const nodePendingAtRemovalResponse = pendingNode.proof.readyAt === null;
+        const snapshot = immutableTerminalSnapshot(operation.plan.terminalLifecycle);
+        expect(snapshot.websiteId).toBe(t.websiteId); expect(snapshot.generationBoundary.api).toEqual(preserved.apiIdentity);
+        const candidates = snapshot.leases.filter(value => value.backend === 'ttyd' && value.evidence.started === false);
+        cancellation = { ...cancellation, operationId: operation.id, snapshot,
+          snapshotSha256: createHash('sha256').update(JSON.stringify(snapshot)).digest('hex'),
+          candidateLeaseIds: candidates.map(value => value.leaseId) };
+        record('T883-pre-spawn-fence-snapshot', { websiteId: t.websiteId, operationId: operation.id,
+          snapshotSha256: cancellation.snapshotSha256, snapshot, candidateLeaseIds: cancellation.candidateLeaseIds });
         await nodeStart;
-        expect((await call(owner, 'GET', '/api/auth/session')).status).toBe(200);
+        cancellation.ownerStatusBefore = (await call(owner, 'GET', '/api/auth/session')).status;
+        expect(cancellation.ownerStatusBefore).toBe(200);
         expect((await call(owner, 'GET', '/api/panel/websites/' + t.websiteId)).status).toBe(200);
         const denied = await call(owner, 'POST', '/api/panel/terminal/capabilities', { scope: 'site', websiteId: t.websiteId });
         expect(denied.status).toBe(409); expect(denied.body.error.code).toBe('terminal_website_removing');
@@ -622,6 +676,9 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         expect([201, 401, 409]).toContain(overlap.status);
         if (overlap.status === 409) expect(overlap.body.error.code).toBe('terminal_website_removing');
         if (overlap.status === 401) expect(overlap.body.error.code).toBe('terminal_capability_invalid');
+        cancellation.responseStatus = overlap.status; cancellation.responseCode = overlap.body?.error?.code ?? null;
+        cancellation.ownerStatusAfter = (await call(owner, 'GET', '/api/auth/session')).status;
+        expect(cancellation.ownerStatusAfter).toBe(200);
         const pendingLeaseObserved = operation.plan.terminalLifecycle.leases.some(value => value.backend === 'ttyd' && value.evidence.started === false);
         record('T898-real-pending-ttyd-overlap', { operationId: operation.id, overlapStartAt, observedAt: new Date().toISOString(), pendingAtRemovalResponse,
           responseStatus: overlap.status, sessionId: overlap.data?.sessionId ?? null, pendingLeaseObserved,
@@ -663,6 +720,18 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
           await expect.poll(() => pendingNode.proof.closedAt !== null, { timeout: 10000 }).toBe(true);
         }
         record('T898-pending-node-final', { operationId: operation.id, proof: { ...pendingNode.proof } });
+        const leaseId = cancellation.candidateLeaseIds.length === 1 ? cancellation.candidateLeaseIds[0] : null;
+        cancellation.closures = ['file_cleanup', 'unix_identity_cleanup'].map(kind => {
+          const drain = removed.steps.find(value => value.kind === kind).result.terminalDrain;
+          const matching = drain.leases.filter(value => value.leaseId === leaseId && value.backend === 'ttyd');
+          const closure = matching.length === 1 ? matching[0] : null;
+          return { kind, websiteMatches: drain.websiteId === t.websiteId, operationMatches: drain.operationId === operation.id,
+            snapshotMatches: drain.snapshotSha256 === cancellation.snapshotSha256, verified: drain.verified === true,
+            matchingLeaseCount: matching.length, closure };
+        });
+        cancellation.sameApiGeneration = JSON.stringify(after.apiIdentity) === JSON.stringify(cancellation.snapshot.generationBoundary.api);
+        cancellation.knownOsAbsent = after.known.every(value => value.absent && value.sessionAbsent && !value.pidReused)
+          && after.sockets.every(value => !value.exists && value.namedKernelRows === 0);
       }
       await f.cleanup(); assertPhysicalGone(readOnlyHostProbe(f, 'lifecycle-absence'), t); state.sites[key].removed = true; state.sites[key].physicalAbsent = true; save();
       for (const other of siteKeys.filter(k => !state.sites[k].removed)) { const reply = await owned(other).http('/'); expect(reply.status).toBe(200); expect(reply.body).toContain(state.sites[other].marker); }
@@ -677,6 +746,31 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
           await expect.poll(() => console.output().includes('\nT898-' + marker + '\r\n'), { timeout: 10000 }).toBe(true);
         }
         record('T898-root-and-other-Website-preserved', { afterRemoving: t.websiteId, sameActualIdentities: current, firstDynamicOutput: true });
+        if (key === 'b') {
+          cancellation.ttydPosts = pendingActions.filter(value => value.proof.kind === 'ttyd' && value.proof.websiteId === t.websiteId).length;
+          const reasons = [];
+          if (cancellation.candidateLeaseIds.length !== 1) reasons.push('pending_lease_not_unique');
+          if (cancellation.capabilityStatus !== 201 || cancellation.ttydPosts !== 1) reasons.push('normal_intent_unverified');
+          if (cancellation.responseStatus !== 409 || cancellation.responseCode !== 'terminal_website_removing') reasons.push('typed_fence_rejection_unobserved');
+          if (cancellation.ownerStatusBefore !== 200 || cancellation.ownerStatusAfter !== 200) reasons.push('owner_session_unverified');
+          for (const value of cancellation.closures) {
+            const proof = value.closure;
+            if (!value.websiteMatches || !value.operationMatches || !value.snapshotMatches || !value.verified || value.matchingLeaseCount !== 1
+              || proof?.verified !== true || proof.childExited !== true || proof.processesExited !== true || proof.socketRemoved !== true
+              || proof.processCount !== 0 || !Array.isArray(proof.processes) || proof.processes.length !== 0) reasons.push(value.kind + '_exact_zero_process_closure_unverified');
+          }
+          if (!cancellation.sameApiGeneration || JSON.stringify(current.apiIdentity) !== JSON.stringify(cancellation.snapshot.generationBoundary.api)) reasons.push('api_generation_changed');
+          if (!cancellation.knownOsAbsent) reasons.push('known_os_absence_unverified');
+          if (state.sites[key].physicalAbsent !== true) reasons.push('normal_physical_cleanup_unverified');
+          record('T883-pre-spawn-fence-cancellation', { acceptanceGate: 'T883.pre-spawn-fence-cancellation', acceptanceSatisfied: reasons.length === 0,
+            causality: reasons.length === 0 ? 'OBSERVED' : 'OPEN', reasons, websiteId: t.websiteId, operationId: operation.id,
+            snapshotSha256: cancellation.snapshotSha256, candidateLeaseIds: cancellation.candidateLeaseIds,
+            capabilityStatus: cancellation.capabilityStatus, ttydPosts: cancellation.ttydPosts, responseStatus: cancellation.responseStatus,
+            responseCode: cancellation.responseCode, ownerStatusBefore: cancellation.ownerStatusBefore, ownerStatusAfter: cancellation.ownerStatusAfter,
+            closures: cancellation.closures, sameApiGeneration: cancellation.sameApiGeneration, knownOsAbsent: cancellation.knownOsAbsent,
+            physicalAbsent: state.sites[key].physicalAbsent, rootAndOtherWebsiteFirstOutputPreserved: true,
+            zeroProcessCandidateHasNoInventedPidOrSocket: true, strictHttpOverlapIsSeparate: true, noPostRetry: true });
+        }
         if (key === 'a') {
           const bStillLive = terminalHostRead({ shells: [bShell, connected.shellPid], ttyd: [connectedSession.sessionId] });
           expect(bStillLive.roots.map(value => value.root)).toEqual(bBefore.roots.map(value => value.root));
