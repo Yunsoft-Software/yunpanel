@@ -1581,7 +1581,7 @@
 
 ### T912 · Doğrulama: test — POST /api/importer/plesk/preview returns 200 and preview for owner
 - **Bağımlı:** —
-- **Dosyalar:** —
+- **Dosyalar:** `apps/api/test/plesk-importer-http.test.js`
 - **Kaynak:** QA · 2026-11-15 01:27
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1631,5 +1631,8 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 806.036458
+
+
+    15 Kasım dar kaynak sözleşmesi: izole temiz96794af0 tam kapısı01 gerçek stack/test67de OwnerPOST401!==200 gösterdi; parent suite de failed sayıldığı için toplamfail2dir, ayrıikiürünhatası değildir. Ham log/gate sonucu korunur. Önce gerçek Node24/umask0022HTTP request'in exactintendedlistener/context/adresailesi ve listen/close yaşam döngüsünü ölçerek tekrar üret. Mevcut auth fixture/200-owner/401-unauth/403-role/400-validation ve .44-only-string-offline sınırlarını gevşetme; yeni mock/auth/canned HTTP veya gerçek .44 erişimi yok. Kaynak yalnız bu test dosyasıdır; ürün guard/route değişikliği kanıtlanırsa önce root'a bildir. Güvenli dinleme/kapanış kusuru varsa gerçekHTTP regresyonuyla dar onar; eskiilkcause kanıtı yokken varsayımı kesinleştirme. Root yeni frozenfullgate ve bağımsızreview sonrasında nativeye geçer. Lisans WIP primarykaynakta korunur, çalışma yalnızverification-checkout-01 içinde yürür.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
