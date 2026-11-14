@@ -245,3 +245,16 @@ Yeni pre-spawn alt kabulü en az iki ayrı fresh own Website/operation/nonce üz
 ### T912 — ilk tam koşuda importer HTTP red ve ayrı fixture yaşam döngüsü
 
 İzole96794af0 kaynak kapısı01'de yerel Owner preview200 yerine401 verdi; tek subtest ile parent suite birlikte fail2 sayıldı. Tek dosya6/6 ve salt gözlemli Node HTTP diagnostic6/6 tekrarında doğru intended listener/Owner context200 görüldü; ilk401 nedeni UNKNOWN ve ham log korunur. Ayrı gerçek kusur: fixture'lar close callback'ini beklemiyordu. Kaynak dilimi yalnız `apps/api/test/plesk-importer-http.test.js`: mevcut auth fixture/200-401-403-400 ve offline yasak-hedef doğrulamaları korunarak explicit loopback/listen-await/finally-close-await ve safe intended-listener diagnostic eklenir. İki yeni gerçek Express varsayılan404 success/throw senaryosu close event+callback ve gerçek yeni bağlantıECONNREFUSED ile RED→GREEN kanıtlar. Bu bir native importer/lisans veya ilk401 kök neden kabulü değildir. Bağımsız dosya incelemesi ve yeni tam kaynak kapısı02 yeşil olmadan .28 native kabulüne geçilmez; başarısız kapı01 veya T889 kapanmaz.
+
+
+### 15 Kasım — source03 doğal API pipeline, pre-spawn kapısı hâlâ açık
+
+İlk kaynakla Q1 Chrome ve Q2 Firefox tam native20 3/3 geçti; iki koşuda da ttyd201 ve started:true olduğu için yeni pre-spawn alt kabulü **0/2 OBSERVED** kaldı. Bu olağan PASS sonuçları ve eski strict HTTP-overlap OPEN kayıtları değişmez. Yeni kaynak aşağıdaki doğal kullanıcı istek sırasını ölçer; başarı garantisi veya yeni native sonuç değildir.
+
+| Senaryo | Gerçek kanal / sıra | Katı kabul |
+|---|---|---|
+| T883-PENDING-NATURAL-API | B için tek normal removal POST başlatılır; await etmeden tek fresh capability POST; yalnız gerçek201 yanıtından sonra tek ttyd POST. A ve Direct için var olan normal UI kaldırmaları korunur. | Capability409 ise ttyd isteği0, ttyd response null, nedensellik OPEN; önceden verilmiş capability fallback/retry, sleep/barrier/interception yok. |
+| T883-PENDING-EXACT-ZERO | Tam immutable snapshot, unique own Website/ttyd/started:false leaseId → aynı journal/snapshotSHA → aynı leaseId file+Unix verified closure | processCount0 ve processes[]; current API generation, gerçek bilinen PID/session/socket yokluğu, diğer terminal/ilk çıktı ve normal fiziksel temizlik zorunlu. Sadece API yanıt zamanı bu zincirin yerine geçmez. |
+| T883-PENDING-SETTLE | Removal/capability/ttyd ve NodeUI gerçek effect promise'ları cleanup öncesi allSettled/join; bilinen removal journal read-only uzlaştırılır | UNKNOWN_KEEP sonrasında yeni mutation yok. Capability değerleri veya confirmation loglanmaz. B sonucu normal-api-removal, diğer ikisi normal-ui-removal diye kaydedilir. |
+
+HTTPpending booleans gerçek call-response fulfillment anında pasif yakalanır, sonra caller'ın capability-await zamanıyla karıştırılmaz; strictAND ifadesi değişmez. capabilityResponseAt her gerçek yanıtta, capabilityIssuedAt yalnız201'de bulunur (409'da null). Mevcut zaman aşımı/interval/sleep sınırları korunur. En az iki fresh ayrı Website/operation/nonce üzerinde OBSERVED ve en az birer tam Chrome/Firefox PASS gereği sürer; en çok dört doğal fresh koşu, aksi halde HOLD. Eski Website/HTTP-overlap veya late-child fault kanalları yeniden etiketlenmez; T889 açık.
