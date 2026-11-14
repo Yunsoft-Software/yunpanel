@@ -69,10 +69,14 @@ for shell in x['shells']:
  roots.append({'kind':'node-pty','shell':shell,'root':root,'ancestry':chain})
 for session in x['ttyd']:
  assert re.fullmatch(r'[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}',session)
- name='/run/yunpanel/ttyd/'+session+'.sock';meta=sock(name);sockets.append(meta)
- if not meta['exists']:continue
+ name='/run/yunpanel/ttyd/'+session+'.sock';meta=sock(name)
  rows=[line.split() for line in open('/proc/net/unix') if line.split()[-1:]==[name]]
- assert len(rows)==1 and len(rows[0])==8;inode=rows[0][6];assert inode.isdecimal()
+ assert all(len(row)==8 and row[6].isdecimal() and re.fullmatch(r'[0-9a-fA-F]{8}',row[3]) and re.fullmatch(r'[0-9a-fA-F]{4}',row[4]) and re.fullmatch(r'[0-9a-fA-F]{2}',row[5]) for row in rows)
+ assert all(row[3] in ('00000000','00010000') and row[4]=='0001' and row[5] in ('01','02','03','04') for row in rows)
+ listeners=[row for row in rows if row[3]=='00010000' and row[5]=='01'];assert len(listeners)<=1
+ meta.update(namedKernelRows=len(rows),listenerCount=len(listeners));sockets.append(meta)
+ if not meta['exists'] or not listeners:continue
+ inode=listeners[0][6]
  owners=[]
  for child in current.values():
   if child['ppid']!=api:continue
@@ -258,7 +262,7 @@ async function assertKnownGone(snapshot, sessionId = null) {
   await expect.poll(() => {
     after = terminalHostRead({ known, ttyd: sessionId ? [sessionId] : [] });
     return after.known.every(value => value.absent && value.sessionAbsent && !value.pidReused)
-      && after.sockets.every(value => !value.exists);
+      && after.sockets.every(value => !value.exists && value.namedKernelRows === 0);
   }, { timeout: 80000, intervals: [500, 1000, 2000] }).toBe(true);
   return after;
 }
@@ -560,6 +564,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     expect(bPty.processes.filter(value => value.ppid === bShell && value.pgid !== shellIdentity.pgid).length).toBeGreaterThanOrEqual(2);
     expect(new Set(bPty.processes.filter(value => value.ppid === bShell).map(value => value.pgid)).size).toBeGreaterThanOrEqual(2);
     expect(bBefore.sockets.every(value => value.exists && value.mode === 0o660)).toBe(true);
+    expect(bBefore.sockets.find(value => value.path.endsWith(connectedSession.sessionId + '.sock')).namedKernelRows).toBeGreaterThanOrEqual(2);
     const preserved = terminalHostRead({ shells: [root.shellPid, directShell] });
     record('T898-real-owned-terminal-baseline', { websiteId: state.sites.b.websiteId, b: bBefore, preserved,
       connectedTtyd: connectedSession.sessionId,
@@ -641,7 +646,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
         const known = [...new Map(bBefore.roots.flatMap(value => value.processes).map(value => [value.pid, value])).values()];
         const after = terminalHostRead({ known, ttyd: state.ttyd.filter(value => value.websiteId === t.websiteId).map(value => value.sessionId) });
         expect(after.known.every(value => value.absent && value.sessionAbsent && !value.pidReused)).toBe(true);
-        expect(after.sockets.every(value => !value.exists)).toBe(true);
+        expect(after.sockets.every(value => !value.exists && value.namedKernelRows === 0)).toBe(true);
         const receipt = removed.steps.find(value => value.kind === 'file_cleanup').result.terminalDrain;
         const drained = receipt.leases.flatMap(value => value.processes);
         for (const process of known) expect(drained.some(value => value.pid === process.pid && value.starttime === process.starttime)).toBe(true);

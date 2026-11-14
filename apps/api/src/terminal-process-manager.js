@@ -43,13 +43,21 @@ def socket_info(p):
   if not stat.S_ISSOCK(s.st_mode) or s.st_nlink!=1:reject('terminal_drain_socket_changed')
   return {'dev':str(s.st_dev),'ino':str(s.st_ino),'uid':s.st_uid,'gid':s.st_gid,'mode':stat.S_IMODE(s.st_mode)}
  except FileNotFoundError:return None
-def socket_kernel_inode(path):
+def socket_kernel_rows(path):
  text=open('/proc/net/unix').read(2097153)
  if len(text)>2097152:reject('terminal_drain_limit')
  rows=[line.split() for line in text.splitlines() if line.split()[-1:]==[path]]
- if not rows:return None
- if len(rows)!=1 or len(rows[0])!=8 or not rows[0][6].isdecimal():reject('terminal_drain_socket_changed')
- return rows[0][6]
+ for row in rows:
+  if len(row)!=8 or not row[6].isdecimal() or len(row[6])>30:reject('terminal_drain_socket_changed')
+  for index,size in ((3,8),(4,4),(5,2)):
+   if len(row[index])!=size or any(c not in '0123456789abcdefABCDEF' for c in row[index]):reject('terminal_drain_socket_changed')
+ return rows
+def socket_listener_inode(path):
+ rows=socket_kernel_rows(path)
+ if any(row[3] not in ('00000000','00010000') or row[4]!='0001' or row[5] not in ('01','02','03','04') for row in rows):reject('terminal_drain_socket_changed')
+ listeners=[row for row in rows if row[3]=='00010000' and row[5]=='01']
+ if len(listeners)>1:reject('terminal_drain_socket_changed')
+ return listeners[0][6] if listeners else None
 try:
  x=json.loads(base64.b64decode(sys.argv[1],validate=True)); deadline=time.monotonic()+x['timeoutMs']/1000
  if sys.platform!='linux' or not hasattr(os,'pidfd_open') or not hasattr(signal,'pidfd_send_signal'):reject('terminal_drain_unsupported')
@@ -116,7 +124,7 @@ try:
   if x.get('socketPath') is not None:
    candidate={'path':x['socketPath'],'identity':socket_info(x['socketPath'])}
    if candidate['identity'] is None:reject('terminal_drain_socket_unavailable')
-   inode=socket_kernel_inode(candidate['path']); owner=False
+   inode=socket_listener_inode(candidate['path']); owner=False
    if inode is None:reject('terminal_drain_socket_unavailable')
    for pid,p in known.items():
     if not same(proc(pid),p):continue
@@ -129,7 +137,7 @@ try:
       except FileNotFoundError:continue
     except FileNotFoundError:continue
     if not same(proc(pid),p):reject('terminal_drain_identity_unavailable')
-   if not owner or socket_info(candidate['path'])!=candidate['identity']:reject('terminal_drain_socket_changed')
+   if not owner or socket_info(candidate['path'])!=candidate['identity'] or socket_listener_inode(candidate['path'])!=inode:reject('terminal_drain_socket_changed')
    candidate['identity']['kernelInode']=inode
    evidence['socket']=candidate;sockets=candidate
   if x['mode']!='drain':print(json.dumps(evidence));sys.exit(0)
@@ -149,7 +157,7 @@ try:
    time.sleep(.02)
   if sockets is not None:
    now=socket_info(sockets['path'])
-   if socket_kernel_inode(sockets['path']) is not None:reject('terminal_drain_socket_changed')
+   if socket_kernel_rows(sockets['path']):reject('terminal_drain_socket_changed')
    if now is not None:
     if sockets['identity'] is None or now!={k:v for k,v in sockets['identity'].items() if k!='kernelInode'}:reject('terminal_drain_socket_changed')
     os.unlink(sockets['path'])

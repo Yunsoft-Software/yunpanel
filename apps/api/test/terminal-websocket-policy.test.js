@@ -127,3 +127,61 @@ test('T898 real asynchronous missing-executable failure is observed before any P
     assert.equal(child.pid, undefined, 'No guessed PID or signal is used for a failed spawn');
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('T898 actual Unix accepts retain one listener and accepted-only kernel rows never prove absence', () => {
+  const python = String.raw`
+import ast,json,os,socket,stat,sys,tempfile,time
+source=ast.parse(sys.argv[1]);names={'reject','socket_kernel_rows','socket_listener_inode'}
+definitions=[node for node in source.body if isinstance(node,ast.FunctionDef) and node.name in names]
+assert {node.name for node in definitions}==names
+namespace={'json':json,'sys':sys}
+exec(compile(ast.Module(body=definitions,type_ignores=[]),'actual-runtime-functions','exec'),namespace)
+rows=namespace['socket_kernel_rows'];select=namespace['socket_listener_inode']
+directory=tempfile.mkdtemp(prefix='t898-unix-',dir='/tmp');path=directory+'/listener.sock'
+listener=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);clients=[];accepted=[];original=None
+result={'realConnections':0,'sourceReaderUsed':True,'linuxPositive':False}
+try:
+ listener.bind(path);listener.listen(2);original=os.lstat(path)
+ for index in range(2):
+  client=socket.socket(socket.AF_UNIX,socket.SOCK_STREAM);clients.append(client);client.connect(path)
+  connection,_=listener.accept();accepted.append(connection)
+  payload=('own-'+str(index)).encode();client.sendall(payload);assert connection.recv(32)==payload
+  assert connection.getsockname()==path;result['realConnections']+=1
+ try:current=rows(path)
+ except OSError as error:
+  if sys.platform=='linux':raise
+  result.update(unsupportedClass=type(error).__name__)
+ else:
+  assert sys.platform=='linux'
+  inode=os.readlink('/proc/self/fd/'+str(listener.fileno()))
+  assert inode.startswith('socket:[') and inode.endswith(']');inode=inode[8:-1]
+  assert select(path)==inode and len(current)>=3
+  assert len([row for row in current if row[3]=='00010000' and row[4]=='0001' and row[5]=='01'])==1
+  listener.close();remaining=rows(path)
+  assert len(remaining)>=2 and select(path) is None
+  result.update(linuxPositive=True,namedRowsWithTwoAccepts=len(current),acceptedOnlyRows=len(remaining),acceptedOnlyIsNotAbsence=bool(remaining))
+finally:
+ for descriptor in accepted+clients:descriptor.close()
+ listener.close()
+ if original is not None:
+  current=os.lstat(path);assert stat.S_ISSOCK(current.st_mode) and (current.st_dev,current.st_ino)==(original.st_dev,original.st_ino)
+  if sys.platform=='linux':
+   deadline=time.monotonic()+3
+   while rows(path) and time.monotonic()<deadline:time.sleep(.01)
+   assert rows(path)==[];result['finalNamedRows']=0
+  os.unlink(path)
+ os.rmdir(directory)
+result.update(allOwnDescriptorsClosed=True,ownSocketAndDirectoryAbsent=not os.path.lexists(path) and not os.path.lexists(directory))
+print(json.dumps(result))
+`;
+  const result = JSON.parse(execFileSync('/usr/bin/python3', ['-c', python, terminalProcessInternals.ownedProcessPython],
+    { encoding: 'utf8', timeout: 10000, maxBuffer: 128 * 1024 }));
+  assert.equal(result.realConnections, 2); assert.equal(result.sourceReaderUsed, true);
+  assert.equal(result.allOwnDescriptorsClosed, true); assert.equal(result.ownSocketAndDirectoryAbsent, true);
+  if (process.platform === 'linux') {
+    assert.equal(result.linuxPositive, true); assert.ok(result.namedRowsWithTwoAccepts >= 3);
+    assert.ok(result.acceptedOnlyRows >= 2); assert.equal(result.acceptedOnlyIsNotAbsence, true); assert.equal(result.finalNamedRows, 0);
+  } else {
+    assert.equal(result.linuxPositive, false); assert.equal(result.unsupportedClass, 'FileNotFoundError');
+  }
+});
