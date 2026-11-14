@@ -260,3 +260,4 @@
 - 2026-11-14 16:49 orchestrator: verify 37fe6741..b515377a: ok, yeniden açılan -, bulgu -
 - 2026-11-14 19:03 orchestrator: verify b515377a..e4a8d46d: ok, yeniden açılan -, bulgu -
 - 2026-11-14 20:09 orchestrator: verify e4a8d46d..20ca3591: ok, yeniden açılan -, bulgu -
+- 2026-11-14 20:56 orchestrator: Aktif claimler normal bırakıldı; günlük 14-11-2026 dalı 13-11-2026 üzerindeki doğrulanmış 812199e7 noktasından açıldı. T898 d2032846 ve T911 edf83ce6 sınırlı kabul; full14 8719 PASS/0 FAIL/1 mevcut Postfix skip; .28 13.08 native20 Chrome3+Firefox3, native27 1 PASS ve sağlık200. T889/T883/T908 ve gözlenmeyen yarış kapıları açık; sunucu kilitleri normal bırakıldı. Ürün/E2E farkı ve push yok.
