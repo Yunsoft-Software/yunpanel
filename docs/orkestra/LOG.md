@@ -263,3 +263,5 @@
 - 2026-11-14 20:56 orchestrator: Aktif claimler normal bırakıldı; günlük 14-11-2026 dalı 13-11-2026 üzerindeki doğrulanmış 812199e7 noktasından açıldı. T898 d2032846 ve T911 edf83ce6 sınırlı kabul; full14 8719 PASS/0 FAIL/1 mevcut Postfix skip; .28 13.08 native20 Chrome3+Firefox3, native27 1 PASS ve sağlık200. T889/T883/T908 ve gözlenmeyen yarış kapıları açık; sunucu kilitleri normal bırakıldı. Ürün/E2E farkı ve push yok.
 - 2026-11-15 00:46 orchestrator: 15 Kasım kullanıcı talebi: T889 OPEN; önce ttyd yarış kanıtı ve T908 gerçek nedeni, sonra T883 kalan kabul senaryoları/tam test/.28 gerçek doğrulama. Temiz 10e10bc5 noktasından günlük dal15-11-2026 açıldı; önceki dağıtım/sonuçlar yeni gerçek ölçüm yerine sayılmaz.
 - 2026-11-15 00:49 orchestrator: verify 20ca3591..29d02d9a: ok, yeniden açılan -, bulgu -
+- 2026-11-15 01:27 orchestrator: verify 29d02d9a..96794af0: failed, yeniden açılan -, bulgu ['T912']
+- 2026-11-15 01:52 orchestrator: verify 29d02d9a..cce5574d: ok, yeniden açılan -, bulgu -
