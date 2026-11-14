@@ -965,7 +965,7 @@ function proxyTtydWebSocket(request, socket, head, {
   upstream.setTimeout(10_000, () => upstream.destroy(new Error('ttyd websocket timeout')));
   upstream.on('upgrade', (upstreamResponse, upstreamSocket, upstreamHead) => {
     upstream.setTimeout(0);
-    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol'];
+    const allowed = ['upgrade', 'connection', 'sec-websocket-accept', 'sec-websocket-protocol', 'sec-websocket-extensions'];
     const responseHeaders = [];
     for (const name of allowed) {
       const value = upstreamResponse.headers[name];
