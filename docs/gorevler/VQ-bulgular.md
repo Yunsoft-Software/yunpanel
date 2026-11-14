@@ -1578,3 +1578,58 @@
     Maker syntax/lint/ilgili mevcut web testleri + bagimsiz kaynak review; ardindan frozen tam sourcegate13 ve matching yeni paket08 .28 yetkili P0 dongusunde. Actualpositive probe public101 extensionpresent + gercek terminalverisi + strict204close/normalphysicalcleanup ve iki fresh FULL native20 gate gereklidir. Native kanit rootta seri, makerhost/network islemez. Kaynak/local test native kabul degildir. T889OPEN korunur. Test-backup GC07 pindeki runtime0864/writer4305/ownedhelper degismez; bu tekwebkaynak dilimi GC ile bagimsiz yuruyebilir, deploy/export ancak GC ve tamgate bittikten sonra.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T912 · Doğrulama: test — POST /api/importer/plesk/preview returns 200 and preview for owner
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-15 01:27
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - POST /api/importer/plesk/preview returns 200 and preview for owner
+    - Plesk Importer HTTP API
+    
+    rofiles without allocating a localhost port (0.522083ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.196958ms)
+    ✔ normalizes complete Node deployment specs (0.730958ms)
+    ✔ normalizes fixed Node process actions against a managed release (1.751833ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (3.452458ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (1.164584ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (1.186417ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (40.349ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.705375ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (1.50675ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.325333ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.611292ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.167625ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.299917ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (3.163959ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.269208ms)
+    ✔ normalizes python rollback, restart, and status specs (1.820375ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (28.276333ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (18.200083ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (1.47975ms)
+    ✔ tenant constants and role classification predicates (2.090042ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (1.999375ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.834709ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.621167ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.385709ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.296166ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.4585ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.518125ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.615083ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.413875ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.606042ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.797ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (2.474ms)
+    ✔ tenant context creation and account normalization security edge cases (1.591583ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 806.036458
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
