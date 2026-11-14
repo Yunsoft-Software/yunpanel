@@ -1566,3 +1566,15 @@
     13 Kasım P0 döngüsü dar test kapsamı: full-source-gate-11 source90a03b11 gerçek raw stack5530–5587 korunur. Yeni terminalDrain güvenli typed sonucu whitelist içinde exact doğrulanır, adapter key/secret sızıntısı beklentisi kaldırılmaz. Restart ve overlap pozitifleri geçerli gerçek file-backed journal + aynı shared lifecycle reservation/commit ile kurulmalı; legacy eksik kanıt hâlâ blocked/fenced ve cleanup yoktur. Callback kapısına hiç ulaşmayan eski legacy fixture timeout artışı/retry/skip veya yeni sahte servis/HTTP/process/fs ile geçirtilemez. Anlamlı gerçek disk/HTTP veya saf durum sınırı kullan; kaynak üretim dosyası değiştirme gereği kanıtlanırsa önce root bildir. Yalnız bu üç test dosyası; T898 ürün/kernel düzeltmesi ayrı kalır. İlgili üç dosya tam batch + bağımsız inceleme ve sonraki full-source-gate-12 gereklidir.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T911 · ttyd WebSocket gateway sikistirma yanit basligini dusuruyor
+- **Bağımlı:** —
+- **Dosyalar:** `apps/web/server.js`
+- **Kaynak:** QA · 2026-11-14 18:51
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Gercek 1307/source0864011a native20 q1 2PASS1FAIL: ilk bagli ttyd browser testinde GET200 ve xterm var, terminal verisi yok. Iki ayri normal sahipli statik/ttyd probe gercek101, client binary40B ve sifirserverframe sonrasi hemen kapandi. Ikinci probe1922074d extensionOfferedtrue, responseExtensionPresentfalse ve75ms reserved-bit protocol error kaydetti; OwnerAPI/browser200. Kaynak apps/web/server.js browserProxyHeaders uzanti teklifini iletirken proxyTtydWebSocket101 yanit allowlisti sec-websocket-extensions alanini dusuruyor.
+    Dar onayli P0 bugfix: YALNIZ apps/web/server.js mevcut upgrade yanit allowlistine sec-websocket-extensions ekle; varolan string/CRLF kontrolu aynen kalir. Auth, Origin, cookie, tenant, reauthorization, routing, pipe, timeout, ttyd args veya motor degismez. Yeni fake HTTP/ttyd/WS servis testi ekleme. Otomatik gercek regression mevcut native20 strict15s terminalframe/pending/drain/cleanup kontrati ve mevcut bounded passive probe. EskiFAIL/UNKNOWN/KEEP kanitlari korunur; HTTP-after101 alternatifi veya tumtarihsel nedenler cozuldu iddia edilmez.
+    Maker syntax/lint/ilgili mevcut web testleri + bagimsiz kaynak review; ardindan frozen tam sourcegate13 ve matching yeni paket08 .28 yetkili P0 dongusunde. Actualpositive probe public101 extensionpresent + gercek terminalverisi + strict204close/normalphysicalcleanup ve iki fresh FULL native20 gate gereklidir. Native kanit rootta seri, makerhost/network islemez. Kaynak/local test native kabul degildir. T889OPEN korunur. Test-backup GC07 pindeki runtime0864/writer4305/ownedhelper degismez; bu tekwebkaynak dilimi GC ile bagimsiz yuruyebilir, deploy/export ancak GC ve tamgate bittikten sonra.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
