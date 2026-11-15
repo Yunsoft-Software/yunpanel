@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import {
+  createLicenseEntitlementService,
+  LicenseEntitlementError,
+} from '../src/license-entitlement-service.js';
 import { WebsiteIsolationAuditError } from '../src/website-isolation-audit.js';
 import {
   mountWebsiteIsolationAuditRoutes,
@@ -210,4 +214,56 @@ test('Website isolation migration apply hides remote Website before mutation', a
   assert.ok(result.nextError instanceof WebsiteRegistryError);
   assert.equal(result.nextError.code, 'website_not_found');
   assert.equal(result.nextError.status, 404);
+});
+
+test('Website isolation audit and migration routes allow Free Owner security remediation while gating separate customer/reseller logins', async () => {
+  const app = fakeApp();
+  const previewDigest = 'b'.repeat(64);
+  const operationId = '9ae512c0-a717-4611-943c-6ce2ab0abf16';
+  const freeLicenseService = createLicenseEntitlementService({
+    filePath: ':memory:',
+    publicKeyPem: '',
+    publicKeyFile: '',
+    publicOrigin: 'https://panel.example.test',
+    development: false,
+  });
+
+  mountWebsiteIsolationAuditRoutes(app, {
+    websiteRegistry: {
+      getWebsite: async (id) => ({ id, serverId: localServerId }),
+    },
+    localServerId,
+    licenseEntitlementService: freeLicenseService,
+    auditService: {
+      audit: async (id) => ({ websiteId: id, status: 'isolated', migrationRequired: false }),
+    },
+    migrationRuntime: {
+      async start({ websiteId: id }) {
+        return { id: operationId, websiteId: id, status: 'succeeded' };
+      },
+      async rollback() {
+        return { id: operationId, websiteId, status: 'compensated' };
+      },
+      async get(id) { return { id, websiteId, status: 'succeeded' }; },
+      async listForWebsite(id) { return [{ id: operationId, websiteId: id }]; },
+    },
+  });
+
+  const apply = app.routes.post.get('/api/websites/:websiteId/isolation-migrations').at(-1);
+  const ownerRes = await invoke(apply, {
+    auth: { user: { id: 'owner-1', role: 'owner' } },
+    params: { websiteId },
+    body: { expectedPreviewDigest: previewDigest, confirmation: `migrate-isolation:${websiteId}:1:${previewDigest}` },
+  });
+  assert.equal(ownerRes.nextError, null);
+  assert.equal(ownerRes.response.payload.data.status, 'succeeded');
+
+  const siteUserRes = await invoke(apply, {
+    auth: { user: { id: 'cust-1', role: 'site_manager', websiteIds: [websiteId] } },
+    params: { websiteId },
+    body: { expectedPreviewDigest: previewDigest, confirmation: `migrate-isolation:${websiteId}:1:${previewDigest}` },
+  });
+  assert.ok(siteUserRes.nextError instanceof LicenseEntitlementError);
+  assert.equal(siteUserRes.nextError.code, 'premium_license_required');
+  assert.equal(siteUserRes.nextError.capability, 'perSiteIsolatedUsers');
 });

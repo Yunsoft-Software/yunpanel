@@ -2,12 +2,14 @@
 import { DEFAULT_AI_TOOL_DEFINITIONS } from './ai-tool-catalog.js';
 import { createAiToolRegistry } from './ai-tool-registry.js';
 import { createAiMcpAdapter } from './ai-mcp-adapter.js';
+import { createLicenseEntitlementService } from './license-entitlement-service.js';
 
 export function startAiMcpServer({
   registry = null,
   audit = null,
   policyOverrides = {},
   policyStore = null,
+  licenseEntitlementService = null,
   auth = null,
   inputStream = process.stdin,
   outputStream = process.stdout,
@@ -18,6 +20,7 @@ export function startAiMcpServer({
     audit,
     policyOverrides,
     policyStore,
+    licenseEntitlementService,
   });
 
   const defaultAuth = auth ?? Object.freeze({
@@ -39,5 +42,7 @@ export function startAiMcpServer({
 }
 
 if (process.argv[1] && import.meta.url.endsWith(process.argv[1])) {
-  startAiMcpServer();
+  startAiMcpServer({
+    licenseEntitlementService: createLicenseEntitlementService(),
+  });
 }

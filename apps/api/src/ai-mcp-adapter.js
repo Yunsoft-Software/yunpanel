@@ -127,10 +127,22 @@ export function createAiMcpAdapter({
   audit = null,
   policyOverrides = {},
   policyStore = null,
+  licenseEntitlementService = null,
   serverInfo = { name: 'yunpanel-ai', version: '1.0.0' },
 } = {}) {
   if (!registry || ['list', 'get', 'prepare', 'execute'].some((m) => typeof registry[m] !== 'function')) {
     throw new AiMcpError('invalid_ai_tool_registry', 'AI MCP adapter requires a valid tool registry', 500);
+  }
+
+  function assertAiOperationsEntitlement() {
+    if (licenseEntitlementService && !licenseEntitlementService.hasCapability('aiOperations')) {
+      throw new AiMcpError(
+        'forbidden',
+        'AI Operations requires an active YunPanel Premium license.',
+        403,
+        { code: 'premium_license_required', capability: 'aiOperations' },
+      );
+    }
   }
 
   function initialize(params = {}) {
@@ -153,6 +165,7 @@ export function createAiMcpAdapter({
     if (!auth || !auth.user || typeof auth.user.role !== 'string') {
       throw new AiMcpError('unauthenticated', 'Authentication is required for tool discovery', 401);
     }
+    assertAiOperationsEntitlement();
     const effectiveOverrides = await resolveOverrides(policyStore, policyOverrides, overrides);
 
     const permitted = [];
@@ -180,6 +193,7 @@ export function createAiMcpAdapter({
     if (!auth || !auth.user || typeof auth.user.role !== 'string') {
       throw new AiMcpError('unauthenticated', 'Authentication is required to execute AI tools', 401);
     }
+    assertAiOperationsEntitlement();
     if (typeof name !== 'string' || !name) {
       throw new AiMcpError('invalid_ai_tool_name', 'AI tool name must be a string', 400);
     }

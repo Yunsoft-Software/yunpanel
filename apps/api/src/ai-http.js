@@ -184,17 +184,36 @@ export function mountAiRoutes(app, {
   providerRegistry = null,
   conversationService = null,
   mcpAdapter = null,
+  licenseEntitlementService = null,
 } = {}) {
   validateDependencies(app, registry, audit, policyOverrides, policyStore, providerRegistry);
 
+  const requireLicensedAiAccess = (request, response, next) => requirePanelRouteAccess(request, response, () => {
+    try {
+      licenseEntitlementService?.requireCapability('aiOperations');
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  const requireLicensedAiOwner = (request, response, next) => requireAiOwner(request, response, () => {
+    try {
+      licenseEntitlementService?.requireCapability('aiOperations');
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   if (providerRegistry) {
-    app.get('/api/ai/providers', requireAiOwner, asyncRoute(async (_request, response) => {
+    app.get('/api/ai/providers', requireLicensedAiOwner, asyncRoute(async (_request, response) => {
       const providers = await providerRegistry.listProviders();
       const active = await providerRegistry.getActiveProvider();
       return response.json({ data: providers, activeProviderId: active?.id ?? null });
     }));
 
-    app.post('/api/ai/providers', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/providers', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const body = providerBody(request.body);
       const actorId = request.auth.user.id;
       try {
@@ -221,7 +240,7 @@ export function mountAiRoutes(app, {
       }
     }));
 
-    app.delete('/api/ai/providers/:providerId', requireAiOwner, asyncRoute(async (request, response) => {
+    app.delete('/api/ai/providers/:providerId', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const providerId = request.params.providerId;
       const actorId = request.auth.user.id;
       const deleted = await providerRegistry.deleteProvider(providerId);
@@ -239,7 +258,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: { success: true } });
     }));
 
-    app.post('/api/ai/providers/:providerId/active', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/providers/:providerId/active', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const providerId = request.params.providerId;
       const actorId = request.auth.user.id;
       const provider = await providerRegistry.setActiveProvider(providerId);
@@ -254,7 +273,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: provider });
     }));
 
-    app.post('/api/ai/providers/:providerId/test', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/providers/:providerId/test', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const providerId = request.params.providerId;
       const provider = await providerRegistry.getDecryptedProvider(providerId);
       if (!provider) {
@@ -273,12 +292,12 @@ export function mountAiRoutes(app, {
   }
 
   if (conversationService) {
-    app.get('/api/ai/conversations/unowned', requireAiOwner, asyncRoute(async (request, response) => {
+    app.get('/api/ai/conversations/unowned', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const list = await conversationService.listUnownedConversations({ auth: request.auth });
       return response.json({ data: list });
     }));
 
-    app.post('/api/ai/conversations/unowned/migrate', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/conversations/unowned/migrate', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const body = normalizeBody(request.body, new Set(['assignments']));
       if (!Array.isArray(body.assignments)) {
         throw new AiHttpError('invalid_ai_request', 'assignments must be an array');
@@ -290,7 +309,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: result });
     }));
 
-    app.post('/api/ai/conversations/unowned/rollback', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/conversations/unowned/rollback', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const body = normalizeBody(request.body, new Set(['conversationIds', 'restoreV1Backup']));
       let result;
       if (body.restoreV1Backup) {
@@ -307,7 +326,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: result });
     }));
 
-    app.get('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.get('/api/ai/conversations', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       assertNoActorSpoofing(request);
       const query = normalizeBody(request.query, new Set(['websiteId', 'limit', 'cursor']));
       const websiteId = query.websiteId ?? null;
@@ -323,7 +342,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: list });
     }));
 
-    app.post('/api/ai/conversations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.post('/api/ai/conversations', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       assertNoActorSpoofing(request);
       normalizeBody(request.query, new Set());
       const body = normalizeBody(request.body, new Set(['title', 'websiteId']));
@@ -331,7 +350,7 @@ export function mountAiRoutes(app, {
       return response.status(201).json({ data: conversation });
     }));
 
-    app.get('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.get('/api/ai/conversations/:conversationId', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       assertNoActorSpoofing(request);
       normalizeBody(request.query, new Set());
       const conversation = await conversationService.getConversation(request.params.conversationId, { auth: request.auth });
@@ -339,7 +358,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: conversation });
     }));
 
-    app.delete('/api/ai/conversations/:conversationId', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.delete('/api/ai/conversations/:conversationId', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       assertNoActorSpoofing(request);
       normalizeBody(request.query, new Set());
       const deleted = await conversationService.deleteConversation(request.params.conversationId, { auth: request.auth });
@@ -347,7 +366,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: { success: true } });
     }));
 
-    app.post('/api/ai/conversations/:conversationId/messages', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.post('/api/ai/conversations/:conversationId/messages', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       assertNoActorSpoofing(request);
       normalizeBody(request.query, new Set());
       const body = normalizeBody(request.body, new Set(['text']));
@@ -368,7 +387,7 @@ export function mountAiRoutes(app, {
       return response.json({ data: message });
     }));
 
-    app.post('/api/ai/conversations/:conversationId/messages/stream', requirePanelRouteAccess, async (request, response) => {
+    app.post('/api/ai/conversations/:conversationId/messages/stream', requireLicensedAiAccess, async (request, response) => {
       let headersSent = false;
       const ensureHeaders = () => {
         if (!headersSent && !response.headersSent) {
@@ -452,7 +471,7 @@ export function mountAiRoutes(app, {
     });
   }
 
-  app.get('/api/ai/tools', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.get('/api/ai/tools', requireLicensedAiAccess, asyncRoute(async (request, response) => {
     const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
     const data = registry.list().map((tool) => Object.freeze({
       ...tool,
@@ -461,7 +480,7 @@ export function mountAiRoutes(app, {
     return response.json({ data });
   }));
 
-  app.post('/api/ai/tools/:toolName/preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/ai/tools/:toolName/preview', requireLicensedAiAccess, asyncRoute(async (request, response) => {
     const toolName = normalizeToolName(request.params.toolName);
     const { input } = previewBody(request.body);
     const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
@@ -476,16 +495,16 @@ export function mountAiRoutes(app, {
   }));
 
   if (policyStore) {
-    app.get('/api/ai/policy', requireAiOwner, asyncRoute(async (_request, response) => (
+    app.get('/api/ai/policy', requireLicensedAiOwner, asyncRoute(async (_request, response) => (
       response.json({ data: await policyStore.getSnapshot() })
     )));
 
-    app.post('/api/ai/policy/preview', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/policy/preview', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const preview = await policyStore.previewUpdate(policyPreviewBody(request.body));
       return response.json({ data: preview });
     }));
 
-    app.post('/api/ai/policy', requireAiOwner, asyncRoute(async (request, response) => {
+    app.post('/api/ai/policy', requireLicensedAiOwner, asyncRoute(async (request, response) => {
       const actorId = request.auth.user.id;
       try {
         const snapshot = await policyStore.applyUpdate(policyApplyBody(request.body));
@@ -512,7 +531,7 @@ export function mountAiRoutes(app, {
     }));
   }
 
-  app.post('/api/ai/tools/:toolName/execute', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/ai/tools/:toolName/execute', requireLicensedAiAccess, asyncRoute(async (request, response) => {
     const toolName = normalizeToolName(request.params.toolName);
     const body = executeBody(request.body);
     const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
@@ -552,11 +571,11 @@ export function mountAiRoutes(app, {
   }));
 
   if (mcpAdapter) {
-    app.get('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+    app.get('/api/ai/mcp', requireLicensedAiAccess, asyncRoute(async (_request, response) => {
       return response.json(mcpAdapter.initialize());
     }));
 
-    app.post('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    app.post('/api/ai/mcp', requireLicensedAiAccess, asyncRoute(async (request, response) => {
       const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
       const result = await mcpAdapter.handleMessage(request.body, {
         auth: request.auth,
@@ -576,15 +595,28 @@ export function mountAiMcpRoutes(app, {
   audit = null,
   policyStore = null,
   policyOverrides = {},
+  licenseEntitlementService = null,
 } = {}) {
-  const adapter = mcpAdapter ?? (registry ? createAiMcpAdapter({ registry, audit, policyStore, policyOverrides }) : null);
+  const adapter = mcpAdapter ?? (
+    registry
+      ? createAiMcpAdapter({ registry, audit, policyStore, policyOverrides, licenseEntitlementService })
+      : null
+  );
   if (!adapter) {
     throw new AiHttpError('invalid_ai_mcp_adapter', 'MCP adapter or tool registry is required');
   }
-  app.get('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (_request, response) => {
+  const requireLicensedMcpAccess = (request, response, next) => requirePanelRouteAccess(request, response, () => {
+    try {
+      licenseEntitlementService?.requireCapability('aiOperations');
+      return next();
+    } catch (error) {
+      return next(error);
+    }
+  });
+  app.get('/api/ai/mcp', requireLicensedMcpAccess, asyncRoute(async (_request, response) => {
     return response.json(adapter.initialize());
   }));
-  app.post('/api/ai/mcp', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+  app.post('/api/ai/mcp', requireLicensedMcpAccess, asyncRoute(async (request, response) => {
     const overrides = await currentPolicyOverrides(policyStore, policyOverrides);
     const result = await adapter.handleMessage(request.body, {
       auth: request.auth,

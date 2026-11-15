@@ -17,6 +17,7 @@ export function WorkspaceProvider({ children }) {
   const [jobOpen, setJobOpen] = useState(false);
   const [notice, setNotice] = useState(null);
   const [telemetryIntervalMs, setTelemetryIntervalMs] = useState(5000);
+  const [licenseState, setLicenseState] = useState({ status: 'loading', data: null, error: null });
   const demand = workspaceResources(pathname, { observingJob: jobOpen, activeJob: Object.values(tracked).some(jobActive) });
   const domains = useCollection('/domains', { enabled: demand.domains && can('domains.read') });
   const websites = useCollection('/websites', { enabled: demand.websites && can('websites.read') });
@@ -27,8 +28,27 @@ export function WorkspaceProvider({ children }) {
   const requests = useRef(null);
   const submitting = useRef(new Set());
   const [sslJobRefresh] = useState(createSslJobRefresh);
-  useEffect(() => { const controller = new AbortController(); requests.current = controller; return () => controller.abort(); }, []);
-  const refreshAll = useCallback(() => { domains.refresh(); websites.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); }, [domains.refresh, websites.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh]);
+  const refreshLicenseState = useCallback(() => {
+    const signal = requests.current?.signal;
+    panelRequest('/license', { signal })
+      .then((res) => {
+        if (!signal?.aborted) {
+          setLicenseState({ status: 'ready', data: res?.data ?? res ?? null, error: null });
+        }
+      })
+      .catch((err) => {
+        if (!signal?.aborted && err?.name !== 'AbortError') {
+          setLicenseState((prev) => ({ status: prev.data ? 'stale' : 'error', data: prev.data, error: err }));
+        }
+      });
+  }, []);
+  useEffect(() => {
+    const controller = new AbortController();
+    requests.current = controller;
+    refreshLicenseState();
+    return () => controller.abort();
+  }, [refreshLicenseState]);
+  const refreshAll = useCallback(() => { domains.refresh(); websites.refresh(); applications.refresh(); certificates.refresh(); servers.refresh(); jobs.refresh(); refreshLicenseState(); }, [domains.refresh, websites.refresh, applications.refresh, certificates.refresh, servers.refresh, jobs.refresh, refreshLicenseState]);
   useEffect(() => {
     if (['unauthorized', 'forbidden'].includes(jobs.status)) { setTracked({}); setJobOpen(false); return; }
     if (jobs.status !== 'ready') return;
@@ -60,7 +80,8 @@ export function WorkspaceProvider({ children }) {
     } finally { submitting.current.delete(path); }
   }, [canManage, observe, jobs.refresh]);
   const resourceBusy = (type, id) => Object.values({ ...Object.fromEntries(jobs.items.map((job) => [job.id, job])), ...tracked }).some((job) => job.resourceType === type && job.resourceId === id && jobActive(job));
-  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, telemetryIntervalMs, setTelemetryIntervalMs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly }}>{children}</WorkspaceContext.Provider>;
+  const license = { ...licenseState, refresh: refreshLicenseState };
+  return <WorkspaceContext.Provider value={{ domains, websites, applications, certificates, servers, jobs, license, telemetryIntervalMs, setTelemetryIntervalMs, runJob, resourceBusy, refreshAll, observe, updateJob, observedJob: tracked[observedId] ?? null, jobOpen, closeJob: () => setJobOpen(false), notice, setNotice, can, canManage, isOwner, isSiteManager, isReseller, isCustomer, hostingProfile, readOnly }}>{children}</WorkspaceContext.Provider>;
 }
 export function useWorkspace() {
   const value = useContext(WorkspaceContext);

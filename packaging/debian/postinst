@@ -87,6 +87,9 @@ fi
 install -d -o root -g yunpanel-elfinder -m 0750 /run/yunpanel-elfinder
 install -d -o root -g yunpanel-elfinder -m 0750 /usr/lib/yunpanel/elfinder
 install -d -o root -g root -m 0700 /etc/yunpanel/control-plane
+if [ ! -e /etc/yunpanel/control-plane/entitlement-public.pem ] && [ ! -L /etc/yunpanel/control-plane/entitlement-public.pem ] && [ -f /usr/share/yunpanel/trust/entitlement-public.pem ]; then
+  install -o root -g root -m 0644 /usr/share/yunpanel/trust/entitlement-public.pem /etc/yunpanel/control-plane/entitlement-public.pem
+fi
 install -d -o yunpanel -g yunpanel -m 0700 /etc/yunpanel/web
 # Shared immutable Node runtimes must be traversable by dedicated site users.
 install -d -o root -g root -m 0755 /opt/yunpanel /opt/yunpanel/node-runtimes
@@ -181,6 +184,18 @@ if [ -f "$api_env" ]; then
   fi
   if ! grep -q '^YUNPANEL_MAIL_ALIAS_STORE=' "$api_env"; then
     printf '%s\n' 'YUNPANEL_MAIL_ALIAS_STORE=/var/lib/yunpanel/control-plane/mail-alias-registry.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_LICENSE_STORE=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_LICENSE_STORE=/var/lib/yunpanel/control-plane/license/entitlement.json' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_ENTITLEMENT_PUBLIC_KEY_FILE=' "$api_env" && ! grep -q '^YUNPANEL_ENTITLEMENT_PUBLIC_KEY_PEM=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_ENTITLEMENT_PUBLIC_KEY_FILE=/etc/yunpanel/control-plane/entitlement-public.pem' >>"$api_temp"
+    api_changed=1
+  fi
+  if ! grep -q '^YUNPANEL_LICENSE_COMMERCE_URL=' "$api_env"; then
+    printf '%s\n' 'YUNPANEL_LICENSE_COMMERCE_URL=https://yunsoft.com/api/commerce' >>"$api_temp"
     api_changed=1
   fi
   if [ "$api_changed" -eq 1 ]; then

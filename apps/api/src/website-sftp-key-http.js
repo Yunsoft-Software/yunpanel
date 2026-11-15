@@ -38,7 +38,26 @@ function asyncRoute(handler) {
   };
 }
 
-export function mountWebsiteSftpKeyRoutes(app, { sftpKeyService } = {}) {
+function requireNonOwnerSftpEntitlement(request, licenseEntitlementService) {
+  if (!licenseEntitlementService) return;
+  const user = request?.auth?.user;
+  if (!user || user.role === 'owner') return;
+  if (user.role === 'reseller' || user.hosting?.kind === 'reseller') {
+    licenseEntitlementService.requireCapability(
+      'resellerAccounts',
+      'Reseller SFTP key management requires an active YunPanel Premium license.',
+    );
+  }
+  licenseEntitlementService.requireCapability(
+    'perSiteIsolatedUsers',
+    'Separate customer and site-user panel SFTP management requires an active YunPanel Premium license.',
+  );
+}
+
+export function mountWebsiteSftpKeyRoutes(app, {
+  sftpKeyService,
+  licenseEntitlementService = null,
+} = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function') {
     throw new Error('Express application is required');
   }
@@ -57,6 +76,7 @@ export function mountWebsiteSftpKeyRoutes(app, { sftpKeyService } = {}) {
   }));
 
   app.post('/api/websites/:websiteId/sftp/keys', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    requireNonOwnerSftpEntitlement(request, licenseEntitlementService);
     const body = exactBody(
       request.body,
       ADD_FIELDS,
@@ -83,6 +103,7 @@ export function mountWebsiteSftpKeyRoutes(app, { sftpKeyService } = {}) {
   }));
 
   app.post('/api/websites/:websiteId/sftp/keys/:keyId/rotate', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    requireNonOwnerSftpEntitlement(request, licenseEntitlementService);
     const body = exactBody(
       request.body,
       ROTATE_FIELDS,
@@ -98,6 +119,7 @@ export function mountWebsiteSftpKeyRoutes(app, { sftpKeyService } = {}) {
   }));
 
   app.post('/api/websites/:websiteId/sftp/keys/reconcile', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+    requireNonOwnerSftpEntitlement(request, licenseEntitlementService);
     emptyBody(request.body);
     const result = await sftpKeyService.reconcile(request.params.websiteId);
     return response.json({ data: result });

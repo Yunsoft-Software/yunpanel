@@ -43,6 +43,7 @@ export function mountTerminalCapabilityRoutes(app, {
   serverRegistry,
   websiteRegistry,
   localServerId,
+  licenseEntitlementService = null,
 } = {}) {
   if (!terminalCapabilityRegistry) return;
   if (!serverRegistry || !websiteRegistry || typeof terminalCapabilityRegistry.issue !== 'function') {
@@ -70,8 +71,22 @@ export function mountTerminalCapabilityRoutes(app, {
       localTarget(server.id, localServerId);
       target = { scope: 'server', serverId: server.id, user: 'root', cwd: '/root' };
     } else if (request.body?.scope === 'site' && exactBody(request.body, ['scope', 'websiteId'])) {
-      if (auth.user.role !== 'owner' && (!Array.isArray(auth.user.websiteIds) || !auth.user.websiteIds.includes(request.body.websiteId))) {
+      const isOwner = auth.user.role === 'owner';
+      if (!isOwner && (!Array.isArray(auth.user.websiteIds) || !auth.user.websiteIds.includes(request.body.websiteId))) {
         throw new TerminalCapabilityError('terminal_site_forbidden', 'You do not have access to this website terminal', 403);
+      }
+      if (!isOwner && licenseEntitlementService) {
+        const isReseller = auth.user.role === 'reseller' || auth.user.hosting?.kind === 'reseller';
+        if (isReseller) {
+          licenseEntitlementService.requireCapability(
+            'resellerAccounts',
+            'Reseller panel terminal access requires an active YunPanel Premium license.',
+          );
+        }
+        licenseEntitlementService.requireCapability(
+          'perSiteIsolatedUsers',
+          'Separate customer and site-user panel terminal access requires an active YunPanel Premium license.',
+        );
       }
       const website = await websiteRegistry.getWebsite(request.body.websiteId);
       if (!website) throw new TerminalCapabilityError('website_not_found', 'Website not found', 404);

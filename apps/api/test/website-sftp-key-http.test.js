@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+  createLicenseEntitlementService,
+  LicenseEntitlementError,
+} from '../src/license-entitlement-service.js';
+import {
   mountWebsiteSftpKeyRoutes,
   WebsiteSftpKeyHttpError,
 } from '../src/website-sftp-key-http.js';
@@ -106,5 +110,71 @@ test('Website SFTP key HTTP rejects extra fields before service mutation', async
     }),
     (error) => error instanceof WebsiteSftpKeyHttpError
       && error.code === 'sftp_key_reconcile_input_invalid',
+  );
+});
+
+test('Website SFTP key HTTP allows Free Owner full SFTP maintenance while gating separate customer/reseller logins', async () => {
+  const calls = [];
+  const app = fakeApp();
+  const freeLicenseService = createLicenseEntitlementService({
+    filePath: ':memory:',
+    publicKeyPem: '',
+    publicKeyFile: '',
+    publicOrigin: 'https://panel.example.test',
+    development: false,
+  });
+  mountWebsiteSftpKeyRoutes(app, {
+    sftpKeyService: service(calls),
+    licenseEntitlementService: freeLicenseService,
+  });
+
+  const ownerAuth = { user: { id: 'owner-1', role: 'owner' } };
+  const ownerAdd = await invoke(app, 'POST /api/websites/:websiteId/sftp/keys', {
+    auth: ownerAuth,
+    params: { websiteId },
+    body: { label: 'OwnerKey', publicKey },
+  });
+  assert.equal(ownerAdd.statusCode, 201);
+
+  const ownerRotate = await invoke(app, 'POST /api/websites/:websiteId/sftp/keys/:keyId/rotate', {
+    auth: ownerAuth,
+    params: { websiteId, keyId },
+    body: { expectedRevision: 1, label: 'OwnerRotated', publicKey },
+  });
+  assert.equal(ownerRotate.statusCode, 200);
+
+  const ownerReconcile = await invoke(app, 'POST /api/websites/:websiteId/sftp/keys/reconcile', {
+    auth: ownerAuth,
+    params: { websiteId },
+    body: {},
+  });
+  assert.equal(ownerReconcile.statusCode, 200);
+
+  // Separate site_manager / customer panel account requires perSiteIsolatedUsers
+  const siteUserAuth = { user: { id: 'cust-1', role: 'site_manager', websiteIds: [websiteId] } };
+  await assert.rejects(
+    invoke(app, 'POST /api/websites/:websiteId/sftp/keys', {
+      auth: siteUserAuth,
+      params: { websiteId },
+      body: { label: 'CustKey', publicKey },
+    }),
+    (error) => error instanceof LicenseEntitlementError
+      && error.code === 'premium_license_required'
+      && error.capability === 'perSiteIsolatedUsers',
+  );
+
+  // Separate reseller panel account requires resellerAccounts
+  const resellerAuth = {
+    user: { id: 'res-1', role: 'site_manager', hosting: { kind: 'reseller', resellerId: null }, websiteIds: [websiteId] },
+  };
+  await assert.rejects(
+    invoke(app, 'POST /api/websites/:websiteId/sftp/keys/:keyId/rotate', {
+      auth: resellerAuth,
+      params: { websiteId, keyId },
+      body: { expectedRevision: 1, label: 'ResKey', publicKey },
+    }),
+    (error) => error instanceof LicenseEntitlementError
+      && error.code === 'premium_license_required'
+      && error.capability === 'resellerAccounts',
   );
 });

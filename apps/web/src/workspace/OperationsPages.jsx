@@ -8,6 +8,7 @@ import ManagedServicesPanel from './ManagedServicesPanel.jsx';
 import NetworkDnsSettingsPanel from './NetworkDnsSettingsPanel.jsx';
 import SystemSettingsPanels from './SystemSettingsPanels.jsx';
 import ApiKeysPanel from './ApiKeysPanel.jsx';
+import LicenseSettingsPanel from './LicenseSettingsPanel.jsx';
 import NotificationSettingsPanel from './NotificationSettingsPanel.jsx';
 import { useWorkspace } from './WorkspaceContext.jsx';
 import { Button, CollectionNotice, ConfirmDialog, EmptyState, LinkButton, PageHeading, Section } from './PanelKit.jsx';
@@ -50,10 +51,11 @@ export function SettingsPage() {
   const { servers, domains, canManage } = useWorkspace();
   const [params] = useSearchParams();
   const server = servers.items.length === 1 ? servers.items[0] : null;
-  const section = ['account', 'dns', 'ai', 'api', 'notifications', 'updates', 'records'].includes(params.get('section'))
+  const section = ['account', 'license', 'dns', 'ai', 'api', 'notifications', 'updates', 'records'].includes(params.get('section'))
     ? params.get('section') : 'account';
   const categories = [
     ['account', 'Hesap ve erişim'],
+    ['license', 'Lisans'],
     ['dns', 'DNS ve SSL'],
     ['ai', 'AI sağlayıcıları'],
     ['api', 'API anahtarları'],
@@ -67,6 +69,7 @@ export function SettingsPage() {
         aria-current={section === key ? 'page' : undefined}>{label}</Link>)}
     </nav>
     {section === 'account' && <Section title="Hesap ve erişim"><div className="ws-section-body"><p className="ws-muted">Kendi parolanız, MFA ve oturumlarınız üstteki Hesabım menüsünden yönetilir.</p><LinkButton to="/settings/users" icon="user">Kullanıcıları yönet</LinkButton></div></Section>}
+    {section === 'license' && <LicenseSettingsPanel />}
     {section === 'dns' && <><CollectionNotice resource={servers} label="Yerel sunucu" /><SystemSettingsPanels canManage={canManage} />{server && <NetworkDnsSettingsPanel server={server} domains={domains.items} canManage={canManage} />}</>}
     {section === 'ai' && canManage && <AiSettingsPanel />}
     {section === 'api' && canManage && <ApiKeysPanel />}

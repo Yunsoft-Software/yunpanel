@@ -39,6 +39,7 @@ documentation_files=(
   .env.example
   README.md
   docs/architecture.md
+  docs/license-configuration.md
   docs/security.md
   docs/operations.md
   docs/local-executor-safety.md
@@ -103,6 +104,7 @@ install -d "$package_root/usr/lib/yunpanel/scripts"
 install -d "$package_root/usr/lib/systemd/system"
 install -d "$package_root/usr/lib/tmpfiles.d"
 install -d "$package_root/usr/share/yunpanel/web"
+install -d "$package_root/usr/share/yunpanel/trust"
 install -d "$package_root/usr/share/yunpanel/elfinder/vendor/elfinder"
 install -d "$package_root/usr/share/doc/yunpanel"
 
@@ -118,6 +120,7 @@ install -m 0644 scripts/rotate-secret-master-key.mjs "$package_root/usr/lib/yunp
 install -m 0755 scripts/local-runtime.mjs "$package_root/usr/lib/yunpanel/scripts/local-runtime.mjs"
 install -m 0755 scripts/job-recovery.mjs "$package_root/usr/lib/yunpanel/scripts/job-recovery.mjs"
 install -m 0755 scripts/local-migration-backup.mjs "$package_root/usr/lib/yunpanel/scripts/local-migration-backup.mjs"
+install -m 0644 apps/api/src/vendor-entitlement-public.pem "$package_root/usr/share/yunpanel/trust/entitlement-public.pem"
 install -m 0644 "${documentation_files[@]}" \
   "$package_root/usr/share/doc/yunpanel/"
 

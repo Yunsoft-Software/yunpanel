@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
 import { terminalWebSocketInternals } from '../src/terminal-websocket.js';
+import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
+import { computePublicKeyId, ENTITLEMENT_ISSUER, ENTITLEMENT_TOKEN_TYPE, YUNPANEL_PRODUCT_CODE } from '../src/license-entitlement-verifier.js';
 import { spawn, execFileSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -70,6 +73,97 @@ test('terminal WebSocket target policy keeps root Owner-only and site access bou
       { code: 'terminal_site_forbidden', status: 403 },
     );
   }
+});
+
+test('terminal WebSocket target policy preserves Free Owner site terminal while gating non-Owner logins after RBAC check', async () => {
+  const { requireTerminalTargetAccess } = terminalWebSocketInternals;
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('ed25519');
+  const publicKeyPem = publicKey.export({ format: 'pem', type: 'spki' }).toString();
+  const kid = computePublicKeyId(publicKey.export({ format: 'der', type: 'spki' }));
+
+  const licenseService = createLicenseEntitlementService({
+    filePath: ':memory:',
+    publicKeyPem,
+    publicKeyFile: '',
+    publicOrigin: 'https://panel.example.test',
+    instanceId: 'local-server',
+    development: false,
+  });
+
+  // Free Owner retains both root server terminal and isolated site terminal
+  assert.equal(
+    requireTerminalTargetAccess(owner(), { scope: 'server', serverId: 'local-server' }, licenseService).user.role,
+    'owner',
+  );
+  assert.equal(
+    requireTerminalTargetAccess(owner(), { scope: 'site', websiteId: WEBSITE_ID }, licenseService).user.role,
+    'owner',
+  );
+
+  // RBAC scope check executes BEFORE license gate on unassigned website
+  assert.throws(
+    () => requireTerminalTargetAccess(siteActor('site_manager'), { scope: 'site', websiteId: OTHER_WEBSITE_ID }, licenseService),
+    { code: 'terminal_site_forbidden', status: 403 },
+  );
+
+  // Separate non-Owner panel logins require Premium capabilities on assigned website
+  assert.throws(
+    () => requireTerminalTargetAccess(siteActor('site_manager'), { scope: 'site', websiteId: WEBSITE_ID }, licenseService),
+    { code: 'premium_license_required', capability: 'perSiteIsolatedUsers', status: 403 },
+  );
+  assert.throws(
+    () => requireTerminalTargetAccess(siteActor('reseller'), { scope: 'site', websiteId: WEBSITE_ID }, licenseService),
+    { code: 'premium_license_required', capability: 'resellerAccounts', status: 403 },
+  );
+
+  // Activate signed Ed25519 Premium token -> assigned non-Owner panel logins are authorized
+  const nowSec = Math.floor(Date.now() / 1000);
+  const headerB64 = Buffer.from(JSON.stringify({
+    alg: 'EdDSA', crv: 'Ed25519', typ: ENTITLEMENT_TOKEN_TYPE, kid,
+  }), 'utf8').toString('base64url');
+  const payloadB64 = Buffer.from(JSON.stringify({
+    iss: ENTITLEMENT_ISSUER,
+    sub: 'lic_ws_01',
+    licenseId: 'lic_ws_01',
+    jti: crypto.randomUUID(),
+    iat: nowSec,
+    nbf: nowSec,
+    exp: nowSec + 30 * 86400,
+    productCode: YUNPANEL_PRODUCT_CODE,
+    billingModel: 'monthly_term',
+    periodMonths: 1,
+    status: 'active',
+    domain: 'panel.example.test',
+    normalizedDomain: 'panel.example.test',
+    allowedHosts: ['panel.example.test'],
+    stagingHosts: [],
+    startsAt: new Date(nowSec * 1000).toISOString(),
+    expiresAt: new Date((nowSec + 30 * 86400) * 1000).toISOString(),
+    entitlementVersion: 1,
+    activatedInstanceId: 'local-server',
+    edition: 'premium',
+    capabilities: {
+      singlePanelUserUnlimitedSites: true,
+      aiOperations: true,
+      resellerAccounts: true,
+      perSiteIsolatedUsers: true,
+    },
+  }), 'utf8').toString('base64url');
+  const sigB64 = crypto.sign(null, Buffer.from(`${headerB64}.${payloadB64}`, 'utf8'), privateKey).toString('base64url');
+  await licenseService.activate({ token: `${headerB64}.${payloadB64}.${sigB64}` });
+
+  assert.equal(
+    requireTerminalTargetAccess(siteActor('site_manager'), { scope: 'site', websiteId: WEBSITE_ID }, licenseService).user.role,
+    'site_manager',
+  );
+  assert.equal(
+    requireTerminalTargetAccess(siteActor('reseller'), { scope: 'site', websiteId: WEBSITE_ID }, licenseService).user.role,
+    'reseller',
+  );
+  assert.throws(
+    () => requireTerminalTargetAccess(siteActor('reseller'), { scope: 'site', websiteId: OTHER_WEBSITE_ID }, licenseService),
+    { code: 'terminal_site_forbidden', status: 403 },
+  );
 });
 
 test('T898 actual embedded Python parses and the current OS either drains its real detached child or rejects unsupported pidfd', async () => {

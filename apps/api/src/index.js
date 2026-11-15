@@ -34,6 +34,7 @@ import { createAuditedJobRegistry } from './audited-job-registry.js';
 import { createMailSmarthostRegistry } from './mail-smarthost-registry.js';
 import { createAuthStore } from './auth-store.js';
 import { createAuthenticatedApi, createLiveConnectionAuthenticator } from './auth-http.js';
+import { createLicenseEntitlementService } from './license-entitlement-service.js';
 import { createApplicationEnvironmentRegistry } from './application-environment-registry.js';
 import { createApplicationDeployQueue } from './application-deploy-queue.js';
 import { createApplicationPassengerMigrationPreviewService } from './application-passenger-migration-preview.js';
@@ -726,6 +727,13 @@ const apiKeyStore = createApiKeyStore({
 const tenantSiteStore = createTenantSiteStore({
   filePath: process.env.YUNPANEL_TENANT_SITE_STORE ?? path.join(controlPlaneStateRoot, 'tenant-sites.json'),
 });
+const licenseEntitlementService = createLicenseEntitlementService({
+  filePath: process.env.YUNPANEL_LICENSE_STORE ?? path.join(controlPlaneStateRoot, 'license', 'entitlement.json'),
+  publicOrigin,
+  instanceId: localServerId,
+  masterKey: process.env.YUNPANEL_SECRET_MASTER_KEY ?? null,
+  development: process.env.NODE_ENV === 'development',
+});
 authorizeApiKeyActor = createApiKeyActorAuthorizer({ apiKeyStore, tenantSiteStore, ownerMfaRequired,
   getAutomationUser: (userId) => authStore.getAutomationUser(userId), mfaEnabled: (userId) => authStore.mfa.enabled(userId) });
 const databaseManager = createDatabaseManager();
@@ -1265,6 +1273,7 @@ const listener = createAuthenticatedApi({
   ownerMfaRequired,
   proxyToken: internalProxyToken,
   trustedProxyIps: process.env.YUNPANEL_TRUSTED_PROXY_IPS,
+  licenseEntitlementService,
   toolGatewayAuthorizer: async ({ gateway, request, session }) => {
     if (gateway.id === 'phpmyadmin') {
       const gatewaySession = request.headers['x-yunpanel-phpmyadmin-session'];
@@ -1325,6 +1334,7 @@ const listener = createAuthenticatedApi({
       jobRegistry,
       aiToolRegistry,
       aiAudit: authStore.audit,
+      licenseEntitlementService,
       authorizeWebsiteActor: authorizeWebsitePhpActor,
       userAdminStore: authStore.users,
       operationalNotificationStore: path.join(controlPlaneStateRoot, 'operational-notifications.json'),
@@ -1510,6 +1520,7 @@ const terminalWebSocket = createTerminalWebSocketServer({
   terminalProcessManager,
   liveSessions,
   audit: authStore.audit,
+  licenseEntitlementService,
 });
 server.on('upgrade', terminalWebSocket.handleUpgrade);
 server.listen(port, host, () => {

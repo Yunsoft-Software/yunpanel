@@ -50,6 +50,7 @@ export function requirePanelRouteAccess(request, response, next) {
     if (
       (path.startsWith('/api/users') && !path.startsWith('/api/users/hosting/accounts'))
       || (isLegacySiteManager && path.startsWith('/api/audit'))
+      || (path.startsWith('/api/license') && !['GET', 'HEAD'].includes(request.method))
       || path.startsWith('/api/panel/settings')
       || path.startsWith('/api/system/packages')
       || path.startsWith('/api/firewall')

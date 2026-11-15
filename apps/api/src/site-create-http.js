@@ -190,12 +190,47 @@ export function createLocalSiteCreator(dependencies = {}) {
   });
 }
 
+function assertHostedSiteCreateEntitlement(request, customerId, dependencies) {
+  const license = dependencies?.licenseEntitlementService;
+  if (!license) return;
+  const isResellerActor = request.auth?.user?.role === 'reseller'
+    || request.auth?.user?.hosting?.kind === 'reseller';
+  if (isResellerActor) {
+    license.requireCapability('resellerAccounts');
+  }
+  const accounts = dependencies?.userAdminStore?.hostingAccounts;
+  if (typeof accounts?.get === 'function' && typeof customerId === 'string') {
+    try {
+      const rawToken = extractRawToken(request);
+      const policy = resolveRequireManagement(dependencies, request);
+      const target = accounts.get(rawToken, policy, customerId);
+      const record = target?.account ?? target ?? null;
+      if (record?.resellerId) {
+        license.requireCapability('resellerAccounts');
+      }
+    } catch {
+      // Underlying hosting runtime enforces customer existence and tenant scope.
+    }
+  }
+  license.requireCapability('perSiteIsolatedUsers');
+}
+
+function assertDirectSiteCreateEntitlement(input, dependencies) {
+  if (input?.siteAdmin !== null && input?.siteAdmin !== undefined) {
+    dependencies?.licenseEntitlementService?.requireCapability(
+      'perSiteIsolatedUsers',
+      'Creating a dedicated per-site panel user requires an active YunPanel Premium license.',
+    );
+  }
+}
+
 export function mountSiteCreateRoutes(app, dependencies = {}) {
   if (!app || typeof app.post !== 'function') throw new Error('Express application is required');
 
   app.post('/api/sites/create-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     if (isHostedRequest(request.body)) {
       const body = hostedPreviewBody(request.body);
+      assertHostedSiteCreateEntitlement(request, body.customerId, dependencies);
       if (dependencies.localServerId && body.input?.serverId && body.input.serverId !== dependencies.localServerId) {
         throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
       }
@@ -213,6 +248,7 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       return response.json({ data: preview });
     }
     const body = previewBody(request.body);
+    assertDirectSiteCreateEntitlement(body.input, dependencies);
     if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
@@ -223,6 +259,7 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
   app.post('/api/sites', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     if (isHostedRequest(request.body)) {
       const body = hostedApplyBody(request.body);
+      assertHostedSiteCreateEntitlement(request, body.customerId, dependencies);
       if (dependencies.localServerId && body.input?.serverId && body.input.serverId !== dependencies.localServerId) {
         throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
       }
@@ -258,6 +295,7 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
       });
     }
     const body = applyBody(request.body);
+    assertDirectSiteCreateEntitlement(body.input, dependencies);
     if (dependencies.localServerId && body.input?.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
@@ -326,6 +364,7 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
 
   app.post('/api/sites/hosted/create-preview', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = hostedPreviewBody(request.body);
+    assertHostedSiteCreateEntitlement(request, body.customerId, dependencies);
     if (dependencies.localServerId && body.input?.serverId && body.input.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }
@@ -345,6 +384,7 @@ export function mountSiteCreateRoutes(app, dependencies = {}) {
 
   app.post('/api/sites/hosted', requirePanelRouteAccess, asyncRoute(async (request, response) => {
     const body = hostedApplyBody(request.body);
+    assertHostedSiteCreateEntitlement(request, body.customerId, dependencies);
     if (dependencies.localServerId && body.input?.serverId && body.input.serverId !== dependencies.localServerId) {
       throw new SiteCreateError('local_server_required', 'Sites can be created only on this panel host', 404);
     }

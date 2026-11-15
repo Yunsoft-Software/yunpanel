@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { WebSocket, WebSocketServer } from 'ws';
 import { AuthError } from './auth-error.js';
+import { LicenseEntitlementError } from './license-entitlement-service.js';
 import { TerminalCapabilityError } from './terminal-capability-registry.js';
 import { TerminalProcessError } from './terminal-process-manager.js';
 
@@ -48,7 +49,7 @@ function auditResource(target) {
     : { resourceType: 'website', resourceId: target.websiteId, scope: 'site' };
 }
 
-function requireTerminalTargetAccess(session, target) {
+function requireTerminalTargetAccess(session, target, licenseEntitlementService = null) {
   const active = session?.user?.active !== false && session?.user?.active !== 0;
   const owner = active
     && session?.user?.role === 'owner'
@@ -58,14 +59,29 @@ function requireTerminalTargetAccess(session, target) {
     if (!owner) throw new AuthError('terminal_server_forbidden', 'Only server owner can access root terminal.', 403);
     return session;
   }
+  const hasSiteRole = ['site_manager', 'reseller', 'customer'].includes(session?.user?.role)
+    || ['reseller', 'customer'].includes(session?.user?.hosting?.kind);
   const siteActor = active
-    && ['site_manager', 'reseller', 'customer'].includes(session?.user?.role)
+    && hasSiteRole
     && session?.access?.mode === 'site_management'
     && session?.security?.managementAllowed === true
     && Array.isArray(session?.user?.websiteIds)
     && session.user.websiteIds.includes(target?.websiteId);
   if (target?.scope !== 'site' || (!owner && !siteActor)) {
     throw new AuthError('terminal_site_forbidden', 'Website terminal access is no longer authorized.', 403);
+  }
+  if (!owner && licenseEntitlementService) {
+    const isReseller = session?.user?.role === 'reseller' || session?.user?.hosting?.kind === 'reseller';
+    if (isReseller) {
+      licenseEntitlementService.requireCapability(
+        'resellerAccounts',
+        'Reseller panel terminal access requires an active YunPanel Premium license.',
+      );
+    }
+    licenseEntitlementService.requireCapability(
+      'perSiteIsolatedUsers',
+      'Separate customer and site-user panel terminal access requires an active YunPanel Premium license.',
+    );
   }
   return session;
 }
@@ -83,6 +99,7 @@ export function createTerminalWebSocketServer({
   terminalProcessManager,
   liveSessions,
   audit,
+  licenseEntitlementService = null,
   now = Date.now,
   setIntervalFn = setInterval,
   clearIntervalFn = clearInterval,
@@ -219,7 +236,7 @@ export function createTerminalWebSocketServer({
         const timestamp = now();
         if (timestamp - record.lastTouchAt >= 30_000) {
           const current = reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId }, { touch: true });
-          requireTerminalTargetAccess(current, record.target);
+          requireTerminalTargetAccess(current, record.target, licenseEntitlementService);
           record.lastTouchAt = timestamp;
         }
         const message = decodeMessage(data, isBinary);
@@ -228,8 +245,11 @@ export function createTerminalWebSocketServer({
         else if (message.type === 'resize') record.terminal.resize(message.cols, message.rows);
         else safeSend(websocket, { type: 'pong' });
       } catch (error) {
-        if (error instanceof AuthError) terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' });
-        else terminate(record, 'invalid_message', 1008, { type: 'error', code: error.code ?? 'terminal_message_invalid', message: 'Terminal message is invalid.' });
+        if (error instanceof AuthError || error instanceof LicenseEntitlementError) {
+          terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' });
+        } else {
+          terminate(record, 'invalid_message', 1008, { type: 'error', code: error.code ?? 'terminal_message_invalid', message: 'Terminal message is invalid.' });
+        }
       }
     });
 
@@ -272,7 +292,7 @@ export function createTerminalWebSocketServer({
       if (timestamp - record.lastActivityAt >= idleMs) { terminate(record, 'idle_timeout', 4008); return; }
       try {
         const current = reauthorize(record.rawToken, { sessionId: record.sessionId, userId: record.userId });
-        requireTerminalTargetAccess(current, record.target);
+        requireTerminalTargetAccess(current, record.target, licenseEntitlementService);
       } catch {
         terminate(record, 'session_revoked', 4001, { type: 'revoked', reason: 'session_revoked' });
       }
@@ -298,12 +318,16 @@ export function createTerminalWebSocketServer({
         sessionId: auth.session.id,
         userId: auth.session.user.id,
       });
-      requireTerminalTargetAccess(auth.session, consumed.target);
+      requireTerminalTargetAccess(auth.session, consumed.target, licenseEntitlementService);
       websocketServer.handleUpgrade(request, socket, head, (websocket) => {
         void begin(websocket, auth, consumed).catch(() => websocket.close(1011, 'terminal_unavailable'));
       });
     } catch (error) {
-      const status = error instanceof AuthError || error instanceof TerminalCapabilityError ? error.status : 503;
+      const status = error instanceof AuthError
+        || error instanceof TerminalCapabilityError
+        || error instanceof LicenseEntitlementError
+        ? error.status
+        : 503;
       rejectUpgrade(socket, status);
     }
   }

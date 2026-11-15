@@ -191,6 +191,7 @@ export function createAuthenticatedApi({
   publicWebhookHandler = null,
   toolGatewayAuthorizer = null,
   automationHandler = null,
+  licenseEntitlementService = null,
 }) {
   const boundary = createBrowserAuthBoundary({ store, publicOrigin, development, ownerMfaRequired, proxyToken, trustedProxyIps });
   const { localDevelopment, ownerPolicy, cookieName, mfaCookieName, readCookie, checkOrigin } = boundary;
@@ -429,7 +430,18 @@ export function createAuthenticatedApi({
     return withAuditActor(authorized.user.id, () => {
       attachManagementAudit({ request, response, pathname, audit: store.audit });
       if (pathname === '/api/users' || pathname.startsWith('/api/users/')) {
-        return handleUserAdmin({ request, response, pathname, query: url.searchParams, store, rawToken, requireManagement: ownerPolicy.requireManagement, readJson, json });
+        return handleUserAdmin({
+          request,
+          response,
+          pathname,
+          query: url.searchParams,
+          store,
+          rawToken,
+          requireManagement: ownerPolicy.requireManagement,
+          readJson,
+          json,
+          licenseEntitlementService,
+        });
       }
       if (pathname === '/api/audit') return handleAuditRead({ request, response, query: url.searchParams, store, json });
       return handler(request, response);
@@ -441,7 +453,14 @@ export function createAuthenticatedApi({
       if (response.headersSent || response.destroyed) { response.destroy(); return; }
       if (error instanceof AuthError) {
         if (error.retryAfter) response.setHeader('retry-after', String(error.retryAfter));
-        json(response, error.status, { error: { code: error.code, message: error.message } });
+        json(response, error.status, {
+          error: {
+            code: error.code,
+            message: error.message,
+            ...(error.capability ? { capability: error.capability } : {}),
+            ...(error.reason ? { reason: error.reason } : {}),
+          },
+        });
       } else {
         json(response, 503, { error: { code: 'auth_unavailable', message: 'Authentication is temporarily unavailable.' } });
       }

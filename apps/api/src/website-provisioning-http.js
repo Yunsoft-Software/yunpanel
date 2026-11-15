@@ -208,6 +208,7 @@ export function mountWebsiteProvisioningRoutes(app, {
   websiteRegistry = null,
   localServerId = null,
   siteMutationLock = null,
+  licenseEntitlementService = null,
 } = {}) {
   if (!app || typeof app.get !== 'function' || typeof app.post !== 'function'
     || !registry || typeof registry.get !== 'function' || typeof registry.getLatestForWebsite !== 'function'
@@ -257,6 +258,7 @@ export function mountWebsiteProvisioningRoutes(app, {
       }),
       ...(isolationMigration ? { migrationRuntime: isolationMigration } : {}),
       ...(websiteRegistry ? { websiteRegistry, localServerId } : {}),
+      licenseEntitlementService,
     });
   }
 

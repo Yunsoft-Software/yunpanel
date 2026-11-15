@@ -132,6 +132,8 @@ import { createMailboxRegistry, MailboxRegistryError } from './mailbox-registry.
 import { mountMailboxRoutes } from './mailbox-http.js';
 import { MailboxPasswordError } from './mailbox-password.js';
 import { LogHttpError, mountLogRoutes } from './log-http.js';
+import { mountLicenseEntitlementRoutes } from './license-entitlement-http.js';
+import { LicenseEntitlementError } from './license-entitlement-service.js';
 import { mountMailSmarthostRoutes } from './mail-smarthost-http.js';
 import { mountProtectedPathRoutes } from './protected-path-http.js';
 import { mountApiKeyRoutes } from './api-key-http.js';
@@ -501,6 +503,7 @@ export function createApp(allOptions = {}) {
   operationalNotificationService = null,
   firewallService = null,
   nftablesManager = null,
+  licenseEntitlementService = null,
   ...options
 } = allOptions;
   const hostingAccounts = allOptions.hostingAccountStore ?? userAdminStore?.hostingAccounts ?? options.hostingAccountStore ?? null;
@@ -673,6 +676,12 @@ export function createApp(allOptions = {}) {
   }) : null);
   app.disable('x-powered-by');
   app.use(express.json({ limit: '256kb' }));
+  if (licenseEntitlementService) {
+    mountLicenseEntitlementRoutes(app, {
+      licenseEntitlementService,
+      auditStore: options.auditStore ?? options.authStore?.audit ?? aiAudit ?? null,
+    });
+  }
   if (aiToolRegistry !== null) {
     mountAiRoutes(app, {
       registry: aiToolRegistry,
@@ -681,6 +690,7 @@ export function createApp(allOptions = {}) {
       policyStore: aiPolicyStore,
       providerRegistry: aiProviderRegistry,
       conversationService: aiConversationService,
+      licenseEntitlementService,
     });
   }
   const resolvedResticManager = resticManager ?? (
@@ -794,6 +804,7 @@ export function createApp(allOptions = {}) {
     dnsZoneTemplateRegistry,
     localServerId,
     userAdminStore,
+    licenseEntitlementService,
     websiteProvisioningRegistry: websiteProvisioningRuntime?.registry ?? null,
     websiteProvisioningRuntime,
     siteMutationLock,
@@ -814,6 +825,7 @@ export function createApp(allOptions = {}) {
       websiteRegistry,
       localServerId,
       siteMutationLock,
+      licenseEntitlementService,
     });
   }
   mountResourceImpactRoutes(app, {
@@ -1247,7 +1259,10 @@ export function createApp(allOptions = {}) {
     localServerId,
   });
   if (websiteSftpKeyService) {
-    mountWebsiteSftpKeyRoutes(app, { sftpKeyService: websiteSftpKeyService });
+    mountWebsiteSftpKeyRoutes(app, {
+      sftpKeyService: websiteSftpKeyService,
+      licenseEntitlementService,
+    });
   }
   if (websiteCronApplyService) {
     mountWebsiteCronRoutes(app, { websiteCronApplyService });
@@ -1377,7 +1392,11 @@ export function createApp(allOptions = {}) {
     });
   }
   mountTerminalCapabilityRoutes(app, {
-    terminalCapabilityRegistry, serverRegistry: registry, websiteRegistry, localServerId,
+    terminalCapabilityRegistry,
+    serverRegistry: registry,
+    websiteRegistry,
+    localServerId,
+    licenseEntitlementService,
   });
   if (ttydSessionManager) {
     mountTtydSessionRoutes(app, {
@@ -1541,8 +1560,16 @@ export function createApp(allOptions = {}) {
       || error instanceof FirewallHttpError
       || error instanceof NftablesManagerError
       || error instanceof ProductionExitGateError
+      || error instanceof LicenseEntitlementError
     ) {
-      return response.status(error.status).json({ error: { code: error.code, message: error.message } });
+      return response.status(error.status).json({
+        error: {
+          code: error.code,
+          message: error.message,
+          ...(error.capability ? { capability: error.capability } : {}),
+          ...(error.reason ? { reason: error.reason } : {}),
+        },
+      });
     }
     if (error instanceof DurableJobRegistryError) {
       return response.status(503).json({ error: { code: error.code, message: error.message } });

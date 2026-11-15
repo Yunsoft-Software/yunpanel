@@ -14,9 +14,31 @@ function pagination(query) {
  * Hosting-account subroutes derive live Owner/reseller scope in their own store;
  * generic user administration still repeats Owner/MFA authorization on writes.
  */
-export async function handleUserAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
+export async function handleUserAdmin({
+  request,
+  response,
+  pathname,
+  query,
+  store,
+  rawToken,
+  requireManagement,
+  readJson,
+  json,
+  licenseEntitlementService = null,
+}) {
   if (isHostingAccountPath(pathname)) {
-    return handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json });
+    return handleHostingAccountAdmin({
+      request,
+      response,
+      pathname,
+      query,
+      store,
+      rawToken,
+      requireManagement,
+      readJson,
+      json,
+      licenseEntitlementService,
+    });
   }
   const collection = pathname === '/api/users';
   const match = /^\/api\/users\/([A-Za-z0-9_-]{1,128})$/.exec(pathname);
@@ -25,12 +47,33 @@ export async function handleUserAdmin({ request, response, pathname, query, stor
     return json(response, 200, { data: store.users.list(rawToken, requireManagement, pagination(query)) });
   }
   if (collection && request.method === 'POST') {
+    licenseEntitlementService?.requireCapability(
+      'perSiteIsolatedUsers',
+      'Creating additional panel users requires an active YunPanel Premium license.',
+    );
     const body = await readJson(request);
     const user = await store.users.create(rawToken, requireManagement, body);
     return json(response, 201, { data: { user, sessionRevoked: false } });
   }
   if (match && ['PATCH', 'DELETE'].includes(request.method)) {
     const body = await readJson(request);
+    if (request.method === 'PATCH' && licenseEntitlementService) {
+      const targetUserId = match[1];
+      const actorId = request.auth?.user?.id ?? null;
+      const isSelfOwnerEdit = actorId && targetUserId === actorId && request.auth?.user?.role === 'owner'
+        && (body?.role === undefined || body.role === 'owner')
+        && body?.websiteIds === undefined;
+      const isSafeRestrictionOrReset = !isSelfOwnerEdit
+        && body?.active !== true
+        && body?.role === undefined
+        && body?.websiteIds === undefined;
+      if (!isSelfOwnerEdit && !isSafeRestrictionOrReset) {
+        licenseEntitlementService.requireCapability(
+          'perSiteIsolatedUsers',
+          'Managing additional isolated panel user permissions requires an active YunPanel Premium license.',
+        );
+      }
+    }
     let patchBody = body;
     if (request.method === 'PATCH' && body && Object.hasOwn(body, 'password')) {
       const hasher = store.hashPassword || (store.users && store.users.hashPassword);

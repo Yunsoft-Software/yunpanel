@@ -45,6 +45,7 @@ export function mountWebsiteIsolationAuditRoutes(app, {
   websiteRegistry = null,
   localServerId = null,
   migrationRuntime = null,
+  licenseEntitlementService = null,
 } = {}) {
   if (!app || typeof app.get !== 'function') throw new Error('Express application is required');
   if (!auditService || typeof auditService.audit !== 'function') {
@@ -78,6 +79,19 @@ export function mountWebsiteIsolationAuditRoutes(app, {
     }));
 
     app.post('/api/websites/:websiteId/isolation-migrations', requirePanelRouteAccess, asyncRoute(async (request, response) => {
+      const user = request?.auth?.user;
+      if (licenseEntitlementService && user && user.role !== 'owner') {
+        if (user.role === 'reseller' || user.hosting?.kind === 'reseller') {
+          licenseEntitlementService.requireCapability(
+            'resellerAccounts',
+            'Reseller website isolation operations require an active YunPanel Premium license.',
+          );
+        }
+        licenseEntitlementService.requireCapability(
+          'perSiteIsolatedUsers',
+          'Separate customer and site-user panel operations require an active YunPanel Premium license.',
+        );
+      }
       const websiteId = websiteRegistry
         ? (await requireLocalWebsite(websiteRegistry, request.params.websiteId, localServerId)).id
         : request.params.websiteId;

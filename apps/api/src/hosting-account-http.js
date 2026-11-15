@@ -59,7 +59,18 @@ function requireResellerActor(actor) {
  * login lifecycle and a dedicated own-customer login create/edit surface; generic
  * registration, limits, unlinking and ownership transfer remain Owner-only.
  */
-export async function handleHostingAccountAdmin({ request, response, pathname, query, store, rawToken, requireManagement, readJson, json }) {
+export async function handleHostingAccountAdmin({
+  request,
+  response,
+  pathname,
+  query,
+  store,
+  rawToken,
+  requireManagement,
+  readJson,
+  json,
+  licenseEntitlementService = null,
+}) {
   const accounts = store.users?.hostingAccounts;
   const actor = requireHostingActor(accounts, rawToken, requireManagement);
   const collection = pathname === ROOT;
@@ -71,6 +82,17 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     if (typeof accounts?.[method] !== 'function') throw unavailable();
     return accounts[method](rawToken, requireManagement, ...args);
   };
+  const inspectTargetAccount = (accountId) => {
+    if (typeof accountId !== 'string' || !/^[A-Za-z0-9_-]{1,128}$/.test(accountId) || typeof accounts?.get !== 'function') {
+      return null;
+    }
+    try {
+      const target = accounts.get(rawToken, requireManagement, accountId);
+      return target?.account ?? target ?? null;
+    } catch {
+      return null;
+    }
+  };
   if (collection && request.method === 'GET') {
     return json(response, 200, { data: call('list', hostingAccountQuery(query)) });
   }
@@ -78,11 +100,24 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   if ([...query.keys()].length) throw invalidQuery();
   if (ownerLogin) {
     requireOwnerActor(actor);
-    const account = await call('createOwnerLogin', await readJson(request));
+    const body = await readJson(request);
+    if (licenseEntitlementService) {
+      if (body?.kind === 'reseller') {
+        licenseEntitlementService.requireCapability('resellerAccounts');
+      } else {
+        if (body?.resellerId != null) {
+          licenseEntitlementService.requireCapability('resellerAccounts');
+        }
+        licenseEntitlementService.requireCapability('perSiteIsolatedUsers');
+      }
+    }
+    const account = await call('createOwnerLogin', body);
     return json(response, 201, { data: { account, accessGranted: false, siteAccessGranted: false } });
   }
   if (selfCustomers && request.method === 'POST') {
     requireResellerActor(actor);
+    licenseEntitlementService?.requireCapability('resellerAccounts');
+    licenseEntitlementService?.requireCapability('perSiteIsolatedUsers');
     const body = await readJson(request);
     const account = await call('createCustomerLogin', body);
     return json(response, 201, { data: { account, accessGranted: false, siteAccessGranted: false } });
@@ -93,6 +128,14 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     if (!body || typeof body !== 'object' || Array.isArray(body) || !['reseller', 'customer'].includes(body.kind)) {
       throw new AuthError('invalid_hosting_kind', 'Choose reseller or customer.');
     }
+    if (body.kind === 'reseller') {
+      licenseEntitlementService?.requireCapability('resellerAccounts');
+    } else {
+      if (body.resellerId != null) {
+        licenseEntitlementService?.requireCapability('resellerAccounts');
+      }
+      licenseEntitlementService?.requireCapability('perSiteIsolatedUsers');
+    }
     const { kind, ...input } = body;
     const account = call(kind === 'reseller' ? 'registerReseller' : 'registerCustomer', input);
     return json(response, 201, { data: { account, accessGranted: false } });
@@ -102,6 +145,7 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   }
   if (match?.[2] === 'limits' && request.method === 'PATCH') {
     requireOwnerActor(actor);
+    licenseEntitlementService?.requireCapability('resellerAccounts');
     const body = await readJson(request);
     return json(response, 200, { data: { account: call('updateLimits', match[1], body), accessGranted: false } });
   }
@@ -109,12 +153,32 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
     if (actor?.role !== 'owner' && actor?.role !== 'reseller') {
       throw new AuthError('reseller_scope_forbidden', 'This account operation is not permitted.', 403);
     }
+    if (actor?.role === 'reseller') {
+      licenseEntitlementService?.requireCapability('resellerAccounts');
+    } else {
+      const target = inspectTargetAccount(match[1]);
+      if (target?.resellerId) {
+        licenseEntitlementService?.requireCapability('resellerAccounts');
+      }
+      licenseEntitlementService?.requireCapability('perSiteIsolatedUsers');
+    }
     const body = await readJson(request);
     const account = call('updateCustomerQuotas', match[1], body);
     return json(response, 200, { data: { account, accessGranted: false } });
   }
   if (match?.[2] === 'status' && request.method === 'PATCH') {
     const body = await readJson(request);
+    if (actor?.role === 'reseller') {
+      licenseEntitlementService?.requireCapability('resellerAccounts');
+    }
+    if (body?.active === true && licenseEntitlementService) {
+      const target = inspectTargetAccount(match[1]);
+      if (target?.kind === 'reseller' || target?.resellerId) {
+        licenseEntitlementService.requireCapability('resellerAccounts');
+      } else {
+        licenseEntitlementService.requireCapability('perSiteIsolatedUsers');
+      }
+    }
     const account = call('setActive', match[1], body);
     return json(response, 200, {
       data: {
@@ -126,10 +190,27 @@ export async function handleHostingAccountAdmin({ request, response, pathname, q
   }
   if (match?.[2] === 'login' && request.method === 'PATCH') {
     const body = await readJson(request);
+    if (actor?.role === 'reseller') {
+      licenseEntitlementService?.requireCapability('resellerAccounts');
+    }
+    const isDeactivateOnly = body && typeof body === 'object' && !Array.isArray(body)
+      && body.active === false
+      && !Object.hasOwn(body, 'username')
+      && !Object.hasOwn(body, 'email');
+    if (!isDeactivateOnly && licenseEntitlementService) {
+      const target = inspectTargetAccount(match[1]);
+      if (target?.kind === 'reseller' || target?.resellerId) {
+        licenseEntitlementService.requireCapability('resellerAccounts');
+      }
+      licenseEntitlementService.requireCapability('perSiteIsolatedUsers');
+    }
     const account = await call('updateCustomerLogin', match[1], body);
     return json(response, 200, { data: { account, accessGranted: false, siteAccessGranted: false } });
   }
   if (match?.[2] === 'login' && request.method === 'DELETE') {
+    if (actor?.role === 'reseller') {
+      licenseEntitlementService?.requireCapability('resellerAccounts');
+    }
     const body = await readJson(request).catch(() => ({}));
     const result = await call('deleteCustomerLogin', match[1], body);
     return json(response, 200, { data: { ...result, accessGranted: false } });

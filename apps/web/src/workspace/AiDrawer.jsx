@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import { useLocation } from 'react-router';
 import { panelRequest } from '../api.js';
 import { usePanelSession } from '../panel-session.jsx';
 import { sessionVersion, sessionTransitionPending } from '../session-client.js';
-import { Badge, Button, ErrorNotice, Icon, Modal } from './PanelKit.jsx';
+import { Badge, Button, EmptyState, ErrorNotice, Icon, LinkButton, Modal } from './PanelKit.jsx';
+import { WorkspaceContext } from './WorkspaceContext.jsx';
 import { createAiConversation, deleteAiConversation, executeAiTool, getAiConversation, listAiConversationPage, sendAiMessage } from './ai-client.js';
 import { createAiHistory, createAiConversationReader, EMPTY_AI_HISTORY, resolveAiWebsiteContext } from './ai-history.js';
 import './ai-history.css';
@@ -11,10 +12,23 @@ import './ai-history.css';
 export default function AiDrawer({ open, onClose }) {
   const location = useLocation();
   const { session } = usePanelSession();
+  const workspace = useContext(WorkspaceContext);
   const match = location.pathname.match(/^\/websites\/([^/]+)/);
   const domainId = match && match[1] !== 'new' ? match[1] : null;
   const identity = JSON.stringify([domainId, session?.user?.id, session?.user?.role, session?.user?.websiteIds, sessionVersion()]);
   if (!open || !session?.user?.id) return null;
+  if (workspace?.license?.status === 'ready' && workspace.license.data?.capabilities?.aiOperations === false) {
+    return (
+      <Modal title="YunPanel AI Yönetim Asistanı" onClose={onClose} wide>
+        <EmptyState
+          icon="shield"
+          title="Premium lisans gerekli"
+          detail="AI yönetim asistanı aktif bir YunPanel Premium lisansı gerektirir."
+          action={session.user?.role === 'owner' ? <LinkButton to="/settings?section=license" variant="primary" onClick={onClose}>Lisans ayarlarını aç</LinkButton> : null}
+        />
+      </Modal>
+    );
+  }
   return <AiScope key={identity} domainId={domainId} actorId={session.user.id} onClose={onClose} />;
 }
 

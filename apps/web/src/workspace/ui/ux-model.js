@@ -47,6 +47,7 @@ export const TOOLS_SETTINGS_GROUPS = Object.freeze([
   { id: 'panel', label: 'Panel ve erişim', items: [
     ['/settings/users', 'Kullanıcılar, bayiler ve müşteriler', 'user'],
     ['/settings?section=account', 'Hesap ve erişim ayarları', 'shield'],
+    ['/settings?section=license', 'Lisans yönetimi', 'shield'],
     ['/settings?section=ai', 'AI sağlayıcıları', 'code'],
     ['/settings?section=api', 'API anahtarları', 'code'],
   ] },
