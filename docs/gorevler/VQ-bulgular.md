@@ -1639,10 +1639,11 @@
 
 ### T913 · Node Passenger site silme sonrasi generated ortam dosyasi kaliyor
 - **Bağımlı:** T861, T881, T892, T898
-- **Dosyalar:** `packages/host-runtime/src/website-passenger-environment-manager.js`, `packages/host-runtime/src/application-environment-backup-manager.js`, `apps/api/src/website-removal-cleanup-adapters.js`, `apps/api/src/website-removal-runtime.js`, `apps/api/src/index.js`, `packages/host-runtime/test/website-passenger-environment-manager.test.js`, `packages/host-runtime/test/application-environment-backup-manager.test.js`, `apps/api/test/website-removal-cleanup-adapters.test.js`, `apps/api/test/website-removal-runtime.test.js`, `apps/api/test/website-removal-cleanup-wiring.test.js`, `e2e/live-audit/29-native-passenger-environment-retirement-mutation.spec.js`, `playwright.live-audit.config.js`, `apps/api/src/domain-registry-base.js`, `apps/api/test/domain-registry.test.js`
+- **Dosyalar:** `packages/host-runtime/src/website-passenger-environment-manager.js`, `packages/host-runtime/src/application-environment-backup-manager.js`, `apps/api/src/website-removal-cleanup-adapters.js`, `apps/api/src/website-removal-runtime.js`, `apps/api/src/index.js`, `packages/host-runtime/test/website-passenger-environment-manager.test.js`, `packages/host-runtime/test/application-environment-backup-manager.test.js`, `apps/api/test/website-removal-cleanup-adapters.test.js`, `apps/api/test/website-removal-runtime.test.js`, `apps/api/test/website-removal-cleanup-wiring.test.js`, `e2e/live-audit/29-native-passenger-environment-retirement-mutation.spec.js`, `playwright.live-audit.config.js`, `apps/api/src/domain-registry-base.js`, `apps/api/test/domain-registry.test.js`, `apps/api/test/website-removal-http.test.js`, `apps/api/test/website-removal-cleanup-preflight-source.test.js`
 - **Kaynak:** QA · 2026-11-16 00:30
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
+    Gate06 ilk tam kaynak sonucu 3 regresyon T914 olarak kaydedildi; exact mevcut HTTP fixture ve source-preflight beklentileri yeni zorunlu retirement/namespace sozlesmesine uygun gercek FS/registry kaniti ile duzeltilir, uretim guardlari gevsetilmez. Bes P1 criticalreview c84d3210 kaynagi ile negatif regresyonlara eklenir; eski5b/Gate06FAILED korunur.
     16 Kasim gerekli dar kapsam eki: domain-registry-base bindWebsite normal migration yazari namespace rezervasyonunu atliyor; yalniz mevcut withRoutingNamespace ile serialize et, reentrant caller kontrolu ve gercek file-backed yaris regresyonu ekle. App->Website->namespace gate actualabsence/checkpoint/unlink boyunca ortak yazarlari dislar; yeni kilit/motor yok.
     16 Kasim kullanici acik talimati: Node.js silme sonrasi kalan ortam dosyasini once duzelt; T889 acik kalacak. T883 genel kabulunu veya tarihsel basarisiz kanitlari kapatma.
     Gercek .28 product08/9c8 Native19Chrome05 run 9PASS/1FAIL (ayri afterAll45s kusuru). Normal dort removal journal removed ve12metadata404; Node App257aad37-bbfe-58f2-9846-bb007a5eb6ff generated /etc/yunpanel/passenger-env/<AppID>.conf kaldi. Salt okunur inspection5226671e ve exactfile proofc939abbd: root0:0/0600/regular/canonical/nlink1/81byte/SHA2959773fa4c9e7dcb6f413a76b201bf03feee0ae997180b27b6c4642e253df0e/emptyrev0; manuel silme yok. Tam artifact paths .local/p0-20261115/checkpoint.md son16Nov kaydi.
@@ -1650,5 +1651,61 @@
     Mimari private oneri .local/p0-20261116/passenger-include-retirement-proposal-ag3-01/PROPOSAL.md e5bdf6e0. Mevcut manager/cleanup/journal yolunda exactApp/Website/server/managedauthority/currentappliedrevision/hash + secureFD ile scope; unlink ONCESI mevcut checkpointStep, ayni journal idempotence ve gercekabsence. Yalniz desteklenen NodePassenger; ordinaryPython/direct/PHP/static korunur. Eski completed journals zorla acilmaz; gecmis ownorphan recovery ayri exact inceleme kapsamidir. Degerler/journallara plaintextsir yazilmaz; yeni motor, rawregistrywrite, glob/prune/manualrm yok.
     Kaynak kabul: once dogru sebeple kirilan otomatik realFS/policy testi, sonra ilgili mevcut birim/API kontrolleri ve bagimsiz kaynak incelemesi; mock/stub/fakestat/yapayHTTP ekleme. Senaryo matrisi: empty0, laterapplied, saved-not-applied, aynijournalretry/absence, interruptedlegacy, foreign/symlink/FIFO/hardlink/drift, protectedsibling. Beklenti/innerdeadlinegevsetme yok.
     Nihai kabul: tam lint/test/build + bagimsizinceleme, matching yeni actualpaket/.28kurulumu (Root ve mevcutP0izni), normal API/browser Nodeempty ve guncellenmis/saved-but-unapplied envcreate->delete iki fresh kosuda exactinclude.existsfalse +3metadata404 +physicalabsence +protectedfirstPHP200. Current08 veya source-onlyPASS yeni productfixed sayilmaz. UserT889 acik; T883 Native18/19/22 testcleanup dilimi AGENT_2 tarafinda ayridir. Test/gelistirme28rutinyedek yok;44erisim yok. Push/main/force/reset yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T914 · Doğrulama: test — production removal wires cleanup preflight inspectors as well as mutators
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-16 01:21
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - production removal wires cleanup preflight inspectors as well as mutators
+    - website-removal-http executes complete removal lifecycle verifying cleanup of files, unix identity, domain, database, SFTP, cron, runtime-binding and Application metadata
+    - website-removal-http remains fail-closed on partial failure and subsequent destructive steps do not execute
+    
+    e profiles without allocating a localhost port (0.346458ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.204417ms)
+    ✔ normalizes complete Node deployment specs (0.518583ms)
+    ✔ normalizes fixed Node process actions against a managed release (3.291084ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (1.477375ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.28375ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.513584ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (9.31225ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.317084ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (1.28925ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.451625ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.508792ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.233959ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.2095ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (2.4315ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.150292ms)
+    ✔ normalizes python rollback, restart, and status specs (0.261875ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (1.057542ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.395084ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.277917ms)
+    ✔ tenant constants and role classification predicates (1.380041ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.2915ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.307709ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.295834ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.13475ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.122958ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.165708ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.195ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.332917ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.192125ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.225458ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.271042ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.306333ms)
+    ✔ tenant context creation and account normalization security edge cases (0.159625ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 223.661625
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
