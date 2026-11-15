@@ -1638,7 +1638,7 @@
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
 ### T913 · Node Passenger site silme sonrasi generated ortam dosyasi kaliyor
-- **Bağımlı:** T861, T881, T892, T898
+- **Bağımlı:** T861, T881, T892, T898, T910
 - **Dosyalar:** `packages/host-runtime/src/website-passenger-environment-manager.js`, `packages/host-runtime/src/application-environment-backup-manager.js`, `apps/api/src/website-removal-cleanup-adapters.js`, `apps/api/src/website-removal-runtime.js`, `apps/api/src/index.js`, `packages/host-runtime/test/website-passenger-environment-manager.test.js`, `packages/host-runtime/test/application-environment-backup-manager.test.js`, `apps/api/test/website-removal-cleanup-adapters.test.js`, `apps/api/test/website-removal-runtime.test.js`, `apps/api/test/website-removal-cleanup-wiring.test.js`, `e2e/live-audit/29-native-passenger-environment-retirement-mutation.spec.js`, `playwright.live-audit.config.js`, `apps/api/src/domain-registry-base.js`, `apps/api/test/domain-registry.test.js`, `apps/api/test/website-removal-http.test.js`, `apps/api/test/website-removal-cleanup-preflight-source.test.js`
 - **Kaynak:** QA · 2026-11-16 00:30
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
