@@ -424,6 +424,14 @@ test('Playwright Chromium E2E: Owner activates Monthly key, refreshes to Yearly,
 
     // Verify Free baseline state in Settings -> Lisans on fresh default install (vendor kid=1cbcc4d3173d0c15 ready out-of-the-box!)
     await page.getByRole('heading', { name: 'Lisans durumu' }).waitFor({ timeout: 15_000 });
+    // Assert the real authenticated Settings navigation in this existing Chromium flow.
+    const settingsTabs = page.getByRole('navigation', { name: 'Ayar kategorileri', exact: true });
+    assert.deepEqual((await settingsTabs.getByRole('link').allTextContents()).map(value => value.trim()), [
+      'Hesap ve erişim', 'Lisans', 'DNS ve SSL', 'AI sağlayıcıları', 'API anahtarları', 'Bildirimler', 'Güncellemeler',
+    ]);
+    assert.equal(await settingsTabs.getByRole('link', { name: 'Lisans', exact: true }).getAttribute('href'), '/settings?section=license');
+    assert.equal(await settingsTabs.locator('a[href="/settings?section=records"]').count(), 0);
+
     await page.getByText('Ücretsiz sürüm').first().waitFor();
     await page.getByText('Tek yönetici ile sınırsız site, site terminali ve SFTP').waitFor();
     await page.getByText('Ayrı müşteri ve site yöneticisi panel hesapları').waitFor();

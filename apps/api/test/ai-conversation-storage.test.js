@@ -1,233 +1,382 @@
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { generateKeyPairSync, randomBytes, randomUUID, sign } from 'node:crypto';
+import { mkdtemp, readFile, writeFile, stat, rm } from 'node:fs/promises';
+import http from 'node:http';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { createApp } from '../src/app.js';
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createAiConversationService } from '../src/ai-conversation-service.js';
+import { createAiProviderRegistry } from '../src/ai-provider-registry.js';
+import { createAiToolRegistry } from '../src/ai-tool-registry.js';
+import { DEFAULT_AI_TOOL_DEFINITIONS } from '../src/ai-tool-catalog.js';
+import { createAuthenticatedApi } from '../src/auth-http.js';
+import { createAuthStore, csrfForSession } from '../src/auth-store.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import {
+  computePublicKeyId, ENTITLEMENT_ISSUER, ENTITLEMENT_TOKEN_TYPE, YUNPANEL_PRODUCT_CODE,
+} from '../src/license-entitlement-verifier.js';
+import { createLicenseEntitlementService } from '../src/license-entitlement-service.js';
+import { createServerRegistry } from '../src/server-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
 
-function assertConversationChildSuccess(script) {
-  const child = spawnSync(process.execPath, ['--experimental-test-module-mocks', '--input-type=module', '-e', script], {
-    encoding: 'utf8', timeout: 15000, stdio: ['ignore', 'pipe', 'pipe'],
-  });
-  const outcome = { status: child.status, signal: child.signal, errorCode: child.error?.code ?? null };
-  assert.ok(child.status === 0 && child.signal === null && !child.error,
-    `Conversation child process failed: ${JSON.stringify(outcome)}`);
+const CONVERSATIONS = '/api/ai/conversations';
+
+// Local crypto inputs exercise the real signature verifier and activation route;
+// they do not claim a vendor-issued entitlement or live model acceptance.
+function signedEntitlement(privateKey, kid, instanceId) {
+  const now = Math.floor(Date.now() / 1000);
+  const domain = 'panel.example.test';
+  const header = { alg: 'EdDSA', crv: 'Ed25519', typ: ENTITLEMENT_TOKEN_TYPE, kid };
+  const payload = {
+    iss: ENTITLEMENT_ISSUER, sub: 'lic_conversations', licenseId: 'lic_conversations',
+    jti: randomUUID(), iat: now, nbf: now, exp: now + 30 * 86400,
+    productCode: YUNPANEL_PRODUCT_CODE, billingModel: 'monthly_term',
+    periodMonths: 1, status: 'active', domain, normalizedDomain: domain,
+    allowedHosts: [domain, 'www.' + domain], stagingHosts: ['localhost', '127.0.0.1'],
+    startsAt: new Date(now * 1000).toISOString(),
+    expiresAt: new Date((now + 30 * 86400) * 1000).toISOString(),
+    entitlementVersion: 1, activatedInstanceId: instanceId, edition: 'premium',
+    capabilities: {
+      singlePanelUser: true, singlePanelUserUnlimitedSites: true,
+      webStackManagement: true, sslAndDnsManagement: true, backupsAndMonitoring: true,
+      aiOperations: true, resellerAccounts: true, perSiteIsolatedUsers: true,
+    },
+  };
+  const message = Buffer.from(JSON.stringify(header)).toString('base64url') + '.'
+    + Buffer.from(JSON.stringify(payload)).toString('base64url');
+  return message + '.' + sign(null, Buffer.from(message), privateKey).toString('base64url');
 }
 
-// The real conversation service and real temporary filesystem run in the child.
-// Only provider/orchestrator imports are replaced; no external model is called.
-test('conversation ownership, legacy preservation, paging and storage failures through the real service', () => {
-  const moduleUrl = new URL('../src/ai-conversation-service.js', import.meta.url).href;
-  const script = `
-    import assert from 'node:assert/strict';
-    import { mock } from 'node:test';
-    import { mkdtemp, readFile, writeFile, stat, rm, mkdir } from 'node:fs/promises';
-    import { tmpdir } from 'node:os';
-    import path from 'node:path';
-    const moduleUrl = ${JSON.stringify(moduleUrl)};
-    let providerCalls = 0;
-    mock.module(new URL('./ai-orchestrator.js', moduleUrl).href, { namedExports: { createAiOrchestrator: () => ({ proposeTurn: async () => { providerCalls++; return { type: 'message', message: { text: 'fixture reply' } }; } }) } });
-    mock.module(new URL('./ai-provider-adapters.js', moduleUrl).href, { namedExports: { createProviderFromConfig: () => { throw new Error('unexpected provider'); } } });
-    const { createAiConversationService } = await import(moduleUrl);
-    const dir = await mkdtemp(path.join(tmpdir(), 'ai-history-'));
-    const filePath = path.join(dir, 'history.json');
-    const siteA = '11111111-1111-4111-8111-111111111111';
-    const siteB = '22222222-2222-4222-8222-222222222222';
-    const auth = (id) => ({ user: { id, role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } });
-    const owner = auth('owner-a'), other = auth('owner-b');
-    const make = () => createAiConversationService({ filePath, providerAdapter: { defaultModel: 'fixture' }, toolRegistry: {}, websiteRegistry: { getWebsite: async (id) => id === siteA || id === siteB ? { id } : null } });
-    try {
-      const legacy = { id: '33333333-3333-4333-8333-333333333333', title: 'legacy', websiteId: siteA, messages: [{ text: 'keep this' }], createdAt: '2026-09-23T00:00:00Z', updatedAt: '2026-09-23T00:00:00Z' };
-      const original = JSON.stringify({ version: 1, conversations: [legacy] });
-      await writeFile(filePath, original);
-      const service = make();
-      assert.equal((await service.listConversationPage({ auth: owner })).legacyUnassigned, true);
-      assert.equal(await service.getConversation(legacy.id, { auth: owner }), null);
-      assert.equal(await service.deleteConversation(legacy.id, { auth: owner }), false);
-      const created = await service.createConversation({ title: 'A', websiteId: siteA, auth: owner });
-      assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
-      assert.equal((await stat(filePath)).mode & 0o777, 0o600);
-      assert.equal((await stat(filePath + '.v1-backup')).mode & 0o777, 0o600);
-      const stored = JSON.parse(await readFile(filePath, 'utf8'));
-      assert.equal(stored.version, 2); assert.equal(stored.conversations[0].messages[0].text, 'keep this');
-      assert.equal(stored.conversations[1].actorId, owner.user.id); assert.equal(created.actorId, undefined);
-      assert.equal(await service.getConversation(created.id, { auth: other }), null);
-      assert.equal(await service.deleteConversation(created.id, { auth: other }), false);
-      await assert.rejects(service.sendMessage({ conversationId: created.id, text: 'steal', auth: other }), { status: 404 });
-      assert.equal(providerCalls, 0);
-      await service.sendMessage({ conversationId: created.id, text: 'hello', auth: owner });
-      assert.equal(providerCalls, 1); assert.equal((await service.getConversation(created.id, { auth: owner })).messages.length, 2);
-      const fresh = make(); assert.equal((await fresh.getConversation(created.id, { auth: owner })).messages.length, 2);
-      assert.equal((await fresh.listConversations({ auth: other })).length, 0);
-      await assert.rejects(fresh.listConversations(), { status: 401 });
-      await assert.rejects(fresh.createConversation({ title: 'wrong-site', websiteId: '44444444-4444-4444-8444-444444444444', auth: owner }), { status: 404 });
-      const manager = { user: { id: 'manager-a', role: 'site_manager', websiteIds: [siteA] }, access: { mode: 'site_management' }, security: { managementAllowed: true } };
-      const own = await fresh.createConversation({ title: 'my site', websiteId: siteA, auth: manager });
-      await assert.rejects(fresh.createConversation({ websiteId: siteB, auth: manager }), { status: 404 });
-      await assert.rejects(fresh.createConversation({ auth: manager }), { status: 403 });
-      manager.user.websiteIds = [];
-      assert.equal(await fresh.getConversation(own.id, { auth: manager }), null);
-      await assert.rejects(fresh.sendMessage({ conversationId: own.id, text: 'blocked', auth: manager }), { status: 404 });
-      assert.equal(await fresh.deleteConversation(own.id, { auth: manager }), false);
-      await Promise.all(Array.from({ length: 24 }, (_, i) => fresh.createConversation({ title: 'C' + i, auth: owner })));
-      const restarted = make();
-      let page = await restarted.listConversationPage({ auth: owner, limit: 10 }); const ids = page.items.map((r) => r.id);
-      while (page.nextCursor) { page = await restarted.listConversationPage({ auth: owner, cursor: page.nextCursor, limit: 10 }); ids.push(...page.items.map((r) => r.id)); }
-      assert.equal(ids.length, 25); assert.equal(new Set(ids).size, 25);
-      assert.equal(await restarted.deleteConversation(created.id, { auth: owner }), true);
-      assert.equal(await make().getConversation(created.id, { auth: owner }), null);
-      // Reaching the existing 100-conversation ceiling never silently evicts history.
-      const raw = JSON.parse(await readFile(filePath, 'utf8'));
-      const seed = raw.conversations.find((r) => r.actorId === owner.user.id);
-      raw.conversations = [legacy, ...Array.from({ length: 100 }, (_, i) => ({ ...seed, id: '55555555-5555-4555-8555-' + String(i).padStart(12, '0') }))];
-      await writeFile(filePath, JSON.stringify(raw)); const full = make();
-      await assert.rejects(full.createConversation({ auth: owner }), { code: 'ai_conversation_limit' });
-      assert.equal(JSON.parse(await readFile(filePath, 'utf8')).conversations.length, 101);
-      await writeFile(filePath, '{broken'); const corrupt = make();
-      await assert.rejects(corrupt.createConversation({ auth: owner }), { code: 'ai_history_store_unavailable' });
-      assert.equal(await readFile(filePath, 'utf8'), '{broken');
-      // A conflicting migration backup must not be overwritten.
-      await writeFile(filePath, original + ' '); const conflict = make();
-      await assert.rejects(conflict.createConversation({ auth: owner }), { code: 'ai_history_store_unavailable' });
-      assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
-      await assert.rejects(conflict.listConversations({ auth: owner }), { code: 'ai_history_store_unavailable' });
+function error(result, status, code) {
+  assert.equal(result.status, status);
+  assert.equal(result.body.error.code, code);
+}
 
-      // Unowned conversation migration, rollback, V1 backup preservation, 100-limit and locking
-      await writeFile(filePath, JSON.stringify(raw));
-      const migService = make();
-      await assert.rejects(migService.listUnownedConversations({ auth: manager }), { status: 403 });
-      const unowned = await migService.listUnownedConversations({ auth: owner });
-      assert.equal(unowned.length, 1);
-      assert.equal(unowned[0].id, legacy.id);
-
-      await assert.rejects(migService.migrateUnownedConversations({
-        assignments: [{ conversationId: legacy.id, targetActorId: 'owner-b' }],
-        auth: manager,
-      }), { status: 403 });
-
-      await assert.rejects(migService.migrateUnownedConversations({
-        assignments: [{ conversationId: legacy.id, targetActorId: owner.user.id }],
-        auth: owner,
-      }), { code: 'ai_conversation_limit', status: 409 });
-      assert.equal(JSON.parse(await readFile(filePath, 'utf8')).conversations.length, 101);
-
-      await assert.rejects(migService.migrateUnownedConversations({
-        assignments: [
-          { conversationId: legacy.id, targetActorId: 'owner-b' },
-          { conversationId: legacy.id, targetActorId: 'owner-b' },
-        ],
-        auth: owner,
-      }), { code: 'invalid_migration_assignments', status: 400 });
-
-      const migResult = await migService.migrateUnownedConversations({
-        assignments: [{ conversationId: legacy.id, targetActorId: other.user.id }],
-        auth: owner,
+async function withConversationApi(action) {
+  const directory = await mkdtemp(path.join(tmpdir(), 'ai-history-http-'));
+  let authStore;
+  let server;
+  const origin = 'http://127.0.0.1:4173';
+  const ownerPassword = randomBytes(24).toString('base64url') + '!9aA';
+  try {
+    authStore = createAuthStore({
+      filePath: path.join(directory, 'auth.sqlite'),
+      masterKey: randomBytes(32).toString('hex'),
+    });
+    const setup = authStore.issueSetupToken();
+    const owner = await authStore.completeSetup({
+      setupToken: setup.token, username: 'history-owner', password: ownerPassword,
+    });
+    const registry = createServerRegistry({ filePath: path.join(directory, 'servers.json') });
+    const localServer = await registry.createLocalServer({ hostname: 'panel.example.test' });
+    const applicationRegistry = createApplicationRegistry({
+      filePath: path.join(directory, 'applications.json'),
+      serverExists: async (id) => Boolean(await registry.getServer(id)),
+    });
+    const websiteRegistry = createWebsiteRegistry({
+      filePath: path.join(directory, 'websites.json'),
+      serverExists: async (id) => Boolean(await registry.getServer(id)),
+      getApplication: (id) => applicationRegistry.getApplication(id),
+    });
+    const domainRegistry = createDomainRegistry({
+      filePath: path.join(directory, 'domains.json'),
+      serverExists: async (id) => Boolean(await registry.getServer(id)),
+      getWebsite: (id) => websiteRegistry.getWebsite(id),
+    });
+    const websites = [];
+    for (const name of ['A', 'B']) {
+      const application = await applicationRegistry.createApplication({
+        serverId: localServer.id, name: 'Conversation ' + name,
+        repositoryUrl: null, branch: null,
+        build: { mode: 'none', outputDir: '.', healthFile: 'index.html' },
       });
-      assert.equal(migResult.count, 1);
-      assert.equal(migResult.migrated[0].id, legacy.id);
-      assert.ok(await migService.getConversation(legacy.id, { auth: other }));
-      assert.equal(await migService.getConversation(legacy.id, { auth: owner }), null);
-
-      await assert.rejects(migService.migrateUnownedConversations({
-        assignments: [{ conversationId: legacy.id, targetActorId: 'owner-c' }],
-        auth: owner,
-      }), { code: 'conversation_already_owned', status: 409 });
-
-      await assert.rejects(migService.rollbackUnownedConversations({
-        conversationIds: [legacy.id],
-        auth: manager,
-      }), { status: 403 });
-
-      await assert.rejects(migService.rollbackUnownedConversations({
-        conversationIds: [legacy.id, legacy.id],
-        auth: owner,
-      }), { code: 'invalid_rollback_request', status: 400 });
-
-      const rollResult = await migService.rollbackUnownedConversations({
-        conversationIds: [legacy.id],
-        auth: owner,
+      websites.push(await websiteRegistry.createWebsite({
+        serverId: localServer.id, name: 'Conversation ' + name, applicationId: application.id,
+      }));
+    }
+    const keys = generateKeyPairSync('ed25519');
+    const kid = computePublicKeyId(keys.publicKey.export({ format: 'der', type: 'spki' }));
+    const license = createLicenseEntitlementService({
+      filePath: path.join(directory, 'license.json'),
+      publicKeyPem: keys.publicKey.export({ format: 'pem', type: 'spki' }).toString(),
+      publicKeyFile: '', publicOrigin: origin, instanceId: localServer.id,
+      masterKey: randomBytes(32).toString('hex'), development: true,
+    });
+    const aiToolRegistry = createAiToolRegistry({ definitions: DEFAULT_AI_TOOL_DEFINITIONS });
+    const aiProviderRegistry = createAiProviderRegistry({
+      filePath: path.join(directory, 'providers.json'), masterKey: randomBytes(32).toString('hex'),
+    });
+    const historyPath = path.join(directory, 'history.json');
+    let baseUrl;
+    async function start() {
+      const conversationService = createAiConversationService({
+        filePath: historyPath, providerRegistry: aiProviderRegistry, toolRegistry: aiToolRegistry,
+        websiteRegistry, domainRegistry, applicationRegistry,
       });
-      assert.equal(rollResult.count, 1);
-      assert.equal(await migService.getConversation(legacy.id, { auth: other }), null);
-      const unownedAgain = await migService.listUnownedConversations({ auth: owner });
-      assert.equal(unownedAgain.length, 1);
+      const handler = createAuthenticatedApi({
+        store: authStore, publicOrigin: origin, development: true, ownerMfaRequired: false,
+        licenseEntitlementService: license,
+        createHandler: () => createApp({
+          registry, applicationRegistry, websiteRegistry, domainRegistry,
+          localServerId: localServer.id, userAdminStore: authStore.users, authStore,
+          aiToolRegistry, aiAudit: authStore.audit, aiProviderRegistry,
+          aiConversationService: conversationService, licenseEntitlementService: license,
+        }),
+      });
+      server = http.createServer(handler);
+      await new Promise((resolve, reject) => {
+        server.once('error', reject);
+        server.listen(0, '127.0.0.1', resolve);
+      });
+      baseUrl = 'http://127.0.0.1:' + server.address().port;
+    }
+    async function stop() {
+      if (!server) return;
+      const closing = server;
+      server = null;
+      await new Promise((resolve, reject) => closing.close((cause) => cause ? reject(cause) : resolve()));
+    }
+    async function login(username, password) {
+      const response = await fetch(baseUrl + '/api/auth/login', {
+        method: 'POST', headers: { Origin: origin, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      });
+      assert.equal(response.status, 200);
+      await response.json();
+      const cookie = response.headers.getSetCookie().map((value) => value.split(';')[0])
+        .find((value) => value.startsWith('yunpanel_session='));
+      assert.ok(cookie);
+      return { cookie, csrf: csrfForSession(cookie.slice(cookie.indexOf('=') + 1)) };
+    }
+    async function request(session, pathname, { method = 'GET', body, csrf = true, headers: extra = {} } = {}) {
+      const headers = { ...extra };
+      if (session) headers.Cookie = session.cookie;
+      if (!['GET', 'HEAD'].includes(method)) {
+        headers.Origin = origin;
+        if (csrf && session) headers['x-csrf-token'] = session.csrf;
+      }
+      if (body !== undefined) headers['Content-Type'] = 'application/json';
+      const response = await fetch(baseUrl + pathname, {
+        method, headers, body: body === undefined ? undefined : JSON.stringify(body),
+      });
+      const text = await response.text();
+      return { status: response.status, body: text ? JSON.parse(text) : null };
+    }
+    await start();
+    const ownerSession = await login('history-owner', ownerPassword);
+    async function activate() {
+      const result = await request(ownerSession, '/api/panel/license/activate', {
+        method: 'POST', body: { token: signedEntitlement(keys.privateKey, kid, localServer.id) },
+      });
+      assert.equal(result.status, 200);
+      assert.equal(result.body.data.valid, true);
+      assert.equal(result.body.data.capabilities.aiOperations, true);
+    }
+    async function createUser(username, role, websiteIds) {
+      const password = randomBytes(24).toString('base64url') + '!9aA';
+      const result = await request(ownerSession, '/api/panel/users', {
+        method: 'POST', body: { username, password, role, ...(websiteIds ? { websiteIds } : {}) },
+      });
+      assert.equal(result.status, 201);
+      return { user: result.body.data.user, session: await login(username, password), username, password };
+    }
+    await action({
+      request, owner, ownerSession, websites, historyPath, directory, activate, createUser, login,
+      restart: async () => { await stop(); await start(); },
+    });
+    await stop();
+  } finally {
+    if (server) await new Promise((resolve, reject) => server.close((cause) => cause ? reject(cause) : resolve()));
+    authStore?.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+}
 
-      await assert.rejects(migService.rollbackToV1Backup({ auth: manager }), { status: 403 });
+// Scenario matrix: actual file persistence/reopen; V1 parser+backup input; native
+// Owner migration/rollback; paging/100-limit; corrupt/conflicting files fail503.
+// No provider is configured, replaced or called; inference success is unverified.
+test('real HTTP conversation storage preserves migration, paging, limits and failed bytes without a model', { timeout: 15000 }, async () => {
+  await withConversationApi(async ({ request, owner, ownerSession, websites, historyPath, activate, restart }) => {
+    await activate();
+    const create = async (title) => {
+      const result = await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title, websiteId: websites[0].id } });
+      assert.equal(result.status, 201);
+      return result.body.data;
+    };
+    const originalConversation = await create('Preserved history');
+    const nativeRecord = JSON.parse(await readFile(historyPath, 'utf8')).conversations[0];
+    // A real saved record supplies the format-compatibility input. Removing its
+    // ownership field represents V1, not a manufactured server/provider result.
+    const legacy = { ...nativeRecord };
+    delete legacy.actorId;
+    const original = JSON.stringify({ version: 1, conversations: [legacy] });
+    await writeFile(historyPath, original);
+    let result = await request(ownerSession, CONVERSATIONS + '?limit=10');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.legacyUnassigned, true);
+    error(await request(ownerSession, CONVERSATIONS + '/' + originalConversation.id), 404, 'conversation_not_found');
+    error(await request(ownerSession, CONVERSATIONS + '/' + originalConversation.id, { method: 'DELETE' }), 404, 'conversation_not_found');
+    const created = await create('Owner history');
+    assert.equal(created.actorId, undefined);
+    assert.equal(await readFile(historyPath + '.v1-backup', 'utf8'), original);
+    assert.equal((await stat(historyPath)).mode & 0o777, 0o600);
+    assert.equal((await stat(historyPath + '.v1-backup')).mode & 0o777, 0o600);
+    let stored = JSON.parse(await readFile(historyPath, 'utf8'));
+    assert.equal(stored.version, 2);
+    assert.equal(stored.conversations.find((item) => item.id === created.id).actorId, owner.id);
+    assert.deepEqual(stored.conversations.find((item) => item.id === legacy.id).messages, nativeRecord.messages);
 
-      const v1Restore = await migService.rollbackToV1Backup({ auth: owner });
-      assert.equal(v1Restore.success, true);
-      assert.equal(v1Restore.restoredCount, 1);
-      assert.equal((await stat(filePath + '.v1-backup')).mode & 0o777, 0o600);
-      assert.equal((await stat(filePath)).mode & 0o777, 0o600);
-      assert.equal(await readFile(filePath + '.v1-backup', 'utf8'), original);
-    } finally { await rm(dir, { recursive: true, force: true }); }
-  `;
-  assertConversationChildSuccess(script);
+    const assignments = [{ conversationId: legacy.id, targetActorId: owner.id }];
+    error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', {
+      method: 'POST', body: { assignments: [...assignments, ...assignments] },
+    }), 400, 'invalid_migration_assignments');
+    result = await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.count, 1);
+    assert.equal((await request(ownerSession, CONVERSATIONS + '/' + legacy.id)).status, 200);
+    error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } }), 409, 'conversation_already_owned');
+    error(await request(ownerSession, CONVERSATIONS + '/unowned/rollback', {
+      method: 'POST', body: { conversationIds: [legacy.id, legacy.id] },
+    }), 400, 'invalid_rollback_request');
+    result = await request(ownerSession, CONVERSATIONS + '/unowned/rollback', {
+      method: 'POST', body: { conversationIds: [legacy.id] },
+    });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.count, 1);
+    error(await request(ownerSession, CONVERSATIONS + '/' + legacy.id), 404, 'conversation_not_found');
+    result = await request(ownerSession, CONVERSATIONS + '/unowned/rollback', { method: 'POST', body: { restoreV1Backup: true } });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.restoredCount, 1);
+
+    const ids = [created.id];
+    for (let i = 0; i < 99; i++) ids.push((await create('History ' + i)).id);
+    assert.equal(new Set(ids).size, 100);
+    const beforeLimit = await readFile(historyPath, 'utf8');
+    error(await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'Beyond limit' } }), 409, 'ai_conversation_limit');
+    assert.equal(await readFile(historyPath, 'utf8'), beforeLimit);
+    error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } }), 409, 'ai_conversation_limit');
+    await restart();
+    let cursor = null;
+    const observed = [];
+    do {
+      result = await request(ownerSession, CONVERSATIONS + '?limit=10' + (cursor ? '&cursor=' + encodeURIComponent(cursor) : ''));
+      assert.equal(result.status, 200);
+      observed.push(...result.body.data.items.map((item) => item.id));
+      cursor = result.body.data.nextCursor;
+    } while (cursor);
+    assert.deepEqual(observed.sort(), ids.sort());
+    result = await request(ownerSession, CONVERSATIONS + '/' + created.id, { method: 'DELETE' });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.success, true);
+    await restart();
+    error(await request(ownerSession, CONVERSATIONS + '/' + created.id), 404, 'conversation_not_found');
+
+    // Actual malformed input and an actual exclusive-backup conflict must not
+    // replace or silently repair either file.
+    await writeFile(historyPath, '{broken');
+    error(await request(ownerSession, CONVERSATIONS), 503, 'ai_history_store_unavailable');
+    error(await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'No overwrite' } }), 503, 'ai_history_store_unavailable');
+    assert.equal(await readFile(historyPath, 'utf8'), '{broken');
+    await writeFile(historyPath, original + ' ');
+    await restart();
+    error(await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'Conflicting backup' } }), 503, 'ai_history_store_unavailable');
+    assert.equal(await readFile(historyPath, 'utf8'), original + ' ');
+    assert.equal(await readFile(historyPath + '.v1-backup', 'utf8'), original);
+    error(await request(ownerSession, CONVERSATIONS), 503, 'ai_history_store_unavailable');
+  });
 });
 
-test('real mounted conversation handlers preserve the auth boundary and reject actor/query spoofing', () => {
-  const routeUrl = new URL('../src/ai-http.js', import.meta.url).href;
-  const script = `
-    import assert from 'node:assert/strict';
-    import { mock } from 'node:test';
-    import { mkdtemp, rm } from 'node:fs/promises';
-    import { tmpdir } from 'node:os';
-    import path from 'node:path';
-    const route = ${JSON.stringify(routeUrl)};
-    const guard = (_request, _response, next) => next();
-    mock.module(new URL('./panel-http-guard.js', route).href, { namedExports: { requirePanelRouteAccess: guard } });
-    mock.module(new URL('./ai-action-plan.js', route).href, { namedExports: { createAiActionPlan: () => {}, verifyAiActionExecution: () => {} } });
-    mock.module(new URL('./ai-policy.js', route).href, { namedExports: { evaluateAiToolPolicy: () => {} } });
-    mock.module(new URL('./ai-provider-adapters.js', route).href, { namedExports: { createProviderFromConfig: () => {} } });
-    mock.module(new URL('./ai-orchestrator.js', route).href, { namedExports: { createAiOrchestrator: () => { throw new Error('provider must not run'); } } });
-    const { mountAiRoutes } = await import(route);
-    const { createAiConversationService } = await import(new URL('./ai-conversation-service.js', route).href);
-    const directory = await mkdtemp(path.join(tmpdir(), 'ai-http-history-'));
-    try {
-      const service = createAiConversationService({ filePath: path.join(directory, 'history.json') });
-      const routes = new Map(), app = {};
-      for (const method of ['get', 'post', 'delete']) app[method] = (path, ...handlers) => routes.set(method + ' ' + path, handlers);
-      mountAiRoutes(app, { registry: { list() {}, get() {}, prepare() {}, execute() {} }, audit: { record() {} }, conversationService: service });
-      const auth = (id) => ({ user: { id, role: 'owner' }, access: { mode: 'management', permissions: ['*'] }, security: { managementAllowed: true } });
-      const owner = auth('owner-a');
-      async function invoke(method, route, request = {}) {
-        const handlers = routes.get(method + ' ' + route); assert.equal(handlers[0], guard);
-        const response = { code: 200, output: '', status(code) { this.code = code; return this; }, json(value) { this.body = value; return this; }, setHeader() {}, flushHeaders() {}, write(value) { this.output += value; }, end() {} };
-        const req = { query: {}, params: {}, body: {}, auth: owner, ...request };
-        try { await handlers[1](req, response, (error) => { throw error; }); } catch (error) { response.error = error; }
-        return response;
-      }
-      const route = '/api/ai/conversations';
-      const created = await invoke('post', route, { body: { title: 'owner-only' } });
-      assert.equal(created.code, 201); const id = created.body.data.id;
-      let result = await invoke('get', route); assert.ok(Array.isArray(result.body.data)); assert.equal(result.body.data.length, 1);
-      result = await invoke('get', route, { query: { limit: '20' } });
-      assert.equal(result.body.data.scope.actorId, owner.user.id); assert.equal(result.body.data.items.length, 1);
-      result = await invoke('get', route, { auth: auth('owner-b'), query: { limit: '20' } }); assert.equal(result.body.data.items.length, 0);
-      for (const query of [{ actorId: 'owner-a' }, { limit: ['20'] }, { limit: '51' }, { limit: '20oops' }, { websiteId: ['anything'] }, { cursor: {} }]) {
-        const invalid = await invoke('get', route, { query }); assert.equal(invalid.error.status, 400);
-      }
-      result = await invoke('post', route, { body: { title: 'spoof', actorId: 'owner-a' }, auth: auth('owner-b') }); assert.ok(result.error.status === 403 || result.error.status === 400);
-      for (const method of ['get', 'delete']) {
-        result = await invoke(method, route + '/:conversationId', { params: { conversationId: id }, auth: auth('owner-b') });
-        assert.equal(result.error.status, 404);
-      }
-      result = await invoke('post', route + '/:conversationId/messages', { params: { conversationId: id }, body: { text: 'steal' }, auth: auth('owner-b') }); assert.equal(result.error.status, 404);
-      result = await invoke('post', route + '/:conversationId/messages/stream', { params: { conversationId: id }, body: { text: 'steal' }, auth: auth('owner-b') });
-      assert.ok(result.output.includes('conversation_not_found') || result.body?.error?.code === 'conversation_not_found'); assert.equal(result.output.includes('owner-only'), false);
-      result = await invoke('get', route, { auth: null }); assert.equal(result.error.status, 401);
-      result = await invoke('get', route + '/:conversationId', { params: { conversationId: id } }); assert.equal(result.body.data.title, 'owner-only');
-      result = await invoke('delete', route + '/:conversationId', { params: { conversationId: id } }); assert.equal(result.body.data.success, true);
-      const unownedGet = routes.get('get /api/ai/conversations/unowned');
-      const unownedMigrate = routes.get('post /api/ai/conversations/unowned/migrate');
-      const unownedRollback = routes.get('post /api/ai/conversations/unowned/rollback');
-      assert.ok(unownedGet); assert.ok(unownedMigrate); assert.ok(unownedRollback);
-      const mockRes = { status(code) { this.statusCode = code; return this; }, json(val) { this.body = val; return this; } };
-      const nonOwner = { auth: { user: { id: 'manager-a', role: 'site_manager' } }, query: {}, body: {} };
-      await unownedGet[0](nonOwner, mockRes, () => {});
-      assert.equal(mockRes.statusCode, 403);
-      await unownedMigrate[0](nonOwner, mockRes, () => {});
-      assert.equal(mockRes.statusCode, 403);
-      await unownedRollback[0](nonOwner, mockRes, () => {});
-      assert.equal(mockRes.statusCode, 403);
-    } finally { await rm(directory, { recursive: true, force: true }); }
-  `;
-  assertConversationChildSuccess(script);
+// Scenario matrix: native session/CSRF/license middleware, per-actor and Website
+// isolation, Owner-only history administration, live grant/session revocation,
+// and real provider-not-configured failure; no provider success is simulated.
+test('real HTTP conversations enforce native auth, license and ownership before provider access', { timeout: 15000 }, async () => {
+  await withConversationApi(async ({ request, owner, ownerSession, websites, historyPath, activate, createUser, login }) => {
+    error(await request(null, CONVERSATIONS), 401, 'unauthorized');
+    error(await request(ownerSession, CONVERSATIONS), 403, 'premium_license_required');
+    error(await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'Free denied' } }), 403, 'premium_license_required');
+    await assert.rejects(readFile(historyPath), { code: 'ENOENT' });
+    await activate();
+    const manager = await createUser('history-manager', 'site_manager', [websites[0].id]);
+    const auditor = await createUser('history-auditor', 'read_only');
+    error(await request(auditor.session, CONVERSATIONS), 403, 'forbidden');
+    error(await request(ownerSession, CONVERSATIONS, { method: 'POST', csrf: false, body: { title: 'No CSRF' } }), 403, 'csrf_invalid');
+
+    let result = await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'Owner only', websiteId: websites[0].id } });
+    assert.equal(result.status, 201);
+    const conversation = result.body.data;
+    result = await request(ownerSession, CONVERSATIONS);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.data.map((item) => item.id), [conversation.id]);
+    result = await request(ownerSession, CONVERSATIONS + '?limit=20');
+    assert.equal(result.body.data.scope.actorId, owner.id);
+    assert.equal(result.body.data.items.length, 1);
+    result = await request(manager.session, CONVERSATIONS + '?limit=20');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.items.length, 0);
+    for (const query of ['actorId=' + owner.id, 'limit=20&limit=10', 'limit=51', 'limit=20oops', 'websiteId=x&websiteId=y', 'cursor=invalid']) {
+      const invalid = await request(ownerSession, CONVERSATIONS + '?' + query);
+      assert.equal(invalid.status, 400);
+    }
+    error(await request(manager.session, CONVERSATIONS, {
+      method: 'POST', body: { title: 'Spoof', actorId: owner.id },
+    }), 403, 'forbidden');
+    error(await request(manager.session, CONVERSATIONS, {
+      headers: { 'x-actor-id': owner.id },
+    }), 403, 'forbidden');
+    error(await request(ownerSession, CONVERSATIONS, {
+      method: 'POST', body: { title: 'Unknown site', websiteId: randomUUID() },
+    }), 404, 'conversation_not_found');
+    error(await request(manager.session, CONVERSATIONS, {
+      method: 'POST', body: { title: 'Other site', websiteId: websites[1].id },
+    }), 404, 'conversation_not_found');
+    error(await request(manager.session, CONVERSATIONS, {
+      method: 'POST', body: { title: 'Global' },
+    }), 403, 'forbidden');
+    for (const method of ['GET', 'DELETE']) {
+      error(await request(manager.session, CONVERSATIONS + '/' + conversation.id, { method }), 404, 'conversation_not_found');
+    }
+    const beforeMessages = await readFile(historyPath, 'utf8');
+    for (const suffix of ['/messages', '/messages/stream']) {
+      error(await request(manager.session, CONVERSATIONS + '/' + conversation.id + suffix, {
+        method: 'POST', body: { text: 'Foreign actor' },
+      }), 404, 'conversation_not_found');
+      error(await request(ownerSession, CONVERSATIONS + '/' + conversation.id + suffix, {
+        method: 'POST', body: { text: '' },
+      }), 400, 'invalid_message_text');
+      error(await request(ownerSession, CONVERSATIONS + '/' + conversation.id + suffix, {
+        method: 'POST', body: { text: 'No provider configured' },
+      }), 503, 'ai_provider_not_configured');
+    }
+    assert.equal(await readFile(historyPath, 'utf8'), beforeMessages);
+    for (const [pathname, method, body] of [
+      ['/unowned', 'GET', undefined],
+      ['/unowned/migrate', 'POST', { assignments: [] }],
+      ['/unowned/rollback', 'POST', { conversationIds: [] }],
+    ]) error(await request(manager.session, CONVERSATIONS + pathname, { method, body }), 403, 'forbidden');
+
+    result = await request(manager.session, CONVERSATIONS, {
+      method: 'POST', body: { title: 'Manager private', websiteId: websites[0].id },
+    });
+    assert.equal(result.status, 201);
+    const managerConversation = result.body.data;
+    error(await request(ownerSession, CONVERSATIONS + '/' + managerConversation.id), 404, 'conversation_not_found');
+    result = await request(ownerSession, '/api/panel/users/' + manager.user.id, {
+      method: 'PATCH', body: { revision: manager.user.revision, websiteIds: [websites[1].id] },
+    });
+    assert.equal(result.status, 200);
+    error(await request(manager.session, CONVERSATIONS), 401, 'unauthorized');
+    const changedSession = await login(manager.username, manager.password);
+    error(await request(changedSession, CONVERSATIONS + '/' + managerConversation.id), 404, 'conversation_not_found');
+    result = await request(changedSession, CONVERSATIONS + '?limit=20');
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.items.length, 0);
+    result = await request(changedSession, '/api/auth/logout', { method: 'POST' });
+    assert.equal(result.status, 204);
+    error(await request(changedSession, CONVERSATIONS), 401, 'unauthorized');
+    result = await request(ownerSession, CONVERSATIONS + '/' + conversation.id, { method: 'DELETE' });
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.success, true);
+  });
 });
