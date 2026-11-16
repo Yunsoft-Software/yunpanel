@@ -1767,8 +1767,8 @@
 - **Entegrasyon kanit siniri:** Yukaridaki72PASS otomatik QA tail'i ilkfailurestack veya birlesik kabul degildir. Actual auth-store164 timeout30157524ms/120000 ve Sleep05:36:48→Wake13:59:29 zaman cizelgesi SourceGate09'a aittir. Powerproof699664a310147cb692f4cee516c6a59fd7e85285b31c20b93c795ec4498067f6; bagimsizdisposition c6d19cfc21839fe9cb6e60373551dae77c85b839121fa2bb196dda7597b70417; Gate10 33b2641461b47b5fd2d1b573b3f49fcc6e68c5baf70d98eab298bb5c99e72a15. Source/Primary artifact ayrimi ve eskihamFAILED korunur; Primary tasks/verified degistirilmez.
 
 ### T916 · Doğrulama: test — real mounted conversation handlers preserve the auth boundary and reject actor/que
-- **Bağımlı:** —
-- **Dosyalar:** —
+- **Bağımlı:** T902
+- **Dosyalar:** `apps/api/test/ai-conversation-storage.test.js`, `apps/web/test/menu-redundancy-log-placement.test.js`, `apps/web/test/license-settings-panel.test.js`
 - **Kaynak:** QA · 2026-11-16 17:19
 - **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
 
@@ -1818,6 +1818,8 @@
     ℹ skipped 0
     ℹ todo 0
     ℹ duration_ms 389.877333
+
+    Root kapsam kaydı: aynı iki başarısız testin gerçek davranış karşılığını doğrulamak için yalnız yukarıdaki üç mevcut test dosyası kullanılır. Gerçek Chromium Settings gezinmesi mevcut license-settings-panel testinde sınanır; yeni sahte auth/HTTP/LLM servisi kurulmaz. AI eski module-mock/doğrudan handler varsayımı yerine gerçek file-backed registry, native SQLite auth, gerçek loopback HTTP ve gerçek Ed25519 doğrulama kullanan depolama/yetki senaryolarıyla değiştirilir. Yerel imzalı kripto vektörü vendor/live lisans veya ödeme kabulü sayılmaz; model inference yokken gerçek provider-not-configured hatası beklenir, sahte başarılı yanıt yok. Lisans gate, CSRF, RBAC, tenant sınırı, Source9e/Primary ve eski başarısız kanıtlar korunur. Yeni kaynak planı → gerçek RED → dar test değişimi → ilgili batch/bağımsız inceleme/tam combined gate sırası geçerlidir.
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
 
