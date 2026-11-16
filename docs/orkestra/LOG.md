@@ -278,3 +278,4 @@
 - 2026-11-16 14:11 orchestrator: verify ce7092bf..1bd992ef: ok, yeniden açılan -, bulgu -
 
 - Private integration candidate only: Source9e gates exclude Primary license03c; Primary tasks/verified unchanged, new combined gate OPEN.
+- 2026-11-16 17:19 orchestrator: verify e3240345..687c562b: failed, yeniden açılan -, bulgu ['T916']

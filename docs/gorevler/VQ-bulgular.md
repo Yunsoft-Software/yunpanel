@@ -1765,3 +1765,58 @@
 - **Kabul:** Izole Gate09 kesintisi icin Root bounded-disposition incelemesi; bu entegrasyon taskacceptance veya Primary combinedPASS degildir. Gate09 FAILED hamkanit korunur; unchanged auth-store25/25 ve Gate10 8745PASS/0cancel makineuykusu sonrasinda gercekten gecmistir. Auth asla flaky degildir/T908-T889 nedeni cozuldu iddiasi yoktur.
 
 - **Entegrasyon kanit siniri:** Yukaridaki72PASS otomatik QA tail'i ilkfailurestack veya birlesik kabul degildir. Actual auth-store164 timeout30157524ms/120000 ve Sleep05:36:48→Wake13:59:29 zaman cizelgesi SourceGate09'a aittir. Powerproof699664a310147cb692f4cee516c6a59fd7e85285b31c20b93c795ec4498067f6; bagimsizdisposition c6d19cfc21839fe9cb6e60373551dae77c85b839121fa2bb196dda7597b70417; Gate10 33b2641461b47b5fd2d1b573b3f49fcc6e68c5baf70d98eab298bb5c99e72a15. Source/Primary artifact ayrimi ve eskihamFAILED korunur; Primary tasks/verified degistirilmez.
+
+### T916 · Doğrulama: test — real mounted conversation handlers preserve the auth boundary and reject actor/que
+- **Bağımlı:** —
+- **Dosyalar:** —
+- **Kaynak:** QA · 2026-11-16 17:19
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    Başarısız testler:
+    - real mounted conversation handlers preserve the auth boundary and reject actor/query spoofing
+    - SettingsPage: categories omit deprecated records tab, keeping only editable settings
+    
+    les without allocating a localhost port (0.311792ms)
+    ✔ rejects shell fragments, unsafe entry files, ports and health URLs (0.155541ms)
+    ✔ normalizes complete Node deployment specs (0.845125ms)
+    ✔ normalizes fixed Node process actions against a managed release (4.003291ms)
+    ✔ Passenger release snapshots carry exact site, runtime and routing revisions without a port (1.947917ms)
+    ✔ Passenger release snapshots reject systemd ports, arbitrary commands and public secrets (0.634959ms)
+    ✔ Passenger snapshots reject missing or ambiguous authorities and unsupported revisions (0.541125ms)
+    ✔ proxy hosts canonicalize DNS, IDN, IPv4 and IPv6 without accepting URLs (19.412917ms)
+    ✔ proxy hosts reject schemes, paths, credentials and config control characters (0.32525ms)
+    ✔ normalizePythonRuntimeConfig applies canonical defaults (0.669083ms)
+    ✔ normalizePythonRuntimeConfig accepts valid custom options (0.463417ms)
+    ✔ normalizePythonRuntimeConfig rejects unsupported versions or app servers (0.282083ms)
+    ✔ normalizePythonRuntimeConfig rejects invalid entry points or workers (0.107958ms)
+    ✔ normalizePythonRuntimeConfig enforces port requirements when requested (0.093209ms)
+    ✔ normalizePythonApplicationSpec normalizes complete spec (1.43075ms)
+    ✔ normalizePythonApplicationSpec rejects invalid fields (0.088833ms)
+    ✔ normalizes python rollback, restart, and status specs (0.170125ms)
+    ✔ a redirect target keeps the URL and defaults to a permanent redirect that keeps the path (1.462542ms)
+    ✔ redirect URLs that could break out of the nginx directive or mislead are refused (0.631334ms)
+    ✔ redirect Domains accept only settings that apply to a redirect response (0.342334ms)
+    ✔ tenant constants and role classification predicates (1.896542ms)
+    ✔ assertTenantIdentifier and isValidTenantIdentifier (0.451667ms)
+    ✔ normalizeResellerAccount validates reseller models and enforces no nesting (0.304667ms)
+    ✔ normalizeCustomerAccount validates customer under reseller and direct Owner customer (0.183ms)
+    ✔ normalizeHostingAccount delegates and verifies expectedKind (0.161292ms)
+    ✔ normalizeWebsiteOwnership validates website-to-customer ownership projection (0.1605ms)
+    ✔ createTenantContext builds accurate tenant context for all roles (0.197209ms)
+    ✔ resolveEntityTenantScope maps all entity types to their tenant scope (0.242709ms)
+    ✔ assertTenantAccess enforces boundaries across Owner, Reseller, Customer, and legacy SM (0.506209ms)
+    ✔ filterByTenantBoundary filters resources according to actor tenant boundary (0.255875ms)
+    ✔ resolveEntityTenantScope handles application, database, mail_alias, job variations and lookup errors (0.268875ms)
+    ✔ assertTenantAccess negative scenarios: cross-tenant data leakage prevention (0.385167ms)
+    ✔ filterByTenantBoundary negative scenarios: prevents cross-tenant data leakage in collections (0.835167ms)
+    ✔ tenant context creation and account normalization security edge cases (0.543167ms)
+    ℹ tests 72
+    ℹ suites 0
+    ℹ pass 72
+    ℹ fail 0
+    ℹ cancelled 0
+    ℹ skipped 0
+    ℹ todo 0
+    ℹ duration_ms 389.877333
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
