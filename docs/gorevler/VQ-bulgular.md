@@ -1820,3 +1820,15 @@
     ℹ duration_ms 389.877333
 
 - **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
+
+### T917 · Website backup operation reads replace unchanged durable store
+- **Bağımlı:** T900
+- **Dosyalar:** `apps/api/src/website-backup-operation-registry.js`, `apps/api/test/website-backup-operation-registry-readonly-real-fs.test.js`
+- **Kaynak:** QA · 2026-11-16 17:29
+- **İş:** Önce tekrar üret ve otomatik teste çevir, sonra düzelt. Kayıt:
+
+    T883 gerçek kabulünün başarılı test yedekleri temizliğinde engel bulundu. Source9e gerçek registry/service+gerçek FS negatifinde 9 testten 8 salt okuma inode korunumunda doğru sebeple FAIL, 1 gerçek create kontrolü PASS: list/get/worker/service/missing/empty-reconcile byte/SHA aynı olduğu halde atomik yeniden yazıyor. Özel RED32f503714b0ccc3459a8e248c03e5ac00fe7a59f257eb9028eb04f86f3ab2af1, tanıfreeze023114b54746dc0ae8dff8e03fb67bbe01ca176bb85916d5dceb88617ac62a7f.
+    Yalnız bu özel combined checkout içinde aynı process lock+fresh disk load korunarak zaten yüklenen raw payload ve yeni canonical payload byte-identical ise gereksiz save/rename atlanır. Eksik store oluşturma, gerçek create/update/cancel/recovery ve migration/canonicalization kalıcı yazımı korunur. Gerçek FS+actual registry/service/default lock; mock/stub/fakeHTTP/DB yok. Önce RED, sonra fix+GREEN; salt regex yeterli değil.
+    Source9e ve Primary28ec bu dilimde değiştirilmez. Eski07/08/401/compare HOLD ve nativeC1FAILED korunur; 14:05 kesin writer UNKNOWN. GC inode/FD/hash/once-only guardları gevşetilmez; 10repo26snapshot/18durable receipts KEEP. T889 açık. Kaynak uygunluğu ve ilgili/full combined gate gereklidir; matching yeni paket/.28 gerçek GET inode korunum+GC sonucu Root tarafından ayrı doğrulanmadan runtime kabulü yok. Push/main/force/reset yok.
+
+- **Kabul:** Hata tekrar üretilmiyor; `orkestra/orchestrator.py verify --quick` geçiyor.
