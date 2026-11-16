@@ -139,6 +139,7 @@ export function createWebsiteBackupOperationRegistry({
 } = {}) {
   let operations = new Map();
   let initialized = false;
+  let persistedPayload = null;
   const storeLock = filePath
     ? storeLockFactory({ filePath: path.resolve(filePath) })
     : null;
@@ -149,8 +150,8 @@ export function createWebsiteBackupOperationRegistry({
       return;
     }
     try {
-      const raw = await readFile(filePath, 'utf8');
-      const parsed = JSON.parse(raw);
+      const raw = await readFile(filePath);
+      const parsed = JSON.parse(raw.toString('utf8'));
       if (parsed && parsed.version === 1 && Array.isArray(parsed.operations)) {
         operations = new Map();
         for (const item of parsed.operations) {
@@ -161,6 +162,7 @@ export function createWebsiteBackupOperationRegistry({
           } else throw new WebsiteBackupOperationRegistryError('website_backup_operation_store_invalid', 'Website backup operation store contains an invalid record', 500);
         }
       } else throw new WebsiteBackupOperationRegistryError('website_backup_operation_store_invalid', 'Website backup operation store is invalid', 500);
+      persistedPayload = raw;
     } catch (error) {
       if (error?.code !== 'ENOENT') {
         throw new WebsiteBackupOperationRegistryError(
@@ -170,21 +172,24 @@ export function createWebsiteBackupOperationRegistry({
         );
       }
       operations = new Map();
+      persistedPayload = null;
     }
     initialized = true;
   }
 
   async function saveUnlocked() {
     if (!filePath) return;
+    const payload = Buffer.from(JSON.stringify({
+      version: 1,
+      operations: Array.from(operations.values()),
+    }, null, 2), 'utf8');
+    if (persistedPayload !== null && payload.equals(persistedPayload)) return;
     const dir = path.dirname(filePath);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
-    const payload = JSON.stringify({
-      version: 1,
-      operations: Array.from(operations.values()),
-    }, null, 2);
     await writeFile(tmpPath, payload, { mode: 0o600 });
     await rename(tmpPath, filePath);
+    persistedPayload = payload;
   }
 
   async function withStore(action) {
