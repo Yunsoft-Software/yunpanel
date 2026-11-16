@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFile, writeFile, mkdir, rename, rm } from 'node:fs/promises';
+import { open, lstat, writeFile, mkdir, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { createProcessStoreLock } from './process-store-lock.js';
 import { assertWebsiteSnapshotContent, resolveWebsiteRestoreSelection } from './website-restore-selection.js';
@@ -15,6 +15,19 @@ const SAFE_ERROR_CODE_PATTERN = /^[a-z0-9_]{1,100}$/;
 const OPERATION_STATUSES = new Set(['queued', 'running', 'succeeded', 'failed', 'rolled_back']);
 const OPERATION_KINDS = new Set(['backup', 'restore', 'check', 'plan']);
 const ACTIVE_STATUSES = new Set(['queued', 'running']);
+
+function sameStoredFileIdentity(left, right) {
+  return Boolean(left && right && ['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeNs', 'ctimeNs']
+    .every((field) => left[field] === right[field]));
+}
+
+function privateStoredFile(metadata) {
+  const uid = typeof process.geteuid === 'function' ? process.geteuid() : null;
+  const gid = typeof process.getegid === 'function' ? process.getegid() : null;
+  return metadata?.isFile() && uid !== null && gid !== null
+    && metadata.uid === BigInt(uid) && metadata.gid === BigInt(gid)
+    && (metadata.mode & 0o7777n) === 0o600n && metadata.nlink === 1n;
+}
 
 function isSafeStagedRoot(stagedRoot) {
   return typeof stagedRoot === 'string'
@@ -147,10 +160,17 @@ export function createWebsiteBackupOperationRegistry({
   async function loadUnlocked() {
     if (!filePath) {
       initialized = true;
-      return;
+      return null;
     }
+    let handle = null;
     try {
-      const raw = await readFile(filePath);
+      // Preserve the legacy read behavior, including reads through a symlink.
+      // Only a stable private regular path may later omit its normal atomic save.
+      handle = await open(filePath, 'r');
+      const before = await handle.stat({ bigint: true });
+      const raw = await handle.readFile();
+      const after = await handle.stat({ bigint: true });
+      const pathMetadata = await lstat(filePath, { bigint: true }).catch(() => null);
       const parsed = JSON.parse(raw.toString('utf8'));
       if (parsed && parsed.version === 1 && Array.isArray(parsed.operations)) {
         operations = new Map();
@@ -163,7 +183,11 @@ export function createWebsiteBackupOperationRegistry({
         }
       } else throw new WebsiteBackupOperationRegistryError('website_backup_operation_store_invalid', 'Website backup operation store is invalid', 500);
       persistedPayload = raw;
+      initialized = true;
+      return { handle, metadata: after, maySkip: privateStoredFile(before)
+        && sameStoredFileIdentity(before, after) && sameStoredFileIdentity(after, pathMetadata) };
     } catch (error) {
+      if (handle) await handle.close();
       if (error?.code !== 'ENOENT') {
         throw new WebsiteBackupOperationRegistryError(
           'website_backup_operation_store_invalid',
@@ -175,15 +199,28 @@ export function createWebsiteBackupOperationRegistry({
       persistedPayload = null;
     }
     initialized = true;
+    return null;
   }
 
-  async function saveUnlocked() {
+  async function unchangedPrivateFile(loaded) {
+    if (!loaded?.maySkip) return false;
+    try {
+      const current = await loaded.handle.stat({ bigint: true });
+      const currentPath = await lstat(filePath, { bigint: true });
+      return privateStoredFile(current) && sameStoredFileIdentity(loaded.metadata, current)
+        && sameStoredFileIdentity(current, currentPath);
+    } catch {
+      return false;
+    }
+  }
+
+  async function saveUnlocked(loaded) {
     if (!filePath) return;
     const payload = Buffer.from(JSON.stringify({
       version: 1,
       operations: Array.from(operations.values()),
     }, null, 2), 'utf8');
-    if (persistedPayload !== null && payload.equals(persistedPayload)) return;
+    if (persistedPayload !== null && payload.equals(persistedPayload) && await unchangedPrivateFile(loaded)) return;
     const dir = path.dirname(filePath);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const tmpPath = `${filePath}.${process.pid}.${Date.now()}.tmp`;
@@ -195,16 +232,24 @@ export function createWebsiteBackupOperationRegistry({
   async function withStore(action) {
     if (storeLock) {
       return storeLock.withLock(async () => {
-        await loadUnlocked();
-        const result = await action();
-        await saveUnlocked();
-        return result;
+        const loaded = await loadUnlocked();
+        try {
+          const result = await action();
+          await saveUnlocked(loaded);
+          return result;
+        } finally {
+          await loaded?.handle.close();
+        }
       });
     }
-    if (!initialized) await loadUnlocked();
-    const result = await action();
-    await saveUnlocked();
-    return result;
+    const loaded = !initialized ? await loadUnlocked() : null;
+    try {
+      const result = await action();
+      await saveUnlocked(loaded);
+      return result;
+    } finally {
+      await loaded?.handle.close();
+    }
   }
 
   async function createOperation({

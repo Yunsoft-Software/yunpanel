@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { constants } from 'node:fs';
-import { chmod, lstat, mkdtemp, open, readFile, realpath, rm, stat, unlink, writeFile } from 'node:fs/promises';
+import { constants, chmodSync, linkSync, renameSync, symlinkSync } from 'node:fs';
+import { chmod, lstat, mkdtemp, open, readFile, readdir, realpath, rename, rm, stat, symlink, link, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -239,4 +239,113 @@ test('actual malformed local store still fails closed without overwriting the in
     assert.equal(await readFile(f.filePath, 'utf8'), '{');
     assert.equal((await stat(f.filePath)).ino, before.ino);
   } finally { await handle.close(); }
+}));
+
+
+async function assertPrivateSingleLinkStore(filePath, expectedOperationId, registry, filter = {}) {
+  const rows = await registry.listOperations(filter);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].id, expectedOperationId);
+  const after = await lstat(filePath);
+  assert.equal(after.isFile(), true, 'the target must end as the original regular-file write result');
+  assert.equal(after.isSymbolicLink(), false, 'a symlink cannot receive no-op authority');
+  assert.equal(after.mode & 0o7777, 0o600, 'private store mode must be retained or repaired');
+  assert.equal(after.nlink, 1, 'the target must end as a single-link file');
+  assert.equal(after.uid, process.getuid());
+}
+
+for (const condition of ['mode0644', 'symlink', 'hardlink']) {
+  test('real existing ' + condition + ' metadata still uses the original private atomic replacement', () => ownDirectory(async directory => {
+    const f = await fixture(directory, true);
+    const originalBytes = await readFile(f.filePath);
+    let target = f.filePath;
+    if (condition === 'mode0644') await chmod(f.filePath, 0o644);
+    if (condition === 'symlink') {
+      target = path.join(directory, 'actual-store-target.json');
+      await rename(f.filePath, target);
+      await symlink(path.basename(target), f.filePath);
+    }
+    if (condition === 'hardlink') await link(f.filePath, path.join(directory, 'actual-store-alias.json'));
+    const held = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      const before = await held.stat();
+      await assertPrivateSingleLinkStore(f.filePath, f.operation.id, f.registry);
+      assert.deepEqual(await readFile(f.filePath), originalBytes);
+      assert.notEqual((await stat(f.filePath)).ino, before.ino, 'unsafe metadata must not silently skip atomic replacement');
+    } finally { await held.close(); }
+    await unchangedStore(f.filePath, () => f.registry.getOperation(f.operation.id));
+  }));
+}
+
+for (const condition of ['mode0644', 'symlink', 'hardlink']) {
+  test('real ' + condition + ' drift after load is rechecked before granting no-op authority', () => ownDirectory(async directory => {
+    const f = await fixture(directory, true);
+    const bytes = await readFile(f.filePath);
+    const held = await open(f.filePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+    let called = false;
+    const filter = {
+      websiteId: {
+        // The real registry evaluates this filter after loading and before save.
+        // Use actual owned FS effects here; no fs method, stat result or HTTP is replaced.
+        toLowerCase() {
+          assert.equal(called, false);
+          called = true;
+          if (condition === 'mode0644') chmodSync(f.filePath, 0o644);
+          if (condition === 'symlink') {
+            const target = path.join(directory, 'actual-drift-target.json');
+            renameSync(f.filePath, target);
+            symlinkSync(path.basename(target), f.filePath);
+          }
+          if (condition === 'hardlink') linkSync(f.filePath, path.join(directory, 'actual-drift-alias.json'));
+          return f.operation.websiteId;
+        },
+      },
+    };
+    try {
+      const before = await held.stat();
+      await assertPrivateSingleLinkStore(f.filePath, f.operation.id, f.registry, filter);
+      assert.equal(called, true);
+      assert.deepEqual(await readFile(f.filePath), bytes);
+      assert.notEqual((await stat(f.filePath)).ino, before.ino, 'fresh path/FD drift cannot silently skip the original write');
+    } finally { await held.close(); }
+    await unchangedStore(f.filePath, () => f.registry.getOperation(f.operation.id));
+  }));
+}
+
+test('real repeated safe reads close every loaded store descriptor', () => ownDirectory(async directory => {
+  const f = await fixture(directory, true);
+  const fdDirectory = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
+  for (let index = 0; index < 4; index += 1) await f.registry.getOperation(f.operation.id);
+  const before = (await readdir(fdDirectory)).length;
+  await unchangedStore(f.filePath, async () => {
+    for (let index = 0; index < 64; index += 1) assert.equal((await f.registry.getOperation(f.operation.id)).id, f.operation.id);
+  });
+  const after = (await readdir(fdDirectory)).length;
+  assert.ok(after <= before, 'loaded-FD lifetime must not leak across successful transactions');
+}));
+
+
+test('real malformed load errors close the descriptor on every rejected read', () => ownDirectory(async directory => {
+  const f = await fixture(directory);
+  await writeFile(f.filePath, '{', { mode: 0o600 });
+  const fdDirectory = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
+  const before = (await readdir(fdDirectory)).length;
+  for (let index = 0; index < 16; index += 1) {
+    await assert.rejects(() => f.registry.listOperations(), error => error.code === 'website_backup_operation_store_invalid' && error.status === 500);
+  }
+  assert.ok((await readdir(fdDirectory)).length <= before, 'failed load must close the actual opened descriptor');
+  assert.equal(await readFile(f.filePath, 'utf8'), '{');
+}));
+
+test('real active-operation conflicts close the loaded descriptor without replacing the store', () => ownDirectory(async directory => {
+  const f = await fixture(directory, true);
+  const fdDirectory = process.platform === 'linux' ? '/proc/self/fd' : '/dev/fd';
+  const before = (await readdir(fdDirectory)).length;
+  await unchangedStore(f.filePath, async () => {
+    for (let index = 0; index < 16; index += 1) {
+      await assert.rejects(() => f.registry.createOperation({ websiteId: f.operation.websiteId, repositoryId: f.operation.repositoryId, kind: 'check' }),
+        error => error.code === 'website_backup_operation_conflict' && error.status === 409);
+    }
+  });
+  assert.ok((await readdir(fdDirectory)).length <= before, 'rejected action must close the actual loaded descriptor');
 }));
