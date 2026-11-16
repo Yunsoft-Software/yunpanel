@@ -1,6 +1,7 @@
 import { lstat, rm } from 'node:fs/promises';
 import { createNodeServiceRemovalManager, createWebsitePathContract } from '@yunpanel/host-runtime';
 import { createNodeDeploymentReceiptStore } from './node-deployment-receipt.js';
+import { createWebsitePassengerEnvironmentManager } from '@yunpanel/host-runtime/website-passenger-environment-manager';
 
 export class WebsiteRemovalCleanupAdapterError extends Error {
   constructor(code, message, status = 409) {
@@ -32,6 +33,8 @@ export function createWebsiteRemovalCleanupAdapters({
   websiteRegistry,
   applicationRegistry,
   websiteProvisioningRuntime,
+  applicationEnvironmentRegistry = null,
+  passengerEnvironmentManager = createWebsitePassengerEnvironmentManager(),
   nodeServiceRemovalManager = createNodeServiceRemovalManager(),
   nodeDeploymentReceiptStore = createNodeDeploymentReceiptStore(),
   lstatFn = lstat,
@@ -73,6 +76,107 @@ export function createWebsiteRemovalCleanupAdapters({
       unavailable('website_cleanup_application_shared', 'Application is bound to another Website');
     }
     return Object.freeze({ website, application });
+  }
+
+  async function passengerEnvironmentCleanupHandler({ operation, priorReceipt = null, checkpoint } = {}) {
+    const { id: removalId, websiteId, applicationId, serverId } = operation ?? {};
+    if (typeof removalId !== 'string' || !/^ws-rem-[a-f0-9-]{36}$/.test(removalId)
+      || !applicationId || !websiteId || !serverId || typeof checkpoint !== 'function') {
+      unavailable('website_cleanup_passenger_environment_scope_invalid', 'Passenger environment removal authority is unavailable');
+    }
+    if (typeof passengerEnvironmentManager?.inspectAbsence !== 'function'
+      || typeof passengerEnvironmentManager?.retire !== 'function') {
+      unavailable('website_cleanup_passenger_environment_unavailable', 'Passenger environment retirement is unavailable');
+    }
+    const [website, application, websites] = await Promise.all([
+      websiteRegistry.getWebsite(websiteId), applicationRegistry.getApplication(applicationId),
+      websiteRegistry.listWebsites({ serverId }),
+    ]);
+    if (!Array.isArray(websites) || websites.some(row => row.id !== websiteId && row.applicationId === applicationId)
+      || website && (website.id !== websiteId || website.serverId !== serverId || website.applicationId !== applicationId)
+      || application && (application.id !== applicationId || application.serverId !== serverId
+        || application.desiredRevision !== operation.applicationRevision || application.activeDeploymentId !== null)) {
+      unavailable('website_cleanup_passenger_environment_scope_invalid', 'Passenger environment Application ownership changed');
+    }
+    if (priorReceipt && (priorReceipt.removalId !== removalId || priorReceipt.websiteId !== websiteId
+      || priorReceipt.applicationId !== applicationId || priorReceipt.serverId !== serverId)) {
+      unavailable('website_cleanup_passenger_environment_scope_invalid', 'Passenger environment removal checkpoint changed');
+    }
+    const presence = await passengerEnvironmentManager.inspectAbsence(applicationId);
+    if (!application && (!priorReceipt || priorReceipt.state !== 'retired' || !presence.includeAbsent)) {
+      unavailable('website_cleanup_passenger_environment_ownership_missing', 'An absent Application requires a completed same-journal retirement and physical absence');
+    }
+    if (operation.plan?.applicationRuntime?.adapter === 'passenger' && priorReceipt?.kind === 'passenger-environment-absence') {
+      unavailable('website_cleanup_passenger_environment_ownership_missing', 'A Passenger removal requires its owned retirement checkpoint');
+    }
+    if (priorReceipt?.kind === 'passenger-environment-absence' && !presence.includeAbsent) {
+      unavailable('website_cleanup_passenger_environment_drift', 'Passenger environment include reappeared after verified absence');
+    }
+    const passenger = application?.type === 'node' && application.runtimeAdapter === 'passenger';
+    if (application && !passenger && operation.plan?.applicationRuntime?.adapter === 'passenger') {
+      unavailable('website_cleanup_passenger_environment_scope_invalid', 'Application adapter changed after the removal plan');
+    }
+    if (!passenger && !priorReceipt?.sourceOperationId) {
+      if (!presence.includeAbsent) unavailable('website_cleanup_passenger_environment_ownership_missing', 'An environment include exists without supported Passenger authority');
+      const result = Object.freeze({ version: 1, kind: 'passenger-environment-absence', state: 'retired', removalId,
+        websiteId, applicationId, serverId, includeAbsent: true, applicable: false });
+      if (priorReceipt && (Object.keys(priorReceipt).length !== Object.keys(result).length
+        || Object.entries(result).some(([key, value]) => priorReceipt[key] !== value))) {
+        unavailable('website_cleanup_passenger_environment_ownership_missing', 'The same-journal absence checkpoint is invalid');
+      }
+      if (!priorReceipt) await checkpoint(result);
+      return result;
+    }
+    if (application && !passenger) unavailable('website_cleanup_passenger_environment_scope_invalid', 'Application adapter changed after Passenger retirement');
+    if (!application && !priorReceipt) {
+      unavailable('website_cleanup_passenger_environment_ownership_missing', 'Application is absent without a Passenger retirement checkpoint');
+    }
+    const operations = await websiteProvisioningRuntime.registry.listForWebsite(websiteId);
+    if (!Array.isArray(operations)) unavailable('website_cleanup_passenger_environment_ownership_missing', 'Passenger provisioning authority is unavailable');
+    const matching = operations.flatMap(source => {
+      const app = source?.resources?.application, site = source?.resources?.website;
+      if (source.websiteId !== websiteId || app?.id !== applicationId || site?.id !== websiteId
+        || site.applicationId !== applicationId || site.serverId !== serverId
+        || app.type !== 'node' || app.runtimeAdapter !== 'passenger') return [];
+      return source.steps.filter(step => step.kind === 'passenger_environment' && step.state === 'succeeded'
+        && step.intent?.applicationId === applicationId && step.evidence?.ownedByOperation === true
+        && step.evidence?.applicationId === applicationId && typeof step.evidence?.includeSha256 === 'string')
+        .map(step => ({ source, step }));
+    }).filter(row => !priorReceipt?.sourceOperationId || row.source.operationId === priorReceipt.sourceOperationId);
+    if (matching.length !== 1) unavailable('website_cleanup_passenger_environment_ownership_missing', 'Passenger provisioning ownership is missing or ambiguous');
+    const { source, step } = matching[0];
+    if (website && (website.runtimeType !== 'node' || website.unixUser !== source.resources.website.unixUser
+      || website.documentRoot !== source.resources.website.documentRoot)) {
+      unavailable('website_cleanup_passenger_environment_scope_invalid', 'Passenger Website identity changed');
+    }
+    let snapshot;
+    if (application && priorReceipt?.state !== 'retired') {
+      if (typeof applicationEnvironmentRegistry?.environmentStatus !== 'function') {
+        unavailable('website_cleanup_passenger_environment_unavailable', 'Application environment metadata is unavailable');
+      }
+      const status = await applicationEnvironmentRegistry.environmentStatus(applicationId);
+      const initialSteps = source.steps.filter(row => row.kind === 'passenger_application_release' && row.state === 'succeeded');
+      const initialStep = initialSteps.length === 1 ? initialSteps[0] : null;
+      const initialReleaseId = application.currentReleaseId === source.operationId && application.lastDeploymentId === source.operationId
+        && application.previousReleaseId === null && Array.isArray(application.releases) && application.releases.length === 1
+        && application.releases[0].releaseId === source.operationId && application.releases[0].deploymentId === source.operationId
+        && initialStep?.intent?.adapter === 'passenger-application-release' && initialStep.intent.applicationId === applicationId
+        && initialStep.intent.releaseId === source.operationId && initialStep.evidence?.satisfied === true
+        && initialStep.evidence.adapter === 'passenger-application-release' && initialStep.evidence.applicationId === applicationId
+        && initialStep.evidence.releaseId === source.operationId && initialStep.evidence.previousReleaseId === null
+        && initialStep.evidence.commitSha === application.currentCommitSha && application.releases[0].commitSha === application.currentCommitSha
+        ? source.operationId : null;
+      snapshot = { releaseId: application.currentReleaseId ?? null, savedRevision: status.savedRevision,
+        appliedRevision: status.appliedRevision, appliedReleaseId: status.appliedReleaseId,
+        originalIncludeSha256: step.evidence.includeSha256, initialReleaseId };
+    } else {
+      snapshot = priorReceipt?.authoritySnapshot;
+      if (!snapshot || snapshot.originalIncludeSha256 !== step.evidence.includeSha256) {
+        unavailable('website_cleanup_passenger_environment_ownership_missing', 'Passenger retirement checkpoint authority is unavailable');
+      }
+    }
+    return passengerEnvironmentManager.retire({ ...snapshot, removalId, websiteId, applicationId, serverId,
+      sourceOperationId: source.operationId }, { priorReceipt, checkpoint });
   }
 
   async function ownedIdentitySource({ websiteId, systemUser } = {}) {
@@ -436,6 +540,7 @@ export function createWebsiteRemovalCleanupAdapters({
   }
 
   return Object.freeze({
+    passengerEnvironmentCleanupHandler,
     inspectDirectSystemdCleanup,
     directSystemdCleanupHandler,
     inspectFileCleanup,

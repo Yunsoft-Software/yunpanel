@@ -1,6 +1,21 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
+import { randomUUID, createHash } from 'node:crypto';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { createServerRegistry } from '../src/server-registry.js';
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
+import { createWebsiteRemovalOperationRegistry } from '../src/website-removal-operation-registry.js';
+import { createWebsitePassengerEnvironmentManager } from '@yunpanel/host-runtime/website-passenger-environment-manager';
+import { createDomainRegistry } from '../src/domain-registry.js';
+import { createSiteMutationLock } from '../src/site-mutation-lock.js';
+import { withPassengerEnvironmentRetirementScope } from '../src/website-removal-runtime.js';
+import { createWebsitePassengerApplicationReleaseProvisioningHandler } from '../src/website-passenger-application-release-provisioning-handler.js';
 
 const websiteId='11111111-1111-4111-8111-111111111111';
 const applicationId='22222222-2222-4222-8222-222222222222';
@@ -300,4 +315,114 @@ test('a provisioning step in an unknown state stays blocked',async()=>{
  const f=fixture({unixState:'running'});
  await assert.rejects(()=>f.adapters.unixIdentityCleanupHandler({websiteId,systemUser}),e=>e.code==='website_cleanup_identity_evidence_unavailable');
  assert.equal(f.compensated.length,0);
+});
+
+async function realPassengerControlPlane(t) {
+ const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'yp-retirement-control-plane-')));t.after(()=>rm(root,{recursive:true,force:true}));
+ const servers=createServerRegistry({filePath:path.join(root,'servers.json')});await servers.init();const server=await servers.createLocalServer({hostname:'retirement-control.example.test'});
+ const applications=createApplicationRegistry({filePath:path.join(root,'applications.json'),serverExists:async id=>Boolean(await servers.getServer(id))});await applications.init();
+ let application=await applications.createNodeApplication({serverId:server.id,name:'Own Passenger retirement',repositoryUrl:'https://github.com/heroku/node-js-getting-started.git',runtimeAdapter:'passenger',runtime:{nodeMajor:24,installMode:'ci',startMode:'node',entryFile:'index.js',healthPath:'/',healthTimeoutSeconds:30,restartPolicy:'on-failure'}});
+ const websites=createWebsiteRegistry({filePath:path.join(root,'websites.json'),serverExists:async id=>Boolean(await servers.getServer(id)),getApplication:id=>applications.getApplication(id)});await websites.init();
+ const website=await websites.createWebsite({serverId:server.id,name:'retirement-control.example.test',applicationId:application.id,runtimeType:'node'});
+ const environments=createApplicationEnvironmentRegistry({filePath:path.join(root,'environments.json'),applicationExists:async id=>Boolean(await applications.getApplication(id))});await environments.init();
+ const includeRoot=path.join(root,'includes');await mkdir(includeRoot,{mode:0o700});
+ const manager=createWebsitePassengerEnvironmentManager({includeRoot,receiptRoot:path.join(root,'receipts'),ownerUid:process.getuid(),ownerGid:process.getgid()});
+ const sourceOperationId=randomUUID(),evidence=await manager.apply({applicationId:application.id,environmentRevision:0,values:{}},{operationId:sourceOperationId});
+ const provisioning=createWebsiteProvisioningRuntime({filePath:path.join(root,'provisioning.json'),passengerEnvironmentManager:manager});await provisioning.registry.init();
+ // Actual registry transitions, driven by pure release policy input; no host/deployment result is asserted.
+ const commitSha=createHash('sha1').update(await readFile(new URL(import.meta.url))).digest('hex');
+ await provisioning.registry.create({operationId:sourceOperationId,websiteId:website.id,resources:{application,website},steps:[{id:'passenger_environment',kind:'passenger_environment',intent:{adapter:'passenger-environment',applicationId:application.id},state:'pending'},
+ {id:'node_release',kind:'node_release',intent:{adapter:'passenger-release',applicationId:application.id},state:'pending'},
+ {id:'passenger_application_release',kind:'passenger_application_release',intent:{adapter:'passenger-application-release',applicationId:application.id,releaseId:sourceOperationId},state:'pending'}]});
+ await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'passenger_environment'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'passenger_environment',evidence});
+ await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'node_release'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'node_release',evidence:{adapter:'passenger-release',applicationId:application.id,releaseId:sourceOperationId,deploymentId:sourceOperationId,previousReleaseId:null,commitSha}});
+ const sourceOperation=await provisioning.registry.get(sourceOperationId),releaseStep=sourceOperation.steps.find(row=>row.kind==='passenger_application_release');
+ const releaseEvidence=await createWebsitePassengerApplicationReleaseProvisioningHandler({applicationRegistry:applications}).apply({operation:sourceOperation,operationId:sourceOperationId,intent:releaseStep.intent});
+ await provisioning.registry.beginStep({operationId:sourceOperationId,stepId:'passenger_application_release'});await provisioning.registry.completeStep({operationId:sourceOperationId,stepId:'passenger_application_release',evidence:releaseEvidence});
+ application=await applications.getApplication(application.id);
+ const journal=createWebsiteRemovalOperationRegistry({filePath:path.join(root,'removals.json')});await journal.init();
+ // Pure removal policy input from these actual new registry records; no HTTP or host outcome is substituted.
+ const operation=await journal.create({operation:'website_remove',readyToStart:true,previewDigest:'a'.repeat(64),confirmation:'own-retirement-policy',website:{...website,desiredRevision:website.revision},plan:{applicationId:application.id,applicationRevision:application.desiredRevision,applicationRuntime:{type:'node',adapter:'passenger',releaseId:sourceOperationId},domainIds:[],domains:[],systemUser:website.unixUser,additional:{}}});
+ const adapters=createWebsiteRemovalCleanupAdapters({websiteRegistry:websites,applicationRegistry:applications,applicationEnvironmentRegistry:environments,websiteProvisioningRuntime:provisioning,passengerEnvironmentManager:manager});
+ return{root,server,servers,application,website,applications,websites,environments,manager,journal,operation,adapters,target:path.join(includeRoot,application.id+'.conf')};
+}
+
+test('actual registries retire an initial Passenger include before deletion and reuse the receipt after Website and Application are gone',async t=>{
+ const f=await realPassengerControlPlane(t),step=f.operation.steps.find(s=>s.kind==='file_cleanup');
+ const checkpoint=receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt});
+ const result=await f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint});assert.equal(result.includeAbsent,true);
+ await assert.rejects(readFile(f.target),{code:'ENOENT'});
+ await f.journal.succeedStep(f.operation.id,step.id,{passengerEnvironmentRetirement:result});
+ await f.websites.finalizeWebsiteRemoval({websiteId:f.website.id,serverId:f.server.id,applicationId:f.application.id,expectedRevision:f.website.revision,operationId:f.operation.id});
+ const appStep=f.operation.steps.find(s=>s.kind==='application_cleanup');
+ const appCheckpoint=receipt=>f.journal.checkpointStep(f.operation.id,appStep.id,{passengerEnvironmentRetirement:receipt});
+ assert.deepEqual(await f.adapters.passengerEnvironmentCleanupHandler({operation:await f.journal.get(f.operation.id),priorReceipt:result,checkpoint:appCheckpoint}),result);
+ await f.environments.purgeApplication(f.application.id);await f.applications.deleteApplication({applicationId:f.application.id,expectedServerId:f.server.id,expectedDesiredRevision:f.application.desiredRevision});
+ assert.deepEqual(await f.adapters.passengerEnvironmentCleanupHandler({operation:await f.journal.get(f.operation.id),priorReceipt:result,checkpoint:appCheckpoint}),result);
+ const persisted=JSON.parse(await readFile(path.join(f.root,'removals.json'),'utf8'));assert.equal(persisted[0].steps.find(s=>s.id===step.id).result.passengerEnvironmentRetirement.state,'retired');
+});
+
+test('actual registry legacy continuation can retire the owned include after Website metadata disappeared without requiring a release symlink',async t=>{
+ const f=await realPassengerControlPlane(t);await f.websites.finalizeWebsiteRemoval({websiteId:f.website.id,serverId:f.server.id,applicationId:f.application.id,expectedRevision:f.website.revision,operationId:f.operation.id});
+ const step=f.operation.steps.find(s=>s.kind==='application_cleanup');
+ const result=await f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt})});
+ assert.equal(result.includeAbsent,true);await assert.rejects(readFile(f.target),{code:'ENOENT'});
+});
+
+test('real App and Website leases plus Domain namespace cover the actual checkpoint and include unlink',async t=>{
+ const f=await realPassengerControlPlane(t),lock=createSiteMutationLock({root:path.join(f.root,'resource-locks')});
+ const domains=createDomainRegistry({filePath:path.join(f.root,'domains.json'),serverExists:async id=>Boolean(await f.servers.getServer(id)),getWebsite:id=>f.websites.getWebsite(id),siteMutationLock:lock});await domains.init();
+ const domain=await domains.createDomain({serverId:f.server.id,primaryDomain:'lease-race.example.test',targetType:'proxy',target:{upstreamPort:3000},httpsMode:'off'});
+ const step=f.operation.steps.find(s=>s.kind==='file_cleanup');let enter,release;
+ const entered=new Promise(resolve=>{enter=resolve;}),barrier=new Promise(resolve=>{release=resolve;});
+ const retirement=lock.withApplicationLock(f.application.id,()=>withPassengerEnvironmentRetirementScope({operation:f.operation,siteMutationLock:lock,domainRegistry:domains},()=>f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:async receipt=>{
+   await f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt});
+   if(receipt.state==='prepared'){enter();await barrier;}
+ }})));
+ await Promise.race([entered,retirement.then(()=>{throw new Error('checkpoint was not observed');})]);
+ const binding=domains.bindWebsite(domain.id,f.website.id);
+ try{await new Promise(setImmediate);assert.equal((await domains.getDomain(domain.id)).websiteId,null);assert.ok((await readFile(f.target)).length>0);}
+ finally{release();await retirement;await binding;}
+ await assert.rejects(readFile(f.target),{code:'ENOENT'});assert.equal((await binding).websiteId,f.website.id);
+});
+
+test('an actual still-bound Domain blocks retirement before checkpoint or unlink',async t=>{
+ const f=await realPassengerControlPlane(t),lock=createSiteMutationLock({root:path.join(f.root,'resource-locks')});
+ const domains=createDomainRegistry({filePath:path.join(f.root,'domains.json'),serverExists:async id=>Boolean(await f.servers.getServer(id)),getWebsite:id=>f.websites.getWebsite(id),siteMutationLock:lock});await domains.init();
+ const domain=await domains.createDomain({serverId:f.server.id,primaryDomain:'still-bound.example.test',targetType:'proxy',target:{upstreamPort:3000},httpsMode:'off'});
+ await domains.bindWebsite(domain.id,f.website.id);const before=await readFile(f.target),step=f.operation.steps.find(s=>s.kind==='file_cleanup');
+ await assert.rejects(lock.withApplicationLock(f.application.id,()=>withPassengerEnvironmentRetirementScope({operation:f.operation,siteMutationLock:lock,domainRegistry:domains},()=>f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt})}))),e=>e.code==='website_removal_domains_still_attached');
+ assert.deepEqual(await readFile(f.target),before);assert.equal((await domains.getDomain(domain.id)).websiteId,f.website.id);
+ assert.equal((await f.journal.get(f.operation.id)).steps.find(s=>s.id===step.id).result?.passengerEnvironmentRetirement,undefined);
+});
+
+test('a real unbound Domain retaining the same Passenger Application blocks include retirement',async t=>{
+ const f=await realPassengerControlPlane(t),lock=createSiteMutationLock({root:path.join(f.root,'resource-locks')});
+ const domains=createDomainRegistry({filePath:path.join(f.root,'domains.json'),serverExists:async id=>Boolean(await f.servers.getServer(id)),getWebsite:id=>f.websites.getWebsite(id),websiteBindingRequired:()=>true,siteMutationLock:lock});await domains.init();
+ const domain=await domains.createDomain({serverId:f.server.id,websiteId:f.website.id,primaryDomain:'unbound-app.example.test',targetType:'passenger',target:{applicationId:f.application.id},httpsMode:'off'});await domains.rollbackWebsiteBinding(domain.id,f.website.id);
+ const before=await readFile(f.target),step=f.operation.steps.find(s=>s.kind==='file_cleanup');
+ await assert.rejects(lock.withApplicationLock(f.application.id,()=>withPassengerEnvironmentRetirementScope({operation:f.operation,siteMutationLock:lock,domainRegistry:domains},()=>f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt})}))),e=>e.code==='website_removal_domains_still_attached');
+ assert.deepEqual(await readFile(f.target),before);const remaining=await domains.getDomain(domain.id);assert.equal(remaining.websiteId,null);assert.equal(remaining.target.applicationId,f.application.id);
+});
+
+test('missing Application cannot advance a prepared retirement or adopt absence without a retired checkpoint',async t=>{
+ for(const phase of ['prepared-present','prepared-absent','no-prior']){
+  const hasPrepared=phase!=='no-prior';
+  const f=await realPassengerControlPlane(t),step=f.operation.steps.find(s=>s.kind==='file_cleanup');let prepared;
+  const checkpoint=receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt});
+  if(hasPrepared)await assert.rejects(f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:async receipt=>{if(receipt.state==='prepared'){await checkpoint(receipt);prepared=receipt;}if(phase==='prepared-present'||receipt.state==='retired')await writeFile(f.root,'actual EISDIR checkpoint boundary');}}),{code:'EISDIR'});
+  else await rm(f.target);
+  await f.websites.finalizeWebsiteRemoval({websiteId:f.website.id,serverId:f.server.id,applicationId:f.application.id,expectedRevision:f.website.revision,operationId:f.operation.id});
+  await f.environments.purgeApplication(f.application.id);await f.applications.deleteApplication({applicationId:f.application.id,expectedServerId:f.server.id,expectedDesiredRevision:f.application.desiredRevision});
+  await assert.rejects(f.adapters.passengerEnvironmentCleanupHandler({operation:await f.journal.get(f.operation.id),priorReceipt:prepared??null,checkpoint}),e=>e.code==='website_cleanup_passenger_environment_ownership_missing');
+  if(phase==='prepared-present')assert.ok((await readFile(f.target)).length>0);else await assert.rejects(readFile(f.target),{code:'ENOENT'});
+ }
+});
+
+test('an actual later Passenger release with absent applied metadata cannot reuse initial include authority',async t=>{
+ const f=await realPassengerControlPlane(t),before=await readFile(f.target),next=randomUUID();
+ await f.applications.activatePassengerRelease(f.application.id,{operationId:next,releaseId:next,previousReleaseId:f.application.currentReleaseId,commitSha:f.application.currentCommitSha});
+ const step=f.operation.steps.find(s=>s.kind==='file_cleanup');
+ await assert.rejects(f.adapters.passengerEnvironmentCleanupHandler({operation:f.operation,checkpoint:receipt=>f.journal.checkpointStep(f.operation.id,step.id,{passengerEnvironmentRetirement:receipt})}),e=>e.code==='website_passenger_environment_retirement_drift');
+ assert.deepEqual(await readFile(f.target),before);assert.equal((await f.journal.get(f.operation.id)).steps.find(s=>s.id===step.id).result?.passengerEnvironmentRetirement,undefined);
 });

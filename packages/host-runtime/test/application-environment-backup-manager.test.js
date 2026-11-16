@@ -169,3 +169,17 @@ test('Expected-current environment CAS refuses a foreign private include before 
   verifyHealth:async()=>true,expectedCurrentContent:foreign}));
  assert.equal(await readFile(temporary,'utf8'),'requires inspection');
 });
+
+test('the shared marked Passenger codec preserves real capture semantics without invoking runtime commands',async t=>{
+ const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'yp-passenger-codec-capture-')));t.after(()=>rm(root,{recursive:true,force:true}));
+ const application={id:randomUUID(),type:'node',runtimeAdapter:'passenger',currentReleaseId:randomUUID(),runtime:{port:3000}};
+ const applications=path.join(root,'apps'),include=path.join(root,'include'),base=path.join(applications,application.id);
+ await mkdir(path.join(base,'releases',application.currentReleaseId),{recursive:true});await symlink('releases/'+application.currentReleaseId,path.join(base,'current'));await mkdir(include,{mode:0o700});
+ const values={OWN_CODEC_PROOF:'quote " dollar $ slash \\ '+randomUUID()},spec=websitePassengerEnvironmentInternals.normalizeSpec({applicationId:application.id,environmentRevision:7,values});
+ await writeFile(path.join(include,application.id+'.conf'),spec.content,{mode:0o600});
+ const manager=createApplicationEnvironmentBackupManager({applicationRoot:applications,passengerRoot:include,ownerUid:process.getuid(),ownerGid:process.getgid()});
+ const snapshot=await manager.captureEnvironment({application});assert.equal(snapshot.content,spec.content);
+ assert.deepEqual(manager.capturedPassengerEnvironment({application,savedRuntime:snapshot}),{values,environmentRevision:7});
+ const changed=spec.content.replace(application.id,randomUUID());await writeFile(path.join(include,application.id+'.conf'),changed,{mode:0o600});
+ await assert.rejects(manager.captureEnvironment({application}),{code:'application_environment_snapshot_invalid'});
+});

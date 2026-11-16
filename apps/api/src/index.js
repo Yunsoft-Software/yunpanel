@@ -987,6 +987,7 @@ const websiteRemovalCleanupAdapters = localServerId
   ? createWebsiteRemovalCleanupAdapters({
     websiteRegistry,
     applicationRegistry,
+    applicationEnvironmentRegistry,
     websiteProvisioningRuntime,
   })
   : null;
@@ -1049,6 +1050,7 @@ const websiteRemovalRuntime = (localServerId && domainRemovalRuntime)
     directSystemdCleanupHandler: websiteRemovalCleanupAdapters?.directSystemdCleanupHandler ?? null,
     directSystemdCleanupInspector: websiteRemovalCleanupAdapters?.inspectDirectSystemdCleanup ?? null,
     fileCleanupHandler: websiteRemovalCleanupAdapters?.fileCleanupHandler ?? null,
+    passengerEnvironmentCleanupHandler: websiteRemovalCleanupAdapters?.passengerEnvironmentCleanupHandler ?? null,
     unixIdentityCleanupHandler: websiteRemovalCleanupAdapters?.unixIdentityCleanupHandler ?? null,
     fileCleanupInspector: websiteRemovalCleanupAdapters?.inspectFileCleanup ?? null,
     unixIdentityCleanupInspector: websiteRemovalCleanupAdapters?.inspectUnixIdentityCleanup ?? null,

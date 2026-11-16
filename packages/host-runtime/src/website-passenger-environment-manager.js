@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
-import { lstat, mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { lstat, mkdir, open, readFile, realpath, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
   assertUuid,
@@ -11,6 +12,7 @@ const INCLUDE_ROOT = '/etc/yunpanel/passenger-env';
 const RECEIPT_ROOT = '/var/lib/yunpanel/staging/website-passenger-env';
 const RECEIPT_VERSION = 1;
 const INCLUDE_MODE = 0o600;
+const MAX_INCLUDE_BYTES = 1024 * 1024;
 const CHECKSUM_PATTERN = /^[a-f0-9]{64}$/;
 const MANAGED_ENVIRONMENT_KEYS = new Set([
   'NODE_ENV',
@@ -106,6 +108,28 @@ function normalizeSpec(value) {
   });
 }
 
+function decodeManagedInclude(content, applicationId) {
+  if (typeof content !== 'string' || content.includes('\0') || Buffer.byteLength(content) > MAX_INCLUDE_BYTES) {
+    throw new WebsitePassengerEnvironmentError('website_passenger_environment_include_drift', 'Passenger environment include is not canonical');
+  }
+  const lines = content.split('\n');
+  const marker = lines.shift().match(/^# YunPanel Passenger environment ([a-f0-9-]{36}) revision (\d+)$/);
+  if (!marker || marker[1] !== applicationId || lines.pop() !== '') {
+    throw new WebsitePassengerEnvironmentError('website_passenger_environment_include_drift', 'Passenger environment include ownership marker is invalid');
+  }
+  const values = {};
+  for (const line of lines) {
+    const match = line.match(/^passenger_env_var ([A-Z_][A-Z0-9_]{0,127}) "((?:[^"\\]|\\["\\$])*)";$/);
+    if (!match || Object.hasOwn(values, match[1])) {
+      throw new WebsitePassengerEnvironmentError('website_passenger_environment_include_drift', 'Passenger environment include is not canonical');
+    }
+    values[match[1]] = match[2].replace(/\\(["\\$])/g, '$1');
+  }
+  const spec = normalizeSpec({ applicationId, environmentRevision: Number(marker[2]), values });
+  if (spec.content !== content) throw new WebsitePassengerEnvironmentError('website_passenger_environment_include_drift', 'Passenger environment include is not canonical');
+  return Object.freeze({ environmentRevision: spec.environmentRevision, values: spec.values });
+}
+
 function fileState(content) {
   if (content === null) return Object.freeze({ exists: false, content: null, checksum: null });
   return Object.freeze({ exists: true, content, checksum: sha256(content) });
@@ -135,6 +159,8 @@ function normalizePrevious(value) {
 export function createWebsitePassengerEnvironmentManager({
   includeRoot = INCLUDE_ROOT,
   receiptRoot = RECEIPT_ROOT,
+  ownerUid = 0,
+  ownerGid = 0,
   lstatFn = lstat,
   mkdirFn = mkdir,
   readFileFn = readFile,
@@ -143,6 +169,7 @@ export function createWebsitePassengerEnvironmentManager({
   writeFileFn = writeFile,
 } = {}) {
   if (![includeRoot, receiptRoot].every((value) => typeof value === 'string' && path.posix.isAbsolute(value))
+    || !Number.isSafeInteger(ownerUid) || ownerUid < 0 || !Number.isSafeInteger(ownerGid) || ownerGid < 0
     || typeof lstatFn !== 'function' || typeof mkdirFn !== 'function' || typeof readFileFn !== 'function'
     || typeof renameFn !== 'function' || typeof rmFn !== 'function' || typeof writeFileFn !== 'function') {
     throw new WebsitePassengerEnvironmentError('website_passenger_environment_dependencies_invalid', 'Passenger environment dependencies are invalid');
@@ -174,7 +201,7 @@ export function createWebsitePassengerEnvironmentManager({
       if (error?.code === 'ENOENT') return fileState(null);
       throw new WebsitePassengerEnvironmentError('website_passenger_environment_inspection_failed', 'Passenger environment include could not be inspected');
     }
-    if (!stat?.isFile?.() || stat.isSymbolicLink?.() || stat.uid !== 0 || stat.gid !== 0 || modeOf(stat) !== INCLUDE_MODE) {
+    if (!stat?.isFile?.() || stat.isSymbolicLink?.() || stat.uid !== ownerUid || stat.gid !== ownerGid || modeOf(stat) !== INCLUDE_MODE) {
       throw new WebsitePassengerEnvironmentError('website_passenger_environment_include_drift', 'Passenger environment include ownership or type has drifted');
     }
     try { return fileState(await readFileFn(targetPath, 'utf8')); }
@@ -402,7 +429,173 @@ export function createWebsitePassengerEnvironmentManager({
     return inspectCompensation(spec, { operationId: normalizedOperationId, ownedByOperation: true });
   }
 
-  return Object.freeze({ operation, inspect, apply, inspectCompensation, compensate });
+  const retirementError = (code = 'website_passenger_environment_retirement_drift') => new WebsitePassengerEnvironmentError(code, 'Passenger environment retirement could not be verified');
+  const identity = info => Object.fromEntries(['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeNs', 'ctimeNs'].map(key => [key, String(info[key])]));
+  const same = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+  async function trustedAncestors(target) {
+    for (let directory = path.dirname(target); ; directory = path.dirname(directory)) {
+      let info;
+      try { info = await lstat(directory); }
+      catch (error) { if (error?.code === 'ENOENT') { if (directory === '/') throw retirementError(); continue; } throw retirementError(); }
+      const privateTempAncestor = ownerUid !== 0 && info.uid === 0 && (info.mode & 0o7777) === 0o1777;
+      if (!info.isDirectory() || info.isSymbolicLink() || ![0, ownerUid].includes(info.uid)
+        || !privateTempAncestor && (info.mode & 0o022) || await realpath(directory) !== directory) throw retirementError();
+      if (directory === '/') break;
+    }
+  }
+
+  async function boundedFile(target, root, limit) {
+    await trustedAncestors(target);
+    let handle; let parent;
+    try {
+      const directory = await lstat(root);
+      if (!directory.isDirectory() || directory.isSymbolicLink() || directory.uid !== ownerUid || directory.gid !== ownerGid
+        || (directory.mode & 0o022) || await realpath(root) !== root) throw retirementError();
+      parent = await open(root, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const parentIdentity = info => ['dev', 'ino', 'mode', 'uid', 'gid'].map(key => String(info[key]));
+      const initialParent = await parent.stat({ bigint: true });
+      if (!same(parentIdentity(initialParent), parentIdentity(await lstat(root, { bigint: true })))) throw retirementError();
+      handle = await open(target, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      const first = await handle.stat({ bigint: true });
+      if (!first.isFile() || first.uid !== BigInt(ownerUid) || first.gid !== BigInt(ownerGid) || first.nlink !== 1n
+        || Number(first.mode & 0o7777n) !== INCLUDE_MODE || first.size > BigInt(limit)) throw retirementError();
+      const chunks = []; let length = 0;
+      while (length <= limit) {
+        const bytes = Buffer.alloc(Math.min(65536, limit + 1 - length));
+        const { bytesRead } = await handle.read(bytes, 0, bytes.length, null);
+        if (!bytesRead) break;
+        length += bytesRead; chunks.push(bytes.subarray(0, bytesRead));
+      }
+      if (length > limit || !same(identity(first), identity(await handle.stat({ bigint: true })))
+        || !same(identity(first), identity(await lstat(target, { bigint: true })))
+        || !same(parentIdentity(initialParent), parentIdentity(await parent.stat({ bigint: true })))
+        || !same(parentIdentity(initialParent), parentIdentity(await lstat(root, { bigint: true })))) throw retirementError();
+      const raw = Buffer.concat(chunks), content = raw.toString('utf8');
+      if (!Buffer.from(content, 'utf8').equals(raw)) throw retirementError();
+      return { exists: true, content, checksum: sha256(raw), identity: identity(first) };
+    } catch (error) {
+      if (error?.code === 'ENOENT' && !handle) return { exists: false, content: null, checksum: null, identity: null };
+      if (error instanceof WebsitePassengerEnvironmentError) throw error;
+      throw retirementError('website_passenger_environment_retirement_unavailable');
+    } finally { await handle?.close(); await parent?.close(); }
+  }
+
+  async function inspectAbsence(applicationId) {
+    const id = uuid(applicationId, 'applicationId', 'website_passenger_environment_application_invalid');
+    const current = await boundedFile(includePath(id), includeRoot, MAX_INCLUDE_BYTES);
+    return Object.freeze({ applicationId: id, includeAbsent: !current.exists, environmentInclude: includePath(id) });
+  }
+
+  function retirementAuthority(value) {
+    if (!value || typeof value !== 'object' || !/^ws-rem-[a-f0-9-]{36}$/.test(value.removalId ?? '')) throw retirementError();
+    const fields = ['websiteId', 'applicationId', 'serverId', 'sourceOperationId', 'removalId', 'releaseId', 'savedRevision', 'appliedRevision', 'appliedReleaseId', 'originalIncludeSha256', 'initialReleaseId'];
+    if (Object.keys(value).length !== fields.length || Object.keys(value).some(key => !fields.includes(key))) throw retirementError();
+    for (const key of ['websiteId', 'applicationId', 'serverId', 'sourceOperationId']) uuid(value[key], key, 'website_passenger_environment_retirement_drift');
+    uuid(value.removalId.slice(7), 'removalId', 'website_passenger_environment_retirement_drift');
+    if (value.releaseId !== null) uuid(value.releaseId, 'releaseId', 'website_passenger_environment_retirement_drift');
+    if (value.appliedReleaseId !== null) uuid(value.appliedReleaseId, 'appliedReleaseId', 'website_passenger_environment_retirement_drift');
+    if (value.initialReleaseId !== null && value.initialReleaseId !== value.sourceOperationId) throw retirementError();
+    revision(value.savedRevision);
+    if (value.appliedRevision !== null && (revision(value.appliedRevision) > value.savedRevision)) throw retirementError();
+    if (!CHECKSUM_PATTERN.test(value.originalIncludeSha256 ?? '')) throw retirementError();
+    return Object.freeze({ ...value });
+  }
+
+  async function retirementState(rawAuthority, priorReceipt = null) {
+    const authority = retirementAuthority(rawAuthority);
+    const raw = await boundedFile(receiptPath(authority.sourceOperationId), receiptRoot, MAX_INCLUDE_BYTES * 2);
+    if (!raw.exists) throw retirementError('website_passenger_environment_retirement_ownership_missing');
+    let original;
+    try { original = normalizeReceipt(JSON.parse(raw.content), { operationId: authority.sourceOperationId, applicationId: authority.applicationId }); }
+    catch { throw retirementError('website_passenger_environment_retirement_ownership_missing'); }
+    if (original.previous.exists || original.includeChecksum !== authority.originalIncludeSha256) throw retirementError('website_passenger_environment_retirement_ownership_missing');
+    const current = await boundedFile(includePath(authority.applicationId), includeRoot, MAX_INCLUDE_BYTES);
+    const binding = { version: 1, kind: 'passenger-environment-retirement', removalId: authority.removalId,
+      websiteId: authority.websiteId, applicationId: authority.applicationId, serverId: authority.serverId,
+      sourceOperationId: authority.sourceOperationId, provisioningReceiptSha256: raw.checksum,
+      environmentInclude: includePath(authority.applicationId) };
+    if (priorReceipt) {
+      const fields = [...Object.keys(binding), 'state', 'hadInclude', 'environmentRevision', 'includeSha256', 'fileIdentity', 'authoritySnapshot'];
+      const finalFields = ['satisfied', 'includeAbsent', 'retired'];
+      const allowed = priorReceipt.state === 'retired' ? [...fields, ...finalFields] : fields;
+      const snapshotFields = ['releaseId', 'savedRevision', 'appliedRevision', 'appliedReleaseId', 'originalIncludeSha256', 'initialReleaseId'];
+      if (Object.keys(priorReceipt).length !== allowed.length || Object.keys(priorReceipt).some(key => !allowed.includes(key))
+        || !priorReceipt.authoritySnapshot || Object.keys(priorReceipt.authoritySnapshot).length !== snapshotFields.length
+        || Object.keys(priorReceipt.authoritySnapshot).some(key => !snapshotFields.includes(key))) throw retirementError();
+      retirementAuthority({ ...authority, ...priorReceipt.authoritySnapshot });
+      if (priorReceipt.authoritySnapshot.originalIncludeSha256 !== authority.originalIncludeSha256
+        || priorReceipt.state === 'retired' && finalFields.some(key => priorReceipt[key] !== true)) throw retirementError();
+      if (!['prepared', 'retired'].includes(priorReceipt.state)
+        || Object.entries(binding).some(([key, value]) => priorReceipt[key] !== value)
+        || typeof priorReceipt.hadInclude !== 'boolean'
+        || priorReceipt.hadInclude && (!CHECKSUM_PATTERN.test(priorReceipt.includeSha256 ?? '') || !priorReceipt.fileIdentity)
+        || !priorReceipt.hadInclude && (priorReceipt.includeSha256 !== null || priorReceipt.fileIdentity !== null)) throw retirementError();
+      if (priorReceipt.hadInclude) {
+        const identityFields = ['dev', 'ino', 'mode', 'uid', 'gid', 'nlink', 'size', 'mtimeNs', 'ctimeNs'];
+        if (!Number.isSafeInteger(priorReceipt.environmentRevision) || priorReceipt.environmentRevision < 0
+          || Object.keys(priorReceipt.fileIdentity).length !== identityFields.length
+          || identityFields.some(key => typeof priorReceipt.fileIdentity[key] !== 'string' || !/^\d+$/.test(priorReceipt.fileIdentity[key]))
+          || priorReceipt.fileIdentity.uid !== String(ownerUid) || priorReceipt.fileIdentity.gid !== String(ownerGid)
+          || priorReceipt.fileIdentity.mode !== String(0o100600) || priorReceipt.fileIdentity.nlink !== '1'
+          || BigInt(priorReceipt.fileIdentity.size) > BigInt(MAX_INCLUDE_BYTES)) throw retirementError();
+        const saved = priorReceipt.authoritySnapshot;
+        const applied = saved.appliedRevision === priorReceipt.environmentRevision && saved.appliedReleaseId === saved.releaseId && saved.releaseId !== null;
+        const initial = saved.appliedRevision === null && saved.appliedReleaseId === null && saved.initialReleaseId === authority.sourceOperationId
+          && saved.releaseId === saved.initialReleaseId && priorReceipt.environmentRevision === original.environmentRevision && priorReceipt.includeSha256 === original.includeChecksum;
+        if (!applied && !initial) throw retirementError();
+      } else if (priorReceipt.environmentRevision !== null) throw retirementError();
+      if (priorReceipt.state === 'prepared') {
+        // A draft-only saved revision change does not change current applied authority.
+        const currentFields = ['releaseId', 'appliedRevision', 'appliedReleaseId', 'initialReleaseId'];
+        if (currentFields.some(key => authority[key] !== priorReceipt.authoritySnapshot[key])) throw retirementError();
+      }
+      if (current.exists && (priorReceipt.state === 'retired' || !priorReceipt.hadInclude
+        || current.checksum !== priorReceipt.includeSha256 || !same(current.identity, priorReceipt.fileIdentity))) throw retirementError();
+      return { authority, current, proof: priorReceipt };
+    }
+    let environmentRevision = null;
+    if (current.exists) {
+      if (original.state !== 'active') throw retirementError();
+      environmentRevision = decodeManagedInclude(current.content, authority.applicationId).environmentRevision;
+      const applied = authority.appliedRevision === environmentRevision && authority.appliedReleaseId === authority.releaseId && authority.releaseId !== null;
+      const initial = authority.appliedRevision === null && authority.appliedReleaseId === null
+        && authority.initialReleaseId === authority.sourceOperationId && authority.releaseId === authority.initialReleaseId
+        && environmentRevision === original.environmentRevision && current.checksum === original.includeChecksum;
+      if (!applied && !initial) throw retirementError();
+    }
+    return { authority, current, proof: Object.freeze({ ...binding, state: 'prepared', hadInclude: current.exists,
+      environmentRevision, includeSha256: current.checksum, fileIdentity: current.identity,
+      authoritySnapshot: Object.freeze(Object.fromEntries(['releaseId', 'savedRevision', 'appliedRevision', 'appliedReleaseId', 'originalIncludeSha256', 'initialReleaseId'].map(key => [key, authority[key]]))) }) };
+  }
+
+  async function inspectRetirement(authority, { priorReceipt = null } = {}) {
+    const state = await retirementState(authority, priorReceipt);
+    return Object.freeze({ ...state.proof, satisfied: !state.current.exists,
+      includeAbsent: !state.current.exists, retired: state.proof.state === 'retired' && !state.current.exists });
+  }
+
+  async function retire(authority, { priorReceipt = null, checkpoint } = {}) {
+    if (typeof checkpoint !== 'function') throw retirementError('website_passenger_environment_checkpoint_unavailable');
+    let state = await retirementState(authority, priorReceipt);
+    if (state.proof.state === 'retired') return Object.freeze({ ...state.proof, satisfied: true, includeAbsent: true, retired: true });
+    if (!priorReceipt) await checkpoint(state.proof);
+    state = await retirementState(authority, state.proof);
+    if (state.current.exists) {
+      // The caller holds App, Website and the existing Domain namespace. This check
+      // does not claim a cross-process atomic compare-and-unlink primitive.
+      await unlink(includePath(state.authority.applicationId));
+      const directory = await open(includeRoot, constants.O_RDONLY | constants.O_DIRECTORY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+      try { await directory.sync(); } finally { await directory.close(); }
+    }
+    const verified = await retirementState(authority, state.proof);
+    if (verified.current.exists) throw retirementError();
+    const result = Object.freeze({ ...state.proof, state: 'retired', satisfied: true, includeAbsent: true, retired: true });
+    await checkpoint(result);
+    return result;
+  }
+
+  return Object.freeze({ operation, inspect, apply, inspectCompensation, compensate, inspectAbsence, inspectRetirement, retire });
 }
 
 export const websitePassengerEnvironmentInternals = Object.freeze({
@@ -410,6 +603,7 @@ export const websitePassengerEnvironmentInternals = Object.freeze({
   normalizedValues,
   quoteNginxValue,
   renderInclude,
+  decodeManagedInclude,
   includeRoot: INCLUDE_ROOT,
   receiptRoot: RECEIPT_ROOT,
   managedEnvironmentKeys: Object.freeze([...MANAGED_ENVIRONMENT_KEYS]),

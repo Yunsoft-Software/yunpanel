@@ -1,15 +1,23 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { mkdtemp, readFile, writeFile, rm, chmod } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile, rm, chmod, mkdir, realpath } from 'node:fs/promises';
 import { renderCronTaskFile } from '@yunpanel/config-templates';
 import { createSiteMutationLock, SiteMutationLockError } from '../src/site-mutation-lock.js';
 import { createProcessStoreLock, ProcessStoreLockError } from '../src/process-store-lock.js';
 import { createWebsiteRemovalCleanupAdapters } from '../src/website-removal-cleanup-adapters.js';
 import { createLiveSessionRegistry } from '../src/live-session-registry.js';
+import { createWebsitePassengerEnvironmentManager } from '@yunpanel/host-runtime/website-passenger-environment-manager';
+import { createServerRegistry } from '../src/server-registry.js';
+import { createApplicationRegistry } from '../src/application-registry.js';
+import { createWebsiteRegistry } from '../src/website-registry.js';
+import { createApplicationEnvironmentRegistry } from '../src/application-environment-registry.js';
+import { createWebsiteProvisioningRuntime } from '../src/website-provisioning-runtime.js';
+import { createDomainRegistry } from '../src/domain-registry.js';
+
 
 function createExpressMockApp() {
   const globalMiddlewares = [];
@@ -201,6 +209,27 @@ import {
 import {
   createWebsiteRemovalPreview,
 } from '../src/website-removal-plan.js';
+
+// Real FS + file-backed Passenger dependencies for the two retained legacy HTTP contract cases.
+// Their pre-existing auth/host-service compatibility fixtures do not attest native services.
+async function passengerRetirementFiles(t,{websiteId,applicationId}){
+ const root=await realpath(await mkdtemp(path.join(os.tmpdir(),'yp-removal-http-passenger-')));t.after(()=>rm(root,{recursive:true,force:true}));
+ const servers=createServerRegistry({filePath:path.join(root,'servers.json')});await servers.init();const server=await servers.createLocalServer({hostname:'removal-http.example.test'});
+ const applications=createApplicationRegistry({filePath:path.join(root,'applications.json'),serverExists:async id=>Boolean(await servers.getServer(id))});await applications.init();
+ let application=await applications.createNodeApplication({applicationId,serverId:server.id,name:'HTTP retirement',repositoryUrl:'https://github.com/heroku/node-js-getting-started.git',runtimeAdapter:'passenger',runtime:{nodeMajor:24,installMode:'ci',startMode:'node',entryFile:'index.js',healthPath:'/',healthTimeoutSeconds:30,restartPolicy:'on-failure'}});
+ const websites=createWebsiteRegistry({filePath:path.join(root,'websites.json'),serverExists:async id=>Boolean(await servers.getServer(id)),getApplication:id=>applications.getApplication(id)});await websites.init();const website=await websites.createWebsite({websiteId,serverId:server.id,name:'own-http.example.test',applicationId,runtimeType:'node'});
+ const environments=createApplicationEnvironmentRegistry({filePath:path.join(root,'environments.json'),applicationExists:async id=>Boolean(await applications.getApplication(id))});await environments.init();
+ const includes=path.join(root,'includes');await mkdir(includes,{mode:0o700});const manager=createWebsitePassengerEnvironmentManager({includeRoot:includes,receiptRoot:path.join(root,'receipts'),ownerUid:process.getuid(),ownerGid:process.getgid()});
+ const operationId=randomUUID(),evidence=await manager.apply({applicationId,environmentRevision:0,values:{}},{operationId});
+ // Pure application policy transition + actual matching include/metadata, without claiming a host deployment.
+ application=await applications.activatePassengerRelease(applicationId,{operationId,releaseId:operationId,previousReleaseId:null,commitSha:createHash('sha1').update(await readFile(new URL(import.meta.url))).digest('hex')});
+ await environments.markApplied({applicationId,revision:0,releaseId:operationId});
+ const provisioning=createWebsiteProvisioningRuntime({filePath:path.join(root,'provisioning.json'),passengerEnvironmentManager:manager});await provisioning.registry.init();
+ await provisioning.registry.create({operationId,websiteId,resources:{application,website},steps:[{id:'passenger_environment',kind:'passenger_environment',intent:{adapter:'passenger-environment',applicationId},state:'pending'}]});await provisioning.registry.beginStep({operationId,stepId:'passenger_environment'});await provisioning.registry.completeStep({operationId,stepId:'passenger_environment',evidence});
+ const adapters=createWebsiteRemovalCleanupAdapters({websiteRegistry:websites,applicationRegistry:applications,applicationEnvironmentRegistry:environments,websiteProvisioningRuntime:provisioning,passengerEnvironmentManager:manager});
+ const lock=createSiteMutationLock({root:path.join(root,'locks')}),domains=createDomainRegistry({filePath:path.join(root,'domains.json'),serverExists:async id=>Boolean(await servers.getServer(id)),getWebsite:id=>websites.getWebsite(id),siteMutationLock:lock});await domains.init();
+ return{root,server,application,website,applications,websites,environments,adapters,lock,domains,target:path.join(includes,applicationId+'.conf'),initialIncludeSha256:evidence.includeSha256};
+}
 
 function createMockRuntime() {
   const calls = [];
@@ -564,36 +593,15 @@ test('website-removal-http enforces Owner, Site A and Site B authorization bound
   }
 });
 
-test('website-removal-http executes complete removal lifecycle verifying cleanup of files, unix identity, domain, database, SFTP, cron, runtime-binding and Application metadata', async () => {
-  const localServerId = '11111111-1111-4111-8111-111111111111';
+test('website-removal-http executes complete removal lifecycle verifying cleanup of files, unix identity, domain, database, SFTP, cron, runtime-binding and Application metadata', async t => {
   const websiteId = '22222222-2222-4222-8222-222222222222';
   const applicationId = '33333333-3333-4333-8333-333333333333';
   const taskId = '44444444-4444-4444-8444-444444444444';
-  const unixUser = 'yunapp-0123456789ab';
+  const passenger=await passengerRetirementFiles(t,{websiteId,applicationId});
+  const localServerId=passenger.server.id,unixUser=passenger.website.unixUser;
 
-  let currentWebsite = {
-    id: websiteId,
-    name: 'Full Lifecycle Site',
-    serverId: localServerId,
-    applicationId,
-    systemUser: unixUser,
-    unixUser,
-    state: 'active',
-    suspended: false,
-    desiredRevision: 1,
-    stagedRevision: 1,
-    appliedRevision: 1,
-  };
-
-  let currentApplication = {
-    id: applicationId,
-    serverId: localServerId,
-    type: 'node',
-    runtimeAdapter: 'passenger',
-    desiredRevision: 1,
-    activeDeploymentId: null,
-    currentReleaseId: null,
-  };
+  let currentWebsite = { ...passenger.website,systemUser:unixUser,state:'active',suspended:false,desiredRevision:passenger.website.revision,stagedRevision:1,appliedRevision:1 };
+  let currentApplication = passenger.application;
 
   const cronTask = {
     id: taskId,
@@ -752,29 +760,30 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
   };
 
   const websiteRegistry = {
-    getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
+    getWebsite: id => passenger.websites.getWebsite(id),
     finalizeWebsiteRemoval: async (input) => {
       assert.equal(input.websiteId, websiteId);
       assert.equal(input.applicationId, applicationId);
+      await passenger.websites.finalizeWebsiteRemoval(input);
       cleaned.websiteMetadataDeleted += 1;
       currentWebsite = null;
     },
   };
 
-  let envState = { applicationId, variableCount: 0, environmentPresent: false };
   const applicationEnvironmentRegistry = {
-    inspectApplicationState: async (appId) => (appId === applicationId ? envState : { variableCount: 0, environmentPresent: false }),
+    inspectApplicationState: id => passenger.environments.inspectApplicationState(id),
     purgeApplication: async (appId) => {
       assert.equal(appId, applicationId);
+      await passenger.environments.purgeApplication(appId);
       cleaned.applicationEnvPurged += 1;
-      envState = { applicationId, variableCount: 0, environmentPresent: false };
     },
   };
 
   const applicationRegistry = {
-    getApplication: async (id) => (id === applicationId ? currentApplication : null),
+    getApplication: id => passenger.applications.getApplication(id),
     deleteApplication: async (input) => {
       assert.equal(input.applicationId, applicationId);
+      await passenger.applications.deleteApplication(input);
       cleaned.applicationMetadataDeleted += 1;
       currentApplication = null;
     },
@@ -812,7 +821,7 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
     operation: 'delete',
     targetServerId: null,
     resource: { id: websiteId, serverId: localServerId },
-    application: { id: applicationId, serverId: localServerId, type: 'node', desiredRevision: 1 },
+    application: { id: applicationId, serverId: localServerId, type: 'node', desiredRevision: currentApplication.desiredRevision, currentReleaseId: currentApplication.currentReleaseId },
     dependencies: impactDependencies,
     blockers: [],
     previewDigest: 'f'.repeat(64),
@@ -830,7 +839,9 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
-    domainRegistry: { listDomains: async () => [] },
+    domainRegistry: passenger.domains,
+    siteMutationLock: passenger.lock,
+    passengerEnvironmentCleanupHandler: passenger.adapters.passengerEnvironmentCleanupHandler,
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime,
@@ -920,6 +931,11 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
 
     // 4. Verify terminal status and completion
     assert.equal(currentOp.status, 'removed');
+    for(const kind of ['file_cleanup','application_cleanup']){
+      const proof=currentOp.steps.find(row=>row.kind===kind).result.passengerEnvironmentRetirement;
+      assert.equal(proof.state,'retired');assert.equal(proof.includeAbsent,true);assert.equal(proof.applicationId,applicationId);assert.equal(proof.includeSha256,passenger.initialIncludeSha256);
+    }
+    await assert.rejects(readFile(passenger.target),{code:'ENOENT'});
     assert.equal(currentOp.steps.every((s) => s.status === 'succeeded'), true);
 
     // 5. Verify every single resource cleanup occurred with exact parameters
@@ -953,35 +969,14 @@ test('website-removal-http executes complete removal lifecycle verifying cleanup
   }
 });
 
-test('website-removal-http remains fail-closed on partial failure and subsequent destructive steps do not execute', async () => {
-  const localServerId = '11111111-1111-4111-8111-111111111111';
+test('website-removal-http remains fail-closed on partial failure and subsequent destructive steps do not execute', async t => {
   const websiteId = '22222222-2222-4222-8222-333333333333';
   const applicationId = '33333333-3333-4333-8333-444444444444';
-  const unixUser = 'yunapp-112233445566';
+  const passenger=await passengerRetirementFiles(t,{websiteId,applicationId});
+  const localServerId=passenger.server.id,unixUser=passenger.website.unixUser;
 
-  let currentWebsite = {
-    id: websiteId,
-    name: 'Partial Failure Site',
-    serverId: localServerId,
-    applicationId,
-    systemUser: unixUser,
-    unixUser,
-    state: 'active',
-    suspended: false,
-    desiredRevision: 1,
-    stagedRevision: 1,
-    appliedRevision: 1,
-  };
-
-  let currentApplication = {
-    id: applicationId,
-    serverId: localServerId,
-    type: 'node',
-    runtimeAdapter: 'passenger',
-    desiredRevision: 1,
-    activeDeploymentId: null,
-    currentReleaseId: null,
-  };
+  let currentWebsite = { ...passenger.website,systemUser:unixUser,state:'active',suspended:false,desiredRevision:passenger.website.revision,stagedRevision:1,appliedRevision:1 };
+  let currentApplication = passenger.application;
 
   let fileCleanupFails = true;
   let fileCleanupAttempts = 0;
@@ -995,7 +990,7 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
     operation: 'delete',
     targetServerId: null,
     resource: { id: websiteId, serverId: localServerId },
-    application: { id: applicationId, serverId: localServerId, type: 'node', desiredRevision: 1 },
+    application: { id: applicationId, serverId: localServerId, type: 'node', desiredRevision: currentApplication.desiredRevision, currentReleaseId: currentApplication.currentReleaseId },
     dependencies: {
       domains: [],
       databases: { status: 'available', items: [] },
@@ -1022,27 +1017,31 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
   await registry.init();
 
   const runtime = createWebsiteRemovalRuntime({
-    domainRegistry: { listDomains: async () => [] },
+    domainRegistry: passenger.domains,
+    siteMutationLock: passenger.lock,
+    passengerEnvironmentCleanupHandler: passenger.adapters.passengerEnvironmentCleanupHandler,
     registry,
     previewProvider: async () => preview,
     domainRemovalRuntime: { listForDomain: async () => [], preview: async () => ({}), start: async () => ({}) },
     websiteRegistry: {
-      getWebsite: async (id) => (id === websiteId ? currentWebsite : null),
-      finalizeWebsiteRemoval: async () => {
+      getWebsite: id => passenger.websites.getWebsite(id),
+      finalizeWebsiteRemoval: async input => {
+        await passenger.websites.finalizeWebsiteRemoval(input);
         websiteMetadataDeletedCount += 1;
         currentWebsite = null;
       },
     },
     applicationRegistry: {
-      getApplication: async (id) => (id === applicationId ? currentApplication : null),
-      deleteApplication: async () => {
+      getApplication: id => passenger.applications.getApplication(id),
+      deleteApplication: async input => {
+        await passenger.applications.deleteApplication(input);
         applicationMetadataDeletedCount += 1;
         currentApplication = null;
       },
     },
     applicationEnvironmentRegistry: {
-      inspectApplicationState: async () => ({ variableCount: 0, environmentPresent: false }),
-      purgeApplication: async () => {},
+      inspectApplicationState: id => passenger.environments.inspectApplicationState(id),
+      purgeApplication: id => passenger.environments.purgeApplication(id),
     },
     fileCleanupHandler: async (input) => {
       fileCleanupAttempts += 1;
@@ -1077,7 +1076,7 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
     };
     next();
   });
-  mountWebsiteRemovalRoutes(app, { runtime, websiteRegistry: { getWebsite: async (id) => (id === websiteId ? currentWebsite : null) }, localServerId });
+  mountWebsiteRemovalRoutes(app, { runtime, websiteRegistry: { getWebsite: id => passenger.websites.getWebsite(id) }, localServerId });
   app.use((err, req, res, next) => {
     res.status(err.status ?? 500).json({ error: { code: err.code, message: err.message } });
   });
@@ -1158,6 +1157,11 @@ test('website-removal-http remains fail-closed on partial failure and subsequent
     }
 
     assert.equal(currentOp.status, 'removed');
+    for(const kind of ['file_cleanup','application_cleanup']){
+      const proof=currentOp.steps.find(row=>row.kind===kind).result.passengerEnvironmentRetirement;
+      assert.equal(proof.state,'retired');assert.equal(proof.includeAbsent,true);assert.equal(proof.applicationId,applicationId);assert.equal(proof.includeSha256,passenger.initialIncludeSha256);
+    }
+    await assert.rejects(readFile(passenger.target),{code:'ENOENT'});
     assert.equal(unixIdentityCleanedCount, 1);
     assert.equal(websiteMetadataDeletedCount, 1);
     assert.equal(applicationMetadataDeletedCount, 1);

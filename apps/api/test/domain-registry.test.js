@@ -8,6 +8,37 @@ import { createDomainRegistry, DomainRegistryError } from '../src/domain-registr
 import { createServerRegistry } from '../src/server-registry.js';
 import { createWebsiteRegistry } from '../src/website-registry.js';
 
+test('real file-backed legacy Domain binding waits for the shared routing namespace reservation', async t => {
+  const directory = await mkdtemp(path.join(os.tmpdir(), 'yp-domain-bind-reservation-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const servers = createServerRegistry({ filePath: path.join(directory, 'servers.json') }); await servers.init();
+  const server = await servers.createLocalServer({ hostname: 'binding-reservation.example.test' });
+  const applications = createApplicationRegistry({ filePath: path.join(directory, 'applications.json'),
+    serverExists: async id => Boolean(await servers.getServer(id)) }); await applications.init();
+  const application = await applications.createPhpApplication({ serverId: server.id, name: 'Binding lease PHP' });
+  const websites = createWebsiteRegistry({ filePath: path.join(directory, 'websites.json'),
+    serverExists: async id => Boolean(await servers.getServer(id)), getApplication: id => applications.getApplication(id) }); await websites.init();
+  const website = await websites.createWebsite({ serverId: server.id, name: 'Binding lease site', applicationId: application.id, runtimeType: 'php' });
+  const domains = createDomainRegistry({ filePath: path.join(directory, 'domains.json'),
+    serverExists: async id => Boolean(await servers.getServer(id)), getWebsite: id => websites.getWebsite(id) }); await domains.init();
+  const domain = await domains.createDomain({ serverId: server.id, primaryDomain: 'binding-lease.example.test',
+    targetType: 'redirect', target: { url: 'https://binding-target.example.test' }, httpsMode: 'off' });
+  let enter, release; const entered = new Promise(resolve => { enter = resolve; }), barrier = new Promise(resolve => { release = resolve; });
+  const lease = domains.withRoutingNamespaceReservation(async snapshot => {
+    assert.equal(snapshot.find(row => row.id === domain.id).websiteId, null); enter(); await barrier;
+  });
+  await entered;
+  const binding = domains.bindWebsite(domain.id, website.id);
+  try {
+    await new Promise(setImmediate);
+    assert.equal((await domains.getDomain(domain.id)).websiteId, null, 'normal bind must not change metadata inside an active retirement reservation');
+    assert.equal(JSON.parse(await readFile(path.join(directory, 'domains.json'), 'utf8')).domains[0].websiteId, null);
+  } finally { release(); await lease; await binding; }
+  await lease; assert.equal((await binding).websiteId, website.id);
+  const reopened = createDomainRegistry({ filePath: path.join(directory, 'domains.json') }); await reopened.init();
+  assert.equal((await reopened.getDomain(domain.id)).websiteId, website.id);
+});
+
 test('creates normalized domain desired state for an existing server', async () => {
   const registry = createDomainRegistry({ serverExists: async (serverId) => serverId === 'server-1' });
   const domain = await registry.createDomain({

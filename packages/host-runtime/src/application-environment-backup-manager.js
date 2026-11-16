@@ -66,29 +66,22 @@ export function createApplicationEnvironmentBackupManager({
       if (render({ applicationId: c.id, runtime: c.runtime, environment: custom }) !== content) throw fail('application_environment_snapshot_invalid');
       return custom;
     }
+    if (content.startsWith('#')) {
+      try { return websitePassengerEnvironmentInternals.decodeManagedInclude(content, c.id).values; }
+      catch { throw fail('application_environment_snapshot_invalid'); }
+    }
     const values = {};
     const lines = content.split('\n');
-    let revision = null;
-    if (lines[0].startsWith('#')) {
-      const match = lines.shift().match(/^# YunPanel Passenger environment ([a-f0-9-]{36}) revision (\d+)$/);
-      if (!match || match[1] !== c.id || !Number.isSafeInteger(Number(match[2]))) throw fail('application_environment_snapshot_invalid');
-      revision = Number(match[2]);
-    }
     if (lines.pop() !== '') throw fail('application_environment_snapshot_invalid');
     for (const line of lines) {
       const match = line.match(/^passenger_env_var ([A-Z_][A-Z0-9_]{0,127}) "((?:[^"\\]|\\["\\$])*)";$/);
       if (!match || Object.hasOwn(values, match[1])) throw fail('application_environment_snapshot_invalid');
       values[match[1]] = match[2].replace(/\\(["\\$])/g, '$1');
     }
-    if (revision !== null) {
-      const normalized = websitePassengerEnvironmentInternals.normalizeSpec({ applicationId: c.id, environmentRevision: revision, values });
-      if (normalized.content !== content) throw fail('application_environment_snapshot_invalid');
-    } else {
-      if (values.YUNPANEL_APPLICATION_ID !== c.id || values.HOST !== '127.0.0.1'
-        || values.PORT !== String(c.runtime.port) || passengerEnvironmentManagerInternals.renderPassengerEnvironmentInclude(values) !== content) throw fail('application_environment_snapshot_invalid');
-      for (const key of ['HOST', 'PORT', 'YUNPANEL_APPLICATION_ID']) delete values[key];
-      websitePassengerEnvironmentInternals.normalizedValues(values);
-    }
+    if (values.YUNPANEL_APPLICATION_ID !== c.id || values.HOST !== '127.0.0.1'
+      || values.PORT !== String(c.runtime.port) || passengerEnvironmentManagerInternals.renderPassengerEnvironmentInclude(values) !== content) throw fail('application_environment_snapshot_invalid');
+    for (const key of ['HOST', 'PORT', 'YUNPANEL_APPLICATION_ID']) delete values[key];
+    websitePassengerEnvironmentInternals.normalizedValues(values);
     return values;
   }
   async function command(file, args, options) {

@@ -27,6 +27,24 @@ function requireCleanupReceipt(receipt, expected, flag) {
     throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Cleanup of this Website could not be verified.', 409);
   }
 }
+
+export async function withPassengerEnvironmentRetirementScope({ operation, siteMutationLock, domainRegistry }, action) {
+  requireCleanupMethod(siteMutationLock?.withWebsiteLock);
+  requireCleanupMethod(domainRegistry?.withRoutingNamespaceReservation);
+  requireCleanupMethod(action);
+  return siteMutationLock.withWebsiteLock(operation.websiteId, () => domainRegistry.withRoutingNamespaceReservation(async namespace => {
+    const types = ['static', 'proxy', 'passenger', 'php', 'python', 'redirect'];
+    if (!Array.isArray(namespace) || namespace.some(domain => !domain || !types.includes(domain.targetType)
+      || !Object.hasOwn(domain, 'targetApplicationId')
+      || ['passenger', 'php', 'python'].includes(domain.targetType) && domain.targetApplicationId === null
+      || !['passenger', 'php', 'python'].includes(domain.targetType) && domain.targetApplicationId !== null
+      || domain.targetApplicationId !== null && (typeof domain.targetApplicationId !== 'string' || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(domain.targetApplicationId))
+      || domain.websiteId === operation.websiteId || domain.targetApplicationId === operation.applicationId)) {
+      throw new WebsiteRemovalRuntimeError('website_removal_domains_still_attached', 'Remove the bound Domains before retiring Passenger environment', 409);
+    }
+    return action();
+  }));
+}
 function cleanupInventory(value) {
   if (!Array.isArray(value) || value.some((item) => !item || typeof item.id !== 'string' || !SAFE_ID.test(item.id))
     || new Set(value.map((item) => item.id)).size !== value.length) {
@@ -92,6 +110,7 @@ export function createWebsiteRemovalRuntime({
   directSystemdCleanupHandler = null,
   directSystemdCleanupInspector = null,
   fileCleanupHandler = null,
+  passengerEnvironmentCleanupHandler = null,
   unixIdentityCleanupHandler = null,
   fileCleanupInspector = null,
   unixIdentityCleanupInspector = null,
@@ -256,6 +275,32 @@ export function createWebsiteRemovalRuntime({
     return op;
   }
 
+  async function retirePassengerEnvironment(operation, step) {
+    if (operation.applicationId === null) return null;
+    const required = operation.plan?.applicationRuntime?.adapter === 'passenger';
+    if (passengerEnvironmentCleanupHandler === null && !required) return null;
+    requireCleanupMethod(passengerEnvironmentCleanupHandler);
+    // withSiteLock selected the Application key. The old Website key and the
+    // existing Domain namespace also exclude normal Domain writers/rebinding.
+    return withPassengerEnvironmentRetirementScope({ operation, siteMutationLock, domainRegistry }, async () => {
+      const current = await loadOperation(operation.id);
+      if (current.websiteId !== operation.websiteId || current.applicationId !== operation.applicationId
+        || current.serverId !== operation.serverId) {
+        throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Passenger removal journal identity changed', 409);
+      }
+      const priorReceipt = [...current.steps].reverse().find(value => value.result?.passengerEnvironmentRetirement)?.result.passengerEnvironmentRetirement ?? null;
+      const checkpoint = async receipt => {
+        const latest = await loadOperation(operation.id), active = latest.steps.find(value => value.id === step.id);
+        if (!active || active.status === 'succeeded') throw new WebsiteRemovalRuntimeError('website_removal_cleanup_unverified', 'Passenger removal step changed', 409);
+        await registry.checkpointStep(operation.id, step.id, { ...(active.result ?? {}), passengerEnvironmentRetirement: receipt });
+      };
+      const result = await passengerEnvironmentCleanupHandler({ operation: current, priorReceipt, checkpoint });
+      requireCleanupReceipt(result, { removalId: current.id, websiteId: current.websiteId,
+        applicationId: current.applicationId, serverId: current.serverId }, 'includeAbsent');
+      return result;
+    });
+  }
+
   async function init() {
     await registry.init();
     // Inspect-first reconciliation for interrupted operations
@@ -290,6 +335,8 @@ export function createWebsiteRemovalRuntime({
     if (plan?.applicationId) require('application_cleanup_unavailable',
       applicationRegistry?.getApplication, applicationRegistry?.deleteApplication,
       applicationEnvironmentRegistry?.inspectApplicationState, applicationEnvironmentRegistry?.purgeApplication);
+    if (plan?.applicationRuntime?.adapter === 'passenger') require('passenger_environment_cleanup_unavailable', passengerEnvironmentCleanupHandler,
+      siteMutationLock?.withWebsiteLock, domainRegistry?.withRoutingNamespaceReservation, registry?.checkpointStep);
     if (plan?.systemUser) require('unix_cleanup_unavailable', unixIdentityCleanupHandler, unixIdentityCleanupInspector);
     if (plan?.additional?.crons?.ids?.length) require(
       'cron_cleanup_unavailable',
@@ -759,6 +806,7 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'file_cleanup': {
+          const passengerEnvironmentRetirement = await retirePassengerEnvironment(op, step);
           requireCleanupMethod(fileCleanupHandler);
           const retainedBackups = [...(op.plan?.additional?.backups?.ids ?? [])];
           const retainedLogScopes = [...(op.plan?.additional?.logScopes?.ids ?? [])];
@@ -780,6 +828,7 @@ export function createWebsiteRemovalRuntime({
           // Do not copy arbitrary adapter fields or secrets into the public operation result.
           op = await registry.succeedStep(op.id, step.id, {
             filesCleaned: true, retainedBackups, retainedLogScopes, terminalDrain,
+            ...(passengerEnvironmentRetirement ? { passengerEnvironmentRetirement } : {}),
             ...(Number.isSafeInteger(cleanupResult.cleanedFilesCount) && cleanupResult.cleanedFilesCount >= 0
               ? { cleanedFilesCount: cleanupResult.cleanedFilesCount } : {}),
           });
@@ -828,6 +877,7 @@ export function createWebsiteRemovalRuntime({
         }
 
         case 'application_cleanup': {
+          const passengerEnvironmentRetirement = await retirePassengerEnvironment(op, step);
           requireCleanupMethod(applicationRegistry?.getApplication);
           requireCleanupMethod(applicationRegistry?.deleteApplication);
           requireCleanupMethod(applicationEnvironmentRegistry?.inspectApplicationState);
@@ -871,6 +921,7 @@ export function createWebsiteRemovalRuntime({
           const hostingAllocation = await releaseHostingAllocation(op, true);
           op = await registry.succeedStep(op.id, step.id, {
             applicationCleaned: true,
+            ...(passengerEnvironmentRetirement ? { passengerEnvironmentRetirement } : {}),
             ...(hostingAllocation ? { hostingAllocation } : {}),
           });
           break;
