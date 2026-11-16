@@ -198,7 +198,7 @@ async function withConversationApi(action) {
 // Owner migration/rollback; paging/100-limit; corrupt/conflicting files fail503.
 // No provider is configured, replaced or called; inference success is unverified.
 test('real HTTP conversation storage preserves migration, paging, limits and failed bytes without a model', { timeout: 15000 }, async () => {
-  await withConversationApi(async ({ request, owner, ownerSession, websites, historyPath, activate, restart }) => {
+  await withConversationApi(async ({ request, owner, ownerSession, websites, historyPath, activate, createUser, restart }) => {
     await activate();
     const create = async (title) => {
       const result = await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title, websiteId: websites[0].id } });
@@ -228,15 +228,28 @@ test('real HTTP conversation storage preserves migration, paging, limits and fai
     assert.equal(stored.conversations.find((item) => item.id === created.id).actorId, owner.id);
     assert.deepEqual(stored.conversations.find((item) => item.id === legacy.id).messages, nativeRecord.messages);
 
-    const assignments = [{ conversationId: legacy.id, targetActorId: owner.id }];
+    // Assign to a different real authenticated actor: using the requester as
+    // the target would violate all three readback/rollback checks below.
+    const recipient = await createUser('history-recipient', 'site_manager', [websites[0].id]);
+    assert.notEqual(recipient.user.id, owner.id);
+    const assignments = [{ conversationId: legacy.id, targetActorId: recipient.user.id }];
     error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', {
       method: 'POST', body: { assignments: [...assignments, ...assignments] },
     }), 400, 'invalid_migration_assignments');
     result = await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } });
     assert.equal(result.status, 200);
     assert.equal(result.body.data.count, 1);
-    assert.equal((await request(ownerSession, CONVERSATIONS + '/' + legacy.id)).status, 200);
+    error(await request(ownerSession, CONVERSATIONS + '/' + legacy.id), 404, 'conversation_not_found');
+    result = await request(recipient.session, CONVERSATIONS + '/' + legacy.id);
+    assert.equal(result.status, 200);
+    assert.equal(result.body.data.id, legacy.id);
+    assert.equal(result.body.data.title, nativeRecord.title);
+    stored = JSON.parse(await readFile(historyPath, 'utf8'));
+    assert.equal(stored.conversations.find((item) => item.id === legacy.id).actorId, recipient.user.id);
     error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } }), 409, 'conversation_already_owned');
+    error(await request(recipient.session, CONVERSATIONS + '/unowned/rollback', {
+      method: 'POST', body: { conversationIds: [legacy.id] },
+    }), 403, 'forbidden');
     error(await request(ownerSession, CONVERSATIONS + '/unowned/rollback', {
       method: 'POST', body: { conversationIds: [legacy.id, legacy.id] },
     }), 400, 'invalid_rollback_request');
@@ -245,18 +258,32 @@ test('real HTTP conversation storage preserves migration, paging, limits and fai
     });
     assert.equal(result.status, 200);
     assert.equal(result.body.data.count, 1);
+    error(await request(recipient.session, CONVERSATIONS + '/' + legacy.id), 404, 'conversation_not_found');
     error(await request(ownerSession, CONVERSATIONS + '/' + legacy.id), 404, 'conversation_not_found');
     result = await request(ownerSession, CONVERSATIONS + '/unowned/rollback', { method: 'POST', body: { restoreV1Backup: true } });
     assert.equal(result.status, 200);
     assert.equal(result.body.data.restoredCount, 1);
 
-    const ids = [created.id];
-    for (let i = 0; i < 99; i++) ids.push((await create('History ' + i)).id);
+    // All24 actual HTTP requests overlap against the same file-backed store.
+    const parallel = await Promise.all(Array.from({ length: 24 }, (_, i) => create('Concurrent history ' + i)));
+    const parallelIds = parallel.map((item) => item.id);
+    assert.equal(new Set(parallelIds).size, 24);
+    const concurrentStored = JSON.parse(await readFile(historyPath, 'utf8')).conversations;
+    const actualOwnerIds = concurrentStored.filter((item) => item.actorId === owner.id).map((item) => item.id);
+    assert.deepEqual(actualOwnerIds.sort(), [created.id, ...parallelIds].sort());
+    await restart();
+    result = await request(ownerSession, CONVERSATIONS);
+    assert.equal(result.status, 200);
+    assert.deepEqual(result.body.data.map((item) => item.id).sort(), actualOwnerIds);
+    const ids = [created.id, ...parallelIds];
+    for (let i = 0; i < 75; i++) ids.push((await create('History ' + i)).id);
     assert.equal(new Set(ids).size, 100);
     const beforeLimit = await readFile(historyPath, 'utf8');
     error(await request(ownerSession, CONVERSATIONS, { method: 'POST', body: { title: 'Beyond limit' } }), 409, 'ai_conversation_limit');
     assert.equal(await readFile(historyPath, 'utf8'), beforeLimit);
-    error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', { method: 'POST', body: { assignments } }), 409, 'ai_conversation_limit');
+    error(await request(ownerSession, CONVERSATIONS + '/unowned/migrate', {
+      method: 'POST', body: { assignments: [{ conversationId: legacy.id, targetActorId: owner.id }] },
+    }), 409, 'ai_conversation_limit');
     await restart();
     let cursor = null;
     const observed = [];
