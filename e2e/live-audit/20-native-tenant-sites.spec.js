@@ -474,6 +474,26 @@ async function call(actor, method, endpoint, data) {
   const body = await response.json().catch(() => ({})); return { status: response.status(), data: body.data ?? body, body };
 }
 function ok(result, label, allowed = [200]) { expect(allowed, label + ' ' + (result.body?.error?.code ?? '')).toContain(result.status); return result.data; }
+async function readAllUsers(label) {
+  const users = [], seen = new Set(), limit = 100, maxUsers = 10000; let total = null;
+  try {
+    for (let offset = 0; offset < maxUsers; offset += limit) {
+      const page = ok(await call(owner, 'GET', '/api/panel/users?limit=' + limit + '&offset=' + offset), label);
+      expect(page && typeof page === 'object' && Array.isArray(page.users), 'A typed native user page is required').toBe(true);
+      expect(Number.isSafeInteger(page.total) && page.total >= 0 && page.total <= maxUsers, 'The complete user inventory must fit its explicit bound').toBe(true);
+      expect(page.offset).toBe(offset); expect(page.limit).toBe(limit);
+      if (total === null) total = page.total; else expect(page.total, 'User collection changed while paging').toBe(total);
+      expect(offset <= total).toBe(true); expect(page.users.length).toBe(Math.min(limit, total - offset));
+      for (const user of page.users) {
+        expect(user && typeof user.id === 'string' && /^[A-Za-z0-9_-]{1,128}$/.test(user.id), 'A typed native user identity is required').toBe(true);
+        expect(seen.has(user.id), 'Duplicate user identity while paging').toBe(false); seen.add(user.id); users.push(user);
+      }
+      if (users.length === total) { expect(seen.size).toBe(total); return users; }
+      expect(users.length).toBeLessThan(total);
+    }
+    throw new Error('Complete user inventory exceeded its bounded page budget');
+  } catch (error) { phase4Keep('complete-user-inventory-unknown'); throw error; }
+}
 async function findCreatedAccount(username) {
   for (const kind of ['reseller', 'customer']) {
     const rows = ok(await call(owner, 'GET', ACCOUNTS + '?kind=' + kind + '&limit=100'), 'Read owned account inventory');
@@ -524,12 +544,12 @@ async function cleanupAccounts() {
         const revision = current.data.revision;
         ok(await call(owner, 'DELETE', ACCOUNTS + '/' + account.id + '/profile', { revision, confirmation: `unregister-hosting-profile:${account.id}:${revision}` }), 'Remove owned hosting profile');
       } else expect(current.status).toBe(404);
-      const users = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Read owned login cleanup');
-      const user = users.users.find(u => u.id === account.id);
+      const users = await readAllUsers('Read owned login cleanup');
+      const user = users.find(u => u.id === account.id);
       if (user) { expect(user.username).toBe(account.username); ok(await call(owner, 'DELETE', '/api/panel/users/' + user.id, { revision: user.revision }), 'Remove owned login'); }
       expect((await call(owner, 'GET', ACCOUNTS + '/' + account.id)).status).toBe(404);
-      const remaining = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Verify login absence');
-      expect(remaining.users.some(u => u.id === account.id)).toBe(false); account.removed = true; save();
+      const remaining = await readAllUsers('Verify login absence');
+      expect(remaining.some(u => u.id === account.id)).toBe(false); account.removed = true; save();
     } catch (error) { failures.push({ key, message: String(error.message).split('\n')[0] }); }
   }
   return failures;
@@ -607,7 +627,7 @@ async function ensureTopology(page, via = 'api') {
 
 test.describe('Owned reseller customer site isolation and revocation', () => {
   test.beforeAll(async ({}, info) => {
-    phase4Prefix = 'native20-phase4-' + info.project.name.replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase() + '-w' + info.workerIndex;
+    phase4Prefix = 'native20-phase4-' + info.project.name.replace(/[^a-z0-9]/gi, '').slice(0, 12).toLowerCase();
     expect(fs.existsSync(phase4Artifact('suite', 'STARTED'))).toBe(false); expect(fs.existsSync(phase4Artifact('suite', 'KEEP'))).toBe(false);
     phase4Durable('suite', 'STARTED', { version: 1, policy: 'normal-owner-dual-persistent-http1', at: new Date().toISOString(), automaticRetry: false });
     owner = phase4Guard(await apiContext()); const nonce = randomBytes(5).toString('hex');
@@ -616,7 +636,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
     state = { nonce, fixturePrefix: 't888-' + project + '-' + info.workerIndex, accounts: {}, sites: {}, events: [], project: info.project.name, baselineUserIds: [] };
     credentials = Object.fromEntries(keys.map(key => [key, { username: 'ypaudit-t888-' + nonce + '-' + key, password: randomBytes(30).toString('base64url') }]));
     fs.writeFileSync(path.join(RUN_DIR, 'tenant-credentials-' + project + '-w' + info.workerIndex + '.json'), JSON.stringify(credentials), { mode: 0o600 });
-    state.baselineUserIds = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Read account baseline').users.map(u => u.id); save();
+    state.baselineUserIds = (await readAllUsers('Read account baseline')).map(u => u.id); save();
     record('source-proof', { sourceSha256: createHash('sha256').update(fs.readFileSync(new URL(import.meta.url))).digest('hex'), pendingOpenPipeline: 'dual-owner-persistent-http1-posts' });
   });
   test.beforeEach(() => { expect(phase4Hold || phase4Closed).toBe(false); expect(phase4Inflight.size).toBe(0); phase4Active = true; });
@@ -648,7 +668,7 @@ test.describe('Owned reseller customer site isolation and revocation', () => {
       for (const [resource, id] of [['websites', t.websiteId], ['applications', t.applicationId], ['domains', t.domainId]]) expect((await call(owner, 'GET', '/api/panel/' + resource + '/' + id)).status).toBe(404);
       assertPhysicalGone(readOnlyHostProbe({ ledger: t }, 'lifecycle-absence'), t);
     }
-    const users = ok(await call(owner, 'GET', '/api/panel/users?limit=100'), 'Read final owned-login absence').users;
+    const users = await readAllUsers('Read final owned-login absence');
     for (const key of keys) { expect((await call(owner, 'GET', ACCOUNTS + '/' + state.accounts[key].id)).status).toBe(404); expect(users.some(u => u.id === state.accounts[key].id)).toBe(false); }
     expect(state.baselineUserIds.every(id => users.some(u => u.id === id))).toBe(true);
     record('cleanup-final', { failures: [], allOwnedSitesAndAccountsRemoved: true, readOnlyAfterAll: true, actualFocusedTransport: phase4Channels.map(v => v.proof), clientSocketReuseIsNotServerConcurrency: true });

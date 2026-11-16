@@ -355,3 +355,17 @@ Native20 exact86b9c5 source ve önceki kanıtları değişmez. Bu üç dosyalık
 ### Primary entegrasyon adayi - kanit siniri
 
 Bu ek izole Source9e kaynak/gecmis kayitlarini tasir; Primary lisans03c ile birlesik dogrulama/deployment kabul edilmis sayilmaz. Native20 phase4 C1 gercekte1PASS/2unexpected bitti; race case kabul edilmedi. Exact6site/10hesap normalcleanup ayri Root Recovery02 de7f2110 sonucudur, test PASS degildir. Eski alti ordinary Native20 sonucu ve strongHOLD1/2, T889 OPEN ve desteklenmeyen fault kanallari korunur. Yeni Native15/PHP, genelT883/T913 DONE veya Source tasks/verified degerinin Primary kabulune tasinmasi iddiasi yoktur.
+
+
+# Guard02 prospective scenarios before code
+
+| Scenario | Required behavior | Evidence boundary |
+|---|---|---|
+| Complete baseline with >100users | Read documented100/offset pages to actual total, dedup and preserve every baseline ID | Native API contract+captured97/100 mismatch now; no fake API execution |
+| Own cleanup at97+5=102users | Complete own lookup/absence and final original-ID preservation across two pages | Actual future normal run required; no all-users cleanup |
+| Duplicate/short/mismatched/changing pagination | Strict failure and sticky KEEP; no subsequent mutation or silently partial success | Static control-flow proof only, no synthetic reply |
+| Existing replacement-worker guard | Shared RUN/project STARTED/KEEP before apiContext; no perworker replay |01realFS proof retained and extracted functions/preamble byte-equal |
+| Invariants | All three case bodies/deadlines/Agent/race criteria byte-equal | Reverse entire01 except helper+fourcalls; no native PASS claim |
+
+
+Private combined Guard02 integration: source/local real-FS preparation only; old Native20 C1 remains FAILED (1pass/2unexpected), no new Native20 run or causal acceptance claimed. Strong pending-cancellation gate remains OPEN. Primary/Source live trees unchanged.
